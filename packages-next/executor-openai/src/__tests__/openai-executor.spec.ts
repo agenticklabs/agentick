@@ -7,6 +7,8 @@
  * SDK's signal option, streaming delta emission.
  */
 
+import { omitUndefined } from "@agentick/utils-next";
+
 import { Chunk, Effect, Fiber, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 
@@ -47,7 +49,7 @@ async function makeExecutor(
   const exec = new OpenAIExecutor("exec-openai-test", journal, bus, inbox, {
     client: asClient(stub),
     model: opts.model ?? "gpt-4o-mini",
-    ...(opts.stream !== undefined ? { stream: opts.stream } : {}),
+    ...omitUndefined({ stream: opts.stream }),
   });
   await exec.ready;
   return { exec, journal, bus, inbox };

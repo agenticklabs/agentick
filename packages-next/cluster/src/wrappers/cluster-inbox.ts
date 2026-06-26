@@ -78,7 +78,7 @@ import type {
   MessageInbox,
   Unsubscribe,
 } from "@agentick/spec-next";
-import { ulid } from "@agentick/utils-next";
+import { ulid, omitUndefined } from "@agentick/utils-next";
 
 import type { ClusterPartitioning } from "../partitioning.js";
 import type { ClusterTransport } from "../transport.js";
@@ -309,10 +309,12 @@ export class ClusterInbox implements MessageInbox {
 
     const askPayload: ClusterAskRequestPayload<T> = {
       innerType: input.type,
-      ...(input.payload !== undefined ? { innerPayload: input.payload } : {}),
-      ...(input.from !== undefined ? { innerFrom: input.from } : {}),
-      ...(input.parentOpId !== undefined ? { innerParentOpId: input.parentOpId } : {}),
-      ...(input.correlationId !== undefined ? { innerCorrelationId: input.correlationId } : {}),
+      ...omitUndefined({
+        innerPayload: input.payload,
+        innerFrom: input.from,
+        innerParentOpId: input.parentOpId,
+        innerCorrelationId: input.correlationId,
+      }),
       timeoutMs,
     };
     const env: MessageEnvelope<ClusterAskRequestPayload<T>> = {
@@ -430,14 +432,12 @@ export class ClusterInbox implements MessageInbox {
     const askPayload = env.payload;
     const innerInput: MessageEnvelopeInput = {
       type: askPayload.innerType,
-      ...(askPayload.innerPayload !== undefined ? { payload: askPayload.innerPayload } : {}),
-      ...(askPayload.innerFrom !== undefined ? { from: askPayload.innerFrom } : {}),
-      ...(askPayload.innerParentOpId !== undefined
-        ? { parentOpId: askPayload.innerParentOpId }
-        : {}),
-      ...(askPayload.innerCorrelationId !== undefined
-        ? { correlationId: askPayload.innerCorrelationId }
-        : {}),
+      ...omitUndefined({
+        payload: askPayload.innerPayload,
+        from: askPayload.innerFrom,
+        parentOpId: askPayload.innerParentOpId,
+        correlationId: askPayload.innerCorrelationId,
+      }),
     };
 
     const askOptions: AskOptions | undefined =
@@ -534,10 +534,12 @@ export class ClusterInbox implements MessageInbox {
     const input: MessageEnvelopeInput = {
       type: env.type,
       messageId: env.messageId,
-      ...(env.from !== undefined ? { from: env.from } : {}),
-      ...(env.parentOpId !== undefined ? { parentOpId: env.parentOpId } : {}),
-      ...(env.correlationId !== undefined ? { correlationId: env.correlationId } : {}),
-      ...(env.payload !== undefined ? { payload: env.payload } : {}),
+      ...omitUndefined({
+        from: env.from,
+        parentOpId: env.parentOpId,
+        correlationId: env.correlationId,
+        payload: env.payload,
+      }),
     };
     Effect.runFork(
       this.local.send(env.addressedTo, input).pipe(
@@ -624,9 +626,11 @@ function stampEnvelope<T>(
     messageId: input.messageId ?? ulid(),
     timestamp: Date.now(),
     from: input.from ?? `node:${currentNode}`,
-    ...(input.parentOpId !== undefined ? { parentOpId: input.parentOpId } : {}),
-    ...(input.correlationId !== undefined ? { correlationId: input.correlationId } : {}),
-    ...(input.payload !== undefined ? { payload: input.payload } : {}),
+    ...omitUndefined({
+      parentOpId: input.parentOpId,
+      correlationId: input.correlationId,
+      payload: input.payload,
+    }),
   };
 }
 

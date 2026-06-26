@@ -21,6 +21,8 @@
  * @see docs/proposals/v2/blueprint/26-harness-api-shape.md
  */
 
+import { omitUndefined } from "@agentick/utils-next";
+
 import { Effect } from "effect";
 import { BaseHarness, runHarnessProtocol } from "@agentick/runtime-next";
 import type {
@@ -155,13 +157,11 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
       handle,
       providerName: init.provider.name,
       elicitation: init.elicitation,
-      ...(init.acl !== undefined ? { acl: init.acl } : {}),
-      ...(init.permissionTimeoutDecision !== undefined
-        ? { permissionTimeoutDecision: init.permissionTimeoutDecision }
-        : {}),
-      ...(init.permissionTimeoutMs !== undefined
-        ? { permissionTimeoutMs: init.permissionTimeoutMs }
-        : {}),
+      ...omitUndefined({
+        acl: init.acl,
+        permissionTimeoutDecision: init.permissionTimeoutDecision,
+        permissionTimeoutMs: init.permissionTimeoutMs,
+      }),
     });
   }
 
@@ -259,10 +259,12 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
       return yield* Effect.tryPromise<SandboxExecResult, SandboxExecError>({
         try: () =>
           this.handle.exec(input.command, {
-            ...(input.cwd !== undefined ? { cwd: input.cwd } : {}),
-            ...(input.env !== undefined ? { env: input.env } : {}),
-            ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
-            ...(input.stdin !== undefined ? { stdin: input.stdin } : {}),
+            ...omitUndefined({
+              cwd: input.cwd,
+              env: input.env,
+              timeoutMs: input.timeoutMs,
+              stdin: input.stdin,
+            }),
           }),
         catch: (cause): SandboxExecError => sandboxExecError(input.command, -1, { cause }),
       });

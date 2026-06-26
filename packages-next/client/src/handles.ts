@@ -32,6 +32,7 @@ import type {
   SubscriptionStream,
 } from "@agentick/spec-next";
 import type { Cursor } from "@agentick/spec-next";
+import { omitUndefined } from "@agentick/utils-next";
 
 interface InternalClient {
   readonly id: string;
@@ -140,8 +141,7 @@ export function makeSessionHandle(client: InternalClient, sessionId: string): Se
         sessionId,
         correlationId: input.correlationId,
         outcome: input.outcome,
-        ...(input.value !== undefined ? { value: input.value } : {}),
-        ...(input.reason !== undefined ? { reason: input.reason } : {}),
+        ...omitUndefined({ value: input.value, reason: input.reason }),
       });
     },
   };
@@ -221,11 +221,13 @@ function parseElicitation(env: EnvelopeWithMetadata): ClientElicitation | undefi
     replyTo,
     mode: payload.mode ?? "form",
     message: payload.message,
-    ...(payload.schema !== undefined ? { schema: payload.schema } : {}),
-    ...(payload.url !== undefined ? { url: payload.url } : {}),
-    ...(payload.elicitationId !== undefined ? { elicitationId: payload.elicitationId } : {}),
-    ...(payload.hints !== undefined ? { hints: payload.hints } : {}),
-    ...(payload.metadata !== undefined ? { metadata: payload.metadata } : {}),
+    ...omitUndefined({
+      schema: payload.schema,
+      url: payload.url,
+      elicitationId: payload.elicitationId,
+      hints: payload.hints,
+      metadata: payload.metadata,
+    }),
     receivedAt: Date.now(),
   };
 }
@@ -245,8 +247,7 @@ function wrapHandle(
         sessionId,
         correlationId: elic.correlationId,
         outcome: body.outcome,
-        ...(body.value !== undefined ? { value: body.value } : {}),
-        ...(body.reason !== undefined ? { reason: body.reason } : {}),
+        ...omitUndefined({ value: body.value, reason: body.reason }),
       })
       .then(() => undefined);
   return {

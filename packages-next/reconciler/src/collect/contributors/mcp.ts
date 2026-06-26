@@ -9,6 +9,7 @@ import type { MCPDeclaration, MCPTransport } from "@agentick/spec-next";
 import type { ElementInstance } from "../../host/host-instance.js";
 import type { CollectContext, Contributor } from "../contributor.js";
 import type { IRFragment } from "../fragments.js";
+import { omitUndefined } from "@agentick/utils-next";
 
 interface MCPProps {
   readonly id?: string;
@@ -40,8 +41,7 @@ export const mcpContributor: Contributor = {
       serverName: props.serverName,
       transport: props.transport,
       config: props.config ?? {},
-      ...(props.exposes !== undefined ? { exposes: props.exposes } : {}),
-      ...(props.metadata !== undefined ? { metadata: props.metadata } : {}),
+      ...omitUndefined({ exposes: props.exposes, metadata: props.metadata }),
     };
     return [{ kind: "mcp-declaration", mcp }];
   },

@@ -8,6 +8,8 @@
  * matches `generateContentStream`.
  */
 
+import { omitUndefined } from "@agentick/utils-next";
+
 import type {
   GoogleGenAI,
   GenerateContentParameters,
@@ -125,7 +127,7 @@ export function mkResponse(opts: MkResponseOpts): GenerateContentResponse {
     for (const tc of opts.toolCalls) {
       const part: Record<string, unknown> = {
         functionCall: {
-          ...(tc.id !== undefined ? { id: tc.id } : {}),
+          ...omitUndefined({ id: tc.id }),
           name: tc.name,
           args: tc.args,
         },
@@ -149,10 +151,10 @@ export function mkResponse(opts: MkResponseOpts): GenerateContentResponse {
       candidatesTokenCount: u.candidatesTokenCount ?? 2,
       totalTokenCount:
         u.totalTokenCount ?? (u.promptTokenCount ?? 4) + (u.candidatesTokenCount ?? 2),
-      ...(u.thoughtsTokenCount !== undefined ? { thoughtsTokenCount: u.thoughtsTokenCount } : {}),
-      ...(u.cachedContentTokenCount !== undefined
-        ? { cachedContentTokenCount: u.cachedContentTokenCount }
-        : {}),
+      ...omitUndefined({
+        thoughtsTokenCount: u.thoughtsTokenCount,
+        cachedContentTokenCount: u.cachedContentTokenCount,
+      }),
     },
   } as unknown as GenerateContentResponse;
 }
@@ -189,7 +191,7 @@ export function mkFunctionCallChunk(opts: {
 }): GenerateContentResponse {
   const part: Record<string, unknown> = {
     functionCall: {
-      ...(opts.id !== undefined ? { id: opts.id } : {}),
+      ...omitUndefined({ id: opts.id }),
       name: opts.name,
       args: opts.args,
     },
@@ -225,10 +227,10 @@ export function mkFinishChunk(opts: {
       candidatesTokenCount: u.candidatesTokenCount ?? 2,
       totalTokenCount:
         u.totalTokenCount ?? (u.promptTokenCount ?? 4) + (u.candidatesTokenCount ?? 2),
-      ...(u.thoughtsTokenCount !== undefined ? { thoughtsTokenCount: u.thoughtsTokenCount } : {}),
-      ...(u.cachedContentTokenCount !== undefined
-        ? { cachedContentTokenCount: u.cachedContentTokenCount }
-        : {}),
+      ...omitUndefined({
+        thoughtsTokenCount: u.thoughtsTokenCount,
+        cachedContentTokenCount: u.cachedContentTokenCount,
+      }),
     },
   } as unknown as GenerateContentResponse;
 }

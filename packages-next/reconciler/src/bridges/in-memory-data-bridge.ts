@@ -23,6 +23,7 @@ import type {
   Unsubscribe,
 } from "@agentick/spec-next";
 import { createKeyedNotifier, type KeyedNotifier } from "@agentick/pubsub-next";
+import { omitUndefined } from "@agentick/utils-next";
 
 type Entry =
   | {
@@ -140,8 +141,7 @@ export class InMemoryDataBridge implements DataBridge {
           status: "fulfilled",
           value,
           fetchedAt: Date.now(),
-          ...(options.ttl !== undefined ? { ttl: options.ttl } : {}),
-          ...(options.tag !== undefined ? { tag: options.tag } : {}),
+          ...omitUndefined({ ttl: options.ttl, tag: options.tag }),
         });
         this.pendingPromises.delete(settled);
         this.options.onSettled?.(key);
@@ -153,7 +153,7 @@ export class InMemoryDataBridge implements DataBridge {
         this.cache.set(key, {
           status: "rejected",
           error: err,
-          ...(options.tag !== undefined ? { tag: options.tag } : {}),
+          ...omitUndefined({ tag: options.tag }),
         });
         this.pendingPromises.delete(settled);
         this.options.onSettled?.(key);
@@ -167,7 +167,7 @@ export class InMemoryDataBridge implements DataBridge {
     this.cache.set(key, {
       status: "pending",
       promise: fetchPromise as Promise<unknown>,
-      ...(options.tag !== undefined ? { tag: options.tag } : {}),
+      ...omitUndefined({ tag: options.tag }),
     });
     this.notifyKey(key);
     return fetchPromise;
@@ -229,8 +229,7 @@ export class InMemoryDataBridge implements DataBridge {
         key,
         value: entry.value,
         fetchedAt: entry.fetchedAt,
-        ...(entry.ttl !== undefined ? { ttl: entry.ttl } : {}),
-        ...(entry.tag !== undefined ? { tag: entry.tag } : {}),
+        ...omitUndefined({ ttl: entry.ttl, tag: entry.tag }),
       });
     }
     return out;
@@ -252,8 +251,7 @@ export class InMemoryDataBridge implements DataBridge {
         status: "fulfilled",
         value: e.value,
         fetchedAt: e.fetchedAt,
-        ...(e.ttl !== undefined ? { ttl: e.ttl } : {}),
-        ...(e.tag !== undefined ? { tag: e.tag } : {}),
+        ...omitUndefined({ ttl: e.ttl, tag: e.tag }),
       });
     }
     // Notify keys that changed: union of old keys + new keys.

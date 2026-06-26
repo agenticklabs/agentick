@@ -10,6 +10,7 @@ import type { OutputDeclaration, StandardSchemaV1 } from "@agentick/spec-next";
 import type { ElementInstance } from "../../host/host-instance.js";
 import type { CollectContext, Contributor } from "../contributor.js";
 import type { IRFragment } from "../fragments.js";
+import { omitUndefined } from "@agentick/utils-next";
 
 interface OutputProps {
   readonly id?: string;
@@ -24,9 +25,7 @@ export const outputContributor: Contributor = {
     const props = instance.props as OutputProps;
     const output: OutputDeclaration = {
       id: props.id ?? ctx.stableId("output", instance),
-      ...(props.schema !== undefined ? { schema: props.schema } : {}),
-      ...(props.mode !== undefined ? { mode: props.mode } : {}),
-      ...(props.metadata !== undefined ? { metadata: props.metadata } : {}),
+      ...omitUndefined({ schema: props.schema, mode: props.mode, metadata: props.metadata }),
     };
     return [{ kind: "output-declaration", output }];
   },

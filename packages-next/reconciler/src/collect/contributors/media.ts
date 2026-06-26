@@ -21,6 +21,7 @@ import type {
 import type { ElementInstance } from "../../host/host-instance.js";
 import type { CollectContext, Contributor } from "../contributor.js";
 import type { IRFragment } from "../fragments.js";
+import { omitUndefined } from "@agentick/utils-next";
 
 interface ImageProps {
   readonly source: MediaSource;
@@ -37,9 +38,7 @@ export const imageContributor: Contributor = {
     const block: ImageBlock = {
       type: "image",
       source: props.source,
-      ...(props.mimeType !== undefined ? { mimeType: props.mimeType } : {}),
-      ...(props.altText !== undefined ? { altText: props.altText } : {}),
-      ...(props.id !== undefined ? { id: props.id } : {}),
+      ...omitUndefined({ mimeType: props.mimeType, altText: props.altText, id: props.id }),
     };
     return [{ kind: "content-block", block }];
   },
@@ -60,9 +59,7 @@ export const documentContributor: Contributor = {
     const block: DocumentBlock = {
       type: "document",
       source: props.source,
-      ...(props.mimeType !== undefined ? { mimeType: props.mimeType } : {}),
-      ...(props.title !== undefined ? { title: props.title } : {}),
-      ...(props.id !== undefined ? { id: props.id } : {}),
+      ...omitUndefined({ mimeType: props.mimeType, title: props.title, id: props.id }),
     };
     return [{ kind: "content-block", block }];
   },
@@ -83,9 +80,7 @@ export const audioContributor: Contributor = {
     const block: AudioBlock = {
       type: "audio",
       source: props.source,
-      ...(props.mimeType !== undefined ? { mimeType: props.mimeType } : {}),
-      ...(props.transcript !== undefined ? { transcript: props.transcript } : {}),
-      ...(props.id !== undefined ? { id: props.id } : {}),
+      ...omitUndefined({ mimeType: props.mimeType, transcript: props.transcript, id: props.id }),
     };
     return [{ kind: "content-block", block }];
   },
@@ -106,9 +101,7 @@ export const videoContributor: Contributor = {
     const block: VideoBlock = {
       type: "video",
       source: props.source,
-      ...(props.mimeType !== undefined ? { mimeType: props.mimeType } : {}),
-      ...(props.transcript !== undefined ? { transcript: props.transcript } : {}),
-      ...(props.id !== undefined ? { id: props.id } : {}),
+      ...omitUndefined({ mimeType: props.mimeType, transcript: props.transcript, id: props.id }),
     };
     return [{ kind: "content-block", block }];
   },

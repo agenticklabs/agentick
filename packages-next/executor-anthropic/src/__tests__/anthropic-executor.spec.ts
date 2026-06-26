@@ -7,6 +7,8 @@
  * cache token plumbing, providerOptions spread, streaming deltas.
  */
 
+import { omitUndefined } from "@agentick/utils-next";
+
 import { Chunk, Effect, Fiber, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 
@@ -68,8 +70,7 @@ async function makeExecutor(
   const exec = new AnthropicExecutor("exec-anthropic-test", journal, bus, inbox, {
     client: asClient(stub),
     model: opts.model ?? "claude-3-5-sonnet-latest",
-    ...(opts.stream !== undefined ? { stream: opts.stream } : {}),
-    ...(opts.maxTokens !== undefined ? { maxTokens: opts.maxTokens } : {}),
+    ...omitUndefined({ stream: opts.stream, maxTokens: opts.maxTokens }),
     ...(opts.parseThinkTags ? { parseThinkTags: true } : {}),
     ...(opts.customBlocks ? { customBlocks: opts.customBlocks } : {}),
   });

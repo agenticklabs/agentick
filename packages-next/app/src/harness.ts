@@ -48,7 +48,7 @@ import {
   isToolExecutorFactory,
   toRegistration,
 } from "@agentick/spec-next";
-import { mergeLayered } from "@agentick/utils-next";
+import { mergeLayered, omitUndefined } from "@agentick/utils-next";
 import type {
   AppError,
   AppExtension,
@@ -524,9 +524,7 @@ export class AppHarness<P = unknown>
       new LocalInbox(),
       {
         metadata: options.metadata,
-        ...(options.journal !== undefined ? { journal: options.journal } : {}),
-        ...(options.bus !== undefined ? { bus: options.bus } : {}),
-        ...(options.inbox !== undefined ? { inbox: options.inbox } : {}),
+        ...omitUndefined({ journal: options.journal, bus: options.bus, inbox: options.inbox }),
         policy: mergeLayered<JournalingPolicy>(DEFAULT_JOURNALING_POLICY, {
           override: { "app:command:close-app": "bus-only" },
         }),
@@ -844,7 +842,7 @@ export class AppHarness<P = unknown>
       surface: "app",
       name: "app:command:create-session",
       scope: {
-        ...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
+        ...omitUndefined({ sessionId: input.sessionId }),
       },
       input,
     };
@@ -864,7 +862,7 @@ export class AppHarness<P = unknown>
       surface: "app",
       name: "app:command:run-once",
       scope: {
-        ...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
+        ...omitUndefined({ sessionId: input.sessionId }),
       },
       input,
     };
@@ -893,7 +891,7 @@ export class AppHarness<P = unknown>
         status,
         metadata: entry.metadata,
         createdAt: entry.createdAt,
-        ...(entry.lastActiveAt !== undefined ? { lastActiveAt: entry.lastActiveAt } : {}),
+        ...omitUndefined({ lastActiveAt: entry.lastActiveAt }),
       };
       out.push(listing);
     }
@@ -1168,7 +1166,7 @@ export class AppHarness<P = unknown>
         })
       : new ToolExecutorHarness(sessionId, this.journal, this.bus, this.inbox, {
           ...this.toolDefaults,
-          ...(mergedInitialTools !== undefined ? { initialTools: mergedInitialTools } : {}),
+          ...omitUndefined({ initialTools: mergedInitialTools }),
           handlerResolver: this.handlerResolver,
           elicitation,
           tasks,
@@ -1235,7 +1233,7 @@ export class AppHarness<P = unknown>
           : {}),
       // Adopter metadata flows through to session.metadata + to
       // session-level substrate factories via `parent.metadata`.
-      ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
+      ...omitUndefined({ metadata: input.metadata }),
       // Inject self as SpawnContext so the child can spawn grandchildren.
       spawnContext: this,
       // Surface the shared handler resolver as a ToolBridge so
@@ -1288,9 +1286,7 @@ export class AppHarness<P = unknown>
       metadata: input.metadata ?? {},
       createdAt: Date.now(),
       ephemeral,
-      ...(overrides.parentSessionId !== undefined
-        ? { parentSessionId: overrides.parentSessionId }
-        : {}),
+      ...omitUndefined({ parentSessionId: overrides.parentSessionId }),
     };
     this.registry.set(sessionId, entry);
     return session;
@@ -1303,11 +1299,13 @@ export class AppHarness<P = unknown>
    */
   async createChildSession(input: SpawnContextChildInput<P>): Promise<SessionHarnessProtocol<P>> {
     const createInput: CreateSessionInput<P> = {
-      ...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
-      ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
-      ...(input.initialProps !== undefined ? { initialProps: input.initialProps } : {}),
-      ...(input.initialKnobs !== undefined ? { initialKnobs: input.initialKnobs } : {}),
-      ...(input.maxTicks !== undefined ? { maxTicks: input.maxTicks } : {}),
+      ...omitUndefined({
+        sessionId: input.sessionId,
+        metadata: input.metadata,
+        initialProps: input.initialProps,
+        initialKnobs: input.initialKnobs,
+        maxTicks: input.maxTicks,
+      }),
     };
     return this.createSessionBody(createInput, /* ephemeral */ false, {
       agent: input.agent,
@@ -1320,9 +1318,11 @@ export class AppHarness<P = unknown>
     const sessionId = input.sessionId ?? `runonce:${ulid()}`;
     const createInput: CreateSessionInput<P> = {
       sessionId,
-      ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
-      ...(input.initialProps !== undefined ? { initialProps: input.initialProps } : {}),
-      ...(input.maxTicks !== undefined ? { maxTicks: input.maxTicks } : {}),
+      ...omitUndefined({
+        metadata: input.metadata,
+        initialProps: input.initialProps,
+        maxTicks: input.maxTicks,
+      }),
     };
     const session = (await this.createSessionBody(
       createInput,

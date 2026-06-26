@@ -53,6 +53,7 @@ import type {
   ToolCall,
 } from "@agentick/spec-next";
 import { SPEC_VERSION } from "@agentick/spec-next";
+import { omitUndefined } from "@agentick/utils-next";
 
 // ============================================================================
 // Construction options
@@ -155,10 +156,9 @@ export class AISDKExecutor extends BaseLanguageModelExecutor<unknown, AISDKStrea
     return generateText({
       model: this.model,
       messages: aiSdk.messages,
-      ...(aiSdk.tools !== undefined ? { tools: aiSdk.tools } : {}),
+      ...omitUndefined({ tools: aiSdk.tools }),
       ...aiSdk.generation,
-      ...(aiSdk.providerOptions !== undefined ? { providerOptions: aiSdk.providerOptions } : {}),
-      ...(signal !== undefined ? { abortSignal: signal } : {}),
+      ...omitUndefined({ providerOptions: aiSdk.providerOptions, abortSignal: signal }),
     }) as unknown as Promise<unknown>;
   }
 
@@ -169,7 +169,7 @@ export class AISDKExecutor extends BaseLanguageModelExecutor<unknown, AISDKStrea
     const stream = streamText({
       model: this.model,
       messages: aiSdk.messages,
-      ...(aiSdk.tools !== undefined ? { tools: aiSdk.tools } : {}),
+      ...omitUndefined({ tools: aiSdk.tools }),
       ...aiSdk.generation,
       ...(aiSdk.providerOptions !== undefined
         ? { providerOptions: aiSdk.providerOptions as never }
@@ -290,12 +290,10 @@ export class AISDKExecutor extends BaseLanguageModelExecutor<unknown, AISDKStrea
               inputTokens: us.inputTokens ?? 0,
               outputTokens: us.outputTokens ?? 0,
               totalTokens: us.totalTokens ?? 0,
-              ...(us.cachedInputTokens !== undefined
-                ? { cachedInputTokens: us.cachedInputTokens }
-                : {}),
-              ...(us.cacheCreationTokens !== undefined
-                ? { cacheCreationTokens: us.cacheCreationTokens }
-                : {}),
+              ...omitUndefined({
+                cachedInputTokens: us.cachedInputTokens,
+                cacheCreationTokens: us.cacheCreationTokens,
+              }),
             },
           });
         }
@@ -418,7 +416,7 @@ function toAISDKMessage(m: LanguageModelMessage): ModelMessage[] {
               return {
                 type: "image",
                 image: p.imageUrl,
-                ...(p.mediaType !== undefined ? { mediaType: p.mediaType } : {}),
+                ...omitUndefined({ mediaType: p.mediaType }),
                 ...pmToProviderOptions(p),
               };
             }

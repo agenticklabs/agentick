@@ -21,6 +21,7 @@
  */
 
 import type { McpSpecEra, McpToolDescriptor } from "./types.js";
+import { omitUndefined } from "@agentick/utils-next";
 
 // ============================================================================
 // EraCodec — the seam
@@ -72,9 +73,11 @@ export const DraftPassthroughCodec: EraCodec = {
       name: r.name,
       ...(typeof r.description === "string" ? { description: r.description } : {}),
       inputSchema: (r.inputSchema as Readonly<Record<string, unknown>>) ?? { type: "object" },
-      ...(r.outputSchema !== undefined ? { outputSchema: r.outputSchema } : {}),
-      ...(r.annotations !== undefined ? { annotations: r.annotations } : {}),
-      ...(r.execution !== undefined ? { execution: r.execution } : {}),
+      ...omitUndefined({
+        outputSchema: r.outputSchema,
+        annotations: r.annotations,
+        execution: r.execution,
+      }),
     };
   },
 };

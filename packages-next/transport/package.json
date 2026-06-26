@@ -45,7 +45,8 @@
   },
   "dependencies": {
     "@agentick/pubsub-next": "workspace:*",
-    "@agentick/spec-next": "workspace:*"
+    "@agentick/spec-next": "workspace:*",
+    "@agentick/utils-next": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.7.3",

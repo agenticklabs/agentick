@@ -30,6 +30,8 @@
  * @see docs/proposals/v2/blueprint/26-harness-api-shape.md
  */
 
+import { omitUndefined } from "@agentick/utils-next";
+
 import { Effect } from "effect";
 import { BaseHarness, runHarnessProtocol, ulid, type Unsubscribe } from "@agentick/runtime-next";
 import { createNotifier, type Notifier } from "@agentick/pubsub-next";
@@ -158,7 +160,7 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
             try: () =>
               s.run({
                 entries: sourceEntries,
-                ...(s.instructions !== undefined ? { instructions: s.instructions } : {}),
+                ...omitUndefined({ instructions: s.instructions }),
               }),
             catch: (cause) => ({ _tag: "CompactHandlerFailed" as const, cause }),
           }).pipe(
@@ -172,7 +174,7 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
             source,
             entriesBefore: before,
             entriesAfter: entries.length,
-            ...(s.metadata !== undefined ? { strategyMetadata: s.metadata } : {}),
+            ...omitUndefined({ strategyMetadata: s.metadata }),
           });
           const result: CompactResult = {
             entriesBefore: before,
@@ -249,7 +251,7 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
             role: m.role,
             content: m.content,
             ts,
-            ...(m.metadata !== undefined ? { metadata: m.metadata } : {}),
+            ...omitUndefined({ metadata: m.metadata }),
           }));
           this._pending = [...this._pending, ...entries];
           this.notify();
@@ -287,7 +289,7 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
               role: p.role,
               content: p.content,
               ts: p.ts,
-              ...(p.metadata !== undefined ? { metadata: p.metadata } : {}),
+              ...omitUndefined({ metadata: p.metadata }),
             },
           }));
           // appendEffect is Effect-native — staying in this fiber lets
@@ -309,7 +311,7 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
       projection: [...this._projection],
       persistedVersion: this._persistedVersion,
       projectionVersion: this._projectionVersion,
-      ...(this._lastCompaction !== undefined ? { lastCompaction: this._lastCompaction } : {}),
+      ...omitUndefined({ lastCompaction: this._lastCompaction }),
     };
   }
 

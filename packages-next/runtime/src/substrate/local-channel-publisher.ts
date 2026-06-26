@@ -27,6 +27,7 @@ import type {
 } from "@agentick/spec-next";
 
 import { ulid } from "./ulid.js";
+import { omitUndefined } from "@agentick/utils-next";
 
 export interface LocalChannelPublisherOptions {
   /**
@@ -108,7 +109,7 @@ export class LocalChannelPublisher implements ChannelPublisher {
       scope,
       payload: seed.payload,
       channelSequence: sequence,
-      ...(seed.parentOpId !== undefined ? { opId: seed.parentOpId } : {}),
+      ...omitUndefined({ opId: seed.parentOpId }),
     };
     return envelope;
   }

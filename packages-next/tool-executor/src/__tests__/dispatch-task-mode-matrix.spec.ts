@@ -26,6 +26,7 @@ import { isTaskRefBlock, jsonSchema } from "@agentick/spec-next";
 import type { ContentBlock, ToolDeclaration, ToolRegistration } from "@agentick/spec-next";
 
 import { createTestHarness } from "../testing/index.js";
+import { omitUndefined } from "@agentick/utils-next";
 
 type SupportMode = "unsupported" | "supported" | "required";
 type TaskMode = "auto" | "ref" | "inline";
@@ -58,7 +59,7 @@ function dispatchOf(opts: {
     toolCallId: opts.toolCallId,
     input: {},
     context: { via: opts.via },
-    ...(opts.task !== undefined ? { task: opts.task } : {}),
+    ...omitUndefined({ task: opts.task }),
   };
 }
 

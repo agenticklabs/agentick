@@ -46,6 +46,7 @@ import type {
 } from "@agentick/spec-next";
 
 import { EXTENSION_NAME } from "./extension-name.js";
+import { omitUndefined } from "@agentick/utils-next";
 
 // ============================================================================
 // Tool names
@@ -231,7 +232,7 @@ const awaitHandler: ToolHandler = async (input, { ctx }) => {
         error: "task_failed",
         taskId: cause.taskId,
         status: cause.status,
-        ...(cause.failure !== undefined ? { failure: cause.failure } : {}),
+        ...omitUndefined({ failure: cause.failure }),
       });
     }
     throw cause;

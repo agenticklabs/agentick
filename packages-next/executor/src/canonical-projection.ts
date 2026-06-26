@@ -30,6 +30,7 @@ import type {
   ToolDeclaration,
 } from "@agentick/spec-next";
 import { toJsonSchema } from "@agentick/spec-next";
+import { omitUndefined } from "@agentick/utils-next";
 
 export function defaultProject(input: ProjectInput): LanguageModelInput {
   const messages = buildMessages(input.compiled);
@@ -127,7 +128,7 @@ export function messagePartFromBlock(block: ContentBlock): LanguageModelMessageP
       return {
         type: "image",
         imageUrl: imageUrlFromSource(block.source, block.mimeType),
-        ...(block.mimeType !== undefined ? { mediaType: block.mimeType } : {}),
+        ...omitUndefined({ mediaType: block.mimeType }),
         ...pm,
       };
     case "tool_use":
@@ -143,7 +144,7 @@ export function messagePartFromBlock(block: ContentBlock): LanguageModelMessageP
         type: "tool_result",
         toolUseId: block.toolUseId,
         content: block.content.map(messagePartFromBlock),
-        ...(block.isError !== undefined ? { isError: block.isError } : {}),
+        ...omitUndefined({ isError: block.isError }),
         ...pm,
       };
     case "task_ref":
@@ -160,9 +161,11 @@ export function messagePartFromBlock(block: ContentBlock): LanguageModelMessageP
           _kind: "session_task_ref",
           taskId: block.taskId,
           status: block.status,
-          ...(block.statusMessage !== undefined ? { statusMessage: block.statusMessage } : {}),
-          ...(block.ttl !== undefined ? { ttl: block.ttl } : {}),
-          ...(block.pollInterval !== undefined ? { pollInterval: block.pollInterval } : {}),
+          ...omitUndefined({
+            statusMessage: block.statusMessage,
+            ttl: block.ttl,
+            pollInterval: block.pollInterval,
+          }),
         }),
         ...pm,
       };
@@ -209,11 +212,11 @@ export function buildTools(tools: readonly ToolDeclaration[]): ReadonlyArray<Lan
     .filter((t) => t.exposure.includes("model"))
     .map((t) => ({
       name: t.name,
-      ...(t.description !== undefined ? { description: t.description } : {}),
+      ...omitUndefined({ description: t.description }),
       inputSchema: toJsonSchema(t.inputSchema) as Record<string, unknown>,
       ...(t.outputSchema !== undefined
         ? { outputSchema: toJsonSchema(t.outputSchema) as Record<string, unknown> }
         : {}),
-      ...(t.providerOptions !== undefined ? { providerOptions: t.providerOptions } : {}),
+      ...omitUndefined({ providerOptions: t.providerOptions }),
     }));
 }

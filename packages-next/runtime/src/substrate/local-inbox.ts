@@ -31,6 +31,7 @@ export interface LocalInboxFactoryParent {
   onClose(handler: () => void | Promise<void>): void;
 }
 import { ulid } from "./ulid.js";
+import { omitUndefined } from "@agentick/utils-next";
 
 /**
  * Promote a caller's {@link MessageEnvelopeInput} to a full
@@ -43,10 +44,12 @@ function stampEnvelope<T>(address: string, input: MessageEnvelopeInput<T>): Mess
     type: input.type,
     messageId: input.messageId ?? ulid(),
     timestamp: Date.now(),
-    ...(input.from !== undefined ? { from: input.from } : {}),
-    ...(input.parentOpId !== undefined ? { parentOpId: input.parentOpId } : {}),
-    ...(input.correlationId !== undefined ? { correlationId: input.correlationId } : {}),
-    ...(input.payload !== undefined ? { payload: input.payload } : {}),
+    ...omitUndefined({
+      from: input.from,
+      parentOpId: input.parentOpId,
+      correlationId: input.correlationId,
+      payload: input.payload,
+    }),
   };
 }
 

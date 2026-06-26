@@ -13,6 +13,7 @@
  */
 
 import type { CompactRun, CompactStrategy } from "@agentick/spec-next";
+import { omitUndefined } from "@agentick/utils-next";
 
 export interface WithHandlerOptions {
   readonly handler: CompactRun;
@@ -30,6 +31,6 @@ export function withHandler(options: WithHandlerOptions): CompactStrategy {
   return {
     source: options.source ?? "persisted",
     run: options.handler,
-    ...(options.metadata !== undefined ? { metadata: options.metadata } : {}),
+    ...omitUndefined({ metadata: options.metadata }),
   };
 }

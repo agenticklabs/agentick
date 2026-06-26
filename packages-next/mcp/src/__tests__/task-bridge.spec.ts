@@ -52,6 +52,7 @@ import type { Task } from "@modelcontextprotocol/sdk/types.js";
 
 import { InMemoryMcpTransport, NoneAuth, withMCP } from "../index.js";
 import { RELATED_TASK_META_KEY } from "../wire/task-codec.js";
+import { omitUndefined } from "@agentick/utils-next";
 
 const Agent = (): React.ReactElement => React.createElement("message", { role: "user" }, "hi");
 
@@ -467,8 +468,7 @@ describe("withMCP — taskSupport:'required' end-to-end", () => {
         if (e.kind === "progress") {
           localProgress.push({
             current: e.current!,
-            ...(e.total !== undefined ? { total: e.total } : {}),
-            ...(e.message !== undefined ? { message: e.message } : {}),
+            ...omitUndefined({ total: e.total, message: e.message }),
           });
         }
       }

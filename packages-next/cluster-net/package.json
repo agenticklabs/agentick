@@ -6,9 +6,9 @@
   "keywords": [
     "agentick",
     "cluster",
+    "ipc",
     "tcp",
-    "unix-socket",
-    "ipc"
+    "unix-socket"
   ],
   "license": "MIT",
   "author": "Ryan Lindgren",

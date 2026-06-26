@@ -8,6 +8,8 @@
  * Per the test-doubles convention: `stub*` for canned answers.
  */
 
+import { omitUndefined } from "@agentick/utils-next";
+
 import type { Effect } from "effect";
 
 import type {
@@ -64,8 +66,7 @@ export function stubTasks(options: StubTasksOptions = {}): TasksHarnessProtocol 
       createdAt: now,
       lastUpdatedAt: now,
       ttl: opts.ttl ?? null,
-      ...(opts.statusMessage !== undefined ? { statusMessage: opts.statusMessage } : {}),
-      ...(opts.pollInterval !== undefined ? { pollInterval: opts.pollInterval } : {}),
+      ...omitUndefined({ statusMessage: opts.statusMessage, pollInterval: opts.pollInterval }),
     };
     known.set(taskId, info);
 

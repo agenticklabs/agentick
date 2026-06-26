@@ -40,6 +40,8 @@
  * @see docs/proposals/v2/IMPLEMENTATION-PLAN.md (FAÇADE.6)
  */
 
+import { omitUndefined } from "@agentick/utils-next";
+
 import { Effect } from "effect";
 import {
   BaseHarness,
@@ -389,7 +391,7 @@ class CallbackLanguageModelExecutor
         const result = yield* Effect.tryPromise<LanguageModelExecutionResult, ExecuteError>({
           try: () =>
             this.spec.run(input.targetInput, {
-              ...(input.signal !== undefined ? { signal: input.signal } : {}),
+              ...omitUndefined({ signal: input.signal }),
               scope: {
                 sessionId: input.scope?.sessionId,
                 executionId,
@@ -430,7 +432,7 @@ class CallbackLanguageModelExecutor
         targetInput: projected,
         target: input.target,
         scope: { ...(input.scope ?? {}), executionId },
-        ...(input.signal !== undefined ? { signal: input.signal } : {}),
+        ...omitUndefined({ signal: input.signal }),
       };
       const raw = yield* this.executeBody(executeInput, executionId, null);
       const result = raw as LanguageModelExecutionResult;

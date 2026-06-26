@@ -73,6 +73,7 @@ import type {
 } from "@agentick/spec-next";
 
 import { InMemoryToolRegistry, sameBindingKey } from "./registry.js";
+import { omitUndefined } from "@agentick/utils-next";
 
 // ============================================================================
 // Public API
@@ -304,11 +305,11 @@ class CallbackToolExecutor extends BaseHarness<"tool"> implements ToolExecutorPr
       surface: "tool",
       name: "tool:command:dispatch",
       scope: {
-        ...(input.context.sessionId !== undefined ? { sessionId: input.context.sessionId } : {}),
-        ...(input.context.executionId !== undefined
-          ? { executionId: input.context.executionId }
-          : {}),
-        ...(input.context.tickId !== undefined ? { tickId: input.context.tickId } : {}),
+        ...omitUndefined({
+          sessionId: input.context.sessionId,
+          executionId: input.context.executionId,
+          tickId: input.context.tickId,
+        }),
       },
       input,
     };
@@ -325,7 +326,7 @@ class CallbackToolExecutor extends BaseHarness<"tool"> implements ToolExecutorPr
     entry.controller.abort({
       _tag: "ToolAbortedError",
       toolCallId: input.toolCallId,
-      ...(input.reason !== undefined ? { reason: input.reason } : {}),
+      ...omitUndefined({ reason: input.reason }),
     });
   }
 

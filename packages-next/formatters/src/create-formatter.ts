@@ -16,6 +16,8 @@
  * @see docs/proposals/v2/blueprint/36-define-vs-create-convention.md
  */
 
+import { omitUndefined } from "@agentick/utils-next";
+
 import type {
   ContentBlock,
   Formatter,
@@ -41,7 +43,7 @@ export function createFormatter(spec: CreateFormatterInput): DefinedFormatter {
   const identity: FormatterIdentity = {
     id: spec.id,
     format: spec.format,
-    ...(spec.version !== undefined ? { version: spec.version } : {}),
+    ...omitUndefined({ version: spec.version }),
   };
   const fn: DefinedFormatter = Object.assign(
     (blocks: readonly SemanticContentBlock[]) => spec.render(blocks),

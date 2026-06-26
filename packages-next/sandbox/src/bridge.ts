@@ -28,6 +28,7 @@ import type {
 import { createNotifier } from "@agentick/pubsub-next";
 
 import { SandboxHarness } from "./harness.js";
+import { omitUndefined } from "@agentick/utils-next";
 
 export interface SandboxRegistration {
   readonly id: string;
@@ -98,13 +99,11 @@ export function createSandboxBridge(options: CreateSandboxBridgeOptions): Sandbo
           provider: input.provider,
           options: input.options,
           elicitation: input.elicitation,
-          ...(input.acl !== undefined ? { acl: input.acl } : {}),
-          ...(input.permissionTimeoutDecision !== undefined
-            ? { permissionTimeoutDecision: input.permissionTimeoutDecision }
-            : {}),
-          ...(input.permissionTimeoutMs !== undefined
-            ? { permissionTimeoutMs: input.permissionTimeoutMs }
-            : {}),
+          ...omitUndefined({
+            acl: input.acl,
+            permissionTimeoutDecision: input.permissionTimeoutDecision,
+            permissionTimeoutMs: input.permissionTimeoutMs,
+          }),
         },
       );
       await harness.ready;

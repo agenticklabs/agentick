@@ -91,6 +91,7 @@ import type { EraCodec } from "../client/era-codec.js";
 
 import { mcpContentToBlocks } from "./content-mapper.js";
 import { mcpTaskEffect } from "./task-bridge.js";
+import { omitUndefined } from "@agentick/utils-next";
 
 // ============================================================================
 // Options
@@ -286,9 +287,11 @@ async function mkClient(
       transport: config.transport,
       auth: config.auth ?? new NoneAuth(),
       elicitAddress: installer.elicitation.address,
-      ...(config.codec !== undefined ? { codec: config.codec } : {}),
-      ...(config.reconnect !== undefined ? { reconnect: config.reconnect } : {}),
-      ...(config.capabilities !== undefined ? { capabilities: config.capabilities } : {}),
+      ...omitUndefined({
+        codec: config.codec,
+        reconnect: config.reconnect,
+        capabilities: config.capabilities,
+      }),
       clientInfo: {
         name: config.clientName ?? config.serverId,
         version: config.clientVersion ?? "1.0.0",

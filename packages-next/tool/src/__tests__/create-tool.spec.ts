@@ -101,6 +101,7 @@ describe("createTool — handler invocation contract", () => {
       signal: new AbortController().signal,
       setState: () => undefined,
       emit: () => undefined,
+      task: "auto" as const,
     };
     await t.handler({ foo: 1 }, { ctx: fakeCtx, use: {} });
     expect(receivedInput).toEqual({ foo: 1 });

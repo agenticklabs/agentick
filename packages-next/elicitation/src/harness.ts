@@ -34,7 +34,7 @@
 
 import { Effect, Either } from "effect";
 import { BaseHarness } from "@agentick/runtime-next";
-import { reasonOf } from "@agentick/utils-next";
+import { reasonOf, omitUndefined } from "@agentick/utils-next";
 import type { RequestError } from "@agentick/runtime-next";
 import type {
   ElicitationFailure,
@@ -147,9 +147,11 @@ export class ElicitationHarness
       mode: "form",
       message: request.message,
       schema: wireSchema,
-      ...(request.hints !== undefined ? { hints: request.hints } : {}),
-      ...(request.metadata !== undefined ? { metadata: request.metadata } : {}),
-      ...(request.relatedTaskId !== undefined ? { relatedTaskId: request.relatedTaskId } : {}),
+      ...omitUndefined({
+        hints: request.hints,
+        metadata: request.metadata,
+        relatedTaskId: request.relatedTaskId,
+      }),
     };
 
     const effect = this.request<FormWirePayload, ElicitationResponse>(
@@ -157,8 +159,7 @@ export class ElicitationHarness
       payload,
       {
         timeoutMs,
-        ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
-        ...(this.parentScope !== undefined ? { scope: this.parentScope } : {}),
+        ...omitUndefined({ signal: opts.signal, scope: this.parentScope }),
       },
     );
 
@@ -178,7 +179,7 @@ export class ElicitationHarness
     // declined | cancelled pass through verbatim.
     return {
       outcome: response.outcome,
-      ...(response.reason !== undefined ? { reason: response.reason } : {}),
+      ...omitUndefined({ reason: response.reason }),
     };
   }
 
@@ -199,15 +200,16 @@ export class ElicitationHarness
       message: request.message,
       url: request.url,
       elicitationId: request.elicitationId,
-      ...(request.hints !== undefined ? { hints: request.hints } : {}),
-      ...(request.metadata !== undefined ? { metadata: request.metadata } : {}),
-      ...(request.relatedTaskId !== undefined ? { relatedTaskId: request.relatedTaskId } : {}),
+      ...omitUndefined({
+        hints: request.hints,
+        metadata: request.metadata,
+        relatedTaskId: request.relatedTaskId,
+      }),
     };
 
     const effect = this.request<UrlWirePayload, ElicitationResponse>(ELICITATION_CHANNEL, payload, {
       timeoutMs,
-      ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
-      ...(this.parentScope !== undefined ? { scope: this.parentScope } : {}),
+      ...omitUndefined({ signal: opts.signal, scope: this.parentScope }),
     });
 
     const either = await Effect.runPromise(effect.pipe(Effect.either));
@@ -224,7 +226,7 @@ export class ElicitationHarness
     }
     return {
       outcome: response.outcome,
-      ...(response.reason !== undefined ? { reason: response.reason } : {}),
+      ...omitUndefined({ reason: response.reason }),
     };
   }
 

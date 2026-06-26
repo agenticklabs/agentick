@@ -32,6 +32,7 @@ import {
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Stream from "effect/Stream";
+import { omitUndefined } from "@agentick/utils-next";
 
 /**
  * A `DispatchHost` is anything that satisfies `GatewayHarnessProtocol`.
@@ -161,8 +162,7 @@ export async function dispatchRequest(
         await sessElic.elicitation.respond({
           correlationId: params.correlationId,
           outcome: params.outcome,
-          ...(params.value !== undefined ? { value: params.value } : {}),
-          ...(params.reason !== undefined ? { reason: params.reason } : {}),
+          ...omitUndefined({ value: params.value, reason: params.reason }),
         });
         return success(req.id, null);
       }

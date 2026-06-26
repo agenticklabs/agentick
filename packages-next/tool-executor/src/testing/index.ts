@@ -23,6 +23,7 @@ import { TasksHarness } from "@agentick/tasks-next";
 import { InMemoryHandlerResolver } from "../handler-resolver.js";
 import { ToolExecutorHarness } from "../harness.js";
 import type { ToolExecutorHarnessOptions, ToolHandler, Validator } from "../types.js";
+import { omitUndefined } from "@agentick/utils-next";
 
 /**
  * Build a {@link ToolRegistration} for tests with sensible defaults.
@@ -43,7 +44,7 @@ export function fakeRegistration(input: {
   return {
     declaration: input.declaration,
     handlerRef: input.handlerRef ?? `h.${input.declaration.name}`,
-    ...(input.useDeps !== undefined ? { useDeps: input.useDeps } : {}),
+    ...omitUndefined({ useDeps: input.useDeps }),
     binding: input.binding ?? { scope: "runtime" },
   };
 }
@@ -137,12 +138,10 @@ export async function createTestHarness(
     elicitation,
     tasks,
     ...(options.tools ? { initialTools: options.tools } : {}),
-    ...(options.defaultTimeoutMs !== undefined
-      ? { defaultTimeoutMs: options.defaultTimeoutMs }
-      : {}),
-    ...(options.defaultConfirmationTimeoutMs !== undefined
-      ? { defaultConfirmationTimeoutMs: options.defaultConfirmationTimeoutMs }
-      : {}),
+    ...omitUndefined({
+      defaultTimeoutMs: options.defaultTimeoutMs,
+      defaultConfirmationTimeoutMs: options.defaultConfirmationTimeoutMs,
+    }),
   };
 
   const harness = new ToolExecutorHarness(scopeId, journal, bus, inbox, harnessOptions);

@@ -12,6 +12,7 @@ import { createConnection, type Socket } from "node:net";
 import type { Connection, Connector } from "@agentick/cluster-broker-next";
 
 import { socketToConnection } from "./socket-connection.js";
+import { omitUndefined } from "@agentick/utils-next";
 
 export interface TcpConnectorOptions {
   /** Target host. Default: `"127.0.0.1"`. */
@@ -74,7 +75,7 @@ export function createTcpConnector(opts: TcpConnectorOptions): Connector {
           clearTimeout(timer);
           socket.off("error", onError);
           const conn = socketToConnection(socket, {
-            ...(opts.maxFrameBytes !== undefined ? { maxFrameBytes: opts.maxFrameBytes } : {}),
+            ...omitUndefined({ maxFrameBytes: opts.maxFrameBytes }),
             onDiagnostic,
           });
           onDiagnostic("cluster:broker:net:connected", { host, port, remote: conn.remote });

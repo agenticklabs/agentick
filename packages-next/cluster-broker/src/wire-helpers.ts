@@ -43,6 +43,7 @@ import {
 import { BaseBroker } from "./base-broker.js";
 import { BaseClusterClient } from "./base-cluster-client.js";
 import type { Connector, Listener } from "./connection.js";
+import { omitUndefined } from "@agentick/utils-next";
 
 // ============================================================================
 // startBroker
@@ -75,7 +76,7 @@ export async function startBroker(opts: StartBrokerOptions): Promise<RunningBrok
   const broker = new BaseBroker({
     listener: opts.listener,
     codec: opts.codec ?? createJsonCodec(),
-    ...(opts.onDiagnostic !== undefined ? { onDiagnostic: opts.onDiagnostic } : {}),
+    ...omitUndefined({ onDiagnostic: opts.onDiagnostic }),
   });
   await broker.start();
   return {
@@ -141,10 +142,12 @@ export function createClusterNode(opts: CreateClusterNodeOptions): ClusterNodeFa
       nodeId: opts.nodeId,
       connector: opts.connector,
       codec: opts.codec ?? createJsonCodec(),
-      ...(opts.heartbeatMs !== undefined ? { heartbeatMs: opts.heartbeatMs } : {}),
-      ...(opts.missedPongLimit !== undefined ? { missedPongLimit: opts.missedPongLimit } : {}),
-      ...(opts.reconnect !== undefined ? { reconnect: opts.reconnect } : {}),
-      ...(opts.onDiagnostic !== undefined ? { onDiagnostic: opts.onDiagnostic } : {}),
+      ...omitUndefined({
+        heartbeatMs: opts.heartbeatMs,
+        missedPongLimit: opts.missedPongLimit,
+        reconnect: opts.reconnect,
+        onDiagnostic: opts.onDiagnostic,
+      }),
     });
     client = c;
     parent.onClose(() => c.close());
@@ -212,9 +215,8 @@ export function defineWireCluster(opts: DefineWireClusterOptions): ClusterFactor
     nodeId: opts.nodeId,
     transport: opts.node.transport,
     membership: opts.node.membership,
-    ...(opts.partitioning !== undefined ? { partitioning: opts.partitioning } : {}),
-    ...(opts.journal !== undefined ? { journal: opts.journal } : {}),
+    ...omitUndefined({ partitioning: opts.partitioning, journal: opts.journal }),
     ...(opts.codec !== undefined ? { codec: () => opts.codec! } : {}),
-    ...(opts.fanoutMode !== undefined ? { fanoutMode: opts.fanoutMode } : {}),
+    ...omitUndefined({ fanoutMode: opts.fanoutMode }),
   });
 }

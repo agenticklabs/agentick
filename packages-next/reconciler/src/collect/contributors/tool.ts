@@ -15,6 +15,7 @@ import type {
 import type { ElementInstance } from "../../host/host-instance.js";
 import type { CollectContext, Contributor } from "../contributor.js";
 import type { IRFragment } from "../fragments.js";
+import { omitUndefined } from "@agentick/utils-next";
 
 interface ToolProps {
   readonly id?: string;
@@ -65,11 +66,13 @@ export const toolContributor: Contributor = {
       name: props.name,
       description,
       inputSchema: props.inputSchema,
-      ...(props.outputSchema !== undefined ? { outputSchema: props.outputSchema } : {}),
+      ...omitUndefined({ outputSchema: props.outputSchema }),
       exposure: props.exposure ?? ["model"],
-      ...(props.handlerRef !== undefined ? { handlerRef: props.handlerRef } : {}),
-      ...(props.annotations !== undefined ? { annotations: props.annotations } : {}),
-      ...(props.metadata !== undefined ? { metadata: props.metadata } : {}),
+      ...omitUndefined({
+        handlerRef: props.handlerRef,
+        annotations: props.annotations,
+        metadata: props.metadata,
+      }),
     };
 
     return [{ kind: "tool-declaration", tool }];

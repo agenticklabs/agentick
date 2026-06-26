@@ -10,6 +10,7 @@ import type { SectionEntry, SectionMetadata } from "@agentick/spec-next";
 import type { ElementInstance } from "../../host/host-instance.js";
 import type { CollectContext, Contributor } from "../contributor.js";
 import type { IRFragment } from "../fragments.js";
+import { omitUndefined } from "@agentick/utils-next";
 
 interface SectionProps {
   readonly id?: string;
@@ -34,11 +35,11 @@ export const sectionContributor: Contributor = {
       props.providerMetadata !== undefined ||
       props.metadata !== undefined
         ? {
-            ...(props.priority !== undefined ? { priority: props.priority } : {}),
-            ...(props.cache !== undefined ? { cache: props.cache } : {}),
-            ...(props.providerMetadata !== undefined
-              ? { providerMetadata: props.providerMetadata }
-              : {}),
+            ...omitUndefined({
+              priority: props.priority,
+              cache: props.cache,
+              providerMetadata: props.providerMetadata,
+            }),
             ...(props.metadata ?? {}),
           }
         : undefined;
@@ -46,7 +47,7 @@ export const sectionContributor: Contributor = {
     const entry: SectionEntry = {
       kind: "section",
       id,
-      ...(props.title !== undefined ? { title: props.title } : {}),
+      ...omitUndefined({ title: props.title }),
       content,
       renderedWith: ctx.formatter("section"),
       ...(metadata ? { metadata } : {}),

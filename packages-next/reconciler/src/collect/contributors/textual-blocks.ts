@@ -25,6 +25,7 @@ import type {
 import type { ElementInstance } from "../../host/host-instance.js";
 import type { CollectContext, Contributor } from "../contributor.js";
 import type { IRFragment } from "../fragments.js";
+import { omitUndefined } from "@agentick/utils-next";
 
 interface TextBlockProps {
   readonly text?: string;
@@ -48,7 +49,7 @@ export const textBlockContributor: Contributor = {
     const block: TextBlock = {
       type: "text",
       text,
-      ...(props.id !== undefined ? { id: props.id } : {}),
+      ...omitUndefined({ id: props.id }),
     };
     return [{ kind: "content-block", block }];
   },
@@ -81,7 +82,7 @@ export const codeContributor: Contributor = {
       type: "code",
       text,
       language: props.language,
-      ...(props.id !== undefined ? { id: props.id } : {}),
+      ...omitUndefined({ id: props.id }),
     };
     return [{ kind: "content-block", block }];
   },
@@ -100,13 +101,13 @@ export const jsonContributor: Contributor = {
     const childText = ctx.collectText(instance);
     const block: JsonBlock = {
       type: "json",
-      ...(props.data !== undefined ? { data: props.data } : {}),
+      ...omitUndefined({ data: props.data }),
       ...(props.text !== undefined
         ? { text: props.text }
         : childText.length > 0
           ? { text: childText }
           : {}),
-      ...(props.id !== undefined ? { id: props.id } : {}),
+      ...omitUndefined({ id: props.id }),
     };
     return [{ kind: "content-block", block }];
   },
@@ -125,7 +126,7 @@ export const xmlBlockContributor: Contributor = {
     const block: XmlBlock = {
       type: "xml",
       text,
-      ...(props.id !== undefined ? { id: props.id } : {}),
+      ...omitUndefined({ id: props.id }),
     };
     return [{ kind: "content-block", block }];
   },
@@ -145,8 +146,7 @@ export const csvContributor: Contributor = {
     const block: CsvBlock = {
       type: "csv",
       text,
-      ...(props.headers !== undefined ? { headers: props.headers } : {}),
-      ...(props.id !== undefined ? { id: props.id } : {}),
+      ...omitUndefined({ headers: props.headers, id: props.id }),
     };
     return [{ kind: "content-block", block }];
   },
@@ -165,7 +165,7 @@ export const htmlContributor: Contributor = {
     const block: HtmlBlock = {
       type: "html",
       text,
-      ...(props.id !== undefined ? { id: props.id } : {}),
+      ...omitUndefined({ id: props.id }),
     };
     return [{ kind: "content-block", block }];
   },
@@ -186,9 +186,7 @@ export const reasoningContributor: Contributor = {
     const block: ReasoningBlock = {
       type: "reasoning",
       text,
-      ...(props.signature !== undefined ? { signature: props.signature } : {}),
-      ...(props.isRedacted !== undefined ? { isRedacted: props.isRedacted } : {}),
-      ...(props.id !== undefined ? { id: props.id } : {}),
+      ...omitUndefined({ signature: props.signature, isRedacted: props.isRedacted, id: props.id }),
     };
     return [{ kind: "content-block", block }];
   },

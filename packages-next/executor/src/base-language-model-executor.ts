@@ -36,6 +36,8 @@
  * @see docs/proposals/v2/blueprint/06-executor-harness.md
  */
 
+import { omitUndefined } from "@agentick/utils-next";
+
 import { Chunk, Effect, Exit, Fiber, Option, Queue, Stream } from "effect";
 
 import { BaseHarness, runHarnessProtocol, ulid } from "@agentick/runtime-next";
@@ -899,7 +901,7 @@ export abstract class BaseLanguageModelExecutor<TRaw, TChunk = unknown>
         targetInput: projected,
         target: input.target,
         scope: { ...(input.scope ?? {}), executionId },
-        ...(input.signal !== undefined ? { signal: input.signal } : {}),
+        ...omitUndefined({ signal: input.signal }),
       };
       const raw = yield* this.executeBody(
         executeInput,

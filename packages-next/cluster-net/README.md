@@ -39,7 +39,7 @@ const cluster = defineTcpCluster({
   // optional: partitioning, codec, journal, fanoutMode pass through
 });
 
-const gateway = await createGateway({ cluster, /* ... */ });
+const gateway = await createGateway({ cluster /* ... */ });
 ```
 
 ### Manual composition (full control)
@@ -102,21 +102,21 @@ const node = tcpClusterNode({ nodeId, host: "127.0.0.1", port: 9876 });
 
 ### High-level
 
-| Export | Role |
-|---|---|
-| `defineTcpCluster(opts)` | Returns a `ClusterFactory` — convenience for the common case |
-| `tcpClusterNode(opts)` | Returns `{ transport, membership }` over one multiplexed connection |
-| `tcpBroker(opts)` | Spins up + starts a `BaseBroker` on a TCP listener |
-| `tcpTransport(opts)` | Standalone `ClusterTransportFactory` (opens its own connection) |
-| `tcpMembership(opts)` | Standalone `ClusterMembershipFactory` (opens its own connection) |
-| `tryBindOrConnect(opts)` | First-to-bind broker-election helper |
+| Export                   | Role                                                                |
+| ------------------------ | ------------------------------------------------------------------- |
+| `defineTcpCluster(opts)` | Returns a `ClusterFactory` — convenience for the common case        |
+| `tcpClusterNode(opts)`   | Returns `{ transport, membership }` over one multiplexed connection |
+| `tcpBroker(opts)`        | Spins up + starts a `BaseBroker` on a TCP listener                  |
+| `tcpTransport(opts)`     | Standalone `ClusterTransportFactory` (opens its own connection)     |
+| `tcpMembership(opts)`    | Standalone `ClusterMembershipFactory` (opens its own connection)    |
+| `tryBindOrConnect(opts)` | First-to-bind broker-election helper                                |
 
 ### Low-level
 
-| Export | Role |
-|---|---|
-| `createTcpListener(opts)` | Wraps `net.Server` as a `Listener` for `BaseBroker` |
-| `createTcpConnector(opts)` | Wraps `net.Socket` connect as a `Connector` for `BaseClusterClient` |
+| Export                       | Role                                                                    |
+| ---------------------------- | ----------------------------------------------------------------------- |
+| `createTcpListener(opts)`    | Wraps `net.Server` as a `Listener` for `BaseBroker`                     |
+| `createTcpConnector(opts)`   | Wraps `net.Socket` connect as a `Connector` for `BaseClusterClient`     |
 | `socketToConnection(socket)` | Wraps a raw `net.Socket` in the message-oriented `Connection` interface |
 
 ## Connection multiplexing
@@ -166,14 +166,14 @@ deferred — tracked as Phase 4+ optional.
 ```typescript
 interface TcpClusterNodeOptions {
   nodeId: NodeId;
-  host?: string;        // default: "127.0.0.1"
+  host?: string; // default: "127.0.0.1"
   port: number;
   maxFrameBytes?: number;
   heartbeatMs?: number;
   missedPongLimit?: number;
-  reconnect?: { initialMs, maxMs, maxAttempts };
-  connectTimeoutMs?: number;  // default: 5000
-  codec?: ClusterCodec;       // default: bundled JSON
+  reconnect?: { initialMs; maxMs; maxAttempts };
+  connectTimeoutMs?: number; // default: 5000
+  codec?: ClusterCodec; // default: bundled JSON
   onDiagnostic?: (name, payload) => void;
 }
 ```

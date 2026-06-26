@@ -23,7 +23,7 @@
  */
 
 import { Cause, Effect, Exit, Option } from "effect";
-import { unwrapExit } from "@agentick/utils-next";
+import { unwrapExit, omitUndefined } from "@agentick/utils-next";
 import type {
   CommandOutcome,
   EventBus,
@@ -854,8 +854,7 @@ export abstract class BaseHarness<
     const replyTo = this.address;
     const registered = this.requests.register({
       correlationId,
-      ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
-      ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
+      ...omitUndefined({ timeoutMs: opts.timeoutMs, signal: opts.signal }),
     });
     // Resolve scope precedence: explicit > captured-at-construction.
     // The captured context carries any RuntimeContext fields the
@@ -863,13 +862,11 @@ export abstract class BaseHarness<
     // explicit override lets per-call code stamp a different scope
     // (e.g., the elicitation harness stamping its parent sessionId).
     const ctxScope: EventScope = {
-      ...(this.capturedContext.sessionId !== undefined
-        ? { sessionId: this.capturedContext.sessionId }
-        : {}),
-      ...(this.capturedContext.executionId !== undefined
-        ? { executionId: this.capturedContext.executionId }
-        : {}),
-      ...(this.capturedContext.tickId !== undefined ? { tickId: this.capturedContext.tickId } : {}),
+      ...omitUndefined({
+        sessionId: this.capturedContext.sessionId,
+        executionId: this.capturedContext.executionId,
+        tickId: this.capturedContext.tickId,
+      }),
     };
     const scope: EventScope = opts.scope ?? ctxScope;
     // Publish the request envelope on the bus. The channel name pattern

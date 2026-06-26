@@ -19,6 +19,7 @@ import type { ContentBlock, MessageEntry, MessageMetadata, MessageRole } from "@
 import type { ElementInstance } from "../../host/host-instance.js";
 import type { CollectContext, Contributor } from "../contributor.js";
 import type { IRFragment } from "../fragments.js";
+import { omitUndefined } from "@agentick/utils-next";
 
 interface MessageProps {
   readonly id?: string;
@@ -65,10 +66,7 @@ export const messageContributor: Contributor = {
       props.providerMetadata !== undefined ||
       props.metadata !== undefined
         ? {
-            ...(props.cache !== undefined ? { cache: props.cache } : {}),
-            ...(props.providerMetadata !== undefined
-              ? { providerMetadata: props.providerMetadata }
-              : {}),
+            ...omitUndefined({ cache: props.cache, providerMetadata: props.providerMetadata }),
             ...(props.metadata ?? {}),
           }
         : undefined;
@@ -78,7 +76,7 @@ export const messageContributor: Contributor = {
       role: props.role,
       content,
       renderedWith: ctx.formatter("message"),
-      ...(props.id !== undefined ? { id: props.id } : {}),
+      ...omitUndefined({ id: props.id }),
       ...(metadata ? { metadata } : {}),
     };
 

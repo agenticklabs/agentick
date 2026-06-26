@@ -9,6 +9,8 @@
  * cache tokens, providerOptions spread, streaming deltas.
  */
 
+import { omitUndefined } from "@agentick/utils-next";
+
 import { Chunk, Effect, Fiber, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 
@@ -67,7 +69,7 @@ async function makeExecutor(
   const exec = new GoogleExecutor("exec-google-test", journal, bus, inbox, {
     client: asClient(stub),
     model: opts.model ?? "gemini-2.5-flash",
-    ...(opts.stream !== undefined ? { stream: opts.stream } : {}),
+    ...omitUndefined({ stream: opts.stream }),
     ...(opts.parseThinkTags ? { parseThinkTags: true } : {}),
     ...(opts.customBlocks ? { customBlocks: opts.customBlocks } : {}),
   });

@@ -28,6 +28,7 @@ import {
 
 import { createWsConnector } from "./ws-connector.js";
 import { createWsListener } from "./ws-listener.js";
+import { omitUndefined } from "@agentick/utils-next";
 
 // ============================================================================
 // wsBroker — convenience for the broker-elected process
@@ -50,14 +51,15 @@ export async function wsBroker(opts: WsBrokerOptions): Promise<RunningWsBroker> 
     ...(opts.httpServer !== undefined
       ? ({ httpServer: opts.httpServer } as const)
       : ({ host: opts.host, port: opts.port! } as const)),
-    ...(opts.path !== undefined ? { path: opts.path } : {}),
-    ...(opts.allowedOrigins !== undefined ? { allowedOrigins: opts.allowedOrigins } : {}),
-    ...(opts.onDiagnostic !== undefined ? { onDiagnostic: opts.onDiagnostic } : {}),
+    ...omitUndefined({
+      path: opts.path,
+      allowedOrigins: opts.allowedOrigins,
+      onDiagnostic: opts.onDiagnostic,
+    }),
   });
   return startBroker({
     listener,
-    ...(opts.codec !== undefined ? { codec: opts.codec } : {}),
-    ...(opts.onDiagnostic !== undefined ? { onDiagnostic: opts.onDiagnostic } : {}),
+    ...omitUndefined({ codec: opts.codec, onDiagnostic: opts.onDiagnostic }),
   });
 }
 
@@ -86,14 +88,18 @@ export function wsClusterNode(opts: WsClusterNodeOptions): ClusterNodeFactories 
     nodeId: opts.nodeId,
     connector: createWsConnector({
       url: opts.url,
-      ...(opts.connectTimeoutMs !== undefined ? { connectTimeoutMs: opts.connectTimeoutMs } : {}),
-      ...(opts.onDiagnostic !== undefined ? { onDiagnostic: opts.onDiagnostic } : {}),
+      ...omitUndefined({
+        connectTimeoutMs: opts.connectTimeoutMs,
+        onDiagnostic: opts.onDiagnostic,
+      }),
     }),
-    ...(opts.codec !== undefined ? { codec: opts.codec } : {}),
-    ...(opts.heartbeatMs !== undefined ? { heartbeatMs: opts.heartbeatMs } : {}),
-    ...(opts.missedPongLimit !== undefined ? { missedPongLimit: opts.missedPongLimit } : {}),
-    ...(opts.reconnect !== undefined ? { reconnect: opts.reconnect } : {}),
-    ...(opts.onDiagnostic !== undefined ? { onDiagnostic: opts.onDiagnostic } : {}),
+    ...omitUndefined({
+      codec: opts.codec,
+      heartbeatMs: opts.heartbeatMs,
+      missedPongLimit: opts.missedPongLimit,
+      reconnect: opts.reconnect,
+      onDiagnostic: opts.onDiagnostic,
+    }),
   });
 }
 
@@ -119,9 +125,11 @@ export function defineWsCluster(opts: DefineWsClusterOptions): ClusterFactory {
   return defineWireCluster({
     nodeId: opts.nodeId,
     node: wsClusterNode(opts),
-    ...(opts.codec !== undefined ? { codec: opts.codec } : {}),
-    ...(opts.partitioning !== undefined ? { partitioning: opts.partitioning } : {}),
-    ...(opts.journal !== undefined ? { journal: opts.journal } : {}),
-    ...(opts.fanoutMode !== undefined ? { fanoutMode: opts.fanoutMode } : {}),
+    ...omitUndefined({
+      codec: opts.codec,
+      partitioning: opts.partitioning,
+      journal: opts.journal,
+      fanoutMode: opts.fanoutMode,
+    }),
   });
 }

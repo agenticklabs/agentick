@@ -24,6 +24,7 @@ import { platform } from "node:os";
 import type { Connection, Listener } from "@agentick/cluster-broker-next";
 
 import { socketToConnection } from "./socket-connection.js";
+import { omitUndefined } from "@agentick/utils-next";
 
 // TODO(phase-4e-followup): consolidate TCP + Unix listener/connector/
 // cluster modules. unix-listener.ts and tcp-listener.ts are ~80%
@@ -102,7 +103,7 @@ export function createUnixListener(opts: UnixListenerOptions): Listener {
       return;
     }
     const conn = socketToConnection(socket, {
-      ...(opts.maxFrameBytes !== undefined ? { maxFrameBytes: opts.maxFrameBytes } : {}),
+      ...omitUndefined({ maxFrameBytes: opts.maxFrameBytes }),
       onDiagnostic,
     });
     for (const handler of [...acceptHandlers]) {

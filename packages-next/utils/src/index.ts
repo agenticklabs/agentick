@@ -3,3 +3,4 @@ export * from "./merge-layered.js";
 export * from "./cause.js";
 export * from "./ulid.js";
 export * from "./match-filter.js";
+export * from "./omit-undefined.js";

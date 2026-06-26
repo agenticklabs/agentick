@@ -19,6 +19,8 @@
  */
 
 import React, { type ReactNode } from "react";
+import { omitUndefined } from "@agentick/utils-next";
+
 import { Effect } from "effect";
 import { runHarnessProtocol, ulid } from "@agentick/runtime-next";
 import type {
@@ -285,7 +287,7 @@ export class ReconcilerHarness extends BaseHarness<"reconciler"> implements Reco
     return {
       specVersion: SPEC_VERSION,
       mountId: state.mountId,
-      ...(state.elementVersion !== undefined ? { elementVersion: state.elementVersion } : {}),
+      ...omitUndefined({ elementVersion: state.elementVersion }),
       bridges: bridges as ReconcilerSnapshot["bridges"],
       dataCache,
       subscriptions: [],
@@ -350,7 +352,7 @@ export class ReconcilerHarness extends BaseHarness<"reconciler"> implements Reco
     const state: MountState = {
       mountId: input.mountId,
       element: input.element as ReactNode,
-      ...(input.elementVersion !== undefined ? { elementVersion: input.elementVersion } : {}),
+      ...omitUndefined({ elementVersion: input.elementVersion }),
       bridges: input.bridges,
       container,
       reconciler: null as unknown as Reconciler,
@@ -527,8 +529,7 @@ export class ReconcilerHarness extends BaseHarness<"reconciler"> implements Reco
         severity: d.severity,
         code: d.code ?? "diagnostic",
         message: d.message,
-        ...(d.path !== undefined ? { path: d.path } : {}),
-        ...(d.metadata !== undefined ? { metadata: d.metadata } : {}),
+        ...omitUndefined({ path: d.path, metadata: d.metadata }),
       });
     }
 
@@ -576,7 +577,7 @@ export class ReconcilerHarness extends BaseHarness<"reconciler"> implements Reco
     return {
       ...tree,
       context: { ...tree.context, entries },
-      ...(rootContent !== undefined ? { content: rootContent } : {}),
+      ...omitUndefined({ content: rootContent }),
     };
   }
 
@@ -605,7 +606,7 @@ export class ReconcilerHarness extends BaseHarness<"reconciler"> implements Reco
       {
         mountId: input.mountId,
         sessionId: state.bridges.session.id,
-        ...(input.maxIterations !== undefined ? { maxIterations: input.maxIterations } : {}),
+        ...omitUndefined({ maxIterations: input.maxIterations }),
       },
       state,
     );

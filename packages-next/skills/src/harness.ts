@@ -35,6 +35,7 @@ import type {
   SkillsUpdateInput,
 } from "@agentick/spec-next";
 import { createKeyedNotifier, type KeyedNotifier } from "@agentick/pubsub-next";
+import { omitUndefined } from "@agentick/utils-next";
 
 // ============================================================================
 // Harness
@@ -220,8 +221,7 @@ export class SkillsHarness extends BaseHarness<SkillsSurface> implements SkillsH
         name: input.name,
         description: input.description,
         content: input.content,
-        ...(input.tags !== undefined ? { tags: input.tags } : {}),
-        ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
+        ...omitUndefined({ tags: input.tags, metadata: input.metadata }),
         createdAt: now,
         updatedAt: now,
       };
@@ -239,9 +239,11 @@ export class SkillsHarness extends BaseHarness<SkillsSurface> implements SkillsH
       }
       const updated: Skill = {
         ...existing,
-        ...(input.description !== undefined ? { description: input.description } : {}),
-        ...(input.content !== undefined ? { content: input.content } : {}),
-        ...(input.tags !== undefined ? { tags: input.tags } : {}),
+        ...omitUndefined({
+          description: input.description,
+          content: input.content,
+          tags: input.tags,
+        }),
         ...(input.metadata !== undefined
           ? { metadata: { ...(existing.metadata ?? {}), ...input.metadata } }
           : {}),

@@ -11,6 +11,7 @@ import type { ResourceDeclaration } from "@agentick/spec-next";
 import type { ElementInstance } from "../../host/host-instance.js";
 import type { CollectContext, Contributor } from "../contributor.js";
 import type { IRFragment } from "../fragments.js";
+import { omitUndefined } from "@agentick/utils-next";
 
 interface ResourceProps {
   readonly id?: string;
@@ -28,12 +29,14 @@ export const resourceContributor: Contributor = {
     const props = instance.props as ResourceProps;
     const resource: ResourceDeclaration = {
       id: props.id ?? ctx.stableId("resource", instance),
-      ...(props.uri !== undefined ? { uri: props.uri } : {}),
-      ...(props.name !== undefined ? { name: props.name } : {}),
-      ...(props.description !== undefined ? { description: props.description } : {}),
-      ...(props.mimeType !== undefined ? { mimeType: props.mimeType } : {}),
-      ...(props.handlerRef !== undefined ? { handlerRef: props.handlerRef } : {}),
-      ...(props.metadata !== undefined ? { metadata: props.metadata } : {}),
+      ...omitUndefined({
+        uri: props.uri,
+        name: props.name,
+        description: props.description,
+        mimeType: props.mimeType,
+        handlerRef: props.handlerRef,
+        metadata: props.metadata,
+      }),
     };
     return [{ kind: "resource-declaration", resource }];
   },

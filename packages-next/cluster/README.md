@@ -74,29 +74,29 @@ today — pure local substrate, zero overhead.
 
 ## Status
 
-| Phase | Scope | Status |
-|---|---|---|
-| 1 | Protocol scaffold — types, factory shapes, helper signatures | **shipped** |
-| 2 | `defineCluster*` impls + JSON codec + `LocalClusterTransport` fixture + conformance suite | **shipped** |
-| 3 | `ClusterEventBus` / `ClusterInbox` wrapper impls + diagnostic event emission | **shipped** |
-| 3.1 | Cross-node `ask` + membership reactivity + transport diagnostics + loud routing | **shipped** |
-| 3.2 | Effect.async cancel + wire validation + namespace enforcement + InboxError round-trip + spec-evolution-safe guards | **shipped** |
-| 4 | `@agentick/cluster-ipc-next` — cross-runtime broker (first real adapter) | pending |
-| 5 | Gateway/App substrate-seam integration + Otto cluster demo | pending |
-| 6 | `@agentick/cluster-redis-next` — cross-machine via Redis | pending |
-| 7+ | NATS, MessagePack/protobuf codecs, durability (rung d) | pending |
+| Phase | Scope                                                                                                              | Status      |
+| ----- | ------------------------------------------------------------------------------------------------------------------ | ----------- |
+| 1     | Protocol scaffold — types, factory shapes, helper signatures                                                       | **shipped** |
+| 2     | `defineCluster*` impls + JSON codec + `LocalClusterTransport` fixture + conformance suite                          | **shipped** |
+| 3     | `ClusterEventBus` / `ClusterInbox` wrapper impls + diagnostic event emission                                       | **shipped** |
+| 3.1   | Cross-node `ask` + membership reactivity + transport diagnostics + loud routing                                    | **shipped** |
+| 3.2   | Effect.async cancel + wire validation + namespace enforcement + InboxError round-trip + spec-evolution-safe guards | **shipped** |
+| 4     | `@agentick/cluster-ipc-next` — cross-runtime broker (first real adapter)                                           | pending     |
+| 5     | Gateway/App substrate-seam integration + Otto cluster demo                                                         | pending     |
+| 6     | `@agentick/cluster-redis-next` — cross-machine via Redis                                                           | pending     |
+| 7+    | NATS, MessagePack/protobuf codecs, durability (rung d)                                                             | pending     |
 
 ## API surface (Phase 1)
 
 ### Protocol seams (interfaces)
 
-| Seam | Role |
-|---|---|
-| `ClusterTransport` | Cross-node wire — sends messages point-to-point, broadcasts events |
-| `ClusterMembership` | Tracks live cluster members + emits join/lost transitions |
+| Seam                  | Role                                                                             |
+| --------------------- | -------------------------------------------------------------------------------- |
+| `ClusterTransport`    | Cross-node wire — sends messages point-to-point, broadcasts events               |
+| `ClusterMembership`   | Tracks live cluster members + emits join/lost transitions                        |
 | `ClusterPartitioning` | Maps address → owning node (default: consistent-hash; override for multi-tenant) |
-| `ClusterCodec` | Wire serialization (default: JSON; swap for MessagePack / protobuf / custom) |
-| `DurableJournal` | Optional rung (d) — durable journal with replay |
+| `ClusterCodec`        | Wire serialization (default: JSON; swap for MessagePack / protobuf / custom)     |
+| `DurableJournal`      | Optional rung (d) — durable journal with replay                                  |
 
 ### `Cluster` value
 
@@ -105,8 +105,8 @@ substrate seam.
 
 ```typescript
 interface Cluster {
-  readonly bus: EventBus;          // wrapped local bus + cross-node fan-out
-  readonly inbox: MessageInbox;    // wrapped local inbox + cross-node routing
+  readonly bus: EventBus; // wrapped local bus + cross-node fan-out
+  readonly inbox: MessageInbox; // wrapped local inbox + cross-node routing
   readonly journal: OperationJournal;
   readonly currentNode: NodeId;
   nodes(): Promise<readonly NodeId[]>;

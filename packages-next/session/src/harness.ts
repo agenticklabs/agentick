@@ -56,7 +56,7 @@ import type {
   ToolExecutorProtocol,
 } from "@agentick/spec-next";
 import { DEFAULT_JOURNALING_POLICY, SPEC_VERSION } from "@agentick/spec-next";
-import { mergeLayered } from "@agentick/utils-next";
+import { mergeLayered, omitUndefined } from "@agentick/utils-next";
 import { withScope } from "@agentick/tool-executor-next";
 import type { KnobsHandle } from "@agentick/knobs-next";
 import type { StateHandle } from "@agentick/state-next";
@@ -259,9 +259,7 @@ export class SessionHarness<P = unknown>
     // without crashing the framework (ADR 31 Option G).
     super("session", options.sessionId, journal, bus, inbox, {
       metadata: options.metadata,
-      ...(options.journal !== undefined ? { journal: options.journal } : {}),
-      ...(options.bus !== undefined ? { bus: options.bus } : {}),
-      ...(options.inbox !== undefined ? { inbox: options.inbox } : {}),
+      ...omitUndefined({ journal: options.journal, bus: options.bus, inbox: options.inbox }),
       policy: mergeLayered<JournalingPolicy>(DEFAULT_JOURNALING_POLICY, {
         override: { "session:command:close": "bus-only" },
       }),
@@ -278,12 +276,12 @@ export class SessionHarness<P = unknown>
       this.store,
       { journal: resolvedJournal, bus: resolvedBus, inbox: resolvedInbox },
       {
-        ...(options.toolBridge !== undefined ? { toolBridge: options.toolBridge } : {}),
-        ...(options.extensionBridges !== undefined
-          ? { extensionBridges: options.extensionBridges }
-          : {}),
-        ...(options.elicitation !== undefined ? { elicitation: options.elicitation } : {}),
-        ...(options.tasks !== undefined ? { tasks: options.tasks } : {}),
+        ...omitUndefined({
+          toolBridge: options.toolBridge,
+          extensionBridges: options.extensionBridges,
+          elicitation: options.elicitation,
+          tasks: options.tasks,
+        }),
       },
     );
     if (options.initialKnobs) {
@@ -504,11 +502,13 @@ export class SessionHarness<P = unknown>
     const childInput = {
       parentSessionId: this.store.id,
       agent: input.agent,
-      ...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
-      ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
-      ...(input.initialProps !== undefined ? { initialProps: input.initialProps } : {}),
-      ...(input.initialKnobs !== undefined ? { initialKnobs: input.initialKnobs } : {}),
-      ...(input.maxTicks !== undefined ? { maxTicks: input.maxTicks } : {}),
+      ...omitUndefined({
+        sessionId: input.sessionId,
+        metadata: input.metadata,
+        initialProps: input.initialProps,
+        initialKnobs: input.initialKnobs,
+        maxTicks: input.maxTicks,
+      }),
     };
     const child = await this.spawnContext.createChildSession(childInput);
     if (input.send !== undefined) {
@@ -579,12 +579,12 @@ export class SessionHarness<P = unknown>
                 const meta: import("@agentick/spec-next").ChannelEventMeta = {
                   id: ev.id,
                   timestamp: ev.timestamp,
-                  ...(evx.metadata !== undefined ? { metadata: evx.metadata } : {}),
-                  ...(evx.correlationId !== undefined ? { correlationId: evx.correlationId } : {}),
-                  ...(evx.parentOpId !== undefined ? { parentOpId: evx.parentOpId } : {}),
-                  ...(evx.channelSequence !== undefined
-                    ? { channelSequence: evx.channelSequence }
-                    : {}),
+                  ...omitUndefined({
+                    metadata: evx.metadata,
+                    correlationId: evx.correlationId,
+                    parentOpId: evx.parentOpId,
+                    channelSequence: evx.channelSequence,
+                  }),
                 };
                 listener(ev.payload as T, meta);
               }),
@@ -786,7 +786,7 @@ export class SessionHarness<P = unknown>
           maxTicks: input.maxTicks ?? this.defaultMaxTicks,
           stream: streamForCall,
           onEvent,
-          ...(input.signal !== undefined ? { signal: input.signal } : {}),
+          ...omitUndefined({ signal: input.signal }),
         }),
     );
 
@@ -849,8 +849,7 @@ export class SessionHarness<P = unknown>
             tick: loopEvent.tick,
             tickIndex: loopEvent.tickIndex,
             shouldContinue: loopEvent.shouldContinue,
-            ...(loopEvent.stopReason !== undefined ? { stopReason: loopEvent.stopReason } : {}),
-            ...(loopEvent.usage !== undefined ? { usage: loopEvent.usage } : {}),
+            ...omitUndefined({ stopReason: loopEvent.stopReason, usage: loopEvent.usage }),
           });
           return;
         case "tick":
@@ -867,9 +866,7 @@ export class SessionHarness<P = unknown>
           emit({
             type: "execution-start",
             tick: loopEvent.tick,
-            ...(loopEvent.rootExecutionId !== undefined
-              ? { rootExecutionId: loopEvent.rootExecutionId }
-              : {}),
+            ...omitUndefined({ rootExecutionId: loopEvent.rootExecutionId }),
           });
           return;
         case "execution-end":
@@ -877,8 +874,7 @@ export class SessionHarness<P = unknown>
             type: "execution-end",
             tick: loopEvent.tick,
             stopReason: loopEvent.stopReason,
-            ...(loopEvent.aborted !== undefined ? { aborted: loopEvent.aborted } : {}),
-            ...(loopEvent.error !== undefined ? { error: loopEvent.error } : {}),
+            ...omitUndefined({ aborted: loopEvent.aborted, error: loopEvent.error }),
           });
           return;
         case "tool-dispatch-start":
@@ -909,8 +905,7 @@ export class SessionHarness<P = unknown>
             content: loopEvent.content,
             succeeded: loopEvent.succeeded,
             durationMs: loopEvent.durationMs,
-            ...(loopEvent.executedBy !== undefined ? { executedBy: loopEvent.executedBy } : {}),
-            ...(loopEvent.isError !== undefined ? { isError: loopEvent.isError } : {}),
+            ...omitUndefined({ executedBy: loopEvent.executedBy, isError: loopEvent.isError }),
           });
           return;
       }
@@ -973,7 +968,7 @@ export class SessionHarness<P = unknown>
     await this.bridges.timeline.queue({
       role: m.role,
       content,
-      ...(m.metadata !== undefined ? { metadata: m.metadata } : {}),
+      ...omitUndefined({ metadata: m.metadata }),
     });
     // Single-input call → result.ids has length 1; caller doesn't need it.
   }
@@ -998,15 +993,16 @@ export class SessionHarness<P = unknown>
       role: input.role,
       content: input.content,
       ts: Date.now(),
-      ...(input.toolCallId !== undefined ? { toolCallId: input.toolCallId } : {}),
-      ...(input.name !== undefined ? { name: input.name } : {}),
-      ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
+      ...omitUndefined({
+        toolCallId: input.toolCallId,
+        name: input.name,
+        metadata: input.metadata,
+      }),
     };
     const entry: TimelineEntry = {
       kind: "message",
       message,
-      ...(input.visibility !== undefined ? { visibility: input.visibility } : {}),
-      ...(input.tags !== undefined ? { tags: input.tags } : {}),
+      ...omitUndefined({ visibility: input.visibility, tags: input.tags }),
     };
     await this.bridges.timeline.append(entry);
     return messageId;

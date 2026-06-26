@@ -27,6 +27,7 @@ import type {
 import { drainRejection } from "@agentick/utils-next/testing";
 
 import { LocalEventBus, LocalInbox, MemoryJournal } from "../index.js";
+import { omitUndefined } from "@agentick/utils-next";
 
 interface MockParent {
   readonly id: string;
@@ -44,9 +45,7 @@ function mockParent(overrides: Partial<MockParent> = {}): {
   const handlers: Array<() => void | Promise<void>> = [];
   const parent: MockParent = {
     id: overrides.id ?? "parent_test",
-    ...(overrides.bus !== undefined ? { bus: overrides.bus } : {}),
-    ...(overrides.inbox !== undefined ? { inbox: overrides.inbox } : {}),
-    ...(overrides.journal !== undefined ? { journal: overrides.journal } : {}),
+    ...omitUndefined({ bus: overrides.bus, inbox: overrides.inbox, journal: overrides.journal }),
     onClose: (h) => handlers.push(h),
   };
   const close = async (): Promise<void> => {

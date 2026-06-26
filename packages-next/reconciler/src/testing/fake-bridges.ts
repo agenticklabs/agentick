@@ -47,6 +47,7 @@ import type {
 } from "@agentick/spec-next";
 import { createKeyedNotifier, createNotifier } from "@agentick/pubsub-next";
 import { InMemoryDataBridge } from "../bridges/in-memory-data-bridge.js";
+import { omitUndefined } from "@agentick/utils-next";
 
 /**
  * Mock timeline harness — Map + Promise resolvers; satisfies
@@ -114,7 +115,7 @@ export function fakeTimelineHarness(
             role: p.role,
             content: p.content,
             ts: p.ts,
-            ...(p.metadata !== undefined ? { metadata: p.metadata } : {}),
+            ...omitUndefined({ metadata: p.metadata }),
           },
         };
         persisted.push(entry);
@@ -133,7 +134,7 @@ export function fakeTimelineHarness(
       const before = entries.length;
       const next = await strategy.run({
         entries,
-        ...(strategy.instructions !== undefined ? { instructions: strategy.instructions } : {}),
+        ...omitUndefined({ instructions: strategy.instructions }),
       });
       projection = [...next];
       refresh();

@@ -63,6 +63,7 @@ import type {
   UsageStats,
 } from "@agentick/spec-next";
 import { SPEC_VERSION } from "@agentick/spec-next";
+import { omitUndefined } from "@agentick/utils-next";
 
 // ============================================================================
 // ProviderOptions augmentation — typed Anthropic escape hatch (G5)
@@ -400,9 +401,7 @@ export class AnthropicExecutor extends BaseLanguageModelExecutor<
             inputTokens,
             outputTokens: u?.output_tokens ?? accum.usage.outputTokens,
             totalTokens: inputTokens + (u?.output_tokens ?? accum.usage.outputTokens),
-            ...(accum.usage.cachedInputTokens !== undefined
-              ? { cachedInputTokens: accum.usage.cachedInputTokens }
-              : {}),
+            ...omitUndefined({ cachedInputTokens: accum.usage.cachedInputTokens }),
           },
         });
         break;
@@ -908,7 +907,7 @@ function anthropicMessagePartFromBlock(block: ContentBlock): LanguageModelMessag
       return {
         type: "image",
         imageUrl: anthropicImageUrlFromSource(block.source, block.mimeType),
-        ...(block.mimeType !== undefined ? { mediaType: block.mimeType } : {}),
+        ...omitUndefined({ mediaType: block.mimeType }),
         ...pm,
       };
     case "tool_use":
@@ -924,7 +923,7 @@ function anthropicMessagePartFromBlock(block: ContentBlock): LanguageModelMessag
         type: "tool_result",
         toolUseId: block.toolUseId,
         content: block.content.map(anthropicMessagePartFromBlock),
-        ...(block.isError !== undefined ? { isError: block.isError } : {}),
+        ...omitUndefined({ isError: block.isError }),
         ...pm,
       };
     default:

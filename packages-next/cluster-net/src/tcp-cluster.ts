@@ -37,6 +37,7 @@ import {
 
 import { createTcpConnector } from "./tcp-connector.js";
 import { createTcpListener } from "./tcp-listener.js";
+import { omitUndefined } from "@agentick/utils-next";
 
 // ============================================================================
 // Shared options
@@ -74,13 +75,11 @@ export async function tcpBroker(opts: TcpBrokerOptions): Promise<RunningTcpBroke
   const listener = createTcpListener({
     host: opts.host,
     port: opts.port,
-    ...(opts.maxFrameBytes !== undefined ? { maxFrameBytes: opts.maxFrameBytes } : {}),
-    ...(opts.onDiagnostic !== undefined ? { onDiagnostic: opts.onDiagnostic } : {}),
+    ...omitUndefined({ maxFrameBytes: opts.maxFrameBytes, onDiagnostic: opts.onDiagnostic }),
   });
   return startBroker({
     listener,
-    ...(opts.codec !== undefined ? { codec: opts.codec } : {}),
-    ...(opts.onDiagnostic !== undefined ? { onDiagnostic: opts.onDiagnostic } : {}),
+    ...omitUndefined({ codec: opts.codec, onDiagnostic: opts.onDiagnostic }),
   });
 }
 
@@ -119,17 +118,21 @@ export function tcpClusterNode(opts: TcpClusterNodeOptions): ClusterNodeFactorie
   return createClusterNode({
     nodeId: opts.nodeId,
     connector: createTcpConnector({
-      ...(opts.host !== undefined ? { host: opts.host } : {}),
+      ...omitUndefined({ host: opts.host }),
       port: opts.port,
-      ...(opts.maxFrameBytes !== undefined ? { maxFrameBytes: opts.maxFrameBytes } : {}),
-      ...(opts.connectTimeoutMs !== undefined ? { connectTimeoutMs: opts.connectTimeoutMs } : {}),
-      ...(opts.onDiagnostic !== undefined ? { onDiagnostic: opts.onDiagnostic } : {}),
+      ...omitUndefined({
+        maxFrameBytes: opts.maxFrameBytes,
+        connectTimeoutMs: opts.connectTimeoutMs,
+        onDiagnostic: opts.onDiagnostic,
+      }),
     }),
-    ...(opts.codec !== undefined ? { codec: opts.codec } : {}),
-    ...(opts.heartbeatMs !== undefined ? { heartbeatMs: opts.heartbeatMs } : {}),
-    ...(opts.missedPongLimit !== undefined ? { missedPongLimit: opts.missedPongLimit } : {}),
-    ...(opts.reconnect !== undefined ? { reconnect: opts.reconnect } : {}),
-    ...(opts.onDiagnostic !== undefined ? { onDiagnostic: opts.onDiagnostic } : {}),
+    ...omitUndefined({
+      codec: opts.codec,
+      heartbeatMs: opts.heartbeatMs,
+      missedPongLimit: opts.missedPongLimit,
+      reconnect: opts.reconnect,
+      onDiagnostic: opts.onDiagnostic,
+    }),
   });
 }
 
@@ -176,10 +179,12 @@ export function defineTcpCluster(opts: DefineTcpClusterOptions): ClusterFactory 
   return defineWireCluster({
     nodeId: opts.nodeId,
     node: tcpClusterNode(opts),
-    ...(opts.codec !== undefined ? { codec: opts.codec } : {}),
-    ...(opts.partitioning !== undefined ? { partitioning: opts.partitioning } : {}),
-    ...(opts.journal !== undefined ? { journal: opts.journal } : {}),
-    ...(opts.fanoutMode !== undefined ? { fanoutMode: opts.fanoutMode } : {}),
+    ...omitUndefined({
+      codec: opts.codec,
+      partitioning: opts.partitioning,
+      journal: opts.journal,
+      fanoutMode: opts.fanoutMode,
+    }),
   });
 }
 

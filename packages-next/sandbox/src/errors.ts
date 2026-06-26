@@ -1,3 +1,5 @@
+import { omitUndefined } from "@agentick/utils-next";
+
 /**
  * Tagged errors for the sandbox harness.
  *
@@ -81,9 +83,7 @@ export const sandboxExecError = (
   _tag: "SandboxExecError",
   command,
   exitCode,
-  ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
-  ...(opts.stderr !== undefined ? { stderr: opts.stderr } : {}),
-  ...(opts.cause !== undefined ? { cause: opts.cause } : {}),
+  ...omitUndefined({ signal: opts.signal, stderr: opts.stderr, cause: opts.cause }),
 });
 
 export const sandboxIoError = (

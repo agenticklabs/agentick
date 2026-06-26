@@ -68,21 +68,21 @@ boundaries directly.
 
 ### Frame types
 
-| Direction | Frame | Purpose |
-|---|---|---|
-| Client → Broker | `cluster:hello` | Identify node on connect |
-| Client → Broker | `cluster:send` | Point-to-point message to a specific node |
-| Client → Broker | `cluster:broadcast` | Fan out an event to all other nodes |
-| Client → Broker | `cluster:subscribe-inbox` | Register an inbox-filter subscription |
-| Client → Broker | `cluster:subscribe-bus` | Register a bus-filter subscription |
-| Client → Broker | `cluster:unsubscribe` | Cancel a subscription |
-| Broker → Client | `cluster:welcome` | Handshake-complete ack + initial membership snapshot |
-| Broker → Client | `cluster:inbox-deliver` | Deliver a routed inbox message |
-| Broker → Client | `cluster:bus-deliver` | Deliver a fan-out bus event |
-| Broker → Client | `cluster:membership` | Topology delta (join / lost / snapshot) |
-| Bidirectional | `cluster:ping` / `cluster:pong` | Custom heartbeat (default 30s; miss-3 = dead) |
-| Bidirectional | `cluster:error` | Report a non-fatal error |
-| Bidirectional | `cluster:goodbye` | Cooperative disconnect |
+| Direction       | Frame                           | Purpose                                              |
+| --------------- | ------------------------------- | ---------------------------------------------------- |
+| Client → Broker | `cluster:hello`                 | Identify node on connect                             |
+| Client → Broker | `cluster:send`                  | Point-to-point message to a specific node            |
+| Client → Broker | `cluster:broadcast`             | Fan out an event to all other nodes                  |
+| Client → Broker | `cluster:subscribe-inbox`       | Register an inbox-filter subscription                |
+| Client → Broker | `cluster:subscribe-bus`         | Register a bus-filter subscription                   |
+| Client → Broker | `cluster:unsubscribe`           | Cancel a subscription                                |
+| Broker → Client | `cluster:welcome`               | Handshake-complete ack + initial membership snapshot |
+| Broker → Client | `cluster:inbox-deliver`         | Deliver a routed inbox message                       |
+| Broker → Client | `cluster:bus-deliver`           | Deliver a fan-out bus event                          |
+| Broker → Client | `cluster:membership`            | Topology delta (join / lost / snapshot)              |
+| Bidirectional   | `cluster:ping` / `cluster:pong` | Custom heartbeat (default 30s; miss-3 = dead)        |
+| Bidirectional   | `cluster:error`                 | Report a non-fatal error                             |
+| Bidirectional   | `cluster:goodbye`               | Cooperative disconnect                               |
 
 All frame `type` values use the reserved `cluster:` namespace.
 Adopter content (envelope `type` fields) cannot collide.

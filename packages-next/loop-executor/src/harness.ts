@@ -45,6 +45,7 @@ import type {
   UsageStats,
 } from "@agentick/spec-next";
 import { toRegistration } from "@agentick/spec-next";
+import { omitUndefined } from "@agentick/utils-next";
 
 // ============================================================================
 // Internal types
@@ -237,7 +238,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
             targetInput: projected,
             target: input.target,
             scope: { sessionId: input.sessionId, executionId, tickId },
-            ...(input.signal !== undefined ? { signal: input.signal } : {}),
+            ...omitUndefined({ signal: input.signal }),
           });
           for await (const delta of stream) {
             input.onEvent?.({ kind: "model", tick: tickIndex, delta });
@@ -267,7 +268,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
             target: input.target,
             scope: { sessionId: input.sessionId, executionId, tickId },
             tools: modelTools,
-            ...(input.signal !== undefined ? { signal: input.signal } : {}),
+            ...omitUndefined({ signal: input.signal }),
           });
         }
 

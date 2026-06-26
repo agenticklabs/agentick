@@ -6,11 +6,11 @@
   "keywords": [
     "agentick",
     "cluster",
-    "redis",
-    "valkey",
-    "keydb",
     "dragonfly",
-    "pubsub"
+    "keydb",
+    "pubsub",
+    "redis",
+    "valkey"
   ],
   "license": "MIT",
   "author": "Ryan Lindgren",
@@ -52,10 +52,10 @@
     "@agentick/spec-next": "workspace:*",
     "@agentick/utils-next": "workspace:*"
   },
-  "peerDependencies": {
+  "devDependencies": {
     "ioredis": "^5.4.0"
   },
-  "devDependencies": {
+  "peerDependencies": {
     "ioredis": "^5.4.0"
   }
 }

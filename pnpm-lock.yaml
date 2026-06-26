@@ -424,6 +424,9 @@ importers:
       '@agentick/spec-next':
         specifier: workspace:*
         version: link:../spec
+      '@agentick/utils-next':
+        specifier: workspace:*
+        version: link:../utils
       effect:
         specifier: ^3.21.2
         version: 3.21.2
@@ -587,6 +590,9 @@ importers:
       '@agentick/spec-next':
         specifier: workspace:*
         version: link:../spec
+      '@agentick/utils-next':
+        specifier: workspace:*
+        version: link:../utils
       ai:
         specifier: ^5.0.0
         version: 5.0.123(zod@4.3.6)
@@ -615,6 +621,9 @@ importers:
       '@agentick/spec-next':
         specifier: workspace:*
         version: link:../spec
+      '@agentick/utils-next':
+        specifier: workspace:*
+        version: link:../utils
       '@anthropic-ai/sdk':
         specifier: ^0.39.0
         version: 0.39.0
@@ -640,6 +649,9 @@ importers:
       '@agentick/spec-next':
         specifier: workspace:*
         version: link:../spec
+      '@agentick/utils-next':
+        specifier: workspace:*
+        version: link:../utils
       '@google/genai':
         specifier: ^1.31.0
         version: 1.38.0(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))
@@ -662,6 +674,9 @@ importers:
       '@agentick/spec-next':
         specifier: workspace:*
         version: link:../spec
+      '@agentick/utils-next':
+        specifier: workspace:*
+        version: link:../utils
       effect:
         specifier: ^3.21.2
         version: 3.21.2
@@ -678,6 +693,9 @@ importers:
       '@agentick/spec-next':
         specifier: workspace:*
         version: link:../spec
+      '@agentick/utils-next':
+        specifier: workspace:*
+        version: link:../utils
 
   packages-next/gates:
     dependencies:
@@ -774,6 +792,9 @@ importers:
       '@agentick/spec-next':
         specifier: workspace:*
         version: link:../spec
+      '@agentick/utils-next':
+        specifier: workspace:*
+        version: link:../utils
       effect:
         specifier: ^3.21.2
         version: 3.21.2
@@ -851,6 +872,9 @@ importers:
       '@agentick/spec-next':
         specifier: workspace:*
         version: link:../spec
+      '@agentick/utils-next':
+        specifier: workspace:*
+        version: link:../utils
       effect:
         specifier: ^3.21.2
         version: 3.21.2
@@ -872,6 +896,9 @@ importers:
       '@agentick/tool-next':
         specifier: workspace:*
         version: link:../tool
+      '@agentick/utils-next':
+        specifier: workspace:*
+        version: link:../utils
       effect:
         specifier: ^3.21.2
         version: 3.21.2
@@ -931,6 +958,9 @@ importers:
       '@agentick/tool-next':
         specifier: workspace:*
         version: link:../tool
+      '@agentick/utils-next':
+        specifier: workspace:*
+        version: link:../utils
       effect:
         specifier: ^3.21.2
         version: 3.21.2
@@ -1014,6 +1044,9 @@ importers:
       '@agentick/spec-next':
         specifier: workspace:*
         version: link:../spec
+      '@agentick/utils-next':
+        specifier: workspace:*
+        version: link:../utils
       effect:
         specifier: ^3.21.2
         version: 3.21.2
@@ -1134,6 +1167,9 @@ importers:
       '@agentick/spec-next':
         specifier: workspace:*
         version: link:../spec
+      '@agentick/utils-next':
+        specifier: workspace:*
+        version: link:../utils
       effect:
         specifier: ^3.21.2
         version: 3.21.2
@@ -1153,6 +1189,9 @@ importers:
       '@agentick/spec-next':
         specifier: workspace:*
         version: link:../spec
+      '@agentick/utils-next':
+        specifier: workspace:*
+        version: link:../utils
     devDependencies:
       zod:
         specifier: ^4.3.6
@@ -1191,6 +1230,9 @@ importers:
       '@agentick/spec-next':
         specifier: workspace:*
         version: link:../spec
+      '@agentick/utils-next':
+        specifier: workspace:*
+        version: link:../utils
     devDependencies:
       typescript:
         specifier: ^5.7.3

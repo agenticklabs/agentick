@@ -36,6 +36,7 @@ import type {
 } from "@agentick/spec-next";
 
 import type { SessionStateStore } from "./session-state.js";
+import { omitUndefined } from "@agentick/utils-next";
 
 export function loopBridgeStub(): LoopBridge {
   return {
@@ -154,7 +155,7 @@ export function buildSessionBridges(
     data: new InMemoryDataBridge(),
     loop: loopBridgeStub(),
     session: sessionBridgeFor(store),
-    ...(options.toolBridge !== undefined ? { tools: options.toolBridge } : {}),
+    ...omitUndefined({ tools: options.toolBridge }),
   };
   if (options.extensionBridges && options.extensionBridges.size > 0) {
     return {

@@ -13,6 +13,7 @@ import { platform } from "node:os";
 import type { Connection, Connector } from "@agentick/cluster-broker-next";
 
 import { socketToConnection } from "./socket-connection.js";
+import { omitUndefined } from "@agentick/utils-next";
 
 export interface UnixConnectorOptions {
   /** Filesystem path to the Unix socket. Required. */
@@ -76,7 +77,7 @@ export function createUnixConnector(opts: UnixConnectorOptions): Connector {
           clearTimeout(timer);
           socket.off("error", onError);
           const conn = socketToConnection(socket, {
-            ...(opts.maxFrameBytes !== undefined ? { maxFrameBytes: opts.maxFrameBytes } : {}),
+            ...omitUndefined({ maxFrameBytes: opts.maxFrameBytes }),
             onDiagnostic,
           });
           onDiagnostic("cluster:broker:net:connected", { socketPath, remote: conn.remote });

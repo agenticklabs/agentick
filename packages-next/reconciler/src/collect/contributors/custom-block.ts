@@ -11,6 +11,7 @@ import type { CustomContentBlock } from "@agentick/spec-next";
 import type { ElementInstance } from "../../host/host-instance.js";
 import type { CollectContext, Contributor } from "../contributor.js";
 import type { IRFragment } from "../fragments.js";
+import { omitUndefined } from "@agentick/utils-next";
 
 interface CustomProps {
   readonly tag: string;
@@ -42,8 +43,7 @@ export const customBlockContributor: Contributor = {
       tag: props.tag,
       content,
       attrs: props.attrs ?? {},
-      ...(props.selfClosing !== undefined ? { selfClosing: props.selfClosing } : {}),
-      ...(props.id !== undefined ? { id: props.id } : {}),
+      ...omitUndefined({ selfClosing: props.selfClosing, id: props.id }),
     };
     return [{ kind: "content-block", block }];
   },

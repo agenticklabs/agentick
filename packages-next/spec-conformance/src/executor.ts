@@ -18,6 +18,8 @@
  * ```
  */
 
+import { omitUndefined } from "@agentick/utils-next";
+
 import { Effect, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 
@@ -88,8 +90,7 @@ function mkRenderedTree(
     context: {
       entries: [section, userContent],
     },
-    ...(opts.config !== undefined ? { config: opts.config } : {}),
-    ...(opts.providerOptions !== undefined ? { providerOptions: opts.providerOptions } : {}),
+    ...omitUndefined({ config: opts.config, providerOptions: opts.providerOptions }),
   };
 }
 

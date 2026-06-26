@@ -50,6 +50,7 @@
     "@agentick/executor-next": "workspace:*",
     "@agentick/runtime-next": "workspace:*",
     "@agentick/spec-next": "workspace:*",
+    "@agentick/utils-next": "workspace:*",
     "ai": "^5.0.0",
     "effect": "^3.21.2"
   },

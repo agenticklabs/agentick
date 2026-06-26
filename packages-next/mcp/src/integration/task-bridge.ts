@@ -48,6 +48,7 @@ import type { McpClientHarness } from "../client/harness.js";
 import type { CallToolAsTaskOptions, Task } from "../wire/task-codec.js";
 
 import { mcpContentToBlocks } from "./content-mapper.js";
+import { omitUndefined } from "@agentick/utils-next";
 
 // ============================================================================
 // Errors
@@ -156,8 +157,7 @@ function foldUntilTerminal(
           const p = note.notification.params;
           workCtx.onProgress({
             current: p.progress,
-            ...(p.total !== undefined ? { total: p.total } : {}),
-            ...(p.message !== undefined ? { message: p.message } : {}),
+            ...omitUndefined({ total: p.total, message: p.message }),
           });
           return undefined;
         }

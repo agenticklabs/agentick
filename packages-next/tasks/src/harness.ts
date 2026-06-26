@@ -61,7 +61,7 @@
 import { Cause, Effect, Fiber, Stream } from "effect";
 import { BaseHarness, ulid } from "@agentick/runtime-next";
 import { createLocalPubSub, type LocalPubSub } from "@agentick/pubsub-next";
-import { causeValue, reasonOf } from "@agentick/utils-next";
+import { causeValue, reasonOf, omitUndefined } from "@agentick/utils-next";
 import type {
   ContentBlock,
   EventBus,
@@ -632,9 +632,11 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
       createdAt: record.createdAt,
       lastUpdatedAt: record.lastUpdatedAt,
       ttl: record.ttl,
-      ...(record.statusMessage !== undefined ? { statusMessage: record.statusMessage } : {}),
-      ...(record.pollInterval !== undefined ? { pollInterval: record.pollInterval } : {}),
-      ...(record.failure !== undefined ? { failure: record.failure } : {}),
+      ...omitUndefined({
+        statusMessage: record.statusMessage,
+        pollInterval: record.pollInterval,
+        failure: record.failure,
+      }),
     };
   }
 
@@ -663,8 +665,7 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
       kind: "progress",
       taskId: record.taskId,
       current: update.current,
-      ...(update.total !== undefined ? { total: update.total } : {}),
-      ...(update.message !== undefined ? { message: update.message } : {}),
+      ...omitUndefined({ total: update.total, message: update.message }),
     });
   }
 
@@ -692,8 +693,7 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
       this.publishOnChannel(TASK_PROGRESS_CHANNEL, {
         taskId: event.taskId,
         current: event.current,
-        ...(event.total !== undefined ? { total: event.total } : {}),
-        ...(event.message !== undefined ? { message: event.message } : {}),
+        ...omitUndefined({ total: event.total, message: event.message }),
       }),
     ).catch(() => undefined);
   }

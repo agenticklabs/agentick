@@ -31,6 +31,8 @@
  *      (`packages/core/src/types/schemas.ts` — Tasks section)
  */
 
+import { omitUndefined } from "@agentick/utils-next";
+
 import {
   CallToolResultSchema,
   CancelTaskResultSchema,
@@ -83,10 +85,9 @@ export function buildCallToolAsTaskParams(
 } {
   return {
     name,
-    ...(args !== undefined ? { arguments: args } : {}),
+    ...omitUndefined({ arguments: args }),
     task: {
-      ...(opts.ttl !== undefined ? { ttl: opts.ttl } : {}),
-      ...(opts.pollInterval !== undefined ? { pollInterval: opts.pollInterval } : {}),
+      ...omitUndefined({ ttl: opts.ttl, pollInterval: opts.pollInterval }),
     },
   };
 }

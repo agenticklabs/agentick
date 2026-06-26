@@ -42,15 +42,15 @@ For **multi-host production**, use this package.
 
 The `ioredis` client speaks RESP, which means:
 
-| Server | Status |
-|---|---|
-| **Redis** ≥ 6.0 | Primary target |
-| **Valkey** (BSD-licensed Redis fork) | Identical protocol; drop-in |
-| **KeyDB** | RESP-compatible; drop-in |
-| **Dragonfly** | RESP-compatible; drop-in |
-| **AWS ElastiCache** (Redis or Valkey) | Drop-in |
-| **GCP MemoryStore** | Drop-in |
-| **Azure Cache for Redis** | Drop-in |
+| Server                                | Status                      |
+| ------------------------------------- | --------------------------- |
+| **Redis** ≥ 6.0                       | Primary target              |
+| **Valkey** (BSD-licensed Redis fork)  | Identical protocol; drop-in |
+| **KeyDB**                             | RESP-compatible; drop-in    |
+| **Dragonfly**                         | RESP-compatible; drop-in    |
+| **AWS ElastiCache** (Redis or Valkey) | Drop-in                     |
+| **GCP MemoryStore**                   | Drop-in                     |
+| **Azure Cache for Redis**             | Drop-in                     |
 
 Pick whichever your ops team prefers. The cluster wire doesn't care.
 
@@ -69,12 +69,12 @@ const cluster = defineRedisCluster({
 
 ## API (planned shape)
 
-| Export | Role |
-|---|---|
-| `defineRedisCluster(opts)` | Returns a `ClusterFactory` — convenience |
-| `redisClusterNode(opts)` | `{transport, membership}` over shared ioredis sockets |
-| `redisTransport(opts)` | Standalone transport factory |
-| `redisMembership(opts)` | Standalone membership factory |
+| Export                     | Role                                                  |
+| -------------------------- | ----------------------------------------------------- |
+| `defineRedisCluster(opts)` | Returns a `ClusterFactory` — convenience              |
+| `redisClusterNode(opts)`   | `{transport, membership}` over shared ioredis sockets |
+| `redisTransport(opts)`     | Standalone transport factory                          |
+| `redisMembership(opts)`    | Standalone membership factory                         |
 
 ## How it differs from broker-based wires
 

@@ -55,6 +55,7 @@ import {
   thinkTagTransform,
 } from "@agentick/executor-next";
 import type { AdapterDelta } from "@agentick/spec-next";
+import { omitUndefined } from "@agentick/utils-next";
 
 // ============================================================================
 // ProviderOptions augmentation — typed Google escape hatch (G5)
@@ -421,7 +422,7 @@ export class GoogleExecutor extends BaseLanguageModelExecutor<
         const sig = state.thoughtSignatureByCallId.get(tc.callId);
         parts.push({
           functionCall: { id: tc.callId, name: tc.name, args: parsed },
-          ...(sig !== undefined ? { thoughtSignature: sig } : {}),
+          ...omitUndefined({ thoughtSignature: sig }),
         });
       }
     }
@@ -438,12 +439,10 @@ export class GoogleExecutor extends BaseLanguageModelExecutor<
         promptTokenCount: accum.usage.inputTokens,
         candidatesTokenCount: accum.usage.outputTokens,
         totalTokenCount: accum.usage.totalTokens,
-        ...(accum.usage.reasoningTokens !== undefined
-          ? { thoughtsTokenCount: accum.usage.reasoningTokens }
-          : {}),
-        ...(accum.usage.cachedInputTokens !== undefined
-          ? { cachedContentTokenCount: accum.usage.cachedInputTokens }
-          : {}),
+        ...omitUndefined({
+          thoughtsTokenCount: accum.usage.reasoningTokens,
+          cachedContentTokenCount: accum.usage.cachedInputTokens,
+        }),
       },
     } as unknown as GenerateContentResponse;
   }
@@ -735,7 +734,7 @@ function toGoogleTools(tools: ReadonlyArray<LanguageModelTool>): GoogleTool[] {
   const functionDeclarations: FunctionDeclaration[] = tools.map((t) => {
     const base: FunctionDeclaration = {
       name: t.name,
-      ...(t.description !== undefined ? { description: t.description } : {}),
+      ...omitUndefined({ description: t.description }),
       parameters: ensureObjectSchema(
         sanitizeSchemaForGemini(t.inputSchema as Record<string, unknown>),
       ) as FunctionDeclaration["parameters"],

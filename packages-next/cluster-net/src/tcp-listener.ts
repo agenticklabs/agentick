@@ -13,6 +13,7 @@ import { createServer, type Server, type Socket } from "node:net";
 import type { Connection, Listener } from "@agentick/cluster-broker-next";
 
 import { socketToConnection } from "./socket-connection.js";
+import { omitUndefined } from "@agentick/utils-next";
 
 export type TcpListenerOptions =
   | {
@@ -59,7 +60,7 @@ export function createTcpListener(opts: TcpListenerOptions): Listener {
     // (small frames, latency-sensitive), keep it on.
     socket.setNoDelay(true);
     const conn = socketToConnection(socket, {
-      ...(opts.maxFrameBytes !== undefined ? { maxFrameBytes: opts.maxFrameBytes } : {}),
+      ...omitUndefined({ maxFrameBytes: opts.maxFrameBytes }),
       onDiagnostic,
     });
     for (const handler of [...acceptHandlers]) {

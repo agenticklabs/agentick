@@ -20,6 +20,7 @@ import type { ToolBinding, ToolDeclaration, ToolRegistration } from "@agentick/s
 import { jsonSchema } from "@agentick/spec-next";
 
 import { InMemoryToolRegistry } from "../registry.js";
+import { omitUndefined } from "@agentick/utils-next";
 
 function mkDecl(name: string, overrides: Partial<ToolDeclaration> = {}): ToolDeclaration {
   return {
@@ -28,10 +29,12 @@ function mkDecl(name: string, overrides: Partial<ToolDeclaration> = {}): ToolDec
     description: overrides.description ?? name,
     inputSchema: overrides.inputSchema ?? jsonSchema({ type: "object" }),
     exposure: overrides.exposure ?? ["model"],
-    ...(overrides.outputSchema !== undefined ? { outputSchema: overrides.outputSchema } : {}),
-    ...(overrides.handlerRef !== undefined ? { handlerRef: overrides.handlerRef } : {}),
-    ...(overrides.annotations !== undefined ? { annotations: overrides.annotations } : {}),
-    ...(overrides.metadata !== undefined ? { metadata: overrides.metadata } : {}),
+    ...omitUndefined({
+      outputSchema: overrides.outputSchema,
+      handlerRef: overrides.handlerRef,
+      annotations: overrides.annotations,
+      metadata: overrides.metadata,
+    }),
   };
 }
 

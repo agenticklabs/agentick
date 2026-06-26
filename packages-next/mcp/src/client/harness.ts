@@ -82,6 +82,7 @@ import type { McpClientHarnessOptions, McpClientState, McpToolDescriptor } from 
 import type { EraCodec } from "./era-codec.js";
 import { DraftPassthroughCodec, selectCodec } from "./era-codec.js";
 import { makeElicitRequestHandler } from "./elicit-bridge.js";
+import { omitUndefined } from "@agentick/utils-next";
 
 /**
  * Discriminated event published to {@link McpClientHarness.taskNotificationBus}.
@@ -184,7 +185,7 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
     this.codec = options.codec ?? DraftPassthroughCodec;
     this.elicitAddress = options.elicitAddress;
     this.lifecycle = new McpLifecycle({
-      ...(options.reconnect !== undefined ? { reconnect: options.reconnect } : {}),
+      ...omitUndefined({ reconnect: options.reconnect }),
       onReconnect: () => this.reconnect(),
       onStateChange: (state) => this.publishStateChange(state),
     });

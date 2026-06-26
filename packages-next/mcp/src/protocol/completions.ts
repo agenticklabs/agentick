@@ -1,3 +1,5 @@
+import { omitUndefined } from "@agentick/utils-next";
+
 /**
  * Completion sugar builders for prompt/template argument completion
  * handlers.
@@ -65,7 +67,7 @@ function clamp(result: CompletionResult): CompletionResult {
   if (result.values.length <= COMPLETION_MAX_VALUES) return result;
   return {
     values: result.values.slice(0, COMPLETION_MAX_VALUES),
-    ...(result.total !== undefined ? { total: result.total } : {}),
+    ...omitUndefined({ total: result.total }),
     hasMore: true,
   };
 }

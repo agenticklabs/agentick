@@ -20,6 +20,8 @@
  * @see docs/proposals/v2/blueprint/07-tool-executor.md
  */
 
+import { omitUndefined } from "@agentick/utils-next";
+
 import { Cause, Effect, Exit, Option } from "effect";
 import { runHarnessProtocol, ulid } from "@agentick/runtime-next";
 import { BaseHarness, type LifecycleHandler, type Unsubscribe } from "@agentick/runtime-next";
@@ -456,7 +458,7 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
             },
           },
           {
-            ...(confirmationTimeoutMs !== undefined ? { timeoutMs: confirmationTimeoutMs } : {}),
+            ...omitUndefined({ timeoutMs: confirmationTimeoutMs }),
             signal: controller.signal,
           },
         );
@@ -547,11 +549,11 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
       const opIdForCausality = input.opId ?? `tool:dispatch:${input.toolCallId}`;
       const ctx: ToolHandlerCtx = {
         toolCallId: input.toolCallId,
-        ...(input.context.sessionId !== undefined ? { sessionId: input.context.sessionId } : {}),
-        ...(input.context.executionId !== undefined
-          ? { executionId: input.context.executionId }
-          : {}),
-        ...(input.context.tickId !== undefined ? { tickId: input.context.tickId } : {}),
+        ...omitUndefined({
+          sessionId: input.context.sessionId,
+          executionId: input.context.executionId,
+          tickId: input.context.tickId,
+        }),
         signal: controller.signal,
         // Resolved task mode for THIS dispatch (#174). Mirrors
         // `DispatchInput.task` after default → `"auto"`. Handlers
@@ -566,7 +568,7 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
         // Always present in production; the optional spec field
         // covers test fixtures that omit them.
         elicitation: this.elicitation,
-        ...(this.tasks !== undefined ? { tasks: this.tasks } : {}),
+        ...omitUndefined({ tasks: this.tasks }),
         setState: (key: string, value: unknown): void => {
           this.stateStore.set(key, value);
         },
@@ -580,16 +582,14 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
               publisher.publish({
                 channel,
                 payload: seed.payload,
-                ...(seed.metadata !== undefined ? { metadata: seed.metadata } : {}),
+                ...omitUndefined({ metadata: seed.metadata }),
                 parentOpId: opIdForCausality,
                 scope: {
-                  ...(input.context.sessionId !== undefined
-                    ? { sessionId: input.context.sessionId }
-                    : {}),
-                  ...(input.context.executionId !== undefined
-                    ? { executionId: input.context.executionId }
-                    : {}),
-                  ...(input.context.tickId !== undefined ? { tickId: input.context.tickId } : {}),
+                  ...omitUndefined({
+                    sessionId: input.context.sessionId,
+                    executionId: input.context.executionId,
+                    tickId: input.context.tickId,
+                  }),
                 },
               }),
             );
@@ -883,9 +883,9 @@ function serializeTaskRef(handle: TaskHandle<readonly ContentBlock[]>): readonly
       type: "task_ref",
       taskId: info.taskId,
       status: info.status,
-      ...(info.statusMessage !== undefined ? { statusMessage: info.statusMessage } : {}),
+      ...omitUndefined({ statusMessage: info.statusMessage }),
       ...(info.ttl !== null && info.ttl !== undefined ? { ttl: info.ttl } : {}),
-      ...(info.pollInterval !== undefined ? { pollInterval: info.pollInterval } : {}),
+      ...omitUndefined({ pollInterval: info.pollInterval }),
     } satisfies ContentBlock,
   ];
 }

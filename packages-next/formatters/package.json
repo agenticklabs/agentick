@@ -46,6 +46,7 @@
     "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
   },
   "dependencies": {
-    "@agentick/spec-next": "workspace:*"
+    "@agentick/spec-next": "workspace:*",
+    "@agentick/utils-next": "workspace:*"
   }
 }

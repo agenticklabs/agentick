@@ -26,6 +26,7 @@ import type {
 import { jsonSchema } from "@agentick/spec-next";
 
 import { SessionHarness } from "../harness.js";
+import { omitUndefined } from "@agentick/utils-next";
 
 // ---------------------------------------------------------------------------
 // Shared fixtures
@@ -99,8 +100,7 @@ async function mkSession(
     executor,
     toolExecutor: tools,
     target,
-    ...(opts.spawnContext !== undefined ? { spawnContext: opts.spawnContext } : {}),
-    ...(opts.parentSessionId !== undefined ? { parentSessionId: opts.parentSessionId } : {}),
+    ...omitUndefined({ spawnContext: opts.spawnContext, parentSessionId: opts.parentSessionId }),
   });
   await session.ready;
   await session.mountReady;

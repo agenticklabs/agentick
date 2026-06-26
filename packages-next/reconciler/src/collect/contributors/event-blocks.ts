@@ -11,6 +11,7 @@ import type { StateChangeBlock, SystemEventBlock, UserActionBlock } from "@agent
 import type { ElementInstance } from "../../host/host-instance.js";
 import type { CollectContext, Contributor } from "../contributor.js";
 import type { IRFragment } from "../fragments.js";
+import { omitUndefined } from "@agentick/utils-next";
 
 interface UserActionProps {
   readonly action: string;
@@ -40,11 +41,9 @@ export const userActionContributor: Contributor = {
     const block: UserActionBlock = {
       type: "user_action",
       action: props.action,
-      ...(props.actor !== undefined ? { actor: props.actor } : {}),
-      ...(props.target !== undefined ? { target: props.target } : {}),
-      ...(props.details !== undefined ? { details: props.details } : {}),
+      ...omitUndefined({ actor: props.actor, target: props.target, details: props.details }),
       ...(childText.length > 0 ? { text: childText } : {}),
-      ...(props.id !== undefined ? { id: props.id } : {}),
+      ...omitUndefined({ id: props.id }),
     };
     return [{ kind: "content-block", block }];
   },
@@ -77,10 +76,9 @@ export const systemEventContributor: Contributor = {
     const block: SystemEventBlock = {
       type: "system_event",
       event: props.event,
-      ...(props.source !== undefined ? { source: props.source } : {}),
-      ...(props.data !== undefined ? { data: props.data } : {}),
+      ...omitUndefined({ source: props.source, data: props.data }),
       ...(childText.length > 0 ? { text: childText } : {}),
-      ...(props.id !== undefined ? { id: props.id } : {}),
+      ...omitUndefined({ id: props.id }),
     };
     return [{ kind: "content-block", block }];
   },
@@ -117,10 +115,9 @@ export const stateChangeContributor: Contributor = {
       entity: props.entity,
       from: props.from,
       to: props.to,
-      ...(props.field !== undefined ? { field: props.field } : {}),
-      ...(props.trigger !== undefined ? { trigger: props.trigger } : {}),
+      ...omitUndefined({ field: props.field, trigger: props.trigger }),
       ...(childText.length > 0 ? { text: childText } : {}),
-      ...(props.id !== undefined ? { id: props.id } : {}),
+      ...omitUndefined({ id: props.id }),
     };
     return [{ kind: "content-block", block }];
   },

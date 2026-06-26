@@ -31,6 +31,7 @@ import type {
 import { jsonSchema } from "@agentick/spec-next";
 
 import { fromStandardSchema, permissiveValidator } from "./validator.js";
+import { omitUndefined } from "@agentick/utils-next";
 
 // ============================================================================
 // Spec
@@ -124,11 +125,10 @@ export function createTool<TInput = unknown>(spec: ToolSpec<TInput>): CreatedToo
     name: spec.name,
     description: spec.description,
     inputSchema: schema,
-    ...(spec.outputSchema !== undefined ? { outputSchema: spec.outputSchema } : {}),
+    ...omitUndefined({ outputSchema: spec.outputSchema }),
     exposure: spec.exposure ?? ["model"],
     handlerRef,
-    ...(spec.annotations !== undefined ? { annotations: spec.annotations } : {}),
-    ...(spec.metadata !== undefined ? { metadata: spec.metadata } : {}),
+    ...omitUndefined({ annotations: spec.annotations, metadata: spec.metadata }),
   };
 
   const handler: ToolHandler = (input, { ctx }) => {
