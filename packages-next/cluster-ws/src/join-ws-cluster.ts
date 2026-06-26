@@ -31,13 +31,26 @@
 import type { Server as HttpServer } from "node:http";
 
 import { startBroker, type RunningBroker } from "@agentick/cluster-broker-next";
-import { makeClusterNode, type ClusterCodec, type ClusterNode } from "@agentick/cluster-next";
+import {
+  makeClusterNode,
+  resolveNodeId,
+  type ClusterCodec,
+  type ClusterNode,
+  type NodeId,
+} from "@agentick/cluster-next";
 import { omitUndefined } from "@agentick/utils-next";
 
 import { createWsListener } from "./ws-listener.js";
 import { wsClusterNode, type WsClusterNodeOptions } from "./ws-cluster.js";
 
-export interface JoinWsClusterOptions extends WsClusterNodeOptions {
+export interface JoinWsClusterOptions extends Omit<WsClusterNodeOptions, "nodeId"> {
+  /**
+   * This node's identity. Optional — defaults to `${hostname}:${pid}`
+   * via {@link resolveNodeId}. A `cluster:nodeId:auto-defaulted` or
+   * `cluster:nodeId:suspicious` diagnostic fires on the supplied
+   * `onDiagnostic` sink (with `layer: "client"`) at join time.
+   */
+  readonly nodeId?: NodeId;
   /**
    * Role this process takes.
    *   - `"broker"`: start the broker on the URL's host:port AND
@@ -78,7 +91,7 @@ export interface JoinWsClusterOptions extends WsClusterNodeOptions {
 export async function joinWsCluster(opts: JoinWsClusterOptions): Promise<ClusterNode> {
   const {
     url,
-    nodeId,
+    nodeId: explicitNodeId,
     codec,
     brokerCodec,
     onDiagnostic,
@@ -91,6 +104,8 @@ export async function joinWsCluster(opts: JoinWsClusterOptions): Promise<Cluster
   const emitDiag = (layer: "broker" | "client", name: string, payload?: unknown): void => {
     onDiagnostic?.(name, payload, layer);
   };
+
+  const nodeId = resolveNodeId(explicitNodeId, (n, p) => emitDiag("client", n, p));
 
   // For mode === "broker", parse the URL to derive listener
   // host/port/path. The same URL is used by the self-client to

@@ -28,14 +28,27 @@
  */
 
 import { startBroker, type RunningBroker } from "@agentick/cluster-broker-next";
-import { makeClusterNode, type ClusterCodec, type ClusterNode } from "@agentick/cluster-next";
+import {
+  makeClusterNode,
+  resolveNodeId,
+  type ClusterCodec,
+  type ClusterNode,
+  type NodeId,
+} from "@agentick/cluster-next";
 import { omitUndefined } from "@agentick/utils-next";
 
 import { tryBindOrConnect } from "./auto-elect.js";
 import { createTcpListener } from "./tcp-listener.js";
 import { tcpClusterNode, type TcpClusterNodeOptions } from "./tcp-cluster.js";
 
-export interface JoinTcpClusterOptions extends TcpClusterNodeOptions {
+export interface JoinTcpClusterOptions extends Omit<TcpClusterNodeOptions, "nodeId"> {
+  /**
+   * This node's identity. Optional — defaults to `${hostname}:${pid}`
+   * via {@link resolveNodeId}. A `cluster:nodeId:auto-defaulted` or
+   * `cluster:nodeId:suspicious` diagnostic fires on the supplied
+   * `onDiagnostic` sink (with `layer: "client"`) at join time.
+   */
+  readonly nodeId?: NodeId;
   /**
    * Role this process takes.
    *   - `"broker"`: start the broker on `host:port` AND participate
@@ -64,11 +77,22 @@ export interface JoinTcpClusterOptions extends TcpClusterNodeOptions {
  * {@link JoinTcpClusterOptions.mode} for the role selection.
  */
 export async function joinTcpCluster(opts: JoinTcpClusterOptions): Promise<ClusterNode> {
-  const { host, port, nodeId, codec, brokerCodec, onDiagnostic, mode = "client", ...rest } = opts;
+  const {
+    host,
+    port,
+    nodeId: explicitNodeId,
+    codec,
+    brokerCodec,
+    onDiagnostic,
+    mode = "client",
+    ...rest
+  } = opts;
 
   const emitDiag = (layer: "broker" | "client", name: string, payload?: unknown): void => {
     onDiagnostic?.(name, payload, layer);
   };
+
+  const nodeId = resolveNodeId(explicitNodeId, (n, p) => emitDiag("client", n, p));
 
   // Resolve actual role:
   //   - "broker" / "client": as written.

@@ -24,6 +24,7 @@
 import {
   createJsonCodec,
   defineCluster,
+  resolveNodeId,
   type ClusterCodec,
   type ClusterFactory,
   type ClusterMembershipFactory,
@@ -111,16 +112,26 @@ export function redisMembership(opts: RedisClusterNodeOptions): ClusterMembershi
 // defineRedisCluster — top-level convenience
 // ============================================================================
 
-export interface DefineRedisClusterOptions extends RedisClusterNodeOptions {
+export interface DefineRedisClusterOptions extends Omit<RedisClusterNodeOptions, "nodeId"> {
+  /**
+   * This node's identity. Optional — defaults to `${hostname}:${pid}`
+   * via {@link resolveNodeId}. A `cluster:nodeId:auto-defaulted` or
+   * `cluster:nodeId:suspicious` diagnostic fires on the supplied
+   * `onDiagnostic` sink at construction time.
+   */
+  readonly nodeId?: NodeId;
   readonly partitioning?: ClusterPartitioningFactory;
   readonly journal?: DurableJournalFactory;
   readonly fanoutMode?: "node-local-default" | "cluster-wide-default";
 }
 
 export function defineRedisCluster(opts: DefineRedisClusterOptions): ClusterFactory {
-  const node = redisClusterNode(opts);
+  // Resolve nodeId once at the public boundary; pass concrete value
+  // to both the wire factory and defineCluster so they agree.
+  const nodeId = resolveNodeId(opts.nodeId, opts.onDiagnostic);
+  const node = redisClusterNode({ ...opts, nodeId });
   return defineCluster({
-    nodeId: opts.nodeId,
+    nodeId,
     transport: node.transport,
     membership: node.membership,
     ...omitUndefined({ partitioning: opts.partitioning, journal: opts.journal }),

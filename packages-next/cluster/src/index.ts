@@ -51,6 +51,9 @@ export {
   type MembershipFacade,
 } from "./cluster-node.js";
 
+// ────────── nodeId auto-default (wire-agnostic; called from each defineXCluster) ──────────
+export { defaultNodeId, resolveNodeId, type DefaultNodeIdResult } from "./default-node-id.js";
+
 // ────────── Per-seam factory aliases (`Factory<R, P>` projections) ──────────
 export type {
   ClusterCodecFactory,

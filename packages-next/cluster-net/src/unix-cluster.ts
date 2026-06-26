@@ -16,14 +16,15 @@
  * @see docs/proposals/v2/blueprint/35-cluster-protocol.md §6
  */
 
-import type {
-  ClusterCodec,
-  ClusterFactory,
-  ClusterMembershipFactory,
-  ClusterPartitioningFactory,
-  ClusterTransportFactory,
-  DurableJournalFactory,
-  NodeId,
+import {
+  resolveNodeId,
+  type ClusterCodec,
+  type ClusterFactory,
+  type ClusterMembershipFactory,
+  type ClusterPartitioningFactory,
+  type ClusterTransportFactory,
+  type DurableJournalFactory,
+  type NodeId,
 } from "@agentick/cluster-next";
 import {
   createClusterNode,
@@ -91,6 +92,12 @@ export async function unixBroker(opts: UnixBrokerOptions): Promise<RunningUnixBr
 // ============================================================================
 
 export interface UnixClusterNodeOptions extends UnixEndpoint {
+  /**
+   * This node's identity. Required at the wire-factory level — the
+   * adopter-facing `defineUnixCluster(...)` / `joinUnixCluster(...)`
+   * facades accept this as OPTIONAL and resolve via
+   * {@link resolveNodeId} before reaching this layer.
+   */
   readonly nodeId: NodeId;
   readonly codec?: ClusterCodec;
   readonly heartbeatMs?: number;
@@ -138,16 +145,28 @@ export function unixMembership(opts: UnixClusterNodeOptions): ClusterMembershipF
 // defineUnixCluster — top-level convenience
 // ============================================================================
 
-export interface DefineUnixClusterOptions extends UnixClusterNodeOptions {
+export interface DefineUnixClusterOptions extends Omit<UnixClusterNodeOptions, "nodeId"> {
+  /**
+   * This node's identity. Optional — defaults to `${hostname}:${pid}`
+   * via {@link resolveNodeId}. A `cluster:nodeId:auto-defaulted` or
+   * `cluster:nodeId:suspicious` diagnostic fires on the supplied
+   * `onDiagnostic` sink at construction time.
+   */
+  readonly nodeId?: NodeId;
   readonly partitioning?: ClusterPartitioningFactory;
   readonly journal?: DurableJournalFactory;
   readonly fanoutMode?: "node-local-default" | "cluster-wide-default";
 }
 
 export function defineUnixCluster(opts: DefineUnixClusterOptions): ClusterFactory {
+  // Resolve nodeId once at the public boundary, then pass the
+  // concrete value to BOTH the wire factory and defineWireCluster.
+  // If they diverge, routing breaks (broker thinks node is "X",
+  // inbox thinks node is "Y").
+  const nodeId = resolveNodeId(opts.nodeId, opts.onDiagnostic);
   return defineWireCluster({
-    nodeId: opts.nodeId,
-    node: unixClusterNode(opts),
+    nodeId,
+    node: unixClusterNode({ ...opts, nodeId }),
     ...omitUndefined({
       codec: opts.codec,
       partitioning: opts.partitioning,

@@ -22,11 +22,24 @@
  * @see @agentick/cluster-next `makeClusterNode` (the shared facade builder)
  */
 
-import { makeClusterNode, type ClusterNode } from "@agentick/cluster-next";
+import {
+  makeClusterNode,
+  resolveNodeId,
+  type ClusterNode,
+  type NodeId,
+} from "@agentick/cluster-next";
 
 import { redisClusterNode, type RedisClusterNodeOptions } from "./redis-cluster.js";
 
-export interface JoinRedisClusterOptions extends RedisClusterNodeOptions {
+export interface JoinRedisClusterOptions extends Omit<RedisClusterNodeOptions, "nodeId"> {
+  /**
+   * This node's identity. Optional — defaults to `${hostname}:${pid}`
+   * via {@link resolveNodeId}. A `cluster:nodeId:auto-defaulted` or
+   * `cluster:nodeId:suspicious` diagnostic fires on the supplied
+   * `onDiagnostic` sink (always `layer: "client"` — Redis is
+   * brokerless) at join time.
+   */
+  readonly nodeId?: NodeId;
   /**
    * Single diagnostic sink. Receives every diagnostic emitted by
    * the transport + membership layers. The `layer` tag is always
@@ -56,7 +69,7 @@ export interface JoinRedisClusterOptions extends RedisClusterNodeOptions {
  * ```
  */
 export async function joinRedisCluster(opts: JoinRedisClusterOptions): Promise<ClusterNode> {
-  const { onDiagnostic, ...rest } = opts;
+  const { nodeId: explicitNodeId, onDiagnostic, ...rest } = opts;
 
   // The Redis tier never starts a broker — fold the layer arg
   // away here for the underlying factory which only takes the
@@ -65,13 +78,16 @@ export async function joinRedisCluster(opts: JoinRedisClusterOptions): Promise<C
     ? (name: string, payload?: unknown): void => onDiagnostic(name, payload, "client")
     : undefined;
 
+  const nodeId = resolveNodeId(explicitNodeId, innerOnDiag);
+
   const factories = redisClusterNode({
     ...rest,
+    nodeId,
     ...(innerOnDiag !== undefined ? { onDiagnostic: innerOnDiag } : {}),
   });
 
   return makeClusterNode({
-    nodeId: opts.nodeId,
+    nodeId,
     role: "client",
     transportFactory: factories.transport,
     membershipFactory: factories.membership,

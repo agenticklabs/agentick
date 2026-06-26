@@ -30,7 +30,13 @@
  */
 
 import { startBroker, type RunningBroker } from "@agentick/cluster-broker-next";
-import { makeClusterNode, type ClusterCodec, type ClusterNode } from "@agentick/cluster-next";
+import {
+  makeClusterNode,
+  resolveNodeId,
+  type ClusterCodec,
+  type ClusterNode,
+  type NodeId,
+} from "@agentick/cluster-next";
 import { omitUndefined } from "@agentick/utils-next";
 
 import { tryBindOrConnectUnix } from "./auto-elect.js";
@@ -40,7 +46,14 @@ import {
   type ElectableUnixClusterNodeOptions,
 } from "./unix-re-election.js";
 
-export interface JoinUnixClusterOptions extends ElectableUnixClusterNodeOptions {
+export interface JoinUnixClusterOptions extends Omit<ElectableUnixClusterNodeOptions, "nodeId"> {
+  /**
+   * This node's identity. Optional — defaults to `${hostname}:${pid}`
+   * via {@link resolveNodeId}. A `cluster:nodeId:auto-defaulted` or
+   * `cluster:nodeId:suspicious` diagnostic fires on the supplied
+   * `onDiagnostic` sink (with `layer: "client"`) at join time.
+   */
+  readonly nodeId?: NodeId;
   /**
    * Codec for the broker if this process wins the initial bind race.
    * Defaults to the same `codec` used by the client side.
@@ -66,11 +79,16 @@ export interface JoinUnixClusterOptions extends ElectableUnixClusterNodeOptions 
  * no external supervisor.
  */
 export async function joinUnixCluster(opts: JoinUnixClusterOptions): Promise<ClusterNode> {
-  const { socketPath, nodeId, codec, brokerCodec, onDiagnostic, ...rest } = opts;
+  const { socketPath, nodeId: explicitNodeId, codec, brokerCodec, onDiagnostic, ...rest } = opts;
 
   const emitDiag = (layer: "broker" | "client", name: string, payload?: unknown): void => {
     onDiagnostic?.(name, payload, layer);
   };
+
+  // Resolve nodeId up-front — the wire factories all need a concrete
+  // value; nodeId-resolution diagnostics are tagged "client" since
+  // the broker doesn't have an identity (it's just a multiplexer).
+  const nodeId = resolveNodeId(explicitNodeId, (n, p) => emitDiag("client", n, p));
 
   // 1. Race the bind.
   const elect = await tryBindOrConnectUnix({ socketPath, mode: "auto" });

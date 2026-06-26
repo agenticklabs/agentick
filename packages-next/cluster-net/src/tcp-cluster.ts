@@ -18,14 +18,15 @@
  * @see docs/proposals/v2/blueprint/35-cluster-protocol.md §6
  */
 
-import type {
-  ClusterCodec,
-  ClusterFactory,
-  ClusterMembershipFactory,
-  ClusterPartitioningFactory,
-  ClusterTransportFactory,
-  DurableJournalFactory,
-  NodeId,
+import {
+  resolveNodeId,
+  type ClusterCodec,
+  type ClusterFactory,
+  type ClusterMembershipFactory,
+  type ClusterPartitioningFactory,
+  type ClusterTransportFactory,
+  type DurableJournalFactory,
+  type NodeId,
 } from "@agentick/cluster-next";
 import {
   createClusterNode,
@@ -158,7 +159,14 @@ export function tcpMembership(opts: TcpClusterNodeOptions): ClusterMembershipFac
 // defineTcpCluster — top-level convenience
 // ============================================================================
 
-export interface DefineTcpClusterOptions extends TcpClusterNodeOptions {
+export interface DefineTcpClusterOptions extends Omit<TcpClusterNodeOptions, "nodeId"> {
+  /**
+   * This node's identity. Optional — defaults to `${hostname}:${pid}`
+   * via {@link resolveNodeId}. A `cluster:nodeId:auto-defaulted` or
+   * `cluster:nodeId:suspicious` diagnostic fires on the supplied
+   * `onDiagnostic` sink at construction time.
+   */
+  readonly nodeId?: NodeId;
   readonly partitioning?: ClusterPartitioningFactory;
   readonly journal?: DurableJournalFactory;
   readonly fanoutMode?: "node-local-default" | "cluster-wide-default";
@@ -168,17 +176,18 @@ export interface DefineTcpClusterOptions extends TcpClusterNodeOptions {
  * One-shot factory that bundles `defineCluster + tcpClusterNode`.
  * Adopters write:
  *
- *     const cluster = defineTcpCluster({
- *       nodeId: () => process.env.NODE_ID ?? `auto-${process.pid}`,
- *       host: "127.0.0.1",
- *       port: 9876,
- *     });
+ *     const cluster = defineTcpCluster({ port: 9876 });
  *     // ... pass `cluster` to createGateway / createApp ...
+ *
+ * `nodeId` and `host` both default — see the type definitions.
  */
 export function defineTcpCluster(opts: DefineTcpClusterOptions): ClusterFactory {
+  // Resolve nodeId once at the public boundary; pass concrete value
+  // to both the wire factory and defineWireCluster so they agree.
+  const nodeId = resolveNodeId(opts.nodeId, opts.onDiagnostic);
   return defineWireCluster({
-    nodeId: opts.nodeId,
-    node: tcpClusterNode(opts),
+    nodeId,
+    node: tcpClusterNode({ ...opts, nodeId }),
     ...omitUndefined({
       codec: opts.codec,
       partitioning: opts.partitioning,

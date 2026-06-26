@@ -9,14 +9,15 @@
 
 import type { Server as HttpServer } from "node:http";
 
-import type {
-  ClusterCodec,
-  ClusterFactory,
-  ClusterMembershipFactory,
-  ClusterPartitioningFactory,
-  ClusterTransportFactory,
-  DurableJournalFactory,
-  NodeId,
+import {
+  resolveNodeId,
+  type ClusterCodec,
+  type ClusterFactory,
+  type ClusterMembershipFactory,
+  type ClusterPartitioningFactory,
+  type ClusterTransportFactory,
+  type DurableJournalFactory,
+  type NodeId,
 } from "@agentick/cluster-next";
 import {
   createClusterNode,
@@ -115,16 +116,26 @@ export function wsMembership(opts: WsClusterNodeOptions): ClusterMembershipFacto
 // defineWsCluster — top-level convenience
 // ============================================================================
 
-export interface DefineWsClusterOptions extends WsClusterNodeOptions {
+export interface DefineWsClusterOptions extends Omit<WsClusterNodeOptions, "nodeId"> {
+  /**
+   * This node's identity. Optional — defaults to `${hostname}:${pid}`
+   * via {@link resolveNodeId}. A `cluster:nodeId:auto-defaulted` or
+   * `cluster:nodeId:suspicious` diagnostic fires on the supplied
+   * `onDiagnostic` sink at construction time.
+   */
+  readonly nodeId?: NodeId;
   readonly partitioning?: ClusterPartitioningFactory;
   readonly journal?: DurableJournalFactory;
   readonly fanoutMode?: "node-local-default" | "cluster-wide-default";
 }
 
 export function defineWsCluster(opts: DefineWsClusterOptions): ClusterFactory {
+  // Resolve nodeId once at the public boundary; pass concrete value
+  // to both the wire factory and defineWireCluster so they agree.
+  const nodeId = resolveNodeId(opts.nodeId, opts.onDiagnostic);
   return defineWireCluster({
-    nodeId: opts.nodeId,
-    node: wsClusterNode(opts),
+    nodeId,
+    node: wsClusterNode({ ...opts, nodeId }),
     ...omitUndefined({
       codec: opts.codec,
       partitioning: opts.partitioning,
