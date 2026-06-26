@@ -1,7 +1,44 @@
 # Agentick v2 — Implementation Status
 
 **Branch:** `feat/v2`
-**Last updated:** 2026-06-26 (Phase 4 closed) — **Cluster Phase 4f–4g — production-ready cluster wire stack across all four packages.** Eight commits land:
+**Last updated:** 2026-06-26 (Phase 5 closed) — **Phase 5 — cluster fusion: `defineXCluster + createApp/createGateway` now actually does something.** Six commits land:
+
+1. **5b — nodeId auto-default**: `defaultNodeId()` / `resolveNodeId()` in `@agentick/cluster-next`. Adopter calls collapse to `defineUnixCluster({ socketPath: "..." })` — no nodeId arg required; falls back to `${hostname}:${pid}` with a `cluster:nodeId:auto-defaulted` diagnostic, OR a `cluster:nodeId:suspicious` warning if hostname is empty/"localhost" (the container-without-HOSTNAME footgun that would otherwise silently corrupt cluster routing). Strict guard at the public-API boundary (`defineXCluster` / `joinXCluster`); internal `XClusterNodeOptions.nodeId` stays required.
+
+2. **5c (app)** — `createApp({ cluster: ClusterFactory })` resolves the factory at construction against a synthesized `ClusterParent`, swaps the substrate to the wrapped versions, and registers cluster close as part of `app.closeApp()`. Substrate factories incompatible with `cluster` (can't resolve factories without the parent shell they'd be constructing) — clear error if mixed. `AppHarness.addInternalCloseHandler(h)` is the new internal slot.
+
+3. **5c (gateway)** — `createGateway({ cluster })` same pattern. Apps spawned via `gateway.createApp(...)` inherit the cluster-wrapped substrate automatically via the existing `bus = input.bus ?? this.bus` default chain. Gateway-owned cluster is THE cluster for all spawned apps — no per-app cluster option, no "precedence" code path needed. `closeGateway()` closes all apps first, then the cluster, then super.close().
+
+4. **defineLocalCluster** — the "fifth wire" testing factory. In-memory ClusterFactory backed by `LocalClusterRegistry`. Optional registry arg (auto-creates for single-node tests; explicit for multi-node simulation). Lives in `@agentick/cluster-next/testing`.
+
+5. **trackPendingAck bug fix** — surfaced via the v2-otto-cluster demo. `subscribeBus`/`subscribeInbox` called before client handshake completes was orphaning the flush()'s Promise; idempotent track preserves the original Promise across the onWelcome re-subscribe loop.
+
+6. **joinXCluster facades** (Phase 4f.7) — `joinUnixCluster`/`joinTcpCluster`/`joinWsCluster`/`joinRedisCluster`. Side-channel cluster wiring for coordination outside the agent loop (proof: `example/v2-otto-cluster` worker went from 148 → 75 LOC). Shared facade builder `makeClusterNode` in `@agentick/cluster-next` hosts the bus / membership.waitForPeers / lifecycle plumbing wire-agnostically.
+
+**ADR 38 — Cluster lifecycle + ownership rules** pins the contract:
+- Pattern A (defineXCluster + createApp/createGateway) → framework owns lifecycle
+- Pattern B (joinXCluster) → caller owns lifecycle
+- One cluster per process (multi-app = gateway-level wiring)
+- Cluster requires substrate INSTANCES, not factories
+- The `{kind: "unix" | "tcp" | ...}` config form was considered and rejected — runtime missing-package crashes + dynamic-import smell
+
+**ADR 37** sketched the future `@agentick/eval-next` package (testing-shaped framework for evaluating agents/models/tools). Not implementing now.
+
+**Workspace test status**: cluster + app + gateway suites at 281/281. Full v2 workspace remains green at the previous Phase 4 count + Phase 5 additions.
+
+**Deferred to Phase 6+**:
+- Real-Redis conformance via docker-compose
+- Double-wrap detection (brand cluster-wrapped substrates so a second wrap can refuse)
+- Per-app clusters under a gateway (hybrid topologies — drop to `joinXCluster` today)
+- Cluster swap mid-flight
+- Conformance suite parameterized over all four wires for the integration path
+- `@agentick/eval-next` (ADR 37 sketch)
+
+**Phase 5 closed.** Cluster machinery is now consumed by app/gateway. The "build it once, configure ergonomically" loop is complete; what remains is hardening + real-world adoption signal.
+
+---
+
+**Previously, 2026-06-26 (Phase 4 closed) — Cluster Phase 4f–4g — production-ready cluster wire stack across all four packages.** Eight commits land:
 
 1. **4f.1 — strict-typecheck sweep**: 9 v2 packages had silently regressed `tsconfig.json` since a 2026-06-12 fix; restored across spec, utils, pubsub, tasks, cluster, cluster-broker, cluster-net, cluster-ws, cluster-redis. Surfaced months of accumulated test-fixture drift (deleted obsolete tests for removed features; updated tests for shape-changed types). Fixed a latent `Factory<R, P>` type-soundness bug where `R | Promise<R> | Effect<R, never, never>` was collapsing to `unknown` in TS inference.
 
