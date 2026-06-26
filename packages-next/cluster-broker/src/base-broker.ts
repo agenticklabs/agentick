@@ -140,14 +140,34 @@ export class BaseBroker {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
+    this.onDiagnostic("cluster:broker:server:closing", { bound: this.listener.bound });
     // Send Goodbye to every connected client so they don't think
-    // it's a network failure. Best-effort; failures are silent.
+    // it's a network failure (clean shutdown vs remote-abort).
+    // Enqueue is sync (Phase 4f.4 — bounded write queue); flush each
+    // queue so the Goodbye actually lands on the wire before we tear
+    // down the listener. Best-effort: flush has a 5s default
+    // timeout; truly-stuck clients miss the Goodbye but other
+    // clients are unaffected.
     for (const client of this.clients.values()) {
       try {
         this.writeFrame(client, { type: FRAME_GOODBYE });
       } catch {
         // ignore
       }
+    }
+    // Phase 4f.6 — graceful shutdown. Await flush across all
+    // queues IN PARALLEL so one slow client doesn't dominate the
+    // shutdown timeline. Each queue's flush is independent.
+    await Promise.all(
+      [...this.clients.values()].map((c) =>
+        c.writeQueue.flush().catch(() => {
+          // flush errors are non-fatal during shutdown
+        }),
+      ),
+    );
+    // Close queues + listener.
+    for (const client of this.clients.values()) {
+      client.writeQueue.close();
     }
     await this.listener.close();
     this.clients.clear();

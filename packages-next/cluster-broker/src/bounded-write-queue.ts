@@ -111,10 +111,43 @@ export class BoundedWriteQueue<T> {
    * Called by the broker on connection close. Does NOT await an
    * in-flight drain — the drain loop exits on its next iteration
    * because `closed` is checked there.
+   *
+   * For graceful close (SIGTERM, broker shutdown) where pending
+   * frames SHOULD be delivered before tear-down, use {@link flush}
+   * first, THEN `close()`.
    */
   close(): void {
     this.closed = true;
     this.queue.length = 0;
+  }
+
+  /**
+   * Wait for the queue to drain (or until `timeoutMs` elapses).
+   * Resolves when `depth === 0` OR the queue is closed. Used by the
+   * broker's graceful-close path: enqueue final frames (Goodbye), then
+   * await flush, then close.
+   *
+   * Without flush, the broker's `close()` would tear down the
+   * listener while Goodbye frames sit unsent in queues — clients
+   * would observe an abrupt remote-abort instead of a clean farewell.
+   *
+   * Cooperative — does NOT force-drain. If `conn.send` is genuinely
+   * stuck (slow remote, dead socket), flush blocks up to `timeoutMs`
+   * (default 5000ms) and then returns; pending frames are dropped
+   * when `close()` runs after.
+   */
+  async flush(timeoutMs = 5000): Promise<void> {
+    if (this.closed) return;
+    if (this.queue.length === 0 && !this.draining) return;
+    const start = Date.now();
+    while (this.queue.length > 0 || this.draining) {
+      if (this.closed) return;
+      if (Date.now() - start > timeoutMs) return;
+      // 1ms tick. Short enough that flush is responsive; long enough
+      // not to thrash the event loop. The drain loop yields between
+      // sends so this tick is well-aligned.
+      await new Promise<void>((resolve) => setTimeout(resolve, 1));
+    }
   }
 
   private async drainLoop(): Promise<void> {
