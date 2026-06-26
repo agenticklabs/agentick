@@ -9,10 +9,11 @@ import { describe, expect, it } from "vitest";
 import type { EventEnvelope, MessageEnvelope } from "@agentick/spec-next";
 
 import { jsonCodec } from "../builtins/json-codec.js";
+import type { ClusterCodec } from "../codec.js";
 
 describe("jsonCodec", () => {
   it("round-trips a MessageEnvelope through encode → decode", () => {
-    const codec = jsonCodec()({} as never);
+    const codec = jsonCodec()({} as never) as ClusterCodec;
     const env: MessageEnvelope = {
       addressedTo: "tasks:session-x",
       type: "tasks-cancel",
@@ -28,7 +29,7 @@ describe("jsonCodec", () => {
   });
 
   it("round-trips an EventEnvelope through encode → decode", () => {
-    const codec = jsonCodec()({} as never);
+    const codec = jsonCodec()({} as never) as ClusterCodec;
     const env: EventEnvelope = {
       id: "evt-1",
       surface: "tool",
@@ -45,7 +46,7 @@ describe("jsonCodec", () => {
   });
 
   it("encode produces bytes that round-trip through string conversion (debug-friendly)", () => {
-    const codec = jsonCodec()({} as never);
+    const codec = jsonCodec()({} as never) as ClusterCodec;
     const env: MessageEnvelope = {
       addressedTo: "test:x",
       type: "ping",
@@ -59,15 +60,15 @@ describe("jsonCodec", () => {
   });
 
   it("decode throws on malformed input", () => {
-    const codec = jsonCodec()({} as never);
+    const codec = jsonCodec()({} as never) as ClusterCodec;
     const garbage = new TextEncoder().encode("not json {{{");
     expect(() => codec.decode(garbage)).toThrow(/json/i);
   });
 
   it("each factory call produces an independent codec instance", () => {
     const factory = jsonCodec();
-    const a = factory({} as never);
-    const b = factory({} as never);
+    const a = factory({} as never) as ClusterCodec;
+    const b = factory({} as never) as ClusterCodec;
     expect(a).not.toBe(b);
     // But both decode each other's encodings — they're stateless.
     const env: MessageEnvelope = {

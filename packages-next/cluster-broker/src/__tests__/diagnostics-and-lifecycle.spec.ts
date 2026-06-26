@@ -244,7 +244,7 @@ describe("BaseClusterClient — heartbeat", () => {
     peerSide.onMessage((bytes) => {
       const frame = codec.decode(bytes) as { type: string };
       if (frame.type === "cluster:hello") {
-        void peerSide.send(codec.encode({ type: "cluster:welcome", nodes: ["node-A"] }));
+        void peerSide.send(codec.encode({ type: "cluster:welcome", nodes: ["node-A"] } as never));
       }
       // Pings get dropped — never reply with pong.
     });

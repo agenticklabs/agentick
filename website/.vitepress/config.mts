@@ -97,6 +97,7 @@ const PACKAGE_GROUPS: Array<{ label: string; packages: string[] }> = [
       "@agentick/cluster-broker-next",
       "@agentick/cluster-net-next",
       "@agentick/cluster-ws-next",
+      "@agentick/cluster-redis-next",
     ],
   },
 ];

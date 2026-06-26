@@ -107,7 +107,7 @@ describe("TasksHarness — submit + complete", () => {
       throw new Error("kaboom");
     });
 
-    await expect(handle.result).rejects.toMatchObject<Partial<TaskRejection>>({
+    await expect(handle.result).rejects.toMatchObject({
       _tag: "TaskRejection",
       taskId: handle.taskId,
       status: "failed",
@@ -218,7 +218,7 @@ describe("TasksHarness — cancel", () => {
     await new Promise((r) => setTimeout(r, 0));
     await bundle.harness.cancel(handle.taskId, "user-aborted");
 
-    await expect(handle.result).rejects.toMatchObject<Partial<TaskRejection>>({
+    await expect(handle.result).rejects.toMatchObject({
       _tag: "TaskRejection",
       taskId: handle.taskId,
       status: "cancelled",
@@ -397,7 +397,7 @@ describe("TasksHarness — Effect-typed work", () => {
   it("Effect.fail with a typed error surfaces as TaskRejection { status: 'failed' }", async () => {
     bundle = await fakeTasks();
     const handle = bundle.harness.submit(() => Effect.fail({ _tag: "MyDomainError" }));
-    await expect(handle.result).rejects.toMatchObject<Partial<TaskRejection>>({
+    await expect(handle.result).rejects.toMatchObject({
       _tag: "TaskRejection",
       taskId: handle.taskId,
       status: "failed",
@@ -408,7 +408,7 @@ describe("TasksHarness — Effect-typed work", () => {
   it("Effect.die (defect) surfaces as TaskRejection { status: 'failed' }", async () => {
     bundle = await fakeTasks();
     const handle = bundle.harness.submit(() => Effect.die(new Error("internal-defect")));
-    await expect(handle.result).rejects.toMatchObject<Partial<TaskRejection>>({
+    await expect(handle.result).rejects.toMatchObject({
       status: "failed",
       failure: { kind: "error", reason: "internal-defect" },
     });
@@ -458,7 +458,7 @@ describe("TasksHarness — Effect-typed work", () => {
     await new Promise((r) => setTimeout(r, 5));
     const cancelStart = Date.now();
     await bundle.harness.cancel(handle.taskId, "interrupt-me");
-    await expect(handle.result).rejects.toMatchObject<Partial<TaskRejection>>({
+    await expect(handle.result).rejects.toMatchObject({
       status: "cancelled",
       failure: { kind: "aborted", reason: "interrupt-me" },
     });
@@ -548,7 +548,7 @@ describe("TasksHarness — Effect-typed work", () => {
         return "unreachable";
       }),
     );
-    await expect(handle.result).rejects.toMatchObject<Partial<TaskRejection>>({
+    await expect(handle.result).rejects.toMatchObject({
       _tag: "TaskRejection",
       taskId: handle.taskId,
       status: "cancelled",
@@ -562,7 +562,7 @@ describe("TasksHarness — Effect-typed work", () => {
       // Author bug: throws before returning an Effect.
       throw new Error("factory-bug");
     });
-    await expect(handle.result).rejects.toMatchObject<Partial<TaskRejection>>({
+    await expect(handle.result).rejects.toMatchObject({
       status: "failed",
       failure: { kind: "error", reason: "factory-bug" },
     });

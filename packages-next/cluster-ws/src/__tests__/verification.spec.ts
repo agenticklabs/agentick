@@ -16,7 +16,7 @@ import { createServer as createNetServer } from "node:net";
 
 import { WebSocket as WSConnection } from "ws";
 
-import { type ClusterCodec } from "@agentick/cluster-broker-next";
+import { type ClusterCodec } from "@agentick/cluster-next";
 
 import { createWsConnector } from "../ws-connector.js";
 import { wsBroker } from "../ws-cluster.js";

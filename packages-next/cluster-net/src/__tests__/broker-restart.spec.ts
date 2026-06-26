@@ -16,7 +16,8 @@ import { describe, expect, it } from "vitest";
 
 import { createServer } from "node:net";
 
-import { BaseClusterClient, type ClusterCodec } from "@agentick/cluster-broker-next";
+import { BaseClusterClient } from "@agentick/cluster-broker-next";
+import { type ClusterCodec } from "@agentick/cluster-next";
 import { waitFor } from "@agentick/utils-next/testing";
 
 import { createTcpConnector } from "../tcp-connector.js";

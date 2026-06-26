@@ -17,7 +17,8 @@ import { describe, expect, it } from "vitest";
 
 import { createServer } from "node:net";
 
-import { BaseBroker, BaseClusterClient, type ClusterCodec } from "@agentick/cluster-broker-next";
+import { BaseBroker, BaseClusterClient } from "@agentick/cluster-broker-next";
+import { type ClusterCodec } from "@agentick/cluster-next";
 import { waitFor } from "@agentick/utils-next/testing";
 
 import { tryBindOrConnect } from "../auto-elect.js";

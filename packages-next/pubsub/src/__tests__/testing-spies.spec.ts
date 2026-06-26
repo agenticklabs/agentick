@@ -28,7 +28,9 @@ describe("spyNotifier", () => {
   it("still fires subscribers normally", () => {
     const spy = spyNotifier<string>();
     const received: string[] = [];
-    spy.subscribe((s) => received.push(s));
+    spy.subscribe((s) => {
+      received.push(s);
+    });
     spy.notify("hello");
     spy.notify("world");
     expect(received).toEqual(["hello", "world"]);
@@ -46,7 +48,9 @@ describe("spyNotifier", () => {
   it("reset() clears recorded calls but keeps subscribers", () => {
     const spy = spyNotifier<number>();
     const received: number[] = [];
-    spy.subscribe((n) => received.push(n));
+    spy.subscribe((n) => {
+      received.push(n);
+    });
     spy.notify(1);
     spy.reset();
     expect(spy.callCount).toBe(0);
@@ -112,8 +116,12 @@ describe("spyKeyedNotifier", () => {
     const spy = spyKeyedNotifier();
     const keyed: string[] = [];
     const wild: string[] = [];
-    spy.subscribe("a", () => keyed.push("a"));
-    spy.subscribeAll(() => wild.push("*"));
+    spy.subscribe("a", () => {
+      keyed.push("a");
+    });
+    spy.subscribeAll(() => {
+      wild.push("*");
+    });
     spy.notify("a");
     spy.notify("b");
     expect(keyed).toEqual(["a"]);
@@ -160,7 +168,11 @@ describe("spyLocalPubSub", () => {
       const fiber = yield* Effect.fork(
         spy.subscribe().pipe(
           Stream.take(2),
-          Stream.runForEach((s) => Effect.sync(() => received.push(s))),
+          Stream.runForEach((s) =>
+            Effect.sync(() => {
+              received.push(s);
+            }),
+          ),
         ),
       );
       yield* Effect.sleep("10 millis");

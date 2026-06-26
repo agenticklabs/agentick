@@ -49,7 +49,7 @@ describe("mergeLayered — cascade semantics", () => {
     });
 
     it("recursive merge multiple levels deep", () => {
-      const out = mergeLayered<{ a: { b: { c: { d: number; e?: number } } } }>(
+      const out = mergeLayered<{ a: { b: { c: { d?: number; e?: number } } } }>(
         { a: { b: { c: { d: 1 } } } },
         { a: { b: { c: { e: 2 } } } },
       );

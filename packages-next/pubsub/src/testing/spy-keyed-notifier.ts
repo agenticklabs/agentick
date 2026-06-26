@@ -15,8 +15,9 @@
  * recording side-effect.
  */
 
-import type { KeyedNotifier, Unsubscribe } from "../keyed-notifier.js";
+import type { KeyedNotifier } from "../keyed-notifier.js";
 import { createKeyedNotifier } from "../keyed-notifier.js";
+import type { Unsubscribe } from "../types.js";
 
 export type KeyedNotifierCall<K, T> =
   | { readonly kind: "notify"; readonly key: K; readonly value: T }

@@ -668,6 +668,7 @@ function defineFailingTransport() {
     subscribeBus() {
       return async () => {};
     },
+    async flush() {},
     async close() {},
   });
 }

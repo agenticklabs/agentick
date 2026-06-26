@@ -6,10 +6,18 @@ describe("createKeyedNotifier — Layer 2 (keyed + wildcards)", () => {
   it("notify(key) fires keyed bucket then wildcards", () => {
     const n = createKeyedNotifier();
     const order: string[] = [];
-    n.subscribe("a", () => order.push("a:1"));
-    n.subscribe("a", () => order.push("a:2"));
-    n.subscribe("b", () => order.push("b:1"));
-    n.subscribeAll(() => order.push("*"));
+    n.subscribe("a", () => {
+      order.push("a:1");
+    });
+    n.subscribe("a", () => {
+      order.push("a:2");
+    });
+    n.subscribe("b", () => {
+      order.push("b:1");
+    });
+    n.subscribeAll(() => {
+      order.push("*");
+    });
     n.notify("a");
     expect(order).toEqual(["a:1", "a:2", "*"]);
   });
@@ -17,7 +25,9 @@ describe("createKeyedNotifier — Layer 2 (keyed + wildcards)", () => {
   it("notify(key) on unknown key fires only wildcards", () => {
     const n = createKeyedNotifier();
     const order: string[] = [];
-    n.subscribeAll(() => order.push("*"));
+    n.subscribeAll(() => {
+      order.push("*");
+    });
     n.notify("missing");
     expect(order).toEqual(["*"]);
   });
@@ -27,8 +37,12 @@ describe("createKeyedNotifier — Layer 2 (keyed + wildcards)", () => {
     const n = createKeyedNotifier<string, Ev>();
     const keyed: Ev[] = [];
     const wild: Ev[] = [];
-    n.subscribe("x", (e) => keyed.push(e));
-    n.subscribeAll((e) => wild.push(e));
+    n.subscribe("x", (e) => {
+      keyed.push(e);
+    });
+    n.subscribeAll((e) => {
+      wild.push(e);
+    });
     n.notify("x", { tag: "hi" });
     expect(keyed).toEqual([{ tag: "hi" }]);
     expect(wild).toEqual([{ tag: "hi" }]);
@@ -61,8 +75,12 @@ describe("createKeyedNotifier — Layer 2 (keyed + wildcards)", () => {
   it("clear() drops keyed + wildcard subscribers", () => {
     const n = createKeyedNotifier();
     const calls: string[] = [];
-    n.subscribe("a", () => calls.push("a"));
-    n.subscribeAll(() => calls.push("*"));
+    n.subscribe("a", () => {
+      calls.push("a");
+    });
+    n.subscribeAll(() => {
+      calls.push("*");
+    });
     n.clear();
     expect(n.size).toBe(0);
     expect(n.wildcardCount).toBe(0);
@@ -74,9 +92,15 @@ describe("createKeyedNotifier — Layer 2 (keyed + wildcards)", () => {
   it("notifyAll fires wildcards only (keyed subscribers untouched)", () => {
     const n = createKeyedNotifier();
     const calls: string[] = [];
-    n.subscribe("a", () => calls.push("a"));
-    n.subscribe("b", () => calls.push("b"));
-    n.subscribeAll(() => calls.push("*"));
+    n.subscribe("a", () => {
+      calls.push("a");
+    });
+    n.subscribe("b", () => {
+      calls.push("b");
+    });
+    n.subscribeAll(() => {
+      calls.push("*");
+    });
     n.notifyAll();
     expect(calls).toEqual(["*"]);
   });
@@ -115,8 +139,12 @@ describe("createKeyedNotifier — Layer 2 (keyed + wildcards)", () => {
     n.subscribe("k", () => {
       throw new Error("boom");
     });
-    n.subscribe("k", () => calls.push("ok"));
-    n.subscribeAll(() => calls.push("*"));
+    n.subscribe("k", () => {
+      calls.push("ok");
+    });
+    n.subscribeAll(() => {
+      calls.push("*");
+    });
     expect(() => n.notify("k")).not.toThrow();
     expect(calls).toEqual(["ok", "*"]);
   });

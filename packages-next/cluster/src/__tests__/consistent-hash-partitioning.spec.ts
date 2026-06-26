@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 
 import { consistentHashPartitioning } from "../builtins/consistent-hash-partitioning.js";
 import type { ClusterMembership } from "../membership.js";
+import type { ClusterPartitioning } from "../partitioning.js";
 import type { MembershipChange, NodeId } from "../types.js";
 
 function fakeMembership(
@@ -31,12 +32,12 @@ function fakeMembership(
         current = [...next];
       },
     } as object),
-  } as ClusterMembership & { __setNodes: (n: NodeId[]) => void };
+  } as unknown as ClusterMembership & { __setNodes: (n: NodeId[]) => void };
 }
 
 describe("consistentHashPartitioning — shardKeyFor", () => {
   const membership = fakeMembership(["n1"]);
-  const partitioning = consistentHashPartitioning(membership)({} as never);
+  const partitioning = consistentHashPartitioning(membership)({} as never) as ClusterPartitioning;
 
   it("extracts the scopeId from a `${surface}:${scopeId}` address", () => {
     expect(partitioning.shardKeyFor("tasks:session-abc-123")).toBe("session-abc-123");
@@ -60,14 +61,14 @@ describe("consistentHashPartitioning — shardKeyFor", () => {
 describe("consistentHashPartitioning — nodeFor", () => {
   it("maps a shardKey to one of the live nodes", async () => {
     const membership = fakeMembership(["n1", "n2", "n3"]);
-    const partitioning = consistentHashPartitioning(membership)({} as never);
+    const partitioning = consistentHashPartitioning(membership)({} as never) as ClusterPartitioning;
     const node = await partitioning.nodeFor("session-abc");
     expect(["n1", "n2", "n3"]).toContain(node);
   });
 
   it("is deterministic: same shardKey + same membership → same node", async () => {
     const membership = fakeMembership(["n1", "n2", "n3"]);
-    const partitioning = consistentHashPartitioning(membership)({} as never);
+    const partitioning = consistentHashPartitioning(membership)({} as never) as ClusterPartitioning;
     const a = await partitioning.nodeFor("session-abc");
     const b = await partitioning.nodeFor("session-abc");
     expect(a).toBe(b);
@@ -75,7 +76,7 @@ describe("consistentHashPartitioning — nodeFor", () => {
 
   it("distributes load across nodes (not all keys map to the same node)", async () => {
     const membership = fakeMembership(["n1", "n2", "n3", "n4"]);
-    const partitioning = consistentHashPartitioning(membership)({} as never);
+    const partitioning = consistentHashPartitioning(membership)({} as never) as ClusterPartitioning;
     const distribution = new Map<NodeId, number>();
     for (let i = 0; i < 1000; i++) {
       const node = await partitioning.nodeFor(`session-${i}`);
@@ -95,7 +96,7 @@ describe("consistentHashPartitioning — nodeFor", () => {
     const membership = fakeMembership(["n1", "n2", "n3"]) as ClusterMembership & {
       __setNodes: (n: NodeId[]) => void;
     };
-    const partitioning = consistentHashPartitioning(membership)({} as never);
+    const partitioning = consistentHashPartitioning(membership)({} as never) as ClusterPartitioning;
 
     // Capture initial mapping for a set of keys.
     const keys = Array.from({ length: 200 }, (_, i) => `key-${i}`);
@@ -121,7 +122,7 @@ describe("consistentHashPartitioning — nodeFor", () => {
 
   it("throws when the cluster has no live members", async () => {
     const membership = fakeMembership([]);
-    const partitioning = consistentHashPartitioning(membership)({} as never);
+    const partitioning = consistentHashPartitioning(membership)({} as never) as ClusterPartitioning;
     await expect(partitioning.nodeFor("any")).rejects.toThrow(/no members/i);
   });
 });

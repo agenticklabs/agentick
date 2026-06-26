@@ -17,8 +17,9 @@
  * only addition is the recording side-effect on each `notify` call.
  */
 
-import type { Listener, Notifier, Unsubscribe } from "../notifier.js";
+import type { Notifier } from "../notifier.js";
 import { createNotifier } from "../notifier.js";
+import type { Listener, Unsubscribe } from "../types.js";
 
 export interface NotifierSpy<T = void> extends Notifier<T> {
   /**

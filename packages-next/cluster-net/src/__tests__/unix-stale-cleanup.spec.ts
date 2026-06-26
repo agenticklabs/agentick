@@ -10,7 +10,7 @@ import { writeFile, mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { type ClusterCodec } from "@agentick/cluster-broker-next";
+import { type ClusterCodec } from "@agentick/cluster-next";
 
 import { tryBindOrConnectUnix } from "../auto-elect.js";
 import { createUnixListener } from "../unix-listener.js";

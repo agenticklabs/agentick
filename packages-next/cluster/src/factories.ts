@@ -12,8 +12,6 @@
  * @see docs/proposals/v2/blueprint/31-harness-hierarchy.md (Factory<R, P>)
  */
 
-import type { Effect } from "effect";
-
 import type { ClusterCodec } from "./codec.js";
 import type { ClusterParent } from "./cluster.js";
 import type { DurableJournal } from "./journal.js";
@@ -25,8 +23,15 @@ import type { ClusterTransport } from "./transport.js";
  * Generic factory shape, parameterized by `R` (the constructed
  * thing) and `P` (the parent context). Matches `Factory<R, P>`
  * from `@agentick/spec-next/protocol/factory.ts`.
+ *
+ * Sync OR Promise returns. `Effect.Effect<R, never, never>` returns
+ * are NOT supported at runtime — `resolveFactoryAsync` throws on
+ * Effect-shaped values. The Factory type narrowly admits only what
+ * the runtime can actually execute. When Effect-typed factories
+ * land (post-Phase-4), this union widens and `resolveFactoryAsync`
+ * picks up an Effect.runPromise arm.
  */
-type Factory<R, P> = (parent: P) => R | Promise<R> | Effect.Effect<R, never, never>;
+type Factory<R, P> = (parent: P) => R | Promise<R>;
 
 export type ClusterTransportFactory = Factory<ClusterTransport, ClusterParent>;
 export type ClusterMembershipFactory = Factory<ClusterMembership, ClusterParent>;

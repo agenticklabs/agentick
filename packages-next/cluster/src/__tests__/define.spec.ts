@@ -33,6 +33,7 @@ function noopTransport() {
     subscribeBus() {
       return async () => {};
     },
+    async flush() {},
     async close() {},
   });
 }
@@ -163,6 +164,7 @@ describe("defineCluster — adapter onClose registration", () => {
       subscribeBus() {
         return async () => {};
       },
+      async flush() {},
       async close() {
         closeCalls.push("transport");
       },

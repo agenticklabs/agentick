@@ -165,7 +165,7 @@ describe("BaseBroker + BaseClusterClient — membership", () => {
     await flushMicrotasks();
     await flushMicrotasks();
     // Broker should have both nodes after both handshakes complete.
-    expect(rig.broker.nodes().sort()).toEqual(["node-A", "node-B"]);
+    expect([...rig.broker.nodes()].sort()).toEqual(["node-A", "node-B"]);
   });
 
   it("Disconnect propagates a `lost` membership delta to other clients", async () => {

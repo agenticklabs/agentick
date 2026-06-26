@@ -13,7 +13,6 @@
  * @see docs/proposals/v2/blueprint/35-cluster-protocol.md §1a
  */
 
-import type { Effect } from "effect";
 import type { EventBus, MessageInbox, OperationJournal } from "@agentick/spec-next";
 
 import type { NodeId } from "./types.js";
@@ -107,6 +106,4 @@ export interface ClusterParent {
  * factories (transport, membership, ...) against the parent shell,
  * constructs the wrapped substrate, and returns the {@link Cluster}.
  */
-export type ClusterFactory = (
-  parent: ClusterParent,
-) => Cluster | Promise<Cluster> | Effect.Effect<Cluster, never, never>;
+export type ClusterFactory = (parent: ClusterParent) => Cluster | Promise<Cluster>;

@@ -1,4 +1,4 @@
-import { Cause, Effect, Exit } from "effect";
+import { Cause, Effect, Exit, FiberId } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { reasonOf, reasonOfCause, unwrapExit } from "../cause.js";
@@ -75,7 +75,7 @@ describe("reasonOfCause", () => {
   });
 
   it("returns Cause.pretty first line for interrupt-only causes", () => {
-    const cause = Cause.interrupt(0 as unknown as number) as Cause.Cause<never>;
+    const cause = Cause.interrupt(FiberId.none) as Cause.Cause<never>;
     const reason = reasonOfCause(cause);
     expect(reason).toBe(Cause.pretty(cause).split("\n")[0]);
     expect(reason.includes("\n")).toBe(false);
@@ -92,10 +92,7 @@ describe("reasonOfCause", () => {
   });
 
   it("typed failure wins over composite (fail + interrupt) cause", () => {
-    const composite = Cause.parallel(
-      Cause.fail({ _tag: "Boom" }),
-      Cause.interrupt(0 as unknown as number),
-    );
+    const composite = Cause.parallel(Cause.fail({ _tag: "Boom" }), Cause.interrupt(FiberId.none));
     expect(reasonOfCause(composite)).toBe("Boom");
   });
 });
@@ -131,7 +128,7 @@ describe("unwrapExit", () => {
   });
 
   it("throws Error(Cause.pretty) for interrupt-only causes", () => {
-    const exit: Exit.Exit<number, never> = Exit.failCause(Cause.interrupt(0 as unknown as number));
+    const exit: Exit.Exit<number, never> = Exit.failCause(Cause.interrupt(FiberId.none));
     expect(() => unwrapExit(exit)).toThrow(Error);
   });
 });
