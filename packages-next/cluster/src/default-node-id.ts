@@ -26,6 +26,8 @@
 
 import { hostname } from "node:os";
 
+import { resolveSync, type Resolvable } from "@agentick/utils-next";
+
 import type { NodeId } from "./types.js";
 
 export interface DefaultNodeIdResult {
@@ -85,8 +87,12 @@ export function defaultNodeId(opts?: DefaultNodeIdOptions): DefaultNodeIdResult 
  * Synchronous only — `defineXCluster` is sync, so we can't await
  * a Promise here. Adopters with async resolution should await
  * BEFORE calling `defineXCluster`.
+ *
+ * Alias for `Resolvable<NodeId>` from `@agentick/utils-next` —
+ * preserves the domain-specific name at the cluster surface while
+ * routing through the shared primitive for the actual resolution.
  */
-export type NodeIdInput = NodeId | (() => NodeId);
+export type NodeIdInput = Resolvable<NodeId>;
 
 /**
  * Resolve an adopter-supplied nodeId, falling back to the
@@ -107,7 +113,7 @@ export function resolveNodeId(
   onDiagnostic?: (name: string, payload?: unknown) => void,
 ): NodeId {
   if (explicit !== undefined) {
-    return typeof explicit === "function" ? explicit() : explicit;
+    return resolveSync(explicit);
   }
   const result = defaultNodeId();
   if (onDiagnostic) {
