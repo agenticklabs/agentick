@@ -42,6 +42,15 @@ export {
   type UnixEndpoint,
 } from "./unix-cluster.js";
 
+// Internal re-election (Phase 4f.3) — single-host failover. Surviving
+// workers race to bind the vacated socket after K consecutive connect
+// failures; winner becomes new broker.
+export {
+  electableUnixClusterNode,
+  type ElectableUnixClusterNode,
+  type ElectableUnixClusterNodeOptions,
+} from "./unix-re-election.js";
+
 // High-level: broker convenience, multiplexed transport+membership, top-level cluster factory.
 export {
   defineTcpCluster,
