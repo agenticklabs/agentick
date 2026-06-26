@@ -25,3 +25,15 @@ export {
   type RedisClusterNode,
   type RedisClusterNodeOptions,
 } from "./redis-cluster.js";
+
+// High-level ergonomic facade. Wire-agnostic plumbing (bus,
+// membership.waitForPeers, lifecycle) lives in
+// `@agentick/cluster-next` as `makeClusterNode`; this is the
+// Redis-specific compose-and-go entry point. Brokerless tier —
+// every node is `role: "client"`.
+export { joinRedisCluster, type JoinRedisClusterOptions } from "./join-redis-cluster.js";
+
+// Re-export wire-agnostic facade types from cluster-next so adopters
+// don't need to reach across two packages just to type a returned
+// `ClusterNode`.
+export type { BusFacade, ClusterNode, MembershipFacade } from "@agentick/cluster-next";

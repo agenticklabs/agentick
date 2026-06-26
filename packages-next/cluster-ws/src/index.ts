@@ -34,3 +34,15 @@ export {
   type WsBrokerOptions,
   type WsClusterNodeOptions,
 } from "./ws-cluster.js";
+
+// High-level ergonomic facade. Wraps broker-bring-up + multiplexed
+// client + lifecycle in one call. Wire-agnostic plumbing (bus,
+// membership.waitForPeers, lifecycle) lives in
+// `@agentick/cluster-next` as `makeClusterNode`; this is the
+// WS-specific compose-and-go entry point.
+export { joinWsCluster, type JoinWsClusterOptions } from "./join-ws-cluster.js";
+
+// Re-export wire-agnostic facade types from cluster-next so adopters
+// don't need to reach across two packages just to type a returned
+// `ClusterNode`.
+export type { BusFacade, ClusterNode, MembershipFacade } from "@agentick/cluster-next";

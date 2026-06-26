@@ -51,6 +51,20 @@ export {
   type ElectableUnixClusterNodeOptions,
 } from "./unix-re-election.js";
 
+// High-level ergonomic facades. Each `joinXCluster(opts)` collapses
+// the wire-specific bind/connect + broker-bring-up + multiplexed
+// client + lifecycle into one call. The wire-agnostic plumbing
+// (bus, membership.waitForPeers, lifecycle) lives in
+// `@agentick/cluster-next` as `makeClusterNode`; this package's
+// facades are the TCP- and Unix-specific compose-and-go entry points.
+export { joinUnixCluster, type JoinUnixClusterOptions } from "./join-unix-cluster.js";
+export { joinTcpCluster, type JoinTcpClusterOptions } from "./join-tcp-cluster.js";
+
+// Re-export the wire-agnostic facade types from cluster-next so
+// adopters don't need to reach across two packages just to type a
+// returned `ClusterNode`.
+export type { BusFacade, ClusterNode, MembershipFacade } from "@agentick/cluster-next";
+
 // High-level: broker convenience, multiplexed transport+membership, top-level cluster factory.
 export {
   defineTcpCluster,

@@ -42,6 +42,15 @@ export type { DurableJournal } from "./journal.js";
 // ────────── Materialized cluster + factory shape ──────────
 export type { Cluster, ClusterFactory, ClusterParent } from "./cluster.js";
 
+// ────────── Ergonomic facade (wire-agnostic; composed by every joinXCluster) ──────────
+export {
+  makeClusterNode,
+  type BusFacade,
+  type ClusterNode,
+  type MakeClusterNodeOptions,
+  type MembershipFacade,
+} from "./cluster-node.js";
+
 // ────────── Per-seam factory aliases (`Factory<R, P>` projections) ──────────
 export type {
   ClusterCodecFactory,
