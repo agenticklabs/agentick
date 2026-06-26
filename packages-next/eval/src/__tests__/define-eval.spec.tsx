@@ -13,9 +13,8 @@
 
 import React from "react";
 
-import { createApp } from "@agentick/app-next";
+import { createApp } from "@agentick/app-next/react";
 import { FakeLanguageModelExecutor } from "@agentick/executor-next";
-import { reactReconciler } from "@agentick/reconciler-react-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type { ContentBlock, ExecutionTarget } from "@agentick/spec-next";
 import { describe, expect, it } from "vitest";
@@ -142,7 +141,6 @@ type Overrides = { executor?: FakeLanguageModelExecutor };
 const calculatorApp = (overrides?: Overrides) =>
   createApp(React.createElement(AgentWithCalculator), {
     executor: overrides?.executor ?? mkCalculatorExecutor(),
-    reconciler: reactReconciler(),
     target: mkTarget(),
     toolHandlers: calculatorHandlers,
   });
@@ -150,7 +148,6 @@ const calculatorApp = (overrides?: Overrides) =>
 const noToolApp = (overrides?: Overrides) =>
   createApp(React.createElement(AgentNoTools), {
     executor: overrides?.executor ?? mkNoToolExecutor(),
-    reconciler: reactReconciler(),
     target: mkTarget(),
   });
 
@@ -247,7 +244,6 @@ describe("defineEval — MVP shape", () => {
       app: (overrides) =>
         createApp(React.createElement(AgentWithCalculator), {
           executor: overrides?.executor ?? mkCalculatorExecutor(),
-          reconciler: reactReconciler(),
           target: mkTarget(),
           toolHandlers: calculatorHandlers,
         }),

@@ -49,3 +49,4 @@ export async function createApp<P = unknown>(
 // Re-export the rest of the public surface so adopters can pull
 // everything from this subpath.
 export { AppHarness, type AppHarnessOptions } from "./harness.js";
+export { type CreateAppOptions } from "./create-app.js";

@@ -28,8 +28,7 @@ across many evals.
 ## Quick start
 
 ```ts
-import { createApp } from "@agentick/app-next";
-import { reactReconciler } from "@agentick/reconciler-react-next";
+import { createApp } from "@agentick/app-next/react";
 import { defineEval } from "@agentick/eval-next";
 
 // One reusable factory across N evals / matrix axes.
@@ -37,7 +36,6 @@ type Overrides = { executor?: ExecutorNext };
 const myApp = (overrides?: Overrides) =>
   createApp(<MyAgent />, {
     executor: overrides?.executor ?? defaultExecutor,
-    reconciler: reactReconciler(),
     target: { kind: "language-model", provider: "openai", modelId: "gpt-4o" },
   });
 
@@ -58,6 +56,10 @@ const result = await calculatorAgent();
 // Run with overrides — flow straight into the factory thunk
 const cheap = await calculatorAgent({ executor: gpt4oMiniExecutor });
 ```
+
+Two imports, reconciler wired automatically via the `/react` subpath
+(adopters on a non-React reconciler import `createApp` from the bare
+`@agentick/app-next` and pass their own factory).
 
 `defineEval` returns a **callable**: `await myEval()` runs with the
 factory's defaults; `await myEval(overrides)` passes the overrides
@@ -133,7 +135,6 @@ type Overrides = { profile: "ci" | "prod" };
 const myApp = ({ profile } = { profile: "prod" }) =>
   createApp(<MyAgent />, {
     executor: profile === "ci" ? fakeExecutor : prodExecutor,
-    reconciler: reactReconciler(),
     target: mkTarget(),
   });
 
