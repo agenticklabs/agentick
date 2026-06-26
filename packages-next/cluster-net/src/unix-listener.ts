@@ -8,38 +8,40 @@
  *   1. The socket is a filesystem entry. A previous process that
  *      crashed without cleanup leaves a stale file; subsequent
  *      `listen()` calls fail with `EADDRINUSE` even though no real
- *      listener exists. The auto-cleanup machinery here probes via
- *      a quick connect-refuse check and `fs.unlink`s confirmed-dead
- *      sockets before binding.
+ *      listener exists. The pre-bind hook probes via a quick
+ *      connect-refuse check and `fs.unlink`s confirmed-dead sockets.
  *
- *   2. Permissions are filesystem permissions. The `mode` option
- *      runs `fs.chmod` after bind so adopters can lock the socket
- *      to specific user/group access (defaults to umask-controlled).
+ *   2. Permissions are filesystem permissions. The post-bind hook
+ *      runs `fs.chmod` to lock the socket to specific access (e.g.,
+ *      `0o600` for owner-only). chmod failure is LOUD — the
+ *      listener tears down and the error propagates rather than
+ *      leaving a world-readable socket.
+ *
+ * Phase 4.7 — thin wrapper around `createSocketListener`. Composes
+ * Unix-specific pre-bind cleanup + post-bind chmod hooks; the shared
+ * server-acceptance machinery lives in socket-listener.ts.
  */
 
 import { chmod, stat, unlink } from "node:fs/promises";
-import { createConnection, createServer, type Server, type Socket } from "node:net";
+import { createConnection, type Server } from "node:net";
 import { platform } from "node:os";
 
-import type { Connection, Listener } from "@agentick/cluster-broker-next";
+import type { Listener } from "@agentick/cluster-broker-next";
 
-import { socketToConnection } from "./socket-connection.js";
 import { omitUndefined } from "@agentick/utils-next";
 
-// Phase 4f.2 consolidated the cluster-side shared helpers
-// (`startBroker`, `createClusterNode`, `defineWireCluster`) into
-// `@agentick/cluster-broker-next/wire-helpers.ts`. The
-// listener/connector modules in this package stay wire-specific —
-// they handle Unix-socket / TCP / WS concerns respectively. Further
-// consolidation (e.g., a shared length-prefix listener for TCP+Unix)
-// is Phase 5+ if the duplication grows worth extracting.
+import {
+  createSocketListener,
+  type SocketBindTarget,
+  type SocketListenerCoreOptions,
+} from "./socket-listener.js";
 
 /**
  * Throws on Windows. Unix sockets exist on Win32 in principle but
  * via a different API (named pipes vs AF_UNIX) — Node's `net`
  * module's behavior on Windows for filesystem paths is undefined.
- * Adopters on Windows should use `tcpBroker` / `tcpClusterNode`
- * from the same package.
+ * Adopters on Windows should use `tcpBroker` / `tcpClusterNode` /
+ * `defineTcpCluster` from the same package.
  */
 function assertNotWindows(): void {
   if (platform() === "win32") {
@@ -77,225 +79,116 @@ export type UnixListenerOptions =
        * auto-elect). Skips the bind step entirely.
        */
       readonly adoptServer: Server;
-      readonly socketPath?: string;
       readonly maxFrameBytes?: number;
       readonly onDiagnostic?: (name: string, payload?: unknown) => void;
+      readonly socketPath?: undefined;
       readonly mode?: undefined;
       readonly cleanupStaleSocket?: undefined;
     };
 
 export function createUnixListener(opts: UnixListenerOptions): Listener {
-  const adopted = opts.adoptServer;
-  const socketPath = adopted ? extractBoundPath(adopted) : opts.socketPath;
   const onDiagnostic = opts.onDiagnostic ?? (() => {});
+  // Eager Windows guard — surface BEFORE the listener is constructed
+  // (consistent with the pre-Phase-4.7 behavior; adopters get a clear
+  // error at construction rather than at start).
+  assertNotWindows();
 
-  let server: Server | null = adopted ?? null;
-  const acceptHandlers = new Set<(conn: Connection) => void>();
-  let started = false;
-  let closed = false;
-
-  function handleSocket(socket: Socket): void {
-    if (closed) {
-      socket.destroy();
-      return;
-    }
-    const conn = socketToConnection(socket, {
+  if (opts.adoptServer) {
+    return createSocketListener({
+      adoptServer: opts.adoptServer,
       ...omitUndefined({ maxFrameBytes: opts.maxFrameBytes }),
       onDiagnostic,
     });
-    for (const handler of [...acceptHandlers]) {
-      try {
-        handler(conn);
-      } catch (cause) {
-        onDiagnostic("cluster:broker:net:accept-handler-threw", {
-          remote: conn.remote,
-          reason: cause instanceof Error ? cause.message : String(cause),
-        });
-      }
-    }
   }
 
-  return {
-    bound: socketPath !== undefined ? `unix://${socketPath}` : undefined,
+  const bind: SocketBindTarget = { kind: "unix", socketPath: opts.socketPath };
+  const cleanupStale = opts.cleanupStaleSocket !== false;
+  const mode = opts.mode;
 
-    async start() {
-      if (started) return;
-      started = true;
-      assertNotWindows();
-      if (adopted) {
-        adopted.on("connection", handleSocket);
-        adopted.on("error", (cause) => {
-          onDiagnostic("cluster:broker:net:listener-error", {
-            socketPath,
-            reason: cause.message,
-          });
-        });
-        onDiagnostic("cluster:broker:net:listener-adopted", { socketPath });
-        return;
-      }
-      if (socketPath === undefined) {
-        throw new Error("cluster-net unix: socketPath required when adoptServer is not supplied");
-      }
-      // Stale-socket cleanup — probe + unlink if dead.
-      if (opts.cleanupStaleSocket !== false) {
-        await tryCleanupStaleSocket(socketPath, onDiagnostic);
-      }
-      server = createServer({ allowHalfOpen: false }, handleSocket);
-      server.on("error", (cause) => {
-        onDiagnostic("cluster:broker:net:listener-error", {
-          socketPath,
-          reason: cause.message,
-        });
-      });
-      await new Promise<void>((resolve, reject) => {
-        const s = server!;
-        const onError = (err: Error): void => {
-          s.off("listening", onListening);
-          reject(err);
-        };
-        const onListening = (): void => {
-          s.off("error", onError);
-          resolve();
-        };
-        s.once("error", onError);
-        s.once("listening", onListening);
-        s.listen(socketPath);
-      });
-      if (opts.mode !== undefined) {
-        // chmod failure is loud — adopters passing `mode: 0o600`
-        // for owner-only security need to know if the lock-down
-        // didn't apply. Silent fallback would leave the socket
-        // world-readable on chmod failure, which is a security
-        // regression the adopter has no signal for. Tear down the
-        // listener so the caller sees a real error.
-        try {
-          await chmod(socketPath, opts.mode);
-        } catch (cause) {
-          onDiagnostic("cluster:broker:net:chmod-failed", {
-            socketPath,
-            mode: opts.mode,
-            reason: cause instanceof Error ? cause.message : String(cause),
-          });
-          // Best-effort teardown so we don't leak a misconfigured
-          // socket past this error.
-          try {
-            await new Promise<void>((resolve) => server!.close(() => resolve()));
-            await unlink(socketPath);
-          } catch {
-            // ignore teardown errors; the chmod throw is the real
-            // signal the caller cares about.
-          }
-          throw new Error(
-            `cluster-net: chmod ${opts.mode.toString(8)} on ${socketPath} failed: ${
-              cause instanceof Error ? cause.message : String(cause)
-            }`,
-            { cause },
-          );
-        }
-      }
-      onDiagnostic("cluster:broker:net:listener-bound", { socketPath });
+  const coreOpts: SocketListenerCoreOptions = {
+    bind,
+    ...omitUndefined({ maxFrameBytes: opts.maxFrameBytes }),
+    onDiagnostic,
+    preBindHook: async (b) => {
+      if (b.kind !== "unix") return;
+      if (cleanupStale) await tryCleanupStaleSocket(b.socketPath, onDiagnostic);
     },
-
-    onConnection(handler) {
-      acceptHandlers.add(handler);
-      return () => {
-        acceptHandlers.delete(handler);
-      };
-    },
-
-    async close() {
-      if (closed) return;
-      closed = true;
-      acceptHandlers.clear();
-      const s = server;
-      server = null;
-      if (!s) return;
-      await new Promise<void>((resolve) => {
-        s.close(() => resolve());
-      });
-      // Try to clean up our own socket file on graceful close.
-      // Failures are silent — common cases are "already gone" (the
-      // close() above unbound it on some kernels) or "permissions
-      // changed mid-flight" which the adopter can recover from.
-      if (socketPath !== undefined && !adopted) {
-        try {
-          await unlink(socketPath);
-        } catch {
-          // ignore
+    ...(mode !== undefined
+      ? {
+          postBindHook: async (b, _server) => {
+            if (b.kind !== "unix") return;
+            // chmod failure is LOUD — see the Phase 4d.1 security
+            // hardening rationale. Silent fallback would leave the
+            // socket world-readable on chmod failure (security
+            // regression). Re-throw with a wrapped error; the core's
+            // postBindHook handling tears down the listener for us.
+            try {
+              await chmod(b.socketPath, mode);
+            } catch (cause) {
+              onDiagnostic("cluster:broker:net:chmod-failed", {
+                socketPath: b.socketPath,
+                mode,
+                reason: cause instanceof Error ? cause.message : String(cause),
+              });
+              throw new Error(
+                `cluster-net: chmod ${mode.toString(8)} on ${b.socketPath} failed: ${
+                  cause instanceof Error ? cause.message : String(cause)
+                }`,
+                { cause },
+              );
+            }
+          },
         }
+      : {}),
+    cleanupHook: async (b) => {
+      // Triggered on postBindHook failure — unlink the socket so the
+      // failed-and-half-bound file doesn't haunt subsequent bind
+      // attempts. Best-effort.
+      if (b.kind !== "unix") return;
+      try {
+        await unlink(b.socketPath);
+      } catch {
+        // ignore
       }
-      onDiagnostic("cluster:broker:net:listener-closed", { socketPath });
     },
   };
+
+  return createSocketListener(coreOpts);
 }
 
 /**
- * Detect a stale Unix socket file and remove it. "Stale" =
- * filesystem entry exists but no process is listening (a probe
- * connect refuses with ECONNREFUSED). Emits diagnostic events for
- * each outcome so operators can audit cleanup.
- *
- * **Race window**: between the probe (connect-refused → "no
- * listener"), the unlink, and the subsequent bind, another process
- * could create + listen on the same path. In practice this is
- * harmless: the bind in the caller fails with EADDRINUSE,
- * `tryBindOrConnectUnix` falls through to client mode (in auto
- * mode), and the cluster heals naturally. Documented here so the
- * non-atomicity isn't surprising on incident review.
+ * Probe + unlink a stale Unix socket file. The probe: try to connect;
+ * if connect refuses (no listener), the file is dead. If connect
+ * succeeds OR times out, the file is alive (or undetermined) — leave
+ * it alone and let bind fail with EADDRINUSE so the caller can decide.
  */
 async function tryCleanupStaleSocket(
   socketPath: string,
   onDiagnostic: (name: string, payload?: unknown) => void,
 ): Promise<void> {
-  let exists = false;
   try {
     await stat(socketPath);
-    exists = true;
   } catch {
-    return; // file doesn't exist; bind will create fresh.
+    return; // doesn't exist; nothing to clean up
   }
-  if (!exists) return;
-  // Probe: try to connect. If it refuses fast, nobody's listening
-  // → unlink. If it succeeds, the socket is live → bail (the bind
-  // attempt will fail with EADDRINUSE which the caller should treat
-  // as auto-elect-loser).
-  const alive = await probeUnixSocket(socketPath);
-  if (alive) {
-    onDiagnostic("cluster:broker:net:stale-socket-skipped", { socketPath, reason: "alive" });
-    return;
-  }
-  try {
-    await unlink(socketPath);
-    onDiagnostic("cluster:broker:net:stale-socket-removed", { socketPath });
-  } catch (cause) {
-    onDiagnostic("cluster:broker:net:stale-socket-removal-failed", {
-      socketPath,
-      reason: cause instanceof Error ? cause.message : String(cause),
-    });
-  }
-}
-
-/** Quick connect-refused check. Resolves true if a peer accepts our connect. */
-function probeUnixSocket(socketPath: string): Promise<boolean> {
-  return new Promise<boolean>((resolve) => {
+  const alive = await new Promise<boolean>((resolve) => {
     const socket = createConnection({ path: socketPath });
-    let settled = false;
-    const finish = (alive: boolean): void => {
-      if (settled) return;
-      settled = true;
+    let done = false;
+    const finish = (v: boolean): void => {
+      if (done) return;
+      done = true;
       socket.destroy();
-      resolve(alive);
+      resolve(v);
     };
     socket.once("connect", () => finish(true));
     socket.once("error", () => finish(false));
-    // Bounded probe — Unix sockets are local, anything past 50ms
-    // is broken-state.
     setTimeout(() => finish(false), 50);
   });
-}
-
-function extractBoundPath(server: Server): string | undefined {
-  const addr = server.address();
-  if (typeof addr === "string") return addr;
-  return undefined;
+  if (alive) return;
+  try {
+    await unlink(socketPath);
+    onDiagnostic("cluster:broker:net:stale-socket-unlinked", { socketPath });
+  } catch {
+    // ignore — adjacent bind will fail with a real error if needed
+  }
 }

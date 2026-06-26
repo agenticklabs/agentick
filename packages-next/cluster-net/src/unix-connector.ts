@@ -1,18 +1,17 @@
 /**
- * `createUnixConnector(opts)` — opens a `net.Socket` to a Unix
- * socket path, returns a {@link Connection}-wrapped result.
+ * `createUnixConnector(opts)` — opens a `net.Socket` to a Unix socket
+ * path, returns a {@link Connection}-wrapped result.
  *
- * Mirror of `createTcpConnector` — same `socketToConnection`
- * wrapping, same timeout handling. Different addressing (path
- * instead of host:port) is the only meaningful difference.
+ * Phase 4.7 — thin wrapper around `createSocketConnector`. The shared
+ * connector body lives there; this file owns the Unix-specific
+ * adopter-facing option shape, default values, and Windows guard.
  */
 
-import { createConnection, type Socket } from "node:net";
 import { platform } from "node:os";
 
 import type { Connection, Connector } from "@agentick/cluster-broker-next";
 
-import { socketToConnection } from "./socket-connection.js";
+import { createSocketConnector } from "./socket-connector.js";
 import { omitUndefined } from "@agentick/utils-next";
 
 export interface UnixConnectorOptions {
@@ -21,72 +20,36 @@ export interface UnixConnectorOptions {
   /** Optional max frame bytes for this connection's decoder. */
   readonly maxFrameBytes?: number;
   /**
-   * Connection-establishment timeout. Unix sockets connect or
-   * refuse fast (no SYN retry), so this defaults shorter than TCP's
-   * 5s — adopters can override.
+   * Connection-establishment timeout. Unix sockets connect or refuse
+   * fast (no SYN retry), so this defaults shorter than TCP's 5s —
+   * adopters can override.
    */
   readonly connectTimeoutMs?: number;
   readonly onDiagnostic?: (name: string, payload?: unknown) => void;
 }
 
 export function createUnixConnector(opts: UnixConnectorOptions): Connector {
-  const socketPath = opts.socketPath;
-  const connectTimeoutMs = opts.connectTimeoutMs ?? 2_000;
   const onDiagnostic = opts.onDiagnostic ?? (() => {});
-
-  return {
-    target: `unix://${socketPath}`,
-    connect(): Promise<Connection> {
-      if (platform() === "win32") {
+  // Windows guard — Unix sockets aren't supported via Node's `net`
+  // module on Win32 (different ipc API). Surface a clear error
+  // EAGERLY at connector construction; don't wait for connect().
+  if (platform() === "win32") {
+    return {
+      target: `unix://${opts.socketPath}`,
+      connect(): Promise<Connection> {
         return Promise.reject(
           new Error(
             "cluster-net: Unix-socket connector is not supported on Windows. " +
               "Use createTcpConnector instead.",
           ),
         );
-      }
-      return new Promise<Connection>((resolve, reject) => {
-        let settled = false;
-        const socket: Socket = createConnection({ path: socketPath });
-
-        const timer = setTimeout(() => {
-          if (settled) return;
-          settled = true;
-          onDiagnostic("cluster:broker:net:connect-timeout", {
-            socketPath,
-            timeoutMs: connectTimeoutMs,
-          });
-          socket.destroy();
-          reject(new Error(`cluster-net: Unix connect to ${socketPath} timed out`));
-        }, connectTimeoutMs);
-
-        const onError = (cause: Error): void => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(timer);
-          onDiagnostic("cluster:broker:net:connect-failed", {
-            socketPath,
-            reason: cause.message,
-          });
-          reject(cause);
-        };
-
-        const onReady = (): void => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(timer);
-          socket.off("error", onError);
-          const conn = socketToConnection(socket, {
-            ...omitUndefined({ maxFrameBytes: opts.maxFrameBytes }),
-            onDiagnostic,
-          });
-          onDiagnostic("cluster:broker:net:connected", { socketPath, remote: conn.remote });
-          resolve(conn);
-        };
-
-        socket.once("error", onError);
-        socket.once("ready", onReady);
-      });
-    },
-  };
+      },
+    };
+  }
+  return createSocketConnector({
+    target: { kind: "unix", socketPath: opts.socketPath },
+    ...omitUndefined({ maxFrameBytes: opts.maxFrameBytes }),
+    connectTimeoutMs: opts.connectTimeoutMs ?? 2_000,
+    onDiagnostic,
+  });
 }

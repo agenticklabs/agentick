@@ -36,6 +36,7 @@ import {
 import type { RedisLikeClient } from "./redis-client-shape.js";
 import { createRedisMembership } from "./redis-membership.js";
 import { createRedisTransport } from "./redis-transport.js";
+import { omitUndefined } from "@agentick/utils-next";
 
 export interface RedisClusterNodeOptions {
   readonly nodeId: NodeId;
@@ -75,8 +76,7 @@ export function redisClusterNode(opts: RedisClusterNodeOptions): RedisClusterNod
         pubClient: opts.pubClient,
         subClient: opts.subClient,
         codec,
-        ...(opts.keyPrefix !== undefined ? { keyPrefix: opts.keyPrefix } : {}),
-        ...(opts.onDiagnostic !== undefined ? { onDiagnostic: opts.onDiagnostic } : {}),
+        ...omitUndefined({ keyPrefix: opts.keyPrefix, onDiagnostic: opts.onDiagnostic }),
       });
       parent.onClose(() => t.close());
       return t;
@@ -85,13 +85,13 @@ export function redisClusterNode(opts: RedisClusterNodeOptions): RedisClusterNod
       const m = createRedisMembership({
         nodeId: opts.nodeId,
         client: opts.pubClient,
-        ...(opts.keyPrefix !== undefined ? { keyPrefix: opts.keyPrefix } : {}),
-        ...(opts.heartbeatTtlSec !== undefined ? { heartbeatTtlSec: opts.heartbeatTtlSec } : {}),
-        ...(opts.heartbeatIntervalMs !== undefined
-          ? { heartbeatIntervalMs: opts.heartbeatIntervalMs }
-          : {}),
-        ...(opts.pollIntervalMs !== undefined ? { pollIntervalMs: opts.pollIntervalMs } : {}),
-        ...(opts.onDiagnostic !== undefined ? { onDiagnostic: opts.onDiagnostic } : {}),
+        ...omitUndefined({
+          keyPrefix: opts.keyPrefix,
+          heartbeatTtlSec: opts.heartbeatTtlSec,
+          heartbeatIntervalMs: opts.heartbeatIntervalMs,
+          pollIntervalMs: opts.pollIntervalMs,
+          onDiagnostic: opts.onDiagnostic,
+        }),
       });
       parent.onClose(() => m.close());
       return m;
@@ -123,9 +123,8 @@ export function defineRedisCluster(opts: DefineRedisClusterOptions): ClusterFact
     nodeId: opts.nodeId,
     transport: node.transport,
     membership: node.membership,
-    ...(opts.partitioning !== undefined ? { partitioning: opts.partitioning } : {}),
-    ...(opts.journal !== undefined ? { journal: opts.journal } : {}),
+    ...omitUndefined({ partitioning: opts.partitioning, journal: opts.journal }),
     ...(opts.codec !== undefined ? { codec: () => opts.codec! } : {}),
-    ...(opts.fanoutMode !== undefined ? { fanoutMode: opts.fanoutMode } : {}),
+    ...omitUndefined({ fanoutMode: opts.fanoutMode }),
   });
 }
