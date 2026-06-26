@@ -413,6 +413,12 @@ export class BaseBroker {
   // ==========================================================================
 
   private async writeFrame(conn: Connection, frame: BrokerFrame): Promise<void> {
+    // TODO(phase-4b): backpressure. Currently we await conn.send
+    // without bounding per-connection in-flight bytes. A slow client
+    // under a broadcast storm can hold up the broker. cluster-net-next
+    // should add a per-conn outbound queue with a configurable bound;
+    // overflow emits cluster:broker:server:backpressure + drops
+    // oldest (or disconnects the slow client, depending on policy).
     const bytes = this.codec.encode(frame);
     await conn.send(bytes);
   }

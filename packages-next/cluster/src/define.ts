@@ -216,15 +216,24 @@ export function defineCluster(spec: DefineClusterConfig): ClusterFactory {
 
     // Codec: explicit > default (JSON). Realized here so adapters
     // that swap codecs (msgpack/protobuf) are visible at construction.
-    // Phase 3's wrappers don't yet route through the codec (the local
-    // fixture transport sends in-process); cross-process adapters will
-    // consume it from `spec.codec` directly. The construction itself is
-    // the load-bearing observable behavior.
+    // TODO(phase-4b): the codec is constructed but not yet routed
+    // through this layer. cluster-net-next / cluster-redis-next will
+    // consume `spec.codec` directly from their factories at the wire
+    // boundary. Until then, configuring `codec: msgpackCodec()` is
+    // observable-at-construction only — no actual serialization
+    // change. Document the no-op clearly in the cluster README's
+    // Quick Start so adopters don't expect performance gains yet.
     const _codec = spec.codec
       ? await resolveFactoryAsync(spec.codec, parent)
       : await resolveFactoryAsync(jsonCodec(), parent);
 
     // Journal: optional — defaults to parent's journal pass-through.
+    // TODO(phase-7+): DurableJournal seam is wired but unused. Rung
+    // (d) durability requires continuation primitives (idempotency
+    // keys on tool dispatches, replay-safe side-effect markers) that
+    // aren't in v2.0. The seam ships so adapters can be built
+    // incrementally; the framework consumes the slot once
+    // continuation primitives land.
     const journal = spec.journal ? await resolveFactoryAsync(spec.journal, parent) : parent.journal;
 
     // Phase 3: wrap the parent's local substrate with cluster-aware
@@ -257,6 +266,15 @@ export function defineCluster(spec: DefineClusterConfig): ClusterFactory {
     // to local — same rationale as inbox diagnostics. The subscription
     // is registered with parent.onClose so it tears down in the LIFO
     // chain.
+    //
+    // TODO(phase-4b): partitioning rebalance on topology change.
+    // Currently consistent-hash partitioning reads `membership.nodes()`
+    // on every `nodeFor()` call, which IS live but does mean a
+    // mid-flight ask can resolve a different owner than it started
+    // with. Custom partitioning impls that CACHE membership state
+    // need an explicit signal here to refresh their cache. Consider
+    // either: (a) ClusterPartitioning.onMembershipChange?(change),
+    // or (b) require partitioning impls to always read live.
     const membershipUnsub = membership.onChange((change) => {
       void Effect.runPromise(
         parent.bus.append({

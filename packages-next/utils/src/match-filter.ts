@@ -108,6 +108,15 @@ export interface EventLike {
  * For richer matching (phase, outcome, tagsAny), use
  * `@agentick/runtime-next`'s `matchesQuery` against the full
  * `EventQuery` shape.
+ *
+ * TODO(phase-5): move `matchesQuery` + `compileQuery` from
+ * `@agentick/runtime-next` into this package alongside the filter
+ * matchers. They have no substrate dependency (pure predicate
+ * compilation over `EventQuery`); living in runtime-next forces
+ * cluster-side consumers to pull the full local-substrate when
+ * they only want the matcher. Direction confirmed by user; timing
+ * deferred to when the move + runtime-next re-export shim can land
+ * without disrupting in-flight work.
  */
 export function matchesEventFilter(filter: EventFilterShape, event: EventLike): boolean {
   if (filter.surface !== undefined && filter.surface !== event.surface) return false;

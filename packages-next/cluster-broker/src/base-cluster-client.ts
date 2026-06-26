@@ -230,6 +230,16 @@ export class BaseClusterClient implements ClusterTransport {
     filter: AddressFilter,
     onMessage: (env: MessageEnvelope) => void,
   ): () => Promise<void> {
+    // TODO(phase-4b): subscribe-before-send race. subscribeInbox
+    // returns synchronously, but the SUBSCRIBE_INBOX frame is in
+    // flight to the broker. If the caller immediately sends a
+    // message that should be delivered to this sub, the broker may
+    // process SEND before SUBSCRIBE_INBOX → no-matching-subscription
+    // diagnostic + dropped delivery. Microtask serialization papers
+    // over this in in-memory tests; real TCP will show it.
+    // Decide in Phase 4b: (a) make subscribe async (await broker
+    // ack) for correctness, or (b) document the race + add a
+    // client.flushSubscriptions() helper.
     const subId = ulid();
     const sub: InboxSubscription = { subId, filter, handler: onMessage };
     this.inboxSubs.set(subId, sub);
@@ -247,6 +257,8 @@ export class BaseClusterClient implements ClusterTransport {
   }
 
   subscribeBus(filter: EventFilter, onEvent: (env: EventEnvelope) => void): () => Promise<void> {
+    // TODO(phase-4b): same subscribe-before-send race as
+    // subscribeInbox — see TODO there for the decision pending.
     const subId = ulid();
     const sub: BusSubscription = { subId, filter, handler: onEvent };
     this.busSubs.set(subId, sub);
@@ -343,6 +355,12 @@ export class BaseClusterClient implements ClusterTransport {
 
   private scheduleReconnect(): void {
     if (this.state.tag === "closed") return;
+    // TODO(phase-4b): "fast first retry" — TCP production deployments
+    // typically want a 0ms first reattempt (transient network blip)
+    // before backoff kicks in. Currently the first reconnect uses
+    // currentBackoffMs = reconnectInitialMs (default 500ms) which
+    // adds latency for the common case. Consider: if attempts === 1,
+    // schedule with 0ms; otherwise apply backoff.
     this.reconnectAttempts += 1;
     if (this.reconnectMaxAttempts > 0 && this.reconnectAttempts > this.reconnectMaxAttempts) {
       this.onDiagnostic("cluster:broker:client:reconnect-gave-up", {

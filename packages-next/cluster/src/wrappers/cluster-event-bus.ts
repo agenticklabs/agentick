@@ -118,10 +118,12 @@ export class ClusterEventBus implements EventBus {
     const stamped = events.map((e) => this.stamp(e));
     return Effect.flatMap(this.local.appendBatch(stamped), () =>
       Effect.sync(() => {
-        // Per-event broadcast — the transport's per-source FIFO
-        // contract preserves order within a batch. A future
-        // `transport.broadcastBatch` seam would let adapters bulk-
-        // ship; tracked for Phase 4's adapter design.
+        // TODO(phase-4b): per-event broadcast. Per-source FIFO
+        // preserves order within a batch, but N events = N wire
+        // round-trips. Add `transport.broadcastBatch(envelopes)` to
+        // the ClusterTransport interface so adapters can ship the
+        // whole batch in one frame. Until then any adopter relying
+        // on appendBatch for throughput loses to per-event overhead.
         for (const e of stamped) this.broadcastWithDiag(e);
       }),
     );
@@ -153,10 +155,13 @@ export class ClusterEventBus implements EventBus {
     if (this.fanoutMode === "node-local-default" && !this.local.hasSubscriberFor(key)) {
       return Effect.void;
     }
-    // In cluster-wide mode, remote subscribers MAY care. Build + append.
-    // Known limitation: we can't probe remote subscriber indexes from
-    // here, so this over-builds when no node has a matching subscriber.
-    // Phase 5+ may gossip subscriber indexes; tracked in README.
+    // TODO(phase-5): publishLazy over-build in cluster-wide-default
+    // mode. We can't probe remote subscriber indexes from here so we
+    // always build + broadcast — defeats publishLazy's purpose for
+    // hot publishers (model token streams, sandbox stdout). Fix
+    // requires gossiping subscriber-index summaries between nodes
+    // (own ADR). For now adopters with hot publishers MUST keep
+    // fanoutMode: "node-local-default" to preserve the optimization.
     return this.append(build());
   }
 
@@ -164,6 +169,13 @@ export class ClusterEventBus implements EventBus {
     query: EventQuery,
     options?: SubscribeOptions,
   ): Stream.Stream<ProtocolEvent, CursorEvictedError, never> {
+    // TODO(phase-5): per-subscription scope opt-in. Currently
+    // fanoutMode is a global per-cluster flag — adopters can't say
+    // "this single subscription wants cluster-wide events." The
+    // right API extends SubscribeOptions with a `scope:
+    // "node-local" | "cluster-wide"` field (or moves the decision
+    // into EventQuery.tags). Defer until createGateway/createApp
+    // substrate-seam integration concretizes the call sites.
     return this.local.subscribe(query, options);
   }
 
@@ -245,6 +257,13 @@ export class ClusterEventBus implements EventBus {
  * `scope`) to be present and well-typed. Optional fields aren't
  * validated since they're, well, optional — downstream subscribers'
  * matchers handle them.
+ *
+ * TODO(phase-4b): tighten validation. Currently we only check field
+ * presence + primitive types. Real adversarial input could pass a
+ * `surface: "session"` but pad payload with deeply-nested objects
+ * that exhaust serializer time downstream. Consider a depth/size
+ * bound. Also validate enum-shaped fields (`phase` ∈ EventPhase set)
+ * to catch decoder version mismatches.
  */
 function isValidProtocolEvent(env: unknown): env is ProtocolEvent {
   if (!isObject(env)) return false;
