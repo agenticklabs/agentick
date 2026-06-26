@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@agentick/app-next": "workspace:*",
+    "@agentick/cluster-next": "workspace:*",
     "@agentick/runtime-next": "workspace:*",
     "@agentick/spec-next": "workspace:*",
     "@agentick/utils-next": "workspace:*",

@@ -287,9 +287,42 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     }
     this._apps.clear();
 
+    // Run internal close handlers (cluster wrappers, etc) in reverse
+    // registration order. After apps close (so cluster wrappers see
+    // their final outbound writes), before super.close() (which tears
+    // down the substrate the cluster wrapped).
+    for (const handler of this.internalCloseHandlers.slice().reverse()) {
+      try {
+        await handler();
+      } catch {
+        // best effort
+      }
+    }
+
     // Substrate close handlers registered via BaseHarness.onClose run
     // through the standard BaseHarness.close() path.
     await super.close();
+  }
+
+  /**
+   * Close handlers registered by `createGateway` (e.g., for cluster
+   * teardown). Fired LIFO during {@link closeGatewayBody}, AFTER apps
+   * close and BEFORE substrate teardown via `super.close()`.
+   */
+  private readonly internalCloseHandlers: Array<() => void | Promise<void>> = [];
+
+  /**
+   * Register a close handler that fires during {@link closeGateway},
+   * AFTER all spawned apps close and BEFORE the substrate teardown.
+   *
+   * Internal slot used by `createGateway` to wire substrate-level
+   * lifecycle (e.g., closing a `cluster` that wrapped the local
+   * bus/inbox/journal). Adopters should NOT call this directly.
+   *
+   * Handler errors are swallowed (best-effort teardown).
+   */
+  addInternalCloseHandler(handler: () => void | Promise<void>): void {
+    this.internalCloseHandlers.push(handler);
   }
 
   // ============================================================================

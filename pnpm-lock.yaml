@@ -758,6 +758,9 @@ importers:
       '@agentick/app-next':
         specifier: workspace:*
         version: link:../app
+      '@agentick/cluster-next':
+        specifier: workspace:*
+        version: link:../cluster
       '@agentick/runtime-next':
         specifier: workspace:*
         version: link:../runtime
