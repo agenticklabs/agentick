@@ -19,10 +19,38 @@
 
 import { chmod, stat, unlink } from "node:fs/promises";
 import { createConnection, createServer, type Server, type Socket } from "node:net";
+import { platform } from "node:os";
 
 import type { Connection, Listener } from "@agentick/cluster-broker-next";
 
 import { socketToConnection } from "./socket-connection.js";
+
+// TODO(phase-4e-followup): consolidate TCP + Unix listener/connector/
+// cluster modules. unix-listener.ts and tcp-listener.ts are ~80%
+// identical (same socketToConnection wiring, same diagnostic
+// emission, same lifecycle). Same for *-connector and *-cluster.
+// The right time to extract a shared base is AFTER Phase 4e
+// (cluster-ws-next) lands so we can see what genuinely
+// generalizes across all three wire impls — WS shares ~20% with
+// net (Connection wrapper) but the listener/connector/cluster
+// shapes diverge. Don't refactor pre-4e or we'll over-fit to
+// TCP/Unix similarity.
+
+/**
+ * Throws on Windows. Unix sockets exist on Win32 in principle but
+ * via a different API (named pipes vs AF_UNIX) — Node's `net`
+ * module's behavior on Windows for filesystem paths is undefined.
+ * Adopters on Windows should use `tcpBroker` / `tcpClusterNode`
+ * from the same package.
+ */
+function assertNotWindows(): void {
+  if (platform() === "win32") {
+    throw new Error(
+      "cluster-net: Unix-socket factories are not supported on Windows. " +
+        "Use tcpBroker / tcpClusterNode / defineTcpCluster instead.",
+    );
+  }
+}
 
 export type UnixListenerOptions =
   | {
@@ -95,6 +123,7 @@ export function createUnixListener(opts: UnixListenerOptions): Listener {
     async start() {
       if (started) return;
       started = true;
+      assertNotWindows();
       if (adopted) {
         adopted.on("connection", handleSocket);
         adopted.on("error", (cause) => {
@@ -135,6 +164,12 @@ export function createUnixListener(opts: UnixListenerOptions): Listener {
         s.listen(socketPath);
       });
       if (opts.mode !== undefined) {
+        // chmod failure is loud — adopters passing `mode: 0o600`
+        // for owner-only security need to know if the lock-down
+        // didn't apply. Silent fallback would leave the socket
+        // world-readable on chmod failure, which is a security
+        // regression the adopter has no signal for. Tear down the
+        // listener so the caller sees a real error.
         try {
           await chmod(socketPath, opts.mode);
         } catch (cause) {
@@ -143,6 +178,21 @@ export function createUnixListener(opts: UnixListenerOptions): Listener {
             mode: opts.mode,
             reason: cause instanceof Error ? cause.message : String(cause),
           });
+          // Best-effort teardown so we don't leak a misconfigured
+          // socket past this error.
+          try {
+            await new Promise<void>((resolve) => server!.close(() => resolve()));
+            await unlink(socketPath);
+          } catch {
+            // ignore teardown errors; the chmod throw is the real
+            // signal the caller cares about.
+          }
+          throw new Error(
+            `cluster-net: chmod ${opts.mode.toString(8)} on ${socketPath} failed: ${
+              cause instanceof Error ? cause.message : String(cause)
+            }`,
+            { cause },
+          );
         }
       }
       onDiagnostic("cluster:broker:net:listener-bound", { socketPath });
@@ -186,6 +236,14 @@ export function createUnixListener(opts: UnixListenerOptions): Listener {
  * filesystem entry exists but no process is listening (a probe
  * connect refuses with ECONNREFUSED). Emits diagnostic events for
  * each outcome so operators can audit cleanup.
+ *
+ * **Race window**: between the probe (connect-refused → "no
+ * listener"), the unlink, and the subsequent bind, another process
+ * could create + listen on the same path. In practice this is
+ * harmless: the bind in the caller fails with EADDRINUSE,
+ * `tryBindOrConnectUnix` falls through to client mode (in auto
+ * mode), and the cluster heals naturally. Documented here so the
+ * non-atomicity isn't surprising on incident review.
  */
 async function tryCleanupStaleSocket(
   socketPath: string,

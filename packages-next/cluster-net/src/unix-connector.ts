@@ -8,6 +8,7 @@
  */
 
 import { createConnection, type Socket } from "node:net";
+import { platform } from "node:os";
 
 import type { Connection, Connector } from "@agentick/cluster-broker-next";
 
@@ -35,6 +36,14 @@ export function createUnixConnector(opts: UnixConnectorOptions): Connector {
   return {
     target: `unix://${socketPath}`,
     connect(): Promise<Connection> {
+      if (platform() === "win32") {
+        return Promise.reject(
+          new Error(
+            "cluster-net: Unix-socket connector is not supported on Windows. " +
+              "Use createTcpConnector instead.",
+          ),
+        );
+      }
       return new Promise<Connection>((resolve, reject) => {
         let settled = false;
         const socket: Socket = createConnection({ path: socketPath });

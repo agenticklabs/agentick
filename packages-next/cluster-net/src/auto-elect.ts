@@ -18,6 +18,7 @@
 
 import { stat, unlink } from "node:fs/promises";
 import { createConnection, createServer, type Server } from "node:net";
+import { platform } from "node:os";
 
 export type AutoElectMode = "broker" | "client" | "broker-explicit" | "client-explicit";
 
@@ -131,6 +132,14 @@ export interface AutoElectUnixOptions {
  * before binding.
  */
 export function tryBindOrConnectUnix(opts: AutoElectUnixOptions): Promise<AutoElectResult> {
+  if (platform() === "win32") {
+    return Promise.reject(
+      new Error(
+        "cluster-net: tryBindOrConnectUnix is not supported on Windows. " +
+          "Use tryBindOrConnect (TCP) instead.",
+      ),
+    );
+  }
   const socketPath = opts.socketPath;
   const mode = opts.mode ?? "auto";
   const cleanupStale = opts.cleanupStaleSocket !== false;

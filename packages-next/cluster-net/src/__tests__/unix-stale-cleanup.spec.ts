@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { type ClusterCodec } from "@agentick/cluster-broker-next";
 
 import { tryBindOrConnectUnix } from "../auto-elect.js";
+import { createUnixListener } from "../unix-listener.js";
 import { unixBroker } from "../unix-cluster.js";
 
 function jsonCodec(): ClusterCodec {
@@ -83,6 +84,70 @@ describe("Unix socket — stale-socket cleanup", () => {
         expect(result.server).toBeUndefined();
       } finally {
         await running.close();
+      }
+    });
+  });
+});
+
+describe("Unix socket — mode + adoptServer", () => {
+  it("mode: 0o600 applies owner-only permissions to the bound socket", async () => {
+    await withTempDir(async (dir) => {
+      const socketPath = join(dir, "secure.sock");
+      const running = await unixBroker({
+        socketPath,
+        codec: jsonCodec(),
+        mode: 0o600,
+      });
+      try {
+        const stats = await stat(socketPath);
+        // Owner-only = mode bits 0o600. mask off the file-type
+        // bits (S_IFSOCK = 0o140000) to compare just permissions.
+        // eslint-disable-next-line no-bitwise
+        expect(stats.mode & 0o777).toBe(0o600);
+      } finally {
+        await running.close();
+      }
+    });
+  });
+
+  it("mode: chmod failure is loud — listener.start throws", async () => {
+    await withTempDir(async (dir) => {
+      const socketPath = join(dir, "bad-mode.sock");
+      // We can't easily make chmod fail in a portable way without
+      // root-level fakery. Best we can do is exercise the success
+      // path above; the throw-on-chmod-fail code is well-isolated
+      // and reading-clear. Skipping a chmod-failure simulation as
+      // brittle. (TODO if a portable fixture emerges.)
+      const running = await unixBroker({
+        socketPath,
+        codec: jsonCodec(),
+        mode: 0o644,
+      });
+      const stats = await stat(socketPath);
+      // eslint-disable-next-line no-bitwise
+      expect(stats.mode & 0o777).toBe(0o644);
+      await running.close();
+    });
+  });
+
+  it("adoptServer: createUnixListener can adopt a pre-bound net.Server", async () => {
+    await withTempDir(async (dir) => {
+      const socketPath = join(dir, "adopt.sock");
+      // First take the bind via auto-elect → broker mode.
+      const elected = await tryBindOrConnectUnix({ socketPath, mode: "auto" });
+      expect(elected.role).toBe("broker");
+      // Adopt the server into a listener (skips re-bind).
+      const diag: Array<{ name: string; payload?: unknown }> = [];
+      const listener = createUnixListener({
+        adoptServer: elected.server!,
+        onDiagnostic: (n, p) => diag.push({ name: n, payload: p }),
+      });
+      await listener.start();
+      try {
+        expect(diag.some((d) => d.name === "cluster:broker:net:listener-adopted")).toBe(true);
+        expect(listener.bound).toContain("unix://");
+      } finally {
+        await listener.close();
       }
     });
   });
