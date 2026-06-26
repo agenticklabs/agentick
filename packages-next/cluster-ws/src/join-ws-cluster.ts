@@ -36,7 +36,7 @@ import {
   resolveNodeId,
   type ClusterCodec,
   type ClusterNode,
-  type NodeId,
+  type NodeIdInput,
 } from "@agentick/cluster-next";
 import { omitUndefined } from "@agentick/utils-next";
 
@@ -50,7 +50,7 @@ export interface JoinWsClusterOptions extends Omit<WsClusterNodeOptions, "nodeId
    * `cluster:nodeId:suspicious` diagnostic fires on the supplied
    * `onDiagnostic` sink (with `layer: "client"`) at join time.
    */
-  readonly nodeId?: NodeId;
+  readonly nodeId?: NodeIdInput;
   /**
    * Role this process takes.
    *   - `"broker"`: start the broker on the URL's host:port AND

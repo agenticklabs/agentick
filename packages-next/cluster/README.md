@@ -82,8 +82,8 @@ today — pure local substrate, zero overhead.
 | 3.1   | Cross-node `ask` + membership reactivity + transport diagnostics + loud routing                                    | **shipped** |
 | 3.2   | Effect.async cancel + wire validation + namespace enforcement + InboxError round-trip + spec-evolution-safe guards | **shipped** |
 | 4     | `@agentick/cluster-ipc-next` — cross-runtime broker (first real adapter)                                           | pending     |
-| 5     | Gateway/App substrate-seam integration + Otto cluster demo                                                         | pending     |
-| 6     | `@agentick/cluster-redis-next` — cross-machine via Redis                                                           | pending     |
+| 5     | Gateway/App substrate-seam integration + Otto cluster demo                                                         | **done**    |
+| 6     | `@agentick/cluster-redis-next` — cross-machine via Redis                                                           | **done**    |
 | 7+    | NATS, MessagePack/protobuf codecs, durability (rung d)                                                             | pending     |
 
 ## API surface (Phase 1)
@@ -130,6 +130,75 @@ composition for their adapter drop into a `/effect` subpath export
 their transport factory to verify ordering, delivery, lifecycle,
 filter semantics, and resource cleanup against the protocol's
 contract.
+
+### Ergonomic facade — `makeClusterNode` (Phase 4f.7)
+
+Every wire package's `joinXCluster(...)` (side-channel ClusterNode
+for adopters who want raw `bus`/`membership` access outside the
+framework substrate) composes against the same wire-agnostic
+facade builder in cluster-next:
+
+```typescript
+import { makeClusterNode } from "@agentick/cluster-next";
+
+// Wire packages do their wire-specific setup, then hand the factory
+// pair to makeClusterNode:
+return makeClusterNode({
+  nodeId,
+  role: "broker" | "client",
+  transportFactory,
+  membershipFactory,
+  cleanup, // optional — for wire-specific tear-down
+  localBrokerRunning, // optional — wire introspection
+});
+```
+
+The facade adds: name-based `bus.subscribe(name, handler)` /
+`bus.broadcast(name, payload)` with auto-stamped envelopes,
+`membership.waitForPeers(n)` convenience, `Symbol.asyncDispose`
+lifecycle. See ADR 38 for the substrate-fusion vs side-channel
+patterns.
+
+### nodeId auto-default — `defaultNodeId`/`resolveNodeId` (Phase 5b)
+
+```typescript
+import { defaultNodeId, resolveNodeId, type NodeIdInput } from "@agentick/cluster-next";
+
+// defaultNodeId(): always returns `${hostname}:${pid}` (+ suspicious
+// flag if hostname is empty/"localhost")
+// resolveNodeId(explicit, onDiagnostic?): use the explicit value if
+// provided (literal OR sync thunk), else fall back to defaultNodeId().
+// Emits `cluster:nodeId:auto-defaulted` / `cluster:nodeId:suspicious`
+// diagnostics at resolution time.
+```
+
+`NodeIdInput = NodeId | (() => NodeId)` — every `defineXCluster` /
+`joinXCluster` accepts the thunk form for deferred env-var reads:
+
+```typescript
+defineUnixCluster({
+  socketPath: "/tmp/cluster.sock",
+  nodeId: () => process.env.NODE_ID ?? `auto-${process.pid}`,
+});
+```
+
+### Testing fifth wire — `defineLocalCluster`
+
+`@agentick/cluster-next/testing` ships `defineLocalCluster(opts)`,
+the in-memory ClusterFactory peer to `defineUnixCluster` etc. Tests
+that need cluster substrate without sockets use it directly:
+
+```typescript
+import { defineLocalCluster } from "@agentick/cluster-next/testing";
+
+// Single-node — implicit registry
+const cluster = defineLocalCluster({ nodeId: "test" });
+
+// Multi-node — explicit shared registry
+const registry = createLocalClusterRegistry();
+const a = defineLocalCluster({ nodeId: "a", registry });
+const b = defineLocalCluster({ nodeId: "b", registry });
+```
 
 ## Observability
 

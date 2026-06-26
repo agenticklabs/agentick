@@ -25,6 +25,7 @@ import {
   type ClusterTransportFactory,
   type DurableJournalFactory,
   type NodeId,
+  type NodeIdInput,
 } from "@agentick/cluster-next";
 import {
   createClusterNode,
@@ -148,11 +149,14 @@ export function unixMembership(opts: UnixClusterNodeOptions): ClusterMembershipF
 export interface DefineUnixClusterOptions extends Omit<UnixClusterNodeOptions, "nodeId"> {
   /**
    * This node's identity. Optional — defaults to `${hostname}:${pid}`
-   * via {@link resolveNodeId}. A `cluster:nodeId:auto-defaulted` or
-   * `cluster:nodeId:suspicious` diagnostic fires on the supplied
-   * `onDiagnostic` sink at construction time.
+   * via {@link resolveNodeId}. Accepts either a literal string or a
+   * synchronous thunk that resolves to one (for adopters who want to
+   * defer env-var reads or generate ids at factory-invocation time).
+   * A `cluster:nodeId:auto-defaulted` or `cluster:nodeId:suspicious`
+   * diagnostic fires on the supplied `onDiagnostic` sink at
+   * construction time.
    */
-  readonly nodeId?: NodeId;
+  readonly nodeId?: NodeIdInput;
   readonly partitioning?: ClusterPartitioningFactory;
   readonly journal?: DurableJournalFactory;
   readonly fanoutMode?: "node-local-default" | "cluster-wide-default";

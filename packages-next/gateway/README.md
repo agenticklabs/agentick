@@ -6,8 +6,8 @@ A gateway hosts one or more `AppHarness` instances, owns the
 substrate (journal + bus + inbox) they inherit by default, and
 mediates cross-app event observation. It's the entry point for
 embedded library deploys, single-process daemons, cloud multi-tenant
-hosts, and (with future cluster substrate) fleet-clustered
-deployments.
+hosts, and fleet-clustered deployments (Phase 5 — cluster fusion
+landed; pass `cluster: ClusterFactory` to `createGateway`).
 
 ## What this package is
 
@@ -52,16 +52,59 @@ const result = await session.send({ messages: [...] }).result;
 await gateway.closeGateway();
 ```
 
+## Cluster integration (Phase 5)
+
+Pass `cluster: ClusterFactory` to wrap the gateway's substrate. Every
+app spawned via `gateway.createApp(...)` automatically inherits the
+cluster-wrapped substrate via the existing default chain — no per-app
+cluster wiring needed.
+
+```ts
+import { createGateway } from "@agentick/gateway-next";
+import { defineUnixCluster } from "@agentick/cluster-net-next";
+
+const gateway = await createGateway({
+  cluster: defineUnixCluster({ socketPath: "/tmp/cluster.sock" }),
+});
+
+const app1 = await gateway.createApp({
+  rootElement: <Agent1 />,
+  options: { executor: ... },
+});
+const app2 = await gateway.createApp({
+  rootElement: <Agent2 />,
+  options: { executor: ... },
+});
+
+// `closeGateway()` closes all apps first, then the cluster
+// (transport / membership / locally-elected broker), then the substrate.
+await gateway.closeGateway();
+```
+
+This is the **recommended multi-app deployment pattern.** Apps that
+pass `cluster: ...` independently via top-level `createApp` each get
+their own cluster (extra connections, double-delivery). The
+gateway-owned cluster is THE cluster for every app it spawns.
+
+See [ADR 38 — Cluster lifecycle + ownership](../../docs/proposals/v2/blueprint/38-cluster-lifecycle-and-ownership.md) for
+the full ownership rules.
+
+**Constraint.** `createGateway({cluster, bus: instance})` is fine.
+`createGateway({cluster, bus: LocalEventBus.factory()})` throws — same
+instance-vs-factory split as `createApp`. Resolve factories yourself
+if you need the combination.
+
 ## API surface
 
 ### `createGateway(options?): Promise<GatewayHarness>`
 
 ```ts
-interface GatewayHarnessOptions {
+interface CreateGatewayOptions {
   gatewayId?: string;
   journal?: OperationJournal | OperationJournalFactory;
   bus?: EventBus | EventBusFactory;
   inbox?: MessageInbox | MessageInboxFactory;
+  cluster?: ClusterFactory; // Phase 5
   metadata?: Readonly<Record<string, unknown>>;
 }
 ```

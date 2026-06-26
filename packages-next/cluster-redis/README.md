@@ -5,11 +5,14 @@ story. Adopters reach for Redis (or Valkey / KeyDB / Dragonfly — same
 RESP protocol, same client) for clustering instead of deploying our
 own broker process.
 
-**Status:** Phase 4f — in progress. Package skeleton landed (4f.1).
-Transport / membership / cluster factories shipping in 4f.2 / 4f.3 / 4f.4.
-Conformance suite + Otto demo in 4f.5 / 4f.6.
+**Status:** Phase 4g closed. Transport / membership / cluster factories
+shipped (4g.1–4g.3), `joinRedisCluster` facade shipped (4f.7c), 5
+integration tests pass against an in-memory fake-Redis hub. Conformance
+against a real Redis (via docker-compose) is deferred to a Phase 6+
+infra task.
 
 **Design:** [ADR 35 — cluster protocol §10](../../docs/proposals/v2/blueprint/35-cluster-protocol.md) ·
+[ADR 38 — cluster lifecycle + ownership](../../docs/proposals/v2/blueprint/38-cluster-lifecycle-and-ownership.md) ·
 [`@agentick/cluster-next`](../cluster/README.md)
 
 ## Why Redis
@@ -54,27 +57,58 @@ The `ioredis` client speaks RESP, which means:
 
 Pick whichever your ops team prefers. The cluster wire doesn't care.
 
-## Quick start (Phase 4f.2+, not yet shipped)
+## Quick start
 
 ```typescript
+import Redis from "ioredis";
 import { defineRedisCluster } from "@agentick/cluster-redis-next";
+import { createGateway } from "@agentick/gateway-next";
 
-const cluster = defineRedisCluster({
-  nodeId: () => process.env.NODE_ID ?? `auto-${process.pid}`,
-  url: "redis://redis.svc.cluster.local:6379",
-  // optional — share one Redis across staging + prod via namespacing
-  keyPrefix: "agentick:prod:",
+// Adopter owns the ioredis clients. We need two: one for pub/regular
+// commands, one for subscribe-mode (Redis pub/sub requires this).
+const url = "redis://redis.svc.cluster.local:6379";
+const pubClient = new Redis(url);
+const subClient = new Redis(url);
+
+const gateway = await createGateway({
+  cluster: defineRedisCluster({
+    pubClient,
+    subClient,
+    // nodeId defaults to `${hostname}:${pid}`; thunk form supported
+    keyPrefix: "agentick:prod:", // optional — share one Redis across envs
+  }),
 });
+
+// ... use the gateway ...
+
+await gateway.closeGateway();
+// Adopter still calls pubClient.quit() / subClient.quit() —
+// the cluster doesn't own them.
 ```
 
-## API (planned shape)
+### Side-channel — `joinRedisCluster`
 
-| Export                     | Role                                                  |
-| -------------------------- | ----------------------------------------------------- |
-| `defineRedisCluster(opts)` | Returns a `ClusterFactory` — convenience              |
-| `redisClusterNode(opts)`   | `{transport, membership}` over shared ioredis sockets |
-| `redisTransport(opts)`     | Standalone transport factory                          |
-| `redisMembership(opts)`    | Standalone membership factory                         |
+```typescript
+import { joinRedisCluster } from "@agentick/cluster-redis-next";
+
+await using node = await joinRedisCluster({ pubClient, subClient });
+node.bus.subscribe("hello", (env) => console.log(env.scope.nodeId));
+await node.membership.waitForPeers(2);
+await node.bus.broadcast("hello");
+```
+
+See [ADR 38 — Cluster lifecycle + ownership](../../docs/proposals/v2/blueprint/38-cluster-lifecycle-and-ownership.md)
+for the substrate-fusion vs side-channel split.
+
+## API
+
+| Export                     | Role                                                       |
+| -------------------------- | ---------------------------------------------------------- |
+| `defineRedisCluster(opts)` | Returns a `ClusterFactory` for createApp/createGateway     |
+| `joinRedisCluster(opts)`   | Returns a `ClusterNode` for side-channel use (Phase 4f.7c) |
+| `redisClusterNode(opts)`   | `{transport, membership}` over shared ioredis sockets      |
+| `redisTransport(opts)`     | Standalone transport factory                               |
+| `redisMembership(opts)`    | Standalone membership factory                              |
 
 ## How it differs from broker-based wires
 

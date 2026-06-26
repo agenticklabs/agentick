@@ -75,23 +75,40 @@ export function defaultNodeId(opts?: DefaultNodeIdOptions): DefaultNodeIdResult 
 }
 
 /**
+ * A nodeId may be supplied as a literal string OR as a synchronous
+ * thunk that resolves to one. The thunk form lets adopters defer
+ * id resolution until factory-invocation time (typically to read
+ * an env var that's set after module load):
+ *
+ *   nodeId: () => process.env.NODE_ID ?? generateId()
+ *
+ * Synchronous only — `defineXCluster` is sync, so we can't await
+ * a Promise here. Adopters with async resolution should await
+ * BEFORE calling `defineXCluster`.
+ */
+export type NodeIdInput = NodeId | (() => NodeId);
+
+/**
  * Resolve an adopter-supplied nodeId, falling back to the
  * `${hostname}:${pid}` default when undefined. Emits the
  * appropriate diagnostic on the supplied callback at resolution
- * time.
+ * time. Accepts either a literal nodeId or a synchronous thunk
+ * (see {@link NodeIdInput}).
  *
  * Sync. Wire factories call this once per construction before
  * building the underlying client (which needs a concrete nodeId).
  *
- * @param explicit  - the adopter-supplied `nodeId` (or undefined → default)
+ * @param explicit  - the adopter-supplied `nodeId` / thunk (or undefined → default)
  * @param onDiagnostic - emit-once sink for the resolution diagnostic
  * @returns the resolved nodeId — never undefined
  */
 export function resolveNodeId(
-  explicit: NodeId | undefined,
+  explicit: NodeIdInput | undefined,
   onDiagnostic?: (name: string, payload?: unknown) => void,
 ): NodeId {
-  if (explicit !== undefined) return explicit;
+  if (explicit !== undefined) {
+    return typeof explicit === "function" ? explicit() : explicit;
+  }
   const result = defaultNodeId();
   if (onDiagnostic) {
     onDiagnostic(

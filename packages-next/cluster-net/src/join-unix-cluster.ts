@@ -35,7 +35,7 @@ import {
   resolveNodeId,
   type ClusterCodec,
   type ClusterNode,
-  type NodeId,
+  type NodeIdInput,
 } from "@agentick/cluster-next";
 import { omitUndefined } from "@agentick/utils-next";
 
@@ -49,11 +49,12 @@ import {
 export interface JoinUnixClusterOptions extends Omit<ElectableUnixClusterNodeOptions, "nodeId"> {
   /**
    * This node's identity. Optional — defaults to `${hostname}:${pid}`
-   * via {@link resolveNodeId}. A `cluster:nodeId:auto-defaulted` or
+   * via {@link resolveNodeId}. Accepts either a literal string or a
+   * synchronous thunk. A `cluster:nodeId:auto-defaulted` or
    * `cluster:nodeId:suspicious` diagnostic fires on the supplied
    * `onDiagnostic` sink (with `layer: "client"`) at join time.
    */
-  readonly nodeId?: NodeId;
+  readonly nodeId?: NodeIdInput;
   /**
    * Codec for the broker if this process wins the initial bind race.
    * Defaults to the same `codec` used by the client side.

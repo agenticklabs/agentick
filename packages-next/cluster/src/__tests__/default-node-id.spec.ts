@@ -66,6 +66,19 @@ describe("resolveNodeId", () => {
     expect(diags).toEqual([]);
   });
 
+  it("accepts a synchronous thunk and invokes it eagerly", () => {
+    const diags: Array<{ name: string; payload?: unknown }> = [];
+    let callCount = 0;
+    const thunk = (): string => {
+      callCount += 1;
+      return "lazy-resolved-id";
+    };
+    const result = resolveNodeId(thunk, (n, p) => diags.push({ name: n, payload: p }));
+    expect(result).toBe("lazy-resolved-id");
+    expect(callCount).toBe(1);
+    expect(diags).toEqual([]); // explicit (via thunk) — no diagnostic
+  });
+
   it("falls back to the auto-default when explicit is undefined", () => {
     const result = resolveNodeId(undefined);
     expect(result).toMatch(/.+:\d+$/);

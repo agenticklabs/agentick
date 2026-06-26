@@ -27,6 +27,7 @@ import {
   type ClusterTransportFactory,
   type DurableJournalFactory,
   type NodeId,
+  type NodeIdInput,
 } from "@agentick/cluster-next";
 import {
   createClusterNode,
@@ -162,11 +163,13 @@ export function tcpMembership(opts: TcpClusterNodeOptions): ClusterMembershipFac
 export interface DefineTcpClusterOptions extends Omit<TcpClusterNodeOptions, "nodeId"> {
   /**
    * This node's identity. Optional — defaults to `${hostname}:${pid}`
-   * via {@link resolveNodeId}. A `cluster:nodeId:auto-defaulted` or
-   * `cluster:nodeId:suspicious` diagnostic fires on the supplied
-   * `onDiagnostic` sink at construction time.
+   * via {@link resolveNodeId}. Accepts either a literal string or a
+   * synchronous thunk (e.g. `() => process.env.NODE_ID ?? generateId()`).
+   * A `cluster:nodeId:auto-defaulted` or `cluster:nodeId:suspicious`
+   * diagnostic fires on the supplied `onDiagnostic` sink at
+   * construction time.
    */
-  readonly nodeId?: NodeId;
+  readonly nodeId?: NodeIdInput;
   readonly partitioning?: ClusterPartitioningFactory;
   readonly journal?: DurableJournalFactory;
   readonly fanoutMode?: "node-local-default" | "cluster-wide-default";

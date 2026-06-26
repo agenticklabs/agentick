@@ -32,7 +32,7 @@ await wsBroker({ httpServer, path: "/cluster" });
 // On every cluster member (including the broker process if it's
 // also a node):
 const cluster = defineWsCluster({
-  nodeId: () => process.env.NODE_ID ?? `auto-${process.pid}`,
+  // nodeId defaults to `${hostname}:${pid}` — set explicitly for tests
   url: "ws://broker-host:8080/cluster",
 });
 ```
@@ -46,16 +46,39 @@ import { wsBroker, defineWsCluster } from "@agentick/cluster-ws-next";
 await wsBroker({ host: "127.0.0.1", port: 9876 });
 
 const cluster = defineWsCluster({
-  nodeId: () => process.env.NODE_ID,
+  // nodeId defaults to `${hostname}:${pid}`
   url: "ws://127.0.0.1:9876/cluster",
 });
 ```
+
+### Side-channel cluster (`joinWsCluster`)
+
+For cross-process coordination outside the agent loop. Returns a
+`ClusterNode` with name-based `bus.subscribe` / `bus.broadcast` /
+`membership.waitForPeers` plus `await using` lifecycle.
+
+```typescript
+import { joinWsCluster } from "@agentick/cluster-ws-next";
+
+await using node = await joinWsCluster({
+  url: "ws://127.0.0.1:9876/cluster",
+  mode: "client", // or "broker" — broker spins up its own ws.Server
+});
+
+node.bus.subscribe("hello", (env) => console.log(env.scope.nodeId));
+await node.membership.waitForPeers(2);
+await node.bus.broadcast("hello");
+```
+
+See [ADR 38 — Cluster lifecycle + ownership](../../docs/proposals/v2/blueprint/38-cluster-lifecycle-and-ownership.md)
+for the substrate-fusion vs side-channel split.
 
 ## API
 
 | Export                         | Role                                              |
 | ------------------------------ | ------------------------------------------------- |
-| `defineWsCluster(opts)`        | Returns a `ClusterFactory` — convenience          |
+| `defineWsCluster(opts)`        | Returns a `ClusterFactory` for createApp/createGateway |
+| `joinWsCluster(opts)`          | Returns a `ClusterNode` for side-channel use      |
 | `wsClusterNode(opts)`          | `{transport, membership}` over one connection     |
 | `wsBroker(opts)`               | Spins up + starts a `BaseBroker` on a WS listener |
 | `wsTransport(opts)`            | Standalone transport factory                      |

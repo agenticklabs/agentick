@@ -5,10 +5,12 @@ wire impl built on
 [`@agentick/cluster-broker-next`](../cluster-broker) + Node's `net`
 module.
 
-Phase 4b ships the TCP factories (`tcpTransport`, `tcpMembership`,
-`tcpBroker`, `defineTcpCluster`). Phase 4d will add Unix-socket
-factories alongside the same package (same Node `net` module,
-different bind address).
+Ships TCP (`tcpTransport`, `tcpMembership`, `tcpBroker`,
+`defineTcpCluster`, `joinTcpCluster`) and Unix-socket (`unixTransport`,
+`unixMembership`, `unixBroker`, `defineUnixCluster`, `joinUnixCluster`)
+factories — same Node `net` module, different bind address. Unix
+adds first-to-bind auto-election + internal re-election on broker
+death (Phase 4f.3); TCP supports explicit `mode: "broker" | "client" | "auto"`.
 
 **External-broker adapters** (`@agentick/cluster-redis-next`,
 `@agentick/cluster-nats-next`) are peers of this package, not
@@ -26,21 +28,58 @@ cleanup for Unix); length-prefix framing.
 
 ## Quick start
 
-### Convenience: `defineTcpCluster` (zero-boilerplate)
+### Substrate-fusion (the normal app-level path)
+
+Pass a `defineXCluster` factory to `createApp` or `createGateway`.
+The framework owns the cluster lifecycle.
 
 ```typescript
-import { defineTcpCluster } from "@agentick/cluster-net-next";
-import { createGateway } from "@agentick/gateway-next"; // Phase 5
+import { defineTcpCluster, defineUnixCluster } from "@agentick/cluster-net-next";
+import { createGateway } from "@agentick/gateway-next";
 
-const cluster = defineTcpCluster({
-  nodeId: () => process.env.NODE_ID ?? `auto-${process.pid}`,
-  host: "127.0.0.1",
-  port: 9876,
-  // optional: partitioning, codec, journal, fanoutMode pass through
+// Multi-host TCP:
+const gateway = await createGateway({
+  cluster: defineTcpCluster({ port: 9876 }),
+  // host defaults to "127.0.0.1"
+  // nodeId defaults to `${hostname}:${pid}` (with a diagnostic if
+  //   hostname is empty / "localhost")
+  // partitioning, codec, journal, fanoutMode all default
 });
 
-const gateway = await createGateway({ cluster /* ... */ });
+// Single-host Unix (with auto-elect + re-election):
+const gateway2 = await createGateway({
+  cluster: defineUnixCluster({ socketPath: "/tmp/cluster.sock" }),
+});
+
+// Closing the gateway closes the cluster.
+await gateway.closeGateway();
 ```
+
+### Side-channel cluster (advanced)
+
+`joinXCluster` returns a `ClusterNode` for direct `bus.broadcast` /
+`bus.subscribe` / `membership.waitForPeers` access — no framework
+substrate wrapping. Use for cross-process coordination outside the
+agent loop (the otto-cluster demo is the canonical use case).
+
+```typescript
+import { joinUnixCluster } from "@agentick/cluster-net-next";
+
+await using node = await joinUnixCluster({
+  socketPath: "/tmp/cluster.sock",
+  // nodeId defaults to `${hostname}:${pid}`
+});
+
+node.bus.subscribe("hello", (env) => console.log("from", env.scope.nodeId));
+await node.membership.waitForPeers(2);
+await node.bus.broadcast("hello");
+// `await using` disposes the cluster at scope exit.
+```
+
+TCP equivalent: `joinTcpCluster({ port, mode: "broker" | "client" | "auto" })`.
+
+See [ADR 38 — Cluster lifecycle + ownership](../../docs/proposals/v2/blueprint/38-cluster-lifecycle-and-ownership.md)
+for the two wiring patterns + lifecycle ownership rules.
 
 ### Manual composition (full control)
 
@@ -50,13 +89,13 @@ import { tcpClusterNode } from "@agentick/cluster-net-next";
 
 // One client, one TCP connection — transport + membership multiplex.
 const { transport, membership } = tcpClusterNode({
-  nodeId: () => process.env.NODE_ID,
+  nodeId: "node-A", // optional — defaults to `${hostname}:${pid}`
   host: "127.0.0.1",
   port: 9876,
 });
 
 const cluster = defineCluster({
-  nodeId: () => process.env.NODE_ID,
+  nodeId: "node-A", // optional — defaults to `${hostname}:${pid}`
   transport,
   membership,
   partitioning: myCustomPartitioning, // optional
@@ -102,14 +141,21 @@ const node = tcpClusterNode({ nodeId, host: "127.0.0.1", port: 9876 });
 
 ### High-level
 
-| Export                   | Role                                                                |
-| ------------------------ | ------------------------------------------------------------------- |
-| `defineTcpCluster(opts)` | Returns a `ClusterFactory` — convenience for the common case        |
-| `tcpClusterNode(opts)`   | Returns `{ transport, membership }` over one multiplexed connection |
-| `tcpBroker(opts)`        | Spins up + starts a `BaseBroker` on a TCP listener                  |
-| `tcpTransport(opts)`     | Standalone `ClusterTransportFactory` (opens its own connection)     |
-| `tcpMembership(opts)`    | Standalone `ClusterMembershipFactory` (opens its own connection)    |
-| `tryBindOrConnect(opts)` | First-to-bind broker-election helper                                |
+| Export                              | Role                                                                       |
+| ----------------------------------- | -------------------------------------------------------------------------- |
+| `defineTcpCluster(opts)`            | Returns a `ClusterFactory` for `createApp`/`createGateway` consumption     |
+| `defineUnixCluster(opts)`           | Same shape, Unix socket addressing                                         |
+| `joinTcpCluster(opts)`              | Returns a `ClusterNode` for side-channel use (Phase 4f.7 + ADR 38)         |
+| `joinUnixCluster(opts)`             | Unix variant with first-to-bind auto-election + re-election watcher       |
+| `tcpClusterNode(opts)`              | Returns `{ transport, membership }` over one multiplexed connection        |
+| `unixClusterNode(opts)`             | Unix variant                                                               |
+| `electableUnixClusterNode(opts)`    | `unixClusterNode` + internal re-election on broker death                   |
+| `tcpBroker(opts)`                   | Spins up + starts a `BaseBroker` on a TCP listener                         |
+| `unixBroker(opts)`                  | Unix variant (with stale-socket cleanup)                                   |
+| `tcpTransport` / `tcpMembership`    | Standalone factories — open their own connection (use `tcpClusterNode` to share) |
+| `unixTransport` / `unixMembership`  | Unix variants                                                              |
+| `tryBindOrConnect(opts)`            | TCP first-to-bind broker-election helper                                   |
+| `tryBindOrConnectUnix(opts)`        | Unix variant                                                               |
 
 ### Low-level
 
@@ -142,12 +188,22 @@ one process succeed; everyone else gets `EADDRINUSE`. Three modes:
 - `mode: "client"` — never tries to bind; assumes the broker
   already exists.
 
-Phase 4 default broker recovery is **external supervisor restart**
-(PM2 / systemd / k8s). If the broker dies, the supervisor brings a
-new process up, which retries the bind, becomes the new broker.
-Clients reconnect via `BaseClusterClient`'s built-in backoff. Internal
-re-election (clients race to bind after detecting broker loss) is
-deferred — tracked as Phase 4+ optional.
+Two broker recovery paths:
+
+- **External supervisor restart** (PM2 / systemd / k8s) — supervisor
+  brings a new process up, retries the bind, becomes the new broker.
+  Clients reconnect via `BaseClusterClient`'s built-in backoff. Works
+  for TCP, Unix, WS.
+- **Internal re-election** (Unix only, Phase 4f.3) — `electableUnixClusterNode`
+  / `joinUnixCluster` watch client-side connect failures. After K
+  consecutive `cluster:broker:client:connect-failed` diagnostics
+  (default 5), surviving workers race to bind the vacated socket;
+  winner spins up a local broker. No supervisor restart needed.
+
+TCP/WS multi-host re-election is out of scope (cross-host bind
+race doesn't make sense; cross-host consensus = wrong fit). For
+multi-host HA reach for `@agentick/cluster-redis-next` (Redis is the
+broker; failover via Sentinel / Cluster).
 
 ## Verified by
 

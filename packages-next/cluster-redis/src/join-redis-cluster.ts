@@ -26,7 +26,7 @@ import {
   makeClusterNode,
   resolveNodeId,
   type ClusterNode,
-  type NodeId,
+  type NodeIdInput,
 } from "@agentick/cluster-next";
 
 import { redisClusterNode, type RedisClusterNodeOptions } from "./redis-cluster.js";
@@ -39,7 +39,7 @@ export interface JoinRedisClusterOptions extends Omit<RedisClusterNodeOptions, "
    * `onDiagnostic` sink (always `layer: "client"` — Redis is
    * brokerless) at join time.
    */
-  readonly nodeId?: NodeId;
+  readonly nodeId?: NodeIdInput;
   /**
    * Single diagnostic sink. Receives every diagnostic emitted by
    * the transport + membership layers. The `layer` tag is always
