@@ -44,6 +44,13 @@ function jsonCodec(): ClusterCodec {
   };
 }
 
+// TODO(phase-4c+): migrate to `waitFor(() => condition)` from
+// `@agentick/utils-next/testing` opportunistically when these tests
+// next see edits. Microtask yields are sufficient for the in-memory
+// pair fixture (delivery via queueMicrotask is <1µs); the canonical
+// waitFor pattern is reserved for real-wire tests where setImmediate
+// loops are fragile (see cluster-net conformance + verification
+// specs). Don't sweep mechanically — sweep when natural.
 async function flushMicrotasks(): Promise<void> {
   for (let i = 0; i < 4; i++) await Promise.resolve();
 }

@@ -18,6 +18,7 @@ import { describe, expect, it } from "vitest";
 import { createServer } from "node:net";
 
 import { BaseBroker, BaseClusterClient, type ClusterCodec } from "@agentick/cluster-broker-next";
+import { waitFor } from "@agentick/utils-next/testing";
 
 import { tryBindOrConnect } from "../auto-elect.js";
 import { createTcpConnector } from "../tcp-connector.js";
@@ -51,14 +52,6 @@ async function allocatePort(): Promise<number> {
       }
     });
   });
-}
-
-async function flushTcp(): Promise<void> {
-  for (let i = 0; i < 5; i++) {
-    await Promise.resolve();
-    await Promise.resolve();
-    await new Promise<void>((resolve) => setImmediate(resolve));
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -185,12 +178,15 @@ describe("tcpClusterNode — shared connection between transport and membership"
       const membership = node.membership(parent);
       void transport;
       void membership;
-      // Wait for connect + welcome.
-      await flushTcp();
-      await flushTcp();
-      // Count broker-side "client-connected" diagnostic events —
-      // there should be exactly ONE despite both factories being
-      // invoked.
+      // Wait for the broker to register the (single) connection.
+      await waitFor(
+        () =>
+          diag.some((d) => d.name === "cluster:broker:server:client-welcomed") ? true : undefined,
+        { description: "broker welcomes node-A" },
+      );
+      // The shared-connection claim: count broker-side
+      // "client-connected" diagnostics — there should be exactly
+      // ONE despite both factories being invoked.
       const connectCount = diag.filter(
         (d) => d.name === "cluster:broker:server:client-connected",
       ).length;

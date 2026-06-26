@@ -72,7 +72,15 @@ function staticMembership(nodes: string[], current: string) {
 /**
  * Yield to the microtask queue so the `LocalClusterTransport` finishes
  * delivering queued envelopes. The fixture routes via `queueMicrotask`;
- * the same `flushMicrotasks` helper as the conformance suite.
+ * three yields cover the deepest chain of synchronous re-enqueues in
+ * our wrappers.
+ *
+ * TODO(phase-4c+): consider migrating to `waitFor` from
+ * `@agentick/utils-next/testing` opportunistically. Microtask yields
+ * are stable here because `LocalClusterTransport` delivers via
+ * `queueMicrotask` — the canonical waitFor pattern is reserved for
+ * real-wire tests (cluster-net) where setImmediate scheduling
+ * matters. Sweep when these tests next see edits, not mechanically.
  */
 async function flushMicrotasks(): Promise<void> {
   await Promise.resolve();

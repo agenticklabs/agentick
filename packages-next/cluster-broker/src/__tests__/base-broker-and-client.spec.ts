@@ -42,6 +42,10 @@ function jsonCodec(): ClusterCodec {
   };
 }
 
+// TODO(phase-4c+): see diagnostics-and-lifecycle.spec.ts for the
+// same rationale — microtask yields are appropriate for the
+// in-memory pair fixture; the canonical waitFor pattern is reserved
+// for real-wire tests where setImmediate scheduling matters.
 async function flushMicrotasks(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();

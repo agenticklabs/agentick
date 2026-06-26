@@ -35,11 +35,28 @@ import type { NodeId } from "./types.js";
  * before every test and `teardown()` after; adapters that need
  * real infrastructure (Redis containers, NATS streams) start them
  * here.
+ *
+ * ## Factory ready-state contract
+ *
+ * `factoryA` / `factoryB` MUST return transports that are
+ * IMMEDIATELY ready to `send` / `subscribeInbox` / `subscribeBus`.
+ * For wire transports with handshake (TCP, WebSocket), this
+ * means the factory awaits the client's handshake-complete
+ * Promise (e.g., `BaseClusterClient.ready`) before returning.
+ *
+ * Adopters writing custom adapter conformance setups: returning a
+ * transport that's still mid-handshake will produce flaky tests —
+ * subscribes and sends issued before the wire is ready may be
+ * dropped or queued without a back-pressure signal. Await the
+ * ready state in the factory.
+ *
+ * In-memory transports (`LocalClusterTransport`) honor this
+ * trivially since they have no handshake.
  */
 export interface ClusterTransportConformanceSetup {
-  /** Factory for node A's transport. */
+  /** Factory for node A's transport. Returns a READY transport. */
   readonly factoryA: ClusterTransportFactory;
-  /** Factory for node B's transport. */
+  /** Factory for node B's transport. Returns a READY transport. */
   readonly factoryB: ClusterTransportFactory;
   /** Node-A identity. */
   readonly nodeAId: NodeId;
@@ -87,6 +104,14 @@ export function runClusterTransportConformance(config: ClusterTransportConforman
     parentB = mkParent("parent-B");
     txA = (await resolveFactory(ctx.factoryA, parentA)) as ClusterTransport;
     txB = (await resolveFactory(ctx.factoryB, parentB)) as ClusterTransport;
+    // Defensive: if the transport exposes a `ready` Promise (the
+    // convention from cluster-broker-next's BaseClusterClient),
+    // await it. Adopter setups SHOULD have awaited ready inside
+    // their factory; this catches the case where they forgot and
+    // produces an early, descriptive failure rather than a flaky
+    // delivery test.
+    await awaitTransportReady(txA);
+    await awaitTransportReady(txB);
   });
 
   afterEach(async () => {
@@ -329,4 +354,21 @@ async function resolveFactory<R, P>(factory: (parent: P) => unknown, parent: P):
     throw new Error("conformance suite: Effect-returning factories not supported (Phase 3).");
   }
   return Promise.resolve(result as R | Promise<R>);
+}
+
+/**
+ * Defensive ready-state check. If the transport-under-test exposes
+ * a `ready` Promise (the convention from cluster-broker-next's
+ * `BaseClusterClient`), await it. Adopter setups should have done
+ * this in their factory, but the contract is non-obvious enough
+ * that it's worth catching here too.
+ *
+ * Transports without a `ready` property (e.g., `LocalClusterTransport`)
+ * are treated as immediately ready.
+ */
+async function awaitTransportReady(transport: ClusterTransport): Promise<void> {
+  const maybeReady = (transport as { readonly ready?: unknown }).ready;
+  if (maybeReady && typeof (maybeReady as PromiseLike<unknown>).then === "function") {
+    await maybeReady;
+  }
 }
