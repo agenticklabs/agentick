@@ -2,7 +2,7 @@
   "name": "@agentick/compiler-react-next",
   "version": "0.0.0",
   "private": true,
-  "description": "React adapter for the Agentick v2 JSX-template compiler. `compileToTree(element, opts)` walks a React tree (calling function components, dispatching host elements through `@agentick/compiler-next`'s intrinsic helpers, honoring `useData` suspends via compile-until-stable) and produces `RenderedTree`. `render(element, opts)` composes that with the formatter pipeline for a string. No react-reconciler dep — static templates don't need React's reactive scaffold; hooks that aren't walker-portable throw naturally because no dispatcher is set up.",
+  "description": "React adapter for the Agentick v2 JSX-template compiler. Uses react-reconciler with a minimal host config exposed as `createHostConfig(deps)` (the seam reconciler-react-next extends for reactivity). `compileToTree(element, opts)` mounts, renders (react-reconciler awaits Suspense natively), walks the committed `HostInstance` tree through compiler-next's intrinsic helpers, unmounts, returns `RenderedTree`. `render(element, opts)` composes that with the formatter pipeline for a string. Reactive-only intrinsics (`<Tool>`, `<MCP>`, channels) emit effects that the compiler rejects — reconciler-react-next swaps in handlers that route through HookBridges. See ADR 39.",
   "keywords": [
     "agentick",
     "compiler",
@@ -47,14 +47,17 @@
   },
   "dependencies": {
     "@agentick/compiler-next": "workspace:*",
+    "@agentick/reconciler-next": "workspace:*",
     "@agentick/spec-next": "workspace:*",
-    "@agentick/utils-next": "workspace:*"
+    "@agentick/utils-next": "workspace:*",
+    "react-reconciler": "^0.33.0"
   },
   "peerDependencies": {
     "react": "^19.0.0"
   },
   "devDependencies": {
     "@types/react": "^19.2.5",
+    "@types/react-reconciler": "0.33.0",
     "react": "^19.2.4"
   }
 }

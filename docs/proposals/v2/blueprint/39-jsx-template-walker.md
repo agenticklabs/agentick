@@ -76,6 +76,66 @@ The reactive walker has the same skeleton but runs inside react-
 reconciler's commit pipeline, where hooks (`useState`/`useEffect`/
 `useSignal`) are valid and the scheduler coordinates re-renders.
 
+## Amendment — 2026-06-26 (Phase 1b rebuild)
+
+Phase 1b's initial implementation built a manual walker over React
+elements — no react-reconciler dep, called function components as
+plain JS. **That was wrong.** It reinvented react-reconciler badly:
+no Suspense, no Context, no error boundaries, no DevTools, no
+function-component lifecycle correctness.
+
+The corrected architecture, locked in by this amendment:
+
+**Compiler owns react-reconciler integration.** `compiler-react-next`
+imports `react-reconciler` and ships a minimal host config exposed as
+`createHostConfig(deps)`. Mount → render (react-reconciler awaits all
+Suspense natively) → walk the committed `HostInstance` tree → unmount.
+The walker post-commit dispatches host elements by tag through a
+shared dispatch table that calls compiler-next's intrinsic helpers.
+
+**Reconciler uses compiler.** `reconciler-react-next` doesn't have its
+own react-reconciler integration. It uses `compiler-react-next`'s
+mount, EXTENDS via:
+
+1. `createHostConfig(deps)` — passes deps for mutation observers,
+   scheduler hooks, instance-augmentation, snapshot/restore.
+2. Dispatch extension — registers handlers for reactive intrinsics
+   (`<Tool>`, `<MCP>`, channels) that route effects through
+   HookBridges instead of throwing.
+3. Multi-tick lifecycle wrapping — keeps the mount alive across ticks,
+   re-triggers compile on bridge invalidation, hooks into the
+   scheduler for signal-driven re-renders.
+4. Harness wrapper — runOperation, events, middleware,
+   snapshot/restore on top.
+
+**Reactive-only intrinsics throw cleanly in the compiler** via the
+effect channel — the dispatch table's `<Tool>` handler emits an
+effect; the compiler's effect handler throws. The reconciler swaps in
+its own effect handler that routes through HookBridges. No special
+intrinsic partition — same dispatch, different effect handlers.
+
+**Reactive HOOKS (`useState`/`useEffect`/`useSignal`) — partial story.**
+Since react-reconciler sets up its own dispatcher, these technically
+run mechanically inside the compiler's mount. They just don't do
+anything useful: a one-shot mount has no re-renders, no scheduler, no
+signal subscriptions. Phase 2 may add a lint rule + runtime warning;
+a hard throw requires React-internals manipulation (version-fragile)
+and is deferred.
+
+**Decisions superseded by this amendment:**
+
+- **D5 (reconciler-agnostic IR)** stands, but the AST normalization
+  happens via react-reconciler's host config callbacks — not via a
+  separate `CompilerAdapter` interface (which is retired).
+- **D8 (`defineCompiler({adapter})`)** retired. The factory pattern
+  was an over-abstraction; each framework adapter ships a plain
+  `compileToTree(element, opts)` function instead.
+
+The "leverage native runtimes" framing now holds for real: react-
+reconciler handles the React side (Suspense, Context, error
+boundaries, function-component lifecycle, DevTools); we don't
+reinvent any of it.
+
 ## Decisions
 
 ### D1 — Uniform IR, effect channel is the context-dependent part

@@ -5,11 +5,10 @@
  * walker.
  */
 
-import { useData } from "@agentick/compiler-next";
 import React from "react";
 import { describe, expect, it } from "vitest";
 
-import { compileToTree, render } from "../index.js";
+import { compileToTree, render, useData } from "../index.js";
 
 describe("compileToTree — JSX → IR", () => {
   it("renders a single section with inline text", async () => {

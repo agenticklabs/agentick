@@ -1,18 +1,10 @@
 /**
- * React-element walker. Pure recursion: function components are
- * called as plain JS; host elements dispatch by tag through
- * `@agentick/compiler-next`'s intrinsic helpers; fragments / arrays
- * flatten transparently.
+ * Post-commit walker. After react-reconciler commits a tree to the
+ * container, walk the `HostInstance` children and produce IR via
+ * compiler-next's intrinsic helpers.
  *
- * No react-reconciler. Static templates that use only walker-portable
- * APIs (useData) don't need React's reactive scaffold — and hooks
- * that DO need a dispatcher (useState/useEffect/useSignal) throw
- * naturally because React's current-dispatcher isn't set up here.
- * That's exactly the contract from ADR 39.
- *
- * The walker is SYNCHRONOUS. Compile-until-stable lives one layer up
- * in `compile.ts` — it catches thrown Promises from `useData`, awaits
- * them, retries the whole walk.
+ * The walker is synchronous. The mount lifecycle around it
+ * (`compile.ts`) handles compile-until-stable for `useData` suspends.
  */
 
 import {
@@ -23,96 +15,69 @@ import {
   sectionEntry,
   textBlock,
 } from "@agentick/compiler-next";
+import type { ElementInstance, HostInstance, TextInstance } from "@agentick/reconciler-next";
 import type { ContentBlock, ContextEntry, MessageEntry } from "@agentick/spec-next";
-import { Fragment, isValidElement, type ReactNode } from "react";
 
-/**
- * Accumulated output of one walk pass. Mirrors the shape compiler-next
- * uses internally — `entries` are top-level context entries; `blocks`
- * are inline content the parent host element will wrap or pass up.
- */
 export interface WalkResult {
   readonly entries: readonly ContextEntry[];
   readonly blocks: readonly ContentBlock[];
 }
 
-/**
- * Walk one React node, returning accumulated entries + blocks.
- */
-export function walk(node: ReactNode): WalkResult {
-  if (node == null || node === false || node === true) return EMPTY;
-
-  if (typeof node === "string") return { entries: [], blocks: [textBlock(node)] };
-  if (typeof node === "number") return { entries: [], blocks: [textBlock(String(node))] };
-
-  if (Array.isArray(node)) return walkAll(node);
-
-  if (!isValidElement(node)) {
-    // Iterables / other shapes — best-effort coerce to string.
-    return { entries: [], blocks: [textBlock(String(node))] };
-  }
-
-  const element = node;
-  const type = element.type;
-  const props = (element.props ?? {}) as Record<string, unknown>;
-
-  if (type === Fragment) {
-    return walkChildren(props.children);
-  }
-
-  if (typeof type === "function") {
-    // Function component: call it, recurse on its output.
-    // Class components are not supported in templates.
-    const result = (type as (p: unknown) => ReactNode)(props);
-    return walk(result);
-  }
-
-  if (typeof type === "string") {
-    return walkHost(type, props);
-  }
-
-  // Forward-refs, lazy, memoized, etc. — not supported in static
-  // templates. Throw with a precise error.
-  throw new Error(
-    `compiler-react: unsupported React element type "${String(type)}". ` +
-      `Static templates support: host elements, function components, fragments, strings, numbers, arrays.`,
-  );
-}
-
-// ────────── Internals ──────────
-
 const EMPTY: WalkResult = { entries: [], blocks: [] };
 
-function walkChildren(children: unknown): WalkResult {
-  if (children == null) return EMPTY;
-  if (Array.isArray(children)) return walkAll(children);
-  return walk(children as ReactNode);
-}
-
-function walkAll(nodes: readonly ReactNode[]): WalkResult {
+/**
+ * Walk the children of a container (or any HostInstance with children)
+ * and produce accumulated entries + blocks.
+ */
+export function walkChildren(children: readonly HostInstance[]): WalkResult {
   const entries: ContextEntry[] = [];
   const blocks: ContentBlock[] = [];
-  for (const n of nodes) {
-    const r = walk(n);
+  for (const child of children) {
+    const r = walkNode(child);
     entries.push(...r.entries);
     blocks.push(...r.blocks);
   }
   return { entries, blocks };
 }
 
-function innerText(blocks: readonly ContentBlock[]): string {
-  // Best-effort concat of inline text blocks. Non-text blocks lose
-  // their fidelity here — heading children that contain a Code block
-  // would not round-trip cleanly. Acceptable for the MVP; revisit
-  // when concrete templates need it.
-  return blocks
-    .filter((b): b is { type: "text"; text: string } => b.type === "text")
-    .map((b) => b.text)
-    .join("");
+function walkNode(node: HostInstance): WalkResult {
+  if (node.kind === "text") {
+    return walkText(node);
+  }
+  return walkElement(node);
 }
 
-function walkHost(tag: string, props: Record<string, unknown>): WalkResult {
-  const inner = walkChildren(props.children);
+function walkText(node: TextInstance): WalkResult {
+  return { entries: [], blocks: [textBlock(node.text)] };
+}
+
+function walkElement(node: ElementInstance): WalkResult {
+  // Function/class components don't appear in the post-commit tree —
+  // react-reconciler has already evaluated them and only HOST elements
+  // remain. `node.type` is the lowercase host-element string.
+  const type = node.type;
+  if (typeof type !== "string") {
+    // Shouldn't happen with react-reconciler; if it does, skip gracefully.
+    return walkChildren(node.children);
+  }
+
+  return dispatchHost(type, node.props, node.children);
+}
+
+/**
+ * Shared dispatch — `tag` + props + children → IR fragment.
+ *
+ * This is the seam reconciler-react-next extends with reactive
+ * intrinsic handlers (Tool, MCP, channels). For now it's hard-coded
+ * to the static intrinsic set; future iteration may make it
+ * registry-driven.
+ */
+function dispatchHost(
+  tag: string,
+  props: Readonly<Record<string, unknown>>,
+  children: readonly HostInstance[],
+): WalkResult {
+  const inner = walkChildren(children);
 
   switch (tag) {
     case "section": {
@@ -127,9 +92,6 @@ function walkHost(tag: string, props: Record<string, unknown>): WalkResult {
             },
             inner.blocks,
           ),
-          // Nested entries inside a section (rare — sections within
-          // sections) get hoisted to the top level, matching how
-          // RenderedTree models the context as flat.
           ...inner.entries,
         ],
         blocks: [],
@@ -165,16 +127,10 @@ function walkHost(tag: string, props: Record<string, unknown>): WalkResult {
     }
     case "code": {
       const lang = typeof props.language === "string" ? props.language : undefined;
-      return {
-        entries: inner.entries,
-        blocks: [codeBlock(innerText(inner.blocks), lang)],
-      };
+      return { entries: inner.entries, blocks: [codeBlock(innerText(inner.blocks), lang)] };
     }
     case "json": {
-      return {
-        entries: inner.entries,
-        blocks: [jsonBlock(props.data)],
-      };
+      return { entries: inner.entries, blocks: [jsonBlock(props.data)] };
     }
     case "text":
     case "p":
@@ -183,11 +139,22 @@ function walkHost(tag: string, props: Record<string, unknown>): WalkResult {
     }
     default:
       throw new Error(
-        `compiler-react: unknown host element <${tag}>. Add a handler in walk.ts, or use a function component to wrap a supported intrinsic.`,
+        `compiler-react: unknown host element <${tag}>. Add a handler in the dispatch, ` +
+          `or wrap in a function component that returns a supported intrinsic.`,
       );
   }
+}
+
+function innerText(blocks: readonly ContentBlock[]): string {
+  return blocks
+    .filter((b): b is { type: "text"; text: string } => b.type === "text")
+    .map((b) => b.text)
+    .join("");
 }
 
 function isAudience(v: unknown): v is "model" | "user" | "both" {
   return v === "model" || v === "user" || v === "both";
 }
+
+// Silence unused import warning for EMPTY if we ever need it.
+void EMPTY;

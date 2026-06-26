@@ -39,3 +39,5 @@ export type { CompileToTreeOptions } from "./compile.js";
 
 export { render } from "./render.js";
 export type { RenderOptions } from "./render.js";
+
+export { useData } from "./use-data.js";
