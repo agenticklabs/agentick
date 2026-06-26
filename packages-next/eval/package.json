@@ -1,0 +1,68 @@
+{
+  "name": "@agentick/eval-next",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Testing-shaped eval framework for Agentick v2. `defineEval(...)` returns a callable function with runtime parameterization (model swap, fixture injection, tool stubs); a single eval definition supports matrix runs, A/B sweeps, and CI-vs-prod profiles. Inspired by Eve evals; Agentick twist: defineEval returns a function, not a config. See ADR 37.",
+  "keywords": [
+    "agentick",
+    "eval",
+    "testing"
+  ],
+  "license": "MIT",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages-next/eval"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./react": {
+      "types": "./src/react/index.ts",
+      "import": "./src/react/index.ts",
+      "default": "./src/react/index.ts"
+    }
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      },
+      "./react": {
+        "types": "./dist/react/index.d.ts",
+        "import": "./dist/react/index.js",
+        "default": "./dist/react/index.js"
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
+  },
+  "dependencies": {
+    "@agentick/app-next": "workspace:*",
+    "@agentick/reconciler-react-next": "workspace:*",
+    "@agentick/spec-next": "workspace:*",
+    "@agentick/utils-next": "workspace:*"
+  },
+  "devDependencies": {
+    "@agentick/executor-next": "workspace:*",
+    "@agentick/runtime-next": "workspace:*",
+    "@types/react": "^19.2.5",
+    "react": "^19.2.4"
+  }
+}

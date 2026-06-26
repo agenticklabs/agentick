@@ -1,7 +1,15 @@
 # Agentick v2 — Implementation Status
 
 **Branch:** `feat/v2`
-**Last updated:** 2026-06-26 (Phase 5 closed) — **Phase 5 — cluster fusion: `defineXCluster + createApp/createGateway` now actually does something.** Six commits land:
+**Last updated:** 2026-06-26 (eval-next MVP shipped) — **`@agentick/eval-next` iteration 1 lands.** `defineEval(definition)` returns a callable function; `await myEval()` runs with definition defaults, `await myEval({ executor: X })` overrides any `createApp` slot for one invocation. Iteration-1 surface: `t.send/completed/calledTool/notCalledTool/noFailedActions`. Two subpaths: base (reconciler-agnostic) + `/react` (defaults reconciler to `reactReconciler()`). 8/8 tests pass.
+
+Substrate-level groundwork: `BaseHarness.runOperation` now stamps `op.input` as the `requested` envelope's payload — the blueprint's phase contract pins requested as "argument bound"; previously the field was empty, so eval ledgers had to find the input some other way. With this change, ANY subscriber (eval, OTel exporter, replay harness) sees what was invoked alongside the operation envelope. Verified non-breaking across the v2 workspace (1909/1909 tests).
+
+Eval-next iteration roadmap (deferred): `.matrix(axes)` parameter sweeps, `t.judge(rubric)` LLM-as-judge, tool stubs, fixtures/cassette replay, cost accounting, streaming-event assertions. See [ADR 37](blueprint/37-eval-package-sketch.md) for the sketch.
+
+---
+
+**Previously, 2026-06-26 (Phase 5 closed) — Phase 5 — cluster fusion: `defineXCluster + createApp/createGateway` now actually does something.** Six commits land:
 
 1. **5b — nodeId auto-default**: `defaultNodeId()` / `resolveNodeId()` in `@agentick/cluster-next`. Adopter calls collapse to `defineUnixCluster({ socketPath: "..." })` — no nodeId arg required; falls back to `${hostname}:${pid}` with a `cluster:nodeId:auto-defaulted` diagnostic, OR a `cluster:nodeId:suspicious` warning if hostname is empty/"localhost" (the container-without-HOSTNAME footgun that would otherwise silently corrupt cluster routing). Strict guard at the public-API boundary (`defineXCluster` / `joinXCluster`); internal `XClusterNodeOptions.nodeId` stays required.
 
@@ -32,7 +40,7 @@
 - Per-app clusters under a gateway (hybrid topologies — drop to `joinXCluster` today)
 - Cluster swap mid-flight
 - Conformance suite parameterized over all four wires for the integration path
-- `@agentick/eval-next` (ADR 37 sketch)
+- `@agentick/eval-next` iterations 2+ (matrix sweeps, judge, fixtures, cassette replay, cost accounting)
 
 **Phase 5 closed.** Cluster machinery is now consumed by app/gateway. The "build it once, configure ergonomically" loop is complete; what remains is hardening + real-world adoption signal.
 

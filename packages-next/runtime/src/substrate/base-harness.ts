@@ -502,8 +502,15 @@ export abstract class BaseHarness<
               return yield* this.replayTerminal<R>(cached.value);
             }
 
-            // 2. Append `requested`.
-            yield* this.publish(this.makeEvent(resolvedOp, "requested", scope));
+            // 2. Append `requested`. The blueprint's phase contract
+            //    pins requested as "argument bound" — the envelope's
+            //    payload IS the operation's input so any subscriber
+            //    (eval ledgers, OTel exporters, replay harnesses) sees
+            //    what was invoked without having to reach into the
+            //    operation by opId.
+            yield* this.publish(
+              this.makeEvent(resolvedOp, "requested", scope, { payload: resolvedOp.input }),
+            );
 
             // 3. Append `before` and run handlers.
             yield* this.publish(this.makeEvent(resolvedOp, "before", scope));

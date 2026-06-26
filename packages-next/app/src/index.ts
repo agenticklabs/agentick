@@ -9,4 +9,4 @@
  */
 
 export { AppHarness, type AppHarnessOptions } from "./harness.js";
-export { createApp } from "./create-app.js";
+export { createApp, type CreateAppOptions } from "./create-app.js";

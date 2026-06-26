@@ -591,6 +591,34 @@ importers:
         specifier: workspace:*
         version: link:../spec-conformance
 
+  packages-next/eval:
+    dependencies:
+      '@agentick/app-next':
+        specifier: workspace:*
+        version: link:../app
+      '@agentick/reconciler-react-next':
+        specifier: workspace:*
+        version: link:../reconciler-react
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../spec
+      '@agentick/utils-next':
+        specifier: workspace:*
+        version: link:../utils
+    devDependencies:
+      '@agentick/executor-next':
+        specifier: workspace:*
+        version: link:../executor
+      '@agentick/runtime-next':
+        specifier: workspace:*
+        version: link:../runtime
+      '@types/react':
+        specifier: ^19.2.5
+        version: 19.2.13
+      react:
+        specifier: ^19.2.4
+        version: 19.2.4
+
   packages-next/executor:
     dependencies:
       '@agentick/runtime-next':
