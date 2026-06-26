@@ -426,7 +426,15 @@ export class BaseBroker {
     // should add a per-conn outbound queue with a configurable bound;
     // overflow emits cluster:broker:server:backpressure + drops
     // oldest (or disconnects the slow client, depending on policy).
-    const bytes = this.codec.encode(frame);
+    //
+    // TODO(phase-4f): ClusterCodec is typed for envelopes (MessageEnvelope |
+    // EventEnvelope) at the cluster-next layer. Broker frames (Hello,
+    // Welcome, Subscribe, SubscribeAck, Membership, etc.) piggyback the
+    // SAME codec — JSON encodes anything; msgpack/protobuf would need a
+    // broker-specific schema. Cast deliberately; a follow-up should
+    // introduce `BrokerCodec` that wraps `ClusterCodec` + handles the
+    // broker-internal frame schema explicitly.
+    const bytes = this.codec.encode(frame as unknown as MessageEnvelope);
     await conn.send(bytes);
   }
 

@@ -39,7 +39,7 @@ import type {
   MembershipChange,
   NodeId,
 } from "@agentick/cluster-next";
-import { defineCluster, jsonCodec } from "@agentick/cluster-next";
+import { createJsonCodec, defineCluster } from "@agentick/cluster-next";
 import { BaseBroker, BaseClusterClient, type Listener } from "@agentick/cluster-broker-next";
 
 import { tryBindOrConnect } from "./auto-elect.js";
@@ -257,8 +257,5 @@ export type { AutoElectMode, AutoElectOptions, AutoElectResult } from "./auto-el
 // ============================================================================
 
 function defaultCodec(): ClusterCodec {
-  // Construct the bundled JSON codec by invoking its factory once
-  // against a no-op parent — the codec has no lifecycle so this is
-  // safe and matches how cluster-next composes it internally.
-  return jsonCodec()({} as never);
+  return createJsonCodec();
 }

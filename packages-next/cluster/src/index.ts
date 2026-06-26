@@ -63,7 +63,7 @@ export {
 } from "./define.js";
 
 // ────────── Bundled built-in adapters ──────────
-export { jsonCodec } from "./builtins/json-codec.js";
+export { jsonCodec, createJsonCodec } from "./builtins/json-codec.js";
 export { consistentHashPartitioning } from "./builtins/consistent-hash-partitioning.js";
 
 // ────────── Canonical filter-matchers (re-exported from @agentick/utils-next) ──────────

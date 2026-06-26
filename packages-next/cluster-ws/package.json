@@ -1,0 +1,57 @@
+{
+  "name": "@agentick/cluster-ws-next",
+  "version": "0.0.0",
+  "private": true,
+  "description": "WebSocket cluster transport for Agentick v2. Concrete wire impl built on `@agentick/cluster-broker-next` + the `ws` library. Mounts on adopter's existing `http.Server` (gateway-level scenario) or owns its own port (app-level fallback). Native WebSocket message framing — no length-prefix wrapping needed. Subprotocol-negotiated for forward-compatible protocol versioning.",
+  "keywords": [
+    "agentick",
+    "cluster",
+    "websocket",
+    "ws"
+  ],
+  "license": "MIT",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages-next/cluster-ws"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
+  },
+  "dependencies": {
+    "@agentick/cluster-broker-next": "workspace:*",
+    "@agentick/cluster-next": "workspace:*",
+    "@agentick/spec-next": "workspace:*",
+    "@agentick/utils-next": "workspace:*",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.10"
+  }
+}

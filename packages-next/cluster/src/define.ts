@@ -356,7 +356,7 @@ function membershipDiagId(): string {
  * than depending on `effect` at this layer.
  */
 async function resolveFactoryAsync<R, P>(
-  factory: (parent: P) => R | Promise<R> | unknown,
+  factory: (parent: P) => R | Promise<R> | Effect.Effect<R, never, never>,
   parent: P,
 ): Promise<R> {
   const result = factory(parent);

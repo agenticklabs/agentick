@@ -1,18 +1,11 @@
 /**
- * High-level Unix-socket cluster factories. Mirror of
- * `tcp-cluster.ts` with filesystem-path addressing instead of
- * host:port.
- *
- *   - `unixBroker(opts)` — spins up a broker on a socket path.
- *     Cleans up stale predecessor sockets automatically.
- *   - `unixClusterNode(opts)` — multiplexed transport + membership
- *     over one Unix-socket connection.
- *   - `unixTransport` / `unixMembership` — standalone factories.
- *   - `defineUnixCluster(spec)` — top-level convenience.
- *
- * @see ./tcp-cluster.ts (TCP equivalent)
- * @see docs/proposals/v2/blueprint/35-cluster-protocol.md §6
+ * High-level WebSocket cluster factories. Mirror of
+ * `cluster-net-next`'s tcp / unix-cluster modules; the WS-specific
+ * concerns (mount vs standalone, subprotocol negotiation) are
+ * encapsulated in `ws-listener.ts` and `ws-connector.ts`.
  */
+
+import type { Server as HttpServer } from "node:http";
 
 import type {
   ClusterCodec,
@@ -29,54 +22,36 @@ import type {
 import { createJsonCodec, defineCluster } from "@agentick/cluster-next";
 import { BaseBroker, BaseClusterClient, type Listener } from "@agentick/cluster-broker-next";
 
-import { createUnixConnector } from "./unix-connector.js";
-import { createUnixListener } from "./unix-listener.js";
+import { createWsConnector } from "./ws-connector.js";
+import { createWsListener } from "./ws-listener.js";
 
 // ============================================================================
-// Shared options
+// wsBroker — convenience for the broker-elected process
 // ============================================================================
 
-export interface UnixEndpoint {
-  /** Filesystem path to the Unix socket. Required. */
-  readonly socketPath: string;
-  /** Optional max frame bytes per connection. */
-  readonly maxFrameBytes?: number;
-}
-
-// ============================================================================
-// unixBroker — convenience for the broker-elected process
-// ============================================================================
-
-export interface UnixBrokerOptions extends UnixEndpoint {
-  /** Optional codec. Default: bundled JSON. */
+export type WsBrokerOptions = (
+  | { readonly httpServer: HttpServer; readonly host?: undefined; readonly port?: undefined }
+  | { readonly httpServer?: undefined; readonly host?: string; readonly port: number }
+) & {
+  readonly path?: string;
+  readonly allowedOrigins?: readonly string[];
   readonly codec?: ClusterCodec;
-  /**
-   * Filesystem permission mode (e.g., `0o600` for owner-only).
-   * Applied via `fs.chmod` after bind.
-   */
-  readonly mode?: number;
-  /**
-   * Auto-unlink a stale socket file before binding. Default `true`.
-   * Set `false` when a supervisor (PM2 / systemd) handles cleanup.
-   */
-  readonly cleanupStaleSocket?: boolean;
   readonly onDiagnostic?: (name: string, payload?: unknown) => void;
-}
+};
 
-export interface RunningUnixBroker {
+export interface RunningWsBroker {
   readonly broker: BaseBroker;
   readonly listener: Listener;
   close(): Promise<void>;
 }
 
-export async function unixBroker(opts: UnixBrokerOptions): Promise<RunningUnixBroker> {
-  const listener = createUnixListener({
-    socketPath: opts.socketPath,
-    ...(opts.maxFrameBytes !== undefined ? { maxFrameBytes: opts.maxFrameBytes } : {}),
-    ...(opts.mode !== undefined ? { mode: opts.mode } : {}),
-    ...(opts.cleanupStaleSocket !== undefined
-      ? { cleanupStaleSocket: opts.cleanupStaleSocket }
-      : {}),
+export async function wsBroker(opts: WsBrokerOptions): Promise<RunningWsBroker> {
+  const listener = createWsListener({
+    ...(opts.httpServer !== undefined
+      ? ({ httpServer: opts.httpServer } as const)
+      : ({ host: opts.host, port: opts.port! } as const)),
+    ...(opts.path !== undefined ? { path: opts.path } : {}),
+    ...(opts.allowedOrigins !== undefined ? { allowedOrigins: opts.allowedOrigins } : {}),
     ...(opts.onDiagnostic !== undefined ? { onDiagnostic: opts.onDiagnostic } : {}),
   });
   const broker = new BaseBroker({
@@ -95,11 +70,13 @@ export async function unixBroker(opts: UnixBrokerOptions): Promise<RunningUnixBr
 }
 
 // ============================================================================
-// unixClusterNode — multiplexed transport + membership
+// wsClusterNode — multiplexed transport + membership
 // ============================================================================
 
-export interface UnixClusterNodeOptions extends UnixEndpoint {
+export interface WsClusterNodeOptions {
   readonly nodeId: NodeId;
+  /** Broker URL, e.g., `ws://127.0.0.1:9876/cluster`. */
+  readonly url: string;
   readonly codec?: ClusterCodec;
   readonly heartbeatMs?: number;
   readonly missedPongLimit?: number;
@@ -108,12 +85,11 @@ export interface UnixClusterNodeOptions extends UnixEndpoint {
     readonly maxMs?: number;
     readonly maxAttempts?: number;
   };
-  /** Connection-establishment timeout. Default 2s (Unix is local). */
   readonly connectTimeoutMs?: number;
   readonly onDiagnostic?: (name: string, payload?: unknown) => void;
 }
 
-export function unixClusterNode(opts: UnixClusterNodeOptions): {
+export function wsClusterNode(opts: WsClusterNodeOptions): {
   readonly transport: ClusterTransportFactory;
   readonly membership: ClusterMembershipFactory;
 } {
@@ -123,9 +99,8 @@ export function unixClusterNode(opts: UnixClusterNodeOptions): {
     if (client) return client;
     const c = new BaseClusterClient({
       nodeId: opts.nodeId,
-      connector: createUnixConnector({
-        socketPath: opts.socketPath,
-        ...(opts.maxFrameBytes !== undefined ? { maxFrameBytes: opts.maxFrameBytes } : {}),
+      connector: createWsConnector({
+        url: opts.url,
         ...(opts.connectTimeoutMs !== undefined ? { connectTimeoutMs: opts.connectTimeoutMs } : {}),
         ...(opts.onDiagnostic !== undefined ? { onDiagnostic: opts.onDiagnostic } : {}),
       }),
@@ -162,30 +137,26 @@ function clientToMembership(client: BaseClusterClient, currentNode: NodeId): Clu
   };
 }
 
-// ============================================================================
-// Individual factories (two-connection trade-off path)
-// ============================================================================
-
-export function unixTransport(opts: UnixClusterNodeOptions): ClusterTransportFactory {
-  return unixClusterNode(opts).transport;
+export function wsTransport(opts: WsClusterNodeOptions): ClusterTransportFactory {
+  return wsClusterNode(opts).transport;
 }
 
-export function unixMembership(opts: UnixClusterNodeOptions): ClusterMembershipFactory {
-  return unixClusterNode(opts).membership;
+export function wsMembership(opts: WsClusterNodeOptions): ClusterMembershipFactory {
+  return wsClusterNode(opts).membership;
 }
 
 // ============================================================================
-// defineUnixCluster — top-level convenience
+// defineWsCluster — top-level convenience
 // ============================================================================
 
-export interface DefineUnixClusterOptions extends UnixClusterNodeOptions {
+export interface DefineWsClusterOptions extends WsClusterNodeOptions {
   readonly partitioning?: ClusterPartitioningFactory;
   readonly journal?: DurableJournalFactory;
   readonly fanoutMode?: "node-local-default" | "cluster-wide-default";
 }
 
-export function defineUnixCluster(opts: DefineUnixClusterOptions): ClusterFactory {
-  const node = unixClusterNode(opts);
+export function defineWsCluster(opts: DefineWsClusterOptions): ClusterFactory {
+  const node = wsClusterNode(opts);
   return defineCluster({
     nodeId: opts.nodeId,
     transport: node.transport,

@@ -22,17 +22,24 @@ import type { ClusterCodecFactory } from "../factories.js";
  * default in {@link defineCluster} when no `codec` is supplied.
  */
 export function jsonCodec(): ClusterCodecFactory {
-  return () => {
-    const encoder = new TextEncoder();
-    const decoder = new TextDecoder();
-    const codec: ClusterCodec = {
-      encode(env) {
-        return encoder.encode(JSON.stringify(env));
-      },
-      decode(raw) {
-        return JSON.parse(decoder.decode(raw)) as MessageEnvelope | EventEnvelope;
-      },
-    };
-    return codec;
+  return () => createJsonCodec();
+}
+
+/**
+ * Sync constructor for the JSON codec. Useful when wire impls
+ * (cluster-net-next, cluster-ws-next) need a `ClusterCodec`
+ * directly rather than through factory plumbing — e.g. internal
+ * defaults when adopters didn't pass `opts.codec`.
+ */
+export function createJsonCodec(): ClusterCodec {
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+  return {
+    encode(env) {
+      return encoder.encode(JSON.stringify(env));
+    },
+    decode(raw) {
+      return JSON.parse(decoder.decode(raw)) as MessageEnvelope | EventEnvelope;
+    },
   };
 }

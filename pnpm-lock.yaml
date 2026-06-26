@@ -500,6 +500,28 @@ importers:
         specifier: workspace:*
         version: link:../utils
 
+  packages-next/cluster-ws:
+    dependencies:
+      '@agentick/cluster-broker-next':
+        specifier: workspace:*
+        version: link:../cluster-broker
+      '@agentick/cluster-next':
+        specifier: workspace:*
+        version: link:../cluster
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../spec
+      '@agentick/utils-next':
+        specifier: workspace:*
+        version: link:../utils
+      ws:
+        specifier: ^8.18.0
+        version: 8.19.0
+    devDependencies:
+      '@types/ws':
+        specifier: ^8.5.10
+        version: 8.18.1
+
   packages-next/elicitation:
     dependencies:
       '@agentick/runtime-next':

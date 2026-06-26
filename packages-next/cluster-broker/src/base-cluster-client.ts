@@ -700,7 +700,12 @@ export class BaseClusterClient implements ClusterTransport {
   }
 
   private async writeFrameRaw(conn: Connection, frame: AnyFrame): Promise<void> {
-    const bytes = this.codec.encode(frame);
+    // TODO(phase-4f): ClusterCodec is typed for envelopes at the
+    // cluster-next layer. Client frames (Hello, Subscribe, Flush, etc.)
+    // share the wire with envelopes — JSON serializes anything, but a
+    // typed codec (msgpack/protobuf) needs an explicit broker frame
+    // schema. See base-broker.ts:writeFrame for the symmetric fix.
+    const bytes = this.codec.encode(frame as unknown as MessageEnvelope);
     await conn.send(bytes);
   }
 

@@ -63,7 +63,8 @@
     "../packages-next/tasks",
     "../packages-next/cluster",
     "../packages-next/cluster-broker",
-    "../packages-next/cluster-net"
+    "../packages-next/cluster-net",
+    "../packages-next/cluster-ws"
   ],
   "out": "api",
   "plugin": ["typedoc-plugin-markdown", "typedoc-vitepress-theme"],
