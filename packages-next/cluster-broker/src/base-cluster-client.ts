@@ -583,8 +583,21 @@ export class BaseClusterClient implements ClusterTransport {
     }
   }
 
-  /** Register a pending subscribe-ack for `subId`. */
+  /**
+   * Register a pending subscribe-ack for `subId`. Idempotent: if an
+   * entry already exists, the existing Promise is preserved so any
+   * `flush()` caller already awaiting it gets resolved when the
+   * broker eventually acks.
+   *
+   * This matters when an adopter subscribes before the client has
+   * finished its first handshake. The original subscribe write is
+   * deferred until `onWelcome` re-issues it on the freshly-connected
+   * socket — both call sites hit `trackPendingAck(subId)`, but the
+   * Promise observed by `flush()` is the one created at subscribe
+   * time, so we MUST keep it through the re-issue.
+   */
   private trackPendingAck(subId: string): void {
+    if (this.pendingSubscribeAcks.has(subId)) return;
     let resolve!: () => void;
     const promise = new Promise<void>((r) => {
       resolve = r;

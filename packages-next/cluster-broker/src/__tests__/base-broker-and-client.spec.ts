@@ -295,6 +295,75 @@ describe("BaseBroker + BaseClusterClient — broadcast / subscribeBus", () => {
     expect(fromC).toHaveLength(1);
   });
 
+  it("flush() resolves when subscribe is issued BEFORE handshake completes", async () => {
+    // Regression: the otto-cluster demo wedged here. An adopter that
+    // calls `subscribeBus(...)` synchronously after spawning the
+    // client (i.e. before microtasks run + handshake completes) saw
+    // `transport.flush()` hang forever. Root cause: the pending-ack
+    // entry tracked at subscribe time got *overwritten* in
+    // `onWelcome` (which re-registers active subs on the fresh
+    // connection), orphaning the Promise the original `flush()`
+    // caller was awaiting. The broker's SUBSCRIBE_ACK resolves the
+    // NEW entry; the orphan never resolves.
+    //
+    // Fix: `trackPendingAck` is idempotent — subsequent calls for
+    // the same `subId` leave the existing entry alone, so the
+    // Promise observed by `flush()` is the one the broker ack
+    // ultimately resolves.
+    await rig.broker.start();
+    const clientA = rig.spawnClient("node-A");
+    const clientB = rig.spawnClient("node-B");
+
+    // CRITICAL: subscribe synchronously, BEFORE the handshake has
+    // had a chance to complete. The client is in "connecting" state
+    // at this moment — `tryWriteIgnoringDisconnect` no-ops, so the
+    // FRAME_SUBSCRIBE_BUS will only actually go out via the onWelcome
+    // resubscribe loop.
+    const received: EventEnvelope[] = [];
+    clientB.subscribeBus({}, (env) => received.push(env));
+
+    // Now await flush() concurrently with the handshake completing.
+    // Without the idempotency fix, this Promise would never resolve.
+    const flushDone = clientB.flush();
+
+    // Drive the handshake.
+    await flushMicrotasks();
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    // flush() must resolve once the broker has acked the (deferred)
+    // SUBSCRIBE_BUS frame.
+    await flushDone;
+
+    // Sanity: subscribe is actually wired — broadcast lands.
+    await clientA.broadcast(mkEvent("tool", "tool:dispatch:started"));
+    await flushMicrotasks();
+    await flushMicrotasks();
+    expect(received).toHaveLength(1);
+  });
+
+  it("flush() resolves when subscribeInbox is issued BEFORE handshake completes", async () => {
+    // Same regression as subscribeBus — both subscribe paths share
+    // the same trackPendingAck plumbing, so verify both are covered.
+    await rig.broker.start();
+    const clientA = rig.spawnClient("node-A");
+    const clientB = rig.spawnClient("node-B");
+
+    const received: MessageEnvelope[] = [];
+    clientB.subscribeInbox({}, (env) => received.push(env));
+
+    const flushDone = clientB.flush();
+    await flushMicrotasks();
+    await flushMicrotasks();
+    await flushMicrotasks();
+    await flushDone;
+
+    await clientA.send("node-B", mkMessage("tasks:s-1", "ping"));
+    await flushMicrotasks();
+    await flushMicrotasks();
+    expect(received).toHaveLength(1);
+  });
+
   it("subscribeBus filter narrows delivery", async () => {
     await rig.broker.start();
     const clientA = rig.spawnClient("node-A");
