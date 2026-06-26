@@ -14,8 +14,33 @@ export { createTcpListener, type TcpListenerOptions } from "./tcp-listener.js";
 export { createTcpConnector, type TcpConnectorOptions } from "./tcp-connector.js";
 
 // Broker election.
-export { tryBindOrConnect } from "./auto-elect.js";
-export type { AutoElectMode, AutoElectOptions, AutoElectResult } from "./auto-elect.js";
+export { tryBindOrConnect, tryBindOrConnectUnix } from "./auto-elect.js";
+export type {
+  AutoElectMode,
+  AutoElectOptions,
+  AutoElectResult,
+  AutoElectUnixOptions,
+} from "./auto-elect.js";
+
+// Unix-socket wire (Phase 4d). Same Node `net` module as TCP; only
+// the bind address shape differs. Multi-platform note: Unix sockets
+// don't exist on Windows in the traditional sense (Windows has
+// named pipes which differ enough to need their own impl). Adopters
+// on Windows should use the TCP factories.
+export { createUnixListener, type UnixListenerOptions } from "./unix-listener.js";
+export { createUnixConnector, type UnixConnectorOptions } from "./unix-connector.js";
+export {
+  defineUnixCluster,
+  unixBroker,
+  unixClusterNode,
+  unixMembership,
+  unixTransport,
+  type DefineUnixClusterOptions,
+  type RunningUnixBroker,
+  type UnixBrokerOptions,
+  type UnixClusterNodeOptions,
+  type UnixEndpoint,
+} from "./unix-cluster.js";
 
 // High-level: broker convenience, multiplexed transport+membership, top-level cluster factory.
 export {

@@ -16,7 +16,8 @@
  * @see docs/proposals/v2/blueprint/35-cluster-protocol.md §8.a
  */
 
-import { createServer, type Server } from "node:net";
+import { stat, unlink } from "node:fs/promises";
+import { createConnection, createServer, type Server } from "node:net";
 
 export type AutoElectMode = "broker" | "client" | "broker-explicit" | "client-explicit";
 
@@ -102,4 +103,108 @@ export function tryBindOrConnect(opts: AutoElectOptions): Promise<AutoElectResul
     server.once("listening", onListening);
     server.listen(port, host);
   });
+}
+
+// ============================================================================
+// Unix-socket variant
+// ============================================================================
+
+export interface AutoElectUnixOptions {
+  readonly socketPath: string;
+  readonly mode?: "auto" | "broker" | "client";
+  /**
+   * Auto-unlink stale socket files before bind. Default `true`. A
+   * stale socket = filesystem entry exists but no listener (a
+   * crashed predecessor); detected via connect-refuse probe.
+   */
+  readonly cleanupStaleSocket?: boolean;
+}
+
+/**
+ * Race to bind a Unix socket path. Same shape as
+ * {@link tryBindOrConnect} but for filesystem-addressed sockets.
+ *
+ * Stale-cleanup is the only meaningful operational difference vs.
+ * TCP: filesystem entries from crashed predecessors persist, and
+ * naive bind fails with EADDRINUSE even though no listener exists.
+ * The default `cleanupStaleSocket: true` probes via connect-refuse
+ * before binding.
+ */
+export function tryBindOrConnectUnix(opts: AutoElectUnixOptions): Promise<AutoElectResult> {
+  const socketPath = opts.socketPath;
+  const mode = opts.mode ?? "auto";
+  const cleanupStale = opts.cleanupStaleSocket !== false;
+
+  if (mode === "client") {
+    return Promise.resolve({ role: "client-explicit" });
+  }
+
+  return (async (): Promise<AutoElectResult> => {
+    if (cleanupStale) {
+      await unlinkIfStale(socketPath);
+    }
+    return new Promise<AutoElectResult>((resolve, reject) => {
+      const server = createServer({ allowHalfOpen: false });
+      let settled = false;
+
+      const onError = (err: NodeJS.ErrnoException): void => {
+        if (settled) return;
+        settled = true;
+        server.off("listening", onListening);
+        if (err.code === "EADDRINUSE") {
+          if (mode === "broker") {
+            reject(
+              new Error(`cluster-net: explicit broker mode but socket ${socketPath} is in use`),
+            );
+            return;
+          }
+          resolve({ role: "client" });
+          return;
+        }
+        reject(err);
+      };
+
+      const onListening = (): void => {
+        if (settled) return;
+        settled = true;
+        server.off("error", onError);
+        resolve({
+          role: mode === "broker" ? "broker-explicit" : "broker",
+          server,
+        });
+      };
+
+      server.once("error", onError);
+      server.once("listening", onListening);
+      server.listen(socketPath);
+    });
+  })();
+}
+
+/** Probe + unlink a stale Unix socket file. */
+async function unlinkIfStale(socketPath: string): Promise<void> {
+  try {
+    await stat(socketPath);
+  } catch {
+    return; // doesn't exist
+  }
+  const alive = await new Promise<boolean>((resolve) => {
+    const socket = createConnection({ path: socketPath });
+    let done = false;
+    const finish = (v: boolean): void => {
+      if (done) return;
+      done = true;
+      socket.destroy();
+      resolve(v);
+    };
+    socket.once("connect", () => finish(true));
+    socket.once("error", () => finish(false));
+    setTimeout(() => finish(false), 50);
+  });
+  if (alive) return;
+  try {
+    await unlink(socketPath);
+  } catch {
+    // ignore — adjacent bind will fail with a real error if needed
+  }
 }

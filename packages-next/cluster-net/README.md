@@ -15,10 +15,11 @@ different bind address).
 children — they talk a different broker's protocol and don't use
 the `cluster-broker-next` plumbing.
 
-**Status:** Phase 4b (TCP shipped). `runClusterTransportConformance`
-from `@agentick/cluster-next` passes 10/10 against the TCP wire.
-Multiplexed transport+membership over ONE connection per node;
-auto-elect first-to-bind; length-prefix framing.
+**Status:** Phase 4d (TCP + Unix socket shipped).
+`runClusterTransportConformance` passes 10/10 against TCP AND 10/10
+against Unix sockets. Multiplexed transport+membership over ONE
+connection per node; auto-elect first-to-bind (with stale-socket
+cleanup for Unix); length-prefix framing.
 
 **Design:** [ADR 35 — cluster protocol](../../docs/proposals/v2/blueprint/35-cluster-protocol.md) ·
 [`@agentick/cluster-broker-next`](../cluster-broker/README.md)
