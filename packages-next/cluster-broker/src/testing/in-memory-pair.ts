@@ -5,12 +5,16 @@
  * tests where TCP/WS setup is overkill.
  *
  *   const [a, b] = createInMemoryConnectionPair();
- *   await a.send(bytes);  // → b.onMessage handlers fire
- *   await b.send(bytes);  // → a.onMessage handlers fire
+ *   await a.send(bytes);  // → b.onMessage handler fires
+ *   await b.send(bytes);  // → a.onMessage handler fires
  *
  * Delivery is microtask-scheduled (matches the convention from
  * `cluster-next`'s `LocalClusterTransport`) so ordering is
  * deterministic and tests can `await flushMicrotasks()`.
+ *
+ * Single-handler `onMessage` semantics per the Connection contract
+ * (Phase 4a.2) — attempting to register a second handler while one
+ * is active throws.
  */
 
 import { ulid } from "@agentick/utils-next";
@@ -42,9 +46,18 @@ interface Side {
   peer?: Side;
 }
 
+interface SideInternals {
+  messageHandler: ((message: Uint8Array) => void) | null;
+  readonly closeHandlers: Set<(reason: ConnectionCloseReason) => void>;
+}
+
+const internals = new WeakMap<Connection, SideInternals>();
+
 function createSide(id: string): Side {
-  const messageHandlers = new Set<(message: Uint8Array) => void>();
-  const closeHandlers = new Set<(reason: ConnectionCloseReason) => void>();
+  const state: SideInternals = {
+    messageHandler: null,
+    closeHandlers: new Set<(reason: ConnectionCloseReason) => void>(),
+  };
   let closed = false;
   let closeReason: ConnectionCloseReason | undefined;
 
@@ -62,22 +75,27 @@ function createSide(id: string): Side {
         }
         // Snapshot the bytes so callers can reuse the buffer.
         const snapshot = message.slice();
+        const peerInternals = internals.get(peer.conn);
         queueMicrotask(() => {
-          if (!peer.conn) return;
-          for (const handler of [...messageHandlersOf(peer.conn)]) {
-            try {
-              handler(snapshot);
-            } catch {
-              // Test fixtures swallow handler throws — production
-              // base broker / base client have their own catches.
-            }
+          const handler = peerInternals?.messageHandler;
+          if (!handler) return;
+          try {
+            handler(snapshot);
+          } catch {
+            // Test fixtures swallow handler throws — production
+            // base broker / base client have their own catches.
           }
         });
       },
       onMessage(handler) {
-        messageHandlers.add(handler);
+        if (state.messageHandler !== null) {
+          throw new Error(
+            `cluster-broker test: connection ${id} already has a message handler attached`,
+          );
+        }
+        state.messageHandler = handler;
         return () => {
-          messageHandlers.delete(handler);
+          if (state.messageHandler === handler) state.messageHandler = null;
         };
       },
       onClose(handler) {
@@ -87,16 +105,16 @@ function createSide(id: string): Side {
           queueMicrotask(() => handler(closeReason!));
           return () => {};
         }
-        closeHandlers.add(handler);
+        state.closeHandlers.add(handler);
         return () => {
-          closeHandlers.delete(handler);
+          state.closeHandlers.delete(handler);
         };
       },
       async close() {
         if (closed) return;
         closed = true;
         closeReason = "local-close";
-        for (const handler of [...closeHandlers]) {
+        for (const handler of [...state.closeHandlers]) {
           queueMicrotask(() => handler("local-close"));
         }
         // Notify peer with remote-graceful.
@@ -112,30 +130,8 @@ function createSide(id: string): Side {
     },
   };
 
-  // Internal accessors for the close cascade.
-  attachInternals(side.conn, { messageHandlers, closeHandlers, setClosed: forceClose });
-
+  internals.set(side.conn, state);
   return side;
-}
-
-// ----------------------------------------------------------------------------
-// Internal plumbing — let the close cascade reach the peer's handlers.
-// ----------------------------------------------------------------------------
-
-interface InMemoryInternals {
-  readonly messageHandlers: Set<(message: Uint8Array) => void>;
-  readonly closeHandlers: Set<(reason: ConnectionCloseReason) => void>;
-  readonly setClosed: (conn: Connection, reason: ConnectionCloseReason) => void;
-}
-
-const internals = new WeakMap<Connection, InMemoryInternals>();
-
-function attachInternals(conn: Connection, value: InMemoryInternals): void {
-  internals.set(conn, value);
-}
-
-function messageHandlersOf(conn: Connection): Set<(message: Uint8Array) => void> {
-  return internals.get(conn)!.messageHandlers;
 }
 
 function forceClose(conn: Connection, reason: ConnectionCloseReason): void {
@@ -144,6 +140,6 @@ function forceClose(conn: Connection, reason: ConnectionCloseReason): void {
   for (const handler of [...inner.closeHandlers]) {
     queueMicrotask(() => handler(reason));
   }
-  // Detach so future sends throw.
   inner.closeHandlers.clear();
+  inner.messageHandler = null;
 }

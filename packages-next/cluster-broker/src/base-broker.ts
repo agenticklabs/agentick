@@ -31,6 +31,7 @@ import type {
   NodeId,
 } from "@agentick/cluster-next";
 import type { EventEnvelope, MessageEnvelope } from "@agentick/spec-next";
+import { matchesAddressFilter, matchesEventFilter } from "@agentick/utils-next";
 
 import type { Connection, Listener } from "./connection.js";
 import {
@@ -209,7 +210,21 @@ export class BaseBroker {
       });
       return;
     }
-    await this.dispatchFrame(client, frame);
+    // dispatchFrame may write to other clients' connections; if any
+    // of those writes throw (slow client, EPIPE, etc.), the rejection
+    // would otherwise propagate to unhandled-promise-rejection because
+    // `conn.onMessage` calls this without awaiting. Catch + diagnose
+    // so the broker stays alive.
+    try {
+      await this.dispatchFrame(client, frame);
+    } catch (cause) {
+      this.onDiagnostic("cluster:broker:server:dispatch-failed", {
+        connId: client.conn.id,
+        nodeId: client.nodeId,
+        frameType: (frame as { type: string }).type,
+        reason: cause instanceof Error ? cause.message : String(cause),
+      });
+    }
   }
 
   private async dispatchFrame(client: ConnectedClient, frame: AnyFrame): Promise<void> {
@@ -405,48 +420,4 @@ export class BaseBroker {
   private async writeError(conn: Connection, reason: string): Promise<void> {
     await this.writeFrame(conn, { type: FRAME_ERROR, reason });
   }
-}
-
-// ============================================================================
-// Filter matching — shared semantics with BaseClusterClient
-// ============================================================================
-
-function matchesAddressFilter(filter: AddressFilter, address: string): boolean {
-  if (filter.address !== undefined && filter.address !== address) return false;
-  const colon = address.indexOf(":");
-  if (filter.scopeId !== undefined) {
-    const scopeId = colon >= 0 ? address.slice(colon + 1) : address;
-    if (scopeId !== filter.scopeId) return false;
-  }
-  if (filter.surface !== undefined) {
-    const surface = colon >= 0 ? address.slice(0, colon) : address;
-    if (surface !== filter.surface) return false;
-  }
-  return true;
-}
-
-function matchesEventFilter(filter: EventFilter, env: EventEnvelope): boolean {
-  if (filter.surface !== undefined && filter.surface !== env.surface) return false;
-  if (filter.name !== undefined) {
-    if (typeof filter.name === "string") {
-      if (env.name !== filter.name) return false;
-    } else if ("exact" in filter.name) {
-      if (env.name !== filter.name.exact) return false;
-    } else if ("prefix" in filter.name) {
-      if (!env.name.startsWith(filter.name.prefix)) return false;
-    }
-  }
-  if (filter.scope !== undefined) {
-    if (filter.scope.appId !== undefined && env.scope.appId !== filter.scope.appId) return false;
-    if (filter.scope.sessionId !== undefined && env.scope.sessionId !== filter.scope.sessionId) {
-      return false;
-    }
-    if (
-      filter.scope.nodeId !== undefined &&
-      (env.scope as { nodeId?: string }).nodeId !== filter.scope.nodeId
-    ) {
-      return false;
-    }
-  }
-  return true;
 }

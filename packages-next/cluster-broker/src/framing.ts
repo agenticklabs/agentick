@@ -101,14 +101,82 @@ export interface LengthPrefixedDecoder {
  * Build a stateful length-prefix decoder. Each `Connection` byte
  * source should hold exactly one decoder; bytes accumulate across
  * `feed()` calls until full frames can be extracted.
+ *
+ * **Implementation**: chunk-list with read cursor. Inbound chunks
+ * are queued without copying; reads walk the chunk list and copy
+ * only when extracting a complete frame. This avoids the
+ * O(n²) "merge + recopy on every feed" pattern that thrashes GC
+ * under high-chunk-count load (typical TCP delivery scenario:
+ * many small chunks of a single large frame).
  */
 export function createLengthPrefixedDecoder(
   options: LengthPrefixedDecoderOptions = {},
 ): LengthPrefixedDecoder {
   const maxFrameBytes = options.maxFrameBytes ?? DEFAULT_MAX_FRAME_BYTES;
-  let buffer: Uint8Array = new Uint8Array(0);
+  // List of pending chunks. Reads consume from the head; partial
+  // consumption of the head chunk shifts it via offset increment so
+  // we don't realloc the chunk itself.
+  const chunks: Uint8Array[] = [];
+  let headOffset = 0; // byte offset into chunks[0] (the active read position)
+  let totalBytes = 0; // total unconsumed bytes across all queued chunks
   let poisoned = false;
   let lastError: LengthPrefixedDecodeError | undefined;
+
+  /** Peek N bytes starting at the current read position. */
+  function peek(n: number, out: Uint8Array): boolean {
+    if (totalBytes < n) return false;
+    let chunkIdx = 0;
+    let chunkOffset = headOffset;
+    let outOffset = 0;
+    let remaining = n;
+    while (remaining > 0) {
+      const chunk = chunks[chunkIdx]!;
+      const available = chunk.length - chunkOffset;
+      const take = Math.min(available, remaining);
+      out.set(chunk.subarray(chunkOffset, chunkOffset + take), outOffset);
+      outOffset += take;
+      remaining -= take;
+      chunkOffset += take;
+      if (chunkOffset >= chunk.length) {
+        chunkIdx += 1;
+        chunkOffset = 0;
+      }
+    }
+    return true;
+  }
+
+  /** Advance the read cursor by N bytes, dropping fully-consumed chunks. */
+  function advance(n: number): void {
+    let remaining = n;
+    while (remaining > 0 && chunks.length > 0) {
+      const chunk = chunks[0]!;
+      const available = chunk.length - headOffset;
+      if (available > remaining) {
+        headOffset += remaining;
+        remaining = 0;
+      } else {
+        chunks.shift();
+        headOffset = 0;
+        remaining -= available;
+      }
+    }
+    totalBytes -= n;
+  }
+
+  /** Extract a fresh-allocated copy of N bytes starting at the cursor. */
+  function extract(n: number): Uint8Array {
+    const out = new Uint8Array(n);
+    peek(n, out);
+    advance(n);
+    return out;
+  }
+
+  /** Read uint32 LE at the cursor without advancing. */
+  function peekUint32LE(): number {
+    const head = new Uint8Array(4);
+    peek(4, head);
+    return head[0]! | (head[1]! << 8) | (head[2]! << 16) | ((head[3]! << 24) >>> 0);
+  }
 
   return {
     get poisoned() {
@@ -119,35 +187,24 @@ export function createLengthPrefixedDecoder(
         // Once poisoned, refuse further input. Caller must close.
         return { frames: [], error: lastError };
       }
-      // Append chunk to buffer. Allocate a fresh Uint8Array sized to
-      // the combined length; copying is fine at these volumes (a few
-      // KB per frame typically).
-      const merged = new Uint8Array(buffer.length + chunk.length);
-      merged.set(buffer, 0);
-      merged.set(chunk, buffer.length);
-      buffer = merged;
+      if (chunk.length > 0) {
+        chunks.push(chunk);
+        totalBytes += chunk.length;
+      }
 
       const frames: Uint8Array[] = [];
 
-      while (buffer.length >= 4) {
-        const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
-        const declared = view.getUint32(0, true);
+      while (totalBytes >= 4) {
+        const declared = peekUint32LE();
         if (declared > maxFrameBytes) {
           poisoned = true;
           lastError = { _tag: "frame-too-large", declaredBytes: declared, maxBytes: maxFrameBytes };
           return { frames, error: lastError };
         }
-        if (buffer.length < 4 + declared) break; // wait for more bytes
-        // Slice so the frame buffer is independent of the rolling
-        // accumulator — keeping a reference to a slice of `buffer`
-        // would keep the entire buffer alive and prevent GC.
-        frames.push(buffer.slice(4, 4 + declared));
-        buffer = buffer.subarray(4 + declared);
+        if (totalBytes < 4 + declared) break; // wait for more bytes
+        advance(4); // consume length prefix
+        frames.push(extract(declared));
       }
-
-      // Snapshot any unconsumed trailing bytes so the accumulator
-      // doesn't pin the larger backing buffer.
-      if (buffer.byteOffset > 0) buffer = buffer.slice();
 
       return { frames };
     },

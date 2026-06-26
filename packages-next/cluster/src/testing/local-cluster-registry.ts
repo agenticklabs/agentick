@@ -14,6 +14,7 @@
  */
 
 import type { EventEnvelope, MessageEnvelope } from "@agentick/spec-next";
+import { matchesAddressFilter, matchesEventFilter } from "@agentick/utils-next";
 
 import type { AddressFilter, EventFilter, MembershipChange, NodeId } from "../types.js";
 
@@ -158,7 +159,7 @@ export function createLocalClusterRegistry(): LocalClusterRegistry {
       const entry = nodes.get(toNode);
       if (!entry) return;
       for (const sub of entry.inboxSubs) {
-        if (matchesAddress(sub.filter, env)) {
+        if (matchesAddressFilter(sub.filter, env.addressedTo)) {
           // Microtask schedule for deterministic ordering and so
           // the sender can `await send()` and have it resolve only
           // after delivery is at least queued.
@@ -170,7 +171,7 @@ export function createLocalClusterRegistry(): LocalClusterRegistry {
       for (const [nodeId, entry] of nodes) {
         if (nodeId === fromNode) continue;
         for (const sub of entry.busSubs) {
-          if (matchesEvent(sub.filter, env)) {
+          if (matchesEventFilter(sub.filter, env)) {
             queueMicrotask(() => sub.onEvent(env));
           }
         }
@@ -184,49 +185,4 @@ export function createLocalClusterRegistry(): LocalClusterRegistry {
       };
     },
   };
-}
-
-// ============================================================================
-// Filter matching — applied at routing time
-// ============================================================================
-
-function matchesAddress(filter: AddressFilter, env: MessageEnvelope): boolean {
-  if (filter.address !== undefined && filter.address !== env.addressedTo) return false;
-  if (filter.scopeId !== undefined) {
-    const idx = env.addressedTo.indexOf(":");
-    const scopeId = idx >= 0 ? env.addressedTo.slice(idx + 1) : env.addressedTo;
-    if (scopeId !== filter.scopeId) return false;
-  }
-  if (filter.surface !== undefined) {
-    const idx = env.addressedTo.indexOf(":");
-    const surface = idx >= 0 ? env.addressedTo.slice(0, idx) : env.addressedTo;
-    if (surface !== filter.surface) return false;
-  }
-  return true;
-}
-
-function matchesEvent(filter: EventFilter, env: EventEnvelope): boolean {
-  if (filter.surface !== undefined && filter.surface !== env.surface) return false;
-  if (filter.name !== undefined) {
-    if (typeof filter.name === "string") {
-      if (env.name !== filter.name) return false;
-    } else if ("exact" in filter.name) {
-      if (env.name !== filter.name.exact) return false;
-    } else if ("prefix" in filter.name) {
-      if (!env.name.startsWith(filter.name.prefix)) return false;
-    }
-  }
-  if (filter.scope !== undefined) {
-    if (filter.scope.appId !== undefined && env.scope.appId !== filter.scope.appId) return false;
-    if (filter.scope.sessionId !== undefined && env.scope.sessionId !== filter.scope.sessionId) {
-      return false;
-    }
-    if (
-      filter.scope.nodeId !== undefined &&
-      (env.scope as { nodeId?: string }).nodeId !== filter.scope.nodeId
-    ) {
-      return false;
-    }
-  }
-  return true;
 }

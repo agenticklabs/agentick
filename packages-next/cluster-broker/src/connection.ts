@@ -47,17 +47,27 @@ export interface Connection {
   send(message: Uint8Array): Promise<void>;
 
   /**
-   * Register a message handler. The returned function detaches the
-   * handler. Multiple handlers MAY be attached; each receives every
-   * inbound message. (Concrete consumers usually attach exactly one.)
+   * Register the message handler. EXACTLY ONE handler may be
+   * attached at a time — attempting to register a second handler
+   * before the first detaches throws (the wire impls would otherwise
+   * silently fan out, which the base classes never want). The
+   * returned function detaches the handler.
+   *
+   * Single-handler semantics match how the base classes actually use
+   * the Connection: `BaseBroker` attaches exactly one
+   * `onClientMessage` per accepted connection; `BaseClusterClient`
+   * attaches exactly one `onInbound` per connection. Multi-handler
+   * support was dead-design code — removed in Phase 4a.2.
    */
   onMessage(handler: (message: Uint8Array) => void): () => void;
 
   /**
-   * Register a close handler. Fires exactly once per Connection, the
-   * first time the underlying wire transitions to closed. Subsequent
-   * registrations after the close handler has fired SHOULD fire
-   * immediately (synchronously) with the recorded reason.
+   * Register a close handler. Multiple close handlers MAY be
+   * attached (e.g., one for logging, one for state-machine
+   * transitions); each fires exactly once per Connection when the
+   * underlying wire transitions to closed. Registrations after the
+   * close handler has fired SHOULD fire immediately (synchronously)
+   * with the recorded reason.
    */
   onClose(handler: (reason: ConnectionCloseReason) => void): () => void;
 

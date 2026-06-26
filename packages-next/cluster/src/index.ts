@@ -66,6 +66,12 @@ export {
 export { jsonCodec } from "./builtins/json-codec.js";
 export { consistentHashPartitioning } from "./builtins/consistent-hash-partitioning.js";
 
+// ────────── Canonical filter-matchers (re-exported from @agentick/utils-next) ──────────
+// Adopters writing custom cluster adapters can import these from
+// either package; they live in utils-next because they're shape-only
+// predicates with no cluster-protocol dependency.
+export { matchesAddressFilter, matchesEventFilter } from "@agentick/utils-next";
+
 // ────────── Conformance suite (Phase 2 impl) ──────────
 export {
   runClusterTransportConformance,

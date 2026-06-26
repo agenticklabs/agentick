@@ -16,10 +16,17 @@ connector:
 `@agentick/cluster-nats-next`) are **peers** of this package, not
 children — Redis IS the broker, so it doesn't reuse this plumbing.
 
-**Status:** Phase 4a (foundation). The abstract base classes, wire
-frame schema, length-prefix framing helper, and in-memory test fixture
-are shipped. First concrete wire impl (`cluster-net-next`, TCP) lands
-in Phase 4b.
+**Status:** Phase 4a.2 (foundation + correctness pass). The abstract
+base classes, wire frame schema, length-prefix framing helper, and
+in-memory test fixture are shipped. Phase 4a.1/4a.2 closed
+load-bearing gaps surfaced by the Phase 4a retrospective:
+heartbeat off-by-one, broker `dispatchFrame` error swallowing,
+reconnect attempt-counter reset bug, length-prefix decoder
+allocation O(n²), single-handler `Connection.onMessage` enforcement,
+and consolidated filter-matching with `@agentick/utils-next`'s
+canonical helpers. Every claimed diagnostic event is now
+test-pinned (`diagnostics-and-lifecycle.spec.ts`). First concrete
+wire impl (`cluster-net-next`, TCP) lands in Phase 4b.
 
 **Design:** [ADR 35 — cluster protocol](../../docs/proposals/v2/blueprint/35-cluster-protocol.md) ·
 [ADR 11 — cluster vision](../../docs/proposals/v2/blueprint/11-cluster.md)

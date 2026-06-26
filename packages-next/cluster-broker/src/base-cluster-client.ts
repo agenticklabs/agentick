@@ -31,7 +31,7 @@ import type {
   NodeId,
 } from "@agentick/cluster-next";
 import type { EventEnvelope, MessageEnvelope } from "@agentick/spec-next";
-import { ulid } from "@agentick/utils-next";
+import { matchesAddressFilter, matchesEventFilter, ulid } from "@agentick/utils-next";
 
 import type { Connection, Connector } from "./connection.js";
 import {
@@ -106,7 +106,7 @@ export interface BaseClusterClientOptions {
 // ============================================================================
 
 type ConnState =
-  | { readonly tag: "disconnected"; readonly attempts: number; readonly nextDelayMs: number }
+  | { readonly tag: "disconnected" }
   | { readonly tag: "connecting" }
   | { readonly tag: "handshaking"; readonly conn: Connection }
   | { readonly tag: "connected"; readonly conn: Connection }
@@ -140,7 +140,18 @@ export class BaseClusterClient implements ClusterTransport {
   private readonly onDiagnostic: (name: string, payload?: unknown) => void;
   private readonly random: () => number;
 
-  private state: ConnState = { tag: "disconnected", attempts: 0, nextDelayMs: 0 };
+  private state: ConnState = { tag: "disconnected" };
+  /**
+   * Reconnect attempts across the lifetime of the client. Lives on
+   * the instance rather than inside the state machine so it survives
+   * the transient `connecting` state between attempts. Pre-Phase-4a.1
+   * the counter was reset on every `disconnected → connecting`
+   * transition — infinite-retry bug that the give-up test caught.
+   */
+  private reconnectAttempts = 0;
+  /** Current backoff delay; doubles on each failure up to reconnectMaxMs. */
+  private currentBackoffMs = 0;
+
   private readonly inboxSubs = new Map<string, InboxSubscription>();
   private readonly busSubs = new Map<string, BusSubscription>();
 
@@ -151,6 +162,18 @@ export class BaseClusterClient implements ClusterTransport {
 
   /** Reconnect deferred timer. Tracked so close() can cancel cleanly. */
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * Resolves on the first successful handshake (Welcome received).
+   * Adopters waiting for "client is actually connected" await this
+   * — without it the only signal is the diagnostic stream.
+   * Re-resolves with the same value across the client's lifetime;
+   * it does NOT reset on reconnect (the contract is "we made it
+   * online at least once").
+   */
+  private readyResolve: ((value: void) => void) | null = null;
+  /** @see {@link ready} */
+  readonly ready: Promise<void>;
 
   constructor(opts: BaseClusterClientOptions) {
     this.nodeId = opts.nodeId;
@@ -164,12 +187,31 @@ export class BaseClusterClient implements ClusterTransport {
     this.onDiagnostic = opts.onDiagnostic ?? (() => {});
     this.random = opts.random ?? Math.random;
 
+    this.ready = new Promise<void>((resolve) => {
+      this.readyResolve = resolve;
+    });
+    this.currentBackoffMs = this.reconnectInitialMs;
+
     // Kick off the first connect on next microtask so subscribers
     // registered immediately after construction don't race with the
     // handshake.
     queueMicrotask(() => {
       void this.connectLoop();
     });
+  }
+
+  // ==========================================================================
+  // Public diagnostics surface
+  // ==========================================================================
+
+  /**
+   * Connection-state tag, for tests + adopter health checks.
+   * (`disconnected` / `connecting` / `handshaking` / `connected` /
+   * `closed`.) Adopters who want a stable Promise-shaped "are we
+   * online?" signal use {@link ready}.
+   */
+  get connectionState(): ConnState["tag"] {
+    return this.state.tag;
   }
 
   // ==========================================================================
@@ -301,27 +343,24 @@ export class BaseClusterClient implements ClusterTransport {
 
   private scheduleReconnect(): void {
     if (this.state.tag === "closed") return;
-    const prior =
-      this.state.tag === "disconnected"
-        ? this.state
-        : { tag: "disconnected" as const, attempts: 0, nextDelayMs: this.reconnectInitialMs };
-    const attempt = prior.attempts + 1;
-    if (this.reconnectMaxAttempts > 0 && attempt > this.reconnectMaxAttempts) {
+    this.reconnectAttempts += 1;
+    if (this.reconnectMaxAttempts > 0 && this.reconnectAttempts > this.reconnectMaxAttempts) {
       this.onDiagnostic("cluster:broker:client:reconnect-gave-up", {
         nodeId: this.nodeId,
-        attempts: prior.attempts,
+        attempts: this.reconnectAttempts - 1,
+        maxAttempts: this.reconnectMaxAttempts,
       });
       this.state = { tag: "closed" };
       return;
     }
-    // Full jitter — uniform [0, nextDelayMs). Standard practice for
-    // backoff; reduces thundering-herd reconnect storms.
-    const jittered = Math.floor(this.random() * prior.nextDelayMs);
-    const next = Math.min(prior.nextDelayMs * 2, this.reconnectMaxMs);
-    this.state = { tag: "disconnected", attempts: attempt, nextDelayMs: next };
+    // Full jitter — uniform [0, currentBackoffMs). Standard practice
+    // for backoff; reduces thundering-herd reconnect storms.
+    const jittered = Math.floor(this.random() * this.currentBackoffMs);
+    this.currentBackoffMs = Math.min(this.currentBackoffMs * 2, this.reconnectMaxMs);
+    this.state = { tag: "disconnected" };
     this.onDiagnostic("cluster:broker:client:reconnect-scheduled", {
       nodeId: this.nodeId,
-      attempt,
+      attempt: this.reconnectAttempts,
       delayMs: jittered,
     });
     this.reconnectTimer = setTimeout(() => {
@@ -403,8 +442,20 @@ export class BaseClusterClient implements ClusterTransport {
     }
     const conn = this.state.conn;
     this.state = { tag: "connected", conn };
+    // Reset backoff so a future drop starts fresh — long-lived
+    // clients survive arbitrarily-many transient disconnects.
+    this.reconnectAttempts = 0;
+    this.currentBackoffMs = this.reconnectInitialMs;
     this.startHeartbeat();
     this.onDiagnostic("cluster:broker:client:connected", { nodeId: this.nodeId });
+    // Resolve the `ready` Promise on first successful handshake.
+    // Subsequent reconnects don't re-create the Promise (the contract
+    // is "we made it online at least once") — adopters watching the
+    // diagnostic stream see reconnect transitions.
+    if (this.readyResolve) {
+      this.readyResolve();
+      this.readyResolve = null;
+    }
     // Re-establish every active subscription on (re-)connect. The
     // wire registry on the broker is per-connection; new connection
     // = fresh registry.
@@ -523,10 +574,14 @@ export class BaseClusterClient implements ClusterTransport {
   private async tickHeartbeat(): Promise<void> {
     if (this.state.tag !== "connected") return;
     this.outstandingPings += 1;
-    if (this.outstandingPings > this.missedPongLimit) {
+    // Declare dead when we've accumulated `missedPongLimit` outstanding
+    // pings without a pong — i.e., on the missedPongLimit-th tick, not
+    // the (missedPongLimit+1)-th. README says "miss-N = dead".
+    if (this.outstandingPings >= this.missedPongLimit) {
       this.onDiagnostic("cluster:broker:client:heartbeat-missed", {
         nodeId: this.nodeId,
         missed: this.outstandingPings,
+        limit: this.missedPongLimit,
       });
       // Force-close the connection — onConnectionClosed kicks
       // reconnect.
@@ -537,48 +592,4 @@ export class BaseClusterClient implements ClusterTransport {
     const seq = ++this.nextPingSeq;
     await this.tryWriteIgnoringDisconnect({ type: FRAME_PING, seq });
   }
-}
-
-// ============================================================================
-// Filter matching — same semantics as LocalClusterRegistry's matchers
-// ============================================================================
-
-function matchesAddressFilter(filter: AddressFilter, address: string): boolean {
-  if (filter.address !== undefined && filter.address !== address) return false;
-  const colon = address.indexOf(":");
-  if (filter.scopeId !== undefined) {
-    const scopeId = colon >= 0 ? address.slice(colon + 1) : address;
-    if (scopeId !== filter.scopeId) return false;
-  }
-  if (filter.surface !== undefined) {
-    const surface = colon >= 0 ? address.slice(0, colon) : address;
-    if (surface !== filter.surface) return false;
-  }
-  return true;
-}
-
-function matchesEventFilter(filter: EventFilter, env: EventEnvelope): boolean {
-  if (filter.surface !== undefined && filter.surface !== env.surface) return false;
-  if (filter.name !== undefined) {
-    if (typeof filter.name === "string") {
-      if (env.name !== filter.name) return false;
-    } else if ("exact" in filter.name) {
-      if (env.name !== filter.name.exact) return false;
-    } else if ("prefix" in filter.name) {
-      if (!env.name.startsWith(filter.name.prefix)) return false;
-    }
-  }
-  if (filter.scope !== undefined) {
-    if (filter.scope.appId !== undefined && env.scope.appId !== filter.scope.appId) return false;
-    if (filter.scope.sessionId !== undefined && env.scope.sessionId !== filter.scope.sessionId) {
-      return false;
-    }
-    if (
-      filter.scope.nodeId !== undefined &&
-      (env.scope as { nodeId?: string }).nodeId !== filter.scope.nodeId
-    ) {
-      return false;
-    }
-  }
-  return true;
 }
