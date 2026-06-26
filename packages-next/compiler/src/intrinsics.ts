@@ -2,18 +2,17 @@
  * Intrinsic semantic helpers — pure functions producing `RenderedTree`
  * fragments. The shared vocabulary every framework adapter targets.
  *
- * Each helper takes already-resolved props + already-walked children
- * (inner content blocks / entries the adapter's runtime produced) and
- * returns the IR fragment for that intrinsic. AST-agnostic — the
- * adapter's host-config / commit pipeline decides WHEN to call which
- * helper based on its native AST walk.
+ * Each helper takes already-resolved props + (optionally) already-walked
+ * children, and returns the IR fragment for that intrinsic. AST-
+ * agnostic — the adapter's host-config / commit pipeline decides WHEN
+ * to call which helper based on its native AST walk.
  *
  * Example (in compiler-react-next's host-config):
  *
  *   case "section":
  *     return { entries: [sectionEntry(props, childBlocks)] };
- *   case "h1":
- *     return { blocks: [headerBlock(1, innerText)] };
+ *   case "image":
+ *     return { blocks: [imageBlock(props)] };
  *
  * Where "render JSX trees to IR" lives differs by framework — react-
  * reconciler drives a commit pipeline; Angular has change detection;
@@ -23,18 +22,21 @@
 
 import type {
   ContentBlock,
+  MediaSource,
   MessageEntry,
   SectionEntry,
   SemanticContentBlock,
   SemanticNode,
 } from "@agentick/spec-next";
+import { omitUndefined } from "@agentick/utils-next";
 
-// ────────── Block-level (inline content) ──────────
+// ============================================================================
+// Block-level (inline content)
+// ============================================================================
 
 /**
- * Plain text block. Accepts either a string or a list of strings
- * (joined). Adopters with mixed inline children typically concat
- * before calling.
+ * Plain text block. Adopters with mixed inline children typically
+ * concat before calling.
  */
 export function textBlock(text: string): ContentBlock {
   return { type: "text", text };
@@ -65,8 +67,7 @@ function semanticBlock(node: SemanticNode): SemanticContentBlock {
 
 /**
  * Fenced code block. `language` is required by the spec — defaults to
- * `"other"` when the caller doesn't know. Common values:
- * `"typescript"`, `"python"`, `"json"`, `"shell"`, `"sql"`, etc.
+ * `"other"` when the caller doesn't know.
  */
 export function codeBlock(text: string, language?: string): ContentBlock {
   return { type: "code", text, language: language ?? "other" };
@@ -80,7 +81,236 @@ export function jsonBlock(data: unknown): ContentBlock {
   return { type: "json", data };
 }
 
-// ────────── Context-level (entries) ──────────
+/**
+ * Reasoning block — opaque-or-redacted internal chain-of-thought
+ * surfaced by some providers. `signature` carries provider-specific
+ * verification info; `isRedacted` flags content the provider hid.
+ */
+export interface ReasoningProps {
+  readonly text: string;
+  readonly signature?: string;
+  readonly isRedacted?: boolean;
+  readonly id?: string;
+}
+
+export function reasoningBlock(props: ReasoningProps): ContentBlock {
+  return {
+    type: "reasoning",
+    text: props.text,
+    ...omitUndefined({
+      signature: props.signature,
+      isRedacted: props.isRedacted,
+      id: props.id,
+    }),
+  };
+}
+
+/**
+ * Raw XML block — pre-formatted XML text wrapped as a block.
+ */
+export function xmlBlockHelper(text: string): ContentBlock {
+  return { type: "xml", text };
+}
+
+/**
+ * Raw HTML block — pre-formatted HTML text wrapped as a block.
+ */
+export function htmlBlock(text: string): ContentBlock {
+  return { type: "html", text };
+}
+
+/**
+ * CSV block — tabular text with optional header row.
+ */
+export function csvBlock(text: string, headers?: readonly string[]): ContentBlock {
+  return {
+    type: "csv",
+    text,
+    ...omitUndefined({ headers: headers && headers.length > 0 ? headers : undefined }),
+  };
+}
+
+// ============================================================================
+// Media blocks
+// ============================================================================
+
+export interface ImageProps {
+  readonly source: MediaSource;
+  readonly mimeType?: string;
+  readonly altText?: string;
+  readonly id?: string;
+}
+
+export function imageBlock(props: ImageProps): ContentBlock {
+  return {
+    type: "image",
+    source: props.source,
+    ...omitUndefined({
+      mimeType: props.mimeType as never,
+      altText: props.altText,
+      id: props.id,
+    }),
+  };
+}
+
+export interface DocumentProps {
+  readonly source: MediaSource;
+  readonly mimeType?: string;
+  readonly title?: string;
+  readonly id?: string;
+}
+
+export function documentBlock(props: DocumentProps): ContentBlock {
+  return {
+    type: "document",
+    source: props.source,
+    ...omitUndefined({
+      mimeType: props.mimeType as never,
+      title: props.title,
+      id: props.id,
+    }),
+  };
+}
+
+export interface AudioProps {
+  readonly source: MediaSource;
+  readonly mimeType?: string;
+  readonly transcript?: string;
+  readonly id?: string;
+}
+
+export function audioBlock(props: AudioProps): ContentBlock {
+  return {
+    type: "audio",
+    source: props.source,
+    ...omitUndefined({
+      mimeType: props.mimeType as never,
+      transcript: props.transcript,
+      id: props.id,
+    }),
+  };
+}
+
+export interface VideoProps {
+  readonly source: MediaSource;
+  readonly mimeType?: string;
+  readonly transcript?: string;
+  readonly id?: string;
+}
+
+export function videoBlock(props: VideoProps): ContentBlock {
+  return {
+    type: "video",
+    source: props.source,
+    ...omitUndefined({
+      mimeType: props.mimeType as never,
+      transcript: props.transcript,
+      id: props.id,
+    }),
+  };
+}
+
+// ============================================================================
+// Event blocks (timeline-event content; produced statically from props)
+// ============================================================================
+
+export interface UserActionProps {
+  readonly action: string;
+  readonly actor?: string;
+  readonly target?: string;
+  readonly details?: Record<string, unknown>;
+  readonly text?: string;
+  readonly id?: string;
+}
+
+export function userActionBlock(props: UserActionProps): ContentBlock {
+  return {
+    type: "user_action",
+    action: props.action,
+    ...omitUndefined({
+      actor: props.actor,
+      target: props.target,
+      details: props.details,
+      text: props.text,
+      id: props.id,
+    }),
+  };
+}
+
+export interface SystemEventProps {
+  readonly event: string;
+  readonly source?: string;
+  readonly data?: Record<string, unknown>;
+  readonly text?: string;
+  readonly id?: string;
+}
+
+export function systemEventBlock(props: SystemEventProps): ContentBlock {
+  return {
+    type: "system_event",
+    event: props.event,
+    ...omitUndefined({
+      source: props.source,
+      data: props.data,
+      text: props.text,
+      id: props.id,
+    }),
+  };
+}
+
+export interface StateChangeProps {
+  readonly entity: string;
+  readonly field?: string;
+  readonly from: unknown;
+  readonly to: unknown;
+  readonly trigger?: string;
+  readonly text?: string;
+  readonly id?: string;
+}
+
+export function stateChangeBlock(props: StateChangeProps): ContentBlock {
+  return {
+    type: "state_change",
+    entity: props.entity,
+    from: props.from,
+    to: props.to,
+    ...omitUndefined({
+      field: props.field,
+      trigger: props.trigger,
+      text: props.text,
+      id: props.id,
+    }),
+  };
+}
+
+// ============================================================================
+// Custom block — adopter-defined tag with arbitrary attrs + content
+// ============================================================================
+
+export interface CustomBlockProps {
+  readonly tag: string;
+  readonly content: string;
+  readonly attrs?: Record<string, string>;
+  readonly selfClosing?: boolean;
+  readonly id?: string;
+}
+
+export function customBlock(props: CustomBlockProps): ContentBlock {
+  return {
+    type: "custom",
+    tag: props.tag,
+    content: props.content,
+    attrs: props.attrs ?? {},
+    ...omitUndefined({
+      selfClosing: props.selfClosing,
+      id: props.id,
+    }),
+  };
+}
+
+// ============================================================================
+// Context-level (entries)
+// ============================================================================
 
 /**
  * Section entry — a structured context entry with a stable `id` that
@@ -97,14 +327,15 @@ export interface SectionProps {
 
 export function sectionEntry(props: SectionProps, content: readonly ContentBlock[]): SectionEntry {
   const id = props.id ?? "anonymous";
-  const metadata: Record<string, unknown> = {};
-  if (props.audience !== undefined) metadata.audience = props.audience;
-  if (props.priority !== undefined) metadata.priority = props.priority;
+  const metadata = omitUndefined({
+    audience: props.audience,
+    priority: props.priority,
+  });
   return {
     kind: "section",
     id,
     content,
-    ...(props.title !== undefined ? { title: props.title } : {}),
+    ...omitUndefined({ title: props.title }),
     ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
   };
 }
@@ -124,6 +355,6 @@ export function messageEntry(props: MessageProps, content: readonly ContentBlock
     kind: "message",
     role: props.role,
     content,
-    ...(props.id !== undefined ? { id: props.id } : {}),
+    ...omitUndefined({ id: props.id }),
   };
 }

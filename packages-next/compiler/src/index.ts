@@ -29,14 +29,38 @@ export type { RenderContext } from "./render-context.js";
 export { useData } from "./use-data.js";
 
 export {
+  audioBlock,
   codeBlock,
+  csvBlock,
+  customBlock,
+  documentBlock,
   headerBlock,
+  htmlBlock,
+  imageBlock,
   jsonBlock,
   messageEntry,
+  reasoningBlock,
   sectionEntry,
+  stateChangeBlock,
+  systemEventBlock,
   textBlock,
+  userActionBlock,
+  videoBlock,
+  xmlBlockHelper,
 } from "./intrinsics.js";
-export type { MessageProps, SectionProps } from "./intrinsics.js";
+export type {
+  AudioProps,
+  CustomBlockProps,
+  DocumentProps,
+  ImageProps,
+  MessageProps,
+  ReasoningProps,
+  SectionProps,
+  StateChangeProps,
+  SystemEventProps,
+  UserActionProps,
+  VideoProps,
+} from "./intrinsics.js";
 
 export { format } from "./format.js";
 export type { FormatOptions } from "./format.js";
