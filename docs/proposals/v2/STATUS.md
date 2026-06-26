@@ -1,7 +1,42 @@
 # Agentick v2 — Implementation Status
 
 **Branch:** `feat/v2`
-**Last updated:** 2026-06-25 (Phase 4e) — **Cluster Phase 4e — `@agentick/cluster-ws-next` lands. WebSocket wire shipped + uncovered + fixed a latent ClusterCodec type-soundness bug across the cluster build graph.** 16/16 cluster-ws tests green; 148/148 across all four cluster packages. The package mirrors cluster-net's shape (transport + membership multiplexed over one connection, broker mounted standalone OR on adopter's `http.Server`) but uses WebSocket-native message boundaries instead of length-prefix framing. Subprotocol negotiation (`agentick-cluster-v1`) provides forward-compatible versioning; `allowedOrigins` policy rejects unauthorized browser clients; path-prefix routing keeps cluster upgrades from conflicting with adopter HTTP handlers. Verified by 6 WS-specific tests on top of the conformance suite: subprotocol rejection of mismatched clients (×2), mount-coexists-with-other-handlers (×2), origin policy enforcement (×1), connector connect-timeout (×1).
+**Last updated:** 2026-06-26 (Phase 4 closed) — **Cluster Phase 4f–4g — production-ready cluster wire stack across all four packages.** Eight commits land:
+
+1. **4f.1 — strict-typecheck sweep**: 9 v2 packages had silently regressed `tsconfig.json` since a 2026-06-12 fix; restored across spec, utils, pubsub, tasks, cluster, cluster-broker, cluster-net, cluster-ws, cluster-redis. Surfaced months of accumulated test-fixture drift (deleted obsolete tests for removed features; updated tests for shape-changed types). Fixed a latent `Factory<R, P>` type-soundness bug where `R | Promise<R> | Effect<R, never, never>` was collapsing to `unknown` in TS inference.
+
+2. **4f.2 — DRY consolidation**: extracted `startBroker` / `createClusterNode` / `defineWireCluster` from the three near-identical wire packages into `cluster-broker-next/wire-helpers.ts`. Per-wire LOC dropped ~30%; future wires (Redis, future custom) reuse the helpers transparently.
+
+3. **omitUndefined sweep**: shipped `@agentick/utils-next/omitUndefined` and mechanically swept ~780 instances of `...(X.Y !== undefined ? { Y: X.Y } : {})` across packages-next/. Restricted to pure-forwarding (backreference-enforced LHS = value); thunk-value patterns (`codec: () => opts.codec!`) intentionally untouched (collapsing them would change semantics). Multi-line variants normalized via two-pass perl.
+
+4. **4f.3 — internal re-election (Unix)**: `electableUnixClusterNode` wraps `unixClusterNode` with a diagnostic-event watcher. After K consecutive connect-failed events (default 5), surviving workers race to bind the vacated socket via `tryBindOrConnectUnix`; winner spins up a local `BaseBroker` adopting the bound server. Single-host broker failover without external supervisor restart. TCP/WS multi-host re-election explicitly out of scope (cross-host consensus = wrong fit; use Redis Sentinel via cluster-redis-next).
+
+5. **4f.4 — backpressure**: per-connection `BoundedWriteQueue<BrokerFrame>` (default 1024 frames). All broker → client writes go through queue.enqueue (sync); per-conn background drain. Slow client no longer blocks fan-out; broker memory bounded under sustained slow-consumer stress. Drop-oldest overflow + `cluster:broker:server:backpressure-drop` diagnostic.
+
+6. **4f.5 — BrokerCodec wrapper**: centralized the `as unknown as MessageEnvelope` cast (from Phase 4e) into one adapter in `cluster-broker-next/broker-codec.ts`. `BaseBroker` + `BaseClusterClient` now hold a typed `BrokerCodec` internally; adopter-facing `ClusterCodec` is unchanged. Phase 5+ msgpack/protobuf codecs implement `BrokerCodec` directly.
+
+7. **4f.6 — graceful broker shutdown**: `BoundedWriteQueue.flush(timeoutMs = 5000)` waits for pending frames to drain. `BaseBroker.close()` enqueues FRAME_GOODBYE to every client, awaits parallel flush, then tears down listener. Fixes a regression Phase 4f.4 introduced (writeFrame became sync; Goodbye was fire-and-forget). Aligns with k8s SIGTERM grace period defaults.
+
+8. **4g.1–4g.4 — `@agentick/cluster-redis-next` lands**: the production multi-host story. `createRedisTransport` (pub/sub channels `agentick:bus` + `agentick:inbox:<nodeId>`, two ioredis conns per node) + `createRedisMembership` (SET + per-node TTL keys, 10s heartbeat / 30s TTL / 5s poll defaults) + `redisClusterNode` / `defineRedisCluster` factories. Adopter passes ioredis clients (peer dep); the package is RESP-protocol-compatible (Redis, Valkey, KeyDB, Dragonfly, all cloud managed). 5 integration tests against a fake-Redis hub verify round-trip + broadcast + filter narrowing + membership snapshot + graceful leave. Symmetric — no broker/client role; Redis IS the broker.
+
+**ADR 35 (cluster-protocol)** gains a §10 "Deployment tiers" section that documents the honest tier matrix: dev (none) / single-host (Unix + electable) / multi-host (Redis) / edge (TCP-WS + external supervisor). The "use Redis for multi-host" recommendation is explicit; our broker is for single-host or specialized edge.
+
+**TODO sweep**: retired three resolved phase-4 TODOs (BrokerCodec, per-conn backpressure, listener consolidation). Remaining TODOs catalog deferred concerns to Phase 5+ (codec routing through cluster-next layer, partitioning rebalance on topology change, per-event broadcast FIFO, validator tightening).
+
+**Workspace test status**: 1854+ tests across all cluster packages pass. Strict typecheck clean across 66/66 v2 packages.
+
+**Deferred to Phase 5+** (explicit, ADR-documented):
+- Real-Redis conformance via docker-compose (fake-Redis integration ships now; real-Redis is an infra task).
+- 3-replica Otto cluster demo (the end-to-end deploy proof point; needs docker-compose infra).
+- `createGateway({ cluster })` fusion (Phase 5 ergonomic win).
+- DurableJournal adapter (Redis Streams).
+- Real adopter signal-driven hardening (compression, TLS shorthand for wsBroker standalone-port, partitioning.onMembershipChange hook).
+
+**Phase 4 closed.** The multi-host production story is shipped; the single-host story has automatic failover; the broker is backpressure-aware and graceful on shutdown. Next: Phase 5 begins with `createGateway` cluster-config fusion.
+
+---
+
+**Previously, 2026-06-25 (Phase 4e) — Cluster Phase 4e — `@agentick/cluster-ws-next` lands. WebSocket wire shipped + uncovered + fixed a latent ClusterCodec type-soundness bug across the cluster build graph.** 16/16 cluster-ws tests green; 148/148 across all four cluster packages. The package mirrors cluster-net's shape (transport + membership multiplexed over one connection, broker mounted standalone OR on adopter's `http.Server`) but uses WebSocket-native message boundaries instead of length-prefix framing. Subprotocol negotiation (`agentick-cluster-v1`) provides forward-compatible versioning; `allowedOrigins` policy rejects unauthorized browser clients; path-prefix routing keeps cluster upgrades from conflicting with adopter HTTP handlers. Verified by 6 WS-specific tests on top of the conformance suite: subprotocol rejection of mismatched clients (×2), mount-coexists-with-other-handlers (×2), origin policy enforcement (×1), connector connect-timeout (×1).
 
 **The uncovered bug:** Building cluster-ws against the cluster build graph surfaced a long-standing type-soundness violation in `packages-next/cluster/src/define.ts` — `resolveFactoryAsync<R, P>(factory: (parent: P) => R | Promise<R> | unknown, ...)` collapsed to `unknown` in TS inference. Every `transport`/`membership`/`partitioning`/`journal`/`codec` resolved-to-unknown, downstream assignments cast through implicit-any. The cluster package's `tsconfig.json` has `"include": []` and references `tsconfig.build.json`, so `pnpm typecheck` (running `tsc -p tsconfig.json --noEmit`) was checking NOTHING — the typecheck script was a silent no-op against the cluster source. Fixed by narrowing the factory's return-type to the documented `R | Promise<R> | Effect.Effect<R, never, never>` union. Once R was correctly inferred, two more cascading errors surfaced in cluster-broker (`writeFrame` passing `BrokerFrame` to a `ClusterCodec.encode` typed for envelopes only — TODOs added documenting the codec-shape gap; cast at boundary is the temporary bridge). A new `createJsonCodec()` synchronous helper was added so wire impls (cluster-net, cluster-ws) can construct the default codec directly instead of invoking `jsonCodec()({} as never)` which returned the factory union.
 

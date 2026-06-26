@@ -26,16 +26,13 @@ import type { Connection, Listener } from "@agentick/cluster-broker-next";
 import { socketToConnection } from "./socket-connection.js";
 import { omitUndefined } from "@agentick/utils-next";
 
-// TODO(phase-4e-followup): consolidate TCP + Unix listener/connector/
-// cluster modules. unix-listener.ts and tcp-listener.ts are ~80%
-// identical (same socketToConnection wiring, same diagnostic
-// emission, same lifecycle). Same for *-connector and *-cluster.
-// The right time to extract a shared base is AFTER Phase 4e
-// (cluster-ws-next) lands so we can see what genuinely
-// generalizes across all three wire impls — WS shares ~20% with
-// net (Connection wrapper) but the listener/connector/cluster
-// shapes diverge. Don't refactor pre-4e or we'll over-fit to
-// TCP/Unix similarity.
+// Phase 4f.2 consolidated the cluster-side shared helpers
+// (`startBroker`, `createClusterNode`, `defineWireCluster`) into
+// `@agentick/cluster-broker-next/wire-helpers.ts`. The
+// listener/connector modules in this package stay wire-specific —
+// they handle Unix-socket / TCP / WS concerns respectively. Further
+// consolidation (e.g., a shared length-prefix listener for TCP+Unix)
+// is Phase 5+ if the duplication grows worth extracting.
 
 /**
  * Throws on Windows. Unix sockets exist on Win32 in principle but

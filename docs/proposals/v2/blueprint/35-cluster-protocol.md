@@ -360,6 +360,32 @@ Rung (d) requires reconciler-level work (continuation primitives, idempotency ke
 
 `@agentick/cluster-next/testing` ships `defineLocalClusterTransport` + `defineLocalClusterMembership` — in-memory impls that route between simulated nodes via shared `LocalEventBus` instances. Adopters and the cluster conformance suite use these to spin up multi-node tests without infrastructure. Same protocol as the real adapters; same code paths; no Docker.
 
+### 10. Deployment tiers — picking a wire (Phase 4f / 4g)
+
+Adopters pick a cluster wire by deployment tier, NOT by intrinsic feature preference. The honest tier matrix:
+
+| Tier | Wire | Adopter config | When |
+|---|---|---|---|
+| **Dev / single-process** | none | `createApp(...)` (no `cluster:` option) | Local development, single-node tests. No clustering needed. |
+| **Single-host multi-worker** | Unix socket | `defineUnixCluster({ socketPath })` + optional `electableUnixClusterNode` for re-election | PM2 fork-mode, Node cluster module, worker pools on one large box. Auto-elect via `tryBindOrConnectUnix`; first-to-bind becomes broker. Re-election on broker death (Phase 4f.3) keeps the cluster healing without external supervisor restart. |
+| **Multi-host production** | Redis | `defineRedisCluster({ pubClient, subClient })` | Multi-host, k8s, anywhere across machines. Redis (Sentinel / Cluster / Valkey / KeyDB / Dragonfly) is the broker. HA / failover / monitoring are Redis's responsibility — adopters use their existing ops infrastructure, not ours. |
+| **Edge / Redis-allergic multi-host** | TCP or WebSocket | `defineTcpCluster` / `defineWsCluster` | Specialized: embedded deployments, air-gapped systems, "we don't want another infra dep." External supervisor (PM2 / systemd / k8s) provides HA. |
+
+**Mental model:** broker = "the thing that holds soft-state routing." For multi-host, Redis IS the broker. The TCP / Unix / WS broker we ship is the option for single-host (Unix) or specialized edge (TCP/WS) cases — not the recommended multi-host path. Multi-host production = Redis. Document that clearly to adopters so they don't reach for our broker when they want a production cluster.
+
+**Why no built-in HA for our broker?** External supervisor (PM2 / systemd / k8s) restart is the documented Phase 4 HA story. Internal re-election (Phase 4f.3) handles single-host scenarios where bind-race makes sense. Cross-host HA requires consensus (Raft, etcd-style) — the wrong-shape problem for v2.0 when Redis Sentinel solves it for free. We don't reinvent the HA wheel; we delegate to infrastructure adopters already operate.
+
+**Phase 4 hardening additions for the broker tiers:**
+- **4f.4 backpressure** — bounded per-connection write queue; one slow client can't stall fan-out (`BoundedWriteQueue` in `@agentick/cluster-broker-next`).
+- **4f.5 BrokerCodec adapter** — broker-frame schema separated from envelope schema; one cast lives in the adapter, not scattered across call sites.
+- **4f.6 graceful shutdown** — `broker.close()` flushes pending Goodbye frames before tearing down the listener; adopters wire `process.on("SIGTERM")` for k8s rolling deploys.
+
+**Phase 5 candidates** (NOT committed in Phase 4):
+- DurableJournal adapter for Redis Streams (rung d).
+- `createGateway({ cluster })` fusion — adopter doesn't manage cluster manually; the gateway handles it.
+- Real-Redis conformance suite via docker-compose (Phase 4g.4 lands fake-Redis integration; real-Redis is its own infra task).
+- 3-replica Otto demo (proof-point of the deploy story end-to-end).
+
 ## What this does NOT commit
 
 - **No `Resolvable<T>` exported type.** Lazy config resolution is per-field inline (`T | (() => T | Promise<T>)`); resolution is a one-line helper. Per ADR 36.

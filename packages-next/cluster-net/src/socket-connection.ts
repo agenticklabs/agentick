@@ -18,11 +18,12 @@
  * (per outbound dial). Same wire format, same framing in both
  * directions.
  *
- * TODO(phase-4b): per-connection backpressure. Currently we
- * `socket.write(bytes)` without checking the return value. Node's
- * Writable.write returns `false` when the kernel buffer is full;
- * we should pause writes until `drain` fires (and surface a
- * `cluster:broker:net:backpressure` diagnostic).
+ * Phase 4f.4 resolved per-connection backpressure at the broker
+ * layer (`BoundedWriteQueue` in `@agentick/cluster-broker-next`).
+ * Below the broker, `writeToSocket` already awaits `socket.drain`
+ * before resolving — `socket.write` returns false → we await drain
+ * → resolve. The bounded queue caps the broker-side buffer; the
+ * kernel buffer + drain handles the in-flight write back-pressure.
  */
 
 import type { Socket } from "node:net";

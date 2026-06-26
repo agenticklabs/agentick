@@ -489,13 +489,9 @@ export class BaseBroker {
    * blocked the broker's sequential fan-out loop. Now slow clients
    * stall locally; fan-out to others proceeds without delay.
    *
-   * TODO(phase-4f): ClusterCodec is typed for envelopes at the
-   * cluster-next layer. Broker frames piggyback the SAME codec —
-   * JSON tolerates anything; msgpack/protobuf would need a broker-
-   * specific schema. The `as unknown as MessageEnvelope` cast lives
-   * inside the queue's encode callback; a follow-up should introduce
-   * `BrokerCodec` that wraps `ClusterCodec` + handles broker-internal
-   * frames explicitly.
+   * Phase 4f.5 introduced `BrokerCodec` — the cast away from
+   * `MessageEnvelope` now lives in one place (`broker-codec.ts`'s
+   * `adaptClusterCodec`). `writeFrame` here is straightforward.
    */
   private writeFrame(client: ConnectedClient, frame: BrokerFrame): void {
     client.writeQueue.enqueue(frame);

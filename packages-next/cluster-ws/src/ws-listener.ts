@@ -33,13 +33,13 @@ import type { Connection, Listener } from "@agentick/cluster-broker-next";
 import { AGENTICK_CLUSTER_SUBPROTOCOL, type WsListenerOptions } from "./ws-shared.js";
 import { wsToConnection } from "./ws-connection.js";
 
-// TODO(phase-4e-followup): consolidate cluster-net (TCP + Unix) and
-// cluster-ws listener/connector/cluster modules. The Connection
-// wrapper interface already abstracts wire-level differences; the
-// listener/connector outer shapes share lifecycle + diagnostic
-// patterns even though their wire impls differ. After 4e ships and
-// all three wires exist, evaluate a `cluster-wire-base-next` package
-// to host the shared bits.
+// Phase 4f.2 consolidated `startBroker`, `createClusterNode`, and
+// `defineWireCluster` into `@agentick/cluster-broker-next/wire-helpers
+// .ts`. The wire-specific listener/connector modules (this file,
+// tcp-listener.ts, unix-listener.ts) stay separate — they each handle
+// wire-specific concerns (subprotocol negotiation here; length-prefix
+// framing in tcp/unix). Phase 5+ may extract more shared bits if real
+// duplication remains; the current shape is post-DRY.
 
 export function createWsListener(opts: WsListenerOptions): Listener {
   const path = opts.path ?? "/cluster";
