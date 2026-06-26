@@ -1,0 +1,54 @@
+{
+  "name": "@agentick/cluster-net-next",
+  "version": "0.0.0",
+  "private": true,
+  "description": "TCP + Unix-socket cluster transport for Agentick v2. Concrete wire impl built on `@agentick/cluster-broker-next` + Node's `net` module. Ships `tcpTransport` / `tcpMembership` / `defineTcpCluster` (Phase 4b), plus `unixTransport` / `unixMembership` / `defineUnixCluster` (Phase 4d). Auto-elect first-to-bind; multiplexed transport+membership over ONE connection per node; length-prefix framing via cluster-broker-next.",
+  "keywords": [
+    "agentick",
+    "cluster",
+    "tcp",
+    "unix-socket",
+    "ipc"
+  ],
+  "license": "MIT",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages-next/cluster-net"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
+  },
+  "dependencies": {
+    "@agentick/cluster-broker-next": "workspace:*",
+    "@agentick/cluster-next": "workspace:*",
+    "@agentick/spec-next": "workspace:*",
+    "@agentick/utils-next": "workspace:*"
+  }
+}

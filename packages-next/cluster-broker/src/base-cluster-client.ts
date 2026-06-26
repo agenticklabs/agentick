@@ -28,6 +28,7 @@ import type {
   ClusterCodec,
   ClusterTransport,
   EventFilter,
+  MembershipChange,
   NodeId,
 } from "@agentick/cluster-next";
 import type { EventEnvelope, MessageEnvelope } from "@agentick/spec-next";
@@ -41,9 +42,11 @@ import {
   FRAME_GOODBYE,
   FRAME_HELLO,
   FRAME_INBOX_DELIVER,
+  FRAME_MEMBERSHIP,
   FRAME_PING,
   FRAME_PONG,
   FRAME_SEND,
+  FRAME_SUBSCRIBE_ACK,
   FRAME_SUBSCRIBE_BUS,
   FRAME_SUBSCRIBE_INBOX,
   FRAME_UNSUBSCRIBE,
@@ -155,6 +158,28 @@ export class BaseClusterClient implements ClusterTransport {
   private readonly inboxSubs = new Map<string, InboxSubscription>();
   private readonly busSubs = new Map<string, BusSubscription>();
 
+  /**
+   * Cluster membership as last reported by the broker. Updated by
+   * the initial Welcome snapshot and subsequent Membership delta
+   * frames. Membership consumers (e.g., the membership seam from
+   * cluster-net-next) subscribe via {@link onMembershipChange} +
+   * read the snapshot via {@link nodes}.
+   */
+  private memberNodes = new Set<NodeId>();
+  private readonly membershipHandlers = new Set<(change: MembershipChange) => void>();
+
+  /**
+   * Per-pending-subscription Promise + resolver pair. When the
+   * broker echoes back {@link FRAME_SUBSCRIBE_ACK}, the resolver
+   * fires and the entry is dropped. {@link flush} awaits every
+   * pending Promise — the call returns only after every in-flight
+   * subscription has been recorded at the broker.
+   */
+  private readonly pendingSubscribeAcks = new Map<
+    string,
+    { readonly promise: Promise<void>; readonly resolve: () => void }
+  >();
+
   /** Heartbeat machinery. Reset on every (re-)connect. */
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private nextPingSeq = 0;
@@ -214,6 +239,33 @@ export class BaseClusterClient implements ClusterTransport {
     return this.state.tag;
   }
 
+  /**
+   * Snapshot of currently-known cluster nodes (per the broker's
+   * last membership update). Used by the membership seam paired
+   * with this client; also exposed for adopter diagnostics.
+   */
+  nodes(): readonly NodeId[] {
+    return [...this.memberNodes];
+  }
+
+  /**
+   * Register a handler for cluster membership changes. The handler
+   * fires for:
+   *   - The initial snapshot extracted from the Welcome frame
+   *     (kind: "snapshot")
+   *   - Every subsequent membership delta from the broker
+   *     (joined / lost)
+   *
+   * The returned function detaches. Multiple handlers may attach;
+   * each receives every event.
+   */
+  onMembershipChange(handler: (change: MembershipChange) => void): () => void {
+    this.membershipHandlers.add(handler);
+    return () => {
+      this.membershipHandlers.delete(handler);
+    };
+  }
+
   // ==========================================================================
   // ClusterTransport surface
   // ==========================================================================
@@ -230,21 +282,15 @@ export class BaseClusterClient implements ClusterTransport {
     filter: AddressFilter,
     onMessage: (env: MessageEnvelope) => void,
   ): () => Promise<void> {
-    // TODO(phase-4b): subscribe-before-send race. subscribeInbox
-    // returns synchronously, but the SUBSCRIBE_INBOX frame is in
-    // flight to the broker. If the caller immediately sends a
-    // message that should be delivered to this sub, the broker may
-    // process SEND before SUBSCRIBE_INBOX → no-matching-subscription
-    // diagnostic + dropped delivery. Microtask serialization papers
-    // over this in in-memory tests; real TCP will show it.
-    // Decide in Phase 4b: (a) make subscribe async (await broker
-    // ack) for correctness, or (b) document the race + add a
-    // client.flushSubscriptions() helper.
+    // Phase 4b: the subscribe-before-send race is resolved via the
+    // broker's SUBSCRIBE_ACK round-trip. subscribeInbox returns
+    // synchronously (preserving the ergonomic ClusterTransport
+    // contract); adopters that need ordering call `transport.flush()`
+    // before issuing work that should land on the subscriber.
     const subId = ulid();
     const sub: InboxSubscription = { subId, filter, handler: onMessage };
     this.inboxSubs.set(subId, sub);
-    // Best-effort wire registration. If disconnected, the
-    // re-subscription cycle runs on next handshake.
+    this.trackPendingAck(subId);
     void this.tryWriteIgnoringDisconnect({
       type: FRAME_SUBSCRIBE_INBOX,
       subId,
@@ -252,16 +298,17 @@ export class BaseClusterClient implements ClusterTransport {
     });
     return async () => {
       if (!this.inboxSubs.delete(subId)) return;
+      this.resolvePendingAck(subId); // drop any stale pending entry
       await this.tryWriteIgnoringDisconnect({ type: FRAME_UNSUBSCRIBE, subId });
     };
   }
 
   subscribeBus(filter: EventFilter, onEvent: (env: EventEnvelope) => void): () => Promise<void> {
-    // TODO(phase-4b): same subscribe-before-send race as
-    // subscribeInbox — see TODO there for the decision pending.
+    // Same subscribe-ack mechanism as subscribeInbox.
     const subId = ulid();
     const sub: BusSubscription = { subId, filter, handler: onEvent };
     this.busSubs.set(subId, sub);
+    this.trackPendingAck(subId);
     void this.tryWriteIgnoringDisconnect({
       type: FRAME_SUBSCRIBE_BUS,
       subId,
@@ -269,8 +316,28 @@ export class BaseClusterClient implements ClusterTransport {
     });
     return async () => {
       if (!this.busSubs.delete(subId)) return;
+      this.resolvePendingAck(subId);
       await this.tryWriteIgnoringDisconnect({ type: FRAME_UNSUBSCRIBE, subId });
     };
+  }
+
+  /**
+   * Resolve when every in-flight subscription registration has
+   * been acknowledged by the broker. Implements the
+   * `ClusterTransport.flush()` contract — adopters use this after
+   * a subscribe and before triggering work that should land on the
+   * new subscriber.
+   *
+   * Idempotent and cheap when nothing is pending.
+   */
+  async flush(): Promise<void> {
+    if (this.pendingSubscribeAcks.size === 0) return;
+    // Snapshot the pending Promises and await them. Each entry's
+    // resolver fires from applySubscribeAck when the broker echoes
+    // back SUBSCRIBE_ACK; multiple concurrent flush() callers share
+    // the same Promise so they all unblock together.
+    const promises = [...this.pendingSubscribeAcks.values()].map((e) => e.promise);
+    await Promise.all(promises);
   }
 
   async close(): Promise<void> {
@@ -282,6 +349,10 @@ export class BaseClusterClient implements ClusterTransport {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
+    // Unblock any flush() callers — close means no more wire
+    // round-trips, so pending subscriptions will never be acked.
+    for (const [, entry] of this.pendingSubscribeAcks) entry.resolve();
+    this.pendingSubscribeAcks.clear();
     const prior = this.state;
     this.state = { tag: "closed" };
     if (prior.tag === "connected" || prior.tag === "handshaking") {
@@ -412,13 +483,19 @@ export class BaseClusterClient implements ClusterTransport {
   private async dispatchFrame(frame: AnyFrame): Promise<void> {
     switch (frame.type) {
       case FRAME_WELCOME:
-        await this.onWelcome();
+        await this.onWelcome(frame.nodes);
         return;
       case FRAME_INBOX_DELIVER:
         this.dispatchInboxDeliver(frame.envelope);
         return;
       case FRAME_BUS_DELIVER:
         this.dispatchBusDeliver(frame.envelope);
+        return;
+      case FRAME_MEMBERSHIP:
+        this.applyMembershipDelta(frame.change);
+        return;
+      case FRAME_SUBSCRIBE_ACK:
+        this.resolvePendingAck(frame.subId);
         return;
       case FRAME_PING:
         // Reply to broker-initiated heartbeat.
@@ -452,7 +529,7 @@ export class BaseClusterClient implements ClusterTransport {
     }
   }
 
-  private async onWelcome(): Promise<void> {
+  private async onWelcome(welcomedNodes: readonly NodeId[]): Promise<void> {
     if (this.state.tag !== "handshaking") {
       // Welcome after we transitioned out of handshaking — could be a
       // late-arriving frame from a previous connection. Ignore.
@@ -464,6 +541,14 @@ export class BaseClusterClient implements ClusterTransport {
     // clients survive arbitrarily-many transient disconnects.
     this.reconnectAttempts = 0;
     this.currentBackoffMs = this.reconnectInitialMs;
+    // Apply the initial membership snapshot from Welcome. Subsequent
+    // Membership delta frames update incrementally.
+    this.memberNodes = new Set(welcomedNodes);
+    this.fireMembershipChange({
+      kind: "snapshot",
+      nodes: [...welcomedNodes],
+      at: new Date().toISOString(),
+    });
     this.startHeartbeat();
     this.onDiagnostic("cluster:broker:client:connected", { nodeId: this.nodeId });
     // Resolve the `ready` Promise on first successful handshake.
@@ -476,8 +561,11 @@ export class BaseClusterClient implements ClusterTransport {
     }
     // Re-establish every active subscription on (re-)connect. The
     // wire registry on the broker is per-connection; new connection
-    // = fresh registry.
+    // = fresh registry. Each re-subscribe gets a fresh pending-ack
+    // entry so flush() after reconnect can detect when all
+    // subscriptions have re-registered.
     for (const sub of this.inboxSubs.values()) {
+      this.trackPendingAck(sub.subId);
       await this.tryWriteIgnoringDisconnect({
         type: FRAME_SUBSCRIBE_INBOX,
         subId: sub.subId,
@@ -485,11 +573,59 @@ export class BaseClusterClient implements ClusterTransport {
       });
     }
     for (const sub of this.busSubs.values()) {
+      this.trackPendingAck(sub.subId);
       await this.tryWriteIgnoringDisconnect({
         type: FRAME_SUBSCRIBE_BUS,
         subId: sub.subId,
         filter: sub.filter,
       });
+    }
+  }
+
+  /** Register a pending subscribe-ack for `subId`. */
+  private trackPendingAck(subId: string): void {
+    let resolve!: () => void;
+    const promise = new Promise<void>((r) => {
+      resolve = r;
+    });
+    this.pendingSubscribeAcks.set(subId, { promise, resolve });
+  }
+
+  /** Resolve a pending subscribe-ack and drop the entry. */
+  private resolvePendingAck(subId: string): void {
+    const entry = this.pendingSubscribeAcks.get(subId);
+    if (!entry) return;
+    entry.resolve();
+    this.pendingSubscribeAcks.delete(subId);
+  }
+
+  /**
+   * Apply a membership delta from the broker. Updates the local
+   * snapshot then fires registered handlers. `snapshot` deltas
+   * replace the set wholesale; `joined` / `lost` add or remove.
+   */
+  private applyMembershipDelta(change: MembershipChange): void {
+    if (change.kind === "snapshot") {
+      this.memberNodes = new Set(change.nodes);
+    } else if (change.kind === "joined") {
+      this.memberNodes.add(change.node);
+    } else {
+      // kind === "lost"
+      this.memberNodes.delete(change.node);
+    }
+    this.fireMembershipChange(change);
+  }
+
+  private fireMembershipChange(change: MembershipChange): void {
+    for (const handler of [...this.membershipHandlers]) {
+      try {
+        handler(change);
+      } catch (cause) {
+        this.onDiagnostic("cluster:broker:client:membership-handler-threw", {
+          nodeId: this.nodeId,
+          reason: cause instanceof Error ? cause.message : String(cause),
+        });
+      }
     }
   }
 

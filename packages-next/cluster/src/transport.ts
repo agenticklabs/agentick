@@ -89,6 +89,31 @@ export interface ClusterTransport {
   subscribeBus(filter: EventFilter, onEvent: (env: EventEnvelope) => void): () => Promise<void>;
 
   /**
+   * Wait until every in-flight subscription registration has been
+   * acknowledged by the underlying wire.
+   *
+   * `subscribeInbox` / `subscribeBus` return SYNCHRONOUSLY for
+   * ergonomic adopter code, but the actual subscription record at
+   * the wire/broker is established asynchronously. Adopters that
+   * subscribe and then IMMEDIATELY trigger work expected to land on
+   * the subscriber (e.g., subscribe on B then send-from-A) MUST
+   * await `flush()` between the two — otherwise the SEND can race
+   * past the SUBSCRIBE at the broker and arrive before any
+   * matching subscription is recorded. Without flush the broker
+   * emits `cluster:broker:server:no-matching-subscription` and
+   * drops the delivery.
+   *
+   * In-memory transports (`LocalClusterTransport`) implement flush
+   * as a microtask yield (subscriptions are recorded synchronously).
+   * Real-wire transports (TCP, WebSocket) await the broker's
+   * subscription acknowledgement.
+   *
+   * Phase 4b protocol addition. Idempotent and cheap when nothing
+   * is pending.
+   */
+  flush(): Promise<void>;
+
+  /**
    * Cooperative close. Drops every subscription; flushes any
    * in-flight `send` / `broadcast` if the adapter supports it;
    * releases transport-level resources (sockets, connections,

@@ -33,6 +33,7 @@ export const FRAME_SEND = "cluster:send";
 export const FRAME_BROADCAST = "cluster:broadcast";
 export const FRAME_SUBSCRIBE_INBOX = "cluster:subscribe-inbox";
 export const FRAME_SUBSCRIBE_BUS = "cluster:subscribe-bus";
+export const FRAME_SUBSCRIBE_ACK = "cluster:subscribe-ack";
 export const FRAME_UNSUBSCRIBE = "cluster:unsubscribe";
 export const FRAME_INBOX_DELIVER = "cluster:inbox-deliver";
 export const FRAME_BUS_DELIVER = "cluster:bus-deliver";
@@ -101,6 +102,21 @@ export interface SubscribeBusFrame {
 /** Cancel a prior subscribe-inbox or subscribe-bus. */
 export interface UnsubscribeFrame {
   readonly type: typeof FRAME_UNSUBSCRIBE;
+  readonly subId: string;
+}
+
+// ----------------------------------------------------------------------------
+// Broker → Client ack for a subscription registration.
+// ----------------------------------------------------------------------------
+
+/**
+ * Broker → Client: acknowledges that the broker has recorded the
+ * subscription with `subId`. Sent after each successful
+ * SubscribeInbox or SubscribeBus. The client's `flush()` waits for
+ * every pending ack to arrive — see `ClusterTransport.flush`.
+ */
+export interface SubscribeAckFrame {
+  readonly type: typeof FRAME_SUBSCRIBE_ACK;
   readonly subId: string;
 }
 
@@ -198,6 +214,7 @@ export type BrokerFrame =
   | InboxDeliverFrame
   | BusDeliverFrame
   | MembershipFrame
+  | SubscribeAckFrame
   | PingFrame
   | PongFrame
   | ErrorFrame
@@ -224,6 +241,7 @@ const KNOWN_FRAME_TYPES: { readonly [K in AnyFrame["type"]]: true } = {
   [FRAME_BROADCAST]: true,
   [FRAME_SUBSCRIBE_INBOX]: true,
   [FRAME_SUBSCRIBE_BUS]: true,
+  [FRAME_SUBSCRIBE_ACK]: true,
   [FRAME_UNSUBSCRIBE]: true,
   [FRAME_INBOX_DELIVER]: true,
   [FRAME_BUS_DELIVER]: true,

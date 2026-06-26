@@ -19,6 +19,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type { EventEnvelope, MessageEnvelope } from "@agentick/spec-next";
+import { waitFor, waitForStable } from "@agentick/utils-next/testing";
 
 import type { ClusterParent } from "./cluster.js";
 import type { ClusterTransport } from "./transport.js";
@@ -105,9 +106,9 @@ export function runClusterTransportConformance(config: ClusterTransportConforman
       const unsub = txB.subscribeInbox({ surface: "tasks" }, (env) => {
         received.push(env);
       });
+      await txB.flush();
       await txA.send(ctx.nodeBId, mkMessage("tasks:session-x", "tasks-cancel"));
-      await flushMicrotasks();
-      expect(received).toHaveLength(1);
+      await waitFor(() => received.length === 1, { description: "1 message delivered to B" });
       expect(received[0]?.type).toBe("tasks-cancel");
       await unsub();
     });
@@ -119,12 +120,13 @@ export function runClusterTransportConformance(config: ClusterTransportConforman
       const unsubElicits = txB.subscribeInbox({ surface: "elicitation" }, (env) =>
         elicits.push(env),
       );
+      await txB.flush();
       await txA.send(ctx.nodeBId, mkMessage("tasks:session-x", "tasks-cancel"));
       await txA.send(ctx.nodeBId, mkMessage("elicitation:session-y", "elicit-request"));
-      await flushMicrotasks();
-      expect(tasks).toHaveLength(1);
+      await waitFor(() => tasks.length === 1 && elicits.length === 1, {
+        description: "1 task + 1 elicit delivered",
+      });
       expect(tasks[0]?.addressedTo).toBe("tasks:session-x");
-      expect(elicits).toHaveLength(1);
       expect(elicits[0]?.addressedTo).toBe("elicitation:session-y");
       await unsubTasks();
       await unsubElicits();
@@ -135,9 +137,14 @@ export function runClusterTransportConformance(config: ClusterTransportConforman
       const unsub = txB.subscribeInbox({ address: "tasks:session-exact" }, (env) =>
         matched.push(env),
       );
+      await txB.flush();
       await txA.send(ctx.nodeBId, mkMessage("tasks:session-exact", "tasks-cancel"));
       await txA.send(ctx.nodeBId, mkMessage("tasks:session-other", "tasks-cancel"));
-      await flushMicrotasks();
+      // Wait for the matching delivery + give the unmatched one a
+      // chance to (NOT) land — use waitForStable to confirm no
+      // late delivery.
+      await waitFor(() => matched.length === 1, { description: "exact-match delivered" });
+      await waitForStable(() => matched.length, { stableMs: 50 });
       expect(matched).toHaveLength(1);
       expect(matched[0]?.addressedTo).toBe("tasks:session-exact");
       await unsub();
@@ -146,11 +153,11 @@ export function runClusterTransportConformance(config: ClusterTransportConforman
     it("per-(source, destination) FIFO: messages from A to B arrive in order", async () => {
       const received: MessageEnvelope[] = [];
       const unsub = txB.subscribeInbox({}, (env) => received.push(env));
+      await txB.flush();
       for (let i = 0; i < 20; i++) {
         await txA.send(ctx.nodeBId, mkMessage("test:x", "ping", { seq: i }));
       }
-      await flushMicrotasks();
-      expect(received).toHaveLength(20);
+      await waitFor(() => received.length === 20, { description: "20 messages delivered" });
       const seqs = received.map((m) => (m.payload as { seq: number }).seq);
       expect(seqs).toEqual(Array.from({ length: 20 }, (_, i) => i));
       await unsub();
@@ -163,9 +170,9 @@ export function runClusterTransportConformance(config: ClusterTransportConforman
     it("delivers a broadcast from A to B's matching subscriber", async () => {
       const received: EventEnvelope[] = [];
       const unsub = txB.subscribeBus({ surface: "tool" }, (env) => received.push(env));
+      await txB.flush();
       await txA.broadcast(mkEvent("tool", "tool:dispatch:started"));
-      await flushMicrotasks();
-      expect(received).toHaveLength(1);
+      await waitFor(() => received.length === 1, { description: "broadcast delivered to B" });
       expect(received[0]?.name).toBe("tool:dispatch:started");
       await unsub();
     });
@@ -175,10 +182,12 @@ export function runClusterTransportConformance(config: ClusterTransportConforman
       const fromB: EventEnvelope[] = [];
       const unsubA = txA.subscribeBus({}, (env) => fromA.push(env));
       const unsubB = txB.subscribeBus({}, (env) => fromB.push(env));
+      await Promise.all([txA.flush(), txB.flush()]);
       await txA.broadcast(mkEvent("tool", "tool:dispatch:started"));
-      await flushMicrotasks();
-      // A doesn't see its own broadcast via the transport — that's
-      // local fan-out's job (ClusterEventBus wrapping in Phase 3).
+      // B receives → wait for that, then confirm A's count is
+      // stable at 0 (no self-echo).
+      await waitFor(() => fromB.length === 1, { description: "broadcast delivered to B" });
+      await waitForStable(() => fromA.length, { stableMs: 50 });
       expect(fromA).toHaveLength(0);
       expect(fromB).toHaveLength(1);
       await unsubA();
@@ -191,10 +200,12 @@ export function runClusterTransportConformance(config: ClusterTransportConforman
         { surface: "tool", name: { prefix: "tool:dispatch:" } },
         (env) => matched.push(env),
       );
+      await txB.flush();
       await txA.broadcast(mkEvent("tool", "tool:dispatch:started"));
       await txA.broadcast(mkEvent("tool", "tool:dispatch:completed"));
       await txA.broadcast(mkEvent("tool", "tool:register"));
-      await flushMicrotasks();
+      await waitFor(() => matched.length === 2, { description: "2 prefix-matching broadcasts" });
+      await waitForStable(() => matched.length, { stableMs: 50 });
       expect(matched).toHaveLength(2);
       expect(matched.map((e) => e.name)).toEqual([
         "tool:dispatch:started",
@@ -210,13 +221,14 @@ export function runClusterTransportConformance(config: ClusterTransportConforman
     it("after unsubscribe, no further callbacks fire", async () => {
       const received: MessageEnvelope[] = [];
       const unsub = txB.subscribeInbox({}, (env) => received.push(env));
+      await txB.flush();
       await txA.send(ctx.nodeBId, mkMessage("test:x", "ping"));
-      await flushMicrotasks();
-      expect(received).toHaveLength(1);
+      await waitFor(() => received.length === 1, { description: "first ping delivered" });
       await unsub();
       await txA.send(ctx.nodeBId, mkMessage("test:x", "ping"));
-      await flushMicrotasks();
-      // No new deliveries after unsubscribe.
+      // No new deliveries — assert the count stays at 1 across
+      // a window long enough for any late delivery to land.
+      await waitForStable(() => received.length, { stableMs: 100 });
       expect(received).toHaveLength(1);
     });
 
@@ -291,19 +303,15 @@ function mkEvent(surface: string, name: string): EventEnvelope {
   };
 }
 
-/**
- * Yield to the microtask queue. The local cluster registry routes
- * via `queueMicrotask`; tests await `flushMicrotasks()` to observe
- * deliveries after `send` / `broadcast`. Real adapters MAY deliver
- * synchronously (in which case this is a no-op) or asynchronously
- * (in which case this gives them a chance to land).
- */
-async function flushMicrotasks(): Promise<void> {
-  // Two passes — covers chained microtasks (a callback that
-  // schedules another microtask).
-  await Promise.resolve();
-  await Promise.resolve();
-}
+// Phase 4b.1: `flushMicrotasks` was deleted in favor of
+// `waitFor` / `waitForStable` from `@agentick/utils-next/testing`.
+// Tests state the observable they're waiting for; the helpers
+// poll until satisfied or fail with a descriptive timeout. No
+// more magic-number yield counts.
+//
+// TODO(phase-4c): sweep the remaining spec files (cluster-broker,
+// cluster-net, cluster wrappers) and replace any local
+// flushMicrotasks helpers with the canonical waitFor.
 
 /**
  * Resolve a `Factory<R, P>` return shape (sync, Promise, or Effect)

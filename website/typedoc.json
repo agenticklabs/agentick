@@ -62,7 +62,8 @@
     "../packages-next/pubsub",
     "../packages-next/tasks",
     "../packages-next/cluster",
-    "../packages-next/cluster-broker"
+    "../packages-next/cluster-broker",
+    "../packages-next/cluster-net"
   ],
   "out": "api",
   "plugin": ["typedoc-plugin-markdown", "typedoc-vitepress-theme"],

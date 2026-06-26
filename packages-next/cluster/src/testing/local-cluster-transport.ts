@@ -53,6 +53,14 @@ export function localClusterTransport(opts: LocalClusterTransportOptions): Clust
         unsubscribe();
       };
     },
+    async flush() {
+      // In-memory subscriptions are recorded synchronously in the
+      // registry, so flush has nothing to wait for. We still yield a
+      // microtask so callers using flush() defensively across all
+      // transport classes get consistent "I'm at a stable point"
+      // semantics.
+      await Promise.resolve();
+    },
     async close() {
       registry.unregisterNode(nodeId);
     },

@@ -45,6 +45,7 @@ import {
   FRAME_PING,
   FRAME_PONG,
   FRAME_SEND,
+  FRAME_SUBSCRIBE_ACK,
   FRAME_SUBSCRIBE_BUS,
   FRAME_SUBSCRIBE_INBOX,
   FRAME_UNSUBSCRIBE,
@@ -240,9 +241,15 @@ export class BaseBroker {
         return;
       case FRAME_SUBSCRIBE_INBOX:
         client.inboxSubs.set(frame.subId, frame.filter);
+        // Ack so the client's flush() can resolve. Without the ack
+        // the SUBSCRIBE_INBOX → SEND race can drop deliveries when
+        // adopters subscribe and immediately invoke work that
+        // should land on the subscriber.
+        await this.writeFrame(client.conn, { type: FRAME_SUBSCRIBE_ACK, subId: frame.subId });
         return;
       case FRAME_SUBSCRIBE_BUS:
         client.busSubs.set(frame.subId, frame.filter);
+        await this.writeFrame(client.conn, { type: FRAME_SUBSCRIBE_ACK, subId: frame.subId });
         return;
       case FRAME_UNSUBSCRIBE:
         client.inboxSubs.delete(frame.subId);
