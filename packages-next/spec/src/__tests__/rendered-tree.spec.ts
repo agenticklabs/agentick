@@ -38,6 +38,7 @@ import type {
   UrlSource,
   UsageStats,
 } from "../index.js";
+import { jsonSchema } from "../index.js";
 
 describe("@agentick/spec-next — reconciler-facing types", () => {
   describe("ContentBlock", () => {
@@ -160,7 +161,7 @@ describe("@agentick/spec-next — reconciler-facing types", () => {
         id: "t.add",
         name: "add",
         description: "Add two numbers",
-        inputSchema: { type: "object" },
+        inputSchema: jsonSchema({ type: "object" }),
         exposure: ["model", "dispatch"],
         handlerRef: "handlers/add",
       };

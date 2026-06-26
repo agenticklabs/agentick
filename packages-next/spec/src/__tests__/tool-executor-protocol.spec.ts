@@ -26,6 +26,7 @@ import type {
   ToolRegistration,
   UnregisterToolInput,
 } from "../index.js";
+import { jsonSchema } from "../index.js";
 
 describe("@agentick/spec-next — tool executor protocol", () => {
   describe("DispatchInput / DispatchContext", () => {
@@ -103,7 +104,7 @@ describe("@agentick/spec-next — tool executor protocol", () => {
         id: "calc.add",
         name: "calc.add",
         description: "add two numbers",
-        inputSchema: { type: "object" },
+        inputSchema: jsonSchema({ type: "object" }),
         exposure: ["model"],
       };
       const reg: ToolRegistration = {
@@ -195,29 +196,28 @@ describe("@agentick/spec-next — tool executor protocol", () => {
   });
 
   describe("Inbox messages", () => {
-    it("abort + confirmation-response are the two recognized types", () => {
+    it("abort is the only recognized type (confirmation flow moved to ElicitationHarness in #126)", () => {
       const abort: ToolExecutorInboxMessage = {
         type: "abort",
         toolCallId: "c1",
         reason: "user pressed escape",
       };
-      const cr: ToolExecutorInboxMessage = {
-        type: "confirmation-response",
-        response: {
-          toolUseId: "tu_1",
-          approved: true,
-        },
-      };
       expect(abort.type).toBe("abort");
-      expect(cr.type).toBe("confirmation-response");
     });
   });
 
   describe("ToolExecutorProtocol surface", () => {
-    it("declares register / unregister / dispatch / abort / list", () => {
+    it("declares the full method set (register/unregister/dispatch/abort/list + binding scopes)", () => {
       type Methods = keyof ToolExecutorProtocol;
       expectTypeOf<Methods>().toEqualTypeOf<
-        "register" | "unregister" | "dispatch" | "abort" | "list"
+        | "register"
+        | "unregister"
+        | "dispatch"
+        | "abort"
+        | "list"
+        | "removeBoundTools"
+        | "replaceReconcilerTools"
+        | "compileForTick"
       >();
     });
   });

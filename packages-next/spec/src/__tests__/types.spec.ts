@@ -1,3 +1,4 @@
+import { Effect } from "effect";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import {
   DEFAULT_JOURNALING_POLICY,
@@ -178,10 +179,9 @@ describe("@agentick/spec-next — structural smoke tests", () => {
       expect(round.messageId).toBe(m.messageId);
     });
 
-    it("MessageHandler is a Promise-returning function", () => {
-      const handler: MessageHandler<{ x: number }, string> = async (msg) => {
-        return `got ${msg.payload?.x ?? 0}`;
-      };
+    it("MessageHandler returns an Effect with typed handler-error channel", () => {
+      const handler: MessageHandler<{ x: number }, string> = (msg) =>
+        Effect.succeed(`got ${msg.payload?.x ?? 0}`);
       expectTypeOf(handler).toBeFunction();
     });
   });

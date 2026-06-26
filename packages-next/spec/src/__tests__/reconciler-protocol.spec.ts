@@ -1,4 +1,7 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
+
+import { isLifecycleTickStart } from "../index.js";
+
 import type {
   DataBridge,
   DataResolveOptions,
@@ -120,8 +123,11 @@ describe("@agentick/spec-next — reconciler protocol", () => {
         event,
       }));
       expect(inputs).toHaveLength(5);
+      // The discriminator `kind` is `string & {}` on LifecycleCustom,
+      // which prevents literal-narrowing across the union. The
+      // `isLifecycleTickStart` guard is the canonical way to narrow.
       const first = inputs[0]!.event;
-      if (first.kind === "tick-start") {
+      if (isLifecycleTickStart(first)) {
         expect(first.tickId).toBe("t_1");
       }
     });
@@ -150,13 +156,17 @@ describe("@agentick/spec-next — reconciler protocol", () => {
 
   describe("ReconcilerSnapshot", () => {
     it("survives JSON round-trip", () => {
+      // Per ADR 27, per-bridge state lives in `bridges` (an opaque map
+      // keyed by HookBridges slot). Knobs/state/timeline payloads land
+      // here at runtime via SnapshotCapable feature-detection. Spec's
+      // own typecheck only sees the foundational slots, so the test
+      // exercises the un-augmented shape.
       const snap: ReconcilerSnapshot = {
         specVersion: "2026-05-01",
         mountId: "m_1",
         elementVersion: "v1",
+        bridges: {},
         dataCache: [{ key: "user/42", value: { name: "x" }, fetchedAt: 1 }],
-        knobs: { mood: "curious" },
-        state: { sessionCount: 3 },
         subscriptions: [
           {
             id: "cron.daily",
@@ -167,7 +177,7 @@ describe("@agentick/spec-next — reconciler protocol", () => {
       };
       const round = JSON.parse(JSON.stringify(snap)) as ReconcilerSnapshot;
       expect(round.mountId).toBe(snap.mountId);
-      expect(round.knobs.mood).toBe("curious");
+      expect(round.dataCache[0]?.key).toBe("user/42");
     });
   });
 
@@ -218,59 +228,33 @@ describe("@agentick/spec-next — reconciler protocol", () => {
     });
   });
 
-  describe("HookBridges — DataBridge no-Suspense contract", () => {
-    it("resolve returns T synchronously when cached", () => {
+  describe("HookBridges — DataBridge contract", () => {
+    it("peek returns undefined when no entry exists; fetch initiates and resolves", async () => {
+      const cache = new Map<string, unknown>();
       const data: DataBridge = {
-        resolve<T>(key: string, fetcher: () => Promise<T>): T {
-          if (key === "cached") return "hit" as unknown as T;
-          throw fetcher();
+        peek<T>(key: string) {
+          if (!cache.has(key)) return undefined;
+          return { kind: "value" as const, value: cache.get(key) as T };
         },
-        invalidate() {},
-        invalidateTag() {},
+        async fetch<T>(key: string, fetcher: () => Promise<T>) {
+          if (cache.has(key)) return cache.get(key) as T;
+          const value = await fetcher();
+          cache.set(key, value);
+          return value;
+        },
+        subscribe: () => () => {},
+        invalidate(key) {
+          cache.delete(key);
+        },
+        invalidateTag: () => {},
         has(key) {
-          return key === "cached";
+          return cache.has(key);
         },
       };
-      const value = data.resolve("cached", async () => "should-not-run");
-      expect(value).toBe("hit");
-    });
-
-    it("resolve throws a Promise to signal pending data (not Suspense)", async () => {
-      let thrown: unknown;
-      const data: DataBridge = {
-        resolve<T>(key: string, fetcher: () => Promise<T>): T {
-          throw fetcher();
-        },
-        invalidate() {},
-        invalidateTag() {},
-        has() {
-          return false;
-        },
-      };
-      try {
-        data.resolve("uncached", async () => "value");
-      } catch (e) {
-        thrown = e;
-      }
-      expect(thrown).toBeInstanceOf(Promise);
-      const resolved = await (thrown as Promise<string>);
-      expect(resolved).toBe("value");
-    });
-
-    it("resolve throws the underlying error on prior fetch rejection", () => {
-      const err = new Error("network down");
-      const data: DataBridge = {
-        resolve<T>(key: string): T {
-          if (key === "failed") throw err;
-          throw new Promise(() => {});
-        },
-        invalidate() {},
-        invalidateTag() {},
-        has(key) {
-          return key === "failed";
-        },
-      };
-      expect(() => data.resolve("failed", async () => "x")).toThrow("network down");
+      expect(data.peek("uncached")).toBeUndefined();
+      const value = await data.fetch("k", async () => "v");
+      expect(value).toBe("v");
+      expect(data.peek("k")).toEqual({ kind: "value", value: "v" });
     });
 
     it("DataResolveOptions allows ttl + tag", () => {
@@ -325,28 +309,17 @@ describe("@agentick/spec-next — reconciler protocol", () => {
 // ============================================================================
 
 function fakeBridges(): HookBridges {
+  // Spec-side HookBridges only declares the foundational slots
+  // (data, loop, session, tools). Other slots — timeline, knobs,
+  // state, sandbox, mcp, ... — are added by their respective
+  // packages via module augmentation per ADR 27. Spec's own tests
+  // only exercise the pre-augmentation surface; conformance for
+  // augmented slots lives with the packages that own them.
   return {
-    timeline: {
-      read: () => ({ entries: [], version: 0 }),
-      subscribe: () => () => {},
-    },
-    knobs: {
-      get: () => undefined,
-      set: () => {},
-      list: () => [],
-      subscribe: () => () => {},
-    },
-    state: {
-      get: () => undefined,
-      set: () => {},
-      has: () => false,
-      list: () => [],
-      subscribe: () => () => {},
-      exportSnapshot: () => ({}),
-      importSnapshot: () => {},
-    },
     data: {
-      resolve: <T>(_k: string, _f: () => Promise<T>): T => undefined as unknown as T,
+      peek: () => undefined,
+      fetch: <T>(_k: string, fetcher: () => Promise<T>) => fetcher(),
+      subscribe: () => () => {},
       invalidate: () => {},
       invalidateTag: () => {},
       has: () => false,
@@ -363,9 +336,8 @@ function emptySnapshot(mountId: string): ReconcilerSnapshot {
   return {
     specVersion: "2026-05-01",
     mountId,
+    bridges: {},
     dataCache: [],
-    knobs: {},
-    state: {},
     subscriptions: [],
   };
 }

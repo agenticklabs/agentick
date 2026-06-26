@@ -56,18 +56,18 @@ describe("@agentick/spec-next — wire structural tests", () => {
     });
 
     it("rejects responses that carry both result and error at the type level", () => {
-      // @ts-expect-error — JsonRpcSuccessResponse forbids `error`
       const bad1: JsonRpcSuccessResponse = {
         jsonrpc: "2.0",
         id: 1,
         result: {},
+        // @ts-expect-error — JsonRpcSuccessResponse forbids `error`
         error: { code: -32000, message: "x" },
       };
       void bad1;
-      // @ts-expect-error — JsonRpcErrorResponse forbids `result`
       const bad2: JsonRpcErrorResponse = {
         jsonrpc: "2.0",
         id: 1,
+        // @ts-expect-error — JsonRpcErrorResponse forbids `result`
         result: {},
         error: { code: -32000, message: "x" },
       };
@@ -111,7 +111,7 @@ describe("@agentick/spec-next — wire structural tests", () => {
             id: "evt-1",
             surface: "session",
             name: "session:lifecycle:start",
-            phase: "started",
+            phase: "before",
             timestamp: 0,
             scope: {},
           },
@@ -379,7 +379,7 @@ describe("@agentick/spec-next — wire structural tests", () => {
             id: "e1",
             surface: "executor",
             name: "executor:tick:delta",
-            phase: "started",
+            phase: "before",
             timestamp: 0,
             scope: {},
           },
@@ -450,7 +450,7 @@ describe("@agentick/spec-next — wire structural tests", () => {
           id: "evt-1",
           surface: "executor",
           name: "executor:tick:delta",
-          phase: "started",
+          phase: "before",
           timestamp: 0,
           scope: {},
         },
