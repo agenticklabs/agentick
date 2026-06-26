@@ -497,6 +497,22 @@ export class AppHarness<P = unknown>
    * Fired in reverse order during `closeApp`.
    */
   private readonly extensionCloseHandlers: Array<() => void | Promise<void>> = [];
+
+  /**
+   * Register a close handler that fires during {@link closeApp},
+   * AFTER session disposal and BEFORE extension close handlers.
+   *
+   * Internal slot used by `createApp` to wire substrate-level
+   * lifecycle (e.g., closing a `cluster` that wrapped the local
+   * bus/inbox/journal). Adopters should NOT call this directly —
+   * use extensions (`installer.onClose(...)`) for ordinary
+   * lifecycle hooks.
+   *
+   * Handler errors are swallowed (best-effort teardown).
+   */
+  addInternalCloseHandler(handler: () => void | Promise<void>): void {
+    this.extensionCloseHandlers.push(handler);
+  }
   /** Pending install promise resolved once all app-targeted extensions complete `install()`. */
   private readonly extensionsReady: Promise<void>;
 
