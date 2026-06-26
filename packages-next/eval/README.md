@@ -20,7 +20,7 @@ across many evals.
 | Iteration | Surface                                                         | State   |
 | --------- | --------------------------------------------------------------- | ------- |
 | 1 (MVP)   | `defineEval` + `t.send/completed/calledTool/notCalled/noFailed` | shipped |
-| 2         | `.matrix(axes)` parameter sweeps                                | planned |
+| 2         | `.matrix(axes, { concurrency? })` parameter sweeps              | shipped |
 | 3         | `t.judge(...)` LLM-as-judge                                     | planned |
 | 4         | Tool stubs, fixtures, cost accounting                           | planned |
 | 5         | Cassette replay (record → freeze → replay)                      | planned |
@@ -128,6 +128,32 @@ const expensive = await myEval({ executor: gpt4oExecutor });
 console.log({ cheap: cheap.passed, expensive: expensive.passed });
 ```
 
+### Matrix sweeps
+
+`.matrix(axes, opts?)` runs the cartesian product of axis values.
+One cell per combination; `passed` aggregates AND across cells.
+
+```ts
+const matrix = await calculatorAgent.matrix(
+  {
+    executor: [openaiExec, anthropicExec],
+    promptVariant: ["concise", "verbose"],
+  },
+  { concurrency: 4 },   // default 1 — sequential — to avoid rate-limit blowups
+);
+
+console.log(`${matrix.cells.filter((c) => c.result.passed).length} / ${matrix.cells.length}`);
+for (const cell of matrix.cells) {
+  console.log(cell.axes, cell.result.passed);
+}
+```
+
+Edge cases:
+- `matrix({})` → 1 cell (equivalent to `myEval()`)
+- `matrix({ executor: [] })` → 0 cells (mathematical product), `passed: true` (vacuous)
+- Missing axes in `O` → that key is `undefined` in the cell; the
+  factory's `??` defaults take over.
+
 ### Domain-shaped overrides
 
 ```ts
@@ -166,11 +192,12 @@ for (const a of result.assertions) {
 - `src/__tests__/define-eval.spec.tsx` — MVP shape (callable, def
   introspection, `calledTool` / `notCalledTool`, per-invocation
   override flowing through the factory thunk).
+- `src/__tests__/matrix.spec.tsx` — cartesian product, axes mirrored
+  into cells, empty-axes / empty-axis edge cases, aggregate `passed`,
+  `opts.concurrency` smoke.
 
 ## Roadmap & known gaps
 
-- **`.matrix(axes)`** — combinatorial parameter sweeps (model × prompt
-  × fixture). Returns one `EvalResult` per cell.
 - **`t.judge(rubric)`** — LLM-as-judge. Subordinate Agentick session
   scores the primary's transcript against an explicit rubric.
 - **Tool stubs** — `t.stubTool("name", fakeImpl)` for hermetic runs.

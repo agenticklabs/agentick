@@ -74,12 +74,55 @@ export interface EvalDefinition<O = DefaultAppOverrides, P = unknown> {
  * defaults; `await myEval(overrides)` passes `overrides` through to
  * the factory unchanged.
  *
- * Future-shipped: `.matrix(axes)` for parameter sweeps. Not in MVP.
+ * `.matrix(axes, opts?)` runs the cartesian product of axis values,
+ * returning one `MatrixCell` per combination. Each cell's `axes` is
+ * the resolved override record handed to the factory; `result` is the
+ * `EvalResult` for that combination.
  */
 export interface CallableEval<O = DefaultAppOverrides, P = unknown> {
   (overrides?: O): Promise<EvalResult>;
   /** The original definition — exposed for tooling that wants to introspect. */
   readonly definition: EvalDefinition<O, P>;
+  /**
+   * Run the cartesian product of `axes`. Each cell merges into one
+   * `O` (one value per axis) and runs the eval once.
+   *
+   *   - Empty axes (`{}`)         → 1 cell, equivalent to calling `myEval()`
+   *   - Any axis with `[]`        → 0 cells (mathematical product)
+   *   - Missing axes in `O`       → `undefined` in the cell, factory's
+   *                                 `??` defaults take over
+   *
+   * `opts.concurrency` caps concurrent runs (default `1` — sequential
+   * — to avoid surprising rate-limit blowups on real-model evals).
+   */
+  matrix<K extends keyof O & string>(
+    axes: { readonly [P in K]?: ReadonlyArray<O[P]> },
+    opts?: MatrixOptions,
+  ): Promise<MatrixResult<O>>;
+}
+
+// ============================================================================
+// Matrix
+// ============================================================================
+
+export interface MatrixOptions {
+  /** Max concurrent eval runs. Default `1` (sequential). */
+  readonly concurrency?: number;
+}
+
+export interface MatrixCell<O = DefaultAppOverrides> {
+  /** The resolved override record handed to the factory for this cell. */
+  readonly axes: O;
+  /** The eval's result for this cell. */
+  readonly result: EvalResult;
+}
+
+export interface MatrixResult<O = DefaultAppOverrides> {
+  readonly cells: ReadonlyArray<MatrixCell<O>>;
+  /** True iff every cell's `result.passed` is true. */
+  readonly passed: boolean;
+  /** Wall-clock duration (ms) of the whole sweep. */
+  readonly elapsedMs: number;
 }
 
 // ============================================================================

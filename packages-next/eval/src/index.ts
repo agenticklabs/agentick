@@ -22,5 +22,8 @@ export type {
   EvalDefinition,
   EvalResult,
   EvalTest,
+  MatrixCell,
+  MatrixOptions,
+  MatrixResult,
   ObservedToolCall,
 } from "./types.js";
