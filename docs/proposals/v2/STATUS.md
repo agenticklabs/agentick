@@ -1,11 +1,15 @@
 # Agentick v2 — Implementation Status
 
 **Branch:** `feat/v2`
-**Last updated:** 2026-06-26 (eval-next MVP shipped) — **`@agentick/eval-next` iteration 1 lands.** `defineEval(definition)` returns a callable function; `await myEval()` runs with definition defaults, `await myEval({ executor: X })` overrides any `createApp` slot for one invocation. Iteration-1 surface: `t.send/completed/calledTool/notCalledTool/noFailedActions`. Two subpaths: base (reconciler-agnostic) + `/react` (defaults reconciler to `reactReconciler()`). 8/8 tests pass.
+**Last updated:** 2026-06-26 (ADR 39 drafted) — **ADR 39 — JSX template walker: one IR, two evaluation contexts.** Proposed framing for the next architectural lift: pull intrinsic-component semantics into a shared dispatch table, ship a static walker (`@agentick/jsx-template-next`) that consumes the same table as reconciler-react-next, and unlock prompts (#121), resources (#123), tool descriptions, MCP server prompts/resources (#171), and snapshot-testable templates from one primitive. Async `render(Template, props): Promise<string>` with compile-until-stable (`useData` suspends via thrown-Promise, walker awaits + retries). Reconciler-agnostic IR — Angular / Solid / custom AST plug into the same dispatch table. Three-phase rollout: parallel static walker → adopt downstream → optional differential-gated refactor of reconciler-react-next. Estimated 6–11 days end-to-end, no risk to existing 1925-test suite (parallel by default).
+
+**Also today (eval-next iter 2 shipped):** `CallableEval.matrix(axes, opts?)` runs the cartesian product of axis values, returns `{ cells, passed, elapsedMs }`. `utils-next` gained `cartesian()` + `mapConcurrent()` primitives backing it. Sequential by default (concurrency cap of 1 to avoid rate-limit blowups against real models); opt-in concurrency. README updated. 5 new matrix tests + 13 new utils tests; full v2 suite green at 177 files / 1925 tests.
+
+**Previously, eval-next MVP shipped.** `defineEval(definition)` returns a callable function; `await myEval()` runs with definition defaults, `await myEval({ executor: X })` overrides any `createApp` slot for one invocation. Iteration-1 surface: `t.send/completed/calledTool/notCalledTool/noFailedActions`. Two subpaths: base (reconciler-agnostic) + `/react` (defaults reconciler to `reactReconciler()`). 8/8 tests pass.
 
 Substrate-level groundwork: `BaseHarness.runOperation` now stamps `op.input` as the `requested` envelope's payload — the blueprint's phase contract pins requested as "argument bound"; previously the field was empty, so eval ledgers had to find the input some other way. With this change, ANY subscriber (eval, OTel exporter, replay harness) sees what was invoked alongside the operation envelope. Verified non-breaking across the v2 workspace (1909/1909 tests).
 
-Eval-next iteration roadmap (deferred): `.matrix(axes)` parameter sweeps, `t.judge(rubric)` LLM-as-judge, tool stubs, fixtures/cassette replay, cost accounting, streaming-event assertions. See [ADR 37](blueprint/37-eval-package-sketch.md) for the sketch.
+Eval-next iteration roadmap (deferred): `t.judge(rubric)` LLM-as-judge, tool stubs, fixtures/cassette replay, cost accounting, streaming-event assertions. See [ADR 37](blueprint/37-eval-package-sketch.md) for the sketch.
 
 ---
 
