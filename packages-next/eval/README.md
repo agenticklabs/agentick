@@ -7,9 +7,10 @@ same definition feeds CI smoke tests, A/B sweeps, and matrix runs
 without duplication.
 
 Inspired by Eve evals. Agentick twist: `defineEval(…)` returns a
-**function**, not a config. Iteration 1 (MVP) lands the assertion
-surface; iteration 2+ layers matrix sweeps, LLM-as-judge,
-cost accounting, and cassette replay.
+**function**, not a config; the agent under test is supplied as a
+**factory thunk** that the runner calls per invocation, so every run
+gets a fresh `AppHarness` and adopters can reuse the same factory
+across many evals.
 
 > Pre-1.0. See [ADR 37](../../docs/proposals/v2/blueprint/37-eval-package-sketch.md)
 > for the long-form sketch and the iteration roadmap.
@@ -27,14 +28,22 @@ cost accounting, and cassette replay.
 ## Quick start
 
 ```ts
-import { defineEval } from "@agentick/eval-next/react";
+import { createApp } from "@agentick/app-next";
+import { reactReconciler } from "@agentick/reconciler-react-next";
+import { defineEval } from "@agentick/eval-next";
 
-const calculatorAgent = defineEval({
+// One reusable factory across N evals / matrix axes.
+type Overrides = { executor?: ExecutorNext };
+const myApp = (overrides?: Overrides) =>
+  createApp(<MyAgent />, {
+    executor: overrides?.executor ?? defaultExecutor,
+    reconciler: reactReconciler(),
+    target: { kind: "language-model", provider: "openai", modelId: "gpt-4o" },
+  });
+
+const calculatorAgent = defineEval<Overrides>({
   description: "agent reaches for the calculator on arithmetic",
-  rootElement: <MyAgent />,
-  executor: realOrFakeExecutor,
-  target: { kind: "language-model", provider: "openai", modelId: "gpt-4o" },
-
+  app: myApp,
   async test(t) {
     await t.send("What is 47 × 23?");
     t.completed();
@@ -43,49 +52,42 @@ const calculatorAgent = defineEval({
   },
 });
 
-// Run with definition defaults
+// Run with the factory's defaults
 const result = await calculatorAgent();
 
-// Run with overrides — model swap for A/B
+// Run with overrides — flow straight into the factory thunk
 const cheap = await calculatorAgent({ executor: gpt4oMiniExecutor });
 ```
 
 `defineEval` returns a **callable**: `await myEval()` runs with the
-definition defaults; `await myEval({ executor: X, target: Y })`
-overrides any `createApp` slot for one invocation. The original
-definition is exposed at `myEval.definition` for tooling and future
-matrix-runner extensions.
-
-## Subpaths
-
-- **`@agentick/eval-next`** — reconciler-agnostic. Adopter supplies
-  the reconciler. Right pick if you ship a non-React reconciler
-  (Angular, custom AST, etc.).
-- **`@agentick/eval-next/react`** — defaults `reconciler` to
-  `reactReconciler()` from `@agentick/reconciler-react-next`. Most
-  JSX-agent adopters land here.
+factory's defaults; `await myEval(overrides)` passes the overrides
+straight into the factory thunk. The factory decides how to fold them
+in — eval-next itself does no option merging. The original definition
+is exposed at `myEval.definition` for tooling and future matrix-runner
+extensions.
 
 ## API
 
 ### `defineEval(definition)`
 
-Returns a `CallableEval`. The definition extends `CreateAppOptions`
-(everything `createApp` takes) plus eval-specific fields:
+```ts
+defineEval<O = DefaultAppOverrides, P = unknown>({
+  description: string;
+  app:  (overrides?: O) => Promise<AppHarness<P>>;
+  test: (t: EvalContext<P>) => unknown;
+}): CallableEval<O, P>
+```
 
-| Field         | Type                          | Notes                                                                |
-| ------------- | ----------------------------- | -------------------------------------------------------------------- |
-| `description` | `string`                      | Surfaces in `result.description` and result reports.                 |
-| `rootElement` | `unknown`                     | Agent root passed to `createApp`. Reconciler interprets the shape.   |
-| `test`        | `(t: EvalContext) => unknown` | Eval body. Assertions record into the result ledger; they don't throw. |
-
-Every other slot (`executor`, `target`, `reconciler`, `tools`,
-`metadata`, …) maps 1:1 to `createApp`.
+Three fields total. The `O` generic is the adopter's per-invocation
+override shape; it defaults to `Partial<CreateAppOptions> & { rootElement? }`
+but adopters typically pin a tighter shape (`{ profile: "ci" | "prod" }`,
+`{ executor?: ExecutorNext }`, etc.) so the call site is self-documenting.
 
 ### `t` — `EvalContext`
 
 | Method                            | Purpose                                                                |
 | --------------------------------- | ---------------------------------------------------------------------- |
-| `t.app`                           | Direct `AppHarness` handle. Use sparingly.                             |
+| `t.app`                           | The `AppHarness` constructed by `definition.app(overrides)`.           |
 | `t.send(prompt)`                  | Drive the agent. Returns the final response text.                      |
 | `t.completed()`                   | Assert the most-recent send reached `stopReason: "end"`.               |
 | `t.calledTool(name, { input?, isError? })` | Assert a specific tool was called; optionally deep-equal on `input` and outcome.   |
@@ -124,6 +126,21 @@ const expensive = await myEval({ executor: gpt4oExecutor });
 console.log({ cheap: cheap.passed, expensive: expensive.passed });
 ```
 
+### Domain-shaped overrides
+
+```ts
+type Overrides = { profile: "ci" | "prod" };
+const myApp = ({ profile } = { profile: "prod" }) =>
+  createApp(<MyAgent />, {
+    executor: profile === "ci" ? fakeExecutor : prodExecutor,
+    reconciler: reactReconciler(),
+    target: mkTarget(),
+  });
+
+const myEval = defineEval<Overrides>({ description: "...", app: myApp, test: ... });
+await myEval({ profile: "ci" });
+```
+
 ### Safety-critical evals
 
 ```ts
@@ -145,10 +162,9 @@ for (const a of result.assertions) {
 
 ## Verified by
 
-- `src/__tests__/define-eval.spec.tsx` — MVP shape (callable, defs,
-  `calledTool` / `notCalledTool` / overrides).
-- `src/__tests__/react-subpath.spec.tsx` — `/react` subpath defaults
-  reconciler to `reactReconciler()`; honors explicit override.
+- `src/__tests__/define-eval.spec.tsx` — MVP shape (callable, def
+  introspection, `calledTool` / `notCalledTool`, per-invocation
+  override flowing through the factory thunk).
 
 ## Roadmap & known gaps
 

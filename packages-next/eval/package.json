@@ -25,11 +25,6 @@
       "types": "./src/index.ts",
       "import": "./src/index.ts",
       "default": "./src/index.ts"
-    },
-    "./react": {
-      "types": "./src/react/index.ts",
-      "import": "./src/react/index.ts",
-      "default": "./src/react/index.ts"
     }
   },
   "publishConfig": {
@@ -38,11 +33,6 @@
         "types": "./dist/index.d.ts",
         "import": "./dist/index.js",
         "default": "./dist/index.js"
-      },
-      "./react": {
-        "types": "./dist/react/index.d.ts",
-        "import": "./dist/react/index.js",
-        "default": "./dist/react/index.js"
       }
     }
   },
@@ -55,12 +45,12 @@
   },
   "dependencies": {
     "@agentick/app-next": "workspace:*",
-    "@agentick/reconciler-react-next": "workspace:*",
     "@agentick/spec-next": "workspace:*",
     "@agentick/utils-next": "workspace:*"
   },
   "devDependencies": {
     "@agentick/executor-next": "workspace:*",
+    "@agentick/reconciler-react-next": "workspace:*",
     "@agentick/runtime-next": "workspace:*",
     "@types/react": "^19.2.5",
     "react": "^19.2.4"

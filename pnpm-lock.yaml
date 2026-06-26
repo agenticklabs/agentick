@@ -596,9 +596,6 @@ importers:
       '@agentick/app-next':
         specifier: workspace:*
         version: link:../app
-      '@agentick/reconciler-react-next':
-        specifier: workspace:*
-        version: link:../reconciler-react
       '@agentick/spec-next':
         specifier: workspace:*
         version: link:../spec
@@ -609,6 +606,9 @@ importers:
       '@agentick/executor-next':
         specifier: workspace:*
         version: link:../executor
+      '@agentick/reconciler-react-next':
+        specifier: workspace:*
+        version: link:../reconciler-react
       '@agentick/runtime-next':
         specifier: workspace:*
         version: link:../runtime

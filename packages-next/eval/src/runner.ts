@@ -3,23 +3,24 @@
  * returned callable to completion.
  *
  * Flow per invocation:
- *   1. Resolve every createApp option: definition defaults +
- *      per-call overrides (overrides win).
- *   2. `createApp` with the resolved configuration.
- *   3. Subscribe to `app.events({ name: "tool:command:dispatch",
- *      phase: "terminal" })` to record every tool call.
- *   4. Build a fresh `EvalContext` (`t`) bound to this app + the
+ *   1. Call `definition.app(overrides)` to construct a fresh
+ *      `AppHarness`. The thunk owns option merging; the runner does
+ *      none of its own.
+ *   2. Subscribe to `app.events({ name: "tool:command:dispatch" })`
+ *      on both `requested` + `terminal` phases. Correlate by opId
+ *      to record each dispatch's name+input (from requested) with
+ *      outcome+result (from terminal).
+ *   3. Build a fresh `EvalContext` (`t`) bound to this app + the
  *      assertion ledger.
- *   5. Invoke `definition.test(t)`.
- *   6. `app.closeApp()` — also stops the events subscription.
- *   7. Return the aggregated {@link EvalResult}.
+ *   4. Invoke `definition.test(t)`.
+ *   5. `app.closeApp()` — also stops the events subscription.
+ *   6. Return the aggregated {@link EvalResult}.
  *
  * Assertions don't throw — they record into a ledger that the
  * result exposes. Adopters who want fail-fast can check
  * `result.passed` and decide whether to continue.
  */
 
-import { createApp, type CreateAppOptions } from "@agentick/app-next";
 import type { AppHarnessProtocol, EventQuery, ProtocolEvent } from "@agentick/spec-next";
 import { isEqual } from "@agentick/utils-next";
 import { waitFor } from "@agentick/utils-next/testing";
@@ -28,7 +29,6 @@ import type {
   AssertionResult,
   EvalContext,
   EvalDefinition,
-  EvalInvocationOverrides,
   EvalResult,
   ObservedToolCall,
 } from "./types.js";
@@ -42,39 +42,21 @@ const TOOL_DISPATCH_FILTER: EventQuery = {
   phase: ["requested", "terminal"],
 };
 
-export async function runEval<P>(
-  definition: EvalDefinition<P>,
-  overrides: EvalInvocationOverrides<P> | undefined,
+export async function runEval<O, P>(
+  definition: EvalDefinition<O, P>,
+  overrides: O | undefined,
 ): Promise<EvalResult> {
   const started = Date.now();
 
-  // Peel off the eval-specific fields. The rest is createApp opts.
-  const { description, rootElement: defRoot, test, ...defAppOpts } = definition;
-  void description;
-  void test;
-  const { rootElement: overrideRoot, ...overrideAppOpts } = overrides ?? {};
+  // Construct the app for this invocation. The factory owns all
+  // option resolution — the runner just passes overrides straight
+  // through. Each invocation gets its OWN app; eval-next owns the
+  // close, but NOT the construction.
+  const app: AppHarnessProtocol<P> = await definition.app(overrides);
 
-  // Merge createApp opts: definition is base, overrides shallowly
-  // win. For metadata specifically we shallow-merge the records to
-  // let matrix runs add axis tags without clobbering definition tags.
-  const mergedMetadata: Record<string, unknown> = {
-    ...(defAppOpts.metadata ?? {}),
-    ...((overrideAppOpts as { metadata?: Record<string, unknown> }).metadata ?? {}),
-  };
-
-  const appOptions: CreateAppOptions<P> = {
-    ...defAppOpts,
-    ...overrideAppOpts,
-    ...(Object.keys(mergedMetadata).length > 0 ? { metadata: mergedMetadata } : {}),
-  } as CreateAppOptions<P>;
-
-  // Construct the app for this invocation. Each invocation gets its
-  // OWN app — the eval framework owns the lifecycle.
-  const app = (await createApp(overrideRoot ?? defRoot, appOptions)) as AppHarnessProtocol<P>;
-
-  // Subscribe to tool:command:dispatch terminal events on a background
-  // task. Pushes into `toolCalls`. Aborts when the eval is done so
-  // the iterator can exit even if app.closeApp() doesn't complete
+  // Subscribe to tool:command:dispatch events on a background task.
+  // Pushes into `toolCalls`. Aborts when the eval is done so the
+  // iterator can exit even if app.closeApp() doesn't complete
   // pending iterator nexts.
   const toolCalls: ObservedToolCall[] = [];
   const eventsAbort = new AbortController();
@@ -99,11 +81,10 @@ export async function runEval<P>(
         // If the model called any tools during this send, wait for
         // the corresponding terminal events to land in the ledger
         // before returning — synchronous t.calledTool assertions
-        // that fire right after t.send must observe them. ticks is
-        // the count from the SendResult (one tick per model call).
-        // For each tool_use tick there's typically one tool call;
-        // we wait until the ledger has at least one more entry than
-        // it did pre-send. 200ms cap is generous for in-memory delivery.
+        // that fire right after t.send must observe them. For each
+        // tool_use tick there's typically one tool call; we wait
+        // until the ledger has at least one more entry than it did
+        // pre-send. 200ms cap is generous for in-memory delivery.
         const expectedToolCalls = Math.max(0, result.ticks - 1);
         if (expectedToolCalls > 0) {
           try {
@@ -187,17 +168,13 @@ export async function runEval<P>(
       message: cause instanceof Error ? cause.message : String(cause),
     };
   } finally {
-    // Yield a microtask so any in-flight terminal events make it into
-    // the ledger BEFORE we abort the consumer. Without this nudge,
-    // events published during the last tool-dispatch can land in the
-    // bus queue after we've already aborted.
+    // Yield a microtask so any in-flight terminal events make it
+    // into the ledger BEFORE we abort the consumer. Without this
+    // nudge, events published during the last tool-dispatch can
+    // land in the bus queue after we've already aborted.
     await new Promise<void>((resolve) => setImmediate(resolve));
-    // Signal the events consumer to stop — it races the abort against
-    // the next iterator.next() so it exits cleanly even if the
-    // underlying iterator wouldn't naturally complete.
     eventsAbort.abort();
     await eventsTask;
-    // Tear down the app.
     await app.closeApp();
   }
 
@@ -225,14 +202,13 @@ async function consumeEvents<P>(
   const iter = app.events(TOOL_DISPATCH_FILTER)[Symbol.asyncIterator]();
 
   // Per-opId scratch keyed by the operation envelope's opId.
-  //   requested envelope carries DispatchInput as payload → we stash
+  //   requested envelope carries DispatchInput as payload → stash
   //     {name, input} on first sight
   //   terminal envelope carries DispatchResult under payload.result →
-  //     we combine with the stashed input + outcome to produce the
-  //     final ObservedToolCall and push to the ledger
-  // The two are correlated by opId. If a `requested` is missed (e.g.
-  // late-attached subscriber, replayed terminal), we still emit a
-  // best-effort record using the result.name with `input: undefined`.
+  //     combine with stashed input + outcome and push to the ledger
+  // If a `requested` is missed (late-attached subscriber, replayed
+  // terminal), we still emit best-effort using result.name with
+  // `input: undefined`.
   const pending = new Map<string, { name: string; input: unknown }>();
 
   const abortPromise = new Promise<{ aborted: true }>((resolve) => {
@@ -264,9 +240,9 @@ function processDispatchEvent(
   if (!opId) return;
 
   if (event.phase === "requested") {
-    // requested.payload IS the DispatchInput — see BaseHarness's
-    // makeEvent path which now stamps op.input as the requested
-    // envelope's payload. We pluck name + input and stash.
+    // requested.payload IS the DispatchInput — BaseHarness stamps
+    // op.input as the requested envelope's payload (the blueprint
+    // pins requested as "argument bound").
     const payload = event.payload as
       | { readonly name?: unknown; readonly input?: unknown }
       | undefined;
@@ -290,7 +266,7 @@ function processDispatchEvent(
 
   const name =
     stashed?.name ?? (typeof dispatchResult?.name === "string" ? dispatchResult.name : undefined);
-  if (!name) return; // can't classify this call; drop silently
+  if (!name) return;
 
   const outcome: "succeeded" | "failed" = event.outcome === "failed" ? "failed" : "succeeded";
 

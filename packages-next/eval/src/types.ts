@@ -3,6 +3,13 @@
  * is the entry point; everything else is the surface the `t` (test
  * context) object exposes to assertion bodies.
  *
+ * Shape: `{ description, app, test }`. `app` is a thunk that
+ * constructs a FRESH `AppHarness` per eval invocation — every
+ * `await myEval()` gets its own app, so session state doesn't leak
+ * between runs or matrix-axis cells. The thunk receives the
+ * per-invocation overrides (`O`) and decides how to fold them in;
+ * eval-next does no option merging itself.
+ *
  * @see docs/proposals/v2/blueprint/37-eval-package-sketch.md
  */
 
@@ -10,63 +17,69 @@ import type { CreateAppOptions } from "@agentick/app-next";
 import type { AppHarnessProtocol } from "@agentick/spec-next";
 
 // ============================================================================
+// App factory + overrides
+// ============================================================================
+
+/**
+ * Default override shape — every `createApp` slot is optional, plus
+ * `rootElement` (which `CreateAppOptions` excludes by design).
+ * Adopters who want a domain-shaped override (e.g.
+ * `{ profile: "ci" | "prod" }`) parameterize `O` themselves.
+ */
+export type DefaultAppOverrides = Partial<CreateAppOptions> & {
+  readonly rootElement?: unknown;
+};
+
+/**
+ * Thunk that constructs a fresh `AppHarness` for one eval invocation.
+ * Receives the per-invocation overrides; the thunk decides how to
+ * compose them with its own defaults. Returning a fresh harness on
+ * each call is required — eval-next closes the app after the body
+ * finishes.
+ */
+export type AppFactory<O = DefaultAppOverrides, P = unknown> = (
+  overrides?: O,
+) => Promise<AppHarnessProtocol<P>>;
+
+// ============================================================================
 // Definition + invocation
 // ============================================================================
 
 /**
  * The eval body. Adopters write assertions against `t`; the runner
- * builds a fresh app for the invocation, executes the body, and
- * collects results.
+ * builds a fresh app via `definition.app(...)`, executes the body,
+ * and collects results.
  *
- * `t.send(prompt)` drives the agent to completion. Subsequent
- * assertions (`t.calledTool`, `t.notCalledTool`, etc.) inspect what
- * happened during that send. Adopters can chain multiple `t.send`
- * calls for multi-turn evals — state carries via the session.
+ * Adopters chain multiple `t.send` calls for multi-turn evals —
+ * state carries via the same session inside `t.app`.
  */
 export type EvalTest<P = unknown> = (t: EvalContext<P>) => Promise<void> | void;
 
 /**
- * The eval definition supplied to `defineEval(...)`. Carries the
- * defaults that bake into the returned callable function. Each
- * field may be overridden per invocation via the
- * {@link EvalInvocationOverrides} arg.
+ * The eval definition supplied to `defineEval(...)`. Three fields:
+ *
+ *   - `description` — human-readable, surfaces in result reports
+ *   - `app` — factory that constructs a fresh `AppHarness` per
+ *     invocation, receiving the per-call overrides
+ *   - `test` — the eval body, assertions against `t`
  */
-export interface EvalDefinition<P = unknown> extends Omit<CreateAppOptions<P>, "rootElement"> {
-  /** Human-readable description — surfaces in result reports. */
+export interface EvalDefinition<O = DefaultAppOverrides, P = unknown> {
   readonly description: string;
-  /**
-   * Agent root element handed to `createApp`. The reconciler
-   * interprets it (React element, custom AST, etc.).
-   */
-  readonly rootElement: unknown;
-  /** The eval body — assertions against `t`. */
+  readonly app: AppFactory<O, P>;
   readonly test: EvalTest<P>;
 }
 
 /**
- * Per-invocation overrides — what `await myEval({ ... })` accepts.
- * Every `createApp` field is optionally overridable; `rootElement`
- * and `test` cannot be overridden (those are eval identity).
- *
- * Common overrides for matrix runs: `executor` (model swap),
- * `metadata` (tagging the run for downstream reporting).
- */
-export type EvalInvocationOverrides<P = unknown> = Partial<
-  Omit<CreateAppOptions<P>, "rootElement">
-> & {
-  readonly rootElement?: unknown;
-};
-
-/**
- * The returned callable. `await myEval()` runs with definition
- * defaults; `await myEval({ executor: X })` overrides for one run.
+ * The returned callable. `await myEval()` runs with the factory's
+ * defaults; `await myEval(overrides)` passes `overrides` through to
+ * the factory unchanged.
  *
  * Future-shipped: `.matrix(axes)` for parameter sweeps. Not in MVP.
  */
-export interface CallableEval<P = unknown> {
-  (overrides?: EvalInvocationOverrides<P>): Promise<EvalResult>;
+export interface CallableEval<O = DefaultAppOverrides, P = unknown> {
+  (overrides?: O): Promise<EvalResult>;
   /** The original definition — exposed for tooling that wants to introspect. */
-  readonly definition: EvalDefinition<P>;
+  readonly definition: EvalDefinition<O, P>;
 }
 
 // ============================================================================
@@ -133,10 +146,11 @@ export interface ObservedToolCall {
  */
 export interface EvalContext<P = unknown> {
   /**
-   * Direct app handle. Adopters reach for this when they need
-   * primitives the `t` surface doesn't sugar (custom session
-   * configuration, multi-session evals, etc.). Use sparingly —
-   * the rest of `t` IS the supported surface.
+   * The app constructed by `definition.app(overrides)` for this
+   * invocation. Adopters reach for this when they need primitives
+   * the `t` surface doesn't sugar (custom session configuration,
+   * multi-session evals, etc.). Use sparingly — the rest of `t` IS
+   * the supported surface.
    */
   readonly app: AppHarnessProtocol<P>;
 
