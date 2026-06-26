@@ -572,6 +572,15 @@ importers:
         specifier: ^8.5.10
         version: 8.18.1
 
+  packages-next/compiler:
+    dependencies:
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../spec
+      '@agentick/utils-next':
+        specifier: workspace:*
+        version: link:../utils
+
   packages-next/elicitation:
     dependencies:
       '@agentick/runtime-next':

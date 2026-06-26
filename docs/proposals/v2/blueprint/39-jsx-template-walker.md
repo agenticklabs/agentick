@@ -192,7 +192,58 @@ only use walker-portable APIs.
 The asymmetry is intentional: **static→reactive is fine** (a snapshot is
 a snapshot); **reactive→static throws** (a hook is a hook).
 
-### D7 — Cache invalidation lives at the data source
+### D7 — Compiler is a pure async function, NOT a harness
+
+Harnesses in v2 are observable, stateful, lifecycle-bound runtime
+containers (runOperation, middleware, events, inbox address, handler
+bridges). The compiler has none of those — it's invoked, runs
+compile-until-stable, returns IR, done. No persistent state across
+calls, no mount/close lifecycle, no inbox routing.
+
+The reactive walker (reconciler-react-next) IS a harness, because the
+reactive scaffold genuinely is observable + stateful + lifecycle-bound.
+Its `render` operation INTERNALLY calls the compiler for the JSX→IR
+step. This mirrors the existing tool-executor pattern: the harness
+wraps user-provided handler functions; the handler isn't a harness.
+
+If observability on static renders is ever requested: wrap with a
+`function instrumentedRender(template, props, sink) { ... }` adapter.
+Don't harness-ify the compiler. Pure functions stay pure.
+
+### D8 — `defineCompiler({ adapter, ... })` is the public factory
+
+Each AST adapter package exports a Compiler instance built via
+`defineCompiler` from `@agentick/compiler-next`. Aligns with the
+framework's `defineX` convention (ADR 36).
+
+```ts
+// compiler-react-next/src/react-compiler.ts
+import { defineCompiler } from "@agentick/compiler-next";
+import { reactAdapter } from "./adapter.js";
+
+export const reactCompiler = defineCompiler({
+  name: "react",
+  adapter: reactAdapter,
+});
+
+// Adopter side
+import { reactCompiler } from "@agentick/compiler-react-next";
+
+const md = await reactCompiler.render(MyTemplate, { lang: "TS" });
+const ir = await reactCompiler.compile(MyTemplate, { lang: "TS" });
+const blocks = await reactCompiler.renderToBlocks(MyTemplate, { lang: "TS" });
+```
+
+`defineCompiler` returns a Compiler object with `.compile()`, `.render()`,
+`.renderToBlocks()`, `.renderSync()` methods. The factory bundles the
+AST adapter into a single callable surface so adopters don't pass an
+adapter at every call site. Compiler identity (`.name`) is exposed for
+diagnostics.
+
+`compile()` is the canonical entry point — returns `RenderedTree`.
+`render()` is `compile()` composed with the formatter pipeline.
+
+### D9 — Cache invalidation lives at the data source
 
 Each `render()` call re-evaluates `useData`. If the fetcher returns
 cached data, the render is fast; if the cache busts, fresh data lands on
@@ -205,40 +256,70 @@ for; use it instead.
 
 ## Package layout
 
+Three packages, no subpath. Matches the existing v2 precedent for
+abstract-base + concrete-adapter families
+(`cluster-next` / `cluster-net-next` / `cluster-redis-next`, etc.).
+
 ```
-@agentick/jsx-walker-next/          — new (shared dispatch table + walker core)
+@agentick/compiler-next/            — AST-agnostic core (NEW)
   src/
-    dispatch-table.ts               — INTRINSICS: Record<tag, IntrinsicHandler>
-    walk.ts                         — pure recursion, mode-agnostic
-    use-data.ts                     — walker-portable thrown-Promise primitive
+    adapter.ts                      — CompilerAdapter<TNode> interface
+    define-compiler.ts              — defineCompiler({...}) → Compiler instance
+    walk.ts                         — pure recursion, AST-agnostic
+    compile.ts                      — compile-until-stable loop
+    use-data.ts                     — walker-portable suspend-via-throw primitive
     effects.ts                      — Effect types (ToolRegister, KnobBind, ...)
-    intrinsics/                     — per-tag handlers (section, message, h1, ...)
+    dispatch.ts                     — dispatch-table types + lookup
+    intrinsics/                     — semantic-vocabulary handlers
+                                       (section, message, h1-h3, paragraph,
+                                        list, code, json, table, ...)
 
-@agentick/jsx-template-next/        — new (static evaluation context)
+@agentick/compiler-react-next/      — React-element adapter (NEW)
   src/
-    render.ts                       — async render + compile-until-stable loop
-    render-sync.ts                  — throws if any hook suspends
-    template-component.ts           — TemplateComponent<P> type alias
+    adapter.ts                      — React-element-shaped CompilerAdapter
+    react-compiler.ts               — `export const reactCompiler = defineCompiler({...})`
+    render.ts                       — render() / renderToBlocks() / renderSync()
 
-@agentick/reconciler-react-next/    — refactored
+@agentick/compiler-angular-next/    — future, parallel structure
+@agentick/compiler-solid-next/      — future, parallel structure
+
+@agentick/reconciler-react-next/    — refactored (Phase 3 only)
   src/
     harness/                        — unchanged externally
-    host/host-config.ts             — delegates to jsx-walker-next dispatch table
+    host/host-config.ts             — delegates intrinsic semantics to
+                                       compiler-react-next's dispatch
+                                       table; keeps the reactive scaffold
+                                       (scheduler, commit, hooks, bridges).
 ```
 
-Reconciler-react-next still owns the reactive scaffold (hooks, scheduler,
-commit pipeline, bridges). Its host-config no longer carries intrinsic
-semantics — those move to `@agentick/jsx-walker-next/intrinsics/`. The
-reactive walker calls into the shared table during commit; static
-walker calls into the same table during recursion.
+Compiler-next carries the SEMANTIC vocabulary (one place to add a new
+intrinsic for the whole framework). The per-framework packages own AST
+normalization — turning React elements / Angular templates / Solid
+signals into the canonical `{tag, props, children, visit}` the dispatch
+table expects.
+
+Why separate packages (not subpaths)?
+
+1. **No React dep at the compiler-next root.** Pure-Angular adopters
+   install `compiler-angular-next` only; never pull in `react`.
+2. **Independent versioning.** React adapter ships at React-ecosystem
+   cadence; Angular at its own.
+3. **Clearer dep graph.** `reconciler-react-next → compiler-react-next →
+   compiler-next`. Linear, inspectable.
+4. **Matches the established v2 convention.** Subpaths in v2 are for
+   thin facades (`app-next/react` is ~10 LOC); substantive adapters
+   ship as their own packages.
 
 ## Rollout
 
-**Phase 1 — Build static walker (parallel, no touch on reconciler-react-next).**
-Carve `@agentick/jsx-walker-next` with the dispatch table + pure
-recursive walker. Build `@agentick/jsx-template-next` with `render()` /
-`renderToBlocks()` / `renderSync()`. Ship snapshot testing helpers.
-Verified by its own suite. **~3 days. Zero risk to existing tests.**
+**Phase 1 — Build compiler-next + compiler-react-next (parallel, no touch on reconciler-react-next).**
+Carve `@agentick/compiler-next` with the dispatch table, `CompilerAdapter`
+interface, `defineCompiler` factory, walk + compile-until-stable loop,
+`useData` primitive, and semantic-intrinsic handlers. Carve
+`@agentick/compiler-react-next` with the React adapter + `render() /
+renderToBlocks() / renderSync()` exports. Verified by its own suite —
+synthetic-adapter tests in compiler-next (no React dep at that layer),
+JSX tests in compiler-react-next. **~3 days. Zero risk to existing tests.**
 
 **Phase 2 — Adopt downstream.** Wire jsx-template-next into:
 

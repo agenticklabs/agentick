@@ -1,0 +1,51 @@
+{
+  "name": "@agentick/compiler-next",
+  "version": "0.0.0",
+  "private": true,
+  "description": "AST-agnostic JSX-template compiler core for Agentick v2. Exports `defineCompiler({adapter})`, the shared intrinsic-vocabulary dispatch table (`<Section>`, `<H1>`, `<Code>`, …), the `useData` walker-portable suspend-via-throw primitive, and the compile-until-stable loop. Per-framework adapters (`compiler-react-next`, future `compiler-angular-next`) build on this — no React dep at this layer. See ADR 39.",
+  "keywords": [
+    "agentick",
+    "compiler",
+    "jsx",
+    "template"
+  ],
+  "license": "MIT",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages-next/compiler"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
+  },
+  "dependencies": {
+    "@agentick/spec-next": "workspace:*",
+    "@agentick/utils-next": "workspace:*"
+  }
+}

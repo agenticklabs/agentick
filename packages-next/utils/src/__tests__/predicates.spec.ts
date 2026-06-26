@@ -11,6 +11,7 @@ import {
   isObject,
   isPlainObject,
   isString,
+  isThenable,
   isUndefined,
 } from "../predicates.js";
 
@@ -148,6 +149,31 @@ describe("predicates", () => {
       // Date counts as a typeof object → isObject true; callers needing
       // "POJO only" can compose with `!isDate(v)` themselves.
       expect(isObject(new Date())).toBe(true);
+    });
+  });
+
+  describe("isThenable", () => {
+    it("native Promises are thenable", () => {
+      expect(isThenable(Promise.resolve(1))).toBe(true);
+      expect(isThenable(Promise.reject(new Error("x")).catch(() => undefined))).toBe(true);
+    });
+
+    it("custom thenables (A+ shape) are thenable", () => {
+      const fake = { then: (_r: (v: number) => void) => undefined };
+      expect(isThenable(fake)).toBe(true);
+    });
+
+    it("rejects non-objects", () => {
+      expect(isThenable(null)).toBe(false);
+      expect(isThenable(undefined)).toBe(false);
+      expect(isThenable("then")).toBe(false);
+      expect(isThenable(42)).toBe(false);
+    });
+
+    it("rejects objects without a function-valued `then`", () => {
+      expect(isThenable({})).toBe(false);
+      expect(isThenable({ then: 1 })).toBe(false);
+      expect(isThenable({ then: "promise" })).toBe(false);
     });
   });
 
