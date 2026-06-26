@@ -136,6 +136,51 @@ reconciler handles the React side (Suspense, Context, error
 boundaries, function-component lifecycle, DevTools); we don't
 reinvent any of it.
 
+### Phase 3 retirement scope (locked 2026-06-26)
+
+The Phase 3 refactor retires the `Contributor` protocol abstraction in
+`@agentick/reconciler-next/collect/` — Contributor interface,
+CollectContext, IRFragment discriminated union, ContributorRegistry,
+built-ins registration ceremony, the harness `registerContributor()`
+method, and the AppExtension `registerContributor` slot. All have
+zero external call sites in two major versions of the framework
+(v1's `registerRendererComponent` is the same shape with the same
+non-usage).
+
+**Replaced by:** a thin `registerIntrinsic(tag, handler)` API on
+`@agentick/compiler-react-next`. Handler signature:
+
+```ts
+type IntrinsicHandler = (
+  props: Readonly<Record<string, unknown>>,
+  children: readonly HostInstance[],
+  walk: (children: readonly HostInstance[]) => WalkResult,
+) => WalkResult;
+
+export function registerIntrinsic(tag: string, handler: IntrinsicHandler): () => void;
+```
+
+A `Map<tag, handler>` sits alongside the built-in switch. The walker
+checks the map first, falls through to the switch, throws on unknown.
+Adopters adding domain-specific intrinsics (`<recipe-card>`,
+`<calendar-event>`, etc.) call `registerIntrinsic` once at module
+load; the returned function deregisters for tests + dynamic scenarios.
+
+**What this preserves:** the extension capability — confidence that if
+plugin packages or adopters need a custom intrinsic tomorrow, the
+path is clear and tested.
+
+**What this drops:** the layers between intrinsic semantics and the
+walker — Contributor objects with `contribute(instance, ctx)`,
+CollectContext with `walk` / `stableId` / `collectText` helpers, the
+IRFragment intermediate buffer between contributor output and final
+RenderedTree assembly. None earned their complexity.
+
+**Reversible:** if we later decide the protocol layers had value, the
+registry surface is still there; we re-introduce Contributor +
+CollectContext as a wrapper around it. Cheap to add back later;
+expensive to keep nobody-uses-it abstraction now.
+
 ## Decisions
 
 ### D1 — Uniform IR, effect channel is the context-dependent part
