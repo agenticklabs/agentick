@@ -34,6 +34,7 @@ import type {
 import type { EventEnvelope, MessageEnvelope } from "@agentick/spec-next";
 import { matchesAddressFilter, matchesEventFilter, ulid } from "@agentick/utils-next";
 
+import { adaptClusterCodec, type BrokerCodec } from "./broker-codec.js";
 import type { Connection, Connector } from "./connection.js";
 import {
   FRAME_BROADCAST,
@@ -134,7 +135,7 @@ interface BusSubscription {
 export class BaseClusterClient implements ClusterTransport {
   private readonly nodeId: NodeId;
   private readonly connector: Connector;
-  private readonly codec: ClusterCodec;
+  private readonly codec: BrokerCodec;
   private readonly heartbeatMs: number;
   private readonly missedPongLimit: number;
   private readonly reconnectInitialMs: number;
@@ -203,7 +204,7 @@ export class BaseClusterClient implements ClusterTransport {
   constructor(opts: BaseClusterClientOptions) {
     this.nodeId = opts.nodeId;
     this.connector = opts.connector;
-    this.codec = opts.codec;
+    this.codec = adaptClusterCodec(opts.codec);
     this.heartbeatMs = opts.heartbeatMs ?? 30_000;
     this.missedPongLimit = opts.missedPongLimit ?? 3;
     this.reconnectInitialMs = opts.reconnect?.initialMs ?? 500;
@@ -700,12 +701,11 @@ export class BaseClusterClient implements ClusterTransport {
   }
 
   private async writeFrameRaw(conn: Connection, frame: AnyFrame): Promise<void> {
-    // TODO(phase-4f): ClusterCodec is typed for envelopes at the
-    // cluster-next layer. Client frames (Hello, Subscribe, Flush, etc.)
-    // share the wire with envelopes — JSON serializes anything, but a
-    // typed codec (msgpack/protobuf) needs an explicit broker frame
-    // schema. See base-broker.ts:writeFrame for the symmetric fix.
-    const bytes = this.codec.encode(frame as unknown as MessageEnvelope);
+    // Encode goes through the centralized BrokerCodec adapter
+    // (`broker-codec.ts`); the cast away from envelopes lives there
+    // in one place. The TODO(phase-5) about a real typed codec also
+    // lives there.
+    const bytes = this.codec.encode(frame);
     await conn.send(bytes);
   }
 

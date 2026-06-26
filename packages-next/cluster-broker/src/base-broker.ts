@@ -34,6 +34,7 @@ import type { EventEnvelope, MessageEnvelope } from "@agentick/spec-next";
 import { matchesAddressFilter, matchesEventFilter } from "@agentick/utils-next";
 
 import { BoundedWriteQueue } from "./bounded-write-queue.js";
+import { adaptClusterCodec, type BrokerCodec } from "./broker-codec.js";
 import type { Connection, Listener } from "./connection.js";
 import {
   FRAME_BROADCAST,
@@ -104,7 +105,7 @@ interface ConnectedClient {
 
 export class BaseBroker {
   private readonly listener: Listener;
-  private readonly codec: ClusterCodec;
+  private readonly codec: BrokerCodec;
   private readonly onDiagnostic: (name: string, payload?: unknown) => void;
   private readonly maxQueueSize: number;
 
@@ -119,7 +120,7 @@ export class BaseBroker {
 
   constructor(opts: BaseBrokerOptions) {
     this.listener = opts.listener;
-    this.codec = opts.codec;
+    this.codec = adaptClusterCodec(opts.codec);
     this.onDiagnostic = opts.onDiagnostic ?? (() => {});
     this.maxQueueSize = opts.maxQueueSize ?? 1024;
   }
@@ -170,7 +171,7 @@ export class BaseBroker {
     }
     const writeQueue = new BoundedWriteQueue<BrokerFrame>({
       conn,
-      encode: (frame) => this.codec.encode(frame as unknown as MessageEnvelope),
+      encode: (frame) => this.codec.encode(frame),
       maxQueueSize: this.maxQueueSize,
       onOverflow: (dropped, depth) => {
         this.onDiagnostic("cluster:broker:server:backpressure-drop", {

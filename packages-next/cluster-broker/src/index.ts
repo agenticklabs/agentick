@@ -68,6 +68,17 @@ export {
 export { BaseClusterClient, type BaseClusterClientOptions } from "./base-cluster-client.js";
 export { BaseBroker, type BaseBrokerOptions } from "./base-broker.js";
 
+// Broker-internal codec adapter (Phase 4f.5). Centralizes the cast
+// between adopter-supplied `ClusterCodec` (envelope-typed) and the
+// broker's own frame schema. Adopter-invisible by default; advanced
+// codec authors implement `BrokerCodec` directly.
+export { adaptClusterCodec, type BrokerCodec } from "./broker-codec.js";
+
+// Per-connection bounded write queue (Phase 4f.4). Used internally
+// by `BaseBroker` for fan-out; exposed for wire impls that need to
+// extend backpressure semantics (e.g., per-frame priorities).
+export { BoundedWriteQueue, type BoundedWriteQueueOptions } from "./bounded-write-queue.js";
+
 // Wire-agnostic convenience helpers — shared scaffolding for every
 // concrete wire's xBroker / xClusterNode / defineXCluster triple.
 export {
