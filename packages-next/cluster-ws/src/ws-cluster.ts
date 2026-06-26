@@ -1,8 +1,10 @@
 /**
- * High-level WebSocket cluster factories. Mirror of
- * `cluster-net-next`'s tcp / unix-cluster modules; the WS-specific
- * concerns (mount vs standalone, subprotocol negotiation) are
- * encapsulated in `ws-listener.ts` and `ws-connector.ts`.
+ * High-level WebSocket cluster factories. Wire-specific concerns
+ * (mount-on-httpServer vs standalone-port, subprotocol negotiation,
+ * allowed-origins policy) are encapsulated in `ws-listener.ts` and
+ * `ws-connector.ts`. The shared `{ xBroker, xClusterNode,
+ * defineXCluster }` scaffolding lives in
+ * `@agentick/cluster-broker-next` (`wire-helpers.ts`).
  */
 
 import type { Server as HttpServer } from "node:http";
@@ -10,17 +12,19 @@ import type { Server as HttpServer } from "node:http";
 import type {
   ClusterCodec,
   ClusterFactory,
-  ClusterMembership,
   ClusterMembershipFactory,
-  ClusterParent,
   ClusterPartitioningFactory,
   ClusterTransportFactory,
   DurableJournalFactory,
-  MembershipChange,
   NodeId,
 } from "@agentick/cluster-next";
-import { createJsonCodec, defineCluster } from "@agentick/cluster-next";
-import { BaseBroker, BaseClusterClient, type Listener } from "@agentick/cluster-broker-next";
+import {
+  createClusterNode,
+  defineWireCluster,
+  startBroker,
+  type ClusterNodeFactories,
+  type RunningBroker,
+} from "@agentick/cluster-broker-next";
 
 import { createWsConnector } from "./ws-connector.js";
 import { createWsListener } from "./ws-listener.js";
@@ -39,11 +43,7 @@ export type WsBrokerOptions = (
   readonly onDiagnostic?: (name: string, payload?: unknown) => void;
 };
 
-export interface RunningWsBroker {
-  readonly broker: BaseBroker;
-  readonly listener: Listener;
-  close(): Promise<void>;
-}
+export type RunningWsBroker = RunningBroker;
 
 export async function wsBroker(opts: WsBrokerOptions): Promise<RunningWsBroker> {
   const listener = createWsListener({
@@ -54,19 +54,11 @@ export async function wsBroker(opts: WsBrokerOptions): Promise<RunningWsBroker> 
     ...(opts.allowedOrigins !== undefined ? { allowedOrigins: opts.allowedOrigins } : {}),
     ...(opts.onDiagnostic !== undefined ? { onDiagnostic: opts.onDiagnostic } : {}),
   });
-  const broker = new BaseBroker({
+  return startBroker({
     listener,
-    codec: opts.codec ?? defaultCodec(),
+    ...(opts.codec !== undefined ? { codec: opts.codec } : {}),
     ...(opts.onDiagnostic !== undefined ? { onDiagnostic: opts.onDiagnostic } : {}),
   });
-  await broker.start();
-  return {
-    broker,
-    listener,
-    async close() {
-      await broker.close();
-    },
-  };
 }
 
 // ============================================================================
@@ -89,52 +81,20 @@ export interface WsClusterNodeOptions {
   readonly onDiagnostic?: (name: string, payload?: unknown) => void;
 }
 
-export function wsClusterNode(opts: WsClusterNodeOptions): {
-  readonly transport: ClusterTransportFactory;
-  readonly membership: ClusterMembershipFactory;
-} {
-  let client: BaseClusterClient | null = null;
-
-  function ensureClient(parent: ClusterParent): BaseClusterClient {
-    if (client) return client;
-    const c = new BaseClusterClient({
-      nodeId: opts.nodeId,
-      connector: createWsConnector({
-        url: opts.url,
-        ...(opts.connectTimeoutMs !== undefined ? { connectTimeoutMs: opts.connectTimeoutMs } : {}),
-        ...(opts.onDiagnostic !== undefined ? { onDiagnostic: opts.onDiagnostic } : {}),
-      }),
-      codec: opts.codec ?? defaultCodec(),
-      ...(opts.heartbeatMs !== undefined ? { heartbeatMs: opts.heartbeatMs } : {}),
-      ...(opts.missedPongLimit !== undefined ? { missedPongLimit: opts.missedPongLimit } : {}),
-      ...(opts.reconnect !== undefined ? { reconnect: opts.reconnect } : {}),
+export function wsClusterNode(opts: WsClusterNodeOptions): ClusterNodeFactories {
+  return createClusterNode({
+    nodeId: opts.nodeId,
+    connector: createWsConnector({
+      url: opts.url,
+      ...(opts.connectTimeoutMs !== undefined ? { connectTimeoutMs: opts.connectTimeoutMs } : {}),
       ...(opts.onDiagnostic !== undefined ? { onDiagnostic: opts.onDiagnostic } : {}),
-    });
-    client = c;
-    parent.onClose(() => c.close());
-    return c;
-  }
-
-  return {
-    transport: (parent) => ensureClient(parent),
-    membership: (parent) => clientToMembership(ensureClient(parent), opts.nodeId),
-  };
-}
-
-function clientToMembership(client: BaseClusterClient, currentNode: NodeId): ClusterMembership {
-  return {
-    currentNode,
-    async nodes() {
-      return client.nodes();
-    },
-    onChange(handler: (change: MembershipChange) => void) {
-      const detach = client.onMembershipChange(handler);
-      return async () => detach();
-    },
-    async close() {
-      // No-op — shared client's close is wired through parent.onClose.
-    },
-  };
+    }),
+    ...(opts.codec !== undefined ? { codec: opts.codec } : {}),
+    ...(opts.heartbeatMs !== undefined ? { heartbeatMs: opts.heartbeatMs } : {}),
+    ...(opts.missedPongLimit !== undefined ? { missedPongLimit: opts.missedPongLimit } : {}),
+    ...(opts.reconnect !== undefined ? { reconnect: opts.reconnect } : {}),
+    ...(opts.onDiagnostic !== undefined ? { onDiagnostic: opts.onDiagnostic } : {}),
+  });
 }
 
 export function wsTransport(opts: WsClusterNodeOptions): ClusterTransportFactory {
@@ -156,22 +116,12 @@ export interface DefineWsClusterOptions extends WsClusterNodeOptions {
 }
 
 export function defineWsCluster(opts: DefineWsClusterOptions): ClusterFactory {
-  const node = wsClusterNode(opts);
-  return defineCluster({
+  return defineWireCluster({
     nodeId: opts.nodeId,
-    transport: node.transport,
-    membership: node.membership,
+    node: wsClusterNode(opts),
+    ...(opts.codec !== undefined ? { codec: opts.codec } : {}),
     ...(opts.partitioning !== undefined ? { partitioning: opts.partitioning } : {}),
     ...(opts.journal !== undefined ? { journal: opts.journal } : {}),
-    ...(opts.codec !== undefined ? { codec: () => opts.codec! } : {}),
     ...(opts.fanoutMode !== undefined ? { fanoutMode: opts.fanoutMode } : {}),
   });
-}
-
-// ============================================================================
-// Internals
-// ============================================================================
-
-function defaultCodec(): ClusterCodec {
-  return createJsonCodec();
 }

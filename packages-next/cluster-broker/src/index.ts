@@ -67,3 +67,16 @@ export {
 // Base classes — wire-impl packages instantiate these.
 export { BaseClusterClient, type BaseClusterClientOptions } from "./base-cluster-client.js";
 export { BaseBroker, type BaseBrokerOptions } from "./base-broker.js";
+
+// Wire-agnostic convenience helpers — shared scaffolding for every
+// concrete wire's xBroker / xClusterNode / defineXCluster triple.
+export {
+  startBroker,
+  createClusterNode,
+  defineWireCluster,
+  type StartBrokerOptions,
+  type RunningBroker,
+  type CreateClusterNodeOptions,
+  type ClusterNodeFactories,
+  type DefineWireClusterOptions,
+} from "./wire-helpers.js";

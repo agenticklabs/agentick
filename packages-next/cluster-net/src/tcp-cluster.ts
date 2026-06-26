@@ -1,28 +1,19 @@
 /**
- * High-level TCP cluster factories.
+ * High-level TCP cluster factories. Wire-specific concerns (host/port,
+ * length-prefix framing, max-frame-bytes) live in `tcp-listener.ts` /
+ * `tcp-connector.ts`. The shared `{ xBroker, xClusterNode,
+ * defineXCluster }` scaffolding lives in
+ * `@agentick/cluster-broker-next` (`wire-helpers.ts`).
  *
- *   - `tcpBroker(opts)` — convenience that spins up a `BaseBroker` on
- *     a TCP listener. Adopters call this in their broker-elected
- *     process (e.g., the PM2 master, or whichever wins the
- *     auto-elect race). Returns the started broker + the underlying
- *     server for explicit lifecycle.
- *
- *   - `tcpClusterNode(opts)` — bundles a `ClusterTransportFactory` +
- *     `ClusterMembershipFactory` over ONE multiplexed connection.
- *     Adopters who use `defineCluster` directly destructure this:
- *
- *         const { transport, membership } = tcpClusterNode({...});
- *         defineCluster({ nodeId, transport, membership, ... });
- *
- *   - `tcpTransport(opts)` + `tcpMembership(opts)` — the
- *     individually-callable factories. Each opens its own
- *     `BaseClusterClient` (= its own TCP connection). Adopters who
- *     want one multiplexed connection use `tcpClusterNode` instead;
- *     these exist for the manual composition path with the
- *     two-connection trade-off documented.
- *
+ *   - `tcpBroker(opts)` — `BaseBroker` on a TCP listener; adopter
+ *     calls this in the broker-elected process.
+ *   - `tcpClusterNode(opts)` — `{transport, membership}` factory pair
+ *     sharing ONE multiplexed connection.
+ *   - `tcpTransport(opts)` / `tcpMembership(opts)` — individually-
+ *     callable factories. Pairing them opens TWO connections per
+ *     node — use `tcpClusterNode` to share.
  *   - `defineTcpCluster(spec)` — top-level convenience returning a
- *     `ClusterFactory`. Wraps `defineCluster + tcpClusterNode`.
+ *     `ClusterFactory`.
  *
  * @see docs/proposals/v2/blueprint/35-cluster-protocol.md §6
  */
@@ -30,19 +21,20 @@
 import type {
   ClusterCodec,
   ClusterFactory,
-  ClusterMembership,
   ClusterMembershipFactory,
-  ClusterParent,
   ClusterPartitioningFactory,
   ClusterTransportFactory,
   DurableJournalFactory,
-  MembershipChange,
   NodeId,
 } from "@agentick/cluster-next";
-import { createJsonCodec, defineCluster } from "@agentick/cluster-next";
-import { BaseBroker, BaseClusterClient, type Listener } from "@agentick/cluster-broker-next";
+import {
+  createClusterNode,
+  defineWireCluster,
+  startBroker,
+  type ClusterNodeFactories,
+  type RunningBroker,
+} from "@agentick/cluster-broker-next";
 
-import { tryBindOrConnect } from "./auto-elect.js";
 import { createTcpConnector } from "./tcp-connector.js";
 import { createTcpListener } from "./tcp-listener.js";
 
@@ -70,18 +62,13 @@ export interface TcpBrokerOptions extends TcpEndpoint {
   readonly onDiagnostic?: (name: string, payload?: unknown) => void;
 }
 
-export interface RunningTcpBroker {
-  readonly broker: BaseBroker;
-  readonly listener: Listener;
-  close(): Promise<void>;
-}
+export type RunningTcpBroker = RunningBroker;
 
 /**
  * Create + start a broker on `host:port`. Caller is responsible for
  * calling `close()` to release the socket. For auto-elect (race to
- * bind), use `tryBindOrConnect` + adopt the server into the
- * listener; this helper assumes the adopter has decided to be the
- * broker.
+ * bind), use `tryBindOrConnect` + adopt the server into the listener;
+ * this helper assumes the adopter has decided to be the broker.
  */
 export async function tcpBroker(opts: TcpBrokerOptions): Promise<RunningTcpBroker> {
   const listener = createTcpListener({
@@ -90,19 +77,11 @@ export async function tcpBroker(opts: TcpBrokerOptions): Promise<RunningTcpBroke
     ...(opts.maxFrameBytes !== undefined ? { maxFrameBytes: opts.maxFrameBytes } : {}),
     ...(opts.onDiagnostic !== undefined ? { onDiagnostic: opts.onDiagnostic } : {}),
   });
-  const broker = new BaseBroker({
+  return startBroker({
     listener,
-    codec: opts.codec ?? defaultCodec(),
+    ...(opts.codec !== undefined ? { codec: opts.codec } : {}),
     ...(opts.onDiagnostic !== undefined ? { onDiagnostic: opts.onDiagnostic } : {}),
   });
-  await broker.start();
-  return {
-    broker,
-    listener,
-    async close() {
-      await broker.close();
-    },
-  };
 }
 
 // ============================================================================
@@ -132,80 +111,41 @@ export interface TcpClusterNodeOptions extends TcpEndpoint {
 
 /**
  * Bundle a `ClusterTransport` + `ClusterMembership` factory pair
- * backed by ONE underlying `BaseClusterClient` (= one TCP
- * connection). Both factories MUST be invoked against the same
- * `ClusterParent` (the caller passes both into `defineCluster`).
+ * backed by ONE underlying `BaseClusterClient` (= one TCP connection).
+ * Both factories MUST be invoked against the same `ClusterParent`
+ * (the caller passes both into `defineCluster`).
  */
-export function tcpClusterNode(opts: TcpClusterNodeOptions): {
-  readonly transport: ClusterTransportFactory;
-  readonly membership: ClusterMembershipFactory;
-} {
-  let client: BaseClusterClient | null = null;
-
-  function ensureClient(parent: ClusterParent): BaseClusterClient {
-    if (client) return client;
-    const c = new BaseClusterClient({
-      nodeId: opts.nodeId,
-      connector: createTcpConnector({
-        ...(opts.host !== undefined ? { host: opts.host } : {}),
-        port: opts.port,
-        ...(opts.maxFrameBytes !== undefined ? { maxFrameBytes: opts.maxFrameBytes } : {}),
-        ...(opts.connectTimeoutMs !== undefined ? { connectTimeoutMs: opts.connectTimeoutMs } : {}),
-        ...(opts.onDiagnostic !== undefined ? { onDiagnostic: opts.onDiagnostic } : {}),
-      }),
-      codec: opts.codec ?? defaultCodec(),
-      ...(opts.heartbeatMs !== undefined ? { heartbeatMs: opts.heartbeatMs } : {}),
-      ...(opts.missedPongLimit !== undefined ? { missedPongLimit: opts.missedPongLimit } : {}),
-      ...(opts.reconnect !== undefined ? { reconnect: opts.reconnect } : {}),
+export function tcpClusterNode(opts: TcpClusterNodeOptions): ClusterNodeFactories {
+  return createClusterNode({
+    nodeId: opts.nodeId,
+    connector: createTcpConnector({
+      ...(opts.host !== undefined ? { host: opts.host } : {}),
+      port: opts.port,
+      ...(opts.maxFrameBytes !== undefined ? { maxFrameBytes: opts.maxFrameBytes } : {}),
+      ...(opts.connectTimeoutMs !== undefined ? { connectTimeoutMs: opts.connectTimeoutMs } : {}),
       ...(opts.onDiagnostic !== undefined ? { onDiagnostic: opts.onDiagnostic } : {}),
-    });
-    client = c;
-    parent.onClose(() => c.close());
-    return c;
-  }
-
-  return {
-    transport: (parent) => ensureClient(parent),
-    membership: (parent) => clientToMembership(ensureClient(parent), opts.nodeId),
-  };
+    }),
+    ...(opts.codec !== undefined ? { codec: opts.codec } : {}),
+    ...(opts.heartbeatMs !== undefined ? { heartbeatMs: opts.heartbeatMs } : {}),
+    ...(opts.missedPongLimit !== undefined ? { missedPongLimit: opts.missedPongLimit } : {}),
+    ...(opts.reconnect !== undefined ? { reconnect: opts.reconnect } : {}),
+    ...(opts.onDiagnostic !== undefined ? { onDiagnostic: opts.onDiagnostic } : {}),
+  });
 }
-
-/** Wrap a BaseClusterClient's membership accessors as a ClusterMembership. */
-function clientToMembership(client: BaseClusterClient, currentNode: NodeId): ClusterMembership {
-  return {
-    currentNode,
-    async nodes() {
-      return client.nodes();
-    },
-    onChange(handler: (change: MembershipChange) => void) {
-      const detach = client.onMembershipChange(handler);
-      return async () => detach();
-    },
-    async close() {
-      // The shared client's close is wired through parent.onClose
-      // by ensureClient. Membership-side close is a no-op so the
-      // transport doesn't get torn down on a partial close.
-    },
-  };
-}
-
-// ============================================================================
-// Individual factories (two-connection trade-off path)
-// ============================================================================
 
 /**
- * Standalone TCP transport — opens its own `BaseClusterClient` (=
- * one TCP connection). Use `tcpClusterNode` instead when you also
- * want a paired membership over the same connection.
+ * Standalone TCP transport — opens its own `BaseClusterClient` (= one
+ * TCP connection). Use `tcpClusterNode` instead when you also want a
+ * paired membership over the same connection.
  */
 export function tcpTransport(opts: TcpClusterNodeOptions): ClusterTransportFactory {
   return tcpClusterNode(opts).transport;
 }
 
 /**
- * Standalone TCP membership — opens its own `BaseClusterClient`.
- * If paired with `tcpTransport` of the same options, you end up
- * with TWO connections per node — use `tcpClusterNode` to share.
+ * Standalone TCP membership — opens its own `BaseClusterClient`. If
+ * paired with `tcpTransport` of the same options, you end up with TWO
+ * connections per node — use `tcpClusterNode` to share.
  */
 export function tcpMembership(opts: TcpClusterNodeOptions): ClusterMembershipFactory {
   return tcpClusterNode(opts).membership;
@@ -233,14 +173,12 @@ export interface DefineTcpClusterOptions extends TcpClusterNodeOptions {
  *     // ... pass `cluster` to createGateway / createApp ...
  */
 export function defineTcpCluster(opts: DefineTcpClusterOptions): ClusterFactory {
-  const node = tcpClusterNode(opts);
-  return defineCluster({
+  return defineWireCluster({
     nodeId: opts.nodeId,
-    transport: node.transport,
-    membership: node.membership,
+    node: tcpClusterNode(opts),
+    ...(opts.codec !== undefined ? { codec: opts.codec } : {}),
     ...(opts.partitioning !== undefined ? { partitioning: opts.partitioning } : {}),
     ...(opts.journal !== undefined ? { journal: opts.journal } : {}),
-    ...(opts.codec !== undefined ? { codec: () => opts.codec! } : {}),
     ...(opts.fanoutMode !== undefined ? { fanoutMode: opts.fanoutMode } : {}),
   });
 }
@@ -251,11 +189,3 @@ export function defineTcpCluster(opts: DefineTcpClusterOptions): ClusterFactory 
 
 export { tryBindOrConnect } from "./auto-elect.js";
 export type { AutoElectMode, AutoElectOptions, AutoElectResult } from "./auto-elect.js";
-
-// ============================================================================
-// Internals
-// ============================================================================
-
-function defaultCodec(): ClusterCodec {
-  return createJsonCodec();
-}

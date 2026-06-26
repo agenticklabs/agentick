@@ -1,12 +1,14 @@
 /**
- * High-level Unix-socket cluster factories. Mirror of
- * `tcp-cluster.ts` with filesystem-path addressing instead of
- * host:port.
+ * High-level Unix-socket cluster factories. Mirror of `tcp-cluster.ts`
+ * with filesystem-path addressing instead of host:port. Wire-specific
+ * concerns (socket path, fs mode, stale-cleanup) live in
+ * `unix-listener.ts` / `unix-connector.ts`. The shared
+ * `{ xBroker, xClusterNode, defineXCluster }` scaffolding lives in
+ * `@agentick/cluster-broker-next` (`wire-helpers.ts`).
  *
- *   - `unixBroker(opts)` — spins up a broker on a socket path.
- *     Cleans up stale predecessor sockets automatically.
- *   - `unixClusterNode(opts)` — multiplexed transport + membership
- *     over one Unix-socket connection.
+ *   - `unixBroker(opts)` — broker on a socket path; cleans stale
+ *     predecessor sockets.
+ *   - `unixClusterNode(opts)` — `{transport, membership}` factory pair.
  *   - `unixTransport` / `unixMembership` — standalone factories.
  *   - `defineUnixCluster(spec)` — top-level convenience.
  *
@@ -17,17 +19,19 @@
 import type {
   ClusterCodec,
   ClusterFactory,
-  ClusterMembership,
   ClusterMembershipFactory,
-  ClusterParent,
   ClusterPartitioningFactory,
   ClusterTransportFactory,
   DurableJournalFactory,
-  MembershipChange,
   NodeId,
 } from "@agentick/cluster-next";
-import { createJsonCodec, defineCluster } from "@agentick/cluster-next";
-import { BaseBroker, BaseClusterClient, type Listener } from "@agentick/cluster-broker-next";
+import {
+  createClusterNode,
+  defineWireCluster,
+  startBroker,
+  type ClusterNodeFactories,
+  type RunningBroker,
+} from "@agentick/cluster-broker-next";
 
 import { createUnixConnector } from "./unix-connector.js";
 import { createUnixListener } from "./unix-listener.js";
@@ -63,11 +67,7 @@ export interface UnixBrokerOptions extends UnixEndpoint {
   readonly onDiagnostic?: (name: string, payload?: unknown) => void;
 }
 
-export interface RunningUnixBroker {
-  readonly broker: BaseBroker;
-  readonly listener: Listener;
-  close(): Promise<void>;
-}
+export type RunningUnixBroker = RunningBroker;
 
 export async function unixBroker(opts: UnixBrokerOptions): Promise<RunningUnixBroker> {
   const listener = createUnixListener({
@@ -79,19 +79,11 @@ export async function unixBroker(opts: UnixBrokerOptions): Promise<RunningUnixBr
       : {}),
     ...(opts.onDiagnostic !== undefined ? { onDiagnostic: opts.onDiagnostic } : {}),
   });
-  const broker = new BaseBroker({
+  return startBroker({
     listener,
-    codec: opts.codec ?? defaultCodec(),
+    ...(opts.codec !== undefined ? { codec: opts.codec } : {}),
     ...(opts.onDiagnostic !== undefined ? { onDiagnostic: opts.onDiagnostic } : {}),
   });
-  await broker.start();
-  return {
-    broker,
-    listener,
-    async close() {
-      await broker.close();
-    },
-  };
 }
 
 // ============================================================================
@@ -113,58 +105,22 @@ export interface UnixClusterNodeOptions extends UnixEndpoint {
   readonly onDiagnostic?: (name: string, payload?: unknown) => void;
 }
 
-export function unixClusterNode(opts: UnixClusterNodeOptions): {
-  readonly transport: ClusterTransportFactory;
-  readonly membership: ClusterMembershipFactory;
-} {
-  let client: BaseClusterClient | null = null;
-
-  function ensureClient(parent: ClusterParent): BaseClusterClient {
-    if (client) return client;
-    const c = new BaseClusterClient({
-      nodeId: opts.nodeId,
-      connector: createUnixConnector({
-        socketPath: opts.socketPath,
-        ...(opts.maxFrameBytes !== undefined ? { maxFrameBytes: opts.maxFrameBytes } : {}),
-        ...(opts.connectTimeoutMs !== undefined ? { connectTimeoutMs: opts.connectTimeoutMs } : {}),
-        ...(opts.onDiagnostic !== undefined ? { onDiagnostic: opts.onDiagnostic } : {}),
-      }),
-      codec: opts.codec ?? defaultCodec(),
-      ...(opts.heartbeatMs !== undefined ? { heartbeatMs: opts.heartbeatMs } : {}),
-      ...(opts.missedPongLimit !== undefined ? { missedPongLimit: opts.missedPongLimit } : {}),
-      ...(opts.reconnect !== undefined ? { reconnect: opts.reconnect } : {}),
+export function unixClusterNode(opts: UnixClusterNodeOptions): ClusterNodeFactories {
+  return createClusterNode({
+    nodeId: opts.nodeId,
+    connector: createUnixConnector({
+      socketPath: opts.socketPath,
+      ...(opts.maxFrameBytes !== undefined ? { maxFrameBytes: opts.maxFrameBytes } : {}),
+      ...(opts.connectTimeoutMs !== undefined ? { connectTimeoutMs: opts.connectTimeoutMs } : {}),
       ...(opts.onDiagnostic !== undefined ? { onDiagnostic: opts.onDiagnostic } : {}),
-    });
-    client = c;
-    parent.onClose(() => c.close());
-    return c;
-  }
-
-  return {
-    transport: (parent) => ensureClient(parent),
-    membership: (parent) => clientToMembership(ensureClient(parent), opts.nodeId),
-  };
+    }),
+    ...(opts.codec !== undefined ? { codec: opts.codec } : {}),
+    ...(opts.heartbeatMs !== undefined ? { heartbeatMs: opts.heartbeatMs } : {}),
+    ...(opts.missedPongLimit !== undefined ? { missedPongLimit: opts.missedPongLimit } : {}),
+    ...(opts.reconnect !== undefined ? { reconnect: opts.reconnect } : {}),
+    ...(opts.onDiagnostic !== undefined ? { onDiagnostic: opts.onDiagnostic } : {}),
+  });
 }
-
-function clientToMembership(client: BaseClusterClient, currentNode: NodeId): ClusterMembership {
-  return {
-    currentNode,
-    async nodes() {
-      return client.nodes();
-    },
-    onChange(handler: (change: MembershipChange) => void) {
-      const detach = client.onMembershipChange(handler);
-      return async () => detach();
-    },
-    async close() {
-      // No-op — shared client's close is wired through parent.onClose.
-    },
-  };
-}
-
-// ============================================================================
-// Individual factories (two-connection trade-off path)
-// ============================================================================
 
 export function unixTransport(opts: UnixClusterNodeOptions): ClusterTransportFactory {
   return unixClusterNode(opts).transport;
@@ -185,22 +141,12 @@ export interface DefineUnixClusterOptions extends UnixClusterNodeOptions {
 }
 
 export function defineUnixCluster(opts: DefineUnixClusterOptions): ClusterFactory {
-  const node = unixClusterNode(opts);
-  return defineCluster({
+  return defineWireCluster({
     nodeId: opts.nodeId,
-    transport: node.transport,
-    membership: node.membership,
+    node: unixClusterNode(opts),
+    ...(opts.codec !== undefined ? { codec: opts.codec } : {}),
     ...(opts.partitioning !== undefined ? { partitioning: opts.partitioning } : {}),
     ...(opts.journal !== undefined ? { journal: opts.journal } : {}),
-    ...(opts.codec !== undefined ? { codec: () => opts.codec! } : {}),
     ...(opts.fanoutMode !== undefined ? { fanoutMode: opts.fanoutMode } : {}),
   });
-}
-
-// ============================================================================
-// Internals
-// ============================================================================
-
-function defaultCodec(): ClusterCodec {
-  return createJsonCodec();
 }
