@@ -33,6 +33,7 @@ import type {
 import type { EventEnvelope, MessageEnvelope } from "@agentick/spec-next";
 import { matchesAddressFilter, matchesEventFilter } from "@agentick/utils-next";
 
+import { BoundedWriteQueue } from "./bounded-write-queue.js";
 import type { Connection, Listener } from "./connection.js";
 import {
   FRAME_BROADCAST,
@@ -68,6 +69,16 @@ export interface BaseBrokerOptions {
    * silently discarded.
    */
   readonly onDiagnostic?: (name: string, payload?: unknown) => void;
+  /**
+   * Per-connection bounded outbound queue depth (frames). Default
+   * 1024. When a connection's queue exceeds this, the OLDEST frame
+   * is dropped + `cluster:broker:server:backpressure-drop` emits.
+   * Prevents one slow client from stalling broker fan-out or
+   * growing the broker heap unbounded.
+   *
+   * @see ./bounded-write-queue.ts
+   */
+  readonly maxQueueSize?: number;
 }
 
 // ============================================================================
@@ -80,6 +91,11 @@ interface ConnectedClient {
   nodeId?: NodeId;
   readonly inboxSubs: Map<string, AddressFilter>;
   readonly busSubs: Map<string, EventFilter>;
+  /**
+   * Per-conn bounded outbound queue. All broker → client frames go
+   * through this; one slow client can't stall fan-out to others.
+   */
+  readonly writeQueue: BoundedWriteQueue<BrokerFrame>;
 }
 
 // ============================================================================
@@ -90,6 +106,7 @@ export class BaseBroker {
   private readonly listener: Listener;
   private readonly codec: ClusterCodec;
   private readonly onDiagnostic: (name: string, payload?: unknown) => void;
+  private readonly maxQueueSize: number;
 
   /** Every accepted connection, pre- and post-handshake. Keyed by Connection.id. */
   private readonly clients = new Map<string, ConnectedClient>();
@@ -104,6 +121,7 @@ export class BaseBroker {
     this.listener = opts.listener;
     this.codec = opts.codec;
     this.onDiagnostic = opts.onDiagnostic ?? (() => {});
+    this.maxQueueSize = opts.maxQueueSize ?? 1024;
   }
 
   // ==========================================================================
@@ -125,7 +143,7 @@ export class BaseBroker {
     // it's a network failure. Best-effort; failures are silent.
     for (const client of this.clients.values()) {
       try {
-        await this.writeFrame(client.conn, { type: FRAME_GOODBYE });
+        this.writeFrame(client, { type: FRAME_GOODBYE });
       } catch {
         // ignore
       }
@@ -150,10 +168,29 @@ export class BaseBroker {
       void conn.close();
       return;
     }
+    const writeQueue = new BoundedWriteQueue<BrokerFrame>({
+      conn,
+      encode: (frame) => this.codec.encode(frame as unknown as MessageEnvelope),
+      maxQueueSize: this.maxQueueSize,
+      onOverflow: (dropped, depth) => {
+        this.onDiagnostic("cluster:broker:server:backpressure-drop", {
+          connId: conn.id,
+          droppedFrameType: dropped.type,
+          queueDepthAfterDrop: depth,
+        });
+      },
+      onSendError: (err) => {
+        this.onDiagnostic("cluster:broker:server:write-failed", {
+          connId: conn.id,
+          reason: err instanceof Error ? err.message : String(err),
+        });
+      },
+    });
     const client: ConnectedClient = {
       conn,
       inboxSubs: new Map(),
       busSubs: new Map(),
+      writeQueue,
     };
     this.clients.set(conn.id, client);
     this.onDiagnostic("cluster:broker:server:client-connected", {
@@ -166,6 +203,7 @@ export class BaseBroker {
 
   private async onClientDisconnected(client: ConnectedClient, reason: string): Promise<void> {
     if (!this.clients.delete(client.conn.id)) return;
+    client.writeQueue.close();
     const nodeId = client.nodeId;
     if (nodeId === undefined) {
       // Disconnect before Hello — nothing to clean up beyond the
@@ -245,18 +283,18 @@ export class BaseBroker {
         // the SUBSCRIBE_INBOX → SEND race can drop deliveries when
         // adopters subscribe and immediately invoke work that
         // should land on the subscriber.
-        await this.writeFrame(client.conn, { type: FRAME_SUBSCRIBE_ACK, subId: frame.subId });
+        this.writeFrame(client, { type: FRAME_SUBSCRIBE_ACK, subId: frame.subId });
         return;
       case FRAME_SUBSCRIBE_BUS:
         client.busSubs.set(frame.subId, frame.filter);
-        await this.writeFrame(client.conn, { type: FRAME_SUBSCRIBE_ACK, subId: frame.subId });
+        this.writeFrame(client, { type: FRAME_SUBSCRIBE_ACK, subId: frame.subId });
         return;
       case FRAME_UNSUBSCRIBE:
         client.inboxSubs.delete(frame.subId);
         client.busSubs.delete(frame.subId);
         return;
       case FRAME_PING:
-        await this.writeFrame(client.conn, { type: FRAME_PONG, seq: frame.seq });
+        this.writeFrame(client, { type: FRAME_PONG, seq: frame.seq });
         return;
       case FRAME_PONG:
         // Brokers don't initiate heartbeat by default — clients do.
@@ -287,18 +325,18 @@ export class BaseBroker {
 
   private async handleHello(client: ConnectedClient, nodeId: NodeId): Promise<void> {
     if (client.nodeId !== undefined) {
-      await this.writeError(client.conn, "duplicate-hello");
+      this.writeError(client, "duplicate-hello");
       return;
     }
     if (this.nodeRouting.has(nodeId)) {
       // Two clients claiming the same nodeId. Reject the newcomer.
-      await this.writeError(client.conn, `node-id-already-registered:${nodeId}`);
+      this.writeError(client, `node-id-already-registered:${nodeId}`);
       await client.conn.close();
       return;
     }
     client.nodeId = nodeId;
     this.nodeRouting.set(nodeId, client.conn.id);
-    await this.writeFrame(client.conn, {
+    this.writeFrame(client, {
       type: FRAME_WELCOME,
       nodes: this.nodes(),
     });
@@ -319,12 +357,12 @@ export class BaseBroker {
     envelope: MessageEnvelope,
   ): Promise<void> {
     if (sender.nodeId === undefined) {
-      await this.writeError(sender.conn, "send-before-hello");
+      this.writeError(sender, "send-before-hello");
       return;
     }
     const targetConnId = this.nodeRouting.get(toNode);
     if (targetConnId === undefined) {
-      await this.writeError(sender.conn, `node-unreachable:${toNode}`);
+      this.writeError(sender, `node-unreachable:${toNode}`);
       this.onDiagnostic("cluster:broker:server:routing-failed", {
         fromNode: sender.nodeId,
         toNode,
@@ -350,7 +388,7 @@ export class BaseBroker {
     // for ergonomic fallbacks. Conformance from `cluster-next` treats
     // empty-filter subscribes as match-all; we keep parity here.
     if (target.inboxSubs.size === 0) {
-      await this.writeFrame(target.conn, { type: FRAME_INBOX_DELIVER, envelope });
+      this.writeFrame(target, { type: FRAME_INBOX_DELIVER, envelope });
       return;
     }
     let matched = false;
@@ -361,7 +399,7 @@ export class BaseBroker {
       }
     }
     if (matched) {
-      await this.writeFrame(target.conn, { type: FRAME_INBOX_DELIVER, envelope });
+      this.writeFrame(target, { type: FRAME_INBOX_DELIVER, envelope });
     } else {
       this.onDiagnostic("cluster:broker:server:no-matching-subscription", {
         toNode,
@@ -373,7 +411,7 @@ export class BaseBroker {
 
   private async handleBroadcast(sender: ConnectedClient, envelope: EventEnvelope): Promise<void> {
     if (sender.nodeId === undefined) {
-      await this.writeError(sender.conn, "broadcast-before-hello");
+      this.writeError(sender, "broadcast-before-hello");
       return;
     }
     // Fan out to every OTHER client whose bus subscription matches.
@@ -382,7 +420,7 @@ export class BaseBroker {
       if (client.conn.id === sender.conn.id) continue;
       if (client.nodeId === undefined) continue; // pre-handshake
       if (client.busSubs.size === 0) {
-        await this.writeFrame(client.conn, { type: FRAME_BUS_DELIVER, envelope });
+        this.writeFrame(client, { type: FRAME_BUS_DELIVER, envelope });
         continue;
       }
       let matched = false;
@@ -393,7 +431,7 @@ export class BaseBroker {
         }
       }
       if (matched) {
-        await this.writeFrame(client.conn, { type: FRAME_BUS_DELIVER, envelope });
+        this.writeFrame(client, { type: FRAME_BUS_DELIVER, envelope });
       }
     }
   }
@@ -403,7 +441,7 @@ export class BaseBroker {
     for (const client of this.clients.values()) {
       if (client.nodeId === undefined) continue; // pre-handshake
       try {
-        await this.writeFrame(client.conn, frame);
+        this.writeFrame(client, frame);
       } catch (cause) {
         // A client closing during fan-out is normal; don't let it
         // block other deliveries.
@@ -419,26 +457,30 @@ export class BaseBroker {
   // Frame I/O helpers
   // ==========================================================================
 
-  private async writeFrame(conn: Connection, frame: BrokerFrame): Promise<void> {
-    // TODO(phase-4b): backpressure. Currently we await conn.send
-    // without bounding per-connection in-flight bytes. A slow client
-    // under a broadcast storm can hold up the broker. cluster-net-next
-    // should add a per-conn outbound queue with a configurable bound;
-    // overflow emits cluster:broker:server:backpressure + drops
-    // oldest (or disconnects the slow client, depending on policy).
-    //
-    // TODO(phase-4f): ClusterCodec is typed for envelopes (MessageEnvelope |
-    // EventEnvelope) at the cluster-next layer. Broker frames (Hello,
-    // Welcome, Subscribe, SubscribeAck, Membership, etc.) piggyback the
-    // SAME codec — JSON encodes anything; msgpack/protobuf would need a
-    // broker-specific schema. Cast deliberately; a follow-up should
-    // introduce `BrokerCodec` that wraps `ClusterCodec` + handles the
-    // broker-internal frame schema explicitly.
-    const bytes = this.codec.encode(frame as unknown as MessageEnvelope);
-    await conn.send(bytes);
+  /**
+   * Enqueue a frame for delivery to `client`'s connection. Returns
+   * synchronously; the per-conn `BoundedWriteQueue` drains on the
+   * microtask queue. If the queue is full, the OLDEST frame is
+   * dropped + `cluster:broker:server:backpressure-drop` emits.
+   *
+   * Phase 4f.4 replaced `await conn.send(...)` with a queue —
+   * pre-4f.4, one slow client (kernel buffer full, drain pending)
+   * blocked the broker's sequential fan-out loop. Now slow clients
+   * stall locally; fan-out to others proceeds without delay.
+   *
+   * TODO(phase-4f): ClusterCodec is typed for envelopes at the
+   * cluster-next layer. Broker frames piggyback the SAME codec —
+   * JSON tolerates anything; msgpack/protobuf would need a broker-
+   * specific schema. The `as unknown as MessageEnvelope` cast lives
+   * inside the queue's encode callback; a follow-up should introduce
+   * `BrokerCodec` that wraps `ClusterCodec` + handles broker-internal
+   * frames explicitly.
+   */
+  private writeFrame(client: ConnectedClient, frame: BrokerFrame): void {
+    client.writeQueue.enqueue(frame);
   }
 
-  private async writeError(conn: Connection, reason: string): Promise<void> {
-    await this.writeFrame(conn, { type: FRAME_ERROR, reason });
+  private writeError(client: ConnectedClient, reason: string): void {
+    this.writeFrame(client, { type: FRAME_ERROR, reason });
   }
 }
