@@ -67,6 +67,12 @@ Both calls are async because `useData` can suspend at any depth
 | `<user_action action>` / `<system_event event>` / `<state_change entity from to>` | event content blocks                |
 | `<custom tag content attrs?>`                                          | adopter-defined custom block                   |
 
+**Formatter-scope intrinsic:**
+
+| Tag                                                          | Effect                                |
+| ------------------------------------------------------------ | ------------------------------------- |
+| `<format formatter={ref} purpose?>`                          | Passthrough that stamps `renderedWith` on descendant entries from the active scope. Innermost scope wins. `purpose="section"` scopes the swap to sections only; `"message"` to messages only. Malformed (no `formatter`) emits a walker diagnostic. |
+
 **Semantic-html intrinsics (nested SemanticNode trees — formatter decides syntax):**
 
 | Tag                                                          | SemanticType                |
@@ -199,12 +205,25 @@ function-component wrappers ship (Phase 2):
 <section id="intro">{children}</section>   // id from HTML attrs
 ```
 
+## Diagnostics
+
+The walker accumulates non-fatal issues (malformed `<format>` props,
+media block missing `source`, `<system_event>` missing `event`, etc.)
+on `RenderedTree.diagnostics.diagnostics: readonly FormatDiagnostic[]`.
+Each entry has `severity` (`"info" | "warning" | "error"`), a stable
+`code`, and a human `message`. The field is absent when there are no
+diagnostics — clean trees stay slim.
+
 ## Verified by
 
 - `src/__tests__/compile.spec.tsx` — JSX → IR → markdown round-trip
   for sections, messages, headings, code blocks, JSON blocks,
   control flow, `useData` integration, rejection propagation,
   unknown-tag error, formatter override, IR shape pin.
+- `src/__tests__/format-scope.spec.tsx` — `<format>` intrinsic
+  scope semantics (passthrough, nested scope, purpose-scoped swap,
+  outer-restore-after-inner, malformed-emits-diagnostic) +
+  walker-diagnostic surfacing for media / event / clean-tree paths.
 
 ## Roadmap
 

@@ -20,18 +20,21 @@ import {
   jsonBlock,
   messageEntry,
   reasoningBlock,
+  resolveFormatter,
   sectionEntry,
   stateChangeBlock,
   systemEventBlock,
   userActionBlock,
   videoBlock,
   xmlBlock,
+  type WalkScope,
 } from "@agentick/compiler-next";
 import type {
   AudioMimeType,
   ContentBlock,
   ContextEntry,
   DocumentMimeType,
+  FormatDiagnostic,
   ImageMimeType,
   MediaSource,
   MessageEntry,
@@ -54,43 +57,41 @@ import type { WalkResult } from "./walk.js";
 /**
  * Dispatch a tag in block-mode. The caller (`walk.ts`) has already
  * walked the children into `inner: WalkResult`. We just combine.
+ *
+ * `scope` carries the active `<format>` binding so section / message
+ * dispatch can stamp `renderedWith` on the produced entries.
  */
 export function dispatchBlock(
   tag: string,
   props: Readonly<Record<string, unknown>>,
   inner: WalkResult,
+  scope: WalkScope,
 ): WalkResult {
   switch (tag) {
     case "section":
-      return sectionCase(props, inner);
+      return sectionCase(props, inner, scope);
     case "message":
     case "system":
     case "user":
     case "assistant":
     case "tool":
-      return messageCase(tag, props, inner);
+      return messageCase(tag, props, inner, scope);
 
     case "code":
-      return blocksWith(
-        inner.entries,
-        codeBlock(innerText(inner.blocks), asString(props.language)),
-      );
+      return blocksWith(inner, codeBlock(innerText(inner.blocks), asString(props.language)));
     case "json":
-      return blocksWith(inner.entries, jsonBlock(props.data));
+      return blocksWith(inner, jsonBlock(props.data));
     case "xml-block":
-      return blocksWith(inner.entries, xmlBlock(innerText(inner.blocks)));
+      return blocksWith(inner, xmlBlock(innerText(inner.blocks)));
     case "html-block":
-      return blocksWith(inner.entries, htmlBlock(innerText(inner.blocks)));
+      return blocksWith(inner, htmlBlock(innerText(inner.blocks)));
     case "csv-block":
-      return blocksWith(
-        inner.entries,
-        csvBlock(innerText(inner.blocks), asStringArray(props.headers)),
-      );
+      return blocksWith(inner, csvBlock(innerText(inner.blocks), asStringArray(props.headers)));
     case "reasoning":
       return reasoningCase(props, inner);
 
     case "image":
-      return mediaCase(props, inner, (src, mime) =>
+      return mediaCase("image", props, inner, (src, mime) =>
         imageBlock({
           source: src,
           ...omitUndefined({
@@ -101,7 +102,7 @@ export function dispatchBlock(
         }),
       );
     case "audio":
-      return mediaCase(props, inner, (src, mime) =>
+      return mediaCase("audio", props, inner, (src, mime) =>
         audioBlock({
           source: src,
           ...omitUndefined({
@@ -112,7 +113,7 @@ export function dispatchBlock(
         }),
       );
     case "video":
-      return mediaCase(props, inner, (src, mime) =>
+      return mediaCase("video", props, inner, (src, mime) =>
         videoBlock({
           source: src,
           ...omitUndefined({
@@ -123,7 +124,7 @@ export function dispatchBlock(
         }),
       );
     case "document":
-      return mediaCase(props, inner, (src, mime) =>
+      return mediaCase("document", props, inner, (src, mime) =>
         documentBlock({
           source: src,
           ...omitUndefined({
@@ -145,7 +146,7 @@ export function dispatchBlock(
       return customCase(props, inner);
 
     case "text":
-      // Inert passthrough wrapper.
+      // Inert passthrough wrapper — preserve inner exactly.
       return inner;
 
     default:
@@ -158,8 +159,12 @@ export function dispatchBlock(
 
 // ────────── Per-case handlers ──────────
 
-function sectionCase(props: Readonly<Record<string, unknown>>, inner: WalkResult): WalkResult {
-  return {
+function sectionCase(
+  props: Readonly<Record<string, unknown>>,
+  inner: WalkResult,
+  scope: WalkScope,
+): WalkResult {
+  return withInner(inner, {
     entries: [
       sectionEntry(
         {
@@ -168,6 +173,7 @@ function sectionCase(props: Readonly<Record<string, unknown>>, inner: WalkResult
             title: asString(props.title),
             audience: asAudience(props.audience),
             priority: asNumber(props.priority),
+            renderedWith: resolveFormatter(scope, "section"),
           }),
         },
         inner.blocks,
@@ -175,29 +181,39 @@ function sectionCase(props: Readonly<Record<string, unknown>>, inner: WalkResult
       ...inner.entries,
     ],
     blocks: [],
-  };
+  });
 }
 
 function messageCase(
   tag: string,
   props: Readonly<Record<string, unknown>>,
   inner: WalkResult,
+  scope: WalkScope,
 ): WalkResult {
   const role: MessageEntry["role"] = (
     tag === "message" ? (asString(props.role) ?? "user") : tag
   ) as MessageEntry["role"];
-  return {
+  return withInner(inner, {
     entries: [
-      messageEntry({ role, ...omitUndefined({ id: asString(props.id) }) }, inner.blocks),
+      messageEntry(
+        {
+          role,
+          ...omitUndefined({
+            id: asString(props.id),
+            renderedWith: resolveFormatter(scope, "message"),
+          }),
+        },
+        inner.blocks,
+      ),
       ...inner.entries,
     ],
     blocks: [],
-  };
+  });
 }
 
 function reasoningCase(props: Readonly<Record<string, unknown>>, inner: WalkResult): WalkResult {
   return blocksWith(
-    inner.entries,
+    inner,
     reasoningBlock({
       text: innerText(inner.blocks),
       ...omitUndefined({
@@ -210,28 +226,33 @@ function reasoningCase(props: Readonly<Record<string, unknown>>, inner: WalkResu
 }
 
 function mediaCase(
+  tag: "image" | "audio" | "video" | "document",
   props: Readonly<Record<string, unknown>>,
   inner: WalkResult,
   build: (source: MediaSource, mime: string | undefined) => ContentBlock,
 ): WalkResult {
   const source = asMediaSource(props.source);
   if (!source) {
-    // TODO(adr-39-phase-3): Source missing / malformed — currently we
-    // drop the media block silently. v1's contributor emitted a
-    // diagnostic fragment; we should do the same once a diagnostics
-    // channel exists on WalkResult (or via a sink threaded through
-    // the walker). For now: preserve any nested entries and drop the
-    // bad block.
-    return { entries: inner.entries, blocks: [] };
+    return appendDiagnostic(droppedBlock(inner), {
+      severity: "warning",
+      code: "media-missing-source",
+      message: `<${tag}> dropped — missing or malformed \`source\` prop.`,
+    });
   }
-  return blocksWith(inner.entries, build(source, asString(props.mimeType)));
+  return blocksWith(inner, build(source, asString(props.mimeType)));
 }
 
 function userActionCase(props: Readonly<Record<string, unknown>>, inner: WalkResult): WalkResult {
   const action = asString(props.action);
-  if (!action) return { entries: inner.entries, blocks: [] };
+  if (!action) {
+    return appendDiagnostic(droppedBlock(inner), {
+      severity: "warning",
+      code: "user-action-missing-action",
+      message: "<user_action> dropped — missing `action` prop.",
+    });
+  }
   return blocksWith(
-    inner.entries,
+    inner,
     userActionBlock({
       action,
       ...omitUndefined({
@@ -247,9 +268,15 @@ function userActionCase(props: Readonly<Record<string, unknown>>, inner: WalkRes
 
 function systemEventCase(props: Readonly<Record<string, unknown>>, inner: WalkResult): WalkResult {
   const event = asString(props.event);
-  if (!event) return { entries: inner.entries, blocks: [] };
+  if (!event) {
+    return appendDiagnostic(droppedBlock(inner), {
+      severity: "warning",
+      code: "system-event-missing-event",
+      message: "<system_event> dropped — missing `event` prop.",
+    });
+  }
   return blocksWith(
-    inner.entries,
+    inner,
     systemEventBlock({
       event,
       ...omitUndefined({
@@ -264,9 +291,15 @@ function systemEventCase(props: Readonly<Record<string, unknown>>, inner: WalkRe
 
 function stateChangeCase(props: Readonly<Record<string, unknown>>, inner: WalkResult): WalkResult {
   const entity = asString(props.entity);
-  if (!entity) return { entries: inner.entries, blocks: [] };
+  if (!entity) {
+    return appendDiagnostic(droppedBlock(inner), {
+      severity: "warning",
+      code: "state-change-missing-entity",
+      message: "<state_change> dropped — missing `entity` prop.",
+    });
+  }
   return blocksWith(
-    inner.entries,
+    inner,
     stateChangeBlock({
       entity,
       from: props.from,
@@ -284,9 +317,15 @@ function stateChangeCase(props: Readonly<Record<string, unknown>>, inner: WalkRe
 function customCase(props: Readonly<Record<string, unknown>>, inner: WalkResult): WalkResult {
   const tag = asString(props.tag);
   const content = asString(props.content);
-  if (!tag || !content) return { entries: inner.entries, blocks: [] };
+  if (!tag || !content) {
+    return appendDiagnostic(droppedBlock(inner), {
+      severity: "warning",
+      code: "custom-block-missing-fields",
+      message: "<custom> dropped — `tag` and `content` props are both required.",
+    });
+  }
   return blocksWith(
-    inner.entries,
+    inner,
     customBlock({
       tag,
       content,
@@ -301,8 +340,49 @@ function customCase(props: Readonly<Record<string, unknown>>, inner: WalkResult)
 
 // ────────── Tiny helpers ──────────
 
-function blocksWith(entries: readonly ContextEntry[], block: ContentBlock): WalkResult {
-  return { entries, blocks: [block] };
+/**
+ * Build a result that emits `block` while preserving inner's
+ * entries / diagnostics / specConfig / providerOptions.
+ */
+function blocksWith(inner: WalkResult, block: ContentBlock): WalkResult {
+  return withInner(inner, { entries: inner.entries, blocks: [block] });
+}
+
+/**
+ * Build a result that drops the block (entry-only) while preserving
+ * inner's entries / diagnostics / specConfig / providerOptions.
+ */
+function droppedBlock(inner: WalkResult): WalkResult {
+  return withInner(inner, { entries: inner.entries, blocks: [] });
+}
+
+/**
+ * Forward inner's optional fields (diagnostics, specConfig,
+ * providerOptions) onto `out`. Caller supplies the new
+ * entries/blocks.
+ */
+function withInner(
+  inner: WalkResult,
+  out: { entries: readonly ContextEntry[]; blocks: readonly ContentBlock[] },
+): WalkResult {
+  const result: {
+    entries: readonly ContextEntry[];
+    blocks: readonly ContentBlock[];
+    diagnostics?: readonly FormatDiagnostic[];
+    specConfig?: WalkResult["specConfig"];
+    providerOptions?: WalkResult["providerOptions"];
+  } = { entries: out.entries, blocks: out.blocks };
+  if (inner.diagnostics?.length) result.diagnostics = inner.diagnostics;
+  if (inner.specConfig) result.specConfig = inner.specConfig;
+  if (inner.providerOptions) result.providerOptions = inner.providerOptions;
+  return result;
+}
+
+function appendDiagnostic(result: WalkResult, diag: FormatDiagnostic): WalkResult {
+  return {
+    ...result,
+    diagnostics: [...(result.diagnostics ?? []), diag],
+  };
 }
 
 function innerText(blocks: readonly ContentBlock[]): string {

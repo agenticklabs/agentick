@@ -13,6 +13,7 @@ import {
   isSemanticHtmlTag,
   semanticBlock,
   semanticNode,
+  type WalkScope,
 } from "@agentick/compiler-next";
 import type { ElementInstance, HostInstance } from "@agentick/reconciler-next";
 import type { SemanticNode } from "@agentick/spec-next";
@@ -22,11 +23,19 @@ import type { WalkResult } from "./walk.js";
 /**
  * Walk a semantic-html tag → one `SemanticContentBlock` whose
  * `semanticNode` is the full nested tree built from the children.
+ *
+ * `scope` is currently unused — semantic-mode produces no entries,
+ * so the active `<format>` scope has nothing to stamp onto. Kept
+ * in the signature so the walker can thread it consistently and
+ * future per-semantic formatter overrides (e.g., scoped inline-code
+ * rendering) drop in here without touching `walk.ts`.
  */
 export function walkSemanticHtml(
   tag: string,
   props: Readonly<Record<string, unknown>>,
   children: readonly HostInstance[],
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _scope: WalkScope,
 ): WalkResult {
   const entry = getSemanticHtmlEntry(tag);
   if (!entry) return { entries: [], blocks: [] }; // shouldn't happen — caller already checked

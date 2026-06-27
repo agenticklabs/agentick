@@ -180,5 +180,14 @@ function finalize(container: ReconcilerContainer, specVersion: string): Rendered
     specVersion,
     context: { entries: walked.entries },
     ...(walked.blocks.length > 0 ? { content: walked.blocks } : {}),
+    ...(walked.specConfig && Object.keys(walked.specConfig).length > 0
+      ? { config: walked.specConfig as RenderedTree["config"] }
+      : {}),
+    ...(walked.providerOptions && Object.keys(walked.providerOptions).length > 0
+      ? { providerOptions: walked.providerOptions }
+      : {}),
+    ...(walked.diagnostics && walked.diagnostics.length > 0
+      ? { diagnostics: { diagnostics: walked.diagnostics } }
+      : {}),
   };
 }

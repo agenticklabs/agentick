@@ -53,6 +53,17 @@ export {
 
 export { getSemanticHtmlEntry, isSemanticHtmlTag, SEMANTIC_HTML_TAGS } from "./semantic-html.js";
 export type { SemanticHtmlEntry } from "./semantic-html.js";
+
+export { FORMAT_INTRINSIC_TAG, isFormatTag, parseFormatProps } from "./format-intrinsic.js";
+export type { ParsedFormatProps } from "./format-intrinsic.js";
+
+export {
+  EMPTY_WALK_SCOPE,
+  createWalkScope,
+  resolveFormatter,
+  withFormatter,
+} from "./walk-scope.js";
+export type { FormatterBinding, FormatterScope, WalkScope } from "./walk-scope.js";
 export type {
   AudioProps,
   CustomBlockProps,

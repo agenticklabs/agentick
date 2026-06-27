@@ -24,6 +24,7 @@ import type {
   AudioMimeType,
   ContentBlock,
   DocumentMimeType,
+  FormatterRef,
   ImageMimeType,
   MediaSource,
   MessageEntry,
@@ -351,6 +352,8 @@ export interface SectionProps {
   readonly title?: string;
   readonly audience?: "model" | "user" | "both";
   readonly priority?: number;
+  /** Formatter ref stamped from the active `<format>` scope, if any. */
+  readonly renderedWith?: FormatterRef;
 }
 
 export function sectionEntry(props: SectionProps, content: readonly ContentBlock[]): SectionEntry {
@@ -363,7 +366,7 @@ export function sectionEntry(props: SectionProps, content: readonly ContentBlock
     kind: "section",
     id,
     content,
-    ...omitUndefined({ title: props.title }),
+    ...omitUndefined({ title: props.title, renderedWith: props.renderedWith }),
     ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
   };
 }
@@ -376,6 +379,8 @@ export function sectionEntry(props: SectionProps, content: readonly ContentBlock
 export interface MessageProps {
   readonly role: MessageEntry["role"];
   readonly id?: string;
+  /** Formatter ref stamped from the active `<format>` scope, if any. */
+  readonly renderedWith?: FormatterRef;
 }
 
 export function messageEntry(props: MessageProps, content: readonly ContentBlock[]): MessageEntry {
@@ -383,7 +388,7 @@ export function messageEntry(props: MessageProps, content: readonly ContentBlock
     kind: "message",
     role: props.role,
     content,
-    ...omitUndefined({ id: props.id }),
+    ...omitUndefined({ id: props.id, renderedWith: props.renderedWith }),
   };
 }
 
