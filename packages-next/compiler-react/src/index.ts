@@ -41,3 +41,12 @@ export { render } from "./render.js";
 export type { RenderOptions } from "./render.js";
 
 export { useData } from "./use-data.js";
+
+export {
+  clearRegisteredIntrinsics,
+  getRegisteredIntrinsic,
+  registerIntrinsic,
+} from "./register-intrinsic.js";
+export type { IntrinsicHandler } from "./register-intrinsic.js";
+
+export type { WalkResult } from "./walk.js";

@@ -24,6 +24,7 @@ import type { ContentBlock, ContextEntry } from "@agentick/spec-next";
 
 import { dispatchBlock } from "./dispatch-block.js";
 import { walkSemanticHtml } from "./dispatch-semantic.js";
+import { getRegisteredIntrinsic } from "./register-intrinsic.js";
 
 export interface WalkResult {
   readonly entries: readonly ContextEntry[];
@@ -58,6 +59,14 @@ function walkElement(node: ElementInstance): WalkResult {
     // Function/class components are already evaluated by react-reconciler
     // and won't appear here. Defensive: recurse children gracefully.
     return walkChildren(node.children);
+  }
+
+  // Adopter-registered intrinsic? Highest precedence — last-writer-wins
+  // over built-ins. Hands the handler raw children + a `walk` callback
+  // so it controls whether/how to recurse.
+  const custom = getRegisteredIntrinsic(type);
+  if (custom) {
+    return custom(node.props, node.children, walkChildren);
   }
 
   // Semantic-html intrinsic? Switch to SemanticNode-mode recursion.

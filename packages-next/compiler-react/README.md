@@ -95,6 +95,59 @@ Both calls are async because `useData` can suspend at any depth
   the reactive walker. Future work: emit effects from the dispatch
   table and throw on static.
 
+## Extending the JSX vocabulary
+
+**Default path: function components.** For ~all adopter needs, writing
+a function component that composes existing intrinsics is the right
+extension mechanism. Works cross-framework (React, future Angular/
+Solid), no registration step, type-safe via React's normal FC typing:
+
+```tsx
+const RecipeCard = ({ title }: { title: string }) => (
+  <section id={`recipe:${title}`}>
+    <h1>{title}</h1>
+  </section>
+);
+```
+
+**Escape hatch: `registerIntrinsic`.** For the narrow cases where you
+need a NEW tag name (not composable from existing intrinsics), custom
+recursion semantics, or to override a built-in:
+
+```ts
+import { registerIntrinsic, textBlock } from "@agentick/compiler-react-next";
+
+const unregister = registerIntrinsic("recipe-card", (props, children, walk) => {
+  // `walk` recurses on children if the intrinsic wraps inner content.
+  const inner = walk(children);
+  return {
+    entries: inner.entries,
+    blocks: [textBlock(`Recipe: ${props.title}`), ...inner.blocks],
+  };
+});
+
+// Later (tests, dynamic teardown):
+unregister();
+```
+
+Registration semantics:
+- **React-specific.** This registry is in compiler-react-next and ties
+  to the React walker's child-recursion shape. Registrations don't
+  carry to other compiler adapters. Function components, by contrast,
+  are cross-framework — adopters wanting cross-framework intrinsics
+  should reach for FC composition. A future cross-framework leaf
+  registry in compiler-next is tracked as a TODO.
+- **Module-level singleton.** Adopters typically register once at
+  module load. Returned unregister function is for tests + the rare
+  dynamic scenario.
+- **Registry wins over built-ins.** Registering `"section"` overrides
+  the built-in section handler (last-writer-wins on the registry,
+  registry-wins over built-ins). Adopters wanting to wrap or
+  augment a built-in own the override semantics.
+- **`unregister` undoes only its own write.** If you register, then
+  someone else registers the same tag, your unregister leaves their
+  write in place. Safe to call multiple times.
+
 ## HTML-overlap caveat
 
 The standard JSX namespace has `<section>` and `<code>` as HTML
