@@ -129,4 +129,79 @@ describe("walker — semantic-html intrinsics", () => {
     const out = await render(<Tpl />);
     expect(out).toMatch(/^> quoted text/m);
   });
+
+  it("renders a full <table> with rows + cells", async () => {
+    const Tpl = () => (
+      <section id="x">
+        <table>
+          <thead>
+            <tr>
+              <th>name</th>
+              <th>count</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>alpha</td>
+              <td>1</td>
+            </tr>
+            <tr>
+              <td>beta</td>
+              <td>2</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+    );
+    const tree = await compileToTree(<Tpl />);
+    const sec = tree.context.entries[0] as { content: readonly unknown[] };
+    expect(sec.content).toHaveLength(1);
+    const tableBlock = sec.content[0] as {
+      semanticNode?: { semantic: string; children: readonly unknown[] };
+    };
+    expect(tableBlock.semanticNode?.semantic).toBe("table");
+    // Top-level children of <table> are thead/tbody (modeled as
+    // `semantic: "custom"` carrying their tag).
+    const top = tableBlock.semanticNode!.children as readonly { semantic: string }[];
+    expect(top.map((c) => c.semantic)).toEqual(["custom", "custom"]);
+
+    // Markdown formatter renders this with pipe + dash row.
+    const out = await render(<Tpl />);
+    expect(out).toContain("name");
+    expect(out).toContain("count");
+    expect(out).toContain("alpha");
+    expect(out).toContain("beta");
+  });
+
+  it("drops non-semantic descendants inside an inline semantic tag", async () => {
+    // The semantic-html contract: block-level content inside an inline
+    // semantic tag is a misuse — drop silently rather than crash.
+    // `<section>` inside `<strong>` is the canonical example.
+    const Tpl = () => (
+      <section id="x">
+        <p>
+          before
+          <strong>
+            visible
+            <section id="dropped">
+              <p>this should NOT appear</p>
+            </section>
+            after
+          </strong>
+          tail
+        </p>
+      </section>
+    );
+    const out = await render(<Tpl />);
+    expect(out).toContain("visible");
+    expect(out).toContain("after");
+    expect(out).toContain("before");
+    expect(out).toContain("tail");
+    // The dropped section's text should NOT appear.
+    expect(out).not.toContain("this should NOT appear");
+    // The dropped section's id should not show up as a separate entry.
+    const tree = await compileToTree(<Tpl />);
+    expect(tree.context.entries).toHaveLength(1);
+    expect((tree.context.entries[0] as { id: string }).id).toBe("x");
+  });
 });

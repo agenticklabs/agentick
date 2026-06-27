@@ -43,19 +43,43 @@ Both calls are async because `useData` can suspend at any depth
 
 ## Supported JSX
 
-| What                  | Example                                            |
-| --------------------- | -------------------------------------------------- |
-| Function components   | `const Tpl = () => <section>…</section>`           |
-| Fragments             | `<>foo {bar}</>`                                   |
-| Strings / numbers     | rendered as text content                           |
-| Arrays / `.map()`     | flattened transparently                            |
-| `<section id audience priority>` | top-level context entry (HTML overlap — see below) |
-| `<message role>` / `<system>` / `<user>` / `<assistant>` / `<tool>` | role-bearing context entry |
-| `<h1>`–`<h6>`         | semantic heading (formatter chooses syntax)        |
-| `<code language>`     | fenced code block (HTML overlap — see below)       |
-| `<json data>`         | JSON content block                                 |
-| `<paragraph>` / `<p>` | pass-through wrapper                               |
-| `useData(key, fetcher)` | suspend-via-throw async data primitive           |
+**General constructs:**
+
+| What                | Example                                  |
+| ------------------- | ---------------------------------------- |
+| Function components | `const Tpl = () => <section>…</section>` |
+| Fragments           | `<>foo {bar}</>`                         |
+| Strings / numbers   | rendered as text content                 |
+| Arrays / `.map()`   | flattened transparently                  |
+| `useData(key, fetcher)` | suspend-via-throw async data primitive |
+
+**Block-level intrinsics (context entries + native ContentBlocks):**
+
+| Tag                                                                    | Produces                                       |
+| ---------------------------------------------------------------------- | ---------------------------------------------- |
+| `<section id audience priority>`                                       | top-level context entry (HTML overlap — below) |
+| `<message role>` / `<system>` / `<user>` / `<assistant>` / `<tool>`    | role-bearing context entry                     |
+| `<code language>`                                                      | fenced code block (HTML overlap — below)       |
+| `<json data>`                                                          | JSON content block                             |
+| `<xml-block>` / `<html-block>` / `<csv-block headers>`                 | raw textual content blocks                     |
+| `<reasoning signature? isRedacted?>`                                   | reasoning content block                        |
+| `<image source mimeType? altText?>` / `<audio>` / `<video>` / `<document>` | typed media content blocks                 |
+| `<user_action action>` / `<system_event event>` / `<state_change entity from to>` | event content blocks                |
+| `<custom tag content attrs?>`                                          | adopter-defined custom block                   |
+
+**Semantic-html intrinsics (nested SemanticNode trees — formatter decides syntax):**
+
+| Tag                                                          | SemanticType                |
+| ------------------------------------------------------------ | --------------------------- |
+| `<h1>`–`<h6>`                                                | heading + `level` prop      |
+| `<p>` / `<blockquote>` / `<pre>`                             | paragraph / blockquote / preformatted |
+| `<strong>` / `<b>` / `<em>` / `<i>` / `<mark>` / `<u>` / `<s>` / `<del>` / `<sub>` / `<sup>` / `<small>` | inline emphasis variants |
+| `<kbd>` / `<var>` / `<q>` / `<cite>`                         | semantic phrasing           |
+| `<a href>`                                                   | link                        |
+| `<br>` / `<hr>`                                              | line-break / horizontal rule |
+| `<ul>` / `<ol>` / `<li>`                                     | list (`ordered` prop) + list-item |
+| `<table>` / `<thead>` / `<tbody>` / `<tr>` / `<td>` / `<th>` | table + structural children |
+| `<img src alt>`                                              | inline image (semantic; not the `<image>` ContentBlock) |
 
 ## Rejected JSX (throws cleanly)
 
