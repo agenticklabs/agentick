@@ -37,11 +37,16 @@ import type {
   ContentBlock,
   ContextEntry,
   FormatDiagnostic,
+  MCPDeclaration,
+  OutputDeclaration,
   ProviderOptions,
+  ResourceDeclaration,
   SpecConfig,
+  ToolDeclaration,
 } from "@agentick/spec-next";
 
 import { dispatchBlock } from "./dispatch-block.js";
+import { isDeclarationTag, dispatchDeclaration } from "./dispatch-declarations.js";
 import { walkSemanticHtml } from "./dispatch-semantic.js";
 import { getRegisteredIntrinsic } from "./register-intrinsic.js";
 
@@ -54,6 +59,14 @@ export interface WalkResult {
   readonly specConfig?: Partial<SpecConfig>;
   /** Provider option overrides merged onto the RenderedTree. */
   readonly providerOptions?: ProviderOptions;
+  /** Tool declarations (`<tool>` intrinsic). */
+  readonly tools?: readonly ToolDeclaration[];
+  /** MCP server declarations (`<mcp>` intrinsic). */
+  readonly mcps?: readonly MCPDeclaration[];
+  /** Resource declarations (`<resource>` intrinsic). */
+  readonly resources?: readonly ResourceDeclaration[];
+  /** Output declarations (`<output>` intrinsic). */
+  readonly outputs?: readonly OutputDeclaration[];
 }
 
 /**
@@ -65,22 +78,21 @@ export function walkChildren(
   children: readonly HostInstance[],
   scope: WalkScope = EMPTY_WALK_SCOPE,
 ): WalkResult {
-  const entries: ContextEntry[] = [];
-  const blocks: ContentBlock[] = [];
-  const diagnostics: FormatDiagnostic[] = [];
-  let specConfig: Partial<SpecConfig> | undefined;
-  let providerOptions: ProviderOptions | undefined;
+  const acc: MutableWalkAccumulator = {
+    entries: [],
+    blocks: [],
+    diagnostics: [],
+    specConfig: undefined,
+    providerOptions: undefined,
+    tools: [],
+    mcps: [],
+    resources: [],
+    outputs: [],
+  };
   for (const child of children) {
-    const r = walkNode(child, scope);
-    entries.push(...r.entries);
-    blocks.push(...r.blocks);
-    if (r.diagnostics?.length) diagnostics.push(...r.diagnostics);
-    if (r.specConfig) specConfig = { ...specConfig, ...r.specConfig };
-    if (r.providerOptions) {
-      providerOptions = { ...(providerOptions ?? {}), ...r.providerOptions };
-    }
+    foldInto(acc, walkNode(child, scope));
   }
-  return finalizeWalkResult(entries, blocks, diagnostics, specConfig, providerOptions);
+  return finalizeWalkResult(acc);
 }
 
 function walkNode(node: HostInstance, scope: WalkScope): WalkResult {
@@ -134,6 +146,15 @@ function walkElement(node: ElementInstance, scope: WalkScope): WalkResult {
     return walkChildren(node.children, nextScope);
   }
 
+  // Declaration intrinsics (`<tool>` / `<mcp>` / `<resource>` /
+  // `<output>` / `<model>`) — produce runtime registrations, not
+  // ContentBlocks. Routed before block-mode dispatch because
+  // `<tool>` is currently in block-mode's role-shorthand fall-through
+  // path; declaration semantics take precedence.
+  if (isDeclarationTag(type)) {
+    return dispatchDeclaration(type, node.props, walkChildren(node.children, scope), node.hostId);
+  }
+
   // Semantic-html intrinsic? Switch to SemanticNode-mode recursion.
   // Semantic-mode produces no entries (so the active scope's
   // `renderedWith` stamp doesn't apply); we still thread the scope
@@ -147,24 +168,54 @@ function walkElement(node: ElementInstance, scope: WalkScope): WalkResult {
   return dispatchBlock(type, node.props, inner, scope);
 }
 
-function finalizeWalkResult(
-  entries: readonly ContextEntry[],
-  blocks: readonly ContentBlock[],
-  diagnostics: readonly FormatDiagnostic[],
-  specConfig: Partial<SpecConfig> | undefined,
-  providerOptions: ProviderOptions | undefined,
-): WalkResult {
+// ────────── Accumulator + finalize ──────────
+
+interface MutableWalkAccumulator {
+  entries: ContextEntry[];
+  blocks: ContentBlock[];
+  diagnostics: FormatDiagnostic[];
+  specConfig: Partial<SpecConfig> | undefined;
+  providerOptions: ProviderOptions | undefined;
+  tools: ToolDeclaration[];
+  mcps: MCPDeclaration[];
+  resources: ResourceDeclaration[];
+  outputs: OutputDeclaration[];
+}
+
+function foldInto(acc: MutableWalkAccumulator, r: WalkResult): void {
+  acc.entries.push(...r.entries);
+  acc.blocks.push(...r.blocks);
+  if (r.diagnostics?.length) acc.diagnostics.push(...r.diagnostics);
+  if (r.specConfig) acc.specConfig = { ...acc.specConfig, ...r.specConfig };
+  if (r.providerOptions) {
+    acc.providerOptions = { ...(acc.providerOptions ?? {}), ...r.providerOptions };
+  }
+  if (r.tools?.length) acc.tools.push(...r.tools);
+  if (r.mcps?.length) acc.mcps.push(...r.mcps);
+  if (r.resources?.length) acc.resources.push(...r.resources);
+  if (r.outputs?.length) acc.outputs.push(...r.outputs);
+}
+
+function finalizeWalkResult(acc: MutableWalkAccumulator): WalkResult {
   const out: {
     entries: readonly ContextEntry[];
     blocks: readonly ContentBlock[];
     diagnostics?: readonly FormatDiagnostic[];
     specConfig?: Partial<SpecConfig>;
     providerOptions?: ProviderOptions;
-  } = { entries, blocks };
-  if (diagnostics.length > 0) out.diagnostics = diagnostics;
-  if (specConfig && Object.keys(specConfig).length > 0) out.specConfig = specConfig;
-  if (providerOptions && Object.keys(providerOptions).length > 0) {
-    out.providerOptions = providerOptions;
+    tools?: readonly ToolDeclaration[];
+    mcps?: readonly MCPDeclaration[];
+    resources?: readonly ResourceDeclaration[];
+    outputs?: readonly OutputDeclaration[];
+  } = { entries: acc.entries, blocks: acc.blocks };
+  if (acc.diagnostics.length > 0) out.diagnostics = acc.diagnostics;
+  if (acc.specConfig && Object.keys(acc.specConfig).length > 0) out.specConfig = acc.specConfig;
+  if (acc.providerOptions && Object.keys(acc.providerOptions).length > 0) {
+    out.providerOptions = acc.providerOptions;
   }
+  if (acc.tools.length > 0) out.tools = acc.tools;
+  if (acc.mcps.length > 0) out.mcps = acc.mcps;
+  if (acc.resources.length > 0) out.resources = acc.resources;
+  if (acc.outputs.length > 0) out.outputs = acc.outputs;
   return out;
 }

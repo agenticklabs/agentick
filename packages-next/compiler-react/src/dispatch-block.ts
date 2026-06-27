@@ -74,7 +74,11 @@ export function dispatchBlock(
     case "system":
     case "user":
     case "assistant":
-    case "tool":
+      // NOTE: `<tool>` was previously in this fall-through (role
+      // shorthand for `role="tool"`) but every callsite uses it as a
+      // declaration (with `name` + `inputSchema` props). Step 3b
+      // moved `<tool>` to `dispatch-declarations.ts`; for tool-result
+      // messages, use `<message role="tool">` explicitly.
       return messageCase(tag, props, inner, scope);
 
     case "code":
@@ -358,8 +362,13 @@ function droppedBlock(inner: WalkResult): WalkResult {
 
 /**
  * Forward inner's optional fields (diagnostics, specConfig,
- * providerOptions) onto `out`. Caller supplies the new
- * entries/blocks.
+ * providerOptions, declaration arrays) onto `out`. Caller supplies
+ * the new entries/blocks.
+ *
+ * Declaration arrays MUST forward even when the parent intrinsic
+ * (section / message / etc.) doesn't itself produce a declaration —
+ * a `<tool>` nested inside a `<section>` is still a top-level tool
+ * declaration on the RenderedTree.
  */
 function withInner(
   inner: WalkResult,
@@ -371,10 +380,18 @@ function withInner(
     diagnostics?: readonly FormatDiagnostic[];
     specConfig?: WalkResult["specConfig"];
     providerOptions?: WalkResult["providerOptions"];
+    tools?: WalkResult["tools"];
+    mcps?: WalkResult["mcps"];
+    resources?: WalkResult["resources"];
+    outputs?: WalkResult["outputs"];
   } = { entries: out.entries, blocks: out.blocks };
   if (inner.diagnostics?.length) result.diagnostics = inner.diagnostics;
   if (inner.specConfig) result.specConfig = inner.specConfig;
   if (inner.providerOptions) result.providerOptions = inner.providerOptions;
+  if (inner.tools?.length) result.tools = inner.tools;
+  if (inner.mcps?.length) result.mcps = inner.mcps;
+  if (inner.resources?.length) result.resources = inner.resources;
+  if (inner.outputs?.length) result.outputs = inner.outputs;
   return result;
 }
 

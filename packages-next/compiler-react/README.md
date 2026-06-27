@@ -58,7 +58,7 @@ Both calls are async because `useData` can suspend at any depth
 | Tag                                                                    | Produces                                       |
 | ---------------------------------------------------------------------- | ---------------------------------------------- |
 | `<section id audience priority>`                                       | top-level context entry (HTML overlap — below) |
-| `<message role>` / `<system>` / `<user>` / `<assistant>` / `<tool>`    | role-bearing context entry                     |
+| `<message role>` / `<system>` / `<user>` / `<assistant>`               | role-bearing context entry. For `role="tool"` (tool-result messages) use `<message role="tool">` explicitly — `<tool>` is the tool-DECLARATION intrinsic, see below. |
 | `<code language>`                                                      | fenced code block (HTML overlap — below)       |
 | `<json data>`                                                          | JSON content block                             |
 | `<xml-block>` / `<html-block>` / `<csv-block headers>`                 | raw textual content blocks                     |
@@ -66,6 +66,32 @@ Both calls are async because `useData` can suspend at any depth
 | `<image source mimeType? altText?>` / `<audio>` / `<video>` / `<document>` | typed media content blocks                 |
 | `<user_action action>` / `<system_event event>` / `<state_change entity from to>` | event content blocks                |
 | `<custom tag content attrs?>`                                          | adopter-defined custom block                   |
+
+**Declaration intrinsics (runtime registrations + generation-time config):**
+
+| Tag                                                                                              | Produces                                                |
+| ------------------------------------------------------------------------------------------------ | ------------------------------------------------------- |
+| `<tool name inputSchema description? outputSchema? exposure? handlerRef? annotations? metadata?>` | `ToolDeclaration` on `tree.declarations.tools`         |
+| `<mcp serverName transport config? exposes? metadata?>`                                          | `MCPDeclaration` on `tree.declarations.mcp`            |
+| `<resource id? uri? name? description? mimeType? handlerRef? metadata?>`                         | `ResourceDeclaration` on `tree.declarations.resources` |
+| `<output id? schema? mode? metadata?>` (HTML overlap — below)                                    | `OutputDeclaration` on `tree.declarations.outputs`     |
+| `<model id? ref? responseFormat? maxOutputTokens? temperature? metadata? providerOptions?>`      | `SpecConfig` fragment on `tree.config` + `tree.providerOptions` |
+
+`<tool>` declaration intrinsic — children's text becomes the
+description fallback. Adopter-friendly handler-closure-capture lives
+in `@agentick/reconciler-react-next`'s `createTool({ use, handler })`
+which wraps an uppercase `<Tool>` component around the lowercase
+intrinsic.
+
+Diagnostic codes for malformed declaration props:
+`tool-missing-name`, `tool-missing-input-schema`, `mcp-missing-fields`.
+
+`<output>` and `<model>` HTML overlap caveat: `<output>` is HTML's
+form-output element. The walker dispatches at runtime regardless, but
+JSX typing for Agentick-specific props needs
+`React.createElement("output", { schema })` or an uppercase wrapper.
+`<model>` has the additional gotcha that `ref` is reserved by React;
+use the `id` prop or pass `ref` via spread.
 
 **Formatter-scope intrinsic:**
 
@@ -224,6 +250,12 @@ diagnostics — clean trees stay slim.
   scope semantics (passthrough, nested scope, purpose-scoped swap,
   outer-restore-after-inner, malformed-emits-diagnostic) +
   walker-diagnostic surfacing for media / event / clean-tree paths.
+- `src/__tests__/declarations.spec.tsx` — `<tool>` / `<mcp>` /
+  `<resource>` / `<output>` / `<model>` declaration intrinsics:
+  emit shape, id-fallback from hostId, description-from-children
+  fallback for `<tool>`, missing-required-field diagnostics,
+  combined declarations + sections, `<message role="tool">`
+  regression guard.
 
 ## Roadmap
 

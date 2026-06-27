@@ -176,10 +176,20 @@ function renderOnce(
 
 function finalize(container: ReconcilerContainer, specVersion: string): RenderedTree {
   const walked = walkChildren(container.children);
+  const declarations: {
+    -readonly [K in keyof NonNullable<RenderedTree["declarations"]>]?: NonNullable<
+      RenderedTree["declarations"]
+    >[K];
+  } = {};
+  if (walked.tools?.length) declarations.tools = walked.tools;
+  if (walked.mcps?.length) declarations.mcp = walked.mcps;
+  if (walked.resources?.length) declarations.resources = walked.resources;
+  if (walked.outputs?.length) declarations.outputs = walked.outputs;
   return {
     specVersion,
     context: { entries: walked.entries },
     ...(walked.blocks.length > 0 ? { content: walked.blocks } : {}),
+    ...(Object.keys(declarations).length > 0 ? { declarations } : {}),
     ...(walked.specConfig && Object.keys(walked.specConfig).length > 0
       ? { config: walked.specConfig as RenderedTree["config"] }
       : {}),

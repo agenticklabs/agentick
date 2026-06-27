@@ -28,6 +28,14 @@
  * can consolidate both — defer until concrete drift surfaces.
  */
 
+import type {
+  MCPTransport,
+  ProviderOptions,
+  ResponseFormat,
+  StandardSchemaV1,
+  ToolAnnotations,
+  ToolExposure,
+} from "@agentick/spec-next";
 import type { ReactNode } from "react";
 
 type MessageRole = "system" | "user" | "assistant" | "tool" | (string & {});
@@ -50,6 +58,56 @@ interface JsonProps {
 
 interface ParagraphProps {
   readonly children?: ReactNode;
+}
+
+// ────────── Declaration intrinsics (Step 3b) ──────────
+
+interface ToolIntrinsicProps {
+  readonly id?: string;
+  readonly name: string;
+  readonly description?: string;
+  readonly inputSchema: StandardSchemaV1;
+  readonly outputSchema?: StandardSchemaV1;
+  readonly exposure?: readonly ToolExposure[];
+  readonly handlerRef?: string;
+  readonly annotations?: ToolAnnotations;
+  readonly metadata?: Readonly<Record<string, unknown>>;
+  readonly children?: ReactNode;
+}
+
+interface McpProps {
+  readonly id?: string;
+  readonly serverName: string;
+  readonly transport: MCPTransport;
+  readonly config?: Readonly<Record<string, unknown>>;
+  readonly exposes?: readonly ("tools" | "resources" | "prompts")[];
+  readonly metadata?: Readonly<Record<string, unknown>>;
+}
+
+interface ResourceProps {
+  readonly id?: string;
+  readonly uri?: string;
+  readonly name?: string;
+  readonly description?: string;
+  readonly mimeType?: string;
+  readonly handlerRef?: string;
+  readonly metadata?: Readonly<Record<string, unknown>>;
+}
+
+// NOTE: `OutputIntrinsicProps` would live here, but `<output>` is an
+// HTML form-output element that React's IntrinsicElements already
+// claims. Adopters use `React.createElement("output", { schema })` at
+// the call site to bypass HTML attribute typing. The walker still
+// dispatches `<output>` at runtime via dispatch-declarations.ts.
+
+interface ModelIntrinsicProps {
+  readonly id?: string;
+  readonly ref?: string;
+  readonly responseFormat?: ResponseFormat;
+  readonly maxOutputTokens?: number;
+  readonly temperature?: number;
+  readonly metadata?: Readonly<Record<string, unknown>>;
+  readonly providerOptions?: ProviderOptions;
 }
 
 // NOTE: HTML-overlap intrinsics (`section`, `code`, `text`) are NOT
@@ -81,9 +139,23 @@ declare module "react" {
       readonly system: MessageRoleProps;
       readonly user: MessageRoleProps;
       readonly assistant: MessageRoleProps;
-      readonly tool: MessageRoleProps;
       readonly json: JsonProps;
       readonly paragraph: ParagraphProps;
+      // Declaration intrinsics — Step 3b. `<tool>` is the canonical
+      // tool DECLARATION (not a `role="tool"` message shorthand —
+      // for that, use `<message role="tool">`).
+      readonly tool: ToolIntrinsicProps;
+      readonly mcp: McpProps;
+      readonly resource: ResourceProps;
+      readonly model: ModelIntrinsicProps;
+      // NOTE: `<output>` is intentionally NOT declared here — HTML's
+      // `<output>` form element already claims the slot with HTML
+      // attributes. The walker still dispatches the lowercase tag at
+      // runtime; adopters who need Agentick-specific props on the
+      // declaration must use
+      // `React.createElement("output", { schema: ... })` or an
+      // uppercase function-component wrapper. Same workaround as
+      // `<section>` / `<code>` / `<text>` — see the note below.
     }
   }
 }

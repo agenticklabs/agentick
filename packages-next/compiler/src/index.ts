@@ -58,6 +58,23 @@ export { FORMAT_INTRINSIC_TAG, isFormatTag, parseFormatProps } from "./format-in
 export type { ParsedFormatProps } from "./format-intrinsic.js";
 
 export {
+  mcpDeclaration,
+  modelConfig,
+  outputDeclaration,
+  resourceDeclaration,
+  toolDeclaration,
+} from "./declarations.js";
+export type {
+  DeclarationResult,
+  McpProps,
+  ModelConfigResult,
+  ModelProps,
+  OutputProps,
+  ResourceProps,
+  ToolProps,
+} from "./declarations.js";
+
+export {
   EMPTY_WALK_SCOPE,
   createWalkScope,
   resolveFormatter,

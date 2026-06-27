@@ -28,6 +28,8 @@ abstraction.
 | Semantic-html mapping: `SEMANTIC_HTML_TAGS`, `isSemanticHtmlTag`, `getSemanticHtmlEntry`                                         | Lowercase-tag → SemanticType lookup table (h1-h6, strong, em, lists, table, …) |
 | **Formatter scope** (ADR 39 Phase 3 Step 3a): `FORMAT_INTRINSIC_TAG`, `isFormatTag`, `parseFormatProps`                          | `<format>` tag name + props parser (formatter ref + optional purpose) |
 | `WalkScope`, `FormatterScope`, `FormatterBinding`, `createWalkScope`, `EMPTY_WALK_SCOPE`, `withFormatter`, `resolveFormatter`    | Immutable formatter binding threaded through an adapter walker. Section/message dispatch stamps `renderedWith` from the active scope. |
+| **Declaration helpers** (ADR 39 Phase 3 Step 3b): `toolDeclaration`, `mcpDeclaration`, `resourceDeclaration`, `outputDeclaration`, `modelConfig`                  | Build declarations + SpecConfig fragments from typed props. Each (except `modelConfig`) returns `DeclarationResult<T>` — either the built value OR a `FormatDiagnostic` for the walker to surface. |
+| Declaration props types: `ToolProps`, `McpProps`, `ResourceProps`, `OutputProps`, `ModelProps`                                                                    | Per-intrinsic typed prop interfaces consumed by the helpers above. |
 
 **Formatting is NOT this package's job.** The compiler produces
 `RenderedTree` (the IR). Serialization (`RenderedTree → string` for
