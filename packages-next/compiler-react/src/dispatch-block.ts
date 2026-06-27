@@ -37,6 +37,7 @@ import type {
   MessageEntry,
   VideoMimeType,
 } from "@agentick/spec-next";
+import { omitUndefined } from "@agentick/utils-next";
 
 import {
   asAudience,
@@ -92,40 +93,44 @@ export function dispatchBlock(
       return mediaCase(props, inner, (src, mime) =>
         imageBlock({
           source: src,
-          ...(mime !== undefined ? { mimeType: mime as ImageMimeType } : {}),
-          ...(asString(props.altText) !== undefined ? { altText: asString(props.altText)! } : {}),
-          ...(asString(props.id) !== undefined ? { id: asString(props.id)! } : {}),
+          ...omitUndefined({
+            mimeType: mime as ImageMimeType | undefined,
+            altText: asString(props.altText),
+            id: asString(props.id),
+          }),
         }),
       );
     case "audio":
       return mediaCase(props, inner, (src, mime) =>
         audioBlock({
           source: src,
-          ...(mime !== undefined ? { mimeType: mime as AudioMimeType } : {}),
-          ...(asString(props.transcript) !== undefined
-            ? { transcript: asString(props.transcript)! }
-            : {}),
-          ...(asString(props.id) !== undefined ? { id: asString(props.id)! } : {}),
+          ...omitUndefined({
+            mimeType: mime as AudioMimeType | undefined,
+            transcript: asString(props.transcript),
+            id: asString(props.id),
+          }),
         }),
       );
     case "video":
       return mediaCase(props, inner, (src, mime) =>
         videoBlock({
           source: src,
-          ...(mime !== undefined ? { mimeType: mime as VideoMimeType } : {}),
-          ...(asString(props.transcript) !== undefined
-            ? { transcript: asString(props.transcript)! }
-            : {}),
-          ...(asString(props.id) !== undefined ? { id: asString(props.id)! } : {}),
+          ...omitUndefined({
+            mimeType: mime as VideoMimeType | undefined,
+            transcript: asString(props.transcript),
+            id: asString(props.id),
+          }),
         }),
       );
     case "document":
       return mediaCase(props, inner, (src, mime) =>
         documentBlock({
           source: src,
-          ...(mime !== undefined ? { mimeType: mime as DocumentMimeType } : {}),
-          ...(asString(props.title) !== undefined ? { title: asString(props.title)! } : {}),
-          ...(asString(props.id) !== undefined ? { id: asString(props.id)! } : {}),
+          ...omitUndefined({
+            mimeType: mime as DocumentMimeType | undefined,
+            title: asString(props.title),
+            id: asString(props.id),
+          }),
         }),
       );
 
@@ -159,13 +164,11 @@ function sectionCase(props: Readonly<Record<string, unknown>>, inner: WalkResult
       sectionEntry(
         {
           id: asString(props.id) ?? "anonymous",
-          ...(asString(props.title) !== undefined ? { title: asString(props.title)! } : {}),
-          ...(asAudience(props.audience) !== undefined
-            ? { audience: asAudience(props.audience)! }
-            : {}),
-          ...(asNumber(props.priority) !== undefined
-            ? { priority: asNumber(props.priority)! }
-            : {}),
+          ...omitUndefined({
+            title: asString(props.title),
+            audience: asAudience(props.audience),
+            priority: asNumber(props.priority),
+          }),
         },
         inner.blocks,
       ),
@@ -185,10 +188,7 @@ function messageCase(
   ) as MessageEntry["role"];
   return {
     entries: [
-      messageEntry(
-        { role, ...(asString(props.id) !== undefined ? { id: asString(props.id)! } : {}) },
-        inner.blocks,
-      ),
+      messageEntry({ role, ...omitUndefined({ id: asString(props.id) }) }, inner.blocks),
       ...inner.entries,
     ],
     blocks: [],
@@ -200,11 +200,11 @@ function reasoningCase(props: Readonly<Record<string, unknown>>, inner: WalkResu
     inner.entries,
     reasoningBlock({
       text: innerText(inner.blocks),
-      ...(asString(props.signature) !== undefined ? { signature: asString(props.signature)! } : {}),
-      ...(asBoolean(props.isRedacted) !== undefined
-        ? { isRedacted: asBoolean(props.isRedacted)! }
-        : {}),
-      ...(asString(props.id) !== undefined ? { id: asString(props.id)! } : {}),
+      ...omitUndefined({
+        signature: asString(props.signature),
+        isRedacted: asBoolean(props.isRedacted),
+        id: asString(props.id),
+      }),
     }),
   );
 }
@@ -216,8 +216,12 @@ function mediaCase(
 ): WalkResult {
   const source = asMediaSource(props.source);
   if (!source) {
-    // Source missing / malformed — drop the media block but preserve
-    // any nested entries the user might have placed alongside.
+    // TODO(adr-39-phase-3): Source missing / malformed — currently we
+    // drop the media block silently. v1's contributor emitted a
+    // diagnostic fragment; we should do the same once a diagnostics
+    // channel exists on WalkResult (or via a sink threaded through
+    // the walker). For now: preserve any nested entries and drop the
+    // bad block.
     return { entries: inner.entries, blocks: [] };
   }
   return blocksWith(inner.entries, build(source, asString(props.mimeType)));
@@ -230,11 +234,13 @@ function userActionCase(props: Readonly<Record<string, unknown>>, inner: WalkRes
     inner.entries,
     userActionBlock({
       action,
-      ...(asString(props.actor) !== undefined ? { actor: asString(props.actor)! } : {}),
-      ...(asString(props.target) !== undefined ? { target: asString(props.target)! } : {}),
-      ...(asRecord(props.details) !== undefined ? { details: asRecord(props.details)! } : {}),
-      ...(asString(props.text) !== undefined ? { text: asString(props.text)! } : {}),
-      ...(asString(props.id) !== undefined ? { id: asString(props.id)! } : {}),
+      ...omitUndefined({
+        actor: asString(props.actor),
+        target: asString(props.target),
+        details: asRecord(props.details),
+        text: asString(props.text),
+        id: asString(props.id),
+      }),
     }),
   );
 }
@@ -246,10 +252,12 @@ function systemEventCase(props: Readonly<Record<string, unknown>>, inner: WalkRe
     inner.entries,
     systemEventBlock({
       event,
-      ...(asString(props.source) !== undefined ? { source: asString(props.source)! } : {}),
-      ...(asRecord(props.data) !== undefined ? { data: asRecord(props.data)! } : {}),
-      ...(asString(props.text) !== undefined ? { text: asString(props.text)! } : {}),
-      ...(asString(props.id) !== undefined ? { id: asString(props.id)! } : {}),
+      ...omitUndefined({
+        source: asString(props.source),
+        data: asRecord(props.data),
+        text: asString(props.text),
+        id: asString(props.id),
+      }),
     }),
   );
 }
@@ -263,10 +271,12 @@ function stateChangeCase(props: Readonly<Record<string, unknown>>, inner: WalkRe
       entity,
       from: props.from,
       to: props.to,
-      ...(asString(props.field) !== undefined ? { field: asString(props.field)! } : {}),
-      ...(asString(props.trigger) !== undefined ? { trigger: asString(props.trigger)! } : {}),
-      ...(asString(props.text) !== undefined ? { text: asString(props.text)! } : {}),
-      ...(asString(props.id) !== undefined ? { id: asString(props.id)! } : {}),
+      ...omitUndefined({
+        field: asString(props.field),
+        trigger: asString(props.trigger),
+        text: asString(props.text),
+        id: asString(props.id),
+      }),
     }),
   );
 }
@@ -280,11 +290,11 @@ function customCase(props: Readonly<Record<string, unknown>>, inner: WalkResult)
     customBlock({
       tag,
       content,
-      ...(asStringRecord(props.attrs) !== undefined ? { attrs: asStringRecord(props.attrs)! } : {}),
-      ...(asBoolean(props.selfClosing) !== undefined
-        ? { selfClosing: asBoolean(props.selfClosing)! }
-        : {}),
-      ...(asString(props.id) !== undefined ? { id: asString(props.id)! } : {}),
+      ...omitUndefined({
+        attrs: asStringRecord(props.attrs),
+        selfClosing: asBoolean(props.selfClosing),
+        id: asString(props.id),
+      }),
     }),
   );
 }

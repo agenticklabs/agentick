@@ -63,6 +63,15 @@ interface ParagraphProps {
 //     shipped in a future package once we add them)
 //
 // Same approach as `reconciler-react-next/src/react/jsx-intrinsics.ts`.
+//
+// TODO(adr-39-phase-3): The semantic-html vocabulary that Step 1b added
+// to the walker (strong / em / ul / ol / li / table / blockquote / pre
+// / br / hr / kbd / var / q / cite / a / img) currently has no JSX
+// type declarations — adopters get React's default HTML typings, which
+// don't expose the Agentick-specific props the walker reads (currently
+// only `href` on `<a>` and `src`/`alt` on `<img>`, so the existing
+// HTML typings match by accident). When we add semantic intrinsics
+// that need non-HTML props, declare them here OR ship uppercase FCs.
 
 declare module "react" {
   // eslint-disable-next-line @typescript-eslint/no-namespace

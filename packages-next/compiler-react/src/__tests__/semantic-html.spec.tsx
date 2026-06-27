@@ -9,6 +9,20 @@
  *   - h1-h6 produce headings via the semantic-html path (semantic IR,
  *     formatter chooses syntax).
  *   - The markdown formatter renders the produced IR correctly.
+ *
+ * TODO(adr-39-phase-3): Coverage gaps to address before Phase 3 closes:
+ *   - <br> / <hr> void-tag walker integration tests (the dispatch
+ *     table is unit-tested in compiler-next, but the walker path
+ *     isn't exercised end-to-end here).
+ *   - Tighten formatter-coupled assertions: most tests currently
+ *     assert on the markdown OUTPUT (`out.toContain("## Title")`) —
+ *     that couples to formatter syntax. Pin the IR shape directly
+ *     (the way the "table" test does); keep formatter-coupled tests
+ *     in a separate formatter-integration suite.
+ *   - `headerBlock(level, text)` helper (compiler-next) is now
+ *     functionally redundant with the walker path for h1-h6. Decide
+ *     if it stays for adopter ergonomics (non-JSX callers) or is
+ *     retired.
  */
 
 import { xmlFormatter } from "@agentick/formatters-next";
