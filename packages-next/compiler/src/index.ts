@@ -41,6 +41,8 @@ export {
   messageEntry,
   reasoningBlock,
   sectionEntry,
+  semanticBlock,
+  semanticNode,
   stateChangeBlock,
   systemEventBlock,
   textBlock,
@@ -48,6 +50,9 @@ export {
   videoBlock,
   xmlBlock,
 } from "./intrinsics.js";
+
+export { getSemanticHtmlEntry, isSemanticHtmlTag, SEMANTIC_HTML_TAGS } from "./semantic-html.js";
+export type { SemanticHtmlEntry } from "./semantic-html.js";
 export type {
   AudioProps,
   CustomBlockProps,

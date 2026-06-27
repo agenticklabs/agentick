@@ -30,6 +30,7 @@ import type {
   SectionEntry,
   SemanticContentBlock,
   SemanticNode,
+  SemanticType,
   VideoMimeType,
 } from "@agentick/spec-next";
 import { omitUndefined } from "@agentick/utils-next";
@@ -61,11 +62,30 @@ export function headerBlock(level: 1 | 2 | 3 | 4 | 5 | 6, text: string): Semanti
 }
 
 /**
- * Helper to wrap a `SemanticNode` into a `SemanticContentBlock`.
- * Matches the convention used by formatters-next test fixtures —
- * empty top-level `text` with the semantic tree on `semanticNode`.
+ * Construct a `SemanticNode` — the recursive unit inside a
+ * `SemanticContentBlock`. Used by both flat helpers (headerBlock)
+ * and the per-framework walkers when they recurse children of
+ * semantic-html elements (`<strong>`, `<em>`, `<ul>`, etc.).
  */
-function semanticBlock(node: SemanticNode): SemanticContentBlock {
+export function semanticNode(
+  semantic: SemanticType,
+  children: readonly SemanticNode[],
+  props?: Readonly<Record<string, unknown>>,
+): SemanticNode {
+  return {
+    semantic,
+    ...omitUndefined({ props }),
+    children,
+  };
+}
+
+/**
+ * Wrap a `SemanticNode` into a `SemanticContentBlock`. Matches the
+ * convention used by formatters-next: empty top-level `text` with
+ * the semantic tree on `semanticNode`. The formatter walks the
+ * `semanticNode` tree to produce the final output text.
+ */
+export function semanticBlock(node: SemanticNode): SemanticContentBlock {
   return { type: "text", text: "", semanticNode: node } as SemanticContentBlock;
 }
 
@@ -384,16 +404,5 @@ export function messageEntry(props: MessageProps, content: readonly ContentBlock
 // See: packages-next/reconciler/src/collect/contributors/model.ts
 // See: packages-next/reconciler/src/collect/contributors/output.ts
 
-// ============================================================================
-// Deferred helpers — semantic-html vocabulary (#234)
-// ============================================================================
-
-// TODO(adr-39-phase-3-1b): Port the semantic-html contributors
-// (strong/em/mark/u/s/sub/sup/small/kbd/var/q/cite/a/h1-h6/p/blockquote/
-// pre/br/hr/ul/ol/li/table+rows/img-inline). Requires the walker to
-// build NESTED SemanticNode trees (e.g., <strong>hi <em>there</em></strong>
-// → { semantic: "strong", children: [{text: "hi "}, { semantic: "em",
-// children: [{text: "there"}] }] }). Today's intrinsic helpers return
-// flat ContentBlock fragments; semantic-html needs a tree builder.
-//
-// See: packages-next/reconciler/src/collect/contributors/semantic-html.ts
+// Semantic-html vocabulary lives in semantic-html.ts (Step 1b shipped
+// the dispatch table + `semanticNode` / `semanticBlock` builders).
