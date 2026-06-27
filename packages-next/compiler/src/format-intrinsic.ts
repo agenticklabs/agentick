@@ -10,10 +10,10 @@
  *   - `formatter` (required) — the {@link FormatterRef} to bind.
  *     Malformed / missing → returns `null` and the walker should
  *     emit a diagnostic.
- *   - `purpose` (optional) — when set to one of the
- *     {@link FormatPurpose} values (`"section"`, `"message"`, …)
- *     scope only that purpose. Unknown values are silently dropped
- *     (no purpose binding, default-scope replacement applies).
+ *   - `purpose` (optional) — when set to one of the SUPPORTED
+ *     purposes (`"section"`, `"message"`) scope only that purpose.
+ *     Other valid `FormatPurpose` values are silently downgraded to
+ *     default-scope replacement — see `SUPPORTED_PURPOSES` below.
  *
  * Lives in compiler-next so every framework adapter sees the same
  * tag name + parsing rules. The walker integration (where to push
@@ -35,16 +35,36 @@ export function isFormatTag(tag: string): boolean {
 }
 
 /**
- * The full set of valid `FormatPurpose` values, mirrored from the
- * spec. Used to validate the `purpose` prop at parse time.
+ * The `purpose` values the walker actually CONSUMES today.
+ *
+ * The full `FormatPurpose` union from spec-next is broader
+ * (`"context" | "message" | "section" | "free-root" | "resource" |
+ * "output"`) but only section + message dispatch ask the scope for
+ * a purpose-specific formatter (`resolveFormatter(scope,
+ * "section" | "message")`). The rest are NOT honest yet:
+ *
+ *  - `"free-root"` — top-level `tree.content` is formatted by the
+ *    single formatter passed to `format(tree, opts)`. No per-scope
+ *    free-root stamping. Tracked as Phase 4+ alongside top-level
+ *    `tree.renderedWith` plumbing in `finalize()`.
+ *  - `"context"`, `"resource"`, `"output"` — these are
+ *    consumer-facing format purposes (executor / resource runtime /
+ *    output declaration). The compiler walker doesn't emit
+ *    `kind: "resource"` / `kind: "output"` ContextEntries yet
+ *    (deferred to Phase 2 of the modular intrinsic vocabulary).
+ *    Once those entries land, the dispatch handlers can ask the
+ *    scope for their purpose-specific formatter and we'll widen
+ *    this set.
+ *
+ * Restricting parse here is the cheap-honest move: an adopter who
+ * writes `<format formatter={xml} purpose="resource">` today gets
+ * the formatter as the DEFAULT (not purpose-scoped), which is the
+ * closest correct behavior. Once Phase 4 lights up the rest, we
+ * widen the set + add tests pinning the new dispatch sites.
  */
-const VALID_PURPOSES: ReadonlySet<FormatPurpose> = new Set<FormatPurpose>([
-  "context",
-  "message",
+const SUPPORTED_PURPOSES: ReadonlySet<FormatPurpose> = new Set<FormatPurpose>([
   "section",
-  "free-root",
-  "resource",
-  "output",
+  "message",
 ]);
 
 export interface ParsedFormatProps {
@@ -55,8 +75,14 @@ export interface ParsedFormatProps {
 /**
  * Validate and unwrap `<format>` props. Returns the parsed binding,
  * or `null` if the `formatter` prop is missing / malformed (no
- * `{id: string}` shape). Unknown `purpose` values are ignored — the
- * binding falls back to scope-default replacement.
+ * `{id: string}` shape).
+ *
+ * `purpose` is honored only for the values the walker currently
+ * dispatches on (`"section"`, `"message"`). All other `purpose`
+ * values (including the spec-valid `"context"` / `"free-root"` /
+ * `"resource"` / `"output"`) are silently dropped — the binding
+ * lands as the scope's default. See `SUPPORTED_PURPOSES` above for
+ * the rationale.
  */
 export function parseFormatProps(
   props: Readonly<Record<string, unknown>>,
@@ -72,7 +98,7 @@ export function parseFormatProps(
   }
   const formatter = f as FormatterRef;
   const p = props.purpose;
-  if (typeof p === "string" && VALID_PURPOSES.has(p as FormatPurpose)) {
+  if (typeof p === "string" && SUPPORTED_PURPOSES.has(p as FormatPurpose)) {
     return { formatter, purpose: p as FormatPurpose };
   }
   return { formatter };

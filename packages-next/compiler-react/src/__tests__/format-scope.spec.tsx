@@ -168,6 +168,66 @@ describe("<format> — formatter scope provider", () => {
     if (s.kind !== "section") throw new Error("expected section");
     expect(s.renderedWith?.id).toBe("xml");
   });
+
+  it("spec-valid but unsupported purpose downgrades to default replacement", async () => {
+    // "resource" is in the FormatPurpose union but no walker dispatch
+    // site reads `resolveFormatter(scope, "resource")` yet. The binding
+    // should land as the scope DEFAULT, so section dispatch (which asks
+    // for purpose="section") still picks it up via the default fallback.
+    const tree = await compileToTree(
+      format(
+        { formatter: xml, purpose: "resource" },
+        createElement("section" as never, { id: "s" }, "body"),
+      ),
+    );
+    const s = tree.context.entries[0]!;
+    if (s.kind !== "section") throw new Error("expected section");
+    expect(s.renderedWith?.id).toBe("xml");
+  });
+
+  it("<format> with multiple direct children walks all of them", async () => {
+    // Regression guard: the original `format(props, child)` helper arity
+    // would have silently dropped extra children. Forces the dispatch
+    // through the multi-child path.
+    const tree = await compileToTree(
+      format(
+        { formatter: xml },
+        createElement("section" as never, { id: "a" }, "alpha"),
+        createElement("section" as never, { id: "b" }, "bravo"),
+        createElement("section" as never, { id: "c" }, "charlie"),
+      ),
+    );
+    const ids = tree.context.entries.map((e) => (e.kind === "section" ? e.id : null));
+    expect(ids).toEqual(["a", "b", "c"]);
+    for (const e of tree.context.entries) {
+      if (e.kind !== "section") throw new Error("expected section");
+      expect(e.renderedWith?.id).toBe("xml");
+    }
+  });
+
+  it("semantic-html descendants render unaffected under <format> scope", async () => {
+    // dispatch-semantic accepts WalkScope but produces no entries —
+    // there's nothing for renderedWith to stamp onto. This test pins
+    // that semantic-mode recursion still works (the scope threading
+    // through dispatch-semantic is not a no-op of the WRONG kind:
+    // it doesn't drop or corrupt semantic children).
+    const tree = await compileToTree(
+      format(
+        { formatter: xml },
+        createElement(
+          "section" as never,
+          { id: "s" },
+          createElement("h2" as never, null, "Heading"),
+          createElement("p" as never, null, "Paragraph body."),
+        ),
+      ),
+    );
+    const s = tree.context.entries[0]!;
+    if (s.kind !== "section") throw new Error("expected section");
+    expect(s.renderedWith?.id).toBe("xml");
+    // Section's content carries the semantic-html children as blocks.
+    expect(s.content.length).toBeGreaterThan(0);
+  });
 });
 
 describe("walker diagnostics — surfaced via RenderedTree.diagnostics", () => {
@@ -208,8 +268,25 @@ describe("walker diagnostics — surfaced via RenderedTree.diagnostics", () => {
     );
   });
 
-  it("clean tree has no diagnostics field at all (not an empty array)", async () => {
+  it("clean tree (section root) has no diagnostics field at all", async () => {
     const tree = await compileToTree(createElement("section" as never, { id: "s" }, "fine"));
+    expect(tree.diagnostics).toBeUndefined();
+  });
+
+  it("clean tree (message root) has no diagnostics field", async () => {
+    const tree = await compileToTree(createElement("message" as never, { role: "user" }, "ok"));
+    expect(tree.diagnostics).toBeUndefined();
+  });
+
+  it("clean tree (code block root) has no diagnostics field", async () => {
+    const tree = await compileToTree(
+      createElement("code" as never, { language: "ts" }, "const x = 1;"),
+    );
+    expect(tree.diagnostics).toBeUndefined();
+  });
+
+  it("clean tree (free-root text only) has no diagnostics field", async () => {
+    const tree = await compileToTree("plain text at root");
     expect(tree.diagnostics).toBeUndefined();
   });
 });

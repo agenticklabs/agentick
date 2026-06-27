@@ -14,6 +14,16 @@
  * compiler-react consumes it; the reconciler still uses its own
  * `HostScope` until ADR 39 Phase 3 step 3d consolidates the two.
  *
+ * TODO(adr-39-phase-3-step-3d): Delete `HostScope` from
+ * `@agentick/reconciler-next/host/host-context.ts` and re-route
+ * reconciler-react's harness to use this `WalkScope` instead. The two
+ * types ARE structurally identical today (`{formatters: {default,
+ * byPurpose}}` plus a `path` field on HostScope we don't need here).
+ * The reconciler's `path` field is unused by the JSX walker; only
+ * the stable-id generator reads it, and that lives inside collect/
+ * which 3e deletes anyway. Do NOT add new HostScope consumers in
+ * the meantime — every one is migration friction in 3d.
+ *
  * @see docs/proposals/v2/blueprint/39-jsx-template-walker.md
  */
 

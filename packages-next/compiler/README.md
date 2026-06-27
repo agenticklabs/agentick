@@ -25,6 +25,9 @@ abstraction.
 | Media: `imageBlock`, `documentBlock`, `audioBlock`, `videoBlock`                                                                 | Typed media content blocks (per-helper mimeType union) |
 | Events: `userActionBlock`, `systemEventBlock`, `stateChangeBlock`                                                                | Timeline event-content (static event-block construction) |
 | Custom: `customBlock`                                                                                                            | Adopter-defined `<custom tag="…" content="…">` block |
+| Semantic-html mapping: `SEMANTIC_HTML_TAGS`, `isSemanticHtmlTag`, `getSemanticHtmlEntry`                                         | Lowercase-tag → SemanticType lookup table (h1-h6, strong, em, lists, table, …) |
+| **Formatter scope** (ADR 39 Phase 3 Step 3a): `FORMAT_INTRINSIC_TAG`, `isFormatTag`, `parseFormatProps`                          | `<format>` tag name + props parser (formatter ref + optional purpose) |
+| `WalkScope`, `FormatterScope`, `FormatterBinding`, `createWalkScope`, `EMPTY_WALK_SCOPE`, `withFormatter`, `resolveFormatter`    | Immutable formatter binding threaded through an adapter walker. Section/message dispatch stamps `renderedWith` from the active scope. |
 
 **Formatting is NOT this package's job.** The compiler produces
 `RenderedTree` (the IR). Serialization (`RenderedTree → string` for
@@ -84,6 +87,28 @@ pass, restore on exit. Concurrent compile invocations are safe because
 their setup/teardown is bounded by the sync pass — no two ever hold
 the singleton across an await.
 
+## `<format>` and WalkScope (Step 3a)
+
+`<format formatter={ref} purpose?>` is a passthrough intrinsic that
+derives a new `WalkScope` for its descendants. An adapter walker
+recognizes the tag via `isFormatTag(tag)`, parses props via
+`parseFormatProps(props)`, and threads the derived scope down via
+`withFormatter(scope, binding)`. Section/message dispatch then reads
+`resolveFormatter(scope, "section" | "message")` and stamps the
+formatter onto produced `ContextEntry`s as `renderedWith`.
+
+`purpose` is honored ONLY for `"section"` and `"message"` today;
+spec-valid values for `"context"` / `"free-root"` / `"resource"` /
+`"output"` are silently downgraded to default-scope replacement —
+those dispatch sites haven't landed in any walker yet. See the
+inline doc on `SUPPORTED_PURPOSES` in `format-intrinsic.ts` for the
+rationale + Phase 4+ pointer.
+
+`WalkScope` mirrors the structural shape of reconciler-next's
+`HostScope` and is positioned to replace it in Step 3d (collect/
+retirement). Until then, the two coexist — no new HostScope
+consumers should be added.
+
 ## Verified by
 
 - `src/__tests__/use-data.spec.ts` — suspend-via-throw contract,
@@ -91,6 +116,9 @@ the singleton across an await.
   out-of-scope throw
 - `src/__tests__/intrinsics.spec.ts` — IR-fragment shape for every
   intrinsic helper
+- `src/__tests__/semantic-html.spec.ts` — semantic-html mapping table
+- `src/__tests__/format.spec.ts` — formatter pipeline (markdown / xml /
+  text dispatch, framing rules)
 
 ## Status & roadmap
 
