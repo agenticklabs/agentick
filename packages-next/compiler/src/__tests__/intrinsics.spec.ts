@@ -24,7 +24,7 @@ import {
   textBlock,
   userActionBlock,
   videoBlock,
-  xmlBlockHelper,
+  xmlBlock,
 } from "../index.js";
 
 describe("intrinsic helpers — block-level", () => {
@@ -142,8 +142,8 @@ describe("intrinsic helpers — media blocks", () => {
 });
 
 describe("intrinsic helpers — textual variants", () => {
-  it("xmlBlockHelper, htmlBlock pass text verbatim", () => {
-    expect(xmlBlockHelper("<root/>")).toEqual({ type: "xml", text: "<root/>" });
+  it("xmlBlock, htmlBlock pass text verbatim", () => {
+    expect(xmlBlock("<root/>")).toEqual({ type: "xml", text: "<root/>" });
     expect(htmlBlock("<p>x</p>")).toEqual({ type: "html", text: "<p>x</p>" });
   });
 

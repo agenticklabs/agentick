@@ -46,7 +46,7 @@ export {
   textBlock,
   userActionBlock,
   videoBlock,
-  xmlBlockHelper,
+  xmlBlock,
 } from "./intrinsics.js";
 export type {
   AudioProps,

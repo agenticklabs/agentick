@@ -21,12 +21,16 @@
  */
 
 import type {
+  AudioMimeType,
   ContentBlock,
+  DocumentMimeType,
+  ImageMimeType,
   MediaSource,
   MessageEntry,
   SectionEntry,
   SemanticContentBlock,
   SemanticNode,
+  VideoMimeType,
 } from "@agentick/spec-next";
 import { omitUndefined } from "@agentick/utils-next";
 
@@ -108,7 +112,7 @@ export function reasoningBlock(props: ReasoningProps): ContentBlock {
 /**
  * Raw XML block — pre-formatted XML text wrapped as a block.
  */
-export function xmlBlockHelper(text: string): ContentBlock {
+export function xmlBlock(text: string): ContentBlock {
   return { type: "xml", text };
 }
 
@@ -120,13 +124,17 @@ export function htmlBlock(text: string): ContentBlock {
 }
 
 /**
- * CSV block — tabular text with optional header row.
+ * CSV block — tabular text with optional header row. Empty `headers`
+ * arrays are treated as "no headers" (filtered out) so an explicit
+ * `[]` argument doesn't trip downstream consumers expecting a non-
+ * empty header row when present.
  */
 export function csvBlock(text: string, headers?: readonly string[]): ContentBlock {
+  const hasHeaders = headers !== undefined && headers.length > 0;
   return {
     type: "csv",
     text,
-    ...omitUndefined({ headers: headers && headers.length > 0 ? headers : undefined }),
+    ...(hasHeaders ? { headers } : {}),
   };
 }
 
@@ -136,7 +144,7 @@ export function csvBlock(text: string, headers?: readonly string[]): ContentBloc
 
 export interface ImageProps {
   readonly source: MediaSource;
-  readonly mimeType?: string;
+  readonly mimeType?: ImageMimeType;
   readonly altText?: string;
   readonly id?: string;
 }
@@ -146,7 +154,7 @@ export function imageBlock(props: ImageProps): ContentBlock {
     type: "image",
     source: props.source,
     ...omitUndefined({
-      mimeType: props.mimeType as never,
+      mimeType: props.mimeType,
       altText: props.altText,
       id: props.id,
     }),
@@ -155,7 +163,7 @@ export function imageBlock(props: ImageProps): ContentBlock {
 
 export interface DocumentProps {
   readonly source: MediaSource;
-  readonly mimeType?: string;
+  readonly mimeType?: DocumentMimeType;
   readonly title?: string;
   readonly id?: string;
 }
@@ -165,7 +173,7 @@ export function documentBlock(props: DocumentProps): ContentBlock {
     type: "document",
     source: props.source,
     ...omitUndefined({
-      mimeType: props.mimeType as never,
+      mimeType: props.mimeType,
       title: props.title,
       id: props.id,
     }),
@@ -174,7 +182,7 @@ export function documentBlock(props: DocumentProps): ContentBlock {
 
 export interface AudioProps {
   readonly source: MediaSource;
-  readonly mimeType?: string;
+  readonly mimeType?: AudioMimeType;
   readonly transcript?: string;
   readonly id?: string;
 }
@@ -184,7 +192,7 @@ export function audioBlock(props: AudioProps): ContentBlock {
     type: "audio",
     source: props.source,
     ...omitUndefined({
-      mimeType: props.mimeType as never,
+      mimeType: props.mimeType,
       transcript: props.transcript,
       id: props.id,
     }),
@@ -193,7 +201,7 @@ export function audioBlock(props: AudioProps): ContentBlock {
 
 export interface VideoProps {
   readonly source: MediaSource;
-  readonly mimeType?: string;
+  readonly mimeType?: VideoMimeType;
   readonly transcript?: string;
   readonly id?: string;
 }
@@ -203,7 +211,7 @@ export function videoBlock(props: VideoProps): ContentBlock {
     type: "video",
     source: props.source,
     ...omitUndefined({
-      mimeType: props.mimeType as never,
+      mimeType: props.mimeType,
       transcript: props.transcript,
       id: props.id,
     }),
@@ -358,3 +366,34 @@ export function messageEntry(props: MessageProps, content: readonly ContentBlock
     ...omitUndefined({ id: props.id }),
   };
 }
+
+// ============================================================================
+// Deferred helpers — model + output (SpecConfig fragments)
+// ============================================================================
+
+// TODO(adr-39-phase-3): Add modelConfig(props) + outputConfig(props)
+// helpers that produce SpecConfig / ProviderOptions fragments (the
+// model contributor in reconciler-next/collect/contributors/model.ts
+// emits "spec-config" + "provider-options" fragment kinds, not
+// ContentBlocks). Blocked on the walker's WalkResult growing
+// `specConfig?: Partial<SpecConfig>` + `providerOptions?: Partial<ProviderOptions>`
+// channels alongside `entries` / `blocks`. Once that lands, port the
+// model + output helpers here so adopters can hand-construct a fully
+// populated SpecConfig without going through the reactive walker.
+//
+// See: packages-next/reconciler/src/collect/contributors/model.ts
+// See: packages-next/reconciler/src/collect/contributors/output.ts
+
+// ============================================================================
+// Deferred helpers — semantic-html vocabulary (#234)
+// ============================================================================
+
+// TODO(adr-39-phase-3-1b): Port the semantic-html contributors
+// (strong/em/mark/u/s/sub/sup/small/kbd/var/q/cite/a/h1-h6/p/blockquote/
+// pre/br/hr/ul/ol/li/table+rows/img-inline). Requires the walker to
+// build NESTED SemanticNode trees (e.g., <strong>hi <em>there</em></strong>
+// → { semantic: "strong", children: [{text: "hi "}, { semantic: "em",
+// children: [{text: "there"}] }] }). Today's intrinsic helpers return
+// flat ContentBlock fragments; semantic-html needs a tree builder.
+//
+// See: packages-next/reconciler/src/collect/contributors/semantic-html.ts

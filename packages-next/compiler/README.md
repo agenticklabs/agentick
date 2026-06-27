@@ -18,7 +18,13 @@ abstraction.
 | `RenderContext`                  | Ambient per-render cache + pending state `useData` reads from    |
 | `withRenderContext` / `getRenderContext` / `createRenderContext` | Stack-discipline scope helpers (no `node:async_hooks`, runs on any JS runtime) |
 | `isThenable`                     | Re-exported from `@agentick/utils-next`                          |
-| Intrinsic helpers: `sectionEntry`, `messageEntry`, `headerBlock`, `codeBlock`, `jsonBlock`, `textBlock` | Pure functions producing `RenderedTree` IR fragments — adapter host-configs call these when their native AST walk encounters the corresponding tag |
+| **Intrinsic helpers** (pure functions producing `RenderedTree` IR fragments — adapter host-configs call these when their native AST walk encounters the corresponding tag) ||
+| Context entries: `sectionEntry`, `messageEntry`                                                                                  | Section / role-bearing message — top-level context entries |
+| Text + headings: `textBlock`, `headerBlock`                                                                                      | Plain text + semantic heading (level → markdown/xml/text via formatter) |
+| Code / data: `codeBlock`, `jsonBlock`, `xmlBlock`, `htmlBlock`, `csvBlock`, `reasoningBlock`                                     | Code + structured data + reasoning content blocks |
+| Media: `imageBlock`, `documentBlock`, `audioBlock`, `videoBlock`                                                                 | Typed media content blocks (per-helper mimeType union) |
+| Events: `userActionBlock`, `systemEventBlock`, `stateChangeBlock`                                                                | Timeline event-content (static event-block construction) |
+| Custom: `customBlock`                                                                                                            | Adopter-defined `<custom tag="…" content="…">` block |
 
 **Formatting is NOT this package's job.** The compiler produces
 `RenderedTree` (the IR). Serialization (`RenderedTree → string` for
@@ -92,25 +98,44 @@ the singleton across an await.
 - `useData` + RenderContext + stack-discipline
 - Intrinsic helpers (section, message, h1-h6, code, json, text)
 
-**Next (Phase 1b):**
+**Shipped (Phase 1b, ADR 39):**
 - `@agentick/compiler-react-next` — react-reconciler-backed adapter,
-  exports JSX-shaped components (`<H1>`, `<Section>`, …) and a
-  `compileToTree(element, opts): Promise<RenderedTree>` entry point
+  `compileToTree(element, opts): Promise<RenderedTree>` + `render()`
+  composing with the formatter pipeline.
+
+**Shipped (Phase 3 Step 1a):**
+- Flat-block intrinsic helpers: media (image/audio/video/document),
+  textual variants (xml/html/csv/reasoning), event blocks
+  (user_action/system_event/state_change), customBlock.
+
+**In progress (Phase 3):**
+- Step 1b — semantic-html vocabulary (`<strong>`, `<em>`, `<list>`,
+  `<table>`, etc.). Needs nested `SemanticNode` walker upgrade.
+- Step 2 — `registerIntrinsic(tag, handler)` extension surface in
+  compiler-react-next.
+- Step 3 — reconciler-react-next refactors to delegate JSX→IR to
+  compiler-react-next; differential gate against the existing test
+  corpus.
+- Step 4 — retire the unused contributor protocol from reconciler-next.
 
 **Future:**
 - `@agentick/compiler-angular-next` — Angular change-detection adapter
 - `@agentick/compiler-solid-next` — Solid reactive-primitive adapter
-- Reconciler-react-next refactor: delegate intrinsic-handling to
-  compiler-react-next + compiler-next helpers (Phase 3, optional)
+- SpecConfig field helpers (model + output) — pending walker's
+  WalkResult growing `specConfig` + `providerOptions` channels.
 
 ## Known gaps
 
-- **Intrinsic vocabulary is initial.** Headers (h1–h6), section,
-  message, code, json, text. Missing: `<List>`, `<Table>`, `<Image>`,
-  `<Document>`, audio / video. Add as concrete use cases drive them.
+- **Semantic-html vocabulary not yet ported** (ADR 39 Phase 3 Step 1b).
+  Missing: `<strong>`, `<em>`, `<mark>`, `<a>`, lists (`<ul>` / `<ol>`
+  / `<li>`), tables, blockquote, pre, `<br>` / `<hr>`. Needs walker
+  upgrade for nested `SemanticNode` trees. Tracked.
+- **SpecConfig helpers not ported.** `<model>` and `<output>` produce
+  SpecConfig + ProviderOptions fragments (not ContentBlocks). Walker's
+  WalkResult needs new channels; deferred (TODO at bottom of intrinsics.ts).
 - **Cross-render caching is opt-in.** `useData`'s cache lives on the
   RenderContext, which is fresh per compile. Adopters who want
   cross-render caching (e.g. server-side memoization) wrap the
-  fetcher with their own cache. Future work may add a `cache` option.
+  fetcher with their own cache.
 - **No streaming render.** Compile returns a final IR. Future:
   `compileStream(...)` yielding fragments as they stabilize.
