@@ -12,10 +12,11 @@
  */
 
 import { textBlock } from "@agentick/compiler-next";
+import { clearRegisteredIntrinsics } from "@agentick/compiler-react-next/testing";
 import React from "react";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { clearRegisteredIntrinsics, compileToTree, registerIntrinsic, render } from "../index.js";
+import { compileToTree, getRegisteredIntrinsic, registerIntrinsic, render } from "../index.js";
 
 afterEach(() => {
   clearRegisteredIntrinsics();
@@ -149,5 +150,49 @@ describe("registerIntrinsic", () => {
     // Built-in section handler is back → produces a section entry.
     expect(tree.context.entries).toHaveLength(1);
     expect((tree.context.entries[0] as { id: string }).id).toBe("x");
+  });
+
+  it("getRegisteredIntrinsic returns the handler for registered tags", () => {
+    expect(getRegisteredIntrinsic("never-registered")).toBeUndefined();
+    const handler = () => ({ entries: [], blocks: [] });
+    registerIntrinsic("query-result", handler);
+    expect(getRegisteredIntrinsic("query-result")).toBe(handler);
+  });
+
+  it("registrations persist across multiple render() invocations", async () => {
+    let calls = 0;
+    registerIntrinsic("counter", () => {
+      calls++;
+      return { entries: [], blocks: [textBlock(`call#${calls}`)] };
+    });
+
+    const Tpl = () =>
+      React.createElement("section" as never, { id: "x" }, React.createElement("counter" as never));
+    const out1 = await render(<Tpl />);
+    const out2 = await render(<Tpl />);
+    const out3 = await render(<Tpl />);
+    expect(out1).toContain("call#1");
+    expect(out2).toContain("call#2");
+    expect(out3).toContain("call#3");
+    expect(calls).toBe(3);
+  });
+});
+
+describe("registerIntrinsic — input validation", () => {
+  it("throws on empty-string tag", () => {
+    expect(() => registerIntrinsic("", () => ({ entries: [], blocks: [] }))).toThrow(
+      /non-empty string/,
+    );
+  });
+
+  it("throws on whitespace-only tag", () => {
+    expect(() => registerIntrinsic("   ", () => ({ entries: [], blocks: [] }))).toThrow(
+      /non-empty string/,
+    );
+  });
+
+  it("throws when handler is not a function", () => {
+    // @ts-expect-error - intentional misuse
+    expect(() => registerIntrinsic("x", "not a function")).toThrow(/must be a function/);
   });
 });

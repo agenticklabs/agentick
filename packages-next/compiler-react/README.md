@@ -147,6 +147,40 @@ Registration semantics:
 - **`unregister` undoes only its own write.** If you register, then
   someone else registers the same tag, your unregister leaves their
   write in place. Safe to call multiple times.
+- **No multi-tenant isolation.** The registry is process-wide. Multiple
+  AppHarnesses in the same process share it. Per-tenant custom
+  intrinsics are not supported today; flagged in the source for
+  future-when-demanded fix.
+
+### JSX type augmentation
+
+After `registerIntrinsic("recipe-card", ...)`, TSX adopters need a
+type declaration so `<recipe-card title="x"/>` typechecks:
+
+```ts
+// In your app or plugin:
+declare module "react" {
+  namespace JSX {
+    interface IntrinsicElements {
+      "recipe-card": { title: string };
+    }
+  }
+}
+```
+
+The walker's runtime dispatch finds the registration regardless of
+typing — the augmentation is purely for adopter-side type safety.
+
+### Test cleanup
+
+The test-only `clearRegisteredIntrinsics()` helper lives on the
+`/testing` subpath — production code shouldn't import from there:
+
+```ts
+import { clearRegisteredIntrinsics } from "@agentick/compiler-react-next/testing";
+
+afterEach(() => clearRegisteredIntrinsics());
+```
 
 ## HTML-overlap caveat
 

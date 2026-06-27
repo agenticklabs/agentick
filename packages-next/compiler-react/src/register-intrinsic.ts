@@ -45,6 +45,22 @@
  *    differently than the default walker — very rare)
  *  - Overriding a built-in for a domain-specific renderer (rare)
  *
+ * # Known limitation: multi-tenant isolation
+ *
+ * This is a process-wide module-level Map. Multiple AppHarnesses in
+ * the same process share the same registry. ADR 22 flagged v1's
+ * module-level renderer registry as a problem for multi-tenant
+ * servers; the v2 contributor registry was per-mount to fix it.
+ *
+ * Phase 3 retired the contributor registry. This `registerIntrinsic`
+ * is honest about that trade-off — adopter registrations are
+ * module-load-time and apply to all renders in the process.
+ *
+ * If concrete multi-tenant demand surfaces (e.g., per-tenant custom
+ * intrinsics in a shared SaaS), the right fix is a per-mount registry
+ * (or per-Compiler-instance, if we ever split the compiler out of
+ * its module). Defer until needed.
+ *
  * TODO(adr-39-phase-3): A FUTURE cross-framework registry could live
  * in `compiler-next` for LEAF intrinsics (no children recursion —
  * pure `(props) => IRFragment`). Those would work in any framework
@@ -83,6 +99,14 @@ const registry = new Map<string, IntrinsicHandler>();
  * goes back to whatever it was before THIS call.
  */
 export function registerIntrinsic(tag: string, handler: IntrinsicHandler): () => void {
+  if (typeof tag !== "string" || tag.trim().length === 0) {
+    throw new Error(
+      `registerIntrinsic: tag must be a non-empty string, got ${JSON.stringify(tag)}`,
+    );
+  }
+  if (typeof handler !== "function") {
+    throw new Error(`registerIntrinsic: handler must be a function`);
+  }
   const previous = registry.get(tag);
   registry.set(tag, handler);
   return () => {

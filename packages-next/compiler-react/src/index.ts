@@ -42,11 +42,9 @@ export type { RenderOptions } from "./render.js";
 
 export { useData } from "./use-data.js";
 
-export {
-  clearRegisteredIntrinsics,
-  getRegisteredIntrinsic,
-  registerIntrinsic,
-} from "./register-intrinsic.js";
+export { getRegisteredIntrinsic, registerIntrinsic } from "./register-intrinsic.js";
 export type { IntrinsicHandler } from "./register-intrinsic.js";
+// NOTE: `clearRegisteredIntrinsics` lives on the `/testing` subpath —
+// production code should NOT import it. See `src/testing/index.ts`.
 
 export type { WalkResult } from "./walk.js";
