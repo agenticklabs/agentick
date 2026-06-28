@@ -1,7 +1,30 @@
 # Agentick v2 — Implementation Status
 
 **Branch:** `feat/v2`
-**Last updated:** 2026-06-26 (eval-next MVP shipped) — **`@agentick/eval-next` iteration 1 lands.** `defineEval(definition)` returns a callable function; `await myEval()` runs with definition defaults, `await myEval({ executor: X })` overrides any `createApp` slot for one invocation. Iteration-1 surface: `t.send/completed/calledTool/notCalledTool/noFailedActions`. Two subpaths: base (reconciler-agnostic) + `/react` (defaults reconciler to `reactReconciler()`). 8/8 tests pass.
+**Last updated:** 2026-06-28 — **ADR 39 compiler experiment archived; reverted to `a15807362` (eval-next iter 2).** Phases 1, 1b, and 3 of the JSX-template-walker work (introduce `@agentick/compiler-next` + `@agentick/compiler-react-next` as a parallel walker, then migrate the reconciler over) are reverted as a discarded experiment. The reconciler's existing `collect/` walker already does what the compiler walker did — including compile-until-stable, formatter scope (HostScope), and contributor extensibility. The parallel implementation was unjustified duplication; no real consumer ever materialized outside the new packages' own tests.
+
+**Archived for reference:** `git tag archive/compiler-phase-3-experiment` preserves the full 16-commit experiment tree (Phase 1 + 1b + 3 substeps 1a–3b). Recover with `git reset --hard archive/compiler-phase-3-experiment` if direction changes.
+
+**What carried forward as small follow-up commits on `feat/v2`:**
+- `2a898c76` `feat(session-next): track reasoning + cached + cache-creation token usage` — unrelated bug-class improvement that landed alongside the experiment; isolated and preserved
+- `e91e9424` `feat(utils-next): isThenable — duck-typed PromiseLike predicate` — generic utility carved out of the experiment; useful broadly
+
+**Lessons that carry forward as practice (not yet ported to code, tracked):**
+- Diagnostic-channel pattern — every silent-drop path in the walker (media missing source, malformed event blocks, etc.) should emit a stable-coded `FormatDiagnostic` rather than discarding the JSX node. Worth porting to `reconciler/collect/contributors/*.ts`.
+- Three of the five "declaration" JSX intrinsics shipped in v1 have **no runtime consumer**: `<output>` (entirely stubbed), `<mcp>` (replaced by `withMCP({...})` extension), `<resource>` (resource runtime is pending — #123). `<tool>` is half-wired: the layered-tools work (#137) explicitly dropped the executor's `tree.declarations.tools` dependency. The "JSX intrinsic produces an IR field" model is legacy from v1; v2's "extension factories + layered options" superseded most of it without retiring the JSX intrinsics. Worth a deliberate cleanup pass.
+- The `RuntimeDeclarations.mcp` singular field name is misleading — it's a plural array. `mcpServers` would read better. Small spec PR if desired.
+- Structured outputs (`<output>` / `responseFormat` / "terminal tool") is an unresolved design question, not a feature. Three candidate models, none implemented end-to-end. Worth a dedicated ADR before any more code lands.
+
+**Meta-lesson:** Audit existing code paths before extracting new packages or layers. The compiler walker duplicated the reconciler's render-until-stable + collect walker; the audit takes minutes and would have caught this at Phase 1 scope time.
+
+**Branch state restored to:**
+- 177 test files / 1925 tests green (matches pre-experiment baseline)
+- Workspace typecheck clean modulo pre-existing v2-real handler-signature drift (`example/v2-real/src/agent.tsx:30` — long-standing, unrelated to revert)
+- Origin/feat/v2 is at `9f77ea9c` and is behind local feat/v2 by 16 commits — non-force push to origin is safe
+
+---
+
+**Previously, 2026-06-26 (eval-next MVP shipped) — `@agentick/eval-next` iteration 1 lands.** `defineEval(definition)` returns a callable function; `await myEval()` runs with definition defaults, `await myEval({ executor: X })` overrides any `createApp` slot for one invocation. Iteration-1 surface: `t.send/completed/calledTool/notCalledTool/noFailedActions`. Two subpaths: base (reconciler-agnostic) + `/react` (defaults reconciler to `reactReconciler()`). 8/8 tests pass.
 
 Substrate-level groundwork: `BaseHarness.runOperation` now stamps `op.input` as the `requested` envelope's payload — the blueprint's phase contract pins requested as "argument bound"; previously the field was empty, so eval ledgers had to find the input some other way. With this change, ANY subscriber (eval, OTel exporter, replay harness) sees what was invoked alongside the operation envelope. Verified non-breaking across the v2 workspace (1909/1909 tests).
 
