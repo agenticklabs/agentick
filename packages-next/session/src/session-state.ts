@@ -28,6 +28,9 @@ export class SessionStateStore {
     inputTokens: 0,
     outputTokens: 0,
     totalTokens: 0,
+    reasoningTokens: 0,
+    cachedInputTokens: 0,
+    cacheCreationTokens: 0,
   };
 
   constructor(id: string) {
@@ -79,9 +82,9 @@ export class SessionStateStore {
     u.inputTokens += delta.inputTokens ?? 0;
     u.outputTokens += delta.outputTokens ?? 0;
     u.totalTokens += delta.totalTokens ?? 0;
-    if (delta.reasoningTokens !== undefined) {
-      u.reasoningTokens = (u.reasoningTokens ?? 0) + delta.reasoningTokens;
-    }
+    u.cachedInputTokens = (u.cachedInputTokens ?? 0) + (delta.cachedInputTokens ?? 0);
+    u.cacheCreationTokens = (u.cacheCreationTokens ?? 0) + (delta.cacheCreationTokens ?? 0);
+    u.reasoningTokens = (u.reasoningTokens ?? 0) + (delta.reasoningTokens ?? 0);
   }
 
   // ────────── subscriptions (status / metadata changes only) ──────────
