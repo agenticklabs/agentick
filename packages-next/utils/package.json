@@ -32,6 +32,16 @@
       "types": "./src/testing/index.ts",
       "import": "./src/testing/index.ts",
       "default": "./src/testing/index.ts"
+    },
+    "./loaders": {
+      "types": "./src/loaders/index.ts",
+      "import": "./src/loaders/index.ts",
+      "default": "./src/loaders/index.ts"
+    },
+    "./loaders/node": {
+      "types": "./src/loaders/node/index.ts",
+      "import": "./src/loaders/node/index.ts",
+      "default": "./src/loaders/node/index.ts"
     }
   },
   "publishConfig": {
@@ -45,6 +55,16 @@
         "types": "./dist/testing/index.d.ts",
         "import": "./dist/testing/index.js",
         "default": "./dist/testing/index.js"
+      },
+      "./loaders": {
+        "types": "./dist/loaders/index.d.ts",
+        "import": "./dist/loaders/index.js",
+        "default": "./dist/loaders/index.js"
+      },
+      "./loaders/node": {
+        "types": "./dist/loaders/node/index.d.ts",
+        "import": "./dist/loaders/node/index.js",
+        "default": "./dist/loaders/node/index.js"
       }
     }
   },

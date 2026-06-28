@@ -195,7 +195,11 @@ fresh.importSnapshot(snapshot);
 - Module augmentation: `session.prompts` typed via `PromptsHandle`
 
 **Planned:**
-- **`PromptLoader[]` support** in `withPrompts` (#247) — `fromArray` / `fromUrl` / `fromModule`
+- **`PromptLoader[]` support** in `withPrompts` (#247). Public surface
+  will be `fromArray` / `fromModule` (function-preserving sources only —
+  `render(args)` cannot cross serialization), plus a `fromStaticUrl`
+  variant constrained to static-template prompts. Built on the
+  primitives in [`@agentick/utils-next/loaders`](../utils/src/loaders/README.md).
 - SQLite / remote backend impls
 - `MCP server harness` integration (#171) — projects our prompts onto MCP `prompts/list` + `prompts/get`
 

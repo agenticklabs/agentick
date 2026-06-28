@@ -8,7 +8,7 @@ no protocol coupling. Anything in this package can be lifted into any
 runtime — Node, Deno, the browser, the edge — without dragging a single
 agentick concept along.
 
-Five things live here today:
+Six things live here today:
 
 - **Type predicates and structural equality** —
   `isString` / `isNumber` / `isBoolean` / `isNull` / `isUndefined` /
@@ -32,6 +32,15 @@ Five things live here today:
   vitest "unhandled rejection" warning) and returns a Promise that
   resolves with the rejection reason or the value. Standardizes the
   ~20 sites that needed the pre-drain pattern.
+- **Loader primitives** ([`loaders/`](./src/loaders/README.md)
+  subpath) — `Loader<T>` + `mergeLoaders` / `mapLoader` /
+  `sourceFromArray` / `sourceFromUrl` / `sourceFromModule` /
+  `extractFrontmatter`. Filesystem-backed sources live under
+  `loaders/node`. Harness packages compose these into their own
+  record-typed `fromX` APIs (skills loaders, prompts loaders, future
+  resources loaders) — the primitive layer is deliberately *not*
+  a unified `from*` surface because the sound source set depends on
+  whether the record type carries unserializable code.
 
 The in-process observer primitives (`Notifier`, `KeyedNotifier`,
 `LocalPubSub`) live in
@@ -102,6 +111,23 @@ Pattern B).
 | `reasonOf(cause)`         | function  | unknown value → single-line reason string                 |
 | `reasonOfCause<E>(cause)` | function  | Effect.Cause → single-line reason string                  |
 | `unwrapExit<A, E>(exit)`  | function  | Exit → value or throw (preserves typed failure identity)  |
+
+**`/loaders` subpath:** see [src/loaders/README.md](./src/loaders/README.md) for the loader primitive surface.
+
+## Loaders subpath — `@agentick/utils-next/loaders` + `/loaders/node`
+
+See [`src/loaders/README.md`](./src/loaders/README.md) for the full
+shape. Quick reference:
+
+| Subpath | Exports | Use when |
+|---------|---------|----------|
+| `/loaders` | `Loader<T>`, `mergeLoaders`, `mapLoader`, `sourceFromArray`, `sourceFromUrl`, `sourceFromModule`, `extractFrontmatter` | platform-agnostic primitives; safe in browser / edge runtime |
+| `/loaders/node` | `sourceFromFile`, `readFrontmatterFile`, `sourceFromDirectory`, `FileRecord` | Node `fs`-backed sources; the path that needs `node:fs` |
+
+Harness packages (`@agentick/skills-next`, `@agentick/prompts-next`)
+build their public `fromArray / fromDirectory / fromModule / ...`
+APIs on these primitives — the constraint on which sources are *sound*
+for a record type belongs to the harness, not to the primitive layer.
 
 ## Testing subpath — `@agentick/utils-next/testing`
 

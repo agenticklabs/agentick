@@ -120,6 +120,15 @@ Cross-harness integration testing — when verifying that skills interact correc
 - Module augmentation: `session.skills` typed via `SkillsHandle`
 
 **Planned:**
+- **`SkillLoader[]` support** in `withSkills` (#246). Public surface
+  will be `fromArray` / `fromFile` / `fromDirectory` / `fromManifest` /
+  `fromUrl` — all sound for skills because skill content is always a
+  `string` (no functions to serialize). Built on the primitives in
+  [`@agentick/utils-next/loaders`](../utils/src/loaders/README.md):
+  `sourceFromArray` / `sourceFromUrl` from the main subpath +
+  `sourceFromFile` / `sourceFromDirectory` from `/loaders/node`, with a
+  Skill-shaped `mapLoader` transform that parses frontmatter to
+  `{ name, description }` and uses the body as `content`.
 - SQLite backend for single-process durability
 - Remote-registry backend (`agentskills.io` compatibility)
 - Embedding-based search (currently substring-only)
