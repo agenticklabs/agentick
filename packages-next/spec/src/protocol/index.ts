@@ -34,5 +34,6 @@ export * from "./elicitation-harness.js";
 export * from "./tasks-harness.js";
 export * from "./knobs-harness.js";
 export * from "./skills-harness.js";
+export * from "./prompts-harness.js";
 export * from "./state-harness.js";
 export * from "./timeline-harness.js";
