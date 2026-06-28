@@ -93,3 +93,22 @@ export type { ReconcilerHarnessOptions } from "./harness/reconciler-harness.js";
 // ReconcilerFactory factory — the canonical way to wire React's
 // reconciler into createApp. Also defaulted by @agentick/app-next/react.
 export { reactReconciler } from "./factory.js";
+
+// One-shot template entry points for static-template use cases
+// (prompts, resources, MCP server prompts, snapshot tests, docs
+// generators). Strip down the full harness — no session, no journal,
+// no operation wrap. See template.ts for the contract.
+//
+// - `compileTemplate(element, opts)` → `RenderedTree` IR + diagnostics
+// - `renderTemplate(element, opts)`  → formatted string + diagnostics
+//
+// Naming mirrors the mental model: COMPILE produces IR; RENDER
+// produces the final output (string). `renderTemplate` uses
+// `compileTemplate` internally + a formatter pass.
+export { compileTemplate, renderTemplate } from "./template.js";
+export type {
+  CompileTemplateOptions,
+  CompileTemplateResult,
+  RenderTemplateOptions,
+  RenderTemplateResult,
+} from "./template.js";

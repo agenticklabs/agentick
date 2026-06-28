@@ -20,6 +20,8 @@ import type {
   CodeBlock,
   ContentBlock,
   JsonBlock,
+  MessageEntry,
+  SectionEntry,
   SemanticContentBlock,
   SemanticNode,
   TextBlock,
@@ -171,8 +173,67 @@ function formatBlock(block: SemanticContentBlock): ContentBlock {
   }
 }
 
+// ============================================================================
+// Tree-level framing + flatten (owned by this formatter)
+// ============================================================================
+
+function frameSection(entry: SectionEntry, body: string): string {
+  return entry.title ? `## ${entry.title}\n\n${body}` : body;
+}
+
+function frameMessage(entry: MessageEntry, body: string): string {
+  return `**${entry.role}:** ${body}`;
+}
+
+function blocksToText(blocks: readonly ContentBlock[]): string {
+  return blocks
+    .map((b) => blockToText(b))
+    .filter((s) => s.length > 0)
+    .join("\n\n");
+}
+
+function blockToText(block: ContentBlock): string {
+  switch (block.type) {
+    case "text":
+    case "reasoning":
+    case "xml":
+    case "csv":
+    case "html":
+      return block.text ?? "";
+    case "code":
+      return block.text;
+    case "json":
+      return block.text ?? (block.data !== undefined ? JSON.stringify(block.data) : "");
+    case "image": {
+      const src = block.source.type === "url" ? block.source.url : "[binary]";
+      return `![${block.altText ?? ""}](${src})`;
+    }
+    case "document":
+    case "audio":
+    case "video": {
+      const src = block.source.type === "url" ? block.source.url : "[binary]";
+      return `[${block.type}](${src})`;
+    }
+    case "tool_use":
+      return `[tool_use ${block.name}] ${JSON.stringify(block.input)}`;
+    case "tool_result":
+      return blocksToText(block.content);
+    case "user_action":
+    case "system_event":
+    case "state_change":
+      return block.text ?? "";
+    case "custom":
+      return block.content;
+    default:
+      return "";
+  }
+}
+
 export const markdownFormatter = createFormatter({
   id: "formatter.markdown",
   format: "markdown",
   render: (blocks) => blocks.map(formatBlock),
+  frameSection,
+  frameMessage,
+  blocksToText,
 });

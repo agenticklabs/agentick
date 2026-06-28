@@ -26,6 +26,14 @@ export { markdownFormatter } from "./markdown.js";
 export { xmlFormatter } from "./xml.js";
 export { textFormatter } from "./text.js";
 
+// Tree-level IR → string serialization. The single entry point for
+// "I have a RenderedTree, give me the final formatted string."
+// Both `ReconcilerHarness.renderToString` and
+// `@agentick/reconciler-react-next`'s `renderTemplate` should
+// delegate here.
+export { formatTree } from "./format-tree.js";
+export type { FormatTreeOptions } from "./format-tree.js";
+
 import { markdownFormatter as md } from "./markdown.js";
 import { xmlFormatter as xml } from "./xml.js";
 import { textFormatter as txt } from "./text.js";
