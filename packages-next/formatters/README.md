@@ -93,6 +93,37 @@ The returned `DefinedFormatter` has a non-enumerable `__identity`
 property carrying `{ id, format, version? }`. (The return-type name
 `DefinedFormatter` stays — ADR 36 covers function names, not type names.)
 
+#### Tree-level serialization (optional)
+
+Beyond the block-level `render` callback, a formatter can OWN its
+own serialization of a full `RenderedTree` to a string by supplying
+three additional callbacks:
+
+```ts
+createFormatter({
+  id: "demo.yaml",
+  format: "yaml",
+  render: (blocks) => blocks.map(/* block-level pass */),
+
+  // How a SectionEntry's formatted body becomes a string
+  frameSection: (entry, body) => `${entry.title ?? entry.id}:\n  ${body.replace(/\n/g, "\n  ")}`,
+
+  // How a MessageEntry's formatted body becomes a string
+  frameMessage: (entry, body) => `${entry.role}: |\n  ${body.replace(/\n/g, "\n  ")}`,
+
+  // How the formatter's ContentBlock[] output becomes a single string
+  blocksToText: (blocks) => blocks.map((b) => ("text" in b ? b.text ?? "" : `[${b.type}]`)).join("\n"),
+});
+```
+
+`formatTree` (below) reads these methods. The three built-in
+formatters (`markdownFormatter`, `xmlFormatter`, `textFormatter`)
+all supply them. 3rd-party formatters that omit them fall back to
+markdown-flavored defaults in `formatTree`. **Custom formatters
+SHOULD supply all three** to get full control over their output
+shape; otherwise the framing your callers see won't match the
+syntax you produced at the block level.
+
 ### `markdownFormatter` · `xmlFormatter` · `textFormatter`
 
 Reference formatters. Each is itself the result of a `createFormatter`
@@ -123,6 +154,45 @@ Extract the `FormatterRef` from a `DefinedFormatter`.
 const ref = refOf(markdownFormatter);
 // → { id: "formatter.markdown", format: "markdown" }
 ```
+
+### `formatTree(tree, defaultFormatter, opts?)`
+
+Tree-level IR → final string. The single entry point for "I have a
+`RenderedTree`, give me the formatted output." Used by:
+
+- `ReconcilerHarness.renderToString` (full reactive harness path)
+- `renderTemplate` in `@agentick/reconciler-react-next` (one-shot
+  static template path)
+- adopters who hold the IR (e.g., from `compileTemplate` or from a
+  `RenderedTree` shipped over the wire) and want the string
+
+```ts
+import { formatTree, markdownFormatter, xmlFormatter, builtInFormatters } from "@agentick/formatters-next";
+
+// Simple — single formatter for everything; ignores entry.renderedWith.
+const md = formatTree(tree, markdownFormatter);
+
+// Per-entry resolution — honors `entry.renderedWith` set by
+// in-template `<format>` scope providers. Each entry resolved
+// against the map by id, then by format hint; defaultFormatter
+// applies when no match.
+const out = formatTree(tree, markdownFormatter, {
+  formatters: builtInFormatters(),
+});
+```
+
+The function delegates ALL serialization work to the formatter:
+
+1. **Block-level pass**: `formatter(entry.content)` — the existing
+   `Formatter` contract (`SemanticContentBlock[] → ContentBlock[]`).
+2. **Block-to-text flatten**: `formatter.blocksToText(blocks)` — the
+   formatter's own block-to-string rules.
+3. **Section / message framing**: `formatter.frameSection(entry, body)`
+   / `formatter.frameMessage(entry, body)`.
+
+When a formatter omits any of those tree-level methods, `formatTree`
+falls back to markdown-flavored defaults. 3rd-party formatters that
+want full output control supply all three.
 
 ## Patterns
 

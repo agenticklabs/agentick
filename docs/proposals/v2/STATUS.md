@@ -1,7 +1,27 @@
 # Agentick v2 — Implementation Status
 
 **Branch:** `feat/v2`
-**Last updated:** 2026-06-28 — **ADR 39 compiler experiment archived; reverted to `a15807362` (eval-next iter 2).** Phases 1, 1b, and 3 of the JSX-template-walker work (introduce `@agentick/compiler-next` + `@agentick/compiler-react-next` as a parallel walker, then migrate the reconciler over) are reverted as a discarded experiment. The reconciler's existing `collect/` walker already does what the compiler walker did — including compile-until-stable, formatter scope (HostScope), and contributor extensibility. The parallel implementation was unjustified duplication; no real consumer ever materialized outside the new packages' own tests.
+**Last updated:** 2026-06-28 (later) — **`renderTemplate` + `compileTemplate` ship on `@agentick/reconciler-react-next`; `formatTree` + per-formatter framing ship on `@agentick/formatters-next`; harness `renderToString` migrated to delegate.**
+
+The capability that came out of the ADR 39 compiler-experiment post-mortem: use the existing reconciler infrastructure (compile-until-stable loop, collect walker, `useData` semantics) as a one-shot template renderer without spinning up a session / harness / journal / operation wrap. Two entry points:
+
+- `compileTemplate(element, opts) → { tree, diagnostics, iterations }` — JSX → `RenderedTree` IR
+- `renderTemplate(element, opts) → { output, diagnostics, iterations }` — JSX → formatted string via `formatTree`
+
+For static-template use cases: prompt rendering, MCP server prompts / resources (#171), tool descriptions, skill content (`@agentick/skills-next`), snapshot tests, doc generators. Reactive workloads (knobs, `<Tool>` factories, session state, channels) continue through `createApp` + full `ReconcilerHarness`.
+
+`formatTree(tree, defaultFormatter, opts?)` lives in `@agentick/formatters-next`. `DefinedFormatter` gained three optional tree-level serialization methods (`frameSection`, `frameMessage`, `blocksToText`) — each formatter owns its own section/message framing and block-flatten rules; 3rd-party formatters supply theirs for full control or fall back to markdown-flavored defaults.
+
+The reconciler harness's inline `serializeTreeToString` (~190 LOC, marked "Phase 4a pending" since 2026-05) is gone; `renderToStringBody` delegates to `formatTree`. Two modes preserved exactly: per-entry `renderedWith` honored when caller doesn't pin a formatter; caller-pinned formatter overrides everything.
+
+Test pinning: `render-to-string.spec.tsx` (13), `formatter-registry.spec.tsx` (3), `formatter-scope.spec.tsx` (10) — all green after the swap. Full v2 suite at 178 files / 1944 tests; reconciler-react gained 15 new template tests.
+
+**Open follow-ups tracked in tasks:**
+- `@agentick/skills-next` lacks a README (memory-rule gap)
+- MCP server harness (#171) — when it lands, prompt/resource bodies should use `renderTemplate`
+- PromptDeclaration runtime (#121) — likewise
+
+**Previously, 2026-06-28 — ADR 39 compiler experiment archived; reverted to `a15807362` (eval-next iter 2).** Phases 1, 1b, and 3 of the JSX-template-walker work (introduce `@agentick/compiler-next` + `@agentick/compiler-react-next` as a parallel walker, then migrate the reconciler over) are reverted as a discarded experiment. The reconciler's existing `collect/` walker already does what the compiler walker did — including compile-until-stable, formatter scope (HostScope), and contributor extensibility. The parallel implementation was unjustified duplication; no real consumer ever materialized outside the new packages' own tests.
 
 **Archived for reference:** `git tag archive/compiler-phase-3-experiment` preserves the full 16-commit experiment tree (Phase 1 + 1b + 3 substeps 1a–3b). Recover with `git reset --hard archive/compiler-phase-3-experiment` if direction changes.
 
