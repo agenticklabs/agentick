@@ -30,6 +30,11 @@
       "types": "./src/index.ts",
       "import": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./loaders": {
+      "types": "./src/loaders.ts",
+      "import": "./src/loaders.ts",
+      "default": "./src/loaders.ts"
     }
   },
   "scripts": {

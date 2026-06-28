@@ -1,7 +1,15 @@
 # Agentick v2 — Implementation Status
 
 **Branch:** `feat/v2`
-**Last updated:** 2026-06-28 (later still) — **Native foundation #5 closed: `@agentick/prompts-next` (core, Shape 1 harness) + `@agentick/prompts-react-next` (React binding) ship.**
+**Last updated:** 2026-06-28 (later) — **Skills loaders (#246) + Prompts loaders (#247) close. `withSkills({ loaders })` and `withPrompts({ loaders })` accept the harness-shaped `SkillLoader[]` / `PromptLoader[]`. Subpaths: `@agentick/skills-next/loaders` + `/loaders/node`; `@agentick/prompts-next/loaders`. Composed from the loaders primitive layer in `@agentick/utils-next/loaders{,/node}`.**
+
+Skill loaders are uniform (`fromArray` / `fromUrl` / `fromManifest` / `fromFile` / `fromDirectory`) because `Skill.content: string` carries no functions — every source is sound. Frontmatter parsing defaults to a minimal `key: value` (with quoted strings + inline arrays); adopters override `parseFrontmatter` for full YAML / TOML to avoid pulling a dep at the framework level.
+
+Prompt loaders are intentionally narrower (`fromArray` / `fromModule` / `fromStaticUrl`) because `render(args)` is a function: `fromStaticUrl` enforces at load time that no loaded prompt names a `render` field, with a helpful error pointing adopters toward `fromModule` for dynamic prompts. No `fromDirectory` here — JSX `.tsx` on disk needs a bundler, which is a framework-binding concern.
+
+31 loader tests green (19 skills + 12 prompts) on top of the existing 29 harness tests for these two packages.
+
+**Previously, 2026-06-28 — Native foundation #5 closed: `@agentick/prompts-next` (core, Shape 1 harness) + `@agentick/prompts-react-next` (React binding) ship.**
 
 Prompts harness mirrors MCP `prompts/*` shape (so #171 server projection is a passthrough). `PromptDeclaration { name, description, arguments?, template?, render?(args) }`; Standard-Schema arg validation; `register/update/remove/get/invoke + subscribe/subscribeAll` surface; `invoke` queues messages onto the timeline via `bridges.timeline.queue`. Snapshot/restore carries names + args + description (template/render are non-serializable; adopters re-seed via `withPrompts({ initial })`).
 

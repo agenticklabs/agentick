@@ -35,6 +35,16 @@
       "types": "./src/testing/index.ts",
       "import": "./src/testing/index.ts",
       "default": "./src/testing/index.ts"
+    },
+    "./loaders": {
+      "types": "./src/loaders.ts",
+      "import": "./src/loaders.ts",
+      "default": "./src/loaders.ts"
+    },
+    "./loaders/node": {
+      "types": "./src/loaders-node.ts",
+      "import": "./src/loaders-node.ts",
+      "default": "./src/loaders-node.ts"
     }
   },
   "scripts": {

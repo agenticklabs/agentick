@@ -17,6 +17,7 @@
 import type { PromptsRegisterInput, SessionExtension, SessionInstaller } from "@agentick/spec-next";
 
 import { PromptsHarness } from "./harness.js";
+import type { PromptLoader } from "./loaders.js";
 import type { PromptRenderer } from "./renderer.js";
 
 export interface WithPromptsOptions {
@@ -26,6 +27,14 @@ export interface WithPromptsOptions {
    * shipping bundled prompts or restore-from-snapshot at startup.
    */
   readonly initial?: readonly PromptsRegisterInput[];
+  /**
+   * Prompt loaders evaluated at install time. All loaders run
+   * concurrently; their outputs concatenate (input order) and are
+   * registered after `initial`. Use `@agentick/prompts-next/loaders`
+   * for `fromArray` / `fromModule` / `fromStaticUrl`; framework
+   * bindings ship their own (`@agentick/prompts-react-next/loaders`).
+   */
+  readonly loaders?: readonly PromptLoader[];
   /**
    * Renderers handling non-native content shapes. First-match-wins on
    * `renderer.handles(content)`. Framework bindings ship their own.
@@ -60,6 +69,15 @@ export function withPrompts(options: WithPromptsOptions = {}): SessionExtension 
       if (options.initial && options.initial.length > 0) {
         for (const decl of options.initial) {
           await harness.register(decl);
+        }
+      }
+
+      if (options.loaders && options.loaders.length > 0) {
+        const batches = await Promise.all(options.loaders.map((l) => l.load()));
+        for (const batch of batches) {
+          for (const decl of batch) {
+            await harness.register(decl);
+          }
         }
       }
 

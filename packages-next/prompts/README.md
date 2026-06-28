@@ -185,21 +185,42 @@ fresh.importSnapshot(snapshot);
 // PromptMissingContent until adopter re-registers content
 ```
 
+## Loaders
+
+`withPrompts({ loaders })` accepts a `PromptLoader[]` for sourcing the initial library. The public surface is **deliberately narrower** than skills loaders: a prompt's `render(args)` is a function, and functions don't survive serialization.
+
+```ts
+import { withPrompts } from "@agentick/prompts-next";
+import { fromArray, fromModule, fromStaticUrl } from "@agentick/prompts-next/loaders";
+
+withPrompts({
+  loaders: [
+    fromArray(bundled),                                         // literal — functions OK
+    fromModule({ specifier: "./my-prompts.js" }),               // dynamic import — functions OK
+    fromStaticUrl({ url: "https://registry/prompts.json" }),    // template-only — throws if URL serves a `render` field
+  ],
+}),
+```
+
+| Factory                                | Source     | Carries `render`?                                                                                                |
+| -------------------------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------- |
+| `fromArray(prompts)`                   | in-memory  | yes — same JS module, functions intact                                                                           |
+| `fromModule({ specifier, picker? })`   | dynamic import | yes — picker defaults to `module.default` (single or array) then named `module.prompts`                          |
+| `fromStaticUrl({ url, ... })`          | JSON manifest | **no** — load fails if any returned prompt names a `render` field; adopters use `fromModule` for dynamic prompts |
+
+No `fromFile` / `fromDirectory` here — JSX `.tsx` files on disk need a bundler / transform pipeline. Framework bindings can supply their own filesystem factories (e.g., a future `@agentick/prompts-react-next/loaders/node`).
+
 ## Status & roadmap
 
 **Shipped:**
 - `PromptsHarness` reference impl (in-memory, journal-backed)
-- `withPrompts` session-extension factory
+- `withPrompts` session-extension factory (accepts `loaders`)
+- `PromptLoader[]` — `fromArray` / `fromModule` / `fromStaticUrl` on the `/loaders` subpath
 - `PromptRenderer` interface + native handlers (`string`, `MessageEntry[]`)
 - Argument validation via Standard-Schema
 - Module augmentation: `session.prompts` typed via `PromptsHandle`
 
 **Planned:**
-- **`PromptLoader[]` support** in `withPrompts` (#247). Public surface
-  will be `fromArray` / `fromModule` (function-preserving sources only —
-  `render(args)` cannot cross serialization), plus a `fromStaticUrl`
-  variant constrained to static-template prompts. Built on the
-  primitives in [`@agentick/utils-next/loaders`](../utils/src/loaders/README.md).
 - SQLite / remote backend impls
 - `MCP server harness` integration (#171) — projects our prompts onto MCP `prompts/list` + `prompts/get`
 

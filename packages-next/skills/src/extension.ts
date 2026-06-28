@@ -17,6 +17,7 @@
 
 import type { SessionExtension, SessionInstaller, SkillsRegisterInput } from "@agentick/spec-next";
 import { SkillsHarness } from "./harness.js";
+import type { SkillLoader } from "./loaders.js";
 
 export interface WithSkillsOptions {
   /**
@@ -25,6 +26,18 @@ export interface WithSkillsOptions {
    * recipes) or for restore-from-snapshot at startup.
    */
   readonly initial?: readonly SkillsRegisterInput[];
+  /**
+   * Skill loaders evaluated at install time. All loaders run
+   * concurrently; their outputs concatenate (input order) and are
+   * registered after `initial`. Duplicate `name` between sources
+   * raises `SkillAlreadyExists` from the harness — wrap loaders or
+   * dedupe upstream if your inputs may overlap.
+   *
+   * See `@agentick/skills-next/loaders` for the `fromArray` / `fromUrl`
+   * / `fromManifest` factories, and `@agentick/skills-next/loaders/node`
+   * for `fromFile` / `fromDirectory`.
+   */
+  readonly loaders?: readonly SkillLoader[];
 }
 
 export function withSkills(options: WithSkillsOptions = {}): SessionExtension {
@@ -46,6 +59,15 @@ export function withSkills(options: WithSkillsOptions = {}): SessionExtension {
       if (options.initial && options.initial.length > 0) {
         for (const skill of options.initial) {
           await harness.register(skill);
+        }
+      }
+
+      if (options.loaders && options.loaders.length > 0) {
+        const batches = await Promise.all(options.loaders.map((l) => l.load()));
+        for (const batch of batches) {
+          for (const skill of batch) {
+            await harness.register(skill);
+          }
         }
       }
 

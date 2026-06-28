@@ -110,25 +110,47 @@ const harness = await stubSkillsHarness([
 
 Cross-harness integration testing — when verifying that skills interact correctly with the reconciler, session, or other harnesses — uses `runSkillsHarnessConformance` against the real protocol surface.
 
+## Loaders
+
+`withSkills({ loaders })` accepts a `SkillLoader[]` for sourcing the initial library from disk, URLs, or in-memory arrays. All sources are sound for skills because `Skill.content` is always a `string` (no functions to serialize).
+
+```ts
+import { withSkills } from "@agentick/skills-next";
+import { fromArray, fromUrl } from "@agentick/skills-next/loaders";
+import { fromDirectory, fromFile } from "@agentick/skills-next/loaders/node";
+
+withSkills({
+  initial: [/* literal records, registered first */],
+  loaders: [
+    fromArray(bundled),
+    fromDirectory({ path: "./skills/" }),    // walks .md files w/ frontmatter
+    fromFile({ path: "./extra.md" }),
+    fromUrl({ url: "https://registry.internal/skills.json" }),
+  ],
+}),
+```
+
+| Factory                                                  | Subpath         | Source                                                                              |
+| -------------------------------------------------------- | --------------- | ----------------------------------------------------------------------------------- |
+| `fromArray(skills)`                                      | `/loaders`      | in-memory                                                                           |
+| `fromUrl({ url, ... })`                                  | `/loaders`      | JSON manifest at `{ "skills": [...] }` (configurable via `arrayField`)              |
+| `fromManifest(...)`                                      | `/loaders`      | alias for `fromUrl`                                                                 |
+| `fromFile({ path, parseFrontmatter? })`                  | `/loaders/node` | one `.md` file with frontmatter                                                     |
+| `fromDirectory({ path, match?, parseFrontmatter?, ... })` | `/loaders/node` | recursive walk of `.md` files; bad records skipped silently                         |
+
+Frontmatter parsing defaults to a minimal `key: value` parser (`parseSimpleFrontmatter` — supports quoted strings + inline arrays like `[a, b, c]`). For full YAML / TOML, pass a custom `parseFrontmatter: (text) => Record<string, unknown>` callback — wire `yaml` / `@iarna/toml` / your parser of choice without adding a dep at the framework level.
+
 ## Status & roadmap
 
 **Shipped:**
 - `SkillsHarness` reference impl (in-memory, journal-backed)
-- `withSkills` session-extension factory
+- `withSkills` session-extension factory (accepts `loaders`)
+- `SkillLoader[]` — `fromArray` / `fromUrl` / `fromManifest` (`/loaders`) and `fromFile` / `fromDirectory` (`/loaders/node`)
 - Conformance suite (`runSkillsHarnessConformance`)
 - `/testing` subpath with `stubSkillsHarness`
 - Module augmentation: `session.skills` typed via `SkillsHandle`
 
 **Planned:**
-- **`SkillLoader[]` support** in `withSkills` (#246). Public surface
-  will be `fromArray` / `fromFile` / `fromDirectory` / `fromManifest` /
-  `fromUrl` — all sound for skills because skill content is always a
-  `string` (no functions to serialize). Built on the primitives in
-  [`@agentick/utils-next/loaders`](../utils/src/loaders/README.md):
-  `sourceFromArray` / `sourceFromUrl` from the main subpath +
-  `sourceFromFile` / `sourceFromDirectory` from `/loaders/node`, with a
-  Skill-shaped `mapLoader` transform that parses frontmatter to
-  `{ name, description }` and uses the body as `content`.
 - SQLite backend for single-process durability
 - Remote-registry backend (`agentskills.io` compatibility)
 - Embedding-based search (currently substring-only)
