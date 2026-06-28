@@ -71,6 +71,25 @@ export function isSet(v: unknown): v is Set<unknown> {
 }
 
 /**
+ * Duck-typed `PromiseLike` check — `v` looks like something we can
+ * `await`. True for native `Promise`, A+ thenables, cross-realm
+ * promises, and the suspend-via-throw promises React's Suspense /
+ * Solid's resources catch.
+ *
+ * Stricter than `v instanceof Promise` (which misses cross-realm
+ * promises + non-native thenables) and matches the shape-check
+ * convention used by React / Effect / most libraries.
+ */
+export function isThenable(v: unknown): v is PromiseLike<unknown> {
+  return (
+    v !== null &&
+    typeof v === "object" &&
+    "then" in (v as object) &&
+    typeof (v as { then: unknown }).then === "function"
+  );
+}
+
+/**
  * Plain object — NOT an array, NOT `null`, NOT a function, NOT a
  * primitive. The everyday "do I have a key/value bag" check.
  *

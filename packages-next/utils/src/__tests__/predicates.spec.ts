@@ -11,6 +11,7 @@ import {
   isObject,
   isPlainObject,
   isString,
+  isThenable,
   isUndefined,
 } from "../predicates.js";
 
@@ -125,6 +126,30 @@ describe("predicates", () => {
       expect(isPlainObject(0)).toBe(false);
       expect(isPlainObject("")).toBe(false);
       expect(isPlainObject(() => 0)).toBe(false);
+    });
+  });
+
+  describe("isThenable — duck-typed PromiseLike", () => {
+    it("matches native Promises", () => {
+      expect(isThenable(Promise.resolve(1))).toBe(true);
+      expect(isThenable(Promise.reject(new Error("x")).catch(() => undefined))).toBe(true);
+    });
+    it("matches A+-shape thenables (custom .then function)", () => {
+      const fake = { then: (_resolve: (v: number) => void) => undefined };
+      expect(isThenable(fake)).toBe(true);
+    });
+    it("rejects non-objects", () => {
+      expect(isThenable(null)).toBe(false);
+      expect(isThenable(undefined)).toBe(false);
+      expect(isThenable("then")).toBe(false);
+      expect(isThenable(42)).toBe(false);
+      expect(isThenable(true)).toBe(false);
+    });
+    it("rejects objects without a function-valued `then`", () => {
+      expect(isThenable({})).toBe(false);
+      expect(isThenable({ then: 1 })).toBe(false);
+      expect(isThenable({ then: "promise" })).toBe(false);
+      expect(isThenable({ then: null })).toBe(false);
     });
   });
 
