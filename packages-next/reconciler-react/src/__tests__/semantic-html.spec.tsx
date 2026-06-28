@@ -316,3 +316,111 @@ describe("semantic HTML — format scope", () => {
     expect((msg.content[0] as { text: string }).text).toBe("Hello world!");
   });
 });
+
+describe("semantic HTML — generic structural containers", () => {
+  it("markdown: <div> adds paragraph break; <span> is inline", async () => {
+    const harness = await makeHarness();
+    await harness.mount({
+      mountId: "m_div_md",
+      sessionId: "s",
+      element: React.createElement(
+        "message",
+        { role: "user" },
+        React.createElement("div", null, "block one"),
+        React.createElement("div", null, "block two"),
+        React.createElement("span", null, "inline ok"),
+      ),
+      bridges: fakeBridges(),
+    });
+    const { tree } = await harness.renderTree({ mountId: "m_div_md", sessionId: "s" });
+    const msg = getMessage(tree);
+    const text = (msg.content[0] as { text: string }).text;
+    // <div>block one</div><div>block two</div> → "block one\n\nblock two\n\n"
+    expect(text).toContain("block one");
+    expect(text).toContain("block two");
+    expect(text).toContain("inline ok");
+    // Two distinct blocks should not collapse onto a single line.
+    expect(text.match(/block one\s*\n\s*\n\s*block two/)).not.toBeNull();
+  });
+
+  it("xml: <div> wraps in <div>; <span> wraps in <span>", async () => {
+    const { XML } = await import("../react/components/format-scope.js");
+    const harness = await makeHarness();
+    await harness.mount({
+      mountId: "m_div_xml",
+      sessionId: "s",
+      element: React.createElement(
+        XML,
+        null,
+        React.createElement(
+          "message",
+          { role: "user" },
+          React.createElement("div", null, "body"),
+          React.createElement("span", null, "span-body"),
+        ),
+      ),
+      bridges: fakeBridges(),
+    });
+    const { tree } = await harness.renderTree({ mountId: "m_div_xml", sessionId: "s" });
+    const msg = getMessage(tree);
+    const text = (msg.content[0] as { text: string }).text;
+    expect(text).toContain("<div>body</div>");
+    expect(text).toContain("<span>span-body</span>");
+  });
+
+  it("text: block containers add paragraph breaks; inline does not", async () => {
+    const { PlainText } = await import("../react/components/format-scope.js");
+    const harness = await makeHarness();
+    await harness.mount({
+      mountId: "m_div_text",
+      sessionId: "s",
+      element: React.createElement(
+        PlainText,
+        null,
+        React.createElement(
+          "message",
+          { role: "user" },
+          React.createElement("article", null, "section a"),
+          React.createElement("article", null, "section b"),
+          React.createElement("span", null, "tail"),
+        ),
+      ),
+      bridges: fakeBridges(),
+    });
+    const { tree } = await harness.renderTree({ mountId: "m_div_text", sessionId: "s" });
+    const msg = getMessage(tree);
+    const text = (msg.content[0] as { text: string }).text;
+    expect(text).toContain("section a");
+    expect(text).toContain("section b");
+    expect(text).toContain("tail");
+    expect(text.match(/section a\s*\n\s*\n\s*section b/)).not.toBeNull();
+  });
+
+  it("nested block containers render correctly (article > div > strong)", async () => {
+    const harness = await makeHarness();
+    await harness.mount({
+      mountId: "m_nested",
+      sessionId: "s",
+      element: React.createElement(
+        "message",
+        { role: "user" },
+        React.createElement(
+          "article",
+          null,
+          React.createElement(
+            "div",
+            null,
+            "Hello ",
+            React.createElement("strong", null, "world"),
+            "!",
+          ),
+        ),
+      ),
+      bridges: fakeBridges(),
+    });
+    const { tree } = await harness.renderTree({ mountId: "m_nested", sessionId: "s" });
+    const msg = getMessage(tree);
+    const text = (msg.content[0] as { text: string }).text;
+    expect(text).toContain("Hello **world**!");
+  });
+});

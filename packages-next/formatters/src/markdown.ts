@@ -123,6 +123,17 @@ function formatNode(node: SemanticNode): string {
       return `<var>${childText}</var>`;
     case "preformatted":
       return `\`\`\`\n${childText}\n\`\`\``;
+    case "block":
+      // Generic structural container (`<div>`, `<article>`, `<main>`, …).
+      // Markdown has no specific block syntax — convey the block-ness
+      // via a paragraph break. Trailing newline lets adjacent blocks
+      // separate naturally.
+      return `${childText}\n\n`;
+    case "inline":
+    case "inline-block":
+      // Generic inline container (`<span>`). No wrapping; children
+      // concatenate inline.
+      return childText;
     case "custom":
       return childText;
     default:

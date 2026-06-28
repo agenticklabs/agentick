@@ -42,6 +42,14 @@ export type SemanticType =
   | "blockquote"
   | "line-break"
   | "horizontal-rule"
+  // Generic structural containers (the HTML <div>/<span>/<article>/...
+  // semantics — adopters who want portable React-y templates can use
+  // these without committing to a specific semantic type). Formatters
+  // render them per their conventions: markdown adds paragraph breaks
+  // for `block`; xml wraps in <div>/<span>; text uses block breaks.
+  | "block"
+  | "inline"
+  | "inline-block"
   // Media (inline lowered form)
   | "image"
   | "audio"

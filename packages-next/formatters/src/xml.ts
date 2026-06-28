@@ -103,6 +103,15 @@ function formatNode(node: SemanticNode): string {
       return `<var>${childText}</var>`;
     case "preformatted":
       return `<pre>${childText}</pre>`;
+    case "block":
+      // Generic structural container (`<div>`, `<article>`, …).
+      // XML wraps in `<div>` to preserve the block-ness in the markup.
+      return `<div>${childText}</div>`;
+    case "inline":
+    case "inline-block":
+      // Generic inline container (`<span>`). Wrap in `<span>` so
+      // the inline structure round-trips in xml output.
+      return `<span>${childText}</span>`;
     case "custom": {
       const tag = String(node.props?.tag ?? "custom");
       return `<${tag}>${childText}</${tag}>`;

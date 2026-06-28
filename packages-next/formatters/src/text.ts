@@ -51,6 +51,14 @@ function formatNode(node: SemanticNode): string {
     case "audio":
     case "video":
       return `[${node.semantic}: ${String(node.props?.src ?? "")}]`;
+    case "block":
+      // Generic structural container — plain-text adds a paragraph
+      // break to separate adjacent blocks.
+      return `${child}\n\n`;
+    case "inline":
+    case "inline-block":
+      // No wrapping in plain text.
+      return child;
     default:
       return child;
   }

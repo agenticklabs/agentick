@@ -207,5 +207,27 @@ export function semanticHtmlContributors(): readonly Contributor[] {
         return Object.keys(out).length > 0 ? out : undefined;
       },
     }),
+
+    // Generic HTML structural containers — adopters writing "portable
+    // React-y templates" use these without committing to a specific
+    // semantic type. Each formatter (markdown / xml / text) frames
+    // them per its conventions: markdown adds paragraph breaks for
+    // `block`; xml wraps in <div>/<span>; text uses block breaks.
+    //
+    // Note: `<section>` is intentionally NOT here — it's claimed by
+    // the agentick `<section id audience priority>` declaration
+    // intrinsic. Adopters wanting an HTML-section-as-container use
+    // `<div>` (or `<article>` for semantic richness).
+    makeSemanticContributor("div", { semantic: "block" }),
+    makeSemanticContributor("span", { semantic: "inline" }),
+    makeSemanticContributor("article", { semantic: "block" }),
+    makeSemanticContributor("aside", { semantic: "block" }),
+    makeSemanticContributor("main", { semantic: "block" }),
+    makeSemanticContributor("header", { semantic: "block" }),
+    makeSemanticContributor("footer", { semantic: "block" }),
+    makeSemanticContributor("nav", { semantic: "block" }),
+    makeSemanticContributor("figure", { semantic: "block" }),
+    makeSemanticContributor("figcaption", { semantic: "block" }),
+    makeSemanticContributor("address", { semantic: "block" }),
   ];
 }
