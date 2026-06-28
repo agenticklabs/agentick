@@ -914,6 +914,46 @@ importers:
         specifier: ^19.2.4
         version: 19.2.4
 
+  packages-next/prompts:
+    dependencies:
+      '@agentick/pubsub-next':
+        specifier: workspace:*
+        version: link:../pubsub
+      '@agentick/runtime-next':
+        specifier: workspace:*
+        version: link:../runtime
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../spec
+      '@agentick/utils-next':
+        specifier: workspace:*
+        version: link:../utils
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
+
+  packages-next/prompts-react:
+    dependencies:
+      '@agentick/prompts-next':
+        specifier: workspace:*
+        version: link:../prompts
+      '@agentick/reconciler-react-next':
+        specifier: workspace:*
+        version: link:../reconciler-react
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../spec
+      react:
+        specifier: ^19.2.4
+        version: 19.2.4
+    devDependencies:
+      '@agentick/runtime-next':
+        specifier: workspace:*
+        version: link:../runtime
+      '@types/react':
+        specifier: ^19.2.5
+        version: 19.2.13
+
   packages-next/pubsub:
     dependencies:
       '@agentick/utils-next':

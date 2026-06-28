@@ -1,7 +1,15 @@
 # Agentick v2 — Implementation Status
 
 **Branch:** `feat/v2`
-**Last updated:** 2026-06-28 (later) — **`renderTemplate` + `compileTemplate` ship on `@agentick/reconciler-react-next`; `formatTree` + per-formatter framing ship on `@agentick/formatters-next`; harness `renderToString` migrated to delegate.**
+**Last updated:** 2026-06-28 (later still) — **Native foundation #5 closed: `@agentick/prompts-next` (core, Shape 1 harness) + `@agentick/prompts-react-next` (React binding) ship.**
+
+Prompts harness mirrors MCP `prompts/*` shape (so #171 server projection is a passthrough). `PromptDeclaration { name, description, arguments?, template?, render?(args) }`; Standard-Schema arg validation; `register/update/remove/get/invoke + subscribe/subscribeAll` surface; `invoke` queues messages onto the timeline via `bridges.timeline.queue`. Snapshot/restore carries names + args + description (template/render are non-serializable; adopters re-seed via `withPrompts({ initial })`).
+
+Content shapes: core handles `string` (→ single `system` MessageEntry) and `MessageEntry[]` (passthrough) natively. Anything else flows through a registered `PromptRenderer { name, handles(content), render(content, args) }`. The React binding exposes `reactPromptRenderer` — compiles `ReactNode` via `compileTemplate` and projects context entries: `<message>` → passthrough, sections + loose content → buffered system message (explicit messages flush the buffer; section titles render as a leading `# title` text block). Cross-framework adopters do `withPrompts({ renderers: [reactPromptRenderer, angularPromptRenderer, ...] })`; single-framework adopters use the `withReactPrompts` sugar.
+
+29 tests across the two packages green (17 in prompts-next, 12 in prompts-react-next). Typecheck clean for both. Open: prompt loaders (#247 — `withPrompts({ loaders: [fromArray, fromUrl, fromModule] })`) deferred to a follow-up commit; MCP server projection (#171) deferred to the server harness work.
+
+**Previously, 2026-06-28 (later) — `renderTemplate` + `compileTemplate` ship on `@agentick/reconciler-react-next`; `formatTree` + per-formatter framing ship on `@agentick/formatters-next`; harness `renderToString` migrated to delegate.**
 
 The capability that came out of the ADR 39 compiler-experiment post-mortem: use the existing reconciler infrastructure (compile-until-stable loop, collect walker, `useData` semantics) as a one-shot template renderer without spinning up a session / harness / journal / operation wrap. Two entry points:
 
@@ -17,9 +25,9 @@ The reconciler harness's inline `serializeTreeToString` (~190 LOC, marked "Phase
 Test pinning: `render-to-string.spec.tsx` (13), `formatter-registry.spec.tsx` (3), `formatter-scope.spec.tsx` (10) — all green after the swap. Full v2 suite at 178 files / 1944 tests; reconciler-react gained 15 new template tests.
 
 **Open follow-ups tracked in tasks:**
-- `@agentick/skills-next` lacks a README (memory-rule gap)
 - MCP server harness (#171) — when it lands, prompt/resource bodies should use `renderTemplate`
-- PromptDeclaration runtime (#121) — likewise
+- Prompts loaders (#247) — `withPrompts({ loaders })` for filesystem/url-backed libraries
+- Skills loaders (#246) — same shape for `@agentick/skills-next`
 
 **Previously, 2026-06-28 — ADR 39 compiler experiment archived; reverted to `a15807362` (eval-next iter 2).** Phases 1, 1b, and 3 of the JSX-template-walker work (introduce `@agentick/compiler-next` + `@agentick/compiler-react-next` as a parallel walker, then migrate the reconciler over) are reverted as a discarded experiment. The reconciler's existing `collect/` walker already does what the compiler walker did — including compile-until-stable, formatter scope (HostScope), and contributor extensibility. The parallel implementation was unjustified duplication; no real consumer ever materialized outside the new packages' own tests.
 

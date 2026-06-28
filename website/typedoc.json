@@ -50,6 +50,8 @@
     "../packages-next/state",
     "../packages-next/timeline",
     "../packages-next/skills",
+    "../packages-next/prompts",
+    "../packages-next/prompts-react",
     "../packages-next/elicitation",
     "../packages-next/mcp",
     "../packages-next/gates",

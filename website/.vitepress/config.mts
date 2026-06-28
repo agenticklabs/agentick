@@ -84,6 +84,8 @@ const PACKAGE_GROUPS: Array<{ label: string; packages: string[] }> = [
       "@agentick/state-next",
       "@agentick/timeline-next",
       "@agentick/skills-next",
+      "@agentick/prompts-next",
+      "@agentick/prompts-react-next",
       "@agentick/elicitation-next",
       "@agentick/mcp-next",
       "@agentick/gates-next",

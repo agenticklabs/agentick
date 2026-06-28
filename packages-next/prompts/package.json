@@ -1,0 +1,49 @@
+{
+  "name": "@agentick/prompts-next",
+  "version": "0.0.0",
+  "private": true,
+  "description": "PromptsHarness — durable parameterized prompt library. Renders to MessageEntry[] via pluggable framework renderers (String + MessageEntry[] handled natively in core; framework JSX via @agentick/prompts-react-next).",
+  "keywords": [
+    "agent",
+    "agentick",
+    "ai",
+    "harness",
+    "prompts"
+  ],
+  "license": "MIT",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages-next/prompts"
+  },
+  "type": "module",
+  "sideEffects": [
+    "./src/index.ts",
+    "./src/augment.ts",
+    "./dist/index.js",
+    "./dist/augment.js"
+  ],
+  "main": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
+  },
+  "dependencies": {
+    "@agentick/pubsub-next": "workspace:*",
+    "@agentick/runtime-next": "workspace:*",
+    "@agentick/spec-next": "workspace:*",
+    "@agentick/utils-next": "workspace:*",
+    "effect": "^3.21.2"
+  }
+}
