@@ -67,6 +67,7 @@ import { BridgeContext } from "../react/bridge-context.js";
 import { LifecycleContext } from "../react/lifecycle-context.js";
 import {
   builtInFormatters,
+  formatTree,
   markdownFormatter,
   type DefinedFormatter,
 } from "@agentick/formatters-next";
@@ -619,13 +620,21 @@ export class ReconcilerHarness extends BaseHarness<"reconciler"> implements Reco
     //    providers like <XML>/<Markdown>). Falls back to the root
     //    scope's default when an entry doesn't pin one.
     const fallback = state.rootScope.formatters.default;
-    const effective = input.formatter ?? fallback;
-    const text = serializeTreeToString(tree.tree, effective, {
-      respectEntryFormatter: input.formatter === undefined,
-      defaultFormatterId: this.defaultFormatterId,
-      formatters: this.formatters,
-    });
-    const mimeType = mimeForFormatter(effective);
+    const requestedRef = input.formatter ?? fallback;
+    const effectiveDefault = resolveFormatterFromMap(
+      this.formatters,
+      requestedRef,
+      this.defaultFormatterId,
+    );
+    const text = formatTree(
+      tree.tree,
+      effectiveDefault,
+      // respect per-entry renderedWith only when caller did NOT pin a
+      // formatter — `opts.formatters` enables per-entry lookup;
+      // omitting it forces `effectiveDefault` for every entry.
+      input.formatter === undefined ? { formatters: this.formatters } : {},
+    );
+    const mimeType = mimeForFormatter(requestedRef);
 
     return {
       payload: { text, mimeType },
@@ -814,77 +823,27 @@ function elementTreeContainsSuspense(node: unknown): boolean {
 }
 
 // ============================================================================
-// Default tree-to-string serializer (until formatter harness lands)
+// Formatter resolution + mime mapping (renderToString helpers)
+//
+// `serializeTreeToString` + per-format framing/flatten helpers
+// previously lived here as the "Phase 4a pending" inline serializer.
+// They moved to `@agentick/formatters-next` as `formatTree` + the
+// per-formatter `frameSection` / `frameMessage` / `blocksToText`
+// methods on each `DefinedFormatter`. The harness now delegates the
+// entire tree-to-string serialization to `formatTree`.
+//
+// What remains:
+//  - `resolveFormatterFromMap` — used by `applyFormatters` (the
+//    per-entry block-level formatter pass that renderTreeBody runs
+//    against tree.context.entries) AND by `renderToStringBody` to
+//    resolve the effective default formatter before calling
+//    `formatTree`.
+//  - `mimeForFormatter` — maps a FormatterRef to a MIME type for
+//    the `renderToString` result payload. Small enough to keep
+//    inline; could move to formatters-next later if other consumers
+//    need it.
 // ============================================================================
 
-/**
- * Pragmatic flatten of a `RenderedTree` to a string. Honors the
- * formatter's `format` hint when known (markdown, xml, text). The
- * formatter harness (Phase 4a) will replace this with real formatter
- * dispatch.
- *
- * Renders the WHOLE mount in declaration order: every context entry
- * (sections + messages), plus free-root content when present. Subtree
- * extraction is the caller's job — use renderTree + filter + custom
- * serialize.
- */
-interface SerializeOptions {
-  readonly respectEntryFormatter: boolean;
-  readonly defaultFormatterId: string;
-  readonly formatters: ReadonlyMap<string, DefinedFormatter>;
-}
-
-/**
- * Walk the {@link RenderedTree} and serialize each entry through the
- * appropriate formatter. Formatters do block-level work (markdown
- * fences, XML wrapping); message/section framing happens here in the
- * reconciler.
- *
- * Dispatch:
- *   - When `respectEntryFormatter` is true, an entry's `renderedWith.id`
- *     wins; falls back to the requested formatter when missing.
- *   - When false (explicit caller override), the requested formatter
- *     applies to every entry.
- *   - Missing formatters fall back to `defaultFormatterId` (markdown).
- */
-function serializeTreeToString(
-  tree: import("@agentick/spec-next").RenderedTree,
-  requestedFormatter: import("@agentick/spec-next").FormatterRef,
-  options: SerializeOptions,
-): string {
-  const parts: string[] = [];
-
-  for (const entry of tree.context.entries) {
-    const formatter = resolveFormatter(entry.renderedWith, requestedFormatter, options);
-    const body = formatter(
-      entry.content as readonly import("@agentick/spec-next").SemanticContentBlock[],
-    );
-    const bodyText = blocksToText(body);
-    const framed =
-      entry.kind === "section"
-        ? frameSection(entry, bodyText, formatter.__identity.format)
-        : frameMessage(entry, bodyText, formatter.__identity.format);
-    parts.push(framed);
-  }
-
-  if (tree.content && tree.content.length > 0) {
-    const formatter = resolveFormatter(tree.renderedWith, requestedFormatter, options);
-    const body = formatter(
-      tree.content as readonly import("@agentick/spec-next").SemanticContentBlock[],
-    );
-    parts.push(blocksToText(body));
-  }
-
-  return parts.filter((p) => p.length > 0).join("\n\n");
-}
-
-/**
- * Map-only formatter resolution. Shared by the formatter pass in
- * `renderTreeBody` and by `serializeTreeToString`'s entry dispatch.
- * Mirrors {@link resolveFormatter}'s fallback chain: exact id match,
- * then format match, then the configured default, then a structural
- * markdown no-op.
- */
 function resolveFormatterFromMap(
   formatters: ReadonlyMap<string, DefinedFormatter>,
   ref: import("@agentick/spec-next").FormatterRef,
@@ -899,125 +858,11 @@ function resolveFormatterFromMap(
   }
   return (
     formatters.get(defaultId) ??
-    (Object.assign((b: readonly import("@agentick/spec-next").SemanticContentBlock[]) => b, {
-      __identity: { id: "formatter.markdown", format: "markdown" as const },
-    }) as DefinedFormatter)
-  );
-}
-
-function resolveFormatter(
-  entryRef: import("@agentick/spec-next").FormatterRef | undefined,
-  requested: import("@agentick/spec-next").FormatterRef,
-  options: SerializeOptions,
-): DefinedFormatter {
-  const ref = options.respectEntryFormatter ? (entryRef ?? requested) : requested;
-  // First try the exact id. Then fall back to any formatter whose
-  // identity.format matches the requested format (so adopters can pass
-  // `{ format: "xml" }` without knowing the canonical id).
-  const byId = options.formatters.get(ref.id);
-  if (byId) return byId;
-  if (ref.format) {
-    for (const fmt of options.formatters.values()) {
-      if (fmt.__identity.format === ref.format) return fmt;
-    }
-  }
-  return (
-    options.formatters.get(options.defaultFormatterId) ??
     // Last-resort: a no-op formatter pretending to be markdown.
     (Object.assign((b: readonly import("@agentick/spec-next").SemanticContentBlock[]) => b, {
       __identity: { id: "formatter.markdown", format: "markdown" as const },
     }) as DefinedFormatter)
   );
-}
-
-function blocksToText(blocks: readonly import("@agentick/spec-next").ContentBlock[]): string {
-  const out: string[] = [];
-  for (const block of blocks) {
-    out.push(blockToText(block));
-  }
-  return out.filter((s) => s.length > 0).join("\n\n");
-}
-
-function blockToText(block: import("@agentick/spec-next").ContentBlock): string {
-  switch (block.type) {
-    case "text":
-    case "reasoning":
-    case "xml":
-    case "csv":
-    case "html":
-      return block.text ?? "";
-    case "code":
-      return block.text;
-    case "json":
-      return block.text ?? (block.data !== undefined ? JSON.stringify(block.data) : "");
-    case "image": {
-      const src = block.source.type === "url" ? block.source.url : "[binary]";
-      return `![${block.altText ?? ""}](${src})`;
-    }
-    case "document":
-    case "audio":
-    case "video": {
-      const src = block.source.type === "url" ? block.source.url : "[binary]";
-      return `[${block.type}](${src})`;
-    }
-    case "tool_use":
-      return `[tool_use ${block.name}] ${JSON.stringify(block.input)}`;
-    case "tool_result":
-      return blocksToText(block.content);
-    case "user_action":
-    case "system_event":
-    case "state_change":
-      return block.text ?? "";
-    case "custom":
-      return block.content;
-    case "generated_image":
-      return `![generated image](data:${block.mimeType};base64,${block.data.slice(0, 16)}…)`;
-    case "generated_file":
-      return `[generated file](${block.uri})`;
-    case "executable_code":
-      return block.code;
-    case "code_execution_result":
-      return block.output;
-    default:
-      return "";
-  }
-}
-
-function frameSection(
-  entry: import("@agentick/spec-next").SectionEntry,
-  body: string,
-  format: string,
-): string {
-  if (format === "xml") {
-    const title = entry.title ? ` title="${escapeAttr(entry.title)}"` : "";
-    return `<section id="${escapeAttr(entry.id)}"${title}>\n${body}\n</section>`;
-  }
-  if (format === "text") {
-    return entry.title ? `${entry.title}\n${body}` : body;
-  }
-  return entry.title ? `## ${entry.title}\n\n${body}` : body;
-}
-
-function frameMessage(
-  entry: import("@agentick/spec-next").MessageEntry,
-  body: string,
-  format: string,
-): string {
-  if (format === "xml") {
-    return `<message role="${escapeAttr(entry.role)}">\n${body}\n</message>`;
-  }
-  if (format === "text") {
-    return `${entry.role}: ${body}`;
-  }
-  return `**${entry.role}:** ${body}`;
-}
-
-function escapeAttr(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/"/g, "&quot;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
 }
 
 function mimeForFormatter(formatter: import("@agentick/spec-next").FormatterRef): string {
