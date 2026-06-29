@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Cause, Effect, Fiber, Stream } from "effect";
 import { LocalEventBus, LocalInbox, MemoryJournal, compileQuery } from "@agentick/runtime-next";
 import type { EventQuery, MessageHandlerError, ProtocolEvent } from "@agentick/spec-next";
+import { InvalidPayload } from "@agentick/spec-next";
 import type { MembershipChange } from "../types.js";
 
 import type { ClusterParent } from "../cluster.js";
@@ -433,7 +434,7 @@ describe("ClusterInbox — inbox wrapping", () => {
 
     await Effect.runPromise(
       clusterB.inbox.register("calc:always-fails", () =>
-        Effect.fail({ _tag: "InvalidPayload", reason: "test-failure" } as MessageHandlerError),
+        Effect.fail(new InvalidPayload({ reason: "test-failure" }) as MessageHandlerError),
       ),
     );
 
@@ -448,9 +449,9 @@ describe("ClusterInbox — inbox wrapping", () => {
       const failureOpt = Cause.failureOption(exit.cause);
       expect(failureOpt._tag).toBe("Some");
       if (failureOpt._tag === "Some") {
-        const err = failureOpt.value as MessageHandlerError;
-        expect(err._tag).toBe("InvalidPayload");
-        if (err._tag === "InvalidPayload") {
+        const err = failureOpt.value;
+        expect(err).toBeInstanceOf(InvalidPayload);
+        if (err instanceof InvalidPayload) {
           expect(err.reason).toBe("test-failure");
         }
       }
@@ -459,7 +460,7 @@ describe("ClusterInbox — inbox wrapping", () => {
 
   it("remote ask: routing-side InboxError (AddressNotFound) round-trips with original tag", async () => {
     // Node B exists but never registers a handler. local.ask on B
-    // fails with InboxError { _tag: "AddressNotFound" }; the wrapper's
+    // fails with InboxError new AddressNotFound(); the wrapper's
     // causeToAskFailure routes that to a `routing-fail` payload; A
     // reconstructs the typed InboxError and rejects the pending
     // Effect with the original tag preserved.

@@ -38,6 +38,7 @@ import type {
   Operation,
   ProtocolEvent,
 } from "@agentick/spec-next";
+import { HandlerError } from "@agentick/spec-next";
 import { BaseHarness, runHarnessProtocol } from "../substrate/base-harness.js";
 import type { SubstrateError } from "@agentick/spec-next";
 import { MemoryJournal } from "../substrate/memory-journal.js";
@@ -127,13 +128,14 @@ class ToyKnobsHarness extends BaseHarness<"tool"> {
       const payload = msg.payload as { id: string; value: string | number | boolean };
       return Effect.tryPromise<void, MessageHandlerError>({
         try: () => this.set(payload),
-        catch: (cause): MessageHandlerError => ({ _tag: "HandlerError", cause }),
+        catch: (cause): MessageHandlerError => new HandlerError({ cause }),
       });
     }
-    return Effect.fail({
-      _tag: "HandlerError",
-      cause: `Unknown message type: ${msg.type}`,
-    });
+    return Effect.fail(
+      new HandlerError({
+        cause: `Unknown message type: ${msg.type}`,
+      }),
+    );
   }
 }
 
@@ -172,7 +174,7 @@ class ToyParentHarness extends BaseHarness<"session"> {
   }
 
   protected handleMessage(): Effect.Effect<unknown, MessageHandlerError, never> {
-    return Effect.fail({ _tag: "HandlerError", cause: "no messages handled" });
+    return Effect.fail(new HandlerError({ cause: "no messages handled" }));
   }
 }
 
@@ -480,7 +482,7 @@ describe("harness plumbing — parent/child Operation composition", () => {
         );
       }
       protected handleMessage(): Effect.Effect<unknown, MessageHandlerError, never> {
-        return Effect.fail({ _tag: "HandlerError", cause: "n/a" });
+        return Effect.fail(new HandlerError({ cause: "n/a" }));
       }
     }
 

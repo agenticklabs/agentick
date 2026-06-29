@@ -82,6 +82,7 @@ import type {
   TasksHarnessProtocol,
   UnknownTaskError,
 } from "@agentick/spec-next";
+import { HandlerError } from "@agentick/spec-next";
 
 import { TASK_PROGRESS_CHANNEL, TASK_STATUS_CHANNEL } from "./channel.js";
 import {
@@ -507,10 +508,11 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
       case TASKS_RESULT_MESSAGE_TYPE:
         return this.handleResultInbox(msg as MessageEnvelope<TasksResultInboxPayload>);
       default:
-        return Effect.fail({
-          _tag: "HandlerError",
-          cause: `Unknown tasks message type: ${String(msg.type)}`,
-        });
+        return Effect.fail(
+          new HandlerError({
+            cause: `Unknown tasks message type: ${String(msg.type)}`,
+          }),
+        );
     }
   }
 
@@ -526,7 +528,7 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
         await this.cancelInternal(record, reason ?? "remote_cancel");
         return undefined;
       },
-      catch: (cause): MessageHandlerError => ({ _tag: "HandlerError", cause }),
+      catch: (cause): MessageHandlerError => new HandlerError({ cause }),
     });
   }
 
@@ -547,7 +549,7 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
         );
         return undefined;
       },
-      catch: (cause): MessageHandlerError => ({ _tag: "HandlerError", cause }),
+      catch: (cause): MessageHandlerError => new HandlerError({ cause }),
     });
   }
 
@@ -587,7 +589,7 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
         );
         return undefined;
       },
-      catch: (cause): MessageHandlerError => ({ _tag: "HandlerError", cause }),
+      catch: (cause): MessageHandlerError => new HandlerError({ cause }),
     });
   }
 

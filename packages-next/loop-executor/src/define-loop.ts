@@ -68,6 +68,7 @@ import type {
   OperationJournal,
   RunExecutionInput,
 } from "@agentick/spec-next";
+import { HandlerError } from "@agentick/spec-next";
 
 // ============================================================================
 // Public API
@@ -166,10 +167,11 @@ class CallbackLoopExecutor extends BaseHarness<"loop"> implements LoopExecutorPr
   protected handleMessage(
     _msg: MessageEnvelope,
   ): Effect.Effect<unknown, MessageHandlerError, never> {
-    return Effect.fail({
-      _tag: "HandlerError",
-      cause: new Error("defineLoop inbox dispatch not yet wired (FAÇADE.6 MVP)"),
-    });
+    return Effect.fail(
+      new HandlerError({
+        cause: new Error("defineLoop inbox dispatch not yet wired (FAÇADE.6 MVP)"),
+      }),
+    );
   }
 
   // ──────── internals ────────

@@ -65,6 +65,7 @@ import type {
   ProjectionError,
   RunInput,
 } from "@agentick/spec-next";
+import { HandlerError } from "@agentick/spec-next";
 
 import { defaultProject } from "./canonical-projection.js";
 import { composeTransforms, identityTransform, type DeltaTransform } from "./delta-transform.js";
@@ -435,10 +436,11 @@ export abstract class BaseLanguageModelExecutor<TRaw, TChunk = unknown>
   protected handleMessage(
     _msg: MessageEnvelope,
   ): Effect.Effect<unknown, MessageHandlerError, never> {
-    return Effect.fail({
-      _tag: "HandlerError",
-      cause: new Error(`${this.constructor.name} inbox dispatch not yet wired`),
-    });
+    return Effect.fail(
+      new HandlerError({
+        cause: new Error(`${this.constructor.name} inbox dispatch not yet wired`),
+      }),
+    );
   }
 
   // ──────────────────────────────────────────────────────────────────

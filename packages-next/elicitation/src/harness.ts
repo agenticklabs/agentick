@@ -52,7 +52,7 @@ import type {
   StandardSchemaV1,
   UrlElicitationRequest,
 } from "@agentick/spec-next";
-import { toJsonSchema } from "@agentick/spec-next";
+import { HandlerError, toJsonSchema } from "@agentick/spec-next";
 
 import { ELICITATION_CHANNEL } from "./channel.js";
 import type { ElicitRequestInboxPayload } from "./inbox-protocol.js";
@@ -311,10 +311,11 @@ export class ElicitationHarness
     if (msg.type === "elicit-request") {
       return this.handleElicitRequest(msg as MessageEnvelope<ElicitRequestInboxPayload>);
     }
-    return Effect.fail({
-      _tag: "HandlerError",
-      cause: `Unknown elicitation message type: ${String((msg as { type?: string }).type)}`,
-    });
+    return Effect.fail(
+      new HandlerError({
+        cause: `Unknown elicitation message type: ${String((msg as { type?: string }).type)}`,
+      }),
+    );
   }
 
   /**
@@ -329,10 +330,7 @@ export class ElicitationHarness
     msg: MessageEnvelope<ElicitRequestInboxPayload>,
   ): Effect.Effect<unknown, MessageHandlerError, never> {
     if (msg.payload === undefined) {
-      return Effect.fail({
-        _tag: "HandlerError",
-        cause: "elicit-request envelope missing payload",
-      });
+      return Effect.fail(new HandlerError({ cause: "elicit-request envelope missing payload" }));
     }
     const { request, replyTo, correlationId } = msg.payload;
     return Effect.tryPromise<unknown, MessageHandlerError>({
@@ -350,7 +348,7 @@ export class ElicitationHarness
         );
         return undefined;
       },
-      catch: (cause): MessageHandlerError => ({ _tag: "HandlerError", cause }),
+      catch: (cause): MessageHandlerError => new HandlerError({ cause }),
     });
   }
 

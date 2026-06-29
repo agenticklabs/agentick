@@ -34,6 +34,7 @@ import type {
   SkillsSearchInput,
   SkillsUpdateInput,
 } from "@agentick/spec-next";
+import { HandlerError, InvalidPayload } from "@agentick/spec-next";
 import { createKeyedNotifier, type KeyedNotifier } from "@agentick/pubsub-next";
 import { omitUndefined } from "@agentick/utils-next";
 
@@ -299,23 +300,24 @@ export class SkillsHarness extends BaseHarness<SkillsSurface> implements SkillsH
       case "skills:register":
         return Effect.tryPromise({
           try: () => this.register(inbound.payload),
-          catch: (cause): MessageHandlerError => ({ _tag: "HandlerError", cause }),
+          catch: (cause): MessageHandlerError => new HandlerError({ cause }),
         });
       case "skills:update":
         return Effect.tryPromise({
           try: () => this.update(inbound.payload),
-          catch: (cause): MessageHandlerError => ({ _tag: "HandlerError", cause }),
+          catch: (cause): MessageHandlerError => new HandlerError({ cause }),
         });
       case "skills:remove":
         return Effect.tryPromise({
           try: () => this.remove(inbound.payload),
-          catch: (cause): MessageHandlerError => ({ _tag: "HandlerError", cause }),
+          catch: (cause): MessageHandlerError => new HandlerError({ cause }),
         });
       default:
-        return Effect.fail({
-          _tag: "InvalidPayload",
-          reason: `Unknown skills inbox message type: ${msg.type}`,
-        } satisfies MessageHandlerError);
+        return Effect.fail(
+          new InvalidPayload({
+            reason: `Unknown skills inbox message type: ${msg.type}`,
+          }),
+        );
     }
   }
 

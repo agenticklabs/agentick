@@ -42,6 +42,7 @@ import {
 } from "@agentick/tool-executor-next";
 import {
   DEFAULT_JOURNALING_POLICY,
+  HandlerError,
   isExecutorFactory,
   isLoopExecutorFactory,
   isReconcilerFactory,
@@ -1029,10 +1030,9 @@ export class AppHarness<P = unknown>
   protected handleMessage(
     _msg: MessageEnvelope,
   ): Effect.Effect<HandlerVerdict | void, MessageHandlerError, never> {
-    return Effect.fail({
-      _tag: "HandlerError",
-      cause: new Error("app inbox dispatch not yet wired (Phase 4f minimum)"),
-    });
+    return Effect.fail(
+      new HandlerError({ cause: new Error("app inbox dispatch not yet wired (Phase 4f minimum)") }),
+    );
   }
 
   // ──────── internals ────────

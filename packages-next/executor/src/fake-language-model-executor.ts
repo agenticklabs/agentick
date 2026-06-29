@@ -52,7 +52,7 @@ import type {
   ProjectionError,
   RunInput,
 } from "@agentick/spec-next";
-import { SPEC_VERSION } from "@agentick/spec-next";
+import { HandlerError, SPEC_VERSION } from "@agentick/spec-next";
 
 import { buildMessages, buildParameters, buildTools } from "./canonical-projection.js";
 import { ExecutorLifecycle } from "./executor-lifecycle.js";
@@ -305,10 +305,11 @@ export class FakeLanguageModelExecutor
   protected handleMessage(
     _msg: MessageEnvelope,
   ): Effect.Effect<unknown, MessageHandlerError, never> {
-    return Effect.fail({
-      _tag: "HandlerError",
-      cause: new Error("executor inbox dispatch not yet wired (Phase 4b minimum)"),
-    });
+    return Effect.fail(
+      new HandlerError({
+        cause: new Error("executor inbox dispatch not yet wired (Phase 4b minimum)"),
+      }),
+    );
   }
 
   // ──────── internals ────────

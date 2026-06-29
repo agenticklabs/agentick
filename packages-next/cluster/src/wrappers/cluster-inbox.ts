@@ -69,14 +69,20 @@ import { Cause, Effect } from "effect";
 import type {
   AskOptions,
   EventBus,
-  InboxError,
   MessageAck,
   MessageEnvelope,
   MessageEnvelopeInput,
   MessageHandler,
-  MessageHandlerError,
   MessageInbox,
   Unsubscribe,
+} from "@agentick/spec-next";
+import {
+  AskTimeout,
+  HandlerError,
+  InboxClosed,
+  InboxError,
+  MessageHandlerError,
+  RoutingFailed,
 } from "@agentick/spec-next";
 import { ulid, omitUndefined } from "@agentick/utils-next";
 
@@ -165,12 +171,13 @@ export class ClusterInbox implements MessageInbox {
     handler: MessageHandler<T, R>,
   ): Effect.Effect<Unsubscribe, InboxError, never> {
     if (address.startsWith(CLUSTER_NS_PREFIX)) {
-      return Effect.fail<InboxError>({
-        _tag: "RoutingFailed",
-        cause: new Error(
-          `address "${address}" uses reserved cluster namespace "${CLUSTER_NS_PREFIX}"`,
-        ),
-      });
+      return Effect.fail(
+        new RoutingFailed({
+          cause: new Error(
+            `address "${address}" uses reserved cluster namespace "${CLUSTER_NS_PREFIX}"`,
+          ),
+        }),
+      );
     }
     return this.local.register(address, handler);
   }
@@ -180,7 +187,7 @@ export class ClusterInbox implements MessageInbox {
     input: MessageEnvelopeInput<T>,
   ): Effect.Effect<MessageAck, InboxError, never> {
     return Effect.suspend((): Effect.Effect<MessageAck, InboxError, never> => {
-      if (this.closed) return Effect.fail({ _tag: "InboxClosed" });
+      if (this.closed) return Effect.fail(new InboxClosed());
       const guard = this.guardReservedNamespace(address, input.type);
       if (guard) return Effect.fail(guard);
       return Effect.flatMap(
@@ -199,7 +206,7 @@ export class ClusterInbox implements MessageInbox {
     options?: AskOptions,
   ): Effect.Effect<R, InboxError | MessageHandlerError, never> {
     return Effect.suspend((): Effect.Effect<R, InboxError | MessageHandlerError, never> => {
-      if (this.closed) return Effect.fail<InboxError>({ _tag: "InboxClosed" });
+      if (this.closed) return Effect.fail(new InboxClosed());
       const guard = this.guardReservedNamespace(address, input.type);
       if (guard) return Effect.fail(guard);
       return Effect.flatMap(
@@ -225,7 +232,7 @@ export class ClusterInbox implements MessageInbox {
     // past close. The asker sees a clean `InboxClosed` outcome.
     for (const [, pending] of this.pendingAsks) {
       clearTimeout(pending.timeoutHandle);
-      pending.reject({ _tag: "InboxClosed" });
+      pending.reject(new InboxClosed());
     }
     this.pendingAsks.clear();
 
@@ -245,18 +252,16 @@ export class ClusterInbox implements MessageInbox {
    */
   private guardReservedNamespace(address: string, type: string): InboxError | null {
     if (address.startsWith(CLUSTER_NS_PREFIX)) {
-      return {
-        _tag: "RoutingFailed",
+      return new RoutingFailed({
         cause: new Error(
           `address "${address}" uses reserved cluster namespace "${CLUSTER_NS_PREFIX}"`,
         ),
-      };
+      });
     }
     if (type.startsWith(CLUSTER_NS_PREFIX)) {
-      return {
-        _tag: "RoutingFailed",
+      return new RoutingFailed({
         cause: new Error(`type "${type}" uses reserved cluster namespace "${CLUSTER_NS_PREFIX}"`),
-      };
+      });
     }
     return null;
   }
@@ -284,10 +289,9 @@ export class ClusterInbox implements MessageInbox {
           messageId: env.messageId,
           reason: cause instanceof Error ? cause.message : String(cause),
         });
-        return {
-          _tag: "RoutingFailed",
+        return new RoutingFailed({
           cause: cause instanceof Error ? cause : new Error(String(cause)),
-        };
+        });
       },
     });
   }
@@ -336,7 +340,7 @@ export class ClusterInbox implements MessageInbox {
           correlationId,
           timeoutMs,
         });
-        resume(Effect.fail<InboxError>({ _tag: "AskTimeout", timeoutMs }));
+        resume(Effect.fail(new AskTimeout({ timeoutMs })));
       }, timeoutMs);
 
       this.pendingAsks.set(correlationId, {
@@ -359,10 +363,11 @@ export class ClusterInbox implements MessageInbox {
           correlationId,
           reason: cause instanceof Error ? cause.message : String(cause),
         });
-        pending.reject({
-          _tag: "RoutingFailed",
-          cause: cause instanceof Error ? cause : new Error(String(cause)),
-        });
+        pending.reject(
+          new RoutingFailed({
+            cause: cause instanceof Error ? cause : new Error(String(cause)),
+          }),
+        );
       });
 
       this.diag.emit("cluster:ask:dispatched", {
@@ -516,10 +521,11 @@ export class ClusterInbox implements MessageInbox {
         // Remote handler's fiber was interrupted (e.g., remote inbox
         // closed mid-call). Surface as RoutingFailed so adopter sees
         // a non-success outcome without inventing a new spec tag.
-        pending.reject({
-          _tag: "RoutingFailed",
-          cause: new Error("remote handler was interrupted"),
-        });
+        pending.reject(
+          new RoutingFailed({
+            cause: new Error("remote handler was interrupted"),
+          }),
+        );
         return;
     }
   }
@@ -672,6 +678,6 @@ function causeToAskFailure(
   // typed failure rather than nothing.
   return {
     _tag: "handler-fail",
-    error: { _tag: "HandlerError", cause: new Error(Cause.pretty(cause)) },
+    error: new HandlerError({ cause: new Error(Cause.pretty(cause)) }),
   };
 }

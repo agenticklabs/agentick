@@ -38,3 +38,22 @@ export {
 export { deserializeAgentickError, serializeAgentickError } from "./codec.js";
 
 export { UnknownAgentickError } from "./unknown.js";
+
+export {
+  AddressNotFound,
+  AskTimeout,
+  HandlerError,
+  InboxClosed,
+  InboxError,
+  type InboxErrorChannel,
+  InvalidPayload,
+  JournalError,
+  type JournalErrorChannel,
+  LifecycleHandlerError,
+  MessageHandlerError,
+  type MessageHandlerErrorChannel,
+  OffsetOutOfRange,
+  ReadFailed,
+  RoutingFailed,
+  WriteFailed,
+} from "./substrate.js";

@@ -35,7 +35,6 @@ import type {
   InboxError,
   JournalError,
   JournalingPolicy,
-  LifecycleHandlerError,
   MessageEnvelope,
   MessageHandlerError,
   MessageInbox,
@@ -51,6 +50,8 @@ import type {
 import {
   AgentickError,
   DEFAULT_JOURNALING_POLICY,
+  HandlerError,
+  LifecycleHandlerError,
   registerAgentickError,
 } from "@agentick/spec-next";
 import { resolveSyncSubstrateSlot } from "./resolve-slot.js";
@@ -523,11 +524,10 @@ export abstract class BaseHarness<
             );
             if (Exit.isFailure(verdictExit)) {
               const cause = Cause.failureOption(verdictExit.cause);
-              const lifecycleErr: LifecycleHandlerError = {
-                _tag: "LifecycleHandlerError",
+              const lifecycleErr = new LifecycleHandlerError({
                 phase: "before",
                 cause: Option.isSome(cause) ? cause.value : verdictExit.cause,
-              };
+              });
               yield* this.publishTerminal(resolvedOp, scope, "failed", {
                 error: this.normalizeError(lifecycleErr),
               });
@@ -820,14 +820,10 @@ export abstract class BaseHarness<
     // built-in switch — that's how "override built-in handling" works.
     const custom = this.customMessageHandlers.get(msg.type);
     if (custom !== undefined) {
-      return custom(msg).pipe(
-        Effect.catchAll((cause) =>
-          Effect.fail<MessageHandlerError>({ _tag: "HandlerError", cause }),
-        ),
-      );
+      return custom(msg).pipe(Effect.catchAll((cause) => Effect.fail(new HandlerError({ cause }))));
     }
     return this.handleMessage(msg).pipe(
-      Effect.catchAll((cause) => Effect.fail<MessageHandlerError>({ _tag: "HandlerError", cause })),
+      Effect.catchAll((cause) => Effect.fail(new HandlerError({ cause }))),
     );
   }
 

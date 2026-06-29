@@ -30,6 +30,7 @@ import type {
   OperationJournal,
   ToolDeclaration,
 } from "@agentick/spec-next";
+import { HandlerError } from "@agentick/spec-next";
 import { createNotifier, type Notifier } from "@agentick/pubsub-next";
 import { Server as SdkServer } from "@modelcontextprotocol/sdk/server/index.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
@@ -359,11 +360,12 @@ export class McpServerHarness
   protected handleMessage(
     msg: MessageEnvelope,
   ): Effect.Effect<unknown, MessageHandlerError, never> {
-    return Effect.fail({
-      _tag: "HandlerError" as const,
-      cause: new Error(
-        `mcpServer harness received unknown message type: ${msg.type} (no message handlers wired yet — lands with #171c+)`,
-      ),
-    });
+    return Effect.fail(
+      new HandlerError({
+        cause: new Error(
+          `mcpServer harness received unknown message type: ${msg.type} (no message handlers wired yet — lands with #171c+)`,
+        ),
+      }),
+    );
   }
 }

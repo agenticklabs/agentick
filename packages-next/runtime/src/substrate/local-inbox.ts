@@ -16,13 +16,19 @@
 
 import { Effect, Fiber } from "effect";
 import type {
-  InboxError,
   MessageAck,
   MessageEnvelope,
   MessageEnvelopeInput,
   MessageHandler,
   MessageHandlerError,
   MessageInboxFactory,
+} from "@agentick/spec-next";
+import {
+  AddressNotFound,
+  AskTimeout,
+  InboxClosed,
+  InboxError,
+  RoutingFailed,
 } from "@agentick/spec-next";
 import type { AskOptions, MessageInbox, Unsubscribe } from "@agentick/spec-next";
 
@@ -144,13 +150,14 @@ export class LocalInbox implements MessageInbox {
   ): Effect.Effect<Unsubscribe, InboxError, never> {
     return Effect.suspend((): Effect.Effect<Unsubscribe, InboxError, never> => {
       if (this.closed) {
-        return Effect.fail({ _tag: "InboxClosed" });
+        return Effect.fail(new InboxClosed());
       }
       if (this.handlers.has(address)) {
-        return Effect.fail({
-          _tag: "RoutingFailed",
-          cause: new Error(`address already registered: ${address}`),
-        });
+        return Effect.fail(
+          new RoutingFailed({
+            cause: new Error(`address already registered: ${address}`),
+          }),
+        );
       }
       this.handlers.set(address, handler as MessageHandler<unknown, unknown>);
       const unsub: Unsubscribe = () => {
@@ -167,7 +174,7 @@ export class LocalInbox implements MessageInbox {
   ): Effect.Effect<MessageAck, InboxError, never> {
     return Effect.suspend((): Effect.Effect<MessageAck, InboxError, never> => {
       if (this.closed) {
-        return Effect.fail({ _tag: "InboxClosed" });
+        return Effect.fail(new InboxClosed());
       }
 
       const message = stampEnvelope(address, input);
@@ -176,7 +183,7 @@ export class LocalInbox implements MessageInbox {
 
       const handler = this.handlers.get(address);
       if (!handler) {
-        return Effect.fail({ _tag: "AddressNotFound", address });
+        return Effect.fail(new AddressNotFound({ address }));
       }
       const ack: MessageAck = { messageId: message.messageId, receivedAt: Date.now() };
       const handlerEffect = handler(message as MessageEnvelope<unknown>);
@@ -207,7 +214,7 @@ export class LocalInbox implements MessageInbox {
   ): Effect.Effect<R, InboxError | MessageHandlerError, never> {
     return Effect.suspend((): Effect.Effect<R, InboxError | MessageHandlerError, never> => {
       if (this.closed) {
-        return Effect.fail<InboxError>({ _tag: "InboxClosed" });
+        return Effect.fail(new InboxClosed());
       }
 
       const message = stampEnvelope(address, input);
@@ -219,7 +226,7 @@ export class LocalInbox implements MessageInbox {
 
       const handler = this.handlers.get(address);
       if (!handler) {
-        return Effect.fail<InboxError>({ _tag: "AddressNotFound", address });
+        return Effect.fail(new AddressNotFound({ address }));
       }
 
       const timeoutMs = options.timeoutMs ?? 30_000;
@@ -240,7 +247,7 @@ export class LocalInbox implements MessageInbox {
       return (Fiber.join(fiber) as Effect.Effect<R, MessageHandlerError, never>).pipe(
         Effect.timeoutFail({
           duration: `${timeoutMs} millis`,
-          onTimeout: (): InboxError => ({ _tag: "AskTimeout", timeoutMs }),
+          onTimeout: (): InboxError => new AskTimeout({ timeoutMs }),
         }),
       );
     });

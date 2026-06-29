@@ -42,6 +42,7 @@ import type {
   Operation,
   OperationJournal,
 } from "@agentick/spec-next";
+import { HandlerError } from "@agentick/spec-next";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import {
@@ -554,10 +555,11 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
   protected handleMessage(
     msg: MessageEnvelope,
   ): Effect.Effect<unknown, MessageHandlerError, never> {
-    return Effect.fail({
-      _tag: "HandlerError",
-      cause: `Unknown mcp message type: ${String((msg as { type?: string }).type)}`,
-    });
+    return Effect.fail(
+      new HandlerError({
+        cause: `Unknown mcp message type: ${String((msg as { type?: string }).type)}`,
+      }),
+    );
   }
 
   // ─────────── internals ───────────

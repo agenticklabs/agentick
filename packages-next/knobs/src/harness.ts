@@ -50,6 +50,7 @@ import type {
   Operation,
   OperationJournal,
 } from "@agentick/spec-next";
+import { HandlerError } from "@agentick/spec-next";
 import { createKeyedNotifier, type KeyedNotifier } from "@agentick/pubsub-next";
 
 // ============================================================================
@@ -206,23 +207,24 @@ export class KnobsHarness extends BaseHarness<"knobs"> implements KnobsHarnessPr
       case "knobs:set":
         return Effect.tryPromise<void, MessageHandlerError>({
           try: () => this.set(m.payload),
-          catch: (cause): MessageHandlerError => ({ _tag: "HandlerError", cause }),
+          catch: (cause): MessageHandlerError => new HandlerError({ cause }),
         });
       case "knobs:register":
         return Effect.tryPromise<void, MessageHandlerError>({
           try: () => this.register(m.payload),
-          catch: (cause): MessageHandlerError => ({ _tag: "HandlerError", cause }),
+          catch: (cause): MessageHandlerError => new HandlerError({ cause }),
         });
       case "knobs:dispatch":
         return Effect.tryPromise<readonly ContentBlock[], MessageHandlerError>({
           try: () => this.dispatch(m.payload),
-          catch: (cause): MessageHandlerError => ({ _tag: "HandlerError", cause }),
+          catch: (cause): MessageHandlerError => new HandlerError({ cause }),
         });
       default:
-        return Effect.fail({
-          _tag: "HandlerError",
-          cause: `Unknown knobs message type: ${(m as { type: string }).type}`,
-        });
+        return Effect.fail(
+          new HandlerError({
+            cause: `Unknown knobs message type: ${(m as { type: string }).type}`,
+          }),
+        );
     }
   }
 

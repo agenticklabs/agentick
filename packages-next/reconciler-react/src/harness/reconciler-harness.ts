@@ -47,7 +47,7 @@ import type {
   SnapshotInput,
   UnmountInput,
 } from "@agentick/spec-next";
-import { SPEC_VERSION } from "@agentick/spec-next";
+import { HandlerError, SPEC_VERSION } from "@agentick/spec-next";
 import { BaseHarness } from "@agentick/runtime-next";
 
 import {
@@ -318,20 +318,19 @@ export class ReconcilerHarness extends BaseHarness<"reconciler"> implements Reco
       case "recompile":
         return Effect.tryPromise({
           try: () => this.renderTree({ mountId: payload.mountId, sessionId: "" }),
-          catch: (cause): MessageHandlerError => ({ _tag: "HandlerError", cause }),
+          catch: (cause): MessageHandlerError => new HandlerError({ cause }),
         });
       case "unmount":
         return Effect.tryPromise({
           try: () => this.unmount({ mountId: payload.mountId }),
-          catch: (cause): MessageHandlerError => ({ _tag: "HandlerError", cause }),
+          catch: (cause): MessageHandlerError => new HandlerError({ cause }),
         });
       case "invalidate":
         return Effect.sync(() => this.handleInvalidate(payload));
       default:
-        return Effect.fail({
-          _tag: "HandlerError",
-          cause: new Error("unknown reconciler message type"),
-        });
+        return Effect.fail(
+          new HandlerError({ cause: new Error("unknown reconciler message type") }),
+        );
     }
   }
 

@@ -36,6 +36,7 @@ import type {
   StateHarnessProtocol,
   StateSetInput,
 } from "@agentick/spec-next";
+import { HandlerError } from "@agentick/spec-next";
 import { createKeyedNotifier, type KeyedNotifier } from "@agentick/pubsub-next";
 
 type StateInboxMessage =
@@ -139,18 +140,19 @@ export class StateHarness extends BaseHarness<"state"> implements StateHarnessPr
       case "state:set":
         return Effect.tryPromise<void, MessageHandlerError>({
           try: () => this.set(m.payload),
-          catch: (cause): MessageHandlerError => ({ _tag: "HandlerError", cause }),
+          catch: (cause): MessageHandlerError => new HandlerError({ cause }),
         });
       case "state:delete":
         return Effect.tryPromise<void, MessageHandlerError>({
           try: () => this.delete(m.payload),
-          catch: (cause): MessageHandlerError => ({ _tag: "HandlerError", cause }),
+          catch: (cause): MessageHandlerError => new HandlerError({ cause }),
         });
       default:
-        return Effect.fail({
-          _tag: "HandlerError",
-          cause: `Unknown state message type: ${(m as { type: string }).type}`,
-        });
+        return Effect.fail(
+          new HandlerError({
+            cause: `Unknown state message type: ${(m as { type: string }).type}`,
+          }),
+        );
     }
   }
 

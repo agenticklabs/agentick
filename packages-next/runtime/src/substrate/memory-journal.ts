@@ -18,12 +18,17 @@ import type {
   Cursor,
   EventKey,
   EventQuery,
-  JournalError,
   LogMetrics,
   ProtocolEvent,
   TerminalEvent,
 } from "@agentick/spec-next";
-import { CursorEvictedError } from "@agentick/spec-next";
+import {
+  CursorEvictedError,
+  JournalError,
+  OffsetOutOfRange,
+  ReadFailed,
+  WriteFailed,
+} from "@agentick/spec-next";
 import type {
   JournalReadFrom,
   Maybe,
@@ -188,7 +193,7 @@ export class MemoryJournal implements OperationJournal {
       try: () => this.appendSync(event),
       catch: (cause): JournalError => {
         if (isJournalError(cause)) return cause;
-        return { _tag: "WriteFailed", cause };
+        return new WriteFailed({ cause });
       },
     });
     // Fan-in to upstream when composed.
@@ -207,7 +212,7 @@ export class MemoryJournal implements OperationJournal {
       },
       catch: (cause): JournalError => {
         if (isJournalError(cause)) return cause;
-        return { _tag: "WriteFailed", cause };
+        return new WriteFailed({ cause });
       },
     });
     if (!this.upstream) return local;
@@ -225,7 +230,7 @@ export class MemoryJournal implements OperationJournal {
 
   private appendSync(event: ProtocolEvent): void {
     if (this.closed) {
-      throw { _tag: "WriteFailed", cause: new Error("journal closed") } satisfies JournalError;
+      throw new WriteFailed({ cause: new Error("journal closed") });
     }
 
     // Idempotency dedup on (opId, phase) for operation envelopes.
@@ -387,9 +392,7 @@ export class MemoryJournal implements OperationJournal {
       try {
         startIndex = this.resolveStart(from, snapshot.length);
       } catch (cause) {
-        return Stream.fail<JournalError>(
-          isJournalError(cause) ? cause : { _tag: "ReadFailed", cause },
-        );
+        return Stream.fail<JournalError>(isJournalError(cause) ? cause : new ReadFailed({ cause }));
       }
       const matched: ProtocolEvent[] = [];
       const matcher = compileQuery(query);
@@ -407,7 +410,7 @@ export class MemoryJournal implements OperationJournal {
     // channel stays uniform.
     const cursor: Cursor = { value: this.dropped + this.events.length };
     return this.read(cursor, compileQuery(query)).pipe(
-      Stream.catchAll((err) => Stream.fail<JournalError>({ _tag: "ReadFailed", cause: err })),
+      Stream.catchAll((err) => Stream.fail<JournalError>(new ReadFailed({ cause: err }))),
     );
   }
 
@@ -457,11 +460,10 @@ export class MemoryJournal implements OperationJournal {
     if (typeof from === "object" && "offset" in from) {
       const local = from.offset - this.dropped;
       if (local < 0) {
-        throw {
-          _tag: "OffsetOutOfRange",
+        throw new OffsetOutOfRange({
           requested: from.offset,
           oldest: this.dropped,
-        } satisfies JournalError;
+        });
       }
       return Math.min(local, snapshotLen);
     }

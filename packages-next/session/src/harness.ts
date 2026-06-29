@@ -55,7 +55,7 @@ import type {
   TimelineEntry,
   ToolExecutorProtocol,
 } from "@agentick/spec-next";
-import { DEFAULT_JOURNALING_POLICY, SPEC_VERSION } from "@agentick/spec-next";
+import { DEFAULT_JOURNALING_POLICY, HandlerError, SPEC_VERSION } from "@agentick/spec-next";
 import { mergeLayered, omitUndefined } from "@agentick/utils-next";
 import { withScope } from "@agentick/tool-executor-next";
 import type { KnobsHandle } from "@agentick/knobs-next";
@@ -679,10 +679,9 @@ export class SessionHarness<P = unknown>
   protected handleMessage(
     _msg: MessageEnvelope,
   ): Effect.Effect<unknown, MessageHandlerError, never> {
-    return Effect.fail({
-      _tag: "HandlerError",
-      cause: new Error("session inbox dispatch not yet wired (Phase 4e+)"),
-    });
+    return Effect.fail(
+      new HandlerError({ cause: new Error("session inbox dispatch not yet wired (Phase 4e+)") }),
+    );
   }
 
   // ──────── internals ────────

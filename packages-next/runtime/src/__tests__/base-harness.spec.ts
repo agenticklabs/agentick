@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Cause, Chunk, Effect, Exit, Option, Stream } from "effect";
+import { HandlerError } from "@agentick/spec-next";
 import type {
   HandlerVerdict,
   MessageEnvelope,
@@ -80,10 +81,11 @@ class TestHarness extends BaseHarness<"tool"> {
   ): Effect.Effect<unknown, MessageHandlerError, never> {
     return Effect.suspend((): Effect.Effect<unknown, MessageHandlerError, never> => {
       if (msg.type === "echo") return Effect.succeed(msg.payload);
-      return Effect.fail({
-        _tag: "HandlerError",
-        cause: new Error(`unknown message: ${msg.type}`),
-      });
+      return Effect.fail(
+        new HandlerError({
+          cause: new Error(`unknown message: ${msg.type}`),
+        }),
+      );
     });
   }
 }

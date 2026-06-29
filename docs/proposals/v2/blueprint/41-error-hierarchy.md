@@ -14,7 +14,7 @@
 
 3. **`_tag` survives as a `readonly literal` on the concrete class.** `class ToolNotFoundError extends ToolExecutorError { readonly _tag = "ToolNotFoundError" as const; … }`. This preserves the two ergonomics that already exist: Effect's `Effect.catchTag("ToolNotFoundError", h)` works unchanged, and `switch (err._tag) { case "ToolNotFoundError": … }` still gets exhaustiveness checking through TS's discriminated-union narrowing. The POJO shape and the class shape are equivalent at the type level; only the runtime gains an `instanceof` chain.
 
-4. **The current union *types* survive as type aliases over the new classes.** `type ToolExecutorErrorChannel = ToolNotFoundError | ToolValidationError | …`. Effect signatures keep referring to the union for exhaustiveness; the abstract class is for runtime `instanceof`. Adopters who don't need exhaustiveness can type-relax to the abstract: `Effect.Effect<A, ToolExecutorError, R>`.
+4. **The current union _types_ survive as type aliases over the new classes.** `type ToolExecutorErrorChannel = ToolNotFoundError | ToolValidationError | …`. Effect signatures keep referring to the union for exhaustiveness; the abstract class is for runtime `instanceof`. Adopters who don't need exhaustiveness can type-relax to the abstract: `Effect.Effect<A, ToolExecutorError, R>`.
 
 5. **Construction = object arg, never positional.** `new SessionAlreadyExistsError({ sessionId, cause })`. The arg object's shape matches the current POJO 1:1 (minus `_tag`) — minimizes codemod diff and keeps call-sites readable. Positional args (`new Foo("x", id, cause)`) get unreadable past 2 params; reject.
 
@@ -58,7 +58,7 @@ Two reasons:
 
 1. **Every new `_tag` site adds codemod surface.** #171 (MCP server) is mid-flight; #171d (prompts/elicitation/tasks projection), #171e (HTTP/OAuth), #171f (WebSocket), #171g (direct projection) will each introduce new tags. Landing them on POJO and converting later means doing the conversion twice. The cost grows linearly with each additional slice.
 
-2. **The user signaled regroup.** Quote: "ok let's do these and then re-group… we'll inventory the v2 errors and make an AgentickError class that they all sub-class". The "regroup" was explicitly framed as *between* cleanup and the next big slice, not after the entire feature is done.
+2. **The user signaled regroup.** Quote: "ok let's do these and then re-group… we'll inventory the v2 errors and make an AgentickError class that they all sub-class". The "regroup" was explicitly framed as _between_ cleanup and the next big slice, not after the entire feature is done.
 
 ### Why a hierarchy and not a flat shape
 
@@ -184,6 +184,7 @@ registerAgentickError(SessionNotFoundError);
 ### The union types — what changes, what stays
 
 **Before:**
+
 ```ts
 export type AppError =
   | { readonly _tag: "SessionAlreadyExistsError"; readonly sessionId: string }
@@ -193,6 +194,7 @@ export type AppError =
 ```
 
 **After:**
+
 ```ts
 // The abstract intermediate. `instanceof AppError` is the group check.
 export abstract class AppError extends AgentickError {}
@@ -330,18 +332,18 @@ The MCP server's tools/call response uses `{ isError: true, content: [...] }` fo
 
 ### Packages with typed errors
 
-| Package | # Tags | # Unions | `extends Error` classes |
-|---|---|---|---|
-| `spec-next` | 94 | 18 | — |
-| `sandbox-next` | 7 | 1 (`SandboxError`) | — |
-| `mcp-next` | 5 | 3 | — |
-| `tool-executor-next` | 4 | 0 (inline) | — |
-| `cluster-next` | 4 | 2 (wrapper guards) | — |
-| `runtime-next` | 3 | 1 (`RequestError`) | 1 (`OperationOutcomeError`) |
-| `tasks-next` | 1 | — | — |
-| `cluster-broker-next` | 1 | 1 | — |
-| `spec-next` (extra) | — | — | 1 (`CursorEvictedError`) |
-| (22 other packages) | 0 | 0 | 0 |
+| Package               | # Tags | # Unions           | `extends Error` classes     |
+| --------------------- | ------ | ------------------ | --------------------------- |
+| `spec-next`           | 94     | 18                 | —                           |
+| `sandbox-next`        | 7      | 1 (`SandboxError`) | —                           |
+| `mcp-next`            | 5      | 3                  | —                           |
+| `tool-executor-next`  | 4      | 0 (inline)         | —                           |
+| `cluster-next`        | 4      | 2 (wrapper guards) | —                           |
+| `runtime-next`        | 3      | 1 (`RequestError`) | 1 (`OperationOutcomeError`) |
+| `tasks-next`          | 1      | —                  | —                           |
+| `cluster-broker-next` | 1      | 1                  | —                           |
+| `spec-next` (extra)   | —      | —                  | 1 (`CursorEvictedError`)    |
+| (22 other packages)   | 0      | 0                  | 0                           |
 
 Rough scale: **~104 concrete classes** to land, **~20 abstract intermediates** (18 existing unions + `SandboxError` + a possible `RequestError` intermediate). Total ~125 new class declarations, distributed across 8 packages.
 
@@ -373,19 +375,23 @@ Each becomes an abstract intermediate class extending `AgentickError`; the exist
 The conversion is mechanical for the common case:
 
 **Before:**
+
 ```ts
-yield* Effect.fail({
-  _tag: "SessionNotFoundError" as const,
-  sessionId: id,
-});
+yield *
+  Effect.fail({
+    _tag: "SessionNotFoundError" as const,
+    sessionId: id,
+  });
 ```
 
 **After:**
+
 ```ts
-yield* Effect.fail(new SessionNotFoundError({ sessionId: id }));
+yield * Effect.fail(new SessionNotFoundError({ sessionId: id }));
 ```
 
 A first-pass codemod (e.g. ts-morph script in `scripts/`) handles ~90% of sites; manual sweep cleans up:
+
 - Sites where `_tag` is computed (rare; checked during inventory — only one case in `tool-executor-next` where the tag is selected by a `kind` variable; flatten manually).
 - Sites where extra fields beyond the constructor's args were carried (audit each — likely indicates the constructor signature needs widening).
 - Type-guard predicates (`isMessageHandlerError`, `isInboxError`, …) — replace the body with `err instanceof MessageHandlerError`.

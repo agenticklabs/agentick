@@ -44,7 +44,7 @@ import type {
   ToolCall,
   UsageStats,
 } from "@agentick/spec-next";
-import { toRegistration } from "@agentick/spec-next";
+import { HandlerError, toRegistration } from "@agentick/spec-next";
 import { omitUndefined } from "@agentick/utils-next";
 
 // ============================================================================
@@ -121,10 +121,9 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
   protected handleMessage(
     _msg: MessageEnvelope,
   ): Effect.Effect<unknown, MessageHandlerError, never> {
-    return Effect.fail({
-      _tag: "HandlerError",
-      cause: new Error("loop executor inbox dispatch not yet wired"),
-    });
+    return Effect.fail(
+      new HandlerError({ cause: new Error("loop executor inbox dispatch not yet wired") }),
+    );
   }
 
   // ──────── internals ────────

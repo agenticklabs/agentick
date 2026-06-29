@@ -67,6 +67,7 @@ import type {
   SnapshotInput,
   UnmountInput,
 } from "@agentick/spec-next";
+import { HandlerError } from "@agentick/spec-next";
 
 // ============================================================================
 // Public API
@@ -199,9 +200,10 @@ class CallbackReconciler extends BaseHarness<"reconciler"> implements Reconciler
   protected handleMessage(
     _msg: MessageEnvelope,
   ): Effect.Effect<unknown, MessageHandlerError, never> {
-    return Effect.fail({
-      _tag: "HandlerError",
-      cause: new Error("defineReconciler inbox dispatch not yet wired (FAÇADE.6 MVP)"),
-    });
+    return Effect.fail(
+      new HandlerError({
+        cause: new Error("defineReconciler inbox dispatch not yet wired (FAÇADE.6 MVP)"),
+      }),
+    );
   }
 }

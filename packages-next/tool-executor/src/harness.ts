@@ -50,6 +50,7 @@ import type {
   ToolRegistration,
   UnregisterToolInput,
 } from "@agentick/spec-next";
+import { HandlerError } from "@agentick/spec-next";
 
 import {
   TOOL_CONFIRMATION_KIND,
@@ -286,10 +287,9 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
   ): Effect.Effect<unknown, MessageHandlerError, never> {
     const payload = msg.payload as ToolExecutorInboxMessage | undefined;
     if (!payload || typeof payload !== "object" || !("type" in payload)) {
-      return Effect.fail({
-        _tag: "HandlerError",
-        cause: new Error("tool inbox: payload missing or untagged"),
-      });
+      return Effect.fail(
+        new HandlerError({ cause: new Error("tool inbox: payload missing or untagged") }),
+      );
     }
     switch (payload.type) {
       case "abort":
@@ -298,10 +298,11 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
         });
       default: {
         const unknownType = (payload as { type: string }).type;
-        return Effect.fail({
-          _tag: "HandlerError",
-          cause: new Error(`tool inbox: unknown message type "${unknownType}"`),
-        });
+        return Effect.fail(
+          new HandlerError({
+            cause: new Error(`tool inbox: unknown message type "${unknownType}"`),
+          }),
+        );
       }
     }
   }

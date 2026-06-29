@@ -71,6 +71,7 @@ import type {
   ToolListFilter,
   UnregisterToolInput,
 } from "@agentick/spec-next";
+import { HandlerError } from "@agentick/spec-next";
 
 import { InMemoryToolRegistry, sameBindingKey } from "./registry.js";
 import { omitUndefined } from "@agentick/utils-next";
@@ -335,10 +336,11 @@ class CallbackToolExecutor extends BaseHarness<"tool"> implements ToolExecutorPr
   protected handleMessage(
     _msg: MessageEnvelope,
   ): Effect.Effect<unknown, MessageHandlerError, never> {
-    return Effect.fail({
-      _tag: "HandlerError",
-      cause: new Error("defineToolExecutor inbox dispatch not yet wired (FAÇADE.6 MVP)"),
-    });
+    return Effect.fail(
+      new HandlerError({
+        cause: new Error("defineToolExecutor inbox dispatch not yet wired (FAÇADE.6 MVP)"),
+      }),
+    );
   }
 
   // ──────── internals ────────

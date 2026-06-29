@@ -80,6 +80,7 @@ import type {
   ProjectionError,
   RunInput,
 } from "@agentick/spec-next";
+import { HandlerError } from "@agentick/spec-next";
 
 // ============================================================================
 // Public API
@@ -348,10 +349,11 @@ class CallbackLanguageModelExecutor
   protected handleMessage(
     _msg: MessageEnvelope,
   ): Effect.Effect<unknown, MessageHandlerError, never> {
-    return Effect.fail({
-      _tag: "HandlerError",
-      cause: new Error("defineExecutor inbox dispatch not yet wired (FAÇADE.6 MVP)"),
-    });
+    return Effect.fail(
+      new HandlerError({
+        cause: new Error("defineExecutor inbox dispatch not yet wired (FAÇADE.6 MVP)"),
+      }),
+    );
   }
 
   // ──────── internals ────────

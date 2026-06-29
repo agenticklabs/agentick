@@ -1,8 +1,17 @@
 import { Effect } from "effect";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import {
+  AddressNotFound,
+  AskTimeout,
   DEFAULT_JOURNALING_POLICY,
+  HandlerError,
+  InboxError,
+  JournalError,
+  MessageHandlerError,
+  OffsetOutOfRange,
+  ReadFailed,
   SPEC_VERSION,
+  WriteFailed,
   type CommandOutcome,
   type DiscreteEvent,
   type EventEnvelope,
@@ -10,13 +19,10 @@ import {
   type EventQuery,
   type EventSurface,
   type HandlerVerdict,
-  type InboxError,
-  type JournalError,
   type JournalingPolicy,
   type MessageAck,
   type MessageEnvelope,
   type MessageHandler,
-  type MessageHandlerError,
   type Operation,
   type ProtocolEvent,
   type StandardSchemaV1,
@@ -194,25 +200,31 @@ describe("@agentick/spec-next — structural smoke tests", () => {
   });
 
   describe("error taxonomies", () => {
-    it("JournalError discriminates by _tag", () => {
-      const e1: JournalError = { _tag: "WriteFailed", cause: new Error() };
-      const e2: JournalError = { _tag: "ReadFailed", cause: "x" };
-      const e3: JournalError = { _tag: "OffsetOutOfRange", requested: 5, oldest: 10 };
+    it("JournalError concrete classes discriminate by _tag and share the abstract parent", () => {
+      const e1 = new WriteFailed({ cause: new Error() });
+      const e2 = new ReadFailed({ cause: "x" });
+      const e3 = new OffsetOutOfRange({ requested: 5, oldest: 10 });
       expect(e1._tag).toBe("WriteFailed");
       expect(e2._tag).toBe("ReadFailed");
       expect(e3._tag).toBe("OffsetOutOfRange");
+      expect(e1).toBeInstanceOf(JournalError);
+      expect(e2).toBeInstanceOf(JournalError);
+      expect(e3).toBeInstanceOf(JournalError);
     });
 
-    it("InboxError discriminates by _tag", () => {
-      const e1: InboxError = { _tag: "AddressNotFound", address: "x" };
-      const e2: InboxError = { _tag: "AskTimeout", timeoutMs: 5000 };
+    it("InboxError concrete classes discriminate by _tag and share the abstract parent", () => {
+      const e1 = new AddressNotFound({ address: "x" });
+      const e2 = new AskTimeout({ timeoutMs: 5000 });
       expect(e1._tag).toBe("AddressNotFound");
       expect(e2._tag).toBe("AskTimeout");
+      expect(e1).toBeInstanceOf(InboxError);
+      expect(e2).toBeInstanceOf(InboxError);
     });
 
-    it("MessageHandlerError discriminates by _tag", () => {
-      const e: MessageHandlerError = { _tag: "HandlerError", cause: "x" };
+    it("MessageHandlerError concrete classes discriminate by _tag", () => {
+      const e = new HandlerError({ cause: "x" });
       expect(e._tag).toBe("HandlerError");
+      expect(e).toBeInstanceOf(MessageHandlerError);
     });
   });
 

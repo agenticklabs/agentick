@@ -44,6 +44,7 @@ import type {
   OperationJournal,
   ProjectInput,
 } from "@agentick/spec-next";
+import { HandlerError } from "@agentick/spec-next";
 import { Effect } from "effect";
 
 import { BaseLanguageModelExecutor, defaultProject } from "./base-language-model-executor.js";
@@ -261,12 +262,13 @@ class CallbackBaseLanguageModelExecutor<TRaw, TChunk> extends BaseLanguageModelE
   protected handleMessage(
     _msg: MessageEnvelope,
   ): Effect.Effect<unknown, MessageHandlerError, never> {
-    return Effect.fail({
-      _tag: "HandlerError",
-      cause: new Error(
-        "defineLanguageModelExecutor inbox dispatch not wired — extend BaseLanguageModelExecutor directly for custom inbox handling",
-      ),
-    });
+    return Effect.fail(
+      new HandlerError({
+        cause: new Error(
+          "defineLanguageModelExecutor inbox dispatch not wired — extend BaseLanguageModelExecutor directly for custom inbox handling",
+        ),
+      }),
+    );
   }
 }
 

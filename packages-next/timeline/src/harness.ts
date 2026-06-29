@@ -56,6 +56,7 @@ import type {
   TimelineReplaceProjectionInput,
   TimelineSnapshot,
 } from "@agentick/spec-next";
+import { HandlerError } from "@agentick/spec-next";
 
 type TimelineInboxMessage =
   | { readonly type: "timeline:append"; readonly payload: TimelineAppendInput }
@@ -373,33 +374,34 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
       case "timeline:append":
         return Effect.tryPromise<void, MessageHandlerError>({
           try: () => this.append(...m.payload.entries),
-          catch: (cause): MessageHandlerError => ({ _tag: "HandlerError", cause }),
+          catch: (cause): MessageHandlerError => new HandlerError({ cause }),
         });
       case "timeline:replaceProjection":
         return Effect.tryPromise<void, MessageHandlerError>({
           try: () => this.replaceProjection(m.payload),
-          catch: (cause): MessageHandlerError => ({ _tag: "HandlerError", cause }),
+          catch: (cause): MessageHandlerError => new HandlerError({ cause }),
         });
       case "timeline:resetProjection":
         return Effect.tryPromise<void, MessageHandlerError>({
           try: () => this.resetProjection(),
-          catch: (cause): MessageHandlerError => ({ _tag: "HandlerError", cause }),
+          catch: (cause): MessageHandlerError => new HandlerError({ cause }),
         });
       case "timeline:queue":
         return Effect.tryPromise<TimelineQueueResult, MessageHandlerError>({
           try: () => this.queue(...m.payload),
-          catch: (cause): MessageHandlerError => ({ _tag: "HandlerError", cause }),
+          catch: (cause): MessageHandlerError => new HandlerError({ cause }),
         });
       case "timeline:drain":
         return Effect.tryPromise<TimelineDrainResult, MessageHandlerError>({
           try: () => this.drain(),
-          catch: (cause): MessageHandlerError => ({ _tag: "HandlerError", cause }),
+          catch: (cause): MessageHandlerError => new HandlerError({ cause }),
         });
       default:
-        return Effect.fail({
-          _tag: "HandlerError",
-          cause: `Unknown timeline message type: ${(m as { type: string }).type}`,
-        });
+        return Effect.fail(
+          new HandlerError({
+            cause: `Unknown timeline message type: ${(m as { type: string }).type}`,
+          }),
+        );
     }
   }
 

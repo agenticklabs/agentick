@@ -51,6 +51,7 @@ import type {
   StandardSchemaV1,
   TimelineHarnessProtocol,
 } from "@agentick/spec-next";
+import { HandlerError, InvalidPayload } from "@agentick/spec-next";
 import { createKeyedNotifier, type KeyedNotifier } from "@agentick/pubsub-next";
 import { omitUndefined } from "@agentick/utils-next";
 
@@ -345,28 +346,29 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
       case "prompts:register":
         return Effect.tryPromise({
           try: () => this.register(inbound.payload),
-          catch: (cause): MessageHandlerError => ({ _tag: "HandlerError", cause }),
+          catch: (cause): MessageHandlerError => new HandlerError({ cause }),
         });
       case "prompts:update":
         return Effect.tryPromise({
           try: () => this.update(inbound.payload),
-          catch: (cause): MessageHandlerError => ({ _tag: "HandlerError", cause }),
+          catch: (cause): MessageHandlerError => new HandlerError({ cause }),
         });
       case "prompts:remove":
         return Effect.tryPromise({
           try: () => this.remove(inbound.payload),
-          catch: (cause): MessageHandlerError => ({ _tag: "HandlerError", cause }),
+          catch: (cause): MessageHandlerError => new HandlerError({ cause }),
         });
       case "prompts:invoke":
         return Effect.tryPromise({
           try: () => this.invoke(inbound.payload),
-          catch: (cause): MessageHandlerError => ({ _tag: "HandlerError", cause }),
+          catch: (cause): MessageHandlerError => new HandlerError({ cause }),
         });
       default:
-        return Effect.fail({
-          _tag: "InvalidPayload",
-          reason: `Unknown prompts inbox message type: ${msg.type}`,
-        } satisfies MessageHandlerError);
+        return Effect.fail(
+          new InvalidPayload({
+            reason: `Unknown prompts inbox message type: ${msg.type}`,
+          }),
+        );
     }
   }
 

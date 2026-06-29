@@ -48,6 +48,7 @@ import type {
   SandboxStatInput,
   SandboxWriteFileInput,
 } from "@agentick/spec-next";
+import { HandlerError } from "@agentick/spec-next";
 
 import {
   SANDBOX_PERMISSION_KIND,
@@ -507,10 +508,9 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
     // Inbox dispatch (abort-exec, destroy, status-probe) is a future
     // refinement; for now the harness only responds to direct method
     // calls. Reject unknown messages explicitly.
-    return Effect.fail({
-      _tag: "HandlerError",
-      cause: new Error("sandbox harness inbox dispatch not yet wired"),
-    });
+    return Effect.fail(
+      new HandlerError({ cause: new Error("sandbox harness inbox dispatch not yet wired") }),
+    );
   }
 }
 

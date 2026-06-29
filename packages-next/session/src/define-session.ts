@@ -81,6 +81,7 @@ import type { TimelineHandle } from "@agentick/timeline-next";
 import { ElicitationHarness } from "@agentick/elicitation-next";
 import { TasksHarness } from "@agentick/tasks-next";
 import type { ElicitationHarnessProtocol, TasksHarnessProtocol } from "@agentick/spec-next";
+import { HandlerError } from "@agentick/spec-next";
 
 // ============================================================================
 // Public API
@@ -273,10 +274,11 @@ class CallbackSessionHarness<P = unknown>
   protected handleMessage(
     _msg: MessageEnvelope,
   ): Effect.Effect<unknown, MessageHandlerError, never> {
-    return Effect.fail({
-      _tag: "HandlerError",
-      cause: new Error("defineSession inbox dispatch not yet wired (FAÇADE.6 MVP)"),
-    });
+    return Effect.fail(
+      new HandlerError({
+        cause: new Error("defineSession inbox dispatch not yet wired (FAÇADE.6 MVP)"),
+      }),
+    );
   }
 }
 

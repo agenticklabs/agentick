@@ -27,7 +27,13 @@
  * `as R` casts.
  */
 
-import type { InboxError, MessageEnvelope, MessageHandlerError } from "@agentick/spec-next";
+import type {
+  InboxError,
+  InboxErrorChannel,
+  MessageEnvelope,
+  MessageHandlerError,
+  MessageHandlerErrorChannel,
+} from "@agentick/spec-next";
 import { isObject } from "@agentick/utils-next";
 
 import type { NodeId } from "../types.js";
@@ -61,12 +67,12 @@ export function isClusterReservedType(type: string): boolean {
  * initializer below fails to compile until we add the case. This is
  * the load-bearing safety net for the typed-error round-trip story.
  */
-const MESSAGE_HANDLER_ERROR_TAGS: { readonly [K in MessageHandlerError["_tag"]]: true } = {
+const MESSAGE_HANDLER_ERROR_TAGS: { readonly [K in MessageHandlerErrorChannel["_tag"]]: true } = {
   HandlerError: true,
   InvalidPayload: true,
 };
 
-const INBOX_ERROR_TAGS: { readonly [K in InboxError["_tag"]]: true } = {
+const INBOX_ERROR_TAGS: { readonly [K in InboxErrorChannel["_tag"]]: true } = {
   AddressNotFound: true,
   RoutingFailed: true,
   InboxClosed: true,

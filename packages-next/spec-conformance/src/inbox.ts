@@ -7,7 +7,14 @@
 
 import { describe, expect, it } from "vitest";
 import { Effect, Exit } from "effect";
-import type { MessageEnvelopeInput, MessageInbox } from "@agentick/spec-next";
+import {
+  AddressNotFound,
+  AskTimeout,
+  HandlerError,
+  RoutingFailed,
+  type MessageEnvelopeInput,
+  type MessageInbox,
+} from "@agentick/spec-next";
 
 export function runInboxConformance(factory: () => MessageInbox): void {
   describe("MessageInbox — registration", () => {
@@ -18,7 +25,7 @@ export function runInboxConformance(factory: () => MessageInbox): void {
       expect(Exit.isFailure(exit)).toBe(true);
       if (Exit.isFailure(exit)) {
         const err = exit.cause._tag === "Fail" ? exit.cause.error : undefined;
-        expect(err).toMatchObject({ _tag: "RoutingFailed" });
+        expect(err).toBeInstanceOf(RoutingFailed);
       }
     });
 
@@ -56,7 +63,7 @@ export function runInboxConformance(factory: () => MessageInbox): void {
       const exit = await Effect.runPromiseExit(inbox.send("nobody:x", mkMsg("nobody:x", "ping")));
       expect(Exit.isFailure(exit)).toBe(true);
       if (Exit.isFailure(exit) && exit.cause._tag === "Fail") {
-        expect(exit.cause.error).toMatchObject({ _tag: "AddressNotFound" });
+        expect(exit.cause.error).toBeInstanceOf(AddressNotFound);
       }
     });
   });
@@ -87,23 +94,21 @@ export function runInboxConformance(factory: () => MessageInbox): void {
       );
       expect(Exit.isFailure(exit)).toBe(true);
       if (Exit.isFailure(exit) && exit.cause._tag === "Fail") {
-        expect(exit.cause.error).toMatchObject({ _tag: "AskTimeout" });
+        expect(exit.cause.error).toBeInstanceOf(AskTimeout);
       }
     });
 
     it("HandlerError surfaces handler failures", async () => {
       const inbox = factory();
       await Effect.runPromise(
-        inbox.register("boom:1", () =>
-          Effect.fail({ _tag: "HandlerError", cause: new Error("nope") } as const),
-        ),
+        inbox.register("boom:1", () => Effect.fail(new HandlerError({ cause: new Error("nope") }))),
       );
       const exit = await Effect.runPromiseExit(
         inbox.ask("boom:1", mkMsg("boom:1", "explode", undefined, "m_err")),
       );
       expect(Exit.isFailure(exit)).toBe(true);
       if (Exit.isFailure(exit) && exit.cause._tag === "Fail") {
-        expect(exit.cause.error).toMatchObject({ _tag: "HandlerError" });
+        expect(exit.cause.error).toBeInstanceOf(HandlerError);
       }
     });
   });

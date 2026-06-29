@@ -1,80 +1,73 @@
 /**
  * Substrate-level error taxonomies.
  *
- * Typed errors for the three substrate components — journal, bus, inbox.
- * Implementations throw or reject with these tagged shapes; consumers
- * can pattern-match.
+ * **Migration in progress (ADR 41).** Most substrate errors moved to
+ * `../errors/substrate.ts` as `AgentickError` subclasses. This file
+ * now hosts only the cross-cutting `SubstrateError` union which mixes
+ * spec-side classes with `OperationOutcomeError` (whose class home is
+ * `@agentick/runtime-next` — out of scope for this spec module). The
+ * union is structural so that union-member references stay valid
+ * regardless of where the class is declared.
  *
- * Distinct from per-harness error types (CompileError, ProviderError,
- * etc.), which live in their respective harness contract files.
+ * Per-domain error classes (`JournalError`, `InboxError`,
+ * `MessageHandlerError`, `LifecycleHandlerError` + their concrete
+ * subclasses) re-export from `@agentick/spec-next/errors`.
  *
+ * @see docs/proposals/v2/blueprint/41-error-hierarchy.md
  * @see docs/proposals/v2/blueprint/19-foundation.md
  */
 
-/**
- * `OperationJournal` failure modes.
- */
-export type JournalError =
-  | { readonly _tag: "WriteFailed"; readonly cause: unknown }
-  | { readonly _tag: "ReadFailed"; readonly cause: unknown }
-  | {
-      readonly _tag: "OffsetOutOfRange";
-      readonly requested: number;
-      readonly oldest: number;
-    };
+import type { CommandOutcome, TerminalEvent } from "./outcomes.js";
+
+// Re-export the substrate error classes from their canonical home so
+// existing `import { JournalError, ... } from "../data/errors.js"`
+// import paths keep working through the migration. New code SHOULD
+// import directly from `@agentick/spec-next/errors`.
+export {
+  AddressNotFound,
+  AskTimeout,
+  HandlerError,
+  InboxClosed,
+  InboxError,
+  type InboxErrorChannel,
+  InvalidPayload,
+  JournalError,
+  type JournalErrorChannel,
+  LifecycleHandlerError,
+  MessageHandlerError,
+  type MessageHandlerErrorChannel,
+  OffsetOutOfRange,
+  ReadFailed,
+  RoutingFailed,
+  WriteFailed,
+} from "../errors/substrate.js";
+
+import type { JournalError, LifecycleHandlerError } from "../errors/substrate.js";
 
 /**
- * `MessageInbox` routing-side failure modes (distinct from handler-side
- * failures, which use `MessageHandlerError`).
- */
-export type InboxError =
-  | { readonly _tag: "AddressNotFound"; readonly address: string }
-  | { readonly _tag: "RoutingFailed"; readonly cause: unknown }
-  | { readonly _tag: "InboxClosed" }
-  | { readonly _tag: "AskTimeout"; readonly timeoutMs: number };
-
-/**
- * Handler-side failure for inbox messages. Distinguished from
- * `InboxError` (routing-side) because they have different recovery
- * profiles: routing errors are usually transient or configuration
- * issues; handler errors are application logic.
- */
-export type MessageHandlerError =
-  | { readonly _tag: "HandlerError"; readonly cause: unknown }
-  | { readonly _tag: "InvalidPayload"; readonly reason: string };
-
-/**
- * Lifecycle-handler failure raised by `BaseHarness.runOperation` when a
- * `before`-phase handler's Effect fails. Distinct from `MessageHandlerError`
- * (inbox) and from the body's own typed error channel. Carried in the
- * substrate error channel so callers can pattern-match by `_tag`.
- */
-export type LifecycleHandlerError = {
-  readonly _tag: "LifecycleHandlerError";
-  readonly phase: "before" | "after" | (string & {});
-  readonly cause: unknown;
-};
-
-/**
- * Tagged-union envelope for every failure mode the substrate itself can
- * surface from `BaseHarness.runOperation`. Concrete harnesses union this
- * with their own body's `E` channel — i.e., `runOperation` returns
- * `Effect<R, E | SubstrateError, never>`.
+ * Tagged-union envelope for every failure mode the substrate itself
+ * can surface from `BaseHarness.runOperation`. Concrete harnesses
+ * union this with their own body's `E` channel — i.e., `runOperation`
+ * returns `Effect<R, E | SubstrateError, never>`.
  *
  * Members:
  *   - `OperationOutcomeError`  — non-success terminals (canceled, vetoed,
- *                                 deferred, replayed `failed`)
- *   - `JournalError`           — write/read failures bubbled from the journal
- *   - `LifecycleHandlerError`  — a before-handler's Effect failed
+ *                                 deferred, replayed `failed`). Class
+ *                                 lives in `@agentick/runtime-next`;
+ *                                 referenced here by its structural
+ *                                 shape so spec stays runtime-free.
+ *   - `JournalError`           — abstract class in `../errors/substrate.ts`
+ *                                 with three concrete variants.
+ *   - `LifecycleHandlerError`  — concrete class in `../errors/substrate.ts`.
  *
- * `OperationOutcomeError` is exposed as a class (instanceof-friendly) but
- * also carries `_tag` so it pattern-matches identically.
+ * All three members participate in `Effect.catchTag` via their `_tag`
+ * discriminator AND in `instanceof AgentickError` via the class chain.
  */
 export type SubstrateError =
   | {
       readonly _tag: "OperationOutcomeError";
-      readonly outcome: import("./outcomes.js").CommandOutcome;
-      readonly terminal: import("./outcomes.js").TerminalEvent;
+      readonly outcome: CommandOutcome;
+      readonly terminal: TerminalEvent;
     }
   | JournalError
   | LifecycleHandlerError;
