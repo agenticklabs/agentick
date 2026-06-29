@@ -22,12 +22,12 @@ const Calculator = createTool({
   name: "calculator",
   description:
     "Evaluate a JavaScript arithmetic expression and return the result. Example inputs: '2 + 2', '47 * 23', '(100 - 7) / 3'.",
-  input: z.object({
+  inputSchema: z.object({
     expression: z
       .string()
       .describe("A JavaScript arithmetic expression. Whitespace and parens are fine."),
   }),
-  handler: async ({ expression }) => {
+  handler: async ({ expression }, _deps) => {
     try {
       // Demo-quality eval — DO NOT use in production. Real adopters
       // wire a real expression parser or sandbox.
