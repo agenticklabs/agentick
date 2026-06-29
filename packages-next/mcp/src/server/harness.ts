@@ -38,18 +38,21 @@ import { Server as SdkServer } from "@modelcontextprotocol/sdk/server/index.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 
 import {
+  resolveElicitOption,
   resolvePromptsOption,
   type McpServerOptions,
   type PromptsFilter,
   validateOptions,
 } from "./config.js";
 import { buildCapabilities } from "./protocol/lifecycle.js";
+import { buildMcpElicit } from "./projection/elicitation.js";
 import { installPromptsHandlers } from "./projection/prompts.js";
 import { installToolsHandlers, type ToolHandlerResolver } from "./projection/tools.js";
 import { resolveSecurity, type ResolvedSecurity } from "./security/index.js";
 import { evaluateConnectionGuard, isMcpSecurityError } from "./security/pipeline.js";
 import type { McpConnectionInfo } from "./security/stages.js";
 import type { ServerTransport } from "./transports/types.js";
+import { isFalsey, isNull, omitUndefined } from "@agentick/utils-next";
 
 const SURFACE = "mcpServer" as const;
 type McpServerSurface = typeof SURFACE;
@@ -112,6 +115,9 @@ export class McpServerHarness
   /** Per-connection prompts visibility predicate (resolved from options). */
   private readonly promptsFilter: PromptsFilter | null;
 
+  /** True when `options.elicit` opted into the elicitation capability. */
+  private readonly elicitWired: boolean;
+
   /** Server identity for the MCP `initialize` response. */
   private readonly serverInfo: { name: string; version: string };
 
@@ -154,10 +160,10 @@ export class McpServerHarness
     this.resolveHandler = this.options.tools?.resolveHandler ?? (() => null);
     this.hasToolsWired = this.options.tools !== undefined;
 
-    if (this.options.prompts !== undefined) {
+    if (!isFalsey(this.options.prompts)) {
       const resolved = resolvePromptsOption(this.options.prompts);
       this.promptsFilter = resolved.filter;
-      if (resolved.use !== null) {
+      if (!isNull(resolved.use)) {
         // Adopter-supplied instance.
         this.promptsSource = resolved.use;
         this.ownsPromptsSource = false;
@@ -176,6 +182,8 @@ export class McpServerHarness
       this.promptsFilter = null;
     }
 
+    this.elicitWired = resolveElicitOption(this.options.elicit);
+
     this.serverInfo = this.options.serverInfo ?? {
       name: this.options.name,
       version: "0.0.0",
@@ -189,7 +197,7 @@ export class McpServerHarness
   // ─────────── Read-side surface ───────────
 
   connections(): readonly McpServerConnectionInfo[] {
-    if (this.connectionsCache !== null) return this.connectionsCache;
+    if (!isNull(this.connectionsCache)) return this.connectionsCache;
     const out = Array.from(this.openConnections.values());
     out.sort((a, b) =>
       a.connectedAt < b.connectedAt ? -1 : a.connectedAt > b.connectedAt ? 1 : 0,
@@ -229,7 +237,7 @@ export class McpServerHarness
     // Internally-owned Prompts: wait for ready + register the initial
     // declarations. Adopter-owned sources are assumed ready already
     // (and registering would be the adopter's responsibility).
-    if (this.promptsSource !== null && this.ownsPromptsSource) {
+    if (!isNull(this.promptsSource) && this.ownsPromptsSource) {
       await this.promptsSource.ready;
       for (const declaration of this.pendingPromptDeclarations) {
         await this.promptsSource.register({ declaration });
@@ -278,7 +286,7 @@ export class McpServerHarness
 
     // 3. Close the internally-owned Prompts source. Adopter-supplied
     //    sources are NOT closed — the adopter owns their lifecycle.
-    if (this.promptsSource !== null && this.ownsPromptsSource) {
+    if (!isNull(this.promptsSource) && this.ownsPromptsSource) {
       try {
         await this.promptsSource.close();
       } catch {
@@ -324,9 +332,9 @@ export class McpServerHarness
     const capabilities = buildCapabilities(
       {
         tools: this.hasToolsWired && this.toolsRegistry.length > 0,
-        prompts: this.promptsSource !== null,
+        prompts: !isNull(this.promptsSource),
         resources: false, // wired with #123
-        elicitation: false, // wired in #171d.2
+        elicitation: this.elicitWired,
         sampling: false, // wired with SamplingHarness
         tasks: false, // wired in #171d.3
       },
@@ -349,21 +357,45 @@ export class McpServerHarness
     this._registerConnection(connectionRecord);
 
     // 4. Install request-handler projections.
-    const buildRequestContext = (): McpRequestContext => ({
-      serverId: this.scopeId,
-      connectionId,
-      transportKind: info.transportKind,
-      connectedAt,
-      user: null,
-      clientInfo: null,
-      clientCapabilities: null,
-      signal: new AbortController().signal,
-      metadata: {
-        ...(info.headers ? { headers: info.headers } : {}),
-        ...(info.origin !== undefined ? { origin: info.origin } : {}),
-        ...(info.remoteAddress !== undefined ? { remoteAddress: info.remoteAddress } : {}),
-      },
-    });
+    const buildRequestContext = (): McpRequestContext => {
+      // Pull the client's negotiated capabilities + identity from the
+      // SDK Server post-initialize. Undefined before initialize
+      // completes (which it always has by the time any request handler
+      // runs, since the SDK gates requests behind initialize).
+      const sdkClientCaps =
+        (sdkServer.getClientCapabilities?.() as Readonly<Record<string, unknown>> | undefined) ??
+        null;
+      const sdkClientInfo = sdkServer.getClientVersion?.() ?? null;
+
+      const ctx: McpRequestContext = {
+        serverId: this.scopeId,
+        connectionId,
+        transportKind: info.transportKind,
+        connectedAt,
+        user: null,
+        clientInfo: sdkClientInfo
+          ? { name: sdkClientInfo.name, version: sdkClientInfo.version }
+          : null,
+        clientCapabilities: sdkClientCaps,
+        signal: new AbortController().signal,
+        metadata: omitUndefined({
+          ...(info.headers ? { headers: info.headers } : {}),
+          origin: info.origin,
+          remoteAddress: info.remoteAddress,
+        }),
+      };
+
+      // Attach `elicit` sugar when wired AND the client advertised
+      // the capability. Tool handlers must check for presence — the
+      // slot is optional per spec.
+      if (this.elicitWired) {
+        const elicit = buildMcpElicit({ sdkServer, clientCapabilities: sdkClientCaps });
+        if (elicit.canDoForm()) {
+          return { ...ctx, elicit };
+        }
+      }
+      return ctx;
+    };
 
     if (this.hasToolsWired && this.toolsRegistry.length > 0) {
       const projection = this.options.tools;

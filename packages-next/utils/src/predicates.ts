@@ -70,6 +70,10 @@ export function isSet(v: unknown): v is Set<unknown> {
   return v instanceof Set;
 }
 
+export function isFalsey(v: unknown): v is false | 0 | "" | null | undefined {
+  return !v;
+}
+
 /**
  * Duck-typed `PromiseLike` check — `v` looks like something we can
  * `await`. True for native `Promise`, A+ thenables, cross-realm

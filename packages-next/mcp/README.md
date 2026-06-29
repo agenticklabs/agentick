@@ -42,7 +42,9 @@ code. See ADR 23 §6 (Package layout) and ADR 40 §1.
 | #171b Server subpath + spec types + `McpServerHarness` skeleton                  | ✅                   |
 | #171c stdio + in-memory transport + tools projection + security pipeline         | ✅                   |
 | #171d.1 **Prompts projection** (`prompts/list` + `prompts/get` + `list_changed`) | ✅                   |
-| #171d.2 Elicitation `ctx.elicit.*` sugar (server→client via SDK request)         | ⏳                   |
+| #171d.2.1 **Elicitation `ctx.elicit.*` sugar** (form-mode basics)                | ✅                   |
+| #171d.2.2 Elicitation URL mode + `tryX` variants + `URLElicitationRequiredError` | ⏳                   |
+| #171d.2.3 Elicitation schema-flatness validation + advanced shapes               | ⏳                   |
 | #171d.3 Tasks projection (`tasks/list` + `tasks/get` + notifications)            | ⏳ (scoping pending) |
 | #171e Streamable HTTP transport + OAuth Resource Server                          | ⏳                   |
 | #171f WebSocket transport                                                        | ⏳                   |
@@ -215,6 +217,49 @@ prompts: {
 **Runtime access:** `server.prompts: Prompts | null` exposes the
 resolved source for register / update / remove / reload regardless of
 how it was constructed.
+
+### Eliciting input from the user (`ctx.elicit.*`)
+
+Opt into the elicitation capability:
+
+```ts
+new McpServerHarness(..., {
+  // ... other options
+  elicit: true,  // or { enabled: true }
+})
+```
+
+When wired AND the connected client advertises the `elicitation`
+capability, tool handlers receive a typed `ctx.elicit` surface:
+
+```ts
+const handler = async (input, ctx) => {
+  if (!ctx.elicit) {
+    // Client didn't advertise elicitation capability — handle gracefully.
+    return [{ type: "text", text: "Cannot prompt user — please supply input directly." }];
+  }
+
+  // Throws ElicitationDeclined / ElicitationCancelled on those outcomes.
+  const name = await ctx.elicit.text("Your name?", { default: "Ada" });
+  const role = await ctx.elicit.select("Role?", ["admin", "viewer"] as const);
+  const confirmed = await ctx.elicit.confirm(`Apply as ${role}?`);
+
+  return [{ type: "text", text: `OK ${name}, role=${role}, confirmed=${confirmed}` }];
+};
+```
+
+The sugar covers `text` / `confirm` / `boolean` / `number` / `select`
+/ `multiSelect` for form-mode requests. Decline and cancel surface as
+thrown `ElicitationDeclined` / `ElicitationCancelled` (`try*` variants
+returning {@link ElicitOutcome} land with #171d.2.2). URL mode + the
+`URLElicitationRequiredError` -32042 deferred-auth path land with
+#171d.2.2 too.
+
+Note on MCP capability semantics: elicitation is a **client**
+capability, not server. The server doesn't advertise it on the wire —
+it just issues `elicitation/create` requests when the connected
+client opted in. `ctx.elicit` is `undefined` when the client didn't
+advertise; tool handlers must check for presence before use.
 
 The same instance-or-config pattern (see ADR 42 — coming) propagates
 to other harness-backed slots (`tools`, `skills`, `tasks`, ...) as

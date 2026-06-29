@@ -107,6 +107,23 @@ export interface McpServerCapabilitiesOptions {
   readonly tools?: boolean;
   readonly prompts?: boolean;
   readonly resources?: boolean;
+  readonly elicitation?: boolean;
+}
+
+/**
+ * Elicit slot — opt-in capability advertisement. Setting `enabled: true`
+ * (or passing `true` shorthand — see {@link McpServerElicitOptions})
+ * flips the `elicitation` server capability and provides `ctx.elicit`
+ * to tool handlers. Without this slot, the capability is NOT advertised
+ * and `ctx.elicit` is `undefined`.
+ *
+ * No declarations or instance — elicit is purely sugar over per-request
+ * `sdkServer.request("elicitation/create")` calls. There's no harness
+ * underneath. Hence the slot is a boolean opt-in, not the ADR 42
+ * trichotomy.
+ */
+export interface McpServerElicitOptions {
+  readonly enabled: boolean;
 }
 
 /**
@@ -136,6 +153,13 @@ export interface McpServerOptions {
   readonly tools?: McpServerToolsOptions;
   /** Prompts registry + per-connection projection. Absent = prompts capability NOT advertised. Lands #171d. */
   readonly prompts?: McpServerPromptsOptions;
+  /**
+   * Elicit opt-in. Truthy → advertise `elicitation` capability +
+   * provide `ctx.elicit` to tool handlers. Shorthand `true` is
+   * equivalent to `{ enabled: true }`. Absent / `false` → `ctx.elicit`
+   * is `undefined`.
+   */
+  readonly elicit?: boolean | McpServerElicitOptions;
   /** Resources slot — wired when #123 lands. Absent = resources capability NOT advertised. */
   readonly resources?: unknown;
   /** Capability opt-OUTS. Defaults derive from what's actually wired. */
@@ -192,6 +216,19 @@ export function validateOptions(options: McpServerOptions): McpServerOptions {
   }
   if (options.prompts !== undefined) {
     validatePromptsOption(options.prompts);
+  }
+  if (options.elicit !== undefined) {
+    if (typeof options.elicit === "boolean") {
+      // OK — shorthand.
+    } else if (
+      typeof options.elicit === "object" &&
+      options.elicit !== null &&
+      typeof (options.elicit as { enabled?: unknown }).enabled === "boolean"
+    ) {
+      // OK — explicit config.
+    } else {
+      throw invalid("elicit must be a boolean or { enabled: boolean }", ["elicit"]);
+    }
   }
   if (
     options.capabilities !== undefined &&
@@ -275,4 +312,11 @@ function validatePromptsOption(option: McpServerPromptsOptions): void {
   // Resolve to surface shape errors at validation time; discard result
   // (the harness re-resolves at construction time).
   resolvePromptsOption(option);
+}
+
+/** Normalize the `elicit` slot to a boolean (true = wired). */
+export function resolveElicitOption(option: boolean | McpServerElicitOptions | undefined): boolean {
+  if (option === undefined) return false;
+  if (typeof option === "boolean") return option;
+  return option.enabled;
 }

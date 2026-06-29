@@ -28,10 +28,12 @@ import "./augment.js";
 export { McpServerHarness } from "./harness.js";
 export { type McpServerHandle, toHandle } from "./handle.js";
 export {
+  resolveElicitOption,
   resolvePromptsOption,
   validateOptions,
   type McpServerAuthOptions,
   type McpServerCapabilitiesOptions,
+  type McpServerElicitOptions,
   type McpServerOptions,
   type McpServerPromptsConfig,
   type McpServerPromptsOptions,
@@ -39,6 +41,15 @@ export {
   type PromptsFilter,
   type ResolvedPromptsOptions,
 } from "./config.js";
+export {
+  buildMcpElicit,
+  inspectElicitationCapabilities,
+  ElicitationCancelled,
+  ElicitationDeclined,
+  ElicitationNotSupported,
+  type BuildMcpElicitOptions,
+  type ElicitationCapabilities,
+} from "./projection/elicitation.js";
 export {
   spawnStandaloneMcpServer,
   type SpawnStandaloneOptions,

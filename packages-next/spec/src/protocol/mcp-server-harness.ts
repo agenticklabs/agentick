@@ -23,6 +23,7 @@
 import type { Effect } from "effect";
 
 import type { McpServerError } from "../errors/harnesses.js";
+import type { Elicit } from "./elicit-api.js";
 import type { Unsubscribe } from "./inbox.js";
 import type { Prompts } from "./prompts-harness.js";
 
@@ -63,6 +64,14 @@ export interface McpRequestContext {
   readonly signal: AbortSignal;
   /** Send a `notifications/progress` to this connection for the in-flight request. */
   readonly sendProgress?: (progress: number, total?: number, message?: string) => Promise<void>;
+  /**
+   * Sugar surface for prompting the connected end-user via the MCP
+   * `elicitation/create` server→client request. Present only when:
+   *   1. The server config wired the `elicit` slot, AND
+   *   2. The connected client advertised the `elicitation` capability.
+   * Tool handlers must check for presence before calling.
+   */
+  readonly elicit?: Elicit;
   /** Free-form metadata — adopter extension point. */
   readonly metadata: Readonly<Record<string, unknown>>;
 }
