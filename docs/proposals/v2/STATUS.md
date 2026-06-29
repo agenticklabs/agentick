@@ -47,6 +47,7 @@ The reconciler harness's inline `serializeTreeToString` (~190 LOC, marked "Phase
 Test pinning: `render-to-string.spec.tsx` (13), `formatter-registry.spec.tsx` (3), `formatter-scope.spec.tsx` (10) — all green after the swap. Full v2 suite at 178 files / 1944 tests; reconciler-react gained 15 new template tests.
 
 **Open follow-ups tracked in tasks:**
+
 - MCP server harness (#171) — when it lands, prompt/resource bodies should use `renderTemplate`
 - Prompts loaders (#247) — `withPrompts({ loaders })` for filesystem/url-backed libraries
 - Skills loaders (#246) — same shape for `@agentick/skills-next`
@@ -56,10 +57,12 @@ Test pinning: `render-to-string.spec.tsx` (13), `formatter-registry.spec.tsx` (3
 **Archived for reference:** `git tag archive/compiler-phase-3-experiment` preserves the full 16-commit experiment tree (Phase 1 + 1b + 3 substeps 1a–3b). Recover with `git reset --hard archive/compiler-phase-3-experiment` if direction changes.
 
 **What carried forward as small follow-up commits on `feat/v2`:**
+
 - `2a898c76` `feat(session-next): track reasoning + cached + cache-creation token usage` — unrelated bug-class improvement that landed alongside the experiment; isolated and preserved
 - `e91e9424` `feat(utils-next): isThenable — duck-typed PromiseLike predicate` — generic utility carved out of the experiment; useful broadly
 
 **Lessons that carry forward as practice (not yet ported to code, tracked):**
+
 - Diagnostic-channel pattern — every silent-drop path in the walker (media missing source, malformed event blocks, etc.) should emit a stable-coded `FormatDiagnostic` rather than discarding the JSX node. Worth porting to `reconciler/collect/contributors/*.ts`.
 - Three of the five "declaration" JSX intrinsics shipped in v1 have **no runtime consumer**: `<output>` (entirely stubbed), `<mcp>` (replaced by `withMCP({...})` extension), `<resource>` (resource runtime is pending — #123). `<tool>` is half-wired: the layered-tools work (#137) explicitly dropped the executor's `tree.declarations.tools` dependency. The "JSX intrinsic produces an IR field" model is legacy from v1; v2's "extension factories + layered options" superseded most of it without retiring the JSX intrinsics. Worth a deliberate cleanup pass.
 - The `RuntimeDeclarations.mcp` singular field name is misleading — it's a plural array. `mcpServers` would read better. Small spec PR if desired.
@@ -68,6 +71,7 @@ Test pinning: `render-to-string.spec.tsx` (13), `formatter-registry.spec.tsx` (3
 **Meta-lesson:** Audit existing code paths before extracting new packages or layers. The compiler walker duplicated the reconciler's render-until-stable + collect walker; the audit takes minutes and would have caught this at Phase 1 scope time.
 
 **Branch state restored to:**
+
 - 177 test files / 1925 tests green (matches pre-experiment baseline)
 - Workspace typecheck clean modulo pre-existing v2-real handler-signature drift (`example/v2-real/src/agent.tsx:30` — long-standing, unrelated to revert)
 - Origin/feat/v2 is at `9f77ea9c` and is behind local feat/v2 by 16 commits — non-force push to origin is safe
@@ -97,6 +101,7 @@ Eval-next iteration roadmap (deferred): `.matrix(axes)` parameter sweeps, `t.jud
 6. **joinXCluster facades** (Phase 4f.7) — `joinUnixCluster`/`joinTcpCluster`/`joinWsCluster`/`joinRedisCluster`. Side-channel cluster wiring for coordination outside the agent loop (proof: `example/v2-otto-cluster` worker went from 148 → 75 LOC). Shared facade builder `makeClusterNode` in `@agentick/cluster-next` hosts the bus / membership.waitForPeers / lifecycle plumbing wire-agnostically.
 
 **ADR 38 — Cluster lifecycle + ownership rules** pins the contract:
+
 - Pattern A (defineXCluster + createApp/createGateway) → framework owns lifecycle
 - Pattern B (joinXCluster) → caller owns lifecycle
 - One cluster per process (multi-app = gateway-level wiring)
@@ -108,6 +113,7 @@ Eval-next iteration roadmap (deferred): `.matrix(axes)` parameter sweeps, `t.jud
 **Workspace test status**: cluster + app + gateway suites at 281/281. Full v2 workspace remains green at the previous Phase 4 count + Phase 5 additions.
 
 **Deferred to Phase 6+**:
+
 - Real-Redis conformance via docker-compose
 - Double-wrap detection (brand cluster-wrapped substrates so a second wrap can refuse)
 - Per-app clusters under a gateway (hybrid topologies — drop to `joinXCluster` today)
@@ -144,6 +150,7 @@ Eval-next iteration roadmap (deferred): `.matrix(axes)` parameter sweeps, `t.jud
 **Workspace test status**: 1854+ tests across all cluster packages pass. Strict typecheck clean across 66/66 v2 packages.
 
 **Deferred to Phase 5+** (explicit, ADR-documented):
+
 - Real-Redis conformance via docker-compose (fake-Redis integration ships now; real-Redis is an infra task).
 - 3-replica Otto cluster demo (the end-to-end deploy proof point; needs docker-compose infra).
 - `createGateway({ cluster })` fusion (Phase 5 ergonomic win).
@@ -159,6 +166,7 @@ Eval-next iteration roadmap (deferred): `.matrix(axes)` parameter sweeps, `t.jud
 **The uncovered bug:** Building cluster-ws against the cluster build graph surfaced a long-standing type-soundness violation in `packages-next/cluster/src/define.ts` — `resolveFactoryAsync<R, P>(factory: (parent: P) => R | Promise<R> | unknown, ...)` collapsed to `unknown` in TS inference. Every `transport`/`membership`/`partitioning`/`journal`/`codec` resolved-to-unknown, downstream assignments cast through implicit-any. The cluster package's `tsconfig.json` has `"include": []` and references `tsconfig.build.json`, so `pnpm typecheck` (running `tsc -p tsconfig.json --noEmit`) was checking NOTHING — the typecheck script was a silent no-op against the cluster source. Fixed by narrowing the factory's return-type to the documented `R | Promise<R> | Effect.Effect<R, never, never>` union. Once R was correctly inferred, two more cascading errors surfaced in cluster-broker (`writeFrame` passing `BrokerFrame` to a `ClusterCodec.encode` typed for envelopes only — TODOs added documenting the codec-shape gap; cast at boundary is the temporary bridge). A new `createJsonCodec()` synchronous helper was added so wire impls (cluster-net, cluster-ws) can construct the default codec directly instead of invoking `jsonCodec()({} as never)` which returned the factory union.
 
 **Architectural follow-ups documented in-code (TODOs):**
+
 - `phase-4f`: `ClusterCodec` is typed for envelopes only at cluster-next layer; broker frames (Hello/Welcome/Subscribe/SubscribeAck/Membership) piggyback the same codec — JSON tolerates anything; msgpack/protobuf would need broker-specific schema. Cast at boundary documented in `base-broker.ts:writeFrame` and `base-cluster-client.ts:writeFrameRaw`. Follow-up: introduce a `BrokerCodec` that wraps `ClusterCodec` + handles broker frame schema separately.
 - `phase-4e-followup`: TCP/Unix/WS listener/connector/cluster modules now follow a near-identical shape across cluster-net + cluster-ws. After Phase 4f Otto demo proves adopter ergonomics, consider a shared `cluster-wire-base-next` package — TODO documented at top of `ws-listener.ts`.
 - **Strict-typecheck gap in cluster-next:** `tsconfig.json` has `"include": []` so `pnpm typecheck` runs a no-op. This is a violation of the strict-typecheck memory rule. Phase 4f cleanup should fix the include to `["src"]` so spec drift gets caught at `pnpm typecheck` time, not at downstream build time.
@@ -1500,6 +1508,29 @@ explicit `typescript` + `vitest` devDeps. Both removed:
 Running record of decisions made during execution (separate from the
 blueprint's design decisions; this is execution-level).
 
+### 2026-06-29
+
+- **ADR 41 landed — `AgentickError` class hierarchy supersedes POJO
+  `{ _tag: ... }` unions for typed errors.** Closes #256. Every typed
+  error in v2 is now a class extending `AgentickError extends Error`
+  (with optional per-domain abstract intermediates carrying a literal
+  `_tag` union for `Effect.catchTag` narrowing). A registry-based codec
+  (`registerAgentickError(tag, cls)` + `serialize`/`deserialize`)
+  preserves class identity across the wire; `UnknownAgentickError` is
+  the lossless fallback for unregistered tags. The previous 2026-05-11
+  decision ("Spec error shape = `{ _tag: ...; ... }` tagged union. No
+  class hierarchy") is **superseded**. Zero production `Effect.fail({_tag:...})`
+  / `throw {_tag:...}` sites remain; 404 surviving `_tag` references
+  are all on non-error tagged unions (message envelopes, wire frames,
+  content blocks, channel events) and are correct. Conformance test in
+  `@agentick/spec-conformance-next/__tests__/agentick-error-conformance.spec.ts`
+  pins registry-membership + instance-shape + codec round-trip
+  invariants for all 88 framework error tags. Adding a new error class
+  requires adding one row to the suite's `EXPECTED` list. Work landed
+  on branch `feat/v2-error-infra`; ready to merge → `feat/v2`. 2476/2476
+  workspace tests green. Commits: `5420945c` (ADR-41 proposal) →
+  `cd90ec8f` (#256e + #256f final sweep).
+
 ### 2026-06-23
 
 - **`@agentick/utils-next` carved out from `@agentick/shared`.** The
@@ -1610,6 +1641,8 @@ ElicitRequestURLParams` union used directly (replaces hand-rolled
 - **Spec async return = Promise/AsyncIterable** (not Effect). Preserves
   zero-dep. Implementations bridge to Effect at the boundary.
 - **Spec error shape = `{ _tag: ...; ... }` tagged union.** No class hierarchy.
+  **⚠ SUPERSEDED 2026-06-29 by ADR 41 — see decision-log entry. v2 now
+  uses an `AgentickError` class hierarchy with a registry-based codec.**
 - **`lookupTerminal` returns `Maybe<T>`** (plain discriminated union),
   not Effect's `Option<T>`.
 - **Phantom type fields on `Operation<I, R, E>`** for inference; not
