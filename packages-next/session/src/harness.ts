@@ -55,7 +55,15 @@ import type {
   TimelineEntry,
   ToolExecutorProtocol,
 } from "@agentick/spec-next";
-import { DEFAULT_JOURNALING_POLICY, HandlerError, SPEC_VERSION } from "@agentick/spec-next";
+import {
+  DEFAULT_JOURNALING_POLICY,
+  ExecutionFailed,
+  HandlerError,
+  SessionBusyError,
+  SessionClosedError,
+  SPEC_VERSION,
+  TimelineWriteFailed,
+} from "@agentick/spec-next";
 import { mergeLayered, omitUndefined } from "@agentick/utils-next";
 import { withScope } from "@agentick/tool-executor-next";
 import type { KnobsHandle } from "@agentick/knobs-next";
@@ -445,10 +453,7 @@ export class SessionHarness<P = unknown>
     return runHarnessProtocol(
       Effect.tryPromise({
         try: () => this.applyExecutorResultBody(input),
-        catch: (cause): StateApplyError => ({
-          _tag: "TimelineWriteFailed",
-          cause,
-        }),
+        catch: (cause): StateApplyError => new TimelineWriteFailed({ cause }),
       }),
     );
   }
@@ -457,10 +462,7 @@ export class SessionHarness<P = unknown>
     return runHarnessProtocol(
       Effect.tryPromise({
         try: () => this.applyToolResultsBody(input),
-        catch: (cause): StateApplyError => ({
-          _tag: "TimelineWriteFailed",
-          cause,
-        }),
+        catch: (cause): StateApplyError => new TimelineWriteFailed({ cause }),
       }),
     );
   }
@@ -469,10 +471,7 @@ export class SessionHarness<P = unknown>
     return runHarnessProtocol(
       Effect.tryPromise({
         try: () => this.appendEntryBody(input),
-        catch: (cause): StateApplyError => ({
-          _tag: "TimelineWriteFailed",
-          cause,
-        }),
+        catch: (cause): StateApplyError => new TimelineWriteFailed({ cause }),
       }),
     );
   }
@@ -489,15 +488,14 @@ export class SessionHarness<P = unknown>
 
   async spawn(input: SpawnInput<P>): Promise<SessionExecutionHandle | SessionHarnessProtocol<P>> {
     if (this._closed) {
-      throw { _tag: "SessionClosedError", attemptedCommand: "spawn" } satisfies SessionError;
+      throw new SessionClosedError({ attemptedCommand: "spawn" }) satisfies SessionError;
     }
     if (this.spawnContext === undefined) {
-      throw {
-        _tag: "ExecutionFailed",
+      throw new ExecutionFailed({
         cause: new Error(
           "spawn() requires a spawnContext — the session was constructed without an app-level parent",
         ),
-      } satisfies SessionError;
+      }) satisfies SessionError;
     }
     const childInput = {
       parentSessionId: this.store.id,
@@ -523,7 +521,7 @@ export class SessionHarness<P = unknown>
     options?: import("@agentick/spec-next").DispatchOptions,
   ): Promise<readonly ContentBlock[]> {
     if (this._closed) {
-      throw { _tag: "SessionClosedError", attemptedCommand: "dispatch" } satisfies SessionError;
+      throw new SessionClosedError({ attemptedCommand: "dispatch" }) satisfies SessionError;
     }
     await this._mountReady;
     // Defaults to Pattern A — when the tool returns a TaskHandle, the
@@ -688,13 +686,12 @@ export class SessionHarness<P = unknown>
 
   private async sendBody(input: SendInput<P>): Promise<SessionExecutionHandle> {
     if (this._closed) {
-      throw { _tag: "SessionClosedError", attemptedCommand: "send" };
+      throw new SessionClosedError({ attemptedCommand: "send" });
     }
     if (this._currentExecution !== null) {
-      throw {
-        _tag: "SessionBusyError",
+      throw new SessionBusyError({
         reason: "another execution is in flight (single-execution semantics in 4e MVP)",
-      };
+      });
     }
 
     await this._mountReady;
@@ -1028,5 +1025,5 @@ function coerceSessionError(cause: unknown): SessionError {
   ) {
     return cause as SessionError;
   }
-  return { _tag: "ExecutionFailed", cause };
+  return new ExecutionFailed({ cause });
 }

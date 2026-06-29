@@ -109,14 +109,17 @@ export type AppOptionsOpaque<P = unknown> = unknown & { readonly __appOptionsBra
 // ============================================================================
 
 /**
- * Gateway error envelope. Covers app-level construction failures + own
- * lifecycle errors. Extensions surface their own error types.
+ * Gateway error envelope — migrated to class hierarchy (ADR 41
+ * cluster 2). Re-exports from `../errors/lifecycle.js`.
  */
-export type GatewayError =
-  | { readonly _tag: "GatewayClosedError" }
-  | { readonly _tag: "AppAlreadyExistsError"; readonly appId: string }
-  | { readonly _tag: "AppNotFoundError"; readonly appId: string }
-  | { readonly _tag: "GatewayLifecycleError"; readonly cause: unknown };
+export {
+  AppAlreadyExistsError,
+  AppNotFoundError,
+  GatewayClosedError,
+  GatewayError,
+  type GatewayErrorChannel,
+  GatewayLifecycleError,
+} from "../errors/lifecycle.js";
 
 /**
  * The runtime-root harness protocol.

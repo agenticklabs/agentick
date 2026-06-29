@@ -81,7 +81,7 @@ import type { TimelineHandle } from "@agentick/timeline-next";
 import { ElicitationHarness } from "@agentick/elicitation-next";
 import { TasksHarness } from "@agentick/tasks-next";
 import type { ElicitationHarnessProtocol, TasksHarnessProtocol } from "@agentick/spec-next";
-import { HandlerError } from "@agentick/spec-next";
+import { ExecutionFailed, HandlerError } from "@agentick/spec-next";
 
 // ============================================================================
 // Public API
@@ -241,10 +241,11 @@ class CallbackSessionHarness<P = unknown>
 
   spawn(input: SpawnInput<P>): Promise<SessionExecutionHandle | SessionHarnessProtocol<P>> {
     if (this.spec.spawn) return this.spec.spawn(input);
-    return Promise.reject({
-      _tag: "ExecutionFailed",
-      cause: new Error("defineSession: spawn() not configured"),
-    } satisfies SessionError);
+    return Promise.reject(
+      new ExecutionFailed({
+        cause: new Error("defineSession: spawn() not configured"),
+      }) satisfies SessionError,
+    );
   }
 
   dispatch(
@@ -253,10 +254,11 @@ class CallbackSessionHarness<P = unknown>
     options?: import("@agentick/spec-next").DispatchOptions,
   ): Promise<readonly ContentBlock[]> {
     if (this.spec.dispatch) return this.spec.dispatch(name, input, options);
-    return Promise.reject({
-      _tag: "ExecutionFailed",
-      cause: new Error("defineSession: dispatch() not configured"),
-    } satisfies SessionError);
+    return Promise.reject(
+      new ExecutionFailed({
+        cause: new Error("defineSession: dispatch() not configured"),
+      }) satisfies SessionError,
+    );
   }
 
   channel<T = unknown>(name: string): ChannelHandle<T> {
@@ -339,5 +341,5 @@ function coerceSessionError(cause: unknown): SessionError {
   ) {
     return cause as SessionError;
   }
-  return { _tag: "ExecutionFailed", cause };
+  return new ExecutionFailed({ cause });
 }

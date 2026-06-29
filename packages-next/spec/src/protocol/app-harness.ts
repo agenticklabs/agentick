@@ -187,11 +187,19 @@ export type TelemetryLayer = Layer.Layer<never, never, never>;
 // Errors
 // ============================================================================
 
-export type AppError =
-  | { readonly _tag: "SessionAlreadyExistsError"; readonly sessionId: string }
-  | { readonly _tag: "SessionNotFoundError"; readonly sessionId: string }
-  | { readonly _tag: "AppClosedError" }
-  | { readonly _tag: "AppExecutionFailed"; readonly cause: unknown };
+/**
+ * Migrated to class hierarchy under `AgentickError` — ADR 41 cluster 2.
+ * Re-exports from `../errors/lifecycle.js` so existing import paths
+ * keep working. New code SHOULD import from `@agentick/spec-next/errors`.
+ */
+export {
+  AppClosedError,
+  AppError,
+  type AppErrorChannel,
+  AppExecutionFailed,
+  SessionAlreadyExistsError,
+  SessionNotFoundError,
+} from "../errors/lifecycle.js";
 
 // ============================================================================
 // AppHarnessProtocol

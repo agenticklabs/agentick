@@ -41,12 +41,15 @@ import {
   type ToolHandler,
 } from "@agentick/tool-executor-next";
 import {
+  AppClosedError,
+  AppExecutionFailed,
   DEFAULT_JOURNALING_POLICY,
   HandlerError,
   isExecutorFactory,
   isLoopExecutorFactory,
   isReconcilerFactory,
   isToolExecutorFactory,
+  SessionAlreadyExistsError,
   toRegistration,
 } from "@agentick/spec-next";
 import { mergeLayered, omitUndefined } from "@agentick/utils-next";
@@ -1053,18 +1056,17 @@ export class AppHarness<P = unknown>
     for (const h of this.sessionCreateHandlers) {
       const verdict = await h(input);
       if (verdict && verdict.kind === "veto") {
-        throw {
-          _tag: "AppExecutionFailed",
+        throw new AppExecutionFailed({
           cause: new Error(
             verdict.reason ? `session create vetoed: ${verdict.reason}` : "session create vetoed",
           ),
-        } as AppError;
+        });
       }
     }
 
     const sessionId = input.sessionId ?? `session:${ulid()}`;
     if (this.registry.has(sessionId)) {
-      throw { _tag: "SessionAlreadyExistsError", sessionId } as AppError;
+      throw new SessionAlreadyExistsError({ sessionId });
     }
 
     // Per-session elicitation harness. Owns the request/response
@@ -1433,7 +1435,7 @@ export class AppHarness<P = unknown>
   }
 
   private assertOpen(): void {
-    if (this._closed) throw { _tag: "AppClosedError" } as AppError;
+    if (this._closed) throw new AppClosedError() as AppError;
   }
 }
 
@@ -1468,7 +1470,7 @@ function mapAppError(cause: unknown): AppError {
   ) {
     return cause as AppError;
   }
-  return { _tag: "AppExecutionFailed", cause };
+  return new AppExecutionFailed({ cause });
 }
 
 // ─────────────────────────────────────────────────────────────────────

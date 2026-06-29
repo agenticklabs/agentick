@@ -16,6 +16,7 @@ import { describe, expect, it } from "vitest";
 import { Effect, Stream } from "effect";
 import { LocalEventBus, MemoryJournal, LocalInbox } from "@agentick/runtime-next";
 import type { ProtocolEvent } from "@agentick/spec-next";
+import { AppAlreadyExistsError, GatewayClosedError } from "@agentick/spec-next";
 
 import { createGateway } from "../index.js";
 
@@ -121,7 +122,7 @@ describe("GatewayHarness — createApp", () => {
         rootElement: {} as unknown,
         options: makeAppOptions() as never,
       }),
-    ).rejects.toMatchObject({ _tag: "AppAlreadyExistsError", appId: "dup" });
+    ).rejects.toMatchObject(new AppAlreadyExistsError({ appId: "dup" }));
     await gateway.closeGateway();
   });
 
@@ -197,7 +198,7 @@ describe("GatewayHarness — close cascade", () => {
         rootElement: {} as unknown,
         options: makeAppOptions() as never,
       }),
-    ).rejects.toMatchObject({ _tag: "GatewayClosedError" });
+    ).rejects.toMatchObject(new GatewayClosedError());
   });
 });
 

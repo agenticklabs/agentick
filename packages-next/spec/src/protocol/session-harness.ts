@@ -345,17 +345,27 @@ export interface SessionSnapshot {
 // Errors
 // ============================================================================
 
-export type SessionError =
-  | { readonly _tag: "SessionClosedError"; readonly attemptedCommand: string }
-  | { readonly _tag: "SessionBusyError"; readonly reason: string }
-  | { readonly _tag: "TimelineError"; readonly reason: string }
-  | { readonly _tag: "KnobError"; readonly knob: string; readonly reason: string }
-  | { readonly _tag: "ChannelError"; readonly channel: string; readonly reason: string }
-  | { readonly _tag: "ExecutionFailed"; readonly cause: unknown };
-
-export type StateApplyError =
-  | { readonly _tag: "TimelineWriteFailed"; readonly cause: unknown }
-  | { readonly _tag: "SessionClosedError"; readonly attemptedCommand: string };
+/**
+ * Session + state-apply errors — migrated to class hierarchy (ADR 41
+ * cluster 2). Re-exports from `../errors/lifecycle.js`.
+ *
+ * Wire tag rename: `"TimelineError"` → `"SessionTimelineError"` to
+ * remove a namespace collision with the planned `TimelineError`
+ * abstract class from the execution cluster.
+ */
+export {
+  ChannelError,
+  ExecutionFailed,
+  KnobError,
+  SessionBusyError,
+  SessionClosedError,
+  SessionError,
+  type SessionErrorChannel,
+  SessionTimelineError,
+  type StateApplyError,
+  type StateApplyErrorChannel,
+  TimelineWriteFailed,
+} from "../errors/lifecycle.js";
 
 // ============================================================================
 // Notify lifecycle (tick-end forwarding)

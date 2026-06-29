@@ -50,6 +50,7 @@ import type {
   SessionHarnessProtocol,
   ToolExecutorProtocol,
 } from "@agentick/spec-next";
+import { SessionClosedError } from "@agentick/spec-next";
 
 // ============================================================================
 // Factory contract
@@ -479,7 +480,7 @@ export function runSessionConformance(factory: SessionConformanceFactory): void 
       await session.close();
       await expect(
         session.send({ messages: [{ role: "user", content: "x" }] }),
-      ).rejects.toMatchObject({ _tag: "SessionClosedError" });
+      ).rejects.toBeInstanceOf(SessionClosedError);
     });
   });
 

@@ -45,7 +45,12 @@ import type {
   ToolDeclaration,
   ToolRegistration,
 } from "@agentick/spec-next";
-import { DEFAULT_JOURNALING_POLICY, toRegistration } from "@agentick/spec-next";
+import {
+  AppAlreadyExistsError,
+  DEFAULT_JOURNALING_POLICY,
+  GatewayClosedError,
+  toRegistration,
+} from "@agentick/spec-next";
 import { mergeLayered } from "@agentick/utils-next";
 import { AppHarness, type AppHarnessOptions } from "@agentick/app-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
@@ -169,13 +174,12 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
 
   async createApp<P>(input: CreateGatewayAppInput<P>): Promise<AppHarnessProtocol<P>> {
     if (this.gatewayClosed) {
-      const err: GatewayError = { _tag: "GatewayClosedError" };
+      const err: GatewayError = new GatewayClosedError();
       throw err;
     }
     const appId = input.appId ?? `app:${ulid()}`;
     if (this._apps.has(appId)) {
-      const err: GatewayError = { _tag: "AppAlreadyExistsError", appId };
-      throw err;
+      throw new AppAlreadyExistsError({ appId });
     }
 
     // Default substrate slots to Gateway's substrate (instance form —

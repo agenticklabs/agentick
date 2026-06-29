@@ -23,7 +23,7 @@ import type {
   SpawnContextChildInput,
   ToolRegistration,
 } from "@agentick/spec-next";
-import { jsonSchema } from "@agentick/spec-next";
+import { ExecutionFailed, jsonSchema } from "@agentick/spec-next";
 
 import { SessionHarness } from "../harness.js";
 import { omitUndefined } from "@agentick/utils-next";
@@ -313,7 +313,7 @@ describe("SessionHarness — knob handle", () => {
 describe("SessionHarness — spawn", () => {
   it("throws when no spawnContext is wired", async () => {
     const { session } = await mkSession();
-    await expect(session.spawn({ agent: null })).rejects.toMatchObject({ _tag: "ExecutionFailed" });
+    await expect(session.spawn({ agent: null })).rejects.toBeInstanceOf(ExecutionFailed);
     await session.close();
   });
 
