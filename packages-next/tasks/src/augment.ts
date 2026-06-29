@@ -24,25 +24,27 @@
  * @see docs/proposals/v2/blueprint/27-modular-built-ins.md
  */
 
-import type { TasksHarnessProtocol } from "@agentick/spec-next";
+import type { Tasks } from "@agentick/spec-next";
 
 declare module "@agentick/spec-next" {
   interface HookBridges {
     /**
      * Substrate-level long-running tool registry. Tool handlers,
      * skill providers, and any code that needs to spawn observable
-     * managed work register tasks here.
+     * managed work register tasks here. Typed as the `Tasks` adopter
+     * alias (= `TasksHarnessProtocol`) so the `Harness`-word stays
+     * out of public surfaces per ADR 42.
      */
-    readonly tasks: TasksHarnessProtocol;
+    readonly tasks: Tasks;
   }
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   interface SessionHarnessProtocol<P> {
     /**
-     * The session's tasks harness. Same instance the per-session
+     * The session's tasks surface — same instance the per-session
      * tool executor + `bridges.tasks` use; clients reach it via
      * `session/cancelTask` to abort pending tasks.
      */
-    readonly tasks: TasksHarnessProtocol;
+    readonly tasks: Tasks;
   }
 }

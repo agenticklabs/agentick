@@ -17,12 +17,12 @@
  * @see docs/proposals/v2/blueprint/32-extension-shape-spectrum.md
  */
 
-import type { SkillsHarnessProtocol } from "@agentick/spec-next";
+import type { Skills } from "@agentick/spec-next";
 import type { SkillsHandle } from "./handle.js";
 
 declare module "@agentick/spec-next" {
   interface HookBridges {
-    readonly skills: SkillsHarnessProtocol;
+    readonly skills: Skills;
   }
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars

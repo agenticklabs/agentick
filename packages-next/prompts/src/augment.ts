@@ -8,7 +8,7 @@
  * `@agentick/prompts-next` (per ADR 27).
  */
 
-import type { PromptsHarnessProtocol } from "@agentick/spec-next";
+import type { Prompts } from "@agentick/spec-next";
 import type { PromptsHandle } from "./handle.js";
 
 declare module "@agentick/spec-next" {
@@ -19,7 +19,7 @@ declare module "@agentick/spec-next" {
      * privileged" — the reconciler iterates `HookBridges` generically
      * via feature detection, so absence is a valid state.
      */
-    readonly prompts?: PromptsHarnessProtocol;
+    readonly prompts?: Prompts;
   }
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
