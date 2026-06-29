@@ -193,6 +193,19 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
     return null;
   }
 
+  /**
+   * Throw-on-miss sister of {@link resolve}. Same lookup path; throws
+   * a `PromptNotFound`-tagged error instead of returning `null` when
+   * no loader has the name. Use when the absence of a name is a
+   * programming error (must-exist contract). For "render this prompt"
+   * use `invoke()` instead — it already throws PromptNotFound on miss.
+   */
+  async require(name: string): Promise<PromptDeclaration> {
+    const resolved = await this.resolve(name);
+    if (resolved !== null) return resolved;
+    throw { _tag: "PromptNotFound", name } satisfies PromptsError;
+  }
+
   // ─────────── Sync surface ───────────
 
   getDeclaration(name: string): PromptDeclaration | undefined {

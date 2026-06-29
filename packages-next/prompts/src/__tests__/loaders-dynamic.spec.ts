@@ -159,3 +159,42 @@ describe("PromptsHarness lookup-on-miss in invoke / get", () => {
     expect(loaderCalled).toBe(false);
   });
 });
+
+describe("PromptsHarness.require", () => {
+  it("returns the declaration on hit (no render)", async () => {
+    const h = await makeHarness();
+    h.setLoaders([fromArray([{ declaration: { name: "p", description: "p", template: "hi" } }])]);
+    const decl = await h.require("p");
+    expect(decl.name).toBe("p");
+    expect(decl.description).toBe("p");
+  });
+
+  it("throws PromptNotFound when no source has the name", async () => {
+    const h = await makeHarness();
+    h.setLoaders([
+      fromArray([{ declaration: { name: "other", description: "o", template: "x" } }]),
+    ]);
+    await expect(h.require("missing")).rejects.toMatchObject({
+      _tag: "PromptNotFound",
+      name: "missing",
+    });
+  });
+
+  it("returns from cache without consulting loaders when already registered", async () => {
+    const h = await makeHarness();
+    await h.register({
+      declaration: { name: "cached", description: "c", template: "x" },
+    });
+    let loaderCalled = false;
+    h.setLoaders([
+      {
+        load: async () => {
+          loaderCalled = true;
+          return [];
+        },
+      },
+    ]);
+    await h.require("cached");
+    expect(loaderCalled).toBe(false);
+  });
+});

@@ -226,6 +226,10 @@ await session.prompts.invoke({ name: "late_prompt", args: { ... } });
 
 // Explicit one-name resolve (no invoke):
 const decl = await session.prompts.resolve("late_prompt");
+
+// Throw-on-miss variant for must-exist contracts:
+const decl = await session.prompts.require("must_exist");
+// → throws { _tag: "PromptNotFound", name: "must_exist" } if no source has it.
 ```
 
 `reload({ pruneMissing: true })` removes entries that have disappeared from sources — off by default so a runtime `harness.register(...)` isn't clobbered. The lookup-on-miss path is transparent in `invoke()` / `get()`; call `resolve()` directly when you want the declaration without rendering. Loaders may implement an optional `lookup(name)` for fast-path resolution; the built-in `fromX` factories do.

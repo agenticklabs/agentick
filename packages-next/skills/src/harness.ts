@@ -161,6 +161,18 @@ export class SkillsHarness extends BaseHarness<SkillsSurface> implements SkillsH
     return null;
   }
 
+  /**
+   * Throw-on-miss sister of {@link resolve}. Same lookup path; throws
+   * a `SkillNotFound`-tagged error instead of returning `null` when
+   * no loader has the name. Use when the absence of a name is a
+   * programming error (must-exist contract), not a domain case.
+   */
+  async require(name: string): Promise<Skill> {
+    const resolved = await this.resolve(name);
+    if (resolved !== null) return resolved;
+    throw { _tag: "SkillNotFound", name } satisfies SkillsError;
+  }
+
   // ─────────── Sync surface ───────────
 
   get(name: string): Skill | undefined {

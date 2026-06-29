@@ -150,3 +150,38 @@ describe("SkillsHarness.resolve", () => {
     expect(result?.description).toBe("FIRST");
   });
 });
+
+describe("SkillsHarness.require", () => {
+  it("returns the skill on hit (same as resolve)", async () => {
+    const h = await makeHarness();
+    h.setLoaders([fromArray([{ name: "p", description: "p", content: "p" }])]);
+    const result = await h.require("p");
+    expect(result.name).toBe("p");
+  });
+
+  it("throws SkillNotFound when no source has the name", async () => {
+    const h = await makeHarness();
+    h.setLoaders([fromArray([{ name: "alpha", description: "a", content: "a" }])]);
+    await expect(h.require("missing")).rejects.toMatchObject({
+      _tag: "SkillNotFound",
+      name: "missing",
+    });
+  });
+
+  it("returns from cache without consulting loaders when already registered", async () => {
+    const h = await makeHarness();
+    await h.register({ name: "cached", description: "c", content: "c" });
+    let loaderCalled = false;
+    h.setLoaders([
+      {
+        load: async () => {
+          loaderCalled = true;
+          return [];
+        },
+      },
+    ]);
+    const result = await h.require("cached");
+    expect(result.name).toBe("cached");
+    expect(loaderCalled).toBe(false);
+  });
+});

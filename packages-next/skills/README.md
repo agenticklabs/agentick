@@ -153,6 +153,10 @@ const { added, updated, removed } = await session.skills.reload();
 const skill = await session.skills.resolve("late_arriving");
 // First call walks loaders, registers + returns. Subsequent calls
 // hit cache. Returns null when no loader has the name.
+
+// Throw-on-miss variant for must-exist contracts:
+const skill = await session.skills.require("must_exist");
+// → throws { _tag: "SkillNotFound", name: "must_exist" } if no source has it.
 ```
 
 `reload({ pruneMissing: true })` removes entries that have disappeared from the loader snapshot — off by default so a runtime `harness.register(...)` isn't clobbered by the next reload. Loaders may implement an optional `lookup(name)` for fast-path resolution (no full enumeration); the built-in `fromX` factories do.

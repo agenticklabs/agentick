@@ -48,4 +48,13 @@ export interface PromptsHandle {
    * want the declaration without invoking it.
    */
   resolve(name: string): Promise<PromptDeclaration | null>;
+
+  /**
+   * Throw-on-miss sister of {@link resolve}. Same lookup path; throws
+   * a `PromptNotFound`-tagged error when no source has the name. Use
+   * when missing is a programming error (must-exist contract), not a
+   * domain case. For "render this prompt" use `invoke()` — it
+   * already throws `PromptNotFound` on miss.
+   */
+  require(name: string): Promise<PromptDeclaration>;
 }

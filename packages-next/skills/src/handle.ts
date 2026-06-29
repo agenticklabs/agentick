@@ -50,4 +50,12 @@ export interface SkillsHandle {
    * the name.
    */
   resolve(name: string): Promise<Skill | null>;
+
+  /**
+   * Throw-on-miss sister of {@link resolve}. Same lookup path; throws
+   * a `SkillNotFound`-tagged error when no source has the name. Use
+   * when missing is a programming error (must-exist contract), not a
+   * domain case.
+   */
+  require(name: string): Promise<Skill>;
 }
