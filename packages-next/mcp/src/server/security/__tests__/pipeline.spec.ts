@@ -55,18 +55,39 @@ import {
 } from "../index.js";
 import type { AuthnResult, AuthzResult, RateLimitResult, ResolvedSecurity } from "../index.js";
 
-function ctx(overrides: Partial<McpRequestContext> = {}): McpRequestContext {
+/**
+ * Build a fake `McpRequestContext` (ADR 43-shaped) for security
+ * pipeline tests. Top-level wire fields (serverId, connectionId,
+ * user, clientInfo, clientCapabilities) live under `mcp:` per
+ * ADR 43; this helper accepts a flat overrides object — top-level
+ * universal overrides (`signal`, `metadata`) AND nested `mcp:`
+ * overrides as a Partial, merged on top of the test defaults.
+ */
+interface CtxOverrides {
+  readonly signal?: AbortSignal;
+  readonly metadata?: Readonly<Record<string, unknown>>;
+  readonly mcp?: Partial<import("@agentick/spec-next").McpRequestExtras>;
+}
+
+function ctx(overrides: CtxOverrides = {}): McpRequestContext {
   return {
-    serverId: "srv:test",
-    connectionId: "conn:1",
-    transportKind: "in-memory",
-    connectedAt: 1000,
-    user: null,
-    clientInfo: null,
-    clientCapabilities: null,
-    signal: new AbortController().signal,
-    metadata: {},
-    ...overrides,
+    toolCallId: "tc:test",
+    signal: overrides.signal ?? new AbortController().signal,
+    setState: () => {},
+    emit: () => {},
+    task: "auto",
+    transport: "mcp",
+    mcp: {
+      serverId: "srv:test",
+      connectionId: "conn:1",
+      transportKind: "in-memory",
+      connectedAt: 1000,
+      user: null,
+      clientInfo: null,
+      clientCapabilities: null,
+      ...(overrides.mcp ?? {}),
+    },
+    metadata: overrides.metadata ?? {},
   };
 }
 
@@ -144,7 +165,7 @@ describe("evaluateRequestPipeline", () => {
       { q: "hello" },
     );
     expect(order).toEqual(["authn", "authz", "rate", "sanitize"]);
-    expect(result.ctx.user).toEqual({ id: "u1" });
+    expect(result.ctx.mcp.user).toEqual({ id: "u1" });
     expect(result.toolInput).toEqual({ q: "hello" });
   });
 
@@ -229,7 +250,7 @@ describe("evaluateRequestPipeline", () => {
           user: { id: "u9", roles: ["admin"] },
         }),
         authorizer: async (c) => {
-          seenAuthz.push(c.user);
+          seenAuthz.push(c.mcp.user);
           return { allowed: true };
         },
       }),
@@ -338,8 +359,8 @@ describe("roleBasedAuthz", () => {
         "tool_call:*": [],
       },
     });
-    const cAdmin = ctx({ user: { id: "u", roles: ["admin"] } });
-    const cUser = ctx({ user: { id: "u", roles: [] } });
+    const cAdmin = ctx({ mcp: { user: { id: "u", roles: ["admin"] } } });
+    const cUser = ctx({ mcp: { user: { id: "u", roles: [] } } });
     expect((await stage(cAdmin, { type: "tool_call", name: "secret" })).allowed).toBe(true);
     expect((await stage(cUser, { type: "tool_call", name: "secret" })).allowed).toBe(false);
     expect((await stage(cUser, { type: "tool_call", name: "other" })).allowed).toBe(true);
@@ -347,20 +368,25 @@ describe("roleBasedAuthz", () => {
 
   it("missing rule = implicit deny", async () => {
     const stage = roleBasedAuthz({ rules: { "tool_call:specific": ["admin"] } });
-    const result = await stage(ctx({ user: { id: "u" } }), { type: "tool_call", name: "other" });
+    const result = await stage(ctx({ mcp: { user: { id: "u" } } }), {
+      type: "tool_call",
+      name: "other",
+    });
     expect(result.allowed).toBe(false);
   });
 
   it("empty role array = any authenticated user", async () => {
     const stage = roleBasedAuthz({ rules: { "*": [] } });
-    expect((await stage(ctx({ user: { id: "u" } }), { type: "tool_list" })).allowed).toBe(true);
+    expect((await stage(ctx({ mcp: { user: { id: "u" } } }), { type: "tool_list" })).allowed).toBe(
+      true,
+    );
   });
 
   it("catch-all `*` rule applies when no specific rule matches", async () => {
     const stage = roleBasedAuthz({
       rules: { "tool_call:specific": ["admin"], "*": ["any-user"] },
     });
-    const c = ctx({ user: { id: "u", roles: ["any-user"] } });
+    const c = ctx({ mcp: { user: { id: "u", roles: ["any-user"] } } });
     expect((await stage(c, { type: "prompt_list" })).allowed).toBe(true);
   });
 });
@@ -368,7 +394,7 @@ describe("roleBasedAuthz", () => {
 describe("slidingWindowLimiter", () => {
   it("allows under limit", async () => {
     const stage = slidingWindowLimiter({ windowMs: 1000, max: 3 });
-    const c = ctx({ user: { id: "u" } });
+    const c = ctx({ mcp: { user: { id: "u" } } });
     for (let i = 0; i < 3; i++) {
       const result = await stage(c, { type: "tool_call", name: "x" });
       expect(result.allowed).toBe(true);
@@ -377,7 +403,7 @@ describe("slidingWindowLimiter", () => {
 
   it("rejects over limit, returns retryAfterMs", async () => {
     const stage = slidingWindowLimiter({ windowMs: 10_000, max: 1 });
-    const c = ctx({ user: { id: "u" } });
+    const c = ctx({ mcp: { user: { id: "u" } } });
     await stage(c, { type: "tool_call", name: "x" });
     const second = await stage(c, { type: "tool_call", name: "x" });
     expect(second.allowed).toBe(false);
@@ -386,8 +412,11 @@ describe("slidingWindowLimiter", () => {
 
   it("per-key isolation", async () => {
     const stage = slidingWindowLimiter({ windowMs: 10_000, max: 1 });
-    await stage(ctx({ user: { id: "u1" } }), { type: "tool_call", name: "x" });
-    const otherUser = await stage(ctx({ user: { id: "u2" } }), { type: "tool_call", name: "x" });
+    await stage(ctx({ mcp: { user: { id: "u1" } } }), { type: "tool_call", name: "x" });
+    const otherUser = await stage(ctx({ mcp: { user: { id: "u2" } } }), {
+      type: "tool_call",
+      name: "x",
+    });
     expect(otherUser.allowed).toBe(true);
   });
 });

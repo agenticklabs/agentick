@@ -64,6 +64,7 @@ function fakeCtx() {
     toolCallId: "tc-1",
     signal: new AbortController().signal,
     task: "auto" as const,
+    transport: "in-process" as const,
     setState: () => undefined,
     emit: () => undefined,
   };

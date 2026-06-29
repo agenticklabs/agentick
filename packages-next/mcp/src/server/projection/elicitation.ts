@@ -42,6 +42,7 @@ import {
   type UrlElicitationSpec,
 } from "@agentick/spec-next";
 import { ulid } from "@agentick/runtime-next";
+import { omitUndefined } from "@agentick/utils-next";
 
 // Re-export the spec classes so adopters who catch these can stay on
 // the `@agentick/mcp-next/server` import path.
@@ -183,16 +184,12 @@ async function sendFormElicit(
     { method: "elicitation/create", params: { message, requestedSchema: schema } },
     ElicitResultSchema,
   );
-  return {
+  return omitUndefined({
     action: result.action,
-    ...(result.content !== undefined
-      ? {
-          content: result.content as Readonly<
-            Record<string, string | number | boolean | readonly string[]>
-          >,
-        }
-      : {}),
-  };
+    content: result.content as Readonly<
+      Record<string, string | number | boolean | readonly string[]>
+    >,
+  }) as FormRoundTripResult;
 }
 
 async function sendUrlElicit(

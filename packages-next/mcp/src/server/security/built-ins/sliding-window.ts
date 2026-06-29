@@ -64,5 +64,5 @@ export function slidingWindowLimiter(options: SlidingWindowLimiterOptions): Rate
 }
 
 function defaultKeyFn(ctx: McpRequestContext): string {
-  return ctx.user?.id ?? ctx.connectionId;
+  return ctx.mcp.user?.id ?? ctx.mcp.connectionId;
 }

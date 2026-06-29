@@ -22,77 +22,46 @@
 
 import type { Effect } from "effect";
 
+import type {
+  McpAuthenticatedUser,
+  McpRequestExtras,
+  ToolHandlerCtx,
+} from "../data/tool-handler.js";
 import type { McpServerError } from "../errors/harnesses.js";
-import type { Elicit } from "./elicit-api.js";
 import type { Unsubscribe } from "./inbox.js";
 import type { Prompts } from "./prompts-harness.js";
+
+// Re-export from data/tool-handler so adopters who import McpAuthenticatedUser
+// / McpRequestExtras from this module's historical path keep working.
+export type { McpAuthenticatedUser, McpRequestExtras };
 
 // ============================================================================
 // Request context — the central flow-through type
 // ============================================================================
 
 /**
- * The per-request context every projection stage sees. Built once per
- * incoming request from the connection's transport-level identity
- * material + the JSON-RPC envelope.
+ * MCP-transport request context for tool handlers, security stages,
+ * and projection code. Structural type alias of {@link ToolHandlerCtx}
+ * narrowed to `transport: "mcp"` with the `mcp` extras non-optional
+ * (definitely populated at MCP request handling time).
  *
- * Ported from v1 `packages/mcp/src/protocol/types.ts` `MCPRequestContext`
- * with minimal renaming for v2 conventions. The shape is intentionally
- * narrow — adopter-specific extension goes in `metadata`, not as
- * top-level slots.
+ * ADR 43 unified ctx across transports — what used to be a standalone
+ * interface here is now {@link ToolHandlerCtx} with a discriminator.
+ * `McpRequestContext` stays as the named import path for code paths
+ * that are intrinsically MCP-only (security stages, projection
+ * builders), but at runtime / type-system level there is ONE ctx
+ * shape; tool handlers should target `ToolHandlerCtx`.
+ *
+ * Migration note: ports from v1 `MCPRequestContext` previously lived
+ * here as a flat interface — `serverId`, `connectionId`, etc. were
+ * top-level. After ADR 43 they live under `ctx.mcp.*`. Adopter code
+ * that destructures from `ctx` directly needs to update; code that
+ * passes the whole `ctx` through doesn't.
  */
-export interface McpRequestContext {
-  /** Identifier of the McpServerHarness instance the request reached. */
-  readonly serverId: string;
-  /** Identifier of the underlying transport connection. */
-  readonly connectionId: string;
-  /** Transport kind ("stdio" / "http" / "ws" / "in-memory" / ...). */
-  readonly transportKind: string;
-  /** Time the connection was established, wall-clock ms. */
-  readonly connectedAt: number;
-  /**
-   * Authenticated principal. Populated by the `Authenticator` stage.
-   * `null` for connections that pass `ConnectionGuard` but have no
-   * explicit authentication (default-allow transports).
-   */
-  readonly user: McpAuthenticatedUser | null;
-  /** Client identification from `initialize` handshake. */
-  readonly clientInfo: { readonly name: string; readonly version: string } | null;
-  /** Capability map the client advertised in `initialize`. */
-  readonly clientCapabilities: Readonly<Record<string, unknown>> | null;
-  /** AbortSignal that fires on client cancellation or transport disconnect. */
-  readonly signal: AbortSignal;
-  /** Send a `notifications/progress` to this connection for the in-flight request. */
-  readonly sendProgress?: (progress: number, total?: number, message?: string) => Promise<void>;
-  /**
-   * Sugar surface for prompting the connected end-user via the MCP
-   * `elicitation/create` server→client request. Present whenever:
-   *   1. The server did NOT explicitly opt out (`elicit: false`), AND
-   *   2. The connected client advertised the `elicitation` capability.
-   *
-   * Elicitation is ON by default — the real gate is the client's
-   * capability advertisement. Tool handlers should still check for
-   * presence before calling, since clients that don't support elicit
-   * leave this `undefined`.
-   */
-  readonly elicit?: Elicit;
-  /** Free-form metadata — adopter extension point. */
-  readonly metadata: Readonly<Record<string, unknown>>;
-}
-
-/**
- * Authenticated principal. Adopter `Authenticator` stages populate
- * this. The `roles` + `scopes` fields are conventional but unenforced
- * at the spec layer — adopters' `Authorizer` stage decides how to use
- * them.
- */
-export interface McpAuthenticatedUser {
-  readonly id: string;
-  readonly displayName?: string;
-  readonly roles?: readonly string[];
-  readonly scopes?: readonly string[];
-  readonly [key: string]: unknown;
-}
+export type McpRequestContext = ToolHandlerCtx & {
+  readonly transport: "mcp";
+  readonly mcp: McpRequestExtras;
+};
 
 // ============================================================================
 // Protocol — the harness surface

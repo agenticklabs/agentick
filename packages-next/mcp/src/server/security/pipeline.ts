@@ -84,7 +84,8 @@ export async function evaluateRequestPipeline(
       reason: authn.reason || "Authentication failed",
     });
   }
-  const authedCtx: McpRequestContext = { ...ctx, user: authn.user };
+  // ADR 43 — `user` lives under `ctx.mcp` now (was top-level pre-ADR-43).
+  const authedCtx: McpRequestContext = { ...ctx, mcp: { ...ctx.mcp, user: authn.user } };
 
   // 2. Authorize.
   const authz = await security.authorizer(authedCtx, operation);

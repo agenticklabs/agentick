@@ -105,5 +105,5 @@ function matchRule(
 }
 
 function defaultGetRoles(ctx: McpRequestContext): readonly string[] {
-  return ctx.user?.roles ?? [];
+  return ctx.mcp.user?.roles ?? [];
 }

@@ -380,17 +380,37 @@ export class McpServerHarness
         null;
       const sdkClientInfo = sdkServer.getClientVersion?.() ?? null;
 
+      // ADR 43 — unified ToolHandlerCtx with `transport: "mcp"` +
+      // MCP-specific extras nested under `mcp:`. Tool handlers receive
+      // the SAME ctx shape whether dispatched in-process or via MCP.
       const ctx: McpRequestContext = {
-        serverId: this.scopeId,
-        connectionId,
-        transportKind: info.transportKind,
-        connectedAt,
-        user: null,
-        clientInfo: sdkClientInfo
-          ? { name: sdkClientInfo.name, version: sdkClientInfo.version }
-          : null,
-        clientCapabilities: sdkClientCaps,
+        // Universal ToolHandlerCtx fields. The MCP server doesn't have
+        // a `toolCallId` until the tool-call handler runs and the
+        // tools projection generates one; we synthesize a default here
+        // that the tool-projection layer overwrites per-call. Same for
+        // `task` — MCP tools default to `"auto"` until per-call wire
+        // metadata flips them.
+        toolCallId: `mcp:req:${ulid()}`,
         signal: new AbortController().signal,
+        setState: () => {
+          /* no-op for MCP-server ctx — sessions own this */
+        },
+        emit: () => {
+          /* no-op for MCP-server ctx — sessions own channel emit */
+        },
+        task: "auto",
+        transport: "mcp" as const,
+        mcp: {
+          serverId: this.scopeId,
+          connectionId,
+          transportKind: info.transportKind,
+          connectedAt,
+          user: null,
+          clientInfo: sdkClientInfo
+            ? { name: sdkClientInfo.name, version: sdkClientInfo.version }
+            : null,
+          clientCapabilities: sdkClientCaps,
+        },
         metadata: omitUndefined({
           ...(info.headers ? { headers: info.headers } : {}),
           origin: info.origin,

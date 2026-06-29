@@ -14,6 +14,7 @@
 
 import type { Effect } from "effect";
 
+import type { Elicit } from "../protocol/elicit-api.js";
 import type { ContentBlock } from "./content-blocks.js";
 
 // ============================================================================
@@ -62,6 +63,7 @@ export interface HandlerChannelSeed {
  * bridge, custom MCP refs) flow through the JSX `use:` capture.
  */
 export interface ToolHandlerCtx {
+  // ── Universal — every transport populates these ───────────────────
   readonly toolCallId: string;
   readonly sessionId?: string;
   readonly executionId?: string;
@@ -69,18 +71,7 @@ export interface ToolHandlerCtx {
   readonly signal: AbortSignal;
   setState(key: string, value: unknown): void;
   emit(seed: HandlerChannelSeed): void;
-  /**
-   * The session's elicitation harness. `undefined` only on
-   * substrate-stripped test fixtures; production sessions always
-   * have one. Cast / null-coalesce if you're in a test that omits
-   * it.
-   */
-  readonly elicitation?: import("../protocol/elicitation-harness.js").ElicitationHarnessProtocol;
-  /**
-   * The session's tasks harness. `undefined` only on
-   * substrate-stripped test fixtures.
-   */
-  readonly tasks?: import("../protocol/tasks-harness.js").TasksHarnessProtocol;
+
   /**
    * Caller-resolved task mode for THIS dispatch. Mirrors
    * `DispatchInput.task` after defaulting (`"auto"` when omitted).
@@ -105,6 +96,120 @@ export interface ToolHandlerCtx {
    * combinations.
    */
   readonly task: "auto" | "ref" | "inline";
+
+  // ── Sugar surfaces (NEW — ADR 43; same in both transports) ────────
+
+  /**
+   * Sugar over the underlying elicit transport. Present whenever the
+   * elicit transport is available (in-process: an `ElicitationHarness`
+   * is mounted; MCP: the connected client advertised the capability +
+   * server didn't opt out). `undefined` otherwise — tool handlers
+   * MUST check before use. Cross-transport portable: a handler that
+   * calls `ctx.elicit!.text(...)` runs identically in an in-process
+   * Agentick session AND inside an MCP server.
+   */
+  readonly elicit?: Elicit;
+
+  // ── Raw substrate primitives (existing — power-user access) ───────
+
+  /**
+   * The session's elicitation harness. `undefined` only on
+   * substrate-stripped test fixtures; production sessions always
+   * have one. Prefer {@link Elicit} sugar via `ctx.elicit` for
+   * cross-transport portability; reach for this when you need raw
+   * protocol surface.
+   */
+  readonly elicitation?: import("../protocol/elicitation-harness.js").ElicitationHarnessProtocol;
+  /**
+   * The session's tasks harness. `undefined` only on
+   * substrate-stripped test fixtures.
+   */
+  readonly tasks?: import("../protocol/tasks-harness.js").TasksHarnessProtocol;
+
+  // ── Transport discriminator + extras (NEW — ADR 43) ───────────────
+
+  /**
+   * Which transport invoked this handler. `"in-process"` for tools
+   * dispatched by an Agentick session's tool executor; `"mcp"` for
+   * tools projected onto the MCP server wire. Discriminator for the
+   * {@link mcp} field below. Common code ignores it — the universal
+   * fields above are enough. Only branch on this when the tool
+   * genuinely needs different behavior per transport.
+   */
+  readonly transport: "in-process" | "mcp";
+
+  /**
+   * MCP transport-specific extras. Present iff `transport === "mcp"`.
+   * Carries wire-level identity material (connection id, client caps,
+   * authenticated user, progress callback) that's meaningless for
+   * in-process dispatch. Use `ctx.mcp?.clientCapabilities` etc. for
+   * defensively-typed code; reach inside without `?` after narrowing
+   * on `transport`.
+   */
+  readonly mcp?: McpRequestExtras;
+
+  /**
+   * Free-form per-call metadata. Adopter extension point. Populated
+   * by the projection layer in the MCP-server case (`headers`,
+   * `origin`, `remoteAddress`); empty by default for in-process.
+   */
+  readonly metadata?: Readonly<Record<string, unknown>>;
+}
+
+// ============================================================================
+// MCP request extras (ADR 43)
+// ============================================================================
+
+/**
+ * MCP-transport-specific ctx extras. Lives under `ToolHandlerCtx.mcp`
+ * when `transport === "mcp"`. The fields here are the wire-level
+ * identity material that's meaningless in the in-process case —
+ * connection ids, client capabilities, progress callbacks, the
+ * authenticated principal as surfaced by the auth pipeline.
+ *
+ * ADR 43 moved these out of a standalone `McpRequestContext`
+ * interface into this sub-slot so tool handlers don't see a
+ * transport-divergent ctx shape.
+ */
+export interface McpRequestExtras {
+  /** Identifier of the McpServerHarness instance the request reached. */
+  readonly serverId: string;
+  /** Identifier of the underlying transport connection. */
+  readonly connectionId: string;
+  /** Transport kind ("stdio" / "http" / "ws" / "in-memory" / ...). */
+  readonly transportKind: string;
+  /** Time the connection was established, wall-clock ms. */
+  readonly connectedAt: number;
+  /**
+   * Authenticated principal. Populated by the `Authenticator` stage.
+   * `null` for connections that pass `ConnectionGuard` but have no
+   * explicit authentication (default-allow transports).
+   */
+  readonly user: McpAuthenticatedUser | null;
+  /** Client identification from `initialize` handshake. */
+  readonly clientInfo: { readonly name: string; readonly version: string } | null;
+  /** Capability map the client advertised in `initialize`. */
+  readonly clientCapabilities: Readonly<Record<string, unknown>> | null;
+  /** Send a `notifications/progress` to this connection for the in-flight request. */
+  readonly sendProgress?: (progress: number, total?: number, message?: string) => Promise<void>;
+}
+
+/**
+ * Authenticated principal. Adopter `Authenticator` stages populate
+ * this. The `roles` + `scopes` fields are conventional but unenforced
+ * at the spec layer — adopters' `Authorizer` stage decides how to use
+ * them.
+ *
+ * (Moved here from `protocol/mcp-server-harness.ts` to break the
+ * import cycle introduced by ADR 43. The type stays re-exported
+ * from `protocol/mcp-server-harness.ts` for back-compat.)
+ */
+export interface McpAuthenticatedUser {
+  readonly id: string;
+  readonly displayName?: string;
+  readonly roles?: readonly string[];
+  readonly scopes?: readonly string[];
+  readonly [key: string]: unknown;
 }
 
 // ============================================================================

@@ -1510,6 +1510,31 @@ blueprint's design decisions; this is execution-level).
 
 ### 2026-06-29
 
+- **ADR 43 proposed + Slice 1 landed — Unified `ToolHandlerCtx` across
+  transports.** Adds `transport: "in-process" | "mcp"` discriminator
+  to `ToolHandlerCtx` + `mcp?: McpRequestExtras` sub-slot for
+  MCP-only wire identity material (connection id, client capabilities,
+  authenticated user, sendProgress). `McpRequestContext` collapses to
+  a structural type alias of `ToolHandlerCtx & { transport: "mcp";
+  mcp: McpRequestExtras }`. Tool handlers receive the SAME ctx shape
+  whether dispatched in-process or via MCP server — `createTool` is
+  now portable across transports. ADD-only rollout strategy: no
+  existing fields removed; new fields populated at three known
+  ctx-build call sites (in-process tool-executor, MCP server
+  projection, session dispatch path) in the same slice. **Why:** the
+  prior split between `ToolHandlerCtx` (in-process) and
+  `McpRequestContext` (MCP) was historical, not designed — adopter
+  pushback on 2026-06-29 ("createTool tools should work with mcp
+  server too and both should basically work the same") forced the
+  unification. **How to apply:** any new ctx-build site populates
+  `transport` + `mcp?` per ADR 43 §3; sugar surfaces (`ctx.elicit`,
+  future `ctx.sample` / `ctx.roots`) work identically in both
+  transports; `Partial<McpRequestContext>` test fixtures use the
+  flat-override helper documented in `pipeline.spec.ts`. Workspace
+  7150/7158 green (+1 conformance round-trip). Tasks #272
+  (session.elicit), #266 (ADR 42 Slice 3 — withX trichotomy), and
+  future sampling/roots ctxes all unblocked by this landing.
+
 - **ADR 42 proposed — Harness-slot trichotomy (`Instance | Config | shorthand`).**
   Codifies the convention every harness-backed adopter slot must follow:
   the slot is an `Instance | Config` union, with an optional third
