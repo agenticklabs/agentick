@@ -25,7 +25,7 @@
  * @see docs/proposals/v2/blueprint/27-modular-built-ins.md
  */
 
-import type { ElicitationHarnessProtocol } from "@agentick/spec-next";
+import type { Elicit, ElicitationHarnessProtocol } from "@agentick/spec-next";
 
 declare module "@agentick/spec-next" {
   interface HookBridges {
@@ -41,10 +41,23 @@ declare module "@agentick/spec-next" {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   interface SessionHarnessProtocol<P> {
     /**
-     * The session's elicitation harness. Same instance the per-session
-     * tool executor + `bridges.elicitation` use; clients reach it via
-     * `session/respondToElicitation` to unblock pending elicitations.
+     * The session's elicitation harness — raw protocol surface. Same
+     * instance the per-session tool executor + `bridges.elicitation`
+     * use; clients reach it via `session/respondToElicitation` to
+     * unblock pending elicitations. Prefer {@link elicit} for the
+     * adopter-friendly sugar surface.
      */
     readonly elicitation: ElicitationHarnessProtocol;
+    /**
+     * Sugar surface — `Elicit` noun-aliased API over the session's
+     * `elicitation` harness. Symmetric with `ctx.elicit` exposed to
+     * tool handlers: same `Elicit` interface, same six form methods
+     * + URL mode + try* variants + `requireUrls` deferred-auth
+     * pattern.
+     *
+     * Built lazily by the session harness factory wiring; production
+     * sessions always have it.
+     */
+    readonly elicit: Elicit;
   }
 }

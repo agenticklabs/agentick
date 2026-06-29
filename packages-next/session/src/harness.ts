@@ -65,6 +65,7 @@ import {
   TimelineWriteFailed,
 } from "@agentick/spec-next";
 import { mergeLayered, omitUndefined } from "@agentick/utils-next";
+import { buildSessionElicit } from "@agentick/elicitation-next";
 import { withScope } from "@agentick/tool-executor-next";
 import type { KnobsHandle } from "@agentick/knobs-next";
 import type { StateHandle } from "@agentick/state-next";
@@ -344,6 +345,25 @@ export class SessionHarness<P = unknown>
   get elicitation(): import("@agentick/spec-next").ElicitationHarnessProtocol {
     return this.bridges.elicitation;
   }
+
+  /**
+   * Sugar surface — `Elicit` noun-aliased API over the session's
+   * `elicitation` harness. Same `Elicit` interface tool handlers see
+   * as `ctx.elicit` (whether dispatched in-process or via MCP server).
+   * Use this to elicit from session-level code paths (commands,
+   * agent-side asks) that don't have a tool ctx.
+   *
+   * Lazily constructed on first access; cached per session.
+   *
+   * @see docs/proposals/v2/blueprint/43-unified-tool-handler-ctx.md
+   */
+  get elicit(): import("@agentick/spec-next").Elicit {
+    if (!this._elicit) {
+      this._elicit = buildSessionElicit({ harness: this.bridges.elicitation });
+    }
+    return this._elicit;
+  }
+  private _elicit?: import("@agentick/spec-next").Elicit;
 
   /**
    * Per-session tasks harness — same instance the tool-executor's

@@ -78,9 +78,9 @@ import type {
 import type { KnobsHandle } from "@agentick/knobs-next";
 import type { StateHandle } from "@agentick/state-next";
 import type { TimelineHandle } from "@agentick/timeline-next";
-import { ElicitationHarness } from "@agentick/elicitation-next";
+import { buildSessionElicit, ElicitationHarness } from "@agentick/elicitation-next";
 import { TasksHarness } from "@agentick/tasks-next";
-import type { ElicitationHarnessProtocol, TasksHarnessProtocol } from "@agentick/spec-next";
+import type { Elicit, ElicitationHarnessProtocol, TasksHarnessProtocol } from "@agentick/spec-next";
 import { ExecutionFailed, HandlerError } from "@agentick/spec-next";
 
 // ============================================================================
@@ -158,6 +158,7 @@ class CallbackSessionHarness<P = unknown>
   readonly knobs: KnobsHandle;
   readonly state: StateHandle;
   readonly elicitation: ElicitationHarnessProtocol;
+  readonly elicit: Elicit;
   readonly tasks: TasksHarnessProtocol;
 
   constructor(
@@ -182,6 +183,7 @@ class CallbackSessionHarness<P = unknown>
       new ElicitationHarness(`${scopeId}:elicitation`, journal, bus, inbox, {
         parentScope: { sessionId: scopeId },
       });
+    this.elicit = buildSessionElicit({ harness: this.elicitation });
     this.tasks =
       spec.tasks ??
       new TasksHarness(`${scopeId}:tasks`, journal, bus, inbox, {
