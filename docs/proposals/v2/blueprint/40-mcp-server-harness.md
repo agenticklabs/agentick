@@ -31,9 +31,15 @@
 
 10. **Capability advertisement is harness-driven.** The server's `initialize` response declares only what's actually wired: prompts capability iff prompts are configured, elicitation iff `ElicitationHarness` is mounted, taskSupport iff `TasksHarness` is mounted, resources iff #123 is wired. No "we support X but it returns empty" lies on the wire.
 
-11. **Sampling/elicitation/roots/completions sugar ports from v1.** v1's `SampleAPIImpl.structured()` retry loop and `ElicitationAPIImpl` flat-schema validation are load-bearing and well-tested. Port the implementations; rewire the state-ownership to the v2 harnesses (which already exist).
+11. **Sampling/elicitation/roots/completions sugar ports from v1.** v1's `SampleAPIImpl.structured()` retry loop and `ElicitationAPIImpl` flat-schema validation are load-bearing and well-tested. Port the implementations; rewire the state-ownership to the v2 harnesses (which already exist). Adopter-facing API (`ctx.elicit.select`, `ctx.roots.assertWithin`, `completeFromList`, three-action elicit) and recipe examples live in the package README, not this ADR.
 
-12. **Resources (#123) ship later. Server capability negotiation handles absence cleanly.** Server config has an optional `resources` slot; missing → don't advertise the capability → no `resources/list` or `resources/read` requests will arrive. Additive when #123 lands. ADR 23's deferral stance applies.
+12. **Resources (#123) ship later. Server capability negotiation handles absence cleanly.** Server config has an optional `resources` slot; missing → don't advertise the capability → no `resources/list` or `resources/read` requests will arrive. Additive when #123 lands — including `resources/subscribe` per-URI, `notifications/resources/updated`, and resource templates. ADR 23's deferral stance applies.
+
+13. **Display metadata mutable per-connection; semantic annotations immutable.** `title`/`icons`/`description` flow through `@agentick/tool-next/transforms` (`setTitle`, `setIcons`, `describe`) and can be customized per audience. Tool annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) are SEMANTIC — set at `createTool` time, immutable through projection. Lying about destructiveness per-connection would be a safety footgun.
+
+14. **Tool handlers receive `ctx.signal` + `ctx.sendProgress` via projection-layer wrapping.** Both ported from v1's `MCPHandlerContext` unchanged. Long-running tools observe `signal` for client cancellation; progress notifications stream to clients that advertised support. Wrapping happens in the projection layer; tool handlers see them as plain function/AbortSignal.
+
+15. **`tools/list_changed`, `prompts/list_changed`** (and `resources/list_changed` when #123 lands) are driven by harness change-notifications — KeyedNotifier subscriptions on tool registry / `PromptsHarness` / `ResourcesHarness`. Adopters get them for free on `register`/`update`/`remove`; the server harness does not own change-tracking state.
 
 ---
 
@@ -251,6 +257,13 @@ Each transport connection produces:
 
 **Filters and transforms run per request, not at connection setup.** This lets the projection react to per-call authz outcomes ("user is in 'admin' role for this request only"), session age, or transient ctx fields without re-establishing the connection.
 
+**Tool handler invocation context.** During `tools/call` dispatch, the projection wraps the handler with two cross-cutting concerns required by the MCP spec:
+
+- **`ctx.signal: AbortSignal`** — fires when the client sends `notifications/cancelled` or the connection drops. Long-running tools MUST respect it. v1 ships this on `MCPHandlerContext`; v2 ports the contract unchanged.
+- **`ctx.sendProgress(progress, total?, message?)`** — emits a `notifications/progress` JSON-RPC message correlated to the in-flight request. The projection layer owns the JSON-RPC framing; the tool handler just calls the function. Progress notifications are capability-gated (only emitted if the client advertised `progress` support in `initialize`).
+
+Both flow through unchanged from v1's `MCPHandlerContext` shape. The projection layer attaches them per-request; tools that don't need them ignore them.
+
 ### 4. Tool transformation primitives (`@agentick/tool-next/transforms`)
 
 A `ToolTransform<C = MCPRequestContext>` is:
@@ -279,6 +292,16 @@ Compose via `composeTransforms(...transforms)` → single transform that applies
 - `alias({ canonical: [alias1, alias2] })` — make a tool callable under multiple names
 
 These are NOT MCP-specific. The MCP server projection uses them via `composeTransforms`; tool-executor uses them for in-app rebranding; eval-next uses them for tool ablation.
+
+**Display metadata vs. semantic annotations — two different concerns:**
+
+- **Display metadata** (`title`, `icons`) is presentation. Adopters customize per-connection: a "kid-friendly" connection might transform `title` to plain-language descriptions; an enterprise connection might add corporate icon URLs. Ships as sugar transforms:
+  - `setTitle({ toolName: titleOverride, ... })`
+  - `setIcons({ toolName: [{src, sizes, mimeType}], ... })`
+  - `describe({ toolName: descOverride, ... })` already covers `description`
+- **Tool annotations** (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) are SEMANTIC metadata that influence agent behavior at the model layer (agents avoid destructive tools unless asked). They are **immutable** at projection time — set at `createTool` registration, flow through projection unchanged, never mutated by per-connection transforms. Lying about destructiveness to one connection but not another would be a safety footgun. The transforms library deliberately does NOT ship `setAnnotations` or equivalent.
+
+This split is intentional: presentation can vary per audience; semantics cannot.
 
 ### 5. Security pipeline
 
@@ -364,6 +387,17 @@ No "we support X but return empty list" surfaces. Clients can rely on advertised
 
 When #123 lands and configures `resources: { ... }`, the capability appears + the projection module wires up. Pure addition; no shape changes elsewhere.
 
+**Resource subscription forward-compat.** When the `ResourcesHarness` lands, the server harness will additionally:
+
+- Project resources at request time (same filter + transforms pattern as tools/prompts; per-connection).
+- Subscribe to the `ResourcesHarness`'s change stream + emit `notifications/resources/list_changed` to all connections whose `clientCapabilities.resources.listChanged` is true.
+- Support `resources/subscribe` (per-connection per-URI subscriptions) → emit `notifications/resources/updated` on backend change.
+- Support resource templates (`uriTemplate: "db://schema/{table}"`) with variable extraction + completion via the completion builders.
+
+No server-harness shape changes are required — the additions plug into the projection layer + the harness's existing change-notification mechanism (KeyedNotifier or equivalent on the ResourcesHarness side). The capability negotiation table in §8 already includes the conditional advertisement.
+
+**`tools/list_changed` and `prompts/list_changed`** (analogous to resources) — emitted when the underlying tool registry or PromptsHarness signals a change, scoped to connections whose `clientCapabilities` opted in. Driven by harness-level subscriptions, not server-internal state. Adopters get this for free when they call `tools/register` or `session.prompts.register`.
+
 ### 10. Standalone mode (Mode A)
 
 The CLI entry (`bin/server.ts`) is a thin shell:
@@ -445,6 +479,23 @@ Total estimate: ~16 days of work. Not blocking on #123 or #124.
    *Mitigation:* expected; the v2 conformance suite is the new pin set. v1 tests serve as a feature checklist, not a reusable suite.
 
 ---
+
+## What lives in the package README (not this ADR)
+
+The following are adopter-facing material that the v2 `@agentick/mcp-server-next` README will document. They are NOT architectural shape questions — they're API surface + recipes. Listed here so the ADR isn't mistaken for the README:
+
+- **Tool definition reference** — input/output schemas, handler context shape, error vs result patterns. Port from v1 README §"Server API — Tools".
+- **Production security recipes** — `bearerTokenAuth` + `roleBasedAuthz` + `slidingWindowLimiter` + `allowListGuard` (IP/origin CIDR + glob) usage examples. Port from v1 §"Production security stages".
+- **Argument completion** — `completeFromList`/`completeFromEnum`/`completePrefixMatch`/`completeDependent`/`completeFromAsync` builders. Already in `@agentick/mcp-next` (client side); the server-side completion handler reuses them.
+- **Elicitation sugar** — `ctx.elicit.{select, confirm, text, number, boolean, object, url, requireUrls, multiSelect}` + `tryX` variants + three-action distinction (`accept`/`decline`/`cancel`). Ported from v1 `ElicitationAPIImpl`.
+- **Sampling sugar** — `ctx.sample.{text, structured, message, image, audio, withTools}` + retry loop. Ported from v1 `SampleAPIImpl`.
+- **Roots helpers** — `ctx.roots.{list, assertWithin, rootContaining, resolveRelative}` + caching + invalidation on `notifications/roots/list_changed`. Ported from v1.
+- **Dynamic registration recipes** — `addTool`/`removeTool`/etc. examples; the harness already exposes these.
+- **Server-to-client request escape hatch** — `MCPServer.request<T>()` analog on v2's `McpServerHarness`. For adopters who need to add custom bidirectional methods beyond the built-in sampling/elicitation/roots.
+- **Tool execution error vs protocol error distinction** — when to throw vs return `{ isError: true }`. Ported recipe from v1 README.
+- **Multi-step elicitation workflows** — chaining `ctx.elicit.*` calls for complex confirmations. v1 examples carry forward.
+
+Each of these will be a section in the v2 package README scaffold built incrementally during #171c–#171i. The README is the user-facing manual; this ADR is the spec.
 
 ## What this ADR does NOT decide
 
