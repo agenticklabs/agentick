@@ -139,39 +139,36 @@ const app = createApp({
 
 ```ts
 import { McpServerHarness, stdioServerTransport, bearerTokenAuth } from "@agentick/mcp-next/server";
-import { PromptsHarness } from "@agentick/prompts-next";
 
-// Construct a PromptsHarness, populate it with prompts.
-const prompts = new PromptsHarness(scopeId, journal, bus, inbox);
-await prompts.register({
-  declaration: {
-    name: "summarize",
-    description: "Summarize a passage",
-    arguments: [{ name: "text", required: true }],
-    render: ({ text }) => [
-      { kind: "message", role: "user", content: [{ type: "text", text: `Summarize: ${text}` }] },
-    ],
-  },
-});
-
-// Construct the server harness. Connected MCP clients will see this
-// server's tools + prompts on the wire.
 const server = new McpServerHarness(scopeId, journal, bus, inbox, {
   name: "my-server",
   transports: [stdioServerTransport()],
+
+  // Tools — registry + handler resolver, plus per-connection projection.
   tools: {
     registry: [
       /* ToolDeclaration[] */
     ],
-    resolveHandler: (ref) => /* return concrete async handler */ null,
+    resolveHandler: (ref) => /* concrete async handler or null */ null,
     filter: (tool, ctx) => ctx.user?.roles?.includes("admin") || !tool.name.startsWith("admin_"),
   },
-  prompts: {
-    harness: prompts,
-    // Optional per-connection visibility predicate. Filtered prompts
-    // are hidden from BOTH `prompts/list` AND `prompts/get`.
-    filter: (decl, ctx) => ctx.user !== null || decl.metadata?.visibility === "public",
-  },
+
+  // Prompts — declarative array shorthand. Server constructs the
+  // Prompts source internally; lifecycle is owned by the server.
+  prompts: [
+    {
+      name: "summarize",
+      description: "Summarize a passage",
+      arguments: [{ name: "text", required: true }],
+      render: ({ text }) => [
+        { kind: "message", role: "user", content: [{ type: "text", text: `Summarize: ${text}` }] },
+      ],
+    },
+    { name: "translate", description: "Translate to French", template: "Translate to French." },
+  ],
+
+  // Auth — pluggable five-stage security pipeline (defaults are
+  // transport-aware).
   auth: {
     authenticator: bearerTokenAuth({ tokens: { "secret-1": { id: "alice", roles: ["admin"] } } }),
   },
@@ -179,7 +176,50 @@ const server = new McpServerHarness(scopeId, journal, bus, inbox, {
 
 await server.ready;
 await server.start();
+
+// Runtime mutation — `server.prompts` exposes the resolved Prompts
+// source regardless of which form constructed it. Register new prompts
+// or update existing ones at any time after start:
+await server.prompts!.register({
+  declaration: { name: "rephrase", description: "Rephrase", template: "Rephrase." },
+});
 ```
+
+### The `prompts` slot — three accepted shapes
+
+```ts
+// Form A — array shorthand (the 90% case)
+prompts: [
+  { name: "summarize", description: "...", render: ({ text }) => [...] },
+]
+
+// Form B — pre-built `Prompts` instance directly (no wrapper)
+prompts: somePromptsInstance,
+
+// Form C — config object: declarations OR a pre-built instance,
+// plus per-connection visibility filter
+prompts: {
+  declarations: [/* ... */],   // OR
+  use: somePromptsInstance,    // ← "use this prompts source"
+  filter: (decl, ctx) => ctx.user !== null || decl.metadata?.visibility === "public",
+}
+```
+
+**Lifecycle ownership:**
+
+- Forms A and C-with-`declarations` → server constructs the source
+  internally; `server.close()` closes it.
+- Forms B and C-with-`use:` → adopter owns the source's lifecycle;
+  `server.close()` leaves it alone (adopter must close it explicitly).
+
+**Runtime access:** `server.prompts: Prompts | null` exposes the
+resolved source for register / update / remove / reload regardless of
+how it was constructed.
+
+The same instance-or-config pattern (see ADR 42 — coming) propagates
+to other harness-backed slots (`tools`, `skills`, `tasks`, ...) as
+they migrate. Adopters should never need to type "Harness" anywhere
+in their code — "Harness" is framework vocabulary.
 
 ### Standalone Mode A
 
