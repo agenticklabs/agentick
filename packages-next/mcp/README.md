@@ -43,7 +43,7 @@ code. See ADR 23 §6 (Package layout) and ADR 40 §1.
 | #171c stdio + in-memory transport + tools projection + security pipeline         | ✅                   |
 | #171d.1 **Prompts projection** (`prompts/list` + `prompts/get` + `list_changed`) | ✅                   |
 | #171d.2.1 **Elicitation `ctx.elicit.*` sugar** (form-mode basics)                | ✅                   |
-| #171d.2.2 **Elicitation URL mode + `tryX` variants + `UrlElicitationRequired`** | ✅                   |
+| #171d.2.2 **Elicitation URL mode + `tryX` variants + `UrlElicitationRequired`**  | ✅                   |
 | #171d.2.3 Elicitation schema-flatness validation + advanced shapes               | ⏳                   |
 | #171d.3 Tasks projection (`tasks/list` + `tasks/get` + notifications)            | ⏳ (scoping pending) |
 | #171e Streamable HTTP transport + OAuth Resource Server                          | ⏳                   |
@@ -288,9 +288,7 @@ URLs, and never returns. The client's tool wrapper recognizes the
 ```ts
 // Inside a tool handler:
 if (!hasGoogleToken) {
-  ctx.elicit!.requireUrls([
-    { message: "Sign in to Google", url: oauthUrl },
-  ]);
+  ctx.elicit!.requireUrls([{ message: "Sign in to Google", url: oauthUrl }]);
   // unreachable
 }
 ```
@@ -307,12 +305,18 @@ adopter explicitly opted out via `elicit: false`). This is the
 server's intent — actual availability per request still depends on
 the connected client's capability.
 
-> **Asymmetry with the in-process flow** — `session.elicit` (the
-> in-process counterpart to `ctx.elicit`) doesn't exist yet. Today
-> the in-process path exposes `session.elicitation:
-ElicitationHarnessProtocol` (raw protocol) but no `Elicit` sugar.
-> Tracked as a follow-up task; the goal is symmetric `Elicit`
-> ergonomics regardless of where the tool handler runs.
+**Cross-transport portability (ADR 43).** The `ctx.elicit` surface
+a tool handler sees inside an MCP-server projection is structurally
+identical to the `ctx.elicit` an in-process tool handler sees, and
+identical again to `session.elicit` exposed on
+`SessionHarnessProtocol`. Same `Elicit` interface, same six form
+methods + URL mode + tryX variants + `requireUrls` deferred-auth.
+Adopter code is portable across all three call sites — write the
+handler once, project to either transport. The unified
+`ToolHandlerCtx` carries a `transport: "in-process" | "mcp"`
+discriminator + an optional `mcp?: McpRequestExtras` sub-slot for
+the MCP-wire identity material (`serverId`, `connectionId`,
+`clientCapabilities`, `sendProgress`).
 
 The same instance-or-config pattern (see ADR 42 — coming) propagates
 to other harness-backed slots (`tools`, `skills`, `tasks`, ...) as

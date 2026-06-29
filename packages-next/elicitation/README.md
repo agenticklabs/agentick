@@ -180,6 +180,15 @@ Roadmap & known gaps:
   `createApp({ elicitation: { defaultTimeoutMs } })` and is tracked
   separately.
 
+### `buildSessionElicit({ harness })`
+
+Wraps an `ElicitationHarnessProtocol` in the `Elicit` sugar surface
+(see ADR 43 §"Elicit sugar"). Used by `tool-executor-next` to build
+`ctx.elicit` for in-process tool handlers and by `session-next` to
+expose `session.elicit`. Each method routes through `harness.elicit`
+with an inline Standard-Schema validator sized for the primitive
+being asked.
+
 ### `runElicitationHarnessConformance(factory)`
 
 Importable conformance suite (vitest). The factory returns a shell:
@@ -226,6 +235,56 @@ close — all silent no-ops.
 **`close()` cancels pending elicitations.** Every in-flight `elicit()`
 resolves to `{ outcome: "failed", failure.kind: "aborted",
 failure.reason: "harness_closed" }`. Idempotent.
+
+## The `Elicit` sugar surface (ADR 43)
+
+`ElicitationHarnessProtocol.elicit(request)` is the **raw substrate**
+— takes a structured request with a Standard-Schema validator,
+returns an `ElicitationResult` discriminated union. Power-user-y;
+correct for cluster-portable cross-transport routing.
+
+For tool handlers and session-level code, the sugar wrapper is much
+nicer. The **`Elicit` noun-aliased interface** lives in
+`@agentick/spec-next/protocol/elicit-api.ts` and gives you typed
+single-call methods:
+
+```ts
+import { buildSessionElicit } from "@agentick/elicitation-next";
+
+const elicit = buildSessionElicit({ harness: someElicitationHarness });
+
+const name = await elicit.text("Your name?", { default: "Ada" });
+const role = await elicit.select("Role?", ["admin", "viewer"] as const);
+const confirmed = await elicit.confirm("Proceed?");
+const count = await elicit.number("How many?", { min: 1, max: 100, integer: true });
+await elicit.url({ message: "Sign in to Google", url: oauthUrl });
+```
+
+Decline / cancel throw `ElicitationDeclined` / `ElicitationCancelled`
+(both `AgentickError` subclasses under `ElicitError`). Use the `try*`
+variants — `tryText`, `tryConfirm`, etc. — for non-throwing semantics
+that return an `ElicitOutcome<T>` discriminated union.
+
+**Cross-transport portability.** The same `Elicit` interface is
+exposed in three places:
+
+| Where                                         | How it's built                                                                     | What it does underneath                              |
+| --------------------------------------------- | ---------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| `ctx.elicit` (in-process tool handler)        | `buildSessionElicit(harness)` in `tool-executor-next/harness.ts`                   | calls `harness.elicit({mode, message, schema})`      |
+| `ctx.elicit` (MCP-server tool handler)        | `buildMcpElicit({ sdkServer, clientCapabilities })` in `@agentick/mcp-next/server` | calls `sdkServer.request("elicitation/create", ...)` |
+| `session.elicit` (session-level command code) | `buildSessionElicit(harness)` in `session-next/harness.ts`                         | identical to in-process tool-handler case            |
+
+Tool handlers writing `await ctx.elicit?.text(...)` are wholly
+portable across in-process and MCP-server transports. The same is
+true for `session.elicit` vs. a tool handler's `ctx.elicit` — same
+noun, same methods, same `ElicitationDeclined`/`Cancelled` exception
+classes.
+
+**Deferred-auth via `requireUrls`** — `ctx.elicit.requireUrls([...])`
+throws `UrlElicitationRequired` (cross-transport class under
+`ElicitError`). The MCP wire codec maps to the `-32042` JSON-RPC
+error; in-process transports handle it however the host wants. Same
+class, same usage, transport-aware serialization.
 
 ## Testing
 

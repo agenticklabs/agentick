@@ -66,6 +66,40 @@ const result = await exec.dispatch({
 // → { toolCallId, name, succeeded: true, content: [{ type: "text", text: "3" }] }
 ```
 
+## Tool handler ctx surface
+
+Tool handlers receive a unified `ToolHandlerCtx` (per ADR 43) — the
+same shape whether invoked in-process by this executor OR by an
+MCP-server projection. Adopter code is portable across transports.
+
+```ts
+const handler: ToolHandler = async (input, { ctx, use }) => {
+  // Universal fields — every transport populates these
+  ctx.toolCallId;     // string
+  ctx.signal;         // AbortSignal
+  ctx.transport;      // "in-process" (here) or "mcp" (MCP-server projection)
+  ctx.task;           // "auto" | "ref" | "inline"
+
+  // Sugar surfaces — cross-transport portable
+  await ctx.elicit?.text("Your name?");      // Elicit sugar (same as session.elicit + MCP ctx.elicit)
+  const task = ctx.tasks?.submit(...);       // Tasks raw protocol
+
+  // Raw protocol access (power users)
+  await ctx.elicitation?.elicit({mode, message, schema}); // raw ElicitationHarness
+
+  // MCP-specific extras — undefined unless transport === "mcp"
+  ctx.mcp?.connectionId;
+  ctx.mcp?.clientCapabilities;
+
+  return [{ type: "text", text: "ok" }];
+};
+```
+
+In-process ctx is built once per dispatch in the executor. The
+`ctx.elicit` sugar is constructed via `buildSessionElicit({ harness:
+this.elicitation })` (see `@agentick/elicitation-next`); identical
+factory + interface to the session-level `session.elicit`.
+
 ## Conformance
 
 Reference implementation passes

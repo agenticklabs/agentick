@@ -29,3 +29,46 @@ implementations land in Phase 2.
 - Marked `private: true` so it doesn't publish to npm.
 - The conformance discipline keeps swap-Layer-substrate honest:
   every implementation must pass the same suite.
+
+## Shared test fixtures
+
+Beyond protocol conformance suites, this package also ships shared
+test fixture factories — concrete value builders consumed across the
+workspace.
+
+### `fakeToolHandlerCtx(overrides?)` — ADR 43
+
+Returns a fresh `ToolHandlerCtx` with sensible defaults
+(`transport: "in-process"`, `task: "auto"`, no-op setState/emit).
+Pass `transport: "mcp"` + `mcp: {...}` for MCP-side fixtures; the
+result is structurally identical to `McpRequestContext`.
+
+```ts
+import { fakeToolHandlerCtx } from "@agentick/spec-conformance-next";
+
+// In-process default
+const ctx = fakeToolHandlerCtx({ toolCallId: "tc-1" });
+
+// MCP-side with custom user
+const mcpCtx = fakeToolHandlerCtx({
+  toolCallId: "tc-2",
+  transport: "mcp",
+  mcp: { user: { id: "alice", roles: ["admin"] } },
+});
+```
+
+Use this factory in every spec that constructs a fake ctx — that way
+when the canonical `ToolHandlerCtx` shape evolves (new required
+field, new sugar slot), one update here propagates to every consumer.
+ADR 43 Slice 1's `transport` discriminator addition would have
+broken every spec independently without this helper.
+
+## Verified by
+
+- The error-class conformance suite (`runAgentickErrorConformance`)
+  pins the full v2 error registry — 88 framework error tags exercised
+  for registry-membership + instance-shape + codec round-trip
+  invariants. See
+  [`src/__tests__/agentick-error-conformance.spec.ts`](./src/__tests__/agentick-error-conformance.spec.ts).
+- Per-protocol suites land in the implementing packages' specs (one
+  spec per implementor calling the matching `run*Conformance`).

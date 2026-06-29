@@ -12,24 +12,40 @@ Reconciler-specific variants (e.g., React tools with `use()`) extend this base i
 import { createTool } from "@agentick/tool-next";
 import { z } from "zod";
 
-const search = createTool({
-  name: "search",
-  description: "Find documents matching a query.",
-  inputSchema: z.object({
-    query: z.string(),
-    limit: z.number().optional(),
-  }),
-  handler: async ({ query, limit }, { ctx }) => {
-    const hits = await ctx.services.search.find({ query, limit });
-    return [{ type: "text", text: JSON.stringify(hits) }];
+const askName = createTool({
+  name: "ask_name",
+  description: "Ask the user their name.",
+  inputSchema: z.object({}),
+  handler: async (_input, { ctx }) => {
+    // ctx.elicit works identically in-process AND in an MCP-server
+    // projection — same tool, both transports. See ADR 43.
+    const name = await ctx.elicit?.text("Your name?", { default: "Ada" });
+    return [{ type: "text", text: `Hello, ${name ?? "anonymous"}` }];
   },
 });
 
 // Drop into a session / app / gateway:
-const app = createApp(<Agent />, { tools: [search] });
+const app = createApp(<Agent />, { tools: [askName] });
 ```
 
 `createTool` validates input against `inputSchema` before the handler runs; invalid input surfaces a `ToolValidationError` (typed) instead of reaching the handler.
+
+## Tool handler ctx is transport-portable
+
+Per ADR 43, every `ToolHandler` receives a `ToolHandlerCtx` with a `transport: "in-process" | "mcp"` discriminator. **The same handler runs unchanged whether dispatched by an in-process Agentick session OR by an MCP server projecting your `ToolDeclaration` onto the wire.**
+
+```ts
+handler: async (input, { ctx }) => {
+  ctx.transport;        // "in-process" or "mcp"
+  ctx.signal;           // AbortSignal — cancellation
+  await ctx.elicit?.confirm("Apply?");  // sugar, both transports
+  ctx.tasks?.submit(...);               // raw protocol, both transports
+  ctx.mcp?.clientCapabilities;          // MCP-only extras, undefined in-process
+  return [...];
+},
+```
+
+Branch on `ctx.transport` only when the handler genuinely needs different behavior per transport (rare). Common code stays portable.
 
 ## Subpaths
 
