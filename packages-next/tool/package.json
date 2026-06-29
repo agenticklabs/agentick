@@ -26,6 +26,11 @@
       "types": "./src/index.ts",
       "import": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./transforms": {
+      "types": "./src/transforms/index.ts",
+      "import": "./src/transforms/index.ts",
+      "default": "./src/transforms/index.ts"
     }
   },
   "publishConfig": {
@@ -34,6 +39,11 @@
         "types": "./dist/index.d.ts",
         "import": "./dist/index.js",
         "default": "./dist/index.js"
+      },
+      "./transforms": {
+        "types": "./dist/transforms/index.d.ts",
+        "import": "./dist/transforms/index.js",
+        "default": "./dist/transforms/index.js"
       }
     }
   },
