@@ -234,7 +234,26 @@ normalizes any of the three shapes into a single internal `Resolved`
 shape. The helper lives in the parent's `config.ts` and is also
 exported for advanced adopters / testing.
 
-### 6. Validation
+### 6. The convention applies to `withX(...)` extensions too
+
+`withX(XConfig | XInstance | XPrimary[]?)` is exactly the slot
+trichotomy applied at the extension-factory level. `withPrompts` /
+`withSkills` / `withTasks` / `withMCP` are all single-argument
+factories whose argument is the union. Same naming rules, same
+lifecycle, same audit checklist.
+
+```ts
+// All three accepted, structurally discriminated:
+withPrompts([{ name: "summarize", ... }])               // shorthand
+withPrompts(somePromptsInstance)                         // instance
+withPrompts({ declarations: [...], filter: ..., ... })   // config
+```
+
+A `withX` factory MUST satisfy all seven checklist rows of §"Audit
+checklist" with the same naming rules; the receiver of the union is
+the factory itself rather than a parent's options field.
+
+### 7. Validation
 
 - The Config form is rejected if it sets BOTH `declarations` and `use`
   (the two are mutually exclusive).
