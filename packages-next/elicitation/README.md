@@ -142,62 +142,60 @@ Transports / devtools / MCP hosts subscribe to the channel, render the
 prompt, and reply via `harness.respond({ correlationId, outcome,
 value?, reason? })`.
 
-## Form-mode schema flatness (#271)
+## Form-mode schema flatness (#271) — utility for MCP wire callers
 
-The MCP `elicitation/create` request schema is intentionally
-constrained: an LLM client renders elicitation requests as a flat UI
-form. The harness enforces the spec's flatness rule synchronously,
-BEFORE the request reaches the wire — bad schemas raise
-`ElicitSchemaTooComplex` (subclass of `ElicitError`) on call, not
-"client refused" wire failures buried in `result.outcome === "failed"`.
+The MCP `elicitation/create` request schema is a restricted subset of
+JSON Schema: clients render the request as a flat UI form and don't
+support nested objects or free-form arrays. The 2025-11-25 GA + 2025-
+06-18 draft specs both require `requestedSchema` to be a flat object
+with primitive properties.
 
-**Allowed at the property level**
+**This harness does not enforce the rule.** The harness is transport-
+agnostic — bus subscribers may be MCP-server projections (constrained
+to flat schemas), React UIs (which render anything), devtools, or
+custom in-process clients. Enforcing MCP's UI limitation at the
+substrate layer would push MCP's constraint onto every subscriber.
 
-- `string` / `number` / `integer` / `boolean` primitives.
-- Single-select string enum (`type: "string"` + `enum: [...]`) or
-  titled enum (`oneOf: [{ const, title }, ...]`).
-- Multi-select `array` whose items enumerate options — either
-  `{ type: "string", enum: [...] }` (untitled) or
-  `{ anyOf: [{ const, title }, ...] }` (titled).
-
-**Disallowed**
-
-- Nested `object` properties — split the request into multiple
-  elicitations, or flatten the schema. (Pattern: ask for `street` /
-  `city` / `zip` as separate primitive fields instead of a nested
-  `address` object.)
-- Free-form string arrays (no `enum` / `anyOf`) — restrict
-  multi-select to enumerated options.
-- Discriminated unions / intersections / property-level `anyOf` other
-  than the spec-defined labeled-enum form.
-
-Adopters who want to pre-validate generated schemas (e.g., before
-caching a derived schema) can call `checkFlatSchema(jsonSchema)` or
-`assertFlatSchema(jsonSchema)` directly — both exported from
-`@agentick/elicitation-next`.
+Instead, the package exports validation helpers for **code about to
+put a schema on the MCP wire**:
 
 ```ts
+import { assertFlatSchema, checkFlatSchema } from "@agentick/elicitation-next";
 import { ElicitSchemaTooComplex } from "@agentick/spec-next";
 
+// In a custom MCP-server projection / wire codec:
+const wire = toJsonSchema(request.schema);
 try {
-  await ctx.elicitation.elicit({
-    mode: "form",
-    message: "Where?",
-    schema: someStandardSchema, // projects to a non-flat JSON Schema
-  });
+  assertFlatSchema(wire); // throws ElicitSchemaTooComplex on violation
+  await sdkServer.request({ method: "elicitation/create", params: { requestedSchema: wire } });
 } catch (err) {
   if (err instanceof ElicitSchemaTooComplex) {
     // err.issues — human-readable violations
-    // err.schema — the offending JSON Schema (for logging)
-    console.error("flatten your schema:", err.issues);
+    // err.schema — the offending JSON Schema
   }
 }
+
+// Or non-throwing:
+const issues = checkFlatSchema(wire);
+if (issues.length > 0) { /* fall back to a flatter schema */ }
 ```
 
-The `ctx.elicit` sugar (`text` / `confirm` / `select` / `multiSelect` /
-`number` / `boolean`) is flat by construction — adopters using the
-sugar never see this error. Only the raw `harness.elicit({mode:
-"form", schema})` path can produce a non-flat wire request.
+The framework's `buildMcpElicit` sugar (`text` / `confirm` / `select` /
+`multiSelect` / `number` / `boolean` / `url` + try variants) uses TS-
+level `FlatProperty` types and produces flat schemas by construction —
+runtime validation is only needed by adopters writing custom MCP-server
+projection code (alternative transports, hand-rolled
+`elicitation/create` bridges).
+
+**Allowed at the property level.** `string` / `number` / `integer` /
+`boolean` primitives; single-select string enum (`type: "string"` +
+`enum: [...]`); multi-select `array` whose items enumerate options
+(`items.enum` or `items.anyOf` with `const` + `title`).
+
+**Disallowed.** Nested `object` properties; free-form string arrays;
+discriminated unions / intersections / property-level `anyOf` other
+than the spec-defined labeled-enum form. The rule is binary in the
+spec — there is no "shallow nesting OK" middle ground.
 
 ## API
 

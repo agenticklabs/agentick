@@ -55,7 +55,6 @@ import type {
 import { HandlerError, toJsonSchema } from "@agentick/spec-next";
 
 import { ELICITATION_CHANNEL } from "./channel.js";
-import { assertFlatSchema } from "./flatness.js";
 import type { ElicitRequestInboxPayload } from "./inbox-protocol.js";
 
 // ============================================================================
@@ -143,11 +142,14 @@ export class ElicitationHarness
     // Project the live StandardSchemaV1 to a JSON Schema on the wire.
     // Functions are not serializable; transports MUST NOT see the
     // validator. Server-side keeps `request.schema` for re-validation.
+    //
+    // The harness is transport-agnostic — bus subscribers may be an
+    // MCP-server projection (constrained to flat schemas per MCP
+    // spec), a React UI (can render anything), devtools, etc. We
+    // therefore do NOT enforce MCP-style flatness here. Subscribers
+    // that need it call `assertFlatSchema` from this package against
+    // the wire JSON Schema before forwarding to their transport.
     const wireSchema = toJsonSchema(request.schema);
-    // Enforce the MCP spec's "flat object with primitive properties"
-    // rule synchronously — bad schemas never reach the wire. Throws
-    // `ElicitSchemaTooComplex` (ElicitError subclass) on violation.
-    assertFlatSchema(wireSchema as Readonly<Record<string, unknown>>);
     const payload: FormWirePayload = {
       mode: "form",
       message: request.message,

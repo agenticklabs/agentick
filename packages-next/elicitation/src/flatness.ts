@@ -2,21 +2,26 @@
  * Form-mode schema flatness validation — MCP spec compliance.
  *
  * The MCP `elicitation/create` request schema is intentionally
- * constrained: an LLM client renders elicitation requests as a flat
- * UI form. Nested objects and arbitrary value types don't fit. The
- * spec restricts the request schema to a flat object with primitive
- * properties.
+ * constrained: clients render elicitation requests as a flat UI form
+ * and don't support nested objects or free-form arrays. The spec
+ * (2025-11-25 GA and 2025-06-18 draft) restricts `requestedSchema`
+ * to a flat object with primitive properties.
  *
- * This module validates a JSON Schema (the projected wire form of an
- * adopter's Standard-Schema) against that rule, BEFORE the request
- * leaves the substrate. Bad schemas raise
- * {@link ElicitSchemaTooComplex} synchronously — the wire never sees
- * a malformed elicit.
+ * **Where this validation belongs.** The MCP wire constraint is
+ * MCP-specific — the in-process `ElicitationHarness` is transport-
+ * agnostic and serves many subscribers (React UI, devtools, custom
+ * clients) that can happily render richer shapes. Code about to put
+ * a schema on the MCP wire SHOULD call {@link assertFlatSchema} on
+ * the projected JSON Schema before forwarding to `sdkServer.request`.
+ * The framework's `buildMcpElicit` sugar surface uses TS-level
+ * `FlatProperty` types and produces flat schemas by construction —
+ * runtime validation is for adopters writing custom MCP-server
+ * projection code (alternative transports, hand-rolled
+ * `elicitation/create` bridges).
  *
  * Ported from v1's `validateFormSchemaFlatness` in
  * `packages/mcp/src/server/elicitation.ts`; v2 lifts it to a stable
- * surface adopters can call directly (e.g., to pre-validate generated
- * schemas).
+ * exported surface.
  *
  * @see https://modelcontextprotocol.io/specification/2025-11-25/elicitation
  */
