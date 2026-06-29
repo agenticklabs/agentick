@@ -57,10 +57,11 @@ async function makeServer(
     {
       name: "test-server",
       transports: [transport],
+      // `use` form — adopter owns the Prompts source lifecycle.
       ...(prompts
         ? {
             prompts: {
-              harness: prompts,
+              use: prompts,
               ...(options.filterPredicate ? { filter: options.filterPredicate } : {}),
             },
           }
@@ -197,6 +198,140 @@ describe("prompts projection — list + get", () => {
     await client.close();
     await harness.close();
     await prompts.close();
+  });
+});
+
+describe("prompts projection — declarative shorthand", () => {
+  it("array shorthand: server constructs Prompts internally + registers declarations", async () => {
+    const transport = inMemoryServerTransport();
+    const harness = new McpServerHarness(
+      `srv:${ulid()}`,
+      new MemoryJournal({ capacity: 1024 }),
+      new LocalEventBus(),
+      new LocalInbox(),
+      {
+        name: "declarative-srv",
+        transports: [transport],
+        prompts: [
+          {
+            name: "summarize",
+            description: "Summarize",
+            template: makeMessageEntries("Summarize."),
+          },
+          {
+            name: "translate",
+            description: "Translate",
+            template: makeMessageEntries("Translate."),
+          },
+        ],
+        serverInfo: { name: "test", version: "0.0.0" },
+      },
+    );
+    await harness.ready;
+    await harness.start();
+
+    const clientTransport = await transport.connect();
+    const client = await makeClient(clientTransport);
+
+    expect(client.getServerCapabilities()?.prompts).toBeDefined();
+
+    const list = await client.listPrompts();
+    expect(list.prompts.map((p) => p.name).sort()).toEqual(["summarize", "translate"]);
+
+    // server.prompts exposes the internally-constructed Prompts source.
+    expect(harness.prompts).not.toBeNull();
+    expect(
+      harness
+        .prompts!.list()
+        .map((p) => p.name)
+        .sort(),
+    ).toEqual(["summarize", "translate"]);
+
+    await client.close();
+    await harness.close();
+    // No prompts.close() — the harness owns the internal source's lifecycle.
+  });
+
+  it("config form with declarations + filter", async () => {
+    const transport = inMemoryServerTransport();
+    const harness = new McpServerHarness(
+      `srv:${ulid()}`,
+      new MemoryJournal({ capacity: 1024 }),
+      new LocalEventBus(),
+      new LocalInbox(),
+      {
+        name: "config-srv",
+        transports: [transport],
+        prompts: {
+          declarations: [
+            { name: "public_x", description: "public", template: makeMessageEntries("x") },
+            { name: "internal_y", description: "private", template: makeMessageEntries("y") },
+          ],
+          filter: (decl) => decl.name.startsWith("public_"),
+        },
+        serverInfo: { name: "test", version: "0.0.0" },
+      },
+    );
+    await harness.ready;
+    await harness.start();
+
+    const clientTransport = await transport.connect();
+    const client = await makeClient(clientTransport);
+
+    const list = await client.listPrompts();
+    expect(list.prompts.map((p) => p.name)).toEqual(["public_x"]);
+
+    await client.close();
+    await harness.close();
+  });
+
+  it("server.prompts returns null when no prompts slot is wired", async () => {
+    const { harness } = await makeServer(undefined);
+    expect(harness.prompts).toBeNull();
+    await harness.close();
+  });
+
+  it("internally-owned Prompts source closes when the server closes; adopter-owned does not", async () => {
+    // Internally-owned: harness.close() must close the source.
+    const transport1 = inMemoryServerTransport();
+    const internalHarness = new McpServerHarness(
+      `srv:${ulid()}`,
+      new MemoryJournal({ capacity: 1024 }),
+      new LocalEventBus(),
+      new LocalInbox(),
+      {
+        name: "internal-srv",
+        transports: [transport1],
+        prompts: [{ name: "x", description: "x", template: makeMessageEntries("x") }],
+        serverInfo: { name: "test", version: "0.0.0" },
+      },
+    );
+    await internalHarness.ready;
+    await internalHarness.start();
+    const internalPrompts = internalHarness.prompts!;
+    let internalClosed = false;
+    const origClose = internalPrompts.close.bind(internalPrompts);
+    internalPrompts.close = async () => {
+      internalClosed = true;
+      await origClose();
+    };
+    await internalHarness.close();
+    expect(internalClosed).toBe(true);
+
+    // Adopter-owned: harness.close() does NOT close the source.
+    const prompts = await makePromptsHarness();
+    let adopterClosed = false;
+    const origAdopterClose = prompts.close.bind(prompts);
+    prompts.close = async () => {
+      adopterClosed = true;
+      await origAdopterClose();
+    };
+    const { harness: adopterHarness } = await makeServer(prompts);
+    await adopterHarness.close();
+    expect(adopterClosed).toBe(false);
+    // Adopter still owns + can use + must close it.
+    await prompts.close();
+    expect(adopterClosed).toBe(true);
   });
 });
 

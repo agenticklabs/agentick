@@ -28,12 +28,16 @@ import "./augment.js";
 export { McpServerHarness } from "./harness.js";
 export { type McpServerHandle, toHandle } from "./handle.js";
 export {
+  resolvePromptsOption,
   validateOptions,
   type McpServerAuthOptions,
   type McpServerCapabilitiesOptions,
   type McpServerOptions,
+  type McpServerPromptsConfig,
   type McpServerPromptsOptions,
   type McpServerToolsOptions,
+  type PromptsFilter,
+  type ResolvedPromptsOptions,
 } from "./config.js";
 export {
   spawnStandaloneMcpServer,

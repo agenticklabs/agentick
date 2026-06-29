@@ -24,6 +24,7 @@ import type { Effect } from "effect";
 
 import type { McpServerError } from "../errors/harnesses.js";
 import type { Unsubscribe } from "./inbox.js";
+import type { Prompts } from "./prompts-harness.js";
 
 // ============================================================================
 // Request context — the central flow-through type
@@ -106,6 +107,15 @@ export interface McpServerHarnessProtocol {
 
   /** Subscribe to connection lifecycle changes. */
   readonly onConnectionChange: (listener: () => void) => Unsubscribe;
+
+  /**
+   * The Prompts source this server projects onto the wire, or `null`
+   * if no prompts are wired. Whether the server constructed it
+   * internally (from a declarations array on the options) or the
+   * adopter supplied an existing one, this is the single read surface
+   * for runtime mutation (`register` / `update` / `remove` / `reload`).
+   */
+  readonly prompts: Prompts | null;
 
   /**
    * Direct-projection handle for in-process clients. Returns a

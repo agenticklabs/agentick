@@ -40,8 +40,8 @@ import type {
   McpRequestContext,
   MessageEntry,
   PromptDeclaration,
+  Prompts,
   PromptsGetResult,
-  PromptsHarnessProtocol,
 } from "@agentick/spec-next";
 import { isTextBlock } from "@agentick/spec-next";
 import type { Unsubscribe } from "@agentick/runtime-next";
@@ -50,8 +50,8 @@ import { evaluateRequestPipeline } from "../security/pipeline.js";
 import type { ResolvedSecurity } from "../security/stages.js";
 
 export interface PromptsProjectionOptions {
-  /** PromptsHarness whose registry is projected onto the wire. */
-  readonly harness: PromptsHarnessProtocol;
+  /** Prompts source whose registry is projected onto the wire. */
+  readonly source: Prompts;
   /** Per-connection visibility predicate. Hidden prompts cannot be fetched either. */
   readonly filter?: (decl: PromptDeclaration, ctx: McpRequestContext) => boolean;
   /** Security pipeline resolved for this server. */
@@ -82,7 +82,7 @@ export function installPromptsHandlers(
       const { ctx } = await evaluateRequestPipeline(options.security, baseCtx, {
         type: "prompt_list",
       });
-      const projected = projectPrompts(options.harness.list(), filter, ctx);
+      const projected = projectPrompts(options.source.list(), filter, ctx);
       return { prompts: projected.map(toWirePrompt) };
     },
   );
@@ -101,7 +101,7 @@ export function installPromptsHandlers(
       // this specific get. A prompt hidden from `list` must not be
       // fetchable via `get` either — symmetric to the tools-projection
       // re-check on call.
-      const projected = projectPrompts(options.harness.list(), filter, ctx);
+      const projected = projectPrompts(options.source.list(), filter, ctx);
       const found = projected.find((p) => p.name === request.params.name);
       if (!found) {
         // Match v1's wire shape: throw a JSON-RPC error with code -32602
@@ -111,7 +111,7 @@ export function installPromptsHandlers(
         throw Object.assign(new Error(`Unknown prompt: ${request.params.name}`), { code: -32602 });
       }
 
-      const result: PromptsGetResult = await options.harness.get({
+      const result: PromptsGetResult = await options.source.get({
         name: request.params.name,
         ...(request.params.arguments ? { args: request.params.arguments } : {}),
       });
@@ -128,7 +128,7 @@ export function installPromptsHandlers(
   // initialized and the client advertised `prompts.listChanged`
   // support. The SDK does the gating; we just call sendPromptListChanged
   // on every harness change.
-  const unsubscribe = options.harness.subscribeAll(() => {
+  const unsubscribe = options.source.subscribeAll(() => {
     void sdkServer.sendPromptListChanged().catch(() => {
       // Connection probably closed mid-notification — silently drop.
       // The harness change still happened; future connections will see

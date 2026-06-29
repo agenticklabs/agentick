@@ -24,7 +24,7 @@ import {
   McpServerConfigInvalid,
   type McpRequestContext,
   type PromptDeclaration,
-  type PromptsHarnessProtocol,
+  type Prompts,
   type ToolDeclaration,
 } from "@agentick/spec-next";
 import type { ToolTransform } from "@agentick/tool-next/transforms";
@@ -57,19 +57,45 @@ export interface McpServerToolsOptions {
 }
 
 /**
- * Per-connection prompts projection. Reads the canonical registry from
- * a `PromptsHarness`; applies per-connection visibility via `filter`.
- *
- * The harness owns prompt mutation (register/update/remove). The
- * server harness only PROJECTS — it subscribes to change notifications
- * and emits `notifications/prompts/list_changed` to connected clients.
+ * Per-connection visibility predicate for prompts. Hidden prompts are
+ * invisible to BOTH `prompts/list` AND `prompts/get` — symmetric with
+ * the tools-projection filter.
  */
-export interface McpServerPromptsOptions {
-  /** The PromptsHarness instance whose registry is projected onto the wire. */
-  readonly harness: PromptsHarnessProtocol;
-  /** Per-connection visibility predicate. Hidden prompts cannot be fetched either. */
-  readonly filter?: (decl: PromptDeclaration, ctx: McpRequestContext) => boolean;
+export type PromptsFilter = (decl: PromptDeclaration, ctx: McpRequestContext) => boolean;
+
+/**
+ * Config-object form of the prompts slot. Either supply
+ * `declarations` (the server constructs an internal `Prompts` source
+ * and owns its lifecycle), OR supply `use` (an adopter-owned `Prompts`
+ * source — adopter retains lifecycle ownership). At most one.
+ */
+export interface McpServerPromptsConfig {
+  /** Declarations the server should register into a freshly-constructed Prompts source. */
+  readonly declarations?: readonly PromptDeclaration[];
+  /** Adopter-supplied Prompts source. Server does NOT close this on its own close. */
+  readonly use?: Prompts;
+  /** Per-connection visibility predicate. */
+  readonly filter?: PromptsFilter;
 }
+
+/**
+ * The prompts slot accepts three shapes:
+ *
+ *   1. `readonly PromptDeclaration[]` — declarations shorthand. Server
+ *      constructs the underlying Prompts source internally and owns
+ *      its lifecycle.
+ *   2. `Prompts` — instance shorthand. Adopter-supplied; server uses
+ *      as-is and never closes it.
+ *   3. {@link McpServerPromptsConfig} — config object for declarations
+ *      OR an existing instance, plus optional per-connection `filter`.
+ *
+ * Discrimination is structural — arrays go to form 1, anything with a
+ * `register` method goes to form 2, plain objects go to form 3.
+ */
+export type McpServerPromptsOptions =
+  | readonly PromptDeclaration[]
+  | Prompts
+  | McpServerPromptsConfig;
 
 /**
  * Capability-advertisement opt-OUTS. The harness drives defaults from
@@ -165,19 +191,7 @@ export function validateOptions(options: McpServerOptions): McpServerOptions {
     }
   }
   if (options.prompts !== undefined) {
-    if (typeof options.prompts !== "object" || options.prompts === null) {
-      throw invalid("prompts must be an object", ["prompts"]);
-    }
-    const harness = (options.prompts as { harness?: unknown }).harness;
-    if (
-      harness == null ||
-      typeof harness !== "object" ||
-      typeof (harness as { list?: unknown }).list !== "function" ||
-      typeof (harness as { get?: unknown }).get !== "function" ||
-      typeof (harness as { subscribeAll?: unknown }).subscribeAll !== "function"
-    ) {
-      throw invalid("prompts.harness must be a PromptsHarness instance", ["prompts", "harness"]);
-    }
+    validatePromptsOption(options.prompts);
   }
   if (
     options.capabilities !== undefined &&
@@ -194,4 +208,71 @@ export function validateOptions(options: McpServerOptions): McpServerOptions {
 
 function invalid(reason: string, path?: readonly string[]): McpServerConfigInvalid {
   return new McpServerConfigInvalid(path ? { reason, path } : { reason });
+}
+
+/**
+ * Internal-shape view onto a resolved {@link McpServerPromptsOptions} —
+ * the harness consumes this. Resolution happens via
+ * {@link resolvePromptsOption}.
+ */
+export interface ResolvedPromptsOptions {
+  readonly declarations: readonly PromptDeclaration[];
+  readonly use: Prompts | null;
+  readonly filter: PromptsFilter | null;
+}
+
+/**
+ * Structural detector for a `Prompts` instance. We don't `instanceof
+ * PromptsHarness` because the spec slot is typed against the protocol,
+ * not the concrete class (adopters may supply stubs, decorated
+ * variants, etc.).
+ */
+function isPromptsInstance(value: unknown): value is Prompts {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { register?: unknown }).register === "function" &&
+    typeof (value as { list?: unknown }).list === "function" &&
+    typeof (value as { get?: unknown }).get === "function" &&
+    typeof (value as { subscribeAll?: unknown }).subscribeAll === "function"
+  );
+}
+
+/**
+ * Normalize the prompts option into its internal resolved shape. Throws
+ * {@link McpServerConfigInvalid} on shape violations.
+ */
+export function resolvePromptsOption(option: McpServerPromptsOptions): ResolvedPromptsOptions {
+  if (Array.isArray(option)) {
+    return { declarations: option, use: null, filter: null };
+  }
+  if (isPromptsInstance(option)) {
+    return { declarations: [], use: option, filter: null };
+  }
+  const cfg = option as McpServerPromptsConfig;
+  const hasDecls = cfg.declarations !== undefined;
+  const hasUse = cfg.use !== undefined;
+  if (hasDecls && hasUse) {
+    throw invalid("prompts config must not set both `declarations` and `use`", ["prompts"]);
+  }
+  if (!hasDecls && !hasUse) {
+    throw invalid("prompts config must set either `declarations` or `use`", ["prompts"]);
+  }
+  if (hasUse && !isPromptsInstance(cfg.use)) {
+    throw invalid("prompts.use must be a Prompts instance", ["prompts", "use"]);
+  }
+  if (hasDecls && !Array.isArray(cfg.declarations)) {
+    throw invalid("prompts.declarations must be an array", ["prompts", "declarations"]);
+  }
+  return {
+    declarations: cfg.declarations ?? [],
+    use: cfg.use ?? null,
+    filter: cfg.filter ?? null,
+  };
+}
+
+function validatePromptsOption(option: McpServerPromptsOptions): void {
+  // Resolve to surface shape errors at validation time; discard result
+  // (the harness re-resolves at construction time).
+  resolvePromptsOption(option);
 }

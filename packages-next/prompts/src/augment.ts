@@ -13,12 +13,23 @@ import type { PromptsHandle } from "./handle.js";
 
 declare module "@agentick/spec-next" {
   interface HookBridges {
-    readonly prompts: PromptsHarnessProtocol;
+    /**
+     * Present when `withPrompts` is installed; consumers must check
+     * before use. Optional per ADR 27 §"Built-ins are bundled, not
+     * privileged" — the reconciler iterates `HookBridges` generically
+     * via feature detection, so absence is a valid state.
+     */
+    readonly prompts?: PromptsHarnessProtocol;
   }
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   interface SessionHarnessProtocol<P> {
-    /** The session's prompts library — register, invoke, get. */
-    readonly prompts: PromptsHandle;
+    /**
+     * The session's prompts library — register, invoke, get. Present
+     * only when `withPrompts` is installed on the session; consumers
+     * must check before use. Optional per ADR 27 §"Built-ins are
+     * bundled, not privileged".
+     */
+    readonly prompts?: PromptsHandle;
   }
 }

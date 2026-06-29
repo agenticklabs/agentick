@@ -102,34 +102,70 @@ describe("McpServerHarness — options validation", () => {
   });
 
   it("accepts capabilities + auth + tools + prompts slots", () => {
-    const stubPromptsHarness = {
-      list: () => [],
-      get: async () => ({ description: "", messages: [] }),
-      subscribeAll: () => () => {},
-    } as unknown as Parameters<typeof validateOptions>[0]["prompts"] extends infer P
-      ? P extends { harness: infer H }
-        ? H
-        : never
-      : never;
     expect(() =>
       validateOptions({
         ...makeOptions(),
         capabilities: { tools: false },
         auth: { authenticator: async () => ({ authenticated: false, reason: "x" }) },
         tools: { registry: [], resolveHandler: () => null, filter: () => true, transforms: [] },
-        prompts: { harness: stubPromptsHarness, filter: () => true },
+        // Declarative shorthand — array of PromptDeclaration[]
+        prompts: [{ name: "greet", description: "Greet", template: "Hello" }],
       }),
     ).not.toThrow();
   });
 
-  it("rejects prompts slot without a harness", () => {
+  it("accepts the config-object form with declarations + filter", () => {
     expect(() =>
       validateOptions({
         ...makeOptions(),
-        // @ts-expect-error — exercising the validation error path
+        prompts: {
+          declarations: [{ name: "x", description: "x", template: "x" }],
+          filter: () => true,
+        },
+      }),
+    ).not.toThrow();
+  });
+
+  it("accepts a pre-built Prompts instance as the slot value (`use` form via shorthand)", () => {
+    const stubPrompts = {
+      register: async () => ({ name: "x", description: "x" }),
+      list: () => [],
+      get: async () => ({ description: "", messages: [] }),
+      subscribeAll: () => () => {},
+    } as unknown as import("@agentick/spec-next").Prompts;
+    expect(() =>
+      validateOptions({
+        ...makeOptions(),
+        prompts: stubPrompts,
+      }),
+    ).not.toThrow();
+  });
+
+  it("rejects a prompts config with both declarations and use", () => {
+    const stubPrompts = {
+      register: async () => ({ name: "x", description: "x" }),
+      list: () => [],
+      get: async () => ({ description: "", messages: [] }),
+      subscribeAll: () => () => {},
+    } as unknown as import("@agentick/spec-next").Prompts;
+    expect(() =>
+      validateOptions({
+        ...makeOptions(),
+        prompts: {
+          declarations: [{ name: "x", description: "x", template: "x" }],
+          use: stubPrompts,
+        },
+      }),
+    ).toThrow(/both/);
+  });
+
+  it("rejects a prompts config with neither declarations nor use", () => {
+    expect(() =>
+      validateOptions({
+        ...makeOptions(),
         prompts: { filter: () => true },
       }),
-    ).toThrow(/prompts.harness/);
+    ).toThrow(/either/);
   });
 });
 

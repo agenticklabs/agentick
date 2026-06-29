@@ -870,6 +870,9 @@ importers:
       '@agentick/elicitation-next':
         specifier: workspace:*
         version: link:../elicitation
+      '@agentick/prompts-next':
+        specifier: workspace:*
+        version: link:../prompts
       '@agentick/pubsub-next':
         specifier: workspace:*
         version: link:../pubsub
@@ -901,9 +904,6 @@ importers:
       '@agentick/executor-next':
         specifier: workspace:*
         version: link:../executor
-      '@agentick/prompts-next':
-        specifier: workspace:*
-        version: link:../prompts
       '@agentick/reconciler-next':
         specifier: workspace:*
         version: link:../reconciler

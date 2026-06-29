@@ -28,14 +28,21 @@ import type {
   MessageHandlerError,
   MessageInbox,
   OperationJournal,
+  Prompts,
   ToolDeclaration,
 } from "@agentick/spec-next";
 import { HandlerError, McpServerClosed } from "@agentick/spec-next";
 import { createNotifier, type Notifier } from "@agentick/pubsub-next";
+import { PromptsHarness } from "@agentick/prompts-next";
 import { Server as SdkServer } from "@modelcontextprotocol/sdk/server/index.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 
-import { type McpServerOptions, validateOptions } from "./config.js";
+import {
+  resolvePromptsOption,
+  type McpServerOptions,
+  type PromptsFilter,
+  validateOptions,
+} from "./config.js";
 import { buildCapabilities } from "./protocol/lifecycle.js";
 import { installPromptsHandlers } from "./projection/prompts.js";
 import { installToolsHandlers, type ToolHandlerResolver } from "./projection/tools.js";
@@ -88,8 +95,22 @@ export class McpServerHarness
   private readonly resolveHandler: ToolHandlerResolver;
   private readonly hasToolsWired: boolean;
 
-  /** Prompts projection wired iff `options.prompts.harness` was provided. */
-  private readonly hasPromptsWired: boolean;
+  /**
+   * Resolved Prompts source — either internally constructed from the
+   * declarations on options, or the adopter-supplied instance. `null`
+   * when no prompts slot was provided. Lifecycle:
+   *
+   *   - Internally-constructed: this harness's `close()` closes it.
+   *   - Adopter-supplied (the `use` form): adopter owns lifecycle;
+   *     `close()` here is a no-op for the source.
+   */
+  private readonly promptsSource: Prompts | null;
+  /** True iff `promptsSource` is internally-owned (so close it on close). */
+  private readonly ownsPromptsSource: boolean;
+  /** Declarations to register into `promptsSource` during start(). */
+  private readonly pendingPromptDeclarations: readonly import("@agentick/spec-next").PromptDeclaration[];
+  /** Per-connection prompts visibility predicate (resolved from options). */
+  private readonly promptsFilter: PromptsFilter | null;
 
   /** Server identity for the MCP `initialize` response. */
   private readonly serverInfo: { name: string; version: string };
@@ -107,6 +128,16 @@ export class McpServerHarness
     return this.options.name;
   }
 
+  /**
+   * The Prompts source this server projects on the wire, or `null` if
+   * no prompts slot was wired. Use this to register/update/remove
+   * prompts at runtime (independent of how it was originally
+   * constructed — declarative array or pre-built instance).
+   */
+  get prompts(): Prompts | null {
+    return this.promptsSource;
+  }
+
   constructor(
     scopeId: string,
     journal: OperationJournal,
@@ -122,7 +153,29 @@ export class McpServerHarness
     this.toolsRegistry = this.options.tools?.registry ?? [];
     this.resolveHandler = this.options.tools?.resolveHandler ?? (() => null);
     this.hasToolsWired = this.options.tools !== undefined;
-    this.hasPromptsWired = this.options.prompts !== undefined;
+
+    if (this.options.prompts !== undefined) {
+      const resolved = resolvePromptsOption(this.options.prompts);
+      this.promptsFilter = resolved.filter;
+      if (resolved.use !== null) {
+        // Adopter-supplied instance.
+        this.promptsSource = resolved.use;
+        this.ownsPromptsSource = false;
+        this.pendingPromptDeclarations = [];
+      } else {
+        // Construct internally; substrate shared with this harness so
+        // events flow through the same bus / are journaled coherently.
+        this.promptsSource = new PromptsHarness(`${scopeId}:prompts`, journal, bus, inbox);
+        this.ownsPromptsSource = true;
+        this.pendingPromptDeclarations = resolved.declarations;
+      }
+    } else {
+      this.promptsSource = null;
+      this.ownsPromptsSource = false;
+      this.pendingPromptDeclarations = [];
+      this.promptsFilter = null;
+    }
+
     this.serverInfo = this.options.serverInfo ?? {
       name: this.options.name,
       version: "0.0.0",
@@ -172,6 +225,17 @@ export class McpServerHarness
   async start(): Promise<void> {
     if (this.started || this.closed) return;
     this.started = true;
+
+    // Internally-owned Prompts: wait for ready + register the initial
+    // declarations. Adopter-owned sources are assumed ready already
+    // (and registering would be the adopter's responsibility).
+    if (this.promptsSource !== null && this.ownsPromptsSource) {
+      await this.promptsSource.ready;
+      for (const declaration of this.pendingPromptDeclarations) {
+        await this.promptsSource.register({ declaration });
+      }
+    }
+
     for (const transport of this.transports) {
       await transport.listen(async (sdkTransport, info) => {
         await this.acceptConnection(sdkTransport, info);
@@ -211,6 +275,17 @@ export class McpServerHarness
     this.openConnections.clear();
     this.connectionsCache = null;
     this.connectionNotifier.notify();
+
+    // 3. Close the internally-owned Prompts source. Adopter-supplied
+    //    sources are NOT closed — the adopter owns their lifecycle.
+    if (this.promptsSource !== null && this.ownsPromptsSource) {
+      try {
+        await this.promptsSource.close();
+      } catch {
+        /* best-effort */
+      }
+    }
+
     await super.close();
   }
 
@@ -249,7 +324,7 @@ export class McpServerHarness
     const capabilities = buildCapabilities(
       {
         tools: this.hasToolsWired && this.toolsRegistry.length > 0,
-        prompts: this.hasPromptsWired,
+        prompts: this.promptsSource !== null,
         resources: false, // wired with #123
         elicitation: false, // wired in #171d.2
         sampling: false, // wired with SamplingHarness
@@ -308,11 +383,10 @@ export class McpServerHarness
       });
     }
 
-    if (this.hasPromptsWired) {
-      const promptsOptions = this.options.prompts!;
+    if (this.promptsSource !== null) {
       const unsubscribe = installPromptsHandlers(sdkServer, {
-        harness: promptsOptions.harness,
-        ...(promptsOptions.filter ? { filter: promptsOptions.filter } : {}),
+        source: this.promptsSource,
+        ...(this.promptsFilter ? { filter: this.promptsFilter } : {}),
         security: this.security,
         buildContext: buildRequestContext,
       });

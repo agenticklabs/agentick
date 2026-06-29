@@ -174,6 +174,13 @@ export {
  *   - Custom backends — adopters override by registering their own
  *     `SessionExtension` that swaps in a subclass.
  */
+/**
+ * Adopter-facing alias for {@link PromptsHarnessProtocol}. Use this in
+ * surface APIs (function signatures, slot types in extension options)
+ * so adopters never have to type "Harness" in their code.
+ */
+export type Prompts = PromptsHarnessProtocol;
+
 export interface PromptsHarnessProtocol {
   readonly id: string;
   readonly ready: Promise<void>;

@@ -65,6 +65,7 @@
   },
   "dependencies": {
     "@agentick/elicitation-next": "workspace:*",
+    "@agentick/prompts-next": "workspace:*",
     "@agentick/pubsub-next": "workspace:*",
     "@agentick/runtime-next": "workspace:*",
     "@agentick/spec-next": "workspace:*",
@@ -78,7 +79,6 @@
     "@agentick/app-next": "workspace:*",
     "@agentick/executor-next": "workspace:*",
     "@agentick/reconciler-next": "workspace:*",
-    "@agentick/prompts-next": "workspace:*",
     "@agentick/spec-conformance-next": "workspace:*",
     "@agentick/tasks-next": "workspace:*",
     "@agentick/utils-next": "workspace:*",
