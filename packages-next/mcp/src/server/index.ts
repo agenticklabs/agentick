@@ -29,6 +29,16 @@ export { McpServerHarness, type McpServerHarnessOptions } from "./harness.js";
 export { type McpServerHandle, toHandle } from "./handle.js";
 export { validateConfig } from "./config.js";
 export * from "./security/index.js";
+export * from "./transports/index.js";
+export { buildCapabilities, type WiredCapabilities } from "./protocol/lifecycle.js";
+export {
+  installToolsHandlers,
+  projectTools,
+  toWireTool,
+  isProjectionError,
+  type ToolHandlerResolver,
+  type ToolsProjectionOptions,
+} from "./projection/tools.js";
 
 // Re-export the spec types so adopters don't need to import from
 // `@agentick/spec-next` directly for the common case.
