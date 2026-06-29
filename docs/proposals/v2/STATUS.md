@@ -1,7 +1,13 @@
 # Agentick v2 — Implementation Status
 
 **Branch:** `feat/v2`
-**Last updated:** 2026-06-28 (later still) — **Skills + Prompts loaders gain `reload()` + lookup-on-miss.** Both harnesses now retain their configured loaders and expose:
+**Last updated:** 2026-06-28 (later still) — **ADR 40 lands: MCP server harness shape resolved.** Closes the open §"Server-side: shape is OPEN" question from ADR 23. Decisions: Shape 1 harness at gateway scope (NOT session); one package with standalone-process + gateway-extension modes; multiple servers per process; declarative object config; per-connection filters + transforms (NOT per-server pre-baked); security pipeline ported verbatim from v1 (5 named stages); OAuth 2.1 spec-aligned (RS by default, optional embedded AS); internal agents use direct projection (`mcp://gateway/<name>` URL form). Resources defer until #123 lands — additive without shape changes.
+
+v1 audit (20k LOC `packages/mcp/`) catalogued for porting: security stages (`bearerTokenAuth`, `roleBasedAuthz`, `slidingWindowLimiter`, `allowListGuard`), `SamplingAPIImpl.structured()` retry loop, `ElicitationAPIImpl` flat-schema validation, roots path safety, completion builders. Tool transforms (rename / prefix / restrictInput / wrapHandler / alias) are net-new — landing as `@agentick/tool-next/transforms` (#171a) because they're useful beyond the MCP server.
+
+First batch of #171 implementation tasks filed: #171a (transforms), #171b (skeleton + spec types), #171c (stdio + tools projection + security pipeline MVP). Total estimated effort ~16 days across 9 subtasks per ADR 40 rollout plan.
+
+**Previously, 2026-06-28 (earlier) — Skills + Prompts loaders gain `reload()` + lookup-on-miss.** Both harnesses now retain their configured loaders and expose:
 
 - `session.skills.reload({ pruneMissing? })` / `session.prompts.reload({ pruneMissing? })` — re-walk loaders, diff against current state, apply adds + updates (+ optional removes).
 - `session.skills.resolve(name)` — async lookup-on-miss read.
