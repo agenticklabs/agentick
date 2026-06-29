@@ -24,6 +24,8 @@
  */
 
 import type { Effect, Stream } from "effect";
+import { AgentickError } from "../errors/base.js";
+import { registerAgentickError } from "../errors/registry.js";
 import type { EventKey } from "./bus.js";
 
 // ============================================================================
@@ -99,21 +101,27 @@ export type CompiledMatcher<E> = (event: E) => boolean;
  *
  * @see docs/proposals/v2/blueprint/29-bus-overhaul.md §Open design decisions §Cursor semantics on resubscribe past retention
  */
-export class CursorEvictedError extends Error {
+export class CursorEvictedError extends AgentickError {
   readonly _tag = "CursorEvictedError" as const;
   /** The cursor the subscriber requested or had at the time of eviction. */
   readonly requested: Cursor;
   /** The oldest cursor still available in the log. Use as the resubscribe point. */
   readonly oldestAvailable: Cursor;
-  constructor(requested: Cursor, oldestAvailable: Cursor) {
+  constructor(args: {
+    readonly requested: Cursor;
+    readonly oldestAvailable: Cursor;
+    readonly cause?: unknown;
+  }) {
     super(
-      `Cursor evicted: requested=${requested.value}, oldest available=${oldestAvailable.value}`,
+      `Cursor evicted: requested=${args.requested.value}, oldest available=${args.oldestAvailable.value}`,
+      { cause: args.cause },
     );
-    this.name = "CursorEvictedError";
-    this.requested = requested;
-    this.oldestAvailable = oldestAvailable;
+    this.requested = args.requested;
+    this.oldestAvailable = args.oldestAvailable;
   }
 }
+
+registerAgentickError("CursorEvictedError", CursorEvictedError);
 
 // ============================================================================
 // LogMetrics — instantaneous read of log state

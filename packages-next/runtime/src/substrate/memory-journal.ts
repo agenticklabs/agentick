@@ -300,7 +300,10 @@ export class MemoryJournal implements OperationJournal {
         // earlier has been evicted by the ring buffer's sliding window.
         if (cursor.value < j.dropped) {
           return Stream.fail(
-            new CursorEvictedError({ value: cursor.value }, { value: j.dropped }),
+            new CursorEvictedError({
+              requested: { value: cursor.value },
+              oldestAvailable: { value: j.dropped },
+            }),
           ) as Stream.Stream<ProtocolEvent, CursorEvictedError, never>;
         }
 
@@ -504,7 +507,10 @@ export class MemoryJournal implements OperationJournal {
       while (true) {
         if (sub.cursor < j.dropped) {
           return yield* Effect.fail(
-            new CursorEvictedError({ value: sub.cursor }, { value: j.dropped }),
+            new CursorEvictedError({
+              requested: { value: sub.cursor },
+              oldestAvailable: { value: j.dropped },
+            }),
           );
         }
 

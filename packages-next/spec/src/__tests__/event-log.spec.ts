@@ -49,7 +49,7 @@ describe("CursorEvictedError", () => {
   it("carries the requested + oldest-available cursors", () => {
     const requested: Cursor = { value: 100 };
     const oldest: Cursor = { value: 250 };
-    const err = new CursorEvictedError(requested, oldest);
+    const err = new CursorEvictedError({ requested, oldestAvailable: oldest });
     expect(err._tag).toBe("CursorEvictedError");
     expect(err.requested).toBe(requested);
     expect(err.oldestAvailable).toBe(oldest);
@@ -57,8 +57,11 @@ describe("CursorEvictedError", () => {
     expect(err.message).toContain("250");
   });
 
-  it("is a real Error subclass (instanceof works)", () => {
-    const err = new CursorEvictedError({ value: 0 }, { value: 1 });
+  it("is a real Error subclass (instanceof works through the AgentickError chain)", () => {
+    const err = new CursorEvictedError({
+      requested: { value: 0 },
+      oldestAvailable: { value: 1 },
+    });
     expect(err).toBeInstanceOf(Error);
     expect(err).toBeInstanceOf(CursorEvictedError);
   });

@@ -501,7 +501,10 @@ export class LocalEventBus implements EventBus {
         const oldest = bus.oldestRetainedCursor();
         if (cursor.value < oldest) {
           return Stream.fail(
-            new CursorEvictedError({ value: cursor.value }, { value: oldest }),
+            new CursorEvictedError({
+              requested: { value: cursor.value },
+              oldestAvailable: { value: oldest },
+            }),
           ) as Stream.Stream<ProtocolEvent, CursorEvictedError, never>;
         }
 
@@ -555,7 +558,10 @@ export class LocalEventBus implements EventBus {
         const oldest = bus.oldestRetainedCursor();
         if (sub.cursor < oldest) {
           return yield* Effect.fail(
-            new CursorEvictedError({ value: sub.cursor }, { value: oldest }),
+            new CursorEvictedError({
+              requested: { value: sub.cursor },
+              oldestAvailable: { value: oldest },
+            }),
           );
         }
 

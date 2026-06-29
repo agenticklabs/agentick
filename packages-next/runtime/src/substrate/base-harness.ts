@@ -48,7 +48,11 @@ import type {
   TerminalEvent,
   Unsubscribe,
 } from "@agentick/spec-next";
-import { DEFAULT_JOURNALING_POLICY } from "@agentick/spec-next";
+import {
+  AgentickError,
+  DEFAULT_JOURNALING_POLICY,
+  registerAgentickError,
+} from "@agentick/spec-next";
 import { resolveSyncSubstrateSlot } from "./resolve-slot.js";
 import { ulid } from "./ulid.js";
 import { EMPTY_CONTEXT, getContext, type RuntimeContext, withContext } from "./runtime-context.js";
@@ -1044,13 +1048,13 @@ export abstract class BaseHarness<
       case "replaced":
         return Effect.succeed(terminal.result as R);
       case "failed":
-        return Effect.fail(new OperationOutcomeError("failed", terminal));
+        return Effect.fail(new OperationOutcomeError({ outcome: "failed", terminal }));
       case "canceled":
-        return Effect.fail(new OperationOutcomeError("canceled", terminal));
+        return Effect.fail(new OperationOutcomeError({ outcome: "canceled", terminal }));
       case "vetoed":
-        return Effect.fail(new OperationOutcomeError("vetoed", terminal));
+        return Effect.fail(new OperationOutcomeError({ outcome: "vetoed", terminal }));
       case "deferred":
-        return Effect.fail(new OperationOutcomeError("deferred", terminal));
+        return Effect.fail(new OperationOutcomeError({ outcome: "deferred", terminal }));
     }
   }
 
@@ -1132,18 +1136,26 @@ function matchOverride(
  * wrapping in `OperationOutcomeError`. Veto / canceled / deferred / the
  * replay path for cached failed terminals use this error class so the
  * caller can pattern-match.
+ *
+ * Subclass of {@link AgentickError} (ADR 41) — `err instanceof
+ * AgentickError` narrows to the framework-error root.
  */
-export class OperationOutcomeError extends Error {
+export class OperationOutcomeError extends AgentickError {
   readonly _tag = "OperationOutcomeError" as const;
   readonly outcome: CommandOutcome;
   readonly terminal: TerminalEvent;
-  constructor(outcome: CommandOutcome, terminal: TerminalEvent) {
-    super(`operation outcome: ${outcome}`);
-    this.name = "OperationOutcomeError";
-    this.outcome = outcome;
-    this.terminal = terminal;
+  constructor(args: {
+    readonly outcome: CommandOutcome;
+    readonly terminal: TerminalEvent;
+    readonly cause?: unknown;
+  }) {
+    super(`operation outcome: ${args.outcome}`, { cause: args.cause });
+    this.outcome = args.outcome;
+    this.terminal = args.terminal;
   }
 }
+
+registerAgentickError("OperationOutcomeError", OperationOutcomeError);
 
 // Re-export InboxError type so concrete harnesses can type-narrow
 // without pulling from @agentick/spec-next directly.
