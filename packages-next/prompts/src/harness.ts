@@ -54,6 +54,7 @@ import type {
 import { createKeyedNotifier, type KeyedNotifier } from "@agentick/pubsub-next";
 import { omitUndefined } from "@agentick/utils-next";
 
+import type { PromptLoader } from "./loaders.js";
 import { isMessageEntryArray, stringToSystemMessage, type PromptRenderer } from "./renderer.js";
 
 const SURFACE = "prompts" as const;
@@ -82,6 +83,12 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
   private readonly renderers: readonly PromptRenderer[];
   private readonly timeline?: TimelineHarnessProtocol;
 
+  /**
+   * Loaders retained from `withPrompts({ loaders })`. Drive
+   * post-startup `reload()` + lookup-on-miss in `invoke()` / `get()`.
+   */
+  private loaders: readonly PromptLoader[] = [];
+
   /** Cached snapshot for `list()`. Invalidated on every mutation. */
   private listCache: readonly PromptDeclaration[] | null = null;
 
@@ -99,6 +106,91 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
     super(SURFACE, scopeId, journal, bus, inbox);
     this.renderers = options.renderers ?? [];
     this.timeline = options.timeline;
+  }
+
+  /**
+   * Replace the loader set used by `reload()` and the lookup-on-miss
+   * fallback in `invoke()` / `get()`. Called by `withPrompts` at
+   * install time; adopters can also swap the loader set at runtime.
+   */
+  setLoaders(loaders: readonly PromptLoader[]): void {
+    this.loaders = loaders;
+  }
+
+  // ─────────── Dynamic surface ───────────
+
+  /**
+   * Re-run every configured loader, diff against current state, apply
+   * adds + updates (and removes when `pruneMissing: true`). Returns
+   * a summary of names touched.
+   *
+   * **Caveat:** the diff only looks at registered prompts; loaded
+   * prompts that lack `template` and `render` are still passed through
+   * to `register` (the harness will reject at `register` time if the
+   * declaration is malformed).
+   */
+  async reload(opts: { pruneMissing?: boolean } = {}): Promise<{
+    readonly added: readonly string[];
+    readonly updated: readonly string[];
+    readonly removed: readonly string[];
+  }> {
+    const batches = await Promise.all(this.loaders.map((l) => l.load()));
+    const fresh = new Map<string, PromptDeclaration>();
+    for (const batch of batches) {
+      for (const input of batch) fresh.set(input.declaration.name, input.declaration);
+    }
+    const added: string[] = [];
+    const updated: string[] = [];
+    for (const [name, decl] of fresh) {
+      if (this.prompts.has(name)) {
+        await this.update({
+          name,
+          declaration: {
+            description: decl.description,
+            ...(decl.arguments ? { arguments: decl.arguments } : {}),
+            ...(decl.template !== undefined ? { template: decl.template } : {}),
+            ...(decl.render !== undefined ? { render: decl.render } : {}),
+            ...(decl.metadata ? { metadata: decl.metadata } : {}),
+          },
+        });
+        updated.push(name);
+      } else {
+        await this.register({ declaration: decl });
+        added.push(name);
+      }
+    }
+    const removed: string[] = [];
+    if (opts.pruneMissing) {
+      for (const name of Array.from(this.prompts.keys())) {
+        if (!fresh.has(name)) {
+          await this.remove({ name });
+          removed.push(name);
+        }
+      }
+    }
+    return { added, updated, removed };
+  }
+
+  /**
+   * Lookup-on-miss internal helper used by `invoke()` / `get()` and
+   * by the public `resolve()`. Returns the registered prompt if
+   * present; otherwise asks each loader (via `lookup` or `load()` +
+   * filter). On hit, registers + returns the declaration. `null` if
+   * no loader has the name.
+   */
+  async resolve(name: string): Promise<PromptDeclaration | null> {
+    const existing = this.prompts.get(name);
+    if (existing) return existing;
+    for (const loader of this.loaders) {
+      const found = loader.lookup
+        ? await loader.lookup(name)
+        : ((await loader.load()).find((p) => p.declaration.name === name) ?? null);
+      if (found) {
+        await this.register(found);
+        return this.prompts.get(name) ?? null;
+      }
+    }
+    return null;
   }
 
   // ─────────── Sync surface ───────────
@@ -168,7 +260,13 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
     );
   }
 
-  invoke(input: PromptsInvokeInput): Promise<PromptsGetResult> {
+  async invoke(input: PromptsInvokeInput): Promise<PromptsGetResult> {
+    // Lookup-on-miss: if the name isn't yet registered, ask configured
+    // loaders. On hit, the prompt is registered + invoke proceeds; on
+    // miss, the existing path throws `PromptNotFound`.
+    if (!this.prompts.has(input.name) && this.loaders.length > 0) {
+      await this.resolve(input.name);
+    }
     const op: Operation<PromptsInvokeInput, PromptsGetResult, PromptsError> = {
       opId: `prompts:invoke:${ulid()}`,
       surface: SURFACE,
@@ -179,7 +277,10 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
     return runHarnessProtocol(this.runOperation(op, (i) => this.applyInvoke(i)));
   }
 
-  get(input: PromptsGetInput): Promise<PromptsGetResult> {
+  async get(input: PromptsGetInput): Promise<PromptsGetResult> {
+    if (!this.prompts.has(input.name) && this.loaders.length > 0) {
+      await this.resolve(input.name);
+    }
     const op: Operation<PromptsGetInput, PromptsGetResult, PromptsError> = {
       opId: `prompts:get:${ulid()}`,
       surface: SURFACE,

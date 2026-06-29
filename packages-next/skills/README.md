@@ -140,6 +140,23 @@ withSkills({
 
 Frontmatter parsing defaults to a minimal `key: value` parser (`parseSimpleFrontmatter` — supports quoted strings + inline arrays like `[a, b, c]`). For full YAML / TOML, pass a custom `parseFrontmatter: (text) => Record<string, unknown>` callback — wire `yaml` / `@iarna/toml` / your parser of choice without adding a dep at the framework level.
 
+### Dynamic — post-startup `reload()` + `resolve(name)`
+
+Loaders are retained on the harness, so the library can grow after session boot:
+
+```ts
+// Adopter drops a new file into ./skills/, then:
+const { added, updated, removed } = await session.skills.reload();
+// → { added: ["new_skill"], updated: [], removed: [] }
+
+// Or pull a single skill lazily (lookup-on-miss):
+const skill = await session.skills.resolve("late_arriving");
+// First call walks loaders, registers + returns. Subsequent calls
+// hit cache. Returns null when no loader has the name.
+```
+
+`reload({ pruneMissing: true })` removes entries that have disappeared from the loader snapshot — off by default so a runtime `harness.register(...)` isn't clobbered by the next reload. Loaders may implement an optional `lookup(name)` for fast-path resolution (no full enumeration); the built-in `fromX` factories do.
+
 ## Status & roadmap
 
 **Shipped:**

@@ -36,7 +36,11 @@ export type PromptLoader = Loader<PromptsRegisterInput>;
  * survive because the array lives in the same JS module.
  */
 export function fromArray(prompts: readonly PromptsRegisterInput[]): PromptLoader {
-  return sourceFromArray(prompts);
+  const base = sourceFromArray(prompts);
+  return {
+    load: base.load,
+    lookup: async (name) => prompts.find((p) => p.declaration.name === name) ?? null,
+  };
 }
 
 export interface FromModuleOptions {
@@ -59,11 +63,18 @@ export interface FromModuleOptions {
  */
 export function fromModule(options: FromModuleOptions): PromptLoader {
   const picker = options.picker ?? defaultPicker;
-  return sourceFromModule<PromptsRegisterInput>({
+  const inner = sourceFromModule<PromptsRegisterInput>({
     specifier: options.specifier,
     picker,
     ...(options.import ? { import: options.import } : {}),
   });
+  return {
+    load: inner.load,
+    lookup: async (name) => {
+      const all = await inner.load();
+      return all.find((p) => p.declaration.name === name) ?? null;
+    },
+  };
 }
 
 function defaultPicker(mod: unknown): readonly PromptsRegisterInput[] {
@@ -134,7 +145,7 @@ export function fromStaticUrl(options: FromStaticUrlOptions): PromptLoader {
       return arr as readonly PromptsRegisterInput[];
     },
   });
-  return mapLoader(inner, (input) => {
+  const validated = mapLoader(inner, (input) => {
     const decl = input.declaration as PromptDeclaration;
     if (decl == null || typeof decl !== "object") {
       throw new Error(
@@ -148,4 +159,11 @@ export function fromStaticUrl(options: FromStaticUrlOptions): PromptLoader {
     }
     return input;
   });
+  return {
+    load: validated.load,
+    lookup: async (name) => {
+      const all = await validated.load();
+      return all.find((p) => p.declaration.name === name) ?? null;
+    },
+  };
 }

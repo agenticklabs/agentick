@@ -31,15 +31,15 @@ That's it. One call returns the full batch. Streaming is deliberately not part o
 
 ## Primitives — `@agentick/utils-next/loaders`
 
-| Primitive                                                    | Purpose                                                                    |
-| ------------------------------------------------------------ | -------------------------------------------------------------------------- |
-| `Loader<T>`                                                  | The contract — `{ load(): Promise<readonly T[]> }`                         |
-| `mergeLoaders(...ls): Loader<T>`                             | Concatenate loader outputs in input order (runs concurrently)              |
-| `mapLoader(loader, fn): Loader<B>`                           | Transform records lazily; `null`/`undefined` returns drop the record       |
-| `sourceFromArray<T>(items): Loader<T>`                       | Literal records — the trivial source                                       |
-| `sourceFromUrl<T>({ url, parse, ... }): Loader<T>`           | `fetch`-based; function-free records only                                  |
-| `sourceFromModule<T>({ specifier, picker, ... }): Loader<T>` | Dynamic `import()`; preserves functions across the boundary                |
-| `extractFrontmatter(text): { frontmatter, body }`            | Delimiter-block scanner (`---` … `---`). No YAML/TOML parse — caller picks |
+| Primitive                                                    | Purpose                                                                               |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
+| `Loader<T>`                                                  | The contract — `{ load(): Promise<readonly T[]>, lookup?(name): Promise<T \| null> }` |
+| `mergeLoaders(...ls): Loader<T>`                             | Concatenate loader outputs in input order (runs concurrently)                         |
+| `mapLoader(loader, fn): Loader<B>`                           | Transform records lazily; `null`/`undefined` returns drop the record                  |
+| `sourceFromArray<T>(items): Loader<T>`                       | Literal records — the trivial source                                                  |
+| `sourceFromUrl<T>({ url, parse, ... }): Loader<T>`           | `fetch`-based; function-free records only                                             |
+| `sourceFromModule<T>({ specifier, picker, ... }): Loader<T>` | Dynamic `import()`; preserves functions across the boundary                           |
+| `extractFrontmatter(text): { frontmatter, body }`            | Delimiter-block scanner (`---` … `---`). No YAML/TOML parse — caller picks            |
 
 Both source primitives accept dependency-injection escapes (`fetch` / `import`) for tests and bundler-specific resolution.
 
@@ -99,6 +99,7 @@ If ANY underlying loader rejects, `merge.load()` rejects too — there is no per
 - **No global state, no caching.** Each `load()` call re-reads the source. Memoization is the caller's choice — if you want it, wrap the loader.
 - **No watch / subscribe.** Loaders are pull-based snapshots. Live-reload is a separate concern (handle via your harness's `register/update/remove` after the initial load).
 - **Symlinks are skipped** in directory walks. Cross-volume traversal and cycles aren't worth the foot-gun.
+- **`lookup(name)` is OPTIONAL.** Loaders that can answer "do you have X" without enumerating the whole batch implement it; harnesses use it as the fast-path during lookup-on-miss reads. Loaders without `lookup` fall back to `load()` + filter on the harness side — same correctness, worse perf.
 
 ## Verified by
 

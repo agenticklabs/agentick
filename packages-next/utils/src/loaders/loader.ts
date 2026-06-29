@@ -19,6 +19,19 @@
 
 export interface Loader<T> {
   readonly load: () => Promise<readonly T[]>;
+  /**
+   * Optional fast-path: resolve a single record by its identifier.
+   * Loaders that can answer "do you have X" without enumerating the
+   * full batch implement this; harnesses use it as the cache-miss
+   * fallback during lookup-on-miss reads. Loaders without this method
+   * fall back to `load()` + filter on the harness side.
+   *
+   * `name` is a string identifier; what it discriminates is loader-
+   * specific (record `name`, manifest entry key, etc.). Return `null`
+   * if the loader is sure the name is not present; let unknown / I/O
+   * errors propagate.
+   */
+  readonly lookup?: (name: string) => Promise<T | null>;
 }
 
 /**

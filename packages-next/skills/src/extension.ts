@@ -53,6 +53,11 @@ export function withSkills(options: WithSkillsOptions = {}): SessionExtension {
       );
       await harness.ready;
 
+      // Retain loaders for post-startup `reload()` / `resolve(name)`.
+      if (options.loaders && options.loaders.length > 0) {
+        harness.setLoaders(options.loaders);
+      }
+
       // Seed initial skills via the async surface so envelopes flow
       // through the journal — adopters subscribing to `skills:register`
       // see them on session boot.

@@ -32,4 +32,22 @@ export interface SkillsHandle {
   remove(input: SkillsRemoveInput): Promise<void>;
   subscribe(name: string, listener: () => void): Unsubscribe;
   subscribeAll(listener: () => void): Unsubscribe;
+
+  /**
+   * Re-run configured loaders, diff against current state, apply adds
+   * + updates (and removes when `pruneMissing: true`). Use to refresh
+   * from disk / URL after startup.
+   */
+  reload(opts?: { pruneMissing?: boolean }): Promise<{
+    readonly added: readonly string[];
+    readonly updated: readonly string[];
+    readonly removed: readonly string[];
+  }>;
+
+  /**
+   * Lookup-on-miss read: returns the registered skill if present;
+   * otherwise asks each configured loader. `null` if no source has
+   * the name.
+   */
+  resolve(name: string): Promise<Skill | null>;
 }

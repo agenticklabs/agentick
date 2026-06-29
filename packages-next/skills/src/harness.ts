@@ -37,6 +37,17 @@ import type {
 import { createKeyedNotifier, type KeyedNotifier } from "@agentick/pubsub-next";
 import { omitUndefined } from "@agentick/utils-next";
 
+import type { SkillLoader } from "./loaders.js";
+
+function skillContentChanged(existing: Skill, incoming: SkillsRegisterInput): boolean {
+  if (existing.description !== incoming.description) return true;
+  if (existing.content !== incoming.content) return true;
+  const existingTags = existing.tags ? [...existing.tags].sort().join("|") : "";
+  const incomingTags = incoming.tags ? [...incoming.tags].sort().join("|") : "";
+  if (existingTags !== incomingTags) return true;
+  return false;
+}
+
 // ============================================================================
 // Harness
 // ============================================================================
@@ -55,12 +66,99 @@ export class SkillsHarness extends BaseHarness<SkillsSurface> implements SkillsH
   /** Cached snapshot for `list()`. Invalidated on every mutation. */
   private listCache: readonly Skill[] | null = null;
 
+  /**
+   * Loaders retained from `withSkills({ loaders })`. Drive
+   * post-startup `reload()` + `resolve(name)` (lookup-on-miss).
+   * Empty when no loaders were configured.
+   */
+  private loaders: readonly SkillLoader[] = [];
+
   get id(): string {
     return this.scopeId;
   }
 
   constructor(scopeId: string, journal: OperationJournal, bus: EventBus, inbox: MessageInbox) {
     super(SURFACE, scopeId, journal, bus, inbox);
+  }
+
+  /**
+   * Replace the loader set used by `reload()` and `resolve()`.
+   * Called by `withSkills` at install time; adopters can also swap the
+   * loader set at runtime (e.g., add a new source after startup).
+   */
+  setLoaders(loaders: readonly SkillLoader[]): void {
+    this.loaders = loaders;
+  }
+
+  // ─────────── Dynamic surface ───────────
+
+  /**
+   * Re-run every configured loader, diff against current state, apply
+   * adds + updates (and removes when `pruneMissing: true`). Loader
+   * errors propagate — wrap individual loaders if you need fallback.
+   *
+   * Returns a summary of names touched.
+   */
+  async reload(opts: { pruneMissing?: boolean } = {}): Promise<{
+    readonly added: readonly string[];
+    readonly updated: readonly string[];
+    readonly removed: readonly string[];
+  }> {
+    const batches = await Promise.all(this.loaders.map((l) => l.load()));
+    const fresh = new Map<string, SkillsRegisterInput>();
+    for (const batch of batches) {
+      for (const skill of batch) fresh.set(skill.name, skill);
+    }
+    const added: string[] = [];
+    const updated: string[] = [];
+    for (const [name, record] of fresh) {
+      if (this.skills.has(name)) {
+        const existing = this.skills.get(name)!;
+        if (skillContentChanged(existing, record)) {
+          await this.update({
+            name,
+            description: record.description,
+            content: record.content,
+            ...(record.tags ? { tags: record.tags } : {}),
+            ...(record.metadata ? { metadata: record.metadata } : {}),
+          });
+          updated.push(name);
+        }
+      } else {
+        await this.register(record);
+        added.push(name);
+      }
+    }
+    const removed: string[] = [];
+    if (opts.pruneMissing) {
+      for (const name of Array.from(this.skills.keys())) {
+        if (!fresh.has(name)) {
+          await this.remove({ name });
+          removed.push(name);
+        }
+      }
+    }
+    return { added, updated, removed };
+  }
+
+  /**
+   * Lookup-on-miss: returns the registered skill if present; otherwise
+   * asks each loader (via `lookup` or `load()` + filter) and registers
+   * the first match. Returns `null` if no loader has the name.
+   */
+  async resolve(name: string): Promise<Skill | null> {
+    const existing = this.skills.get(name);
+    if (existing) return existing;
+    for (const loader of this.loaders) {
+      const found = loader.lookup
+        ? await loader.lookup(name)
+        : ((await loader.load()).find((s) => s.name === name) ?? null);
+      if (found) {
+        await this.register(found);
+        return this.skills.get(name) ?? null;
+      }
+    }
+    return null;
   }
 
   // ─────────── Sync surface ───────────

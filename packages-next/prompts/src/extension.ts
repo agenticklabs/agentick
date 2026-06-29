@@ -66,6 +66,12 @@ export function withPrompts(options: WithPromptsOptions = {}): SessionExtension 
       );
       await harness.ready;
 
+      // Retain loaders for post-startup reload() + lookup-on-miss in
+      // invoke() / get().
+      if (options.loaders && options.loaders.length > 0) {
+        harness.setLoaders(options.loaders);
+      }
+
       if (options.initial && options.initial.length > 0) {
         for (const decl of options.initial) {
           await harness.register(decl);

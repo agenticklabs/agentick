@@ -55,13 +55,25 @@ export interface FromDirectoryOptionsForSkills extends Omit<FromDirectoryOptions
  * Missing either → load error.
  */
 export function fromFile(options: FromFileOptions): SkillLoader {
-  return mapLoader(
+  const inner = mapLoader(
     sourceFromFile({
       path: options.path,
       ...(options.encoding ? { encoding: options.encoding } : {}),
     }),
     (record) => fileRecordToSkill(record, options.parseFrontmatter ?? parseSimpleFrontmatter),
   );
+  return {
+    load: inner.load,
+    lookup: async (name) => {
+      try {
+        const all = await inner.load();
+        return all.find((s) => s.name === name) ?? null;
+      } catch {
+        // A bad file → lookup returns null rather than poisoning the chain.
+        return null;
+      }
+    },
+  };
 }
 
 /**
@@ -79,7 +91,7 @@ export function fromDirectory(options: FromDirectoryOptionsForSkills): SkillLoad
     ...(options.includeHidden !== undefined ? { includeHidden: options.includeHidden } : {}),
     ...(options.encoding ? { encoding: options.encoding } : {}),
   };
-  return mapLoader(sourceFromDirectory(dirOpts), (record) => {
+  const inner = mapLoader(sourceFromDirectory(dirOpts), (record) => {
     try {
       return fileRecordToSkill(record, parser);
     } catch {
@@ -87,6 +99,13 @@ export function fromDirectory(options: FromDirectoryOptionsForSkills): SkillLoad
       return null;
     }
   });
+  return {
+    load: inner.load,
+    lookup: async (name) => {
+      const all = await inner.load();
+      return all.find((s) => s.name === name) ?? null;
+    },
+  };
 }
 
 // ---------------------------------------------------------------------

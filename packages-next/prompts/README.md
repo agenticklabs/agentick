@@ -210,6 +210,26 @@ withPrompts({
 
 No `fromFile` / `fromDirectory` here — JSX `.tsx` files on disk need a bundler / transform pipeline. Framework bindings can supply their own filesystem factories (e.g., a future `@agentick/prompts-react-next/loaders/node`).
 
+### Dynamic — post-startup `reload()` + lookup-on-miss
+
+Loaders are retained on the harness, so the library can grow after session boot:
+
+```ts
+// Re-pull from all loaders:
+const { added, updated, removed } = await session.prompts.reload();
+
+// Or just invoke a prompt that wasn't loaded yet — the harness asks
+// each loader on cache miss before throwing PromptNotFound:
+await session.prompts.invoke({ name: "late_prompt", args: { ... } });
+// First call walks loaders, registers, then invokes. Subsequent calls
+// hit cache.
+
+// Explicit one-name resolve (no invoke):
+const decl = await session.prompts.resolve("late_prompt");
+```
+
+`reload({ pruneMissing: true })` removes entries that have disappeared from sources — off by default so a runtime `harness.register(...)` isn't clobbered. The lookup-on-miss path is transparent in `invoke()` / `get()`; call `resolve()` directly when you want the declaration without rendering. Loaders may implement an optional `lookup(name)` for fast-path resolution; the built-in `fromX` factories do.
+
 ## Status & roadmap
 
 **Shipped:**

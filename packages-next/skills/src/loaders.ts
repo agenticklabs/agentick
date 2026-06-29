@@ -27,7 +27,11 @@ export type SkillLoader = Loader<SkillsRegisterInput>;
  * skills shipped with an app.
  */
 export function fromArray(skills: readonly SkillsRegisterInput[]): SkillLoader {
-  return sourceFromArray(skills);
+  const base = sourceFromArray(skills);
+  return {
+    load: base.load,
+    lookup: async (name) => skills.find((s) => s.name === name) ?? null,
+  };
 }
 
 export interface FromUrlOptions {
@@ -55,7 +59,7 @@ export interface FromUrlOptions {
  */
 export function fromUrl(options: FromUrlOptions): SkillLoader {
   const field = options.arrayField === undefined ? "skills" : options.arrayField;
-  return sourceFromUrl<SkillsRegisterInput>({
+  const inner = sourceFromUrl<SkillsRegisterInput>({
     url: options.url,
     ...(options.fetch ? { fetch: options.fetch } : {}),
     ...(options.init ? { init: options.init } : {}),
@@ -78,6 +82,13 @@ export function fromUrl(options: FromUrlOptions): SkillLoader {
       return arr as readonly SkillsRegisterInput[];
     },
   });
+  return {
+    load: inner.load,
+    lookup: async (name) => {
+      const all = await inner.load();
+      return all.find((s) => s.name === name) ?? null;
+    },
+  };
 }
 
 /**

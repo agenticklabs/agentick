@@ -1,7 +1,15 @@
 # Agentick v2 — Implementation Status
 
 **Branch:** `feat/v2`
-**Last updated:** 2026-06-28 (later) — **Skills loaders (#246) + Prompts loaders (#247) close. `withSkills({ loaders })` and `withPrompts({ loaders })` accept the harness-shaped `SkillLoader[]` / `PromptLoader[]`. Subpaths: `@agentick/skills-next/loaders` + `/loaders/node`; `@agentick/prompts-next/loaders`. Composed from the loaders primitive layer in `@agentick/utils-next/loaders{,/node}`.**
+**Last updated:** 2026-06-28 (later still) — **Skills + Prompts loaders gain `reload()` + lookup-on-miss.** Both harnesses now retain their configured loaders and expose:
+
+- `session.skills.reload({ pruneMissing? })` / `session.prompts.reload({ pruneMissing? })` — re-walk loaders, diff against current state, apply adds + updates (+ optional removes).
+- `session.skills.resolve(name)` — async lookup-on-miss read.
+- `session.prompts.resolve(name)` — same, plus `invoke()` / `get()` transparently call `resolve` on cache miss before throwing `PromptNotFound`.
+
+`Loader<T>` (in `@agentick/utils-next/loaders`) gains optional `lookup(name): Promise<T | null>` for fast-path resolution; built-in `fromX` factories implement it. Loaders without `lookup` fall back to `load()` + filter on the harness side — same correctness, worse perf. 19 dynamic-surface tests across the two packages bring the total to 98/98 (skills + prompts + prompts-react).
+
+**Previously, 2026-06-28 (earlier) — Skills loaders (#246) + Prompts loaders (#247) close. `withSkills({ loaders })` and `withPrompts({ loaders })` accept the harness-shaped `SkillLoader[]` / `PromptLoader[]`. Subpaths: `@agentick/skills-next/loaders` + `/loaders/node`; `@agentick/prompts-next/loaders`. Composed from the loaders primitive layer in `@agentick/utils-next/loaders{,/node}`.**
 
 Skill loaders are uniform (`fromArray` / `fromUrl` / `fromManifest` / `fromFile` / `fromDirectory`) because `Skill.content: string` carries no functions — every source is sound. Frontmatter parsing defaults to a minimal `key: value` (with quoted strings + inline arrays); adopters override `parseFrontmatter` for full YAML / TOML to avoid pulling a dep at the framework level.
 
