@@ -59,6 +59,7 @@
     "@agentick/utils-next": "workspace:*"
   },
   "devDependencies": {
+    "@agentick/spec-conformance-next": "workspace:*",
     "zod": "^4.3.6"
   }
 }

@@ -6,6 +6,7 @@
 
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import { fakeToolHandlerCtx } from "@agentick/spec-conformance-next";
 
 import { createTool } from "../create-tool.js";
 
@@ -96,14 +97,7 @@ describe("createTool — handler invocation contract", () => {
         return [{ type: "text", text: "ok" }];
       },
     });
-    const fakeCtx = {
-      toolCallId: "tc-1",
-      signal: new AbortController().signal,
-      setState: () => undefined,
-      emit: () => undefined,
-      task: "auto" as const,
-      transport: "in-process" as const,
-    };
+    const fakeCtx = fakeToolHandlerCtx({ toolCallId: "tc-1" });
     await t.handler({ foo: 1 }, { ctx: fakeCtx, use: {} });
     expect(receivedInput).toEqual({ foo: 1 });
     expect(receivedCtx).toBe(fakeCtx);

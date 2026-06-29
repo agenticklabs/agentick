@@ -11,6 +11,9 @@
 // AgentickError class hierarchy (ADR 41)
 export { runAgentickErrorConformance, type AgentickErrorConformanceFactory } from "./errors.js";
 
+// Unified ToolHandlerCtx test fixture (ADR 43)
+export { fakeToolHandlerCtx, type FakeToolHandlerCtxOverrides } from "./fake-tool-handler-ctx.js";
+
 // Substrate protocols (Phase 2)
 export { runJournalConformance } from "./journal.js";
 export { runEventBusConformance } from "./event-bus.js";

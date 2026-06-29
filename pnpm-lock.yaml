@@ -1301,6 +1301,9 @@ importers:
         specifier: workspace:*
         version: link:../utils
     devDependencies:
+      '@agentick/spec-conformance-next':
+        specifier: workspace:*
+        version: link:../spec-conformance
       zod:
         specifier: ^4.3.6
         version: 4.3.6

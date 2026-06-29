@@ -1510,6 +1510,24 @@ blueprint's design decisions; this is execution-level).
 
 ### 2026-06-29
 
+- **ADR 43 Slices 2 + 3 landed.** Slice 2: `buildSessionElicit(harness)`
+  factory in `@agentick/elicitation-next/src/elicit-sugar.ts` wraps an
+  in-process `ElicitationHarness` in the `Elicit` sugar surface. Wired
+  into `tool-executor-next/harness.ts` ctx-build so in-process tool
+  handlers get `ctx.elicit` populated identically to MCP-server tool
+  handlers (same Elicit interface, same throwing semantics). Slice 3:
+  `fakeToolHandlerCtx({ ... })` factory in `spec-conformance-next`
+  centralizes ToolHandlerCtx test fixtures; two existing ad-hoc fakes
+  (`tool-next/__tests__`, `reconciler-react-next/__tests__`) migrated
+  to the helper. Tool-handler ctx shape changes now propagate to all
+  tests via one factory update.
+- **#272 landed — `session.elicit` accessor.** Augment adds
+  `SessionHarnessProtocol.elicit: Elicit` required slot; both
+  `SessionHarness` (lazy getter) and `CallbackSessionHarness` (eager
+  constructor) implementations expose the sugar. Adopters writing
+  session-level commands or agent-side asks use the same `Elicit`
+  interface tool handlers receive via `ctx.elicit`.
+
 - **ADR 43 proposed + Slice 1 landed — Unified `ToolHandlerCtx` across
   transports.** Adds `transport: "in-process" | "mcp"` discriminator
   to `ToolHandlerCtx` + `mcp?: McpRequestExtras` sub-slot for

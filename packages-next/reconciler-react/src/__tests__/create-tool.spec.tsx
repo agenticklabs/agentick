@@ -9,6 +9,7 @@
 import React from "react";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import { fakeToolHandlerCtx } from "@agentick/spec-conformance-next";
 
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type {
@@ -60,14 +61,7 @@ async function makeHarness() {
 }
 
 function fakeCtx() {
-  return {
-    toolCallId: "tc-1",
-    signal: new AbortController().signal,
-    task: "auto" as const,
-    transport: "in-process" as const,
-    setState: () => undefined,
-    emit: () => undefined,
-  };
+  return fakeToolHandlerCtx({ toolCallId: "tc-1" });
 }
 
 describe("reconciler-react createTool — bundle shape", () => {
