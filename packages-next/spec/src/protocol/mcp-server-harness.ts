@@ -253,8 +253,22 @@ export interface McpServerConnectionInfo {
 // ============================================================================
 
 /**
- * Typed errors emitted from harness operations and projection. Each
- * tag is a discriminator usable in `_tag`-based switches.
+ * Typed errors emitted from harness operations + projection +
+ * security pipeline. Each tag is a discriminator usable in
+ * `_tag`-based switches.
+ *
+ * Security-pipeline rejections use this same union — the transport
+ * layer maps each tag to an HTTP-equivalent code + JSON-RPC error:
+ *
+ *   McpServerConnectionRejected → 403 / JSON-RPC -32000
+ *   McpServerAuthRejected       → 401
+ *   McpServerAuthzDenied        → 403
+ *   McpServerRateLimited        → 429 / Retry-After
+ *
+ * TODO(error-infra): when the AgentickError class hierarchy lands
+ * (filed), every tag here becomes `instanceof`-checkable AgentickError
+ * subclass while preserving the `_tag` discriminator for switch-style
+ * handling. The shape on the wire stays identical.
  */
 export type McpServerError =
   | { readonly _tag: "McpServerNotFound"; readonly name: string }
@@ -268,7 +282,9 @@ export type McpServerError =
       readonly transportKind: string;
       readonly cause: unknown;
     }
+  | { readonly _tag: "McpServerConnectionRejected"; readonly reason: string }
   | { readonly _tag: "McpServerAuthRejected"; readonly reason: string }
+  | { readonly _tag: "McpServerAuthzDenied"; readonly reason: string }
   | { readonly _tag: "McpServerRateLimited"; readonly retryAfterMs?: number }
   | { readonly _tag: "McpServerClosed"; readonly serverId: string }
   | JournalError;

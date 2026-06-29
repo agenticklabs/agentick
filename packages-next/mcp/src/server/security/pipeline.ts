@@ -8,41 +8,36 @@
  *  - `evaluateRequestPipeline(security, ctx, op, toolInput?)` — per
  *    request. Runs authenticate → authorize → rate-limit → sanitize.
  *
- * Throws `SecurityError` on rejection at any stage. Each error carries
- * an HTTP-equivalent code (401/403/429) the transport layer maps to
- * the appropriate JSON-RPC error code.
+ * Throws POJO {@link McpServerError} on rejection at any stage. The
+ * transport layer maps each tag to its HTTP-equivalent JSON-RPC code:
+ *
+ *   McpServerConnectionRejected  →  403  (-32000)
+ *   McpServerAuthRejected        →  401
+ *   McpServerAuthzDenied         →  403
+ *   McpServerRateLimited         →  429  (Retry-After)
+ *
+ * Aligned with the v2 convention used by every other typed error in
+ * the framework — no `class extends Error`. See
+ * `docs/proposals/v2/blueprint/40-mcp-server-harness.md` and the
+ * TODO(error-infra) note on `McpServerError` for the planned
+ * AgentickError-class layering that will overlay `instanceof` checks
+ * on these same `_tag` shapes.
  *
  * Ported from v1 `packages/mcp/src/server/security/pipeline.ts` with
- * v2 type substitutions (`McpRequestContext`, `OperationInfo`).
+ * v2 type substitutions + dropped the SecurityError class.
  */
 
-import type { McpRequestContext } from "@agentick/spec-next";
+import type { McpRequestContext, McpServerError } from "@agentick/spec-next";
 
 import type { McpConnectionInfo, OperationInfo, ResolvedSecurity } from "./stages.js";
-
-/**
- * Thrown when a security stage rejects. The `code` mirrors HTTP
- * semantics for adopter ergonomics (and what v1 chose); the transport
- * layer maps it to the appropriate JSON-RPC error code.
- */
-export class SecurityError extends Error {
-  readonly code: number;
-  readonly retryAfterMs?: number;
-  constructor(code: number, message: string, retryAfterMs?: number) {
-    super(message);
-    this.name = "SecurityError";
-    this.code = code;
-    if (retryAfterMs !== undefined) this.retryAfterMs = retryAfterMs;
-  }
-}
 
 /** Trusted transport kinds — `ConnectionGuard` skipped. */
 const TRUSTED_TRANSPORTS = new Set<string>(["stdio", "in-memory"]);
 
 /**
  * Evaluate connection-level acceptance. Returns when accepted; throws
- * `SecurityError(403)` when rejected. Trusted transports short-circuit
- * to `true`.
+ * `McpServerConnectionRejected` when rejected. Trusted transports
+ * short-circuit to accept without consulting the guard.
  */
 export async function evaluateConnectionGuard(
   security: ResolvedSecurity,
@@ -51,10 +46,10 @@ export async function evaluateConnectionGuard(
   if (TRUSTED_TRANSPORTS.has(info.transportKind)) return;
   const accepted = await security.connectionGuard(info);
   if (!accepted) {
-    throw new SecurityError(
-      403,
-      `Connection rejected from ${info.origin ?? info.remoteAddress ?? "unknown"}`,
-    );
+    throw {
+      _tag: "McpServerConnectionRejected" as const,
+      reason: `Connection rejected from ${info.origin ?? info.remoteAddress ?? "unknown"}`,
+    } satisfies McpServerError;
   }
 }
 
@@ -66,11 +61,11 @@ export async function evaluateConnectionGuard(
  *   3. RateLimiter     — checks the per-key budget
  *   4. InputSanitizer  — tool calls only; sanitizes input
  *
- * Throws `SecurityError` on rejection. On success returns the
- * (possibly sanitized) tool input for tool calls; `undefined` for
- * non-tool operations.
+ * Throws POJO `McpServerError` on rejection. On success returns the
+ * authenticated context + (possibly sanitized) tool input for tool
+ * calls; `undefined` toolInput for non-tool operations.
  *
- * The pipeline mutates a SHALLOW COPY of `ctx` to populate `user`
+ * The pipeline produces a SHALLOW COPY of `ctx` with `user` populated
  * from the authenticator's result. The original ctx is unchanged.
  */
 export async function evaluateRequestPipeline(
@@ -85,20 +80,29 @@ export async function evaluateRequestPipeline(
   // 1. Authenticate.
   const authn = await security.authenticator(ctx);
   if (!authn.authenticated) {
-    throw new SecurityError(401, authn.reason || "Authentication failed");
+    throw {
+      _tag: "McpServerAuthRejected" as const,
+      reason: authn.reason || "Authentication failed",
+    } satisfies McpServerError;
   }
   const authedCtx: McpRequestContext = { ...ctx, user: authn.user };
 
   // 2. Authorize.
   const authz = await security.authorizer(authedCtx, operation);
   if (!authz.allowed) {
-    throw new SecurityError(403, authz.reason || "Forbidden");
+    throw {
+      _tag: "McpServerAuthzDenied" as const,
+      reason: authz.reason || "Forbidden",
+    } satisfies McpServerError;
   }
 
   // 3. Rate-limit.
   const rate = await security.rateLimiter(authedCtx, operation);
   if (!rate.allowed) {
-    throw new SecurityError(429, "Rate limit exceeded", rate.retryAfterMs);
+    throw {
+      _tag: "McpServerRateLimited" as const,
+      ...(rate.retryAfterMs !== undefined ? { retryAfterMs: rate.retryAfterMs } : {}),
+    } satisfies McpServerError;
   }
 
   // 4. Sanitize — tool calls only.
@@ -108,4 +112,21 @@ export async function evaluateRequestPipeline(
   }
 
   return { ctx: authedCtx, toolInput: undefined };
+}
+
+/**
+ * Type guard for security-pipeline rejections — useful at catch sites
+ * that need to distinguish security errors from other thrown values
+ * before the AgentickError class hierarchy lands. Matches the four
+ * tags the pipeline throws.
+ */
+export function isMcpSecurityError(value: unknown): value is McpServerError {
+  if (value == null || typeof value !== "object") return false;
+  const tag = (value as { _tag?: unknown })._tag;
+  return (
+    tag === "McpServerConnectionRejected" ||
+    tag === "McpServerAuthRejected" ||
+    tag === "McpServerAuthzDenied" ||
+    tag === "McpServerRateLimited"
+  );
 }

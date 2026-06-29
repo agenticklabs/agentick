@@ -9,7 +9,11 @@
  * @see docs/proposals/v2/blueprint/40-mcp-server-harness.md §5
  */
 
-export { evaluateConnectionGuard, evaluateRequestPipeline, SecurityError } from "./pipeline.js";
+export {
+  evaluateConnectionGuard,
+  evaluateRequestPipeline,
+  isMcpSecurityError,
+} from "./pipeline.js";
 export {
   type AuthnResult,
   type Authenticator,

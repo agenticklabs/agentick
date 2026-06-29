@@ -4,13 +4,26 @@
  * Pins:
  *  - Connection guard: trusted transports skip; untrusted run guard
  *  - Pipeline order: authn → authz → rate-limit → sanitize
- *  - Each stage's rejection produces the correct SecurityError code
- *    (401 / 403 / 429)
- *  - Transport-aware defaults: stdio/in-memory = allowAll, HTTP/WS = localOnly + rejectAll
+ *  - Each stage's rejection produces the correct POJO `_tag`:
+ *      McpServerConnectionRejected (guard)
+ *      McpServerAuthRejected       (authn)
+ *      McpServerAuthzDenied        (authz)
+ *      McpServerRateLimited        (rate)
+ *  - Transport-aware defaults: stdio/in-memory = allowAll; HTTP/WS = localOnly + rejectAll
  *  - bearerTokenAuth: static map + verify fallback + case-insensitive header lookup
  *  - roleBasedAuthz: pattern specificity, missing rule = deny, empty roles = any-authn
  *  - slidingWindowLimiter: enforces max within window, retryAfterMs on rejection
  *  - allowListGuard: IPv4 CIDR + IPv6 prefix + origin glob
+ *
+ * Error shape follows v2's POJO `_tag` convention. The
+ * `SecurityError extends Error` class that was here briefly has been
+ * dropped — every rejection throws a discriminated-union member of
+ * `McpServerError` from `@agentick/spec-next`.
+ *
+ * TODO(error-infra): when the AgentickError class hierarchy lands,
+ * these throws become `instanceof McpServerConnectionRejected` etc.
+ * while preserving the `_tag` discriminator. Tests will gain
+ * `instanceof` assertions alongside the `_tag` matches.
  */
 
 import { describe, expect, it } from "vitest";
@@ -25,12 +38,12 @@ import {
   bearerTokenAuth,
   evaluateConnectionGuard,
   evaluateRequestPipeline,
+  isMcpSecurityError,
   localOnlyGuard,
   passthroughSanitizer,
   rejectAllAuth,
   resolveSecurity,
   roleBasedAuthz,
-  SecurityError,
   slidingWindowLimiter,
 } from "../index.js";
 import type { AuthnResult, AuthzResult, RateLimitResult, ResolvedSecurity } from "../index.js";
@@ -63,7 +76,7 @@ function security(over: Partial<ResolvedSecurity> = {}): ResolvedSecurity {
 
 describe("evaluateConnectionGuard", () => {
   it("skips guard for stdio transports", async () => {
-    const guard = vi_fn(async () => false);
+    const guard = countingFn(async () => false);
     await expect(
       evaluateConnectionGuard(security({ connectionGuard: guard }), { transportKind: "stdio" }),
     ).resolves.toBeUndefined();
@@ -71,9 +84,11 @@ describe("evaluateConnectionGuard", () => {
   });
 
   it("skips guard for in-memory transports", async () => {
-    const guard = vi_fn(async () => false);
+    const guard = countingFn(async () => false);
     await expect(
-      evaluateConnectionGuard(security({ connectionGuard: guard }), { transportKind: "in-memory" }),
+      evaluateConnectionGuard(security({ connectionGuard: guard }), {
+        transportKind: "in-memory",
+      }),
     ).resolves.toBeUndefined();
     expect(guard.calls).toBe(0);
   });
@@ -84,14 +99,14 @@ describe("evaluateConnectionGuard", () => {
     ).resolves.toBeUndefined();
   });
 
-  it("throws 403 SecurityError when guard rejects", async () => {
+  it("throws McpServerConnectionRejected when guard rejects", async () => {
     const guard = async () => false;
     await expect(
       evaluateConnectionGuard(security({ connectionGuard: guard }), {
         transportKind: "http",
         remoteAddress: "1.2.3.4",
       }),
-    ).rejects.toMatchObject({ code: 403 });
+    ).rejects.toMatchObject({ _tag: "McpServerConnectionRejected" });
   });
 });
 
@@ -126,50 +141,49 @@ describe("evaluateRequestPipeline", () => {
     expect(result.toolInput).toEqual({ q: "hello" });
   });
 
-  it("rejects with 401 on authn failure; later stages don't run", async () => {
+  it("rejects with McpServerAuthRejected; later stages don't run", async () => {
     let authzCalled = false;
-    await expect(
-      evaluateRequestPipeline(
-        security({
-          authenticator: async (): Promise<AuthnResult> => ({
-            authenticated: false,
-            reason: "nope",
-          }),
-          authorizer: async () => {
-            authzCalled = true;
-            return { allowed: true };
-          },
-        }),
-        ctx(),
-        { type: "tool_call", name: "x" },
-      ),
-    ).rejects.toMatchObject({ code: 401 });
-    expect(authzCalled).toBe(false);
-  });
-
-  it("rejects with 403 on authz failure", async () => {
-    await expect(
-      evaluateRequestPipeline(
-        security({
-          authorizer: async (): Promise<AuthzResult> => ({ allowed: false, reason: "no role" }),
-        }),
-        ctx(),
-        { type: "tool_call", name: "x" },
-      ),
-    ).rejects.toMatchObject({ code: 403 });
-  });
-
-  it("rejects with 429 + retryAfterMs on rate-limit", async () => {
     const err = await evaluateRequestPipeline(
       security({
-        rateLimiter: async (): Promise<RateLimitResult> => ({ allowed: false, retryAfterMs: 5000 }),
+        authenticator: async (): Promise<AuthnResult> => ({
+          authenticated: false,
+          reason: "nope",
+        }),
+        authorizer: async () => {
+          authzCalled = true;
+          return { allowed: true };
+        },
       }),
       ctx(),
       { type: "tool_call", name: "x" },
-    ).catch((e) => e);
-    expect(err).toBeInstanceOf(SecurityError);
-    expect((err as SecurityError).code).toBe(429);
-    expect((err as SecurityError).retryAfterMs).toBe(5000);
+    ).catch((e: unknown) => e);
+    expect(err).toMatchObject({ _tag: "McpServerAuthRejected", reason: "nope" });
+    expect(authzCalled).toBe(false);
+  });
+
+  it("rejects with McpServerAuthzDenied on authz failure", async () => {
+    const err = await evaluateRequestPipeline(
+      security({
+        authorizer: async (): Promise<AuthzResult> => ({ allowed: false, reason: "no role" }),
+      }),
+      ctx(),
+      { type: "tool_call", name: "x" },
+    ).catch((e: unknown) => e);
+    expect(err).toMatchObject({ _tag: "McpServerAuthzDenied", reason: "no role" });
+  });
+
+  it("rejects with McpServerRateLimited + retryAfterMs on rate-limit", async () => {
+    const err = await evaluateRequestPipeline(
+      security({
+        rateLimiter: async (): Promise<RateLimitResult> => ({
+          allowed: false,
+          retryAfterMs: 5000,
+        }),
+      }),
+      ctx(),
+      { type: "tool_call", name: "x" },
+    ).catch((e: unknown) => e);
+    expect(err).toMatchObject({ _tag: "McpServerRateLimited", retryAfterMs: 5000 });
   });
 
   it("does NOT call sanitizer for non-tool operations", async () => {
@@ -219,6 +233,23 @@ describe("evaluateRequestPipeline", () => {
   });
 });
 
+describe("isMcpSecurityError type guard", () => {
+  it("recognizes all four security tags", () => {
+    expect(isMcpSecurityError({ _tag: "McpServerConnectionRejected", reason: "x" })).toBe(true);
+    expect(isMcpSecurityError({ _tag: "McpServerAuthRejected", reason: "x" })).toBe(true);
+    expect(isMcpSecurityError({ _tag: "McpServerAuthzDenied", reason: "x" })).toBe(true);
+    expect(isMcpSecurityError({ _tag: "McpServerRateLimited" })).toBe(true);
+  });
+
+  it("rejects non-security tags + non-objects", () => {
+    expect(isMcpSecurityError({ _tag: "McpServerClosed", serverId: "x" })).toBe(false);
+    expect(isMcpSecurityError({ _tag: "OtherError" })).toBe(false);
+    expect(isMcpSecurityError(null)).toBe(false);
+    expect(isMcpSecurityError("string")).toBe(false);
+    expect(isMcpSecurityError(new Error("plain"))).toBe(false);
+  });
+});
+
 describe("resolveSecurity — transport-aware defaults", () => {
   it("trusted-only transports: allowAll across the board", () => {
     const sec = resolveSecurity(undefined, ["stdio"]);
@@ -242,7 +273,6 @@ describe("resolveSecurity — transport-aware defaults", () => {
     const customGuard = async () => true;
     const sec = resolveSecurity({ connectionGuard: customGuard }, ["http"]);
     expect(sec.connectionGuard).toBe(customGuard);
-    // Others untouched.
     expect(sec.authenticator).toBe(rejectAllAuth);
   });
 });
@@ -298,7 +328,7 @@ describe("roleBasedAuthz", () => {
     const stage = roleBasedAuthz({
       rules: {
         "tool_call:secret": ["admin"],
-        "tool_call:*": [], // any-authn
+        "tool_call:*": [],
       },
     });
     const cAdmin = ctx({ user: { id: "u", roles: ["admin"] } });
@@ -415,21 +445,25 @@ describe("allowListGuard", () => {
 });
 
 // ---------------------------------------------------------------------
-// vitest doesn't expose a counting-spy that types cleanly under
-// `noPropertyAccessFromIndexSignature`; this is a tiny local one.
+// TODO(test-helpers): the `countingFn` helper below + `caughtTag`-style
+// patterns in other test files should migrate to a shared
+// `@agentick/utils-next/testing` export so each test file doesn't roll
+// its own. Filed alongside the broader error-infra task — adopters
+// writing custom security stages also benefit from a stable testing
+// surface.
 // ---------------------------------------------------------------------
 
-interface SpyFn<R> {
+interface CountingFn<R> {
   (...args: unknown[]): Promise<R>;
   calls: number;
 }
 
-function vi_fn<R>(impl: () => Promise<R>): SpyFn<R> {
+function countingFn<R>(impl: () => Promise<R>): CountingFn<R> {
   let calls = 0;
   const fn = (async () => {
     calls++;
     return impl();
-  }) as SpyFn<R>;
+  }) as CountingFn<R>;
   Object.defineProperty(fn, "calls", { get: () => calls });
   return fn;
 }
