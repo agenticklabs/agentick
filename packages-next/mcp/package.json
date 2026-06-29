@@ -23,8 +23,12 @@
   "sideEffects": [
     "./src/index.ts",
     "./src/augment.ts",
+    "./src/server/index.ts",
+    "./src/server/augment.ts",
     "./dist/index.js",
-    "./dist/augment.js"
+    "./dist/augment.js",
+    "./dist/server/index.js",
+    "./dist/server/augment.js"
   ],
   "main": "src/index.ts",
   "exports": {
@@ -38,11 +42,19 @@
       "import": "./src/oauth/index.ts",
       "default": "./src/oauth/index.ts"
     },
+    "./server": {
+      "types": "./src/server/index.ts",
+      "import": "./src/server/index.ts",
+      "default": "./src/server/index.ts"
+    },
     "./testing": {
       "types": "./src/testing/index.ts",
       "import": "./src/testing/index.ts",
       "default": "./src/testing/index.ts"
     }
+  },
+  "bin": {
+    "agentick-mcp-server": "./src/server/bin.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
