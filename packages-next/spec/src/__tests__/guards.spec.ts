@@ -47,6 +47,7 @@ import {
   isToolUseBlock,
   isUserActionBlock,
 } from "../guards/index.js";
+import { ProviderTimeout } from "../errors/index.js";
 
 describe("guards — ContentBlock narrowing", () => {
   it("isTextBlock narrows to TextBlock", () => {
@@ -198,7 +199,7 @@ describe("guards — TerminalEvent + ExecutorTerminal outcomes", () => {
     };
     const fail: ExecutorTerminal = {
       outcome: "failed",
-      error: { _tag: "ProviderTimeout", timeoutMs: 1000 },
+      error: new ProviderTimeout({ timeoutMs: 1000 }),
     };
     expect(isExecutorSucceeded(ok)).toBe(true);
     expect(isExecutorFailed(fail)).toBe(true);

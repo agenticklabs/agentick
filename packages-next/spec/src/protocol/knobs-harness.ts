@@ -68,12 +68,16 @@ export interface KnobsDispatchInput {
 // Errors
 // ============================================================================
 
-export type KnobsError =
-  | { readonly _tag: "UnknownKnob"; readonly id: string }
-  | { readonly _tag: "ValidationFailed"; readonly id: string; readonly reason: string }
-  | { readonly _tag: "GroupEmpty"; readonly group: string }
-  | { readonly _tag: "GroupTypeMismatch"; readonly group: string; readonly reason: string }
-  | { readonly _tag: "InvalidDispatchInput"; readonly reason: string };
+/** Migrated to class hierarchy (ADR 41). Re-exports from `../errors/harnesses.js`. */
+export {
+  GroupEmpty,
+  GroupTypeMismatch,
+  InvalidDispatchInput,
+  KnobsError,
+  type KnobsErrorChannel,
+  UnknownKnob,
+  ValidationFailed,
+} from "../errors/harnesses.js";
 
 // ============================================================================
 // Protocol

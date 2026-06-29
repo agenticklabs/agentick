@@ -11,6 +11,7 @@
 import { describe, expect, it } from "vitest";
 import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime-next";
 import type { PromptsRegisterInput } from "@agentick/spec-next";
+import { PromptNotFound } from "@agentick/spec-next";
 
 import { PromptsHarness } from "../harness.js";
 import { fromArray } from "../loaders.js";
@@ -134,10 +135,7 @@ describe("PromptsHarness lookup-on-miss in invoke / get", () => {
       fromArray([{ declaration: { name: "alpha", description: "a", template: "a" } }]),
     ]);
 
-    await expect(h.invoke({ name: "unknown" })).rejects.toMatchObject({
-      _tag: "PromptNotFound",
-      name: "unknown",
-    });
+    await expect(h.invoke({ name: "unknown" })).rejects.toBeInstanceOf(PromptNotFound);
   });
 
   it("invoke() bypasses loader fallback when name is already registered", async () => {
@@ -174,10 +172,7 @@ describe("PromptsHarness.require", () => {
     h.setLoaders([
       fromArray([{ declaration: { name: "other", description: "o", template: "x" } }]),
     ]);
-    await expect(h.require("missing")).rejects.toMatchObject({
-      _tag: "PromptNotFound",
-      name: "missing",
-    });
+    await expect(h.require("missing")).rejects.toBeInstanceOf(PromptNotFound);
   });
 
   it("returns from cache without consulting loaders when already registered", async () => {

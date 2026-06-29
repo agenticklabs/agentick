@@ -23,6 +23,7 @@ import type {
   ToolListFilter,
   ToolRegistration,
 } from "@agentick/spec-next";
+import { ToolAlreadyRegistered } from "@agentick/spec-next";
 import { isEqual } from "@agentick/utils-next";
 
 export class InMemoryToolRegistry {
@@ -48,7 +49,7 @@ export class InMemoryToolRegistry {
       if (areRegistrationsEqual(list[idx]!, registration)) {
         return; // idempotent on identical shape
       }
-      throw { _tag: "ToolAlreadyRegistered", name } as const;
+      throw new ToolAlreadyRegistered({ name });
     }
     list.push(registration);
   }

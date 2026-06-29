@@ -37,7 +37,14 @@ import type {
   ToolExecutorProtocol,
   ToolRegistration,
 } from "@agentick/spec-next";
-import { jsonSchema } from "@agentick/spec-next";
+import {
+  ToolAbortedError,
+  ToolHandlerError,
+  ToolNotFoundError,
+  ToolPermissionError,
+  ToolValidationError,
+  jsonSchema,
+} from "@agentick/spec-next";
 
 /**
  * Fixture tool description for the conformance factory. The factory
@@ -250,18 +257,16 @@ export function runToolExecutorConformance(factory: ToolExecutorConformanceFacto
   describe("ToolExecutorProtocol — two doors", () => {
     it("model-only tool rejects host-door dispatch with ToolPermissionError", async () => {
       const exec = await factory.createExecutor([modelOnlyTool()]);
-      await expect(exec.dispatch(dispatchOf("model.only", "dispatch", {}))).rejects.toMatchObject({
-        _tag: "ToolPermissionError",
-        via: "dispatch",
-      });
+      await expect(exec.dispatch(dispatchOf("model.only", "dispatch", {}))).rejects.toBeInstanceOf(
+        ToolPermissionError,
+      );
     });
 
     it("dispatch-only tool rejects model-door dispatch with ToolPermissionError", async () => {
       const exec = await factory.createExecutor([dispatchOnlyTool()]);
-      await expect(exec.dispatch(dispatchOf("dispatch.only", "model", {}))).rejects.toMatchObject({
-        _tag: "ToolPermissionError",
-        via: "model",
-      });
+      await expect(exec.dispatch(dispatchOf("dispatch.only", "model", {}))).rejects.toBeInstanceOf(
+        ToolPermissionError,
+      );
     });
 
     it("dual-exposure tool accepts both doors", async () => {
@@ -276,10 +281,9 @@ export function runToolExecutorConformance(factory: ToolExecutorConformanceFacto
   describe("ToolExecutorProtocol — validation + lookup", () => {
     it("unknown name rejects with ToolNotFoundError", async () => {
       const exec = await factory.createExecutor([echoTool()]);
-      await expect(exec.dispatch(dispatchOf("missing", "dispatch", {}))).rejects.toMatchObject({
-        _tag: "ToolNotFoundError",
-        name: "missing",
-      });
+      await expect(exec.dispatch(dispatchOf("missing", "dispatch", {}))).rejects.toBeInstanceOf(
+        ToolNotFoundError,
+      );
     });
 
     it("input that violates inputSchema rejects with ToolValidationError", async () => {
@@ -287,7 +291,7 @@ export function runToolExecutorConformance(factory: ToolExecutorConformanceFacto
       // Missing required `q` field.
       await expect(
         exec.dispatch(dispatchOf("strict", "dispatch", { other: 1 })),
-      ).rejects.toMatchObject({ _tag: "ToolValidationError", toolName: "strict" });
+      ).rejects.toBeInstanceOf(ToolValidationError);
     });
 
     it("valid input passes validation and reaches the handler", async () => {
@@ -302,10 +306,9 @@ export function runToolExecutorConformance(factory: ToolExecutorConformanceFacto
   describe("ToolExecutorProtocol — handler errors", () => {
     it("handler throwing rejects with ToolHandlerError", async () => {
       const exec = await factory.createExecutor([throwingTool()]);
-      await expect(exec.dispatch(dispatchOf("boom", "dispatch", {}))).rejects.toMatchObject({
-        _tag: "ToolHandlerError",
-        toolName: "boom",
-      });
+      await expect(exec.dispatch(dispatchOf("boom", "dispatch", {}))).rejects.toBeInstanceOf(
+        ToolHandlerError,
+      );
     });
   });
 
@@ -317,10 +320,7 @@ export function runToolExecutorConformance(factory: ToolExecutorConformanceFacto
       // Abort shortly after dispatch begins.
       await new Promise<void>((r) => setTimeout(r, 5));
       await exec.abort({ toolCallId: callId, reason: "test" });
-      await expect(inFlight).rejects.toMatchObject({
-        _tag: "ToolAbortedError",
-        toolCallId: callId,
-      });
+      await expect(inFlight).rejects.toBeInstanceOf(ToolAbortedError);
     });
 
     it("abort of an unknown toolCallId is a no-op (does not throw)", async () => {

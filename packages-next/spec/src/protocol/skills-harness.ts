@@ -99,10 +99,14 @@ export interface SkillsSearchInput {
 // Errors
 // ============================================================================
 
-export type SkillsError =
-  | { readonly _tag: "SkillNotFound"; readonly name: string }
-  | { readonly _tag: "SkillAlreadyExists"; readonly name: string }
-  | { readonly _tag: "SkillsBackendError"; readonly cause: unknown };
+/** Migrated to class hierarchy (ADR 41). Re-exports from `../errors/harnesses.js`. */
+export {
+  SkillAlreadyExists,
+  SkillNotFound,
+  SkillsBackendError,
+  SkillsError,
+  type SkillsErrorChannel,
+} from "../errors/harnesses.js";
 
 // ============================================================================
 // Protocol

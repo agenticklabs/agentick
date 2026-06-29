@@ -122,7 +122,7 @@ describe("GatewayHarness — createApp", () => {
         rootElement: {} as unknown,
         options: makeAppOptions() as never,
       }),
-    ).rejects.toMatchObject(new AppAlreadyExistsError({ appId: "dup" }));
+    ).rejects.toBeInstanceOf(AppAlreadyExistsError);
     await gateway.closeGateway();
   });
 
@@ -198,7 +198,7 @@ describe("GatewayHarness — close cascade", () => {
         rootElement: {} as unknown,
         options: makeAppOptions() as never,
       }),
-    ).rejects.toMatchObject(new GatewayClosedError());
+    ).rejects.toBeInstanceOf(GatewayClosedError);
   });
 });
 

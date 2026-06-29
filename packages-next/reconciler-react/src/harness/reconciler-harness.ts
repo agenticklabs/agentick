@@ -47,7 +47,13 @@ import type {
   SnapshotInput,
   UnmountInput,
 } from "@agentick/spec-next";
-import { HandlerError, SPEC_VERSION } from "@agentick/spec-next";
+import {
+  AlreadyMounted,
+  HandlerError,
+  NotMounted,
+  RenderFailed,
+  SPEC_VERSION,
+} from "@agentick/spec-next";
 import { BaseHarness } from "@agentick/runtime-next";
 
 import {
@@ -186,7 +192,7 @@ export class ReconcilerHarness extends BaseHarness<"reconciler"> implements Reco
       Effect.suspend(() => {
         const state = this.tryMountState(input.mountId);
         if (!state) {
-          return Effect.fail({ _tag: "NotMounted", mountId: input.mountId } as const);
+          return Effect.fail(new NotMounted({ mountId: input.mountId }));
         }
         const op: Operation<RerenderInput, void> = {
           opId: input.opId ?? `reconciler:rerender:${input.mountId}`,
@@ -212,7 +218,7 @@ export class ReconcilerHarness extends BaseHarness<"reconciler"> implements Reco
       Effect.suspend(() => {
         const state = this.tryMountState(input.mountId);
         if (!state) {
-          return Effect.fail({ _tag: "NotMounted", mountId: input.mountId } as const);
+          return Effect.fail(new NotMounted({ mountId: input.mountId }));
         }
         const op: Operation<RenderTreeInput, RenderTreeResult> = {
           opId: input.opId ?? `reconciler:render:${input.mountId}:${ulid()}`,
@@ -239,7 +245,7 @@ export class ReconcilerHarness extends BaseHarness<"reconciler"> implements Reco
       Effect.suspend(() => {
         const state = this.tryMountState(input.mountId);
         if (!state) {
-          return Effect.fail({ _tag: "NotMounted", mountId: input.mountId } as const);
+          return Effect.fail(new NotMounted({ mountId: input.mountId }));
         }
         const op: Operation<RenderToStringInput, RenderToStringResult> = {
           opId: input.opId ?? `reconciler:render-to-string:${input.mountId}:${ulid()}`,
@@ -260,7 +266,7 @@ export class ReconcilerHarness extends BaseHarness<"reconciler"> implements Reco
 
   async notifyLifecycle(input: NotifyLifecycleInput): Promise<void> {
     const state = this.tryMountState(input.mountId);
-    if (!state) throw { _tag: "NotMounted", mountId: input.mountId };
+    if (!state) throw new NotMounted({ mountId: input.mountId });
     await state.lifecycle.dispatch(input.event);
   }
 
@@ -338,7 +344,7 @@ export class ReconcilerHarness extends BaseHarness<"reconciler"> implements Reco
 
   private async mountBody(input: MountInput): Promise<MountResult> {
     if (this.mounts.has(input.mountId)) {
-      throw { _tag: "AlreadyMounted", mountId: input.mountId };
+      throw new AlreadyMounted({ mountId: input.mountId });
     }
     const rootScope = createHostScope({
       formatter: input.defaultFormatter ?? { id: "default" },
@@ -468,10 +474,7 @@ export class ReconcilerHarness extends BaseHarness<"reconciler"> implements Reco
       // If the render produced a real error AND no pending data
       // explains it, terminate with RenderFailed.
       if (state.renderError !== null && (pending === null || pending.length === 0)) {
-        throw {
-          _tag: "RenderFailed",
-          cause: state.renderError,
-        };
+        throw new RenderFailed({ cause: state.renderError });
       }
 
       if (pending === null) {

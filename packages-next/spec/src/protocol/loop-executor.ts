@@ -29,6 +29,7 @@ import type {
   LanguageModelStopReason,
   UsageStats,
 } from "../data/execution-result.js";
+import type { LoopExecutorError } from "../errors/harnesses.js";
 import type { FormatterRef } from "../data/formatter.js";
 import type { ExecutorProtocol } from "./executor.js";
 import type { ReconcilerProtocol } from "./reconciler.js";
@@ -301,16 +302,15 @@ export type TickEndDecision =
 // Errors
 // ============================================================================
 
-export type LoopExecutorError =
-  | { readonly _tag: "ExecutionError"; readonly cause: unknown }
-  | {
-      readonly _tag: "TickError";
-      readonly tick: number;
-      readonly phase: "compile" | "execute" | "tool-dispatch" | "ingest" | "continuation";
-      readonly cause: unknown;
-    }
-  | { readonly _tag: "LoopCanceledError"; readonly reason?: string }
-  | { readonly _tag: "MaxTicksExceeded"; readonly maxTicks: number };
+/** Migrated to class hierarchy (ADR 41). Re-exports from `../errors/harnesses.js`. */
+export {
+  ExecutionError,
+  LoopCanceledError,
+  LoopExecutorError,
+  type LoopExecutorErrorChannel,
+  MaxTicksExceeded,
+  TickError,
+} from "../errors/harnesses.js";
 
 // ============================================================================
 // Protocol

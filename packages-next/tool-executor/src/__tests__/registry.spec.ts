@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ToolRegistration } from "@agentick/spec-next";
-import { jsonSchema } from "@agentick/spec-next";
+import { ToolAlreadyRegistered, jsonSchema } from "@agentick/spec-next";
 import { InMemoryToolRegistry } from "../registry.js";
 
 function reg(name: string, overrides: Partial<ToolRegistration> = {}): ToolRegistration {
@@ -39,7 +39,7 @@ describe("InMemoryToolRegistry", () => {
     const r = new InMemoryToolRegistry();
     r.add(reg("a"));
     expect(() => r.add(reg("a", { handlerRef: "h.different" }))).toThrowError(
-      expect.objectContaining({ _tag: "ToolAlreadyRegistered", name: "a" }),
+      expect.objectContaining(new ToolAlreadyRegistered({ name: "a" })),
     );
   });
 

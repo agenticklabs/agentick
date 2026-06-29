@@ -32,6 +32,7 @@ import type {
   ReconcilerProtocol,
   ReconcilerSnapshot,
 } from "@agentick/spec-next";
+import { NotMounted } from "@agentick/spec-next";
 
 /**
  * Test-fixture factory shape. The conformance suite is reconciler-
@@ -107,7 +108,7 @@ export function runReconcilerConformance(factory: ReconcilerConformanceFactory):
       const reconciler = await factory.createReconciler();
       await expect(
         reconciler.renderTree({ mountId: "missing", sessionId: "s" }),
-      ).rejects.toMatchObject({ _tag: "NotMounted" });
+      ).rejects.toBeInstanceOf(NotMounted);
     });
   });
 
@@ -240,7 +241,7 @@ export function runReconcilerConformance(factory: ReconcilerConformanceFactory):
           mountId: "nope",
           event: { kind: "tick-start", tickId: "t1" },
         }),
-      ).rejects.toMatchObject({ _tag: "NotMounted" });
+      ).rejects.toBeInstanceOf(NotMounted);
     });
   });
 
@@ -287,7 +288,7 @@ export function runReconcilerConformance(factory: ReconcilerConformanceFactory):
       await reconciler.unmount({ mountId: "m_un" });
       await expect(
         reconciler.renderTree({ mountId: "m_un", sessionId: "s" }),
-      ).rejects.toMatchObject({ _tag: "NotMounted" });
+      ).rejects.toBeInstanceOf(NotMounted);
     });
 
     it("unmounting an unknown mountId is a no-op", async () => {

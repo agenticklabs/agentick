@@ -57,6 +57,7 @@ import type {
   RenderedTree,
   SessionBridge,
 } from "@agentick/spec-next";
+import { RenderFailed } from "@agentick/spec-next";
 import { type DefinedFormatter, formatTree, markdownFormatter } from "@agentick/formatters-next";
 import { isThenable, omitUndefined } from "@agentick/utils-next";
 
@@ -199,7 +200,7 @@ async function compileInternal(
       const pending = dataBridge.pending();
 
       if (renderError !== null && pending.length === 0) {
-        throw { _tag: "RenderFailed", cause: renderError };
+        throw new RenderFailed({ cause: renderError });
       }
       if (pending.length === 0) break;
 

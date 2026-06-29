@@ -52,7 +52,13 @@ import type {
   ProjectionError,
   RunInput,
 } from "@agentick/spec-next";
-import { HandlerError, SPEC_VERSION } from "@agentick/spec-next";
+import {
+  HandlerError,
+  NormalizationFailed,
+  ProjectionFailed,
+  ProviderAborted,
+  SPEC_VERSION,
+} from "@agentick/spec-next";
 
 import { buildMessages, buildParameters, buildTools } from "./canonical-projection.js";
 import { ExecutorLifecycle } from "./executor-lifecycle.js";
@@ -166,11 +172,8 @@ export class FakeLanguageModelExecutor
       this.runOperation(op, (i) =>
         Effect.try({
           try: () => projectImpl(i),
-          catch: (cause): ProjectionError => ({
-            _tag: "ProjectionFailed",
-            reason: "projection threw",
-            cause,
-          }),
+          catch: (cause): ProjectionError =>
+            new ProjectionFailed({ reason: "projection threw", cause }),
         }),
       ),
     );
@@ -264,10 +267,7 @@ export class FakeLanguageModelExecutor
       this.runOperation(op, (i) =>
         Effect.try({
           try: () => normalizeImpl(i, this.scriptedSequence[0]),
-          catch: (cause): NormalizeError => ({
-            _tag: "NormalizationFailed",
-            cause,
-          }),
+          catch: (cause): NormalizeError => new NormalizationFailed({ cause }),
         }),
       ),
     );
@@ -320,10 +320,9 @@ export class FakeLanguageModelExecutor
   ): Effect.Effect<unknown, ExecuteError, never> {
     return Effect.gen(this, function* () {
       if (this.lifecycle.isAborted(executionId)) {
-        return yield* Effect.fail<ExecuteError>({
-          _tag: "ProviderAborted",
-          reason: "aborted prior to execute",
-        });
+        return yield* Effect.fail<ExecuteError>(
+          new ProviderAborted({ reason: "aborted prior to execute" }),
+        );
       }
       this.lifecycle.register({ executionId });
 

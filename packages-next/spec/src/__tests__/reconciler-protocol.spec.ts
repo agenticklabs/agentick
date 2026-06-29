@@ -1,6 +1,18 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 
-import { isLifecycleTickStart } from "../index.js";
+import {
+  AlreadyMounted,
+  BridgeUnavailable,
+  DataFetchFailed,
+  FormatterFailed,
+  InvalidElement,
+  isLifecycleTickStart,
+  MaxIterationsExceeded,
+  NotMounted,
+  RenderFailed,
+  SnapshotIncompatible,
+  UnstableTree,
+} from "../index.js";
 
 import type {
   DataBridge,
@@ -184,16 +196,16 @@ describe("@agentick/spec-next — reconciler protocol", () => {
   describe("ReconcileError taxonomy", () => {
     it("discriminates by _tag", () => {
       const errs: ReconcileError[] = [
-        { _tag: "NotMounted", mountId: "x" },
-        { _tag: "AlreadyMounted", mountId: "x" },
-        { _tag: "RenderFailed", cause: new Error("bad") },
-        { _tag: "DataFetchFailed", key: "user/42", cause: "timeout" },
-        { _tag: "MaxIterationsExceeded", iterations: 10 },
-        { _tag: "UnstableTree", iterations: 10 },
-        { _tag: "InvalidElement", reason: "not a react element" },
-        { _tag: "SnapshotIncompatible", specVersion: "2025-01-01" },
-        { _tag: "BridgeUnavailable", bridge: "mcp", hook: "useMCP" },
-        { _tag: "FormatterFailed", cause: "missing renderer" },
+        new NotMounted({ mountId: "x" }),
+        new AlreadyMounted({ mountId: "x" }),
+        new RenderFailed({ cause: new Error("bad") }),
+        new DataFetchFailed({ key: "user/42", cause: "timeout" }),
+        new MaxIterationsExceeded({ iterations: 10 }),
+        new UnstableTree({ iterations: 10 }),
+        new InvalidElement({ reason: "not a react element" }),
+        new SnapshotIncompatible({ specVersion: "2025-01-01" }),
+        new BridgeUnavailable({ bridge: "mcp", hook: "useMCP" }),
+        new FormatterFailed({ cause: "missing renderer" }),
       ];
       expect(errs).toHaveLength(10);
     });

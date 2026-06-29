@@ -17,6 +17,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { CompactStrategy, TimelineEntry, TimelineHarnessProtocol } from "@agentick/spec-next";
+import { RehydrateStrategyMissing } from "@agentick/spec-next";
 
 export interface TimelineHarnessFactoryDeps {
   /** Construct a fresh harness. Caller MUST await `harness.ready`. */
@@ -329,7 +330,7 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
           { persisted: [], projection: [], persistedVersion: 0, projectionVersion: 0 },
           { mode: "rehydrate" },
         ),
-      ).rejects.toMatchObject({ _tag: "RehydrateStrategyMissing" });
+      ).rejects.toBeInstanceOf(RehydrateStrategyMissing);
       await h.close();
     });
   });

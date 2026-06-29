@@ -28,8 +28,15 @@
  */
 
 import type { McpRequestContext, McpServerError } from "@agentick/spec-next";
+import {
+  McpServerAuthRejected,
+  McpServerAuthzDenied,
+  McpServerConnectionRejected,
+  McpServerRateLimited,
+} from "@agentick/spec-next";
 
 import type { McpConnectionInfo, OperationInfo, ResolvedSecurity } from "./stages.js";
+import { omitUndefined } from "@agentick/utils-next";
 
 /** Trusted transport kinds — `ConnectionGuard` skipped. */
 const TRUSTED_TRANSPORTS = new Set<string>(["stdio", "in-memory"]);
@@ -46,10 +53,9 @@ export async function evaluateConnectionGuard(
   if (TRUSTED_TRANSPORTS.has(info.transportKind)) return;
   const accepted = await security.connectionGuard(info);
   if (!accepted) {
-    throw {
-      _tag: "McpServerConnectionRejected" as const,
+    throw new McpServerConnectionRejected({
       reason: `Connection rejected from ${info.origin ?? info.remoteAddress ?? "unknown"}`,
-    } satisfies McpServerError;
+    });
   }
 }
 
@@ -80,29 +86,28 @@ export async function evaluateRequestPipeline(
   // 1. Authenticate.
   const authn = await security.authenticator(ctx);
   if (!authn.authenticated) {
-    throw {
-      _tag: "McpServerAuthRejected" as const,
+    throw new McpServerAuthRejected({
       reason: authn.reason || "Authentication failed",
-    } satisfies McpServerError;
+    });
   }
   const authedCtx: McpRequestContext = { ...ctx, user: authn.user };
 
   // 2. Authorize.
   const authz = await security.authorizer(authedCtx, operation);
   if (!authz.allowed) {
-    throw {
-      _tag: "McpServerAuthzDenied" as const,
+    throw new McpServerAuthzDenied({
       reason: authz.reason || "Forbidden",
-    } satisfies McpServerError;
+    });
   }
 
   // 3. Rate-limit.
   const rate = await security.rateLimiter(authedCtx, operation);
   if (!rate.allowed) {
-    throw {
-      _tag: "McpServerRateLimited" as const,
-      ...(rate.retryAfterMs !== undefined ? { retryAfterMs: rate.retryAfterMs } : {}),
-    } satisfies McpServerError;
+    throw new McpServerRateLimited(
+      omitUndefined({
+        retryAfterMs: rate.retryAfterMs,
+      }),
+    );
   }
 
   // 4. Sanitize — tool calls only.

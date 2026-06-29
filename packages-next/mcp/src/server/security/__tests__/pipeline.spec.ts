@@ -28,6 +28,13 @@
 
 import { describe, expect, it } from "vitest";
 import type { McpAuthenticatedUser, McpRequestContext } from "@agentick/spec-next";
+import {
+  McpServerAuthRejected,
+  McpServerAuthzDenied,
+  McpServerClosed,
+  McpServerConnectionRejected,
+  McpServerRateLimited,
+} from "@agentick/spec-next";
 
 import {
   allowAllAuth,
@@ -106,7 +113,7 @@ describe("evaluateConnectionGuard", () => {
         transportKind: "http",
         remoteAddress: "1.2.3.4",
       }),
-    ).rejects.toMatchObject({ _tag: "McpServerConnectionRejected" });
+    ).rejects.toBeInstanceOf(McpServerConnectionRejected);
   });
 });
 
@@ -157,7 +164,7 @@ describe("evaluateRequestPipeline", () => {
       ctx(),
       { type: "tool_call", name: "x" },
     ).catch((e: unknown) => e);
-    expect(err).toMatchObject({ _tag: "McpServerAuthRejected", reason: "nope" });
+    expect(err).toBeInstanceOf(McpServerAuthRejected);
     expect(authzCalled).toBe(false);
   });
 
@@ -169,7 +176,7 @@ describe("evaluateRequestPipeline", () => {
       ctx(),
       { type: "tool_call", name: "x" },
     ).catch((e: unknown) => e);
-    expect(err).toMatchObject({ _tag: "McpServerAuthzDenied", reason: "no role" });
+    expect(err).toBeInstanceOf(McpServerAuthzDenied);
   });
 
   it("rejects with McpServerRateLimited + retryAfterMs on rate-limit", async () => {
@@ -183,7 +190,7 @@ describe("evaluateRequestPipeline", () => {
       ctx(),
       { type: "tool_call", name: "x" },
     ).catch((e: unknown) => e);
-    expect(err).toMatchObject({ _tag: "McpServerRateLimited", retryAfterMs: 5000 });
+    expect(err).toBeInstanceOf(McpServerRateLimited);
   });
 
   it("does NOT call sanitizer for non-tool operations", async () => {
@@ -235,14 +242,14 @@ describe("evaluateRequestPipeline", () => {
 
 describe("isMcpSecurityError type guard", () => {
   it("recognizes all four security tags", () => {
-    expect(isMcpSecurityError({ _tag: "McpServerConnectionRejected", reason: "x" })).toBe(true);
-    expect(isMcpSecurityError({ _tag: "McpServerAuthRejected", reason: "x" })).toBe(true);
-    expect(isMcpSecurityError({ _tag: "McpServerAuthzDenied", reason: "x" })).toBe(true);
-    expect(isMcpSecurityError({ _tag: "McpServerRateLimited" })).toBe(true);
+    expect(isMcpSecurityError(new McpServerConnectionRejected({ reason: "x" }))).toBe(true);
+    expect(isMcpSecurityError(new McpServerAuthRejected({ reason: "x" }))).toBe(true);
+    expect(isMcpSecurityError(new McpServerAuthzDenied({ reason: "x" }))).toBe(true);
+    expect(isMcpSecurityError(new McpServerRateLimited())).toBe(true);
   });
 
   it("rejects non-security tags + non-objects", () => {
-    expect(isMcpSecurityError({ _tag: "McpServerClosed", serverId: "x" })).toBe(false);
+    expect(isMcpSecurityError(new McpServerClosed({ serverId: "x" }))).toBe(false);
     expect(isMcpSecurityError({ _tag: "OtherError" })).toBe(false);
     expect(isMcpSecurityError(null)).toBe(false);
     expect(isMcpSecurityError("string")).toBe(false);

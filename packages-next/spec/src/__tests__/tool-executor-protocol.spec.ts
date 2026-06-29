@@ -26,7 +26,12 @@ import type {
   ToolRegistration,
   UnregisterToolInput,
 } from "../index.js";
-import { jsonSchema } from "../index.js";
+import {
+  jsonSchema,
+  ToolConfirmationDeniedError,
+  ToolNotFoundError,
+  ToolTimeoutError,
+} from "../index.js";
 
 describe("@agentick/spec-next — tool executor protocol", () => {
   describe("DispatchInput / DispatchContext", () => {
@@ -174,21 +179,18 @@ describe("@agentick/spec-next — tool executor protocol", () => {
 
   describe("Errors", () => {
     it("ToolExecutorError tags discriminate", () => {
-      const e1: ToolExecutorError = {
-        _tag: "ToolNotFoundError",
+      const e1: ToolExecutorError = new ToolNotFoundError({
         name: "missing",
         registered: ["a", "b"],
-      };
-      const e2: ToolExecutorError = {
-        _tag: "ToolTimeoutError",
+      });
+      const e2: ToolExecutorError = new ToolTimeoutError({
         toolName: "slow",
         ms: 5_000,
-      };
-      const e3: ToolExecutorError = {
-        _tag: "ToolConfirmationDeniedError",
+      });
+      const e3: ToolExecutorError = new ToolConfirmationDeniedError({
         toolName: "fs.delete",
         reason: "user denied",
-      };
+      });
       expect(e1._tag).toBe("ToolNotFoundError");
       expect(e2._tag).toBe("ToolTimeoutError");
       expect(e3._tag).toBe("ToolConfirmationDeniedError");

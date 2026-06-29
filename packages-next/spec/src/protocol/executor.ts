@@ -39,19 +39,22 @@ import type { AdapterDelta } from "../data/streaming.js";
  * own slice. `run`'s E channel is the union — see `ExecutorError` in
  * `data/execution-result.ts`.
  */
-export type ProjectionError = {
-  readonly _tag: "ProjectionFailed";
-  readonly reason: string;
-  readonly cause?: unknown;
-};
+/** Single-tag projection failure — migrated to a class (ADR 41). */
+export type { ProjectionFailed as ProjectionError } from "../errors/harnesses.js";
 
-export type ExecuteError =
-  | { readonly _tag: "ProviderRejected"; readonly status?: number; readonly cause?: unknown }
-  | { readonly _tag: "ProviderTimeout"; readonly timeoutMs: number }
-  | { readonly _tag: "ProviderAborted"; readonly reason?: string }
-  | { readonly _tag: "StreamFailed"; readonly cause: unknown };
+/** Migrated to class hierarchy (ADR 41). Re-exports from `../errors/harnesses.js`. */
+export {
+  ExecuteError,
+  type ExecuteErrorChannel,
+  NormalizationFailed,
+  ProviderAborted,
+  ProviderRejected,
+  ProviderTimeout,
+  StreamFailed,
+} from "../errors/harnesses.js";
 
-export type NormalizeError = { readonly _tag: "NormalizationFailed"; readonly cause: unknown };
+/** Legacy alias — single-tag union, retained for code that references `NormalizeError`. */
+export type NormalizeError = import("../errors/harnesses.js").NormalizationFailed;
 
 // ============================================================================
 // Streaming surface — ExecutorStream returned by `executeStream`

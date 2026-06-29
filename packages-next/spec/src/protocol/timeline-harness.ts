@@ -202,9 +202,13 @@ export interface TimelineImportSnapshotOptions {
 // Errors
 // ============================================================================
 
-export type TimelineError =
-  | { readonly _tag: "CompactHandlerFailed"; readonly cause: unknown }
-  | { readonly _tag: "RehydrateStrategyMissing"; readonly reason: string };
+/** Migrated to class hierarchy (ADR 41). Re-exports from `../errors/harnesses.js`. */
+export {
+  CompactHandlerFailed,
+  RehydrateStrategyMissing,
+  TimelineError,
+  type TimelineErrorChannel,
+} from "../errors/harnesses.js";
 
 // ============================================================================
 // Protocol

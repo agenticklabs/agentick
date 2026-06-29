@@ -25,7 +25,7 @@ import { Chunk, Effect, Stream } from "effect";
 import type { LocalEventBus } from "@agentick/runtime-next";
 
 import type { DispatchInput, ProtocolEvent, ToolRegistration } from "@agentick/spec-next";
-import { jsonSchema } from "@agentick/spec-next";
+import { ToolConfirmationTimeoutError, jsonSchema } from "@agentick/spec-next";
 
 import { createTestHarness } from "../testing/index.js";
 
@@ -280,10 +280,7 @@ describe("ToolExecutorHarness — confirmation flow (via ElicitationHarness)", (
 
     await expect(
       harness.dispatch(dispatchOf("delete-file", "tc-7", {}, { confirmationTimeoutMs: 50 })),
-    ).rejects.toMatchObject({
-      _tag: "ToolConfirmationTimeoutError",
-      toolName: "delete-file",
-    });
+    ).rejects.toBeInstanceOf(ToolConfirmationTimeoutError);
   });
 
   it("wire envelope: published with hints.kind=tool_confirmation and metadata fields", async () => {

@@ -51,7 +51,17 @@ import type {
   StandardSchemaV1,
   TimelineHarnessProtocol,
 } from "@agentick/spec-next";
-import { HandlerError, InvalidPayload } from "@agentick/spec-next";
+import {
+  HandlerError,
+  InvalidPayload,
+  PromptAlreadyExists,
+  PromptArgumentInvalid,
+  PromptArgumentMissing,
+  PromptMissingContent,
+  PromptNotFound,
+  PromptRenderFailed,
+  PromptsBackendError,
+} from "@agentick/spec-next";
 import { createKeyedNotifier, type KeyedNotifier } from "@agentick/pubsub-next";
 import { omitUndefined } from "@agentick/utils-next";
 
@@ -204,7 +214,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
   async require(name: string): Promise<PromptDeclaration> {
     const resolved = await this.resolve(name);
     if (resolved !== null) return resolved;
-    throw { _tag: "PromptNotFound", name } satisfies PromptsError;
+    throw new PromptNotFound({ name });
   }
 
   // ─────────── Sync surface ───────────
@@ -380,7 +390,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
     return Effect.suspend((): Effect.Effect<PromptDeclaration, PromptsError, never> => {
       const decl = input.declaration;
       if (this.prompts.has(decl.name)) {
-        return Effect.fail({ _tag: "PromptAlreadyExists", name: decl.name });
+        return Effect.fail(new PromptAlreadyExists({ name: decl.name }));
       }
       this.prompts.set(decl.name, decl);
       this.invalidateAndNotify(decl.name);
@@ -394,7 +404,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
     return Effect.suspend((): Effect.Effect<PromptDeclaration, PromptsError, never> => {
       const existing = this.prompts.get(input.name);
       if (!existing) {
-        return Effect.fail({ _tag: "PromptNotFound", name: input.name });
+        return Effect.fail(new PromptNotFound({ name: input.name }));
       }
       const updated: PromptDeclaration = {
         name: input.name,
@@ -440,7 +450,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
         return result;
       },
       catch: (cause): PromptsError =>
-        isPromptsError(cause) ? cause : { _tag: "PromptsBackendError", cause },
+        isPromptsError(cause) ? cause : new PromptsBackendError({ cause }),
     });
   }
 
@@ -448,7 +458,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
     return Effect.tryPromise({
       try: () => this.renderToMessages(input.name, input.args),
       catch: (cause): PromptsError =>
-        isPromptsError(cause) ? cause : { _tag: "PromptsBackendError", cause },
+        isPromptsError(cause) ? cause : new PromptsBackendError({ cause }),
     });
   }
 
@@ -457,7 +467,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
     rawArgs: Readonly<Record<string, unknown>> | undefined,
   ): Promise<PromptsGetResult> {
     const decl = this.prompts.get(name);
-    if (!decl) throw { _tag: "PromptNotFound", name } satisfies PromptsError;
+    if (!decl) throw new PromptNotFound({ name });
 
     // 1. Validate args against the declared schemas.
     const args = await validateArgs(name, decl.arguments, rawArgs ?? {});
@@ -468,12 +478,12 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
       try {
         content = await Promise.resolve(decl.render(args));
       } catch (cause) {
-        throw { _tag: "PromptRenderFailed", name, cause } satisfies PromptsError;
+        throw new PromptRenderFailed({ name, cause });
       }
     } else if (decl.template !== undefined) {
       content = decl.template;
     } else {
-      throw { _tag: "PromptMissingContent", name } satisfies PromptsError;
+      throw new PromptMissingContent({ name });
     }
 
     // 3. Dispatch to native handler or matching renderer.
@@ -498,15 +508,14 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
         try {
           return await renderer.render(content, args);
         } catch (cause) {
-          throw { _tag: "PromptRenderFailed", name, cause } satisfies PromptsError;
+          throw new PromptRenderFailed({ name, cause });
         }
       }
     }
-    throw {
-      _tag: "PromptRenderFailed",
+    throw new PromptRenderFailed({
       name,
       cause: `no registered renderer handles content (typeof=${typeof content}); registered: [${this.renderers.map((r) => r.name).join(", ")}]`,
-    } satisfies PromptsError;
+    });
   }
 
   private invalidateAndNotify(name: string): void {
@@ -528,26 +537,24 @@ async function validateArgs(
     const value = raw[arg.name];
     if (value === undefined) {
       if (arg.required === true) {
-        throw {
-          _tag: "PromptArgumentMissing",
+        throw new PromptArgumentMissing({
           name: promptName,
           argument: arg.name,
-        } satisfies PromptsError;
+        }) satisfies PromptsError;
       }
       continue;
     }
     if (arg.schema) {
       const result = await runStandardSchema(arg.schema, value);
       if (result.issues) {
-        throw {
-          _tag: "PromptArgumentInvalid",
+        throw new PromptArgumentInvalid({
           name: promptName,
           argument: arg.name,
           issues: result.issues.map((iss) => ({
             ...omitUndefined({ path: iss.path?.map(coercePathSegment) }),
             message: iss.message,
           })),
-        } satisfies PromptsError;
+        });
       }
       validated[arg.name] = result.value;
     } else {

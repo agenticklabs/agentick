@@ -45,7 +45,7 @@ import type {
   AbortExecutorInput,
   AdapterDelta,
   EventBus,
-  ExecuteError,
+  ExecuteErrorChannel,
   ExecuteInput,
   ExecutionTarget,
   ExecutorError,
@@ -65,7 +65,14 @@ import type {
   ProjectionError,
   RunInput,
 } from "@agentick/spec-next";
-import { HandlerError } from "@agentick/spec-next";
+import {
+  HandlerError,
+  NormalizationFailed,
+  ProjectionFailed,
+  ProviderAborted,
+  ProviderRejected,
+  StreamFailed,
+} from "@agentick/spec-next";
 
 import { defaultProject } from "./canonical-projection.js";
 import { composeTransforms, identityTransform, type DeltaTransform } from "./delta-transform.js";
@@ -325,23 +332,16 @@ export abstract class BaseLanguageModelExecutor<TRaw, TChunk = unknown>
    * when your provider surfaces structured errors you can extract more
    * detail from.
    */
-  protected mapProviderError(cause: unknown): ExecuteError {
+  protected mapProviderError(cause: unknown): ExecuteErrorChannel {
     if (this.isAbortError(cause)) {
-      return {
-        _tag: "ProviderAborted",
-        reason: cause instanceof Error ? cause.message : "aborted",
-      };
+      return new ProviderAborted({ reason: cause instanceof Error ? cause.message : "aborted" });
     }
     const status =
       (cause as { status?: unknown })?.status ?? (cause as { statusCode?: unknown })?.statusCode;
     if (typeof status === "number") {
-      return {
-        _tag: "ProviderRejected",
-        status,
-        cause,
-      };
+      return new ProviderRejected({ status, cause });
     }
-    return { _tag: "StreamFailed", cause };
+    return new StreamFailed({ cause });
   }
 
   /**
@@ -459,11 +459,8 @@ export abstract class BaseLanguageModelExecutor<TRaw, TChunk = unknown>
       this.runOperation(op, (i) =>
         Effect.try({
           try: () => this.projectImpl(i),
-          catch: (cause): ProjectionError => ({
-            _tag: "ProjectionFailed",
-            reason: "projection threw",
-            cause,
-          }),
+          catch: (cause): ProjectionError =>
+            new ProjectionFailed({ reason: "projection threw", cause }),
         }),
       ),
     );
@@ -487,12 +484,11 @@ export abstract class BaseLanguageModelExecutor<TRaw, TChunk = unknown>
 
   executeStream(input: ExecuteInput<LanguageModelInput>): ExecutorStream<TRaw> {
     if (!this.supportsRunStreaming) {
-      const err: ExecuteError = {
-        _tag: "StreamFailed",
+      const err: ExecuteErrorChannel = new StreamFailed({
         cause: new Error(
           `${this.constructor.name} does not support executeStream — use execute() instead`,
         ),
-      };
+      });
       const resultPromise: Promise<TRaw> = Promise.reject(err);
       // Silence Node's unhandled-rejection — the caller may not await .result.
       resultPromise.catch(() => {});
@@ -643,10 +639,7 @@ export abstract class BaseLanguageModelExecutor<TRaw, TChunk = unknown>
       this.runOperation(op, (i) =>
         Effect.try({
           try: () => this.normalizeRaw(i.targetOutput as TRaw),
-          catch: (cause): NormalizeError => ({
-            _tag: "NormalizationFailed",
-            cause,
-          }),
+          catch: (cause): NormalizeError => new NormalizationFailed({ cause }),
         }),
       ),
     );
@@ -684,13 +677,12 @@ export abstract class BaseLanguageModelExecutor<TRaw, TChunk = unknown>
     executionId: string,
     op: Operation<unknown, unknown>,
     sink: ((delta: AdapterDelta) => Effect.Effect<void>) | null,
-  ): Effect.Effect<TRaw, ExecuteError, never> {
+  ): Effect.Effect<TRaw, ExecuteErrorChannel, never> {
     return Effect.gen(this, function* () {
       if (this.aborted.has(executionId)) {
-        return yield* Effect.fail<ExecuteError>({
-          _tag: "ProviderAborted",
-          reason: "aborted prior to execute",
-        });
+        return yield* Effect.fail<ExecuteErrorChannel>(
+          new ProviderAborted({ reason: "aborted prior to execute" }),
+        );
       }
 
       // External-abort bridge: the caller's signal + abort() API both
@@ -715,10 +707,10 @@ export abstract class BaseLanguageModelExecutor<TRaw, TChunk = unknown>
         if (!wantStream) {
           // Non-streaming: Effect.tryPromise's `signal` arg auto-aborts
           // on fiber interrupt; merge with caller's external signal.
-          return yield* Effect.tryPromise<TRaw, ExecuteError>({
+          return yield* Effect.tryPromise<TRaw, ExecuteErrorChannel>({
             try: (fiberSignal) =>
               this.callProvider(params, mergeSignals(input.signal, fiberSignal)),
-            catch: (cause): ExecuteError => this.mapProviderError(cause),
+            catch: (cause): ExecuteErrorChannel => this.mapProviderError(cause),
           }).pipe(
             // The external controller (abort() API) feeds the SDK via
             // the merged signal too — wire it through `Effect.race`
@@ -743,8 +735,8 @@ export abstract class BaseLanguageModelExecutor<TRaw, TChunk = unknown>
         const externalSignal = input.signal;
 
         // Build the data stream — pure deltas, no side-effects yet.
-        const chunkStream: Stream.Stream<AdapterDelta, ExecuteError> = Stream.unwrap(
-          Effect.tryPromise<AsyncIterable<TChunk>, ExecuteError>({
+        const chunkStream: Stream.Stream<AdapterDelta, ExecuteErrorChannel> = Stream.unwrap(
+          Effect.tryPromise<AsyncIterable<TChunk>, ExecuteErrorChannel>({
             try: async (fiberSignal) => {
               const merged = mergeSignals(externalSignal, fiberSignal);
               // External controller too — abort() API path.
@@ -752,10 +744,10 @@ export abstract class BaseLanguageModelExecutor<TRaw, TChunk = unknown>
               const iter = await this.openStream(params, finalSignal);
               return iter;
             },
-            catch: (cause): ExecuteError => this.mapProviderError(cause),
+            catch: (cause): ExecuteErrorChannel => this.mapProviderError(cause),
           }).pipe(
             Effect.map((iter) =>
-              Stream.fromAsyncIterable<TChunk, ExecuteError>(iter, (cause) =>
+              Stream.fromAsyncIterable<TChunk, ExecuteErrorChannel>(iter, (cause) =>
                 this.mapProviderError(cause),
               ),
             ),
@@ -765,11 +757,11 @@ export abstract class BaseLanguageModelExecutor<TRaw, TChunk = unknown>
           Stream.mapConcat((delta: AdapterDelta) => pipeline.process(delta)),
         );
 
-        const flushStream: Stream.Stream<AdapterDelta, ExecuteError> = Stream.suspend(() =>
+        const flushStream: Stream.Stream<AdapterDelta, ExecuteErrorChannel> = Stream.suspend(() =>
           Stream.fromIterable(pipeline.flush()),
         );
-        const finalizeStream: Stream.Stream<AdapterDelta, ExecuteError> = Stream.suspend(() =>
-          Stream.fromIterable(this.finalizeStream(accum)),
+        const finalizeStream: Stream.Stream<AdapterDelta, ExecuteErrorChannel> = Stream.suspend(
+          () => Stream.fromIterable(this.finalizeStream(accum)),
         );
 
         // Synthetic-message-start guard: if the provider's first delta
@@ -794,7 +786,7 @@ export abstract class BaseLanguageModelExecutor<TRaw, TChunk = unknown>
         // carry their own (with model) without doubling up. Finalize
         // runs after everything else (suspend defers the closure until
         // upstream is drained).
-        const fullStream: Stream.Stream<AdapterDelta, ExecuteError> = Stream.concatAll(
+        const fullStream: Stream.Stream<AdapterDelta, ExecuteErrorChannel> = Stream.concatAll(
           Chunk.make(chunkStream, flushStream, finalizeStream),
         )
           .pipe(ensureMessageStart)
@@ -815,7 +807,7 @@ export abstract class BaseLanguageModelExecutor<TRaw, TChunk = unknown>
         // the queue is full → upstream stream pauses → provider stream
         // paces. This is the real backpressure win over the previous
         // unbounded array sink.
-        const finalStream: Stream.Stream<AdapterDelta, ExecuteError> = sink
+        const finalStream: Stream.Stream<AdapterDelta, ExecuteErrorChannel> = sink
           ? Stream.tap(fullStream, sink)
           : fullStream;
 
@@ -839,17 +831,16 @@ export abstract class BaseLanguageModelExecutor<TRaw, TChunk = unknown>
   private withExternalAbort(
     controller: AbortController,
     callerSignal: AbortSignal | undefined,
-  ): <A>(self: Effect.Effect<A, ExecuteError>) => Effect.Effect<A, ExecuteError> {
-    return <A>(self: Effect.Effect<A, ExecuteError>) =>
+  ): <A>(self: Effect.Effect<A, ExecuteErrorChannel>) => Effect.Effect<A, ExecuteErrorChannel> {
+    return <A>(self: Effect.Effect<A, ExecuteErrorChannel>) =>
       Effect.race(
         self,
-        Effect.async<never, ExecuteError>((resume) => {
+        Effect.async<never, ExecuteErrorChannel>((resume) => {
           const fire = (reason: unknown): void =>
             resume(
-              Effect.fail<ExecuteError>({
-                _tag: "ProviderAborted",
-                reason: typeof reason === "string" ? reason : "aborted",
-              }),
+              Effect.fail<ExecuteErrorChannel>(
+                new ProviderAborted({ reason: typeof reason === "string" ? reason : "aborted" }),
+              ),
             );
           if (controller.signal.aborted) {
             fire(controller.signal.reason);
@@ -911,7 +902,7 @@ export abstract class BaseLanguageModelExecutor<TRaw, TChunk = unknown>
         op as Operation<unknown, unknown>,
         null,
       ).pipe(
-        Effect.catchTag("ProviderAborted", (e) =>
+        Effect.catchTag("ProviderAborted", (e: ProviderAborted) =>
           Effect.succeed<ExecutorTerminal<LanguageModelExecutionResult>>({
             outcome: "canceled",
             reason: e.reason ?? "aborted",
@@ -930,10 +921,7 @@ export abstract class BaseLanguageModelExecutor<TRaw, TChunk = unknown>
       // 4. normalize (deterministic)
       const result = yield* Effect.try({
         try: () => this.normalizeRaw(rawForNormalize),
-        catch: (cause): ExecutorError => ({
-          _tag: "NormalizationFailed",
-          cause,
-        }),
+        catch: (cause): ExecutorError => new NormalizationFailed({ cause }),
       });
 
       // 5. merge provider-specific metadata (v1 extractMetadata parity).

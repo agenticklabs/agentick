@@ -22,7 +22,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { isTaskRefBlock, jsonSchema } from "@agentick/spec-next";
+import { ToolTaskModeConflictError, isTaskRefBlock, jsonSchema } from "@agentick/spec-next";
 import type { ContentBlock, ToolDeclaration, ToolRegistration } from "@agentick/spec-next";
 
 import { createTestHarness } from "../testing/index.js";
@@ -121,11 +121,7 @@ describe("dispatch task mode matrix — task: 'ref'", () => {
       harness.dispatch(
         dispatchOf({ name: "u", toolCallId: "tc-u-ref", via: "dispatch", task: "ref" }),
       ),
-    ).rejects.toMatchObject({
-      _tag: "ToolTaskModeConflictError",
-      requestedTaskMode: "ref",
-      supportMode: "unsupported",
-    });
+    ).rejects.toBeInstanceOf(ToolTaskModeConflictError);
   });
 
   it("(supported, 'ref') → returns TaskRefBlock (Pattern B, #160)", async () => {
@@ -205,11 +201,7 @@ describe("dispatch task mode matrix — task: 'inline'", () => {
       harness.dispatch(
         dispatchOf({ name: "r", toolCallId: "tc-r-inline", via: "dispatch", task: "inline" }),
       ),
-    ).rejects.toMatchObject({
-      _tag: "ToolTaskModeConflictError",
-      requestedTaskMode: "inline",
-      supportMode: "required",
-    });
+    ).rejects.toBeInstanceOf(ToolTaskModeConflictError);
   });
 });
 

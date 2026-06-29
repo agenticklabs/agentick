@@ -56,7 +56,7 @@ import type {
   TimelineReplaceProjectionInput,
   TimelineSnapshot,
 } from "@agentick/spec-next";
-import { HandlerError } from "@agentick/spec-next";
+import { HandlerError, RehydrateStrategyMissing } from "@agentick/spec-next";
 
 type TimelineInboxMessage =
   | { readonly type: "timeline:append"; readonly payload: TimelineAppendInput }
@@ -345,12 +345,11 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
       }
       case "rehydrate": {
         if (!options.rehydrateStrategy) {
-          throw {
-            _tag: "RehydrateStrategyMissing",
+          throw new RehydrateStrategyMissing({
             reason:
               "importSnapshot({ mode: 'rehydrate' }) requires `rehydrateStrategy`. " +
               "Derive it from snapshot.lastCompaction.strategyMetadata or supply a new one.",
-          };
+          });
         }
         // Reset projection to log, then re-run the strategy.
         this._projection = [...this._persisted];

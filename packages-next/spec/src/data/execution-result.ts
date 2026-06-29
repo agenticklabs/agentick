@@ -49,15 +49,23 @@ export interface ExecutionResult {
 
 /**
  * Tagged-union executor errors. Carried by `ExecutorTerminal.failed`.
+ *
+ * Migrated to class hierarchy (ADR 41). `ExecutorError` is now an alias
+ * for `ExecutorErrorChannel` (union of concrete `AgentickError`
+ * subclasses); old POJO consumers should construct instances via
+ * `new ProviderRejected({...})` etc.
  */
-export type ExecutorError =
-  | { readonly _tag: "ProjectionFailed"; readonly reason: string; readonly cause?: unknown }
-  | { readonly _tag: "ProviderRejected"; readonly status?: number; readonly cause?: unknown }
-  | { readonly _tag: "ProviderTimeout"; readonly timeoutMs: number }
-  | { readonly _tag: "ProviderAborted"; readonly reason?: string }
-  | { readonly _tag: "StreamFailed"; readonly cause: unknown }
-  | { readonly _tag: "NormalizationFailed"; readonly cause: unknown }
-  | { readonly _tag: "Unknown"; readonly cause: unknown };
+import type { ExecutorErrorChannel } from "../errors/harnesses.js";
+export type ExecutorError = ExecutorErrorChannel;
+export {
+  NormalizationFailed,
+  ProjectionFailed,
+  ProviderAborted,
+  ProviderRejected,
+  ProviderTimeout,
+  StreamFailed,
+  UnknownExecutorError,
+} from "../errors/harnesses.js";
 
 // ============================================================================
 // ExecutorTerminal — terminal envelope

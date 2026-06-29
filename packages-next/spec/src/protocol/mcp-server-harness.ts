@@ -22,7 +22,7 @@
 
 import type { Effect } from "effect";
 
-import type { JournalError } from "../data/errors.js";
+import type { McpServerError } from "../errors/harnesses.js";
 import type { Unsubscribe } from "./inbox.js";
 
 // ============================================================================
@@ -156,24 +156,19 @@ export interface McpServerConnectionInfo {
  * subclass while preserving the `_tag` discriminator for switch-style
  * handling. The shape on the wire stays identical.
  */
-export type McpServerError =
-  | { readonly _tag: "McpServerNotFound"; readonly name: string }
-  | {
-      readonly _tag: "McpServerConfigInvalid";
-      readonly reason: string;
-      readonly path?: readonly string[];
-    }
-  | {
-      readonly _tag: "McpServerTransportFailed";
-      readonly transportKind: string;
-      readonly cause: unknown;
-    }
-  | { readonly _tag: "McpServerConnectionRejected"; readonly reason: string }
-  | { readonly _tag: "McpServerAuthRejected"; readonly reason: string }
-  | { readonly _tag: "McpServerAuthzDenied"; readonly reason: string }
-  | { readonly _tag: "McpServerRateLimited"; readonly retryAfterMs?: number }
-  | { readonly _tag: "McpServerClosed"; readonly serverId: string }
-  | JournalError;
+/** Migrated to class hierarchy (ADR 41). Re-exports from `../errors/harnesses.js`. */
+export {
+  McpServerAuthRejected,
+  McpServerAuthzDenied,
+  McpServerClosed,
+  McpServerConfigInvalid,
+  McpServerConnectionRejected,
+  McpServerError,
+  type McpServerErrorChannel,
+  McpServerNotFound,
+  McpServerRateLimited,
+  McpServerTransportFailed,
+} from "../errors/harnesses.js";
 
 /**
  * Effect-typed error union for harness operations. Use in

@@ -58,7 +58,7 @@ import type {
   AbortExecutorInput,
   AdapterDelta,
   EventBus,
-  ExecuteError,
+  ExecuteErrorChannel,
   ExecuteInput,
   ExecutionTarget,
   ExecutorError,
@@ -80,7 +80,13 @@ import type {
   ProjectionError,
   RunInput,
 } from "@agentick/spec-next";
-import { HandlerError } from "@agentick/spec-next";
+import {
+  HandlerError,
+  NormalizationFailed,
+  ProjectionFailed,
+  ProviderAborted,
+  ProviderRejected,
+} from "@agentick/spec-next";
 
 // ============================================================================
 // Public API
@@ -201,11 +207,8 @@ class CallbackLanguageModelExecutor
       this.runOperation(op, (i) =>
         Effect.try({
           try: () => (this.spec.project ?? defaultProject)(i),
-          catch: (cause): ProjectionError => ({
-            _tag: "ProjectionFailed",
-            reason: "projection threw",
-            cause,
-          }),
+          catch: (cause): ProjectionError =>
+            new ProjectionFailed({ reason: "projection threw", cause }),
         }),
       ),
     );
@@ -312,10 +315,7 @@ class CallbackLanguageModelExecutor
       this.runOperation(op, (i) =>
         Effect.try({
           try: () => normalizeImpl(i),
-          catch: (cause): NormalizeError => ({
-            _tag: "NormalizationFailed",
-            cause,
-          }),
+          catch: (cause): NormalizeError => new NormalizationFailed({ cause }),
         }),
       ),
     );
@@ -362,13 +362,12 @@ class CallbackLanguageModelExecutor
     input: ExecuteInput<LanguageModelInput>,
     executionId: string,
     sink: DeltaSink | null,
-  ): Effect.Effect<unknown, ExecuteError, never> {
+  ): Effect.Effect<unknown, ExecuteErrorChannel, never> {
     return Effect.gen(this, function* () {
       if (this.lifecycle.isAborted(executionId)) {
-        return yield* Effect.fail<ExecuteError>({
-          _tag: "ProviderAborted",
-          reason: "aborted prior to execute",
-        });
+        return yield* Effect.fail<ExecuteErrorChannel>(
+          new ProviderAborted({ reason: "aborted prior to execute" }),
+        );
       }
       const controller = new AbortController();
       this.lifecycle.register({ executionId, abort: controller });
@@ -390,7 +389,7 @@ class CallbackLanguageModelExecutor
         if (sink) sink(delta);
       };
       try {
-        const result = yield* Effect.tryPromise<LanguageModelExecutionResult, ExecuteError>({
+        const result = yield* Effect.tryPromise<LanguageModelExecutionResult, ExecuteErrorChannel>({
           try: () =>
             this.spec.run(input.targetInput, {
               ...omitUndefined({ signal: input.signal }),
@@ -401,10 +400,7 @@ class CallbackLanguageModelExecutor
               },
               emit,
             }),
-          catch: (cause): ExecuteError => ({
-            _tag: "ProviderRejected",
-            cause,
-          }),
+          catch: (cause): ExecuteErrorChannel => new ProviderRejected({ cause }),
         });
         return result as unknown;
       } finally {

@@ -68,7 +68,7 @@ import type {
   OperationJournal,
   RunExecutionInput,
 } from "@agentick/spec-next";
-import { HandlerError } from "@agentick/spec-next";
+import { ExecutionError, HandlerError } from "@agentick/spec-next";
 
 // ============================================================================
 // Public API
@@ -214,7 +214,7 @@ class CallbackLoopExecutor extends BaseHarness<"loop"> implements LoopExecutorPr
         ) {
           return cause as LoopExecutorError;
         }
-        return { _tag: "ExecutionError", cause };
+        return new ExecutionError({ cause });
       },
     });
   }

@@ -17,7 +17,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { ToolBinding, ToolDeclaration, ToolRegistration } from "@agentick/spec-next";
-import { jsonSchema } from "@agentick/spec-next";
+import { ToolAlreadyRegistered, jsonSchema } from "@agentick/spec-next";
 
 import { InMemoryToolRegistry } from "../registry.js";
 import { omitUndefined } from "@agentick/utils-next";
@@ -69,7 +69,7 @@ describe("InMemoryToolRegistry — layered tools (#136)", () => {
       r.add(reg("foo", { scope: "session", sessionId: "s1" }));
       expect(() =>
         r.add(reg("foo", { scope: "session", sessionId: "s1" }, { handlerRef: "h.different" })),
-      ).toThrow(expect.objectContaining({ _tag: "ToolAlreadyRegistered" }));
+      ).toThrow(ToolAlreadyRegistered);
     });
 
     it("same name + different binding adds a sibling", () => {

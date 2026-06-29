@@ -15,6 +15,7 @@ import { describe, expect, it } from "vitest";
 import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime-next";
 import type { Loader } from "@agentick/utils-next/loaders";
 import type { SkillsRegisterInput } from "@agentick/spec-next";
+import { SkillNotFound } from "@agentick/spec-next";
 
 import { SkillsHarness } from "../harness.js";
 import { fromArray } from "../loaders.js";
@@ -162,10 +163,7 @@ describe("SkillsHarness.require", () => {
   it("throws SkillNotFound when no source has the name", async () => {
     const h = await makeHarness();
     h.setLoaders([fromArray([{ name: "alpha", description: "a", content: "a" }])]);
-    await expect(h.require("missing")).rejects.toMatchObject({
-      _tag: "SkillNotFound",
-      name: "missing",
-    });
+    await expect(h.require("missing")).rejects.toBeInstanceOf(SkillNotFound);
   });
 
   it("returns from cache without consulting loaders when already registered", async () => {

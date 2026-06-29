@@ -359,25 +359,21 @@ export interface RestoreInput extends MountScopedInput {
  * rejection values; the `BaseHarness` wraps these into the
  * `terminal:failed` envelope.
  */
-export type ReconcileError =
-  | { readonly _tag: "NotMounted"; readonly mountId: string }
-  | { readonly _tag: "AlreadyMounted"; readonly mountId: string }
-  | { readonly _tag: "RenderFailed"; readonly cause: unknown; readonly path?: string }
-  | { readonly _tag: "DataFetchFailed"; readonly key: string; readonly cause: unknown }
-  | {
-      readonly _tag: "MaxIterationsExceeded";
-      readonly iterations: number;
-      readonly reason?: string;
-    }
-  | { readonly _tag: "UnstableTree"; readonly iterations: number }
-  | { readonly _tag: "InvalidElement"; readonly reason: string }
-  | {
-      readonly _tag: "SnapshotIncompatible";
-      readonly specVersion: string;
-      readonly reason?: string;
-    }
-  | { readonly _tag: "BridgeUnavailable"; readonly bridge: string; readonly hook: string }
-  | { readonly _tag: "FormatterFailed"; readonly cause: unknown };
+/** Migrated to class hierarchy (ADR 41). Re-exports from `../errors/harnesses.js`. */
+export {
+  AlreadyMounted,
+  BridgeUnavailable,
+  DataFetchFailed,
+  FormatterFailed,
+  InvalidElement,
+  MaxIterationsExceeded,
+  NotMounted,
+  ReconcileError,
+  type ReconcileErrorChannel,
+  RenderFailed,
+  SnapshotIncompatible,
+  UnstableTree,
+} from "../errors/harnesses.js";
 
 // ============================================================================
 // Inbox messages

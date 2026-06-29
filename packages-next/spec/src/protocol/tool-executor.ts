@@ -424,55 +424,22 @@ export interface ToolDispatchAborted {
  * rejection values; the `BaseHarness` wraps these into the
  * `terminal:failed` envelope.
  */
-export type ToolExecutorError =
-  | {
-      readonly _tag: "ToolNotFoundError";
-      readonly name: string;
-      readonly registered: readonly string[];
-    }
-  | {
-      readonly _tag: "ToolValidationError";
-      readonly toolName: string;
-      readonly issues: readonly StandardSchemaIssue[];
-    }
-  | { readonly _tag: "ToolHandlerError"; readonly toolName: string; readonly cause: unknown }
-  | {
-      readonly _tag: "ToolPermissionError";
-      readonly toolName: string;
-      readonly via: DispatchContext["via"];
-      readonly reason?: string;
-    }
-  | { readonly _tag: "ToolTimeoutError"; readonly toolName: string; readonly ms: number }
-  | {
-      readonly _tag: "ToolConfirmationDeniedError";
-      readonly toolName: string;
-      readonly reason?: string;
-    }
-  | {
-      readonly _tag: "ToolConfirmationTimeoutError";
-      readonly toolName: string;
-      readonly ms: number;
-    }
-  | { readonly _tag: "ToolAbortedError"; readonly toolCallId: string; readonly reason?: string }
-  | { readonly _tag: "ToolAlreadyRegistered"; readonly name: string }
-  | { readonly _tag: "ToolHandlerMissing"; readonly toolName: string; readonly handlerRef: string }
-  | {
-      /**
-       * The caller's `task` option conflicts with the tool's
-       * `taskSupport` annotation. Emitted by the executor BEFORE the
-       * handler runs:
-       *
-       *   - `task: "ref"` + `taskSupport: "unsupported"` — the tool
-       *     never produces a handle; there's no ref to return.
-       *   - `task: "inline"` + `taskSupport: "required"` — the tool
-       *     contract requires async-ref semantics; awaiting it inline
-       *     defeats the point.
-       */
-      readonly _tag: "ToolTaskModeConflictError";
-      readonly toolName: string;
-      readonly requestedTaskMode: "ref" | "inline";
-      readonly supportMode: "unsupported" | "supported" | "required";
-    };
+/** Migrated to class hierarchy (ADR 41). Re-exports from `../errors/harnesses.js`. */
+export {
+  ToolAbortedError,
+  ToolAlreadyRegistered,
+  ToolConfirmationDeniedError,
+  ToolConfirmationTimeoutError,
+  ToolExecutorError,
+  type ToolExecutorErrorChannel,
+  ToolHandlerError,
+  ToolHandlerMissing,
+  ToolNotFoundError,
+  ToolPermissionError,
+  ToolTaskModeConflictError,
+  ToolTimeoutError,
+  ToolValidationError,
+} from "../errors/harnesses.js";
 
 // ============================================================================
 // Inbox messages

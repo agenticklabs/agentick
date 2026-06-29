@@ -50,7 +50,18 @@ import type {
   ToolRegistration,
   UnregisterToolInput,
 } from "@agentick/spec-next";
-import { HandlerError } from "@agentick/spec-next";
+import {
+  HandlerError,
+  ToolAbortedError,
+  ToolConfirmationTimeoutError,
+  ToolHandlerError,
+  ToolHandlerMissing,
+  ToolNotFoundError,
+  ToolPermissionError,
+  ToolTaskModeConflictError,
+  ToolTimeoutError,
+  ToolValidationError,
+} from "@agentick/spec-next";
 
 import {
   TOOL_CONFIRMATION_KIND,
@@ -217,11 +228,9 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
   async abort(input: AbortInput): Promise<void> {
     const entry = this.inFlight.get(input.toolCallId);
     if (!entry) return; // no-op for unknown ids
-    entry.controller.abort({
-      _tag: "ToolAbortedError",
-      toolCallId: input.toolCallId,
-      reason: input.reason,
-    });
+    entry.controller.abort(
+      new ToolAbortedError({ toolCallId: input.toolCallId, reason: input.reason }),
+    );
     // The dispatchBody promise will see the abort + reject with
     // ToolAbortedError; we leave cleanup of inFlight to the dispatch
     // path's `finally`.
@@ -341,19 +350,18 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
     return Effect.gen(this, function* () {
       const reg = this.registry.get(input.name);
       if (!reg) {
-        return yield* Effect.fail({
-          _tag: "ToolNotFoundError",
-          name: input.name,
-          registered: this.registry.names(),
-        } as const);
+        return yield* Effect.fail(
+          new ToolNotFoundError({ name: input.name, registered: this.registry.names() }),
+        );
       }
       if (!reg.declaration.exposure.includes(input.context.via)) {
-        return yield* Effect.fail({
-          _tag: "ToolPermissionError",
-          toolName: input.name,
-          via: input.context.via,
-          reason: `tool "${input.name}" is not exposed via "${input.context.via}"`,
-        } as const);
+        return yield* Effect.fail(
+          new ToolPermissionError({
+            toolName: input.name,
+            via: input.context.via,
+            reason: `tool "${input.name}" is not exposed via "${input.context.via}"`,
+          }),
+        );
       }
 
       // Pre-flight: explicit `task` overrides that contradict the
@@ -374,30 +382,30 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
         const supportMode = reg.declaration.annotations?.taskSupport ?? "unsupported";
         const requestedTaskMode = input.task ?? "auto";
         if (requestedTaskMode === "ref" && supportMode === "unsupported") {
-          return yield* Effect.fail({
-            _tag: "ToolTaskModeConflictError",
-            toolName: input.name,
-            requestedTaskMode: "ref",
-            supportMode: "unsupported",
-          } as const);
+          return yield* Effect.fail(
+            new ToolTaskModeConflictError({
+              toolName: input.name,
+              requestedTaskMode: "ref",
+              supportMode: "unsupported",
+            }),
+          );
         }
         if (requestedTaskMode === "inline" && supportMode === "required") {
-          return yield* Effect.fail({
-            _tag: "ToolTaskModeConflictError",
-            toolName: input.name,
-            requestedTaskMode: "inline",
-            supportMode: "required",
-          } as const);
+          return yield* Effect.fail(
+            new ToolTaskModeConflictError({
+              toolName: input.name,
+              requestedTaskMode: "inline",
+              supportMode: "required",
+            }),
+          );
         }
       }
 
       const entry = this.handlerResolver.resolve(reg.handlerRef);
       if (!entry) {
-        return yield* Effect.fail({
-          _tag: "ToolHandlerMissing",
-          toolName: input.name,
-          handlerRef: reg.handlerRef,
-        } as const);
+        return yield* Effect.fail(
+          new ToolHandlerMissing({ toolName: input.name, handlerRef: reg.handlerRef }),
+        );
       }
 
       // Validate input. Validator may be sync or async — both shapes
@@ -410,11 +418,9 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
         }),
       });
       if (isValidationFailure(result)) {
-        return yield* Effect.fail({
-          _tag: "ToolValidationError",
-          toolName: input.name,
-          issues: result.issues,
-        } as const);
+        return yield* Effect.fail(
+          new ToolValidationError({ toolName: input.name, issues: result.issues }),
+        );
       }
       let validated = result.value;
 
@@ -473,11 +479,12 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
         // Timeout → caller error so the loop sees it via
         // ToolConfirmationTimeoutError (existing contract).
         if (elicitResult.outcome === "failed" && elicitResult.failure.kind === "timeout") {
-          return yield* Effect.fail({
-            _tag: "ToolConfirmationTimeoutError",
-            toolName: input.name,
-            ms: confirmationTimeoutMs ?? 0,
-          } as const);
+          return yield* Effect.fail(
+            new ToolConfirmationTimeoutError({
+              toolName: input.name,
+              ms: confirmationTimeoutMs ?? 0,
+            }),
+          );
         }
 
         // Approval requires accepted + reply.approved === true. Every
@@ -522,11 +529,9 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
             }),
           });
           if (isValidationFailure(revalidated)) {
-            return yield* Effect.fail({
-              _tag: "ToolValidationError",
-              toolName: input.name,
-              issues: revalidated.issues,
-            } as const);
+            return yield* Effect.fail(
+              new ToolValidationError({ toolName: input.name, issues: revalidated.issues }),
+            );
           }
           validated = revalidated.value;
         }
@@ -537,11 +542,7 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
       let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
       if (timeoutMs !== undefined && timeoutMs > 0) {
         timeoutHandle = setTimeout(() => {
-          controller.abort({
-            _tag: "ToolTimeoutError",
-            toolName: input.name,
-            ms: timeoutMs,
-          });
+          controller.abort(new ToolTimeoutError({ toolName: input.name, ms: timeoutMs }));
         }, timeoutMs);
       }
 
@@ -610,10 +611,7 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
         (): Effect.Effect<readonly ContentBlock[], unknown, never> => {
           if (controller.signal.aborted) {
             return Effect.fail(
-              controller.signal.reason ?? {
-                _tag: "ToolAbortedError",
-                toolCallId: input.toolCallId,
-              },
+              controller.signal.reason ?? new ToolAbortedError({ toolCallId: input.toolCallId }),
             );
           }
           const handlerResult = entry.handler(validated, { ctx, use: useDeps });
@@ -630,10 +628,8 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
             if (controller.signal.aborted) {
               resume(
                 Effect.fail(
-                  controller.signal.reason ?? {
-                    _tag: "ToolAbortedError",
-                    toolCallId: input.toolCallId,
-                  },
+                  controller.signal.reason ??
+                    new ToolAbortedError({ toolCallId: input.toolCallId }),
                 ),
               );
               return;
@@ -641,10 +637,8 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
             const onAbort = () => {
               resume(
                 Effect.fail(
-                  controller.signal.reason ?? {
-                    _tag: "ToolAbortedError",
-                    toolCallId: input.toolCallId,
-                  },
+                  controller.signal.reason ??
+                    new ToolAbortedError({ toolCallId: input.toolCallId }),
                 ),
               );
             };
@@ -797,21 +791,18 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
         return yield* Effect.fail(
           isTaggedAbort(abortReason)
             ? abortReason
-            : ({
-                _tag: "ToolAbortedError",
+            : new ToolAbortedError({
                 toolCallId: input.toolCallId,
                 reason: typeof abortReason === "string" ? abortReason : undefined,
-              } as const),
+              }),
         );
       }
       if (rawErr !== undefined && isTaggedToolError(rawErr)) {
         return yield* Effect.fail(rawErr);
       }
-      return yield* Effect.fail({
-        _tag: "ToolHandlerError",
-        toolName: input.name,
-        cause: rawErr ?? exit.cause,
-      } as const);
+      return yield* Effect.fail(
+        new ToolHandlerError({ toolName: input.name, cause: rawErr ?? exit.cause }),
+      );
     });
   }
 }

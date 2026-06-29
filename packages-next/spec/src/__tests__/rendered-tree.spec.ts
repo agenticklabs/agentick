@@ -38,7 +38,7 @@ import type {
   UrlSource,
   UsageStats,
 } from "../index.js";
-import { jsonSchema } from "../index.js";
+import { jsonSchema, ProviderTimeout } from "../index.js";
 
 describe("@agentick/spec-next — reconciler-facing types", () => {
   describe("ContentBlock", () => {
@@ -246,7 +246,7 @@ describe("@agentick/spec-next — reconciler-facing types", () => {
         outcome: "succeeded",
         result: { specVersion: "2026-05-01", output: [] },
       };
-      const err: ExecutorError = { _tag: "ProviderTimeout", timeoutMs: 30_000 };
+      const err: ExecutorError = new ProviderTimeout({ timeoutMs: 30_000 });
       const fail: ExecutorTerminal = { outcome: "failed", error: err };
       const cancel: ExecutorTerminal = { outcome: "canceled", reason: "user" };
       const veto: ExecutorTerminal = { outcome: "vetoed", reason: "policy" };

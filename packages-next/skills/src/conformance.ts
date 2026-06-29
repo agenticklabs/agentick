@@ -17,6 +17,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { SkillsHarnessProtocol } from "@agentick/spec-next";
+import { SkillAlreadyExists, SkillNotFound } from "@agentick/spec-next";
 
 export interface SkillsHarnessFactoryDeps {
   readonly make: () => Promise<SkillsHarnessProtocol>;
@@ -93,7 +94,7 @@ export function runSkillsHarnessConformance(deps: SkillsHarnessFactoryDeps): voi
       await h.register({ name: "dup", description: "first", content: "..." });
       await expect(
         h.register({ name: "dup", description: "second", content: "..." }),
-      ).rejects.toMatchObject({ _tag: "SkillAlreadyExists", name: "dup" });
+      ).rejects.toBeInstanceOf(SkillAlreadyExists);
       await h.close();
     });
 
@@ -121,10 +122,9 @@ export function runSkillsHarnessConformance(deps: SkillsHarnessFactoryDeps): voi
 
     it("update() rejects unknown names with SkillNotFound", async () => {
       const h = await deps.make();
-      await expect(h.update({ name: "ghost", description: "new" })).rejects.toMatchObject({
-        _tag: "SkillNotFound",
-        name: "ghost",
-      });
+      await expect(h.update({ name: "ghost", description: "new" })).rejects.toBeInstanceOf(
+        SkillNotFound,
+      );
       await h.close();
     });
 

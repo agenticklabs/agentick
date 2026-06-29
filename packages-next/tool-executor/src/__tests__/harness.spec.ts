@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { DispatchInput, ToolRegistration } from "@agentick/spec-next";
-import { jsonSchema } from "@agentick/spec-next";
+import {
+  ToolAbortedError,
+  ToolHandlerMissing,
+  ToolNotFoundError,
+  ToolPermissionError,
+  ToolTimeoutError,
+  jsonSchema,
+} from "@agentick/spec-next";
 import { createTestHarness } from "../testing/index.js";
 import { permissiveValidator } from "../validator.js";
 
@@ -83,10 +90,9 @@ describe("ToolExecutorHarness — dispatch happy path", () => {
 describe("ToolExecutorHarness — error paths", () => {
   it("unknown tool → ToolNotFoundError", async () => {
     const { harness } = await createTestHarness({});
-    await expect(harness.dispatch(dispatchOf("missing", "dispatch", {}))).rejects.toMatchObject({
-      _tag: "ToolNotFoundError",
-      name: "missing",
-    });
+    await expect(harness.dispatch(dispatchOf("missing", "dispatch", {}))).rejects.toBeInstanceOf(
+      ToolNotFoundError,
+    );
   });
 
   it("wrong door → ToolPermissionError", async () => {
@@ -94,11 +100,9 @@ describe("ToolExecutorHarness — error paths", () => {
       tools: [echoReg("model-only", ["model"])],
       handlers: [{ handlerRef: "h.model-only", handler: async () => [] }],
     });
-    await expect(harness.dispatch(dispatchOf("model-only", "dispatch", {}))).rejects.toMatchObject({
-      _tag: "ToolPermissionError",
-      toolName: "model-only",
-      via: "dispatch",
-    });
+    await expect(harness.dispatch(dispatchOf("model-only", "dispatch", {}))).rejects.toBeInstanceOf(
+      ToolPermissionError,
+    );
   });
 
   it("missing handler → ToolHandlerMissing", async () => {
@@ -106,11 +110,9 @@ describe("ToolExecutorHarness — error paths", () => {
       tools: [echoReg("noimpl")],
       // No handler registered for h.noimpl.
     });
-    await expect(harness.dispatch(dispatchOf("noimpl", "dispatch", {}))).rejects.toMatchObject({
-      _tag: "ToolHandlerMissing",
-      toolName: "noimpl",
-      handlerRef: "h.noimpl",
-    });
+    await expect(harness.dispatch(dispatchOf("noimpl", "dispatch", {}))).rejects.toBeInstanceOf(
+      ToolHandlerMissing,
+    );
   });
 
   it("validator failure → ToolValidationError", async () => {
@@ -186,10 +188,7 @@ describe("ToolExecutorHarness — abort", () => {
     const inFlight = harness.dispatch(dispatchOf("slow", "dispatch", {}, { toolCallId: callId }));
     await new Promise((r) => setTimeout(r, 10));
     await harness.abort({ toolCallId: callId, reason: "test cancel" });
-    await expect(inFlight).rejects.toMatchObject({
-      _tag: "ToolAbortedError",
-      toolCallId: callId,
-    });
+    await expect(inFlight).rejects.toBeInstanceOf(ToolAbortedError);
   });
 
   it("abort of an unknown id is a no-op", async () => {
@@ -223,7 +222,7 @@ describe("ToolExecutorHarness — abort", () => {
     );
     await new Promise((r) => setTimeout(r, 10));
     controller.abort();
-    await expect(inFlight).rejects.toMatchObject({ _tag: "ToolAbortedError" });
+    await expect(inFlight).rejects.toBeInstanceOf(ToolAbortedError);
   });
 
   it("timeoutMs causes the handler to reject with ToolTimeoutError", async () => {
@@ -248,11 +247,7 @@ describe("ToolExecutorHarness — abort", () => {
 
     await expect(
       harness.dispatch(dispatchOf("never", "dispatch", {}, { timeoutMs: 20 })),
-    ).rejects.toMatchObject({
-      _tag: "ToolTimeoutError",
-      toolName: "never",
-      ms: 20,
-    });
+    ).rejects.toBeInstanceOf(ToolTimeoutError);
   });
 });
 

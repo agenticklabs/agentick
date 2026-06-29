@@ -34,7 +34,12 @@ import type {
   SkillsSearchInput,
   SkillsUpdateInput,
 } from "@agentick/spec-next";
-import { HandlerError, InvalidPayload } from "@agentick/spec-next";
+import {
+  HandlerError,
+  InvalidPayload,
+  SkillAlreadyExists,
+  SkillNotFound,
+} from "@agentick/spec-next";
 import { createKeyedNotifier, type KeyedNotifier } from "@agentick/pubsub-next";
 import { omitUndefined } from "@agentick/utils-next";
 
@@ -171,7 +176,7 @@ export class SkillsHarness extends BaseHarness<SkillsSurface> implements SkillsH
   async require(name: string): Promise<Skill> {
     const resolved = await this.resolve(name);
     if (resolved !== null) return resolved;
-    throw { _tag: "SkillNotFound", name } satisfies SkillsError;
+    throw new SkillNotFound({ name });
   }
 
   // ─────────── Sync surface ───────────
@@ -326,7 +331,7 @@ export class SkillsHarness extends BaseHarness<SkillsSurface> implements SkillsH
   private applyRegister(input: SkillsRegisterInput): Effect.Effect<Skill, SkillsError, never> {
     return Effect.suspend((): Effect.Effect<Skill, SkillsError, never> => {
       if (this.skills.has(input.name)) {
-        return Effect.fail({ _tag: "SkillAlreadyExists", name: input.name });
+        return Effect.fail(new SkillAlreadyExists({ name: input.name }));
       }
       const now = Date.now();
       const skill: Skill = {
@@ -347,7 +352,7 @@ export class SkillsHarness extends BaseHarness<SkillsSurface> implements SkillsH
     return Effect.suspend((): Effect.Effect<Skill, SkillsError, never> => {
       const existing = this.skills.get(input.name);
       if (!existing) {
-        return Effect.fail({ _tag: "SkillNotFound", name: input.name });
+        return Effect.fail(new SkillNotFound({ name: input.name }));
       }
       const updated: Skill = {
         ...existing,

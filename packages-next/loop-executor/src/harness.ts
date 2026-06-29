@@ -44,7 +44,12 @@ import type {
   ToolCall,
   UsageStats,
 } from "@agentick/spec-next";
-import { HandlerError, toRegistration } from "@agentick/spec-next";
+import {
+  ExecutionError,
+  HandlerError,
+  ProviderRejected,
+  toRegistration,
+} from "@agentick/spec-next";
 import { omitUndefined } from "@agentick/utils-next";
 
 // ============================================================================
@@ -133,10 +138,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
   ): Effect.Effect<ExecutionTerminal, LoopExecutorError, never> {
     return Effect.tryPromise({
       try: () => this.runExecutionAsync(input),
-      catch: (cause): LoopExecutorError => ({
-        _tag: "ExecutionError",
-        cause,
-      }),
+      catch: (cause): LoopExecutorError => new ExecutionError({ cause }),
     });
   }
 
@@ -249,7 +251,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
             // executor.execute rejection — treat as failed terminal.
             executorTerminal = {
               outcome: "failed",
-              error: { _tag: "ProviderRejected", cause },
+              error: new ProviderRejected({ cause }),
             };
             stopReason = "executor_failed";
             break;

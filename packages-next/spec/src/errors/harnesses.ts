@@ -1,0 +1,896 @@
+/**
+ * Per-harness error classes — execution (loop / reconciler / executor /
+ * timeline) + domain (tool-executor / prompts / skills / knobs / mcp-server).
+ *
+ * Migrated from POJO `_tag` unions to the `AgentickError` class
+ * hierarchy per ADR 41 (clusters 3 + 4). Each domain has an abstract
+ * intermediate plus concrete subclasses; single-tag unions
+ * (`NormalizeError`) become concrete classes directly under
+ * `AgentickError`.
+ */
+
+import { AgentickError } from "./base.js";
+import { registerAgentickError } from "./registry.js";
+import { JournalError } from "./substrate.js";
+
+// ============================================================================
+// LoopExecutorError — loop orchestration failures
+// ============================================================================
+
+export abstract class LoopExecutorError extends AgentickError {}
+
+export class ExecutionError extends LoopExecutorError {
+  readonly _tag = "ExecutionError" as const;
+  override readonly cause: unknown;
+  constructor(args: { readonly cause: unknown }) {
+    super(`execution error: ${String(args.cause)}`, { cause: args.cause });
+    this.cause = args.cause;
+  }
+}
+registerAgentickError("ExecutionError", ExecutionError);
+
+export class TickError extends LoopExecutorError {
+  readonly _tag = "TickError" as const;
+  readonly tick: number;
+  readonly phase: "compile" | "execute" | "tool-dispatch" | "ingest" | "continuation";
+  override readonly cause: unknown;
+  constructor(args: {
+    readonly tick: number;
+    readonly phase: "compile" | "execute" | "tool-dispatch" | "ingest" | "continuation";
+    readonly cause: unknown;
+  }) {
+    super(`tick ${args.tick} ${args.phase} failed: ${String(args.cause)}`, { cause: args.cause });
+    this.tick = args.tick;
+    this.phase = args.phase;
+    this.cause = args.cause;
+  }
+}
+registerAgentickError("TickError", TickError);
+
+export class LoopCanceledError extends LoopExecutorError {
+  readonly _tag = "LoopCanceledError" as const;
+  readonly reason?: string;
+  constructor(args?: { readonly reason?: string; readonly cause?: unknown }) {
+    super(args?.reason ? `loop canceled: ${args.reason}` : `loop canceled`, { cause: args?.cause });
+    if (args?.reason !== undefined) this.reason = args.reason;
+  }
+}
+registerAgentickError("LoopCanceledError", LoopCanceledError);
+
+export class MaxTicksExceeded extends LoopExecutorError {
+  readonly _tag = "MaxTicksExceeded" as const;
+  readonly maxTicks: number;
+  constructor(args: { readonly maxTicks: number; readonly cause?: unknown }) {
+    super(`max ticks exceeded (${args.maxTicks})`, { cause: args.cause });
+    this.maxTicks = args.maxTicks;
+  }
+}
+registerAgentickError("MaxTicksExceeded", MaxTicksExceeded);
+
+export type LoopExecutorErrorChannel =
+  | ExecutionError
+  | TickError
+  | LoopCanceledError
+  | MaxTicksExceeded;
+
+// ============================================================================
+// ReconcileError — reconciler render + snapshot failures
+// ============================================================================
+
+export abstract class ReconcileError extends AgentickError {}
+
+export class NotMounted extends ReconcileError {
+  readonly _tag = "NotMounted" as const;
+  readonly mountId: string;
+  constructor(args: { readonly mountId: string; readonly cause?: unknown }) {
+    super(`reconciler not mounted: ${args.mountId}`, { cause: args.cause });
+    this.mountId = args.mountId;
+  }
+}
+registerAgentickError("NotMounted", NotMounted);
+
+export class AlreadyMounted extends ReconcileError {
+  readonly _tag = "AlreadyMounted" as const;
+  readonly mountId: string;
+  constructor(args: { readonly mountId: string; readonly cause?: unknown }) {
+    super(`reconciler already mounted: ${args.mountId}`, { cause: args.cause });
+    this.mountId = args.mountId;
+  }
+}
+registerAgentickError("AlreadyMounted", AlreadyMounted);
+
+export class RenderFailed extends ReconcileError {
+  readonly _tag = "RenderFailed" as const;
+  override readonly cause: unknown;
+  readonly path?: string;
+  constructor(args: { readonly cause: unknown; readonly path?: string }) {
+    super(`render failed${args.path ? ` at ${args.path}` : ""}: ${String(args.cause)}`, {
+      cause: args.cause,
+    });
+    this.cause = args.cause;
+    if (args.path !== undefined) this.path = args.path;
+  }
+}
+registerAgentickError("RenderFailed", RenderFailed);
+
+export class DataFetchFailed extends ReconcileError {
+  readonly _tag = "DataFetchFailed" as const;
+  readonly key: string;
+  override readonly cause: unknown;
+  constructor(args: { readonly key: string; readonly cause: unknown }) {
+    super(`data fetch failed (${args.key}): ${String(args.cause)}`, { cause: args.cause });
+    this.key = args.key;
+    this.cause = args.cause;
+  }
+}
+registerAgentickError("DataFetchFailed", DataFetchFailed);
+
+export class MaxIterationsExceeded extends ReconcileError {
+  readonly _tag = "MaxIterationsExceeded" as const;
+  readonly iterations: number;
+  readonly reason?: string;
+  constructor(args: {
+    readonly iterations: number;
+    readonly reason?: string;
+    readonly cause?: unknown;
+  }) {
+    super(`max reconcile iterations (${args.iterations})${args.reason ? `: ${args.reason}` : ""}`, {
+      cause: args.cause,
+    });
+    this.iterations = args.iterations;
+    if (args.reason !== undefined) this.reason = args.reason;
+  }
+}
+registerAgentickError("MaxIterationsExceeded", MaxIterationsExceeded);
+
+export class UnstableTree extends ReconcileError {
+  readonly _tag = "UnstableTree" as const;
+  readonly iterations: number;
+  constructor(args: { readonly iterations: number; readonly cause?: unknown }) {
+    super(`unstable tree after ${args.iterations} iterations`, { cause: args.cause });
+    this.iterations = args.iterations;
+  }
+}
+registerAgentickError("UnstableTree", UnstableTree);
+
+export class InvalidElement extends ReconcileError {
+  readonly _tag = "InvalidElement" as const;
+  readonly reason: string;
+  constructor(args: { readonly reason: string; readonly cause?: unknown }) {
+    super(`invalid element: ${args.reason}`, { cause: args.cause });
+    this.reason = args.reason;
+  }
+}
+registerAgentickError("InvalidElement", InvalidElement);
+
+export class SnapshotIncompatible extends ReconcileError {
+  readonly _tag = "SnapshotIncompatible" as const;
+  readonly specVersion: string;
+  readonly reason?: string;
+  constructor(args: {
+    readonly specVersion: string;
+    readonly reason?: string;
+    readonly cause?: unknown;
+  }) {
+    super(
+      `snapshot incompatible (specVersion=${args.specVersion})${args.reason ? `: ${args.reason}` : ""}`,
+      { cause: args.cause },
+    );
+    this.specVersion = args.specVersion;
+    if (args.reason !== undefined) this.reason = args.reason;
+  }
+}
+registerAgentickError("SnapshotIncompatible", SnapshotIncompatible);
+
+export class BridgeUnavailable extends ReconcileError {
+  readonly _tag = "BridgeUnavailable" as const;
+  readonly bridge: string;
+  readonly hook: string;
+  constructor(args: { readonly bridge: string; readonly hook: string; readonly cause?: unknown }) {
+    super(`bridge unavailable: ${args.bridge}.${args.hook}`, { cause: args.cause });
+    this.bridge = args.bridge;
+    this.hook = args.hook;
+  }
+}
+registerAgentickError("BridgeUnavailable", BridgeUnavailable);
+
+export class FormatterFailed extends ReconcileError {
+  readonly _tag = "FormatterFailed" as const;
+  override readonly cause: unknown;
+  constructor(args: { readonly cause: unknown }) {
+    super(`formatter failed: ${String(args.cause)}`, { cause: args.cause });
+    this.cause = args.cause;
+  }
+}
+registerAgentickError("FormatterFailed", FormatterFailed);
+
+export type ReconcileErrorChannel =
+  | NotMounted
+  | AlreadyMounted
+  | RenderFailed
+  | DataFetchFailed
+  | MaxIterationsExceeded
+  | UnstableTree
+  | InvalidElement
+  | SnapshotIncompatible
+  | BridgeUnavailable
+  | FormatterFailed;
+
+// ============================================================================
+// ExecuteError — model-provider call failures
+// ============================================================================
+
+export abstract class ExecuteError extends AgentickError {
+  abstract override readonly _tag:
+    | "ProviderRejected"
+    | "ProviderTimeout"
+    | "ProviderAborted"
+    | "StreamFailed";
+}
+
+export class ProviderRejected extends ExecuteError {
+  readonly _tag = "ProviderRejected" as const;
+  readonly status?: number;
+  override readonly cause?: unknown;
+  constructor(args?: { readonly status?: number; readonly cause?: unknown }) {
+    const statusPart = args?.status !== undefined ? ` (status=${args.status})` : "";
+    super(`provider rejected${statusPart}`, { cause: args?.cause });
+    if (args?.status !== undefined) this.status = args.status;
+    if (args?.cause !== undefined) this.cause = args.cause;
+  }
+}
+registerAgentickError("ProviderRejected", ProviderRejected);
+
+export class ProviderTimeout extends ExecuteError {
+  readonly _tag = "ProviderTimeout" as const;
+  readonly timeoutMs: number;
+  constructor(args: { readonly timeoutMs: number; readonly cause?: unknown }) {
+    super(`provider timed out after ${args.timeoutMs}ms`, { cause: args.cause });
+    this.timeoutMs = args.timeoutMs;
+  }
+}
+registerAgentickError("ProviderTimeout", ProviderTimeout);
+
+export class ProviderAborted extends ExecuteError {
+  readonly _tag = "ProviderAborted" as const;
+  readonly reason?: string;
+  constructor(args?: { readonly reason?: string; readonly cause?: unknown }) {
+    super(args?.reason ? `provider aborted: ${args.reason}` : `provider aborted`, {
+      cause: args?.cause,
+    });
+    if (args?.reason !== undefined) this.reason = args.reason;
+  }
+}
+registerAgentickError("ProviderAborted", ProviderAborted);
+
+export class StreamFailed extends ExecuteError {
+  readonly _tag = "StreamFailed" as const;
+  override readonly cause: unknown;
+  constructor(args: { readonly cause: unknown }) {
+    super(`provider stream failed: ${String(args.cause)}`, { cause: args.cause });
+    this.cause = args.cause;
+  }
+}
+registerAgentickError("StreamFailed", StreamFailed);
+
+export type ExecuteErrorChannel =
+  | ProviderRejected
+  | ProviderTimeout
+  | ProviderAborted
+  | StreamFailed;
+
+/**
+ * `ProjectionFailed` — JSX → model-input projection step. Carried in
+ * the executor's terminal `failed` outcome alongside provider/normalize
+ * failures.
+ */
+export class ProjectionFailed extends AgentickError {
+  readonly _tag = "ProjectionFailed" as const;
+  readonly reason: string;
+  override readonly cause?: unknown;
+  constructor(args: { readonly reason: string; readonly cause?: unknown }) {
+    super(`projection failed: ${args.reason}`, { cause: args.cause });
+    this.reason = args.reason;
+    if (args.cause !== undefined) this.cause = args.cause;
+  }
+}
+registerAgentickError("ProjectionFailed", ProjectionFailed);
+
+/**
+ * `UnknownExecutorError` — catch-all for executor failures that don't
+ * fit the typed cases. Concrete class directly under `AgentickError`.
+ */
+export class UnknownExecutorError extends AgentickError {
+  readonly _tag = "Unknown" as const;
+  override readonly cause: unknown;
+  constructor(args: { readonly cause: unknown }) {
+    super(`unknown executor error: ${String(args.cause)}`, { cause: args.cause });
+    this.cause = args.cause;
+  }
+}
+registerAgentickError("Unknown", UnknownExecutorError);
+
+/**
+ * Full executor failure channel — overlaps with `ExecuteErrorChannel`
+ * (provider call failures) and adds projection/normalize/unknown.
+ * Replaces the legacy POJO `ExecutorError` union in
+ * `data/execution-result.ts`.
+ */
+export type ExecutorErrorChannel =
+  | ProjectionFailed
+  | ProviderRejected
+  | ProviderTimeout
+  | ProviderAborted
+  | StreamFailed
+  | NormalizationFailed
+  | UnknownExecutorError;
+
+/**
+ * Single-tag normalization failure. Concrete class directly under
+ * `AgentickError` — no abstract intermediate.
+ */
+export class NormalizationFailed extends AgentickError {
+  readonly _tag = "NormalizationFailed" as const;
+  override readonly cause: unknown;
+  constructor(args: { readonly cause: unknown }) {
+    super(`normalization failed: ${String(args.cause)}`, { cause: args.cause });
+    this.cause = args.cause;
+  }
+}
+registerAgentickError("NormalizationFailed", NormalizationFailed);
+
+// ============================================================================
+// TimelineError — timeline projection failures
+// ============================================================================
+
+export abstract class TimelineError extends AgentickError {}
+
+export class CompactHandlerFailed extends TimelineError {
+  readonly _tag = "CompactHandlerFailed" as const;
+  override readonly cause: unknown;
+  constructor(args: { readonly cause: unknown }) {
+    super(`compact handler failed: ${String(args.cause)}`, { cause: args.cause });
+    this.cause = args.cause;
+  }
+}
+registerAgentickError("CompactHandlerFailed", CompactHandlerFailed);
+
+export class RehydrateStrategyMissing extends TimelineError {
+  readonly _tag = "RehydrateStrategyMissing" as const;
+  readonly reason: string;
+  constructor(args: { readonly reason: string; readonly cause?: unknown }) {
+    super(`rehydrate strategy missing: ${args.reason}`, { cause: args.cause });
+    this.reason = args.reason;
+  }
+}
+registerAgentickError("RehydrateStrategyMissing", RehydrateStrategyMissing);
+
+export type TimelineErrorChannel = CompactHandlerFailed | RehydrateStrategyMissing;
+
+// ============================================================================
+// ToolExecutorError — tool dispatch failures
+// ============================================================================
+
+export abstract class ToolExecutorError extends AgentickError {}
+
+export class ToolNotFoundError extends ToolExecutorError {
+  readonly _tag = "ToolNotFoundError" as const;
+  readonly name: string;
+  readonly registered: readonly string[];
+  constructor(args: {
+    readonly name: string;
+    readonly registered: readonly string[];
+    readonly cause?: unknown;
+  }) {
+    super(`tool ${args.name} not found`, { cause: args.cause });
+    this.name = args.name;
+    this.registered = args.registered;
+  }
+}
+registerAgentickError("ToolNotFoundError", ToolNotFoundError);
+
+interface StandardSchemaIssueLike {
+  readonly path?: ReadonlyArray<string | number | { readonly key: string | number }>;
+  readonly message: string;
+}
+
+export class ToolValidationError extends ToolExecutorError {
+  readonly _tag = "ToolValidationError" as const;
+  readonly toolName: string;
+  readonly issues: readonly StandardSchemaIssueLike[];
+  constructor(args: {
+    readonly toolName: string;
+    readonly issues: readonly StandardSchemaIssueLike[];
+    readonly cause?: unknown;
+  }) {
+    super(`tool ${args.toolName} validation failed`, { cause: args.cause });
+    this.toolName = args.toolName;
+    this.issues = args.issues;
+  }
+}
+registerAgentickError("ToolValidationError", ToolValidationError);
+
+export class ToolHandlerError extends ToolExecutorError {
+  readonly _tag = "ToolHandlerError" as const;
+  readonly toolName: string;
+  override readonly cause: unknown;
+  constructor(args: { readonly toolName: string; readonly cause: unknown }) {
+    super(`tool ${args.toolName} handler error: ${String(args.cause)}`, { cause: args.cause });
+    this.toolName = args.toolName;
+    this.cause = args.cause;
+  }
+}
+registerAgentickError("ToolHandlerError", ToolHandlerError);
+
+export class ToolPermissionError extends ToolExecutorError {
+  readonly _tag = "ToolPermissionError" as const;
+  readonly toolName: string;
+  readonly via: unknown;
+  readonly reason?: string;
+  constructor(args: {
+    readonly toolName: string;
+    readonly via: unknown;
+    readonly reason?: string;
+    readonly cause?: unknown;
+  }) {
+    super(`tool ${args.toolName} permission denied${args.reason ? `: ${args.reason}` : ""}`, {
+      cause: args.cause,
+    });
+    this.toolName = args.toolName;
+    this.via = args.via;
+    if (args.reason !== undefined) this.reason = args.reason;
+  }
+}
+registerAgentickError("ToolPermissionError", ToolPermissionError);
+
+export class ToolTimeoutError extends ToolExecutorError {
+  readonly _tag = "ToolTimeoutError" as const;
+  readonly toolName: string;
+  readonly ms: number;
+  constructor(args: { readonly toolName: string; readonly ms: number; readonly cause?: unknown }) {
+    super(`tool ${args.toolName} timed out after ${args.ms}ms`, { cause: args.cause });
+    this.toolName = args.toolName;
+    this.ms = args.ms;
+  }
+}
+registerAgentickError("ToolTimeoutError", ToolTimeoutError);
+
+export class ToolConfirmationDeniedError extends ToolExecutorError {
+  readonly _tag = "ToolConfirmationDeniedError" as const;
+  readonly toolName: string;
+  readonly reason?: string;
+  constructor(args: {
+    readonly toolName: string;
+    readonly reason?: string;
+    readonly cause?: unknown;
+  }) {
+    super(`tool ${args.toolName} confirmation denied${args.reason ? `: ${args.reason}` : ""}`, {
+      cause: args.cause,
+    });
+    this.toolName = args.toolName;
+    if (args.reason !== undefined) this.reason = args.reason;
+  }
+}
+registerAgentickError("ToolConfirmationDeniedError", ToolConfirmationDeniedError);
+
+export class ToolConfirmationTimeoutError extends ToolExecutorError {
+  readonly _tag = "ToolConfirmationTimeoutError" as const;
+  readonly toolName: string;
+  readonly ms: number;
+  constructor(args: { readonly toolName: string; readonly ms: number; readonly cause?: unknown }) {
+    super(`tool ${args.toolName} confirmation timed out after ${args.ms}ms`, { cause: args.cause });
+    this.toolName = args.toolName;
+    this.ms = args.ms;
+  }
+}
+registerAgentickError("ToolConfirmationTimeoutError", ToolConfirmationTimeoutError);
+
+export class ToolAbortedError extends ToolExecutorError {
+  readonly _tag = "ToolAbortedError" as const;
+  readonly toolCallId: string;
+  readonly reason?: string;
+  constructor(args: {
+    readonly toolCallId: string;
+    readonly reason?: string;
+    readonly cause?: unknown;
+  }) {
+    super(`tool call ${args.toolCallId} aborted${args.reason ? `: ${args.reason}` : ""}`, {
+      cause: args.cause,
+    });
+    this.toolCallId = args.toolCallId;
+    if (args.reason !== undefined) this.reason = args.reason;
+  }
+}
+registerAgentickError("ToolAbortedError", ToolAbortedError);
+
+export class ToolAlreadyRegistered extends ToolExecutorError {
+  readonly _tag = "ToolAlreadyRegistered" as const;
+  readonly name: string;
+  constructor(args: { readonly name: string; readonly cause?: unknown }) {
+    super(`tool ${args.name} already registered`, { cause: args.cause });
+    this.name = args.name;
+  }
+}
+registerAgentickError("ToolAlreadyRegistered", ToolAlreadyRegistered);
+
+export class ToolHandlerMissing extends ToolExecutorError {
+  readonly _tag = "ToolHandlerMissing" as const;
+  readonly toolName: string;
+  readonly handlerRef: string;
+  constructor(args: {
+    readonly toolName: string;
+    readonly handlerRef: string;
+    readonly cause?: unknown;
+  }) {
+    super(`tool ${args.toolName} handler missing (ref=${args.handlerRef})`, { cause: args.cause });
+    this.toolName = args.toolName;
+    this.handlerRef = args.handlerRef;
+  }
+}
+registerAgentickError("ToolHandlerMissing", ToolHandlerMissing);
+
+export class ToolTaskModeConflictError extends ToolExecutorError {
+  readonly _tag = "ToolTaskModeConflictError" as const;
+  readonly toolName: string;
+  readonly requestedTaskMode: "ref" | "inline";
+  readonly supportMode: "unsupported" | "supported" | "required";
+  constructor(args: {
+    readonly toolName: string;
+    readonly requestedTaskMode: "ref" | "inline";
+    readonly supportMode: "unsupported" | "supported" | "required";
+    readonly cause?: unknown;
+  }) {
+    super(
+      `tool ${args.toolName} task mode conflict: requested=${args.requestedTaskMode}, support=${args.supportMode}`,
+      { cause: args.cause },
+    );
+    this.toolName = args.toolName;
+    this.requestedTaskMode = args.requestedTaskMode;
+    this.supportMode = args.supportMode;
+  }
+}
+registerAgentickError("ToolTaskModeConflictError", ToolTaskModeConflictError);
+
+export type ToolExecutorErrorChannel =
+  | ToolNotFoundError
+  | ToolValidationError
+  | ToolHandlerError
+  | ToolPermissionError
+  | ToolTimeoutError
+  | ToolConfirmationDeniedError
+  | ToolConfirmationTimeoutError
+  | ToolAbortedError
+  | ToolAlreadyRegistered
+  | ToolHandlerMissing
+  | ToolTaskModeConflictError;
+
+// ============================================================================
+// PromptsError — prompt registry + invocation failures
+// ============================================================================
+
+export abstract class PromptsError extends AgentickError {}
+
+export class PromptNotFound extends PromptsError {
+  readonly _tag = "PromptNotFound" as const;
+  readonly name: string;
+  constructor(args: { readonly name: string; readonly cause?: unknown }) {
+    super(`prompt ${args.name} not found`, { cause: args.cause });
+    this.name = args.name;
+  }
+}
+registerAgentickError("PromptNotFound", PromptNotFound);
+
+export class PromptAlreadyExists extends PromptsError {
+  readonly _tag = "PromptAlreadyExists" as const;
+  readonly name: string;
+  constructor(args: { readonly name: string; readonly cause?: unknown }) {
+    super(`prompt ${args.name} already exists`, { cause: args.cause });
+    this.name = args.name;
+  }
+}
+registerAgentickError("PromptAlreadyExists", PromptAlreadyExists);
+
+export class PromptArgumentMissing extends PromptsError {
+  readonly _tag = "PromptArgumentMissing" as const;
+  readonly name: string;
+  readonly argument: string;
+  constructor(args: {
+    readonly name: string;
+    readonly argument: string;
+    readonly cause?: unknown;
+  }) {
+    super(`prompt ${args.name} missing argument: ${args.argument}`, { cause: args.cause });
+    this.name = args.name;
+    this.argument = args.argument;
+  }
+}
+registerAgentickError("PromptArgumentMissing", PromptArgumentMissing);
+
+interface PromptIssueLike {
+  readonly path?: ReadonlyArray<string | number>;
+  readonly message: string;
+}
+
+export class PromptArgumentInvalid extends PromptsError {
+  readonly _tag = "PromptArgumentInvalid" as const;
+  readonly name: string;
+  readonly argument: string;
+  readonly issues: readonly PromptIssueLike[];
+  constructor(args: {
+    readonly name: string;
+    readonly argument: string;
+    readonly issues: readonly PromptIssueLike[];
+    readonly cause?: unknown;
+  }) {
+    super(`prompt ${args.name} invalid argument ${args.argument}`, { cause: args.cause });
+    this.name = args.name;
+    this.argument = args.argument;
+    this.issues = args.issues;
+  }
+}
+registerAgentickError("PromptArgumentInvalid", PromptArgumentInvalid);
+
+export class PromptMissingContent extends PromptsError {
+  readonly _tag = "PromptMissingContent" as const;
+  readonly name: string;
+  constructor(args: { readonly name: string; readonly cause?: unknown }) {
+    super(`prompt ${args.name} produced no content`, { cause: args.cause });
+    this.name = args.name;
+  }
+}
+registerAgentickError("PromptMissingContent", PromptMissingContent);
+
+export class PromptRenderFailed extends PromptsError {
+  readonly _tag = "PromptRenderFailed" as const;
+  readonly name: string;
+  override readonly cause: unknown;
+  constructor(args: { readonly name: string; readonly cause: unknown }) {
+    super(`prompt ${args.name} render failed: ${String(args.cause)}`, { cause: args.cause });
+    this.name = args.name;
+    this.cause = args.cause;
+  }
+}
+registerAgentickError("PromptRenderFailed", PromptRenderFailed);
+
+export class PromptsBackendError extends PromptsError {
+  readonly _tag = "PromptsBackendError" as const;
+  override readonly cause: unknown;
+  constructor(args: { readonly cause: unknown }) {
+    super(`prompts backend error: ${String(args.cause)}`, { cause: args.cause });
+    this.cause = args.cause;
+  }
+}
+registerAgentickError("PromptsBackendError", PromptsBackendError);
+
+export type PromptsErrorChannel =
+  | PromptNotFound
+  | PromptAlreadyExists
+  | PromptArgumentMissing
+  | PromptArgumentInvalid
+  | PromptMissingContent
+  | PromptRenderFailed
+  | PromptsBackendError;
+
+// ============================================================================
+// SkillsError — skill registry failures
+// ============================================================================
+
+export abstract class SkillsError extends AgentickError {}
+
+export class SkillNotFound extends SkillsError {
+  readonly _tag = "SkillNotFound" as const;
+  readonly name: string;
+  constructor(args: { readonly name: string; readonly cause?: unknown }) {
+    super(`skill ${args.name} not found`, { cause: args.cause });
+    this.name = args.name;
+  }
+}
+registerAgentickError("SkillNotFound", SkillNotFound);
+
+export class SkillAlreadyExists extends SkillsError {
+  readonly _tag = "SkillAlreadyExists" as const;
+  readonly name: string;
+  constructor(args: { readonly name: string; readonly cause?: unknown }) {
+    super(`skill ${args.name} already exists`, { cause: args.cause });
+    this.name = args.name;
+  }
+}
+registerAgentickError("SkillAlreadyExists", SkillAlreadyExists);
+
+export class SkillsBackendError extends SkillsError {
+  readonly _tag = "SkillsBackendError" as const;
+  override readonly cause: unknown;
+  constructor(args: { readonly cause: unknown }) {
+    super(`skills backend error: ${String(args.cause)}`, { cause: args.cause });
+    this.cause = args.cause;
+  }
+}
+registerAgentickError("SkillsBackendError", SkillsBackendError);
+
+export type SkillsErrorChannel = SkillNotFound | SkillAlreadyExists | SkillsBackendError;
+
+// ============================================================================
+// KnobsError — knob registry + dispatch failures
+// ============================================================================
+
+export abstract class KnobsError extends AgentickError {}
+
+export class UnknownKnob extends KnobsError {
+  readonly _tag = "UnknownKnob" as const;
+  readonly id: string;
+  constructor(args: { readonly id: string; readonly cause?: unknown }) {
+    super(`unknown knob: ${args.id}`, { cause: args.cause });
+    this.id = args.id;
+  }
+}
+registerAgentickError("UnknownKnob", UnknownKnob);
+
+export class ValidationFailed extends KnobsError {
+  readonly _tag = "ValidationFailed" as const;
+  readonly id: string;
+  readonly reason: string;
+  constructor(args: { readonly id: string; readonly reason: string; readonly cause?: unknown }) {
+    super(`knob ${args.id} validation failed: ${args.reason}`, { cause: args.cause });
+    this.id = args.id;
+    this.reason = args.reason;
+  }
+}
+registerAgentickError("ValidationFailed", ValidationFailed);
+
+export class GroupEmpty extends KnobsError {
+  readonly _tag = "GroupEmpty" as const;
+  readonly group: string;
+  constructor(args: { readonly group: string; readonly cause?: unknown }) {
+    super(`knob group ${args.group} is empty`, { cause: args.cause });
+    this.group = args.group;
+  }
+}
+registerAgentickError("GroupEmpty", GroupEmpty);
+
+export class GroupTypeMismatch extends KnobsError {
+  readonly _tag = "GroupTypeMismatch" as const;
+  readonly group: string;
+  readonly reason: string;
+  constructor(args: { readonly group: string; readonly reason: string; readonly cause?: unknown }) {
+    super(`knob group ${args.group} type mismatch: ${args.reason}`, { cause: args.cause });
+    this.group = args.group;
+    this.reason = args.reason;
+  }
+}
+registerAgentickError("GroupTypeMismatch", GroupTypeMismatch);
+
+export class InvalidDispatchInput extends KnobsError {
+  readonly _tag = "InvalidDispatchInput" as const;
+  readonly reason: string;
+  constructor(args: { readonly reason: string; readonly cause?: unknown }) {
+    super(`invalid dispatch input: ${args.reason}`, { cause: args.cause });
+    this.reason = args.reason;
+  }
+}
+registerAgentickError("InvalidDispatchInput", InvalidDispatchInput);
+
+export type KnobsErrorChannel =
+  | UnknownKnob
+  | ValidationFailed
+  | GroupEmpty
+  | GroupTypeMismatch
+  | InvalidDispatchInput;
+
+// ============================================================================
+// McpServerError — MCP server lifecycle failures
+// ============================================================================
+
+export abstract class McpServerError extends AgentickError {}
+
+export class McpServerNotFound extends McpServerError {
+  readonly _tag = "McpServerNotFound" as const;
+  readonly name: string;
+  constructor(args: { readonly name: string; readonly cause?: unknown }) {
+    super(`mcp server ${args.name} not found`, { cause: args.cause });
+    this.name = args.name;
+  }
+}
+registerAgentickError("McpServerNotFound", McpServerNotFound);
+
+export class McpServerConfigInvalid extends McpServerError {
+  readonly _tag = "McpServerConfigInvalid" as const;
+  readonly reason: string;
+  readonly path?: readonly string[];
+  constructor(args: {
+    readonly reason: string;
+    readonly path?: readonly string[];
+    readonly cause?: unknown;
+  }) {
+    const pathPart = args.path ? ` at ${args.path.join(".")}` : "";
+    super(`mcp server config invalid${pathPart}: ${args.reason}`, { cause: args.cause });
+    this.reason = args.reason;
+    if (args.path !== undefined) this.path = args.path;
+  }
+}
+registerAgentickError("McpServerConfigInvalid", McpServerConfigInvalid);
+
+export class McpServerTransportFailed extends McpServerError {
+  readonly _tag = "McpServerTransportFailed" as const;
+  readonly transportKind: string;
+  override readonly cause: unknown;
+  constructor(args: { readonly transportKind: string; readonly cause: unknown }) {
+    super(`mcp server transport ${args.transportKind} failed: ${String(args.cause)}`, {
+      cause: args.cause,
+    });
+    this.transportKind = args.transportKind;
+    this.cause = args.cause;
+  }
+}
+registerAgentickError("McpServerTransportFailed", McpServerTransportFailed);
+
+export class McpServerConnectionRejected extends McpServerError {
+  readonly _tag = "McpServerConnectionRejected" as const;
+  readonly reason: string;
+  constructor(args: { readonly reason: string; readonly cause?: unknown }) {
+    super(`mcp server connection rejected: ${args.reason}`, { cause: args.cause });
+    this.reason = args.reason;
+  }
+}
+registerAgentickError("McpServerConnectionRejected", McpServerConnectionRejected);
+
+export class McpServerAuthRejected extends McpServerError {
+  readonly _tag = "McpServerAuthRejected" as const;
+  readonly reason: string;
+  constructor(args: { readonly reason: string; readonly cause?: unknown }) {
+    super(`mcp server auth rejected: ${args.reason}`, { cause: args.cause });
+    this.reason = args.reason;
+  }
+}
+registerAgentickError("McpServerAuthRejected", McpServerAuthRejected);
+
+export class McpServerAuthzDenied extends McpServerError {
+  readonly _tag = "McpServerAuthzDenied" as const;
+  readonly reason: string;
+  constructor(args: { readonly reason: string; readonly cause?: unknown }) {
+    super(`mcp server authorization denied: ${args.reason}`, { cause: args.cause });
+    this.reason = args.reason;
+  }
+}
+registerAgentickError("McpServerAuthzDenied", McpServerAuthzDenied);
+
+export class McpServerRateLimited extends McpServerError {
+  readonly _tag = "McpServerRateLimited" as const;
+  readonly retryAfterMs?: number;
+  constructor(args?: { readonly retryAfterMs?: number; readonly cause?: unknown }) {
+    super(
+      args?.retryAfterMs !== undefined
+        ? `mcp server rate limited (retryAfter=${args.retryAfterMs}ms)`
+        : `mcp server rate limited`,
+      { cause: args?.cause },
+    );
+    if (args?.retryAfterMs !== undefined) this.retryAfterMs = args.retryAfterMs;
+  }
+}
+registerAgentickError("McpServerRateLimited", McpServerRateLimited);
+
+export class McpServerClosed extends McpServerError {
+  readonly _tag = "McpServerClosed" as const;
+  readonly serverId: string;
+  constructor(args: { readonly serverId: string; readonly cause?: unknown }) {
+    super(`mcp server ${args.serverId} closed`, { cause: args.cause });
+    this.serverId = args.serverId;
+  }
+}
+registerAgentickError("McpServerClosed", McpServerClosed);
+
+/**
+ * Union channel for MCP server harness. Includes `JournalError`
+ * (substrate cluster) because the legacy POJO union did — adopters
+ * who care about journal-side failures from the MCP server's
+ * substrate path keep that pattern-match.
+ */
+export type McpServerErrorChannel =
+  | McpServerNotFound
+  | McpServerConfigInvalid
+  | McpServerTransportFailed
+  | McpServerConnectionRejected
+  | McpServerAuthRejected
+  | McpServerAuthzDenied
+  | McpServerRateLimited
+  | McpServerClosed
+  | JournalError;

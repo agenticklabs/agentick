@@ -142,22 +142,18 @@ export interface PromptsGetResult {
 // Errors
 // ============================================================================
 
-export type PromptsError =
-  | { readonly _tag: "PromptNotFound"; readonly name: string }
-  | { readonly _tag: "PromptAlreadyExists"; readonly name: string }
-  | { readonly _tag: "PromptArgumentMissing"; readonly name: string; readonly argument: string }
-  | {
-      readonly _tag: "PromptArgumentInvalid";
-      readonly name: string;
-      readonly argument: string;
-      readonly issues: readonly {
-        readonly path?: ReadonlyArray<string | number>;
-        readonly message: string;
-      }[];
-    }
-  | { readonly _tag: "PromptMissingContent"; readonly name: string }
-  | { readonly _tag: "PromptRenderFailed"; readonly name: string; readonly cause: unknown }
-  | { readonly _tag: "PromptsBackendError"; readonly cause: unknown };
+/** Migrated to class hierarchy (ADR 41). Re-exports from `../errors/harnesses.js`. */
+export {
+  PromptAlreadyExists,
+  PromptArgumentInvalid,
+  PromptArgumentMissing,
+  PromptMissingContent,
+  PromptNotFound,
+  PromptRenderFailed,
+  PromptsBackendError,
+  PromptsError,
+  type PromptsErrorChannel,
+} from "../errors/harnesses.js";
 
 // ============================================================================
 // Protocol
