@@ -47,14 +47,21 @@ const app = await createApp(<Agent />, {
 const session = await app.createSession();
 ```
 
-`withTasks()` constructs a per-session `TasksHarness` at install time
-and registers it under the `tasks` slot — reachable as `session.tasks`,
+`withTasks()` does NOT construct the per-session `TasksHarness` —
+the AppHarness owns construction via the single-construction-site
+pattern (#159). The harness is reachable as `session.tasks`,
 `bridges.tasks`, and `ctx.tasks` from any tool handler on that
-session.
+session. What `withTasks()` does is auto-register the four
+model-facing `session_tasks_*` tools so the model can list / get /
+cancel / await framework tasks.
 
 > The `agentick` metapackage bundles `withTasks()` automatically.
 > The standalone `withTasks()` import is for adopters wiring `app-next`
 > directly without the metapackage.
+
+### About the trichotomy (ADR 42)
+
+`withTasks` does NOT accept the array/instance/config-object slot trichotomy that `withSkills` / `withPrompts` / `withMCP` accept. The per-session `TasksHarness` is owned by the parent `AppHarness` (single-construction-site #159), not by this extension — constructing one here would collide on the inbox address (`tasks:${sessionId}:tasks`) and cause `bridges.tasks` / `ctx.tasks` / `session.tasks` to resolve to different instances. The only slot `withTasks` carries today is `registerModelTools` (boolean opt-out). The adopter-facing `Tasks` (= `TasksHarnessProtocol`) noun alias is still exported from `@agentick/spec-next` for downstream code that takes a `Tasks` reference directly (cross-harness wiring, custom bridges).
 
 ### Submit a task from a tool handler
 

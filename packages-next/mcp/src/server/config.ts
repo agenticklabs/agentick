@@ -21,6 +21,7 @@
  */
 
 import {
+  isPromptsInstance,
   McpServerConfigInvalid,
   type McpRequestContext,
   type PromptDeclaration,
@@ -308,25 +309,10 @@ export interface ResolvedPromptsOptions {
 }
 
 /**
- * Structural detector for a `Prompts` instance. We don't `instanceof
- * PromptsHarness` because the spec slot is typed against the protocol,
- * not the concrete class (adopters may supply stubs, decorated
- * variants, etc.).
- */
-function isPromptsInstance(value: unknown): value is Prompts {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    typeof (value as { register?: unknown }).register === "function" &&
-    typeof (value as { list?: unknown }).list === "function" &&
-    typeof (value as { get?: unknown }).get === "function" &&
-    typeof (value as { subscribeAll?: unknown }).subscribeAll === "function"
-  );
-}
-
-/**
  * Normalize the prompts option into its internal resolved shape. Throws
- * {@link McpServerConfigInvalid} on shape violations.
+ * {@link McpServerConfigInvalid} on shape violations. Uses
+ * `isPromptsInstance` from `@agentick/spec-next` (the canonical
+ * structural guard) — no local duplicate.
  */
 export function resolvePromptsOption(option: McpServerPromptsOptions): ResolvedPromptsOptions {
   if (Array.isArray(option)) {

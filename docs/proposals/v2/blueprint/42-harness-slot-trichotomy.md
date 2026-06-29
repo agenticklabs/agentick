@@ -377,21 +377,62 @@ satisfy the convention.
 - 7. Test coverage: ✅ — `tools-slot.spec.ts` covers both authoring
      patterns + the xor-discrimination boundary cases.
 
-### `@agentick/app-next` → `withSkills`
-- 1. Array shorthand: ⚠ — `withSkills` takes loaders only; no
-     `SkillDeclaration[]` form. Acceptable IF the convention says
-     loader-driven harnesses are exempt from the shorthand case (since
-     loaders ARE the declarative form). Document this in the ADR.
-- 2. Instance shorthand: ⚠ MISSING.
-- 3. `use:` escape hatch: ⚠ MISSING.
-- 4. `Skills` alias: ⚠ MISSING.
-- 5. Lifecycle docs: partial.
-- 6. `<parent>.skills` getter: present via SessionHarnessProtocol
-     augment, but typed as `SkillsHarnessProtocol` (leaks "Harness").
-- 7. Test coverage: partial.
+### `@agentick/skills-next` → `withSkills` — landed via Slice 3 (#266)
+- 1. Array shorthand: ✅ — `withSkills([{ name, description, content }, ...])`
+     is sugar for `{ initial: [...] }`. The earlier note about
+     "loader-driven harnesses exempt from the shorthand" was
+     superseded — `SkillsRegisterInput[]` is the natural declarative
+     form; loaders remain available as a sibling option.
+- 2. Instance shorthand: ✅ — `withSkills(mySkillsInstance)` collapses
+     to `{ use: ... }`. Adopter owns lifecycle.
+- 3. `use:` escape hatch: ✅ — `WithSkillsOptions.use: Skills`.
+     Mutually exclusive with `initial`/`loaders`.
+- 4. `Skills` alias: ✅ — `export type Skills = SkillsHarnessProtocol`
+     + `isSkillsInstance` structural guard in spec-next.
+- 5. Lifecycle docs: ✅ — README §"The withSkills slot — three
+     accepted shapes" + extension.ts JSDoc cover Form A/B/C lifecycle
+     ownership explicitly.
+- 6. `session.skills` getter: still typed as `SkillsHarnessProtocol`
+     via SessionHarnessProtocol augment — leaks "Harness". Renaming
+     the augment slot type to `Skills` is a downstream cleanup
+     (cross-cuts session-next augments; out of scope for this slice).
+- 7. Test coverage: ✅ — `slot-trichotomy.spec.ts` (10 tests) +
+     `loaders.spec.ts` end-to-end still green.
 
-### `@agentick/app-next` → `withPrompts`
-- Symmetric to `withSkills`. Same gaps.
+### `@agentick/prompts-next` → `withPrompts` — landed via Slice 3 (#266)
+- 1. Array shorthand: ✅ — `withPrompts([{ declaration }, ...])` →
+     `{ initial: [...] }`.
+- 2. Instance shorthand: ✅ — `withPrompts(myPromptsInstance)` →
+     `{ use: ... }`.
+- 3. `use:` escape hatch: ✅. Mutually exclusive with
+     `initial`/`loaders`/`renderers` (the adopter's instance brings
+     its own renderer set).
+- 4. `Prompts` alias: ✅ — already existed; `isPromptsInstance`
+     structural guard added to spec-next (replaces the local copy in
+     mcp/server/config.ts).
+- 5. Lifecycle docs: ✅ — README §"The withPrompts slot — three
+     accepted shapes" + extension.ts JSDoc.
+- 6. `session.prompts` getter: same caveat as skills — leaks "Harness".
+- 7. Test coverage: ✅ — `slot-trichotomy.spec.ts` (11 tests).
+
+### `@agentick/tasks-next` → `withTasks` — alias-only, slot deferred (#266)
+- 1-3. Trichotomy: ⚠ INTENTIONALLY EXEMPT — per ADR 42 §"What this
+     ADR does NOT decide", the per-session `TasksHarness` is owned by
+     the parent `AppHarness` via the single-construction-site pattern
+     (#159), not by `withTasks`. The only slot today is
+     `registerModelTools` (boolean opt-out for the auto-registered
+     `session_tasks_*` tools). Documented in the package README.
+- 4. `Tasks` alias: ✅ — `export type Tasks = TasksHarnessProtocol`
+     + `isTasksInstance` structural guard in spec-next. The alias
+     exists for downstream code that takes a `Tasks` reference
+     directly (cross-harness wiring, custom bridges).
+- 5. Lifecycle docs: ✅ — README §"About the trichotomy" calls out
+     the exemption + reason.
+- 6. `session.tasks` getter: present; types still leak "Harness"
+     (same downstream cleanup as skills/prompts).
+- 7. Test coverage: existing TasksHarness suite covers the
+     instance contract; no slot-trichotomy tests since the slot
+     doesn't apply.
 
 ### `@agentick/eval-next` → `app` slot
 - Differs from harness slots — it accepts a factory thunk, not a
@@ -423,10 +464,26 @@ optional on both authoring patterns. Form B (`Tools` instance via
 own `ToolHandlerCtx` and would clobber the MCP `transport`/`mcp.*`
 discriminator fields). See audit row above + `tools-slot.spec.ts`.
 
-### Slice 3 — Refresh `Skills` + `Tasks` aliases + their parent slots
-Same shape as Slice 2 for the remaining first-party harnesses.
-`withSkills` and `withPrompts` extension options get the same
-treatment. ETA: ~2 days combined.
+### Slice 3 — Refresh `Skills` + `Prompts` + `Tasks` aliases + their parent slots — ✅ LANDED (#266)
+spec-next exports `Skills` / `Tasks` adopter aliases (Prompts already
+existed) + matching `isSkillsInstance` / `isPromptsInstance` /
+`isTasksInstance` structural guards. Lifted `isPromptsInstance` out
+of `mcp/server/config.ts` (was a local duplicate) — single canonical
+guard now.
+
+`withSkills` and `withPrompts` accept the trichotomy: array
+shorthand → `{ initial }`; instance shorthand → `{ use }`;
+config-object form with `use:` mutually exclusive against
+`initial`/`loaders`/`renderers`. `resolveSlot` exported per package
+for adopter inspection + test access. Per-package
+`slot-trichotomy.spec.ts` suites (10 skills, 11 prompts) verify every
+form + every xor-discrimination boundary.
+
+`withTasks` is **intentionally exempt** from the trichotomy — the
+per-session `TasksHarness` is owned by `AppHarness`
+(single-construction-site #159); constructing another via this
+extension would collide on the inbox address. README §"About the
+trichotomy" calls out the exemption.
 
 ### Slice 4 — Update reusable conformance fixtures
 Add a `runHarnessSlotConformance` helper to `spec-conformance-next`

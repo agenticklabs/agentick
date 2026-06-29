@@ -83,6 +83,34 @@ The harness is inbox-addressable at `skills:{scopeId}`. Adopters needing cross-h
 await inbox.send({ addressedTo: "skills:s_42", type: "skills:register", payload: { ... } });
 ```
 
+## The `withSkills` slot — three accepted shapes
+
+Per [ADR 42](../../docs/proposals/v2/blueprint/42-harness-slot-trichotomy.md) `withSkills` accepts a trichotomic slot — array, instance, or config object. All three collapse to the same internal `WithSkillsOptions` shape and produce a `SessionExtension`.
+
+```ts
+import { withSkills } from "@agentick/skills-next";
+
+// Form A — array shorthand (sugar for { initial })
+withSkills([{ name: "x", description: "x", content: "..." }]);
+
+// Form B — instance shorthand. Adopter brings a long-lived
+// `Skills` source that backs EVERY session (shared on-disk DB,
+// remote registry, cluster-wide replica). The extension does NOT
+// construct or close it — adopter owns the full lifecycle.
+withSkills(mySharedSkillsHarness);
+
+// Form C — config object
+withSkills({
+  initial: [/* SkillsRegisterInput[] */],
+  loaders: [fromArray([...]), fromDirectory("./skills")],
+
+  // OR — adopter-supplied instance (mutually exclusive with initial / loaders)
+  use: mySharedSkillsHarness,
+});
+```
+
+**Lifecycle ownership.** Forms A / C-with-`initial`/`loaders` → extension constructs a per-session harness and closes it on session teardown. Forms B / C-with-`use:` → adopter owns the source's lifecycle; the extension publishes the same instance under the session's `skills` namespace but never closes it.
+
 ## Backend swap
 
 The reference `SkillsHarness` keeps skills in memory (with snapshot/restore). The protocol is backend-agnostic — `SkillsHarnessProtocol` in `@agentick/spec-next` defines the shape; alternative implementations slot in:
@@ -90,7 +118,7 @@ The reference `SkillsHarness` keeps skills in memory (with snapshot/restore). Th
 - **`SqliteSkillsHarness`** (planned) — durable single-process backend; survives process restart without snapshot/restore plumbing.
 - **`RemoteSkillsHarness`** (planned) — `agentskills.io`-compatible remote registry; cross-session, cross-process library.
 
-Backend lives in the harness instance — `withSkills({ ... })` constructs the reference impl. Adopters wanting a different backend register their own `SessionExtension` that swaps in their `SkillsHarness` subclass.
+To plug a custom backend in today, construct your impl once + pass it via the `use:` escape hatch (or top-level instance shorthand). Form B is exactly this hand-off.
 
 ## Snapshot / restore
 

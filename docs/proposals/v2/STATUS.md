@@ -1,7 +1,17 @@
 # Agentick v2 — Implementation Status
 
 **Branch:** `feat/v2`
-**Last updated:** 2026-06-29 — **ADR 42 Slice 2 lands (#265): `Tools` alias + `mcp-next/server` `tools` slot refresh.**
+**Last updated:** 2026-06-29 (later) — **ADR 42 Slice 3 lands (#266): `Skills` + `Tasks` aliases + `withSkills` / `withPrompts` slot refresh.**
+
+`spec-next` now exports `Skills` (= `SkillsHarnessProtocol`) + `Tasks` (= `TasksHarnessProtocol`) adopter-facing aliases, joining the existing `Prompts`. Each ships a matching `isSkillsInstance` / `isPromptsInstance` / `isTasksInstance` structural guard so adopters can discriminate slot forms without touching internal types. The previously-local `isPromptsInstance` inside `mcp/server/config.ts` is gone — single canonical guard now.
+
+`withSkills` and `withPrompts` extension factories accept the trichotomic slot: array shorthand (sugar for `{ initial }`), instance shorthand (`Skills` / `Prompts` instance — adopter owns lifecycle, no per-session construction), or the full config object with a `use:` escape hatch mutually exclusive against `initial` / `loaders` (and `renderers` for prompts). `resolveSlot` is exported per package for adopter inspection. Per-package `slot-trichotomy.spec.ts` suites (10 skills, 11 prompts) verify every form.
+
+`withTasks` is **intentionally exempt** from the trichotomy — the per-session `TasksHarness` is owned by `AppHarness` via the single-construction-site pattern (#159), not by this extension. Constructing another via the slot would collide on the inbox address. README §"About the trichotomy" calls out the exemption + the reason; the `Tasks` alias still lands for downstream code that takes a `Tasks` reference directly.
+
+ADR 42 audit rows updated for skills / prompts / tasks; the trichotomy is a CONVENTION, not a religion — `withTasks` documents why it can't fit. Workspace tests 7173/7188 green; the 7 pre-existing flakes (packages/core v1 reactive-session, cluster-broker reconnect, SessionTree) are unchanged.
+
+**Previously, 2026-06-29 — ADR 42 Slice 2 lands (#265): `Tools` alias + `mcp-next/server` `tools` slot refresh.**
 
 `@agentick/spec-next` exports `export type Tools = ToolExecutorProtocol;` (adopter-facing noun alias) + a structural `isToolsInstance` guard. The mcp-next/server `tools` slot now accepts the trichotomy-aligned shape: `tools: CreatedTool[]` (array shorthand — server splits each into the registry + handler resolver) OR a config object with either inline `tools: CreatedTool[]` OR the low-level `{registry, resolveHandler}` escape hatch (mutually exclusive — `resolveToolsOption` xor-validates at construction time). Filter + transforms work the same on both. Per ADR 43 the handler receives the LIVE `McpRequestContext` (transport: "mcp", `mcp.*` nested) directly — no stub-ctx + no result-shape gymnastics; the spawn-time `normalizeTools` + `createStubHandlerCtx` shims that papered over the old single-shape slot are gone (dead code purged, "no production users" rule).
 

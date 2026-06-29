@@ -88,6 +88,36 @@ withPrompts({
 
 Each prompt's `render(args)` returns the content shape its renderer handles. The harness dispatches at invoke time via `renderer.handles(content)`.
 
+## The `withPrompts` slot — three accepted shapes
+
+Per [ADR 42](../../docs/proposals/v2/blueprint/42-harness-slot-trichotomy.md) `withPrompts` accepts a trichotomic slot — array, instance, or config object. All three collapse to the same internal `WithPromptsOptions` shape.
+
+```ts
+import { withPrompts } from "@agentick/prompts-next";
+
+// Form A — array shorthand (sugar for { initial })
+withPrompts([{ declaration: { name: "x", description: "x", template: "..." } }]);
+
+// Form B — instance shorthand. Adopter brings a long-lived
+// `Prompts` source that backs EVERY session. The extension does
+// NOT construct or close it.
+withPrompts(mySharedPromptsHarness);
+
+// Form C — config object
+withPrompts({
+  initial: [/* PromptsRegisterInput[] */],
+  loaders: [fromArray([...]), fromModule(() => import("./prompts.js"))],
+  renderers: [reactPromptRenderer],
+
+  // OR — adopter-supplied instance (mutually exclusive with
+  // initial / loaders / renderers; the adopter's instance brings
+  // its own renderer set)
+  use: mySharedPromptsHarness,
+});
+```
+
+**Lifecycle ownership.** Forms A / C-with-`initial`/`loaders` → extension constructs a per-session harness and closes it on session teardown. Forms B / C-with-`use:` → adopter owns the lifecycle; the extension publishes the same instance under the session's `prompts` namespace but never closes it.
+
 ## API — `PromptsHandle` on `session.prompts`
 
 | Method                          | Async? | Effect                                                   |

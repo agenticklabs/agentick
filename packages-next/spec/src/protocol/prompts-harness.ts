@@ -181,6 +181,31 @@ export {
  */
 export type Prompts = PromptsHarnessProtocol;
 
+/**
+ * Structural type guard for a `Prompts` instance. Discriminates the
+ * trichotomic adopter slot pattern (array | instance | config object)
+ * by checking for the live `PromptsHarnessProtocol` method surface.
+ *
+ * A `Prompts` instance has all of `register`, `update`, `remove`,
+ * `list`, `subscribeAll`, `invoke`, `get`. None of these appear on a
+ * `PromptsRegisterInput[]` shorthand or a plain config object. Order
+ * matters in the discriminator: test for arrays first, then
+ * `isPromptsInstance`, then fall through to the config-object form.
+ */
+export function isPromptsInstance(v: unknown): v is Prompts {
+  if (v === null || typeof v !== "object") return false;
+  const obj = v as Record<string, unknown>;
+  return (
+    typeof obj.register === "function" &&
+    typeof obj.update === "function" &&
+    typeof obj.remove === "function" &&
+    typeof obj.list === "function" &&
+    typeof obj.subscribeAll === "function" &&
+    typeof obj.invoke === "function" &&
+    typeof obj.get === "function"
+  );
+}
+
 export interface PromptsHarnessProtocol {
   readonly id: string;
   readonly ready: Promise<void>;

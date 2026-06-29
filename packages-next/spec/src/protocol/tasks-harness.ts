@@ -349,3 +349,37 @@ export interface TasksHarnessProtocol {
    */
   close(): Promise<void>;
 }
+
+/**
+ * Adopter-facing alias for the tasks protocol. Use `Tasks` in public
+ * APIs and `withX` slot signatures; reserve `TasksHarnessProtocol` for
+ * internal/framework code that wants to speak in spec-vocabulary. The
+ * two are structurally identical — `Tasks` is the noun-form chosen
+ * for ergonomics per ADR 42 (the `Harness`-word stays out of adopter
+ * surfaces).
+ *
+ * NOTE: per ADR 42 §"What this ADR does NOT decide", `withTasks` does
+ * NOT accept the full slot trichotomy — the per-session
+ * `TasksHarness` is owned by the parent `AppHarness` (single-
+ * construction-site #159), not by `withTasks`. The alias exists for
+ * downstream consumers that DO take a `Tasks` instance directly
+ * (e.g., adapters wiring into `bridges.tasks` outside the standard
+ * extension path).
+ */
+export type Tasks = TasksHarnessProtocol;
+
+/**
+ * Structural type guard for a `Tasks` instance. Returns `true` for
+ * objects exposing the live `TasksHarnessProtocol` method surface
+ * (`submit`, `list`, `events`, `close`).
+ */
+export function isTasksInstance(v: unknown): v is Tasks {
+  if (v === null || typeof v !== "object") return false;
+  const obj = v as Record<string, unknown>;
+  return (
+    typeof obj.submit === "function" &&
+    typeof obj.list === "function" &&
+    typeof obj.events === "function" &&
+    typeof obj.close === "function"
+  );
+}

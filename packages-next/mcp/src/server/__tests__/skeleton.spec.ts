@@ -34,6 +34,25 @@ async function makeHarness(options: McpServerOptions = makeOptions()): Promise<M
   return harness;
 }
 
+/**
+ * Minimal fake satisfying the canonical `isPromptsInstance` structural
+ * guard from `@agentick/spec-next` — register / update / remove /
+ * list / subscribeAll / invoke / get. Used by the prompts-slot
+ * discriminator tests to verify Form B (instance) acceptance without
+ * spinning up a real `PromptsHarness`.
+ */
+function fakePromptsInstance(): import("@agentick/spec-next").Prompts {
+  return {
+    register: async () => ({ name: "x", description: "x" }),
+    update: async () => ({ name: "x", description: "x" }),
+    remove: async () => {},
+    list: () => [],
+    invoke: async () => ({ description: "", messages: [] }),
+    get: async () => ({ description: "", messages: [] }),
+    subscribeAll: () => () => {},
+  } as unknown as import("@agentick/spec-next").Prompts;
+}
+
 describe("McpServerHarness — construction + lifecycle", () => {
   it("constructs from minimal options", async () => {
     const h = await makeHarness();
@@ -127,33 +146,21 @@ describe("McpServerHarness — options validation", () => {
   });
 
   it("accepts a pre-built Prompts instance as the slot value (`use` form via shorthand)", () => {
-    const stubPrompts = {
-      register: async () => ({ name: "x", description: "x" }),
-      list: () => [],
-      get: async () => ({ description: "", messages: [] }),
-      subscribeAll: () => () => {},
-    } as unknown as import("@agentick/spec-next").Prompts;
     expect(() =>
       validateOptions({
         ...makeOptions(),
-        prompts: stubPrompts,
+        prompts: fakePromptsInstance(),
       }),
     ).not.toThrow();
   });
 
   it("rejects a prompts config with both declarations and use", () => {
-    const stubPrompts = {
-      register: async () => ({ name: "x", description: "x" }),
-      list: () => [],
-      get: async () => ({ description: "", messages: [] }),
-      subscribeAll: () => () => {},
-    } as unknown as import("@agentick/spec-next").Prompts;
     expect(() =>
       validateOptions({
         ...makeOptions(),
         prompts: {
           declarations: [{ name: "x", description: "x", template: "x" }],
-          use: stubPrompts,
+          use: fakePromptsInstance(),
         },
       }),
     ).toThrow(/both/);

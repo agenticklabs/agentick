@@ -167,6 +167,39 @@ export interface SkillsHarnessProtocol {
   importSnapshot(snapshot: Readonly<Record<string, Skill>>): void;
 }
 
+/**
+ * Adopter-facing alias for the skills protocol. Use `Skills` in public
+ * APIs and `withX` slot signatures; reserve `SkillsHarnessProtocol` for
+ * internal/framework code that wants to speak in spec-vocabulary. The
+ * two are structurally identical — `Skills` is the noun-form chosen
+ * for ergonomics per ADR 42 (the `Harness`-word stays out of adopter
+ * surfaces).
+ */
+export type Skills = SkillsHarnessProtocol;
+
+/**
+ * Structural type guard for a `Skills` instance. Discriminates the
+ * trichotomic adopter slot pattern (array | instance | config object)
+ * by checking for the live `SkillsHarnessProtocol` method surface.
+ *
+ * A `Skills` instance has all of `register`, `update`, `remove`,
+ * `list`, `subscribeAll` — none of which appear on a
+ * `SkillsRegisterInput[]` shorthand or a plain config object. Order
+ * matters in the discriminator: test for arrays first, then
+ * `isSkillsInstance`, then fall through to the config-object form.
+ */
+export function isSkillsInstance(v: unknown): v is Skills {
+  if (v === null || typeof v !== "object") return false;
+  const obj = v as Record<string, unknown>;
+  return (
+    typeof obj.register === "function" &&
+    typeof obj.update === "function" &&
+    typeof obj.remove === "function" &&
+    typeof obj.list === "function" &&
+    typeof obj.subscribeAll === "function"
+  );
+}
+
 // ============================================================================
 // Inbox message catalog
 // ============================================================================
