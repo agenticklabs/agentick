@@ -61,7 +61,7 @@ import {
   sandboxExecError,
   sandboxIoError,
   sandboxPermissionDenied,
-  type SandboxConnectionError,
+  SandboxConnectionError,
   type SandboxError,
   type SandboxExecError,
   type SandboxIoError,
@@ -386,11 +386,8 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
     return Effect.gen(this, function* () {
       yield* Effect.tryPromise<void, SandboxConnectionError>({
         try: () => this.handle.destroy(),
-        catch: (cause): SandboxConnectionError => ({
-          _tag: "SandboxConnectionError",
-          reason: "destroy failed",
-          cause,
-        }),
+        catch: (cause): SandboxConnectionError =>
+          new SandboxConnectionError({ reason: "destroy failed", cause }),
       });
       this._status = "destroyed";
     });

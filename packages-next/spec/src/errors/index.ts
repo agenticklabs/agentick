@@ -162,3 +162,25 @@ export {
   ValidationFailed,
   type ExecutorErrorChannel,
 } from "./harnesses.js";
+
+export {
+  ChannelPublishError,
+  type ChannelPublishErrorChannel,
+  ChannelPublisherClosed,
+  ChannelSequenceOverflow,
+  McpClientError,
+  type McpClientErrorChannel,
+  McpClientNotReadyError,
+  McpRemoteTaskNonCompletedError,
+  McpTransportError,
+  SandboxConnectionError,
+  SandboxError,
+  type SandboxErrorChannel,
+  SandboxEscapeError,
+  SandboxExecError,
+  SandboxIoError,
+  SandboxMountError,
+  SandboxPermissionDeniedError,
+  SandboxResourceLimitError,
+  UnknownTaskError,
+} from "./remaining.js";

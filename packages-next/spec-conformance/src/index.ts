@@ -8,6 +8,9 @@
  * @see docs/proposals/v2/blueprint/20-pluggability-charter.md
  */
 
+// AgentickError class hierarchy (ADR 41)
+export { runAgentickErrorConformance, type AgentickErrorConformanceFactory } from "./errors.js";
+
 // Substrate protocols (Phase 2)
 export { runJournalConformance } from "./journal.js";
 export { runEventBusConformance } from "./event-bus.js";

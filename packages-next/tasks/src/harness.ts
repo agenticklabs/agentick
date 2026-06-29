@@ -80,9 +80,8 @@ import type {
   TaskStatus,
   TaskWorkContext,
   TasksHarnessProtocol,
-  UnknownTaskError,
 } from "@agentick/spec-next";
-import { HandlerError } from "@agentick/spec-next";
+import { HandlerError, UnknownTaskError } from "@agentick/spec-next";
 
 import { TASK_PROGRESS_CHANNEL, TASK_STATUS_CHANNEL } from "./channel.js";
 import {
@@ -402,7 +401,7 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
   async result<T = readonly ContentBlock[]>(taskId: string): Promise<T> {
     const record = this.tasks.get(taskId);
     if (!record) {
-      throw { _tag: "UnknownTaskError", taskId } satisfies UnknownTaskError;
+      throw new UnknownTaskError({ taskId });
     }
     return (await record.resultDeferred.promise) as T;
   }
@@ -412,7 +411,7 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
   async cancel(taskId: string, reason?: string): Promise<void> {
     const record = this.tasks.get(taskId);
     if (!record) {
-      throw { _tag: "UnknownTaskError", taskId } satisfies UnknownTaskError;
+      throw new UnknownTaskError({ taskId });
     }
     if (this.isTerminal(record.status)) return; // idempotent
     await this.cancelInternal(record, reason ?? "cancelled");
@@ -451,7 +450,7 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
   events(taskId: string): AsyncIterable<TaskEvent> {
     const record = this.tasks.get(taskId);
     if (!record) {
-      throw { _tag: "UnknownTaskError", taskId } satisfies UnknownTaskError;
+      throw new UnknownTaskError({ taskId });
     }
     return this.subscribeToTask(record);
   }

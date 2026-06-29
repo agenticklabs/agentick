@@ -27,6 +27,7 @@
 
 import type { Effect } from "effect";
 
+import type { ChannelPublishError } from "../errors/remaining.js";
 import type { EventScope } from "../data/events.js";
 
 /**
@@ -57,9 +58,13 @@ export interface ChannelSeed<T = unknown> {
  * callers can recover differently — closed channel is configuration,
  * sequence overflow is structural.
  */
-export type ChannelPublishError =
-  | { readonly _tag: "ChannelPublisherClosed" }
-  | { readonly _tag: "ChannelSequenceOverflow"; readonly channel: string };
+/** Migrated to class hierarchy (ADR 41). Re-exports from `../errors/remaining.js`. */
+export {
+  ChannelPublishError,
+  type ChannelPublishErrorChannel,
+  ChannelPublisherClosed,
+  ChannelSequenceOverflow,
+} from "../errors/remaining.js";
 
 /**
  * The protocol every channel publisher implements.

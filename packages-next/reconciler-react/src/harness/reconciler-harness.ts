@@ -679,7 +679,7 @@ export class ReconcilerHarness extends BaseHarness<"reconciler"> implements Reco
 
   private mountState(mountId: string): MountState {
     const state = this.mounts.get(mountId);
-    if (!state) throw { _tag: "NotMounted", mountId };
+    if (!state) throw new NotMounted({ mountId });
     return state;
   }
 

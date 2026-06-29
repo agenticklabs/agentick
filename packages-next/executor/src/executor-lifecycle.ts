@@ -65,7 +65,7 @@ export interface ExecutorInFlightEntry {
  *   private executeBody(input, executionId) {
  *     return Effect.gen(this, function* () {
  *       if (this.lifecycle.isAborted(executionId)) {
- *         return yield* Effect.fail({ _tag: "ProviderAborted", reason: "aborted prior to execute" });
+ *         return yield* Effect.fail(new ProviderAborted({ reason: "aborted prior to execute" }));
  *       }
  *       const controller = new AbortController();
  *       this.lifecycle.register(executionId, { executionId, abort: controller });

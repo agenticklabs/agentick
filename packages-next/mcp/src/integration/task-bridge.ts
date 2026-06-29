@@ -59,12 +59,9 @@ import { omitUndefined } from "@agentick/utils-next";
  * terminal. We surface a typed error so the `TasksHarness` failure
  * path emits a symmetric local `TaskRejection`.
  */
-export interface McpRemoteTaskNonCompletedError {
-  readonly _tag: "McpRemoteTaskNonCompletedError";
-  readonly taskId: string;
-  readonly status: "failed" | "cancelled";
-  readonly statusMessage?: string;
-}
+/** Migrated to class hierarchy (ADR 41). Re-exports from spec-next. */
+export { McpRemoteTaskNonCompletedError } from "@agentick/spec-next";
+import { McpRemoteTaskNonCompletedError } from "@agentick/spec-next";
 
 // ============================================================================
 // Public factory
@@ -172,22 +169,24 @@ function foldUntilTerminal(
     if (terminalStatus === undefined || !isTerminal(terminalStatus)) {
       // Stream closed before a terminal arrived (e.g., transport
       // dropped). Treat as failed.
-      return yield* Effect.fail<McpRemoteTaskNonCompletedError>({
-        _tag: "McpRemoteTaskNonCompletedError",
-        taskId: remoteTaskId,
-        status: "failed",
-        statusMessage: "Notification stream ended before terminal status",
-      });
+      return yield* Effect.fail(
+        new McpRemoteTaskNonCompletedError({
+          taskId: remoteTaskId,
+          status: "failed",
+          statusMessage: "Notification stream ended before terminal status",
+        }),
+      );
     }
 
     if (terminalStatus !== "completed") {
-      return yield* Effect.fail<McpRemoteTaskNonCompletedError>({
-        _tag: "McpRemoteTaskNonCompletedError",
-        taskId: remoteTaskId,
-        // Narrow: `isTerminal` returned true and we excluded `completed`,
-        // so status is failed or cancelled.
-        status: terminalStatus as "failed" | "cancelled",
-      });
+      return yield* Effect.fail(
+        new McpRemoteTaskNonCompletedError({
+          taskId: remoteTaskId,
+          // Narrow: `isTerminal` returned true and we excluded `completed`,
+          // so status is failed or cancelled.
+          status: terminalStatus as "failed" | "cancelled",
+        }),
+      );
     }
 
     // Terminal "completed" → fetch the payload.

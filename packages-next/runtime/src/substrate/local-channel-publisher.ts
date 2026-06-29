@@ -25,6 +25,7 @@ import type {
   EventScope,
   ProtocolEvent,
 } from "@agentick/spec-next";
+import { ChannelPublisherClosed, ChannelSequenceOverflow } from "@agentick/spec-next";
 
 import { ulid } from "./ulid.js";
 import { omitUndefined } from "@agentick/utils-next";
@@ -53,12 +54,12 @@ export class LocalChannelPublisher implements ChannelPublisher {
   publish<T = unknown>(seed: ChannelSeed<T>): Effect.Effect<void, ChannelPublishError, never> {
     return Effect.suspend((): Effect.Effect<void, ChannelPublishError, never> => {
       if (this.closed) {
-        return Effect.fail({ _tag: "ChannelPublisherClosed" });
+        return Effect.fail(new ChannelPublisherClosed());
       }
       const name = `session:channel:${seed.channel}` as const;
       const next = (this.sequences.get(seed.channel) ?? 0) + 1;
       if (!Number.isSafeInteger(next)) {
-        return Effect.fail({ _tag: "ChannelSequenceOverflow", channel: seed.channel });
+        return Effect.fail(new ChannelSequenceOverflow({ channel: seed.channel }));
       }
 
       // Probe the bus subscriber index before materializing — channels

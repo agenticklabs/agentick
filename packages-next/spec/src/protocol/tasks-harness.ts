@@ -229,10 +229,8 @@ export interface TaskRejection {
  * developer misuse (typo, stale id, wrong harness) — not a semantic
  * task outcome.
  */
-export interface UnknownTaskError {
-  readonly _tag: "UnknownTaskError";
-  readonly taskId: string;
-}
+/** Migrated to class hierarchy (ADR 41). Re-exports from `../errors/remaining.js`. */
+export { UnknownTaskError } from "../errors/remaining.js";
 
 // ============================================================================
 // Protocol

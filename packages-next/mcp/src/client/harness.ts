@@ -108,19 +108,14 @@ type TaskNotificationEvent =
 // Errors
 // ============================================================================
 
-export interface McpClientNotReadyError {
-  readonly _tag: "McpClientNotReadyError";
-  readonly state: McpClientState;
-  readonly serverId: string;
-}
-
-export interface McpTransportError {
-  readonly _tag: "McpTransportError";
-  readonly cause: unknown;
-  readonly serverId: string;
-}
-
-export type McpClientError = McpClientNotReadyError | McpTransportError;
+/** Migrated to class hierarchy (ADR 41). Re-exports from spec-next. */
+export {
+  McpClientError,
+  type McpClientErrorChannel,
+  McpClientNotReadyError,
+  McpTransportError,
+} from "@agentick/spec-next";
+import { McpClientNotReadyError } from "@agentick/spec-next";
 
 // ============================================================================
 // Harness
@@ -642,11 +637,10 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
 
   private requireReadyClient(): Client {
     if (this.lifecycle.state !== "ready" || !this.client) {
-      throw {
-        _tag: "McpClientNotReadyError",
+      throw new McpClientNotReadyError({
         state: this.lifecycle.state,
         serverId: this.serverId,
-      } satisfies McpClientNotReadyError;
+      });
     }
     return this.client;
   }

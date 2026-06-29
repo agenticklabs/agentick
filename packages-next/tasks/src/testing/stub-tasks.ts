@@ -22,8 +22,8 @@ import type {
   TaskStatus,
   TaskWorkContext,
   TasksHarnessProtocol,
-  UnknownTaskError,
 } from "@agentick/spec-next";
+import { UnknownTaskError } from "@agentick/spec-next";
 
 export interface StubTasksOptions {
   /** Identity surfaced as `id` / `scopeId` (`tasks:${id}`). */
@@ -110,20 +110,20 @@ export function stubTasks(options: StubTasksOptions = {}): TasksHarnessProtocol 
     status: (taskId: string): TaskStatus | undefined => known.get(taskId)?.status,
     async result<T = readonly ContentBlock[]>(taskId: string): Promise<T> {
       if (!known.has(taskId)) {
-        throw { _tag: "UnknownTaskError", taskId } satisfies UnknownTaskError;
+        throw new UnknownTaskError({ taskId });
       }
       return cannedResult as unknown as T;
     },
     async cancel(taskId: string, _reason?: string): Promise<void> {
       if (!known.has(taskId)) {
-        throw { _tag: "UnknownTaskError", taskId } satisfies UnknownTaskError;
+        throw new UnknownTaskError({ taskId });
       }
       // canned tasks complete immediately — cancel is a no-op.
     },
     events(taskId: string): AsyncIterable<TaskEvent> {
       const info = known.get(taskId);
       if (!info) {
-        throw { _tag: "UnknownTaskError", taskId } satisfies UnknownTaskError;
+        throw new UnknownTaskError({ taskId });
       }
       return {
         [Symbol.asyncIterator]: (): AsyncIterator<TaskEvent> => {
