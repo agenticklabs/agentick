@@ -33,6 +33,7 @@ import type {
 import { HandlerError, McpServerClosed } from "@agentick/spec-next";
 import { createNotifier, type Notifier } from "@agentick/pubsub-next";
 import { PromptsHarness } from "@agentick/prompts-next";
+import { TasksHarness } from "@agentick/tasks-next";
 import { Server as SdkServer } from "@modelcontextprotocol/sdk/server/index.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 
@@ -48,6 +49,7 @@ import {
 import { buildCapabilities } from "./protocol/lifecycle.js";
 import { buildMcpElicit } from "./projection/elicitation.js";
 import { installPromptsHandlers } from "./projection/prompts.js";
+import { createServerTaskRegistry, installTasksHandlers } from "./projection/tasks.js";
 import { installToolsHandlers } from "./projection/tools.js";
 import { resolveSecurity, type ResolvedSecurity } from "./security/index.js";
 import { evaluateConnectionGuard, isMcpSecurityError } from "./security/pipeline.js";
@@ -101,6 +103,17 @@ export class McpServerHarness
    * was provided.
    */
   private readonly resolvedTools: ResolvedToolsOptions | null;
+
+  /**
+   * Server-side TasksHarness for Pattern B tool returns (#171d.3).
+   * One per server; shared across all connections + tools. Tool
+   * handlers reach it via `ctx.tasks` in the McpRequestContext.
+   * Lifecycle: constructed on harness creation, closed on harness
+   * close (cancels every in-flight task).
+   */
+  private readonly serverTasks: TasksHarness;
+  /** True iff any registered tool advertises `taskSupport: "required" | "supported"`. */
+  private readonly hasTasksWired: boolean;
 
   /**
    * Resolved Prompts source — either internally constructed from the
@@ -161,6 +174,17 @@ export class McpServerHarness
     return this.elicitWired;
   }
 
+  /**
+   * The server-side `TasksHarness` (#171d.3). Adopters introspecting
+   * Pattern B tasks running on this server — debug UIs, telemetry,
+   * tests — reach it here. Tool handlers reach the same instance via
+   * `ctx.tasks!.submit(...)`. Always present (constructed eagerly);
+   * `null` would be a special signal we don't need.
+   */
+  get tasks(): TasksHarness {
+    return this.serverTasks;
+  }
+
   constructor(
     scopeId: string,
     journal: OperationJournal,
@@ -175,6 +199,16 @@ export class McpServerHarness
     this.transports = this.options.transports;
     this.resolvedTools =
       this.options.tools !== undefined ? resolveToolsOption(this.options.tools) : null;
+
+    // Server-side TasksHarness — handles Pattern B tool returns
+    // (#171d.3). Constructed eagerly; idle when no Pattern B tool is
+    // ever called. Substrate shared with this harness so task
+    // envelopes flow through the same bus / journal.
+    this.serverTasks = new TasksHarness(`${scopeId}:tasks`, journal, bus, inbox);
+    this.hasTasksWired = (this.resolvedTools?.registry ?? []).some((decl) => {
+      const ts = decl.annotations?.taskSupport;
+      return ts === "required" || ts === "supported";
+    });
 
     if (!isFalsey(this.options.prompts)) {
       const resolved = resolvePromptsOption(this.options.prompts);
@@ -310,6 +344,14 @@ export class McpServerHarness
       }
     }
 
+    // 4. Close the server-side TasksHarness — cancels every in-flight
+    //    Pattern B task with reason "harness_closed" (#171d.3).
+    try {
+      await this.serverTasks.close();
+    } catch {
+      /* best-effort */
+    }
+
     await super.close();
   }
 
@@ -352,7 +394,10 @@ export class McpServerHarness
         resources: false, // wired with #123
         elicitation: this.elicitWired,
         sampling: false, // wired with SamplingHarness
-        tasks: false, // wired in #171d.3
+        // #171d.3 — advertise tasks when at least one tool declares
+        // taskSupport: "required" | "supported". Pattern B clients
+        // gate the task wire on this capability.
+        tasks: this.hasTasksWired,
       },
       this.options.capabilities,
     );
@@ -403,6 +448,12 @@ export class McpServerHarness
         },
         task: "auto",
         transport: "mcp" as const,
+        // #171d.3 — the server's TasksHarness. Handlers calling
+        // `ctx.tasks!.submit(...)` get a TaskHandle that the tools
+        // projection layer recognises (via isTaskHandle) and routes
+        // to the per-connection task registry → CreateTaskResult on
+        // the wire + notifications/tasks/status fan-out.
+        tasks: this.serverTasks,
         mcp: {
           serverId: this.scopeId,
           connectionId,
@@ -433,11 +484,21 @@ export class McpServerHarness
       return ctx;
     };
 
+    // Per-connection task registry — bookkeeping for Pattern B tool
+    // returns (#171d.3). Built unconditionally when tasks are wired
+    // so the tools projection can register handles + the tasks
+    // projection can serve tasks/get / tasks/result / tasks/cancel /
+    // tasks/list. Cleared on transport close.
+    const tasksRegistry = this.hasTasksWired
+      ? createServerTaskRegistry(sdkServer, this.serverTasks)
+      : undefined;
+
     if (!isNull(this.resolvedTools) && this.resolvedTools.registry.length > 0) {
       const tools = this.resolvedTools;
       installToolsHandlers(sdkServer, {
         registry: tools.registry,
         resolveHandler: tools.resolveHandler,
+        ...(tasksRegistry ? { tasks: tasksRegistry } : {}),
         ...(tools.filter || tools.transforms.length > 0
           ? {
               projection: {
@@ -449,6 +510,11 @@ export class McpServerHarness
         security: this.security,
         buildContext: buildRequestContext,
       });
+    }
+
+    if (tasksRegistry) {
+      installTasksHandlers({ sdkServer, registry: tasksRegistry });
+      cleanup.push(() => tasksRegistry.clear());
     }
 
     if (this.promptsSource !== null) {

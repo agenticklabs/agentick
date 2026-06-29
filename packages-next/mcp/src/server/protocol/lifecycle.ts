@@ -63,9 +63,17 @@ export function buildCapabilities(
   // appropriate, surfaced through ctx-side APIs (ctx.elicit /
   // ctx.sample) installed in #171d. The wire shape stays correct.
 
-  // Tasks is era-aware — exposed via `_meta`/extension fields on the
-  // wire rather than a top-level capability key in `2025-11-25`. Add
-  // here when #171d wires tasks projection + we settle the era-codec.
+  // Tasks (#171d.3) — advertise server-side tasks capability when at
+  // least one tool declares taskSupport: "required" | "supported". The
+  // SDK's `assertRequestHandlerCapability` check (tasks/get + friends)
+  // requires this key be present on the server. Pattern B clients gate
+  // their `tools/call` task-mode opt-in on this advertisement.
+  if (wired.tasks && override?.resources !== false) {
+    // The capability shape is intentionally empty — listChanged
+    // notifications would be a future extension; not required by
+    // current spec.
+    (out as ServerCapabilities & { tasks?: Record<string, unknown> }).tasks = {};
+  }
 
   return out;
 }

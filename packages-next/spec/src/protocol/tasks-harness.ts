@@ -209,6 +209,27 @@ export interface TaskHandle<T = readonly ContentBlock[]> {
 }
 
 /**
+ * Structural type guard for a {@link TaskHandle}. Distinguishes a
+ * Pattern B return from inline `ContentBlock[]` / `Promise` / `Effect`
+ * results without an `instanceof` check (handles may originate from
+ * any TasksHarness implementation, including remote MCP proxies).
+ *
+ * Used by the tool-executor's task-mode resolver and by the
+ * mcp-next/server tasks projection (#171d.3) to detect Pattern B
+ * handler returns and route them to the MCP task wire.
+ */
+export function isTaskHandle(value: unknown): value is TaskHandle<readonly ContentBlock[]> {
+  if (value === null || typeof value !== "object") return false;
+  const v = value as Partial<TaskHandle<readonly ContentBlock[]>>;
+  return (
+    typeof v.taskId === "string" &&
+    typeof v.initialStatus === "string" &&
+    typeof (v as { result?: unknown }).result === "object" &&
+    typeof v.cancel === "function"
+  );
+}
+
+/**
  * Tagged rejection shape thrown by {@link TaskHandle.result} on
  * non-completed terminal states.
  */

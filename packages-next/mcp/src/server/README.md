@@ -154,6 +154,49 @@ Per ADR 43 the handler receives the **live `McpRequestContext`** — same
 `connectionId`, `transportKind`, `user`, `clientInfo`, `clientCapabilities`.
 The handler is portable across transports unchanged.
 
+### Pattern B over the MCP wire (#171d.3)
+
+A tool handler that returns a `TaskHandle` (typically via
+`ctx.tasks!.submit(...)`) is automatically routed through the MCP
+task wire — same handler code that yields a `session_task_ref` block
+in-process now yields a `CreateTaskResult` (the `{ task: { taskId,
+status } }` wire shape) on the MCP side. The harness:
+
+- Constructs one server-side `TasksHarness` per server (`server.tasks`).
+- Wires `ctx.tasks` so handlers can call `submit(...)` without
+  knowing they're running over MCP.
+- Detects `TaskHandle` returns via the canonical `isTaskHandle`
+  guard from `@agentick/spec-next`.
+- Maintains a per-connection task registry that serves `tasks/get`,
+  `tasks/result`, `tasks/cancel`, `tasks/list`.
+- Subscribes to each handle's `events()` stream and emits
+  `notifications/tasks/status` as the task progresses.
+- Translates `annotations.taskSupport` → wire `execution.taskSupport`
+  (`required` / `supported` → `optional` / `unsupported` →
+  `forbidden`) so MCP clients know to wrap the tool in their own
+  `ctx.tasks.submit(...)` (Pattern B reciprocity).
+- Advertises `tasks: {}` in the `initialize` capabilities reply when
+  any registered tool declares `taskSupport`.
+
+```ts
+const Lint = createTool({
+  name: "lint_repo",
+  description: "Lint the repository (long-running)",
+  annotations: { taskSupport: "required" },
+  handler: async (input, { ctx }) => {
+    return ctx.tasks!.submit(async ({ signal, onProgress }) => {
+      // ... work that respects signal + emits progress ...
+      return [{ type: "text", text: "lint complete" }];
+    });
+  },
+});
+
+// Both routes work — same handler, same shape:
+spawnStandaloneMcpServer({ name: "lint-server", tools: [Lint], ... });
+// or createApp({ extensions: [withTasks(), withMCP({ servers: [...] })] })
+//   with Lint registered in-process.
+```
+
 ---
 
 ## The `prompts` slot — accepted shapes

@@ -27,9 +27,16 @@ import type {
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { Server as SdkServer } from "@modelcontextprotocol/sdk/server/index.js";
 import { toJsonSchema, type ToolDeclaration } from "@agentick/spec-next";
-import { McpServerError, type ContentBlock, type McpRequestContext } from "@agentick/spec-next";
+import {
+  McpServerError,
+  type ContentBlock,
+  type McpRequestContext,
+  type TaskHandle,
+} from "@agentick/spec-next";
 import { applyTransform, composeTransforms } from "@agentick/tool-next/transforms";
 import type { ToolTransform } from "@agentick/tool-next/transforms";
+
+import { toCreateTaskResult, type ServerTaskRegistry } from "./tasks.js";
 
 /**
  * Per-connection projection rules — narrow slice of
@@ -46,23 +53,66 @@ import { evaluateRequestPipeline } from "../security/pipeline.js";
 import type { ResolvedSecurity } from "../security/stages.js";
 
 /**
+ * Discriminated return shape from a resolved tool handler:
+ *
+ *   - `inline` — the handler ran and produced `ContentBlock[]`.
+ *     Projection wraps as a `CallToolResult`.
+ *   - `task` — the handler submitted a Pattern B task and returned a
+ *     `TaskHandle`. Projection registers it with the server task
+ *     registry and returns a `CreateTaskResult` on the wire.
+ *
+ * This shape is INTERNAL to the v2 projection — the low-level
+ * `{ registry, resolveHandler }` escape hatch still uses the legacy
+ * inline-only signature via {@link InlineToolHandlerResolver}; the
+ * harness adapts between the two shapes at resolution time.
+ */
+export type ToolHandlerInvokeResult =
+  | { readonly kind: "inline"; readonly content: readonly ContentBlock[] }
+  | { readonly kind: "task"; readonly handle: TaskHandle<readonly ContentBlock[]> };
+
+/**
  * Handler-resolution callback. The tool-executor (or test harness)
  * provides this — the projection layer doesn't know about the
  * tool-executor registry. Given a `handlerRef`, return the concrete
- * async handler.
+ * async handler. Inline-only — the low-level form predates Pattern B.
  *
  * Return `null` for unknown refs — the projection turns this into a
  * tool-not-found `CallToolResult` (NOT a protocol error).
+ *
+ * Adopters using the `tools: CreatedTool[]` form get Pattern B
+ * automatically (the harness wraps every `TaskHandle` return into a
+ * {@link ToolHandlerInvokeResult}); adopters dropping to the
+ * low-level `registry + resolveHandler` escape hatch stay inline.
  */
 export type ToolHandlerResolver = (
   handlerRef: string,
 ) => ((input: unknown, ctx: McpRequestContext) => Promise<readonly ContentBlock[]>) | null;
 
+/**
+ * Internal Pattern-B-aware resolver — used by the projection.
+ * Builds on the public `ToolHandlerResolver` plus an optional
+ * `ServerTaskRegistry` for Pattern B handler returns.
+ */
+export type ToolInvokeResolver = (
+  handlerRef: string,
+) => ((input: unknown, ctx: McpRequestContext) => Promise<ToolHandlerInvokeResult>) | null;
+
 export interface ToolsProjectionOptions {
   /** Canonical tool registry — the projection filters + transforms this per connection. */
   readonly registry: readonly ToolDeclaration[];
-  /** Resolves `handlerRef` → concrete async handler. */
-  readonly resolveHandler: ToolHandlerResolver;
+  /**
+   * Resolves `handlerRef` → concrete async handler. Returns the
+   * Pattern-B-aware {@link ToolHandlerInvokeResult} discriminated
+   * union so the projection can route TaskHandle returns to the
+   * server task registry (#171d.3).
+   */
+  readonly resolveHandler: ToolInvokeResolver;
+  /**
+   * Per-connection task registry. Required for Pattern B routing;
+   * when omitted, TaskHandle returns from handlers surface as a
+   * tool-execution error.
+   */
+  readonly tasks?: ServerTaskRegistry;
   /** Per-connection filter + transforms — narrow slice of `McpServerOptions.tools`. */
   readonly projection?: ToolsProjectionRules;
   /** Security pipeline resolved for this server. */
@@ -148,7 +198,36 @@ export function installToolsHandlers(sdkServer: SdkServer, options: ToolsProject
 
       try {
         const result = await handler(toolInput ?? {}, ctx);
-        return { content: result as CallToolResult["content"], isError: false };
+        if (result.kind === "task") {
+          // Pattern B — handler returned a TaskHandle. Register with
+          // the per-connection task registry so subsequent
+          // `tasks/get` / `tasks/result` / `tasks/cancel` requests
+          // can drive its lifecycle, then return a wire
+          // `CreateTaskResult`. Per the MCP wire codec
+          // (discriminateCallToolResponse on the client side), the
+          // `task` field discriminates this response from a regular
+          // inline `CallToolResult`.
+          if (!options.tasks) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Tool '${tool.name}' returned a TaskHandle but the server is not configured with tasks projection.`,
+                },
+              ],
+              isError: true,
+            };
+          }
+          options.tasks.register(result.handle);
+          // The CreateTaskResult shape is structurally compatible
+          // with the SDK's CallToolResult union via the discriminator
+          // field `task`; cast through `unknown` because the SDK's
+          // CallToolResult type doesn't include the task variant
+          // (the wire spec evolved in 2025-11-25 and the SDK's
+          // typings cover both via separate aliases).
+          return toCreateTaskResult(result.handle.info()) as unknown as CallToolResult;
+        }
+        return { content: result.content as CallToolResult["content"], isError: false };
       } catch (cause) {
         // Tool-execution error — surface as `isError: true` per the v1
         // convention. JSON-RPC protocol errors are for transport /
@@ -201,6 +280,31 @@ export function toWireTool(decl: ToolDeclaration): McpWireTool {
   }
   if (Array.isArray(meta.icons)) {
     wire.icons = meta.icons as McpWireTool["icons"];
+  }
+  // #171d.3 — translate framework `annotations.taskSupport` to the
+  // MCP wire `execution.taskSupport` enum so clients know to wrap
+  // the tool in `ctx.tasks.submit(...)` (Pattern B). Mapping mirrors
+  // mcp-next's `mapMcpTaskSupport` on the inbound client side:
+  //   "required"    → "required"   (every call returns CreateTaskResult)
+  //   "supported"   → "optional"   (caller picks per call)
+  //   "unsupported" → "forbidden"
+  const localTaskSupport = decl.annotations?.taskSupport;
+  if (
+    localTaskSupport === "required" ||
+    localTaskSupport === "supported" ||
+    localTaskSupport === "unsupported"
+  ) {
+    const wireTaskSupport: "required" | "optional" | "forbidden" =
+      localTaskSupport === "required"
+        ? "required"
+        : localTaskSupport === "supported"
+          ? "optional"
+          : "forbidden";
+    (
+      wire as McpWireTool & {
+        execution?: { taskSupport: "required" | "optional" | "forbidden" };
+      }
+    ).execution = { taskSupport: wireTaskSupport };
   }
   return wire;
 }

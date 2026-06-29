@@ -57,7 +57,13 @@ describe("resolveToolsOption — form A: CreatedTool[] shorthand", () => {
     const handler = resolved.resolveHandler(echo.handlerRef);
     expect(handler).not.toBeNull();
     const result = await handler!({}, fakeCtx());
-    expect(result).toEqual([{ type: "text", text: "ok" }]);
+    // Post-#171d.3: handler invocation returns a discriminated union
+    // — `inline` for plain ContentBlock[] returns, `task` for
+    // Pattern B TaskHandle returns. echo is inline by construction.
+    expect(result.kind).toBe("inline");
+    if (result.kind === "inline") {
+      expect(result.content).toEqual([{ type: "text", text: "ok" }]);
+    }
   });
 
   it("returns null for unknown handlerRef", () => {
@@ -107,12 +113,25 @@ describe("resolveToolsOption — form C: config object with inline tools", () =>
 });
 
 describe("resolveToolsOption — form C: low-level registry + resolveHandler", () => {
-  it("passes through the canonical pair unchanged", () => {
+  it("passes through the canonical pair, wrapping inline resolver as Pattern-B-aware", async () => {
     const reg = [decl("a", "ref:a")];
-    const resolver = (): null => null;
+    // Inline resolver — Pattern B unavailable on this path; the
+    // harness wraps the return as `{kind:"inline"}` so the projection
+    // layer routes through the inline `CallToolResult` branch.
+    const resolver = (ref: string) =>
+      ref === "ref:a" ? async () => [{ type: "text" as const, text: "alpha" }] : null;
     const resolved = resolveToolsOption({ registry: reg, resolveHandler: resolver });
     expect(resolved.registry).toBe(reg);
-    expect(resolved.resolveHandler).toBe(resolver);
+    // The resolveHandler is adapted (not reference-equal) — verify
+    // behaviorally instead.
+    const handler = resolved.resolveHandler("ref:a");
+    expect(handler).not.toBeNull();
+    const result = await handler!({}, fakeCtx());
+    expect(result.kind).toBe("inline");
+    if (result.kind === "inline") {
+      expect(result.content).toEqual([{ type: "text", text: "alpha" }]);
+    }
+    expect(resolved.resolveHandler("ref:unknown")).toBeNull();
   });
 
   it("rejects registry without resolveHandler", () => {

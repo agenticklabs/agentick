@@ -22,6 +22,7 @@
 
 import {
   isPromptsInstance,
+  isTaskHandle,
   McpServerConfigInvalid,
   type McpRequestContext,
   type PromptDeclaration,
@@ -39,7 +40,7 @@ import type {
   RateLimiter,
 } from "./security/stages.js";
 import type { ServerTransport } from "./transports/types.js";
-import type { ToolHandlerResolver } from "./projection/tools.js";
+import type { ToolHandlerResolver, ToolInvokeResolver } from "./projection/tools.js";
 
 /**
  * Per-connection visibility predicate for tools. Hidden tools are
@@ -377,22 +378,38 @@ export interface ResolvedToolsOptions {
    */
   readonly registry: readonly ToolDeclaration[];
   /**
-   * Resolve a `ToolDeclaration.handlerRef` to its concrete async
-   * handler. Returns `null` when the ref is unknown (the projection
-   * surfaces this as a tool-not-found `CallToolResult`).
+   * Pattern-B-aware handler resolver. Returns the projection-internal
+   * discriminated union — `kind: "inline"` for the common case
+   * (returns `ContentBlock[]`), `kind: "task"` when the handler
+   * returned a `TaskHandle` (Pattern B over MCP, #171d.3). Returns
+   * `null` for unknown handlerRefs (the projection surfaces this as
+   * a tool-not-found `CallToolResult`).
    */
-  readonly resolveHandler: (
-    handlerRef: string,
-  ) =>
-    | ((
-        input: unknown,
-        ctx: McpRequestContext,
-      ) => Promise<readonly import("@agentick/spec-next").ContentBlock[]>)
-    | null;
+  readonly resolveHandler: ToolInvokeResolver;
   /** Per-connection visibility predicate. */
   readonly filter: ToolsFilter | null;
   /** Per-connection name / metadata / schema transforms. */
   readonly transforms: readonly ToolTransform<McpRequestContext>[];
+}
+
+/**
+ * Wrap an inline-only {@link ToolHandlerResolver} (the public low-
+ * level escape hatch) as a Pattern-B-aware {@link ToolInvokeResolver}.
+ * The wrapped form always returns `{kind:"inline"}` — adopters using
+ * the raw `{registry, resolveHandler}` form opt out of Pattern B over
+ * MCP automatically; if they want it, they switch to the
+ * `tools: CreatedTool[]` form which the harness pipes through
+ * isTaskHandle detection.
+ */
+function adaptInlineResolver(inline: ToolHandlerResolver): ToolInvokeResolver {
+  return (handlerRef) => {
+    const handler = inline(handlerRef);
+    if (handler === null) return null;
+    return async (input, ctx) => {
+      const content = await handler(input, ctx);
+      return { kind: "inline", content };
+    };
+  };
 }
 
 function isCreatedTool(value: unknown): value is CreatedTool {
@@ -454,7 +471,7 @@ export function resolveToolsOption(option: McpServerToolsOptions): ResolvedTools
   }
   return {
     registry: cfg.registry,
-    resolveHandler: cfg.resolveHandler,
+    resolveHandler: adaptInlineResolver(cfg.resolveHandler),
     filter: cfg.filter ?? null,
     transforms: cfg.transforms ?? [],
   };
@@ -485,15 +502,25 @@ function resolveFromCreatedTools(
       // `transport: "mcp"` discriminator). Pass directly; no stub /
       // adapter needed.
       const result = await h(input, { ctx, use: {} });
-      if (Array.isArray(result)) return result;
+      if (Array.isArray(result)) {
+        return { kind: "inline", content: result };
+      }
+      // Pattern B (#171d.3) — the handler returned a TaskHandle (via
+      // `ctx.tasks!.submit(...)`). The projection layer registers the
+      // handle in the per-connection server-task registry, returns
+      // CreateTaskResult on the wire, and emits
+      // `notifications/tasks/status` as the task progresses.
+      if (isTaskHandle(result)) {
+        return { kind: "task", handle: result };
+      }
       // ToolHandlerResult can also be Promise<ContentBlock[]> /
-      // Effect<...> / TaskHandle. The MCP server projection only
-      // supports the inline ContentBlock[] return shape today; richer
-      // shapes (TaskHandle → Pattern B over MCP, Effect handlers)
-      // land with #171d.3 (tasks projection) + downstream integration.
+      // Effect<...>. The MCP server projection doesn't speak Effect
+      // yet — Effect handlers + Promise<ContentBlock[]> handlers land
+      // with downstream integration.
       throw new Error(
-        "MCP-server tool handlers must currently return ContentBlock[] (sync or via Promise). " +
-          "TaskHandle / Effect returns land with the MCP tasks projection (#171d.3).",
+        "MCP-server tool handlers must return either ContentBlock[] (inline) " +
+          "or a TaskHandle (Pattern B via ctx.tasks!.submit). Effect handlers " +
+          "are deferred.",
       );
     };
   };

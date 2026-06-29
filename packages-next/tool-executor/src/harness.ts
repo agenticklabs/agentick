@@ -53,6 +53,7 @@ import type {
 } from "@agentick/spec-next";
 import {
   HandlerError,
+  isTaskHandle,
   ToolAbortedError,
   ToolConfirmationTimeoutError,
   ToolHandlerError,
@@ -842,26 +843,6 @@ function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
     value !== null &&
     (typeof value === "object" || typeof value === "function") &&
     typeof (value as { then?: unknown }).then === "function"
-  );
-}
-
-/**
- * Structural test for a `TaskHandle` return shape. The handle has
- * `taskId` (string), `initialStatus` (string), and `result`
- * (Promise) — three required fields rules out plain objects /
- * ContentBlock arrays / Effects / Promises.
- *
- * Promises are excluded explicitly (a Promise has `.then` but no
- * `.taskId`); the `isPromiseLike` branch downstream handles those.
- */
-function isTaskHandle(value: unknown): value is TaskHandle<readonly ContentBlock[]> {
-  if (value === null || typeof value !== "object") return false;
-  const v = value as Partial<TaskHandle<readonly ContentBlock[]>>;
-  return (
-    typeof v.taskId === "string" &&
-    typeof v.initialStatus === "string" &&
-    typeof (v as { result?: unknown }).result === "object" &&
-    typeof v.cancel === "function"
   );
 }
 
