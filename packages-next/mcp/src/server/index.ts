@@ -28,6 +28,7 @@ import "./augment.js";
 export { McpServerHarness, type McpServerHarnessOptions } from "./harness.js";
 export { type McpServerHandle, toHandle } from "./handle.js";
 export { validateConfig } from "./config.js";
+export * from "./security/index.js";
 
 // Re-export the spec types so adopters don't need to import from
 // `@agentick/spec-next` directly for the common case.

@@ -1,0 +1,435 @@
+/**
+ * Security pipeline runner + transport-aware defaults + 4 built-in stages.
+ *
+ * Pins:
+ *  - Connection guard: trusted transports skip; untrusted run guard
+ *  - Pipeline order: authn → authz → rate-limit → sanitize
+ *  - Each stage's rejection produces the correct SecurityError code
+ *    (401 / 403 / 429)
+ *  - Transport-aware defaults: stdio/in-memory = allowAll, HTTP/WS = localOnly + rejectAll
+ *  - bearerTokenAuth: static map + verify fallback + case-insensitive header lookup
+ *  - roleBasedAuthz: pattern specificity, missing rule = deny, empty roles = any-authn
+ *  - slidingWindowLimiter: enforces max within window, retryAfterMs on rejection
+ *  - allowListGuard: IPv4 CIDR + IPv6 prefix + origin glob
+ */
+
+import { describe, expect, it } from "vitest";
+import type { McpAuthenticatedUser, McpRequestContext } from "@agentick/spec-next";
+
+import {
+  allowAllAuth,
+  allowAllAuthz,
+  allowAllGuard,
+  allowAllRateLimit,
+  allowListGuard,
+  bearerTokenAuth,
+  evaluateConnectionGuard,
+  evaluateRequestPipeline,
+  localOnlyGuard,
+  passthroughSanitizer,
+  rejectAllAuth,
+  resolveSecurity,
+  roleBasedAuthz,
+  SecurityError,
+  slidingWindowLimiter,
+} from "../index.js";
+import type { AuthnResult, AuthzResult, RateLimitResult, ResolvedSecurity } from "../index.js";
+
+function ctx(overrides: Partial<McpRequestContext> = {}): McpRequestContext {
+  return {
+    serverId: "srv:test",
+    connectionId: "conn:1",
+    transportKind: "in-memory",
+    connectedAt: 1000,
+    user: null,
+    clientInfo: null,
+    clientCapabilities: null,
+    signal: new AbortController().signal,
+    metadata: {},
+    ...overrides,
+  };
+}
+
+function security(over: Partial<ResolvedSecurity> = {}): ResolvedSecurity {
+  return {
+    connectionGuard: allowAllGuard,
+    authenticator: allowAllAuth,
+    authorizer: allowAllAuthz,
+    rateLimiter: allowAllRateLimit,
+    inputSanitizer: passthroughSanitizer,
+    ...over,
+  };
+}
+
+describe("evaluateConnectionGuard", () => {
+  it("skips guard for stdio transports", async () => {
+    const guard = vi_fn(async () => false);
+    await expect(
+      evaluateConnectionGuard(security({ connectionGuard: guard }), { transportKind: "stdio" }),
+    ).resolves.toBeUndefined();
+    expect(guard.calls).toBe(0);
+  });
+
+  it("skips guard for in-memory transports", async () => {
+    const guard = vi_fn(async () => false);
+    await expect(
+      evaluateConnectionGuard(security({ connectionGuard: guard }), { transportKind: "in-memory" }),
+    ).resolves.toBeUndefined();
+    expect(guard.calls).toBe(0);
+  });
+
+  it("runs guard for HTTP transports + accepts on true", async () => {
+    await expect(
+      evaluateConnectionGuard(security(), { transportKind: "http", remoteAddress: "1.2.3.4" }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("throws 403 SecurityError when guard rejects", async () => {
+    const guard = async () => false;
+    await expect(
+      evaluateConnectionGuard(security({ connectionGuard: guard }), {
+        transportKind: "http",
+        remoteAddress: "1.2.3.4",
+      }),
+    ).rejects.toMatchObject({ code: 403 });
+  });
+});
+
+describe("evaluateRequestPipeline", () => {
+  it("runs stages in order: authn → authz → rate → sanitize", async () => {
+    const order: string[] = [];
+    const result = await evaluateRequestPipeline(
+      security({
+        authenticator: async () => {
+          order.push("authn");
+          return { authenticated: true, user: { id: "u1" } };
+        },
+        authorizer: async () => {
+          order.push("authz");
+          return { allowed: true };
+        },
+        rateLimiter: async () => {
+          order.push("rate");
+          return { allowed: true };
+        },
+        inputSanitizer: async (_c, _t, input) => {
+          order.push("sanitize");
+          return { ...input };
+        },
+      }),
+      ctx(),
+      { type: "tool_call", name: "search" },
+      { q: "hello" },
+    );
+    expect(order).toEqual(["authn", "authz", "rate", "sanitize"]);
+    expect(result.ctx.user).toEqual({ id: "u1" });
+    expect(result.toolInput).toEqual({ q: "hello" });
+  });
+
+  it("rejects with 401 on authn failure; later stages don't run", async () => {
+    let authzCalled = false;
+    await expect(
+      evaluateRequestPipeline(
+        security({
+          authenticator: async (): Promise<AuthnResult> => ({
+            authenticated: false,
+            reason: "nope",
+          }),
+          authorizer: async () => {
+            authzCalled = true;
+            return { allowed: true };
+          },
+        }),
+        ctx(),
+        { type: "tool_call", name: "x" },
+      ),
+    ).rejects.toMatchObject({ code: 401 });
+    expect(authzCalled).toBe(false);
+  });
+
+  it("rejects with 403 on authz failure", async () => {
+    await expect(
+      evaluateRequestPipeline(
+        security({
+          authorizer: async (): Promise<AuthzResult> => ({ allowed: false, reason: "no role" }),
+        }),
+        ctx(),
+        { type: "tool_call", name: "x" },
+      ),
+    ).rejects.toMatchObject({ code: 403 });
+  });
+
+  it("rejects with 429 + retryAfterMs on rate-limit", async () => {
+    const err = await evaluateRequestPipeline(
+      security({
+        rateLimiter: async (): Promise<RateLimitResult> => ({ allowed: false, retryAfterMs: 5000 }),
+      }),
+      ctx(),
+      { type: "tool_call", name: "x" },
+    ).catch((e) => e);
+    expect(err).toBeInstanceOf(SecurityError);
+    expect((err as SecurityError).code).toBe(429);
+    expect((err as SecurityError).retryAfterMs).toBe(5000);
+  });
+
+  it("does NOT call sanitizer for non-tool operations", async () => {
+    let sanCalled = false;
+    await evaluateRequestPipeline(
+      security({
+        inputSanitizer: async (_c, _t, input) => {
+          sanCalled = true;
+          return { ...input };
+        },
+      }),
+      ctx(),
+      { type: "tool_list" },
+    );
+    expect(sanCalled).toBe(false);
+  });
+
+  it("sanitizes input on tool_call only", async () => {
+    const result = await evaluateRequestPipeline(
+      security({
+        inputSanitizer: async (_c, _t, input) => ({ ...input, _sanitized: true }),
+      }),
+      ctx(),
+      { type: "tool_call", name: "x" },
+      { q: "hi" },
+    );
+    expect(result.toolInput).toEqual({ q: "hi", _sanitized: true });
+  });
+
+  it("propagates authn-provided user into authz/rate stages", async () => {
+    const seenAuthz: (McpAuthenticatedUser | null)[] = [];
+    await evaluateRequestPipeline(
+      security({
+        authenticator: async () => ({
+          authenticated: true,
+          user: { id: "u9", roles: ["admin"] },
+        }),
+        authorizer: async (c) => {
+          seenAuthz.push(c.user);
+          return { allowed: true };
+        },
+      }),
+      ctx(),
+      { type: "tool_call", name: "x" },
+    );
+    expect(seenAuthz[0]).toEqual({ id: "u9", roles: ["admin"] });
+  });
+});
+
+describe("resolveSecurity — transport-aware defaults", () => {
+  it("trusted-only transports: allowAll across the board", () => {
+    const sec = resolveSecurity(undefined, ["stdio"]);
+    expect(sec.connectionGuard).toBe(allowAllGuard);
+    expect(sec.authenticator).toBe(allowAllAuth);
+  });
+
+  it("HTTP transport: localOnly + rejectAll defaults", () => {
+    const sec = resolveSecurity(undefined, ["http"]);
+    expect(sec.connectionGuard).toBe(localOnlyGuard);
+    expect(sec.authenticator).toBe(rejectAllAuth);
+  });
+
+  it("Mixed (HTTP + stdio): conservative — uses untrusted defaults", () => {
+    const sec = resolveSecurity(undefined, ["stdio", "http"]);
+    expect(sec.connectionGuard).toBe(localOnlyGuard);
+    expect(sec.authenticator).toBe(rejectAllAuth);
+  });
+
+  it("explicit overrides win", () => {
+    const customGuard = async () => true;
+    const sec = resolveSecurity({ connectionGuard: customGuard }, ["http"]);
+    expect(sec.connectionGuard).toBe(customGuard);
+    // Others untouched.
+    expect(sec.authenticator).toBe(rejectAllAuth);
+  });
+});
+
+describe("localOnlyGuard", () => {
+  it("accepts 127.0.0.1, ::1, ::ffff:127.0.0.1", async () => {
+    for (const addr of ["127.0.0.1", "::1", "::ffff:127.0.0.1"]) {
+      expect(await localOnlyGuard({ transportKind: "http", remoteAddress: addr })).toBe(true);
+    }
+  });
+
+  it("rejects non-loopback", async () => {
+    expect(await localOnlyGuard({ transportKind: "http", remoteAddress: "10.0.0.1" })).toBe(false);
+    expect(await localOnlyGuard({ transportKind: "http" })).toBe(false);
+  });
+});
+
+describe("bearerTokenAuth", () => {
+  it("accepts a static-mapped token (case-insensitive Authorization header)", async () => {
+    const stage = bearerTokenAuth({
+      tokens: { abc123: { id: "u1" } },
+    });
+    const result = await stage(ctx({ metadata: { headers: { Authorization: "Bearer abc123" } } }));
+    expect(result).toEqual({ authenticated: true, user: { id: "u1" } });
+
+    const lower = await stage(ctx({ metadata: { headers: { authorization: "bearer abc123" } } }));
+    expect(lower).toEqual({ authenticated: true, user: { id: "u1" } });
+  });
+
+  it("falls through to verify on cache miss", async () => {
+    const stage = bearerTokenAuth({
+      verify: async (token) => (token === "xyz" ? { id: "uX" } : null),
+    });
+    const result = await stage(ctx({ metadata: { headers: { Authorization: "Bearer xyz" } } }));
+    expect(result).toMatchObject({ authenticated: true, user: { id: "uX" } });
+  });
+
+  it("rejects missing Authorization header", async () => {
+    const stage = bearerTokenAuth({ tokens: { x: { id: "u1" } } });
+    const result = await stage(ctx({ metadata: {} }));
+    expect(result).toMatchObject({ authenticated: false });
+  });
+
+  it("rejects unknown token (no verify supplied)", async () => {
+    const stage = bearerTokenAuth({ tokens: {} });
+    const result = await stage(ctx({ metadata: { headers: { Authorization: "Bearer zzz" } } }));
+    expect(result).toMatchObject({ authenticated: false, reason: "Invalid token" });
+  });
+});
+
+describe("roleBasedAuthz", () => {
+  it("specificity: exact name beats wildcard name", async () => {
+    const stage = roleBasedAuthz({
+      rules: {
+        "tool_call:secret": ["admin"],
+        "tool_call:*": [], // any-authn
+      },
+    });
+    const cAdmin = ctx({ user: { id: "u", roles: ["admin"] } });
+    const cUser = ctx({ user: { id: "u", roles: [] } });
+    expect((await stage(cAdmin, { type: "tool_call", name: "secret" })).allowed).toBe(true);
+    expect((await stage(cUser, { type: "tool_call", name: "secret" })).allowed).toBe(false);
+    expect((await stage(cUser, { type: "tool_call", name: "other" })).allowed).toBe(true);
+  });
+
+  it("missing rule = implicit deny", async () => {
+    const stage = roleBasedAuthz({ rules: { "tool_call:specific": ["admin"] } });
+    const result = await stage(ctx({ user: { id: "u" } }), { type: "tool_call", name: "other" });
+    expect(result.allowed).toBe(false);
+  });
+
+  it("empty role array = any authenticated user", async () => {
+    const stage = roleBasedAuthz({ rules: { "*": [] } });
+    expect((await stage(ctx({ user: { id: "u" } }), { type: "tool_list" })).allowed).toBe(true);
+  });
+
+  it("catch-all `*` rule applies when no specific rule matches", async () => {
+    const stage = roleBasedAuthz({
+      rules: { "tool_call:specific": ["admin"], "*": ["any-user"] },
+    });
+    const c = ctx({ user: { id: "u", roles: ["any-user"] } });
+    expect((await stage(c, { type: "prompt_list" })).allowed).toBe(true);
+  });
+});
+
+describe("slidingWindowLimiter", () => {
+  it("allows under limit", async () => {
+    const stage = slidingWindowLimiter({ windowMs: 1000, max: 3 });
+    const c = ctx({ user: { id: "u" } });
+    for (let i = 0; i < 3; i++) {
+      const result = await stage(c, { type: "tool_call", name: "x" });
+      expect(result.allowed).toBe(true);
+    }
+  });
+
+  it("rejects over limit, returns retryAfterMs", async () => {
+    const stage = slidingWindowLimiter({ windowMs: 10_000, max: 1 });
+    const c = ctx({ user: { id: "u" } });
+    await stage(c, { type: "tool_call", name: "x" });
+    const second = await stage(c, { type: "tool_call", name: "x" });
+    expect(second.allowed).toBe(false);
+    expect((second as { retryAfterMs: number }).retryAfterMs).toBeGreaterThan(0);
+  });
+
+  it("per-key isolation", async () => {
+    const stage = slidingWindowLimiter({ windowMs: 10_000, max: 1 });
+    await stage(ctx({ user: { id: "u1" } }), { type: "tool_call", name: "x" });
+    const otherUser = await stage(ctx({ user: { id: "u2" } }), { type: "tool_call", name: "x" });
+    expect(otherUser.allowed).toBe(true);
+  });
+});
+
+describe("allowListGuard", () => {
+  it("matches IPv4 CIDR", async () => {
+    const stage = allowListGuard({ addresses: ["10.0.0.0/8"] });
+    expect(await stage({ transportKind: "http", remoteAddress: "10.5.6.7" })).toBe(true);
+    expect(await stage({ transportKind: "http", remoteAddress: "11.0.0.1" })).toBe(false);
+  });
+
+  it("matches IPv4 exact address", async () => {
+    const stage = allowListGuard({ addresses: ["1.2.3.4"] });
+    expect(await stage({ transportKind: "http", remoteAddress: "1.2.3.4" })).toBe(true);
+    expect(await stage({ transportKind: "http", remoteAddress: "1.2.3.5" })).toBe(false);
+  });
+
+  it("matches origin glob", async () => {
+    const stage = allowListGuard({ origins: ["https://*.example.com"] });
+    expect(
+      await stage({
+        transportKind: "ws",
+        remoteAddress: "1.2.3.4",
+        origin: "https://app.example.com",
+      }),
+    ).toBe(true);
+    expect(
+      await stage({
+        transportKind: "ws",
+        remoteAddress: "1.2.3.4",
+        origin: "https://evil.com",
+      }),
+    ).toBe(false);
+  });
+
+  it("empty allowlist + empty origins = reject", async () => {
+    const stage = allowListGuard({});
+    expect(await stage({ transportKind: "http", remoteAddress: "1.2.3.4" })).toBe(false);
+  });
+
+  it("mode 'all' requires both lists to match", async () => {
+    const stage = allowListGuard({
+      addresses: ["1.2.3.4"],
+      origins: ["https://example.com"],
+      mode: "all",
+    });
+    expect(
+      await stage({
+        transportKind: "http",
+        remoteAddress: "1.2.3.4",
+        origin: "https://example.com",
+      }),
+    ).toBe(true);
+    expect(
+      await stage({
+        transportKind: "http",
+        remoteAddress: "1.2.3.4",
+        origin: "https://evil.com",
+      }),
+    ).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------
+// vitest doesn't expose a counting-spy that types cleanly under
+// `noPropertyAccessFromIndexSignature`; this is a tiny local one.
+// ---------------------------------------------------------------------
+
+interface SpyFn<R> {
+  (...args: unknown[]): Promise<R>;
+  calls: number;
+}
+
+function vi_fn<R>(impl: () => Promise<R>): SpyFn<R> {
+  let calls = 0;
+  const fn = (async () => {
+    calls++;
+    return impl();
+  }) as SpyFn<R>;
+  Object.defineProperty(fn, "calls", { get: () => calls });
+  return fn;
+}
