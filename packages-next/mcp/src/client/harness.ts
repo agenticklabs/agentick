@@ -116,6 +116,7 @@ export {
   McpTransportError,
 } from "@agentick/spec-next";
 import { McpClientNotReadyError } from "@agentick/spec-next";
+import type { McpClientError } from "@agentick/spec-next";
 
 // ============================================================================
 // Harness

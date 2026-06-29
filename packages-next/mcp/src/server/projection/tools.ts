@@ -27,7 +27,7 @@ import type {
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { Server as SdkServer } from "@modelcontextprotocol/sdk/server/index.js";
 import { toJsonSchema, type ToolDeclaration } from "@agentick/spec-next";
-import type { ContentBlock, McpRequestContext, McpServerError } from "@agentick/spec-next";
+import { McpServerError, type ContentBlock, type McpRequestContext } from "@agentick/spec-next";
 import { applyTransform, composeTransforms } from "@agentick/tool-next/transforms";
 import type { ToolTransform } from "@agentick/tool-next/transforms";
 
@@ -209,12 +209,7 @@ export function toWireTool(decl: ToolDeclaration): McpWireTool {
  * Type guard for typed errors thrown by the projection. Used in tests
  * + adopter catch sites that need to distinguish projection failures
  * from arbitrary thrown values.
- *
- * TODO(error-infra): becomes `instanceof McpServerError` once the
- * AgentickError class hierarchy lands (#256).
  */
 export function isProjectionError(value: unknown): value is McpServerError {
-  if (value == null || typeof value !== "object") return false;
-  const tag = (value as { _tag?: unknown })._tag;
-  return typeof tag === "string" && tag.startsWith("McpServer");
+  return value instanceof McpServerError;
 }

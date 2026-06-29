@@ -102,15 +102,34 @@ describe("McpServerHarness — options validation", () => {
   });
 
   it("accepts capabilities + auth + tools + prompts slots", () => {
+    const stubPromptsHarness = {
+      list: () => [],
+      get: async () => ({ description: "", messages: [] }),
+      subscribeAll: () => () => {},
+    } as unknown as Parameters<typeof validateOptions>[0]["prompts"] extends infer P
+      ? P extends { harness: infer H }
+        ? H
+        : never
+      : never;
     expect(() =>
       validateOptions({
         ...makeOptions(),
         capabilities: { tools: false },
         auth: { authenticator: async () => ({ authenticated: false, reason: "x" }) },
         tools: { registry: [], resolveHandler: () => null, filter: () => true, transforms: [] },
-        prompts: { filter: () => true },
+        prompts: { harness: stubPromptsHarness, filter: () => true },
       }),
     ).not.toThrow();
+  });
+
+  it("rejects prompts slot without a harness", () => {
+    expect(() =>
+      validateOptions({
+        ...makeOptions(),
+        // @ts-expect-error — exercising the validation error path
+        prompts: { filter: () => true },
+      }),
+    ).toThrow(/prompts.harness/);
   });
 });
 

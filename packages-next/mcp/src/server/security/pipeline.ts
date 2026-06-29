@@ -8,23 +8,17 @@
  *  - `evaluateRequestPipeline(security, ctx, op, toolInput?)` — per
  *    request. Runs authenticate → authorize → rate-limit → sanitize.
  *
- * Throws POJO {@link McpServerError} on rejection at any stage. The
- * transport layer maps each tag to its HTTP-equivalent JSON-RPC code:
+ * Throws subclasses of {@link McpServerError} on rejection at any
+ * stage. The transport layer maps each `_tag` to its HTTP-equivalent
+ * JSON-RPC code:
  *
  *   McpServerConnectionRejected  →  403  (-32000)
  *   McpServerAuthRejected        →  401
  *   McpServerAuthzDenied         →  403
  *   McpServerRateLimited         →  429  (Retry-After)
  *
- * Aligned with the v2 convention used by every other typed error in
- * the framework — no `class extends Error`. See
- * `docs/proposals/v2/blueprint/40-mcp-server-harness.md` and the
- * TODO(error-infra) note on `McpServerError` for the planned
- * AgentickError-class layering that will overlay `instanceof` checks
- * on these same `_tag` shapes.
- *
  * Ported from v1 `packages/mcp/src/server/security/pipeline.ts` with
- * v2 type substitutions + dropped the SecurityError class.
+ * v2 type substitutions.
  */
 
 import type { McpRequestContext, McpServerError } from "@agentick/spec-next";
@@ -67,7 +61,7 @@ export async function evaluateConnectionGuard(
  *   3. RateLimiter     — checks the per-key budget
  *   4. InputSanitizer  — tool calls only; sanitizes input
  *
- * Throws POJO `McpServerError` on rejection. On success returns the
+ * Throws an `McpServerError` subclass on rejection. On success returns the
  * authenticated context + (possibly sanitized) tool input for tool
  * calls; `undefined` toolInput for non-tool operations.
  *
@@ -121,17 +115,14 @@ export async function evaluateRequestPipeline(
 
 /**
  * Type guard for security-pipeline rejections — useful at catch sites
- * that need to distinguish security errors from other thrown values
- * before the AgentickError class hierarchy lands. Matches the four
- * tags the pipeline throws.
+ * that need to distinguish security errors from other thrown values.
+ * Matches the four concrete classes the pipeline throws.
  */
 export function isMcpSecurityError(value: unknown): value is McpServerError {
-  if (value == null || typeof value !== "object") return false;
-  const tag = (value as { _tag?: unknown })._tag;
   return (
-    tag === "McpServerConnectionRejected" ||
-    tag === "McpServerAuthRejected" ||
-    tag === "McpServerAuthzDenied" ||
-    tag === "McpServerRateLimited"
+    value instanceof McpServerConnectionRejected ||
+    value instanceof McpServerAuthRejected ||
+    value instanceof McpServerAuthzDenied ||
+    value instanceof McpServerRateLimited
   );
 }

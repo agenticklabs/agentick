@@ -30,13 +30,14 @@ import type {
   OperationJournal,
   ToolDeclaration,
 } from "@agentick/spec-next";
-import { HandlerError } from "@agentick/spec-next";
+import { HandlerError, McpServerClosed } from "@agentick/spec-next";
 import { createNotifier, type Notifier } from "@agentick/pubsub-next";
 import { Server as SdkServer } from "@modelcontextprotocol/sdk/server/index.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 
 import { type McpServerOptions, validateOptions } from "./config.js";
 import { buildCapabilities } from "./protocol/lifecycle.js";
+import { installPromptsHandlers } from "./projection/prompts.js";
 import { installToolsHandlers, type ToolHandlerResolver } from "./projection/tools.js";
 import { resolveSecurity, type ResolvedSecurity } from "./security/index.js";
 import { evaluateConnectionGuard, isMcpSecurityError } from "./security/pipeline.js";
@@ -45,15 +46,6 @@ import type { ServerTransport } from "./transports/types.js";
 
 const SURFACE = "mcpServer" as const;
 type McpServerSurface = typeof SURFACE;
-
-/**
- * @deprecated Use {@link McpServerOptions} directly. Kept as an alias
- * for backward-compat across the in-flight #171 work.
- *
- * TODO(error-infra / cleanup): remove this alias once any in-tree
- * callers migrate.
- */
-export type McpServerHarnessOptions = McpServerOptions;
 
 export class McpServerHarness
   extends BaseHarness<McpServerSurface>
@@ -65,10 +57,14 @@ export class McpServerHarness
   /** Listeners. Mounted at start(); closed at close(). */
   private readonly transports: readonly ServerTransport[];
 
-  /** Per-connection state — SDK Server + transport ref. */
+  /** Per-connection state — SDK Server + transport ref + cleanup hooks. */
   private readonly connectionState = new Map<
     string,
-    { readonly sdkServer: SdkServer; readonly transport: Transport }
+    {
+      readonly sdkServer: SdkServer;
+      readonly transport: Transport;
+      readonly cleanup: readonly Unsubscribe[];
+    }
   >();
 
   /** Open connections, keyed by connectionId. */
@@ -91,6 +87,9 @@ export class McpServerHarness
   private readonly toolsRegistry: readonly ToolDeclaration[];
   private readonly resolveHandler: ToolHandlerResolver;
   private readonly hasToolsWired: boolean;
+
+  /** Prompts projection wired iff `options.prompts.harness` was provided. */
+  private readonly hasPromptsWired: boolean;
 
   /** Server identity for the MCP `initialize` response. */
   private readonly serverInfo: { name: string; version: string };
@@ -123,6 +122,7 @@ export class McpServerHarness
     this.toolsRegistry = this.options.tools?.registry ?? [];
     this.resolveHandler = this.options.tools?.resolveHandler ?? (() => null);
     this.hasToolsWired = this.options.tools !== undefined;
+    this.hasPromptsWired = this.options.prompts !== undefined;
     this.serverInfo = this.options.serverInfo ?? {
       name: this.options.name,
       version: "0.0.0",
@@ -194,6 +194,13 @@ export class McpServerHarness
 
     // 2. Drain in-flight connections.
     for (const [, state] of this.connectionState) {
+      for (const fn of state.cleanup) {
+        try {
+          fn();
+        } catch {
+          /* best-effort */
+        }
+      }
       try {
         await state.sdkServer.close();
       } catch {
@@ -242,11 +249,11 @@ export class McpServerHarness
     const capabilities = buildCapabilities(
       {
         tools: this.hasToolsWired && this.toolsRegistry.length > 0,
-        prompts: false, // wired in #171d
+        prompts: this.hasPromptsWired,
         resources: false, // wired with #123
-        elicitation: false, // wired in #171d
-        sampling: false, // wired in #171d
-        tasks: false, // wired in #171d
+        elicitation: false, // wired in #171d.2
+        sampling: false, // wired with SamplingHarness
+        tasks: false, // wired in #171d.3
       },
       this.options.capabilities,
     );
@@ -262,7 +269,8 @@ export class McpServerHarness
       user: null,
       clientInfo: null,
     };
-    this.connectionState.set(connectionId, { sdkServer, transport });
+    const cleanup: Unsubscribe[] = [];
+    this.connectionState.set(connectionId, { sdkServer, transport, cleanup });
     this._registerConnection(connectionRecord);
 
     // 4. Install request-handler projections.
@@ -300,12 +308,34 @@ export class McpServerHarness
       });
     }
 
+    if (this.hasPromptsWired) {
+      const promptsOptions = this.options.prompts!;
+      const unsubscribe = installPromptsHandlers(sdkServer, {
+        harness: promptsOptions.harness,
+        ...(promptsOptions.filter ? { filter: promptsOptions.filter } : {}),
+        security: this.security,
+        buildContext: buildRequestContext,
+      });
+      cleanup.push(unsubscribe);
+    }
+
     // 5. Wire the transport's close path to harness cleanup. The SDK
     //    invokes `onclose` when the underlying transport closes; we
-    //    remove the connection from our tracking.
+    //    remove the connection from our tracking and run per-connection
+    //    cleanup (harness subscriptions, etc.).
     transport.onclose = () => {
+      const state = this.connectionState.get(connectionId);
       this.connectionState.delete(connectionId);
       this._removeConnection(connectionId);
+      if (state) {
+        for (const fn of state.cleanup) {
+          try {
+            fn();
+          } catch {
+            /* swallow */
+          }
+        }
+      }
     };
 
     // 6. Connect SDK Server to the transport — starts processing.
@@ -322,10 +352,7 @@ export class McpServerHarness
   /** @internal */
   _registerConnection(info: McpServerConnectionInfo): void {
     if (this.closed) {
-      throw {
-        _tag: "McpServerClosed" as const,
-        serverId: this.scopeId,
-      };
+      throw new McpServerClosed({ serverId: this.scopeId });
     }
     this.openConnections.set(info.connectionId, info);
     this.connectionsCache = null;

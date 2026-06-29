@@ -20,7 +20,13 @@
  * @see docs/proposals/v2/blueprint/40-mcp-server-harness.md §1, §2
  */
 
-import type { McpRequestContext, McpServerError, ToolDeclaration } from "@agentick/spec-next";
+import {
+  McpServerConfigInvalid,
+  type McpRequestContext,
+  type PromptDeclaration,
+  type PromptsHarnessProtocol,
+  type ToolDeclaration,
+} from "@agentick/spec-next";
 import type { ToolTransform } from "@agentick/tool-next/transforms";
 
 import type {
@@ -51,14 +57,18 @@ export interface McpServerToolsOptions {
 }
 
 /**
- * Per-connection prompts projection. Same shape pattern as tools —
- * canonical registry + per-connection filter. Lands with #171d when
- * the prompts projection module is wired.
+ * Per-connection prompts projection. Reads the canonical registry from
+ * a `PromptsHarness`; applies per-connection visibility via `filter`.
+ *
+ * The harness owns prompt mutation (register/update/remove). The
+ * server harness only PROJECTS — it subscribes to change notifications
+ * and emits `notifications/prompts/list_changed` to connected clients.
  */
 export interface McpServerPromptsOptions {
-  /** Canonical prompts registry — populated by `@agentick/prompts-next`. */
-  readonly registry?: unknown;
-  readonly filter?: (decl: unknown, ctx: McpRequestContext) => boolean;
+  /** The PromptsHarness instance whose registry is projected onto the wire. */
+  readonly harness: PromptsHarnessProtocol;
+  /** Per-connection visibility predicate. Hidden prompts cannot be fetched either. */
+  readonly filter?: (decl: PromptDeclaration, ctx: McpRequestContext) => boolean;
 }
 
 /**
@@ -114,10 +124,10 @@ export interface McpServerOptions {
 
 /**
  * Validate + normalize `McpServerOptions`. Throws
- * `McpServerConfigInvalid` (POJO discriminated union member of
- * `McpServerError`) on bad input. Returns the input unchanged on
- * success — kept as a separate step so adopters can validate ahead
- * of harness construction (e.g., from a CLI config-load path).
+ * {@link McpServerConfigInvalid} (concrete subclass of `McpServerError`)
+ * on bad input. Returns the input unchanged on success — kept as a
+ * separate step so adopters can validate ahead of harness construction
+ * (e.g., from a CLI config-load path).
  *
  * Eager: surface bad configs at harness construction time, not at
  * first connection.
@@ -154,6 +164,21 @@ export function validateOptions(options: McpServerOptions): McpServerOptions {
       throw invalid("tools.resolveHandler must be a function", ["tools", "resolveHandler"]);
     }
   }
+  if (options.prompts !== undefined) {
+    if (typeof options.prompts !== "object" || options.prompts === null) {
+      throw invalid("prompts must be an object", ["prompts"]);
+    }
+    const harness = (options.prompts as { harness?: unknown }).harness;
+    if (
+      harness == null ||
+      typeof harness !== "object" ||
+      typeof (harness as { list?: unknown }).list !== "function" ||
+      typeof (harness as { get?: unknown }).get !== "function" ||
+      typeof (harness as { subscribeAll?: unknown }).subscribeAll !== "function"
+    ) {
+      throw invalid("prompts.harness must be a PromptsHarness instance", ["prompts", "harness"]);
+    }
+  }
   if (
     options.capabilities !== undefined &&
     options.capabilities !== null &&
@@ -167,10 +192,6 @@ export function validateOptions(options: McpServerOptions): McpServerOptions {
   return options;
 }
 
-function invalid(reason: string, path?: readonly string[]): McpServerError {
-  return {
-    _tag: "McpServerConfigInvalid" as const,
-    reason,
-    ...(path ? { path } : {}),
-  };
+function invalid(reason: string, path?: readonly string[]): McpServerConfigInvalid {
+  return new McpServerConfigInvalid(path ? { reason, path } : { reason });
 }

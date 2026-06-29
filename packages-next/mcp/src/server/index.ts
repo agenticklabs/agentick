@@ -25,7 +25,7 @@
 // Side-effect import — augments `GatewayExtensions.mcpServers` slot.
 import "./augment.js";
 
-export { McpServerHarness, type McpServerHarnessOptions } from "./harness.js";
+export { McpServerHarness } from "./harness.js";
 export { type McpServerHandle, toHandle } from "./handle.js";
 export {
   validateOptions,
@@ -51,6 +51,13 @@ export {
   type ToolHandlerResolver,
   type ToolsProjectionOptions,
 } from "./projection/tools.js";
+export {
+  installPromptsHandlers,
+  projectPrompts,
+  toWirePrompt,
+  toWirePromptMessages,
+  type PromptsProjectionOptions,
+} from "./projection/prompts.js";
 
 // Re-export the spec types so adopters don't need to import from
 // `@agentick/spec-next` directly for the common case.
