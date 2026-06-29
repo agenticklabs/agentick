@@ -1510,6 +1510,29 @@ blueprint's design decisions; this is execution-level).
 
 ### 2026-06-29
 
+- **ADR 42 proposed — Harness-slot trichotomy (`Instance | Config | shorthand`).**
+  Codifies the convention every harness-backed adopter slot must follow:
+  the slot is an `Instance | Config` union, with an optional third
+  `readonly Decl[]` shorthand case for harnesses that have a single
+  dominant declaration type. Naming rules pin "no Harness in adopter
+  vocabulary" (every protocol gets a `<Noun>` alias —
+  `Prompts = PromptsHarnessProtocol`, etc.), `use:` as the pre-built
+  escape-hatch field name (never `harness:`, `instance:`, `source:`),
+  `filter:` for per-connection visibility, and `parent.<slotName>:
+  Instance | null` as the runtime-mutation read surface. Lifecycle
+  ownership follows construction: parent-built → parent closes;
+  adopter-supplied (top-level Instance OR `use:`) → adopter closes.
+  Initial audit lists `mcp-next/server.prompts` as the lone fully-
+  passing slot; `mcp-next/server.tools`, `withSkills`, `withPrompts`
+  all flagged for follow-up slices. Triggered by #171d.1b where
+  `prompts: { harness: ... }` leaked framework vocabulary into adopter
+  code. Not a code-level generic (the first draft was — pushed back as
+  too tight; the per-harness Config shape varies too much). ADR is a
+  CONVENTION + 7-item audit CHECKLIST. Cross-references ADR 26, 27,
+  40, 41. **How to apply:** every new harness-backed slot scored
+  against the checklist before merge; existing slots get follow-up
+  tasks for each gap.
+
 - **ADR 41 landed — `AgentickError` class hierarchy supersedes POJO
   `{ _tag: ... }` unions for typed errors.** Closes #256. Every typed
   error in v2 is now a class extending `AgentickError extends Error`
