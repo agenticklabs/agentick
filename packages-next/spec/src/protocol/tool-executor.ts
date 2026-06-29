@@ -565,6 +565,50 @@ export interface ToolExecutorProtocol {
   compileForTick(filter?: ToolListFilter): Promise<readonly ToolDeclaration[]>;
 }
 
+/**
+ * Adopter-facing alias for the tool-executor protocol. Use `Tools` in
+ * public APIs and `withX` slot signatures; reserve
+ * `ToolExecutorProtocol` for internal/framework code that wants to
+ * speak in spec-vocabulary. The two are structurally identical —
+ * `Tools` is the noun-form chosen for ergonomics per ADR 42 (the
+ * `Harness`-word stays out of adopter surfaces).
+ *
+ * Example — adopter-facing slot:
+ *
+ * ```ts
+ * import type { Tools } from "@agentick/spec-next";
+ *
+ * export interface McpServerToolsConfig {
+ *   readonly use?: Tools;
+ *   // ...
+ * }
+ * ```
+ */
+export type Tools = ToolExecutorProtocol;
+
+/**
+ * Structural type guard for a `Tools` instance. Discriminates the
+ * trichotomic adopter slot pattern (array | instance | config object)
+ * by checking for the live `ToolExecutorProtocol` method surface.
+ *
+ * A `Tools` instance has all of `register`, `unregister`, `dispatch`,
+ * `list`, `compileForTick` — none of which appear on a `CreatedTool[]`
+ * shorthand or a plain config object. Order matters in the discriminator:
+ * test for arrays first (form A), then `isToolsInstance` (form B), then
+ * fall through to form C (config object).
+ */
+export function isToolsInstance(v: unknown): v is Tools {
+  if (v === null || typeof v !== "object") return false;
+  const obj = v as Record<string, unknown>;
+  return (
+    typeof obj.register === "function" &&
+    typeof obj.unregister === "function" &&
+    typeof obj.dispatch === "function" &&
+    typeof obj.list === "function" &&
+    typeof obj.compileForTick === "function"
+  );
+}
+
 // ============================================================================
 // ToolExecutorFactory — deferred construction with shared substrate
 // ============================================================================

@@ -27,6 +27,7 @@ import {
   type Prompts,
   type ToolDeclaration,
 } from "@agentick/spec-next";
+import type { CreatedTool } from "@agentick/tool-next";
 import type { ToolTransform } from "@agentick/tool-next/transforms";
 
 import type {
@@ -40,21 +41,63 @@ import type { ServerTransport } from "./transports/types.js";
 import type { ToolHandlerResolver } from "./projection/tools.js";
 
 /**
- * Per-connection tool projection rules. Applied per request against
- * the live {@link McpRequestContext} (post-authenticator), NOT pre-
- * baked at connection setup. A tool hidden by `filter` cannot be
- * called either — the projection re-applies at `tools/call`.
+ * Per-connection visibility predicate for tools. Hidden tools are
+ * invisible to BOTH `tools/list` AND `tools/call` — symmetric with
+ * the prompts-projection filter.
  */
-export interface McpServerToolsOptions {
-  /** Canonical registry — what tools exist on this server. */
-  readonly registry: readonly ToolDeclaration[];
-  /** Resolves a `handlerRef` to the concrete async handler. */
-  readonly resolveHandler: ToolHandlerResolver;
+export type ToolsFilter = (tool: ToolDeclaration, ctx: McpRequestContext) => boolean;
+
+/**
+ * Config-object form of the tools slot. Authoring patterns (mutually
+ * exclusive — exactly ONE must be present):
+ *
+ *   - `tools: CreatedTool[]` — the standard ergonomic shape. Server
+ *     builds an internal registry + handler resolver from each
+ *     `CreatedTool` bundle. Matches the top-level array shorthand
+ *     with added projection rules.
+ *
+ *   - `registry: ToolDeclaration[]` + `resolveHandler:
+ *     ToolHandlerResolver` — the low-level escape hatch for advanced
+ *     adopters: custom handler resolution (lookup tables, late-bound
+ *     dispatch), dynamic registries, projection-layer tests, etc.
+ *     Both fields must appear together.
+ *
+ * Form B (an existing `Tools` instance via `use:`) is architecturally
+ * blocked on `DispatchInput.ctxOverride` (spec evolution): the
+ * `ToolExecutorProtocol` builds its OWN `ToolHandlerCtx` per dispatch
+ * and would clobber the MCP-server `transport` / `mcp.*` fields.
+ * Filed as a follow-up; see ADR 42 audit row.
+ */
+export interface McpServerToolsConfig {
+  /** Inline tools — server builds an internal handler registry from each. */
+  readonly tools?: readonly CreatedTool[];
+  /** Low-level: explicit canonical registry (paired with `resolveHandler`). */
+  readonly registry?: readonly ToolDeclaration[];
+  /** Low-level: explicit handler resolver (paired with `registry`). */
+  readonly resolveHandler?: ToolHandlerResolver;
   /** Per-connection visibility predicate. */
-  readonly filter?: (tool: ToolDeclaration, ctx: McpRequestContext) => boolean;
+  readonly filter?: ToolsFilter;
   /** Per-connection name / metadata / schema transforms. Applied left-to-right. */
   readonly transforms?: readonly ToolTransform<McpRequestContext>[];
 }
+
+/**
+ * The tools slot accepts two shapes (per ADR 42 §"slot trichotomy" —
+ * Form B / instance shorthand is deferred; see {@link McpServerToolsConfig}
+ * for the rationale):
+ *
+ *   1. `readonly CreatedTool[]` — array shorthand. Server builds the
+ *      underlying registry + handler resolver internally and owns its
+ *      lifecycle.
+ *   2. {@link McpServerToolsConfig} — config object: either inline
+ *      `tools: CreatedTool[]` OR the low-level
+ *      `registry + resolveHandler` pair, plus optional `filter` +
+ *      `transforms`.
+ *
+ * Discrimination is structural — arrays go to form 1, plain objects go
+ * to form 2.
+ */
+export type McpServerToolsOptions = readonly CreatedTool[] | McpServerToolsConfig;
 
 /**
  * Per-connection visibility predicate for prompts. Hidden prompts are
@@ -218,15 +261,7 @@ export function validateOptions(options: McpServerOptions): McpServerOptions {
     }
   }
   if (options.tools !== undefined) {
-    if (typeof options.tools !== "object" || options.tools === null) {
-      throw invalid("tools must be an object", ["tools"]);
-    }
-    if (!Array.isArray(options.tools.registry)) {
-      throw invalid("tools.registry must be an array", ["tools", "registry"]);
-    }
-    if (typeof options.tools.resolveHandler !== "function") {
-      throw invalid("tools.resolveHandler must be a function", ["tools", "resolveHandler"]);
-    }
+    validateToolsOption(options.tools);
   }
   if (options.prompts !== undefined) {
     validatePromptsOption(options.prompts);
@@ -337,4 +372,150 @@ export function resolveElicitOption(option: boolean | McpServerElicitOptions | u
   if (option === undefined) return true;
   if (typeof option === "boolean") return option;
   return option.enabled;
+}
+
+/**
+ * Internal-shape view onto a resolved {@link McpServerToolsOptions} —
+ * the harness consumes this. Resolution happens via
+ * {@link resolveToolsOption}.
+ *
+ * Both forms (array shorthand, config object) collapse to the same
+ * pair: a canonical declarations registry and a `handlerRef → handler`
+ * resolver. The projection layer (`installToolsHandlers`) consumes
+ * exactly these two values, plus the projection rules.
+ */
+export interface ResolvedToolsOptions {
+  /**
+   * Canonical declarations for `tools/list`. Per-connection filter +
+   * transforms apply on top.
+   */
+  readonly registry: readonly ToolDeclaration[];
+  /**
+   * Resolve a `ToolDeclaration.handlerRef` to its concrete async
+   * handler. Returns `null` when the ref is unknown (the projection
+   * surfaces this as a tool-not-found `CallToolResult`).
+   */
+  readonly resolveHandler: (
+    handlerRef: string,
+  ) =>
+    | ((
+        input: unknown,
+        ctx: McpRequestContext,
+      ) => Promise<readonly import("@agentick/spec-next").ContentBlock[]>)
+    | null;
+  /** Per-connection visibility predicate. */
+  readonly filter: ToolsFilter | null;
+  /** Per-connection name / metadata / schema transforms. */
+  readonly transforms: readonly ToolTransform<McpRequestContext>[];
+}
+
+function isCreatedTool(value: unknown): value is CreatedTool {
+  if (typeof value !== "object" || value === null) return false;
+  const obj = value as Record<string, unknown>;
+  return (
+    typeof obj.handlerRef === "string" &&
+    typeof obj.handler === "function" &&
+    typeof obj.declaration === "object"
+  );
+}
+
+/**
+ * Normalize the tools option into its internal resolved shape. Throws
+ * {@link McpServerConfigInvalid} on shape violations.
+ *
+ * Both forms — array shorthand and config object — collapse to the
+ * same pair `{ registry, resolveHandler }`. The handler is invoked
+ * with the LIVE `McpRequestContext` (ADR 43: same shape as in-process
+ * `ToolHandlerCtx`, just discriminated by `transport: "mcp"`).
+ */
+export function resolveToolsOption(option: McpServerToolsOptions): ResolvedToolsOptions {
+  if (Array.isArray(option)) {
+    return resolveFromCreatedTools(option, null, []);
+  }
+  const cfg = option as McpServerToolsConfig;
+  const hasTools = cfg.tools !== undefined;
+  const hasRegistry = cfg.registry !== undefined;
+  const hasResolver = cfg.resolveHandler !== undefined;
+  if (hasTools && (hasRegistry || hasResolver)) {
+    throw invalid(
+      "tools config must not mix `tools` with `registry`/`resolveHandler` — pick one authoring pattern",
+      ["tools"],
+    );
+  }
+  if (hasRegistry !== hasResolver) {
+    throw invalid("tools config must supply BOTH `registry` and `resolveHandler` together", [
+      "tools",
+    ]);
+  }
+  if (!hasTools && !hasRegistry) {
+    throw invalid(
+      "tools config must supply either `tools: CreatedTool[]` OR `registry`+`resolveHandler`",
+      ["tools"],
+    );
+  }
+  if (hasTools) {
+    if (!Array.isArray(cfg.tools)) {
+      throw invalid("tools.tools must be an array of CreatedTool", ["tools", "tools"]);
+    }
+    return resolveFromCreatedTools(cfg.tools, cfg.filter ?? null, cfg.transforms ?? []);
+  }
+  // hasRegistry === true
+  if (!Array.isArray(cfg.registry)) {
+    throw invalid("tools.registry must be an array of ToolDeclaration", ["tools", "registry"]);
+  }
+  if (typeof cfg.resolveHandler !== "function") {
+    throw invalid("tools.resolveHandler must be a function", ["tools", "resolveHandler"]);
+  }
+  return {
+    registry: cfg.registry,
+    resolveHandler: cfg.resolveHandler,
+    filter: cfg.filter ?? null,
+    transforms: cfg.transforms ?? [],
+  };
+}
+
+function resolveFromCreatedTools(
+  created: readonly CreatedTool[],
+  filter: ToolsFilter | null,
+  transforms: readonly ToolTransform<McpRequestContext>[],
+): ResolvedToolsOptions {
+  const registry: ToolDeclaration[] = [];
+  const handlersByRef = new Map<string, CreatedTool["handler"]>();
+  for (const [i, t] of created.entries()) {
+    if (!isCreatedTool(t)) {
+      throw invalid(
+        `tools[${i}] is not a CreatedTool (missing handler / handlerRef / declaration)`,
+        ["tools", String(i)],
+      );
+    }
+    registry.push(t.declaration);
+    handlersByRef.set(t.handlerRef, t.handler);
+  }
+  const resolveHandler: ResolvedToolsOptions["resolveHandler"] = (handlerRef) => {
+    const h = handlersByRef.get(handlerRef);
+    if (!h) return null;
+    return async (input, ctx) => {
+      // ADR 43: McpRequestContext IS a ToolHandlerCtx (with
+      // `transport: "mcp"` discriminator). Pass directly; no stub /
+      // adapter needed.
+      const result = await h(input, { ctx, use: {} });
+      if (Array.isArray(result)) return result;
+      // ToolHandlerResult can also be Promise<ContentBlock[]> /
+      // Effect<...> / TaskHandle. The MCP server projection only
+      // supports the inline ContentBlock[] return shape today; richer
+      // shapes (TaskHandle → Pattern B over MCP, Effect handlers)
+      // land with #171d.3 (tasks projection) + downstream integration.
+      throw new Error(
+        "MCP-server tool handlers must currently return ContentBlock[] (sync or via Promise). " +
+          "TaskHandle / Effect returns land with the MCP tasks projection (#171d.3).",
+      );
+    };
+  };
+  return { registry, resolveHandler, filter, transforms };
+}
+
+function validateToolsOption(option: McpServerToolsOptions): void {
+  // Resolve to surface shape errors at validation time; discard
+  // result (the harness re-resolves at construction time).
+  resolveToolsOption(option);
 }

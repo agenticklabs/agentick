@@ -29,7 +29,6 @@ import type {
   MessageInbox,
   OperationJournal,
   Prompts,
-  ToolDeclaration,
 } from "@agentick/spec-next";
 import { HandlerError, McpServerClosed } from "@agentick/spec-next";
 import { createNotifier, type Notifier } from "@agentick/pubsub-next";
@@ -40,14 +39,16 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import {
   resolveElicitOption,
   resolvePromptsOption,
+  resolveToolsOption,
   type McpServerOptions,
   type PromptsFilter,
+  type ResolvedToolsOptions,
   validateOptions,
 } from "./config.js";
 import { buildCapabilities } from "./protocol/lifecycle.js";
 import { buildMcpElicit } from "./projection/elicitation.js";
 import { installPromptsHandlers } from "./projection/prompts.js";
-import { installToolsHandlers, type ToolHandlerResolver } from "./projection/tools.js";
+import { installToolsHandlers } from "./projection/tools.js";
 import { resolveSecurity, type ResolvedSecurity } from "./security/index.js";
 import { evaluateConnectionGuard, isMcpSecurityError } from "./security/pipeline.js";
 import type { McpConnectionInfo } from "./security/stages.js";
@@ -93,10 +94,13 @@ export class McpServerHarness
   /** Resolved security stack (transport-aware defaults + adopter config). */
   private readonly security: ResolvedSecurity;
 
-  /** Tools registry + handler resolver (canonical view; per-conn projection applies on top). */
-  private readonly toolsRegistry: readonly ToolDeclaration[];
-  private readonly resolveHandler: ToolHandlerResolver;
-  private readonly hasToolsWired: boolean;
+  /**
+   * Resolved tools projection — registry + handler resolver + filter +
+   * transforms, normalized from any of the {@link McpServerToolsOptions}
+   * shapes via {@link resolveToolsOption}. `null` when no tools slot
+   * was provided.
+   */
+  private readonly resolvedTools: ResolvedToolsOptions | null;
 
   /**
    * Resolved Prompts source — either internally constructed from the
@@ -169,9 +173,8 @@ export class McpServerHarness
     // first connection. Throws `McpServerConfigInvalid`.
     this.options = validateOptions(options);
     this.transports = this.options.transports;
-    this.toolsRegistry = this.options.tools?.registry ?? [];
-    this.resolveHandler = this.options.tools?.resolveHandler ?? (() => null);
-    this.hasToolsWired = this.options.tools !== undefined;
+    this.resolvedTools =
+      this.options.tools !== undefined ? resolveToolsOption(this.options.tools) : null;
 
     if (!isFalsey(this.options.prompts)) {
       const resolved = resolvePromptsOption(this.options.prompts);
@@ -344,7 +347,7 @@ export class McpServerHarness
     // 2. Construct SDK Server with negotiated capabilities.
     const capabilities = buildCapabilities(
       {
-        tools: this.hasToolsWired && this.toolsRegistry.length > 0,
+        tools: !isNull(this.resolvedTools) && this.resolvedTools.registry.length > 0,
         prompts: !isNull(this.promptsSource),
         resources: false, // wired with #123
         elicitation: this.elicitWired,
@@ -430,16 +433,16 @@ export class McpServerHarness
       return ctx;
     };
 
-    if (this.hasToolsWired && this.toolsRegistry.length > 0) {
-      const projection = this.options.tools;
+    if (!isNull(this.resolvedTools) && this.resolvedTools.registry.length > 0) {
+      const tools = this.resolvedTools;
       installToolsHandlers(sdkServer, {
-        registry: this.toolsRegistry,
-        resolveHandler: this.resolveHandler,
-        ...(projection?.filter || projection?.transforms
+        registry: tools.registry,
+        resolveHandler: tools.resolveHandler,
+        ...(tools.filter || tools.transforms.length > 0
           ? {
               projection: {
-                ...(projection.filter ? { filter: projection.filter } : {}),
-                ...(projection.transforms ? { transforms: projection.transforms } : {}),
+                ...(tools.filter ? { filter: tools.filter } : {}),
+                ...(tools.transforms.length > 0 ? { transforms: tools.transforms } : {}),
               },
             }
           : {}),

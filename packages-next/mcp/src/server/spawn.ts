@@ -19,27 +19,24 @@
  */
 
 import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime-next";
-import type { CreatedTool } from "@agentick/tool-next";
 
-import type { McpServerOptions, McpServerToolsOptions } from "./config.js";
+import type { McpServerOptions } from "./config.js";
 import { McpServerHarness } from "./harness.js";
-import type { ToolHandlerResolver } from "./projection/tools.js";
 
 /**
  * Input to {@link spawnStandaloneMcpServer}. A superset of
- * `McpServerOptions`:
- *
- *  - `tools` accepts EITHER the harness's full `McpServerToolsOptions`
- *    shape (`{ registry, resolveHandler, filter?, transforms? }`), OR a
- *    more ergonomic `CreatedTool[]` array. The array form auto-builds
- *    the registry + resolver; filter + transforms can't be supplied
- *    via the sugar — pass the full shape if you need projection rules.
+ * `McpServerOptions` with one optional override:
  *
  *  - `scopeId` overrides the default `srv:<ulid>` for tests + custom
  *    naming.
+ *
+ * The `tools` field accepts the same trichotomic
+ * {@link McpServerToolsOptions} shape as the harness itself (per ADR
+ * 42 Slice 2). The array shorthand `tools: [Calculator, ...]` is the
+ * common case — the harness builds the internal registry + handler
+ * resolver from each `CreatedTool`.
  */
-export interface SpawnStandaloneOptions extends Omit<McpServerOptions, "tools"> {
-  readonly tools?: McpServerToolsOptions | readonly CreatedTool[];
+export interface SpawnStandaloneOptions extends McpServerOptions {
   readonly scopeId?: string;
 }
 
@@ -66,17 +63,9 @@ export async function spawnStandaloneMcpServer(
   const inbox = new LocalInbox();
   const scopeId = options.scopeId ?? `srv:${ulid()}`;
 
-  const tools = normalizeTools(options.tools);
-
-  // Split: spread base options minus tools (which we replace with the
-  // normalized shape).
-  const { tools: _drop, scopeId: _ignore, ...rest } = options;
+  const { scopeId: _drop, ...harnessOptions } = options;
   void _drop;
-  void _ignore;
-  const harnessOptions: McpServerOptions = {
-    ...rest,
-    ...(tools ? { tools } : {}),
-  };
+
   const harness = new McpServerHarness(scopeId, journal, bus, inbox, harnessOptions);
   await harness.ready;
   await harness.start();
@@ -84,66 +73,4 @@ export async function spawnStandaloneMcpServer(
     harness,
     close: () => harness.close(),
   };
-}
-
-/**
- * Accept either the harness's raw `{ registry, resolveHandler }`
- * shape or a `CreatedTool[]` array. Adopters pass whichever is
- * convenient; the spawn shim handles the conversion.
- */
-function normalizeTools(tools: SpawnStandaloneOptions["tools"]): McpServerToolsOptions | undefined {
-  if (tools === undefined) return undefined;
-  if (!Array.isArray(tools)) {
-    return tools as McpServerToolsOptions;
-  }
-  const created = tools as readonly CreatedTool[];
-  const registry = created.map((c) => c.declaration);
-  const handlersByRef = new Map<string, CreatedTool["handler"]>();
-  for (const t of created) handlersByRef.set(t.handlerRef, t.handler);
-  const resolveHandler: ToolHandlerResolver = (ref) => {
-    const h = handlersByRef.get(ref);
-    if (!h) return null;
-    // ToolHandler from @agentick/spec-next has signature
-    // (input, { ctx, use }) => ToolHandlerResult. The MCP projection
-    // wants (input, mcpCtx) => Promise<ContentBlock[]>. Mode A MVP
-    // passes a stub ctx — adopters running fully-isolated Mode A use
-    // simple tools that don't read ctx. Richer ctx-bridge (sendProgress,
-    // signal forwarding, tasks/elicitation passthrough) lands when
-    // gateway integration arrives.
-    return async (input) => {
-      const result = await h(input, { ctx: createStubHandlerCtx(), use: {} });
-      // ToolHandlerResult can be ContentBlock[] OR Promise/Effect/Task.
-      // The MVP only supports the sync ContentBlock[] return; richer
-      // shapes need ctx integration that doesn't exist in Mode A yet.
-      if (Array.isArray(result)) return result;
-      // TODO(#171-spawn): Mode A standalone needs ctx-bridge for
-      // Promise / Effect / TaskHandle handler returns + ctx.tasks /
-      // ctx.elicitation. Lands when gateway integration arrives.
-      throw new Error(
-        "spawnStandaloneMcpServer: tool handlers must return ContentBlock[] synchronously in Mode A MVP. " +
-          "Async / Effect / TaskHandle returns need gateway-side ctx integration (#171 follow-up).",
-      );
-    };
-  };
-  return { registry, resolveHandler };
-}
-
-/**
- * Minimal `ToolHandlerCtx` stub for standalone-mode dispatch. None of
- * its fields are populated — adopters in Mode A pass tools that don't
- * read ctx.
- *
- * TODO(#171-spawn): wire a real ctx adapter that bridges
- * `McpRequestContext` ↔ `ToolHandlerCtx` so adopters can write tools
- * that observe identity / signal / sendProgress in Mode A.
- */
-function createStubHandlerCtx(): import("@agentick/spec-next").ToolHandlerCtx {
-  return {
-    toolCallId: "standalone",
-    sessionId: "standalone",
-    executionId: "standalone",
-    signal: new AbortController().signal,
-    emit: () => {},
-    services: {},
-  } as unknown as import("@agentick/spec-next").ToolHandlerCtx;
 }

@@ -351,20 +351,31 @@ satisfy the convention.
 - 6. `server.prompts` getter: ✅
 - 7. Test coverage: ✅
 
-### `@agentick/mcp-next/server` → `tools` slot
-- 1. Array shorthand: ⚠ MISSING — slot requires `{ registry, resolveHandler, ... }`.
-     Possible fix: when given `readonly ToolDeclaration[]`, treat
-     handlers as resolved-by-name from a default registry built by the
-     parent. Or: drop the shorthand because tools genuinely need the
-     two-collection shape and there's no honest single-array form.
-- 2. Instance shorthand: ⚠ MISSING — no way to pass a pre-built
-     `ToolExecutor` instance directly.
-- 3. `use:` escape hatch: ⚠ MISSING.
-- 4. `Tools` alias: ⚠ MISSING — slot references
-     `ToolExecutorProtocol` directly.
-- 5. Lifecycle docs: partial.
-- 6. `server.tools` getter: ⚠ MISSING.
-- 7. Test coverage: partial.
+### `@agentick/mcp-next/server` → `tools` slot — landed via Slice 2 (#265)
+- 1. Array shorthand: ✅ — `tools: CreatedTool[]` is the 90% case.
+     The two-collection problem (declarations + handlers) is solved
+     by `CreatedTool` carrying both: server splits `t.declaration`
+     into the registry and `t.handlerRef → t.handler` into a
+     default resolver.
+- 2. Instance shorthand: ⚠ DEFERRED — a `Tools`
+     (`ToolExecutorProtocol`) instance can't be plugged in without
+     spec evolution: `ToolExecutor.dispatch` builds its OWN
+     `ToolHandlerCtx` and would clobber the MCP-server
+     `transport: "mcp"` + `mcp.*` discriminator fields. Lands when
+     `DispatchInput.ctxOverride` ships. Adopters with an existing
+     executor can project its registry today via the low-level
+     `{registry, resolveHandler}` escape hatch.
+- 3. `use:` escape hatch: ⚠ DEFERRED with item 2 (same blocker).
+- 4. `Tools` alias: ✅ — `export type Tools = ToolExecutorProtocol`
+     added to spec-next; `isToolsInstance` structural guard alongside.
+- 5. Lifecycle docs: ✅ — config.ts JSDoc + README cover both
+     authoring patterns; the low-level form documents adopter-owned
+     handler lifetimes explicitly.
+- 6. `server.tools` getter: ⚠ MISSING — pending the same spec
+     evolution as item 2 (without a uniform `Tools` instance, there's
+     no consistent runtime read shape).
+- 7. Test coverage: ✅ — `tools-slot.spec.ts` covers both authoring
+     patterns + the xor-discrimination boundary cases.
 
 ### `@agentick/app-next` → `withSkills`
 - 1. Array shorthand: ⚠ — `withSkills` takes loaders only; no
@@ -400,12 +411,17 @@ satisfy the convention.
 Lands the convention. No code changes; documentation only. Future
 slices reference this ADR.
 
-### Slice 2 — Refresh `Tools` alias + slot
-Add `export type Tools = ToolExecutorProtocol;` to spec. Refactor the
-mcp-server tools slot to accept the three forms (where the shorthand
-case may be dropped — see audit row 1 — but the Instance / `use:` /
-`Tools` alias / read getter must all land). Migrate
-existing tests. Update README. ETA: ~1 day.
+### Slice 2 — Refresh `Tools` alias + slot — ✅ LANDED (#265)
+Added `export type Tools = ToolExecutorProtocol;` + `isToolsInstance`
+to spec. Refactored the mcp-server `tools` slot to accept the array
+shorthand (`CreatedTool[]`) plus a config object that supports either
+inline `tools: CreatedTool[]` OR the low-level
+`{ registry, resolveHandler }` escape hatch. Filter + transforms are
+optional on both authoring patterns. Form B (`Tools` instance via
+`use:`) and `server.tools` getter remain deferred — both blocked on
+`DispatchInput.ctxOverride` spec evolution (the executor builds its
+own `ToolHandlerCtx` and would clobber the MCP `transport`/`mcp.*`
+discriminator fields). See audit row above + `tools-slot.spec.ts`.
 
 ### Slice 3 — Refresh `Skills` + `Tasks` aliases + their parent slots
 Same shape as Slice 2 for the remaining first-party harnesses.

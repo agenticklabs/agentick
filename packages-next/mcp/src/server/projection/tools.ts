@@ -56,7 +56,7 @@ import type { ResolvedSecurity } from "../security/stages.js";
  */
 export type ToolHandlerResolver = (
   handlerRef: string,
-) => ((input: unknown, ctx: McpRequestContext) => Promise<ContentBlock[]>) | null;
+) => ((input: unknown, ctx: McpRequestContext) => Promise<readonly ContentBlock[]>) | null;
 
 export interface ToolsProjectionOptions {
   /** Canonical tool registry — the projection filters + transforms this per connection. */

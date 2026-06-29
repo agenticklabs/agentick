@@ -146,14 +146,17 @@ const server = new McpServerHarness(scopeId, journal, bus, inbox, {
   name: "my-server",
   transports: [stdioServerTransport()],
 
-  // Tools — registry + handler resolver, plus per-connection projection.
-  tools: {
-    registry: [
-      /* ToolDeclaration[] */
-    ],
-    resolveHandler: (ref) => /* concrete async handler or null */ null,
-    filter: (tool, ctx) => ctx.user?.roles?.includes("admin") || !tool.name.startsWith("admin_"),
-  },
+  // Tools — accepts `CreatedTool[]` shorthand OR the projection-config
+  // object. The array form is the 90% case; the config form adds
+  // per-connection projection rules (filter + transforms).
+  tools: [
+    createTool({
+      name: "echo",
+      description: "Echo the input",
+      handler: async ({ text }) => [{ type: "text", text }],
+    }),
+    /* ... more CreatedTool entries ... */
+  ],
 
   // Prompts — declarative array shorthand. Server constructs the
   // Prompts source internally; lifecycle is owned by the server.
@@ -186,6 +189,41 @@ await server.prompts!.register({
   declaration: { name: "rephrase", description: "Rephrase", template: "Rephrase." },
 });
 ```
+
+### The `tools` slot — accepted shapes
+
+```ts
+// Form A — array shorthand (the 90% case)
+tools: [Calculator, Search, Translate];                 // each: CreatedTool
+
+// Form C (inline) — config object: CreatedTool[] + projection rules
+tools: {
+  tools: [Calculator, Search],
+  filter: (tool, ctx) => ctx.user?.roles?.includes("admin") || !tool.name.startsWith("admin_"),
+  transforms: [toolPrefix({ prefix: "v2_" })],
+}
+
+// Form C (low-level escape hatch) — explicit registry + handler resolver
+// for custom resolution (lookup tables, late-bound dispatch),
+// dynamic registries, or projection-layer tests
+tools: {
+  registry: [/* ToolDeclaration[] */],
+  resolveHandler: (handlerRef) => /* (input, ctx) => Promise<ContentBlock[]> */ null,
+  filter, transforms,
+}
+```
+
+**Form B (a `Tools` instance via `use:`) is intentionally absent** —
+blocked on `DispatchInput.ctxOverride` spec evolution. The
+`ToolExecutorProtocol.dispatch` path builds its own `ToolHandlerCtx`
+and would clobber the MCP-server `transport: "mcp"` + `mcp.*` fields.
+Filed as a follow-up. For now, adopters with an existing executor can
+project its registry via the low-level form.
+
+**Per-connection projection** — `filter` decides visibility; hidden
+tools are invisible to BOTH `tools/list` AND `tools/call`. `transforms`
+rewrites declarations (name/metadata/schema) per-connection — adopters
+build with the helpers in `@agentick/tool-next/transforms`.
 
 ### The `prompts` slot — three accepted shapes
 
