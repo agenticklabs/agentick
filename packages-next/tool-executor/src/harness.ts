@@ -21,6 +21,7 @@
  */
 
 import { omitUndefined } from "@agentick/utils-next";
+import { buildSessionElicit } from "@agentick/elicitation-next";
 
 import { Cause, Effect, Exit, Option } from "effect";
 import { runHarnessProtocol, ulid } from "@agentick/runtime-next";
@@ -574,6 +575,11 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
         // Always present in production; the optional spec field
         // covers test fixtures that omit them.
         elicitation: this.elicitation,
+        // ADR 43 — `ctx.elicit` is the sugar wrapper over the raw
+        // protocol. Same `Elicit` interface as the MCP-server side
+        // (built by `buildMcpElicit`), so tool handlers calling
+        // `ctx.elicit.text(...)` work identically across transports.
+        elicit: buildSessionElicit({ harness: this.elicitation }),
         ...omitUndefined({ tasks: this.tasks }),
         setState: (key: string, value: unknown): void => {
           this.stateStore.set(key, value);
