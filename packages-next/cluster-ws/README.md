@@ -75,18 +75,18 @@ for the substrate-fusion vs side-channel split.
 
 ## API
 
-| Export                         | Role                                              |
-| ------------------------------ | ------------------------------------------------- |
+| Export                         | Role                                                   |
+| ------------------------------ | ------------------------------------------------------ |
 | `defineWsCluster(opts)`        | Returns a `ClusterFactory` for createApp/createGateway |
-| `joinWsCluster(opts)`          | Returns a `ClusterNode` for side-channel use      |
-| `wsClusterNode(opts)`          | `{transport, membership}` over one connection     |
-| `wsBroker(opts)`               | Spins up + starts a `BaseBroker` on a WS listener |
-| `wsTransport(opts)`            | Standalone transport factory                      |
-| `wsMembership(opts)`           | Standalone membership factory                     |
-| `createWsListener(opts)`       | Low-level — `WebSocketServer` as `Listener`       |
-| `createWsConnector(opts)`      | Low-level — `WebSocket(url)` as `Connector`       |
-| `wsToConnection(ws, opts)`     | Wrap a raw `ws.WebSocket` as `Connection`         |
-| `AGENTICK_CLUSTER_SUBPROTOCOL` | The negotiated subprotocol name                   |
+| `joinWsCluster(opts)`          | Returns a `ClusterNode` for side-channel use           |
+| `wsClusterNode(opts)`          | `{transport, membership}` over one connection          |
+| `wsBroker(opts)`               | Spins up + starts a `BaseBroker` on a WS listener      |
+| `wsTransport(opts)`            | Standalone transport factory                           |
+| `wsMembership(opts)`           | Standalone membership factory                          |
+| `createWsListener(opts)`       | Low-level — `WebSocketServer` as `Listener`            |
+| `createWsConnector(opts)`      | Low-level — `WebSocket(url)` as `Connector`            |
+| `wsToConnection(ws, opts)`     | Wrap a raw `ws.WebSocket` as `Connection`              |
+| `AGENTICK_CLUSTER_SUBPROTOCOL` | The negotiated subprotocol name                        |
 
 ## How it differs from TCP/Unix
 

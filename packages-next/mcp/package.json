@@ -19,6 +19,9 @@
     "url": "git+https://github.com/agenticklabs/agentick.git",
     "directory": "packages-next/mcp"
   },
+  "bin": {
+    "agentick-mcp-server": "./src/server/bin.ts"
+  },
   "type": "module",
   "sideEffects": [
     "./src/index.ts",
@@ -53,9 +56,6 @@
       "default": "./src/testing/index.ts"
     }
   },
-  "bin": {
-    "agentick-mcp-server": "./src/server/bin.ts"
-  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -70,6 +70,7 @@
     "@agentick/spec-next": "workspace:*",
     "@agentick/tool-executor-next": "workspace:*",
     "@agentick/tool-next": "workspace:*",
+    "@agentick/utils-next": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "effect": "^3.21.2"
   },

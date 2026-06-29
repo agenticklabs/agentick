@@ -38,7 +38,7 @@ Six things live here today:
   `extractFrontmatter`. Filesystem-backed sources live under
   `loaders/node`. Harness packages compose these into their own
   record-typed `fromX` APIs (skills loaders, prompts loaders, future
-  resources loaders) — the primitive layer is deliberately *not*
+  resources loaders) — the primitive layer is deliberately _not_
   a unified `from*` surface because the sound source set depends on
   whether the record type carries unserializable code.
 
@@ -119,14 +119,14 @@ Pattern B).
 See [`src/loaders/README.md`](./src/loaders/README.md) for the full
 shape. Quick reference:
 
-| Subpath | Exports | Use when |
-|---------|---------|----------|
-| `/loaders` | `Loader<T>`, `mergeLoaders`, `mapLoader`, `sourceFromArray`, `sourceFromUrl`, `sourceFromModule`, `extractFrontmatter` | platform-agnostic primitives; safe in browser / edge runtime |
-| `/loaders/node` | `sourceFromFile`, `readFrontmatterFile`, `sourceFromDirectory`, `FileRecord` | Node `fs`-backed sources; the path that needs `node:fs` |
+| Subpath         | Exports                                                                                                                | Use when                                                     |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `/loaders`      | `Loader<T>`, `mergeLoaders`, `mapLoader`, `sourceFromArray`, `sourceFromUrl`, `sourceFromModule`, `extractFrontmatter` | platform-agnostic primitives; safe in browser / edge runtime |
+| `/loaders/node` | `sourceFromFile`, `readFrontmatterFile`, `sourceFromDirectory`, `FileRecord`                                           | Node `fs`-backed sources; the path that needs `node:fs`      |
 
 Harness packages (`@agentick/skills-next`, `@agentick/prompts-next`)
 build their public `fromArray / fromDirectory / fromModule / ...`
-APIs on these primitives — the constraint on which sources are *sound*
+APIs on these primitives — the constraint on which sources are _sound_
 for a record type belongs to the harness, not to the primitive layer.
 
 ## Testing subpath — `@agentick/utils-next/testing`

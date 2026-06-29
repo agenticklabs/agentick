@@ -87,14 +87,14 @@ but adopters typically pin a tighter shape (`{ profile: "ci" | "prod" }`,
 
 ### `t` — `EvalContext`
 
-| Method                            | Purpose                                                                |
-| --------------------------------- | ---------------------------------------------------------------------- |
-| `t.app`                           | The `AppHarness` constructed by `definition.app(overrides)`.           |
-| `t.send(prompt)`                  | Drive the agent. Returns the final response text.                      |
-| `t.completed()`                   | Assert the most-recent send reached `stopReason: "end"`.               |
-| `t.calledTool(name, { input?, isError? })` | Assert a specific tool was called; optionally deep-equal on `input` and outcome.   |
-| `t.notCalledTool(name)`           | Assert a specific tool was NOT called. Critical for safety evals.      |
-| `t.noFailedActions()`             | Assert every observed tool call's `outcome === "succeeded"`.           |
+| Method                                     | Purpose                                                                          |
+| ------------------------------------------ | -------------------------------------------------------------------------------- |
+| `t.app`                                    | The `AppHarness` constructed by `definition.app(overrides)`.                     |
+| `t.send(prompt)`                           | Drive the agent. Returns the final response text.                                |
+| `t.completed()`                            | Assert the most-recent send reached `stopReason: "end"`.                         |
+| `t.calledTool(name, { input?, isError? })` | Assert a specific tool was called; optionally deep-equal on `input` and outcome. |
+| `t.notCalledTool(name)`                    | Assert a specific tool was NOT called. Critical for safety evals.                |
+| `t.noFailedActions()`                      | Assert every observed tool call's `outcome === "succeeded"`.                     |
 
 Assertions record into `result.assertions[]` rather than throwing.
 Adopters who want fail-fast check `result.passed` and decide whether
@@ -139,7 +139,7 @@ const matrix = await calculatorAgent.matrix(
     executor: [openaiExec, anthropicExec],
     promptVariant: ["concise", "verbose"],
   },
-  { concurrency: 4 },   // default 1 — sequential — to avoid rate-limit blowups
+  { concurrency: 4 }, // default 1 — sequential — to avoid rate-limit blowups
 );
 
 console.log(`${matrix.cells.filter((c) => c.result.passed).length} / ${matrix.cells.length}`);
@@ -149,6 +149,7 @@ for (const cell of matrix.cells) {
 ```
 
 Edge cases:
+
 - `matrix({})` → 1 cell (equivalent to `myEval()`)
 - `matrix({ executor: [] })` → 0 cells (mathematical product), `passed: true` (vacuous)
 - Missing axes in `O` → that key is `undefined` in the cell; the

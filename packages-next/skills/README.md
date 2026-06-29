@@ -38,12 +38,12 @@ await session.skills.register({ name: "..", description: "..", content: ".." });
 
 ```ts
 interface Skill {
-  readonly name: string;          // unique within the harness; snake_case convention
-  readonly description: string;   // one-line summary for retrieval / listing
-  readonly content: string;       // full body — markdown / prose / recipe
+  readonly name: string; // unique within the harness; snake_case convention
+  readonly description: string; // one-line summary for retrieval / listing
+  readonly content: string; // full body — markdown / prose / recipe
   readonly tags?: readonly string[];
   readonly metadata?: Readonly<Record<string, unknown>>; // adopter-defined
-  readonly updatedAt: number;     // wall-clock ms
+  readonly updatedAt: number; // wall-clock ms
   readonly createdAt: number;
 }
 ```
@@ -52,17 +52,17 @@ Skills are first-class data. The harness treats them as opaque content; the agen
 
 ## API — `SkillsHandle` on `session.skills`
 
-| Method | Async? | Effect |
-|--------|--------|--------|
-| `get(name)` | sync | Read by exact name; `undefined` if missing |
-| `has(name)` | sync | Existence check |
-| `list()` | sync | All skills (no filter) |
-| `search({ query?, tagsAny?, tagsAll?, limit? })` | sync | Filtered subset. `query` matches `name` + `description` (case-insensitive substring in reference impl); `tagsAny` is OR, `tagsAll` is AND |
-| `register({ name, description, content, tags?, metadata? })` | async | Create. Throws `{_tag: "SkillAlreadyExists"}` on duplicate name |
-| `update({ name, description?, content?, tags?, metadata? })` | async | Patch fields. Throws `{_tag: "SkillNotFound"}` if missing |
-| `remove({ name })` | async | Delete. Throws `{_tag: "SkillNotFound"}` if missing |
-| `subscribe(name, listener)` | sync | Listen for a specific skill's mutations |
-| `subscribeAll(listener)` | sync | Listen for any mutation |
+| Method                                                       | Async? | Effect                                                                                                                                    |
+| ------------------------------------------------------------ | ------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `get(name)`                                                  | sync   | Read by exact name; `undefined` if missing                                                                                                |
+| `has(name)`                                                  | sync   | Existence check                                                                                                                           |
+| `list()`                                                     | sync   | All skills (no filter)                                                                                                                    |
+| `search({ query?, tagsAny?, tagsAll?, limit? })`             | sync   | Filtered subset. `query` matches `name` + `description` (case-insensitive substring in reference impl); `tagsAny` is OR, `tagsAll` is AND |
+| `register({ name, description, content, tags?, metadata? })` | async  | Create. Throws `{_tag: "SkillAlreadyExists"}` on duplicate name                                                                           |
+| `update({ name, description?, content?, tags?, metadata? })` | async  | Patch fields. Throws `{_tag: "SkillNotFound"}` if missing                                                                                 |
+| `remove({ name })`                                           | async  | Delete. Throws `{_tag: "SkillNotFound"}` if missing                                                                                       |
+| `subscribe(name, listener)`                                  | sync   | Listen for a specific skill's mutations                                                                                                   |
+| `subscribeAll(listener)`                                     | sync   | Listen for any mutation                                                                                                                   |
 
 Reads are cheap and synchronous (no envelopes). Mutations go through `runOperation` — every `register` / `update` / `remove` produces `requested → terminal` envelopes on the session's bus that the model, admins, or audit tooling can observe.
 
@@ -130,13 +130,13 @@ withSkills({
 }),
 ```
 
-| Factory                                                  | Subpath         | Source                                                                              |
-| -------------------------------------------------------- | --------------- | ----------------------------------------------------------------------------------- |
-| `fromArray(skills)`                                      | `/loaders`      | in-memory                                                                           |
-| `fromUrl({ url, ... })`                                  | `/loaders`      | JSON manifest at `{ "skills": [...] }` (configurable via `arrayField`)              |
-| `fromManifest(...)`                                      | `/loaders`      | alias for `fromUrl`                                                                 |
-| `fromFile({ path, parseFrontmatter? })`                  | `/loaders/node` | one `.md` file with frontmatter                                                     |
-| `fromDirectory({ path, match?, parseFrontmatter?, ... })` | `/loaders/node` | recursive walk of `.md` files; bad records skipped silently                         |
+| Factory                                                   | Subpath         | Source                                                                 |
+| --------------------------------------------------------- | --------------- | ---------------------------------------------------------------------- |
+| `fromArray(skills)`                                       | `/loaders`      | in-memory                                                              |
+| `fromUrl({ url, ... })`                                   | `/loaders`      | JSON manifest at `{ "skills": [...] }` (configurable via `arrayField`) |
+| `fromManifest(...)`                                       | `/loaders`      | alias for `fromUrl`                                                    |
+| `fromFile({ path, parseFrontmatter? })`                   | `/loaders/node` | one `.md` file with frontmatter                                        |
+| `fromDirectory({ path, match?, parseFrontmatter?, ... })` | `/loaders/node` | recursive walk of `.md` files; bad records skipped silently            |
 
 Frontmatter parsing defaults to a minimal `key: value` parser (`parseSimpleFrontmatter` — supports quoted strings + inline arrays like `[a, b, c]`). For full YAML / TOML, pass a custom `parseFrontmatter: (text) => Record<string, unknown>` callback — wire `yaml` / `@iarna/toml` / your parser of choice without adding a dep at the framework level.
 
@@ -164,6 +164,7 @@ const skill = await session.skills.require("must_exist");
 ## Status & roadmap
 
 **Shipped:**
+
 - `SkillsHarness` reference impl (in-memory, journal-backed)
 - `withSkills` session-extension factory (accepts `loaders`)
 - `SkillLoader[]` — `fromArray` / `fromUrl` / `fromManifest` (`/loaders`) and `fromFile` / `fromDirectory` (`/loaders/node`)
@@ -172,12 +173,14 @@ const skill = await session.skills.require("must_exist");
 - Module augmentation: `session.skills` typed via `SkillsHandle`
 
 **Planned:**
+
 - SQLite backend for single-process durability
 - Remote-registry backend (`agentskills.io` compatibility)
 - Embedding-based search (currently substring-only)
 - Skill versioning / history
 
 **Known gaps:**
+
 - Search is substring-only on `name` + `description`. Adopters who need richer retrieval supply a custom harness backend.
 - No transaction support across multiple mutations — each `register`/`update`/`remove` is its own Operation.
 - No per-skill ACL — all session participants share one library.

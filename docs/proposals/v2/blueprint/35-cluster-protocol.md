@@ -104,14 +104,8 @@ Read-only. No methods that mutate cluster state — partitioning rebalances, tra
 export interface ClusterTransport {
   send(toNode: NodeId, env: MessageEnvelope): Promise<void>;
   broadcast(env: EventEnvelope): Promise<void>;
-  subscribeInbox(
-    filter: AddressFilter,
-    onMessage: (env: MessageEnvelope) => void,
-  ): () => void;
-  subscribeBus(
-    filter: EventFilter,
-    onEvent: (env: EventEnvelope) => void,
-  ): () => void;
+  subscribeInbox(filter: AddressFilter, onMessage: (env: MessageEnvelope) => void): () => void;
+  subscribeBus(filter: EventFilter, onEvent: (env: EventEnvelope) => void): () => void;
   close(): Promise<void>;
 }
 
@@ -171,8 +165,8 @@ export interface DefineClusterConfig {
   readonly nodeId: NodeId | (() => NodeId | Promise<NodeId>);
   readonly transport: ClusterTransportFactory;
   readonly membership: ClusterMembershipFactory;
-  readonly partitioning?: ClusterPartitioningFactory;  // default: consistent-hash on sessionId
-  readonly journal?: DurableJournalFactory;             // rung (d); optional
+  readonly partitioning?: ClusterPartitioningFactory; // default: consistent-hash on sessionId
+  readonly journal?: DurableJournalFactory; // rung (d); optional
   /**
    * Wire serialization codec. Default: JSON (universal, debuggable).
    * Swap for MessagePack (performance), protobuf (strict schemas), or
@@ -200,13 +194,10 @@ Adapter author writes Promise-flavored impls; helper produces the factory; adopt
 ```typescript
 // @agentick/cluster-redis-next
 import Redis from "ioredis";
-import {
-  defineClusterTransport,
-  defineClusterMembership,
-} from "@agentick/cluster-next";
+import { defineClusterTransport, defineClusterMembership } from "@agentick/cluster-next";
 
 export interface RedisTransportOptions {
-  readonly url: string | (() => string | Promise<string>);  // lazy-resolvable
+  readonly url: string | (() => string | Promise<string>); // lazy-resolvable
   readonly currentNode: NodeId | (() => NodeId);
 }
 
@@ -215,11 +206,21 @@ export function redisTransport(opts: RedisTransportOptions): ClusterTransportFac
   // and returns the boring impl. The defineClusterTransport bridge
   // wraps it as a Layer-backed factory internally.
   return defineClusterTransport({
-    async send(toNode, env) { /* await pub.publish(...) */ },
-    async broadcast(env) { /* await pub.publish(...) */ },
-    subscribeInbox(filter, onMessage) { /* subscribe; return unsubscribe */ return () => {}; },
-    subscribeBus(filter, onEvent) { /* subscribe; return unsubscribe */ return () => {}; },
-    async close() { /* await pub.quit(); await sub.quit(); */ },
+    async send(toNode, env) {
+      /* await pub.publish(...) */
+    },
+    async broadcast(env) {
+      /* await pub.publish(...) */
+    },
+    subscribeInbox(filter, onMessage) {
+      /* subscribe; return unsubscribe */ return () => {};
+    },
+    subscribeBus(filter, onEvent) {
+      /* subscribe; return unsubscribe */ return () => {};
+    },
+    async close() {
+      /* await pub.quit(); await sub.quit(); */
+    },
   });
 }
 ```
@@ -253,9 +254,13 @@ import { ClusterTransport } from "@agentick/cluster-next/effect";
 export const RedisTransportLayer = Layer.effect(
   ClusterTransport,
   Effect.gen(function* () {
-    const redis = yield* RedisService;  // Effect-typed dep
+    const redis = yield* RedisService; // Effect-typed dep
     return {
-      send: (to, env) => Effect.tryPromise({ try: () => redis.publish(/* ... */), catch: (cause) => new TransportError({ cause }) }),
+      send: (to, env) =>
+        Effect.tryPromise({
+          try: () => redis.publish(/* ... */),
+          catch: (cause) => new TransportError({ cause }),
+        }),
       // ... Effect-typed methods
     };
   }),
@@ -275,8 +280,9 @@ const factory: ClusterFactory = (appShell) => {
   const nodeId = await resolveLazy(config.nodeId);
   const transport = await runFactory(config.transport, clusterShell);
   const membership = await runFactory(config.membership, clusterShell);
-  const partitioning =
-    config.partitioning ? await runFactory(config.partitioning, clusterShell) : defaultConsistentHash();
+  const partitioning = config.partitioning
+    ? await runFactory(config.partitioning, clusterShell)
+    : defaultConsistentHash();
   const journal = config.journal ? await runFactory(config.journal, clusterShell) : undefined;
 
   const wrappedBus = new ClusterEventBus({
@@ -338,21 +344,21 @@ User-level isolation works the same way — `shardKeyFor: (a) => extractUserId(a
 
 Each rung is opt-in via the choice of transport / membership / journal adapters. The protocol package is the same across all rungs.
 
-| Rung | Use case | Adapter packages |
-|---|---|---|
-| (a) | Single-host multi-process | `@agentick/cluster-ipc-next` — Node.js IPC + worker_threads / cluster module |
-| (b) | Multi-node ephemeral | `@agentick/cluster-redis-next`, `@agentick/cluster-nats-next` |
-| (c) | Multi-tenant isolation | Same transports as (b); adopter writes custom `defineClusterPartitioning` |
-| (d) | Durable execution | `@agentick/cluster-effect-next` (wraps `@effect/cluster`), or a custom `DurableJournal` adapter |
+| Rung | Use case                  | Adapter packages                                                                                |
+| ---- | ------------------------- | ----------------------------------------------------------------------------------------------- |
+| (a)  | Single-host multi-process | `@agentick/cluster-ipc-next` — Node.js IPC + worker_threads / cluster module                    |
+| (b)  | Multi-node ephemeral      | `@agentick/cluster-redis-next`, `@agentick/cluster-nats-next`                                   |
+| (c)  | Multi-tenant isolation    | Same transports as (b); adopter writes custom `defineClusterPartitioning`                       |
+| (d)  | Durable execution         | `@agentick/cluster-effect-next` (wraps `@effect/cluster`), or a custom `DurableJournal` adapter |
 
 **Wire codec adapter packages** (cross-cutting; any rung):
 
-| Codec | Use case | Package |
-|---|---|---|
-| JSON | Default — debuggable, universal | bundled in `@agentick/cluster-next` |
-| MessagePack | Performance-sensitive deployments | `@agentick/cluster-codec-msgpack-next` |
-| Protobuf | Strict schema enforcement; multi-language clusters | `@agentick/cluster-codec-protobuf-next` (ships .proto schemas alongside) |
-| Custom | Adopter-defined wire (e.g., FlatBuffers, CBOR, encrypted-at-rest variants) | `defineClusterCodec` in adopter code |
+| Codec       | Use case                                                                   | Package                                                                  |
+| ----------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| JSON        | Default — debuggable, universal                                            | bundled in `@agentick/cluster-next`                                      |
+| MessagePack | Performance-sensitive deployments                                          | `@agentick/cluster-codec-msgpack-next`                                   |
+| Protobuf    | Strict schema enforcement; multi-language clusters                         | `@agentick/cluster-codec-protobuf-next` (ships .proto schemas alongside) |
+| Custom      | Adopter-defined wire (e.g., FlatBuffers, CBOR, encrypted-at-rest variants) | `defineClusterCodec` in adopter code                                     |
 
 Rung (d) requires reconciler-level work (continuation primitives, idempotency keys on tool dispatches, replay-safe side-effect markers) that isn't shipped in v2.0. The seam (`DurableJournal` factory slot) ships now so adapters can be built and tested incrementally; the framework consumes the slot once continuation primitives land.
 
@@ -364,23 +370,25 @@ Rung (d) requires reconciler-level work (continuation primitives, idempotency ke
 
 Adopters pick a cluster wire by deployment tier, NOT by intrinsic feature preference. The honest tier matrix:
 
-| Tier | Wire | Adopter config | When |
-|---|---|---|---|
-| **Dev / single-process** | none | `createApp(...)` (no `cluster:` option) | Local development, single-node tests. No clustering needed. |
-| **Single-host multi-worker** | Unix socket | `defineUnixCluster({ socketPath })` + optional `electableUnixClusterNode` for re-election | PM2 fork-mode, Node cluster module, worker pools on one large box. Auto-elect via `tryBindOrConnectUnix`; first-to-bind becomes broker. Re-election on broker death (Phase 4f.3) keeps the cluster healing without external supervisor restart. |
-| **Multi-host production** | Redis | `defineRedisCluster({ pubClient, subClient })` | Multi-host, k8s, anywhere across machines. Redis (Sentinel / Cluster / Valkey / KeyDB / Dragonfly) is the broker. HA / failover / monitoring are Redis's responsibility — adopters use their existing ops infrastructure, not ours. |
-| **Edge / Redis-allergic multi-host** | TCP or WebSocket | `defineTcpCluster` / `defineWsCluster` | Specialized: embedded deployments, air-gapped systems, "we don't want another infra dep." External supervisor (PM2 / systemd / k8s) provides HA. |
+| Tier                                 | Wire             | Adopter config                                                                            | When                                                                                                                                                                                                                                            |
+| ------------------------------------ | ---------------- | ----------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Dev / single-process**             | none             | `createApp(...)` (no `cluster:` option)                                                   | Local development, single-node tests. No clustering needed.                                                                                                                                                                                     |
+| **Single-host multi-worker**         | Unix socket      | `defineUnixCluster({ socketPath })` + optional `electableUnixClusterNode` for re-election | PM2 fork-mode, Node cluster module, worker pools on one large box. Auto-elect via `tryBindOrConnectUnix`; first-to-bind becomes broker. Re-election on broker death (Phase 4f.3) keeps the cluster healing without external supervisor restart. |
+| **Multi-host production**            | Redis            | `defineRedisCluster({ pubClient, subClient })`                                            | Multi-host, k8s, anywhere across machines. Redis (Sentinel / Cluster / Valkey / KeyDB / Dragonfly) is the broker. HA / failover / monitoring are Redis's responsibility — adopters use their existing ops infrastructure, not ours.             |
+| **Edge / Redis-allergic multi-host** | TCP or WebSocket | `defineTcpCluster` / `defineWsCluster`                                                    | Specialized: embedded deployments, air-gapped systems, "we don't want another infra dep." External supervisor (PM2 / systemd / k8s) provides HA.                                                                                                |
 
 **Mental model:** broker = "the thing that holds soft-state routing." For multi-host, Redis IS the broker. The TCP / Unix / WS broker we ship is the option for single-host (Unix) or specialized edge (TCP/WS) cases — not the recommended multi-host path. Multi-host production = Redis. Document that clearly to adopters so they don't reach for our broker when they want a production cluster.
 
 **Why no built-in HA for our broker?** External supervisor (PM2 / systemd / k8s) restart is the documented Phase 4 HA story. Internal re-election (Phase 4f.3) handles single-host scenarios where bind-race makes sense. Cross-host HA requires consensus (Raft, etcd-style) — the wrong-shape problem for v2.0 when Redis Sentinel solves it for free. We don't reinvent the HA wheel; we delegate to infrastructure adopters already operate.
 
 **Phase 4 hardening additions for the broker tiers:**
+
 - **4f.4 backpressure** — bounded per-connection write queue; one slow client can't stall fan-out (`BoundedWriteQueue` in `@agentick/cluster-broker-next`).
 - **4f.5 BrokerCodec adapter** — broker-frame schema separated from envelope schema; one cast lives in the adapter, not scattered across call sites.
 - **4f.6 graceful shutdown** — `broker.close()` flushes pending Goodbye frames before tearing down the listener; adopters wire `process.on("SIGTERM")` for k8s rolling deploys.
 
 **Phase 5 candidates** (NOT committed in Phase 4):
+
 - DurableJournal adapter for Redis Streams (rung d).
 - `createGateway({ cluster })` fusion — adopter doesn't manage cluster manually; the gateway handles it.
 - Real-Redis conformance suite via docker-compose (Phase 4g.4 lands fake-Redis integration; real-Redis is its own infra task).

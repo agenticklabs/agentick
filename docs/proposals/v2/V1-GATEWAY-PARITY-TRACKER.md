@@ -52,7 +52,7 @@ feature reshaped into v2 extension or different harness location ·
       construction OR lazy factory (ADR 31 line 138 lists both as
       options; final shape decided during Phase 4 build).
 - [ ] **GG3. Cross-app event observation.** `gateway.events(filter?,
-  options?)` returns `AsyncIterable<ProtocolEvent>` aggregating
+options?)` returns `AsyncIterable<ProtocolEvent>` aggregating
       every app the gateway hosts. **Inherits from Phase C bus
       surface.**
 - [ ] **GG4. Lifecycle.** `closeGateway()` / `close()` alias.

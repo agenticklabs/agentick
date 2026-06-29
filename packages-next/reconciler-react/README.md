@@ -103,15 +103,15 @@ hardcoded in the renderer.
 
 ### When to reach for `renderTemplate` vs `createApp`
 
-| Use case | Reach for |
-|----------|-----------|
-| **Authoring a prompt** | `renderTemplate` — render JSX to a string, hand to a model |
-| **MCP server prompt / resource body** | `renderTemplate` — server returns formatted text |
-| **Tool description with rich semantic content** | `renderTemplate` — `<Section>` / `<H1>` / `<Code>` etc. in your description, render once |
-| **Skill content** (`@agentick/skills-next`) | `renderTemplate` — JSX-authored skill bodies become wire strings |
-| **Snapshot tests for JSX templates** | `compileTemplate` — assert against a stable `RenderedTree` |
-| **Docs generator / static site that embeds prompts** | `renderTemplate` — JSX in, markdown out |
-| **Agentic loop, tool dispatch, hibernate/resume, channels, reactive `<Tool>`** | `createApp` — full reconciler harness |
+| Use case                                                                       | Reach for                                                                                |
+| ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
+| **Authoring a prompt**                                                         | `renderTemplate` — render JSX to a string, hand to a model                               |
+| **MCP server prompt / resource body**                                          | `renderTemplate` — server returns formatted text                                         |
+| **Tool description with rich semantic content**                                | `renderTemplate` — `<Section>` / `<H1>` / `<Code>` etc. in your description, render once |
+| **Skill content** (`@agentick/skills-next`)                                    | `renderTemplate` — JSX-authored skill bodies become wire strings                         |
+| **Snapshot tests for JSX templates**                                           | `compileTemplate` — assert against a stable `RenderedTree`                               |
+| **Docs generator / static site that embeds prompts**                           | `renderTemplate` — JSX in, markdown out                                                  |
+| **Agentic loop, tool dispatch, hibernate/resume, channels, reactive `<Tool>`** | `createApp` — full reconciler harness                                                    |
 
 ### What the template variants do NOT provide
 

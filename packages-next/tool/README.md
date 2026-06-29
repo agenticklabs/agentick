@@ -33,9 +33,9 @@ const app = createApp(<Agent />, { tools: [search] });
 
 ## Subpaths
 
-| Subpath                          | Purpose                                                                                    |
-| -------------------------------- | ------------------------------------------------------------------------------------------ |
-| `@agentick/tool-next`            | `createTool` + `Validator` + JSON-Schema helpers                                           |
+| Subpath                          | Purpose                                                                                     |
+| -------------------------------- | ------------------------------------------------------------------------------------------- |
+| `@agentick/tool-next`            | `createTool` + `Validator` + JSON-Schema helpers                                            |
 | `@agentick/tool-next/transforms` | `ToolTransform<C>` primitives for per-context tool-list projection (rename / filter / etc.) |
 
 ## Transforms — `@agentick/tool-next/transforms`
@@ -46,11 +46,22 @@ Library of `ToolTransform<C>` primitives that map / filter / rewrite `ToolDeclar
 import {
   applyTransform,
   composeTransforms,
-  allow, deny, filter, onlyExposingTo,
-  rename, renameBy, prefix, suffix,
-  describe, setTitle, setIcons,
-  replaceInputSchema, replaceOutputSchema, mapSchemas,
-  setMetadata, replaceMetadata,
+  allow,
+  deny,
+  filter,
+  onlyExposingTo,
+  rename,
+  renameBy,
+  prefix,
+  suffix,
+  describe,
+  setTitle,
+  setIcons,
+  replaceInputSchema,
+  replaceOutputSchema,
+  mapSchemas,
+  setMetadata,
+  replaceMetadata,
 } from "@agentick/tool-next/transforms";
 
 // Per-connection MCP-server-style projection:
@@ -74,36 +85,36 @@ const projectedTools = applyTransform(projection, gatewayTools, ctx);
 
 ### Primitive reference
 
-| Primitive | Purpose |
-|-----------|---------|
-| `composeTransforms(...ts)` | Compose N transforms left-to-right; first-null short-circuits |
-| `applyTransform(t, tools, ctx)` | Apply once to a list, dropping nulls |
-| `rename({ from: to })` | Explicit name map; `false` drops |
-| `renameBy(fn)` | Project new name from `(tool, ctx)` |
-| `prefix(str, { unlessAlready? })` | Prepend to name |
-| `suffix(str, { unlessAlready? })` | Append to name |
-| `describe({ name: text })` | Override description |
-| `setTitle({ name: text })` | Set `metadata.title` (MCP wire display) |
-| `setIcons({ name: [...] })` | Set `metadata.icons` (MCP wire display) |
-| `filter((tool, ctx) => bool)` | Drop where predicate is false |
-| `allow([names + regexps])` | Keep only matches |
-| `deny([names + regexps])` | Drop matches |
-| `onlyExposingTo(audience)` | Drop tools not exposing to the audience |
-| `replaceInputSchema({ name: schema })` | Swap inputSchema |
-| `replaceOutputSchema({ name: schema })` | Swap outputSchema (sets it even if absent) |
-| `mapSchemas({ mapInput?, mapOutput? })` | Generic mapper for both |
-| `setMetadata({ name: patch })` | Shallow-merge metadata |
-| `replaceMetadata({ name: replacement \| null })` | Replace or remove metadata wholesale |
+| Primitive                                        | Purpose                                                       |
+| ------------------------------------------------ | ------------------------------------------------------------- |
+| `composeTransforms(...ts)`                       | Compose N transforms left-to-right; first-null short-circuits |
+| `applyTransform(t, tools, ctx)`                  | Apply once to a list, dropping nulls                          |
+| `rename({ from: to })`                           | Explicit name map; `false` drops                              |
+| `renameBy(fn)`                                   | Project new name from `(tool, ctx)`                           |
+| `prefix(str, { unlessAlready? })`                | Prepend to name                                               |
+| `suffix(str, { unlessAlready? })`                | Append to name                                                |
+| `describe({ name: text })`                       | Override description                                          |
+| `setTitle({ name: text })`                       | Set `metadata.title` (MCP wire display)                       |
+| `setIcons({ name: [...] })`                      | Set `metadata.icons` (MCP wire display)                       |
+| `filter((tool, ctx) => bool)`                    | Drop where predicate is false                                 |
+| `allow([names + regexps])`                       | Keep only matches                                             |
+| `deny([names + regexps])`                        | Drop matches                                                  |
+| `onlyExposingTo(audience)`                       | Drop tools not exposing to the audience                       |
+| `replaceInputSchema({ name: schema })`           | Swap inputSchema                                              |
+| `replaceOutputSchema({ name: schema })`          | Swap outputSchema (sets it even if absent)                    |
+| `mapSchemas({ mapInput?, mapOutput? })`          | Generic mapper for both                                       |
+| `setMetadata({ name: patch })`                   | Shallow-merge metadata                                        |
+| `replaceMetadata({ name: replacement \| null })` | Replace or remove metadata wholesale                          |
 
 ### Composition order
 
 `composeTransforms` runs left-to-right. Order matters:
 
 ```ts
-composeTransforms(rename({ a: "b" }), prefix("api_"))
+composeTransforms(rename({ a: "b" }), prefix("api_"));
 // "a" → "b" → "api_b"
 
-composeTransforms(prefix("api_"), rename({ a: "b" }))
+composeTransforms(prefix("api_"), rename({ a: "b" }));
 // "a" → "api_a"  (rename only matches "a", which is now "api_a"; no-op)
 ```
 

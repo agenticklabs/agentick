@@ -82,19 +82,19 @@ gateway — see
 
 ### `createApp(rootElement, options)`
 
-| Field         | Type                                          | Notes                                                |
-| ------------- | --------------------------------------------- | ---------------------------------------------------- |
-| `executor`    | `LanguageModelExecutor` or factory            | Required. Wire to your model adapter.                |
-| `target`      | `ExecutionTarget`                             | Optional. Defaults to `executor.target`.             |
-| `reconciler`  | `ReconcilerHarness` or factory                | Required (omittable via `/react` subpath default).   |
-| `cluster`     | `ClusterFactory`                              | Optional. See "Cluster integration" above.           |
-| `tools`       | `ToolDeclaration[]`                           | App-scope tool registry. Threads to every session.   |
-| `extensions`  | `Extension[]`                                 | App + session extensions. Composed at construction.  |
-| `bus`         | `EventBus` or factory                         | Optional substrate override.                         |
-| `inbox`       | `MessageInbox` or factory                     | Optional substrate override.                         |
-| `journal`     | `OperationJournal` or factory                 | Optional substrate override.                         |
-| `metadata`    | `Record<string, unknown>`                     | Adopter-defined bag carried on the harness instance. |
-| `appId`       | `string`                                      | Defaults to `app:${ulid()}`.                         |
+| Field        | Type                               | Notes                                                |
+| ------------ | ---------------------------------- | ---------------------------------------------------- |
+| `executor`   | `LanguageModelExecutor` or factory | Required. Wire to your model adapter.                |
+| `target`     | `ExecutionTarget`                  | Optional. Defaults to `executor.target`.             |
+| `reconciler` | `ReconcilerHarness` or factory     | Required (omittable via `/react` subpath default).   |
+| `cluster`    | `ClusterFactory`                   | Optional. See "Cluster integration" above.           |
+| `tools`      | `ToolDeclaration[]`                | App-scope tool registry. Threads to every session.   |
+| `extensions` | `Extension[]`                      | App + session extensions. Composed at construction.  |
+| `bus`        | `EventBus` or factory              | Optional substrate override.                         |
+| `inbox`      | `MessageInbox` or factory          | Optional substrate override.                         |
+| `journal`    | `OperationJournal` or factory      | Optional substrate override.                         |
+| `metadata`   | `Record<string, unknown>`          | Adopter-defined bag carried on the harness instance. |
+| `appId`      | `string`                           | Defaults to `app:${ulid()}`.                         |
 
 Returns `Promise<AppHarness>` after substrate readiness signals.
 

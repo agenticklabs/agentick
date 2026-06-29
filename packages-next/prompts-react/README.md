@@ -47,12 +47,12 @@ await session.prompts.invoke({
 
 The renderer calls `compileTemplate(node)` and walks the resulting IR's context entries:
 
-| Authored JSX | Projected entry |
-|--------------|-----------------|
-| `<message role="...">...</message>` | passthrough `MessageEntry` (role preserved) |
-| `<section title="..."><p>…</p></section>` | absorbed into the running system-message buffer |
-| Loose text / headings / lists | absorbed into the running system-message buffer |
-| Section's `title` prop | leading `# title` text block in that buffered system message |
+| Authored JSX                              | Projected entry                                              |
+| ----------------------------------------- | ------------------------------------------------------------ |
+| `<message role="...">...</message>`       | passthrough `MessageEntry` (role preserved)                  |
+| `<section title="..."><p>…</p></section>` | absorbed into the running system-message buffer              |
+| Loose text / headings / lists             | absorbed into the running system-message buffer              |
+| Section's `title` prop                    | leading `# title` text block in that buffered system message |
 
 Explicit `<message>` JSX **flushes** the buffered system message, so authoring order is preserved on the wire. Two consecutive sections concatenate into a single system message whose content blocks are the parts.
 
@@ -69,9 +69,9 @@ This is the v1-equivalent of how regular Agentick agents handle non-message cont
 
 ```ts
 import {
-  reactPromptRenderer,       // singleton PromptRenderer
+  reactPromptRenderer, // singleton PromptRenderer
   createReactPromptRenderer, // factory — opts: { compile, handles }
-  withReactPrompts,          // SessionExtension factory (sugar over withPrompts)
+  withReactPrompts, // SessionExtension factory (sugar over withPrompts)
 } from "@agentick/prompts-react-next";
 ```
 
@@ -141,15 +141,18 @@ The renderer awaits `useData` suspends to completion (it's `compileTemplate` und
 ## Status & roadmap
 
 **Shipped:**
+
 - `reactPromptRenderer` + `createReactPromptRenderer`
 - `withReactPrompts` convenience extension
 - JSX → MessageEntry[] projection (passthrough + system-message buffering)
 
 **Planned:**
+
 - **React-specific loaders** (#247) — `fromReactModule` / `fromReactDirectory` for filesystem-backed prompt libraries
 - Adapter for v2 semantic components (`<H1>`/`<List>`/...) → richer content blocks beyond plain text
 
 **Known gaps:**
+
 - Loose content always projects to `system` role. If an adopter wants a different default role (e.g., loose text → user), they currently need to wrap each block in `<message>` explicitly.
 - Section ordering is preserved but the `id` field on sections is dropped during projection (it has no analogue in the wire `MessageEntry`).
 

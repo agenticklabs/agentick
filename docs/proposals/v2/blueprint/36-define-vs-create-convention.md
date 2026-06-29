@@ -37,22 +37,22 @@ The verb encodes the deferral, which encodes the dependency on parent substrate.
 
 ## Audit (the existing surface)
 
-| Name | Returns | Needs parent substrate? | Verb correct? |
-|---|---|---|---|
-| `defineExecutor` | `ExecutorFactory` | yes | ✅ |
-| `defineReconciler` | `ReconcilerFactory` | yes | ✅ |
-| `defineSession` | `SessionHarnessFactory` | yes | ✅ |
-| `defineLoop` | `LoopExecutorFactory` | yes | ✅ |
-| `defineToolExecutor` | `ToolExecutorFactory` | yes | ✅ |
-| `defineLanguageModelExecutor` | `Factory<…>` | yes | ✅ |
-| `defineCluster` (new) | `ClusterFactory` | yes — wraps app substrate | ✅ |
-| `defineFormatter` | `DefinedFormatter` directly | no | ❌ — rename `createFormatter` |
-| `createApp` | `Promise<AppHarness>` | no (outermost) | ✅ |
-| `app.createSession` | `Promise<Session>` | n/a (method on parent) | ✅ |
-| `createTool` | `CreatedTool` | no | ✅ |
-| `createLocalPubSub` | `LocalPubSub` | no | ✅ |
-| `createNotifier`, `createKeyedNotifier` | `Notifier`, `KeyedNotifier` | no | ✅ |
-| `defineApp` (alias) | `Promise<AppHarness>` | n/a | ❌ — drop alias |
+| Name                                    | Returns                     | Needs parent substrate?   | Verb correct?                 |
+| --------------------------------------- | --------------------------- | ------------------------- | ----------------------------- |
+| `defineExecutor`                        | `ExecutorFactory`           | yes                       | ✅                            |
+| `defineReconciler`                      | `ReconcilerFactory`         | yes                       | ✅                            |
+| `defineSession`                         | `SessionHarnessFactory`     | yes                       | ✅                            |
+| `defineLoop`                            | `LoopExecutorFactory`       | yes                       | ✅                            |
+| `defineToolExecutor`                    | `ToolExecutorFactory`       | yes                       | ✅                            |
+| `defineLanguageModelExecutor`           | `Factory<…>`                | yes                       | ✅                            |
+| `defineCluster` (new)                   | `ClusterFactory`            | yes — wraps app substrate | ✅                            |
+| `defineFormatter`                       | `DefinedFormatter` directly | no                        | ❌ — rename `createFormatter` |
+| `createApp`                             | `Promise<AppHarness>`       | no (outermost)            | ✅                            |
+| `app.createSession`                     | `Promise<Session>`          | n/a (method on parent)    | ✅                            |
+| `createTool`                            | `CreatedTool`               | no                        | ✅                            |
+| `createLocalPubSub`                     | `LocalPubSub`               | no                        | ✅                            |
+| `createNotifier`, `createKeyedNotifier` | `Notifier`, `KeyedNotifier` | no                        | ✅                            |
+| `defineApp` (alias)                     | `Promise<AppHarness>`       | n/a                       | ❌ — drop alias               |
 
 ## Adapter packages
 

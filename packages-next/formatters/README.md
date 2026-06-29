@@ -112,7 +112,8 @@ createFormatter({
   frameMessage: (entry, body) => `${entry.role}: |\n  ${body.replace(/\n/g, "\n  ")}`,
 
   // How the formatter's ContentBlock[] output becomes a single string
-  blocksToText: (blocks) => blocks.map((b) => ("text" in b ? b.text ?? "" : `[${b.type}]`)).join("\n"),
+  blocksToText: (blocks) =>
+    blocks.map((b) => ("text" in b ? (b.text ?? "") : `[${b.type}]`)).join("\n"),
 });
 ```
 
@@ -167,7 +168,12 @@ Tree-level IR → final string. The single entry point for "I have a
   `RenderedTree` shipped over the wire) and want the string
 
 ```ts
-import { formatTree, markdownFormatter, xmlFormatter, builtInFormatters } from "@agentick/formatters-next";
+import {
+  formatTree,
+  markdownFormatter,
+  xmlFormatter,
+  builtInFormatters,
+} from "@agentick/formatters-next";
 
 // Simple — single formatter for everything; ignores entry.renderedWith.
 const md = formatTree(tree, markdownFormatter);

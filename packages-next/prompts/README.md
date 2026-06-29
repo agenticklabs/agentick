@@ -10,12 +10,12 @@ Mirrors MCP's `prompts/*` shape per [ADR 23](../../docs/proposals/v2/blueprint/2
 
 The core handles two content shapes natively. Anything else flows through a registered `PromptRenderer`.
 
-| Content type | Where rendered | Output |
-|--------------|----------------|--------|
-| `string` | core | single `system`-role `MessageEntry` |
-| `readonly MessageEntry[]` | core | passthrough — used as-is |
-| `ReactNode` | [`@agentick/prompts-react-next`](../prompts-react) (binding) | compiled via `renderTemplate` to `MessageEntry[]` |
-| Custom (Solid / Angular / domain-specific) | adopter-registered `PromptRenderer` | adopter-defined |
+| Content type                               | Where rendered                                               | Output                                            |
+| ------------------------------------------ | ------------------------------------------------------------ | ------------------------------------------------- |
+| `string`                                   | core                                                         | single `system`-role `MessageEntry`               |
+| `readonly MessageEntry[]`                  | core                                                         | passthrough — used as-is                          |
+| `ReactNode`                                | [`@agentick/prompts-react-next`](../prompts-react) (binding) | compiled via `renderTemplate` to `MessageEntry[]` |
+| Custom (Solid / Angular / domain-specific) | adopter-registered `PromptRenderer`                          | adopter-defined                                   |
 
 ## Quick start — text-only (no framework)
 
@@ -79,8 +79,8 @@ Drop to the full `withPrompts` surface; supply multiple renderers + multiple loa
 withPrompts({
   renderers: [reactPromptRenderer, angularPromptRenderer],
   loaders: [
-    fromDirectory("./prompts/text/"),          // markdown — framework-agnostic
-    fromReactDirectory("./prompts/react/"),    // compiled .tsx
+    fromDirectory("./prompts/text/"), // markdown — framework-agnostic
+    fromReactDirectory("./prompts/react/"), // compiled .tsx
     fromAngularDirectory("./prompts/angular/"), // future
   ],
 });
@@ -90,18 +90,18 @@ Each prompt's `render(args)` returns the content shape its renderer handles. The
 
 ## API — `PromptsHandle` on `session.prompts`
 
-| Method | Async? | Effect |
-|--------|--------|--------|
-| `getDeclaration(name)` | sync | Read a declaration |
-| `has(name)` | sync | Existence check |
-| `list()` | sync | All declarations (sorted by name) |
-| `register({ declaration })` | async | Create. Throws `PromptAlreadyExists` on duplicate |
-| `update({ name, declaration })` | async | Partial update. Throws `PromptNotFound` if missing |
-| `remove({ name })` | async | Delete. Idempotent |
-| `invoke({ name, args? })` | async | Render + queue to timeline; returns `PromptsGetResult` |
-| `get({ name, args? })` | async | Render only; returns `PromptsGetResult` without queueing |
-| `subscribe(name, listener)` | sync | Listen for a specific prompt's mutations |
-| `subscribeAll(listener)` | sync | Listen for any mutation |
+| Method                          | Async? | Effect                                                   |
+| ------------------------------- | ------ | -------------------------------------------------------- |
+| `getDeclaration(name)`          | sync   | Read a declaration                                       |
+| `has(name)`                     | sync   | Existence check                                          |
+| `list()`                        | sync   | All declarations (sorted by name)                        |
+| `register({ declaration })`     | async  | Create. Throws `PromptAlreadyExists` on duplicate        |
+| `update({ name, declaration })` | async  | Partial update. Throws `PromptNotFound` if missing       |
+| `remove({ name })`              | async  | Delete. Idempotent                                       |
+| `invoke({ name, args? })`       | async  | Render + queue to timeline; returns `PromptsGetResult`   |
+| `get({ name, args? })`          | async  | Render only; returns `PromptsGetResult` without queueing |
+| `subscribe(name, listener)`     | sync   | Listen for a specific prompt's mutations                 |
+| `subscribeAll(listener)`        | sync   | Listen for any mutation                                  |
 
 ### `invoke` vs `get`
 
@@ -128,16 +128,16 @@ interface PromptDeclaration {
   name: string;
   description: string;
   arguments?: PromptArgument[];
-  template?: unknown;                                         // static; framework-typed at adapter layer
-  render?: (args: Record<string, unknown>) => unknown;       // dynamic
+  template?: unknown; // static; framework-typed at adapter layer
+  render?: (args: Record<string, unknown>) => unknown; // dynamic
   metadata?: Record<string, unknown>;
 }
 
 interface PromptArgument {
   name: string;
   description?: string;
-  schema?: StandardSchemaV1;   // optional — when omitted, no shape check
-  required?: boolean;          // default false
+  schema?: StandardSchemaV1; // optional — when omitted, no shape check
+  required?: boolean; // default false
 }
 ```
 
@@ -202,11 +202,11 @@ withPrompts({
 }),
 ```
 
-| Factory                                | Source     | Carries `render`?                                                                                                |
-| -------------------------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------- |
-| `fromArray(prompts)`                   | in-memory  | yes — same JS module, functions intact                                                                           |
-| `fromModule({ specifier, picker? })`   | dynamic import | yes — picker defaults to `module.default` (single or array) then named `module.prompts`                          |
-| `fromStaticUrl({ url, ... })`          | JSON manifest | **no** — load fails if any returned prompt names a `render` field; adopters use `fromModule` for dynamic prompts |
+| Factory                              | Source         | Carries `render`?                                                                                                |
+| ------------------------------------ | -------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `fromArray(prompts)`                 | in-memory      | yes — same JS module, functions intact                                                                           |
+| `fromModule({ specifier, picker? })` | dynamic import | yes — picker defaults to `module.default` (single or array) then named `module.prompts`                          |
+| `fromStaticUrl({ url, ... })`        | JSON manifest  | **no** — load fails if any returned prompt names a `render` field; adopters use `fromModule` for dynamic prompts |
 
 No `fromFile` / `fromDirectory` here — JSX `.tsx` files on disk need a bundler / transform pipeline. Framework bindings can supply their own filesystem factories (e.g., a future `@agentick/prompts-react-next/loaders/node`).
 
@@ -237,6 +237,7 @@ const decl = await session.prompts.require("must_exist");
 ## Status & roadmap
 
 **Shipped:**
+
 - `PromptsHarness` reference impl (in-memory, journal-backed)
 - `withPrompts` session-extension factory (accepts `loaders`)
 - `PromptLoader[]` — `fromArray` / `fromModule` / `fromStaticUrl` on the `/loaders` subpath
@@ -245,10 +246,12 @@ const decl = await session.prompts.require("must_exist");
 - Module augmentation: `session.prompts` typed via `PromptsHandle`
 
 **Planned:**
+
 - SQLite / remote backend impls
 - `MCP server harness` integration (#171) — projects our prompts onto MCP `prompts/list` + `prompts/get`
 
 **Known gaps:**
+
 - No transaction support across multi-prompt mutations
 - No per-prompt ACL (all session participants share one library)
 - `update` is partial-shallow; nested metadata merge is intentional but `arguments` array replace-not-merge (full-replace semantics for the array as a whole)

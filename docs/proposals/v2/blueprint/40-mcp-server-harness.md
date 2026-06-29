@@ -56,21 +56,21 @@ The discussion on 2026-06-28 surfaced that neither matches the deployment shape 
 
 - An MCP server is multi-tenant. Multiple unrelated clients connect concurrently. Sessions are single-conversation. Putting a server inside a session forces session-per-connection, which destroys the multi-tenant property.
 - An MCP server's tool surface is configured at deploy time by an operator. A session author writes "what does THIS agent do." Those are different stakeholders, different rev cycles. JSX inside an agent file mixes them.
-- The JSX-in-agent model is right for things the model perceives and influences within a turn (sections, tools the model can call, knobs it can read). An MCP server is *infrastructure the agent is unaware of*. The agent is a CLIENT of MCP servers (via `withMCP`); the agent does not host them.
+- The JSX-in-agent model is right for things the model perceives and influences within a turn (sections, tools the model can call, knobs it can read). An MCP server is _infrastructure the agent is unaware of_. The agent is a CLIENT of MCP servers (via `withMCP`); the agent does not host them.
 
 ### What we have now that v1 didn't
 
 ADR 23 reaffirmed: MCP semantics ARE Agentick's native semantics. Concretely, the v2 substrate already has the primitives a server needs to project, with minimal translation:
 
-| MCP wire concept                | v2 source of truth                              | Translation needed?            |
-| ------------------------------- | ----------------------------------------------- | ------------------------------ |
-| `tools/list`, `tools/call`      | `@agentick/tool-next` registry + `createTool`   | None — `createTool` IS the MCP shape |
-| `prompts/list`, `prompts/get`   | `@agentick/prompts-next` (`PromptsHarness`)     | None — mirror is exact         |
-| `elicitation/create` (server→client) | `@agentick/elicitation-next` (`ElicitationHarness`) | None         |
-| `tasks/list`, `tasks/get`, taskSupport | `@agentick/tasks-next` (`TasksHarness`) | None — already cluster-aware  |
-| `sampling/createMessage` (server→client) | `SamplingHarness` (pending)                | Bridge needed (not v1-shape direct call) |
-| `resources/list`, `resources/read` | `@agentick/resources-next` (#123, pending)   | Bridge needed when #123 lands  |
-| `roots/list`                    | Workspace bridge (#124, pending)                | Bridge needed                  |
+| MCP wire concept                         | v2 source of truth                                  | Translation needed?                      |
+| ---------------------------------------- | --------------------------------------------------- | ---------------------------------------- |
+| `tools/list`, `tools/call`               | `@agentick/tool-next` registry + `createTool`       | None — `createTool` IS the MCP shape     |
+| `prompts/list`, `prompts/get`            | `@agentick/prompts-next` (`PromptsHarness`)         | None — mirror is exact                   |
+| `elicitation/create` (server→client)     | `@agentick/elicitation-next` (`ElicitationHarness`) | None                                     |
+| `tasks/list`, `tasks/get`, taskSupport   | `@agentick/tasks-next` (`TasksHarness`)             | None — already cluster-aware             |
+| `sampling/createMessage` (server→client) | `SamplingHarness` (pending)                         | Bridge needed (not v1-shape direct call) |
+| `resources/list`, `resources/read`       | `@agentick/resources-next` (#123, pending)          | Bridge needed when #123 lands            |
+| `roots/list`                             | Workspace bridge (#124, pending)                    | Bridge needed                            |
 
 All but the bottom three are ready today. The MCP server harness composes the existing harnesses + bridges; it does NOT own state for things the harnesses already own.
 
@@ -297,17 +297,15 @@ A `ToolTransform<C = MCPRequestContext>` is:
 
 ```ts
 interface ToolTransform<C = unknown> {
-  readonly name: string;  // debug + transform-trace
-  readonly apply: (
-    tool: ToolDeclaration,
-    ctx: C,
-  ) => ToolDeclaration | null;  // null = drop
+  readonly name: string; // debug + transform-trace
+  readonly apply: (tool: ToolDeclaration, ctx: C) => ToolDeclaration | null; // null = drop
 }
 ```
 
 Compose via `composeTransforms(...transforms)` → single transform that applies in array order.
 
 **Shipped primitives** (initial set):
+
 - `rename({ from: to, ... })` — explicit map
 - `prefix(p)` — prepend to every tool name
 - `suffix(s)`
@@ -336,12 +334,12 @@ Ported from v1 verbatim, with one structural change: stages are functions (not c
 
 Defaults — applied per transport type unless overridden:
 
-| Transport     | ConnectionGuard | Authenticator   | Authorizer    | RateLimiter   | InputSanitizer  |
-|---------------|-----------------|------------------|----------------|----------------|------------------|
-| stdio         | allowAll        | allowAll         | allowAll       | allowAll       | passthrough      |
-| in-memory     | allowAll        | allowAll         | allowAll       | allowAll       | passthrough      |
-| HTTP          | localOnly       | **rejectAll**   | allowAll       | allowAll       | passthrough      |
-| WebSocket     | localOnly       | **rejectAll**   | allowAll       | allowAll       | passthrough      |
+| Transport | ConnectionGuard | Authenticator | Authorizer | RateLimiter | InputSanitizer |
+| --------- | --------------- | ------------- | ---------- | ----------- | -------------- |
+| stdio     | allowAll        | allowAll      | allowAll   | allowAll    | passthrough    |
+| in-memory | allowAll        | allowAll      | allowAll   | allowAll    | passthrough    |
+| HTTP      | localOnly       | **rejectAll** | allowAll   | allowAll    | passthrough    |
+| WebSocket | localOnly       | **rejectAll** | allowAll   | allowAll    | passthrough    |
 
 `rejectAll` is intentional: HTTP/WS adopters must explicitly configure an authenticator. Refusing all unauthenticated requests is the safe default; the framework will not silently expose internal tools on a network port.
 
@@ -408,6 +406,7 @@ No "we support X but return empty list" surfaces. Clients can rely on advertised
 ### 9. Resources deferral
 
 `McpServerConfig.resources` is an optional slot. When absent:
+
 - `resources` capability is NOT advertised
 - `resources/list` and `resources/read` would be `Method not found` (but clients won't send them without the capability)
 - `notifications/resources/list_changed` is never emitted
@@ -448,6 +447,7 @@ Per ADR 38 (cluster lifecycle + ownership rules):
 - **Mode A (standalone):** the shell owns it. SIGINT triggers the same close path.
 
 Within a server:
+
 - Each `Connection` is owned by the harness and tracked in an internal `Map<ConnectionId, Connection>`.
 - Transport-level disconnects cause `Connection.close()` to fire; harness removes the entry.
 - Harness shutdown iterates over `Map`, drains each, then closes transports.
@@ -491,19 +491,19 @@ Total estimate: ~16 days of work. Not blocking on #123 or #124.
 ## Risks + mitigations
 
 1. **OAuth 2.1 spec interpretation drift.** The MCP authorization spec is still maturing; era-codec covers the wire-level differences but the AS/RS contract may evolve.
-   *Mitigation:* implement the Resource Server first (passive — validates tokens issued by any compliant AS); embedded AS is opt-in and can lag.
+   _Mitigation:_ implement the Resource Server first (passive — validates tokens issued by any compliant AS); embedded AS is opt-in and can lag.
 
 2. **Direct projection's identity model is hand-wave-y.** "Synthetic in-process identity, defaults to 'service-account'" needs to be tightened.
-   *Mitigation:* expose `mcp://gateway/<name>?as=<principal>` URL form for explicit identity selection. Defer until first adopter scenario forces the decision.
+   _Mitigation:_ expose `mcp://gateway/<name>?as=<principal>` URL form for explicit identity selection. Defer until first adopter scenario forces the decision.
 
 3. **Per-connection per-request transforms may surprise on perf.** v1's audit notes filter+transform run on every request; for high-QPS connections this is non-trivial.
-   *Mitigation:* `composeTransforms` caches the composed function reference; per-call cost is the chain itself, not composition. If profiling shows hot, add a "static" config form (`tools: { filter, transforms, transformsCacheKey: (ctx) => ... }`) later.
+   _Mitigation:_ `composeTransforms` caches the composed function reference; per-call cost is the chain itself, not composition. If profiling shows hot, add a "static" config form (`tools: { filter, transforms, transformsCacheKey: (ctx) => ... }`) later.
 
 4. **Multi-server config grows unwieldy.** A gateway with 5 MCP servers + 3 transports each is a lot of TS.
-   *Mitigation:* the declarative shape is plain objects — adopters can factor into per-server modules and spread. No framework feature needed.
+   _Mitigation:_ the declarative shape is plain objects — adopters can factor into per-server modules and spread. No framework feature needed.
 
 5. **v1's tests don't fully translate.** v1's tool/resource/prompt registries live on the server; v2's live on the harnesses. v1 tests that drive server.tools.register(...) need rewriting.
-   *Mitigation:* expected; the v2 conformance suite is the new pin set. v1 tests serve as a feature checklist, not a reusable suite.
+   _Mitigation:_ expected; the v2 conformance suite is the new pin set. v1 tests serve as a feature checklist, not a reusable suite.
 
 ---
 

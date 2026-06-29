@@ -885,6 +885,9 @@ importers:
       '@agentick/tool-next':
         specifier: workspace:*
         version: link:../tool
+      '@agentick/utils-next':
+        specifier: workspace:*
+        version: link:../utils
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(zod@4.3.6)
@@ -907,9 +910,6 @@ importers:
       '@agentick/tasks-next':
         specifier: workspace:*
         version: link:../tasks
-      '@agentick/utils-next':
-        specifier: workspace:*
-        version: link:../utils
       '@types/react':
         specifier: ^19.2.5
         version: 19.2.13

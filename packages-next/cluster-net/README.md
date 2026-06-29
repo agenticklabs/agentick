@@ -141,21 +141,21 @@ const node = tcpClusterNode({ nodeId, host: "127.0.0.1", port: 9876 });
 
 ### High-level
 
-| Export                              | Role                                                                       |
-| ----------------------------------- | -------------------------------------------------------------------------- |
-| `defineTcpCluster(opts)`            | Returns a `ClusterFactory` for `createApp`/`createGateway` consumption     |
-| `defineUnixCluster(opts)`           | Same shape, Unix socket addressing                                         |
-| `joinTcpCluster(opts)`              | Returns a `ClusterNode` for side-channel use (Phase 4f.7 + ADR 38)         |
-| `joinUnixCluster(opts)`             | Unix variant with first-to-bind auto-election + re-election watcher       |
-| `tcpClusterNode(opts)`              | Returns `{ transport, membership }` over one multiplexed connection        |
-| `unixClusterNode(opts)`             | Unix variant                                                               |
-| `electableUnixClusterNode(opts)`    | `unixClusterNode` + internal re-election on broker death                   |
-| `tcpBroker(opts)`                   | Spins up + starts a `BaseBroker` on a TCP listener                         |
-| `unixBroker(opts)`                  | Unix variant (with stale-socket cleanup)                                   |
-| `tcpTransport` / `tcpMembership`    | Standalone factories — open their own connection (use `tcpClusterNode` to share) |
-| `unixTransport` / `unixMembership`  | Unix variants                                                              |
-| `tryBindOrConnect(opts)`            | TCP first-to-bind broker-election helper                                   |
-| `tryBindOrConnectUnix(opts)`        | Unix variant                                                               |
+| Export                             | Role                                                                             |
+| ---------------------------------- | -------------------------------------------------------------------------------- |
+| `defineTcpCluster(opts)`           | Returns a `ClusterFactory` for `createApp`/`createGateway` consumption           |
+| `defineUnixCluster(opts)`          | Same shape, Unix socket addressing                                               |
+| `joinTcpCluster(opts)`             | Returns a `ClusterNode` for side-channel use (Phase 4f.7 + ADR 38)               |
+| `joinUnixCluster(opts)`            | Unix variant with first-to-bind auto-election + re-election watcher              |
+| `tcpClusterNode(opts)`             | Returns `{ transport, membership }` over one multiplexed connection              |
+| `unixClusterNode(opts)`            | Unix variant                                                                     |
+| `electableUnixClusterNode(opts)`   | `unixClusterNode` + internal re-election on broker death                         |
+| `tcpBroker(opts)`                  | Spins up + starts a `BaseBroker` on a TCP listener                               |
+| `unixBroker(opts)`                 | Unix variant (with stale-socket cleanup)                                         |
+| `tcpTransport` / `tcpMembership`   | Standalone factories — open their own connection (use `tcpClusterNode` to share) |
+| `unixTransport` / `unixMembership` | Unix variants                                                                    |
+| `tryBindOrConnect(opts)`           | TCP first-to-bind broker-election helper                                         |
+| `tryBindOrConnectUnix(opts)`       | Unix variant                                                                     |
 
 ### Low-level
 

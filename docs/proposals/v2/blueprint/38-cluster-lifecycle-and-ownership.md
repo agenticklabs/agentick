@@ -2,8 +2,8 @@
 
 **Status:** DECIDED (Phase 5 implementation landed)
 
-The cluster protocol (ADR 35) defines the *seams*. This ADR pins
-*who calls them, when, and who owns the cleanup*. It is the manual
+The cluster protocol (ADR 35) defines the _seams_. This ADR pins
+_who calls them, when, and who owns the cleanup_. It is the manual
 adopters need to wire cluster into their app correctly without
 double-wrapping, lifecycle leaks, or routing corruption.
 
@@ -82,6 +82,7 @@ each invocation runs the body and stands up a fresh
 transport/membership pair.
 
 Symptoms of violating this rule:
+
 - Double broker connections (or double Redis pub/sub clients)
 - Every local emission fans out twice across the wire
 - Same nodeId → broker rejects the second client
@@ -177,13 +178,13 @@ and the documentation of all of the above.
 Every required arg has a default, EXCEPT wire-specific addressing.
 Minimum-viable adopter call by tier:
 
-| Wire   | Minimum call                                                                    |
-| ------ | ------------------------------------------------------------------------------- |
-| Unix   | `defineUnixCluster({ socketPath: "..." })`                                      |
-| TCP    | `defineTcpCluster({ port: 9876 })` *(host defaults to `"127.0.0.1"`)*           |
-| WS     | `defineWsCluster({ url: "ws://127.0.0.1:9876/cluster" })`                       |
-| Redis  | `defineRedisCluster({ pubClient: ..., subClient: ... })`                        |
-| Local  | `defineLocalCluster({ nodeId: "test-node" })` *(testing — `@agentick/cluster-next/testing`)* |
+| Wire  | Minimum call                                                                                 |
+| ----- | -------------------------------------------------------------------------------------------- |
+| Unix  | `defineUnixCluster({ socketPath: "..." })`                                                   |
+| TCP   | `defineTcpCluster({ port: 9876 })` _(host defaults to `"127.0.0.1"`)_                        |
+| WS    | `defineWsCluster({ url: "ws://127.0.0.1:9876/cluster" })`                                    |
+| Redis | `defineRedisCluster({ pubClient: ..., subClient: ... })`                                     |
+| Local | `defineLocalCluster({ nodeId: "test-node" })` _(testing — `@agentick/cluster-next/testing`)_ |
 
 `partitioning`, `codec`, `fanoutMode`, `journal`, `nodeId` all
 default. Adopters override only when they have a reason.
