@@ -10,6 +10,7 @@
 export { SPEC_VERSION, type SpecVersion } from "./version.js";
 
 export * from "./data/index.js";
+export * from "./errors/index.js";
 export * from "./protocol/index.js";
 export * from "./wire/index.js";
 export * from "./client/index.js";
