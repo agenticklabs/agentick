@@ -57,7 +57,7 @@ function staticHandlers(
   return (ref: string) => {
     const handler = map[ref];
     if (!handler) return null;
-    return async (input) => handler(input);
+    return async (input) => ({ kind: "inline", content: await handler(input) });
   };
 }
 

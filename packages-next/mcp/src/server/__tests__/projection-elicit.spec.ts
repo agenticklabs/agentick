@@ -68,7 +68,8 @@ async function makeElicitServer(
   const transport = inMemoryServerTransport();
   const resolveHandler: ToolHandlerResolver = (ref) => {
     const handler = handlers[ref];
-    return handler ?? null;
+    if (!handler) return null;
+    return async (input, ctx) => ({ kind: "inline", content: await handler(input, ctx) });
   };
   const harness = new McpServerHarness(
     `srv:${ulid()}`,
@@ -207,7 +208,7 @@ describe("elicitation projection — ctx.elicit presence", () => {
           registry: [tool("probe")],
           resolveHandler: () => async (_input, ctx) => {
             elicitPresent = ctx.elicit !== undefined;
-            return [{ type: "text", text: "ok" }];
+            return { kind: "inline", content: [{ type: "text", text: "ok" }] };
           },
         },
         serverInfo: { name: "test", version: "0.0.0" },

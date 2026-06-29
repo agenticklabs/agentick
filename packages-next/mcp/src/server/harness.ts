@@ -489,9 +489,7 @@ export class McpServerHarness
     // so the tools projection can register handles + the tasks
     // projection can serve tasks/get / tasks/result / tasks/cancel /
     // tasks/list. Cleared on transport close.
-    const tasksRegistry = this.hasTasksWired
-      ? createServerTaskRegistry(sdkServer, this.serverTasks)
-      : undefined;
+    const tasksRegistry = this.hasTasksWired ? createServerTaskRegistry(sdkServer) : undefined;
 
     if (!isNull(this.resolvedTools) && this.resolvedTools.registry.length > 0) {
       const tools = this.resolvedTools;

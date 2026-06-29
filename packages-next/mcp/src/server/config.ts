@@ -29,7 +29,7 @@ import {
   type Prompts,
   type ToolDeclaration,
 } from "@agentick/spec-next";
-import type { CreatedTool } from "@agentick/tool-next";
+import { isCreatedTool, type CreatedTool } from "@agentick/tool-next";
 import type { ToolTransform } from "@agentick/tool-next/transforms";
 
 import type {
@@ -40,7 +40,7 @@ import type {
   RateLimiter,
 } from "./security/stages.js";
 import type { ServerTransport } from "./transports/types.js";
-import type { ToolHandlerResolver, ToolInvokeResolver } from "./projection/tools.js";
+import type { ToolHandlerResolver } from "./projection/tools.js";
 
 /**
  * Per-connection visibility predicate for tools. Hidden tools are
@@ -385,41 +385,11 @@ export interface ResolvedToolsOptions {
    * `null` for unknown handlerRefs (the projection surfaces this as
    * a tool-not-found `CallToolResult`).
    */
-  readonly resolveHandler: ToolInvokeResolver;
+  readonly resolveHandler: ToolHandlerResolver;
   /** Per-connection visibility predicate. */
   readonly filter: ToolsFilter | null;
   /** Per-connection name / metadata / schema transforms. */
   readonly transforms: readonly ToolTransform<McpRequestContext>[];
-}
-
-/**
- * Wrap an inline-only {@link ToolHandlerResolver} (the public low-
- * level escape hatch) as a Pattern-B-aware {@link ToolInvokeResolver}.
- * The wrapped form always returns `{kind:"inline"}` — adopters using
- * the raw `{registry, resolveHandler}` form opt out of Pattern B over
- * MCP automatically; if they want it, they switch to the
- * `tools: CreatedTool[]` form which the harness pipes through
- * isTaskHandle detection.
- */
-function adaptInlineResolver(inline: ToolHandlerResolver): ToolInvokeResolver {
-  return (handlerRef) => {
-    const handler = inline(handlerRef);
-    if (handler === null) return null;
-    return async (input, ctx) => {
-      const content = await handler(input, ctx);
-      return { kind: "inline", content };
-    };
-  };
-}
-
-function isCreatedTool(value: unknown): value is CreatedTool {
-  if (typeof value !== "object" || value === null) return false;
-  const obj = value as Record<string, unknown>;
-  return (
-    typeof obj.handlerRef === "string" &&
-    typeof obj.handler === "function" &&
-    typeof obj.declaration === "object"
-  );
 }
 
 /**
@@ -471,7 +441,7 @@ export function resolveToolsOption(option: McpServerToolsOptions): ResolvedTools
   }
   return {
     registry: cfg.registry,
-    resolveHandler: adaptInlineResolver(cfg.resolveHandler),
+    resolveHandler: cfg.resolveHandler,
     filter: cfg.filter ?? null,
     transforms: cfg.transforms ?? [],
   };

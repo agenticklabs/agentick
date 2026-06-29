@@ -61,10 +61,12 @@ import type { ResolvedSecurity } from "../security/stages.js";
  *     `TaskHandle`. Projection registers it with the server task
  *     registry and returns a `CreateTaskResult` on the wire.
  *
- * This shape is INTERNAL to the v2 projection — the low-level
- * `{ registry, resolveHandler }` escape hatch still uses the legacy
- * inline-only signature via {@link InlineToolHandlerResolver}; the
- * harness adapts between the two shapes at resolution time.
+ * Adopters using the `tools: CreatedTool[]` form get this shape
+ * built for them automatically (the framework inspects the handler
+ * return via `isTaskHandle`). Adopters dropping to the low-level
+ * `{ registry, resolveHandler }` escape hatch return this shape
+ * directly — Pattern B is available there too if the resolver opts
+ * in.
  */
 export type ToolHandlerInvokeResult =
   | { readonly kind: "inline"; readonly content: readonly ContentBlock[] }
@@ -74,26 +76,12 @@ export type ToolHandlerInvokeResult =
  * Handler-resolution callback. The tool-executor (or test harness)
  * provides this — the projection layer doesn't know about the
  * tool-executor registry. Given a `handlerRef`, return the concrete
- * async handler. Inline-only — the low-level form predates Pattern B.
+ * async handler.
  *
  * Return `null` for unknown refs — the projection turns this into a
  * tool-not-found `CallToolResult` (NOT a protocol error).
- *
- * Adopters using the `tools: CreatedTool[]` form get Pattern B
- * automatically (the harness wraps every `TaskHandle` return into a
- * {@link ToolHandlerInvokeResult}); adopters dropping to the
- * low-level `registry + resolveHandler` escape hatch stay inline.
  */
 export type ToolHandlerResolver = (
-  handlerRef: string,
-) => ((input: unknown, ctx: McpRequestContext) => Promise<readonly ContentBlock[]>) | null;
-
-/**
- * Internal Pattern-B-aware resolver — used by the projection.
- * Builds on the public `ToolHandlerResolver` plus an optional
- * `ServerTaskRegistry` for Pattern B handler returns.
- */
-export type ToolInvokeResolver = (
   handlerRef: string,
 ) => ((input: unknown, ctx: McpRequestContext) => Promise<ToolHandlerInvokeResult>) | null;
 
@@ -106,7 +94,7 @@ export interface ToolsProjectionOptions {
    * union so the projection can route TaskHandle returns to the
    * server task registry (#171d.3).
    */
-  readonly resolveHandler: ToolInvokeResolver;
+  readonly resolveHandler: ToolHandlerResolver;
   /**
    * Per-connection task registry. Required for Pattern B routing;
    * when omitted, TaskHandle returns from handlers surface as a

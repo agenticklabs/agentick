@@ -151,7 +151,7 @@ describe("MCP server tasks projection — Pattern B over the wire", () => {
           { method: "tools/call", params: { name: "lint_repo", arguments: { strict: false } } },
           CallToolResultSchema.passthrough(),
         );
-        const taskField = (raw as { task?: { taskId: string; status: string } }).task;
+        const taskField = (raw as unknown as { task?: { taskId: string; status: string } }).task;
         expect(taskField).toBeDefined();
         expect(taskField?.taskId).toMatch(/^task:/);
         // Status is "working" immediately after submit; race-tolerant —
@@ -174,7 +174,7 @@ describe("MCP server tasks projection — Pattern B over the wire", () => {
           { method: "tools/call", params: { name: "lint_repo", arguments: {} } },
           CallToolResultSchema.passthrough(),
         );
-        const taskId = (callRaw as { task: { taskId: string } }).task.taskId;
+        const taskId = (callRaw as unknown as { task: { taskId: string } }).task.taskId;
         const snapshot = await client.request(
           { method: "tasks/get", params: { taskId } },
           GetTaskResultSchema,
@@ -198,13 +198,14 @@ describe("MCP server tasks projection — Pattern B over the wire", () => {
           { method: "tools/call", params: { name: "lint_repo", arguments: { strict: true } } },
           CallToolResultSchema.passthrough(),
         );
-        const taskId = (callRaw as { task: { taskId: string } }).task.taskId;
+        const taskId = (callRaw as unknown as { task: { taskId: string } }).task.taskId;
         const payload = await client.request(
           { method: "tasks/result", params: { taskId } },
           GetTaskPayloadResultSchema,
         );
         expect(payload.isError).toBe(false);
-        const text = (payload.content[0] as { type: string; text: string }).text;
+        const content = payload.content as ReadonlyArray<{ type: string; text: string }>;
+        const text = content[0]!.text;
         expect(text).toMatch(/lint complete — 0 errors, 0 warnings \(strict\)/);
       } finally {
         await client.close();
@@ -250,7 +251,7 @@ describe("MCP server tasks projection — Pattern B over the wire", () => {
           { method: "tools/call", params: { name: "lint_repo", arguments: {} } },
           CallToolResultSchema.passthrough(),
         );
-        const taskId = (callRaw as { task: { taskId: string } }).task.taskId;
+        const taskId = (callRaw as unknown as { task: { taskId: string } }).task.taskId;
         const cancelResult = await client.request(
           { method: "tasks/cancel", params: { taskId } },
           CancelTaskResultSchema,

@@ -113,17 +113,22 @@ describe("resolveToolsOption — form C: config object with inline tools", () =>
 });
 
 describe("resolveToolsOption — form C: low-level registry + resolveHandler", () => {
-  it("passes through the canonical pair, wrapping inline resolver as Pattern-B-aware", async () => {
+  it("passes through the canonical pair unchanged", async () => {
     const reg = [decl("a", "ref:a")];
-    // Inline resolver — Pattern B unavailable on this path; the
-    // harness wraps the return as `{kind:"inline"}` so the projection
-    // layer routes through the inline `CallToolResult` branch.
+    // Low-level resolver returns the Pattern-B-aware discriminated
+    // union directly. Resolver can return `{kind:"task"}` from any
+    // handler — Pattern B is available on this path too post-#171d.3
+    // (the public ToolHandlerResolver shape covers both).
     const resolver = (ref: string) =>
-      ref === "ref:a" ? async () => [{ type: "text" as const, text: "alpha" }] : null;
+      ref === "ref:a"
+        ? async () => ({
+            kind: "inline" as const,
+            content: [{ type: "text" as const, text: "alpha" }],
+          })
+        : null;
     const resolved = resolveToolsOption({ registry: reg, resolveHandler: resolver });
     expect(resolved.registry).toBe(reg);
-    // The resolveHandler is adapted (not reference-equal) — verify
-    // behaviorally instead.
+    expect(resolved.resolveHandler).toBe(resolver); // No adapter — reference equality holds.
     const handler = resolved.resolveHandler("ref:a");
     expect(handler).not.toBeNull();
     const result = await handler!({}, fakeCtx());

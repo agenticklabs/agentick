@@ -11,5 +11,5 @@
  * @see docs/proposals/v2/blueprint/07-tool-executor.md
  */
 
-export { createTool, type ToolSpec, type CreatedTool } from "./create-tool.js";
+export { createTool, isCreatedTool, type ToolSpec, type CreatedTool } from "./create-tool.js";
 export { permissiveValidator, fromStandardSchema } from "./validator.js";

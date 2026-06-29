@@ -33,13 +33,9 @@ import {
   type CreateTaskResult,
   type CallToolResult,
 } from "@modelcontextprotocol/sdk/types.js";
-import type {
-  ContentBlock,
-  TasksHarnessProtocol,
-  TaskHandle,
-  TaskInfo,
-  TaskStatus,
-} from "@agentick/spec-next";
+import type { ContentBlock, TaskHandle, TaskInfo, TaskStatus } from "@agentick/spec-next";
+
+import { TASK_STATUS_NOTIFICATION_METHOD } from "../../wire/task-codec.js";
 
 // ============================================================================
 // Wire-shape helpers
@@ -72,7 +68,7 @@ function wireTaskFromInfo(info: TaskInfo): {
     status: toWireStatus(info.status),
     ttl: info.ttl,
     createdAt: new Date(info.createdAt).toISOString(),
-    lastUpdatedAt: new Date(info.lastUpdatedAt ?? info.createdAt).toISOString(),
+    lastUpdatedAt: new Date(info.lastUpdatedAt).toISOString(),
     ...(info.pollInterval !== undefined ? { pollInterval: info.pollInterval } : {}),
     ...(info.statusMessage !== undefined ? { statusMessage: info.statusMessage } : {}),
   };
@@ -131,10 +127,7 @@ export interface ServerTaskRegistry {
  * naturally; `stop()` only short-circuits an in-flight iteration on
  * forced clear (harness close, transport down).
  */
-export function createServerTaskRegistry(
-  sdkServer: SdkServer,
-  _tasks: TasksHarnessProtocol,
-): ServerTaskRegistry {
+export function createServerTaskRegistry(sdkServer: SdkServer): ServerTaskRegistry {
   const handles = new Map<string, RegisteredTask>();
 
   return {
@@ -164,7 +157,7 @@ export function createServerTaskRegistry(
             if (event.kind === "status") {
               try {
                 await sdkServer.notification({
-                  method: "notifications/tasks/status",
+                  method: TASK_STATUS_NOTIFICATION_METHOD,
                   params: {
                     taskId: handle.taskId,
                     status: toWireStatus(event.info.status),

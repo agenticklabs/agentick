@@ -108,6 +108,27 @@ export interface CreatedTool {
   readonly validator: Validator;
 }
 
+/**
+ * Structural type guard for {@link CreatedTool}. Discriminates the
+ * `createTool` registration bundle from a raw `ToolDeclaration`,
+ * other plain objects, or arbitrary runtime values.
+ *
+ * Used by registries that accept BOTH `CreatedTool[]` shorthand AND
+ * raw declarations (e.g., the `mcp-next/server` tools slot). Living
+ * in this package keeps the guard next to the type it discriminates
+ * — no duplicated structural checks scattered across consumers.
+ */
+export function isCreatedTool(value: unknown): value is CreatedTool {
+  if (value === null || typeof value !== "object") return false;
+  const obj = value as Record<string, unknown>;
+  return (
+    typeof obj.handlerRef === "string" &&
+    typeof obj.handler === "function" &&
+    typeof obj.declaration === "object" &&
+    obj.declaration !== null
+  );
+}
+
 // ============================================================================
 // createTool
 // ============================================================================
