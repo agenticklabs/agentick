@@ -36,7 +36,11 @@ interface Fixture {
   ) => (input: Readonly<Record<string, unknown>>) => Promise<readonly ContentBlock[]>;
 }
 
-async function fixture(sessionId = "test-session"): Promise<Fixture> {
+interface FixtureOptions {
+  readonly getNamespace?: (name: string) => unknown;
+}
+
+async function fixture(sessionId = "test-session", options: FixtureOptions = {}): Promise<Fixture> {
   const journal = new MemoryJournal();
   const bus = new LocalEventBus();
   const inbox = new LocalInbox();
@@ -44,7 +48,7 @@ async function fixture(sessionId = "test-session"): Promise<Fixture> {
   const tasks = new TasksHarness(`${sessionId}:tasks`, journal, bus, inbox);
   await tasks.ready;
 
-  const bundle = buildSessionTasksTools(sessionId);
+  const bundle = buildSessionTasksTools(sessionId, options.getNamespace);
   const handlersByName = new Map<string, (typeof bundle.handlers)[number]["handler"]>();
   for (const reg of bundle.registrations) {
     const handler = bundle.handlers.find((h) => h.handlerRef === reg.handlerRef);
@@ -105,6 +109,124 @@ describe("session_tasks_list", () => {
       const payload = parseJsonBlock(blocks) as { tasks: { taskId: string }[] };
       const ids = payload.tasks.map((t) => t.taskId).sort();
       expect(ids).toEqual([a.taskId, b.taskId].sort());
+    } finally {
+      await fx.close();
+    }
+  });
+
+  // ── Remote `tasks/list` integration (#175) ────────────────────────
+  //
+  // The list handler reads `bridges.mcp` structurally at call time and
+  // merges per-server `tasks/list` snapshots into the response. The
+  // structural shape under test: `{ clients: [{ serverId, harness:
+  // { listTasks(): Promise<{ tasks: [...] }> }}] }` — anything
+  // matching this contract works, no MCP package dep needed.
+
+  it("merges remote MCP tasks under `remote` when bridges.mcp is registered", async () => {
+    const remoteCall = { count: 0 };
+    const getNamespace = (name: string): unknown => {
+      if (name !== "mcp") return undefined;
+      return {
+        clients: [
+          {
+            serverId: "demo",
+            harness: {
+              listTasks: async () => {
+                remoteCall.count++;
+                return {
+                  tasks: [
+                    { taskId: "remote-1", status: "working", statusMessage: "scanning" },
+                    { taskId: "remote-2", status: "completed" },
+                  ],
+                };
+              },
+            },
+          },
+        ],
+      };
+    };
+    const fx = await fixture("test-merge", { getNamespace });
+    try {
+      const local = fx.tasks.submit(async () => [{ type: "text", text: "L" } as ContentBlock]);
+      const blocks = await fx.handlerOf(SESSION_TASKS_LIST)({});
+      const payload = parseJsonBlock(blocks) as {
+        tasks: { taskId: string }[];
+        remote: Array<{ serverId: string; tasks?: Array<{ taskId: string }> }>;
+      };
+      expect(remoteCall.count).toBe(1);
+      expect(payload.tasks.map((t) => t.taskId)).toContain(local.taskId);
+      expect(payload.remote).toHaveLength(1);
+      expect(payload.remote[0]?.serverId).toBe("demo");
+      expect(payload.remote[0]?.tasks?.map((t) => t.taskId).sort()).toEqual([
+        "remote-1",
+        "remote-2",
+      ]);
+    } finally {
+      await fx.close();
+    }
+  });
+
+  it("captures per-server errors without blanking the response", async () => {
+    const getNamespace = (name: string): unknown => {
+      if (name !== "mcp") return undefined;
+      return {
+        clients: [
+          {
+            serverId: "healthy",
+            harness: {
+              listTasks: async () => ({ tasks: [{ taskId: "ok-1", status: "working" }] }),
+            },
+          },
+          {
+            serverId: "broken",
+            harness: {
+              listTasks: async () => {
+                throw new Error("connection refused");
+              },
+            },
+          },
+          {
+            serverId: "ancient",
+            harness: {}, // no listTasks — server doesn't support tasks
+          },
+        ],
+      };
+    };
+    const fx = await fixture("test-errors", { getNamespace });
+    try {
+      const blocks = await fx.handlerOf(SESSION_TASKS_LIST)({});
+      const payload = parseJsonBlock(blocks) as {
+        tasks: unknown[];
+        remote: Array<{ serverId: string; tasks?: unknown[]; error?: string }>;
+      };
+      const byId = new Map(payload.remote.map((r) => [r.serverId, r]));
+      expect(byId.get("healthy")?.tasks).toHaveLength(1);
+      expect(byId.get("broken")?.error).toMatch(/connection refused/);
+      expect(byId.get("ancient")?.error).toBe("tasks-unsupported");
+    } finally {
+      await fx.close();
+    }
+  });
+
+  it("omits `remote` entirely when no MCP bridge is registered", async () => {
+    const fx = await fixture("test-no-mcp");
+    try {
+      const blocks = await fx.handlerOf(SESSION_TASKS_LIST)({});
+      const payload = parseJsonBlock(blocks);
+      expect(payload).toEqual({ tasks: [] });
+      expect("remote" in payload).toBe(false);
+    } finally {
+      await fx.close();
+    }
+  });
+
+  it("omits `remote` when the MCP bridge has zero clients", async () => {
+    const getNamespace = (name: string): unknown => (name === "mcp" ? { clients: [] } : undefined);
+    const fx = await fixture("test-empty-mcp", { getNamespace });
+    try {
+      const blocks = await fx.handlerOf(SESSION_TASKS_LIST)({});
+      const payload = parseJsonBlock(blocks);
+      expect("remote" in payload).toBe(false);
     } finally {
       await fx.close();
     }

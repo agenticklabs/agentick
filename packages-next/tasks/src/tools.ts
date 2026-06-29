@@ -83,10 +83,15 @@ function listDeclaration(localName: string, handlerRef: string): ToolDeclaration
     name: localName,
     description:
       `${TOOLS_DESCRIPTION_PREAMBLE} ` +
-      "List every framework background task known to this session — both " +
-      "in-flight and recently terminal. Returns `{ tasks: TaskInfo[] }`. " +
-      "Use this to discover tasks you may have started in earlier ticks but " +
-      "whose ids you no longer have.",
+      "List every framework background task known to this session — local " +
+      "tasks (in-flight + recently terminal) PLUS tasks living on each " +
+      "connected MCP server. Use this to discover tasks you may have started " +
+      "in earlier ticks but whose ids you no longer have, or to enumerate " +
+      "remote tasks spawned by sibling sessions sharing the server. " +
+      "Returns `{ tasks: TaskInfo[], remote?: Array<{ serverId, tasks? | error }> }` " +
+      "— `remote` is omitted when no MCP servers are connected; individual " +
+      "server entries carry an `error` string when that server's tasks/list " +
+      "query failed (server down, tasks-unsupported, etc).",
     inputSchema: jsonSchema({ type: "object", properties: {}, additionalProperties: false }),
     exposure: ["model", "dispatch"],
     handlerRef,
@@ -191,10 +196,75 @@ function isTaskRejection(value: unknown): value is TaskRejectionLike {
   );
 }
 
-const listHandler: ToolHandler = async (_input, { ctx }) => {
-  const tasks = ctx.tasks?.list() ?? ([] as readonly TaskInfo[]);
-  return jsonBlock({ tasks });
-};
+/**
+ * Structural shape of `bridges.mcp` — the slot withMCP populates. We
+ * intentionally don't import from `@agentick/mcp-next` (this package
+ * is a substrate primitive; depending on the MCP integration would be
+ * a layering violation). The structural type captures only what the
+ * list handler reads. Adopters wiring custom MCP-style integrations
+ * can publish the same shape and get remote-task enumeration for free.
+ */
+interface RemoteTaskSummary {
+  readonly taskId: string;
+  readonly status: string;
+  readonly statusMessage?: string;
+  readonly ttl?: number;
+  readonly createdAt?: string;
+  readonly lastUpdatedAt?: string;
+}
+interface RemoteTaskSourceHandle {
+  readonly serverId: string;
+  readonly harness: {
+    readonly listTasks?: () => Promise<{ readonly tasks: ReadonlyArray<RemoteTaskSummary> }>;
+  };
+}
+interface RemoteTaskSourceBridge {
+  readonly clients: ReadonlyArray<RemoteTaskSourceHandle>;
+}
+
+function asRemoteTaskBridge(value: unknown): RemoteTaskSourceBridge | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const bridge = value as { readonly clients?: unknown };
+  if (!Array.isArray(bridge.clients)) return undefined;
+  return bridge as RemoteTaskSourceBridge;
+}
+
+/**
+ * Build the list handler closed over a per-session namespace lookup.
+ * The handler reads `bridges.mcp` (or any other remote-task source
+ * matching the structural {@link RemoteTaskSourceBridge} shape)
+ * lazily — `withTasks` and `withMCP` can install in either order
+ * because the lookup happens at call time, not install time.
+ *
+ * The response carries TWO lists: `tasks` (local) + `remote`
+ * (per-server snapshots). Remote query failures are captured per
+ * server (`error: string` slot) so a single down server doesn't
+ * blank out the whole listing.
+ */
+function makeListHandler(getNamespace: (name: string) => unknown): ToolHandler {
+  return async (_input, { ctx }) => {
+    const local = ctx.tasks?.list() ?? ([] as readonly TaskInfo[]);
+    const bridge = asRemoteTaskBridge(getNamespace("mcp"));
+    if (bridge === undefined || bridge.clients.length === 0) {
+      return jsonBlock({ tasks: local });
+    }
+    const remote = await Promise.all(
+      bridge.clients.map(async (handle) => {
+        if (typeof handle.harness.listTasks !== "function") {
+          return { serverId: handle.serverId, error: "tasks-unsupported" as const };
+        }
+        try {
+          const result = await handle.harness.listTasks();
+          return { serverId: handle.serverId, tasks: result.tasks };
+        } catch (cause) {
+          const reason = cause instanceof Error ? cause.message : String(cause);
+          return { serverId: handle.serverId, error: reason };
+        }
+      }),
+    );
+    return jsonBlock({ tasks: local, remote });
+  };
+}
 
 const getHandler: ToolHandler = async (input, { ctx }) => {
   const { taskId } = input as { readonly taskId: string };
@@ -256,8 +326,20 @@ export interface SessionTasksToolsBundle {
  * Build the four `session_tasks_*` tool registrations + their
  * handlers, scoped to a single session. Returned in a bundle so
  * `withTasks()` can register both surfaces in lockstep.
+ *
+ * @param sessionId — handler-ref namespace scope.
+ * @param getNamespace — per-session bridge lookup (typically
+ *   `installer.getNamespace.bind(installer)`). Used by the `list`
+ *   handler to discover `bridges.mcp` (or any structurally-equivalent
+ *   remote-task source) AT CALL TIME so the install order between
+ *   `withTasks` and `withMCP` doesn't matter. When omitted (or when
+ *   no MCP bridge is registered), the list handler returns local
+ *   tasks only — backward-compatible behavior.
  */
-export function buildSessionTasksTools(sessionId: string): SessionTasksToolsBundle {
+export function buildSessionTasksTools(
+  sessionId: string,
+  getNamespace: (name: string) => unknown = () => undefined,
+): SessionTasksToolsBundle {
   const listRef = handlerRefFor(sessionId, "list");
   const getRef = handlerRefFor(sessionId, "get");
   const cancelRef = handlerRefFor(sessionId, "cancel");
@@ -277,7 +359,7 @@ export function buildSessionTasksTools(sessionId: string): SessionTasksToolsBund
       toRegistration(awaitDeclaration(SESSION_TASKS_AWAIT, awaitRef), binding),
     ],
     handlers: [
-      { handlerRef: listRef, handler: listHandler },
+      { handlerRef: listRef, handler: makeListHandler(getNamespace) },
       { handlerRef: getRef, handler: getHandler },
       { handlerRef: cancelRef, handler: cancelHandler },
       { handlerRef: awaitRef, handler: awaitHandler },

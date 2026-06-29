@@ -141,10 +141,37 @@ every session so the model can manage Pattern B (`taskSupport:
 
 | Tool                   | Purpose                                                          |
 | ---------------------- | ---------------------------------------------------------------- |
-| `session_tasks_list`   | List every framework background task in this session             |
+| `session_tasks_list`   | List local + remote (MCP) framework background tasks (#175)      |
 | `session_tasks_get`    | Fetch a single task's `TaskInfo` snapshot by id                  |
 | `session_tasks_cancel` | Abort an in-flight task (idempotent)                             |
 | `session_tasks_await`  | Block this tick until a task reaches terminal; return its blocks |
+
+### Remote-task visibility (`session_tasks_list` → `remote` slot)
+
+Per #175 the list handler reads `bridges.mcp` at call time and merges
+each connected server's `tasks/list` snapshot into the response. The
+model sees:
+
+```json
+{
+  "tasks": [/* local TaskInfo[] */],
+  "remote": [
+    { "serverId": "demo", "tasks": [{ "taskId": "...", "status": "working", "statusMessage": "scanning" }] },
+    { "serverId": "broken", "error": "connection refused" },
+    { "serverId": "ancient", "error": "tasks-unsupported" }
+  ]
+}
+```
+
+- `remote` is omitted entirely when no MCP servers are connected
+  (backward-compatible with the pre-#175 response shape).
+- A single down / tasks-unsupported server contributes an `error`
+  entry; the rest of the listing returns normally.
+- The lookup is structural — anything matching `{ clients: [{
+  serverId, harness: { listTasks(): Promise<{tasks}> }}] }` on the
+  `mcp` slot is queried. The framework doesn't depend on
+  `@agentick/mcp-next`; adopters wiring custom MCP-style integrations
+  can publish the same shape and get remote-task enumeration free.
 
 ### Naming: why `session_*`, why underscores
 

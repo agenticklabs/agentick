@@ -50,6 +50,7 @@ import {
   CancelTaskResultSchema,
   ElicitRequestSchema,
   GetTaskResultSchema,
+  ListTasksResultSchema,
   ProgressNotificationSchema,
   TaskStatusNotificationSchema,
 } from "@modelcontextprotocol/sdk/types.js";
@@ -57,6 +58,7 @@ import type {
   CallToolResult,
   CancelTaskResult,
   GetTaskResult,
+  ListTasksResult,
   ProgressNotification,
   TaskStatusNotification,
   Tool,
@@ -69,6 +71,7 @@ import {
   parseTaskPayloadAsCallToolResult,
   TASKS_CANCEL_METHOD,
   TASKS_GET_METHOD,
+  TASKS_LIST_METHOD,
   TASKS_RESULT_METHOD,
   type CallToolAsTaskOptions,
   type CallToolOrTaskOutcome,
@@ -442,6 +445,39 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
               CallToolResultSchema.passthrough(),
             );
             return parseTaskPayloadAsCallToolResult(raw);
+          },
+          catch: (cause) => cause as McpClientError,
+        }),
+      ),
+    );
+  }
+
+  /**
+   * Send `tasks/list` and return the server's snapshot of every task
+   * it knows about (in-flight + terminal-still-within-TTL). Used by
+   * the framework's `session_tasks_list` model-facing tool (#175) to
+   * give the model visibility into remote tasks that may have been
+   * spawned by other sessions sharing the server, persisted across a
+   * reconnect, or otherwise lack a live local proxy.
+   *
+   * Throws if the server didn't advertise tasks support or if the
+   * connection isn't ready. Callers SHOULD catch + degrade — a
+   * non-tasks-aware MCP server is a normal configuration.
+   */
+  listTasks(): Promise<ListTasksResult> {
+    const op: Operation<Readonly<Record<string, never>>, ListTasksResult> = {
+      opId: `mcp:${this.serverId}:list-tasks:${ulid()}`,
+      surface: "mcp",
+      name: "mcp:command:list-tasks",
+      scope: { sessionId: this.scopeId },
+      input: {},
+    };
+    return runHarnessProtocol(
+      this.runOperation(op, () =>
+        Effect.tryPromise({
+          try: async (): Promise<ListTasksResult> => {
+            const c = this.requireReadyClient();
+            return await c.request({ method: TASKS_LIST_METHOD }, ListTasksResultSchema);
           },
           catch: (cause) => cause as McpClientError,
         }),

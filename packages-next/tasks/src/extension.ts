@@ -57,7 +57,16 @@ export function withTasks(options: WithTasksOptions = {}): SessionExtension {
       // ToolExecutor's `ctx.tasks` slot AND into `bridges.tasks`,
       // so registering handlers here does not require touching the
       // harness instance directly.
-      const bundle = buildSessionTasksTools(installer.sessionId);
+      //
+      // The list handler ALSO peeks at `bridges.mcp` at call time (per
+      // #175) so the model can enumerate remote MCP tasks alongside
+      // local ones. `getNamespace` here closes over the per-session
+      // bridge map — the lookup happens at tool-call time, not now,
+      // so install order between `withTasks` and `withMCP` doesn't
+      // matter.
+      const getNamespace = (name: string): unknown =>
+        installer.getNamespace ? installer.getNamespace<unknown>(name) : undefined;
+      const bundle = buildSessionTasksTools(installer.sessionId, getNamespace);
       for (const { handlerRef, handler } of bundle.handlers) {
         installer.registerToolHandler(handlerRef, handler);
       }
