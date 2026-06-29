@@ -15,9 +15,9 @@
    - **Mode B — Gateway extension** (`createGateway({ mcpServers: [...] })`). Production deployment for most adopters.
    - Both modes wrap the same `McpServerHarness`. Mode A is "Mode B with a minimal synthesized gateway shell."
 
-3. **Multiple servers per process.** `mcpServers: McpServerConfig[]` — each server has its own name, transports, identity, tool/prompt/resource projection, auth, and rate limits. Our own agents can connect to any of them via `withMCP({ url })` exactly as a 3rd party would.
+3. **Multiple servers per process.** `mcpServers: McpServerOptions[]` — each server has its own name, transports, identity, tool/prompt/resource projection, auth, and rate limits. Our own agents can connect to any of them via `withMCP({ url })` exactly as a 3rd party would.
 
-4. **Declarative object config, NOT a builder.** Each `McpServerConfig` is a plain TS object literal — spreadable, composable, no method-chaining ceremony. Builder pattern was considered + rejected (discoverability gain didn't outweigh the indirection).
+4. **Declarative object config, FLAT, NOT a builder.** Each `McpServerOptions` is a plain TS object literal — spreadable, composable, no method-chaining ceremony. NO `config: {}` nesting; the public adopter API mirrors v2's `withSkills` / `withPrompts` flat-options convention. Builder pattern was considered + rejected (discoverability gain didn't outweigh the indirection). **Amended 2026-06-29** to drop a duplicate transports list that earlier drafts of this ADR had carried.
 
 5. **Per-connection projection + transforms, NOT per-server pre-baked sets.** Filters and transforms run at request time against the live `MCPRequestContext` of each connection. Same per-session-per-request granularity as v1. A single server can serve "anonymous read-only" and "authenticated admin" connections with different visibility, no separate server instance per persona.
 
@@ -212,9 +212,12 @@ export const gateway = createGateway({
         httpTransport({ port: 8080, host: "0.0.0.0" }),
       ],
 
-      // Per-connection projection. Filter + transforms are FUNCTIONS,
-      // not pre-baked lists — they see the live MCPRequestContext.
+      // Tools: canonical registry + per-connection projection (filter +
+      // transforms) live together. Filter + transforms run per request
+      // against the live McpRequestContext, NOT pre-baked.
       tools: {
+        registry: [/* CreatedTool[] | ToolDeclaration[] */],
+        resolveHandler: /* (handlerRef) => Handler */,
         filter: (tool, ctx) => tool.metadata?.public === true,
         transforms: [
           // Tool transforms apply in array order. Per-connection.
@@ -224,6 +227,7 @@ export const gateway = createGateway({
       },
 
       prompts: {
+        // registry + filter, same shape pattern. Lands with #171d.
         filter: (decl, ctx) => decl.metadata?.public === true,
       },
 
@@ -244,9 +248,11 @@ export const gateway = createGateway({
     {
       name: "admin",
       transports: [stdioTransport()],
-      // Admin server: no tool filter — sees the full gateway tool registry.
-      // Transforms still apply per-connection if needed.
-      tools: {},  // all
+      // Admin server: no filter — sees the full gateway tool registry.
+      tools: {
+        registry: gatewayTools,
+        resolveHandler: gatewayResolver,
+      },
       auth: {
         authenticator: oauthValidator({
           issuer: "https://idp.internal/",

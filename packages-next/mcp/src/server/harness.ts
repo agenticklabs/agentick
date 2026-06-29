@@ -21,7 +21,6 @@ import { Effect } from "effect";
 import { BaseHarness, ulid, type Unsubscribe } from "@agentick/runtime-next";
 import type {
   EventBus,
-  McpServerConfig,
   McpServerConnectionInfo,
   McpServerHarnessProtocol,
   McpRequestContext,
@@ -35,7 +34,7 @@ import { createNotifier, type Notifier } from "@agentick/pubsub-next";
 import { Server as SdkServer } from "@modelcontextprotocol/sdk/server/index.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 
-import { validateConfig } from "./config.js";
+import { type McpServerOptions, validateOptions } from "./config.js";
 import { buildCapabilities } from "./protocol/lifecycle.js";
 import { installToolsHandlers, type ToolHandlerResolver } from "./projection/tools.js";
 import { resolveSecurity, type ResolvedSecurity } from "./security/index.js";
@@ -47,51 +46,20 @@ const SURFACE = "mcpServer" as const;
 type McpServerSurface = typeof SURFACE;
 
 /**
- * Construction options. The config arg is the resolved
- * {@link McpServerConfig}; substrate args (journal/bus/inbox) come
- * from the gateway substrate the harness is mounted under.
+ * @deprecated Use {@link McpServerOptions} directly. Kept as an alias
+ * for backward-compat across the in-flight #171 work.
  *
- * `transports` is the runtime-side companion to `config.transports`:
- * adopters call factories (`stdioTransport()`,
- * `inMemoryServerTransport()`) and pass the returned
- * `ServerTransport[]`. The config-level `McpServerTransportSpec[]` is
- * advisory metadata; the actual listeners live here.
- *
- * `tools` supplies the canonical registry + handler resolver. Gateway
- * integration (#171 follow-up) will wire this from the tool-executor
- * registry; for the #171c MVP, adopters pass it directly. Per-
- * connection projection (filter + transforms) lives on
- * `config.tools`.
+ * TODO(error-infra / cleanup): remove this alias once any in-tree
+ * callers migrate.
  */
-export interface McpServerHarnessOptions {
-  readonly config: McpServerConfig;
-  /**
-   * Listeners. Each is mounted at `start()`; each accepted connection
-   * gets a fresh SDK Server with the configured request handlers
-   * installed.
-   */
-  readonly transports?: readonly ServerTransport[];
-  /**
-   * Canonical tool registry + handler resolver. Absent → tools
-   * capability not advertised (verifies via {@link buildCapabilities}).
-   */
-  readonly tools?: {
-    readonly registry: readonly ToolDeclaration[];
-    readonly resolveHandler: ToolHandlerResolver;
-  };
-  /**
-   * Server identification for the MCP `initialize` response. Defaults
-   * to `{ name: config.name, version: "0.0.0" }`.
-   */
-  readonly serverInfo?: { readonly name: string; readonly version: string };
-}
+export type McpServerHarnessOptions = McpServerOptions;
 
 export class McpServerHarness
   extends BaseHarness<McpServerSurface>
   implements McpServerHarnessProtocol
 {
-  /** Resolved config — validated at construction. */
-  private readonly config: McpServerConfig;
+  /** Validated options. */
+  private readonly options: McpServerOptions;
 
   /** Listeners. Mounted at start(); closed at close(). */
   private readonly transports: readonly ServerTransport[];
@@ -136,7 +104,7 @@ export class McpServerHarness
   }
 
   get name(): string {
-    return this.config.name;
+    return this.options.name;
   }
 
   constructor(
@@ -144,23 +112,23 @@ export class McpServerHarness
     journal: OperationJournal,
     bus: EventBus,
     inbox: MessageInbox,
-    options: McpServerHarnessOptions,
+    options: McpServerOptions,
   ) {
     super(SURFACE, scopeId, journal, bus, inbox);
-    // Validate eagerly — surface bad configs at construction, not at
+    // Validate eagerly — surface bad options at construction, not at
     // first connection. Throws `McpServerConfigInvalid`.
-    this.config = validateConfig(options.config);
-    this.transports = options.transports ?? [];
-    this.toolsRegistry = options.tools?.registry ?? [];
-    this.resolveHandler = options.tools?.resolveHandler ?? (() => null);
-    this.hasToolsWired = options.tools !== undefined;
-    this.serverInfo = options.serverInfo ?? {
-      name: this.config.name,
+    this.options = validateOptions(options);
+    this.transports = this.options.transports;
+    this.toolsRegistry = this.options.tools?.registry ?? [];
+    this.resolveHandler = this.options.tools?.resolveHandler ?? (() => null);
+    this.hasToolsWired = this.options.tools !== undefined;
+    this.serverInfo = this.options.serverInfo ?? {
+      name: this.options.name,
       version: "0.0.0",
     };
     this.security = resolveSecurity(
-      this.config.auth,
-      this.config.transports.map((t) => t.kind),
+      this.options.auth,
+      this.options.transports.map((t) => t.kind),
     );
   }
 
@@ -279,7 +247,7 @@ export class McpServerHarness
         sampling: false, // wired in #171d
         tasks: false, // wired in #171d
       },
-      this.config.capabilities,
+      this.options.capabilities,
     );
     const sdkServer = new SdkServer(this.serverInfo, { capabilities });
 
@@ -314,10 +282,18 @@ export class McpServerHarness
     });
 
     if (this.hasToolsWired && this.toolsRegistry.length > 0) {
+      const projection = this.options.tools;
       installToolsHandlers(sdkServer, {
         registry: this.toolsRegistry,
         resolveHandler: this.resolveHandler,
-        ...(this.config.tools ? { config: this.config.tools } : {}),
+        ...(projection?.filter || projection?.transforms
+          ? {
+              projection: {
+                ...(projection.filter ? { filter: projection.filter } : {}),
+                ...(projection.transforms ? { transforms: projection.transforms } : {}),
+              },
+            }
+          : {}),
         security: this.security,
         buildContext: buildRequestContext,
       });
@@ -368,8 +344,8 @@ export class McpServerHarness
   }
 
   /** @internal */
-  _config(): McpServerConfig {
-    return this.config;
+  _options(): McpServerOptions {
+    return this.options;
   }
 
   // ─────────── Inbox dispatch ───────────

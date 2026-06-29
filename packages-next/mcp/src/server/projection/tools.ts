@@ -27,14 +27,20 @@ import type {
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { Server as SdkServer } from "@modelcontextprotocol/sdk/server/index.js";
 import { toJsonSchema, type ToolDeclaration } from "@agentick/spec-next";
-import type {
-  ContentBlock,
-  McpRequestContext,
-  McpServerError,
-  McpServerToolsConfig,
-} from "@agentick/spec-next";
+import type { ContentBlock, McpRequestContext, McpServerError } from "@agentick/spec-next";
 import { applyTransform, composeTransforms } from "@agentick/tool-next/transforms";
 import type { ToolTransform } from "@agentick/tool-next/transforms";
+
+/**
+ * Per-connection projection rules — narrow slice of
+ * {@link McpServerToolsOptions} (config.ts) the projection layer
+ * actually consumes. Distinct from the registry + resolveHandler which
+ * are passed separately.
+ */
+export interface ToolsProjectionRules {
+  readonly filter?: (tool: ToolDeclaration, ctx: McpRequestContext) => boolean;
+  readonly transforms?: readonly ToolTransform<McpRequestContext>[];
+}
 
 import { evaluateRequestPipeline } from "../security/pipeline.js";
 import type { ResolvedSecurity } from "../security/stages.js";
@@ -57,8 +63,8 @@ export interface ToolsProjectionOptions {
   readonly registry: readonly ToolDeclaration[];
   /** Resolves `handlerRef` → concrete async handler. */
   readonly resolveHandler: ToolHandlerResolver;
-  /** Per-connection filter + transforms from `McpServerConfig.tools`. */
-  readonly config?: McpServerToolsConfig;
+  /** Per-connection filter + transforms — narrow slice of `McpServerOptions.tools`. */
+  readonly projection?: ToolsProjectionRules;
   /** Security pipeline resolved for this server. */
   readonly security: ResolvedSecurity;
   /** Connection-scoped context base (the projection clones + augments per-request). */
@@ -70,10 +76,9 @@ export interface ToolsProjectionOptions {
  * SDK Server. Called once per connection at accept time.
  */
 export function installToolsHandlers(sdkServer: SdkServer, options: ToolsProjectionOptions): void {
-  const transforms = (options.config?.transforms ??
-    []) as readonly ToolTransform<McpRequestContext>[];
+  const transforms = options.projection?.transforms ?? [];
   const composed = composeTransforms<McpRequestContext>(...transforms);
-  const filter = options.config?.filter;
+  const filter = options.projection?.filter;
 
   // ─────────── tools/list ───────────
   sdkServer.setRequestHandler(
@@ -164,7 +169,7 @@ export function installToolsHandlers(sdkServer: SdkServer, options: ToolsProject
  */
 export function projectTools(
   registry: readonly ToolDeclaration[],
-  filter: McpServerToolsConfig["filter"] | undefined,
+  filter: ToolsProjectionRules["filter"] | undefined,
   composed: ToolTransform<McpRequestContext>,
   ctx: McpRequestContext,
 ): readonly ToolDeclaration[] {

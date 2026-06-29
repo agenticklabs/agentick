@@ -80,26 +80,21 @@ async function makeServer(
     new LocalEventBus(),
     new LocalInbox(),
     {
-      config: {
-        name: "test-server",
-        transports: [{ kind: "in-memory" }],
-        tools: {
-          ...(options.filterPredicate ? { filter: options.filterPredicate } : {}),
-          ...(options.transform ? { transforms: [toolPrefix(options.transform)] } : {}),
-        },
-        ...(options.bearer
-          ? {
-              auth: {
-                authenticator: bearerTokenAuth({ tokens: options.bearer }),
-              },
-            }
-          : {}),
-      },
+      name: "test-server",
       transports: [transport],
       tools: {
         registry: tools,
         resolveHandler: staticHandlers(handlers),
+        ...(options.filterPredicate ? { filter: options.filterPredicate } : {}),
+        ...(options.transform ? { transforms: [toolPrefix(options.transform)] } : {}),
       },
+      ...(options.bearer
+        ? {
+            auth: {
+              authenticator: bearerTokenAuth({ tokens: options.bearer }),
+            },
+          }
+        : {}),
       serverInfo: { name: "test", version: "0.0.0" },
     },
   );

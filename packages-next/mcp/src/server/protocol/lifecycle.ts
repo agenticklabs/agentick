@@ -13,7 +13,8 @@
  */
 
 import type { ServerCapabilities } from "@modelcontextprotocol/sdk/types.js";
-import type { McpServerCapabilitiesConfig } from "@agentick/spec-next";
+
+import type { McpServerCapabilitiesOptions } from "../config.js";
 
 /**
  * What the projection layer has wired. Each flag answers "can the
@@ -40,7 +41,7 @@ export interface WiredCapabilities {
  */
 export function buildCapabilities(
   wired: WiredCapabilities,
-  override: McpServerCapabilitiesConfig | undefined,
+  override: McpServerCapabilitiesOptions | undefined,
 ): ServerCapabilities {
   const out: ServerCapabilities = {};
 

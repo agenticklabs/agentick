@@ -21,23 +21,25 @@
 import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime-next";
 import type { CreatedTool } from "@agentick/tool-next";
 
-import { McpServerHarness, type McpServerHarnessOptions } from "./harness.js";
+import type { McpServerOptions, McpServerToolsOptions } from "./config.js";
+import { McpServerHarness } from "./harness.js";
 import type { ToolHandlerResolver } from "./projection/tools.js";
 
 /**
  * Input to {@link spawnStandaloneMcpServer}. A superset of
- * `McpServerHarnessOptions`:
+ * `McpServerOptions`:
  *
- *  - `tools` accepts EITHER the harness's raw `{ registry,
- *    resolveHandler }` shape, OR a more ergonomic `CreatedTool[]`
- *    array (the return values of `createTool({...})` calls). The
- *    array form is auto-converted into a registry + resolver.
+ *  - `tools` accepts EITHER the harness's full `McpServerToolsOptions`
+ *    shape (`{ registry, resolveHandler, filter?, transforms? }`), OR a
+ *    more ergonomic `CreatedTool[]` array. The array form auto-builds
+ *    the registry + resolver; filter + transforms can't be supplied
+ *    via the sugar — pass the full shape if you need projection rules.
  *
  *  - `scopeId` overrides the default `srv:<ulid>` for tests + custom
  *    naming.
  */
-export interface SpawnStandaloneOptions extends Omit<McpServerHarnessOptions, "tools"> {
-  readonly tools?: McpServerHarnessOptions["tools"] | readonly CreatedTool[];
+export interface SpawnStandaloneOptions extends Omit<McpServerOptions, "tools"> {
+  readonly tools?: McpServerToolsOptions | readonly CreatedTool[];
   readonly scopeId?: string;
 }
 
@@ -66,11 +68,14 @@ export async function spawnStandaloneMcpServer(
 
   const tools = normalizeTools(options.tools);
 
-  const harnessOptions: McpServerHarnessOptions = {
-    config: options.config,
-    ...(options.transports ? { transports: options.transports } : {}),
+  // Split: spread base options minus tools (which we replace with the
+  // normalized shape).
+  const { tools: _drop, scopeId: _ignore, ...rest } = options;
+  void _drop;
+  void _ignore;
+  const harnessOptions: McpServerOptions = {
+    ...rest,
     ...(tools ? { tools } : {}),
-    ...(options.serverInfo ? { serverInfo: options.serverInfo } : {}),
   };
   const harness = new McpServerHarness(scopeId, journal, bus, inbox, harnessOptions);
   await harness.ready;
@@ -86,12 +91,10 @@ export async function spawnStandaloneMcpServer(
  * shape or a `CreatedTool[]` array. Adopters pass whichever is
  * convenient; the spawn shim handles the conversion.
  */
-function normalizeTools(
-  tools: SpawnStandaloneOptions["tools"],
-): McpServerHarnessOptions["tools"] | undefined {
+function normalizeTools(tools: SpawnStandaloneOptions["tools"]): McpServerToolsOptions | undefined {
   if (tools === undefined) return undefined;
   if (!Array.isArray(tools)) {
-    return tools as McpServerHarnessOptions["tools"];
+    return tools as McpServerToolsOptions;
   }
   const created = tools as readonly CreatedTool[];
   const registry = created.map((c) => c.declaration);

@@ -1,13 +1,13 @@
 /**
  * `spawnStandaloneMcpServer` — Mode A entry-point smoke.
  *
- * The full end-to-end flow (transport mount, projection, request/
- * response) is covered by `end-to-end.spec.ts` against the harness
- * directly. This file pins the spawn wrapper's two ergonomic features:
- *
+ * Pins the spawn wrapper's ergonomics:
  *  - Accepts `CreatedTool[]` sugar (auto-builds registry + resolver)
- *  - Synthesizes a substrate, starts the harness, returns a working
- *    handle whose `close()` drains everything
+ *  - Accepts the harness's full `McpServerToolsOptions` shape
+ *  - Synthesizes a substrate, starts the harness, returns a handle
+ *    whose `close()` drains everything
+ *
+ * Adopter API is FLAT — no `config: {}` nesting (post-ADR-40 amendment).
  */
 
 import { describe, expect, it } from "vitest";
@@ -19,10 +19,7 @@ describe("spawnStandaloneMcpServer", () => {
   it("spawns from a CreatedTool[] sugar shape", async () => {
     const transport = inMemoryServerTransport();
     const handle = await spawnStandaloneMcpServer({
-      config: {
-        name: "spawn-test",
-        transports: [{ kind: "in-memory" }],
-      },
+      name: "spawn-test",
       transports: [transport],
       tools: [
         createTool({
@@ -39,23 +36,16 @@ describe("spawnStandaloneMcpServer", () => {
 
   it("close() is idempotent + drains the harness", async () => {
     const handle = await spawnStandaloneMcpServer({
-      config: {
-        name: "spawn-test",
-        transports: [{ kind: "in-memory" }],
-      },
+      name: "spawn-test",
       transports: [inMemoryServerTransport()],
     });
     await handle.close();
     await handle.close();
-    // No expectation beyond "doesn't throw".
   });
 
-  it("accepts the harness-raw { registry, resolveHandler } tools shape", async () => {
+  it("accepts the full McpServerToolsOptions shape", async () => {
     const handle = await spawnStandaloneMcpServer({
-      config: {
-        name: "raw-tools",
-        transports: [{ kind: "in-memory" }],
-      },
+      name: "raw-tools",
       transports: [inMemoryServerTransport()],
       tools: {
         registry: [],
@@ -69,10 +59,7 @@ describe("spawnStandaloneMcpServer", () => {
   it("honors scopeId override", async () => {
     const handle = await spawnStandaloneMcpServer({
       scopeId: "srv:pinned",
-      config: {
-        name: "x",
-        transports: [{ kind: "in-memory" }],
-      },
+      name: "x",
       transports: [inMemoryServerTransport()],
     });
     expect(handle.harness.id).toBe("srv:pinned");

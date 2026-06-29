@@ -27,7 +27,14 @@ import "./augment.js";
 
 export { McpServerHarness, type McpServerHarnessOptions } from "./harness.js";
 export { type McpServerHandle, toHandle } from "./handle.js";
-export { validateConfig } from "./config.js";
+export {
+  validateOptions,
+  type McpServerAuthOptions,
+  type McpServerCapabilitiesOptions,
+  type McpServerOptions,
+  type McpServerPromptsOptions,
+  type McpServerToolsOptions,
+} from "./config.js";
 export {
   spawnStandaloneMcpServer,
   type SpawnStandaloneOptions,
@@ -50,14 +57,8 @@ export {
 export type {
   McpAuthenticatedUser,
   McpRequestContext,
-  McpServerAuthConfig,
-  McpServerCapabilitiesConfig,
-  McpServerConfig,
   McpServerConnectionInfo,
   McpServerError,
   McpServerHarnessProtocol,
-  McpServerPromptsConfig,
   McpServerRegistry,
-  McpServerToolsConfig,
-  McpServerTransportSpec,
 } from "@agentick/spec-next";

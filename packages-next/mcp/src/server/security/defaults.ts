@@ -17,7 +17,7 @@ import type {
   RateLimiter,
   ResolvedSecurity,
 } from "./stages.js";
-import type { McpServerAuthConfig } from "@agentick/spec-next";
+import type { McpServerAuthOptions } from "../config.js";
 
 const TRUSTED_TRANSPORTS = new Set<string>(["stdio", "in-memory"]);
 
@@ -57,7 +57,7 @@ export const passthroughSanitizer: InputSanitizer = async (_ctx, _toolName, inpu
 });
 
 /**
- * Resolve adopter-supplied {@link McpServerAuthConfig} against the
+ * Resolve adopter-supplied {@link McpServerAuthOptions} against the
  * transport-aware defaults. Returns a fully-populated
  * {@link ResolvedSecurity}.
  *
@@ -66,7 +66,7 @@ export const passthroughSanitizer: InputSanitizer = async (_ctx, _toolName, inpu
  * conservatively (any HTTP/WS transport in the list → reject-all).
  */
 export function resolveSecurity(
-  auth: McpServerAuthConfig | undefined,
+  auth: McpServerAuthOptions | undefined,
   transportKinds: readonly string[],
 ): ResolvedSecurity {
   const allTrusted = transportKinds.every((kind) => TRUSTED_TRANSPORTS.has(kind));

@@ -1,42 +1,41 @@
 /**
- * `McpServerHarness` skeleton — pin construction, lifecycle, config
- * validation, and the connection-tracking primitives that #171c+
- * transports will hook into.
+ * `McpServerHarness` skeleton — construction, lifecycle, options
+ * validation, connection-tracking primitives.
  *
- * Does NOT test transports, projection, or protocol handling — those
- * land with #171c onward and have their own conformance.
+ * Pins the post-ADR-40-amendment flat options shape: no `config`
+ * nesting, no duplicate transports list. `tools` is a single object
+ * with registry + projection rules.
  */
 
 import { describe, expect, it } from "vitest";
 import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime-next";
-import type { McpServerConfig, McpServerConnectionInfo } from "@agentick/spec-next";
+import type { McpServerConnectionInfo } from "@agentick/spec-next";
 
-import { McpServerHarness, validateConfig, toHandle } from "../index.js";
+import { inMemoryServerTransport, McpServerHarness, validateOptions, toHandle } from "../index.js";
+import type { McpServerOptions } from "../index.js";
 
-const stdioTransport = { kind: "stdio" } as const;
-
-function makeConfig(overrides: Partial<McpServerConfig> = {}): McpServerConfig {
+function makeOptions(overrides: Partial<McpServerOptions> = {}): McpServerOptions {
   return {
     name: "test-server",
-    transports: [stdioTransport],
+    transports: [inMemoryServerTransport()],
     ...overrides,
   };
 }
 
-async function makeHarness(config: McpServerConfig = makeConfig()): Promise<McpServerHarness> {
+async function makeHarness(options: McpServerOptions = makeOptions()): Promise<McpServerHarness> {
   const harness = new McpServerHarness(
     `test:${ulid()}`,
     new MemoryJournal({ capacity: 1024 }),
     new LocalEventBus(),
     new LocalInbox(),
-    { config },
+    options,
   );
   await harness.ready;
   return harness;
 }
 
 describe("McpServerHarness — construction + lifecycle", () => {
-  it("constructs from a minimal config", async () => {
+  it("constructs from minimal options", async () => {
     const h = await makeHarness();
     expect(h.name).toBe("test-server");
     expect(h.id).toMatch(/^test:/);
@@ -48,7 +47,6 @@ describe("McpServerHarness — construction + lifecycle", () => {
     expect(h.connections()).toHaveLength(1);
     await h.close();
     expect(h.connections()).toHaveLength(0);
-    // Second close doesn't throw.
     await h.close();
   });
 
@@ -59,46 +57,57 @@ describe("McpServerHarness — construction + lifecycle", () => {
   });
 });
 
-describe("McpServerHarness — config validation", () => {
+describe("McpServerHarness — options validation", () => {
   it("throws on missing name", () => {
-    expect(caughtTag(() => validateConfig({ ...makeConfig(), name: "" }))).toBe(
+    expect(caughtTag(() => validateOptions({ ...makeOptions(), name: "" }))).toBe(
       "McpServerConfigInvalid",
     );
-    expect(
-      caughtTag(() =>
-        // @ts-expect-error — exercising runtime guard against bad input.
-        validateConfig({ ...makeConfig(), name: undefined }),
-      ),
-    ).toBe("McpServerConfigInvalid");
   });
 
   it("throws on empty transports array", () => {
-    expect(caughtTag(() => validateConfig({ ...makeConfig(), transports: [] }))).toBe(
+    expect(caughtTag(() => validateOptions({ ...makeOptions(), transports: [] }))).toBe(
       "McpServerConfigInvalid",
     );
   });
 
-  it("throws when a transport entry is missing kind", () => {
+  it("throws when a transport is missing listen()", () => {
     expect(
       caughtTag(() =>
-        // @ts-expect-error — exercising runtime guard.
-        validateConfig({ ...makeConfig(), transports: [{}] }),
+        validateOptions({
+          ...makeOptions(),
+          // Bare object — has kind but no listen method.
+          transports: [{ kind: "stdio" } as unknown as ReturnType<typeof inMemoryServerTransport>],
+        }),
       ),
     ).toBe("McpServerConfigInvalid");
   });
 
-  it("returns the config unchanged on valid input", () => {
-    const cfg = makeConfig({ metadata: { tier: "public" } });
-    expect(validateConfig(cfg)).toEqual(cfg);
+  it("throws when tools is missing registry or resolveHandler", () => {
+    expect(
+      caughtTag(() =>
+        validateOptions({
+          ...makeOptions(),
+          tools: {
+            // Missing registry.
+            resolveHandler: () => null,
+          } as unknown as McpServerOptions["tools"],
+        }),
+      ),
+    ).toBe("McpServerConfigInvalid");
   });
 
-  it("accepts capability + auth + tools + prompts slots", () => {
+  it("returns the options unchanged on valid input", () => {
+    const opts = makeOptions({ metadata: { tier: "public" } });
+    expect(validateOptions(opts)).toEqual(opts);
+  });
+
+  it("accepts capabilities + auth + tools + prompts slots", () => {
     expect(() =>
-      validateConfig({
-        ...makeConfig(),
-        capabilities: { tools: true, prompts: false },
-        auth: { authenticator: () => null },
-        tools: { filter: () => true, transforms: [] },
+      validateOptions({
+        ...makeOptions(),
+        capabilities: { tools: false },
+        auth: { authenticator: async () => ({ authenticated: false, reason: "x" }) },
+        tools: { registry: [], resolveHandler: () => null, filter: () => true, transforms: [] },
         prompts: { filter: () => true },
       }),
     ).not.toThrow();
@@ -118,7 +127,7 @@ describe("McpServerHarness — connection tracking", () => {
     const h = await makeHarness();
     h._registerConnection(fakeConnection("c1"));
     h._removeConnection("c1");
-    h._removeConnection("c1"); // idempotent
+    h._removeConnection("c1");
     expect(h.connections()).toHaveLength(0);
   });
 
@@ -141,7 +150,7 @@ describe("McpServerHarness — connection tracking", () => {
     const second = h.connections();
     expect(first).not.toBe(second);
     const third = h.connections();
-    expect(third).toBe(second); // cached
+    expect(third).toBe(second);
   });
 });
 
@@ -180,14 +189,13 @@ function fakeConnection(
 ): McpServerConnectionInfo {
   return {
     connectionId: id,
-    transportKind: "stdio",
+    transportKind: "in-memory",
     connectedAt,
     user: null,
     clientInfo: null,
   };
 }
 
-/** Capture the `_tag` of a typed error thrown synchronously. */
 function caughtTag(fn: () => unknown): string | undefined {
   try {
     fn();
