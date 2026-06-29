@@ -66,10 +66,14 @@ export interface McpRequestContext {
   readonly sendProgress?: (progress: number, total?: number, message?: string) => Promise<void>;
   /**
    * Sugar surface for prompting the connected end-user via the MCP
-   * `elicitation/create` server→client request. Present only when:
-   *   1. The server config wired the `elicit` slot, AND
+   * `elicitation/create` server→client request. Present whenever:
+   *   1. The server did NOT explicitly opt out (`elicit: false`), AND
    *   2. The connected client advertised the `elicitation` capability.
-   * Tool handlers must check for presence before calling.
+   *
+   * Elicitation is ON by default — the real gate is the client's
+   * capability advertisement. Tool handlers should still check for
+   * presence before calling, since clients that don't support elicit
+   * leave this `undefined`.
    */
   readonly elicit?: Elicit;
   /** Free-form metadata — adopter extension point. */

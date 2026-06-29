@@ -220,17 +220,20 @@ how it was constructed.
 
 ### Eliciting input from the user (`ctx.elicit.*`)
 
-Opt into the elicitation capability:
+**Elicitation is ON by default.** Tool handlers receive `ctx.elicit`
+whenever the connected client advertised the `elicitation` capability;
+no server-side opt-in needed. Adopters with specific constraints can
+disable it explicitly:
 
 ```ts
 new McpServerHarness(..., {
   // ... other options
-  elicit: true,  // or { enabled: true }
+  elicit: false,  // forbid ctx.elicit on this server, period
 })
 ```
 
-When wired AND the connected client advertises the `elicitation`
-capability, tool handlers receive a typed `ctx.elicit` surface:
+Tool handlers MUST still check `ctx.elicit` for presence — clients
+that didn't advertise the capability leave it `undefined`:
 
 ```ts
 const handler = async (input, ctx) => {
@@ -260,6 +263,19 @@ capability, not server. The server doesn't advertise it on the wire —
 it just issues `elicitation/create` requests when the connected
 client opted in. `ctx.elicit` is `undefined` when the client didn't
 advertise; tool handlers must check for presence before use.
+
+For introspection, `server.elicitEnabled: boolean` reports the
+server's policy flag (`true` by default; `false` only when the
+adopter explicitly opted out via `elicit: false`). This is the
+server's intent — actual availability per request still depends on
+the connected client's capability.
+
+> **Asymmetry with the in-process flow** — `session.elicit` (the
+> in-process counterpart to `ctx.elicit`) doesn't exist yet. Today
+> the in-process path exposes `session.elicitation:
+ElicitationHarnessProtocol` (raw protocol) but no `Elicit` sugar.
+> Tracked as a follow-up task; the goal is symmetric `Elicit`
+> ergonomics regardless of where the tool handler runs.
 
 The same instance-or-config pattern (see ADR 42 — coming) propagates
 to other harness-backed slots (`tools`, `skills`, `tasks`, ...) as

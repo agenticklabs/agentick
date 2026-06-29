@@ -111,16 +111,28 @@ export interface McpServerCapabilitiesOptions {
 }
 
 /**
- * Elicit slot — opt-in capability advertisement. Setting `enabled: true`
- * (or passing `true` shorthand — see {@link McpServerElicitOptions})
- * flips the `elicitation` server capability and provides `ctx.elicit`
- * to tool handlers. Without this slot, the capability is NOT advertised
- * and `ctx.elicit` is `undefined`.
+ * Elicit slot — opt-OUT for `ctx.elicit`. Elicitation is ON by
+ * default: tool handlers receive `ctx.elicit` whenever the connected
+ * client advertised the `elicitation` capability. The slot only
+ * exists to let adopters with specific constraints (audit policies
+ * that forbid server-initiated requests, security postures that
+ * sandbox server→client communication, etc.) DISABLE it entirely:
  *
- * No declarations or instance — elicit is purely sugar over per-request
- * `sdkServer.request("elicitation/create")` calls. There's no harness
- * underneath. Hence the slot is a boolean opt-in, not the ADR 42
- * trichotomy.
+ *   elicit: false  →  ctx.elicit is always undefined, even for
+ *                     clients that advertised the capability.
+ *
+ * Per ADR 42 §"What this ADR does NOT decide": elicit is sugar over
+ * per-request `sdkServer.request("elicitation/create")` calls, not a
+ * harness-backed source. The trichotomy convention does not apply
+ * (no declarations / no instance / no shorthand) — boolean opt-out
+ * is the right shape.
+ *
+ * Elicitation is NOT advertised in server capabilities (it's a
+ * client-side capability in MCP); the server just issues
+ * `elicitation/create` when it wants. The real gate is the client's
+ * `initialize`-time capability advertisement — `ctx.elicit` is
+ * `undefined` if the client didn't opt in, regardless of server
+ * config.
  */
 export interface McpServerElicitOptions {
   readonly enabled: boolean;
@@ -154,10 +166,12 @@ export interface McpServerOptions {
   /** Prompts registry + per-connection projection. Absent = prompts capability NOT advertised. Lands #171d. */
   readonly prompts?: McpServerPromptsOptions;
   /**
-   * Elicit opt-in. Truthy → advertise `elicitation` capability +
-   * provide `ctx.elicit` to tool handlers. Shorthand `true` is
-   * equivalent to `{ enabled: true }`. Absent / `false` → `ctx.elicit`
-   * is `undefined`.
+   * Elicit opt-OUT. Elicitation is ON by default — tool handlers
+   * receive `ctx.elicit` whenever the connected client advertised
+   * the capability. Set `elicit: false` (or `{ enabled: false }`)
+   * to forbid `ctx.elicit` entirely, regardless of client support
+   * (audit policies, security postures sandboxing server→client
+   * communication). Absent or truthy → default behavior.
    */
   readonly elicit?: boolean | McpServerElicitOptions;
   /** Resources slot — wired when #123 lands. Absent = resources capability NOT advertised. */
@@ -314,9 +328,13 @@ function validatePromptsOption(option: McpServerPromptsOptions): void {
   resolvePromptsOption(option);
 }
 
-/** Normalize the `elicit` slot to a boolean (true = wired). */
+/**
+ * Normalize the `elicit` slot to a boolean (true = ctx.elicit
+ * available when client supports). ON by default; only an explicit
+ * `false` or `{ enabled: false }` opts out.
+ */
 export function resolveElicitOption(option: boolean | McpServerElicitOptions | undefined): boolean {
-  if (option === undefined) return false;
+  if (option === undefined) return true;
   if (typeof option === "boolean") return option;
   return option.enabled;
 }

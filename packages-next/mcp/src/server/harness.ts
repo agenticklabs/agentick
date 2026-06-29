@@ -144,6 +144,19 @@ export class McpServerHarness
     return this.promptsSource;
   }
 
+  /**
+   * Read-only flag indicating whether the server is willing to issue
+   * `elicitation/create` requests to connected clients. `true` by
+   * default; `false` only when the adopter explicitly opted out via
+   * `elicit: false`. Note that even when `true`, `ctx.elicit` is
+   * `undefined` for clients that didn't advertise the capability —
+   * this flag reports the server's POLICY, not whether any given
+   * client supports it.
+   */
+  get elicitEnabled(): boolean {
+    return this.elicitWired;
+  }
+
   constructor(
     scopeId: string,
     journal: OperationJournal,

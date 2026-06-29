@@ -170,7 +170,8 @@ describe("elicitation projection — ctx.elicit presence", () => {
     await harness.close();
   });
 
-  it("ctx.elicit is undefined when server does not wire the slot", async () => {
+  it("ctx.elicit is defined by default when the slot is absent (elicit ON by default)", async () => {
+    // Default behavior: ctx.elicit available whenever client supports.
     let elicitPresent: boolean | null = null;
     const { harness, transport } = await makeElicitServer({
       "handler:probe": async (_input, ctx) => {
@@ -182,10 +183,67 @@ describe("elicitation projection — ctx.elicit presence", () => {
     const client = await makeElicitClient(clientTransport, () => ({ action: "cancel" }));
 
     await client.callTool({ name: "probe", arguments: {} }, CallToolResultSchema);
+    expect(elicitPresent).toBe(true);
+
+    await client.close();
+    await harness.close();
+  });
+
+  it("ctx.elicit is undefined when the server explicitly opts out with `elicit: false`", async () => {
+    let elicitPresent: boolean | null = null;
+    const transport = inMemoryServerTransport();
+    const harness = new McpServerHarness(
+      `srv:${ulid()}`,
+      new MemoryJournal({ capacity: 1024 }),
+      new LocalEventBus(),
+      new LocalInbox(),
+      {
+        name: "elicit-opt-out-srv",
+        transports: [transport],
+        elicit: false,
+        tools: {
+          registry: [tool("probe")],
+          resolveHandler: () => async (_input, ctx) => {
+            elicitPresent = ctx.elicit !== undefined;
+            return [{ type: "text", text: "ok" }];
+          },
+        },
+        serverInfo: { name: "test", version: "0.0.0" },
+      },
+    );
+    await harness.ready;
+    await harness.start();
+    const clientTransport = await transport.connect();
+    const client = await makeElicitClient(clientTransport, () => ({ action: "cancel" }));
+
+    await client.callTool({ name: "probe", arguments: {} }, CallToolResultSchema);
     expect(elicitPresent).toBe(false);
 
     await client.close();
     await harness.close();
+  });
+
+  it("server.elicitEnabled reports the policy flag", async () => {
+    const { harness: onByDefault } = await makeElicitServer({});
+    expect(onByDefault.elicitEnabled).toBe(true);
+    await onByDefault.close();
+
+    const transport = inMemoryServerTransport();
+    const optedOut = new McpServerHarness(
+      `srv:${ulid()}`,
+      new MemoryJournal({ capacity: 1024 }),
+      new LocalEventBus(),
+      new LocalInbox(),
+      {
+        name: "x",
+        transports: [transport],
+        elicit: false,
+        serverInfo: { name: "test", version: "0.0.0" },
+      },
+    );
+    await optedOut.ready;
+    expect(optedOut.elicitEnabled).toBe(false);
+    await optedOut.close();
   });
 });
 

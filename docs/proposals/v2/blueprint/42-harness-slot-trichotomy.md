@@ -253,7 +253,45 @@ A `withX` factory MUST satisfy all seven checklist rows of §"Audit
 checklist" with the same naming rules; the receiver of the union is
 the factory itself rather than a parent's options field.
 
-### 7. Validation
+### 7. Sugar-only slots (boolean opt-out)
+
+Some slots wire pure SUGAR — no harness-backed source, no instance,
+no declarations, no registry. They route per-request through a
+fixed transport (e.g. `mcp-next/server`'s `elicit:` flows through
+`sdkServer.request("elicitation/create")` on every call; there is no
+persistent server-side elicit instance to manage).
+
+These slots DO NOT follow the trichotomy. They are boolean opt-OUT
+slots — ON by default whenever the underlying transport is available;
+adopters set `slot: false` only when they have a specific reason to
+forbid the surface entirely. Shape:
+
+```ts
+slot?: boolean | { readonly enabled: boolean };
+```
+
+Rules:
+- **Default to ON.** The real gate is downstream (in MCP elicit's
+  case, the connected client's capability advertisement). An off-by-
+  default flag would hide the API without preventing anything that
+  isn't already prevented at the protocol layer.
+- **Opt-OUT is explicit.** `slot: false` (or `{ enabled: false }`)
+  disables the surface. Useful for audit / security postures with
+  hard rules against server-initiated work.
+- **Trichotomy rows that don't apply:** rows 1-3 (array shorthand,
+  instance shorthand, `use:` escape) — there's no source to wrap.
+- **Rows that still apply:** row 4 (`Noun` alias for whatever sugar
+  the slot exposes — `Elicit` for elicit, etc.), row 5 (lifecycle
+  docs — though there's no lifecycle to manage, the policy default
+  must be documented), row 6 (read getter — but as a boolean policy
+  flag like `server.elicitEnabled`, NOT a resolved instance), row 7
+  (test coverage — the default behavior AND the opt-out path).
+
+The MCP server's `elicit:` slot is the canonical example. Future
+sugar-only slots (e.g. `sample:` when sampling lands) follow the same
+shape.
+
+### 8. Validation
 
 - The Config form is rejected if it sets BOTH `declarations` and `use`
   (the two are mutually exclusive).
