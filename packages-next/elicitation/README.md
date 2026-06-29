@@ -142,6 +142,63 @@ Transports / devtools / MCP hosts subscribe to the channel, render the
 prompt, and reply via `harness.respond({ correlationId, outcome,
 value?, reason? })`.
 
+## Form-mode schema flatness (#271)
+
+The MCP `elicitation/create` request schema is intentionally
+constrained: an LLM client renders elicitation requests as a flat UI
+form. The harness enforces the spec's flatness rule synchronously,
+BEFORE the request reaches the wire — bad schemas raise
+`ElicitSchemaTooComplex` (subclass of `ElicitError`) on call, not
+"client refused" wire failures buried in `result.outcome === "failed"`.
+
+**Allowed at the property level**
+
+- `string` / `number` / `integer` / `boolean` primitives.
+- Single-select string enum (`type: "string"` + `enum: [...]`) or
+  titled enum (`oneOf: [{ const, title }, ...]`).
+- Multi-select `array` whose items enumerate options — either
+  `{ type: "string", enum: [...] }` (untitled) or
+  `{ anyOf: [{ const, title }, ...] }` (titled).
+
+**Disallowed**
+
+- Nested `object` properties — split the request into multiple
+  elicitations, or flatten the schema. (Pattern: ask for `street` /
+  `city` / `zip` as separate primitive fields instead of a nested
+  `address` object.)
+- Free-form string arrays (no `enum` / `anyOf`) — restrict
+  multi-select to enumerated options.
+- Discriminated unions / intersections / property-level `anyOf` other
+  than the spec-defined labeled-enum form.
+
+Adopters who want to pre-validate generated schemas (e.g., before
+caching a derived schema) can call `checkFlatSchema(jsonSchema)` or
+`assertFlatSchema(jsonSchema)` directly — both exported from
+`@agentick/elicitation-next`.
+
+```ts
+import { ElicitSchemaTooComplex } from "@agentick/spec-next";
+
+try {
+  await ctx.elicitation.elicit({
+    mode: "form",
+    message: "Where?",
+    schema: someStandardSchema, // projects to a non-flat JSON Schema
+  });
+} catch (err) {
+  if (err instanceof ElicitSchemaTooComplex) {
+    // err.issues — human-readable violations
+    // err.schema — the offending JSON Schema (for logging)
+    console.error("flatten your schema:", err.issues);
+  }
+}
+```
+
+The `ctx.elicit` sugar (`text` / `confirm` / `select` / `multiSelect` /
+`number` / `boolean`) is flat by construction — adopters using the
+sugar never see this error. Only the raw `harness.elicit({mode:
+"form", schema})` path can produce a non-flat wire request.
+
 ## API
 
 ### `ElicitationHarness` (class)

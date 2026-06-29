@@ -55,6 +55,7 @@ import type {
 import { HandlerError, toJsonSchema } from "@agentick/spec-next";
 
 import { ELICITATION_CHANNEL } from "./channel.js";
+import { assertFlatSchema } from "./flatness.js";
 import type { ElicitRequestInboxPayload } from "./inbox-protocol.js";
 
 // ============================================================================
@@ -143,6 +144,10 @@ export class ElicitationHarness
     // Functions are not serializable; transports MUST NOT see the
     // validator. Server-side keeps `request.schema` for re-validation.
     const wireSchema = toJsonSchema(request.schema);
+    // Enforce the MCP spec's "flat object with primitive properties"
+    // rule synchronously — bad schemas never reach the wire. Throws
+    // `ElicitSchemaTooComplex` (ElicitError subclass) on violation.
+    assertFlatSchema(wireSchema as Readonly<Record<string, unknown>>);
     const payload: FormWirePayload = {
       mode: "form",
       message: request.message,

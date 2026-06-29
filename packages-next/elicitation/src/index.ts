@@ -24,6 +24,7 @@ import "./augment.js";
 export { ElicitationHarness, type ElicitationHarnessOptions } from "./harness.js";
 export { withElicitation } from "./extension.js";
 export { buildSessionElicit, type BuildSessionElicitOptions } from "./elicit-sugar.js";
+export { assertFlatSchema, checkFlatSchema } from "./flatness.js";
 export { runElicitationHarnessConformance } from "./conformance.js";
 export {
   ELICITATION_CHANNEL,

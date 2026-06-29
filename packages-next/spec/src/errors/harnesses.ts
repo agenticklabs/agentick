@@ -906,7 +906,8 @@ export abstract class ElicitError extends AgentickError {
     | "ElicitationDeclined"
     | "ElicitationCancelled"
     | "ElicitationNotSupported"
-    | "UrlElicitationRequired";
+    | "UrlElicitationRequired"
+    | "ElicitSchemaTooComplex";
 }
 
 /**
@@ -1005,8 +1006,46 @@ export class ElicitationNotSupported extends ElicitError {
 }
 registerAgentickError("ElicitationNotSupported", ElicitationNotSupported);
 
+/**
+ * Form-mode schema fails the MCP spec's "flat object with primitive
+ * properties" rule. Thrown synchronously by the elicitation harness
+ * BEFORE issuing the wire request — bad schemas never reach the
+ * client.
+ *
+ * The MCP `elicitation/create` request schema must be:
+ *   - Top-level `type: "object"` with a `properties` map.
+ *   - Property types limited to `string` / `number` / `integer` /
+ *     `boolean`, single-select string `enum`, or `array` whose items
+ *     are an enumerated set (`items.enum` or `items.anyOf` with
+ *     `const` + `title`).
+ *   - No nested objects, no free-form string arrays, no
+ *     discriminated unions at the property level.
+ *
+ * Carries the offending schema + a list of human-readable issues so
+ * adopters can fix the schema or split a nested shape into multiple
+ * elicitation calls.
+ */
+export class ElicitSchemaTooComplex extends ElicitError {
+  readonly _tag = "ElicitSchemaTooComplex" as const;
+  readonly issues: readonly string[];
+  readonly schema: Readonly<Record<string, unknown>>;
+  constructor(args: {
+    readonly issues: readonly string[];
+    readonly schema: Readonly<Record<string, unknown>>;
+    readonly cause?: unknown;
+  }) {
+    super(`elicitation schema is not flat per MCP spec — ${args.issues.join("; ")}`, {
+      cause: args.cause,
+    });
+    this.issues = args.issues;
+    this.schema = args.schema;
+  }
+}
+registerAgentickError("ElicitSchemaTooComplex", ElicitSchemaTooComplex);
+
 export type ElicitErrorChannel =
   | ElicitationDeclined
   | ElicitationCancelled
   | ElicitationNotSupported
-  | UrlElicitationRequired;
+  | UrlElicitationRequired
+  | ElicitSchemaTooComplex;

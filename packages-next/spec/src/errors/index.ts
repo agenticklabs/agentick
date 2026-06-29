@@ -109,6 +109,7 @@ export {
   ElicitationCancelled,
   ElicitationDeclined,
   ElicitationNotSupported,
+  ElicitSchemaTooComplex,
   McpServerAuthRejected,
   McpServerAuthzDenied,
   McpServerClosed,
