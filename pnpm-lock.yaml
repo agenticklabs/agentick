@@ -202,64 +202,6 @@ importers:
         specifier: ^5.4.11
         version: 5.4.21(@types/node@25.0.9)
 
-  example/v2:
-    dependencies:
-      '@agentick/app-next':
-        specifier: workspace:*
-        version: link:../../packages-next/app
-      '@agentick/executor-ai-sdk-next':
-        specifier: workspace:*
-        version: link:../../packages-next/executor-ai-sdk
-      '@agentick/executor-next':
-        specifier: workspace:*
-        version: link:../../packages-next/executor
-      '@agentick/loop-executor-next':
-        specifier: workspace:*
-        version: link:../../packages-next/loop-executor
-      '@agentick/reconciler-next':
-        specifier: workspace:*
-        version: link:../../packages-next/reconciler
-      '@agentick/reconciler-react-next':
-        specifier: workspace:*
-        version: link:../../packages-next/reconciler-react
-      '@agentick/runtime-next':
-        specifier: workspace:*
-        version: link:../../packages-next/runtime
-      '@agentick/session-next':
-        specifier: workspace:*
-        version: link:../../packages-next/session
-      '@agentick/spec-next':
-        specifier: workspace:*
-        version: link:../../packages-next/spec
-      '@agentick/tool-executor-next':
-        specifier: workspace:*
-        version: link:../../packages-next/tool-executor
-      '@ai-sdk/provider':
-        specifier: ^2.0.0
-        version: 2.0.1
-      ai:
-        specifier: ^5.0.0
-        version: 5.0.123(zod@4.3.6)
-      effect:
-        specifier: ^3.21.2
-        version: 3.21.2
-      react:
-        specifier: ^19.2.4
-        version: 19.2.4
-      zod:
-        specifier: ^4.3.6
-        version: 4.3.6
-    devDependencies:
-      '@types/react':
-        specifier: ^19.2.13
-        version: 19.2.13
-      tsx:
-        specifier: ^4.19.2
-        version: 4.21.0
-      typescript:
-        specifier: ^5.7.3
-        version: 5.9.3
-
   example/v2-otto:
     dependencies:
       '@agentick/app-next':
@@ -277,6 +219,9 @@ importers:
       '@agentick/reconciler-react-next':
         specifier: workspace:*
         version: link:../../packages-next/reconciler-react
+      '@agentick/runtime-next':
+        specifier: workspace:*
+        version: link:../../packages-next/runtime
       '@agentick/spec-next':
         specifier: workspace:*
         version: link:../../packages-next/spec
@@ -289,12 +234,12 @@ importers:
       '@agentick/timeline-next':
         specifier: workspace:*
         version: link:../../packages-next/timeline
+      '@agentick/tool-next':
+        specifier: workspace:*
+        version: link:../../packages-next/tool
       '@ai-sdk/openai':
         specifier: ^2.0.0
         version: 2.0.89(zod@4.3.6)
-      '@modelcontextprotocol/sdk':
-        specifier: ^1.29.0
-        version: 1.29.0(zod@4.3.6)
       dotenv:
         specifier: ^16.4.5
         version: 16.6.1

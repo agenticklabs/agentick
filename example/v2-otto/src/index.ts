@@ -9,9 +9,16 @@
  *     name collision.
  *   - App-level tool — `time_now`. Bound at app construction; every
  *     session this app spawns sees it.
- *   - MCP-discovered tools — an in-memory MCP server exposing
- *     `echo`. Auto-registered by `withMCP`; the model sees them
- *     with NO JSX ceremony (no `<MCPTools>` needed).
+ *   - MCP-discovered tools — an in-memory MCP **server harness** (v2's
+ *     `McpServerHarness`) exposing `echo` (inline) and `lint_repo`
+ *     (Pattern B over the MCP wire). Auto-registered by `withMCP`;
+ *     the model sees them with NO JSX ceremony.
+ *
+ * The MCP server is the v2 `McpServerHarness` — same `createTool`
+ * authoring surface as in-process tools, no hand-rolled task
+ * bookkeeping (`tasks/get` / `tasks/result` / `tasks/cancel` /
+ * `notifications/tasks/status` are all served by the harness's
+ * projection layer per #171d.3).
  *
  * Run:
  *   1. cp .env.example .env  (then fill in OPENAI_API_KEY)
@@ -20,208 +27,104 @@
 
 import "dotenv/config";
 import React from "react";
+import { z } from "zod";
 
 import { createApp } from "@agentick/app-next/react";
 import { aisdk } from "@agentick/executor-ai-sdk-next";
 import { openai } from "@ai-sdk/openai";
-import type { AppExtension } from "@agentick/spec-next";
+import type { AppExtension, ContentBlock } from "@agentick/spec-next";
 import { jsonSchema } from "@agentick/spec-next";
 
-import { InMemoryMcpTransport, NoneAuth, withMCP } from "@agentick/mcp-next";
+import { NoneAuth, withMCP } from "@agentick/mcp-next";
+import { inMemoryServerTransport, McpServerHarness } from "@agentick/mcp-next/server";
+import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import { withTasks } from "@agentick/tasks-next";
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import {
-  CallToolRequestSchema,
-  CancelTaskRequestSchema,
-  GetTaskPayloadRequestSchema,
-  GetTaskRequestSchema,
-  ListToolsRequestSchema,
-  type CallToolResult,
-} from "@modelcontextprotocol/sdk/types.js";
+import { createTool } from "@agentick/tool-next";
 
 import { Agent } from "./agent.js";
 
 /**
- * Spin up an in-memory MCP server exposing two tools:
+ * Spin up an in-memory MCP server harness exposing two tools:
  *
- *   - `echo` — synchronous, inline-result. Demonstrates a vanilla
- *     `tools/call` round-trip over the MCP wire.
- *   - `lint_repo` — declared with `execution.taskSupport: "required"`.
- *     `tools/call` immediately returns a `CreateTaskResult` (the wire
- *     analogue of our local `session_task_ref`); the server runs the
- *     work in the background, emits `notifications/tasks/status`
- *     updates as it progresses, and responds to `tasks/get` /
- *     `tasks/result` / `tasks/cancel` requests from the client.
+ *   - `echo` — inline result.
+ *   - `lint_repo` — annotated `taskSupport: "required"`. The handler
+ *     returns `ctx.tasks!.submit(...)` exactly the way an in-process
+ *     Pattern B tool would (cf. `deploy_branch` in `agent.tsx`). The
+ *     server harness recognises the TaskHandle return, projects it
+ *     to `CreateTaskResult` on the wire, and serves the full
+ *     `tasks/*` lifecycle automatically — adopters write zero
+ *     bookkeeping for the MCP task wire.
  *
- * The `InMemoryMcpTransport.createLinkedPair()` gives us a client /
- * server transport pair that talks over a shared in-process queue —
- * no subprocess, no socket, no network. Useful for tests AND for
- * demos like this one.
- *
- * On the client side, `withMCP` recognises `execution.taskSupport ===
- * "required"` (per #174 capability negotiation) and wraps the
- * discovered tool's handler in `ctx.tasks.submit(...)`. From the
- * model's perspective, calling `demo__lint_repo` is indistinguishable
- * from calling the local `deploy_branch` — both immediately yield a
- * `session_task_ref` content block and both are driven by the
- * `session_tasks_*` model-facing tools. Pattern B is transport-
- * transparent.
+ * Compare to the v1-style raw-SDK approach (replaced #171d.3): the
+ * server-side task bookkeeping (Map of taskId → status, manual
+ * `tools/call` → `CreateTaskResult`, hand-rolled `tasks/get` etc.)
+ * collapses into the standard `createTool` + `ctx.tasks!.submit`
+ * pattern that already works in-process.
  */
-function mkMcpServer(): {
-  readonly clientTransport: InMemoryMcpTransport;
-  readonly server: Server;
-} {
-  const [clientTransport, serverTransport] = InMemoryMcpTransport.createLinkedPair();
-  const server = new Server(
-    { name: "otto-demo-mcp", version: "1.0.0" },
-    { capabilities: { tools: {}, tasks: { listChanged: false } } },
-  );
-
-  // ── Server-side task registry. Real adopters back this with whatever
-  //    durable store fits — a queue, a database, an external job
-  //    runner. For the demo we keep it in memory and run the work
-  //    inside a fire-and-forget async function with an AbortController
-  //    for cancellation.
-  interface TaskRecord {
-    status: "working" | "completed" | "failed" | "cancelled";
-    statusMessage?: string;
-    result?: CallToolResult;
-    failureReason?: string;
-    readonly abort: AbortController;
-  }
-  const tasks = new Map<string, TaskRecord>();
-  let taskSeq = 0;
-  const nextTaskId = (): string => `task-${Date.now().toString(36)}-${++taskSeq}`;
-
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: [
-      {
-        name: "echo",
-        description: "Echoes the supplied `message` back as text.",
-        inputSchema: {
-          type: "object",
-          properties: { message: { type: "string" } },
-          required: ["message"],
-        },
-      },
-      {
-        name: "lint_repo",
-        description:
-          "Lint the whole repository — runs ~2 seconds in the background. " +
-          "Returns a task reference immediately; poll / await / cancel via the " +
-          "`session_tasks_*` tools.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            strict: {
-              type: "boolean",
-              description: "If true, treat warnings as errors.",
-            },
-          },
-        },
-        execution: { taskSupport: "required" },
-      },
-    ],
-  }));
-
-  server.setRequestHandler(CallToolRequestSchema, async (req) => {
-    if (req.params.name === "echo") {
-      const message = String(
-        (req.params.arguments as { message?: string } | undefined)?.message ?? "",
-      );
-      return { content: [{ type: "text", text: `echo: ${message}` }] };
-    }
-
-    if (req.params.name === "lint_repo") {
-      const strict =
-        Boolean((req.params.arguments as { strict?: boolean } | undefined)?.strict) === true;
-      const taskId = nextTaskId();
-      const record: TaskRecord = { status: "working", abort: new AbortController() };
-      tasks.set(taskId, record);
-
-      // Run the work in the background. The async closure is
-      // intentionally not awaited from this handler — `tools/call`
-      // must return promptly with the `CreateTaskResult`.
-      void (async () => {
-        const stages: ReadonlyArray<readonly [string, number]> = [
-          ["scanning-files", 500],
-          ["applying-rules", 700],
-          ["formatting-report", 400],
-        ];
-        try {
-          for (const [stage, ms] of stages) {
-            if (record.abort.signal.aborted) {
-              record.status = "cancelled";
-              record.failureReason = "client cancelled";
-              await server.notification({
-                method: "notifications/tasks/status",
-                params: { taskId, status: "cancelled" },
-              });
-              return;
-            }
-            record.statusMessage = stage;
-            await server.notification({
-              method: "notifications/tasks/status",
-              params: { taskId, status: "working", statusMessage: stage },
+async function mkMcpServer(): Promise<{
+  readonly clientTransport: Awaited<
+    ReturnType<ReturnType<typeof inMemoryServerTransport>["connect"]>
+  >;
+  readonly harness: McpServerHarness;
+}> {
+  const transport = inMemoryServerTransport();
+  const harness = new McpServerHarness(
+    "srv:otto-demo",
+    new MemoryJournal({ capacity: 1024 }),
+    new LocalEventBus(),
+    new LocalInbox(),
+    {
+      name: "otto-demo-mcp",
+      transports: [transport],
+      serverInfo: { name: "otto-demo-mcp", version: "1.0.0" },
+      tools: [
+        createTool({
+          name: "echo",
+          description: "Echo the supplied message back as text.",
+          inputSchema: z.object({ message: z.string() }),
+          handler: async ({ message }) => [
+            { type: "text", text: `echo: ${message}` } as ContentBlock,
+          ],
+        }),
+        createTool({
+          name: "lint_repo",
+          description:
+            "Lint the whole repository — runs ~2 seconds in the background. " +
+            "Returns a task reference immediately; poll / await / cancel via the " +
+            "`session_tasks_*` tools.",
+          inputSchema: z.object({
+            strict: z
+              .boolean()
+              .optional()
+              .describe("If true, treat warnings as errors."),
+          }),
+          annotations: { taskSupport: "required" },
+          handler: async ({ strict }, { ctx }) => {
+            return ctx.tasks!.submit(async ({ signal, setStatusMessage }) => {
+              const stages = [
+                ["scanning-files", 500],
+                ["applying-rules", 700],
+                ["formatting-report", 400],
+              ] as const;
+              for (const [stage, ms] of stages) {
+                if (signal.aborted) throw new DOMException("aborted", "AbortError");
+                setStatusMessage(stage);
+                await new Promise<void>((r) => setTimeout(r, ms));
+              }
+              const summary = strict ? "0 errors, 0 warnings (strict)" : "0 errors, 3 warnings";
+              return [
+                { type: "text", text: `lint complete — ${summary}` } as ContentBlock,
+              ];
             });
-            await new Promise<void>((r) => setTimeout(r, ms));
-          }
-          const summary = strict ? "0 errors, 0 warnings (strict)" : "0 errors, 3 warnings";
-          record.status = "completed";
-          record.result = { content: [{ type: "text", text: `lint complete — ${summary}` }] };
-          await server.notification({
-            method: "notifications/tasks/status",
-            params: { taskId, status: "completed" },
-          });
-        } catch (err) {
-          record.status = "failed";
-          record.failureReason = err instanceof Error ? err.message : String(err);
-          await server.notification({
-            method: "notifications/tasks/status",
-            params: { taskId, status: "failed" },
-          });
-        }
-      })();
-
-      return { task: { taskId, status: "working", ttl: 60_000 } };
-    }
-
-    throw new Error(`unknown tool: ${req.params.name}`);
-  });
-
-  server.setRequestHandler(GetTaskRequestSchema, async (req) => {
-    const t = tasks.get(req.params.taskId);
-    if (!t) throw new Error(`unknown task: ${req.params.taskId}`);
-    return {
-      taskId: req.params.taskId,
-      status: t.status,
-      ...(t.statusMessage !== undefined ? { statusMessage: t.statusMessage } : {}),
-    };
-  });
-
-  server.setRequestHandler(GetTaskPayloadRequestSchema, async (req) => {
-    const t = tasks.get(req.params.taskId);
-    if (!t) throw new Error(`unknown task: ${req.params.taskId}`);
-    if (t.status === "completed" && t.result) return t.result;
-    if (t.status === "failed") {
-      return {
-        content: [{ type: "text", text: `lint failed: ${t.failureReason ?? "unknown"}` }],
-        isError: true,
-      };
-    }
-    throw new Error(`task ${req.params.taskId} not yet terminal (status=${t.status})`);
-  });
-
-  server.setRequestHandler(CancelTaskRequestSchema, async (req) => {
-    const t = tasks.get(req.params.taskId);
-    if (t && t.status === "working") {
-      t.abort.abort();
-    }
-    return {};
-  });
-
-  void server.connect(serverTransport);
-  return { clientTransport, server };
+          },
+        }),
+      ],
+    },
+  );
+  await harness.ready;
+  await harness.start();
+  const clientTransport = await transport.connect();
+  return { clientTransport, harness };
 }
 
 /**
@@ -256,7 +159,7 @@ async function main(): Promise<void> {
   //     a streamable-HTTP transport (remote MCP server). The
   //     in-memory server exposes both an `echo` (inline) and a
   //     `lint_repo` (Pattern B via the MCP task wire) tool.
-  const { clientTransport } = mkMcpServer();
+  const { clientTransport, harness: mcpServer } = await mkMcpServer();
 
   // ─── Construct the app with all the layered seams wired:
   const app = await createApp(React.createElement(Agent), {
@@ -308,10 +211,10 @@ async function main(): Promise<void> {
   });
 
   try {
-    // Run two prompts back-to-back on the same session so the Pattern B
-    // task ref persists across ticks — the model kicks off the deploy
-    // in the first turn, then is asked to check on / await it in the
-    // second turn.
+    // Run three prompts back-to-back on the same session so the Pattern B
+    // task refs persist across ticks — the model kicks off a local deploy
+    // in turn 1, drives it across turn 2, then exercises the MCP-remote
+    // Pattern B path via demo__lint_repo in turn 3.
     const session = await app.createSession();
     try {
       const turn = async (text: string, label: string): Promise<void> => {
@@ -344,6 +247,7 @@ async function main(): Promise<void> {
     }
   } finally {
     await app.closeApp();
+    await mcpServer.close();
   }
 }
 
