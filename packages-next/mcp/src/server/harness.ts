@@ -403,7 +403,7 @@ export class McpServerHarness
       // slot is optional per spec.
       if (this.elicitWired) {
         const elicit = buildMcpElicit({ sdkServer, clientCapabilities: sdkClientCaps });
-        if (elicit.canDoForm()) {
+        if (elicit.canDoForm() || elicit.canDoUrl()) {
           return { ...ctx, elicit };
         }
       }

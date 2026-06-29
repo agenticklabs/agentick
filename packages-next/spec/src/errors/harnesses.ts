@@ -894,3 +894,119 @@ export type McpServerErrorChannel =
   | McpServerRateLimited
   | McpServerClosed
   | JournalError;
+
+// ============================================================================
+// ElicitError — failures specific to the elicitation flow (form / URL),
+// surfaced by the `Elicit` sugar surface regardless of routing transport
+// (MCP server, in-process ElicitationHarness, future flavors).
+// ============================================================================
+
+export abstract class ElicitError extends AgentickError {
+  abstract override readonly _tag:
+    | "ElicitationDeclined"
+    | "ElicitationCancelled"
+    | "ElicitationNotSupported"
+    | "UrlElicitationRequired";
+}
+
+/**
+ * Single URL-mode elicitation spec carried by
+ * {@link UrlElicitationRequired.elicitations}. The shape is
+ * cross-transport — mirrors MCP's wire `data.elicitations[]` entries
+ * in the `-32042` JSON-RPC error, but the same class flows through
+ * in-process tool-handler dispatch too.
+ */
+export interface UrlElicitationSpec {
+  readonly mode: "url";
+  readonly elicitationId: string;
+  readonly url: string;
+  readonly message: string;
+}
+
+/**
+ * Thrown by `ctx.elicit.requireUrls(...)` to signal that the user
+ * must walk one or more URL-mode elicitations before the originating
+ * tool call can complete. Canonical use case: OAuth-style deferred
+ * auth.
+ *
+ * Transport behavior:
+ *   - **MCP server:** the transport layer reads `jsonRpcCode = -32042`
+ *     and maps to the corresponding wire error with
+ *     `data.elicitations: [...]`. The MCP client's tool wrapper
+ *     recognises -32042, walks the URLs, then retries the originating
+ *     tool call.
+ *   - **In-process:** the tool dispatcher catches this class and
+ *     surfaces the URLs to whoever owns the session's client surface
+ *     (devtools, React UI, CLI). The retry pattern is the same; only
+ *     the wire format differs.
+ *
+ * The `jsonRpcCode` field is informational — non-MCP transports
+ * ignore it. The deferred-auth PATTERN is cross-transport; only the
+ * SERIALIZATION at the MCP wire edge is MCP-specific.
+ */
+export class UrlElicitationRequired extends ElicitError {
+  readonly _tag = "UrlElicitationRequired" as const;
+  readonly elicitations: readonly UrlElicitationSpec[];
+  /** JSON-RPC error code surfaced by the MCP wire codec. */
+  readonly jsonRpcCode = -32042 as const;
+  constructor(args: {
+    readonly elicitations: readonly UrlElicitationSpec[];
+    readonly cause?: unknown;
+  }) {
+    super(
+      `URL elicitation required (${args.elicitations.length} URL${args.elicitations.length === 1 ? "" : "s"})`,
+      { cause: args.cause },
+    );
+    this.elicitations = args.elicitations;
+  }
+}
+registerAgentickError("UrlElicitationRequired", UrlElicitationRequired);
+
+/** The user explicitly declined the elicitation. */
+export class ElicitationDeclined extends ElicitError {
+  readonly _tag = "ElicitationDeclined" as const;
+  readonly reason?: string;
+  constructor(args?: { readonly reason?: string; readonly cause?: unknown }) {
+    super(args?.reason ? `user declined: ${args.reason}` : "user declined the elicitation", {
+      cause: args?.cause,
+    });
+    if (args?.reason !== undefined) this.reason = args.reason;
+  }
+}
+registerAgentickError("ElicitationDeclined", ElicitationDeclined);
+
+/** The user dismissed the elicitation without deciding. */
+export class ElicitationCancelled extends ElicitError {
+  readonly _tag = "ElicitationCancelled" as const;
+  readonly reason?: string;
+  constructor(args?: { readonly reason?: string; readonly cause?: unknown }) {
+    super(args?.reason ? `user cancelled: ${args.reason}` : "user cancelled the elicitation", {
+      cause: args?.cause,
+    });
+    if (args?.reason !== undefined) this.reason = args.reason;
+  }
+}
+registerAgentickError("ElicitationCancelled", ElicitationCancelled);
+
+/**
+ * The requested elicitation mode is not supported — the connected
+ * client did not advertise the matching sub-capability
+ * (`elicitation.form` or `elicitation.url`).
+ */
+export class ElicitationNotSupported extends ElicitError {
+  readonly _tag = "ElicitationNotSupported" as const;
+  readonly mode: "form" | "url";
+  constructor(args: { readonly mode: "form" | "url"; readonly cause?: unknown }) {
+    super(`client did not advertise the \`elicitation.${args.mode}\` sub-capability`, {
+      cause: args.cause,
+    });
+    this.mode = args.mode;
+  }
+}
+registerAgentickError("ElicitationNotSupported", ElicitationNotSupported);
+
+export type ElicitErrorChannel =
+  | ElicitationDeclined
+  | ElicitationCancelled
+  | ElicitationNotSupported
+  | UrlElicitationRequired;

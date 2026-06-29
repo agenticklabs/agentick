@@ -28,8 +28,10 @@ import { jsonSchema } from "@agentick/spec-next";
 import {
   ElicitationCancelled,
   ElicitationDeclined,
+  ElicitationNotSupported,
   inMemoryServerTransport,
   McpServerHarness,
+  UrlElicitationRequired,
   type ToolHandlerResolver,
 } from "../index.js";
 
@@ -359,5 +361,204 @@ describe("elicitation projection — decline + cancel", () => {
       () => ({ action: "cancel" }),
       ElicitationCancelled,
     );
+  });
+});
+
+describe("elicitation projection — try* variants return ElicitOutcome (no throw)", () => {
+  async function runWith<T>(
+    method: (ctx: import("@agentick/spec-next").McpRequestContext) => Promise<T>,
+    respond: Parameters<typeof makeElicitClient>[1],
+  ): Promise<T> {
+    let captured: T | null = null;
+    const { harness, transport } = await makeElicitServer({
+      "handler:run": async (_input, ctx) => {
+        captured = await method(ctx);
+        return [{ type: "text", text: "done" }];
+      },
+    });
+    const clientTransport = await transport.connect();
+    const client = await makeElicitClient(clientTransport, respond);
+    await client.callTool({ name: "run", arguments: {} }, CallToolResultSchema);
+    await client.close();
+    await harness.close();
+    return captured as T;
+  }
+
+  it("tryText accept returns { status: 'accept', value }", async () => {
+    const outcome = await runWith(
+      (ctx) => ctx.elicit!.tryText("?"),
+      () => ({ action: "accept", content: { value: "Ada" } }),
+    );
+    expect(outcome).toEqual({ status: "accept", value: "Ada" });
+  });
+
+  it("tryConfirm decline returns { status: 'decline' } (no throw)", async () => {
+    const outcome = await runWith(
+      (ctx) => ctx.elicit!.tryConfirm("?"),
+      () => ({ action: "decline" }),
+    );
+    expect(outcome).toEqual({ status: "decline" });
+  });
+
+  it("tryNumber cancel returns { status: 'cancel' } (no throw)", async () => {
+    const outcome = await runWith(
+      (ctx) => ctx.elicit!.tryNumber("?"),
+      () => ({ action: "cancel" }),
+    );
+    expect(outcome).toEqual({ status: "cancel" });
+  });
+
+  it("trySelect accept returns the chosen option", async () => {
+    const outcome = await runWith(
+      (ctx) => ctx.elicit!.trySelect("?", ["a", "b"] as const),
+      () => ({ action: "accept", content: { value: "b" } }),
+    );
+    expect(outcome).toEqual({ status: "accept", value: "b" });
+  });
+
+  it("tryMultiSelect accept returns the chosen options", async () => {
+    const outcome = await runWith(
+      (ctx) => ctx.elicit!.tryMultiSelect("?", ["x", "y", "z"] as const),
+      () => ({ action: "accept", content: { value: ["x", "z"] } }),
+    );
+    expect(outcome).toEqual({ status: "accept", value: ["x", "z"] });
+  });
+});
+
+describe("elicitation projection — URL mode", () => {
+  it("url accept resolves void; tryUrl returns the outcome", async () => {
+    let resolved = false;
+    let tryOutcome: unknown = null;
+    const { harness, transport } = await makeElicitServer(
+      {
+        "handler:both": async (_input, ctx) => {
+          await ctx.elicit!.url({ message: "Sign in", url: "https://example.com/auth" });
+          resolved = true;
+          tryOutcome = await ctx.elicit!.tryUrl({
+            message: "Approve",
+            url: "https://example.com/approve",
+          });
+          return [{ type: "text", text: "ok" }];
+        },
+      },
+      { elicitWired: true },
+    );
+    const clientTransport = await transport.connect();
+    const client = await makeElicitClient(clientTransport, () => ({ action: "accept" }), {
+      elicitation: { form: {}, url: {} },
+    });
+
+    await client.callTool({ name: "both", arguments: {} }, CallToolResultSchema);
+    expect(resolved).toBe(true);
+    expect(tryOutcome).toEqual({ status: "accept" });
+
+    await client.close();
+    await harness.close();
+  });
+
+  it("url throws ElicitationNotSupported when client only advertises form", async () => {
+    let caught: unknown = null;
+    const { harness, transport } = await makeElicitServer(
+      {
+        "handler:run": async (_input, ctx) => {
+          try {
+            await ctx.elicit!.url({ message: "x", url: "https://x" });
+          } catch (err) {
+            caught = err;
+          }
+          return [{ type: "text", text: "done" }];
+        },
+      },
+      { elicitWired: true },
+    );
+    const clientTransport = await transport.connect();
+    const client = await makeElicitClient(
+      clientTransport,
+      () => ({ action: "accept" }),
+      { elicitation: { form: {} } }, // form-only, no url
+    );
+
+    await client.callTool({ name: "run", arguments: {} }, CallToolResultSchema);
+    expect(caught).toBeInstanceOf(ElicitationNotSupported);
+    expect((caught as ElicitationNotSupported).mode).toBe("url");
+
+    await client.close();
+    await harness.close();
+  });
+
+  it("url decline throws ElicitationDeclined", async () => {
+    let caught: unknown = null;
+    const { harness, transport } = await makeElicitServer(
+      {
+        "handler:run": async (_input, ctx) => {
+          try {
+            await ctx.elicit!.url({ message: "x", url: "https://x" });
+          } catch (err) {
+            caught = err;
+          }
+          return [{ type: "text", text: "done" }];
+        },
+      },
+      { elicitWired: true },
+    );
+    const clientTransport = await transport.connect();
+    const client = await makeElicitClient(clientTransport, () => ({ action: "decline" }), {
+      elicitation: { url: {} },
+    });
+
+    await client.callTool({ name: "run", arguments: {} }, CallToolResultSchema);
+    expect(caught).toBeInstanceOf(ElicitationDeclined);
+
+    await client.close();
+    await harness.close();
+  });
+});
+
+describe("elicitation projection — requireUrls (deferred auth)", () => {
+  it("throws UrlElicitationRequired with the URL specs + jsonRpcCode -32042", async () => {
+    let caught: unknown = null;
+    const { harness, transport } = await makeElicitServer(
+      {
+        "handler:run": async (_input, ctx) => {
+          try {
+            ctx.elicit!.requireUrls([
+              { message: "Sign in", url: "https://example.com/oauth" },
+              { message: "Authorize", url: "https://example.com/authorize" },
+            ]);
+            // Unreachable — requireUrls returns `never`.
+            return [{ type: "text", text: "should not reach" }];
+          } catch (err) {
+            caught = err;
+            // Re-throw so the tools/call path surfaces it on the wire.
+            throw err;
+          }
+        },
+      },
+      { elicitWired: true },
+    );
+    const clientTransport = await transport.connect();
+    const client = await makeElicitClient(clientTransport, () => ({ action: "cancel" }));
+
+    // The handler throws — tools/call returns isError: true.
+    const result = await client.callTool({ name: "run", arguments: {} }, CallToolResultSchema);
+    expect(result.isError).toBe(true);
+
+    expect(caught).toBeInstanceOf(UrlElicitationRequired);
+    const required = caught as UrlElicitationRequired;
+    expect(required.jsonRpcCode).toBe(-32042);
+    expect(required.elicitations).toHaveLength(2);
+    expect(required.elicitations[0]).toMatchObject({
+      mode: "url",
+      url: "https://example.com/oauth",
+      message: "Sign in",
+    });
+    expect(required.elicitations[1]).toMatchObject({
+      mode: "url",
+      url: "https://example.com/authorize",
+      message: "Authorize",
+    });
+
+    await client.close();
+    await harness.close();
   });
 });

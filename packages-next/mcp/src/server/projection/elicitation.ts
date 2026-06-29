@@ -3,63 +3,54 @@
  *
  * Tool handlers running in the server process can call
  * `ctx.elicit.text("Are you sure?")` / `.confirm(...)` / `.select(...)` etc.
- * Each call constructs a single form-mode `elicitation/create` JSON-RPC
- * request, sends it through the per-connection SDK `Server` via
+ * Each call constructs a single `elicitation/create` JSON-RPC request,
+ * sends it through the per-connection SDK `Server` via
  * `sdkServer.request(...)`, and maps the client's three-action response
- * (`accept` / `decline` / `cancel`) into either the typed value
- * (throwing-variant methods) or a {@link ElicitOutcome} discriminated
- * union (`try*` — landing with #171d.2.2).
+ * (`accept` / `decline` / `cancel`) into either:
  *
- * Scope of this slice (#171d.2.1):
- *   - Form-mode basics: `text`, `confirm`, `boolean`, `number`,
- *     `select`, `multiSelect`.
- *   - Throwing semantics on decline/cancel (`ElicitationDeclined`,
- *     `ElicitationCancelled` — temporary classes in this module; will
- *     migrate to `AgentickError` subclasses in `spec-next/errors`
- *     during #171d.2.2).
- *   - Capability probe (`canDoForm`) reads `clientCapabilities`
- *     advertised at `initialize`.
+ *   - The typed value (throwing variants → throw
+ *     `ElicitationDeclined` / `ElicitationCancelled` on those outcomes), OR
+ *   - An {@link ElicitOutcome} discriminated union (`try*` variants).
  *
- * Deferred to #171d.2.2 / d.2.3:
- *   - URL mode (`url`, `requireUrls`).
- *   - `try*` variants returning `ElicitOutcome`.
- *   - Schema-flatness validation, custom `object` shapes.
- *   - Per-call `timeoutMs` enforcement (server-side cancellation).
+ * Coverage:
+ *   - Form-mode (#171d.2.1): text, confirm, boolean, number, select,
+ *     multiSelect.
+ *   - URL mode (#171d.2.2): `url(spec)` — single URL consent;
+ *     `requireUrls(specs)` — throws `UrlElicitationRequired` (-32042
+ *     JSON-RPC) for the OAuth-style deferred-auth retry pattern.
+ *   - `try*` variants for every throwing form-mode method + `tryUrl`.
+ *
+ * Deferred to #171d.2.3:
+ *   - Schema-flatness validation, `object<T>(message, schema)` for
+ *     Standard-Schema-driven custom shapes.
+ *   - Per-call `timeoutMs` enforcement (server-side AbortController
+ *     wiring).
  */
 
 import type { Server as SdkServer } from "@modelcontextprotocol/sdk/server/index.js";
 import { ElicitResultSchema } from "@modelcontextprotocol/sdk/types.js";
-import type { Elicit, ElicitTimeoutOption } from "@agentick/spec-next";
+import {
+  ElicitationCancelled,
+  ElicitationDeclined,
+  ElicitationNotSupported,
+  UrlElicitationRequired,
+  type Elicit,
+  type ElicitOutcome,
+  type ElicitTimeoutOption,
+  type UrlElicitOutcome,
+  type UrlElicitSpec,
+  type UrlElicitationSpec,
+} from "@agentick/spec-next";
+import { ulid } from "@agentick/runtime-next";
 
-// ============================================================================
-// Errors — temporary classes; migrate to AgentickError subclasses with #256
-// follow-up during #171d.2.2.
-// ============================================================================
-
-export class ElicitationDeclined extends Error {
-  override readonly name = "ElicitationDeclined";
-  readonly reason?: string;
-  constructor(message = "User declined the elicitation", reason?: string) {
-    super(message);
-    if (reason !== undefined) this.reason = reason;
-  }
-}
-
-export class ElicitationCancelled extends Error {
-  override readonly name = "ElicitationCancelled";
-  readonly reason?: string;
-  constructor(message = "User cancelled the elicitation", reason?: string) {
-    super(message);
-    if (reason !== undefined) this.reason = reason;
-  }
-}
-
-export class ElicitationNotSupported extends Error {
-  override readonly name = "ElicitationNotSupported";
-  constructor() {
-    super("Connected client did not advertise the `elicitation` capability");
-  }
-}
+// Re-export the spec classes so adopters who catch these can stay on
+// the `@agentick/mcp-next/server` import path.
+export {
+  ElicitationCancelled,
+  ElicitationDeclined,
+  ElicitationNotSupported,
+  UrlElicitationRequired,
+};
 
 // ============================================================================
 // Capability probe
@@ -174,26 +165,20 @@ function multiEnumProp<T extends readonly string[]>(
 }
 
 // ============================================================================
-// Routing — single form-mode request through sdkServer.request
+// Routing — single form-mode round-trip through sdkServer.request
 // ============================================================================
 
-/**
- * Single round-trip: build the `elicitation/create` request, send it
- * via the SDK Server, and return the result (parsed by
- * `ElicitResultSchema`). Throws if the round-trip itself fails
- * (transport, validation); does NOT throw on `decline`/`cancel`
- * outcomes — the caller maps those.
- */
-async function sendElicit(
+interface FormRoundTripResult {
+  readonly action: "accept" | "decline" | "cancel";
+  readonly content?: Readonly<Record<string, string | number | boolean | readonly string[]>>;
+}
+
+async function sendFormElicit(
   sdkServer: SdkServer,
   message: string,
   schema: FlatProperty,
   _timeoutMs?: ElicitTimeoutOption,
-): Promise<{
-  action: "accept" | "decline" | "cancel";
-  content?: Readonly<Record<string, string | number | boolean | readonly string[]>>;
-}> {
-  // The SDK's `request<T>` overload narrows by the result schema.
+): Promise<FormRoundTripResult> {
   const result = await sdkServer.request(
     { method: "elicitation/create", params: { message, requestedSchema: schema } },
     ElicitResultSchema,
@@ -210,12 +195,35 @@ async function sendElicit(
   };
 }
 
-/**
- * Map an `accept` content payload to a typed value by pulling the
- * single field identified by `key`. The MCP elicit shape always
- * returns a flat object; we pluck the one property our schema asked
- * for.
- */
+async function sendUrlElicit(
+  sdkServer: SdkServer,
+  spec: UrlElicitSpec,
+  elicitationId: string,
+  _timeoutMs?: ElicitTimeoutOption,
+): Promise<UrlElicitOutcome> {
+  // MCP draft URL-mode wire shape: `mode: "url"` + `url` + `elicitationId`.
+  // The SDK's ElicitRequest type doesn't yet carry `mode` typed-strictly;
+  // we pass via `params` directly with a cast at the boundary.
+  const result = (await sdkServer.request(
+    {
+      method: "elicitation/create",
+      params: {
+        message: spec.message,
+        mode: "url",
+        url: spec.url,
+        elicitationId,
+        // The SDK still requires `requestedSchema`; URL mode uses an
+        // empty object schema as a placeholder. The client SHOULD
+        // ignore it on URL-mode requests.
+        requestedSchema: flatObjectSchema({}),
+      },
+    } as Parameters<SdkServer["request"]>[0],
+    ElicitResultSchema,
+  )) as { action: "accept" | "decline" | "cancel" };
+
+  return { status: result.action } as UrlElicitOutcome;
+}
+
 function pluck<T>(content: Readonly<Record<string, unknown>> | undefined, key: string): T {
   if (content === undefined) {
     throw new Error(`elicit: client returned accept with no content`);
@@ -235,25 +243,14 @@ export interface BuildMcpElicitOptions {
   readonly clientCapabilities: Readonly<Record<string, unknown>> | null;
 }
 
-/**
- * Build a per-connection {@link Elicit} sugar instance. Wires the
- * methods to `sdkServer.request("elicitation/create")` so each call
- * round-trips to the connected MCP client.
- *
- * Every method THROWS on `decline` / `cancel`. The `try*` variants
- * (returning {@link ElicitOutcome}) land with #171d.2.2.
- *
- * Methods throw {@link ElicitationNotSupported} when the connected
- * client didn't advertise the `elicitation` capability — the
- * capability probe runs at construction time AND each call (the
- * latter is cheap and avoids surprise if capability state changes
- * mid-session, though SDK semantics make that unlikely).
- */
 export function buildMcpElicit(options: BuildMcpElicitOptions): Elicit {
   const caps = inspectElicitationCapabilities(options.clientCapabilities);
 
   function ensureFormMode(): void {
-    if (!caps.form) throw new ElicitationNotSupported();
+    if (!caps.form) throw new ElicitationNotSupported({ mode: "form" });
+  }
+  function ensureUrlMode(): void {
+    if (!caps.url) throw new ElicitationNotSupported({ mode: "url" });
   }
 
   async function singleField<T>(
@@ -264,7 +261,7 @@ export function buildMcpElicit(options: BuildMcpElicitOptions): Elicit {
   ): Promise<T> {
     ensureFormMode();
     const wrapped = flatObjectSchema({ [key]: propSchema });
-    const result = await sendElicit(options.sdkServer, message, wrapped, timeoutMs);
+    const result = await sendFormElicit(options.sdkServer, message, wrapped, timeoutMs);
     switch (result.action) {
       case "accept":
         return pluck<T>(result.content, key);
@@ -275,12 +272,26 @@ export function buildMcpElicit(options: BuildMcpElicitOptions): Elicit {
     }
   }
 
+  async function singleFieldTry<T>(
+    message: string,
+    key: string,
+    propSchema: FlatProperty,
+    timeoutMs?: ElicitTimeoutOption,
+  ): Promise<ElicitOutcome<T>> {
+    ensureFormMode();
+    const wrapped = flatObjectSchema({ [key]: propSchema });
+    const result = await sendFormElicit(options.sdkServer, message, wrapped, timeoutMs);
+    if (result.action === "accept")
+      return { status: "accept", value: pluck<T>(result.content, key) };
+    return { status: result.action };
+  }
+
   return {
+    // ─────────── Form mode — throwing variants ───────────
     text(message, opts) {
       const { timeoutMs, ...propOpts } = opts ?? {};
       return singleField<string>(message, "value", textProp(propOpts), timeoutMs);
     },
-
     select(message, choices, opts) {
       const { timeoutMs, ...propOpts } = opts ?? {};
       return singleField<(typeof choices)[number]>(
@@ -290,7 +301,6 @@ export function buildMcpElicit(options: BuildMcpElicitOptions): Elicit {
         timeoutMs,
       );
     },
-
     multiSelect(message, choices, opts) {
       const { timeoutMs, ...propOpts } = opts ?? {};
       return singleField<Array<(typeof choices)[number]>>(
@@ -300,24 +310,91 @@ export function buildMcpElicit(options: BuildMcpElicitOptions): Elicit {
         timeoutMs,
       );
     },
-
     confirm(message, opts) {
       const { timeoutMs, ...propOpts } = opts ?? {};
       return singleField<boolean>(message, "value", booleanProp(propOpts), timeoutMs);
     },
-
     boolean(message, opts) {
       const { timeoutMs, ...propOpts } = opts ?? {};
       return singleField<boolean>(message, "value", booleanProp(propOpts), timeoutMs);
     },
-
     number(message, opts) {
       const { timeoutMs, ...propOpts } = opts ?? {};
       return singleField<number>(message, "value", numberProp(propOpts), timeoutMs);
     },
 
+    // ─────────── URL mode ───────────
+    async url(spec) {
+      ensureUrlMode();
+      const elicitationId = `el-${ulid()}`;
+      const outcome = await sendUrlElicit(options.sdkServer, spec, elicitationId, spec.timeoutMs);
+      switch (outcome.status) {
+        case "accept":
+          return;
+        case "decline":
+          throw new ElicitationDeclined();
+        case "cancel":
+          throw new ElicitationCancelled();
+      }
+    },
+
+    requireUrls(specs) {
+      const elicitations: readonly UrlElicitationSpec[] = specs.map((spec) => ({
+        mode: "url" as const,
+        elicitationId: `el-required-${ulid()}`,
+        url: spec.url,
+        message: spec.message,
+      }));
+      throw new UrlElicitationRequired({ elicitations });
+    },
+
+    // ─────────── try* variants — non-throwing ───────────
+    tryText(message, opts) {
+      const { timeoutMs, ...propOpts } = opts ?? {};
+      return singleFieldTry<string>(message, "value", textProp(propOpts), timeoutMs);
+    },
+    trySelect(message, choices, opts) {
+      const { timeoutMs, ...propOpts } = opts ?? {};
+      return singleFieldTry<(typeof choices)[number]>(
+        message,
+        "value",
+        enumProp(choices, propOpts),
+        timeoutMs,
+      );
+    },
+    tryMultiSelect(message, choices, opts) {
+      const { timeoutMs, ...propOpts } = opts ?? {};
+      return singleFieldTry<Array<(typeof choices)[number]>>(
+        message,
+        "value",
+        multiEnumProp(choices, propOpts),
+        timeoutMs,
+      );
+    },
+    tryConfirm(message, opts) {
+      const { timeoutMs, ...propOpts } = opts ?? {};
+      return singleFieldTry<boolean>(message, "value", booleanProp(propOpts), timeoutMs);
+    },
+    tryNumber(message, opts) {
+      const { timeoutMs, ...propOpts } = opts ?? {};
+      return singleFieldTry<number>(message, "value", numberProp(propOpts), timeoutMs);
+    },
+    tryBoolean(message, opts) {
+      const { timeoutMs, ...propOpts } = opts ?? {};
+      return singleFieldTry<boolean>(message, "value", booleanProp(propOpts), timeoutMs);
+    },
+    async tryUrl(spec) {
+      ensureUrlMode();
+      const elicitationId = `el-${ulid()}`;
+      return sendUrlElicit(options.sdkServer, spec, elicitationId, spec.timeoutMs);
+    },
+
+    // ─────────── Capability probes ───────────
     canDoForm() {
       return caps.form;
+    },
+    canDoUrl() {
+      return caps.url;
     },
   };
 }

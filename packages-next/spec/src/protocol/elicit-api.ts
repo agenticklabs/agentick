@@ -41,6 +41,27 @@ export type ElicitOutcome<T> =
   | { readonly status: "decline"; readonly reason?: string }
   | { readonly status: "cancel"; readonly reason?: string };
 
+/**
+ * Outcome of a URL-mode elicitation. URL mode never carries a value
+ * — the user consented (or didn't) to navigate to the URL; whatever
+ * happens out-of-band arrives via a separate notification path (e.g.
+ * OAuth flow's redirect callback).
+ */
+export type UrlElicitOutcome =
+  | { readonly status: "accept" }
+  | { readonly status: "decline"; readonly reason?: string }
+  | { readonly status: "cancel"; readonly reason?: string };
+
+/**
+ * Single URL specification used by {@link Elicit.url} and
+ * {@link Elicit.requireUrls}.
+ */
+export interface UrlElicitSpec {
+  readonly message: string;
+  readonly url: string;
+  readonly timeoutMs?: ElicitTimeoutOption;
+}
+
 // ============================================================================
 // Common option types
 // ============================================================================
@@ -131,6 +152,63 @@ export interface Elicit {
     opts?: { readonly default?: boolean; readonly timeoutMs?: ElicitTimeoutOption },
   ): Promise<boolean>;
 
+  // ── URL mode — out-of-band consent ─────────────────────────────────
+
+  /**
+   * Ask the user to navigate to a URL out-of-band (OAuth, payment,
+   * credential entry). `accept` means the user consented to navigate;
+   * the actual flow completion arrives via a separate notification
+   * (the OAuth callback, etc.) layered on top of this consent signal.
+   *
+   * Throws `ElicitationNotSupported` if the connected client did not
+   * advertise the `elicitation.url` sub-capability. Throws
+   * `ElicitationDeclined` / `ElicitationCancelled` on the respective
+   * outcomes (use {@link tryUrl} to handle without exceptions).
+   */
+  url(spec: UrlElicitSpec): Promise<void>;
+
+  /**
+   * Throw a {@link UrlElicitationRequired} (-32042 JSON-RPC error)
+   * carrying one or more URL-mode elicitations the client should walk
+   * before retrying the originating tool call. The canonical pattern
+   * for OAuth-style deferred auth: the tool handler detects "I need
+   * the user to complete X before I can proceed," packages the URLs,
+   * and never returns. The client's tool wrapper recognizes the
+   * -32042 code, walks the URLs, then retries.
+   */
+  requireUrls(
+    elicitations: ReadonlyArray<{ readonly message: string; readonly url: string }>,
+  ): never;
+
+  // ── try* variants — discriminated outcomes instead of throwing ─────
+
+  tryText(message: string, opts?: Parameters<Elicit["text"]>[1]): Promise<ElicitOutcome<string>>;
+  trySelect<const T extends readonly string[]>(
+    message: string,
+    options: T,
+    opts?: Parameters<Elicit["select"]>[2],
+  ): Promise<ElicitOutcome<T[number]>>;
+  tryMultiSelect<const T extends readonly string[]>(
+    message: string,
+    options: T,
+    opts?: Parameters<Elicit["multiSelect"]>[2],
+  ): Promise<ElicitOutcome<Array<T[number]>>>;
+  tryConfirm(
+    message: string,
+    opts?: Parameters<Elicit["confirm"]>[1],
+  ): Promise<ElicitOutcome<boolean>>;
+  tryNumber(
+    message: string,
+    opts?: Parameters<Elicit["number"]>[1],
+  ): Promise<ElicitOutcome<number>>;
+  tryBoolean(
+    message: string,
+    opts?: Parameters<Elicit["boolean"]>[1],
+  ): Promise<ElicitOutcome<boolean>>;
+  tryUrl(spec: UrlElicitSpec): Promise<UrlElicitOutcome>;
+
+  // ── Capability probes ──────────────────────────────────────────────
+
   /**
    * Capability probe — true when the connected client advertised the
    * `elicitation.form` sub-capability (or the legacy empty
@@ -139,4 +217,11 @@ export interface Elicit {
    * helpful error from each method when called regardless.
    */
   canDoForm(): boolean;
+
+  /**
+   * Capability probe for URL mode (`elicitation.url` sub-capability).
+   * Legacy empty `elicitation: {}` advertises form-only, so this
+   * returns `false` for those clients.
+   */
+  canDoUrl(): boolean;
 }

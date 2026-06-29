@@ -139,6 +139,25 @@ const EXPECTED: ReadonlyArray<readonly [string, () => AgentickError]> = [
   ["McpServerAuthzDenied", () => new Errors.McpServerAuthzDenied({ reason: "test" })],
   ["McpServerRateLimited", () => new Errors.McpServerRateLimited({ retryAfterMs: 1000 })],
   ["McpServerClosed", () => new Errors.McpServerClosed({ serverId: "srv-1" })],
+  [
+    "UrlElicitationRequired",
+    () =>
+      new Errors.UrlElicitationRequired({
+        elicitations: [
+          {
+            mode: "url",
+            elicitationId: "el-1",
+            url: "https://example.com/auth",
+            message: "Sign in",
+          },
+        ],
+      }),
+  ],
+
+  // Elicit cluster
+  ["ElicitationDeclined", () => new Errors.ElicitationDeclined()],
+  ["ElicitationCancelled", () => new Errors.ElicitationCancelled()],
+  ["ElicitationNotSupported", () => new Errors.ElicitationNotSupported({ mode: "form" })],
 
   // Remaining cluster
   ["UnknownTaskError", () => new Errors.UnknownTaskError({ taskId: "task-1" })],

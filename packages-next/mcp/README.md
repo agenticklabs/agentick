@@ -43,7 +43,7 @@ code. See ADR 23 §6 (Package layout) and ADR 40 §1.
 | #171c stdio + in-memory transport + tools projection + security pipeline         | ✅                   |
 | #171d.1 **Prompts projection** (`prompts/list` + `prompts/get` + `list_changed`) | ✅                   |
 | #171d.2.1 **Elicitation `ctx.elicit.*` sugar** (form-mode basics)                | ✅                   |
-| #171d.2.2 Elicitation URL mode + `tryX` variants + `URLElicitationRequiredError` | ⏳                   |
+| #171d.2.2 **Elicitation URL mode + `tryX` variants + `UrlElicitationRequired`** | ✅                   |
 | #171d.2.3 Elicitation schema-flatness validation + advanced shapes               | ⏳                   |
 | #171d.3 Tasks projection (`tasks/list` + `tasks/get` + notifications)            | ⏳ (scoping pending) |
 | #171e Streamable HTTP transport + OAuth Resource Server                          | ⏳                   |
@@ -251,12 +251,49 @@ const handler = async (input, ctx) => {
 };
 ```
 
-The sugar covers `text` / `confirm` / `boolean` / `number` / `select`
-/ `multiSelect` for form-mode requests. Decline and cancel surface as
-thrown `ElicitationDeclined` / `ElicitationCancelled` (`try*` variants
-returning {@link ElicitOutcome} land with #171d.2.2). URL mode + the
-`URLElicitationRequiredError` -32042 deferred-auth path land with
-#171d.2.2 too.
+**Form-mode methods** — `text` / `confirm` / `boolean` / `number` /
+`select` / `multiSelect`. Decline and cancel surface as thrown
+`ElicitationDeclined` / `ElicitationCancelled` (both `AgentickError`
+subclasses under the `ElicitError` abstract intermediate, per ADR 41).
+
+**`try*` variants** — `tryText`, `trySelect`, `tryMultiSelect`,
+`tryConfirm`, `tryNumber`, `tryBoolean`, `tryUrl` — return an
+`ElicitOutcome<T>` discriminated union instead of throwing. Use when
+you want to handle decline/cancel as normal control flow:
+
+```ts
+const outcome = await ctx.elicit!.tryConfirm("Apply changes?");
+if (outcome.status === "accept" && outcome.value) {
+  // proceed
+} else if (outcome.status === "decline") {
+  return [{ type: "text", text: "User declined; no changes applied." }];
+} else {
+  return [{ type: "text", text: "Cancelled." }];
+}
+```
+
+**URL mode** — `ctx.elicit!.url({ message, url })` directs the user
+to an external URL for out-of-band consent (OAuth, payment,
+credential entry). `accept` means the user CONSENTED to navigate;
+actual flow completion arrives via a separate notification path. Use
+`tryUrl(...)` for the non-throwing variant.
+
+**Deferred auth** — `ctx.elicit!.requireUrls([...])` throws
+`UrlElicitationRequired` (JSON-RPC code `-32042`) carrying one or
+more URL specs. The canonical pattern for OAuth-style retry: the
+tool handler detects "user must complete X first," packages the
+URLs, and never returns. The client's tool wrapper recognizes the
+-32042 code, walks the URLs, then retries the originating tool call.
+
+```ts
+// Inside a tool handler:
+if (!hasGoogleToken) {
+  ctx.elicit!.requireUrls([
+    { message: "Sign in to Google", url: oauthUrl },
+  ]);
+  // unreachable
+}
+```
 
 Note on MCP capability semantics: elicitation is a **client**
 capability, not server. The server doesn't advertise it on the wire —

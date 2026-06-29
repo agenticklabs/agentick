@@ -47,6 +47,7 @@ export {
   ElicitationCancelled,
   ElicitationDeclined,
   ElicitationNotSupported,
+  UrlElicitationRequired,
   type BuildMcpElicitOptions,
   type ElicitationCapabilities,
 } from "./projection/elicitation.js";
