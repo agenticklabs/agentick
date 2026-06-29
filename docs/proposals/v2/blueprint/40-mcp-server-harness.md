@@ -1,7 +1,7 @@
 # ADR 40 — MCP server harness shape
 
-**Status:** Proposed — 2026-06-28.
-**Touches:** `@agentick/mcp-server-next` (new package — #171), `@agentick/tool-next` (transforms subpath, new), `@agentick/prompts-next` (server projection), `@agentick/elicitation-next` (inbound dispatch), `@agentick/tasks-next` (server-side `taskSupport`), `@agentick/gateway-next` + `@agentick/app-next` (extension wiring), `@agentick/spec-next/protocol/mcp-server-harness.ts` (new). Cross-references ADR 23 §"Server-side: shape is OPEN" — this is the resolution.
+**Status:** Proposed — 2026-06-28. **Amended 2026-06-28** to align package layout with ADR 23 §6 (one package, subpath exports) — the original ADR 40 proposed a separate `@agentick/mcp-server-next` which would have duplicated ~70% of code shared with the client. Server now lives at `@agentick/mcp-next/server`.
+**Touches:** `@agentick/mcp-next` (server subpath — #171), `@agentick/tool-next` (transforms subpath, shipped #171a), `@agentick/prompts-next` (server projection), `@agentick/elicitation-next` (inbound dispatch), `@agentick/tasks-next` (server-side `taskSupport`), `@agentick/gateway-next` + `@agentick/app-next` (extension wiring), `@agentick/spec-next/protocol/mcp-server-harness.ts` (new). Cross-references ADR 23 §"Server-side: shape is OPEN" — this is the resolution.
 **Driver:** Lock the v2 MCP server shape so #171 can ship. ADR 23 left it open between two candidate models ("integrated session-extension" vs "descriptive standalone declaration tree"); the discussion on 2026-06-28 + the v1 audit closed the choice. This ADR is the resolution + the implementation contract.
 
 ---
@@ -10,8 +10,8 @@
 
 1. **MCP server is a Shape 1 harness at GATEWAY scope, NOT session scope.** A server is long-lived multi-tenant infrastructure; binding it to a session is wrong containment. Sessions interact with MCP servers as clients (existing `withMCP` + `McpClientHarness`), not by hosting them.
 
-2. **One package, two deployment modes, same harness.** `@agentick/mcp-server-next` ships both:
-   - **Mode A — Standalone process** (`npx @agentick/mcp-server-next --config server.config.ts`). A thin shell boots substrate + harness + transports.
+2. **One package, two deployment modes, same harness.** Server ships at `@agentick/mcp-next/server` (subpath of the existing client package — ADR 23 §6 alignment; ~70% of code is shared between client + server, so a separate package would duplicate transport, era-codec, OAuth, JSON-RPC framing, and Standard-Schema bridge). Two modes:
+   - **Mode A — Standalone process** (`npx agentick-mcp-server --config server.config.ts` — bin shipped by `@agentick/mcp-next`). A thin shell boots substrate + harness + transports.
    - **Mode B — Gateway extension** (`createGateway({ mcpServers: [...] })`). Production deployment for most adopters.
    - Both modes wrap the same `McpServerHarness`. Mode A is "Mode B with a minimal synthesized gateway shell."
 
@@ -23,7 +23,7 @@
 
 6. **Tool transforms are first-class primitives, shared with the rest of the framework.** `rename`, `alias`, `prefix`, `restrict-input`, `restrict-output`, `wrap-handler`, `filter` live in `@agentick/tool-next/transforms` — usable anywhere a tool list is consumed, not MCP-server-specific. The MCP server just composes them.
 
-7. **Security pipeline ported from v1 verbatim.** `ConnectionGuard` / `Authenticator` / `Authorizer` / `RateLimiter` / `InputSanitizer` — five named async stages, swappable per-server. Defaults are transport-aware (HTTP forces explicit auth config; stdio + in-process default to allow-all). v1's stages library (`bearerTokenAuth`, `roleBasedAuthz`, `slidingWindowLimiter`, `allowListGuard`) ports as-is to `@agentick/mcp-server-next/security`.
+7. **Security pipeline ported from v1 verbatim.** `ConnectionGuard` / `Authenticator` / `Authorizer` / `RateLimiter` / `InputSanitizer` — five named async stages, swappable per-server. Defaults are transport-aware (HTTP forces explicit auth config; stdio + in-process default to allow-all). v1's stages library (`bearerTokenAuth`, `roleBasedAuthz`, `slidingWindowLimiter`, `allowListGuard`) ports as-is to `@agentick/mcp-next/server/security`.
 
 8. **OAuth 2.1 fully spec-aligned, both AS and RS roles.** v1 shipped client-side OAuth only. v2 server ships token validation (Resource Server role) + optional embedded Authorization Server. PKCE-mandatory, OIDC discovery, JWT/introspection token formats. Reuses #134's URL-mode elicit infrastructure for symmetric callback handling.
 
@@ -120,65 +120,86 @@ The audit of `packages/mcp/src/server/` (20k LOC, ~3k LOC test) surfaced these l
 
 ### 1. Package layout
 
+Server code lives inside the existing `@agentick/mcp-next` package as a `/server` subpath. This is ADR 23 §6 alignment: client + server share ~70% of code (wire codec, transport abstractions, OAuth utilities, era-codec, JSON-RPC framing, Standard-Schema bridge), so they live together and import from shared internal modules. The client public surface (`@agentick/mcp-next`) is unchanged; server consumers import from `@agentick/mcp-next/server`.
+
 ```
-@agentick/mcp-server-next/
+@agentick/mcp-next/                         ← existing package
 ├── src/
-│   ├── harness.ts                McpServerHarness (Shape 1, gateway-scope)
-│   ├── extension.ts              withMcpServer(config) — gateway extension factory
-│   ├── handle.ts                 McpServerHandle (curated surface on gateway)
-│   ├── augment.ts                HookBridges.mcpServer slot
-│   ├── config.ts                 McpServerConfig + validation
-│   ├── projection/
-│   │   ├── index.ts              per-connection projection orchestrator
-│   │   ├── tools.ts              tool registry → MCP tools/* projection
-│   │   ├── prompts.ts            PromptsHarness → MCP prompts/*
-│   │   ├── elicitation.ts        ElicitationHarness → MCP elicitation/create
-│   │   ├── tasks.ts              TasksHarness → MCP tasks/*
-│   │   ├── sampling.ts           SamplingHarness → MCP sampling/createMessage
-│   │   └── resources.ts          (placeholder; lands with #123)
-│   ├── transports/
-│   │   ├── index.ts              Transport interface (reused from existing transport-next where possible)
-│   │   ├── stdio.ts              StdioServerTransport
-│   │   ├── http.ts               Streamable HTTP (the modern HTTP transport)
-│   │   ├── ws.ts                 WebSocket server transport
-│   │   └── in-memory.ts          tests / direct-projection demos
-│   ├── protocol/
-│   │   ├── jsonrpc.ts            framing, request/response/notification, error codes
-│   │   ├── lifecycle.ts          initialize + capability negotiation
-│   │   └── era-codec.ts          target draft 2026-07-28; encode/decode 2025-11-25 (per ADR 23)
-│   ├── security/
-│   │   ├── pipeline.ts           5-stage runner
-│   │   ├── stages.ts             ConnectionGuard / Authenticator / Authorizer / RateLimiter / InputSanitizer
-│   │   ├── defaults.ts           transport-aware defaults
-│   │   ├── built-ins/
-│   │   │   ├── bearer.ts
-│   │   │   ├── role-based-authz.ts
-│   │   │   ├── sliding-window.ts
-│   │   │   ├── allow-list.ts
-│   │   │   └── oauth-validator.ts  Resource Server token validation
-│   │   └── identity.ts           MCPRequestContext shape (ported from v1)
-│   ├── auth/
-│   │   ├── oauth-as.ts           optional embedded Authorization Server
-│   │   ├── pkce.ts
-│   │   └── discovery.ts          OIDC + MCP-specific discovery endpoints
-│   ├── transforms/               re-export of @agentick/tool-next/transforms for ergonomics
-│   ├── conformance.ts            runMcpServerHarnessConformance(makeHarness)
-│   ├── testing/                  stubMcpServerHarness, fakeTransport
-│   └── bin/
-│       └── server.ts             Mode A CLI entry
-└── package.json                  bin: { "agentick-mcp-server": "./src/bin/server.ts" }
+│   ├── index.ts                            ← CLIENT public surface (unchanged)
+│   ├── client/                             ← existing
+│   ├── oauth/                              ← existing OAuth client utilities (shared)
+│   ├── transports/                         ← existing in-memory + future shared transports
+│   ├── protocol/                           ← existing JSON-RPC + completions (shared)
+│   ├── server/                             ← NEW (the #171 work)
+│   │   ├── index.ts                        ← server public surface
+│   │   ├── harness.ts                      McpServerHarness (Shape 1, gateway-scope)
+│   │   ├── extension.ts                    withMcpServer(config) — gateway extension factory
+│   │   ├── handle.ts                       McpServerHandle (curated surface on gateway)
+│   │   ├── augment.ts                      HookBridges.mcpServer slot
+│   │   ├── config.ts                       McpServerConfig + validation
+│   │   ├── projection/
+│   │   │   ├── index.ts                    per-connection projection orchestrator
+│   │   │   ├── tools.ts                    tool registry → MCP tools/* projection
+│   │   │   ├── prompts.ts                  PromptsHarness → MCP prompts/*
+│   │   │   ├── elicitation.ts              ElicitationHarness → MCP elicitation/create
+│   │   │   ├── tasks.ts                    TasksHarness → MCP tasks/*
+│   │   │   ├── sampling.ts                 SamplingHarness → MCP sampling/createMessage
+│   │   │   └── resources.ts                (placeholder; lands with #123)
+│   │   ├── transports/                     server-side transport adapters; shared types from ../transports
+│   │   │   ├── stdio.ts
+│   │   │   ├── http.ts                     Streamable HTTP
+│   │   │   ├── ws.ts
+│   │   │   └── in-memory.ts                (shares LinkedPair with client)
+│   │   ├── protocol/                       server-specific protocol layer over ../protocol
+│   │   │   ├── jsonrpc.ts                  framing helpers, reuses error codes from ../protocol/errors.ts
+│   │   │   ├── lifecycle.ts                initialize + capability negotiation
+│   │   │   └── era-codec.ts                target draft 2026-07-28; encode/decode 2025-11-25
+│   │   ├── security/
+│   │   │   ├── pipeline.ts                 5-stage runner
+│   │   │   ├── stages.ts                   ConnectionGuard / Authenticator / Authorizer / RateLimiter / InputSanitizer
+│   │   │   ├── defaults.ts                 transport-aware defaults
+│   │   │   ├── built-ins/
+│   │   │   │   ├── bearer.ts
+│   │   │   │   ├── role-based-authz.ts
+│   │   │   │   ├── sliding-window.ts
+│   │   │   │   ├── allow-list.ts
+│   │   │   │   └── oauth-validator.ts      Resource Server token validation; reuses ../oauth shared
+│   │   │   └── identity.ts                 MCPRequestContext shape (ported from v1)
+│   │   ├── auth/                           server-side OAuth specifics
+│   │   │   ├── oauth-as.ts                 optional embedded Authorization Server
+│   │   │   ├── pkce.ts                     reused from ../oauth where possible
+│   │   │   └── discovery.ts                OIDC + MCP-specific discovery endpoints
+│   │   ├── conformance.ts                  runMcpServerHarnessConformance(makeHarness)
+│   │   ├── testing/                        stubMcpServerHarness, fakeTransport
+│   │   └── bin.ts                          Mode A CLI entry — `agentick-mcp-server`
+└── package.json
+    exports:
+      ".":         → ./src/index.ts                  (client; unchanged)
+      "./oauth":   → ./src/oauth/index.ts            (existing)
+      "./server":  → ./src/server/index.ts           (NEW)
+      "./testing": → ./src/server/testing/index.ts   (server testing; future)
+    bin:
+      "agentick-mcp-server": "./src/server/bin.ts"  (NEW)
 ```
 
-`@agentick/tool-next/transforms` is a new subpath of the existing tool package. It is NOT MCP-specific — it's a generic tool-list transformation library that the MCP server projection happens to use.
+**Shared internal modules** (not re-exported from `index.ts`; both client and server import from `./protocol`, `./oauth`, `./transports`):
+
+- `src/protocol/` — JSON-RPC framing, error codes, completion builders, era-codec utilities
+- `src/oauth/` — PKCE, discovery, token formats, callback server (currently client-shaped; server-side validator added here too)
+- `src/transports/` — base transport interfaces, in-memory `LinkedPair`, shared codecs
+
+When client + server need diverging types (e.g., client `McpRequestContext` vs server `McpServerRequestContext`), they live in their respective subdirectories. Otherwise: shared internal modules first.
+
+`@agentick/tool-next/transforms` (shipped in #171a) is a separate package. The MCP server projection imports `composeTransforms` + the primitives from there; the transforms library is NOT MCP-specific.
 
 ### 2. Config shape (declarative)
 
 ```ts
 // gateway.config.ts
 import { createGateway } from "@agentick/gateway-next";
-import { stdioTransport, httpTransport } from "@agentick/mcp-server-next/transports";
+import { stdioTransport, httpTransport } from "@agentick/mcp-next/server";
 import { rename, prefix, filter } from "@agentick/tool-next/transforms";
-import { bearerTokenAuth, roleBasedAuthz } from "@agentick/mcp-server-next/security/built-ins";
+import { bearerTokenAuth, roleBasedAuthz } from "@agentick/mcp-next/server/security/built-ins";
 
 export const gateway = createGateway({
   cluster: defineCluster({ ... }),
@@ -330,7 +351,7 @@ Defaults — applied per transport type unless overridden:
 
 ### 7. Internal agents — direct projection
 
-When an `@agentick/app-next` instance and an `@agentick/mcp-server-next` configuration live in the same process under the same gateway:
+When an `@agentick/app-next` instance and a `withMcpServer` configuration live in the same process under the same gateway:
 
 ```ts
 // in an app, talking to our own MCP server without going over the wire:
@@ -404,7 +425,7 @@ The CLI entry (`bin/server.ts`) is a thin shell:
 
 ```ts
 #!/usr/bin/env node
-import { spawnStandaloneMcpServer } from "@agentick/mcp-server-next";
+import { spawnStandaloneMcpServer } from "@agentick/mcp-next/server";
 const config = await import(parseArgs(process.argv).config);
 await spawnStandaloneMcpServer(config.default);
 ```
@@ -429,7 +450,7 @@ Within a server:
 
 ## Conformance + testing
 
-`@agentick/mcp-server-next/conformance.ts` exports `runMcpServerHarnessConformance(makeHarness)`. Cases pin:
+`@agentick/mcp-next/server/conformance.ts` exports `runMcpServerHarnessConformance(makeHarness)`. Cases pin:
 
 - Capability negotiation matches wired harnesses
 - Per-connection filter + transforms apply correctly
@@ -447,7 +468,7 @@ Within a server:
 ## Migration / rollout plan
 
 1. **#171a — `@agentick/tool-next/transforms` subpath.** Lands first; usable independently. ~1 day.
-2. **#171b — `@agentick/mcp-server-next` skeleton + spec types.** Package scaffold, `McpServerHarness` shell, config validation, no transports yet. ~1 day.
+2. **#171b — `@agentick/mcp-next/server` subpath + spec types.** Subpath scaffold inside the existing mcp-next package, `McpServerHarness` shell, config validation, no transports yet. ~1 day.
 3. **#171c — stdio transport + tools-only projection.** Minimum viable: stdio transport, capability negotiation, tools projection, security pipeline default-allow stages. Smoke test via Mode A CLI on a fixture config. ~2 days.
 4. **#171d — Prompts + elicitation + tasks projections.** Each is a small commit; harnesses already exist. ~2 days.
 5. **#171e — HTTP transport (Streamable HTTP) + OAuth 2.1 Resource Server.** ~3 days.
@@ -482,7 +503,7 @@ Total estimate: ~16 days of work. Not blocking on #123 or #124.
 
 ## What lives in the package README (not this ADR)
 
-The following are adopter-facing material that the v2 `@agentick/mcp-server-next` README will document. They are NOT architectural shape questions — they're API surface + recipes. Listed here so the ADR isn't mistaken for the README:
+The following are adopter-facing material that the `@agentick/mcp-next` README will document (server section, alongside the existing client section). They are NOT architectural shape questions — they're API surface + recipes. Listed here so the ADR isn't mistaken for the README:
 
 - **Tool definition reference** — input/output schemas, handler context shape, error vs result patterns. Port from v1 README §"Server API — Tools".
 - **Production security recipes** — `bearerTokenAuth` + `roleBasedAuthz` + `slidingWindowLimiter` + `allowListGuard` (IP/origin CIDR + glob) usage examples. Port from v1 §"Production security stages".
