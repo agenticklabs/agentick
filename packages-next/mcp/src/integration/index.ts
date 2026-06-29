@@ -15,4 +15,9 @@ export {
   type McpTaskEffectInput,
   type McpRemoteTaskNonCompletedError,
 } from "./task-bridge.js";
+export {
+  isTransportFactory,
+  type TransportFactory,
+  type TransportFactoryDeps,
+} from "./transport-factory.js";
 export * from "../wire/task-codec.js";

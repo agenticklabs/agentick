@@ -91,6 +91,7 @@ import type { EraCodec } from "../client/era-codec.js";
 
 import { mcpContentToBlocks } from "./content-mapper.js";
 import { mcpTaskEffect } from "./task-bridge.js";
+import { isTransportFactory, type TransportFactory } from "./transport-factory.js";
 import { omitUndefined } from "@agentick/utils-next";
 
 // ============================================================================
@@ -107,16 +108,25 @@ export interface McpServerConfig {
   readonly serverId: string;
 
   /**
-   * Pre-built transport (stdio / streamable-http / in-memory).
+   * Transport for this server. Two shapes (#154):
    *
-   * Per-session harness construction means a single transport
-   * instance can only serve one session — if the adopter passes a
-   * `transport` literal here, it's effectively shared across
-   * sessions and will break under multi-session use. For
-   * single-session use it's fine. For multi-session use, supply a
-   * `transport` FACTORY pattern (a future feature; see ADR-23).
+   *   - `Transport` — pre-built SDK transport instance (stdio,
+   *     pre-authenticated HTTP, in-memory). Single-session use is
+   *     safe; multi-session use shares the instance across sessions
+   *     and breaks under concurrent connections.
+   *
+   *   - {@link TransportFactory} — `(deps) => Transport`. Constructed
+   *     once per session at install time; `deps` carries the session-
+   *     bound elicit binding (`installer.elicitation.elicit`) so
+   *     OAuth-over-HTTP factories can wire
+   *     `DefaultOAuthProvider({ elicit: deps.elicit, ... })` without
+   *     adopter boilerplate per session. Each session gets its own
+   *     transport, so multi-session deployments are safe.
+   *
+   * Adopters who don't need OAuth — stay with the pre-built form.
+   * OAuth adopters use the factory.
    */
-  readonly transport: Transport;
+  readonly transport: Transport | TransportFactory;
 
   /** Auth strategy. Defaults to {@link NoneAuth} (stdio default). */
   readonly auth?: McpAuth;
@@ -277,6 +287,19 @@ async function mkClient(
   installer: SessionInstaller,
   config: McpServerConfig,
 ): Promise<McpClientHarness> {
+  // Resolve the transport. Per #154, `config.transport` may be a
+  // pre-built `Transport` (the existing path) or a `TransportFactory`
+  // that constructs one from session-bound deps. The factory path is
+  // the canonical way to wire OAuth-over-HTTP: factories receive the
+  // session's elicit binding and feed it into
+  // `DefaultOAuthProvider({ elicit, ... })`.
+  const transport = isTransportFactory(config.transport)
+    ? await config.transport({
+        elicit: (request) => installer.elicitation.elicit(request),
+        serverId: config.serverId,
+      })
+    : config.transport;
+
   const harness = new McpClientHarness(
     `${installer.sessionId}:mcp:${config.serverId}`,
     installer.substrate.journal,
@@ -284,7 +307,7 @@ async function mkClient(
     installer.substrate.inbox,
     {
       serverId: config.serverId,
-      transport: config.transport,
+      transport,
       auth: config.auth ?? new NoneAuth(),
       elicitAddress: installer.elicitation.address,
       ...omitUndefined({
