@@ -28,6 +28,11 @@ import "./augment.js";
 export { McpServerHarness, type McpServerHarnessOptions } from "./harness.js";
 export { type McpServerHandle, toHandle } from "./handle.js";
 export { validateConfig } from "./config.js";
+export {
+  spawnStandaloneMcpServer,
+  type SpawnStandaloneOptions,
+  type StandaloneServerHandle,
+} from "./spawn.js";
 export * from "./security/index.js";
 export * from "./transports/index.js";
 export { buildCapabilities, type WiredCapabilities } from "./protocol/lifecycle.js";
