@@ -196,40 +196,53 @@ export interface WithMCPOptions {
    * Default: `mcp:<serverId>:<field>` — a flat single-tenant scheme.
    *
    * Override to namespace credentials by user / tenant / any value
-   * readable from the active {@link RuntimeContext}:
+   * readable from the active {@link RuntimeContext} (typed via
+   * `RuntimeContextUser` augmentation):
    *
+   *     // Adopter app augments first:
+   *     declare module "@agentick/runtime-next" {
+   *       interface RuntimeContextUser {
+   *         readonly tenantId: string;
+   *       }
+   *     }
+   *
+   *     // Then in withMCP:
    *     credentialKey: (ctx, { serverId, field }) =>
-   *       `mcp:${String(ctx.request?.userId ?? "anon")}:${serverId}:${field}`,
+   *       `mcp:${String(ctx.user?.tenantId ?? "anon")}:${serverId}:${field}`,
    *
    * Strategy pattern — same shape as sliding-window's `keyFn`,
    * bearer's `extract`, etc. The store stays singleton +
    * tenant-ignorant; user-awareness lives at this one composition site.
    *
-   * ## Multi-tenant caveat
+   * ## Multi-tenant — recommended pattern
    *
-   * The function calls `readContext()` at provider read/write time —
-   * i.e., inside the SDK's `client.connect()` chain, not from inside
-   * an Effect. `readContext()` reads from the active `FiberRef`,
-   * which is `EMPTY_CONTEXT` outside an Effect fiber. To make the
-   * RuntimeContext visible at this call site, adopters must wrap
-   * the session-driving call (typically `app.run`, `session.send`,
-   * or wherever the per-request principal is known) so the context
-   * propagates through to the harness's connect path.
+   * Per ADR 45 (the runtime context model), the cleanest multi-tenant
+   * approach is **structural identity** — encode the principal in the
+   * harness's `serverId` itself rather than reading from ambient
+   * context. Each principal gets its own `McpClientHarness` instance:
    *
-   * Today (#284 unshipped): there is no sync `runWithContext`
-   * primitive — `Effect.runSync(withContext(...))` does not propagate
-   * through nested `Effect.runSync(getContext)` calls. So the
-   * multi-tenant pattern works only inside fiber-preserved paths
-   * (e.g., when the session's request-handler explicitly threads
-   * principal through to install). For the common case where install
-   * runs at session creation time and the principal is known then,
-   * the simplest approach is to derive `serverId` per-tenant
-   * (e.g. `linear:user-42`) so each tenant gets its own
-   * `McpClientHarness` instance — bypassing the readContext
-   * propagation issue entirely. The full multi-tenant story lands
-   * with #284.
+   *     withMCP({
+   *       servers: [{
+   *         serverId: `linear:user-${principal.userId}`,
+   *         transport: ...,
+   *       }],
+   *     });
    *
-   * @see #284 — runtime-next sync scoped-set primitive
+   * The default `credentialKey` (`mcp:<serverId>:<field>`) then
+   * already namespaces per-principal because `serverId` itself does.
+   * No `credentialKey` override needed.
+   *
+   * ## When `credentialKey` is genuinely useful
+   *
+   * The override matters when multiple principals SHARE a harness
+   * instance and you want their credentials kept separate within the
+   * shared store. That's the unusual case (most adopters fan out
+   * per-principal harnesses). Document the propagation caveats
+   * (`readContext()` returns `EMPTY_CONTEXT` inside Effect fibers
+   * unless ctx was bound via `withContext` at the call boundary) and
+   * prefer structural identity when feasible.
+   *
+   * @see docs/proposals/v2/blueprint/45-runtime-context-model.md
    */
   readonly credentialKey?: (
     ctx: RuntimeContext,
@@ -556,8 +569,11 @@ export function withMCP(options: WithMCPOptions): SessionExtension {
       for (const config of options.servers) {
         // Per-server key resolver. Reads `RuntimeContext` at every
         // call (not once per session) so request-scoped principals
-        // (`ctx.request?.userId`) compose correctly under per-tick
-        // tenant switching.
+        // (e.g. `ctx.user?.tenantId` after adopter augments
+        // `RuntimeContextUser`) compose correctly. Caveat: readContext()
+        // returns EMPTY_CONTEXT inside Effect fibers — see ADR 45.
+        // Prefer structural identity (per-principal serverId) when
+        // feasible; this hook is for cases where harnesses are shared.
         const serverKeyOf = (field: CredentialField): string =>
           options.credentialKey
             ? options.credentialKey(readContext(), { serverId: config.serverId, field })
