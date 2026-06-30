@@ -28,5 +28,3 @@ export {
   type StatusUnsubscribe,
   isTerminalStatus,
 } from "./connection-status.js";
-
-export { type CredentialsStore, InMemoryCredentialsStore } from "./credentials-store.js";

@@ -1,18 +1,18 @@
 /**
- * Type-contract pin for the #277a surface. Behavior lands in #277b —
- * this spec only checks the shape: every kind is constructible, the
- * terminal-status helper agrees with the design table, the
- * credentials-store ref impl satisfies its interface, and the stub
- * action methods on `McpClientHandle` throw with a clear pointer.
+ * Type-contract pin for the #277a connection-status surface.
+ * Behavior — including the credential-aware lifecycle — lands in
+ * #277b. This spec only checks that the status union is constructible
+ * and that `isTerminalStatus` agrees with the design table.
+ *
+ * (The credential-store contract is no longer tested here. The
+ * per-MCP `CredentialsStore<T>` shim from #277a was retired in
+ * #281c — the substrate `CredentialsHarness` from
+ * `@agentick/credentials-next` is the canonical credential surface,
+ * with its own conformance suite over the store interface.)
  */
 import { describe, expect, it } from "vitest";
 
-import {
-  type CredentialsStore,
-  InMemoryCredentialsStore,
-  isTerminalStatus,
-  type McpConnectionStatus,
-} from "../client/index.js";
+import { isTerminalStatus, type McpConnectionStatus } from "../client/index.js";
 
 describe("#277a — connection status type surface", () => {
   it("constructs every status kind", () => {
@@ -34,31 +34,5 @@ describe("#277a — connection status type surface", () => {
     expect(isTerminalStatus({ kind: "credentials-missing" })).toBe(true);
     expect(isTerminalStatus({ kind: "credentials-expired" })).toBe(true);
     expect(isTerminalStatus({ kind: "error", reason: "x" })).toBe(true);
-  });
-});
-
-describe("#277a — credentials store", () => {
-  it("InMemoryCredentialsStore satisfies CredentialsStore<T>", async () => {
-    type Tok = { access_token: string };
-    const store: CredentialsStore<Tok> = new InMemoryCredentialsStore<Tok>();
-    expect(await store.get("srv-a")).toBeUndefined();
-    await store.set("srv-a", { access_token: "abc" });
-    expect(await store.get("srv-a")).toEqual({ access_token: "abc" });
-    await store.delete("srv-a");
-    expect(await store.get("srv-a")).toBeUndefined();
-    // delete on unknown key is a no-op
-    await store.delete("missing");
-  });
-
-  it("isolates entries by serverId", async () => {
-    type Tok = { access_token: string };
-    const store = new InMemoryCredentialsStore<Tok>();
-    await store.set("srv-a", { access_token: "a" });
-    await store.set("srv-b", { access_token: "b" });
-    expect(await store.get("srv-a")).toEqual({ access_token: "a" });
-    expect(await store.get("srv-b")).toEqual({ access_token: "b" });
-    await store.delete("srv-a");
-    expect(await store.get("srv-a")).toBeUndefined();
-    expect(await store.get("srv-b")).toEqual({ access_token: "b" });
   });
 });

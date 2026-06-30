@@ -501,6 +501,22 @@ export function withMCP(options: WithMCPOptions): SessionExtension {
       const clientsById = new Map<string, McpClientHandle>();
       const handles: McpClientHandle[] = [];
 
+      // TODO(#277b): the connection-status lifecycle implementation
+      // reads stored OAuth tokens / API keys via the substrate
+      // credentials harness when one is installed by the adopter:
+      //
+      //   import type { CredentialsHarnessProtocol } from "@agentick/spec-next";
+      //   const creds =
+      //     installer.getNamespace<CredentialsHarnessProtocol>("credentials");
+      //   if (creds) {
+      //     const tokens = await creds.get<OAuthTokens>("mcp", config.serverId);
+      //     ...
+      //   }
+      //
+      // No-`creds` path is valid — sessions without `withCredentials({ store })`
+      // surface `credentials-missing` status and require an explicit
+      // `reauthenticate()` to populate the store via OAuth.
+
       for (const config of options.servers) {
         const harness = await mkClient(installer, config);
         const handle: McpClientHandle = {
