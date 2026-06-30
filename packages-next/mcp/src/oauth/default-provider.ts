@@ -161,6 +161,12 @@ export class DefaultOAuthProvider implements OAuthProvider {
         `DefaultOAuthProvider("${opts.serverName}"): \`credentials\` requires \`keyOf\` for key composition`,
       );
     }
+    // Note: `keyOf` without `credentials` is permitted but unused —
+    // the in-memory fallback path doesn't consult `keyOf`. `withMCP`
+    // always passes the pair together (when wiring is intentional),
+    // so this asymmetric tolerance only matters for adopters who
+    // construct `DefaultOAuthProvider` directly with a stray `keyOf`.
+    // Cheaper than a second invariant check for a non-bug.
   }
 
   // ── Credential field accessors ──────────────────────────────────────────

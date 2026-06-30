@@ -196,19 +196,40 @@ export interface WithMCPOptions {
    * Default: `mcp:<serverId>:<field>` — a flat single-tenant scheme.
    *
    * Override to namespace credentials by user / tenant / any value
-   * readable from the active {@link RuntimeContext}. Single-tenant
-   * deployments leave this unset; multi-tenant deployments compose
-   * `ctx.request?.userId` (or whatever principal field they thread
-   * through their RuntimeContext) into the key:
+   * readable from the active {@link RuntimeContext}:
    *
    *     credentialKey: (ctx, { serverId, field }) =>
    *       `mcp:${String(ctx.request?.userId ?? "anon")}:${serverId}:${field}`,
    *
-   * The function runs at OAuth-provider read/write time inside the
-   * harness's transport build. The store itself stays singleton and
-   * tenant-ignorant; user-awareness lives at the one site that
-   * actually composes the key. (Strategy pattern — same shape as
-   * sliding-window's `keyFn`, bearer's `extract`, etc.)
+   * Strategy pattern — same shape as sliding-window's `keyFn`,
+   * bearer's `extract`, etc. The store stays singleton +
+   * tenant-ignorant; user-awareness lives at this one composition site.
+   *
+   * ## Multi-tenant caveat
+   *
+   * The function calls `readContext()` at provider read/write time —
+   * i.e., inside the SDK's `client.connect()` chain, not from inside
+   * an Effect. `readContext()` reads from the active `FiberRef`,
+   * which is `EMPTY_CONTEXT` outside an Effect fiber. To make the
+   * RuntimeContext visible at this call site, adopters must wrap
+   * the session-driving call (typically `app.run`, `session.send`,
+   * or wherever the per-request principal is known) so the context
+   * propagates through to the harness's connect path.
+   *
+   * Today (#284 unshipped): there is no sync `runWithContext`
+   * primitive — `Effect.runSync(withContext(...))` does not propagate
+   * through nested `Effect.runSync(getContext)` calls. So the
+   * multi-tenant pattern works only inside fiber-preserved paths
+   * (e.g., when the session's request-handler explicitly threads
+   * principal through to install). For the common case where install
+   * runs at session creation time and the principal is known then,
+   * the simplest approach is to derive `serverId` per-tenant
+   * (e.g. `linear:user-42`) so each tenant gets its own
+   * `McpClientHarness` instance — bypassing the readContext
+   * propagation issue entirely. The full multi-tenant story lands
+   * with #284.
+   *
+   * @see #284 — runtime-next sync scoped-set primitive
    */
   readonly credentialKey?: (
     ctx: RuntimeContext,

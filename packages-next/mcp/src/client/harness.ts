@@ -95,6 +95,15 @@ import { makeElicitRequestHandler } from "./elicit-bridge.js";
 import { omitUndefined } from "@agentick/utils-next";
 
 /**
+ * Bound on the `err.cause` walk in {@link findCredentialsRequired}.
+ * Defensive — a malformed cause cycle (e.g. `a.cause = b; b.cause = a`)
+ * would otherwise spin forever. Eight links is well beyond anything
+ * the SDK wraps in practice (typical depth is 1–2: the provider's
+ * throw nested under `UnhandledRequestError`).
+ */
+const MAX_CAUSE_CHAIN_DEPTH = 8;
+
+/**
  * Walk an error chain (`err.cause` recursion) looking for an
  * {@link McpCredentialsRequiredError}. The SDK frequently wraps
  * provider-thrown errors as `UnhandledRequestError` or generic
@@ -103,8 +112,7 @@ import { omitUndefined } from "@agentick/utils-next";
  */
 function findCredentialsRequired(err: unknown): McpCredentialsRequiredError | undefined {
   let cursor: unknown = err;
-  // Bound the walk — a malformed cause cycle shouldn't spin forever.
-  for (let i = 0; i < 8 && cursor !== null && cursor !== undefined; i++) {
+  for (let i = 0; i < MAX_CAUSE_CHAIN_DEPTH && cursor !== null && cursor !== undefined; i++) {
     if (cursor instanceof McpCredentialsRequiredError) return cursor;
     cursor = (cursor as { cause?: unknown }).cause;
   }
