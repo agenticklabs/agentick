@@ -1049,3 +1049,116 @@ export type ElicitErrorChannel =
   | ElicitationNotSupported
   | UrlElicitationRequired
   | ElicitSchemaTooComplex;
+
+// ============================================================================
+// CredentialsError — CredentialsHarness backend + lookup failures (#281)
+// ============================================================================
+
+/**
+ * Abstract base for credentials-store failures. `err instanceof
+ * CredentialsError` matches any of the concrete subclasses below.
+ *
+ * **Server-resident only.** Credentials never cross the wire, so these
+ * errors are not expected to round-trip across the gateway boundary
+ * (registered in the codec registry anyway for consistency + future
+ * adapter-level RPCs).
+ */
+export abstract class CredentialsError extends AgentickError {
+  declare readonly _tag:
+    | "CredentialsNotFound"
+    | "CredentialsBackendUnavailable"
+    | "CredentialsCorrupted"
+    | "CredentialsWriteFailed";
+}
+
+/**
+ * Adopter asked for a key that does not exist. Distinct from `has()`
+ * returning `false` — `get()` may resolve `undefined` for absent keys
+ * without throwing; this fires when the caller asserts presence
+ * (`require`-style accessors, post-set lookups that should have hit).
+ */
+export class CredentialsNotFound extends CredentialsError {
+  readonly _tag = "CredentialsNotFound" as const;
+  readonly namespace: string;
+  readonly key: string;
+  constructor(args: {
+    readonly namespace: string;
+    readonly key: string;
+    readonly cause?: unknown;
+  }) {
+    super(`credentials not found: ${args.namespace}/${args.key}`, { cause: args.cause });
+    this.namespace = args.namespace;
+    this.key = args.key;
+  }
+}
+registerAgentickError("CredentialsNotFound", CredentialsNotFound);
+
+/**
+ * Backend cannot be reached or initialized. Keychain locked, libsecret
+ * daemon down, env vars unset, KV connection refused. Recoverable on
+ * the adopter side — typically by retrying after the backend recovers
+ * or by falling back to a different store.
+ */
+export class CredentialsBackendUnavailable extends CredentialsError {
+  readonly _tag = "CredentialsBackendUnavailable" as const;
+  readonly backend: string;
+  override readonly cause: unknown;
+  constructor(args: { readonly backend: string; readonly cause: unknown }) {
+    super(`credentials backend ${args.backend} unavailable: ${String(args.cause)}`, {
+      cause: args.cause,
+    });
+    this.backend = args.backend;
+    this.cause = args.cause;
+  }
+}
+registerAgentickError("CredentialsBackendUnavailable", CredentialsBackendUnavailable);
+
+/**
+ * Stored value exists but cannot be deserialized — JSON parse error,
+ * schema drift, encryption decode failure. Non-recoverable without
+ * external intervention (drop + re-auth). Adopter should treat this
+ * the same as `CredentialsNotFound` semantically (no usable credential)
+ * but distinct for telemetry.
+ */
+export class CredentialsCorrupted extends CredentialsError {
+  readonly _tag = "CredentialsCorrupted" as const;
+  readonly namespace: string;
+  readonly key: string;
+  override readonly cause: unknown;
+  constructor(args: { readonly namespace: string; readonly key: string; readonly cause: unknown }) {
+    super(`credentials at ${args.namespace}/${args.key} corrupted: ${String(args.cause)}`, {
+      cause: args.cause,
+    });
+    this.namespace = args.namespace;
+    this.key = args.key;
+    this.cause = args.cause;
+  }
+}
+registerAgentickError("CredentialsCorrupted", CredentialsCorrupted);
+
+/**
+ * Write to the backend failed — keychain rejected, disk full, KV
+ * timeout. The credential was not persisted; callers should treat the
+ * operation as not having happened.
+ */
+export class CredentialsWriteFailed extends CredentialsError {
+  readonly _tag = "CredentialsWriteFailed" as const;
+  readonly namespace: string;
+  readonly key: string;
+  override readonly cause: unknown;
+  constructor(args: { readonly namespace: string; readonly key: string; readonly cause: unknown }) {
+    super(`credentials write failed at ${args.namespace}/${args.key}: ${String(args.cause)}`, {
+      cause: args.cause,
+    });
+    this.namespace = args.namespace;
+    this.key = args.key;
+    this.cause = args.cause;
+  }
+}
+registerAgentickError("CredentialsWriteFailed", CredentialsWriteFailed);
+
+export type CredentialsErrorChannel =
+  | CredentialsNotFound
+  | CredentialsBackendUnavailable
+  | CredentialsCorrupted
+  | CredentialsWriteFailed;
