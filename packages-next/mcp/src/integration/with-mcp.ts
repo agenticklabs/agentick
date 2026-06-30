@@ -185,18 +185,6 @@ export interface WithMCPOptions {
 // Bridge surface
 // ============================================================================
 
-/**
- * The adopter-facing "MCP client for this (session, server)" thing.
- *
- * After #277b's collapse, this is just `McpClientHarness` directly —
- * the harness owns the connection-status FSM + all four verbs
- * (`connect` / `disconnect` / `reconnect` / `reauthenticate`) +
- * wire-level operations. The historical `McpClientHandle` wrapper
- * is gone; adopters interact with the harness directly via
- * `bridges.mcp.client(serverId)`.
- */
-export type McpClientHandle = McpClientHarness;
-
 export interface McpHookBridgeImpl {
   readonly client: (serverId: string) => McpClientHarness | undefined;
   readonly clients: ReadonlyArray<McpClientHarness>;

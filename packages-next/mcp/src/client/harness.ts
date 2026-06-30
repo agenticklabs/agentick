@@ -211,31 +211,32 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
     createLocalPubSub<TaskNotificationEvent>();
 
   /**
-   * In-process fan-out for `McpClientState` transitions. Each
-   * transition fires this notifier; the bus envelope (mcp:<scopeId>:state)
-   * fires in lockstep for substrate subscribers. Adopters wanting a
-   * direct callback subscription use {@link onStateChange}.
-   */
-  private readonly stateNotifier: Notifier<McpClientState> = createNotifier<McpClientState>();
-
-  /**
    * Adopter-facing connection status — the {@link McpConnectionStatus}
    * union. Layered above the wire-level {@link McpClientState}; the
    * harness's lifecycle callback (constructor) lifts each transition
    * into this FSM via {@link liftLifecycleState}. Credential-aware
    * kinds (`credentials-missing` / `credentials-expired`) are set
    * explicitly by `connect()`'s catch block when the OAuth provider
-   * surfaces an auth failure.
+   * surfaces an auth failure (follow-up slice).
    */
   private _status: McpConnectionStatus = { kind: "disconnected" };
   private readonly statusNotifier: Notifier<McpConnectionStatus> =
     createNotifier<McpConnectionStatus>();
   /**
    * Promise of the current in-flight connect attempt — used to
-   * de-dup concurrent connect() calls + as a race-token for the
-   * status-update guards below. `undefined` between attempts.
+   * de-dup concurrent `connect()` calls + as a race-token for the
+   * status-update guards in the connect IIFE. `undefined` between
+   * attempts.
    */
   private inFlightConnect: Promise<void> | undefined;
+  /**
+   * Promise of the current in-flight disconnect attempt — same
+   * de-dup + serialization role for the disconnect path. A
+   * `connect()` arriving while disconnect is mid-await waits on
+   * the disconnect to settle before proceeding; without this gate
+   * the new SDK Client would race with the still-closing old one.
+   */
+  private inFlightDisconnect: Promise<void> | undefined;
 
   constructor(
     scopeId: string,
@@ -253,17 +254,14 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
       ...omitUndefined({ reconnect: options.reconnect }),
       onReconnect: () => this.recycleClient(),
       onStateChange: (state) => {
-        // Three-channel fan-out:
-        //   1. wire-level notifier (existing) — back-compat
-        //      `harness.onStateChange` callback subscribers
-        //   2. bus envelope `mcp:<scopeId>:state` — substrate
+        // Two-channel fan-out:
+        //   1. bus envelope `mcp:<scopeId>:state` — substrate
         //      subscribers reach via the canonical name
-        //   3. adopter-facing status — lift the wire state into the
+        //   2. adopter-facing status — lift the wire state into the
         //      `McpConnectionStatus` union and notify status
         //      subscribers. Skipped when a connect() catch block has
         //      already moved status to a credential-aware kind we
         //      don't want overwritten.
-        this.stateNotifier.notify(state);
         this.publishStateChange(state);
         const lifted = liftLifecycleState(state);
         // Avoid clobbering credential-aware status set explicitly by
@@ -308,25 +306,6 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
     this.statusNotifier.notify(next);
   }
 
-  /**
-   * Subscribe to state transitions on this harness. Listener is
-   * invoked synchronously after each transition with the new state.
-   * Returns an unsubscribe function. Listener errors are caught
-   * per-listener (createNotifier semantics) — a buggy consumer
-   * cannot corrupt sibling listeners or the producer's state.
-   *
-   * The current state is NOT replayed at subscribe time. Use
-   * {@link state} for the snapshot; subscribe for future transitions.
-   *
-   * Used by the {@link McpClientHandle} connection-status FSM to
-   * lift transport-level transitions into the adopter-facing status
-   * union — so `degraded` / `reconnecting` observed by the harness
-   * surface to adopters as `error` / `connecting` without polling.
-   */
-  onStateChange(listener: (state: McpClientState) => void): () => void {
-    return this.stateNotifier.subscribe(listener);
-  }
-
   get id(): string {
     return this.scopeId;
   }
@@ -354,6 +333,10 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
       throw new Error(`McpClientHarness "${this.serverId}" is closed`);
     }
     if (this.inFlightConnect) return this.inFlightConnect;
+    // Serialize against any in-flight disconnect — its `client.close()`
+    // needs to finish before we construct a fresh client, otherwise
+    // we race two SDK Clients over the same transport.
+    if (this.inFlightDisconnect) await this.inFlightDisconnect;
 
     // markConnecting fires the lifecycle's onStateChange callback,
     // which lifts to setStatus({ kind: "connecting" }) — no explicit
@@ -424,6 +407,8 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
    */
   async disconnect(): Promise<void> {
     if (this._status.kind === "disconnected") return;
+    if (this.inFlightDisconnect) return this.inFlightDisconnect;
+
     // Set status FIRST so any in-flight connect's race-guard sees
     // the intent and bails without overwriting.
     this.setStatus({ kind: "disconnected" });
@@ -432,15 +417,23 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
     this.lifecycle.pause();
     const client = this.client;
     this.client = undefined;
-    if (client) {
+
+    this.inFlightDisconnect = (async () => {
       try {
-        await client.close();
-      } catch {
-        // Close errors are diagnostic, not actionable — we've
-        // already moved the harness to disconnected; surfacing a
-        // throw here would only confuse adopters.
+        if (client) {
+          try {
+            await client.close();
+          } catch {
+            // Close errors are diagnostic, not actionable — we've
+            // already moved the harness to disconnected; surfacing
+            // a throw here would only confuse adopters.
+          }
+        }
+      } finally {
+        this.inFlightDisconnect = undefined;
       }
-    }
+    })();
+    return this.inFlightDisconnect;
   }
 
   /**
@@ -455,12 +448,24 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
   }
 
   /**
-   * Re-run the auth flow — interactively. Delegates to
-   * `disconnect()` + `connect()` for now; the credentials wire-through
-   * + interactive-flag plumbing that distinguishes optimistic
-   * connect (no elicit) from re-auth (URL-mode elicit) lands in the
-   * follow-up slice. Until then, reauthenticate is a connectivity
-   * cycle without the deeper OAuth integration.
+   * Re-run the auth flow — interactively.
+   *
+   * ⚠️  **PROVISIONAL** — in the current slice this is literally
+   * `disconnect()` + `connect()`, IDENTICAL to {@link reconnect}.
+   * The semantic divergence between the two verbs lands in the
+   * follow-up slice (#277b OAuth integration):
+   *
+   *   - `reconnect()` → optimistic; OAuth elicit suppressed; auth
+   *     failures bucket into `credentials-missing`/`expired`.
+   *   - `reauthenticate()` → interactive; OAuth provider fires the
+   *     URL-mode elicit; the only caller-side path that opens the
+   *     browser OAuth dance. Deletes stored credentials first to
+   *     force a fresh flow.
+   *
+   * Adopters writing UI code today can wire a "Re-authenticate"
+   * button to this verb — when the follow-up slice ships, the
+   * button does the right thing without any caller-side change.
+   * Until then, expect the same outcome as `reconnect()`.
    */
   async reauthenticate(): Promise<void> {
     // TODO(#277b-followup): pass interactive=true through to the

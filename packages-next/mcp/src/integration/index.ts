@@ -7,7 +7,6 @@ export {
   withMCP,
   type McpServerConfig,
   type WithMCPOptions,
-  type McpClientHandle,
   type McpHookBridgeImpl,
 } from "./with-mcp.js";
 export {

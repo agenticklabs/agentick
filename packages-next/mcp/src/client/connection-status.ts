@@ -1,7 +1,7 @@
 /**
  * `McpConnectionStatus` — per-server connection state surfaced to
- * adopter UIs. Read via `McpClientHandle.status`; subscribe to
- * transitions via `McpClientHandle.onStatusChange`.
+ * adopter UIs. Read via `McpClientHarness.status`; subscribe to
+ * transitions via `McpClientHarness.onStatusChange`.
  *
  * The states are **credentials-shaped**, not UI-shaped. There is no
  * `auth-required` state that fires elicit — the UI decides what to

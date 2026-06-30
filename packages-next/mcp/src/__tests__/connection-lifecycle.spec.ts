@@ -193,32 +193,76 @@ describe("McpClientHarness — connection-status FSM", () => {
   });
 
   it("disconnect during a slow connect — final status is disconnected, not error", async () => {
-    // We hijack `client.connect` indirectly by constructing the
-    // harness with a transport whose `start()` never resolves
-    // — but that's hard with InMemoryMcpTransport. Instead, we
-    // exploit the fact that `harness.connect()` returns a Promise:
-    // schedule disconnect on a microtask, then await connect's
-    // outcome. With race-guards in place, status ends `disconnected`.
-    const { server, clientTransport } = await mkRealServerPair();
-    const harness = mkHarness("x", clientTransport);
+    // Construct a controllable transport whose `start()` hangs until
+    // we resolve a Deferred. That gives us a real race window where
+    // `harness.connect()` is suspended mid-await; we fire disconnect
+    // during that window and verify the race-guard wins.
+    let resolveStart: () => void = () => {};
+    const startPromise = new Promise<void>((resolve) => {
+      resolveStart = resolve;
+    });
+    const hangingTransport = {
+      async start(): Promise<void> {
+        await startPromise;
+      },
+      async send(): Promise<void> {
+        /* never called — we disconnect before initialize */
+      },
+      async close(): Promise<void> {
+        /* idempotent */
+      },
+    };
 
-    const connectPromise = harness.connect();
-    // Status is now `connecting`. Race a disconnect against the
-    // connect's completion via a microtask.
-    void Promise.resolve().then(() => {
-      void harness.disconnect();
+    const harness = new McpClientHarness(
+      `test:slow`,
+      new MemoryJournal(),
+      new LocalEventBus(),
+      new LocalInbox(),
+      {
+        serverId: "slow",
+        transport: hangingTransport,
+        auth: new NoneAuth(),
+        elicitAddress: "elicitation:test",
+        clientInfo: { name: "slow", version: "1.0.0" },
+      },
+    );
+
+    // Fire connect — it'll await `transport.start()` which is hung.
+    // We don't await the connectPromise itself; the SDK Client's
+    // initialize handshake awaits a response over the transport
+    // which never arrives (the disconnect short-circuits the wire),
+    // so the connect Promise effectively hangs. We attach a noop
+    // catch so the rejection (or non-resolution) doesn't surface as
+    // an unhandled rejection at test teardown.
+    void harness.connect().catch(() => {
+      /* late connect outcome is irrelevant to the race contract */
     });
 
-    await connectPromise.catch(() => {
-      /* connect's outcome can race either way; we only care about
-       * the final status. */
-    });
-    // Drain microtasks so disconnect has a chance to run.
-    await new Promise((r) => setTimeout(r, 10));
+    // Yield to the microtask queue so connect's IIFE starts and
+    // reaches the `await client.connect(...)` line. Status is now
+    // `connecting`.
+    await new Promise<void>((r) => setImmediate(r));
+    expect(harness.status).toEqual({ kind: "connecting" });
 
+    // Concurrent disconnect — race-guard should win. Status flips
+    // to `disconnected` SYNCHRONOUSLY inside disconnect() (the set
+    // happens before any await), so we can assert against the
+    // already-mutated status without awaiting the disconnect's
+    // close-side-effect.
+    void harness.disconnect();
+    expect(harness.status).toEqual({ kind: "disconnected" });
+
+    // Let the hung transport finally resolve; the race-guard
+    // observes `status.kind !== "connecting"` and bails without
+    // overwriting `disconnected`.
+    resolveStart();
+
+    // Brief drain — even after letting the transport unblock, the
+    // connect IIFE's late code paths must NOT push status back to
+    // `error` or `connected`.
+    await new Promise<void>((r) => setTimeout(r, 20));
     expect(harness.status).toEqual({ kind: "disconnected" });
 
     await harness.close();
-    await server.close();
   });
 });
