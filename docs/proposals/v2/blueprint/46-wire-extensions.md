@@ -649,6 +649,102 @@ generic typed primitives from `@agentick/client-next`).
 
 ---
 
+## The framework's own wire methods ARE wire extensions
+
+**Eat-your-own-dogfood commitment.** The methods currently hardcoded
+in `WireMethods` — `gateway/listApps`, `gateway/getApp`,
+`app/createSession`, `app/getSession`, `app/listSessions`,
+`app/runOnce`, `app/close`, `session/send`, `session/dispatch`,
+`session/abort`, `session/queue`, `session/snapshot`, `session/rebind`,
+`session/close`, `session/respondToElicitation`, `subscribe`,
+`unsubscribe`, `auth/refresh`, `auth/completeChallenge`,
+`auth/signOut`, `ping` — get reorganized into framework-supplied
+`WireExtension` values during Phase B/C:
+
+- `gatewayWireExtension` — namespace `gateway/*`.
+- `appWireExtension` — namespace `app/*`.
+- `sessionWireExtension` — namespace `session/*`.
+- `subscriptionWireExtension` — `subscribe` + `unsubscribe`. (Special
+  case: these are bare names, not namespaced. Either the validator
+  carves an exception, or they get renamed to `subscriptions/*` —
+  decision in Phase B/C.)
+- `authWireExtension` — namespace `auth/*`.
+- `pingWireExtension` — bare `ping`. (Same exception or rename
+  question as subscribe/unsubscribe.)
+- `frameworkInternalWireExtension` — `_extensions/list` (the
+  capability discovery method, the only `_*` extension permitted).
+
+These extensions are loaded INTO THE GATEWAY by default at
+construction. Adopters writing `createGateway({ apps: [...] })` get
+them automatically; they don't have to import or pass anything.
+Adopters can in theory replace them by passing a `defaultWireExtensions:
+false` option (Phase B/C exposes the seam for testing / non-standard
+deployments), but the canonical case is "all framework methods
+register via the same primitive adopter extensions use."
+
+### What this gets us
+
+1. **No hardcoded dispatch path.** The gateway has one dispatcher.
+   Look up method name in the registered extensions; call handler;
+   return result. No `if (method === "session/send") { ... }`
+   special-case at the top of the dispatcher. Smaller surface, fewer
+   places for bugs.
+
+2. **First-class conformance.** The framework's own extensions go
+   through `runWireExtensionConformance` (#299) just like adopter
+   ones do. If the framework violates its own discipline, the
+   conformance suite catches it.
+
+3. **Documentation alignment.** When an adopter wants to learn how
+   wire extensions work, they read `gatewayWireExtension` as the
+   canonical example. It's not a teaching toy — it's the real
+   implementation of the framework's core RPC surface.
+
+4. **Test-doubles consistency.** The framework's testing helpers
+   (`stubGateway`, `fakeSession`) can mock at the extension boundary
+   by registering test versions of these extensions. Same hook
+   adopters use for testing their own extensions.
+
+5. **Discovery is uniform.** `_extensions/list` returns the
+   framework's own extensions alongside adopter ones. Client SDK
+   doesn't need a separate "is this a framework method or adopter
+   method" branch.
+
+### Special cases (subscribe / unsubscribe / ping)
+
+Bare method names (no `namespace/` prefix) don't fit the validator
+rule that every method starts with the declared namespace. Two
+options for Phase B/C:
+
+- **Carve an exception** — framework-supplied extensions may declare
+  bare methods provided their namespace is the framework's reserved
+  prefix (`_subscribe`, `_ping`). The validator allows underscore-
+  prefixed namespaces ONLY for framework-supplied extensions.
+- **Rename** — `subscribe` → `subscriptions/create`, `unsubscribe` →
+  `subscriptions/cancel`, `ping` → `framework/ping`. Breaking change
+  to existing clients (acceptable per the no-backcompat rule before
+  v2.0).
+
+Lean toward **rename** for cleanliness. The discriminator at the
+adopter level becomes "every method has a namespace/" — no
+exceptions, no special cases. Phase B/C decides definitively.
+
+### Phase B/C scope amendment
+
+The wire-dispatcher implementation needs to:
+1. Define the framework's built-in `WireExtension` values
+   (`gatewayWireExtension`, `appWireExtension`, etc.) that wrap the
+   existing hardcoded handlers.
+2. Load them into the gateway's wire registry at construction.
+3. Drop the hardcoded dispatch path in favor of uniform
+   extension-driven dispatch.
+
+This is a meaningful refactor — every existing wire method's handler
+moves from gateway internals into a framework-supplied extension
+file. The behavior stays identical; the dispatch path collapses.
+
+---
+
 ## Capability discovery — `_extensions/list`
 
 Gateway registers a built-in method `_extensions/list` (the
