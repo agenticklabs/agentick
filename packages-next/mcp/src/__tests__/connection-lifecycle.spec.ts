@@ -158,8 +158,7 @@ describe("McpClientHandle — status FSM via createConnectionHandle", () => {
     });
 
     await handle.connect();
-    const live = handle.harness;
-    expect(live).toBeDefined();
+    expect(handle.status).toEqual({ kind: "connected" });
 
     const seen: McpConnectionStatus[] = [];
     handle.onStatusChange((s) => seen.push(s));
@@ -167,9 +166,6 @@ describe("McpClientHandle — status FSM via createConnectionHandle", () => {
 
     expect(seen).toEqual([{ kind: "disconnected" }]);
     expect(handle.status).toEqual({ kind: "disconnected" });
-    // Accessing the harness when disconnected throws — the live ref
-    // is gone after disconnect.
-    expect(() => handle.harness).toThrow(/harness reference not available/);
 
     await dispose();
     await server.close();
@@ -242,6 +238,45 @@ describe("McpClientHandle — status FSM via createConnectionHandle", () => {
     expect(isTerminalStatus(handle.status)).toBe(true);
 
     await dispose();
+  });
+
+  it("disconnect during a slow connect — final status is `disconnected`, not `error`", async () => {
+    // A `makeHarness` factory that hangs for ~50ms simulates a slow
+    // remote connect. Mid-flight we call disconnect(); the
+    // connect IIFE later sees the harness fail to close + tries to
+    // setStatus(error). The race-guard prevents that overwrite.
+    const { server, clientTransport } = await mkRealServerPair();
+    let resolveMakeHarness: (h: McpClientHarness) => void = () => {};
+    const slowFactory = () =>
+      new Promise<McpClientHarness>((resolve) => {
+        resolveMakeHarness = resolve;
+      });
+    const { handle, dispose } = mkBareHandle({
+      serverId: "x",
+      makeHarness: slowFactory,
+    });
+
+    const connectPromise = handle.connect();
+
+    // Status is now `connecting`. Disconnect concurrently.
+    await handle.disconnect();
+    expect(handle.status).toEqual({ kind: "disconnected" });
+
+    // Let the slow factory finally resolve — harness arrives late.
+    // The IIFE will close it and bail without touching status.
+    resolveMakeHarness(await mkHarnessFactory("x", clientTransport)());
+
+    // The original connect() Promise rejects only if it actually
+    // tries to use the harness — but since we returned early
+    // post-race-check, it resolves normally with `undefined`.
+    await connectPromise.catch(() => {
+      /* late connect outcome is acceptable either way */
+    });
+
+    expect(handle.status).toEqual({ kind: "disconnected" });
+
+    await dispose();
+    await server.close();
   });
 
   it("reauthenticate() still throws with the follow-up-slice pointer", async () => {

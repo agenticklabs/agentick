@@ -40,6 +40,7 @@ export {
   EMPTY_CONTEXT,
   RuntimeContextRef,
   getContext,
+  readContext,
   withContext,
   type RuntimeContext,
 } from "./substrate/runtime-context.js";

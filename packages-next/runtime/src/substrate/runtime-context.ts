@@ -61,6 +61,33 @@ export const RuntimeContextRef = FiberRef.unsafeMake<RuntimeContext>(EMPTY_CONTE
 export const getContext: Effect.Effect<RuntimeContext> = FiberRef.get(RuntimeContextRef);
 
 /**
+ * Synchronous accessor for the active runtime context. The v2 analog
+ * of v1's `Context.get()` — lifted onto the FiberRef substrate so
+ * adopters never have to enter Effect-land for a simple scope read.
+ *
+ * Returns a plain `RuntimeContext` snapshot. Internally runs
+ * `Effect.runSync(getContext)`, which is safe because FiberRef.get is
+ * pure: no async, no scope acquisition, no failure modes. The
+ * try/catch is a belt-and-suspenders fallback for runtime variants
+ * where `Effect.runSync` of a top-level FiberRef read could change
+ * semantics in a future Effect release; if it ever does, callers
+ * degrade to the EMPTY_CONTEXT (the same value the FiberRef holds
+ * outside any fiber).
+ *
+ * Use when you need the context in a NON-Effect call site —
+ * Promise-typed adopter wrappers, sync callback hooks, JSX
+ * components reading scope at render time. Effect-native call sites
+ * should compose `getContext` via `yield*` directly.
+ */
+export function readContext(): RuntimeContext {
+  try {
+    return Effect.runSync(getContext);
+  } catch {
+    return EMPTY_CONTEXT;
+  }
+}
+
+/**
  * Run an Effect with the supplied scope merged into the ambient
  * runtime context. Visible to nested reads via `getContext`.
  *
@@ -76,3 +103,17 @@ export function withContext<R, E, A>(
     return yield* Effect.locally(RuntimeContextRef, merged)(effect);
   });
 }
+
+// NOTE: `runWithContext` / `runWithContextAsync` (the v1
+// `Context.run(...)` analog) are NOT shipped on FiberRef alone.
+// `Effect.runSync(withContext(scope, Effect.sync(fn)))` looks like
+// it should work but doesn't — the nested `Effect.runSync(getContext)`
+// inside `readContext()` starts a fresh fiber that doesn't inherit
+// the outer's locally-scoped FiberRef value. Faithfully imitating
+// v1's ALS-based Context.run requires either AsyncLocalStorage as a
+// parallel state mechanism the substrate keeps in sync with the
+// FiberRef, OR forcing the scoped-set into Effect-typed `withContext`.
+// Tracked as a deliberate design slice — see the depless-reconciler-
+// adjacent context-set design ticket when it surfaces. Until then,
+// callers wanting scoped sync set use `Effect.runPromise(withContext(...))`
+// from Effect-land.

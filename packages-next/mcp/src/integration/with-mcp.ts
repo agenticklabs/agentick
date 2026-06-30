@@ -189,12 +189,18 @@ export interface WithMCPOptions {
 
 export interface McpClientHandle {
   readonly serverId: string;
-  readonly harness: McpClientHarness;
 
   /**
    * Current per-server connection status (#277). Read once for
    * snapshot rendering; subscribe via {@link onStatusChange} for
    * reactive UI.
+   *
+   * The underlying transport-level `McpClientHarness` is an
+   * implementation detail of the handle's lifecycle management
+   * (recreated per connect/reconnect cycle) — NOT part of the
+   * public surface. Adopters interact with the server through the
+   * verbs below + the canonical `session.dispatch()` tool path; no
+   * direct access to the harness is needed or supported.
    */
   readonly status: McpConnectionStatus;
 

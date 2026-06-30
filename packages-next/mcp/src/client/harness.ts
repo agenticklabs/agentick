@@ -79,7 +79,12 @@ import {
 
 import type { ElicitationResult } from "@agentick/spec-next";
 import type { RequestResponseRegistry } from "@agentick/runtime-next";
-import { createLocalPubSub, type LocalPubSub } from "@agentick/pubsub-next";
+import {
+  createLocalPubSub,
+  createNotifier,
+  type LocalPubSub,
+  type Notifier,
+} from "@agentick/pubsub-next";
 
 import { McpLifecycle } from "./lifecycle.js";
 import type { McpClientHarnessOptions, McpClientState, McpToolDescriptor } from "./types.js";
@@ -172,6 +177,14 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
   private readonly taskNotificationBus: LocalPubSub<TaskNotificationEvent> =
     createLocalPubSub<TaskNotificationEvent>();
 
+  /**
+   * In-process fan-out for `McpClientState` transitions. Each
+   * transition fires this notifier; the bus envelope (mcp:<scopeId>:state)
+   * fires in lockstep for substrate subscribers. Adopters wanting a
+   * direct callback subscription use {@link onStateChange}.
+   */
+  private readonly stateNotifier: Notifier<McpClientState> = createNotifier<McpClientState>();
+
   constructor(
     scopeId: string,
     journal: OperationJournal,
@@ -187,8 +200,34 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
     this.lifecycle = new McpLifecycle({
       ...omitUndefined({ reconnect: options.reconnect }),
       onReconnect: () => this.reconnect(),
-      onStateChange: (state) => this.publishStateChange(state),
+      onStateChange: (state) => {
+        // Two-channel fan-out: in-process notifier (push to adopter
+        // callbacks via `onStateChange`) AND bus envelope (substrate
+        // subscribers reach via the canonical `mcp:<scopeId>:state`
+        // bus name). Both fire on every transition.
+        this.stateNotifier.notify(state);
+        this.publishStateChange(state);
+      },
     });
+  }
+
+  /**
+   * Subscribe to state transitions on this harness. Listener is
+   * invoked synchronously after each transition with the new state.
+   * Returns an unsubscribe function. Listener errors are caught
+   * per-listener (createNotifier semantics) — a buggy consumer
+   * cannot corrupt sibling listeners or the producer's state.
+   *
+   * The current state is NOT replayed at subscribe time. Use
+   * {@link state} for the snapshot; subscribe for future transitions.
+   *
+   * Used by the {@link McpClientHandle} connection-status FSM to
+   * lift transport-level transitions into the adopter-facing status
+   * union — so `degraded` / `reconnecting` observed by the harness
+   * surface to adopters as `error` / `connecting` without polling.
+   */
+  onStateChange(listener: (state: McpClientState) => void): () => void {
+    return this.stateNotifier.subscribe(listener);
   }
 
   get id(): string {

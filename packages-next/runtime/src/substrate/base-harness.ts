@@ -56,27 +56,12 @@ import {
 } from "@agentick/spec-next";
 import { resolveSyncSubstrateSlot } from "./resolve-slot.js";
 import { ulid } from "./ulid.js";
-import { EMPTY_CONTEXT, getContext, type RuntimeContext, withContext } from "./runtime-context.js";
-
-/**
- * Sync snapshot of `RuntimeContextRef` for harness-construction-time
- * capture. Returns the EMPTY context when called outside any active
- * Effect fiber (top-of-tree adopter construction). Inside a fiber
- * that has the ref set (a `runOperation` body), returns that value.
- *
- * Implementation uses `Effect.runSync(getContext)`. Effect's `runSync`
- * of a pure FiberRef read is safe — no async, no scope acquisition.
- */
-function readContextSnapshot(): RuntimeContext {
-  try {
-    return Effect.runSync(getContext);
-  } catch {
-    // Should never happen for a pure FiberRef.get — but if Effect's
-    // runSync changes semantics in a future release, degrade gracefully
-    // to the empty context.
-    return EMPTY_CONTEXT;
-  }
-}
+import {
+  getContext,
+  readContext as readContextSnapshot,
+  type RuntimeContext,
+  withContext,
+} from "./runtime-context.js";
 import { RequestResponseRegistry, type RequestError } from "./request-response-registry.js";
 
 export type { Unsubscribe } from "@agentick/spec-next";

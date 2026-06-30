@@ -24,8 +24,52 @@ import { createNotifier, type Notifier } from "@agentick/pubsub-next";
 
 import type { McpClientHarness } from "../client/harness.js";
 import type { McpConnectionStatus, StatusUnsubscribe } from "../client/connection-status.js";
+import type { McpClientState } from "../client/types.js";
 
 import type { McpClientHandle } from "./with-mcp.js";
+
+/**
+ * Lift a transport-level `McpClientState` (from the underlying
+ * harness's lifecycle FSM) into the adopter-facing `McpConnectionStatus`.
+ *
+ * The two FSMs are at different abstraction layers:
+ *
+ *   - Harness state — wire-protocol-level: `idle / connecting / ready /
+ *     degraded / reconnecting / closed`. Tracks the SDK Client's actual
+ *     connection + the auto-reconnect-with-backoff machinery.
+ *   - Handle status — adopter-facing: `disconnected / connecting /
+ *     connected / credentials-missing / credentials-expired / error`.
+ *     Layered concerns the harness doesn't know about (credential
+ *     bucketing) live only on the handle.
+ *
+ * Mapping:
+ *
+ *     harness `ready`        → handle `connected`
+ *     harness `connecting`   → handle `connecting`
+ *     harness `reconnecting` → handle `connecting`  (visible as "trying again")
+ *     harness `degraded`     → handle `error`       (transport drop, reconnect exhausted)
+ *     harness `closed`       → handle `disconnected`
+ *     harness `idle`         → handle `disconnected`
+ *
+ * Credential states (`credentials-missing` / `credentials-expired`)
+ * are NOT reachable via this lift — they come from auth bucketing
+ * during connect, which the harness's transport FSM doesn't see.
+ * The connect path sets them explicitly before subscribing here.
+ */
+function harnessStateToStatus(state: McpClientState): McpConnectionStatus {
+  switch (state) {
+    case "ready":
+      return { kind: "connected" };
+    case "connecting":
+    case "reconnecting":
+      return { kind: "connecting" };
+    case "degraded":
+      return { kind: "error", reason: "transport drop; reconnect exhausted" };
+    case "closed":
+    case "idle":
+      return { kind: "disconnected" };
+  }
+}
 
 /**
  * Recreate the underlying harness — invoked by `connect()` /
@@ -50,15 +94,11 @@ export interface ConnectionHandleOptions {
 }
 
 /**
- * Internal record paired with each handle — holds the currently-live
- * harness reference (or undefined when disconnected) for the install
- * path's cleanup and tool-discovery use. Returned alongside the
- * handle so the install loop can drive the right harness reference.
+ * Pairs each handle with a `dispose` callback the install path uses
+ * at session close to tear down the FSM + close the live harness.
  */
 export interface ConnectionHandleBundle {
   readonly handle: McpClientHandle;
-  /** Currently-mounted harness, if any — `undefined` after disconnect/error. */
-  readonly current: () => McpClientHarness | undefined;
   /** Tear down the handle's state + close the live harness. */
   readonly dispose: () => Promise<void>;
 }
@@ -68,6 +108,10 @@ export function createConnectionHandle(opts: ConnectionHandleOptions): Connectio
   let live: McpClientHarness | undefined;
   let inFlightConnect: Promise<void> | undefined;
   let disposed = false;
+  // Unsubscribe from the live harness's state-change notifier. Set
+  // after successful connect, cleared on disconnect/dispose so the
+  // lift-mapping doesn't fire against a stale harness.
+  let stateUnsubscribe: (() => void) | undefined;
 
   const changes: Notifier<McpConnectionStatus> = createNotifier<McpConnectionStatus>();
 
@@ -93,30 +137,74 @@ export function createConnectionHandle(opts: ConnectionHandleOptions): Connectio
 
     setStatus({ kind: "connecting" });
     inFlightConnect = (async () => {
+      let pendingHarness: McpClientHarness | undefined;
       try {
-        const harness = await opts.makeHarness();
-        await harness.connect();
-        live = harness;
-        setStatus({ kind: "connected" });
-        if (opts.onConnected) {
-          // Run the post-connect hook OUTSIDE the inFlightConnect
-          // guard — if the hook errors, we still consider the
-          // connection itself successful (tools failing to discover
-          // is a degraded mode, not a connection failure). Adopter
-          // can subscribe to bus envelopes for that signal.
+        pendingHarness = await opts.makeHarness();
+        await pendingHarness.connect();
+        // Race check: a concurrent `disconnect()` / `dispose()` could
+        // have moved status away from `connecting` while we awaited
+        // makeHarness + harness.connect(). If it did, the user's
+        // intent wins — close the late-arriving harness and bail
+        // without touching status.
+        if (status.kind !== "connecting") {
           try {
-            await opts.onConnected(harness);
+            await pendingHarness.close();
           } catch {
-            // Swallow — connection itself succeeded; tool-discovery
-            // failures are a separate concern.
+            /* close errors moot — handle already moved on */
+          }
+          return;
+        }
+        live = pendingHarness;
+        // Run the post-connect hook BEFORE emitting `connected` so
+        // subscribers reacting to the status see a fully-prepared
+        // server (tools discovered, registrations applied). The hook
+        // is wrapped in try/catch so discovery failure doesn't change
+        // the connection-status outcome — the connection itself
+        // succeeded; tool discovery is a separate concern.
+        if (opts.onConnected) {
+          try {
+            await opts.onConnected(pendingHarness);
+          } catch {
+            // Tool-discovery failures are non-fatal for connection
+            // status. Adopters watching for "tools registered"
+            // subscribe to the ToolExecutor's registration stream,
+            // not to this handle's status.
           }
         }
+        // Race check again: onConnected can await arbitrarily long.
+        if (status.kind !== "connecting") {
+          try {
+            await pendingHarness.close();
+          } catch {
+            /* close errors moot */
+          }
+          live = undefined;
+          return;
+        }
+        setStatus({ kind: "connected" });
+        // Lift subsequent transport-level transitions (mid-session
+        // disconnects, auto-reconnect-with-backoff via the harness's
+        // ReconnectPolicy) into the adopter-facing status. Without
+        // this subscription, the handle would stay `connected`
+        // forever even if the transport silently dropped.
+        const subscribed = pendingHarness;
+        stateUnsubscribe = subscribed.onStateChange((harnessState) => {
+          if (disposed) return;
+          const lifted = harnessStateToStatus(harnessState);
+          if (lifted.kind === status.kind) return;
+          setStatus(lifted);
+        });
       } catch (err) {
+        // Race-protected: only bump to `error` if status is still
+        // `connecting`. A concurrent disconnect would have set
+        // status to `disconnected`; don't clobber the user's intent.
         // 277b minimum: any failure → error. Credentials-aware
         // bucketing (credentials-missing / credentials-expired)
         // lands when the OAuth provider write-through to
         // bridges.credentials ships.
-        setStatus({ kind: "error", reason: reasonOf(err) });
+        if (status.kind === "connecting") {
+          setStatus({ kind: "error", reason: reasonOf(err) });
+        }
         throw err;
       } finally {
         inFlightConnect = undefined;
@@ -127,6 +215,11 @@ export function createConnectionHandle(opts: ConnectionHandleOptions): Connectio
 
   const disconnect = async (): Promise<void> => {
     if (status.kind === "disconnected") return;
+    // Drop the harness-state subscription first — once we close the
+    // harness, its terminal `closed` state would fire here and
+    // re-overwrite the `disconnected` we set below.
+    stateUnsubscribe?.();
+    stateUnsubscribe = undefined;
     // Cancel any in-flight connect — its outcome is moot.
     inFlightConnect = undefined;
     const harness = live;
@@ -156,14 +249,6 @@ export function createConnectionHandle(opts: ConnectionHandleOptions): Connectio
 
   const handle: McpClientHandle = {
     serverId: opts.serverId,
-    get harness(): McpClientHarness {
-      if (!live) {
-        throw new Error(
-          `McpClientHandle ${opts.serverId}: harness reference not available — status is "${status.kind}". Call connect() first.`,
-        );
-      }
-      return live;
-    },
     get status(): McpConnectionStatus {
       return status;
     },
@@ -180,6 +265,8 @@ export function createConnectionHandle(opts: ConnectionHandleOptions): Connectio
     if (disposed) return;
     disposed = true;
     inFlightConnect = undefined;
+    stateUnsubscribe?.();
+    stateUnsubscribe = undefined;
     const harness = live;
     live = undefined;
     changes.clear();
@@ -192,9 +279,5 @@ export function createConnectionHandle(opts: ConnectionHandleOptions): Connectio
     }
   };
 
-  return {
-    handle,
-    current: () => live,
-    dispose,
-  };
+  return { handle, dispose };
 }
