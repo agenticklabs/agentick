@@ -90,6 +90,7 @@ import type { McpToolDescriptor, ReconnectPolicy } from "../client/types.js";
 import type { EraCodec } from "../client/era-codec.js";
 import type { McpConnectionStatus, StatusUnsubscribe } from "../client/connection-status.js";
 
+import { createConnectionHandle } from "./connection-handle.js";
 import { mcpContentToBlocks } from "./content-mapper.js";
 import { mcpTaskEffect } from "./task-bridge.js";
 import { isTransportFactory, type TransportFactory } from "./transport-factory.js";
@@ -501,63 +502,38 @@ export function withMCP(options: WithMCPOptions): SessionExtension {
       const clientsById = new Map<string, McpClientHandle>();
       const handles: McpClientHandle[] = [];
 
-      // TODO(#277b): the connection-status lifecycle implementation
-      // reads stored OAuth tokens / API keys via the substrate
-      // credentials harness when one is installed by the adopter:
+      // TODO(#277b-followup): wire stored OAuth tokens / API keys
+      // through to the OAuth provider via the substrate credentials
+      // harness installed by `withCredentials({ store })`. The
+      // current slice ships the status FSM + verbs; the credentials
+      // write-through + the credentials-missing/expired status
+      // bucketing land in the next slice along with reauthenticate().
       //
-      //   import type { CredentialsHarnessProtocol } from "@agentick/spec-next";
+      // Lookup shape when the wire-through lands:
       //   const creds =
       //     installer.getNamespace<CredentialsHarnessProtocol>("credentials");
-      //   if (creds) {
-      //     const tokens = await creds.get<OAuthTokens>("mcp", config.serverId);
-      //     ...
-      //   }
-      //
-      // No-`creds` path is valid — sessions without `withCredentials({ store })`
-      // surface `credentials-missing` status and require an explicit
-      // `reauthenticate()` to populate the store via OAuth.
 
       for (const config of options.servers) {
-        const harness = await mkClient(installer, config);
-        const handle: McpClientHandle = {
+        const bundle = createConnectionHandle({
           serverId: config.serverId,
-          harness,
-          status: { kind: "disconnected" },
-          onStatusChange: () => {
-            throw new Error(
-              "McpClientHandle.onStatusChange — not yet implemented; lands with #277b",
-            );
-          },
-          connect: async () => {
-            throw new Error("McpClientHandle.connect — not yet implemented; lands with #277b");
-          },
-          disconnect: async () => {
-            throw new Error("McpClientHandle.disconnect — not yet implemented; lands with #277b");
-          },
-          reconnect: async () => {
-            throw new Error("McpClientHandle.reconnect — not yet implemented; lands with #277b");
-          },
-          reauthenticate: async () => {
-            throw new Error(
-              "McpClientHandle.reauthenticate — not yet implemented; lands with #277b",
-            );
-          },
-        };
-        clientsById.set(config.serverId, handle);
-        handles.push(handle);
-        installer.onClose(() => harness.close());
+          makeHarness: () => mkClient(installer, config),
+          onConnected: (harness) => discoverAndRegisterTools(installer, config, harness),
+        });
+        clientsById.set(config.serverId, bundle.handle);
+        handles.push(bundle.handle);
+        installer.onClose(() => bundle.dispose());
 
-        // Connect + discover. A connect failure records the server as
-        // degraded but doesn't block other servers (the lifecycle
-        // FSM transitions to `degraded` / `reconnecting`; observe
-        // via `bridges.mcp.client(id).state` or the bus envelope
-        // `mcp:<scopeId>:state`).
+        // Eager optimistic connect on install. A connect failure
+        // surfaces on `handle.status` as `error` (and through
+        // `onStatusChange` subscribers) — it does NOT throw out of
+        // the install loop. Adopters watching the handle's status
+        // observe the failure; the rest of the install proceeds.
         try {
-          await harness.connect();
+          await bundle.handle.connect();
         } catch {
-          continue;
+          // Status already captured the failure; swallow so other
+          // servers' installs proceed.
         }
-        await discoverAndRegisterTools(installer, config, harness);
       }
 
       const bridge: McpHookBridgeImpl = {
