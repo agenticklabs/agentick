@@ -1,7 +1,11 @@
 # Agentick v2 — Implementation Status
 
 **Branch:** `feat/v2`
-**Last updated:** 2026-06-29 (later) — **ADR 42 Slice 3 lands (#266): `Skills` + `Tasks` aliases + `withSkills` / `withPrompts` slot refresh.**
+**Last updated:** 2026-06-30 — **ADR 45 drafted (#284 design): Runtime context model — structural identity, propagated context, journal envelope.**
+
+ADR 45 codifies the three-layer model for how identity + ambient state move through the framework: (1) auth-bearing resources encode principal in their CONSTRUCTION (`McpClientHarness` for user-42 ≠ user-43 — structural, not contextual), (2) `RuntimeContext` carries typed dimensions (sessionId/opId/correlationId/traceparent) PLUS an adopter-augmentable `RuntimeContextUser` slot (empty-seed module augmentation, mirrors `HookBridges`), (3) `Operation.scope` collapses into RuntimeContext (one source of truth — operations READ + ENRICH ambient context, don't carry their own scope field). The propagation primitive `runWithContext` writes to BOTH the Effect FiberRef AND an `AsyncLocalStorage` so `readContext()` works across plain async boundaries (post-`Effect.runSync`, callback-based libs, fetch chains). Tool handlers become dual-typed server-side — Promise OR Effect return — same convention as the kernel procedure layer. Client SDK stays Promise-only. Framework primitives NEVER trust adopter `ctx.user` for authorization; adopters can use it for telemetry/branching at their own risk. This unblocks #280 (wire extensions taxonomy needs settled context model), #289 (principal-bearing harness audit — structural identity rule), #290 (capture-replay sweep — residual after ALS coupling). #288 (narrow `RuntimeContext.request`) becomes the destructive prerequisite this ADR specifies the constructive replacement for. Driven by the #277b multi-tenant caveat (OAuth provider's `loadTokens` runs outside Effect → `readContext()` returns EMPTY_CONTEXT → multi-tenant key derivation silently broken).
+
+**Previously, 2026-06-29 (later) — ADR 42 Slice 3 lands (#266): `Skills` + `Tasks` aliases + `withSkills` / `withPrompts` slot refresh.**
 
 `spec-next` now exports `Skills` (= `SkillsHarnessProtocol`) + `Tasks` (= `TasksHarnessProtocol`) adopter-facing aliases, joining the existing `Prompts`. Each ships a matching `isSkillsInstance` / `isPromptsInstance` / `isTasksInstance` structural guard so adopters can discriminate slot forms without touching internal types. The previously-local `isPromptsInstance` inside `mcp/server/config.ts` is gone — single canonical guard now.
 
