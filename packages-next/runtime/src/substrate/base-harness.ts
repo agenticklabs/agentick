@@ -56,12 +56,7 @@ import {
 } from "@agentick/spec-next";
 import { resolveSyncSubstrateSlot } from "./resolve-slot.js";
 import { ulid } from "./ulid.js";
-import {
-  getContext,
-  readContext as readContextSnapshot,
-  type RuntimeContext,
-  withContext,
-} from "./runtime-context.js";
+import { getContext, type RuntimeContext, withContext } from "./runtime-context.js";
 import { RequestResponseRegistry, type RequestError } from "./request-response-registry.js";
 
 export type { Unsubscribe } from "@agentick/spec-next";
@@ -299,12 +294,6 @@ export abstract class BaseHarness<
   readonly metadata: Readonly<Record<string, unknown>>;
 
   /**
-   * Snapshot of the {@link RuntimeContext} captured at construction.
-   * Returned by {@link runtimeContext}; reflects the context of the
-   * parent operation that triggered this harness's construction.
-   */
-  private readonly capturedContext: RuntimeContext;
-  /**
    * In-flight request/response correlation map. Every BaseHarness can
    * issue `this.request(channel, payload)` and receives `request-response`
    * inbox messages routed automatically by `dispatchMessage` before
@@ -399,10 +388,6 @@ export abstract class BaseHarness<
     // Replay buffered close handlers onto this (the now-real harness).
     for (const h of pendingCloseHandlers) this.onClose(h);
 
-    // Snapshot the current operation's RuntimeContext at construction.
-    // Empty when constructed outside any active Operation (the common
-    // case for top-of-tree harnesses constructed by adopter code).
-    this.capturedContext = readContextSnapshot();
     if (options.autoRegisterInbox !== false) {
       // Register is async — cluster impls may negotiate across nodes.
       // Local impls resolve immediately. Either way, `ready` is the
@@ -415,28 +400,6 @@ export abstract class BaseHarness<
     } else {
       this.ready = Promise.resolve();
     }
-  }
-
-  /**
-   * Sync read of the {@link RuntimeContext} captured at this harness's
-   * construction time. Reflects the context of the parent Operation
-   * that triggered construction (sessionId, executionId, tickId, opId,
-   * parentOpId, correlationId — whatever was set on the parent's
-   * fiber when this harness's substrate/slot factories ran).
-   *
-   * Returns an empty context when this harness was constructed outside
-   * any active Operation (the common case for top-of-tree adopter
-   * code).
-   *
-   * Adopters writing substrate or slot factories use
-   * `parent.runtimeContext()` to read this without going Effect-native.
-   * Effect-typed factories may also yield `getContext` for the same
-   * info from inside `Effect.gen`.
-   *
-   * @see docs/proposals/v2/blueprint/31-harness-hierarchy.md
-   */
-  runtimeContext(): RuntimeContext {
-    return this.capturedContext;
   }
 
   // ──────── ① Commands (heavy path) ────────
@@ -848,19 +811,15 @@ export abstract class BaseHarness<
       correlationId,
       ...omitUndefined({ timeoutMs: opts.timeoutMs, signal: opts.signal }),
     });
-    // Resolve scope precedence: explicit > captured-at-construction.
-    // The captured context carries any RuntimeContext fields the
-    // parent operation set when this harness was constructed; the
-    // explicit override lets per-call code stamp a different scope
-    // (e.g., the elicitation harness stamping its parent sessionId).
-    const ctxScope: EventScope = {
-      ...omitUndefined({
-        sessionId: this.capturedContext.sessionId,
-        executionId: this.capturedContext.executionId,
-        tickId: this.capturedContext.tickId,
-      }),
-    };
-    const scope: EventScope = opts.scope ?? ctxScope;
+    // Scope on the published envelope. Subscribers filter on
+    // `scope.sessionId` etc.; harnesses that publish from within a
+    // session pass `opts.scope` explicitly (e.g., ElicitationHarness
+    // stamps its parent sessionId). Defaults to empty when the caller
+    // doesn't supply one — per ADR 45 / #294 there's no longer an
+    // implicit "captured at construction" fallback. Effect-typed
+    // call sites should `yield* getContext` to populate scope if
+    // they need it.
+    const scope: EventScope = opts.scope ?? {};
     // Publish the request envelope on the bus. The channel name pattern
     // matches `ChannelHandle.publish` — `session:channel:<channel>`.
     const fullName = `session:channel:${channel}`;

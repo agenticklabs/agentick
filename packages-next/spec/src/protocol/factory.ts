@@ -11,9 +11,13 @@
  * The parent harness carries everything a factory needs: identity
  * (`parent.id`), substrate access (`parent.bus` / `parent.journal` /
  * `parent.inbox`), lifecycle (`parent.onClose(h)` for teardown
- * registration), construction input (`parent.input` /
- * `parent.metadata`), and current runtime context
- * (`parent.runtimeContext()`).
+ * registration), and construction input (`parent.input` /
+ * `parent.metadata`). Factories needing runtime context must compose
+ * inside `Effect.gen` and `yield* getContext` — the per-construction
+ * `parent.runtimeContext()` accessor was removed in #294 because the
+ * sync `readContext()` inside a constructor cannot see the outer
+ * fiber's FiberRef (the runSync gap). See ADR 45 for the propagation
+ * model.
  *
  * The discrimination at the slot is `typeof slot === "function"`:
  * substrate primitives and harness protocols are all object
@@ -41,9 +45,11 @@ import type { Effect } from "effect";
  *    `RuntimeContextRef` for fiber-tracked context, yield
  *    `Effect.acquireRelease` for automatic teardown
  *
- * Sync/Promise factories that need fiber-tracked context call
- * `parent.runtimeContext()` synchronously. Effect factories yield
- * directly.
+ * Sync/Promise factories cannot read the parent fiber's runtime
+ * context — the sync escape hatch `readContext()` returns
+ * `EMPTY_CONTEXT` from inside a fresh `Effect.runSync` fiber (see ADR
+ * 45 + #294). Factories needing context return Effect and `yield*
+ * getContext` from `@agentick/runtime-next`.
  *
  * Cleanup registration: `parent.onClose(h)` registers a teardown that
  * fires when the parent harness closes. LIFO order, error-isolated.
