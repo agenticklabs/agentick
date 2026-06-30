@@ -246,22 +246,22 @@ describe("InMemoryMcpTransport", () => {
 // ---------------------------------------------------------------------------
 
 describe("DefaultOAuthProvider", () => {
-  it("stores + loads tokens / client info round-trip", () => {
+  it("stores + loads tokens / client info round-trip", async () => {
     const provider = new DefaultOAuthProvider({
       serverName: "test",
       serverUrl: "https://example.invalid",
     });
-    expect(provider.loadTokens()).toBeUndefined();
-    expect(provider.loadClientInfo()).toBeUndefined();
+    expect(await provider.loadTokens()).toBeUndefined();
+    expect(await provider.loadClientInfo()).toBeUndefined();
 
-    provider.saveTokens({ access_token: "tok", token_type: "Bearer" });
-    expect(provider.loadTokens()).toEqual({ access_token: "tok", token_type: "Bearer" });
+    await provider.saveTokens({ access_token: "tok", token_type: "Bearer" });
+    expect(await provider.loadTokens()).toEqual({ access_token: "tok", token_type: "Bearer" });
 
-    provider.saveClientInfo({
+    await provider.saveClientInfo({
       client_id: "cid",
       redirect_uris: ["http://127.0.0.1:8080/callback"],
     });
-    expect(provider.loadClientInfo()?.client_id).toBe("cid");
+    expect((await provider.loadClientInfo())?.client_id).toBe("cid");
   });
 
   it("redirectToAuthorization gates waitForAuthorizationCode on resolveAuthorizationCode", async () => {

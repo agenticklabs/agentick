@@ -868,6 +868,9 @@ importers:
       '@agentick/app-next':
         specifier: workspace:*
         version: link:../app
+      '@agentick/credentials-next':
+        specifier: workspace:*
+        version: link:../credentials
       '@agentick/executor-next':
         specifier: workspace:*
         version: link:../executor

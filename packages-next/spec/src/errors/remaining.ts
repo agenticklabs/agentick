@@ -230,7 +230,10 @@ export type SandboxErrorChannel =
 // ============================================================================
 
 export abstract class McpClientError extends AgentickError {
-  abstract override readonly _tag: "McpClientNotReadyError" | "McpTransportError";
+  abstract override readonly _tag:
+    | "McpClientNotReadyError"
+    | "McpTransportError"
+    | "McpCredentialsRequiredError";
 }
 
 export class McpClientNotReadyError extends McpClientError {
@@ -261,7 +264,37 @@ export class McpTransportError extends McpClientError {
 }
 registerAgentickError("McpTransportError", McpTransportError);
 
-export type McpClientErrorChannel = McpClientNotReadyError | McpTransportError;
+/**
+ * Raised when the MCP client needs credentials to connect but the
+ * caller opted out of interactive auth (e.g. optimistic `connect()`
+ * or `reconnect()` on a server that has no stored tokens or whose
+ * tokens have expired and can't be silently refreshed). The harness
+ * classifier maps the error's `kind` to a `credentials-missing` /
+ * `credentials-expired` connection status.
+ *
+ * Only `reauthenticate()` connects with the interactive flag, which
+ * is the single caller-side path that opens the OAuth dance.
+ */
+export class McpCredentialsRequiredError extends McpClientError {
+  readonly _tag = "McpCredentialsRequiredError" as const;
+  readonly serverId: string;
+  readonly kind: "missing" | "expired";
+  constructor(args: {
+    readonly serverId: string;
+    readonly kind: "missing" | "expired";
+    readonly cause?: unknown;
+  }) {
+    super(`mcp credentials ${args.kind} for ${args.serverId}`, { cause: args.cause });
+    this.serverId = args.serverId;
+    this.kind = args.kind;
+  }
+}
+registerAgentickError("McpCredentialsRequiredError", McpCredentialsRequiredError);
+
+export type McpClientErrorChannel =
+  | McpClientNotReadyError
+  | McpTransportError
+  | McpCredentialsRequiredError;
 
 // ============================================================================
 // McpRemoteTaskNonCompletedError — task bridge surface

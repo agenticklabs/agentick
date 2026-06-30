@@ -19,13 +19,24 @@
  */
 
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import type { ElicitationResult, UrlElicitationRequest } from "@agentick/spec-next";
+import type {
+  CredentialsHarnessProtocol,
+  ElicitationResult,
+  UrlElicitationRequest,
+} from "@agentick/spec-next";
+
+/**
+ * Discriminator for the four storage fields the OAuth flow uses.
+ * Mirrors the SDK's `invalidateCredentials` scope enum (minus `"all"`,
+ * which is a delete-everything sentinel — not a storable field).
+ */
+export type CredentialField = "tokens" | "client" | "verifier" | "discovery";
 
 /**
  * Session-bound resources a {@link TransportFactory} can read at
  * mount time. The factory uses these to wire transport-level deps
- * (most commonly `DefaultOAuthProvider.elicit`) to the live session
- * surfaces.
+ * (most commonly `DefaultOAuthProvider.elicit` + credentials read-
+ * through) to the live session surfaces.
  *
  * Stable shape — additive evolution only. Adopters destructure what
  * they need.
@@ -50,6 +61,35 @@ export interface TransportFactoryDeps {
    * across servers (e.g., one OAuthCallbackServer per serverId).
    */
   readonly serverId: string;
+
+  /**
+   * Credentials harness bound to this session, when
+   * `withCredentials({ store })` is installed at the app/gateway
+   * level. `undefined` if no credentials substrate is present —
+   * adopters wiring OAuth-backed servers must install one or accept
+   * the in-memory fallback in `DefaultOAuthProvider`.
+   */
+  readonly credentials?: CredentialsHarnessProtocol;
+
+  /**
+   * Resolved storage key for one of the four OAuth credential fields.
+   * Default composition is `mcp:<serverId>:<field>`; adopters override
+   * via `withMCP({ credentialKey })` to namespace by user / tenant /
+   * any value readable from {@link RuntimeContext}. The factory hands
+   * this directly to the provider; the provider never composes keys
+   * itself.
+   */
+  readonly credentialKey: (field: CredentialField) => string;
+
+  /**
+   * Whether interactive auth (the OAuth URL elicit) is permitted on
+   * this transport build. `false` for optimistic `connect()` and
+   * silent `reconnect()` — the provider must short-circuit with
+   * `McpCredentialsRequiredError` rather than fire the elicit.
+   * `true` ONLY for `reauthenticate()` — the single caller-side path
+   * that opens the browser OAuth dance.
+   */
+  readonly interactive: boolean;
 }
 
 /**

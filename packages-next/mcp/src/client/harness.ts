@@ -95,6 +95,23 @@ import { makeElicitRequestHandler } from "./elicit-bridge.js";
 import { omitUndefined } from "@agentick/utils-next";
 
 /**
+ * Walk an error chain (`err.cause` recursion) looking for an
+ * {@link McpCredentialsRequiredError}. The SDK frequently wraps
+ * provider-thrown errors as `UnhandledRequestError` or generic
+ * `Error`, so structural detection at the leaf is the only reliable
+ * lift. Returns `undefined` when no link in the chain matches.
+ */
+function findCredentialsRequired(err: unknown): McpCredentialsRequiredError | undefined {
+  let cursor: unknown = err;
+  // Bound the walk — a malformed cause cycle shouldn't spin forever.
+  for (let i = 0; i < 8 && cursor !== null && cursor !== undefined; i++) {
+    if (cursor instanceof McpCredentialsRequiredError) return cursor;
+    cursor = (cursor as { cause?: unknown }).cause;
+  }
+  return undefined;
+}
+
+/**
  * Lift the wire-protocol `McpClientState` (managed by {@link McpLifecycle})
  * into the adopter-facing {@link McpConnectionStatus}. The two FSMs sit
  * at different abstraction layers:
@@ -154,9 +171,10 @@ export {
   McpClientError,
   type McpClientErrorChannel,
   McpClientNotReadyError,
+  McpCredentialsRequiredError,
   McpTransportError,
 } from "@agentick/spec-next";
-import { McpClientNotReadyError } from "@agentick/spec-next";
+import { McpClientNotReadyError, McpCredentialsRequiredError } from "@agentick/spec-next";
 import type { McpClientError } from "@agentick/spec-next";
 
 // ============================================================================
@@ -174,6 +192,14 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
   private readonly lifecycle: McpLifecycle;
   private codec: EraCodec;
   private client: Client | undefined;
+  /**
+   * Active SDK Transport used by the next `connect()`. Initialized from
+   * `options.transport`; replaced by `reauthenticate()` when a
+   * {@link McpClientHarnessOptions.rebuildTransport} closure is wired,
+   * so the OAuth-interactive transport replaces the optimistic one for
+   * the duration of the re-auth attempt.
+   */
+  private currentTransport: import("@modelcontextprotocol/sdk/shared/transport.js").Transport;
   /**
    * Fixed elicit-harness inbox address — set at construction by
    * `withMCP` to the owning session's elicit harness address. The
@@ -248,6 +274,7 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
     super("mcp", scopeId, journal, bus, inbox);
     this.serverId = options.serverId;
     this.options = options;
+    this.currentTransport = options.transport;
     this.codec = options.codec ?? DraftPassthroughCodec;
     this.elicitAddress = options.elicitAddress;
     this.lifecycle = new McpLifecycle({
@@ -306,6 +333,30 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
     this.statusNotifier.notify(next);
   }
 
+  /**
+   * Map a `connect()` failure to the terminal {@link McpConnectionStatus}
+   * the harness should surface (#277b Commit B).
+   *
+   *   - `McpCredentialsRequiredError` (kind=missing|expired) → bucket
+   *     into `credentials-missing` / `credentials-expired`. These are
+   *     UI-actionable: the adopter renders a "Sign in" button bound
+   *     to {@link reauthenticate}.
+   *   - everything else → `error` with the underlying message.
+   *
+   * Walks `error.cause` so the lift survives the SDK's wrappers
+   * (`UnhandledRequestError` etc.).
+   */
+  private classifyConnectFailure(err: unknown): McpConnectionStatus {
+    const credErr = findCredentialsRequired(err);
+    if (credErr) {
+      return credErr.kind === "missing"
+        ? { kind: "credentials-missing" }
+        : { kind: "credentials-expired", reason: credErr.message };
+    }
+    const reason = err instanceof Error ? err.message : String(err);
+    return { kind: "error", reason };
+  }
+
   get id(): string {
     return this.scopeId;
   }
@@ -347,7 +398,7 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
       try {
         const client = this.makeClient();
         this.wireClientEvents(client);
-        await client.connect(this.options.transport);
+        await client.connect(this.currentTransport);
         // Race check: a concurrent `disconnect()` could have moved
         // the status away from `connecting` while we awaited
         // `client.connect`. If so, the user's intent wins — close
@@ -377,13 +428,33 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
         // The lifecycle's onStateChange callback lifts `ready` to
         // `connected` via setStatus — no explicit call needed here.
       } catch (err) {
+        // Race-guarded: only bucket into a terminal status if status
+        // is still `connecting`. A concurrent disconnect would have
+        // moved status to `disconnected`; don't clobber the user's
+        // intent.
+        //
+        // Order matters: classify-and-set BEFORE markDisconnected.
+        // Without a reconnect policy markDisconnected transitions
+        // straight to `degraded`, whose lift is `error` — that would
+        // clobber a credentials-* classification. The lifecycle's
+        // onStateChange callback has a credential-aware skip guard
+        // so once we set credentials-*, the lift won't overwrite.
+        // For non-credential errors we let the lift assign `error`
+        // (the prior behavior) — explicit setStatus would only
+        // duplicate the emission.
+        const classified =
+          this._status.kind === "connecting" ? this.classifyConnectFailure(err) : undefined;
+        if (
+          classified &&
+          (classified.kind === "credentials-missing" || classified.kind === "credentials-expired")
+        ) {
+          this.setStatus(classified);
+        }
         this.lifecycle.markDisconnected();
-        // Race-guarded: only bucket into `error` if status is still
-        // `connecting`. A concurrent disconnect would have set
-        // status to `disconnected`; don't clobber the user's intent.
-        if (this._status.kind === "connecting") {
-          const reason = err instanceof Error ? err.message : String(err);
-          this.setStatus({ kind: "error", reason });
+        // Non-credential errors: if the lift didn't run (status was
+        // already non-connecting), still surface as `error`.
+        if (classified && classified.kind === "error" && this._status.kind === "connecting") {
+          this.setStatus(classified);
         }
         throw err;
       } finally {
@@ -450,28 +521,34 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
   /**
    * Re-run the auth flow — interactively.
    *
-   * ⚠️  **PROVISIONAL** — in the current slice this is literally
-   * `disconnect()` + `connect()`, IDENTICAL to {@link reconnect}.
-   * The semantic divergence between the two verbs lands in the
-   * follow-up slice (#277b OAuth integration):
+   *   1. Disconnect (release the current transport / SDK Client).
+   *   2. Rebuild the transport with `interactive: true` so the OAuth
+   *      provider fires the URL-mode elicit when it needs an auth
+   *      code. Without a {@link McpClientHarnessOptions.rebuildTransport}
+   *      closure (pre-built `Transport`, no factory), the harness
+   *      reuses the original transport — useful for non-OAuth flows
+   *      where reauthenticate degenerates to a full reconnect.
+   *   3. Connect.
    *
-   *   - `reconnect()` → optimistic; OAuth elicit suppressed; auth
-   *     failures bucket into `credentials-missing`/`expired`.
-   *   - `reauthenticate()` → interactive; OAuth provider fires the
-   *     URL-mode elicit; the only caller-side path that opens the
-   *     browser OAuth dance. Deletes stored credentials first to
-   *     force a fresh flow.
+   * The only caller-side path that opens the OAuth dance. `connect()`
+   * / `reconnect()` build with `interactive: false` and short-circuit
+   * via `McpCredentialsRequiredError` instead of prompting.
    *
-   * Adopters writing UI code today can wire a "Re-authenticate"
-   * button to this verb — when the follow-up slice ships, the
-   * button does the right thing without any caller-side change.
-   * Until then, expect the same outcome as `reconnect()`.
+   * Failures from the rebuild step surface as `error` status; if the
+   * interactive connect itself fails the classifier may still bucket
+   * into `credentials-expired` (refresh exhausted) or `error`.
    */
   async reauthenticate(): Promise<void> {
-    // TODO(#277b-followup): pass interactive=true through to the
-    // transport-factory deps so the OAuth provider's elicit gate
-    // fires the URL-mode elicit. Delete stored credentials first.
     await this.disconnect();
+    if (this.options.rebuildTransport) {
+      try {
+        this.currentTransport = await this.options.rebuildTransport({ interactive: true });
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        this.setStatus({ kind: "error", reason });
+        throw err;
+      }
+    }
     await this.connect();
   }
 
@@ -799,7 +876,7 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
     }
     const client = this.makeClient();
     this.wireClientEvents(client);
-    await client.connect(this.options.transport);
+    await client.connect(this.currentTransport);
     this.client = client;
     this.lifecycle.markReady();
   }

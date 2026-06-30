@@ -20,8 +20,14 @@
  * this utility runs outside any substrate context (bootstrap path).
  */
 
-import type { ElicitationResult, UrlElicitationRequest } from "@agentick/spec-next";
+import type {
+  CredentialsHarnessProtocol,
+  ElicitationResult,
+  UrlElicitationRequest,
+} from "@agentick/spec-next";
+import { McpCredentialsRequiredError } from "@agentick/spec-next";
 
+import type { CredentialField } from "../integration/transport-factory.js";
 import type {
   OAuthClientInformationMixed,
   OAuthClientMetadata,
@@ -71,7 +77,46 @@ export interface DefaultOAuthProviderOptions {
    * `waitForAuthorizationCode` doesn't hang.
    */
   readonly elicit?: (request: UrlElicitationRequest) => Promise<ElicitationResult<undefined>>;
+
+  // ── Credentials read-through (#277b Commit B) ─────────────────────────
+
+  /**
+   * Credentials harness for persistent token / client-info storage.
+   * When provided, all four OAuth credential fields
+   * (`tokens` / `client` / `verifier` / `discovery`) read-through the
+   * harness instead of staying in-memory. Wired by `withMCP` from
+   * `installer.getNamespace<CredentialsHarnessProtocol>("credentials")`.
+   *
+   * Omit for in-memory-only behavior (default — matches the prior
+   * bootstrap shape).
+   */
+  readonly credentials?: CredentialsHarnessProtocol;
+
+  /**
+   * Resolved storage key for one of the four credential fields. Hands
+   * back the namespace-qualified key string the harness should use
+   * (`mcp:<serverId>:<field>` by default, but adopters override the
+   * composition via `withMCP({ credentialKey })` to namespace by user
+   * / tenant). Required when `credentials` is set; ignored otherwise.
+   */
+  readonly keyOf?: (field: CredentialField) => string;
+
+  /**
+   * Whether interactive auth is permitted. `true` (default) preserves
+   * the existing behavior — `redirectToAuthorization` fires the URL
+   * elicit. `false` short-circuits the elicit with a typed
+   * `McpCredentialsRequiredError` so optimistic `connect()` /
+   * `reconnect()` flows surface as `credentials-missing` /
+   * `credentials-expired` status on the harness rather than
+   * surprising the user with an unsolicited browser prompt.
+   *
+   * The harness's `reauthenticate()` is the only caller-side path
+   * that builds a transport with `interactive: true`.
+   */
+  readonly interactive?: boolean;
 }
+
+const DEFAULT_NAMESPACE = "mcp";
 
 export class DefaultOAuthProvider implements OAuthProvider {
   readonly clientMetadata: OAuthClientMetadata;
@@ -80,6 +125,15 @@ export class DefaultOAuthProvider implements OAuthProvider {
   private currentTokens: OAuthTokens | undefined;
   private currentClientInfo: OAuthClientInformationMixed | undefined;
   private readonly opts: DefaultOAuthProviderOptions;
+  /**
+   * Whether the SDK has invalidated tokens during this provider's
+   * lifetime (called `onInvalidateCredentials("tokens" | "all")`).
+   * Used to discriminate `missing` vs `expired` when short-circuiting
+   * a non-interactive auth attempt: if tokens were invalidated, the
+   * user previously had a working session that has now expired; if
+   * never invalidated, the user never authenticated to begin with.
+   */
+  private tokensInvalidated = false;
 
   private pendingAuthPromise?: Promise<string | undefined>;
   private pendingAuthResolve?: (code: string | undefined) => void;
@@ -102,25 +156,87 @@ export class DefaultOAuthProvider implements OAuthProvider {
       response_types: ["code"],
       token_endpoint_auth_method: "none",
     };
+    if (opts.credentials && !opts.keyOf) {
+      throw new Error(
+        `DefaultOAuthProvider("${opts.serverName}"): \`credentials\` requires \`keyOf\` for key composition`,
+      );
+    }
   }
 
-  loadTokens(): OAuthTokens | undefined {
+  // ── Credential field accessors ──────────────────────────────────────────
+  //
+  // Each field follows the same pattern: if a credentials harness +
+  // keyOf are configured, read/write through it; else fall back to
+  // in-memory (the bootstrap shape). The harness's `.get` and `.set`
+  // are async; the SDK accepts `Promise<T>` returns for these hooks,
+  // so we don't have to thread synchronousness.
+
+  async loadTokens(): Promise<OAuthTokens | undefined> {
+    if (this.opts.credentials && this.opts.keyOf) {
+      return this.opts.credentials.get<OAuthTokens>(DEFAULT_NAMESPACE, this.opts.keyOf("tokens"));
+    }
     return this.currentTokens;
   }
 
-  saveTokens(tokens: OAuthTokens): void {
+  async saveTokens(tokens: OAuthTokens): Promise<void> {
+    if (this.opts.credentials && this.opts.keyOf) {
+      await this.opts.credentials.set(DEFAULT_NAMESPACE, this.opts.keyOf("tokens"), tokens);
+      return;
+    }
     this.currentTokens = tokens;
   }
 
-  loadClientInfo(): OAuthClientInformationMixed | undefined {
+  async loadClientInfo(): Promise<OAuthClientInformationMixed | undefined> {
+    if (this.opts.credentials && this.opts.keyOf) {
+      return this.opts.credentials.get<OAuthClientInformationMixed>(
+        DEFAULT_NAMESPACE,
+        this.opts.keyOf("client"),
+      );
+    }
     return this.currentClientInfo;
   }
 
-  saveClientInfo(info: OAuthClientInformationMixed): void {
+  async saveClientInfo(info: OAuthClientInformationMixed): Promise<void> {
+    if (this.opts.credentials && this.opts.keyOf) {
+      await this.opts.credentials.set(DEFAULT_NAMESPACE, this.opts.keyOf("client"), info);
+      return;
+    }
     this.currentClientInfo = info;
   }
 
+  async onInvalidateCredentials(
+    scope: "all" | "client" | "tokens" | "verifier" | "discovery",
+  ): Promise<void> {
+    if (scope === "tokens" || scope === "all") {
+      this.tokensInvalidated = true;
+    }
+    if (!this.opts.credentials || !this.opts.keyOf) {
+      if (scope === "tokens" || scope === "all") this.currentTokens = undefined;
+      if (scope === "client" || scope === "all") this.currentClientInfo = undefined;
+      return;
+    }
+    const fields: readonly CredentialField[] =
+      scope === "all" ? ["tokens", "client", "verifier", "discovery"] : [scope];
+    await Promise.all(
+      fields.map((f) =>
+        this.opts.credentials!.delete(DEFAULT_NAMESPACE, this.opts.keyOf!(f)).then(() => undefined),
+      ),
+    );
+  }
+
   async redirectToAuthorization(url: URL): Promise<void> {
+    // Non-interactive guard (#277b Commit B). Opt-out callers
+    // (optimistic `connect()` / silent `reconnect()`) must not be
+    // ambushed by an unsolicited OAuth dance. Throw a typed signal
+    // the harness's connect classifier maps to `credentials-missing`
+    // / `credentials-expired`.
+    if (this.opts.interactive === false) {
+      throw new McpCredentialsRequiredError({
+        serverId: this.opts.serverName,
+        kind: this.tokensInvalidated ? "expired" : "missing",
+      });
+    }
+
     // Reset any in-flight pending promise; the connect loop is calling
     // us to start a fresh auth flow.
     this.pendingAuthResolve = undefined;

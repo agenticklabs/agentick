@@ -70,9 +70,14 @@
  * @see docs/proposals/v2/blueprint/23-mcp-as-harness.md
  */
 
-import type { SessionExtension, SessionInstaller } from "@agentick/spec-next";
+import type {
+  CredentialsHarnessProtocol,
+  SessionExtension,
+  SessionInstaller,
+} from "@agentick/spec-next";
 import type { ContentBlock, ToolDeclaration, ToolHandler } from "@agentick/spec-next";
 import { jsonSchema, toRegistration } from "@agentick/spec-next";
+import { readContext, type RuntimeContext } from "@agentick/runtime-next";
 
 // Side-effect import — pulls in the `SessionHarnessProtocol.elicitation`
 // module augmentation. The installer exposes elicit directly today
@@ -91,7 +96,12 @@ import type { EraCodec } from "../client/era-codec.js";
 
 import { mcpContentToBlocks } from "./content-mapper.js";
 import { mcpTaskEffect } from "./task-bridge.js";
-import { isTransportFactory, type TransportFactory } from "./transport-factory.js";
+import {
+  isTransportFactory,
+  type CredentialField,
+  type TransportFactory,
+  type TransportFactoryDeps,
+} from "./transport-factory.js";
 import { omitUndefined } from "@agentick/utils-next";
 
 // ============================================================================
@@ -179,6 +189,42 @@ export interface McpServerConfig {
 
 export interface WithMCPOptions {
   readonly servers: readonly McpServerConfig[];
+
+  /**
+   * Derive the credentials-store key for one of an MCP server's four
+   * OAuth fields (`tokens` / `client` / `verifier` / `discovery`).
+   * Default: `mcp:<serverId>:<field>` — a flat single-tenant scheme.
+   *
+   * Override to namespace credentials by user / tenant / any value
+   * readable from the active {@link RuntimeContext}. Single-tenant
+   * deployments leave this unset; multi-tenant deployments compose
+   * `ctx.request?.userId` (or whatever principal field they thread
+   * through their RuntimeContext) into the key:
+   *
+   *     credentialKey: (ctx, { serverId, field }) =>
+   *       `mcp:${String(ctx.request?.userId ?? "anon")}:${serverId}:${field}`,
+   *
+   * The function runs at OAuth-provider read/write time inside the
+   * harness's transport build. The store itself stays singleton and
+   * tenant-ignorant; user-awareness lives at the one site that
+   * actually composes the key. (Strategy pattern — same shape as
+   * sliding-window's `keyFn`, bearer's `extract`, etc.)
+   */
+  readonly credentialKey?: (
+    ctx: RuntimeContext,
+    deps: { readonly serverId: string; readonly field: CredentialField },
+  ) => string;
+}
+
+/**
+ * Default key composition when `WithMCPOptions.credentialKey` is unset.
+ * Single-tenant flat scheme — `mcp:<serverId>:<field>`. Adopters
+ * override the composition; the harness never reaches into the
+ * default itself (the resolved string is what gets passed to the
+ * provider).
+ */
+function defaultCredentialKey(serverId: string, field: CredentialField): string {
+  return `mcp:${serverId}:${field}`;
 }
 
 // ============================================================================
@@ -277,23 +323,56 @@ function mapMcpTaskSupport(
  * Construct one per-session `McpClientHarness` for a server config.
  * The harness's elicit address is fixed at construction to the
  * session's elicit harness — no slot, no resolver callback, no race.
+ *
+ * `credentials` is the substrate credentials harness if installed
+ * (via app-/gateway-level `withCredentials({ store })`); `undefined`
+ * means OAuth providers fall back to in-memory. `keyOfField` is the
+ * resolved key strategy for this server — defaulted from
+ * `defaultCredentialKey` or composed from the adopter's
+ * `WithMCPOptions.credentialKey`.
  */
 async function mkClient(
   installer: SessionInstaller,
   config: McpServerConfig,
+  credentials: CredentialsHarnessProtocol | undefined,
+  keyOfField: (field: CredentialField) => string,
 ): Promise<McpClientHarness> {
-  // Resolve the transport. Per #154, `config.transport` may be a
-  // pre-built `Transport` (the existing path) or a `TransportFactory`
-  // that constructs one from session-bound deps. The factory path is
-  // the canonical way to wire OAuth-over-HTTP: factories receive the
-  // session's elicit binding and feed it into
-  // `DefaultOAuthProvider({ elicit, ... })`.
+  // Build the factory-deps shape once; both the initial build and
+  // the `rebuildTransport` closure consume the same object with a
+  // different `interactive` flag. `credentials` is conditionally
+  // present in the spread — adopters whose factories don't need it
+  // can ignore it; OAuth factories destructure it.
+  const baseDeps = (interactive: boolean): TransportFactoryDeps => ({
+    elicit: (request) => installer.elicitation.elicit(request),
+    serverId: config.serverId,
+    credentialKey: keyOfField,
+    interactive,
+    ...(credentials !== undefined ? { credentials } : {}),
+  });
+
+  // Resolve the initial transport — optimistic build (interactive=false).
+  // Per #154, `config.transport` may be a pre-built `Transport` or a
+  // `TransportFactory`. The factory path is the canonical way to wire
+  // OAuth-over-HTTP.
   const transport = isTransportFactory(config.transport)
-    ? await config.transport({
-        elicit: (request) => installer.elicitation.elicit(request),
-        serverId: config.serverId,
-      })
+    ? await config.transport(baseDeps(false))
     : config.transport;
+
+  // If the adopter supplied a factory, expose a rebuild closure on
+  // the harness so `reauthenticate()` can re-run it with
+  // `interactive: true`. Pre-built transports skip this — there's no
+  // factory to re-run, and reauthenticate falls back to a
+  // disconnect+connect against the original transport.
+  const rebuildTransport: ((deps: { interactive: boolean }) => Promise<Transport>) | undefined =
+    isTransportFactory(config.transport)
+      ? async (deps): Promise<Transport> => {
+          const factory = config.transport;
+          if (!isTransportFactory(factory)) {
+            throw new Error(`unreachable: transport became non-factory mid-session`);
+          }
+          return factory(baseDeps(deps.interactive));
+        }
+      : undefined;
 
   const harness = new McpClientHarness(
     `${installer.sessionId}:mcp:${config.serverId}`,
@@ -309,6 +388,7 @@ async function mkClient(
         codec: config.codec,
         reconnect: config.reconnect,
         capabilities: config.capabilities,
+        rebuildTransport,
       }),
       clientInfo: {
         name: config.clientName ?? config.serverId,
@@ -445,20 +525,23 @@ export function withMCP(options: WithMCPOptions): SessionExtension {
       const clientsById = new Map<string, McpClientHarness>();
       const harnesses: McpClientHarness[] = [];
 
-      // TODO(#277b-followup): wire stored OAuth tokens / API keys
-      // through to the OAuth provider via the substrate credentials
-      // harness installed by `withCredentials({ store })`. The
-      // current slice ships the structural collapse + status FSM
-      // + verbs on the harness; the credentials write-through +
-      // credentials-missing/expired status bucketing + interactive-
-      // mode plumbing for reauthenticate land in the next slice.
-      //
-      // Lookup shape when the wire-through lands:
-      //   const creds =
-      //     installer.getNamespace<CredentialsHarnessProtocol>("credentials");
+      // Pull the substrate credentials harness if one is installed at
+      // app or gateway level via `withCredentials({ store })`. Optional
+      // — OAuth providers fall back to in-memory persistence when
+      // absent (matches the bootstrap shape for adopters who haven't
+      // yet wired credentials).
+      const credentials = installer.getNamespace<CredentialsHarnessProtocol>("credentials");
 
       for (const config of options.servers) {
-        const harness = await mkClient(installer, config);
+        // Per-server key resolver. Reads `RuntimeContext` at every
+        // call (not once per session) so request-scoped principals
+        // (`ctx.request?.userId`) compose correctly under per-tick
+        // tenant switching.
+        const serverKeyOf = (field: CredentialField): string =>
+          options.credentialKey
+            ? options.credentialKey(readContext(), { serverId: config.serverId, field })
+            : defaultCredentialKey(config.serverId, field);
+        const harness = await mkClient(installer, config, credentials, serverKeyOf);
         clientsById.set(config.serverId, harness);
         harnesses.push(harness);
         installer.onClose(() => harness.close());

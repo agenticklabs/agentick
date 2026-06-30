@@ -185,6 +185,7 @@ export {
   McpClientError,
   type McpClientErrorChannel,
   McpClientNotReadyError,
+  McpCredentialsRequiredError,
   McpRemoteTaskNonCompletedError,
   McpTransportError,
   SandboxConnectionError,

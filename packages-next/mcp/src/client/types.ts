@@ -130,6 +130,21 @@ export interface McpClientHarnessOptions {
    * fiber on user inactivity.
    */
   readonly elicitTimeoutMs?: number;
+
+  /**
+   * Rebuild the transport with a fresh `interactive` setting (#277b
+   * Commit B). When `withMCP({ transport: factory })` is in play, the
+   * extension installs this closure so the harness can re-run the
+   * factory with `interactive: true` during `reauthenticate()` — the
+   * only caller-side path that should fire the OAuth URL elicit.
+   *
+   * Omitted → `reauthenticate()` falls back to `disconnect() + connect()`
+   * against the original transport (the bootstrap shape; useful for
+   * non-OAuth servers + adopters who pre-built a transport).
+   */
+  readonly rebuildTransport?: (deps: {
+    readonly interactive: boolean;
+  }) => Promise<Transport> | Transport;
 }
 
 export interface ReconnectPolicy {
