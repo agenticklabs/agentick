@@ -154,9 +154,14 @@ model sees:
 
 ```json
 {
-  "tasks": [/* local TaskInfo[] */],
+  "tasks": [
+    /* local TaskInfo[] */
+  ],
   "remote": [
-    { "serverId": "demo", "tasks": [{ "taskId": "...", "status": "working", "statusMessage": "scanning" }] },
+    {
+      "serverId": "demo",
+      "tasks": [{ "taskId": "...", "status": "working", "statusMessage": "scanning" }]
+    },
     { "serverId": "broken", "error": "connection refused" },
     { "serverId": "ancient", "error": "tasks-unsupported" }
   ]
@@ -168,7 +173,7 @@ model sees:
 - A single down / tasks-unsupported server contributes an `error`
   entry; the rest of the listing returns normally.
 - The lookup is structural — anything matching `{ clients: [{
-  serverId, harness: { listTasks(): Promise<{tasks}> }}] }` on the
+serverId, harness: { listTasks(): Promise<{tasks}> }}] }` on the
   `mcp` slot is queried. The framework doesn't depend on
   `@agentick/mcp-next`; adopters wiring custom MCP-style integrations
   can publish the same shape and get remote-task enumeration free.
@@ -287,6 +292,56 @@ fire.
   terminal.
 - `cancel(reason?: string): Promise<void>` — cluster-portable cancel.
   No-op if already terminal.
+
+#### `TaskHandle` IS the canonical `OperationHandle` shape
+
+Per the v2 audit (#291), `TaskHandle` is the canonical shape for any
+long-running operation handle in the framework. New surfaces that
+need lifetime management should adopt the same six-field convention:
+
+| Concern          | Field                                                          |
+| ---------------- | -------------------------------------------------------------- |
+| Identity         | `taskId` (rename to `opId` / `handleId` for non-task surfaces) |
+| Initial status   | `initialStatus`                                                |
+| Result           | `result: Promise<T>`                                           |
+| Live snapshot    | `info()`                                                       |
+| Streaming events | `events(): AsyncIterable<...>`                                 |
+| Cancellation     | `cancel(reason?)`                                              |
+
+Operations that are bounded request/response (e.g., `sandbox.exec`,
+`mcp.callTool`) intentionally return `Promise<Result>` without a
+handle — there's nothing to manage between request and response.
+The handle shape is for work where the caller may want to observe
+progress, cancel mid-flight, or persist across boundaries.
+
+### Lifetime semantics (current behavior)
+
+`TasksHarness` is per-session (#159). Today's lifetime model is
+effectively:
+
+- **Per-task**: `handle.cancel(reason?)` interrupts the work fiber
+  (`Effect.runFork`-rooted via `Fiber.interrupt`) and finalizes the
+  task as `cancelled`.
+- **Per-session**: `harness.close()` cancels ALL in-flight tasks via
+  the cascading interrupt path. The harness is owned by the session
+  per the single-construction-site rule (#159); session close
+  cascades to harness close cascades to task interrupt.
+
+There is no app-level or daemon-level lifetime today — a task started
+in session A cannot survive session A's close. Adding those modes
+requires:
+
+- **App lifetime**: an app-level TasksHarness instance OR session→app
+  forwarding (no infrastructure today).
+- **Daemon lifetime**: a process-level fiber pool decoupled from
+  harness cleanup (no infrastructure today).
+
+These are tracked under #292 (TasksHarness lifetime selection)
+pending a design pass. The fiber primitive — `Effect.runFork`,
+`Effect.forkIn(scope)`, `Effect.forkDaemon` — supports all three
+shapes; what's missing is the substrate to host non-session-scoped
+tasks. Adopters who need daemon behavior today can manage their own
+detached fibers outside the harness.
 
 ### Lookups by id
 
