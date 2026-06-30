@@ -1,5 +1,6 @@
 export * from "./cartesian.js";
 export * from "./cause.js";
+export * from "./effect-lift.js";
 export * from "./map-concurrent.js";
 export * from "./match-filter.js";
 export * from "./merge-layered.js";

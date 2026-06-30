@@ -24,6 +24,21 @@ declare module "@agentick/spec-next" {
       readonly list: () => readonly McpServerHandle[];
     };
   }
+
+  interface EventScopeExtensions {
+    /**
+     * MCP SERVER harness identifier — populated by inbound MCP
+     * server-side operations so subscribers can filter events to a
+     * specific exposed server via
+     * `gateway.events({ scope: { mcpServerId: "..." } })`.
+     *
+     * Distinct from `mcpConnectionId` (client-side) — same wire
+     * protocol, opposite role.
+     *
+     * @see docs/proposals/v2/blueprint/45-runtime-context-model.md
+     */
+    readonly mcpServerId?: string;
+  }
 }
 
 // Empty export keeps this file an ES module so the `declare module`

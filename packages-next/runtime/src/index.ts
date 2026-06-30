@@ -43,6 +43,7 @@ export {
   readContext,
   withContext,
   type RuntimeContext,
+  type RuntimeContextUser,
 } from "./substrate/runtime-context.js";
 export { matchesQuery, compileQuery, type CompiledMatcher } from "./substrate/query.js";
 export { resolveSyncSubstrateSlot } from "./substrate/resolve-slot.js";

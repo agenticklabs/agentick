@@ -47,11 +47,45 @@ export type EventSurface =
 export type EventPhase = "requested" | "before" | "delta" | "terminal";
 
 /**
+ * Empty-seed augmentation slot for harness-specific identifier
+ * dimensions on {@link EventScope}. Each harness package with its
+ * own routing identifier augments this via module declaration:
+ *
+ * @example
+ *     // In @agentick/sandbox-next/augment.ts:
+ *     declare module "@agentick/spec-next" {
+ *       interface EventScopeExtensions {
+ *         readonly sandboxId?: string;
+ *       }
+ *     }
+ *
+ *     // In @agentick/mcp-next/augment.ts (client subpath):
+ *     declare module "@agentick/spec-next" {
+ *       interface EventScopeExtensions {
+ *         readonly mcpConnectionId?: string;
+ *       }
+ *     }
+ *
+ * Mirrors the `HookBridges` empty-seed pattern. Spec-next stays
+ * harness-agnostic — only framework-core identity dimensions live in
+ * the canonical {@link EventScope}; harness-specific dimensions live
+ * in the augmenting packages.
+ *
+ * @see docs/proposals/v2/blueprint/45-runtime-context-model.md
+ */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+export interface EventScopeExtensions {}
+
+/**
  * Scope context attached to every event. Identifies the runtime
  * coordinates the event belongs to. Optional fields are populated as
  * applicable.
+ *
+ * Augmentable via {@link EventScopeExtensions} — harness packages
+ * add their own identifier dimensions there, not by modifying this
+ * type.
  */
-export interface EventScope {
+export interface EventScope extends EventScopeExtensions {
   readonly appId?: string;
   readonly sessionId?: string;
   readonly executionId?: string;
@@ -63,10 +97,6 @@ export interface EventScope {
   readonly nodeId?: string;
   /** Populated by the gateway wrapper when present. */
   readonly gatewayId?: string;
-  /** Populated by sandbox harness operations. */
-  readonly sandboxId?: string;
-  /** Populated by MCP harness operations. */
-  readonly mcpConnectionId?: string;
 }
 
 /**

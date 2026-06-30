@@ -36,4 +36,16 @@ declare module "@agentick/spec-next" {
      */
     readonly mcp?: McpHookBridge;
   }
+
+  interface EventScopeExtensions {
+    /**
+     * MCP client connection identifier — populated by McpClientHarness
+     * operations so subscribers can filter events to a specific
+     * (session, server) connection via
+     * `app.events({ scope: { mcpConnectionId: "..." } })`.
+     *
+     * @see docs/proposals/v2/blueprint/45-runtime-context-model.md
+     */
+    readonly mcpConnectionId?: string;
+  }
 }

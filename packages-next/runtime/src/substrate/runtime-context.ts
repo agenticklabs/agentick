@@ -1,47 +1,117 @@
 /**
- * RuntimeContext — scope identity that propagates through Effect fibers.
+ * RuntimeContext — ambient scope identity propagated through Effect fibers.
  *
- * One substrate, one truth. The active runtime scope (sessionId,
- * executionId, tickId, opId, parentOpId, correlationId, plus a
- * caller-supplied request bag) lives in an Effect `FiberRef`. It
- * inherits across forks, propagates across structured concurrency
- * boundaries, and (when the cluster substrate lands) is serializable
- * across nodes.
+ * Extends `EventScope` (the canonical event-routing identity coordinates,
+ * declared in `@agentick/spec-next/data/events.ts`) with operation-level
+ * state, diagnostic ephemera, and an adopter-augmentable `user` slot.
  *
- *   - **Effect-native readers** use `getContext`.
- *   - **Effect-native writers** layer scope via `withContext(scope, eff)`.
+ *   - **Inside Effect**: substrate code reads via `yield* getContext` and
+ *     scopes via `withContext(scope, effect)`. FiberRef-backed.
+ *   - **Outside Effect** (adopter tool handlers, middleware, hooks):
+ *     receive `ctx` as a deps parameter (per ADR 43); JS closure semantics
+ *     propagate it through any async chain the function authors. Do NOT
+ *     call `readContext()` inside an active Effect fiber — nested
+ *     `Effect.runSync` starts a fresh root fiber that doesn't inherit
+ *     the outer's FiberRef. Use `yield* getContext` inside Effect.
  *
- * Promise-shaped consumers do NOT have a parallel surface here. Code
- * that needs to bridge crosses at the runtime edge with
- * `Effect.runPromise` / `Effect.promise`, where the FiberRef remains
- * the source of truth. We do not maintain an AsyncLocalStorage mirror —
- * ALS is the wrong primitive for an actor substrate where addresses
- * outlive any single async call stack.
+ * Per ADR 45 — see `docs/proposals/v2/blueprint/45-runtime-context-model.md`.
  *
- * @see docs/proposals/v2/blueprint/19-foundation.md §The MessageInbox / §BaseHarness
+ * @see EventScope (the canonical identity coordinates this extends)
+ * @see RuntimeContextUser (the adopter-augmentable extension slot)
  */
 
 import { Effect, FiberRef } from "effect";
+
+import type { EventScope } from "@agentick/spec-next";
+
+// ============================================================================
+// Adopter extension slot
+// ============================================================================
+
+/**
+ * Empty-seed augmentation slot for adopter-defined ambient state on
+ * {@link RuntimeContext}. Adopter app code augments via module
+ * declaration:
+ *
+ * @example
+ *     // In your app's setup:
+ *     declare module "@agentick/runtime-next" {
+ *       interface RuntimeContextUser {
+ *         readonly tenantId: string;
+ *         readonly userId: string;
+ *         readonly requestId?: string;
+ *         readonly featureFlags?: Readonly<Record<string, boolean>>;
+ *       }
+ *     }
+ *
+ *     // Then anywhere ctx is in scope:
+ *     async (input, { ctx }) => {
+ *       const tenant = ctx.user?.tenantId;  // typed!
+ *       // ...
+ *     };
+ *
+ * Mirrors v1's `UserContext` augmentation pattern + the v2
+ * `HookBridges` / `EventScopeExtensions` empty-seed convention.
+ *
+ * ⚠️  **The framework's auth-bearing primitives do NOT consult
+ * `ctx.user` for authorization decisions.** Per ADR 45's structural-
+ * identity rule, principal-bearing resources (MCP client harness,
+ * sandbox runtime, etc.) encode the principal in their construction
+ * identity. Adopters MAY put `userId` / `tenantId` in `ctx.user` for
+ * their OWN telemetry / branching / logging, accepting that ambient
+ * context across plain-async boundaries is best-effort (closure
+ * capture handles 90% of cases; ambient-via-FiberRef breaks at
+ * Promise boundaries).
+ *
+ * @see docs/proposals/v2/blueprint/45-runtime-context-model.md
+ */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+export interface RuntimeContextUser {}
 
 // ============================================================================
 // Scope shape
 // ============================================================================
 
 /**
- * The runtime scope a handler / middleware / observer sees. Every
- * field is optional — outside any bracket they are `undefined`.
+ * The runtime scope a handler / middleware / observer sees. Extends
+ * {@link EventScope} (with all augmented harness identifiers like
+ * `sandboxId`, `mcpConnectionId`) and adds operation-level state +
+ * diagnostic ephemera + adopter extension.
+ *
+ * Every field is optional — outside any active bracket they are
+ * `undefined`. Adopters reading framework-typed fields should treat
+ * `undefined` as "no active scope of this kind."
  */
-export interface RuntimeContext {
-  readonly sessionId?: string;
-  readonly executionId?: string;
-  readonly tickId?: string;
+export interface RuntimeContext extends EventScope {
+  // ── Operation-level identity (NOT in EventScope because envelopes
+  //    already carry opId at the top level; the runtime version is for
+  //    code that wants to read "what's my current op" without unpacking
+  //    an envelope) ─────────────────────────────────────────────────
+
   readonly opId?: string;
-  /** Parent op id for causality. */
+  /** Parent operation id for causality. */
   readonly parentOpId?: string;
+
+  // ── Diagnostic ephemera (per-request bundle, OTel trace context) ───
+
   /** Request bundle id when one user request spawns many ops. */
   readonly correlationId?: string;
-  /** Caller-supplied bag (traceparent, userId, etc.). */
-  readonly request?: Readonly<Record<string, unknown>>;
+  /** W3C TraceContext header value when present. */
+  readonly traceparent?: string;
+
+  // ── Adopter extension (typed via module augmentation) ──────────────
+
+  /**
+   * Adopter-defined per-call ambient state. Typed via
+   * {@link RuntimeContextUser} module augmentation.
+   *
+   * Framework primitives do NOT read this for authorization. Adopters
+   * use it for telemetry, logging, branching, request correlation —
+   * whatever fits the propagation guarantees (closure-capture is
+   * sufficient for code-controlled async chains; ambient is
+   * best-effort).
+   */
+  readonly user?: RuntimeContextUser;
 }
 
 /** The "no scope active" value. */
@@ -61,23 +131,41 @@ export const RuntimeContextRef = FiberRef.unsafeMake<RuntimeContext>(EMPTY_CONTE
 export const getContext: Effect.Effect<RuntimeContext> = FiberRef.get(RuntimeContextRef);
 
 /**
- * Synchronous accessor for the active runtime context. The v2 analog
- * of v1's `Context.get()` — lifted onto the FiberRef substrate so
- * adopters never have to enter Effect-land for a simple scope read.
+ * Synchronous accessor for the active runtime context.
  *
- * Returns a plain `RuntimeContext` snapshot. Internally runs
- * `Effect.runSync(getContext)`, which is safe because FiberRef.get is
- * pure: no async, no scope acquisition, no failure modes. The
- * try/catch is a belt-and-suspenders fallback for runtime variants
- * where `Effect.runSync` of a top-level FiberRef read could change
- * semantics in a future Effect release; if it ever does, callers
- * degrade to the EMPTY_CONTEXT (the same value the FiberRef holds
- * outside any fiber).
+ * ## Honest contract
  *
- * Use when you need the context in a NON-Effect call site —
- * Promise-typed adopter wrappers, sync callback hooks, JSX
- * components reading scope at render time. Effect-native call sites
- * should compose `getContext` via `yield*` directly.
+ * **Works correctly:**
+ *   - Called from raw JS at the top of a chain where the runtime has
+ *     been set via a single `withContext(...)` scope that wraps the
+ *     synchronous portion of the call (rare in v2; the substrate
+ *     usually keeps context inside Effect chains).
+ *
+ * **Does NOT work as expected — returns `EMPTY_CONTEXT`:**
+ *   - Called from INSIDE an active Effect fiber. Internally runs
+ *     `Effect.runSync(getContext)` — that nested `runSync` starts a
+ *     FRESH root fiber that does NOT inherit the outer fiber's
+ *     FiberRef state. Use `yield* getContext` inside Effect chains.
+ *   - Called from inside a Promise chain that's being awaited by an
+ *     Effect (via `Effect.tryPromise`). The Promise's continuation
+ *     runs outside the fiber; FiberRef is invisible there.
+ *
+ * **Preferred patterns** (per ADR 45):
+ *   - **Adopter code**: receive `ctx` as a parameter via deps. JS
+ *     closure semantics propagate ctx through any async chain you
+ *     author. No `readContext()` call needed inside the body.
+ *   - **Substrate code**: use `yield* getContext` inside Effect
+ *     chains. Effect-native, fiber-aware, works correctly.
+ *   - **Lifting between worlds**: use `liftHandler` / `liftToEffect`
+ *     to capture ctx from FiberRef at lift time and thread it
+ *     through deps to a plain-async handler.
+ *
+ * `readContext()` exists for the narrow case where neither pattern
+ * fits — top-level subscribers / plugin hooks with fixed signatures
+ * that don't receive deps. Use sparingly. Prefer refactoring the
+ * callsite to receive ctx explicitly.
+ *
+ * @see docs/proposals/v2/blueprint/45-runtime-context-model.md
  */
 export function readContext(): RuntimeContext {
   try {
@@ -91,10 +179,12 @@ export function readContext(): RuntimeContext {
  * Run an Effect with the supplied scope merged into the ambient
  * runtime context. Visible to nested reads via `getContext`.
  *
- * Merge rule: inner wins on collision.
+ * Merge rule: inner wins on collision. Partial scope — only the
+ * fields you specify are overlaid; unspecified fields keep their
+ * ambient values.
  */
 export function withContext<R, E, A>(
-  scope: RuntimeContext,
+  scope: Partial<RuntimeContext>,
   effect: Effect.Effect<A, E, R>,
 ): Effect.Effect<A, E, R> {
   return Effect.gen(function* () {
@@ -104,16 +194,26 @@ export function withContext<R, E, A>(
   });
 }
 
-// NOTE: `runWithContext` / `runWithContextAsync` (the v1
-// `Context.run(...)` analog) are NOT shipped on FiberRef alone.
-// `Effect.runSync(withContext(scope, Effect.sync(fn)))` looks like
-// it should work but doesn't — the nested `Effect.runSync(getContext)`
-// inside `readContext()` starts a fresh fiber that doesn't inherit
-// the outer's locally-scoped FiberRef value. Faithfully imitating
-// v1's ALS-based Context.run requires either AsyncLocalStorage as a
-// parallel state mechanism the substrate keeps in sync with the
-// FiberRef, OR forcing the scoped-set into Effect-typed `withContext`.
-// Tracked as a deliberate design slice — see the depless-reconciler-
-// adjacent context-set design ticket when it surfaces. Until then,
-// callers wanting scoped sync set use `Effect.runPromise(withContext(...))`
-// from Effect-land.
+// NOTE: `runWithContext` / `runWithContextAsync` — the v1 `Context.run(...)`
+// sync-scoped-set analogs — are deliberately NOT shipped. Per ADR 45:
+//
+//   `Effect.runSync(withContext(scope, Effect.sync(fn)))` looks like
+//   it should work but doesn't — the nested `Effect.runSync(getContext)`
+//   inside `readContext()` starts a fresh fiber that doesn't inherit
+//   the outer's locally-scoped FiberRef value. Faithfully imitating
+//   v1's ALS-based Context.run would require AsyncLocalStorage as a
+//   parallel substrate the FiberRef stays in sync with.
+//
+// The v2 design rejects ALS coupling — Node-tie, worker-thread caveat,
+// cross-runtime portability cost — in favor of closure-capture-via-deps
+// (the primary propagation pattern for adopter code) plus FiberRef-
+// native propagation inside Effect chains. See:
+//
+//   docs/proposals/v2/blueprint/45-runtime-context-model.md — §"What
+//   we considered and rejected — sync `runWithContext` primitive."
+//
+// Callers wanting a scoped sync set should either:
+//   (a) Restructure to receive ctx via a deps parameter (closure
+//       capture handles propagation through any async work).
+//   (b) Enter Effect-land at the boundary:
+//       `Effect.runPromise(withContext(scope, eff))`.
