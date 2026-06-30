@@ -30,6 +30,12 @@
  * @see docs/proposals/v2/blueprint/33-client-and-transports.md
  */
 
+import { WireExtensionDefinitionError } from "../errors/remaining.js";
+
+// Re-export so adopters can `import { WireExtensionDefinitionError } from "@agentick/spec-next"`
+// without digging into the errors subpath.
+export { WireExtensionDefinitionError } from "../errors/remaining.js";
+
 import type { AppHarnessProtocol } from "../protocol/app-harness.js";
 import type { GatewayHarnessProtocol } from "../protocol/gateway-harness.js";
 import type { HookBridges } from "../protocol/hook-bridges.js";
@@ -95,15 +101,23 @@ export interface WireExtensionContext {
   /**
    * Active bridges on the resolved session. Empty for gateway-level
    * methods that don't bind to a session.
+   *
+   * Thunk (not value) so the gateway can resolve bridges lazily after
+   * cluster routing settles — at handler call time the session is
+   * known, but bridge construction may depend on cross-node state
+   * that wasn't ready at context-build time. Phase B revisits if the
+   * lazy bind isn't necessary.
    */
   readonly bridges: () => HookBridges;
   /**
    * Publish a notification declared in this extension's
-   * `notifications` array. The gateway validates the name against
-   * the declaration at publish time.
+   * `notifications` array. The gateway-supplied implementation
+   * validates the name against the declaration at publish time —
+   * `publish("name-not-declared", ...)` throws.
    *
-   * Notifications get routed to subscribers based on their declared
-   * scope (see `WireExtension.notifications` JSDoc).
+   * Fire-and-forget shape (`void` return). Cluster-distributed
+   * publish failures are handled by the gateway's notification
+   * router; they don't surface to the handler.
    */
   readonly publish: <K extends WireNotificationMethod>(
     name: K,
@@ -130,18 +144,25 @@ export interface WireExtensionContext {
  * Otherwise the typed `client.request(...)` calls can't reach them.
  *
  * @example
- *   const mcpControlWireExtension: WireExtension = {
+ *   // In @agentick/mcp-next/src/wire/server.ts (Phase F):
+ *   const mcpControlWireExtension: WireExtension = defineWireExtension({
  *     name: "@agentick/mcp-next",
  *     namespace: "mcpClients",
  *     version: "1.0.0",
  *     methods: {
  *       "mcpClients/list": async (_params, ctx) => {
  *         const clients = ctx.bridges().mcp?.clients ?? [];
- *         return { clients: clients.map(c => ({ serverId: c.serverId, status: c.status })) };
+ *         return {
+ *           clients: clients.map(c => ({ serverId: c.serverId, status: c.status })),
+ *         };
  *       },
  *       "mcpClients/reauthenticate": async ({ serverId }, ctx) => {
  *         const client = ctx.bridges().mcp?.client(serverId);
- *         if (!client) throw new McpClientNotFoundError({ serverId });
+ *         if (!client) {
+ *           // Throw an AgentickError subclass — Phase F will introduce
+ *           // McpClientNotFoundError under McpClientError.
+ *           throw new Error(`unknown serverId: ${serverId}`);
+ *         }
  *         await client.reauthenticate();
  *         ctx.publish("mcpClients/status-changed", { serverId, status: client.status });
  *         return { status: client.status };
@@ -151,7 +172,7 @@ export interface WireExtensionContext {
  *     auth: {
  *       "mcpClients/reauthenticate": { required: true, scope: "session-user" },
  *     },
- *   };
+ *   });
  */
 export interface WireExtension {
   /**
@@ -173,6 +194,10 @@ export interface WireExtension {
    *     requires admin").
    *   - Cluster routing defaults (namespace-wide overrides).
    *   - Capability enumeration grouping.
+   *
+   * Reserved: namespaces starting with `_` are framework-internal
+   * (`_extensions/list` for discovery) — adopter extensions cannot
+   * claim them; the validator rejects.
    */
   readonly namespace: string;
 
@@ -186,26 +211,28 @@ export interface WireExtension {
   /**
    * Method handlers keyed by full method name. Each handler receives
    * typed params + a {@link WireExtensionContext} and returns the
-   * typed result.
+   * typed result wrapped in a Promise.
    *
    * Names MUST appear in `WireMethods` (via this package's or its
    * dependencies' declaration-merge augmentations). Names MUST start
    * with `${namespace}/`. Both invariants checked at registration.
    *
-   * Handlers may be synchronous or async. The dispatcher awaits the
-   * returned value.
+   * Handlers are always async — Phase A dropped sync support to keep
+   * the dispatcher simple; the `Promise<...>` wrap is cheap and the
+   * sync escape hatch had no real consumers.
    */
   readonly methods: {
     readonly [K in WireMethod]?: (
       params: WireParams<K>,
       ctx: WireExtensionContext,
-    ) => Promise<WireResult<K>> | WireResult<K>;
+    ) => Promise<WireResult<K>>;
   };
 
   /**
    * Notification names this extension may publish via
    * `ctx.publish(name, params)`. Used for:
-   *   - Validation: `ctx.publish("name-not-declared", ...)` throws.
+   *   - Validation: `ctx.publish("name-not-declared", ...)` throws
+   *     at the gateway-supplied `publish` impl.
    *   - Enumeration: surfaced in `_extensions/list`.
    *   - Subscription routing: subscribers to these names are
    *     associated with this extension's namespace.
@@ -246,24 +273,10 @@ export interface WireExtension {
 // ============================================================================
 
 /**
- * Wire-extension validation diagnostic. Thrown by
- * {@link defineWireExtension} when the declared extension violates an
- * invariant.
- */
-export class WireExtensionDefinitionError extends Error {
-  constructor(
-    public readonly extensionName: string,
-    message: string,
-  ) {
-    super(`WireExtension "${extensionName}": ${message}`);
-    this.name = "WireExtensionDefinitionError";
-  }
-}
-
-/**
  * Construct a {@link WireExtension} with validation at definition
- * time. Catches namespace mismatches, missing `namespace/` prefixes,
- * and auth/cluster declarations that reference methods not in the
+ * time. Catches empty methods, namespace mismatches, missing
+ * `namespace/` prefixes, reserved `_*` namespace claims, and
+ * auth/cluster declarations that reference methods not in the
  * `methods` map.
  *
  * Use this instead of `as WireExtension` to get the validation. The
@@ -275,6 +288,16 @@ export class WireExtensionDefinitionError extends Error {
  * `WireExtension` shape — definitions referencing unknown method
  * names fail typecheck before reaching this validator.
  *
+ * Validation order (matters for which error a reader sees first):
+ *   1. methods non-empty (the most fundamental requirement)
+ *   2. namespace non-empty
+ *   3. namespace doesn't contain `/`
+ *   4. namespace isn't `_*`-reserved
+ *   5. every method starts with `${namespace}/`
+ *   6. every notification starts with `${namespace}/`
+ *   7. auth entries reference declared methods
+ *   8. clusterRoute entries reference declared methods
+ *
  * @example
  *   export const myExtension = defineWireExtension({
  *     name: "@agentick/my-package",
@@ -285,65 +308,79 @@ export class WireExtensionDefinitionError extends Error {
  *   });
  */
 export function defineWireExtension(ext: WireExtension): WireExtension {
-  // 1. namespace non-empty + plain identifier-ish.
-  if (!ext.namespace) {
-    throw new WireExtensionDefinitionError(ext.name, "`namespace` is required and non-empty.");
-  }
-  if (ext.namespace.includes("/")) {
-    throw new WireExtensionDefinitionError(
-      ext.name,
-      `\`namespace\` ("${ext.namespace}") MUST NOT contain "/" — namespaces are bare identifiers (use "${ext.namespace.split("/")[0]}" instead).`,
-    );
+  // 1. at least one method (otherwise the extension does nothing).
+  const methodNames = Object.keys(ext.methods);
+  if (methodNames.length === 0) {
+    throw new WireExtensionDefinitionError({
+      extensionName: ext.name,
+      reason: "extension declares no methods. At minimum one method handler is required.",
+    });
   }
 
-  // 2. every method name starts with `${namespace}/`.
+  // 2. namespace non-empty.
+  if (!ext.namespace) {
+    throw new WireExtensionDefinitionError({
+      extensionName: ext.name,
+      reason: "`namespace` is required and non-empty.",
+    });
+  }
+
+  // 3. namespace doesn't contain `/`.
+  if (ext.namespace.includes("/")) {
+    throw new WireExtensionDefinitionError({
+      extensionName: ext.name,
+      reason: `\`namespace\` ("${ext.namespace}") MUST NOT contain "/" — namespaces are bare identifiers (use "${ext.namespace.split("/")[0]}" instead).`,
+    });
+  }
+
+  // 4. `_*` namespaces are reserved for framework-internal extensions
+  // (`_extensions/list` for capability discovery, future internals).
+  if (ext.namespace.startsWith("_")) {
+    throw new WireExtensionDefinitionError({
+      extensionName: ext.name,
+      reason: `\`namespace\` ("${ext.namespace}") starts with "_" — reserved for framework-internal extensions. Pick a different prefix.`,
+    });
+  }
+
+  // 5. every method name starts with `${namespace}/`.
   const prefix = `${ext.namespace}/`;
-  const methodNames = Object.keys(ext.methods);
   for (const method of methodNames) {
     if (!method.startsWith(prefix)) {
-      throw new WireExtensionDefinitionError(
-        ext.name,
-        `method "${method}" must start with the declared namespace prefix "${prefix}".`,
-      );
+      throw new WireExtensionDefinitionError({
+        extensionName: ext.name,
+        reason: `method "${method}" must start with the declared namespace prefix "${prefix}".`,
+      });
     }
   }
 
-  // 3. every declared notification starts with `${namespace}/`.
+  // 6. every declared notification starts with `${namespace}/`.
   for (const notif of ext.notifications ?? []) {
     if (!notif.startsWith(prefix)) {
-      throw new WireExtensionDefinitionError(
-        ext.name,
-        `notification "${notif}" must start with the declared namespace prefix "${prefix}".`,
-      );
+      throw new WireExtensionDefinitionError({
+        extensionName: ext.name,
+        reason: `notification "${notif}" must start with the declared namespace prefix "${prefix}".`,
+      });
     }
   }
 
-  // 4. `auth` entries reference methods that exist in `methods`.
+  // 7. `auth` entries reference methods that exist in `methods`.
   for (const authMethod of Object.keys(ext.auth ?? {})) {
     if (!(authMethod in ext.methods)) {
-      throw new WireExtensionDefinitionError(
-        ext.name,
-        `\`auth\` references method "${authMethod}" but no handler is declared for it. Add the handler or remove the auth entry.`,
-      );
+      throw new WireExtensionDefinitionError({
+        extensionName: ext.name,
+        reason: `\`auth\` references method "${authMethod}" but no handler is declared for it. Add the handler or remove the auth entry.`,
+      });
     }
   }
 
-  // 5. `clusterRoute` entries reference methods that exist in `methods`.
+  // 8. `clusterRoute` entries reference methods that exist in `methods`.
   for (const routeMethod of Object.keys(ext.clusterRoute ?? {})) {
     if (!(routeMethod in ext.methods)) {
-      throw new WireExtensionDefinitionError(
-        ext.name,
-        `\`clusterRoute\` references method "${routeMethod}" but no handler is declared for it. Add the handler or remove the route entry.`,
-      );
+      throw new WireExtensionDefinitionError({
+        extensionName: ext.name,
+        reason: `\`clusterRoute\` references method "${routeMethod}" but no handler is declared for it. Add the handler or remove the route entry.`,
+      });
     }
-  }
-
-  // 6. at least one method (otherwise the extension does nothing).
-  if (methodNames.length === 0) {
-    throw new WireExtensionDefinitionError(
-      ext.name,
-      "extension declares no methods. At minimum one method handler is required.",
-    );
   }
 
   return ext;

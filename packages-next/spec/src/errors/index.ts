@@ -198,4 +198,5 @@ export {
   SandboxPermissionDeniedError,
   SandboxResourceLimitError,
   UnknownTaskError,
+  WireExtensionDefinitionError,
 } from "./remaining.js";

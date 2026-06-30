@@ -326,3 +326,25 @@ export class McpRemoteTaskNonCompletedError extends AgentickError {
   }
 }
 registerAgentickError("McpRemoteTaskNonCompletedError", McpRemoteTaskNonCompletedError);
+
+// ============================================================================
+// WireExtensionDefinitionError — wire extension validation failures
+// ============================================================================
+
+/**
+ * Thrown by `defineWireExtension` when the declared extension violates
+ * an invariant — namespace mismatch, missing prefix, auth/clusterRoute
+ * referencing undeclared methods, etc. Caught at definition time, well
+ * before the gateway tries to register the broken extension.
+ *
+ * Single-tag — concrete class directly under `AgentickError`.
+ */
+export class WireExtensionDefinitionError extends AgentickError {
+  readonly _tag = "WireExtensionDefinitionError" as const;
+  readonly extensionName: string;
+  constructor(args: { readonly extensionName: string; readonly reason: string }) {
+    super(`WireExtension "${args.extensionName}": ${args.reason}`);
+    this.extensionName = args.extensionName;
+  }
+}
+registerAgentickError("WireExtensionDefinitionError", WireExtensionDefinitionError);

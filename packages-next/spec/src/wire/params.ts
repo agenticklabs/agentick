@@ -343,6 +343,29 @@ export type PingParams = WireRequestParams;
 export type PingResult = Record<string, never>;
 
 // ============================================================================
+// _extensions/* — framework-internal capability discovery (ADR 46)
+// ============================================================================
+
+/**
+ * Discovery info for a single wire extension registered on the gateway.
+ * Returned by `_extensions/list`. Adopters / SDKs read this to gate
+ * UI on feature availability.
+ */
+export interface ExtensionsListEntry {
+  readonly name: string;
+  readonly namespace: string;
+  readonly version?: string;
+  readonly methods: readonly string[];
+  readonly notifications: readonly string[];
+}
+
+export type ExtensionsListParams = WireRequestParams;
+
+export interface ExtensionsListResult {
+  readonly extensions: readonly ExtensionsListEntry[];
+}
+
+// ============================================================================
 // Method registry — exhaustive map for OpenRPC generation + type safety
 // ============================================================================
 
@@ -396,6 +419,18 @@ export interface WireMethods {
   "auth/signOut": { params: AuthSignOutParams; result: AuthSignOutResult };
 
   ping: { params: PingParams; result: PingResult };
+
+  /**
+   * Capability discovery (ADR 46). Returns every wire extension
+   * registered on the gateway: `{ name, namespace, version, methods,
+   * notifications }[]`. SDKs call this immediately after `initialize`
+   * to populate `client.capabilities`.
+   *
+   * The `_extensions` prefix is reserved for framework-internal
+   * methods — adopter wire extensions can't claim it (validator
+   * rejects).
+   */
+  "_extensions/list": { params: ExtensionsListParams; result: ExtensionsListResult };
 }
 
 export type WireMethod = keyof WireMethods;
