@@ -20,6 +20,9 @@ export { runEventBusConformance } from "./event-bus.js";
 export { runInboxConformance } from "./inbox.js";
 export { runHarnessConformance } from "./harness.js";
 
+// Slot trichotomy (ADR 42 Slice 4)
+export { runHarnessSlotConformance, type HarnessSlotConformanceOptions } from "./harness-slot.js";
+
 // Reconciler harness (Phase 3.14)
 export {
   runReconcilerConformance,
