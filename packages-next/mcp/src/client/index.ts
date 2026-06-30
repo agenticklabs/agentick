@@ -22,3 +22,11 @@ export { type McpAuth, BearerAuth, type BearerAuthOptions, NoneAuth } from "./au
 export { type EraCodec, DraftPassthroughCodec, selectCodec } from "./era-codec.js";
 
 export { McpLifecycle, type McpLifecycleOptions } from "./lifecycle.js";
+
+export {
+  type McpConnectionStatus,
+  type StatusUnsubscribe,
+  isTerminalStatus,
+} from "./connection-status.js";
+
+export { type CredentialsStore, InMemoryCredentialsStore } from "./credentials-store.js";

@@ -88,6 +88,7 @@ import type { McpAuth } from "../client/auth.js";
 import { NoneAuth } from "../client/auth.js";
 import type { McpToolDescriptor, ReconnectPolicy } from "../client/types.js";
 import type { EraCodec } from "../client/era-codec.js";
+import type { McpConnectionStatus, StatusUnsubscribe } from "../client/connection-status.js";
 
 import { mcpContentToBlocks } from "./content-mapper.js";
 import { mcpTaskEffect } from "./task-bridge.js";
@@ -188,6 +189,56 @@ export interface WithMCPOptions {
 export interface McpClientHandle {
   readonly serverId: string;
   readonly harness: McpClientHarness;
+
+  /**
+   * Current per-server connection status (#277). Read once for
+   * snapshot rendering; subscribe via {@link onStatusChange} for
+   * reactive UI.
+   */
+  readonly status: McpConnectionStatus;
+
+  /**
+   * Subscribe to status transitions. Listener invoked synchronously
+   * after the status changes. Returns an unsubscribe function. UI
+   * bindings (`useMcpClient(serverId)` in #277d) wire this through
+   * `useSyncExternalStore`.
+   */
+  onStatusChange(listener: (status: McpConnectionStatus) => void): StatusUnsubscribe;
+
+  /**
+   * Attempt connection using whatever the credentials store currently
+   * has for this server. Bumps status `connecting` → `connected` on
+   * success, `credentials-missing` / `credentials-expired` / `error`
+   * on failure. **Does NOT fire OAuth elicit** — use
+   * {@link reauthenticate} for that.
+   *
+   * Idempotent on a connected harness — no-op when status is
+   * already `connected`.
+   */
+  connect(): Promise<void>;
+
+  /**
+   * Drop the live connection but KEEP the credentials. Status →
+   * `disconnected`. Use when the user wants to pause a server
+   * without forcing a re-auth on next reconnect.
+   */
+  disconnect(): Promise<void>;
+
+  /**
+   * `disconnect()` + `connect()` in sequence. Convenience for "I
+   * suspect the wire is stale, try again with the credentials I
+   * have." Does not delete credentials; failures surface as
+   * `credentials-expired` per the same connect() semantics.
+   */
+  reconnect(): Promise<void>;
+
+  /**
+   * Delete current credentials + run the full OAuth dance. The ONLY
+   * caller-side path that fires URL-mode elicit. Triggered by UI
+   * code in response to an explicit user action ("Authenticate to
+   * Linear").
+   */
+  reauthenticate(): Promise<void>;
 }
 
 export interface McpHookBridgeImpl {
@@ -452,7 +503,30 @@ export function withMCP(options: WithMCPOptions): SessionExtension {
 
       for (const config of options.servers) {
         const harness = await mkClient(installer, config);
-        const handle: McpClientHandle = { serverId: config.serverId, harness };
+        const handle: McpClientHandle = {
+          serverId: config.serverId,
+          harness,
+          status: { kind: "disconnected" },
+          onStatusChange: () => {
+            throw new Error(
+              "McpClientHandle.onStatusChange — not yet implemented; lands with #277b",
+            );
+          },
+          connect: async () => {
+            throw new Error("McpClientHandle.connect — not yet implemented; lands with #277b");
+          },
+          disconnect: async () => {
+            throw new Error("McpClientHandle.disconnect — not yet implemented; lands with #277b");
+          },
+          reconnect: async () => {
+            throw new Error("McpClientHandle.reconnect — not yet implemented; lands with #277b");
+          },
+          reauthenticate: async () => {
+            throw new Error(
+              "McpClientHandle.reauthenticate — not yet implemented; lands with #277b",
+            );
+          },
+        };
         clientsById.set(config.serverId, handle);
         handles.push(handle);
         installer.onClose(() => harness.close());
