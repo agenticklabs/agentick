@@ -30,6 +30,7 @@ export * from "./session-harness.js";
 export * from "./app-harness.js";
 export * from "./app-extension.js";
 export * from "./gateway-harness.js";
+export * from "./credentials-harness.js";
 export * from "./elicitation-harness.js";
 export * from "./elicit-api.js";
 export * from "./tasks-harness.js";

@@ -41,7 +41,16 @@
  *      modularity pattern
  */
 
+// Side-effect import — registers the `credentials` slot on `HookBridges`
+// via TypeScript module augmentation. Per ADR 27, every harness
+// package owns its own slot declaration.
+import "./augment.js";
+
 export type { CredentialsStore } from "./store.js";
+
+export { CredentialsHarness, type CredentialsHarnessOptions } from "./harness.js";
+
+export type { CredentialsChangeEvent, CredentialsHarnessProtocol } from "@agentick/spec-next";
 
 export {
   inMemoryCredentialsStore,
@@ -53,6 +62,11 @@ export {
   runCredentialsStoreConformance,
   type CredentialsStoreConformanceOptions,
 } from "./conformance.js";
+
+export {
+  runCredentialsHarnessConformance,
+  type CredentialsHarnessConformanceOptions,
+} from "./harness-conformance.js";
 
 // Error types re-exported from spec-next for convenience — adopters
 // who only depend on credentials-next get them without a second import.

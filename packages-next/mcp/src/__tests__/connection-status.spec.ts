@@ -51,7 +51,8 @@ describe("#277a — credentials store", () => {
   });
 
   it("isolates entries by serverId", async () => {
-    const store = new InMemoryCredentialsStore();
+    type Tok = { access_token: string };
+    const store = new InMemoryCredentialsStore<Tok>();
     await store.set("srv-a", { access_token: "a" });
     await store.set("srv-b", { access_token: "b" });
     expect(await store.get("srv-a")).toEqual({ access_token: "a" });

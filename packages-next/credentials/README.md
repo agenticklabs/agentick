@@ -8,18 +8,33 @@ reactivity, and the typed-error infrastructure from ADR 41.
 
 ## Status
 
-Slice **281a** (this commit): substrate interfaces + bundled
-reference adapters (`inMemoryCredentialsStore`, `envCredentialsStore`)
-+ typed errors + conformance suite.
+Slice **281a** (shipped): substrate interfaces + bundled reference
+adapters (`inMemoryCredentialsStore`, `envCredentialsStore`) + typed
+errors + store conformance suite.
 
-Slice **281b**: `CredentialsHarness` substrate harness — augments
-`HookBridges`, owns the change-notification PubSub, ships
-conformance + testing doubles, wired through gateway/app/session
-installers.
+Slice **281b.1** (this commit): `CredentialsHarness` substrate
+harness class (Effect-typed; `BaseHarness`-derived) + module
+augmentation adding `bridges.credentials` slot + harness conformance
+suite + `/testing` doubles (`fakeCredentialsHarness`,
+`stubCredentialsStore`, `unavailableCredentialsStore`). NO Extension
+factory yet; NO app/gateway wiring yet — pure harness contract
+testable in isolation.
 
-Slice **281c**: wire into `createGateway({ credentials })`; migrate
-`withMCP` from the placeholder `CredentialsStore<T>` shim (#277a) to
-the substrate harness; delete the per-MCP shim.
+Slice **281b.2**: `withCredentials({ store })` Extension factory
+returning both `AppExtension` (constructs the shared harness) AND
+`SessionExtension` (registers it on each session's bridge tree);
+app-harness integration so `createSession` threads
+`bridges.credentials` from the app-installed harness. Cross-session
+sharing tested.
+
+Slice **281c**: Migrate `withMCP` from the placeholder
+`CredentialsStore<T>` shim (#277a) to read `installer.credentials`.
+Delete the per-MCP shim.
+
+When #254 (`GatewayExtension` factory) ships, `withCredentials`
+gains a third install variant that puts the harness at gateway level
+— cascading down to apps the same way app-level cascades to sessions
+today.
 
 ## Why a new package
 
@@ -179,6 +194,56 @@ Pinned behaviors: round-trip, namespace isolation, idempotent
 delete, complete enumeration, reactive change notifications,
 backend identifier stability.
 
+### `CredentialsHarness`
+
+Substrate harness wrapping a `CredentialsStore` with reactive change
+notification. Implements `CredentialsHarnessProtocol` (lives in
+`@agentick/spec-next`).
+
+```ts
+import {
+  CredentialsHarness,
+  inMemoryCredentialsStore,
+} from "@agentick/credentials-next";
+import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
+
+const harness = new CredentialsHarness(
+  "app-creds",
+  inMemoryCredentialsStore(),
+  new MemoryJournal(),
+  new LocalEventBus(),
+  new LocalInbox(),
+);
+
+await harness.set("mcp", "linear", { access_token: "..." });
+const tokens = await harness.get<{ access_token: string }>("mcp", "linear");
+
+const off = harness.subscribe((ev) => {
+  console.log(`changed: ${ev.namespace}/${ev.key}`);
+});
+// ... later
+off();
+await harness.close();
+```
+
+Surface (matches `CredentialsHarnessProtocol`):
+- `get<T>(namespace, key)` / `set<T>(namespace, key, value)` /
+  `delete(namespace, key)` / `has(namespace, key)` /
+  `keys(namespace)` — proxies to the underlying store.
+- `subscribe(listener)` — fan-out of `CredentialsChangeEvent`
+  (`{ namespace, key }`) for internal writes AND external rotations
+  (when the adapter implements `onChange`).
+- `id` / `address` — BaseHarness convention; `address` is
+  `credentials:<id>`.
+- `close()` — drops subscribers, unsubscribes from the underlying
+  store, idempotent.
+
+Adopters typically don't construct `CredentialsHarness` directly —
+slice 281b.2 ships `withCredentials({ store })` which wires
+construction + bridge registration through the app extension
+lifecycle. Direct construction is for tests, custom adapter
+integrations, and `fakeCredentialsHarness()`.
+
 ### Errors
 
 All `AgentickError` subclasses; round-trip-safe via the spec-next
@@ -196,7 +261,15 @@ convenience.
 ## Verified by
 
 - `src/__tests__/conformance.spec.ts` — `inMemoryCredentialsStore` +
-  `envCredentialsStore` (writable mode) both pass the suite.
+  `envCredentialsStore` (writable mode) both pass the store
+  conformance suite.
+- `src/__tests__/harness-conformance.spec.ts` —
+  `fakeCredentialsHarness()` passes the harness contract: fan-out
+  of internal set/delete, forwarding of external store changes,
+  no double-publish when the adapter has native `onChange`, no-op
+  delete suppresses events, listener-error isolation, `Unsubscribe`
+  stops future events, `close()` idempotency, `close()` drops
+  subscribers, `id` + `address` follow BaseHarness convention.
 
 ## Roadmap & known gaps
 

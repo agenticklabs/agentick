@@ -519,6 +519,12 @@ importers:
 
   packages-next/credentials:
     dependencies:
+      '@agentick/pubsub-next':
+        specifier: workspace:*
+        version: link:../pubsub
+      '@agentick/runtime-next':
+        specifier: workspace:*
+        version: link:../runtime
       '@agentick/spec-next':
         specifier: workspace:*
         version: link:../spec

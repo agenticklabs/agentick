@@ -1,13 +1,32 @@
 /**
- * Test doubles for `@agentick/credentials-next`.
+ * `@agentick/credentials-next/testing` — test doubles.
  *
- * Per `feedback_test_doubles_meszaros`: `fake*` for working impls,
- * `stub*` for canned answers, `spy*` for call recorders.
+ * Per the Meszaros taxonomy in the project memory:
+ *   - `fake*` — working impl, in-memory substrate (default)
+ *   - `stub*` — canned answers, no real round-trip
  *
- * Today this subpath re-exports the in-memory adapter — which IS a
- * fake (working impl, lost-on-process-exit). When the harness lands
- * in slice 281b, this subpath will add `fakeCredentialsHarness` /
- * `stubCredentialsStore` (canned `get` responses keyed by namespace).
+ * Production tests of consumer code (`withMCP`, future adopter code)
+ * should prefer `fakeCredentialsHarness()` — it exercises the real
+ * harness over an in-memory store, so consumers exercise the same
+ * code path the runtime hits at production-time.
+ *
+ * `stubCredentialsStore` is for the narrower case where the test
+ * cares only about what the consumer does WITH the credential and
+ * not about persistence behavior.
  */
 
+export {
+  fakeCredentialsHarness,
+  type FakeCredentialsOptions,
+  type FakeCredentialsBundle,
+} from "./fake-credentials.js";
+
+export {
+  stubCredentialsStore,
+  unavailableCredentialsStore,
+  type StubCredentialsStoreOptions,
+} from "./stub-credentials-store.js";
+
+// Re-export the in-memory store as `fakeCredentialsStore` for adopters
+// who want a working-impl store double without the full harness bundle.
 export { inMemoryCredentialsStore as fakeCredentialsStore } from "../stores/in-memory.js";
