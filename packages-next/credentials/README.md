@@ -20,12 +20,16 @@ suite + `/testing` doubles (`fakeCredentialsHarness`,
 factory yet; NO app/gateway wiring yet — pure harness contract
 testable in isolation.
 
-Slice **281b.2**: `withCredentials({ store })` Extension factory
-returning both `AppExtension` (constructs the shared harness) AND
-`SessionExtension` (registers it on each session's bridge tree);
-app-harness integration so `createSession` threads
-`bridges.credentials` from the app-installed harness. Cross-session
-sharing tested.
+Slice **281b.2** (this commit): `withCredentials({ store })`
+`AppExtension` factory — constructs ONE `CredentialsHarness` at
+install time and registers it on the app's `extensionBridges`
+map. Sessions inherit the SAME instance via the existing
+`extensionBridges`-cascade pattern (the app's `createSession`
+copies the app-level map into each session's bridge tree).
+Cross-session sharing is therefore an emergent property of
+`AppHarness` — already covered by app-next's own tests — not a
+property of `withCredentials`. This slice tests the extension's
+own contract: registration shape, harness wiring, lifecycle.
 
 Slice **281c**: Migrate `withMCP` from the placeholder
 `CredentialsStore<T>` shim (#277a) to read `installer.credentials`.
@@ -117,12 +121,19 @@ const store = inMemoryCredentialsStore();
 // Platform-managed env vars (k8s secrets, Vercel env, Docker --env-file)
 const envStore = envCredentialsStore({ prefix: "AGENTICK_CRED" });
 
-// Adopter use (post 281c — exact shape TBD when gateway wiring lands):
-//
-// const gateway = createGateway({
-//   credentials: { store: envStore },
-//   apps: [...],
-// });
+// Adopter use — app-level install (the production path):
+const app = await createApp(<Agent />, {
+  executor,
+  extensions: [
+    withCredentials({ store: envStore }),
+  ],
+});
+
+// Sessions automatically inherit the shared CredentialsHarness via
+// the app's extensionBridges cascade. From a session:
+//   const tokens = await session.bridges.credentials?.get<OAuthTokens>(
+//     "mcp", "linear",
+//   );
 ```
 
 ## API
@@ -270,6 +281,11 @@ convenience.
   delete suppresses events, listener-error isolation, `Unsubscribe`
   stops future events, `close()` idempotency, `close()` drops
   subscribers, `id` + `address` follow BaseHarness convention.
+- `src/__tests__/with-credentials.spec.ts` — `withCredentials({ store })`
+  registers a `CredentialsHarness` under the `"credentials"` slot,
+  scopes the harness id under the host id (`<appId>:credentials`),
+  wires the harness over the adopter-supplied store, and schedules
+  `harness.close()` on host shutdown.
 
 ## Roadmap & known gaps
 

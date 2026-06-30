@@ -50,6 +50,8 @@ export type { CredentialsStore } from "./store.js";
 
 export { CredentialsHarness, type CredentialsHarnessOptions } from "./harness.js";
 
+export { withCredentials, type WithCredentialsOptions } from "./extension.js";
+
 export type { CredentialsChangeEvent, CredentialsHarnessProtocol } from "@agentick/spec-next";
 
 export {
