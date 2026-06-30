@@ -88,9 +88,7 @@ import type { McpAuth } from "../client/auth.js";
 import { NoneAuth } from "../client/auth.js";
 import type { McpToolDescriptor, ReconnectPolicy } from "../client/types.js";
 import type { EraCodec } from "../client/era-codec.js";
-import type { McpConnectionStatus, StatusUnsubscribe } from "../client/connection-status.js";
 
-import { createConnectionHandle } from "./connection-handle.js";
 import { mcpContentToBlocks } from "./content-mapper.js";
 import { mcpTaskEffect } from "./task-bridge.js";
 import { isTransportFactory, type TransportFactory } from "./transport-factory.js";
@@ -187,70 +185,21 @@ export interface WithMCPOptions {
 // Bridge surface
 // ============================================================================
 
-export interface McpClientHandle {
-  readonly serverId: string;
-
-  /**
-   * Current per-server connection status (#277). Read once for
-   * snapshot rendering; subscribe via {@link onStatusChange} for
-   * reactive UI.
-   *
-   * The underlying transport-level `McpClientHarness` is an
-   * implementation detail of the handle's lifecycle management
-   * (recreated per connect/reconnect cycle) — NOT part of the
-   * public surface. Adopters interact with the server through the
-   * verbs below + the canonical `session.dispatch()` tool path; no
-   * direct access to the harness is needed or supported.
-   */
-  readonly status: McpConnectionStatus;
-
-  /**
-   * Subscribe to status transitions. Listener invoked synchronously
-   * after the status changes. Returns an unsubscribe function. UI
-   * bindings (`useMcpClient(serverId)` in #277d) wire this through
-   * `useSyncExternalStore`.
-   */
-  onStatusChange(listener: (status: McpConnectionStatus) => void): StatusUnsubscribe;
-
-  /**
-   * Attempt connection using whatever the credentials store currently
-   * has for this server. Bumps status `connecting` → `connected` on
-   * success, `credentials-missing` / `credentials-expired` / `error`
-   * on failure. **Does NOT fire OAuth elicit** — use
-   * {@link reauthenticate} for that.
-   *
-   * Idempotent on a connected harness — no-op when status is
-   * already `connected`.
-   */
-  connect(): Promise<void>;
-
-  /**
-   * Drop the live connection but KEEP the credentials. Status →
-   * `disconnected`. Use when the user wants to pause a server
-   * without forcing a re-auth on next reconnect.
-   */
-  disconnect(): Promise<void>;
-
-  /**
-   * `disconnect()` + `connect()` in sequence. Convenience for "I
-   * suspect the wire is stale, try again with the credentials I
-   * have." Does not delete credentials; failures surface as
-   * `credentials-expired` per the same connect() semantics.
-   */
-  reconnect(): Promise<void>;
-
-  /**
-   * Delete current credentials + run the full OAuth dance. The ONLY
-   * caller-side path that fires URL-mode elicit. Triggered by UI
-   * code in response to an explicit user action ("Authenticate to
-   * Linear").
-   */
-  reauthenticate(): Promise<void>;
-}
+/**
+ * The adopter-facing "MCP client for this (session, server)" thing.
+ *
+ * After #277b's collapse, this is just `McpClientHarness` directly —
+ * the harness owns the connection-status FSM + all four verbs
+ * (`connect` / `disconnect` / `reconnect` / `reauthenticate`) +
+ * wire-level operations. The historical `McpClientHandle` wrapper
+ * is gone; adopters interact with the harness directly via
+ * `bridges.mcp.client(serverId)`.
+ */
+export type McpClientHandle = McpClientHarness;
 
 export interface McpHookBridgeImpl {
-  readonly client: (serverId: string) => McpClientHandle | undefined;
-  readonly clients: ReadonlyArray<McpClientHandle>;
+  readonly client: (serverId: string) => McpClientHarness | undefined;
+  readonly clients: ReadonlyArray<McpClientHarness>;
 }
 
 // ============================================================================
@@ -505,46 +454,57 @@ export function withMCP(options: WithMCPOptions): SessionExtension {
     name: EXTENSION_NAME,
     target: "session",
     async install(installer: SessionInstaller): Promise<void> {
-      const clientsById = new Map<string, McpClientHandle>();
-      const handles: McpClientHandle[] = [];
+      const clientsById = new Map<string, McpClientHarness>();
+      const harnesses: McpClientHarness[] = [];
 
       // TODO(#277b-followup): wire stored OAuth tokens / API keys
       // through to the OAuth provider via the substrate credentials
       // harness installed by `withCredentials({ store })`. The
-      // current slice ships the status FSM + verbs; the credentials
-      // write-through + the credentials-missing/expired status
-      // bucketing land in the next slice along with reauthenticate().
+      // current slice ships the structural collapse + status FSM
+      // + verbs on the harness; the credentials write-through +
+      // credentials-missing/expired status bucketing + interactive-
+      // mode plumbing for reauthenticate land in the next slice.
       //
       // Lookup shape when the wire-through lands:
       //   const creds =
       //     installer.getNamespace<CredentialsHarnessProtocol>("credentials");
 
       for (const config of options.servers) {
-        const bundle = createConnectionHandle({
-          serverId: config.serverId,
-          makeHarness: () => mkClient(installer, config),
-          onConnected: (harness) => discoverAndRegisterTools(installer, config, harness),
-        });
-        clientsById.set(config.serverId, bundle.handle);
-        handles.push(bundle.handle);
-        installer.onClose(() => bundle.dispose());
+        const harness = await mkClient(installer, config);
+        clientsById.set(config.serverId, harness);
+        harnesses.push(harness);
+        installer.onClose(() => harness.close());
 
-        // Eager optimistic connect on install. A connect failure
-        // surfaces on `handle.status` as `error` (and through
-        // `onStatusChange` subscribers) — it does NOT throw out of
-        // the install loop. Adopters watching the handle's status
-        // observe the failure; the rest of the install proceeds.
+        // Eager optimistic connect on install + inline tool
+        // discovery. Connect failure surfaces on `harness.status`
+        // as `error` (visible through `onStatusChange` subscribers);
+        // it does NOT throw out of the install loop. Discovery runs
+        // only after a successful connect — must complete before
+        // the install loop moves on so tool registrations are
+        // visible to session.dispatch by the time the install
+        // returns. Discovery failures are non-fatal (caught + logged
+        // via the substrate bus by the ToolExecutor; the harness's
+        // status remains `connected`).
         try {
-          await bundle.handle.connect();
+          await harness.connect();
         } catch {
-          // Status already captured the failure; swallow so other
-          // servers' installs proceed.
+          continue;
+        }
+        if (harness.status.kind === "connected") {
+          try {
+            await discoverAndRegisterTools(installer, config, harness);
+          } catch {
+            // Tool-discovery failures are non-fatal for the
+            // connection-status FSM. Adopters watching for "tools
+            // registered" subscribe to the ToolExecutor's
+            // registration stream, not the harness.
+          }
         }
       }
 
       const bridge: McpHookBridgeImpl = {
         client: (serverId) => clientsById.get(serverId),
-        clients: handles,
+        clients: harnesses,
       };
       installer.registerNamespace("mcp", bridge);
     },

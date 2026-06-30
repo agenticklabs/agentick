@@ -114,6 +114,27 @@ export class McpLifecycle {
     if (this._state !== "closed") this.setState("closed");
   }
 
+  /**
+   * User-initiated soft pause — distinct from `close()` (terminal)
+   * and `markDisconnected()` (drops via the reconnect-with-backoff
+   * curve). Cancels any pending reconnect timer, resets the attempt
+   * counter, and transitions to `idle` so a subsequent
+   * `markConnecting()` works without bouncing through `degraded`.
+   *
+   * Used by `McpClientHarness.disconnect()` to support the
+   * adopter-driven "pause this connection, I'll reconnect when I
+   * want" verb without firing the auto-reconnect curve.
+   */
+  pause(): void {
+    if (this._state === "closed") return;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = undefined;
+    }
+    this.reconnectAttempts = 0;
+    if (this._state !== "idle") this.setState("idle");
+  }
+
   /** Test-only — fires the pending reconnect timer immediately. */
   triggerReconnectNow(): void {
     if (this.reconnectTimer) {
