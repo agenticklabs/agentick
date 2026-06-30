@@ -8,6 +8,13 @@
  * exercising the full harness round-trip; `stubCredentialsStore` is for
  * the narrower case where the test cares only about what the consumer
  * does WITH the credential and not about persistence behavior.
+ *
+ * **Not conformant by design.** Stubs throw on write (read-only), use
+ * a custom `keyOf` composition rather than the standard
+ * `(namespace, key)` tuple internally, and ship no `onChange`. Do NOT
+ * run `runCredentialsStoreConformance` against a stub — by intent it
+ * fails the writable + enumeration cases. Use the in-memory adapter
+ * (or `fakeCredentialsStore`) when you need a working impl.
  */
 
 import { CredentialsBackendUnavailable, CredentialsWriteFailed } from "@agentick/spec-next";

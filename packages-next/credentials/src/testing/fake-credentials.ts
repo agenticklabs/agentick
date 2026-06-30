@@ -36,12 +36,12 @@ export interface FakeCredentialsBundle {
 export function fakeCredentialsHarness(
   options: FakeCredentialsOptions = {},
 ): FakeCredentialsBundle {
-  const { harnessId = `fake-credentials-${ulid()}`, store, ...rest } = options;
+  const { harnessId = `fake-credentials-${ulid()}`, store } = options;
   const resolvedStore = store ?? inMemoryCredentialsStore();
   const journal = new MemoryJournal();
   const bus = new LocalEventBus();
   const inbox = new LocalInbox();
-  const harness = new CredentialsHarness(harnessId, resolvedStore, journal, bus, inbox, rest);
+  const harness = new CredentialsHarness(harnessId, resolvedStore, journal, bus, inbox);
   return {
     harness,
     store: resolvedStore,

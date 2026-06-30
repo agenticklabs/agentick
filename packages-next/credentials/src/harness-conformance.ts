@@ -123,16 +123,24 @@ export function runCredentialsHarnessConformance(opts: CredentialsHarnessConform
     });
 
     it("close() drops subscribers and stops fan-out", async () => {
-      const { harness } = await opts.factory();
+      const { harness, store } = await opts.factory();
       const events: Array<unknown> = [];
       harness.subscribe((ev) => events.push(ev));
       await harness.close();
-      // After close, subsequent writes against the underlying store
-      // (if still possible) must not reach the now-dropped listener.
-      // We can't easily drive that for stores whose adapter the
-      // harness closes too; the contract is "no events after close",
-      // which we verify by observing that close() itself drops the
-      // listener set.
+      // Drive a post-close write directly against the adapter — if
+      // the harness failed to unsubscribe its forwarder OR failed to
+      // clear its notifier, the listener would fire here.
+      if (store.onChange) {
+        await store.set("ns", "post-close", "v");
+      }
+      // ...and through the harness itself, for impls whose set/delete
+      // path publishes independently of the adapter's onChange.
+      try {
+        await harness.set("ns", "post-close-harness", "v");
+      } catch {
+        // Adopter impls that throw on post-close writes (#281b.2 candidate)
+        // are conformant — what matters is that NO event surfaced.
+      }
       expect(events).toEqual([]);
     });
 

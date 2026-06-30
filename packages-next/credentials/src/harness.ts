@@ -25,7 +25,6 @@ import type {
   CredentialsChangeEvent,
   CredentialsHarnessProtocol,
   EventBus,
-  EventScope,
   MessageEnvelope,
   MessageHandlerError,
   MessageInbox,
@@ -35,14 +34,12 @@ import type {
 
 import type { CredentialsStore } from "./store.js";
 
-export interface CredentialsHarnessOptions {
-  /**
-   * Optional parent scope merged into every event envelope this
-   * harness emits. Used by app- / gateway-level installs to thread
-   * `{ appId, gatewayId }` down to the harness's bus emissions.
-   */
-  readonly parentScope?: EventScope;
-}
+// `CredentialsHarnessOptions` is intentionally empty in 281b.1. Future
+// slots (e.g. `parentScope` for projecting `{ appId, gatewayId }` onto
+// audit-log bus envelopes) land alongside the consumer that needs
+// them — no preemptive dead fields.
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+export interface CredentialsHarnessOptions {}
 
 export class CredentialsHarness
   extends BaseHarness<"credentials">
@@ -52,16 +49,6 @@ export class CredentialsHarness
   private readonly changes: Notifier<CredentialsChangeEvent>;
   private storeUnsubscribe: Unsubscribe | undefined;
   private closed = false;
-
-  // `parentScope` is captured but not yet projected onto bus
-  // emissions — the substrate harness layer wires that automatically
-  // for any commands routed through `runOperation`. The field is held
-  // for symmetry with the other substrate harnesses and so a future
-  // bus-emit path (audit log, see TODO below) has it available.
-  // TODO(#281): wire `parentScope` into the substrate envelope when
-  // we add the audit-log bus path.
-  // eslint-disable-next-line @typescript-eslint/no-unused-private-class-members
-  private readonly parentScope: EventScope | undefined;
 
   get id(): string {
     return this.scopeId;
@@ -73,11 +60,11 @@ export class CredentialsHarness
     journal: OperationJournal,
     bus: EventBus,
     inbox: MessageInbox,
-    options: CredentialsHarnessOptions = {},
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _options: CredentialsHarnessOptions = {},
   ) {
     super("credentials", scopeId, journal, bus, inbox);
     this.store = store;
-    this.parentScope = options.parentScope;
     this.changes = createNotifier<CredentialsChangeEvent>();
 
     // If the adapter natively observes external changes (keychain
