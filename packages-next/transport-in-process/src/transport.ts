@@ -14,32 +14,82 @@
  */
 
 import type {
+  ClientConnection,
   ClientTransport,
-  GatewayHarnessProtocol,
   JsonRpcFrame,
   JsonRpcRequest,
   JsonRpcResponse,
   TransportCapabilities,
 } from "@agentick/spec-next";
 import { BaseClientTransport } from "@agentick/transport-next";
+import { ulid } from "@agentick/utils-next";
 
 export type InProcessGatewayHandler = (
   request: JsonRpcRequest,
   sendNotification: (notification: { method: string; params?: unknown }) => void,
 ) => Promise<JsonRpcResponse>;
 
+/**
+ * Callback the transport hands to the server side on `connect()`,
+ * enabling out-of-band notification pushes (server → client).
+ *
+ * The transport calls this once during `openConnection`, passing a
+ * `deliver` callback the server can invoke while the connection is
+ * open. Whatever the caller returns is treated as an unsubscribe,
+ * invoked during `closeConnection`.
+ *
+ * Test / stub usage — capture `deliver` directly and push:
+ *
+ * ```ts
+ * let push: (n: { method: string; params?: unknown }) => void = () => {};
+ * inProcessTransport({
+ *   handler,
+ *   serverNotifier: (deliver) => { push = deliver; return () => { push = () => {}; }; },
+ * });
+ * // later: push({ method: "notifications/whatever", params: {} });
+ * ```
+ *
+ * For the common case of pushing from a real gateway, pass the
+ * gateway directly instead — the transport structurally detects
+ * `acceptConnection` and wires it. See {@link InProcessTransportOptions}.
+ */
+export type InProcessServerNotifierFn = (
+  deliver: (notification: { method: string; params?: unknown }) => void,
+) => () => void;
+
+/**
+ * Anything the transport can call `acceptConnection` on — every
+ * `@agentick/gateway-next` instance satisfies this. Enables the
+ * zero-boilerplate shortcut:
+ *
+ * ```ts
+ * inProcessTransport({ handler, serverNotifier: gateway })
+ * ```
+ */
+export interface AcceptingServer {
+  acceptConnection(connection: ClientConnection): () => void;
+}
+
+/**
+ * Server-side notification wiring. Either a raw callback (full
+ * control over metadata + registration mechanism) or an object
+ * with `acceptConnection` (typically a `GatewayHarness`; transport
+ * generates default metadata + connectionId).
+ */
+export type InProcessServerNotifier = InProcessServerNotifierFn | AcceptingServer;
+
 export interface InProcessTransportOptions {
   readonly handler: InProcessGatewayHandler;
   readonly wireParity?: boolean;
   readonly id?: string;
   /**
-   * Optional gateway reference. When supplied, the transport
-   * registers itself as a notification sink on `connect()` — the
-   * gateway's `broadcastNotification` fans out through the transport
-   * to the client (#311). Omitted for tests that don't exercise the
-   * broadcast path.
+   * Optional server-side notification wiring (#311). Pass a
+   * `GatewayHarness` directly for the common case; pass a function
+   * for full control over metadata or when wiring a non-gateway
+   * server. When omitted, no server→client push channel is
+   * installed — safe for tests that don't exercise the path.
    */
-  readonly gateway?: GatewayHarnessProtocol;
+  readonly serverNotifier?: InProcessServerNotifier;
 }
 
 const CAPABILITIES: TransportCapabilities = {
@@ -61,24 +111,25 @@ class InProcessTransport extends BaseClientTransport {
 
   private readonly handler: InProcessGatewayHandler;
   private readonly wireParity: boolean;
-  private readonly gateway: GatewayHarnessProtocol | undefined;
-  private unregisterSink: (() => void) | null = null;
+  private readonly serverNotifier: InProcessServerNotifier | undefined;
+  private unregisterServerNotifier: (() => void) | null = null;
 
   constructor(options: InProcessTransportOptions) {
     super();
     this.id = options.id ?? `in-process-${++transportCounter}`;
     this.handler = options.handler;
     this.wireParity = options.wireParity ?? false;
-    this.gateway = options.gateway;
+    this.serverNotifier = options.serverNotifier;
   }
 
   protected async openConnection(): Promise<void> {
     this.setState("connecting");
-    // Register a broadcast sink with the gateway BEFORE the state
-    // flips open — a `notifications/capabilities/changed` fired during
-    // the ensuing handshake must reach us.
-    if (this.gateway && this.gateway.registerNotificationSink) {
-      this.unregisterSink = this.gateway.registerNotificationSink((notification) => {
+    // Install the server-side notification path BEFORE the state
+    // flips open — a notification fired during the ensuing handshake
+    // must reach us.
+    if (this.serverNotifier) {
+      const notifierFn = normalizeServerNotifier(this.serverNotifier, this.id);
+      this.unregisterServerNotifier = notifierFn((notification) => {
         const noteFrame = this.maybeRoundtrip({
           jsonrpc: "2.0" as const,
           method: notification.method,
@@ -91,9 +142,9 @@ class InProcessTransport extends BaseClientTransport {
   }
 
   protected async closeConnection(): Promise<void> {
-    if (this.unregisterSink) {
-      this.unregisterSink();
-      this.unregisterSink = null;
+    if (this.unregisterServerNotifier) {
+      this.unregisterServerNotifier();
+      this.unregisterServerNotifier = null;
     }
   }
 
@@ -122,4 +173,24 @@ class InProcessTransport extends BaseClientTransport {
     if (!this.wireParity) return value;
     return JSON.parse(JSON.stringify(value)) as T;
   }
+}
+
+/**
+ * Normalize the union {@link InProcessServerNotifier} to a function.
+ * When adopters pass a gateway-shaped object, wrap it into a
+ * function that calls `acceptConnection` with default metadata.
+ */
+function normalizeServerNotifier(
+  notifier: InProcessServerNotifier,
+  transportId: string,
+): InProcessServerNotifierFn {
+  if (typeof notifier === "function") return notifier;
+  return (deliver) =>
+    notifier.acceptConnection({
+      metadata: {
+        transport: "in-process",
+        connectionId: `inproc:${transportId}:${ulid()}`,
+      },
+      deliver: (n) => deliver({ method: n.method, params: n.params }),
+    });
 }

@@ -206,6 +206,89 @@ See [ADR 46 — Wire extensions](../../docs/proposals/v2/blueprint/46-wire-exten
 and [`@agentick/spec-next/wire`](../spec/src/wire/README.md) for the
 extension authoring guide.
 
+## Server-initiated notifications (#311)
+
+The gateway can push notifications out to every connected client
+independent of any active RPC — used by
+`notifications/capabilities/changed` today; the seam #308 dynamic
+extensions and #302 auth-expired flows will build on.
+
+Two primitives:
+
+### `gateway.acceptConnection(connection): () => void`
+
+Transport servers call this at wire-accept time, supplying a
+`ClientConnection` — metadata + a synchronous `deliver` callback.
+Returns an unsubscribe the transport invokes on close. The
+framework-supplied WebSocket, Unix-socket, and in-process transport
+servers wire this automatically; adopters building custom transports
+call it themselves.
+
+```ts
+const releaseConnection = gateway.acceptConnection({
+  metadata: { transport: "my-transport", connectionId: "conn-42" },
+  deliver: (n) => myWire.writeJson(n),
+});
+// on close:
+releaseConnection();
+```
+
+### `gateway.notify(notification, options?)`
+
+Push a notification to connected clients. With no options, fans out
+to every client. Pass `options.to` to filter by metadata — future
+auth-scoped pushes, tenant-scoped install/uninstall notifications,
+and transport-targeted announcements all use this shape.
+
+```ts
+// broadcast to every connected client
+gateway.notify({
+  method: "notifications/capabilities/changed",
+  params: {},
+});
+
+// WebSocket-only broadcast (metadata.transport is populated by
+// every framework transport server)
+gateway.notify(
+  { method: "myext/announce", params: { field: "x" } },
+  { to: (m) => m.transport === "websocket" },
+);
+```
+
+**Metadata today = `{ transport, connectionId }`.** Framework
+transport servers (WS, Unix-socket, in-process) populate those two
+fields. The `[k]: unknown` slot is reserved for future extensions:
+`principal` (auth extension, #302) and application-scoped
+discriminators like tenant / project id (populated by an adopter-
+supplied transport variant or an auth-adjacent extension at accept
+time). Nothing in the framework fills those slots today — if
+`to: (m) => m.principal === X` matters to you, either (a) wait for
+#302, or (b) provide a custom transport server that mutates
+`metadata` at `acceptConnection` time.
+
+A connection whose `deliver` throws is caught so one broken client
+cannot poison the fan-out. Errors route through the
+`onDeliveryError` diagnostic hook on `GatewayHarnessOptions`.
+
+### Delivery errors — visible by default
+
+`onDeliveryError` defaults to `console.error`. Failed deliveries
+are logged with the connection id + transport kind + failing
+notification method so adopters see wire problems without wiring
+observability first. Pass `() => {}` to silence, or supply a
+structured logger:
+
+```ts
+await createGateway({
+  onDeliveryError: (err, connId, meta, notif) => {
+    myLogger.warn("wire delivery failed", { err, connId, meta, method: notif.method });
+  },
+});
+```
+
+The invariant — one broken connection does not poison the
+broadcast — is preserved regardless of what the hook does.
+
 ## Patterns
 
 ### Multi-app cross-tenant hosting (single gateway, multi-app)

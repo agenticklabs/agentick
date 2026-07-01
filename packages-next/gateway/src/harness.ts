@@ -29,6 +29,8 @@ import {
 } from "@agentick/runtime-next";
 import type {
   AppHarnessProtocol,
+  ClientConnection,
+  ClientConnectionMetadata,
   CreateAppInput,
   EventBus,
   EventQuery,
@@ -117,6 +119,23 @@ export interface GatewayHarnessOptions extends BaseHarnessOptions {
    * cannot be registered post-hoc.
    */
   readonly wireExtensions?: ReadonlyArray<WireExtension>;
+
+  /**
+   * Diagnostic callback invoked when a {@link ClientConnection}'s
+   * `deliver` throws during `notify`. The default logs to
+   * `console.error` — failures are visible by default. Adopters
+   * wanting silence pass `() => {}`; adopters wanting structured
+   * telemetry supply their own hook.
+   *
+   * The gateway does NOT retry, unregister, or otherwise act on the
+   * error — telemetry and remediation are the adopter's call.
+   */
+  readonly onDeliveryError?: (
+    error: unknown,
+    connectionId: string,
+    metadata: ClientConnectionMetadata,
+    notification: { method: string; params: unknown },
+  ) => void;
 }
 
 // ============================================================================
@@ -144,18 +163,29 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
   private readonly _wireExtensions: WireExtensionRegistry;
 
   /**
-   * Registered notification sinks — one per active client connection.
-   * Transport servers call {@link registerNotificationSink} on accept
-   * and invoke the returned unsubscribe on close. The gateway iterates
-   * this set from {@link broadcastNotification} to fan a single
-   * server-initiated notification to every currently-connected client.
+   * Every currently-connected client, keyed by gateway-assigned
+   * connection id. Transport servers call {@link acceptConnection}
+   * on wire accept and invoke the returned unsubscribe on close.
+   * {@link notify} iterates this map, optionally filtered by
+   * metadata, and delivers the payload to every matching client.
    *
-   * Sinks that throw are swallowed — a bad sink must not poison the
-   * fan-out. Broadcast is a best-effort operation.
+   * Deliveries that throw are caught to preserve the "one broken
+   * client must not poison the fan-out" invariant. Errors route
+   * through the adopter-supplied `onDeliveryError` diagnostic hook
+   * (defaults to `console.error` — see {@link GatewayHarnessOptions}).
    */
-  private readonly notificationSinks = new Set<
-    (notification: { method: string; params: unknown }) => void
-  >();
+  private readonly connectedClients = new Map<string, ClientConnection>();
+
+  /** Monotonic counter used to mint connection ids. */
+  private nextClientNumber = 0;
+
+  /** Diagnostic hook — defaults to `console.error` when option absent. */
+  private readonly onDeliveryError: (
+    error: unknown,
+    connectionId: string,
+    metadata: ClientConnectionMetadata,
+    notification: { method: string; params: unknown },
+  ) => void;
 
   get id(): string {
     return this.scopeId;
@@ -220,6 +250,18 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
       this._wireExtensions.register(ext);
     }
     this._wireExtensions.seal();
+
+    this.onDeliveryError =
+      options.onDeliveryError ??
+      ((err, connectionId, metadata, notification) => {
+        // Default: log failures visibly so adopters aren't silently
+        // dropping notifications on broken connections. Adopters
+        // wanting silence supply an explicit no-op.
+        console.error(
+          `[gateway ${this.scopeId}] notify delivery to ${connectionId} (${metadata.transport}) failed for ${notification.method}:`,
+          err,
+        );
+      });
   }
 
   /**
@@ -233,44 +275,57 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
   }
 
   /**
-   * Register a per-connection notification sink. Transport servers
-   * call this on connection accept, supplying a function that writes
-   * a JSON-RPC notification frame to the client. Returns an
-   * unsubscribe the server invokes on connection close.
+   * Accept a client-connection so the gateway can push server-
+   * initiated notifications to it. Transport servers call this at
+   * accept time, supplying a {@link ClientConnection} that carries
+   * a `deliver` callback plus transport-provided metadata
+   * (transport kind, connection id, optional principal). Returns
+   * an unsubscribe the transport invokes on close.
    *
-   * Independent of the request-dispatch path — the sink is a pure
-   * out-of-band emitter, used by {@link broadcastNotification} and
-   * (later) by wire extensions that push unsolicited frames.
-   *
-   * The sink is invoked synchronously from the emit site. Transport
-   * implementations MUST NOT throw; if the wire has dropped, silently
-   * swallow inside the sink.
+   * The gateway assigns a stable per-acceptance id used by
+   * `onDeliveryError` diagnostics. Filter-based dispatch (auth-
+   * scoped, tenant-scoped) is enabled by transports populating
+   * `metadata` thoughtfully.
    */
-  registerNotificationSink(
-    sink: (notification: { method: string; params: unknown }) => void,
-  ): () => void {
-    this.notificationSinks.add(sink);
+  acceptConnection(connection: ClientConnection): () => void {
+    const connectionId = `client:${this.scopeId}:${++this.nextClientNumber}`;
+    this.connectedClients.set(connectionId, connection);
     return () => {
-      this.notificationSinks.delete(sink);
+      this.connectedClients.delete(connectionId);
     };
   }
 
   /**
-   * Fan a server-initiated notification out to every registered sink.
-   * A sink that throws is caught and skipped — one broken connection
-   * does not poison the broadcast. Order is insertion order (set
-   * iteration order), but no adopter should depend on it.
+   * Notify connected clients of a server-initiated event.
+   * `options.to` receives each connection's metadata and returns
+   * `true` to include, `false` to skip — the shape for auth-scoped
+   * pushes, tenant-scoped install/uninstall notifications, and
+   * transport-targeted announcements. No `to` = every connected
+   * client.
    *
-   * Used by #311's capability-change flow: `broadcastNotification({
-   *   method: "notifications/capabilities/changed", params: {}
-   * })`. #308 will call this from install/uninstall paths.
+   * A connection whose `deliver` throws is caught so one broken
+   * client cannot poison the fan-out. Errors route through
+   * `onDeliveryError` (defaults to `console.error`).
+   *
+   * Used by #311's capability-change flow. #308 will call this
+   * from dynamic install/uninstall paths; #302 will add auth-
+   * principal filtering as a canonical `to:` pattern.
    */
-  broadcastNotification(notification: { method: string; params: unknown }): void {
-    for (const sink of this.notificationSinks) {
+  notify(
+    notification: { method: string; params: unknown },
+    options?: { to?: (metadata: ClientConnectionMetadata) => boolean },
+  ): void {
+    const to = options?.to;
+    for (const [connectionId, connection] of this.connectedClients) {
+      if (to && !to(connection.metadata)) continue;
       try {
-        sink(notification);
-      } catch {
-        /* swallow — see notificationSinks doc */
+        connection.deliver(notification);
+      } catch (err) {
+        try {
+          this.onDeliveryError(err, connectionId, connection.metadata, notification);
+        } catch {
+          /* swallow — a broken diagnostic hook must not poison the fan-out either */
+        }
       }
     }
   }

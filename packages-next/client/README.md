@@ -139,6 +139,26 @@ console.log(client.serverInfo?.name, client.serverInfo?.version);
 
 **Type-augmentable slots.** `capabilities.framework` (aka `ServerCapabilities`) is declaration-merge extensible for adopters that want typed boolean flags. `capabilities.ext` (aka `ClientCapabilityExtensions`) is an empty-seed slot reserved for future richer per-extension typed metadata — declaration-merge into it to add typed slots as adopters/extensions add per-extension metadata blobs to `_extensions/list` responses.
 
+**Reactive to server changes (#311).** The client subscribes to `notifications/capabilities/changed` at connect time. When the server emits it (currently manual via `gateway.notify(...)`, #308 will wire dynamic install/uninstall to fire it automatically), the client refetches `_extensions/list` and swaps the capability snapshot. Adopters observe via `onCapabilitiesChange`:
+
+```ts
+const unsub = client.onCapabilitiesChange((caps) => {
+  // Fires on: initial handshake, post-reconnect handshake,
+  // notifications/capabilities/changed refetch, and wire drop
+  // (empty snapshot). Same payload as reading client.capabilities
+  // at the moment it fires.
+  refreshFeatureGates(caps);
+});
+```
+
+**Synchronizing on "capabilities settled."** `client.whenReady()` awaits every currently in-flight capability-syncing operation — post-reconnect handshake AND refetches from `notifications/capabilities/changed`. Adopters wanting to gate on a fresh snapshot use it directly:
+
+```ts
+gateway.notify({ method: "notifications/capabilities/changed", params: {} });
+await client.whenReady();
+// client.capabilities now reflects the fresh server view
+```
+
 ### Extensions
 
 ```ts

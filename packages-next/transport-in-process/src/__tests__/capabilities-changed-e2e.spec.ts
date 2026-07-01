@@ -8,11 +8,11 @@
  * seals the registry (extensions cannot yet be added at runtime — #308
  * lands that). Here we simulate the mutation by swapping the
  * `_extensions/list` response before triggering
- * `broadcastNotification`. This exercises the wire-level plumbing
+ * `notify`. This exercises the wire-level plumbing
  * without depending on #308's dynamic-registry API.
  *
  * Covers:
- *   - Gateway `broadcastNotification` fans out to every registered sink
+ *   - Gateway `notify` fans out to every registered sink
  *   - Client refetches `_extensions/list` on the notification
  *   - `client.onCapabilitiesChange` fires with the fresh snapshot
  *   - Multiple connected clients each receive their own notification
@@ -95,7 +95,10 @@ async function setup(): Promise<{
     },
     makeClient: () =>
       createClient({
-        transport: inProcessTransport({ handler, gateway }),
+        // One-line wiring: pass the gateway directly. The transport
+        // structurally detects `acceptConnection` and installs the
+        // sink itself (with default in-process metadata).
+        transport: inProcessTransport({ handler, serverNotifier: gateway }),
       }),
     cleanup: async () => {
       await gateway.close();
@@ -104,7 +107,7 @@ async function setup(): Promise<{
 }
 
 describe("notifications/capabilities/changed end-to-end (#311)", () => {
-  it("gateway.broadcastNotification refreshes the client's capabilities", async () => {
+  it("gateway.notify refreshes the client's capabilities", async () => {
     const { gateway, setListResult, makeClient, cleanup } = await setup();
     const client = await makeClient();
     const snapshots: number[] = [];
@@ -116,7 +119,7 @@ describe("notifications/capabilities/changed end-to-end (#311)", () => {
 
     // Server-side "install" — swap the future list, then broadcast.
     setListResult(ROUND_2);
-    gateway.broadcastNotification!({
+    gateway.notify!({
       method: "notifications/capabilities/changed",
       params: {},
     });
@@ -141,7 +144,7 @@ describe("notifications/capabilities/changed end-to-end (#311)", () => {
     expect(c2.capabilities.extensions).toHaveLength(1);
 
     setListResult(ROUND_2);
-    gateway.broadcastNotification!({
+    gateway.notify!({
       method: "notifications/capabilities/changed",
       params: {},
     });
@@ -169,7 +172,7 @@ describe("notifications/capabilities/changed end-to-end (#311)", () => {
 
     // First broadcast reaches both.
     setListResult(ROUND_2);
-    gateway.broadcastNotification!({
+    gateway.notify!({
       method: "notifications/capabilities/changed",
       params: {},
     });
@@ -184,7 +187,7 @@ describe("notifications/capabilities/changed end-to-end (#311)", () => {
 
     // Broadcast again — c1's sink is gone, c2 still hears it.
     setListResult(ROUND_1);
-    gateway.broadcastNotification!({
+    gateway.notify!({
       method: "notifications/capabilities/changed",
       params: {},
     });

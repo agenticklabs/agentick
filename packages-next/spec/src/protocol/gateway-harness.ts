@@ -197,25 +197,88 @@ export interface GatewayHarnessProtocol {
   wireExtensions?(): WireExtensionRegistry;
 
   /**
-   * Register a per-connection notification sink (#311). Transport
-   * servers call this on connection accept, supplying a callback
-   * that writes a JSON-RPC notification frame to their client.
-   * Returns an unsubscribe the server invokes on close.
+   * Accept a per-client connection so the gateway can push server-
+   * initiated notifications to it (#311). Transport servers call this
+   * at connection-accept time, supplying a {@link ClientConnection}
+   * that pairs the wire-writer with opaque metadata (transport kind,
+   * connection id, later auth principal). Returns an unsubscribe the
+   * transport invokes on connection close.
    *
    * Independent of the request-dispatch path. Optional on the
    * protocol so pre-#311 stubs don't need to implement it — real
    * gateways always populate one.
    */
-  registerNotificationSink?(
-    sink: (notification: { method: string; params: unknown }) => void,
-  ): () => void;
+  acceptConnection?(connection: ClientConnection): () => void;
 
   /**
-   * Fan a server-initiated notification to every registered sink
-   * (#311). Bad sinks are swallowed. Used by the capability-change
-   * flow and (later) by wire extensions that need out-of-band pushes.
+   * Notify connected clients of a server-initiated event (#311).
+   * `options.to` receives each connection's metadata and returns
+   * `true` to include, `false` to skip — an auth-scoped push targets
+   * connections whose principal matches; a per-tenant push filters
+   * on a transport-supplied tenant discriminator. No `to` = every
+   * connected client.
+   *
+   * A connection whose `deliver` throws is caught (so one broken
+   * client cannot poison the fan-out) and routed to the adopter-
+   * supplied `onDeliveryError` diagnostic hook on
+   * {@link GatewayHarnessOptions}. `notify` is best-effort and never
+   * rejects the caller.
    */
-  broadcastNotification?(notification: { method: string; params: unknown }): void;
+  notify?(
+    notification: { method: string; params: unknown },
+    options?: { to?: (metadata: ClientConnectionMetadata) => boolean },
+  ): void;
+}
+
+// ============================================================================
+// Client-connection types (#311)
+// ============================================================================
+
+/**
+ * Opaque metadata every {@link ClientConnection} carries. The
+ * gateway treats this as an unstructured bag — it never inspects
+ * fields — but the recommended shape lets filters, telemetry, and
+ * observability tooling reason about connected clients uniformly.
+ *
+ * Transport servers fill this in at accept time; future extensions
+ * (auth #302, per-tenant `notify` filtering #308) augment it with
+ * additional discriminators via declaration merging or convention.
+ */
+export interface ClientConnectionMetadata {
+  /**
+   * Transport-kind discriminator: `"websocket"`, `"unix-socket"`,
+   * `"in-process"`, `"http-sse"`, or an adopter-supplied string.
+   * Enables filters like `metadata.transport === "websocket"` for
+   * transport-specific pushes.
+   */
+  readonly transport: string;
+
+  /**
+   * Stable per-connection id assigned by the transport. Format is
+   * transport-specific — WS may use remote-address+port, HTTP its
+   * session id, in-process a ulid. Meaningful only within the same
+   * transport-server instance.
+   */
+  readonly connectionId: string;
+
+  /** Room for auth principals, tenant ids, custom flags. Read via type-narrowing. */
+  readonly [k: string]: unknown;
+}
+
+/**
+ * A single connected client from the gateway's perspective —
+ * metadata (transport, id, principal, ...) plus a synchronous
+ * `deliver` callback that writes one JSON-RPC notification frame
+ * to the wire.
+ *
+ * `deliver` MUST NOT throw for expected wire-drop conditions —
+ * "wire already closed" is swallowed internally by the transport.
+ * A throw signals a bug and routes to the gateway's `onDeliveryError`
+ * diagnostic hook.
+ */
+export interface ClientConnection {
+  readonly metadata: ClientConnectionMetadata;
+  readonly deliver: (notification: { method: string; params: unknown }) => void;
 }
 
 // ============================================================================

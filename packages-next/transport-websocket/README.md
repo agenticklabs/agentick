@@ -93,6 +93,13 @@ interface WebSocketServerOptions {
 }
 ```
 
+**Server-initiated notifications (#311).** Every accepted WS
+connection is automatically registered with `gateway.acceptConnection`
+using metadata `{ transport: "websocket", connectionId: "ws:<ulid>" }`.
+`gateway.notify(...)` fans out to every currently-connected client;
+`options.to` filters by that metadata. Zero adopter opt-in — passing
+a `gateway` to `websocketServer` is enough.
+
 ## Patterns
 
 ### Native `WebSocket` everywhere

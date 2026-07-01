@@ -25,7 +25,6 @@ import type {
   ClientTransport,
   Cursor,
   EventBus,
-  ExtensionsListResult,
   GatewayHandle,
   InitializeResult,
   SendInput,
@@ -84,6 +83,14 @@ class AgentickClient implements ClientProtocol {
   /** Unsubscribe for the `notifications/capabilities/changed` observer,
    *  set on connect(), cleared on close(). Null when no observer is armed. */
   private capabilityNotifUnsubscribe: (() => void) | null = null;
+  /**
+   * Every in-flight `refetchCapabilities()` promise, tracked so
+   * `whenReady()` can await them. Entries self-remove on completion.
+   */
+  private readonly inFlightRefetches = new Set<Promise<void>>();
+  /** Latest server-advertised framework flags; needed for post-notification
+   *  refetch (an extension-set delta preserves framework caps). */
+  private lastFrameworkCapabilities: import("@agentick/spec-next").ServerCapabilities = {};
 
   private currentState: ClientState = "idle";
   private _capabilities: ClientCapabilities = EMPTY_CLIENT_CAPABILITIES;
@@ -124,17 +131,15 @@ class AgentickClient implements ClientProtocol {
       // with a different extension set. Mark that a fresh handshake
       // is owed once the transport comes back to `open`.
       if (s === "reconnecting") {
-        this._capabilities = EMPTY_CLIENT_CAPABILITIES;
         this._serverInfo = undefined;
         this.reconnectHandshakePending = true;
-        this.capabilityListeners.notify(this._capabilities);
+        this.commitCapabilities({}, []);
       }
       if (s === "closed" || isFailedState(s)) {
-        this._capabilities = EMPTY_CLIENT_CAPABILITIES;
         this._serverInfo = undefined;
         // Terminal — no reconnect coming, no handshake to owe.
         this.reconnectHandshakePending = false;
-        this.capabilityListeners.notify(this._capabilities);
+        this.commitCapabilities({}, []);
       }
       // Post-reconnect: re-run the handshake so `capabilities` +
       // `serverInfo` reflect whoever we came back to. Initial connect
@@ -227,16 +232,29 @@ class AgentickClient implements ClientProtocol {
   }
 
   /**
-   * Await any in-flight post-reconnect handshake. Resolves immediately
-   * when none is pending. Useful for adopters (and tests) that need to
-   * synchronize on the moment `capabilities` becomes valid again after
-   * a reconnect.
+   * Await every currently in-flight capability-syncing operation:
    *
-   * The initial connect handshake is awaited by `connect()` itself —
-   * this method is only load-bearing for the reconnect path.
+   *   - post-reconnect handshake (initiated by a transport
+   *     `reconnecting → open` transition), AND
+   *   - `notifications/capabilities/changed` refetches in flight.
+   *
+   * Resolves immediately when nothing is pending. The initial
+   * `connect()` handshake is already awaited by `connect()` itself;
+   * `whenReady()` covers every OTHER moment the capability snapshot
+   * might be mid-swap.
+   *
+   * Adopters synchronizing on "capabilities are settled" (tests,
+   * UI-gating logic) should call `whenReady()` before reading
+   * `client.capabilities` post-notification.
    */
   async whenReady(): Promise<void> {
-    if (this.postReconnectHandshake) await this.postReconnectHandshake;
+    // Snapshot both. New refetches scheduled *after* this call are
+    // NOT awaited — the contract is "everything already in flight,"
+    // not "block until the wire is fully quiet forever."
+    const pending: Array<Promise<void>> = [];
+    if (this.postReconnectHandshake) pending.push(this.postReconnectHandshake);
+    for (const p of this.inFlightRefetches) pending.push(p);
+    if (pending.length > 0) await Promise.allSettled(pending);
   }
 
   /**
@@ -256,36 +274,46 @@ class AgentickClient implements ClientProtocol {
     } catch (err) {
       if (!isMethodNotFound(err)) throw err;
     }
-    if (initResult) this.applyInitializeResult(initResult);
 
+    // Framework flags from `initialize` are held aside; the definitive
+    // capability commit happens once `_extensions/list` resolves so
+    // subscribers see one atomic snapshot per handshake instead of a
+    // "framework-only, no extensions" intermediate.
+    if (initResult) {
+      this._serverInfo = {
+        name: initResult.serverInfo.name,
+        version: initResult.serverInfo.version,
+        protocolVersion: initResult.protocolVersion,
+        connectionId: initResult.connectionId,
+      };
+      this.lastFrameworkCapabilities = initResult.capabilities;
+    }
+
+    let extensions: readonly import("@agentick/spec-next").WireExtensionInfo[] = [];
     try {
       const listResult = await this.request("_extensions/list", {});
-      this.applyExtensionsList(initResult?.capabilities ?? {}, listResult);
+      extensions = listResult.extensions;
     } catch (err) {
       if (!isMethodNotFound(err)) throw err;
+      // Old server; leave extensions empty and commit the framework-only
+      // snapshot below so subscribers still fire exactly once.
     }
+    this.commitCapabilities(this.lastFrameworkCapabilities, extensions);
   }
 
-  private applyInitializeResult(result: InitializeResult): void {
-    this._serverInfo = {
-      name: result.serverInfo.name,
-      version: result.serverInfo.version,
-      protocolVersion: result.protocolVersion,
-      connectionId: result.connectionId,
-    };
-    this._capabilities = buildClientCapabilities(result.capabilities, []);
-    // Don't fire capability subscribers yet — `applyExtensionsList`
-    // fires the definitive event once discovery completes. Firing
-    // here would yield an intermediate "framework-only, no extensions"
-    // snapshot that adopters would then have to reconcile against a
-    // second fire moments later.
-  }
-
-  private applyExtensionsList(
+  /**
+   * Atomic capability commit. Single source of truth: rebuild the
+   * snapshot, swap it in, fire subscribers. Every code path that
+   * changes `_capabilities` goes through here — connect-handshake,
+   * reconnect-handshake, notification refetch, and the empty-snapshot
+   * reset on wire drop.
+   */
+  private commitCapabilities(
     framework: import("@agentick/spec-next").ServerCapabilities,
-    listResult: ExtensionsListResult,
+    extensions: readonly import("@agentick/spec-next").WireExtensionInfo[],
   ): void {
-    this._capabilities = buildClientCapabilities(framework, listResult.extensions);
+    this.lastFrameworkCapabilities = framework;
+    this._capabilities = buildClientCapabilities(framework, extensions);
     this.capabilityListeners.notify(this._capabilities);
   }
 
@@ -297,24 +325,31 @@ class AgentickClient implements ClientProtocol {
    * extension-set delta, not a framework-version delta. A concurrent
    * refetch (e.g., the server bursts multiple notifications) is
    * benign: each completes with the current server view and each
-   * notifies listeners; later completions overwrite earlier ones.
+   * commits; later commits overwrite earlier ones.
+   *
+   * Tracked in `inFlightRefetches` so `whenReady()` can await mid-
+   * connection refetches, not just the reconnect handshake.
    *
    * `MethodNotFound` from `_extensions/list` is tolerated silently
    * for parity with the initial handshake — a server that stops
-   * implementing discovery mid-connection leaves an empty extension
-   * set, with subscribers still notified so adopters can react.
+   * implementing discovery mid-connection leaves the current
+   * snapshot in place.
    */
-  private async refetchCapabilities(): Promise<void> {
-    try {
-      const listResult = await this.request("_extensions/list", {});
-      this.applyExtensionsList(this._capabilities.framework, listResult);
-    } catch (err) {
-      if (!isMethodNotFound(err)) return;
-      // Server dropped support mid-connection. Best-effort — leave
-      // the current capabilities in place. Adopters relying on the
-      // notification for feature discovery will still see a stale
-      // set, but at least nothing crashes.
-    }
+  private refetchCapabilities(): Promise<void> {
+    const p = (async () => {
+      try {
+        const listResult = await this.request("_extensions/list", {});
+        this.commitCapabilities(this.lastFrameworkCapabilities, listResult.extensions);
+      } catch (err) {
+        if (!isMethodNotFound(err)) return;
+        // Server dropped support mid-connection. Leave the current
+        // snapshot untouched — safer than firing an empty one that
+        // would break every feature-gated adopter.
+      }
+    })();
+    this.inFlightRefetches.add(p);
+    void p.finally(() => this.inFlightRefetches.delete(p));
+    return p;
   }
 
   async close(): Promise<void> {

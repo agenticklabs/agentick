@@ -21,6 +21,7 @@ import {
   type JsonRpcResponse,
 } from "@agentick/spec-next";
 import { dispatchRequest, type DispatchHost } from "@agentick/transport-next";
+import { ulid } from "@agentick/utils-next";
 import { NdjsonDecoder, encodeNdjson } from "../shared/ndjson.js";
 
 export interface UnixSocketServerOptions {
@@ -39,19 +40,23 @@ export function unixSocketServer(options: UnixSocketServerOptions): UnixSocketSe
   const server = netCreateServer((socket) => {
     const ctx = new ConnectionContext(socket, options.gateway);
     liveConnections.add(ctx);
-    // Broadcast sink for server-initiated notifications (#311).
-    // Optional-chained — pre-#311 stubs won't expose the seam.
-    const unregisterSink =
-      options.gateway.registerNotificationSink?.((notification) => {
-        ctx.send({
-          jsonrpc: "2.0",
-          method: notification.method,
-          params: notification.params,
-        } as JsonRpcFrame);
+    // Hand the client-connection to the gateway for server-initiated
+    // notifications (#311). Optional-chained — pre-#311 stubs won't
+    // expose the seam.
+    const releaseConnection =
+      options.gateway.acceptConnection?.({
+        metadata: { transport: "unix-socket", connectionId: `uds:${ulid()}` },
+        deliver: (notification) => {
+          ctx.send({
+            jsonrpc: "2.0",
+            method: notification.method,
+            params: notification.params,
+          } as JsonRpcFrame);
+        },
       }) ?? (() => {});
     socket.on("close", () => {
       liveConnections.delete(ctx);
-      unregisterSink();
+      releaseConnection();
       void ctx.close();
     });
     socket.on("error", () => {

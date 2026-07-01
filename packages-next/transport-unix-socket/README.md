@@ -69,6 +69,12 @@ Caller owns the socket file's lifecycle. To rebind cleanly after a
 daemon restart, `fs.unlink(path)` before `unixSocketServer({ path })`
 when an existing file is found.
 
+**Server-initiated notifications (#311).** Every accepted UDS
+connection is automatically registered with `gateway.acceptConnection`
+using metadata `{ transport: "unix-socket", connectionId: "uds:<ulid>" }`.
+`gateway.notify(...)` fans out to every connected client. Zero
+adopter opt-in — passing a `gateway` to `unixSocketServer` is enough.
+
 ## Wire format
 
 Each frame is `JSON.stringify(frame) + '\n'`. Receivers split on `\n`

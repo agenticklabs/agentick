@@ -53,20 +53,71 @@ interface InProcessTransportOptions {
   handler: InProcessGatewayHandler;
   wireParity?: boolean;
   id?: string;
+  serverNotifier?: InProcessServerNotifier;
 }
 
 type InProcessGatewayHandler = (
   request: JsonRpcRequest,
   sendNotification: (n: { method: string; params?: unknown }) => void,
 ) => Promise<JsonRpcResponse>;
+
+type InProcessServerNotifier =
+  | ((deliver: (n: { method: string; params?: unknown }) => void) => () => void)
+  | { acceptConnection(connection: ClientConnection): () => void };
 ```
 
-- `handler` — the server-side function called for every RPC. Receives
-  a `sendNotification` callback for pushing progress / subscription
-  events back to the client.
+- `handler` — server-side function called for every RPC. Receives a
+  per-request `sendNotification` for progress + subscription frames.
 - `wireParity` — when `true`, frame payloads roundtrip through
   `JSON.parse(JSON.stringify(...))`. Catches wire-shape regressions at
   test time without paying the cost in production. Off by default.
+- `serverNotifier` — optional wiring for **server-initiated
+  notifications** (out-of-band frames pushed to the client, e.g.
+  `notifications/capabilities/changed`). Two accepted shapes:
+  - **A gateway** — pass a `GatewayHarness` directly. The transport
+    calls `gateway.acceptConnection` on connect with default in-
+    process metadata. The one-line ergonomic shortcut.
+  - **A function** — full control over metadata + registration. Used
+    when wiring a non-gateway push source (test fixture, mock server).
+
+### Server-initiated notifications (#311)
+
+For the common case — a real gateway pushing capability-change,
+tenant-scoped, or extension-declared notifications — the wiring is
+one line:
+
+```ts
+const gateway = await createGateway();
+const client = await createClient({
+  transport: inProcessTransport({ handler, serverNotifier: gateway }),
+});
+await client.connect();
+
+// From anywhere on the server side:
+gateway.notify({ method: "notifications/capabilities/changed", params: {} });
+// Client's onCapabilitiesChange subscriber fires; capabilities re-sync.
+```
+
+For test fixtures that need to push without a real gateway, use the
+function form:
+
+```ts
+let pushToClient: (n: { method: string; params?: unknown }) => void = () => {};
+inProcessTransport({
+  handler,
+  serverNotifier: (deliver) => {
+    pushToClient = deliver;
+    return () => {
+      pushToClient = () => {};
+    };
+  },
+});
+// later in the test:
+pushToClient({ method: "notifications/whatever", params: {} });
+```
+
+Omit `serverNotifier` entirely if no server→client push channel is
+needed — the transport still works for RPC-only communication.
 
 ## Patterns
 
