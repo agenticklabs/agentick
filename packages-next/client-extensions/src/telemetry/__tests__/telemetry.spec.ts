@@ -8,7 +8,7 @@
 import { describe, expect, it } from "vitest";
 import type { JsonRpcRequest, JsonRpcResponse } from "@agentick/spec-next";
 import { createClient } from "@agentick/client-next";
-import { inProcessTransport } from "@agentick/transport-in-process-next";
+import { inProcessTransport, withHandshake } from "@agentick/transport-in-process-next";
 
 import {
   telemetry,
@@ -61,7 +61,7 @@ describe("telemetry middleware", () => {
       result: {},
     });
     const client = await createClient({
-      transport: inProcessTransport({ handler }),
+      transport: inProcessTransport({ handler: withHandshake(handler) }),
       extensions: [telemetry({ adapter })],
     });
     await client.connect();
@@ -89,7 +89,7 @@ describe("telemetry middleware", () => {
       return { jsonrpc: "2.0", id: req.id, result: {} };
     };
     const client = await createClient({
-      transport: inProcessTransport({ handler }),
+      transport: inProcessTransport({ handler: withHandshake(handler) }),
       extensions: [telemetry({ adapter })],
     });
     await client.connect();
@@ -108,7 +108,7 @@ describe("telemetry middleware", () => {
       return { jsonrpc: "2.0", id: req.id, result: {} };
     };
     const client = await createClient({
-      transport: inProcessTransport({ handler }),
+      transport: inProcessTransport({ handler: withHandshake(handler) }),
       extensions: [telemetry({ adapter })],
     });
     await client.connect();
@@ -126,10 +126,11 @@ describe("telemetry middleware", () => {
       error: { code: -32011, message: "app not found" },
     });
     const client = await createClient({
-      transport: inProcessTransport({ handler }),
+      transport: inProcessTransport({ handler: withHandshake(handler) }),
       extensions: [telemetry({ adapter })],
     });
     await client.connect();
+    spans.length = 0;
     await expect(client.request("gateway/getApp", { appId: "x" })).rejects.toBeDefined();
     await client.close();
 
@@ -147,7 +148,7 @@ describe("telemetry middleware", () => {
       result: {},
     });
     const client = await createClient({
-      transport: inProcessTransport({ handler }),
+      transport: inProcessTransport({ handler: withHandshake(handler) }),
       extensions: [telemetry({ adapter, sample: (m) => m !== "ping" })],
     });
     await client.connect();
@@ -167,10 +168,11 @@ describe("telemetry middleware", () => {
       result: {},
     });
     const client = await createClient({
-      transport: inProcessTransport({ handler }),
+      transport: inProcessTransport({ handler: withHandshake(handler) }),
       extensions: [telemetry({ adapter, serviceName: "my-app" })],
     });
     await client.connect();
+    spans.length = 0;
     await client.request("ping", {});
     await client.close();
 
@@ -187,7 +189,7 @@ describe("telemetry middleware", () => {
       return { jsonrpc: "2.0", id: req.id, result: {} };
     };
     const client = await createClient({
-      transport: inProcessTransport({ handler }),
+      transport: inProcessTransport({ handler: withHandshake(handler) }),
       extensions: [telemetry({ adapter: noopAdapter })],
     });
     await client.connect();

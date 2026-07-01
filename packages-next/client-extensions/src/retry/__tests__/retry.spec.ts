@@ -9,7 +9,7 @@
 import { describe, expect, it } from "vitest";
 import type { JsonRpcRequest, JsonRpcResponse } from "@agentick/spec-next";
 import { createClient } from "@agentick/client-next";
-import { inProcessTransport } from "@agentick/transport-in-process-next";
+import { inProcessTransport, withHandshake } from "@agentick/transport-in-process-next";
 
 import {
   retry,
@@ -29,7 +29,7 @@ describe("retry middleware", () => {
       return { jsonrpc: "2.0", id: req.id, result: { attempts } };
     };
     const client = await createClient({
-      transport: inProcessTransport({ handler }),
+      transport: inProcessTransport({ handler: withHandshake(handler) }),
       extensions: [retry({ initialDelayMs: 1 })],
     });
     await client.connect();
@@ -45,7 +45,7 @@ describe("retry middleware", () => {
       throw { kind: "connection", message: "always fail" };
     };
     const client = await createClient({
-      transport: inProcessTransport({ handler }),
+      transport: inProcessTransport({ handler: withHandshake(handler) }),
       extensions: [retry({ maxAttempts: 3, initialDelayMs: 1 })],
     });
     await client.connect();
@@ -65,7 +65,7 @@ describe("retry middleware", () => {
       };
     };
     const client = await createClient({
-      transport: inProcessTransport({ handler }),
+      transport: inProcessTransport({ handler: withHandshake(handler) }),
       extensions: [retry({ maxAttempts: 5, initialDelayMs: 1 })],
     });
     await client.connect();
@@ -88,7 +88,7 @@ describe("retry middleware", () => {
         return { jsonrpc: "2.0", id: req.id, result: { ok: true } };
       };
       const client = await createClient({
-        transport: inProcessTransport({ handler }),
+        transport: inProcessTransport({ handler: withHandshake(handler) }),
         extensions: [retry({ initialDelayMs: 1 })],
       });
       await client.connect();
@@ -114,7 +114,7 @@ describe("retry middleware", () => {
       };
     };
     const client = await createClient({
-      transport: inProcessTransport({ handler }),
+      transport: inProcessTransport({ handler: withHandshake(handler) }),
       extensions: [retry({})],
     });
     await client.connect();
@@ -132,7 +132,7 @@ describe("retry middleware", () => {
       return { jsonrpc: "2.0", id: req.id, result: { apps: [] } };
     };
     const client = await createClient({
-      transport: inProcessTransport({ handler }),
+      transport: inProcessTransport({ handler: withHandshake(handler) }),
       extensions: [retry({})],
     });
     await client.connect();
@@ -162,7 +162,7 @@ describe("retry middleware", () => {
       };
     };
     const client = await createClient({
-      transport: inProcessTransport({ handler }),
+      transport: inProcessTransport({ handler: withHandshake(handler) }),
       extensions: [retry({ initialDelayMs: 1 })],
     });
     await client.connect();
@@ -184,7 +184,7 @@ describe("retry middleware", () => {
       return { jsonrpc: "2.0", id: req.id, result: {} };
     };
     const client = await createClient({
-      transport: inProcessTransport({ handler }),
+      transport: inProcessTransport({ handler: withHandshake(handler) }),
       extensions: [
         retry({
           maxAttempts: 3,
@@ -204,7 +204,7 @@ describe("retry middleware", () => {
       throw { kind: "connection", message: "fail" };
     };
     const client = await createClient({
-      transport: inProcessTransport({ handler }),
+      transport: inProcessTransport({ handler: withHandshake(handler) }),
       extensions: [retry({ maxAttempts: 5, initialDelayMs: 1000 })],
     });
     await client.connect();

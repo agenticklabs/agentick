@@ -104,6 +104,41 @@ Returns a `Client` (= `ClientProtocol` widened with any extension-registered nam
 
 Shapes mirror the in-process `GatewayHarnessProtocol` / `AppHarnessProtocol` / `SessionHarnessProtocol`.
 
+### Capabilities + server info
+
+`client.connect()` runs a two-step handshake — `initialize` (protocol version + framework flags + server info) then `_extensions/list` (wire-extension enumeration for feature-gating). Both populate `client.capabilities` and `client.serverInfo`.
+
+```ts
+await client.connect();
+
+// Framework flags advertised by the server:
+if (client.capabilities.framework.progress) {
+  // server supports notifications/progress
+}
+
+// Feature-gate on wire-extension methods:
+if (client.capabilities.hasMethod("mcpClients/reauthenticate")) {
+  showConnectButton();
+}
+if (client.capabilities.hasNamespace("crm")) {
+  mountCrmAdminPanel();
+}
+
+// Full enumeration for admin UIs:
+for (const ext of client.capabilities.extensions) {
+  console.log(`${ext.name} v${ext.version} — ${ext.methods.join(", ")}`);
+}
+
+// Server identity:
+console.log(client.serverInfo?.name, client.serverInfo?.version);
+```
+
+**Timing.** Before `connect()` returns: capabilities empty, `serverInfo` undefined. After successful connect: populated. On disconnect / reconnect: cleared, then repopulated on the next successful connect. Extension sets are per-connection.
+
+**Graceful degradation.** If the server returns `MethodNotFound` for either `initialize` or `_extensions/list` (older-server transitional compat), that RPC's result is skipped and connect proceeds — leaving that portion of `capabilities` empty. Every other error surfaces as a rejected `connect()`.
+
+**Type-augmentable slots.** `capabilities.framework` (aka `ServerCapabilities`) is declaration-merge extensible for adopters that want typed boolean flags. `capabilities.ext` (aka `ClientCapabilityExtensions`) is an empty-seed slot reserved for future richer per-extension typed metadata — declaration-merge into it to add typed slots as adopters/extensions add per-extension metadata blobs to `_extensions/list` responses.
+
 ### Extensions
 
 ```ts

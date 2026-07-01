@@ -10,7 +10,7 @@ import { createClient } from "@agentick/client-next";
 import { describe, expect, it } from "vitest";
 import type { JsonRpcRequest, JsonRpcResponse } from "@agentick/spec-next";
 
-import { inProcessTransport } from "../index.js";
+import { inProcessTransport, withHandshake } from "../index.js";
 
 describe("client.send(sessionId, input) shortcut", () => {
   function makeHandler(): {
@@ -46,13 +46,17 @@ describe("client.send(sessionId, input) shortcut", () => {
 
   it("emits the same `session/send` RPC as client.session(id).send(input)", async () => {
     const { handler: handlerA, seen: seenA } = makeHandler();
-    const clientA = await createClient({ transport: inProcessTransport({ handler: handlerA }) });
+    const clientA = await createClient({
+      transport: inProcessTransport({ handler: withHandshake(handlerA) }),
+    });
     await clientA.connect();
     await clientA.send("sess-x", { messages: [{ role: "user", content: "hi" }] }).result;
     await clientA.close();
 
     const { handler: handlerB, seen: seenB } = makeHandler();
-    const clientB = await createClient({ transport: inProcessTransport({ handler: handlerB }) });
+    const clientB = await createClient({
+      transport: inProcessTransport({ handler: withHandshake(handlerB) }),
+    });
     await clientB.connect();
     await clientB.session("sess-x").send({ messages: [{ role: "user", content: "hi" }] }).result;
     await clientB.close();
@@ -74,7 +78,9 @@ describe("client.send(sessionId, input) shortcut", () => {
 
   it("returns the canonical SessionExecutionHandle shape", async () => {
     const { handler } = makeHandler();
-    const client = await createClient({ transport: inProcessTransport({ handler }) });
+    const client = await createClient({
+      transport: inProcessTransport({ handler: withHandshake(handler) }),
+    });
     await client.connect();
     const handle = client.send("sess-x", { messages: [{ role: "user", content: "hi" }] });
     expect(typeof handle.abort).toBe("function");

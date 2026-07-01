@@ -301,7 +301,7 @@ export interface InitializeParams extends WireRequestParams {
   /** Wire protocol version client speaks. Currently the only value is
    *  the literal "v1"; future incompatible changes bump. */
   readonly protocolVersion: "v1";
-  readonly capabilities: ClientCapabilities;
+  readonly capabilities: ClientHandshakeCapabilities;
   readonly clientInfo: { readonly name: string; readonly version: string };
 }
 
@@ -315,10 +315,16 @@ export interface InitializeResult {
 }
 
 /**
- * Capability flags advertised by either side. Open for declaration-merge
- * extension as adopters add new capabilities.
+ * Handshake capability flags the client advertises to the server in
+ * the `initialize.capabilities` field. Distinct from the client-side
+ * aggregation type `ClientCapabilities` (see
+ * `@agentick/spec-next/client/capabilities.ts`) which is the CLIENT's
+ * view of the SERVER's capabilities plus registered extensions.
+ *
+ * Open for declaration-merge extension as adopters add new
+ * capabilities.
  */
-export interface ClientCapabilities {
+export interface ClientHandshakeCapabilities {
   /** Client supports cursor-based resume on reconnect. */
   readonly cursorResume?: boolean;
   /** Client can render Streamable HTTP SSE responses. */

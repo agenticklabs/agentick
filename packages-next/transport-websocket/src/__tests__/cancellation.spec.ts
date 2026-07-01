@@ -52,6 +52,38 @@ describe("WebSocket transport — notifications/cancelled", () => {
             return;
           }
           received.push(frame);
+          // Handshake short-circuit — client.connect() issues
+          // initialize + _extensions/list before any user RPC.
+          if ("id" in frame && frame.method === "initialize") {
+            ws.send(
+              JSON.stringify({
+                jsonrpc: "2.0",
+                id: frame.id,
+                result: {
+                  protocolVersion: "v1",
+                  capabilities: {
+                    cursorResume: true,
+                    subscriptions: true,
+                    progress: true,
+                    cancellation: true,
+                  },
+                  serverInfo: { name: "test-ws", version: "0.0.0" },
+                  connectionId: `conn-${Date.now()}`,
+                },
+              }),
+            );
+            return;
+          }
+          if ("id" in frame && frame.method === "_extensions/list") {
+            ws.send(
+              JSON.stringify({
+                jsonrpc: "2.0",
+                id: frame.id,
+                result: { extensions: [] },
+              }),
+            );
+            return;
+          }
           // Respond to the request after a short delay so the client has
           // time to issue the cancellation before the response arrives.
           if ("id" in frame && frame.method === "ping") {

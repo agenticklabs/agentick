@@ -22,6 +22,7 @@ import type {
   GatewayHandle,
   SessionHandle,
 } from "./handles.js";
+import type { ClientCapabilities, ServerInfo } from "./capabilities.js";
 import type { ClientState } from "./state.js";
 import type { ClientTransport } from "./transport.js";
 
@@ -48,6 +49,33 @@ export interface ClientProtocol {
   readonly id: string;
   readonly state: ClientState;
   readonly transport: ClientTransport;
+
+  // ── capability surface (populated by connect handshake) ────────────────
+
+  /**
+   * Server identity + protocol version + connection id, populated by
+   * the `initialize` handshake in `connect()`. `undefined` before
+   * connect resolves and after disconnect.
+   *
+   * @see docs/proposals/v2/blueprint/46-wire-extensions.md §"Capability discovery"
+   */
+  readonly serverInfo: ServerInfo | undefined;
+
+  /**
+   * View of what the connected gateway supports — framework-level
+   * flags from `initialize` and wire-extension enumeration from
+   * `_extensions/list`. Empty before connect / after disconnect;
+   * repopulated on reconnect.
+   *
+   * Adopter usage pattern:
+   *
+   * ```ts
+   * if (client.capabilities.hasMethod("mcpClients/reauthenticate")) {
+   *   showConnectButton();
+   * }
+   * ```
+   */
+  readonly capabilities: ClientCapabilities;
 
   // ── connection lifecycle ────────────────────────────────────────────────
   connect(): Promise<void>;

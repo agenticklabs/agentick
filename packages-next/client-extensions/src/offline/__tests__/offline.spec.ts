@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import type { JsonRpcRequest, JsonRpcResponse } from "@agentick/spec-next";
 import { createClient } from "@agentick/client-next";
-import { inProcessTransport } from "@agentick/transport-in-process-next";
+import { inProcessTransport, withHandshake } from "@agentick/transport-in-process-next";
 
 import { offline, InMemoryOfflineStore } from "../index.js";
 
@@ -18,7 +18,7 @@ describe("offline middleware", () => {
       result: {},
     });
     const client = await createClient({
-      transport: inProcessTransport({ handler }),
+      transport: inProcessTransport({ handler: withHandshake(handler) }),
       extensions: [offline()],
     });
     // Don't connect — transport state is "idle".
@@ -36,7 +36,7 @@ describe("offline middleware", () => {
     };
     const store = new InMemoryOfflineStore();
     const client = await createClient({
-      transport: inProcessTransport({ handler }),
+      transport: inProcessTransport({ handler: withHandshake(handler) }),
       extensions: [offline({ methods: { ping: "queue" }, store })],
     });
 
@@ -63,7 +63,7 @@ describe("offline middleware", () => {
       result: {},
     });
     const client = await createClient({
-      transport: inProcessTransport({ handler }),
+      transport: inProcessTransport({ handler: withHandshake(handler) }),
       extensions: [offline({ methods: { ping: "never" } })],
     });
 
@@ -81,7 +81,7 @@ describe("offline middleware", () => {
       result: {},
     });
     const client = await createClient({
-      transport: inProcessTransport({ handler }),
+      transport: inProcessTransport({ handler: withHandshake(handler) }),
       extensions: [offline({ methods: { ping: "queue" } })],
     });
 
@@ -107,7 +107,7 @@ describe("offline middleware", () => {
       error: { code: -32011, message: "fail" },
     });
     const client = await createClient({
-      transport: inProcessTransport({ handler }),
+      transport: inProcessTransport({ handler: withHandshake(handler) }),
       extensions: [
         offline({
           methods: { ping: "queue" },

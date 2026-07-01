@@ -7,7 +7,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { JsonRpcRequest, JsonRpcResponse } from "@agentick/spec-next";
 import { createClient } from "@agentick/client-next";
-import { inProcessTransport } from "@agentick/transport-in-process-next";
+import { inProcessTransport, withHandshake } from "@agentick/transport-in-process-next";
 
 import { cache, LruCacheStore } from "../index.js";
 
@@ -22,10 +22,11 @@ describe("cache middleware", () => {
       return { jsonrpc: "2.0", id: req.id, result: {} };
     };
     const client = await createClient({
-      transport: inProcessTransport({ handler }),
+      transport: inProcessTransport({ handler: withHandshake(handler) }),
       extensions: [cache({ methods: { "gateway/listApps": { ttlMs: 60_000 } } })],
     });
     await client.connect();
+    calls = 0;
 
     await client.gateway().listApps();
     await client.gateway().listApps();
@@ -48,10 +49,11 @@ describe("cache middleware", () => {
       return { jsonrpc: "2.0", id: req.id, result: { apps: [] } };
     };
     const client = await createClient({
-      transport: inProcessTransport({ handler }),
+      transport: inProcessTransport({ handler: withHandshake(handler) }),
       extensions: [cache({ methods: { "gateway/listApps": { ttlMs: 1000 } } })],
     });
     await client.connect();
+    calls = 0;
 
     await client.gateway().listApps();
     expect(calls).toBe(1);
@@ -76,10 +78,11 @@ describe("cache middleware", () => {
       return { jsonrpc: "2.0", id: req.id, result: { id: params.appId } };
     };
     const client = await createClient({
-      transport: inProcessTransport({ handler }),
+      transport: inProcessTransport({ handler: withHandshake(handler) }),
       extensions: [cache({ methods: { "gateway/getApp": { ttlMs: 60_000 } } })],
     });
     await client.connect();
+    calls = 0;
 
     await client.gateway().getApp("a");
     await client.gateway().getApp("a");
@@ -96,10 +99,11 @@ describe("cache middleware", () => {
       return { jsonrpc: "2.0", id: req.id, result: { apps: [] } };
     };
     const client = await createClient({
-      transport: inProcessTransport({ handler }),
+      transport: inProcessTransport({ handler: withHandshake(handler) }),
       extensions: [cache({ methods: { "gateway/listApps": { ttlMs: 60_000 } } })],
     });
     await client.connect();
+    calls = 0;
 
     // Two requests with same logical params but different `_meta`
     // entries — should be a cache hit on the second.
@@ -135,7 +139,7 @@ describe("cache middleware", () => {
       return { jsonrpc: "2.0", id: req.id, result: { id: "x" } };
     };
     const client = await createClient({
-      transport: inProcessTransport({ handler }),
+      transport: inProcessTransport({ handler: withHandshake(handler) }),
       extensions: [
         cache({
           methods: {
@@ -148,6 +152,7 @@ describe("cache middleware", () => {
       ],
     });
     await client.connect();
+    calls = 0;
 
     await client.gateway().getApp("a");
     await client.gateway().getApp("a");
@@ -163,7 +168,7 @@ describe("cache middleware", () => {
       result: { ok: true },
     });
     const client = await createClient({
-      transport: inProcessTransport({ handler }),
+      transport: inProcessTransport({ handler: withHandshake(handler) }),
       extensions: [
         cache({
           methods: { "gateway/listApps": { ttlMs: 60_000 } },

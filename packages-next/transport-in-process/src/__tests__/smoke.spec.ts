@@ -2,7 +2,7 @@ import { createClient } from "@agentick/client-next";
 import type { JsonRpcRequest, JsonRpcResponse } from "@agentick/spec-next";
 import { ErrorCode } from "@agentick/spec-next";
 import { describe, expect, it } from "vitest";
-import { inProcessTransport } from "../index.js";
+import { inProcessTransport, withHandshake } from "../index.js";
 
 /**
  * Phase 33.B smoke — client → in-process transport → stub handler.
@@ -136,7 +136,7 @@ describe("client-next + in-process transport smoke", () => {
     const { handler } = makeStubHandler();
     const observed: string[] = [];
     const client = await createClient({
-      transport: inProcessTransport({ handler }),
+      transport: inProcessTransport({ handler: withHandshake(handler) }),
       extensions: [
         {
           name: "observer",
@@ -150,6 +150,10 @@ describe("client-next + in-process transport smoke", () => {
       ],
     });
     await client.connect();
+    // Filter to just the test's method-of-interest — connect() runs
+    // the initialize + _extensions/list handshake, which middleware
+    // ALSO sees (correctly: it's an all-request pipeline).
+    observed.length = 0;
     await client.request("ping", {});
     expect(observed).toEqual(["before:ping", "after:ping"]);
     await client.close();
@@ -160,7 +164,7 @@ describe("client-next + in-process transport smoke", () => {
     type CounterApi = { value(): number; increment(): void };
     let counter = 0;
     const client = await createClient({
-      transport: inProcessTransport({ handler }),
+      transport: inProcessTransport({ handler: withHandshake(handler) }),
       extensions: [
         {
           name: "counter",
@@ -188,7 +192,7 @@ describe("client-next + in-process transport smoke", () => {
     const { handler } = makeStubHandler();
     const order: string[] = [];
     const client = await createClient({
-      transport: inProcessTransport({ handler }),
+      transport: inProcessTransport({ handler: withHandshake(handler) }),
       extensions: [
         {
           name: "first",

@@ -15,6 +15,7 @@ import { LocalEventBus } from "@agentick/runtime-next";
 import type {
   Client,
   ClientAuthSurface,
+  ClientCapabilities,
   ClientEvent,
   ClientEventFilter,
   ClientExtension,
@@ -24,16 +25,25 @@ import type {
   ClientTransport,
   Cursor,
   EventBus,
+  ExtensionsListResult,
   GatewayHandle,
+  InitializeResult,
   SendInput,
+  ServerInfo,
   WireMethod,
   WireParams,
   WireResult,
 } from "@agentick/spec-next";
+import { EMPTY_CLIENT_CAPABILITIES, ErrorCode } from "@agentick/spec-next";
 import { createNotifier } from "@agentick/pubsub-next";
+import { buildClientCapabilities } from "./capabilities.js";
 import { ClientHandlerRegistry } from "./handler-registry.js";
 import { makeAppHandle, makeGatewayHandle, makeSessionHandle } from "./handles.js";
 import { composeRequest } from "./pipeline.js";
+
+/** Fixed client identity broadcast in `initialize.clientInfo`. */
+const CLIENT_NAME = "@agentick/client-next";
+const CLIENT_VERSION = "0.0.0";
 
 let clientCounter = 0;
 
@@ -72,6 +82,8 @@ class AgentickClient implements ClientProtocol {
   private readonly namespaces = new Map<string, unknown>();
 
   private currentState: ClientState = "idle";
+  private _capabilities: ClientCapabilities = EMPTY_CLIENT_CAPABILITIES;
+  private _serverInfo: ServerInfo | undefined = undefined;
 
   constructor(options: CreateClientOptions) {
     this.id = options.id ?? `client-${++clientCounter}`;
@@ -94,6 +106,14 @@ class AgentickClient implements ClientProtocol {
       this.currentState = s;
       this.publishConnectionEvent(previous, s);
       this.stateListeners.notify(s);
+      // Clear stale capabilities when the wire drops. Repopulated by
+      // the handshake on next successful connect. `reconnecting`
+      // also clears — the peer we come back to may have restarted
+      // with a different extension set.
+      if (s === "reconnecting" || s === "closed" || isFailedState(s)) {
+        this._capabilities = EMPTY_CLIENT_CAPABILITIES;
+        this._serverInfo = undefined;
+      }
     });
 
     // Auth surface seed — ADR 34 fills this in.
@@ -120,8 +140,78 @@ class AgentickClient implements ClientProtocol {
     return this.currentState;
   }
 
+  get capabilities(): ClientCapabilities {
+    return this._capabilities;
+  }
+
+  get serverInfo(): ServerInfo | undefined {
+    return this._serverInfo;
+  }
+
+  /**
+   * Open the transport, run the post-connect handshake, and populate
+   * `client.capabilities` + `client.serverInfo`.
+   *
+   * The handshake is TWO RPCs, in order:
+   *
+   *   1. `initialize` — protocol-version negotiation + framework-flag
+   *      capabilities + server info.
+   *   2. `_extensions/list` — wire-extension enumeration for feature-
+   *      gating.
+   *
+   * Failure semantics:
+   *   - `initialize` failure rejects `connect()` — the client can't
+   *     talk to the gateway without a completed handshake.
+   *   - `_extensions/list` `MethodNotFound` is tolerated silently —
+   *     older gateways don't implement the discovery method; the
+   *     extension list stays empty and `hasMethod`/`hasNamespace`
+   *     return false.
+   *
+   * @verifiedBy src/__tests__/capabilities.spec.ts
+   */
   async connect(): Promise<void> {
     await this.transport.connect();
+
+    // Both handshake methods tolerate MethodNotFound (older-server /
+    // stub-transport compat): the client falls back to empty
+    // capabilities and empty server info in that case. Every other
+    // failure mode is propagated to the caller — we can't silently
+    // paper over a broken handshake.
+    let initResult: InitializeResult | undefined;
+    try {
+      initResult = await this.request("initialize", {
+        protocolVersion: "v1",
+        capabilities: {},
+        clientInfo: { name: CLIENT_NAME, version: CLIENT_VERSION },
+      });
+    } catch (err) {
+      if (!isMethodNotFound(err)) throw err;
+    }
+    if (initResult) this.applyInitializeResult(initResult);
+
+    try {
+      const listResult = await this.request("_extensions/list", {});
+      this.applyExtensionsList(initResult?.capabilities ?? {}, listResult);
+    } catch (err) {
+      if (!isMethodNotFound(err)) throw err;
+    }
+  }
+
+  private applyInitializeResult(result: InitializeResult): void {
+    this._serverInfo = {
+      name: result.serverInfo.name,
+      version: result.serverInfo.version,
+      protocolVersion: result.protocolVersion,
+      connectionId: result.connectionId,
+    };
+    this._capabilities = buildClientCapabilities(result.capabilities, []);
+  }
+
+  private applyExtensionsList(
+    framework: import("@agentick/spec-next").ServerCapabilities,
+    listResult: ExtensionsListResult,
+  ): void {
+    this._capabilities = buildClientCapabilities(framework, listResult.extensions);
   }
 
   async close(): Promise<void> {
@@ -211,6 +301,29 @@ class AgentickClient implements ClientProtocol {
     // Deferred — see events() comment. State listeners (added via
     // onStateChange) work today; bus-emitted events arrive in follow-up.
   }
+}
+
+/** True when the ClientState value is the failed-object variant. */
+function isFailedState(s: ClientState): boolean {
+  return typeof s === "object" && s !== null && "kind" in s && s.kind === "failed";
+}
+
+/**
+ * True when the caught error surfaces as a JSON-RPC `MethodNotFound`.
+ * Handles the canonical `TransportError` shape from
+ * `@agentick/transport-next` (`{ kind: "rpc", error: { code: -32601 } }`)
+ * plus looser POJO shapes downstream adapters may throw
+ * (`{ code: -32601 }`, `{ rpcError: { code: -32601 } }`).
+ */
+function isMethodNotFound(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const e = err as {
+    code?: unknown;
+    error?: { code?: unknown };
+    rpcError?: { code?: unknown };
+  };
+  const codes = [e.code, e.error?.code, e.rpcError?.code];
+  return codes.some((c) => c === ErrorCode.MethodNotFound);
 }
 
 /**

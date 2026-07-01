@@ -18,3 +18,9 @@ export {
   type InProcessTransportOptions,
   type InProcessGatewayHandler,
 } from "./transport.js";
+export {
+  withHandshake,
+  buildHandshakeInitializeResult,
+  buildHandshakeExtensionsListResult,
+  type WithHandshakeOverrides,
+} from "./handshake.js";
