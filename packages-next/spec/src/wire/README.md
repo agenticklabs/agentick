@@ -34,11 +34,30 @@ validator).
   view for capability discovery (Phase D wires this into
   `client.capabilities`).
 
-**Framework methods refactor into `WireExtension` values** — the
-Phase C follow-up inside #295 — is next. Capability discovery
-(#296), composite extension factories (#297), the canonical
-`mcpControlWireExtension` first-user (#298), and the conformance
-helper (#299) land in subsequent phases per ADR 46.
+**Phase C of #280 (Framework methods as wire extensions) — landed
+(#295).**
+
+- `gatewayWireExtension` (`gateway/listApps`, `gateway/getApp`),
+  `appWireExtension` (`app/createSession`, `app/getSession`,
+  `app/listSessions`), `sessionWireExtension`
+  (`session/dispatch`, `session/abort`, `session/close`,
+  `session/respondToElicitation`) ship in `@agentick/gateway-next`
+  and register as defaults on every `GatewayHarness`.
+- Framework extensions register BEFORE adopter-supplied extensions.
+  Adopter attempts to claim `gateway` / `app` / `session`
+  namespaces surface as `WireExtensionDefinitionError` at
+  construction — no silent shadowing.
+- Corresponding hardcoded cases deleted from the transport
+  dispatcher.
+- **Streaming methods (`session/send`, `subscribe`, `unsubscribe`)
+  remain hardcoded** — they need transport-level primitives
+  (`sink.sendNotification`, `sink.registerInFlight`,
+  `sink.registerSubscription`) not yet on `WireExtensionContext`.
+  Refactor lands with #303 (streaming primitives).
+
+Capability discovery (#296), composite extension factories (#297),
+the canonical `mcpControlWireExtension` first-user (#298), and the
+conformance helper (#299) land in subsequent phases per ADR 46.
 
 ---
 
@@ -250,10 +269,9 @@ extensions can't claim it. The validator rejects.
 ## Roadmap & known gaps
 
 - ✅ #295 Phase B — dispatcher + registry (**landed**).
-- ⏳ #295 Phase C — refactor framework methods (`gateway/*`,
-  `app/*`, `session/*`) into framework-supplied `WireExtension`
-  values; delete corresponding hardcoded switch cases from the
-  transport dispatcher.
+- ✅ #295 Phase C — non-streaming framework methods refactored into
+  `WireExtension` values (**landed**). Streaming methods deferred
+  to #303.
 - ⏳ #296 — Capability discovery + `client.capabilities` (Phase D).
 - ⏳ #297 — Composite extension factory shape — `withX` returns
   multi-scope objects (Phase E). Depends on #254 (Gateway extensions
@@ -271,6 +289,11 @@ extensions can't claim it. The validator rejects.
   gains the logical dispatch entry point).
 - ⏳ #302 — `authWireExtension` — builds alongside ADR 33 auth
   subsystem; today's `auth/*` methods are type-stubs only.
+- ⏳ #303 — Extend `WireExtensionContext` with transport-level
+  primitives (`reportProgress`, `registerCancel`,
+  `registerSubscription`) so `session/send`, `subscribe`,
+  `unsubscribe` can also become `WireExtension` values. Completes
+  the eat-our-own-dogfood commitment.
 - ⚠ Phase B design items deferred to later phases:
   - `ctx.bridges()` returns `{}` for Phase B — no framework
     extension needs it yet. Phase F (mcpControlWireExtension) is

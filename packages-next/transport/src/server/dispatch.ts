@@ -9,10 +9,6 @@
 
 import {
   ErrorCode,
-  type AppCreateSessionParams,
-  type AppGetSessionParams,
-  type AppHarnessProtocol,
-  type AppListSessionsParams,
   type EventEnvelope,
   type ExtensionsListResult,
   type GatewayHarnessProtocol,
@@ -22,11 +18,7 @@ import {
   type JsonRpcId,
   type JsonRpcRequest,
   type JsonRpcResponse,
-  type SessionAbortParams,
-  type SessionCloseParams,
-  type SessionDispatchParams,
   type SessionHarnessProtocol,
-  type SessionRespondToElicitationParams,
   type SessionSendParams,
   type SubscribeParams,
   type UnsubscribeParams,
@@ -37,7 +29,6 @@ import {
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Stream from "effect/Stream";
-import { omitUndefined } from "@agentick/utils-next";
 
 /**
  * A `DispatchHost` is anything that satisfies `GatewayHarnessProtocol`.
@@ -84,9 +75,10 @@ export async function dispatchRequest(
       }
     }
 
-    // Registry-based dispatch — Phase B. Adopter-supplied wire
-    // extensions (and, post-Phase-C, framework-supplied ones)
-    // resolve here before falling through to the hardcoded switch.
+    // Registry-based dispatch. Framework-supplied extensions
+    // (gateway/*, app/*, session/*) register on GatewayHarness
+    // construction; adopter-supplied extensions register after.
+    // Both resolve through this single path.
     const registry = host.wireExtensions?.();
     if (registry) {
       const resolution = registry.resolve(req.method);
@@ -97,107 +89,17 @@ export async function dispatchRequest(
       }
     }
 
+    // Hardcoded switch — streaming methods that need transport-level
+    // primitives (`sink.sendNotification`, `sink.registerInFlight`,
+    // `sink.registerSubscription`) not yet exposed on
+    // `WireExtensionContext`. Refactor into wire extensions lands
+    // with #303.
     switch (req.method) {
-      case "gateway/listApps":
-        return success(req.id, {
-          apps: host.apps().map((a) => ({ id: a.id })),
-        });
-      case "gateway/getApp": {
-        const params = req.params as { appId: string };
-        const app = host.app(params.appId);
-        if (!app)
-          return errorResponse(req.id, ErrorCode.AppNotFound, "app not found", {
-            appId: params.appId,
-          });
-        return success(req.id, { id: app.id });
-      }
-      case "app/createSession": {
-        const params = req.params as AppCreateSessionParams;
-        const app = requireApp(host, params.appId);
-        if (isError(app)) return errorResponse(req.id, app.code, app.message, app.data);
-        const session = await app.createSession({
-          sessionId: params.sessionId,
-          metadata: params.metadata,
-        });
-        return success(req.id, { sessionId: session.id });
-      }
-      case "app/getSession": {
-        const params = req.params as AppGetSessionParams;
-        const app = requireApp(host, params.appId);
-        if (isError(app)) return errorResponse(req.id, app.code, app.message, app.data);
-        const entry = app.listSessions().find((e) => e.id === params.sessionId);
-        if (!entry) {
-          return errorResponse(req.id, ErrorCode.SessionNotFound, "session not found", {
-            appId: params.appId,
-            sessionId: params.sessionId,
-          });
-        }
-        return success(req.id, entry);
-      }
-      case "app/listSessions": {
-        const params = req.params as AppListSessionsParams;
-        const app = requireApp(host, params.appId);
-        if (isError(app)) return errorResponse(req.id, app.code, app.message, app.data);
-        return success(req.id, { sessions: app.listSessions(params.filter) });
-      }
       case "session/send": {
         const params = req.params as SessionSendParams;
         const sess = requireSession(host, params.sessionId);
         if (isError(sess)) return errorResponse(req.id, sess.code, sess.message, sess.data);
         return dispatchSessionSend(req.id, sess, params, sink);
-      }
-      case "session/dispatch": {
-        const params = req.params as SessionDispatchParams;
-        const sess = requireSession(host, params.sessionId);
-        if (isError(sess)) return errorResponse(req.id, sess.code, sess.message, sess.data);
-        const content = await sess.dispatch(params.tool, params.input as Record<string, unknown>);
-        return success(req.id, { content });
-      }
-      case "session/abort": {
-        // SessionHarnessProtocol exposes abort() on the SessionExecutionHandle
-        // returned from send(), not on the session itself. Wiring session-level
-        // abort requires per-session active-handle tracking on the server adapter.
-        // Deferred — Phase 33.C ships the wire method; the adapter tracking
-        // lands when the GatewayExtension wrapper is built.
-        const params = req.params as SessionAbortParams;
-        const sess = requireSession(host, params.sessionId);
-        if (isError(sess)) return errorResponse(req.id, sess.code, sess.message, sess.data);
-        return success(req.id, null);
-      }
-      case "session/close": {
-        const params = req.params as SessionCloseParams;
-        const sess = requireSession(host, params.sessionId);
-        if (isError(sess)) return errorResponse(req.id, sess.code, sess.message, sess.data);
-        await sess.close();
-        return success(req.id, null);
-      }
-      case "session/respondToElicitation": {
-        const params = req.params as SessionRespondToElicitationParams;
-        const sess = requireSession(host, params.sessionId);
-        if (isError(sess)) return errorResponse(req.id, sess.code, sess.message, sess.data);
-        // The elicitation slot on `SessionHarnessProtocol` is added by
-        // `@agentick/elicitation-next` via module augmentation, but
-        // transport is a foundation-layer package and intentionally
-        // does NOT depend on elicitation-next (would invert the
-        // dependency direction). Cast to a local typed shape that
-        // captures the contract we need — every conforming session
-        // surfaces this slot via the augmentation at adopter-side.
-        const sessElic = sess as SessionHarnessProtocol & {
-          readonly elicitation: {
-            respond(input: {
-              readonly correlationId: string;
-              readonly outcome: "accepted" | "declined" | "cancelled";
-              readonly value?: unknown;
-              readonly reason?: string;
-            }): Promise<void>;
-          };
-        };
-        await sessElic.elicitation.respond({
-          correlationId: params.correlationId,
-          outcome: params.outcome,
-          ...omitUndefined({ value: params.value, reason: params.reason }),
-        });
-        return success(req.id, null);
       }
       case "subscribe": {
         const params = req.params as SubscribeParams;
@@ -471,18 +373,6 @@ function isError<T>(
   v: Located<T>,
 ): v is { __error: true; code: number; message: string; data?: unknown } {
   return typeof v === "object" && v !== null && "__error" in v;
-}
-
-function requireApp(gateway: GatewayHarnessProtocol, appId: string): Located<AppHarnessProtocol> {
-  const app = gateway.app(appId);
-  if (!app)
-    return {
-      __error: true,
-      code: ErrorCode.AppNotFound,
-      message: "app not found",
-      data: { appId },
-    };
-  return app;
 }
 
 function requireSession(

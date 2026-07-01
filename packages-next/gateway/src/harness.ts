@@ -54,6 +54,7 @@ import {
   toRegistration,
 } from "@agentick/spec-next";
 import { createWireExtensionRegistry } from "./wire-registry.js";
+import { appWireExtension, gatewayWireExtension, sessionWireExtension } from "./wire/index.js";
 import { mergeLayered } from "@agentick/utils-next";
 import { AppHarness, type AppHarnessOptions } from "@agentick/app-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
@@ -181,12 +182,16 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
       toRegistration(decl, { scope: "gateway" }),
     );
 
-    // Build + seal the wire-extension registry. Adopter-supplied
-    // extensions register here at construction. Phase C will also
-    // register framework-supplied extensions (gateway/*, app/*,
-    // session/*) here, replacing the corresponding hardcoded cases
-    // in the transport dispatcher.
+    // Build + seal the wire-extension registry. Framework-supplied
+    // extensions register FIRST — adopter attempts to claim
+    // `gateway` / `app` / `session` namespaces then fail at
+    // construction with a clear conflict error instead of silently
+    // shadowing framework methods. Adopter-supplied extensions
+    // register after.
     this._wireExtensions = createWireExtensionRegistry();
+    for (const ext of [gatewayWireExtension, appWireExtension, sessionWireExtension]) {
+      this._wireExtensions.register(ext);
+    }
     for (const ext of options.wireExtensions ?? []) {
       this._wireExtensions.register(ext);
     }

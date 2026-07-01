@@ -913,18 +913,33 @@ Delivered:
   when the extension didn't declare a notifications array at all,
   or when the requested name isn't in it.
 
-**Phase C — framework methods refactor.**
+**Phase C — framework methods refactor. ✅ LANDED (#295 Phase C).**
 
-- Author `gatewayWireExtension`, `appWireExtension`,
-  `sessionWireExtension` — each contains the current hardcoded
-  dispatch logic for its namespace.
-- Register these as framework defaults on `GatewayHarness`
-  construction, BEFORE adopter-supplied extensions (so adopter
-  attempts to claim `gateway`/`app`/`session` namespaces fail
-  at construction).
-- Delete corresponding hardcoded cases from the transport dispatcher.
-- Keep `subscribe`/`unsubscribe` + `auth/*` hardcoded — deferred to
-  #300 (namespace rename) and #302 (ADR 33 subsystem).
+Non-streaming framework methods now flow through the same wire
+extension registry adopters use:
+
+- `gatewayWireExtension` — `gateway/listApps`, `gateway/getApp`.
+- `appWireExtension` — `app/createSession`, `app/getSession`,
+  `app/listSessions`.
+- `sessionWireExtension` — `session/dispatch`, `session/abort`,
+  `session/close`, `session/respondToElicitation`.
+
+Registered as framework defaults on `GatewayHarness` construction,
+BEFORE adopter-supplied extensions. Adopter attempts to claim
+`gateway` / `app` / `session` namespaces surface as
+`WireExtensionDefinitionError` at construction — no silent
+shadowing.
+
+Streaming methods stay hardcoded pending #303:
+
+- `session/send` — uses `sink.sendNotification` for progress frames
+  - `sink.registerInFlight` for cancellation
+- `subscribe` / `unsubscribe` — use `sink.registerSubscription` for
+  the event fan-out; also awaiting #300 rename to `sub/subscribe` +
+  `sub/unsubscribe`
+
+`auth/*` remains type-stubs only — refactor lands with #302
+alongside the ADR 33 auth subsystem.
 
 **Phase D — capability discovery + client.capabilities.**
 
