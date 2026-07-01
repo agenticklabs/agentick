@@ -34,6 +34,7 @@
  */
 
 import type { ToolDeclaration, Unsubscribe } from "@agentick/spec-next";
+import { createNotifier } from "@agentick/pubsub-next";
 
 /**
  * A mutable collection of tool declarations with change notifications.
@@ -107,28 +108,17 @@ export interface MutableToolCatalog extends ToolCatalog {
 export function createToolCatalog(initial: readonly ToolDeclaration[] = []): MutableToolCatalog {
   const byName = new Map<string, ToolDeclaration>();
   for (const decl of initial) byName.set(decl.name, decl);
-  const listeners = new Set<() => void>();
-
-  const notify = (): void => {
-    // Snapshot listeners so removal-during-fire is safe.
-    for (const l of Array.from(listeners)) {
-      try {
-        l();
-      } catch {
-        /* per-listener isolation — one throwing listener cannot block siblings */
-      }
-    }
-  };
+  // Foundational single-channel notifier — snapshot-on-fire +
+  // per-listener error isolation, same as every other harness change
+  // fan-out (credentials, knobs, prompts, ...). No hand-rolled Set.
+  const changes = createNotifier();
 
   return {
     list(): readonly ToolDeclaration[] {
       return Array.from(byName.values());
     },
     subscribeAll(listener) {
-      listeners.add(listener);
-      return () => {
-        listeners.delete(listener);
-      };
+      return changes.subscribe(listener);
     },
     register(declaration) {
       if (byName.has(declaration.name)) {
@@ -137,21 +127,21 @@ export function createToolCatalog(initial: readonly ToolDeclaration[] = []): Mut
         );
       }
       byName.set(declaration.name, declaration);
-      notify();
+      changes.notify();
     },
     remove(name) {
       if (!byName.has(name)) return;
       byName.delete(name);
-      notify();
+      changes.notify();
     },
     replace(declaration) {
       byName.set(declaration.name, declaration);
-      notify();
+      changes.notify();
     },
     setAll(declarations) {
       byName.clear();
       for (const decl of declarations) byName.set(decl.name, decl);
-      notify();
+      changes.notify();
     },
   };
 }

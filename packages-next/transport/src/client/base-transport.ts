@@ -110,13 +110,6 @@ export abstract class BaseClientTransport implements ClientTransport {
   protected currentState: ClientState = "idle";
   private readonly stateListeners = createNotifier<ClientState>();
 
-  // Generic notification observers keyed by method name — the fallback
-  // path for `routeNotification`. Progress + subscription frames are
-  // handled by the dedicated stream registries above; everything else
-  // (auth/expired, capabilities/changed, future notifications) fans out
-  // through this map.
-  private readonly notificationHandlers = new Map<string, Set<(params: unknown) => void>>();
-
   // RPC correlation
   private nextRequestId = 1;
   protected readonly pending = new Map<
@@ -443,51 +436,12 @@ export abstract class BaseClientTransport implements ClientTransport {
         this.activeSubscriptions.delete(subId);
         return;
       }
-      default: {
-        // Fallback path — anything the transport doesn't handle
-        // intrinsically fans out to `onNotification` subscribers keyed
-        // by method. `params` may legitimately be `undefined` for
-        // bare-payload notifications (capabilities/changed, initialized).
-        const listeners = this.notificationHandlers.get(method);
-        if (!listeners) return;
-        for (const l of listeners) {
-          try {
-            l(paramsRaw);
-          } catch {
-            /* swallow — a bad listener must not poison the routing loop */
-          }
-        }
+      default:
+        // Unrecognized notification — no dedicated stream, no handler.
+        // Silently ignored (forward-compat: a newer server may emit
+        // frames this client doesn't model).
         return;
-      }
     }
-  }
-
-  /**
-   * Subscribe to arbitrary server-emitted notifications by method name.
-   * Unlike `notifications/progress` and `notifications/subscription/*`
-   * (which route to stream registries), everything reaching this
-   * subscriber is a fire-and-forget frame — auth/expired,
-   * capabilities/changed, and adopter-declared extension notifications.
-   *
-   * Multiple listeners per method are allowed; each is called in
-   * registration order. A throwing listener is caught and does not
-   * poison siblings.
-   *
-   * Returns an unsubscribe.
-   */
-  onNotification(method: string, listener: (params: unknown) => void): () => void {
-    let set = this.notificationHandlers.get(method);
-    if (!set) {
-      set = new Set();
-      this.notificationHandlers.set(method, set);
-    }
-    set.add(listener);
-    return () => {
-      const s = this.notificationHandlers.get(method);
-      if (!s) return;
-      s.delete(listener);
-      if (s.size === 0) this.notificationHandlers.delete(method);
-    };
   }
 
   // ── helpers for subclasses with reconnect support ────────────────────

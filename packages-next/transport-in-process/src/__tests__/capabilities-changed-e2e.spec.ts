@@ -1,85 +1,53 @@
 /**
- * `notifications/capabilities/changed` end-to-end (#311) — gateway
- * broadcast → in-process transport sink → client
- * `onNotification("notifications/capabilities/changed")` handler →
- * `_extensions/list` refetch → `onCapabilitiesChange` subscriber fires.
+ * Control-plane emit seam end-to-end (ADR 47).
  *
- * The gateway registers its wire-extension set at construction and
- * seals the registry (extensions cannot yet be added at runtime — #308
- * lands that). Here we simulate the mutation by swapping the
- * `_extensions/list` response before triggering
- * `notify`. This exercises the wire-level plumbing
- * without depending on #308's dynamic-registry API.
+ * Proves the SERVER-side + wire mechanism that `emitCapabilitiesChanged`
+ * relies on:
+ *   gateway.emitCapabilitiesChanged()
+ *     → bus.append(gateway:capabilities:changed on surface "gateway")
+ *     → subscriptionsWireExtension drain (a gateway-scope subscription)
+ *     → notifications/subscription/event over the in-process transport
+ *     → subscriber receives the frame
  *
- * Covers:
- *   - Gateway `notify` fans out to every registered sink
- *   - Client refetches `_extensions/list` on the notification
- *   - `client.onCapabilitiesChange` fires with the fresh snapshot
- *   - Multiple connected clients each receive their own notification
- *   - Client `close()` unsubscribes the sink — post-close broadcasts
- *     don't reach that client
+ * The CLIENT does NOT auto-react to this today. Runtime capability
+ * re-sync (the client keeping its own `capabilities` fresh when the
+ * extension set mutates) is deferred to #308 — the registry is sealed
+ * at gateway construction, so `gateway:capabilities:changed` cannot
+ * fire in normal operation yet. This test drives the emit directly and
+ * consumes it via a manual subscription, exactly as the #308-era
+ * client self-maintenance will. See ADR 47.
  */
 
 import { createClient } from "@agentick/client-next";
 import { createGateway } from "@agentick/gateway-next";
-import type {
-  ExtensionsListResult,
-  JsonRpcId,
-  JsonRpcRequest,
-  JsonRpcResponse,
+import {
+  GATEWAY_CAPABILITIES_CHANGED,
+  type JsonRpcId,
+  type JsonRpcRequest,
+  type JsonRpcResponse,
 } from "@agentick/spec-next";
 import { dispatchRequest, type DispatchSink } from "@agentick/transport-next";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { inProcessTransport } from "../index.js";
-import { buildHandshakeInitializeResult } from "../handshake.js";
-
-const ROUND_1: ExtensionsListResult = {
-  extensions: [
-    {
-      name: "@agentick/gateway-next#session",
-      namespace: "session",
-      version: "1.0.0",
-      methods: ["session/send"],
-      notifications: [],
-    },
-  ],
-};
-
-const ROUND_2: ExtensionsListResult = {
-  extensions: [
-    ...ROUND_1.extensions,
-    {
-      name: "@my-org/dynamic",
-      namespace: "dynamic",
-      version: "0.1.0",
-      methods: ["dynamic/thing"],
-      notifications: [],
-    },
-  ],
-};
+import { withHandshake } from "../handshake.js";
 
 async function setup(): Promise<{
   readonly gateway: Awaited<ReturnType<typeof createGateway>>;
-  readonly setListResult: (r: ExtensionsListResult) => void;
-  readonly makeClient: () => ReturnType<typeof createClient>;
+  readonly client: Awaited<ReturnType<typeof createClient>>;
   readonly cleanup: () => Promise<void>;
 }> {
   const gateway = await createGateway();
-  let listResult: ExtensionsListResult = ROUND_1;
-  const initResult = buildHandshakeInitializeResult();
 
-  const handler = async (req: JsonRpcRequest): Promise<JsonRpcResponse> => {
-    if (req.method === "initialize") {
-      return { jsonrpc: "2.0", id: req.id, result: initResult };
-    }
-    if (req.method === "_extensions/list") {
-      return { jsonrpc: "2.0", id: req.id, result: listResult };
-    }
-    // Everything else goes through the real gateway dispatch — none of
-    // it fires in these tests but keep the shape honest for regression.
+  const handler = async (
+    req: JsonRpcRequest,
+    sendNotification: (n: { method: string; params?: unknown }) => void,
+  ): Promise<JsonRpcResponse> => {
+    // sub/subscribe + everything else routes through the real gateway
+    // dispatch; the sink's sendNotification MUST be the transport's
+    // callback so subscription-event frames reach the subscriber.
     const sink: DispatchSink = {
-      sendNotification: () => {},
+      sendNotification,
       registerSubscription: () => {},
       unregisterSubscription: () => {},
       registerInFlight: (_id: JsonRpcId, _abort: () => void) => {},
@@ -88,120 +56,73 @@ async function setup(): Promise<{
     return dispatchRequest(gateway, req, sink);
   };
 
+  const client = await createClient({
+    transport: inProcessTransport({ handler: withHandshake(handler) }),
+  });
+  await client.connect();
+
   return {
     gateway,
-    setListResult: (r) => {
-      listResult = r;
-    },
-    makeClient: () =>
-      createClient({
-        // One-line wiring: pass the gateway directly. The transport
-        // structurally detects `acceptConnection` and installs the
-        // sink itself (with default in-process metadata).
-        transport: inProcessTransport({ handler, serverNotifier: gateway }),
-      }),
+    client,
     cleanup: async () => {
+      await client.close();
       await gateway.close();
     },
   };
 }
 
-describe("notifications/capabilities/changed end-to-end (#311)", () => {
-  it("gateway.notify refreshes the client's capabilities", async () => {
-    const { gateway, setListResult, makeClient, cleanup } = await setup();
-    const client = await makeClient();
-    const snapshots: number[] = [];
-    client.onCapabilitiesChange((c) => snapshots.push(c.extensions.length));
+describe("control-plane emit seam end-to-end (ADR 47)", () => {
+  it("emitCapabilitiesChanged delivers gateway:capabilities:changed over sub/subscribe", async () => {
+    const { gateway, client, cleanup } = await setup();
 
-    await client.connect();
-    expect(client.capabilities.extensions).toHaveLength(1);
-    expect(snapshots).toEqual([1]);
+    // Manual gateway-scope subscription — the shape the #308 client
+    // self-maintenance will open internally.
+    const stream = client.transport.subscribe({ kind: "gateway" }, { surface: "gateway" });
+    const received: string[] = [];
+    void (async () => {
+      for await (const frame of stream) {
+        if (frame.envelope?.name) received.push(frame.envelope.name);
+      }
+    })();
 
-    // Server-side "install" — swap the future list, then broadcast.
-    setListResult(ROUND_2);
-    gateway.notify!({
-      method: "notifications/capabilities/changed",
-      params: {},
+    // Emit inside the poll: `sub/subscribe` establishes the bus
+    // subscriber asynchronously, and bus subscriptions start at the
+    // current head — an event appended before the subscriber attaches
+    // is missed. Re-emitting until one lands sidesteps the
+    // subscribe-then-emit race (a test-only concern; real capability
+    // changes happen long after connect).
+    await vi.waitFor(() => {
+      gateway.emitCapabilitiesChanged!();
+      expect(received).toContain(GATEWAY_CAPABILITIES_CHANGED);
     });
 
-    // Refetch is scheduled via a microtask; give the RPC a tick.
-    await new Promise((r) => setImmediate(r));
-    expect(client.capabilities.extensions).toHaveLength(2);
-    expect(client.capabilities.hasNamespace("dynamic")).toBe(true);
-    expect(snapshots).toEqual([1, 2]);
-
-    await client.close();
+    await stream.close();
     await cleanup();
   });
 
-  it("multi-client: broadcast reaches every connected client", async () => {
-    const { gateway, setListResult, makeClient, cleanup } = await setup();
-    const c1 = await makeClient();
-    const c2 = await makeClient();
-    await c1.connect();
-    await c2.connect();
-    expect(c1.capabilities.extensions).toHaveLength(1);
-    expect(c2.capabilities.extensions).toHaveLength(1);
+  it("fans to every gateway-scope subscriber", async () => {
+    const { gateway, client, cleanup } = await setup();
 
-    setListResult(ROUND_2);
-    gateway.notify!({
-      method: "notifications/capabilities/changed",
-      params: {},
+    const s1 = client.transport.subscribe({ kind: "gateway" }, { surface: "gateway" });
+    const s2 = client.transport.subscribe({ kind: "gateway" }, { surface: "gateway" });
+    const r1: string[] = [];
+    const r2: string[] = [];
+    void (async () => {
+      for await (const f of s1) if (f.envelope?.name) r1.push(f.envelope.name);
+    })();
+    void (async () => {
+      for await (const f of s2) if (f.envelope?.name) r2.push(f.envelope.name);
+    })();
+
+    // Emit inside the poll — see the race note in the first test.
+    await vi.waitFor(() => {
+      gateway.emitCapabilitiesChanged!();
+      expect(r1).toContain(GATEWAY_CAPABILITIES_CHANGED);
+      expect(r2).toContain(GATEWAY_CAPABILITIES_CHANGED);
     });
-    await new Promise((r) => setImmediate(r));
 
-    expect(c1.capabilities.extensions).toHaveLength(2);
-    expect(c2.capabilities.extensions).toHaveLength(2);
-
-    await c1.close();
-    await c2.close();
-    await cleanup();
-  });
-
-  it("client.close unregisters the sink — subsequent broadcasts don't reach it", async () => {
-    const { gateway, setListResult, makeClient, cleanup } = await setup();
-    const c1 = await makeClient();
-    const c2 = await makeClient();
-    await c1.connect();
-    await c2.connect();
-
-    const c1Snapshots: number[] = [];
-    c1.onCapabilitiesChange((c) => c1Snapshots.push(c.extensions.length));
-    const c2Snapshots: number[] = [];
-    c2.onCapabilitiesChange((c) => c2Snapshots.push(c.extensions.length));
-
-    // First broadcast reaches both.
-    setListResult(ROUND_2);
-    gateway.notify!({
-      method: "notifications/capabilities/changed",
-      params: {},
-    });
-    await new Promise((r) => setImmediate(r));
-    expect(c1Snapshots.length).toBeGreaterThanOrEqual(1);
-    expect(c2Snapshots.length).toBeGreaterThanOrEqual(1);
-
-    // Close c1. c2 remains connected.
-    await c1.close();
-    const c1Before = c1Snapshots.length;
-    const c2Before = c2Snapshots.length;
-
-    // Broadcast again — c1's sink is gone, c2 still hears it.
-    setListResult(ROUND_1);
-    gateway.notify!({
-      method: "notifications/capabilities/changed",
-      params: {},
-    });
-    await new Promise((r) => setImmediate(r));
-
-    // c1: no NEW capability-driven snapshot (the close-time empty
-    // snapshot already fired synchronously, so an equal count means
-    // the post-close broadcast did not reach the sink).
-    expect(c1Snapshots.length).toBe(c1Before);
-    // c2: got the refetch.
-    expect(c2Snapshots.length).toBeGreaterThan(c2Before);
-    expect(c2.capabilities.extensions).toHaveLength(1);
-
-    await c2.close();
+    await s1.close();
+    await s2.close();
     await cleanup();
   });
 });

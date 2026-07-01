@@ -35,8 +35,7 @@
   },
   "dependencies": {
     "@agentick/spec-next": "workspace:*",
-    "@agentick/transport-next": "workspace:*",
-    "@agentick/utils-next": "workspace:*"
+    "@agentick/transport-next": "workspace:*"
   },
   "devDependencies": {
     "@agentick/app-next": "workspace:*",

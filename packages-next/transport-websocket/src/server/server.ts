@@ -14,7 +14,6 @@ import type { Server as HttpServer } from "node:http";
 import { WebSocketServer, type WebSocket as WSConnection } from "ws";
 import { ErrorCode, type JsonRpcFrame } from "@agentick/spec-next";
 import { BaseConnectionContext, type DispatchHost } from "@agentick/transport-next";
-import { ulid } from "@agentick/utils-next";
 import { AGENTICK_SUBPROTOCOL, decodeFrame, encodeFrame } from "../shared/codec.js";
 
 export interface WebSocketServerOptions {
@@ -70,20 +69,6 @@ export function websocketServer(options: WebSocketServerOptions): WebSocketServe
     liveSockets.add(ws);
     const ctx = new ConnectionContext(ws, options.gateway);
 
-    // Hand the client-connection to the gateway so `gateway.notify`
-    // can push server-initiated frames to this wire (#311). No-op on
-    // gateways predating #311 that don't expose the seam. Metadata
-    // carries the transport kind + a stable per-connection id so
-    // `notify({to})` filters and the `onDeliveryError` diagnostic
-    // hook can identify the connection.
-    const releaseConnection =
-      options.gateway.acceptConnection?.({
-        metadata: { transport: "websocket", connectionId: `ws:${ulid()}` },
-        deliver: (notification) => {
-          ctx.sendNotification(notification);
-        },
-      }) ?? (() => {});
-
     let alive = true;
     ws.on("pong", () => {
       alive = true;
@@ -110,7 +95,6 @@ export function websocketServer(options: WebSocketServerOptions): WebSocketServe
     ws.on("close", () => {
       clearInterval(heartbeat);
       liveSockets.delete(ws);
-      releaseConnection();
       void ctx.close();
     });
 

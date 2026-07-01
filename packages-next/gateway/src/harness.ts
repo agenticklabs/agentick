@@ -29,8 +29,6 @@ import {
 } from "@agentick/runtime-next";
 import type {
   AppHarnessProtocol,
-  ClientConnection,
-  ClientConnectionMetadata,
   CreateAppInput,
   EventBus,
   EventQuery,
@@ -52,6 +50,7 @@ import type {
 import {
   AppAlreadyExistsError,
   DEFAULT_JOURNALING_POLICY,
+  GATEWAY_CAPABILITIES_CHANGED,
   GatewayClosedError,
   toRegistration,
 } from "@agentick/spec-next";
@@ -119,23 +118,6 @@ export interface GatewayHarnessOptions extends BaseHarnessOptions {
    * cannot be registered post-hoc.
    */
   readonly wireExtensions?: ReadonlyArray<WireExtension>;
-
-  /**
-   * Diagnostic callback invoked when a {@link ClientConnection}'s
-   * `deliver` throws during `notify`. The default logs to
-   * `console.error` — failures are visible by default. Adopters
-   * wanting silence pass `() => {}`; adopters wanting structured
-   * telemetry supply their own hook.
-   *
-   * The gateway does NOT retry, unregister, or otherwise act on the
-   * error — telemetry and remediation are the adopter's call.
-   */
-  readonly onDeliveryError?: (
-    error: unknown,
-    connectionId: string,
-    metadata: ClientConnectionMetadata,
-    notification: { method: string; params: unknown },
-  ) => void;
 }
 
 // ============================================================================
@@ -161,31 +143,6 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
    * {@link wireExtensions} to route incoming JSON-RPC frames.
    */
   private readonly _wireExtensions: WireExtensionRegistry;
-
-  /**
-   * Every currently-connected client, keyed by gateway-assigned
-   * connection id. Transport servers call {@link acceptConnection}
-   * on wire accept and invoke the returned unsubscribe on close.
-   * {@link notify} iterates this map, optionally filtered by
-   * metadata, and delivers the payload to every matching client.
-   *
-   * Deliveries that throw are caught to preserve the "one broken
-   * client must not poison the fan-out" invariant. Errors route
-   * through the adopter-supplied `onDeliveryError` diagnostic hook
-   * (defaults to `console.error` — see {@link GatewayHarnessOptions}).
-   */
-  private readonly connectedClients = new Map<string, ClientConnection>();
-
-  /** Monotonic counter used to mint connection ids. */
-  private nextClientNumber = 0;
-
-  /** Diagnostic hook — defaults to `console.error` when option absent. */
-  private readonly onDeliveryError: (
-    error: unknown,
-    connectionId: string,
-    metadata: ClientConnectionMetadata,
-    notification: { method: string; params: unknown },
-  ) => void;
 
   get id(): string {
     return this.scopeId;
@@ -250,18 +207,6 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
       this._wireExtensions.register(ext);
     }
     this._wireExtensions.seal();
-
-    this.onDeliveryError =
-      options.onDeliveryError ??
-      ((err, connectionId, metadata, notification) => {
-        // Default: log failures visibly so adopters aren't silently
-        // dropping notifications on broken connections. Adopters
-        // wanting silence supply an explicit no-op.
-        console.error(
-          `[gateway ${this.scopeId}] notify delivery to ${connectionId} (${metadata.transport}) failed for ${notification.method}:`,
-          err,
-        );
-      });
   }
 
   /**
@@ -275,59 +220,34 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
   }
 
   /**
-   * Accept a client-connection so the gateway can push server-
-   * initiated notifications to it. Transport servers call this at
-   * accept time, supplying a {@link ClientConnection} that carries
-   * a `deliver` callback plus transport-provided metadata
-   * (transport kind, connection id, optional principal). Returns
-   * an unsubscribe the transport invokes on close.
+   * Emit the control-plane "wire-extension set changed" signal
+   * (ADR 47). Appends a {@link GATEWAY_CAPABILITIES_CHANGED} event to
+   * the gateway bus on the gateway scope. Clients subscribed to the
+   * gateway control-plane scope (every `@agentick/client-next` on
+   * connect) receive it via `notifications/subscription/event` and
+   * refetch `_extensions/list`.
    *
-   * The gateway assigns a stable per-acceptance id used by
-   * `onDeliveryError` diagnostics. Filter-based dispatch (auth-
-   * scoped, tenant-scoped) is enabled by transports populating
-   * `metadata` thoughtfully.
+   * This is the bus-native replacement for the ripped-out `notify`
+   * fan-out. Delivery, replay, reconnect-resume, and per-instance
+   * (per-tenant / per-principal child bus) isolation are the bus's
+   * job — not a bespoke connection registry with a runtime filter.
+   *
+   * #308 (dynamic wire extensions) is the primary caller. Fire it
+   * after mutating the extension set.
    */
-  acceptConnection(connection: ClientConnection): () => void {
-    const connectionId = `client:${this.scopeId}:${++this.nextClientNumber}`;
-    this.connectedClients.set(connectionId, connection);
-    return () => {
-      this.connectedClients.delete(connectionId);
-    };
-  }
-
-  /**
-   * Notify connected clients of a server-initiated event.
-   * `options.to` receives each connection's metadata and returns
-   * `true` to include, `false` to skip — the shape for auth-scoped
-   * pushes, tenant-scoped install/uninstall notifications, and
-   * transport-targeted announcements. No `to` = every connected
-   * client.
-   *
-   * A connection whose `deliver` throws is caught so one broken
-   * client cannot poison the fan-out. Errors route through
-   * `onDeliveryError` (defaults to `console.error`).
-   *
-   * Used by #311's capability-change flow. #308 will call this
-   * from dynamic install/uninstall paths; #302 will add auth-
-   * principal filtering as a canonical `to:` pattern.
-   */
-  notify(
-    notification: { method: string; params: unknown },
-    options?: { to?: (metadata: ClientConnectionMetadata) => boolean },
-  ): void {
-    const to = options?.to;
-    for (const [connectionId, connection] of this.connectedClients) {
-      if (to && !to(connection.metadata)) continue;
-      try {
-        connection.deliver(notification);
-      } catch (err) {
-        try {
-          this.onDeliveryError(err, connectionId, connection.metadata, notification);
-        } catch {
-          /* swallow — a broken diagnostic hook must not poison the fan-out either */
-        }
-      }
-    }
+  emitCapabilitiesChanged(): void {
+    void Effect.runPromise(
+      this.bus.append({
+        id: `evt_${ulid()}`,
+        surface: SURFACE,
+        name: GATEWAY_CAPABILITIES_CHANGED,
+        phase: "terminal",
+        outcome: "succeeded",
+        timestamp: Date.now(),
+        scope: { gatewayId: this.scopeId },
+        payload: {},
+      } as ProtocolEvent),
+    );
   }
 
   // ============================================================================

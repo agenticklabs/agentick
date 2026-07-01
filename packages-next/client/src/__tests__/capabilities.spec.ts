@@ -33,11 +33,9 @@ type Handler = <M extends WireMethod>(method: M, params: WireParams<M>) => Promi
  */
 function fakeTransport(handler: Handler): ClientTransport & {
   setState(s: ClientState): void;
-  emitNotification(method: string, params?: unknown): void;
 } {
   let state: ClientState = "idle";
   const listeners = new Set<(s: ClientState) => void>();
-  const notifListeners = new Map<string, Set<(params: unknown) => void>>();
   const notify = (s: ClientState) => {
     state = s;
     for (const l of listeners) l(s);
@@ -72,25 +70,7 @@ function fakeTransport(handler: Handler): ClientTransport & {
       listeners.add(h);
       return () => listeners.delete(h);
     },
-    onNotification(method, listener) {
-      let set = notifListeners.get(method);
-      if (!set) {
-        set = new Set();
-        notifListeners.set(method, set);
-      }
-      set.add(listener);
-      return () => {
-        set!.delete(listener);
-        if (set!.size === 0) notifListeners.delete(method);
-      };
-    },
     setState: notify,
-    // Test seam — simulate the gateway pushing a notification frame.
-    emitNotification(method, params) {
-      const set = notifListeners.get(method);
-      if (!set) return;
-      for (const l of set) l(params);
-    },
   };
 }
 
@@ -394,88 +374,12 @@ describe("client capabilities", () => {
   });
 
   // -------------------------------------------------------------------
-  // #311 — notifications/capabilities/changed refetch + onCapabilitiesChange
+  // ADR 47 — onCapabilitiesChange fires on handshake / reconnect / drop.
+  // Runtime `gateway:capabilities:changed` reactivity (client re-syncing
+  // its own capabilities when dynamic extensions mutate the set) is
+  // deferred to #308, when that event can actually fire — the registry
+  // is sealed at gateway construction today.
   // -------------------------------------------------------------------
-
-  it("refetches _extensions/list on notifications/capabilities/changed and fires onCapabilitiesChange", async () => {
-    // Simulates a server that installs a new extension at runtime.
-    // Round 1: initial _extensions/list returns [session]. Round 2
-    // (after the notification): returns [session, crm]. The client
-    // MUST refetch, MUST swap capabilities, MUST fire the subscriber.
-    const initResult = buildInitializeResult();
-    const round1 = {
-      extensions: [
-        {
-          name: "@agentick/gateway-next#session",
-          namespace: "session",
-          version: "1.0.0",
-          methods: ["session/send"],
-          notifications: [],
-        },
-      ],
-    } satisfies ExtensionsListResult;
-    const round2 = buildExtensionsList(); // session + crm
-
-    let listCalls = 0;
-    const transport = fakeTransport(async (method) => {
-      if (method === "initialize") return initResult as never;
-      if (method === "_extensions/list") {
-        listCalls += 1;
-        return (listCalls === 1 ? round1 : round2) as never;
-      }
-      throw new Error(`unexpected: ${method}`);
-    });
-
-    const client = await createClient({ transport });
-    const snapshots: number[] = [];
-    client.onCapabilitiesChange((c) => snapshots.push(c.extensions.length));
-
-    await client.connect();
-    expect(client.capabilities.extensions).toHaveLength(1);
-    expect(client.capabilities.hasNamespace("crm")).toBe(false);
-    expect(snapshots).toEqual([1]); // initial applyExtensionsList
-
-    transport.emitNotification("notifications/capabilities/changed", {});
-    // Refetch is async; give it a microtask cycle.
-    await new Promise((r) => setImmediate(r));
-    expect(listCalls).toBe(2);
-    expect(client.capabilities.extensions).toHaveLength(2);
-    expect(client.capabilities.hasNamespace("crm")).toBe(true);
-    expect(snapshots).toEqual([1, 2]);
-
-    await client.close();
-  });
-
-  it("tolerates MethodNotFound during a capabilities-refetch — capabilities stay put", async () => {
-    // Server drops `_extensions/list` support mid-connection. The
-    // refetch swallows the error and leaves the current snapshot
-    // in place. Adopters get no false-positive empty snapshot.
-    const initResult = buildInitializeResult();
-    let listCalls = 0;
-    const transport = fakeTransport(async (method) => {
-      if (method === "initialize") return initResult as never;
-      if (method === "_extensions/list") {
-        listCalls += 1;
-        if (listCalls === 1) return buildExtensionsList() as never;
-        throw { kind: "rpc", code: ErrorCode.MethodNotFound, message: "gone" };
-      }
-      throw new Error(`unexpected: ${method}`);
-    });
-
-    const client = await createClient({ transport });
-    await client.connect();
-    expect(client.capabilities.extensions).toHaveLength(2);
-
-    transport.emitNotification("notifications/capabilities/changed", {});
-    await new Promise((r) => setImmediate(r));
-    expect(listCalls).toBe(2);
-    // Still populated — the refetch failed but the pre-existing
-    // snapshot is unchanged.
-    expect(client.capabilities.extensions).toHaveLength(2);
-    expect(client.capabilities.hasNamespace("crm")).toBe(true);
-
-    await client.close();
-  });
 
   it("fires onCapabilitiesChange with the empty snapshot on reconnecting / close", async () => {
     const initResult = buildInitializeResult();

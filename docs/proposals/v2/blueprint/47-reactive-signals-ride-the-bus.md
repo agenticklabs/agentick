@@ -11,7 +11,7 @@
 
 `gateway.notify()` is the only server→client change-fan-out in the framework that (a) reinvents a fan-out mechanism instead of using the bus or `@agentick/pubsub-next`, and (b) isolates by **runtime filter** (`to: (meta) => boolean`) instead of **by instance**. Every other reactive signal path in the codebase uses one of the two foundational primitives, and every other isolation boundary (app, session, MCP connection, credential namespace, outbound principal) is **per-instance / structural**, per ADR 45.
 
-**Decision:** server→client reactive signals are modeled as `ProtocolEvent`s on the bus and delivered over the existing `sub/subscribe` wire extension. The client opens one framework-managed baseline control-plane subscription on `connect()`. `gateway.notify` / `acceptConnection` / `ClientConnection` / `ClientConnectionMetadata` / `onDeliveryError` / the per-transport sink registration / `serverNotifier` are **deleted**. Multi-tenant and principal isolation are per-instance child buses — the composition that already isolates app and session substrate — not a `notify({to})` predicate.
+**Decision:** server→client reactive signals are modeled as `ProtocolEvent`s on the bus and delivered over the existing `sub/subscribe` wire extension. The gateway gets an `emitCapabilitiesChanged()` seam (bus append) now; the client's *unconditional, client-owned* self-maintenance of `client.capabilities` is deferred to #308 (the trigger event can't fire until dynamic extensions exist). `gateway.notify` / `acceptConnection` / `ClientConnection` / `ClientConnectionMetadata` / `onDeliveryError` / the per-transport sink registration / `serverNotifier` are **deleted**. Multi-tenant and principal isolation are per-instance child buses — the composition that already isolates app and session substrate — not a `notify({to})` predicate.
 
 This is not a shrink. It is a total removal. The residual "per-connection control frame" case that motivated keeping a slimmed `notify` **does not exist**: every application signal we can name is scope-expressible (auth notifications already carry `affectedSessions`), and the remaining per-socket concerns (WS close, heartbeat, `notifications/cancelled`) are transport-layer, never `notify`'s job.
 
@@ -71,7 +71,11 @@ Multi-tenant isolation felt like unbuilt infrastructure with significant edge ca
 
 2. **Deliver them over `sub/subscribe`.** No new wire mechanism.
 
-3. **The client opens one framework-managed baseline control-plane subscription on `connect()`.** This is the single genuinely-new piece. `client-next` already runs the handshake in `connect()`; it additionally opens a subscription to the gateway-scope control-plane surface. On a matching event it runs the existing refetch/apply path. `onCapabilitiesChange`, `whenReady()`, and the capability-snapshot logic are **unchanged** — only the delivery mechanism beneath them swaps from "notify push" to "baseline subscription."
+3. **The client self-maintains its capability snapshot — and this is deferred to #308.** Keeping `client.capabilities` fresh is the **client's own** concern (the client and framework machinery read it — `hasMethod`, feature-gating, routing), so the maintenance must be **unconditional** when connected: the client opens a gateway-scope control-plane subscription for *its own* correctness, **not** gated on whether an adopter registered an `onCapabilitiesChange` listener. `onCapabilitiesChange` is an observation layer *on top* of the fresh snapshot, never the *trigger* for freshness.
+
+   **Timing:** the wire-extension registry is **sealed at gateway construction** (`gateway/harness.ts` — `this._wireExtensions.seal()`), so `gateway:capabilities:changed` **cannot fire until #308** (dynamic wire extensions). Building the client's unconditional self-maintenance now would be inert machinery reacting to an impossible event, and would add a `sub/subscribe` to every `connect()` (forcing every stub-server test double to model it). So: **the principle is settled here (unconditional, client-owned, not adopter-gated); the implementation lands in #308**, where the trigger event exists and a real consumer shapes it. Today the client's snapshot is refreshed on handshake / reconnect (real events), which `onCapabilitiesChange` already reflects.
+
+   **Rejected alternative — lazy, adopter-callback-gated subscription.** An earlier iteration opened the subscription only when an `onCapabilitiesChange` listener existed. That is **wrong**: it couples the client's own capability-freshness to whether the adopter happened to care, so `hasMethod` could silently go stale for a non-listening adopter. Capability-freshness is not an adopter-opt-in feature; it is the client's baseline correctness.
 
 4. **Delete the bespoke surface entirely:**
    - `gateway`: `acceptConnection`, `notify`, `connectedClients`, `onDeliveryError`, `nextClientNumber`
@@ -106,7 +110,7 @@ Multi-tenant isolation felt like unbuilt infrastructure with significant edge ca
 
 ### New / changed
 
-- `client-next` gains a framework-managed baseline control-plane subscription in `connect()` (and re-establishes it in the post-reconnect path, alongside the existing handshake). Small, but it is the load-bearing new behavior — see Risks.
+- `gateway` gains `emitCapabilitiesChanged()` — a bus append on `surface: "gateway"`. The client's unconditional self-maintenance that *consumes* it is deferred to #308 (see Decision §3).
 - A control-plane event surface + naming convention must be defined in spec (`gateway:capabilities:changed`, and the pattern for #279/#308 to follow).
 - `#302` (auth wire extension) no longer needs a `notify` auth filter; principal-private events are delivered on a per-principal-scoped subscription, isolation by instance.
 
@@ -128,7 +132,7 @@ No backwards-compat shims (per project philosophy). The wire method `notificatio
 
 ## Risks & open questions
 
-- **The baseline control-plane subscription is the only new load-bearing piece.** Risk: a client that fails to establish it silently misses capability updates. Mitigation: it is framework-managed inside `connect()` (not adopter-opt-in), and failure is observable via the same `whenReady()` / state surface as the handshake. **Confidence it is low-risk: high**, because the subscription primitive and its reconnect-resume are already proven; this is composition of tested parts, not new mechanism.
+- **The client's unconditional self-maintenance (deferred to #308) is the one genuinely-new behavior.** When built, it must be unconditional (client-owned), not adopter-callback-gated (see Decision §3, rejected alternative). Risk at that point: a client that fails to establish the subscription silently misses capability updates — mitigated by making it framework-managed inside `connect()` and observable via `whenReady()`. **Confidence low-risk: high** — composition of the already-proven subscription + reconnect-resume primitives.
 - **Surface/scope taxonomy for control-plane events** needs a deliberate choice (one `gateway` surface with control-plane phases, vs. a dedicated `control` surface). Minor spec work; decide in the implementing slice.
 - **`EventScope` has no tenant/principal field today** (it has app/session/execution/gateway/node + `EventScopeExtensions`). Per-tenant isolation therefore comes from **child-bus instances**, not a scope predicate. Confirmed sufficient for isolation; a tenant/principal scope *field* is only needed if we later want same-bus multiplexing, which this ADR explicitly avoids in favor of per-instance composition.
 - **One thing to verify in the implementing slice:** that no current bus subscriber assumes a single flat gateway-global bus. The app/session factory threading says the child-bus tree is already the norm, so this is expected-clean, but it is the migration's one checkpoint.
@@ -143,7 +147,7 @@ Slice shape:
 
 1. Define the control-plane event surface + naming in `spec-next`.
 2. Gateway publishes `gateway:capabilities:changed` on the bus instead of `notify()`.
-3. `client-next` opens the baseline control-plane subscription in `connect()` + reconnect path; route its events into the existing refetch/apply.
+3. (#308) `client-next` opens the unconditional gateway-scope control-plane subscription in `connect()` + reconnect path; route its events into the existing refetch/apply. Deferred until the trigger event can fire.
 4. Delete `notify` / `acceptConnection` / `ClientConnection` / transport sink registration / `serverNotifier`.
 5. `ToolCatalog.subscribeAll` → `createNotifier`.
 6. Port the #311 E2E test to drive capability change through `bus.append` → subscription → client refetch. Its assertions (`onCapabilitiesChange` fires, snapshot re-syncs, multi-client fan-out, isolation) carry over unchanged; only the trigger swaps.

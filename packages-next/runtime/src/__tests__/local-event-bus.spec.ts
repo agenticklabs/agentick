@@ -246,6 +246,53 @@ describe("LocalEventBus — metrics", () => {
   });
 });
 
+describe("LocalEventBus — fan-in writes / isolated reads (multi-tenant composition)", () => {
+  it("child writes fan IN to parent; parent writes do NOT leak into child reads", async () => {
+    // This is the structural primitive under per-tenant / per-user bus
+    // isolation (ADR 47, blueprint 31): a child bus wraps a parent;
+    // child events flow UP so parent-level observers see everything,
+    // but parent events never flow DOWN into the child's read view —
+    // so a tenant subscriber physically cannot observe another scope's
+    // (or the gateway's) events. Isolation by construction, not filter.
+    const parent = new LocalEventBus({ batch: {} });
+    const child = new LocalEventBus({ batch: {}, parent });
+
+    const parentSeen: string[] = [];
+    const childSeen: string[] = [];
+    const pf = Effect.runFork(
+      Stream.runForEach(parent.subscribe({}, { fromCursor: { value: 0 } }), (e) =>
+        Effect.sync(() => {
+          parentSeen.push(e.id);
+        }),
+      ),
+    );
+    const cf = Effect.runFork(
+      Stream.runForEach(child.subscribe({}, { fromCursor: { value: 0 } }), (e) =>
+        Effect.sync(() => {
+          childSeen.push(e.id);
+        }),
+      ),
+    );
+    await new Promise((r) => setImmediate(r));
+
+    await Effect.runPromise(parent.append(ev("parent-only")));
+    await Effect.runPromise(child.append(ev("child-local")));
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+
+    // Fan-in: the parent observes its own event AND the child's.
+    expect(parentSeen).toContain("parent-only");
+    expect(parentSeen).toContain("child-local");
+    // Isolated reads: the child observes ONLY its own event; the
+    // parent-scoped event never leaks downward.
+    expect(childSeen).toContain("child-local");
+    expect(childSeen).not.toContain("parent-only");
+
+    await Effect.runPromise(Fiber.interrupt(pf));
+    await Effect.runPromise(Fiber.interrupt(cf));
+  });
+});
+
 function ev(id: string, partial: Partial<ProtocolEvent> = {}): ProtocolEvent {
   return {
     id,
