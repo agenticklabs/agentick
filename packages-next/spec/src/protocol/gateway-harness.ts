@@ -195,6 +195,27 @@ export interface GatewayHarnessProtocol {
    * @see docs/proposals/v2/blueprint/46-wire-extensions.md
    */
   wireExtensions?(): WireExtensionRegistry;
+
+  /**
+   * Register a per-connection notification sink (#311). Transport
+   * servers call this on connection accept, supplying a callback
+   * that writes a JSON-RPC notification frame to their client.
+   * Returns an unsubscribe the server invokes on close.
+   *
+   * Independent of the request-dispatch path. Optional on the
+   * protocol so pre-#311 stubs don't need to implement it — real
+   * gateways always populate one.
+   */
+  registerNotificationSink?(
+    sink: (notification: { method: string; params: unknown }) => void,
+  ): () => void;
+
+  /**
+   * Fan a server-initiated notification to every registered sink
+   * (#311). Bad sinks are swallowed. Used by the capability-change
+   * flow and (later) by wire extensions that need out-of-band pushes.
+   */
+  broadcastNotification?(notification: { method: string; params: unknown }): void;
 }
 
 // ============================================================================

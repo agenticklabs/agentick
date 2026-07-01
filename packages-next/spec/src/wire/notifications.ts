@@ -70,6 +70,29 @@ export interface CancelledNotificationParams {
 }
 
 // ============================================================================
+// notifications/capabilities/changed — wire-extension set mutated (#311)
+// ============================================================================
+
+/**
+ * Sent by the server when its wire-extension set changes at runtime
+ * (extension installed / uninstalled / replaced). Payload is
+ * intentionally bare — the client refetches `_extensions/list` and
+ * rebuilds its `ClientCapabilities` from the fresh enumeration.
+ *
+ * Mirrors the MCP `notifications/{tools,prompts,resources}/list_changed`
+ * pattern: "the list changed, ask again." Avoids delta reconciliation
+ * (adds/removes/replaces) and the race windows that come with it.
+ *
+ * SDKs in other languages (Go, Python) MUST implement this notification
+ * to keep their in-memory capability sets fresh. Servers that never
+ * install/uninstall extensions at runtime simply never emit it — the
+ * static-registration case has no client-side burden.
+ *
+ * @see docs/proposals/v2/blueprint/46-wire-extensions.md
+ */
+export type CapabilitiesChangedNotificationParams = Record<string, never>;
+
+// ============================================================================
 // notifications/auth/* — unsolicited auth events
 // ============================================================================
 
@@ -105,6 +128,7 @@ export interface WireNotifications {
   "notifications/subscription/evicted": SubscriptionEvictedParams;
   "notifications/subscription/closed": SubscriptionClosedParams;
   "notifications/cancelled": CancelledNotificationParams;
+  "notifications/capabilities/changed": CapabilitiesChangedNotificationParams;
   "notifications/auth/expired": AuthExpiredNotificationParams;
   "notifications/auth/challenge": AuthChallengeNotificationParams;
 }

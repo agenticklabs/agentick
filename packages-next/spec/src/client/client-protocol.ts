@@ -83,6 +83,19 @@ export interface ClientProtocol {
   onStateChange(handler: (state: ClientState) => void): () => void;
 
   /**
+   * Subscribe to capability-set changes. Fires whenever the client
+   * swaps its `capabilities` snapshot — after the initial handshake,
+   * after a post-reconnect handshake, and after every inbound
+   * `notifications/capabilities/changed` refetch (#311).
+   *
+   * Payload is the fresh snapshot (equivalent to `client.capabilities`
+   * at the moment the listener fires). Cleared subscribers on `close()`.
+   *
+   * Returns an unsubscribe. Symmetric with {@link onStateChange}.
+   */
+  onCapabilitiesChange(listener: (capabilities: ClientCapabilities) => void): () => void;
+
+  /**
    * Resolve once any in-flight post-reconnect handshake completes.
    * The initial `connect()` handshake is awaited by `connect()`
    * itself — this method matters only for the reconnect path where

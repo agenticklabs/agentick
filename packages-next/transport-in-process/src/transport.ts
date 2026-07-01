@@ -15,6 +15,7 @@
 
 import type {
   ClientTransport,
+  GatewayHarnessProtocol,
   JsonRpcFrame,
   JsonRpcRequest,
   JsonRpcResponse,
@@ -31,6 +32,14 @@ export interface InProcessTransportOptions {
   readonly handler: InProcessGatewayHandler;
   readonly wireParity?: boolean;
   readonly id?: string;
+  /**
+   * Optional gateway reference. When supplied, the transport
+   * registers itself as a notification sink on `connect()` — the
+   * gateway's `broadcastNotification` fans out through the transport
+   * to the client (#311). Omitted for tests that don't exercise the
+   * broadcast path.
+   */
+  readonly gateway?: GatewayHarnessProtocol;
 }
 
 const CAPABILITIES: TransportCapabilities = {
@@ -52,21 +61,40 @@ class InProcessTransport extends BaseClientTransport {
 
   private readonly handler: InProcessGatewayHandler;
   private readonly wireParity: boolean;
+  private readonly gateway: GatewayHarnessProtocol | undefined;
+  private unregisterSink: (() => void) | null = null;
 
   constructor(options: InProcessTransportOptions) {
     super();
     this.id = options.id ?? `in-process-${++transportCounter}`;
     this.handler = options.handler;
     this.wireParity = options.wireParity ?? false;
+    this.gateway = options.gateway;
   }
 
   protected async openConnection(): Promise<void> {
     this.setState("connecting");
+    // Register a broadcast sink with the gateway BEFORE the state
+    // flips open — a `notifications/capabilities/changed` fired during
+    // the ensuing handshake must reach us.
+    if (this.gateway && this.gateway.registerNotificationSink) {
+      this.unregisterSink = this.gateway.registerNotificationSink((notification) => {
+        const noteFrame = this.maybeRoundtrip({
+          jsonrpc: "2.0" as const,
+          method: notification.method,
+          params: notification.params,
+        });
+        this.routeFrame(noteFrame as JsonRpcFrame);
+      });
+    }
     this.setState("open");
   }
 
   protected async closeConnection(): Promise<void> {
-    /* nothing to tear down for in-process */
+    if (this.unregisterSink) {
+      this.unregisterSink();
+      this.unregisterSink = null;
+    }
   }
 
   protected async sendFrame(frame: JsonRpcFrame): Promise<void> {

@@ -69,6 +69,15 @@ export function websocketServer(options: WebSocketServerOptions): WebSocketServe
     liveSockets.add(ws);
     const ctx = new ConnectionContext(ws, options.gateway);
 
+    // Register this connection as a broadcast sink so the gateway can
+    // fan out server-initiated notifications (#311's
+    // `notifications/capabilities/changed`; future extensions). No-op
+    // on gateways predating #311 that don't expose the seam.
+    const unregisterSink =
+      options.gateway.registerNotificationSink?.((notification) => {
+        ctx.sendNotification(notification);
+      }) ?? (() => {});
+
     let alive = true;
     ws.on("pong", () => {
       alive = true;
@@ -95,6 +104,7 @@ export function websocketServer(options: WebSocketServerOptions): WebSocketServe
     ws.on("close", () => {
       clearInterval(heartbeat);
       liveSockets.delete(ws);
+      unregisterSink();
       void ctx.close();
     });
 

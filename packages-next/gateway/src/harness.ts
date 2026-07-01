@@ -143,6 +143,20 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
    */
   private readonly _wireExtensions: WireExtensionRegistry;
 
+  /**
+   * Registered notification sinks — one per active client connection.
+   * Transport servers call {@link registerNotificationSink} on accept
+   * and invoke the returned unsubscribe on close. The gateway iterates
+   * this set from {@link broadcastNotification} to fan a single
+   * server-initiated notification to every currently-connected client.
+   *
+   * Sinks that throw are swallowed — a bad sink must not poison the
+   * fan-out. Broadcast is a best-effort operation.
+   */
+  private readonly notificationSinks = new Set<
+    (notification: { method: string; params: unknown }) => void
+  >();
+
   get id(): string {
     return this.scopeId;
   }
@@ -216,6 +230,49 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
    */
   wireExtensions(): WireExtensionRegistry {
     return this._wireExtensions;
+  }
+
+  /**
+   * Register a per-connection notification sink. Transport servers
+   * call this on connection accept, supplying a function that writes
+   * a JSON-RPC notification frame to the client. Returns an
+   * unsubscribe the server invokes on connection close.
+   *
+   * Independent of the request-dispatch path — the sink is a pure
+   * out-of-band emitter, used by {@link broadcastNotification} and
+   * (later) by wire extensions that push unsolicited frames.
+   *
+   * The sink is invoked synchronously from the emit site. Transport
+   * implementations MUST NOT throw; if the wire has dropped, silently
+   * swallow inside the sink.
+   */
+  registerNotificationSink(
+    sink: (notification: { method: string; params: unknown }) => void,
+  ): () => void {
+    this.notificationSinks.add(sink);
+    return () => {
+      this.notificationSinks.delete(sink);
+    };
+  }
+
+  /**
+   * Fan a server-initiated notification out to every registered sink.
+   * A sink that throws is caught and skipped — one broken connection
+   * does not poison the broadcast. Order is insertion order (set
+   * iteration order), but no adopter should depend on it.
+   *
+   * Used by #311's capability-change flow: `broadcastNotification({
+   *   method: "notifications/capabilities/changed", params: {}
+   * })`. #308 will call this from install/uninstall paths.
+   */
+  broadcastNotification(notification: { method: string; params: unknown }): void {
+    for (const sink of this.notificationSinks) {
+      try {
+        sink(notification);
+      } catch {
+        /* swallow — see notificationSinks doc */
+      }
+    }
   }
 
   // ============================================================================

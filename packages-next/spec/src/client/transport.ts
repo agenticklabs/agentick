@@ -106,6 +106,18 @@ export interface ClientTransport {
    * Observe transport state changes. Returns an unsubscribe.
    */
   onStateChange(handler: (state: ClientState) => void): () => void;
+
+  /**
+   * Observe server-emitted notifications by method name. Progress
+   * (`notifications/progress`) and subscription-event frames flow
+   * through their dedicated stream APIs; everything else
+   * (auth/expired, capabilities/changed, adopter extension
+   * notifications) surfaces through this seam.
+   *
+   * Multiple subscribers per method are allowed. Returns an
+   * unsubscribe.
+   */
+  onNotification(method: string, listener: (params: unknown) => void): () => void;
 }
 
 export interface SubscriptionStream extends AsyncIterable<EventFrame> {

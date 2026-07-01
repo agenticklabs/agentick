@@ -78,8 +78,12 @@ class AgentickClient implements ClientProtocol {
   private readonly clientBus: LocalEventBus;
   private readonly composedRequest: ReturnType<typeof composeRequest>;
   private readonly stateListeners = createNotifier<ClientState>();
+  private readonly capabilityListeners = createNotifier<ClientCapabilities>();
   private readonly closeHandlers: Array<() => void | Promise<void>> = [];
   private readonly namespaces = new Map<string, unknown>();
+  /** Unsubscribe for the `notifications/capabilities/changed` observer,
+   *  set on connect(), cleared on close(). Null when no observer is armed. */
+  private capabilityNotifUnsubscribe: (() => void) | null = null;
 
   private currentState: ClientState = "idle";
   private _capabilities: ClientCapabilities = EMPTY_CLIENT_CAPABILITIES;
@@ -123,12 +127,14 @@ class AgentickClient implements ClientProtocol {
         this._capabilities = EMPTY_CLIENT_CAPABILITIES;
         this._serverInfo = undefined;
         this.reconnectHandshakePending = true;
+        this.capabilityListeners.notify(this._capabilities);
       }
       if (s === "closed" || isFailedState(s)) {
         this._capabilities = EMPTY_CLIENT_CAPABILITIES;
         this._serverInfo = undefined;
         // Terminal — no reconnect coming, no handshake to owe.
         this.reconnectHandshakePending = false;
+        this.capabilityListeners.notify(this._capabilities);
       }
       // Post-reconnect: re-run the handshake so `capabilities` +
       // `serverInfo` reflect whoever we came back to. Initial connect
@@ -203,6 +209,20 @@ class AgentickClient implements ClientProtocol {
    */
   async connect(): Promise<void> {
     await this.transport.connect();
+    // Arm the capability-refresh observer BEFORE the handshake — a
+    // server that emits `notifications/capabilities/changed` between
+    // `initialize` and `_extensions/list` (unlikely but legal) still
+    // triggers our refetch path. The observer stays armed across
+    // reconnects; the transport preserves subscribers through its
+    // state machine.
+    if (!this.capabilityNotifUnsubscribe) {
+      this.capabilityNotifUnsubscribe = this.transport.onNotification(
+        "notifications/capabilities/changed",
+        () => {
+          void this.refetchCapabilities();
+        },
+      );
+    }
     await this.runHandshake();
   }
 
@@ -254,6 +274,11 @@ class AgentickClient implements ClientProtocol {
       connectionId: result.connectionId,
     };
     this._capabilities = buildClientCapabilities(result.capabilities, []);
+    // Don't fire capability subscribers yet — `applyExtensionsList`
+    // fires the definitive event once discovery completes. Firing
+    // here would yield an intermediate "framework-only, no extensions"
+    // snapshot that adopters would then have to reconcile against a
+    // second fire moments later.
   }
 
   private applyExtensionsList(
@@ -261,6 +286,35 @@ class AgentickClient implements ClientProtocol {
     listResult: ExtensionsListResult,
   ): void {
     this._capabilities = buildClientCapabilities(framework, listResult.extensions);
+    this.capabilityListeners.notify(this._capabilities);
+  }
+
+  /**
+   * Refetch `_extensions/list` in response to
+   * `notifications/capabilities/changed` and swap the resulting
+   * capabilities snapshot in. Framework flags from the last
+   * `initialize` response are reused — the notification signals an
+   * extension-set delta, not a framework-version delta. A concurrent
+   * refetch (e.g., the server bursts multiple notifications) is
+   * benign: each completes with the current server view and each
+   * notifies listeners; later completions overwrite earlier ones.
+   *
+   * `MethodNotFound` from `_extensions/list` is tolerated silently
+   * for parity with the initial handshake — a server that stops
+   * implementing discovery mid-connection leaves an empty extension
+   * set, with subscribers still notified so adopters can react.
+   */
+  private async refetchCapabilities(): Promise<void> {
+    try {
+      const listResult = await this.request("_extensions/list", {});
+      this.applyExtensionsList(this._capabilities.framework, listResult);
+    } catch (err) {
+      if (!isMethodNotFound(err)) return;
+      // Server dropped support mid-connection. Best-effort — leave
+      // the current capabilities in place. Adopters relying on the
+      // notification for feature discovery will still see a stale
+      // set, but at least nothing crashes.
+    }
   }
 
   async close(): Promise<void> {
@@ -272,11 +326,19 @@ class AgentickClient implements ClientProtocol {
         /* swallow — close must not throw */
       }
     }
+    if (this.capabilityNotifUnsubscribe) {
+      this.capabilityNotifUnsubscribe();
+      this.capabilityNotifUnsubscribe = null;
+    }
     await this.transport.close();
   }
 
   onStateChange(handler: (state: ClientState) => void): () => void {
     return this.stateListeners.subscribe(handler);
+  }
+
+  onCapabilitiesChange(listener: (capabilities: ClientCapabilities) => void): () => void {
+    return this.capabilityListeners.subscribe(listener);
   }
 
   /**
