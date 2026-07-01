@@ -1,0 +1,185 @@
+# ADR 48 — Layered isolation: scope keys, per-scope harnesses, shared resources
+
+**Status:** Accepted (model settled; implementation phased)
+**Date:** 2026-07-01
+**Related:** ADR 29 (bus cursor log), ADR 31 (harness hierarchy / composable substrate), ADR 45 (structural identity), ADR 47 (signals ride the bus), ADR 35 (cluster tiers), #302 (authWireExtension), #283 (gateway `withCredentials` cascade), #289 (per-principal construction), #292 (task lifetime), #152 (per-principal connection pool)
+
+---
+
+## TL;DR
+
+A "multi-tenant distributed durable gateway" needs **no tenancy subsystem, no `Principal` class, no snapshot/migration protocol, no universal `Store` supertype.** It is the composition of primitives that already exist:
+
+- **Isolation = composition.** A per-scope harness instance (child bus / child journal / namespace-keyed store) isolates by construction. Bus/journal fan writes **up** to parents (global observability) while keeping reads **isolated** downward. Verified to hold across cluster replicas.
+- **Harness instance ≠ backing resource.** The harness is per-scope and cheap (an object + a scope key). The expensive backing resource (Pg pool, Redis client, socket) is shared/global and *injected*. A per-session harness is a scoped **view** over a shared adapter, isolated by a key — never a per-session connection.
+- **A principal is a scope key.** The identity axis (`tenant → user`) is a hierarchical scope key of the same shape as the work axis (`gateway → app → session`). It is derived by an **auth projection function** (identically shaped to `ClusterPartitioning.keyFor`), fixed in scope at construction (ADR 45), and threaded like `sessionId`. Authentication *is* producing this key.
+- **Scope is chosen by what the state IS**, not a blanket rule: work/execution → **session**; identity/auth → **principal**; physical resource → **global**.
+- **Migration = durable store adapter.** Put the source of truth in an external durable adapter and node failover is "re-point + read." Snapshot/restore is only for in-memory-source-of-truth; live mid-execution resumes via journal replay + idempotency, not fiber snapshot.
+
+The framework already has the mechanisms (substrate factories, namespace-keyed stores, `EventScope` + `EventScopeExtensions`, structural identity). The gap is **convention + wiring + two durable adapters + the auth boundary**, not new architecture.
+
+---
+
+## Context
+
+The stated goal is a fully-functional multi-tenant, distributed, durable gateway cluster. The obvious-but-wrong path is to build a tenancy subsystem: a `Tenant` type, a `Principal` class with a registry, `tenantId` hardcoded into core types, a snapshot/restore migration protocol, a universal `Store<T>`. Every one of those is over-engineering — a "worldview" layered on top of systems that already express the need more simply.
+
+Two facts, both verified in-tree this session, collapse most of that work:
+
+1. **`LocalEventBus` fan-in / isolated-reads composes, and it composes across replicas.** A per-session child bus wrapping its node's (cluster-wrapped) bus: session events fan up and reach a gateway-scope observer on *another* replica, while a sibling session on the same node never observes them. Isolation is physical (separate ring buffers), not filter-based, so clustering cannot leak it. (`packages-next/cluster/src/__tests__/composition-across-replicas.spec.ts`, `packages-next/runtime/src/__tests__/local-event-bus.spec.ts`.)
+
+2. **Stores are namespace-keyed pluggable adapters.** `CredentialsStore` is `(namespace, key) → value` with a `backend` id, conformance suite, in-memory reference adapter, optional reactivity. `OperationJournal`, `SandboxRuntime`, `ClusterTransport` follow the same pattern. Namespacing *is* the isolation mechanism.
+
+So the design question is not "how do we build multi-tenancy" — it's "how do we compose what exists, and where does each thing's isolation boundary sit."
+
+---
+
+## Decision
+
+### 1. Two scope axes, both hierarchical scope keys on `EventScope`
+
+```
+Work path      (execution):  gateway → app → session      (already in EventScope)
+Identity path  (who):        tenant  → user               (added via EventScopeExtensions)
+```
+
+Both are hierarchical keys. Both **fan in / resolve up**. The work path already exists (`EventScope.appId / sessionId / gatewayId / nodeId`). The identity path is the *same shape at a different key*, added through the augmentation seam so `spec-next` stays agnostic:
+
+```ts
+declare module "@agentick/spec-next" {
+  interface EventScopeExtensions {
+    /** Identity scope key — WHO this work belongs to. Opaque to the
+     *  framework; threaded like sessionId; namespaces identity-scoped
+     *  stores; resolves up (user → tenant → global). Fixed at
+     *  construction (ADR 45). */
+    readonly principal?: string;
+  }
+}
+```
+
+### 2. Isolation = composition, at the scope determined by the state's nature
+
+| State | Isolation unit | Mechanism |
+|---|---|---|
+| Work / execution — bus, journal, session-state, tasks (default) | **session** | child bus/journal (fan-in/isolated) or namespace = work-path |
+| Identity / auth — credentials, tokens | **principal** | namespace = identity-path; **resolve up** user → tenant → global |
+| Physical resource — Pg pool, Redis client, sockets | **global** | shared, injected; never scoped |
+
+Work-scoped state fans writes up to app/gateway (global observability) while reads stay isolated. Identity-scoped stores namespace by principal and resolve up the hierarchy on read (the read-side twin of bus fan-in).
+
+### 3. Harness instance (per-scope, cheap) vs backing resource (shared, injected)
+
+A per-scope harness is a scoped view over a shared adapter. The Pg example:
+
+- Gateway constructs **one** `PgCredentialsStore` (one connection pool).
+- Each principal gets a per-principal `CredentialsHarness` **instance** whose `store` is that shared pool and whose namespace is the principal key.
+- Isolation is the namespace; the pool is shared. **Per-scope instances, shared connections. No connection fanout.**
+
+This is dependency injection over the existing factory pattern: `LocalEventBus.factory({parent})` already constructs a per-child instance that wraps a shared parent. A `credentialsFactory` constructs a per-principal harness wrapping a shared gateway-level store. Same move.
+
+### 4. Principal is derived by an auth projection function; authentication *is* producing the key
+
+The derivation is the identity analog of `ClusterPartitioning.keyFor(addr) => shardKey`: a projection from inbound context to a key.
+
+```ts
+interface AuthConfig {
+  /** Project inbound auth context → the principal scope key.
+   *  string           → static single-principal deploys ("local")
+   *  (ctx) => string  → real auth (token → "acme/user-42")
+   *  Runs once per connection / session creation; result fixed on the
+   *  session's scope for its lifetime (structural identity, ADR 45). */
+  principal?: string | ((ctx: AuthContext) => string | Promise<string>);
+}
+```
+
+**The function lives on auth** (deriving identity from wire material is authentication, by definition). **The result lives on scope** (`EventScope.principal`, opaque downstream). These are not in tension — auth produces the key; scope carries it; stores consume it. Layering: gateway-level default, app-level override; **not** session-level (a session inherits its principal from the connection that created it).
+
+### 5. Migration = durable store adapter; snapshot only for in-memory
+
+If the source of truth is an external durable adapter (Pg/Redis), node failover is: the new node constructs the same harnesses pointed at the same store + scope key, and **reads current state**. No snapshot, no migration protocol. Snapshot/restore is only for in-memory-source-of-truth (local single-node). Live mid-execution (a suspended fiber tree) resumes via **journal replay + idempotency** (the `DurableJournal` seam, `cluster/journal.ts`) or **task checkpoints**, never fiber snapshot.
+
+This unifies two things previously treated separately: **durable execution and HA migration are the same mechanism — externalize the source of truth into a durable store adapter.**
+
+---
+
+## What's built vs. the gap
+
+**Built (mechanisms):**
+- Substrate factories with parent composition (bus + journal fan-in/isolated; inbox deliberately does not compose — addressing).
+- `EventScope` + `EventScopeExtensions` augmentation seam.
+- Namespace-keyed pluggable stores + conformance + in-memory adapters.
+- Structural identity (ADR 45): scope fixed at construction, not read ambiently.
+- Cluster substrate (broker/net/ws/redis, membership, partitioning, re-election) — distribution.
+
+**Gap (convention + wiring + adapters, not architecture):**
+- Per-scope-by-default wiring: store-backed harnesses install app-level today; the "per-scope instance over injected shared adapter, namespaced by session (work) / principal (identity)" convention is not yet blessed or defaulted.
+- The auth boundary (#302) that runs `auth.principal` and fixes it in scope.
+- Resolve-up convention in identity-scoped harnesses (~10-line hierarchy walk).
+- Durable adapters: only `MemoryJournal` and in-memory credential/task stores exist. Pg/Redis adapters are the durable path against existing interfaces.
+- `TaskStore` interface (designed; see below) — tasks are an in-memory `Map` today.
+
+---
+
+## `TaskStore` (designed, shelved until durable execution is active)
+
+Follows the pattern (interface + `backend` + conformance + in-memory default). Domain-shaped — **not** a reused `CredentialsStore`, because durable execution needs `list({status})` (a secondary index) to answer "on restart, which tasks were in-flight?"
+
+```ts
+interface TaskStore {
+  put(record: TaskRecord): Promise<void>;
+  get(taskId: string): Promise<TaskRecord | undefined>;
+  list(filter?: { status?: TaskStatus }): Promise<readonly TaskRecord[]>;
+  delete(taskId: string): Promise<boolean>;
+  readonly backend: string;
+}
+interface TaskRecord {
+  readonly taskId: string;
+  readonly status: TaskStatus;
+  readonly input: unknown;
+  readonly result?: unknown;
+  readonly error?: unknown;
+  readonly createdAt: number;
+  readonly updatedAt: number;
+  readonly scope?: EventScope; // isolation
+}
+```
+
+A durable `TaskStore` adapter *is* durable execution and survives node failover for free (state was never in the node).
+
+---
+
+## Rejected alternatives
+
+- **`Principal` class / registry / plumbing.** Principal is an opaque scope key; auth material lives in the credential store keyed by it; roles live where the Authorizer reads them. A class holds nothing that isn't handled elsewhere.
+- **Universal `Store<T>` supertype to subclass.** Shapes diverge (namespaced KV vs append-log vs query-by-status); the framework reuses by composition + per-domain interfaces + adapter convention, not inheritance. No polymorphic consumer exists (three-consumers rule fails). Extract a narrow **capability** interface (e.g. a snapshot capability) only when a real consumer needs it — never a base class.
+- **Snapshot-based migration as the primary path.** Dissolved: externalize the source of truth and migration is re-point + read. Snapshot is the in-memory fallback only.
+- **`tenantId` / `principalId` as core `EventScope` fields.** Use the `EventScopeExtensions` augmentation seam; core stays agnostic.
+
+---
+
+## Open choices (deferred to the consumer that reveals them)
+
+- **Flat vs structured principal key** — `"acme/user-42"` (hierarchy by splitting convention) vs `{ tenant, user }` / `string[]`. Ship `string`; let #302 + the first credential adapter decide if structure is needed. Do not model N-level hierarchy speculatively.
+- **`TaskStore` exact shape** — pin when durable execution is the active goal.
+- **A snapshot *capability* interface** (`{ backend; snapshot(); restore() }`) — only if/when the in-memory-migration fallback needs it; not now.
+
+---
+
+## Consequences
+
+- Multi-tenant needs no new concepts — it's per-scope composition + injected shared adapters + the identity scope key.
+- Durable execution and HA migration unify into "durable store adapter."
+- The next work is small and empirical: prove the per-scope-instance-over-shared-adapter convention with one store-backed harness, then generalize.
+
+---
+
+## Rollout (smallest-first)
+
+1. **Verify composition across replicas** — done (`composition-across-replicas.spec.ts`).
+2. **Per-session child bus/journal by default** — flip isolation from opt-in to default for work-scoped substrate.
+3. **Prove the store convention** — one store-backed harness (`StateHarness`) as per-scope instance over a shared adapter, namespaced by scope, fan-in preserved. Find where the wiring chafes before generalizing.
+4. **`TaskStore` interface + in-memory adapter** — unlocks durable execution + migration as an adapter swap.
+5. **Auth boundary (#302)** — `auth.principal` projection; fix principal in scope.
+6. **Hierarchical credential resolution** (#283) + per-principal construction enforcement (#289).
+7. **Durable adapters** (Pg/Redis journal + stores) + **Redis-tier conformance** (#207).
+8. **Multi-tenant cluster conformance** — isolation × HA × scale × reactivity, adversarial.
