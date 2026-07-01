@@ -84,6 +84,15 @@ class AgentickClient implements ClientProtocol {
   private currentState: ClientState = "idle";
   private _capabilities: ClientCapabilities = EMPTY_CLIENT_CAPABILITIES;
   private _serverInfo: ServerInfo | undefined = undefined;
+  /** Set when a `reconnecting` transition fires; cleared when the
+   *  post-reconnect handshake kicks off. */
+  private reconnectHandshakePending = false;
+  /**
+   * Promise for the in-flight post-reconnect handshake, exposed on the
+   * `whenReady()` seam so tests (and adopters that care) can await
+   * it. Undefined when no post-reconnect handshake has ever fired.
+   */
+  private postReconnectHandshake: Promise<void> | undefined = undefined;
 
   constructor(options: CreateClientOptions) {
     this.id = options.id ?? `client-${++clientCounter}`;
@@ -106,13 +115,36 @@ class AgentickClient implements ClientProtocol {
       this.currentState = s;
       this.publishConnectionEvent(previous, s);
       this.stateListeners.notify(s);
-      // Clear stale capabilities when the wire drops. Repopulated by
-      // the handshake on next successful connect. `reconnecting`
-      // also clears — the peer we come back to may have restarted
-      // with a different extension set.
-      if (s === "reconnecting" || s === "closed" || isFailedState(s)) {
+      // Clear stale capabilities when the wire drops. Reconnecting
+      // ALSO clears — the peer we come back to may have restarted
+      // with a different extension set. Mark that a fresh handshake
+      // is owed once the transport comes back to `open`.
+      if (s === "reconnecting") {
         this._capabilities = EMPTY_CLIENT_CAPABILITIES;
         this._serverInfo = undefined;
+        this.reconnectHandshakePending = true;
+      }
+      if (s === "closed" || isFailedState(s)) {
+        this._capabilities = EMPTY_CLIENT_CAPABILITIES;
+        this._serverInfo = undefined;
+        // Terminal — no reconnect coming, no handshake to owe.
+        this.reconnectHandshakePending = false;
+      }
+      // Post-reconnect: re-run the handshake so `capabilities` +
+      // `serverInfo` reflect whoever we came back to. Initial connect
+      // handles the FIRST `open` transition explicitly via
+      // `connect()`, so we only re-handshake when
+      // `reconnectHandshakePending` was set by the reconnecting
+      // transition above.
+      if (s === "open" && this.reconnectHandshakePending) {
+        this.reconnectHandshakePending = false;
+        this.postReconnectHandshake = this.runHandshake().catch(() => {
+          // Best-effort — a failed post-reconnect handshake leaves
+          // capabilities empty, but the wire is otherwise open.
+          // Adopters observe the empty capabilities via `hasMethod`
+          // returning `false`. Rethrowing would swallow into an
+          // uncaught rejection on a state-change tick.
+        });
       }
     });
 
@@ -171,12 +203,29 @@ class AgentickClient implements ClientProtocol {
    */
   async connect(): Promise<void> {
     await this.transport.connect();
+    await this.runHandshake();
+  }
 
-    // Both handshake methods tolerate MethodNotFound (older-server /
-    // stub-transport compat): the client falls back to empty
-    // capabilities and empty server info in that case. Every other
-    // failure mode is propagated to the caller — we can't silently
-    // paper over a broken handshake.
+  /**
+   * Await any in-flight post-reconnect handshake. Resolves immediately
+   * when none is pending. Useful for adopters (and tests) that need to
+   * synchronize on the moment `capabilities` becomes valid again after
+   * a reconnect.
+   *
+   * The initial connect handshake is awaited by `connect()` itself —
+   * this method is only load-bearing for the reconnect path.
+   */
+  async whenReady(): Promise<void> {
+    if (this.postReconnectHandshake) await this.postReconnectHandshake;
+  }
+
+  /**
+   * Issue the `initialize` + `_extensions/list` handshake pair.
+   * Shared between the initial `connect()` and the post-reconnect
+   * state-change hook. Tolerates `MethodNotFound` on either RPC —
+   * see the failure-semantics doc on `connect()`.
+   */
+  private async runHandshake(): Promise<void> {
     let initResult: InitializeResult | undefined;
     try {
       initResult = await this.request("initialize", {

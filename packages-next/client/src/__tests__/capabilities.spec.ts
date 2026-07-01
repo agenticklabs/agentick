@@ -240,6 +240,139 @@ describe("client capabilities", () => {
     expect(client.capabilities.extensions).toEqual([]);
   });
 
+  it("re-runs the handshake on transport reconnect (open → reconnecting → open)", async () => {
+    // Counter tracks how many times each handshake RPC has been issued.
+    // Initial connect: 1 initialize + 1 _extensions/list.
+    // After open→reconnecting→open: expect 2 + 2.
+    let initCount = 0;
+    let listCount = 0;
+
+    // First response reports one extension; second response (after
+    // reconnect) reports a DIFFERENT set. Proves capabilities actually
+    // reflect the post-reconnect gateway state, not stale cached values.
+    const initialListResult: ExtensionsListResult = {
+      extensions: [
+        {
+          name: "@test/before",
+          namespace: "before",
+          methods: ["before/ping"],
+          notifications: [],
+        },
+      ],
+    };
+    const postReconnectListResult: ExtensionsListResult = {
+      extensions: [
+        {
+          name: "@test/after",
+          namespace: "after",
+          methods: ["after/pong"],
+          notifications: ["after/changed"],
+        },
+      ],
+    };
+
+    const transport = fakeTransport(async (method) => {
+      if (method === "initialize") {
+        initCount++;
+        return buildInitializeResult({
+          connectionId: `conn-${initCount}`,
+        }) as never;
+      }
+      if (method === "_extensions/list") {
+        listCount++;
+        return (listCount === 1 ? initialListResult : postReconnectListResult) as never;
+      }
+      throw new Error(`unexpected method: ${method}`);
+    });
+
+    const client = await createClient({ transport });
+    await client.connect();
+
+    expect(initCount).toBe(1);
+    expect(listCount).toBe(1);
+    expect(client.capabilities.hasNamespace("before")).toBe(true);
+    expect(client.capabilities.hasNamespace("after")).toBe(false);
+    expect(client.serverInfo?.connectionId).toBe("conn-1");
+
+    // Simulate the transport driving reconnect autonomously.
+    transport.setState("reconnecting");
+    expect(client.capabilities.extensions).toEqual([]);
+    expect(client.serverInfo).toBeUndefined();
+
+    // Transport comes back to open — handshake should fire again.
+    transport.setState("open");
+    await client.whenReady();
+
+    expect(initCount).toBe(2);
+    expect(listCount).toBe(2);
+    expect(client.capabilities.hasNamespace("before")).toBe(false);
+    expect(client.capabilities.hasNamespace("after")).toBe(true);
+    expect(client.capabilities.hasMethod("after/pong")).toBe(true);
+    expect(client.capabilities.hasNotification("after/changed")).toBe(true);
+    expect(client.serverInfo?.connectionId).toBe("conn-2");
+
+    await client.close();
+  });
+
+  it("does NOT re-run handshake on the initial `open` transition (only post-reconnect)", async () => {
+    // Regression: `connect()` awaits the handshake explicitly. The
+    // state-change listener should NOT ALSO trigger a second handshake
+    // on the same open transition.
+    let initCount = 0;
+
+    const transport = fakeTransport(async (method) => {
+      if (method === "initialize") {
+        initCount++;
+        return buildInitializeResult() as never;
+      }
+      if (method === "_extensions/list") return buildExtensionsList() as never;
+      throw new Error(`unexpected method: ${method}`);
+    });
+
+    const client = await createClient({ transport });
+    await client.connect();
+    await client.whenReady();
+
+    // Only one initialize — the explicit `connect()`, not a
+    // state-change-triggered duplicate.
+    expect(initCount).toBe(1);
+
+    await client.close();
+  });
+
+  it("post-reconnect handshake failure leaves capabilities empty (best-effort)", async () => {
+    // If the post-reconnect handshake fails hard (server unreachable
+    // on the way back), we can't propagate to a caller — nobody
+    // awaited it. Behavior: swallow the failure, capabilities stay
+    // empty until the next explicit `connect()` succeeds.
+    let initCount = 0;
+    const transport = fakeTransport(async (method) => {
+      if (method === "initialize") {
+        initCount++;
+        if (initCount === 1) return buildInitializeResult() as never;
+        throw { kind: "rpc", error: { code: ErrorCode.InternalError, message: "boom" } };
+      }
+      if (method === "_extensions/list") return buildExtensionsList() as never;
+      throw new Error(`unexpected method: ${method}`);
+    });
+
+    const client = await createClient({ transport });
+    await client.connect();
+    expect(client.capabilities.extensions.length).toBeGreaterThan(0);
+
+    transport.setState("reconnecting");
+    transport.setState("open");
+    await client.whenReady();
+
+    // Handshake failed on the way back — capabilities remain empty.
+    // `whenReady()` still resolves (best-effort, no propagation).
+    expect(client.capabilities.extensions).toEqual([]);
+    expect(client.serverInfo).toBeUndefined();
+    expect(initCount).toBe(2);
+
+    await client.close();
+  });
+
   it("client.request works with typed WireMethods during handshake", async () => {
     // Regression / type sanity — the connect() flow calls request()
     // with method="initialize" and method="_extensions/list". Both

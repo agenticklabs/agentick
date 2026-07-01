@@ -82,6 +82,17 @@ export interface ClientProtocol {
   close(): Promise<void>;
   onStateChange(handler: (state: ClientState) => void): () => void;
 
+  /**
+   * Resolve once any in-flight post-reconnect handshake completes.
+   * The initial `connect()` handshake is awaited by `connect()`
+   * itself — this method matters only for the reconnect path where
+   * the transport transitions `open → reconnecting → open` without
+   * an explicit `connect()` call.
+   *
+   * Resolves immediately when nothing is in flight.
+   */
+  whenReady(): Promise<void>;
+
   // ── generic RPC dispatch (typed via WireMethods) ───────────────────────
   /**
    * Issue a single JSON-RPC request. Pass an `AbortSignal` to cancel
