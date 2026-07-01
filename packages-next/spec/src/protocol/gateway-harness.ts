@@ -29,6 +29,7 @@ import type { EventBus, EventBusFactory, SubscribeOptions } from "./bus.js";
 import type { OperationJournal, OperationJournalFactory } from "./journal.js";
 import type { MessageInbox, MessageInboxFactory } from "./inbox.js";
 import type { AppHarnessProtocol } from "./app-harness.js";
+import type { WireExtensionRegistry } from "../wire/registry.js";
 
 // ============================================================================
 // Gateway substrate parent
@@ -174,6 +175,26 @@ export interface GatewayHarnessProtocol {
    * (`SubscribeOptions.fromCursor`) flows through.
    */
   events(filter?: EventQuery, options?: SubscribeOptions): AsyncIterable<ProtocolEvent>;
+
+  // ─── Wire extensions (ADR 46) ───────────────────────────────────
+
+  /**
+   * The gateway's registry of {@link WireExtension} values. The wire
+   * dispatcher (in `@agentick/transport-next`) consults it to route
+   * incoming JSON-RPC frames to extension-registered handlers.
+   *
+   * Optional on the protocol so lightweight test stubs and older
+   * gateway impls don't need to implement it — dispatchers fall back
+   * to the hardcoded built-in switch when the registry is absent.
+   * Real gateway impls (`@agentick/gateway-next`) always populate
+   * one.
+   *
+   * The returned registry is sealed by construction time — callers
+   * cannot register new extensions post-hoc.
+   *
+   * @see docs/proposals/v2/blueprint/46-wire-extensions.md
+   */
+  wireExtensions?(): WireExtensionRegistry;
 }
 
 // ============================================================================

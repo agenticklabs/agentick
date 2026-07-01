@@ -18,10 +18,27 @@ method registry, notification registry, scope discriminator, frame
 validator).
 
 **Phase A of #280 (Wire extensions framework) — landed.** New
-`WireExtension` primitive + `defineWireExtension` validator. Runtime
-dispatcher, capability discovery, composite extension factories, and
-the canonical first user (`mcpControlWireExtension`) land in Phases
-B–F per ADR 46.
+`WireExtension` primitive + `defineWireExtension` validator.
+
+**Phase B of #280 (Wire dispatcher + registry) — landed (#295).**
+
+- `WireExtensionRegistry` interface (this package) + concrete
+  `createWireExtensionRegistry()` (`@agentick/gateway-next`).
+- `GatewayHarnessOptions.wireExtensions?: WireExtension[]` opt-in.
+- `GatewayHarness.wireExtensions()` publicly exposes the sealed
+  registry.
+- `@agentick/transport-next` dispatcher consults the registry
+  BEFORE its hardcoded switch, so adopter extensions dispatch
+  end-to-end.
+- `_extensions/list` built-in wire method returns the enumerate
+  view for capability discovery (Phase D wires this into
+  `client.capabilities`).
+
+**Framework methods refactor into `WireExtension` values** — the
+Phase C follow-up inside #295 — is next. Capability discovery
+(#296), composite extension factories (#297), the canonical
+`mcpControlWireExtension` first-user (#298), and the conformance
+helper (#299) land in subsequent phases per ADR 46.
 
 ---
 
@@ -216,13 +233,27 @@ extensions can't claim it. The validator rejects.
 ## Verified by
 
 - `__tests__/wire-extension.spec.ts` — 9 tests covering happy path +
-  all 8 validation rules.
+  all 8 validation rules (Phase A).
 - `__tests__/wire.spec.ts` — JSON-RPC envelope + validator coverage
   for the broader wire surface (Phase 33.A).
+- `../../gateway/src/__tests__/wire-registry.spec.ts` — 7 tests for
+  the concrete `WireExtensionRegistry` (register / resolve /
+  enumerate / seal, duplicate-namespace + duplicate-name rejection)
+  (Phase B).
+- `../../transport/src/__tests__/wire-extension-dispatch.spec.ts` —
+  11 tests for the dispatcher's registry lookup path: registered
+  extensions dispatch, ctx duck-types session/app, `ctx.publish`
+  validates against declared notifications (throws when undeclared),
+  `_extensions/list` enumerates, MethodNotFound for unknown methods,
+  handler exceptions surface as JSON-RPC errors (Phase B).
 
 ## Roadmap & known gaps
 
-- ⏳ #295 — Gateway wire dispatcher + extension registration (Phase B/C).
+- ✅ #295 Phase B — dispatcher + registry (**landed**).
+- ⏳ #295 Phase C — refactor framework methods (`gateway/*`,
+  `app/*`, `session/*`) into framework-supplied `WireExtension`
+  values; delete corresponding hardcoded switch cases from the
+  transport dispatcher.
 - ⏳ #296 — Capability discovery + `client.capabilities` (Phase D).
 - ⏳ #297 — Composite extension factory shape — `withX` returns
   multi-scope objects (Phase E). Depends on #254 (Gateway extensions
@@ -231,12 +262,26 @@ extensions can't claim it. The validator rejects.
   user; closes #279, unblocks #277d).
 - ⏳ #299 — `runWireExtensionConformance` helper (Phase G — executable
   audit suite).
-- ⚠ Phase A design items deferred to later phases: `bridges()` thunk
-  vs value (load-bearing for cluster routing?), publish failure
-  semantics, generic `SessionHarnessProtocol<unknown>` shape,
-  extension-level `defaultAuth` / `defaultClusterRoute`, `dispose`
-  hook, runtime `publish` validation. See ADR 46 §"What we considered
-  and rejected" + the Phase A retro discussion.
+- ⏳ #300 — Rename `subscribe`/`unsubscribe` → `sub/subscribe` +
+  `sub/unsubscribe` so they can move into a `subscriptionsWireExtension`
+  (wire-namespace-prefix validator rejects bare names). Punted from
+  #295 to isolate the wire-protocol-version bump.
+- ⏳ #301 — Move dispatch logic from `@agentick/transport-next` to
+  `@agentick/gateway-next` (transport keeps wire framing; gateway
+  gains the logical dispatch entry point).
+- ⏳ #302 — `authWireExtension` — builds alongside ADR 33 auth
+  subsystem; today's `auth/*` methods are type-stubs only.
+- ⚠ Phase B design items deferred to later phases:
+  - `ctx.bridges()` returns `{}` for Phase B — no framework
+    extension needs it yet. Phase F (mcpControlWireExtension) is
+    the first consumer and will resolve bridges from the target
+    session's session-extension registry.
+  - Handler exceptions collapse to `ErrorCode.InternalError` on the
+    wire. Typed AgentickError → JSON-RPC error code mapping is a
+    broader dispatcher concern (see #301).
+  - Cross-extension notification-name collision detection deferred
+    (low-priority — declaration-merged `WireNotifications` types
+    already provide compile-time signal).
 
 ## See also
 

@@ -732,6 +732,7 @@ exceptions, no special cases. Phase B/C decides definitively.
 ### Phase B/C scope amendment
 
 The wire-dispatcher implementation needs to:
+
 1. Define the framework's built-in `WireExtension` values
    (`gatewayWireExtension`, `appWireExtension`, etc.) that wrap the
    existing hardcoded handlers.
@@ -874,7 +875,7 @@ ships through the framework runs this in its package's test suite.
 
 The ADR specifies the design; implementation lands as sub-tickets.
 
-**Phase A — spec-next types + WireExtension interface.**
+**Phase A — spec-next types + WireExtension interface. ✅ LANDED.**
 
 - `WireExtension` / `WireExtensionContext` / `WireMethodAuth` types
   in `@agentick/spec-next/wire/extension.ts`.
@@ -882,19 +883,48 @@ The ADR specifies the design; implementation lands as sub-tickets.
   construction (namespace prefix, method-name alignment, etc.).
 - No runtime behavior change in this phase.
 
-**Phase B — gateway-extensions framework (#254).**
+**Phase B — dispatcher + registry plumbing. ✅ LANDED (#295 Phase B).**
 
-- This ADR depends on #254 (formal `GatewayExtension` factory + installer
-  - lifecycle). #254 currently pending; needs its own design pass.
-- If #254's design lands cleanly, this ADR's wire-extension install
-  fits as one scope (`wire`) in the composite-extension dispatch.
+Reversal from the original ADR sequencing: Phase B does NOT depend on
+#254 (formal `GatewayExtension` factory type). Empirical validation
+during #295 revealed the registry + dispatcher can land standalone,
+and only the composite-extension shape (Phase E, #297) actually
+needs #254 formalized. Phase C (framework methods refactor) also
+unblocks independently. #254 slots in between Phase C and Phase E
+with real evidence from Phase B/C code to inform the design.
 
-**Phase C — gateway dispatcher + registration.**
+Delivered:
 
-- Gateway construction accepts `wireExtensions: WireExtension[]`.
-- Reads composite-extension `wire` pieces from `apps[].extensions[]`.
-- Validates conflicts, registers handlers in the dispatch table.
-- Routes incoming RPCs by method name through auth + cluster + handler.
+- `WireExtensionRegistry` interface in spec + concrete
+  `createWireExtensionRegistry()` in `@agentick/gateway-next`.
+- `GatewayHarnessOptions.wireExtensions?: WireExtension[]` — adopter
+  ad-hoc registration path.
+- `GatewayHarness.wireExtensions()` publicly exposes the sealed
+  registry.
+- Optional `wireExtensions?()` on `GatewayHarnessProtocol` — bare
+  test stubs still typecheck.
+- `@agentick/transport-next` dispatcher checks the registry BEFORE
+  its hardcoded switch.
+- `_extensions/list` built-in wire method returns the enumerate
+  view.
+- Duck-typed session/app resolution from `params.sessionId` /
+  `params.appId`.
+- `ctx.publish` validates against declared notifications — throws
+  when the extension didn't declare a notifications array at all,
+  or when the requested name isn't in it.
+
+**Phase C — framework methods refactor.**
+
+- Author `gatewayWireExtension`, `appWireExtension`,
+  `sessionWireExtension` — each contains the current hardcoded
+  dispatch logic for its namespace.
+- Register these as framework defaults on `GatewayHarness`
+  construction, BEFORE adopter-supplied extensions (so adopter
+  attempts to claim `gateway`/`app`/`session` namespaces fail
+  at construction).
+- Delete corresponding hardcoded cases from the transport dispatcher.
+- Keep `subscribe`/`unsubscribe` + `auth/*` hardcoded — deferred to
+  #300 (namespace rename) and #302 (ADR 33 subsystem).
 
 **Phase D — capability discovery + client.capabilities.**
 

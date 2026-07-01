@@ -44,6 +44,8 @@ import type {
   SubscribeOptions,
   ToolDeclaration,
   ToolRegistration,
+  WireExtension,
+  WireExtensionRegistry,
 } from "@agentick/spec-next";
 import {
   AppAlreadyExistsError,
@@ -51,6 +53,7 @@ import {
   GatewayClosedError,
   toRegistration,
 } from "@agentick/spec-next";
+import { createWireExtensionRegistry } from "./wire-registry.js";
 import { mergeLayered } from "@agentick/utils-next";
 import { AppHarness, type AppHarnessOptions } from "@agentick/app-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
@@ -96,6 +99,18 @@ export interface GatewayHarnessOptions extends BaseHarnessOptions {
    * @see ToolBinding in `@agentick/spec-next` for the precedence ladder.
    */
   readonly tools?: ReadonlyArray<ToolDeclaration>;
+
+  /**
+   * Adopter-supplied wire extensions (ADR 46) installed on this
+   * gateway. Each contributes a JSON-RPC namespace (`crm/*`,
+   * `myOrg/*`, ...) that the wire dispatcher can route to. Package
+   * self-install (`withMCP(...)` returning a composite extension
+   * with a `wire` slot) will layer on top of this in Phase E.
+   *
+   * The registry is sealed once `gateway.ready` resolves — extensions
+   * cannot be registered post-hoc.
+   */
+  readonly wireExtensions?: ReadonlyArray<WireExtension>;
 }
 
 // ============================================================================
@@ -114,6 +129,13 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
    * `GatewayHarnessOptions.tools` was omitted.
    */
   private readonly gatewayTools: readonly ToolRegistration[];
+  /**
+   * Wire-extension registry built at construction from
+   * {@link GatewayHarnessOptions.wireExtensions}. Sealed once
+   * `super.ready` resolves. The transport dispatcher reads it via
+   * {@link wireExtensions} to route incoming JSON-RPC frames.
+   */
+  private readonly _wireExtensions: WireExtensionRegistry;
 
   get id(): string {
     return this.scopeId;
@@ -158,6 +180,27 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     this.gatewayTools = (options.tools ?? []).map((decl) =>
       toRegistration(decl, { scope: "gateway" }),
     );
+
+    // Build + seal the wire-extension registry. Adopter-supplied
+    // extensions register here at construction. Phase C will also
+    // register framework-supplied extensions (gateway/*, app/*,
+    // session/*) here, replacing the corresponding hardcoded cases
+    // in the transport dispatcher.
+    this._wireExtensions = createWireExtensionRegistry();
+    for (const ext of options.wireExtensions ?? []) {
+      this._wireExtensions.register(ext);
+    }
+    this._wireExtensions.seal();
+  }
+
+  /**
+   * Gateway-side wire-extension registry (ADR 46). The transport
+   * dispatcher consults this to route incoming JSON-RPC frames to
+   * extension-registered handlers before falling back to the
+   * hardcoded built-in switch.
+   */
+  wireExtensions(): WireExtensionRegistry {
+    return this._wireExtensions;
   }
 
   // ============================================================================

@@ -105,6 +105,8 @@ interface CreateGatewayOptions {
   bus?: EventBus | EventBusFactory;
   inbox?: MessageInbox | MessageInboxFactory;
   cluster?: ClusterFactory; // Phase 5
+  tools?: readonly ToolDeclaration[]; // gateway-scope tools (see below)
+  wireExtensions?: readonly WireExtension[]; // ADR 46 — see below
   metadata?: Readonly<Record<string, unknown>>;
 }
 ```
@@ -122,10 +124,74 @@ class GatewayHarness extends BaseHarness<"gateway"> implements GatewayHarnessPro
   apps(): readonly AppHarnessProtocol[];
   createApp<P>(input: CreateGatewayAppInput<P>): Promise<AppHarnessProtocol<P>>;
   events(filter?: EventQuery, options?: SubscribeOptions): AsyncIterable<ProtocolEvent>;
+  wireExtensions(): WireExtensionRegistry; // ADR 46 — see below
   closeGateway(): Promise<void>;
   close(): Promise<void>; // alias for closeGateway
 }
 ```
+
+## Wire extensions (ADR 46)
+
+The gateway can host **wire extensions** — extensible JSON-RPC
+namespaces reachable from `@agentick/client-next`. Adopters install
+their own via `wireExtensions: [...]`; framework packages will
+self-install via composite extension factories in Phase E (#297).
+
+The `@agentick/transport-next` dispatcher checks the registry BEFORE
+its hardcoded switch — so extension-registered handlers take priority
+over framework built-ins with the same name. Framework methods
+(`gateway/*`, `app/*`, `session/*`) themselves migrate into
+`WireExtension` values in #295 Phase C — same code path, no
+adopter-visible change.
+
+### Installing an adopter extension
+
+```ts
+import { createGateway } from "@agentick/gateway-next";
+import { defineWireExtension } from "@agentick/spec-next";
+
+const crmExt = defineWireExtension({
+  name: "@my-org/crm",
+  namespace: "crm",
+  methods: {
+    "crm/listContacts": async (_, ctx) => ({ contacts: await loadContacts() }),
+  },
+  notifications: ["crm/contact-changed"],
+});
+
+const gateway = await createGateway({
+  wireExtensions: [crmExt],
+});
+```
+
+### Discovery
+
+The gateway ships a built-in `_extensions/list` wire method that
+returns every registered extension. `@agentick/client-next`
+consumes this after `initialize` to populate `client.capabilities`
+(landing in #296).
+
+```ts
+// From a client:
+const { extensions } = await client.request("_extensions/list", {});
+// -> [{ name: "@my-org/crm", namespace: "crm", methods: [...], notifications: [...] }]
+```
+
+### Constraints
+
+- Namespaces reserved for framework-internal use (`_*`) can't be
+  claimed by adopter extensions — the `defineWireExtension`
+  validator rejects.
+- Registered namespaces must be unique per gateway. Duplicate
+  registration throws `WireExtensionDefinitionError` at construction
+  time (not first-request time).
+- The registry is sealed once `gateway.ready` resolves — extensions
+  cannot be added post-hoc. To layer additional extensions,
+  reconstruct the gateway.
+
+See [ADR 46 — Wire extensions](../../docs/proposals/v2/blueprint/46-wire-extensions.md)
+and [`@agentick/spec-next/wire`](../spec/src/wire/README.md) for the
+extension authoring guide.
 
 ## Patterns
 
@@ -176,21 +242,26 @@ layer between wire and harness.
 
 ## Verified by
 
-| Concern                                                | Test file                       |
-| ------------------------------------------------------ | ------------------------------- |
-| Construction + default in-memory substrate             | `src/__tests__/harness.spec.ts` |
-| `createApp` with default gateway-substrate inheritance | `src/__tests__/harness.spec.ts` |
-| `createApp` with per-app substrate factory override    | `src/__tests__/harness.spec.ts` |
-| `apps()` / `app(id)` read-side                         | `src/__tests__/harness.spec.ts` |
-| `closeGateway()` cascades into app closes              | `src/__tests__/harness.spec.ts` |
-| `events()` observes app-level events via fan-in        | `src/__tests__/harness.spec.ts` |
-| Duplicate `appId` rejection                            | `src/__tests__/harness.spec.ts` |
-| `GatewayClosedError` after close                       | `src/__tests__/harness.spec.ts` |
+| Concern                                                | Test file                                                    |
+| ------------------------------------------------------ | ------------------------------------------------------------ |
+| Construction + default in-memory substrate             | `src/__tests__/harness.spec.ts`                              |
+| `createApp` with default gateway-substrate inheritance | `src/__tests__/harness.spec.ts`                              |
+| `createApp` with per-app substrate factory override    | `src/__tests__/harness.spec.ts`                              |
+| `apps()` / `app(id)` read-side                         | `src/__tests__/harness.spec.ts`                              |
+| `closeGateway()` cascades into app closes              | `src/__tests__/harness.spec.ts`                              |
+| `events()` observes app-level events via fan-in        | `src/__tests__/harness.spec.ts`                              |
+| Duplicate `appId` rejection                            | `src/__tests__/harness.spec.ts`                              |
+| `GatewayClosedError` after close                       | `src/__tests__/harness.spec.ts`                              |
+| Wire extension registry — register / resolve / seal    | `src/__tests__/wire-registry.spec.ts`                        |
+| Wire extension dispatch end-to-end                     | `../transport/src/__tests__/wire-extension-dispatch.spec.ts` |
 
 ## Status
 
 Phase 4 (gateway scaffold) and now consumed by Phase 33.C+
-(transports). See `docs/proposals/v2/STATUS.md`.
+(transports). Wire-extension registry (#295 Phase B / ADR 46) landed
+— adopters can install extensions via `wireExtensions: [...]`.
+Framework methods refactor into `WireExtension` values in Phase C.
+See `docs/proposals/v2/STATUS.md`.
 
 ## Roadmap & known gaps
 
@@ -215,6 +286,22 @@ Phase 4 (gateway scaffold) and now consumed by Phase 33.C+
   interfaces. Concrete extensions land per their owning scope
   (auth in ADR 34, mcp-surface in 33.I, transports as their own
   packages).
+- **Framework wire methods still hardcoded in transport dispatcher.**
+  Phase B (#295) landed the registry + dispatch plumbing. Phase C
+  refactors `gateway/*`, `app/*`, `session/*` into
+  `WireExtension` values registered as framework defaults on
+  `GatewayHarness` construction. Blocked on #254 (formal
+  `GatewayExtension` factory type) only for the composite factory
+  shape (#297); the WireExtension refactor itself can land
+  standalone.
+- **`bridges()` on wire-extension context is empty.** No
+  framework-supplied extension needs bridges today. Phase F (#298 —
+  `mcpControlWireExtension`) is the first consumer; it will resolve
+  bridges from the target session's session-extension registry.
+- **`_extensions/list` is unauthenticated for now.** Discovery is
+  intended to be open — clients need it to know what they can
+  reach. If future deployments want gated discovery, the wire method
+  can grow an auth entry in Phase C.
 
 ## Development plan
 

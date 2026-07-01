@@ -14,7 +14,9 @@ import {
   type AppHarnessProtocol,
   type AppListSessionsParams,
   type EventEnvelope,
+  type ExtensionsListResult,
   type GatewayHarnessProtocol,
+  type HookBridges,
   type InitializeParams,
   type InitializeResult,
   type JsonRpcId,
@@ -28,6 +30,9 @@ import {
   type SessionSendParams,
   type SubscribeParams,
   type UnsubscribeParams,
+  type WireExtension,
+  type WireExtensionContext,
+  type WireNotificationMethod,
 } from "@agentick/spec-next";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -60,11 +65,39 @@ export async function dispatchRequest(
   sink: DispatchSink,
 ): Promise<JsonRpcResponse> {
   try {
+    // Bootstrap methods dispatched directly — must resolve BEFORE the
+    // extension registry (initialize runs before the registry is
+    // observable; _extensions/list reads the registry itself; ping
+    // is stateless keepalive).
     switch (req.method) {
       case "initialize":
         return success(req.id, initialize(req.params as InitializeParams));
       case "ping":
         return success(req.id, {});
+      case "_extensions/list": {
+        // Capability discovery (ADR 46 §Discovery). Reads the sealed
+        // registry that the gateway populated at construction.
+        const registry = host.wireExtensions?.();
+        const extensions = registry ? registry.enumerate() : [];
+        const result: ExtensionsListResult = { extensions };
+        return success(req.id, result);
+      }
+    }
+
+    // Registry-based dispatch — Phase B. Adopter-supplied wire
+    // extensions (and, post-Phase-C, framework-supplied ones)
+    // resolve here before falling through to the hardcoded switch.
+    const registry = host.wireExtensions?.();
+    if (registry) {
+      const resolution = registry.resolve(req.method);
+      if (resolution) {
+        const ctx = buildWireExtensionContext(host, resolution.extension, req.params, sink);
+        const result = await resolution.handler(req.params, ctx);
+        return success(req.id, result);
+      }
+    }
+
+    switch (req.method) {
       case "gateway/listApps":
         return success(req.id, {
           apps: host.apps().map((a) => ({ id: a.id })),
@@ -354,6 +387,78 @@ function initialize(_params: InitializeParams): InitializeResult {
     serverInfo: { name: "@agentick/transport-websocket-next", version: "0.0.0" },
     connectionId: `conn-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
   };
+}
+
+// ============================================================================
+// WireExtension context builder — ADR 46
+// ============================================================================
+
+/**
+ * Build the {@link WireExtensionContext} that gets passed to a wire
+ * extension handler. Resolves `session`/`app` by duck-typing the
+ * incoming params (`params.sessionId` / `params.appId`), wires the
+ * `publish` fn to validate against the extension's declared
+ * notifications, and forwards `bridges()` as an empty proxy for now
+ * (populated properly when the first bridge-consuming extension
+ * lands — Phase F, mcpControlWireExtension).
+ *
+ * Bridges resolution is deliberately deferred: no framework-shipped
+ * extension needs bridges today, and returning a real bridges
+ * dictionary requires session-level session-extension coordination
+ * that's out of Phase B scope. The thunk shape reserves the seam.
+ *
+ * TODO(phase-F): populate `bridges()` from the resolved session's
+ * HookBridges once the mcpControlWireExtension needs
+ * `ctx.bridges().mcp` (see ADR 46 §"Bridges resolution").
+ */
+function buildWireExtensionContext(
+  host: DispatchHost,
+  extension: WireExtension,
+  rawParams: unknown,
+  sink: DispatchSink,
+): WireExtensionContext {
+  const params = (rawParams ?? {}) as Record<string, unknown>;
+  const sessionId = typeof params.sessionId === "string" ? params.sessionId : undefined;
+  const appId = typeof params.appId === "string" ? params.appId : undefined;
+
+  const app = appId ? host.app(appId) : undefined;
+  const session = sessionId ? findSessionOrUndef(host, sessionId) : undefined;
+
+  const declaredNotifications = new Set<string>(extension.notifications ?? []);
+
+  return {
+    gateway: host,
+    ...(app ? { app } : {}),
+    ...(session ? { session } : {}),
+    // TODO(phase-F): resolve HookBridges from the session's session-extension
+    // registry when the mcpControlWireExtension needs `ctx.bridges().mcp`.
+    // For Phase B, no framework-shipped extension uses bridges — the empty
+    // object honors the type without lying about behavior.
+    bridges: (): HookBridges => ({}) as HookBridges,
+    publish: <K extends WireNotificationMethod>(name: K, notifParams: unknown) => {
+      // Undeclared publish always rejects — an extension without a
+      // `notifications` array is declaring "I publish nothing." Extensions
+      // that want to publish MUST declare the names they own.
+      if (!declaredNotifications.has(name)) {
+        throw new Error(
+          `extension "${extension.name}" cannot publish "${name}" — ` +
+            `${extension.notifications ? "not in its declared notifications list" : "no notifications declared"}.`,
+        );
+      }
+      sink.sendNotification({ method: name, params: notifParams });
+    },
+  };
+}
+
+function findSessionOrUndef(
+  host: GatewayHarnessProtocol,
+  sessionId: string,
+): SessionHarnessProtocol | undefined {
+  for (const app of host.apps()) {
+    const sess = app.getSession(sessionId);
+    if (sess) return sess;
+  }
+  return undefined;
 }
 
 // ============================================================================

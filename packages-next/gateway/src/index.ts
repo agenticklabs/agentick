@@ -11,3 +11,4 @@ export {
   type GatewayHarnessOptions,
 } from "./harness.js";
 export { createGateway } from "./create-gateway.js";
+export { createWireExtensionRegistry } from "./wire-registry.js";
