@@ -50,7 +50,7 @@ describe("resolveToolsOption — form A: CreatedTool[] shorthand", () => {
       handler: async () => [{ type: "text", text: "ok" }],
     });
     const resolved = resolveToolsOption([echo]);
-    expect(resolved.registry).toEqual([echo.declaration]);
+    expect(resolved.registry.list()).toEqual([echo.declaration]);
     expect(resolved.filter).toBeNull();
     expect(resolved.transforms).toEqual([]);
 
@@ -92,7 +92,7 @@ describe("resolveToolsOption — form C: config object with inline tools", () =>
     });
     const filter = (): boolean => true;
     const resolved = resolveToolsOption({ tools: [t], filter });
-    expect(resolved.registry).toEqual([t.declaration]);
+    expect(resolved.registry.list()).toEqual([t.declaration]);
     expect(resolved.filter).toBe(filter);
   });
 
@@ -127,7 +127,10 @@ describe("resolveToolsOption — form C: low-level registry + resolveHandler", (
           })
         : null;
     const resolved = resolveToolsOption({ registry: reg, resolveHandler: resolver });
-    expect(resolved.registry).toBe(reg);
+    // Static arrays wrap as staticToolCatalog — reference equality no
+    // longer holds (the catalog wraps a snapshot), but .list() returns
+    // the equivalent declarations.
+    expect(resolved.registry.list()).toEqual(reg);
     expect(resolved.resolveHandler).toBe(resolver); // No adapter — reference equality holds.
     const handler = resolved.resolveHandler("ref:a");
     expect(handler).not.toBeNull();

@@ -26,7 +26,8 @@ import type {
 } from "@modelcontextprotocol/sdk/types.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { Server as SdkServer } from "@modelcontextprotocol/sdk/server/index.js";
-import { toJsonSchema, type ToolDeclaration } from "@agentick/spec-next";
+import { toJsonSchema, type ToolDeclaration, type Unsubscribe } from "@agentick/spec-next";
+import type { ToolCatalog } from "@agentick/tool-next";
 import {
   McpServerError,
   type ContentBlock,
@@ -86,8 +87,15 @@ export type ToolHandlerResolver = (
 ) => ((input: unknown, ctx: McpRequestContext) => Promise<ToolHandlerInvokeResult>) | null;
 
 export interface ToolsProjectionOptions {
-  /** Canonical tool registry — the projection filters + transforms this per connection. */
-  readonly registry: readonly ToolDeclaration[];
+  /**
+   * Tool-declaration source — the projection calls `.list()` on every
+   * `tools/list` (and `tools/call` re-project) request, and subscribes
+   * via `.subscribeAll(cb)` to fan mutations out as
+   * `notifications/tools/list_changed`. Static-array adopters wrap
+   * via `staticToolCatalog` upstream; dynamic adopters bring their
+   * own catalog via `createToolCatalog` from `@agentick/tool-next`.
+   */
+  readonly registry: ToolCatalog;
   /**
    * Resolves `handlerRef` → concrete async handler. Returns the
    * Pattern-B-aware {@link ToolHandlerInvokeResult} discriminated
@@ -112,8 +120,16 @@ export interface ToolsProjectionOptions {
 /**
  * Install the `tools/list` and `tools/call` request handlers on an
  * SDK Server. Called once per connection at accept time.
+ *
+ * Returns an `Unsubscribe` — call it from the connection close path
+ * to stop the change-notification fan-out for this connection.
+ * (Static-array registries wrap as a `staticToolCatalog` whose
+ * `subscribeAll` is a no-op; the returned function still teardown-cleanly.)
  */
-export function installToolsHandlers(sdkServer: SdkServer, options: ToolsProjectionOptions): void {
+export function installToolsHandlers(
+  sdkServer: SdkServer,
+  options: ToolsProjectionOptions,
+): Unsubscribe {
   const transforms = options.projection?.transforms ?? [];
   const composed = composeTransforms<McpRequestContext>(...transforms);
   const filter = options.projection?.filter;
@@ -126,7 +142,7 @@ export function installToolsHandlers(sdkServer: SdkServer, options: ToolsProject
       const { ctx } = await evaluateRequestPipeline(options.security, baseCtx, {
         type: "tool_list",
       });
-      const projected = projectTools(options.registry, filter, composed, ctx);
+      const projected = projectTools(options.registry.list(), filter, composed, ctx);
       return { tools: projected.map(toWireTool) };
     },
   );
@@ -147,7 +163,7 @@ export function installToolsHandlers(sdkServer: SdkServer, options: ToolsProject
       // Re-project so per-connection filter/transforms decide
       // visibility for this specific call. A tool hidden from `list`
       // must not be callable via `call` either.
-      const projected = projectTools(options.registry, filter, composed, ctx);
+      const projected = projectTools(options.registry.list(), filter, composed, ctx);
       const tool = projected.find((t) => t.name === request.params.name);
       if (!tool) {
         // Tool either doesn't exist or is filtered for this connection.
@@ -228,6 +244,22 @@ export function installToolsHandlers(sdkServer: SdkServer, options: ToolsProject
       }
     },
   );
+
+  // ─────────── notifications/tools/list_changed ───────────
+  // The SDK only sends the notification when the connection has fully
+  // initialized and the client advertised `tools.listChanged` support.
+  // The SDK does the gating; we just call sendToolListChanged on
+  // every catalog change. Static-array registries wrap as
+  // `staticToolCatalog`, whose `subscribeAll` is a no-op — the
+  // returned unsubscribe is safe to call regardless.
+  const unsubscribe = options.registry.subscribeAll(() => {
+    void sdkServer.sendToolListChanged().catch(() => {
+      // Connection probably closed mid-notification — silently drop.
+      // The catalog change still happened; future connections see the
+      // new list state via `tools/list`.
+    });
+  });
+  return unsubscribe;
 }
 
 /**

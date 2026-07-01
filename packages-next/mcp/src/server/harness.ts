@@ -205,7 +205,7 @@ export class McpServerHarness
     // ever called. Substrate shared with this harness so task
     // envelopes flow through the same bus / journal.
     this.serverTasks = new TasksHarness(`${scopeId}:tasks`, journal, bus, inbox);
-    this.hasTasksWired = (this.resolvedTools?.registry ?? []).some((decl) => {
+    this.hasTasksWired = (this.resolvedTools?.registry.list() ?? []).some((decl) => {
       const ts = decl.annotations?.taskSupport;
       return ts === "required" || ts === "supported";
     });
@@ -389,7 +389,7 @@ export class McpServerHarness
     // 2. Construct SDK Server with negotiated capabilities.
     const capabilities = buildCapabilities(
       {
-        tools: !isNull(this.resolvedTools) && this.resolvedTools.registry.length > 0,
+        tools: !isNull(this.resolvedTools) && this.resolvedTools.registry.list().length > 0,
         prompts: !isNull(this.promptsSource),
         resources: false, // wired with #123
         elicitation: this.elicitWired,
@@ -491,9 +491,9 @@ export class McpServerHarness
     // tasks/list. Cleared on transport close.
     const tasksRegistry = this.hasTasksWired ? createServerTaskRegistry(sdkServer) : undefined;
 
-    if (!isNull(this.resolvedTools) && this.resolvedTools.registry.length > 0) {
+    if (!isNull(this.resolvedTools) && this.resolvedTools.registry.list().length > 0) {
       const tools = this.resolvedTools;
-      installToolsHandlers(sdkServer, {
+      const toolsUnsubscribe = installToolsHandlers(sdkServer, {
         registry: tools.registry,
         resolveHandler: tools.resolveHandler,
         ...(tasksRegistry ? { tasks: tasksRegistry } : {}),
@@ -508,6 +508,7 @@ export class McpServerHarness
         security: this.security,
         buildContext: buildRequestContext,
       });
+      cleanup.push(toolsUnsubscribe);
     }
 
     if (tasksRegistry) {

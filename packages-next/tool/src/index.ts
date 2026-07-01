@@ -13,3 +13,10 @@
 
 export { createTool, isCreatedTool, type ToolSpec, type CreatedTool } from "./create-tool.js";
 export { permissiveValidator, fromStandardSchema } from "./validator.js";
+export {
+  createToolCatalog,
+  isToolCatalog,
+  staticToolCatalog,
+  type MutableToolCatalog,
+  type ToolCatalog,
+} from "./catalog.js";

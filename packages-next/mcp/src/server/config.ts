@@ -29,7 +29,13 @@ import {
   type Prompts,
   type ToolDeclaration,
 } from "@agentick/spec-next";
-import { isCreatedTool, type CreatedTool } from "@agentick/tool-next";
+import {
+  isCreatedTool,
+  isToolCatalog,
+  staticToolCatalog,
+  type CreatedTool,
+  type ToolCatalog,
+} from "@agentick/tool-next";
 import type { ToolTransform } from "@agentick/tool-next/transforms";
 
 import type {
@@ -73,8 +79,17 @@ export type ToolsFilter = (tool: ToolDeclaration, ctx: McpRequestContext) => boo
 export interface McpServerToolsConfig {
   /** Inline tools — server builds an internal handler registry from each. */
   readonly tools?: readonly CreatedTool[];
-  /** Low-level: explicit canonical registry (paired with `resolveHandler`). */
-  readonly registry?: readonly ToolDeclaration[];
+  /**
+   * Low-level: explicit canonical registry (paired with `resolveHandler`).
+   *
+   * Accepts either a static `readonly ToolDeclaration[]` OR a
+   * {@link ToolCatalog} for reactive tool-set changes. Adopters who
+   * want MCP clients to receive `notifications/tools/list_changed`
+   * when the tool set mutates should pass a catalog (see
+   * `createToolCatalog` from `@agentick/tool-next`). Arrays wrap
+   * internally as static catalogs — no change in behavior.
+   */
+  readonly registry?: readonly ToolDeclaration[] | ToolCatalog;
   /** Low-level: explicit handler resolver (paired with `registry`). */
   readonly resolveHandler?: ToolHandlerResolver;
   /** Per-connection visibility predicate. */
@@ -373,10 +388,13 @@ export function resolveElicitOption(option: boolean | McpServerElicitOptions | u
  */
 export interface ResolvedToolsOptions {
   /**
-   * Canonical declarations for `tools/list`. Per-connection filter +
-   * transforms apply on top.
+   * Canonical tool-declaration source. Always a {@link ToolCatalog} —
+   * static arrays supplied by adopters wrap via `staticToolCatalog`;
+   * dynamic sources feed reactivity to
+   * `notifications/tools/list_changed` on the MCP wire.
+   * Per-connection filter + transforms apply on top of `.list()`.
    */
-  readonly registry: readonly ToolDeclaration[];
+  readonly registry: ToolCatalog;
   /**
    * Pattern-B-aware handler resolver. Returns the projection-internal
    * discriminated union — `kind: "inline"` for the common case
@@ -433,14 +451,25 @@ export function resolveToolsOption(option: McpServerToolsOptions): ResolvedTools
     return resolveFromCreatedTools(cfg.tools, cfg.filter ?? null, cfg.transforms ?? []);
   }
   // hasRegistry === true
-  if (!Array.isArray(cfg.registry)) {
-    throw invalid("tools.registry must be an array of ToolDeclaration", ["tools", "registry"]);
-  }
   if (typeof cfg.resolveHandler !== "function") {
     throw invalid("tools.resolveHandler must be a function", ["tools", "resolveHandler"]);
   }
+  // Accept either a static array (wrapped via staticToolCatalog) or a
+  // live ToolCatalog (used directly). Live catalogs propagate their
+  // change notifications to `sendToolListChanged` at connection scope.
+  let registry: ToolCatalog;
+  if (Array.isArray(cfg.registry)) {
+    registry = staticToolCatalog(cfg.registry);
+  } else if (isToolCatalog(cfg.registry)) {
+    registry = cfg.registry;
+  } else {
+    throw invalid(
+      "tools.registry must be a ToolDeclaration[] or a ToolCatalog (from @agentick/tool-next)",
+      ["tools", "registry"],
+    );
+  }
   return {
-    registry: cfg.registry,
+    registry,
     resolveHandler: cfg.resolveHandler,
     filter: cfg.filter ?? null,
     transforms: cfg.transforms ?? [],
@@ -494,7 +523,7 @@ function resolveFromCreatedTools(
       );
     };
   };
-  return { registry, resolveHandler, filter, transforms };
+  return { registry: staticToolCatalog(registry), resolveHandler, filter, transforms };
 }
 
 function validateToolsOption(option: McpServerToolsOptions): void {
