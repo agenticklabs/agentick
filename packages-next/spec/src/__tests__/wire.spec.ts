@@ -400,11 +400,11 @@ describe("@agentick/spec-next — wire structural tests", () => {
   describe("WireMethods registry", () => {
     it("WireParams<M> resolves params per method", () => {
       expectTypeOf<WireParams<"session/send">>().toEqualTypeOf<SessionSendParams>();
-      expectTypeOf<WireParams<"subscribe">>().toEqualTypeOf<SubscribeParams>();
+      expectTypeOf<WireParams<"sub/subscribe">>().toEqualTypeOf<SubscribeParams>();
     });
 
     it("WireResult<M> resolves result per method", () => {
-      expectTypeOf<WireResult<"subscribe">>().toEqualTypeOf<SubscribeResult>();
+      expectTypeOf<WireResult<"sub/subscribe">>().toEqualTypeOf<SubscribeResult>();
     });
 
     it("WireMethod is the union of every registered method name", () => {
@@ -422,7 +422,7 @@ describe("@agentick/spec-next — wire structural tests", () => {
       type _gateway = WireMethods["gateway/listApps"];
       type _app = WireMethods["app/createSession"];
       type _session = WireMethods["session/send"];
-      type _subscribe = WireMethods["subscribe"];
+      type _subscribe = WireMethods["sub/subscribe"];
       type _auth = WireMethods["auth/refresh"];
       type _ping = WireMethods["ping"];
     });

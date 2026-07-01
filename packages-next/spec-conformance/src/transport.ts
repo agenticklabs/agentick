@@ -207,7 +207,7 @@ export function runTransportConformance(name: string, factory: TransportConforma
     describe("subscriptions", () => {
       it("subscribe → server-allocated id → events route to the stream", async () => {
         const handler: TestHandler = async (req, sendNotification) => {
-          if (req.method === "subscribe") {
+          if (req.method === "sub/subscribe") {
             // Reply with a server-allocated id, then push two events.
             const subscriptionId = "srv-sub-test-1";
             setTimeout(() => {
@@ -230,7 +230,7 @@ export function runTransportConformance(name: string, factory: TransportConforma
             }, 0);
             return { jsonrpc: "2.0", id: req.id, result: { subscriptionId } };
           }
-          if (req.method === "unsubscribe") {
+          if (req.method === "sub/unsubscribe") {
             return { jsonrpc: "2.0", id: req.id, result: null };
           }
           return { jsonrpc: "2.0", id: req.id, result: {} };
@@ -254,7 +254,7 @@ export function runTransportConformance(name: string, factory: TransportConforma
 
       it("notifications/subscription/closed terminates the stream", async () => {
         const handler: TestHandler = async (req, sendNotification) => {
-          if (req.method === "subscribe") {
+          if (req.method === "sub/subscribe") {
             const subscriptionId = "srv-sub-close-1";
             setTimeout(() => {
               sendNotification({
@@ -278,7 +278,7 @@ export function runTransportConformance(name: string, factory: TransportConforma
 
       it("notifications/subscription/evicted surfaces a protocol error", async () => {
         const handler: TestHandler = async (req, sendNotification) => {
-          if (req.method === "subscribe") {
+          if (req.method === "sub/subscribe") {
             const subscriptionId = "srv-sub-evict-1";
             setTimeout(() => {
               sendNotification({

@@ -930,16 +930,41 @@ BEFORE adopter-supplied extensions. Adopter attempts to claim
 `WireExtensionDefinitionError` at construction — no silent
 shadowing.
 
-Streaming methods stay hardcoded pending #303:
-
-- `session/send` — uses `sink.sendNotification` for progress frames
-  - `sink.registerInFlight` for cancellation
-- `subscribe` / `unsubscribe` — use `sink.registerSubscription` for
-  the event fan-out; also awaiting #300 rename to `sub/subscribe` +
-  `sub/unsubscribe`
-
 `auth/*` remains type-stubs only — refactor lands with #302
 alongside the ADR 33 auth subsystem.
+
+**Post-Phase-C (streaming primitives + subscribe rename + full
+dogfood) — ✅ LANDED (#300 + #303).**
+
+Extended `WireExtensionContext` with a `transport` slot that
+carries typed streaming primitives:
+
+- `progress(progressToken)` returns a `ProgressReporter` with
+  auto-cursor tracking + `notifications/progress` emit.
+- `registerCancel(abort)` bridges to
+  `sink.registerInFlight(reqId, abort)`; auto-cleared on RPC
+  return.
+- `registerSubscription(cleanup)` returns a
+  `SubscriptionHandle` (`id`, `publish(envelope)`,
+  `close(reason?)`) with server-allocated id + auto-cursor
+  tracking + cleanup routing.
+- `closeSubscription(id)` is the client-initiated teardown seam.
+
+`session/send`, `sub/subscribe`, `sub/unsubscribe` all use this
+slot — no direct sink access. The rename `subscribe` →
+`sub/subscribe` + `unsubscribe` → `sub/unsubscribe` (#300) closed
+concurrently so the methods fit the wire-extension namespace-prefix
+validator.
+
+The transport dispatcher's error handler also maps AgentickError
+subclasses to matching JSON-RPC error codes so typed errors reach
+the client with structured shape instead of a generic
+"internal error" wrapper.
+
+Result: only three methods dispatch outside the extension registry
+— `initialize`, `ping`, `_extensions/list` — because they run
+BEFORE the registry is queryable. Full dogfood: **every other
+framework method is a `WireExtension`.**
 
 **Phase D — capability discovery + client.capabilities.**
 

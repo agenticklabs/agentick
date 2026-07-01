@@ -40,20 +40,50 @@ validator).
 - `gatewayWireExtension` (`gateway/listApps`, `gateway/getApp`),
   `appWireExtension` (`app/createSession`, `app/getSession`,
   `app/listSessions`), `sessionWireExtension`
-  (`session/dispatch`, `session/abort`, `session/close`,
-  `session/respondToElicitation`) ship in `@agentick/gateway-next`
-  and register as defaults on every `GatewayHarness`.
+  (`session/send`, `session/dispatch`, `session/abort`,
+  `session/close`, `session/respondToElicitation`), and
+  `subscriptionsWireExtension` (`sub/subscribe`,
+  `sub/unsubscribe`) ship in `@agentick/gateway-next` and register
+  as defaults on every `GatewayHarness`.
 - Framework extensions register BEFORE adopter-supplied extensions.
-  Adopter attempts to claim `gateway` / `app` / `session`
+  Adopter attempts to claim `gateway` / `app` / `session` / `sub`
   namespaces surface as `WireExtensionDefinitionError` at
   construction — no silent shadowing.
 - Corresponding hardcoded cases deleted from the transport
   dispatcher.
-- **Streaming methods (`session/send`, `subscribe`, `unsubscribe`)
-  remain hardcoded** — they need transport-level primitives
-  (`sink.sendNotification`, `sink.registerInFlight`,
-  `sink.registerSubscription`) not yet on `WireExtensionContext`.
-  Refactor lands with #303 (streaming primitives).
+
+**#303 (Streaming primitives on WireExtensionContext) — landed.**
+
+`WireExtensionContext.transport` exposes typed streaming primitives:
+
+- `progress(progressToken)` — returns a `ProgressReporter` that
+  auto-tracks cursor ordering and emits
+  `notifications/progress` frames.
+- `registerCancel(abort)` — bridges to
+  `sink.registerInFlight(reqId, abort)`; unregistered
+  automatically when the RPC returns.
+- `registerSubscription(cleanup)` — returns a
+  `SubscriptionHandle` (`id`, `publish(envelope)`,
+  `close(reason?)`); server-side allocates the id, cursor tracking
+  is automatic, cleanup fires on client unsubscribe.
+- `closeSubscription(id)` — client-initiated teardown seam.
+
+`session/send`, `sub/subscribe`, `sub/unsubscribe` all use this
+slot instead of poking at the sink directly — completing the ADR 46
+eat-our-own-dogfood commitment.
+
+**#300 (subscribe/unsubscribe rename) — landed.** Bare `subscribe`
+/ `unsubscribe` renamed to `sub/subscribe` / `sub/unsubscribe` so
+they fit under `subscriptionsWireExtension` per the wire-extension
+namespace-prefix rule.
+
+**Error surface — landed.** The dispatcher's `catch` maps
+`AgentickError` subclasses to matching JSON-RPC error codes
+(`AppNotFoundError` → `AppNotFound`, `SessionNotFoundError` →
+`SessionNotFound`, validation errors → `InvalidParams`, etc.).
+Falls back to `InternalError` for unmapped tags. Handler-thrown
+errors reach the client with typed shape instead of a generic
+"internal error" wrapper.
 
 Capability discovery (#296), composite extension factories (#297),
 the canonical `mcpControlWireExtension` first-user (#298), and the
@@ -270,8 +300,15 @@ extensions can't claim it. The validator rejects.
 
 - ✅ #295 Phase B — dispatcher + registry (**landed**).
 - ✅ #295 Phase C — non-streaming framework methods refactored into
-  `WireExtension` values (**landed**). Streaming methods deferred
-  to #303.
+  `WireExtension` values (**landed**).
+- ✅ #300 — `subscribe`/`unsubscribe` → `sub/subscribe` /
+  `sub/unsubscribe` rename (**landed**).
+- ✅ #303 — `WireExtensionContext.transport` streaming primitives
+  + `session/send` + `sub/subscribe` + `sub/unsubscribe` refactored
+  into wire extensions (**landed**). Full ADR 46
+  eat-our-own-dogfood commitment realized — the only remaining
+  hardcoded methods are the three bootstrap builtins
+  (`initialize`, `ping`, `_extensions/list`).
 - ⏳ #296 — Capability discovery + `client.capabilities` (Phase D).
 - ⏳ #297 — Composite extension factory shape — `withX` returns
   multi-scope objects (Phase E). Depends on #254 (Gateway extensions
@@ -289,11 +326,6 @@ extensions can't claim it. The validator rejects.
   gains the logical dispatch entry point).
 - ⏳ #302 — `authWireExtension` — builds alongside ADR 33 auth
   subsystem; today's `auth/*` methods are type-stubs only.
-- ⏳ #303 — Extend `WireExtensionContext` with transport-level
-  primitives (`reportProgress`, `registerCancel`,
-  `registerSubscription`) so `session/send`, `subscribe`,
-  `unsubscribe` can also become `WireExtension` values. Completes
-  the eat-our-own-dogfood commitment.
 - ⚠ Phase B design items deferred to later phases:
   - `ctx.bridges()` returns `{}` for Phase B — no framework
     extension needs it yet. Phase F (mcpControlWireExtension) is

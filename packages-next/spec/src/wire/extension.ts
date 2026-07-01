@@ -84,6 +84,107 @@ export interface WireMethodAuth {
 export type WireClusterRoute = "session-local" | "any" | "leader";
 
 /**
+ * Progress reporter for a single in-flight RPC. Returned by
+ * {@link WireExtensionTransport.progress}. Cursor tracking is
+ * internal — each `push` auto-increments and stamps the outbound
+ * `notifications/progress` frame with a monotonically increasing
+ * cursor.
+ *
+ * Progress delivery is fire-and-forget — cluster-distributed
+ * routing failures don't surface to the extension.
+ */
+export interface ProgressReporter {
+  /**
+   * Push one progress envelope. Extensions define envelope shape;
+   * the framework wraps it in the `notifications/progress`
+   * `{ progressToken, cursor, envelope }` structure on the wire.
+   */
+  push<Envelope>(envelope: Envelope): void;
+}
+
+/**
+ * A live subscription owned by an extension handler. Returned by
+ * {@link WireExtensionTransport.registerSubscription}. The `id` is
+ * server-allocated and returned in the handler's RPC response so the
+ * client can later `unsubscribe`.
+ *
+ * `publish` sends `notifications/subscription/event` frames
+ * correlated by `id`, with automatic cursor tracking. `close` sends
+ * a `notifications/subscription/closed` frame — used for
+ * server-initiated teardown (typically on iteration error).
+ * Client-initiated unsubscribe fires the cleanup callback passed
+ * at registration; no `close` notification is sent because the
+ * client already knows.
+ */
+export interface SubscriptionHandle {
+  readonly id: string;
+  publish<Envelope>(envelope: Envelope): void;
+  close(reason?: { readonly code: number; readonly message: string }): void;
+}
+
+/**
+ * Transport-level primitives exposed to wire-extension handlers.
+ * These reach past the JSON-RPC request/response envelope for
+ * long-running or fan-out operations — progress notifications on an
+ * in-flight RPC, cancellation registration, and durable subscription
+ * fan-out.
+ *
+ * Framework-supplied extensions (`sessionWireExtension`'s
+ * `session/send`, `subscriptionsWireExtension`'s `sub/subscribe`)
+ * consume this slot. Most adopter extensions don't need it —
+ * simple request/response handlers can ignore `ctx.transport`
+ * entirely.
+ *
+ * The slot is always present on the context (never conditional),
+ * matching the pattern established by `ctx.publish` — framework
+ * plumbing is uniformly reachable.
+ */
+export interface WireExtensionTransport {
+  /**
+   * Start reporting `notifications/progress` frames for this RPC,
+   * correlated by `progressToken`. LSP-style protocol convention —
+   * the client opted in by including
+   * `params._meta.progressToken` on the request.
+   *
+   * Returns a stateful reporter that auto-tracks cursor ordering.
+   * Extensions that don't want progress simply never call this
+   * method.
+   */
+  progress(progressToken: string | number): ProgressReporter;
+
+  /**
+   * Register an abort callback fired when the client sends
+   * `notifications/cancelled` for this RPC. The callback runs at
+   * most once per RPC. Cleanup runs automatically when the RPC
+   * completes — extensions do NOT need to unregister.
+   *
+   * Multiple calls within one RPC replace the prior callback —
+   * "one cancel handler per request" is enforced by the underlying
+   * in-flight registry.
+   */
+  registerCancel(abort: () => void): void;
+
+  /**
+   * Open a subscription. Returns a handle whose `id` the handler
+   * MUST return in its RPC response — clients unsubscribe by that
+   * id.
+   *
+   * `cleanup` runs when the client unsubscribes (via the
+   * unsubscribe RPC) or when the connection drops. Server-initiated
+   * teardown uses `handle.close({ code, message })` instead — the
+   * cleanup ALSO fires in that case.
+   */
+  registerSubscription(cleanup: () => Promise<void>): SubscriptionHandle;
+
+  /**
+   * Client-initiated unsubscribe. Runs the cleanup fn associated
+   * with the id, then removes it from the registry. Idempotent —
+   * unknown ids are silent no-ops.
+   */
+  closeSubscription(subscriptionId: string): void;
+}
+
+/**
  * Runtime context passed to wire-extension handlers. The gateway
  * constructs one per request after auth + cluster routing succeed.
  *
@@ -123,6 +224,13 @@ export interface WireExtensionContext {
     name: K,
     params: WireNotificationParams<K>,
   ) => void;
+  /**
+   * Transport-level primitives for streaming operations — progress
+   * notifications, cancellation registration, subscription fan-out.
+   * See {@link WireExtensionTransport}. Adopter extensions that only
+   * do simple request/response can ignore this slot entirely.
+   */
+  readonly transport: WireExtensionTransport;
 }
 
 // ============================================================================

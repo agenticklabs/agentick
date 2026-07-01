@@ -137,14 +137,20 @@ namespaces reachable from `@agentick/client-next`. Adopters install
 their own via `wireExtensions: [...]`; framework packages will
 self-install via composite extension factories in Phase E (#297).
 
-The `@agentick/transport-next` dispatcher routes ALL non-streaming
-framework methods (`gateway/*`, `app/*`, `session/*` except
-`session/send`) through the same registry adopter extensions use.
-These framework-supplied `WireExtension` values are pre-registered
-on every `GatewayHarness` at construction. Streaming methods
-(`session/send`, `subscribe`, `unsubscribe`) still dispatch through
-a hardcoded switch pending transport-primitive access on
-`WireExtensionContext` (#303).
+The `@agentick/transport-next` dispatcher routes EVERY framework
+method (`gateway/*`, `app/*`, `session/*`, `sub/*`) through the
+same registry adopter extensions use. Framework-supplied
+`WireExtension` values are pre-registered on every `GatewayHarness`
+at construction. Streaming methods (`session/send` with
+`_meta.progressToken`, `sub/subscribe` with server-allocated ids)
+consume the `ctx.transport` slot on `WireExtensionContext` —
+`progress(...)` for progress frames, `registerCancel(...)` for
+`notifications/cancelled` seam, `registerSubscription(...)` for
+subscription fan-out.
+
+Only three methods dispatch outside the extension registry —
+`initialize`, `ping`, `_extensions/list` — because they need to
+resolve BEFORE the registry itself is queryable.
 
 ### Installing an adopter extension
 
@@ -184,9 +190,9 @@ const { extensions } = await client.request("_extensions/list", {});
 - Namespaces reserved for framework-internal use (`_*`) can't be
   claimed by adopter extensions — the `defineWireExtension`
   validator rejects.
-- Framework-supplied namespaces (`gateway`, `app`, `session`) are
-  registered by `GatewayHarness` construction. Adopter attempts to
-  claim those namespaces fail with
+- Framework-supplied namespaces (`gateway`, `app`, `session`,
+  `sub`) are registered by `GatewayHarness` construction. Adopter
+  attempts to claim those namespaces fail with
   `WireExtensionDefinitionError` — the registry rejects duplicates
   and framework registration runs FIRST.
 - Registered namespaces must be unique per gateway. Duplicate
@@ -266,10 +272,12 @@ layer between wire and harness.
 ## Status
 
 Phase 4 (gateway scaffold) and now consumed by Phase 33.C+
-(transports). Wire-extension registry (#295 Phase B) + framework
-methods as wire extensions (#295 Phase C, ADR 46 eat-our-own-dogfood)
-both landed. Only the streaming methods (`session/send`,
-`subscribe`, `unsubscribe`) remain hardcoded pending #303.
+(transports). Wire-extension registry + framework methods as wire
+extensions + streaming primitives on `WireExtensionContext` all
+landed (#295 Phase B/C, #300 subscribe rename, #303 streaming
+primitives). ADR 46 eat-our-own-dogfood commitment is complete —
+only three bootstrap builtins (`initialize`, `ping`,
+`_extensions/list`) dispatch outside the wire extension registry.
 See `docs/proposals/v2/STATUS.md`.
 
 ## Roadmap & known gaps
@@ -295,13 +303,12 @@ See `docs/proposals/v2/STATUS.md`.
   interfaces. Concrete extensions land per their owning scope
   (auth in ADR 34, mcp-surface in 33.I, transports as their own
   packages).
-- **Streaming methods (`session/send`, `subscribe`, `unsubscribe`)
-  still hardcoded in the transport dispatcher.** They need
-  transport-level primitives (`sink.sendNotification`,
-  `sink.registerInFlight`, `sink.registerSubscription`) that
-  `WireExtensionContext` doesn't yet expose. Refactor lands with
-  #303 (streaming primitives on the extension context) — completes
-  the ADR 46 eat-our-own-dogfood commitment.
+- **All framework methods dispatch through the wire extension
+  registry.** #295 Phase B/C + #303 streaming primitives landed
+  the full ADR 46 eat-our-own-dogfood commitment. Only bootstrap
+  builtins (`initialize`, `ping`, `_extensions/list`) remain
+  hardcoded — they run BEFORE the registry is queryable, which is
+  intentional.
 - **`bridges()` on wire-extension context is empty.** No
   framework-supplied extension needs bridges today. Phase F (#298 —
   `mcpControlWireExtension`) is the first consumer; it will resolve

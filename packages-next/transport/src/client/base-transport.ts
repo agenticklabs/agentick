@@ -276,7 +276,7 @@ export abstract class BaseClientTransport implements ClientTransport {
       this.activeSubscriptions.delete(real);
       if (this.currentState === "open") {
         try {
-          await this.request("unsubscribe", { subscriptionId: real });
+          await this.request("sub/unsubscribe", { subscriptionId: real });
         } catch {
           /* swallow */
         }
@@ -324,7 +324,7 @@ export abstract class BaseClientTransport implements ClientTransport {
     const frame: JsonRpcFrame = {
       jsonrpc: "2.0",
       id,
-      method: "subscribe",
+      method: "sub/subscribe",
       params: params as unknown,
     };
 

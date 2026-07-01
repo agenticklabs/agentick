@@ -14,7 +14,7 @@ import type { ExecutionResult } from "../data/execution-result.js";
 import type { ExecutionTarget } from "../data/execution-target.js";
 import type { SessionEntry, SessionFilter } from "../protocol/app-harness.js";
 import type { Cursor } from "../protocol/event-log.js";
-import type { SendMessageInput } from "../protocol/session-harness.js";
+import type { SendMessageInput, SendResult } from "../protocol/session-harness.js";
 import type { RequestMeta } from "./json-rpc.js";
 import type { SubscriptionScope } from "./scope.js";
 
@@ -139,10 +139,17 @@ export interface SessionSendParams extends WireRequestParams {
   readonly target?: ExecutionTarget;
 }
 
+/**
+ * `session/send` returns the session-scope {@link SendResult} —
+ * session-level fields (`stopReason`, `ticks`, `response`) that the
+ * client-side handle exposes on `.result`. `app/runOnce` uses the
+ * broader {@link ExecutionResult} shape instead — the two RPCs
+ * return different projections deliberately.
+ */
 export interface SessionSendResult {
   readonly executionId: string;
   readonly finalCursor: Cursor;
-  readonly result: ExecutionResult;
+  readonly result: SendResult;
 }
 
 export interface SessionDispatchParams extends WireRequestParams {
@@ -408,8 +415,14 @@ export interface WireMethods {
     result: SessionRespondToElicitationResult;
   };
 
-  subscribe: { params: SubscribeParams; result: SubscribeResult };
-  unsubscribe: { params: UnsubscribeParams; result: UnsubscribeResult };
+  /**
+   * Open a durable subscription on a scope's event bus. Server
+   * allocates a `subscriptionId`; the client uses `sub/unsubscribe`
+   * later to tear down. Wire-namespaced (per ADR 46) so the method
+   * fits under `subscriptionsWireExtension`.
+   */
+  "sub/subscribe": { params: SubscribeParams; result: SubscribeResult };
+  "sub/unsubscribe": { params: UnsubscribeParams; result: UnsubscribeResult };
 
   "auth/refresh": { params: AuthRefreshParams; result: AuthRefreshResult };
   "auth/completeChallenge": {

@@ -1,16 +1,13 @@
 /**
  * `sessionWireExtension` — framework-supplied `WireExtension` that
  * projects the `session/*` namespace over the Agentick client↔gateway
- * wire (partial — the streaming methods stay hardcoded pending #303).
+ * wire.
  *
- * Part of the ADR 46 eat-our-own-dogfood commitment (#295 Phase C).
- * Deferred to #303 (streaming primitives on `WireExtensionContext`):
- *
- *   - `session/send` — needs `sink.sendNotification` for progress
- *     frames + `sink.registerInFlight` for cancellation
- *   - `subscribe` / `unsubscribe` — needs sink for subscription
- *     event fan-out; also awaiting #300 rename to
- *     `sub/subscribe` / `sub/unsubscribe`
+ * Part of the ADR 46 eat-our-own-dogfood commitment (#295 Phase C +
+ * #303 streaming primitives). Post-#303, `session/send` uses
+ * `ctx.transport.progress(...)` and `ctx.transport.registerCancel(...)`
+ * to bridge to the connection's `DispatchSink` — no direct sink
+ * access needed.
  *
  * @see docs/proposals/v2/blueprint/46-wire-extensions.md
  */
@@ -39,6 +36,56 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
   namespace: "session",
   version: "1.0.0",
   methods: {
+    "session/send": async (params, ctx) => {
+      const sess = ctx.session ?? findSession(ctx, params.sessionId);
+      const progressToken = params._meta?.progressToken;
+
+      const handle = await sess.send({
+        messages: params.messages,
+        props: params.props,
+        metadata: params.metadata,
+        maxTicks: params.maxTicks,
+        stream: params.stream,
+        target: params.target,
+      });
+
+      // Register cancellation seam — `notifications/cancelled` from
+      // the client aborts the underlying execution handle. The
+      // dispatcher clears the in-flight entry when the RPC returns.
+      ctx.transport.registerCancel(() => {
+        void handle.abort("client cancelled");
+      });
+
+      // LSP-style progress: opt-in via `_meta.progressToken`. When
+      // set, drain the handle's AsyncIterable in the background and
+      // fan out one `notifications/progress` frame per event.
+      if (progressToken !== undefined) {
+        const reporter = ctx.transport.progress(progressToken);
+        (async () => {
+          try {
+            for await (const event of handle) {
+              reporter.push({
+                surface: "session",
+                name: "session:execution:event",
+                phase: "started",
+                timestamp: Date.now(),
+                scope: { sessionId: sess.id },
+                payload: event,
+              });
+            }
+          } catch {
+            /* result-Promise below carries the failure — progress is best-effort */
+          }
+        })();
+      }
+
+      const result = await handle.result;
+      return {
+        executionId: handle.executionId,
+        finalCursor: { value: 0 },
+        result,
+      };
+    },
     "session/dispatch": async ({ sessionId, tool, input }, ctx) => {
       const sess = ctx.session ?? findSession(ctx, sessionId);
       const content = await sess.dispatch(tool, input as Record<string, unknown>);
@@ -48,8 +95,8 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
       // Stub-only today: SessionHarnessProtocol exposes abort() on the
       // returned SessionExecutionHandle, not on the session itself.
       // Full wiring requires per-session active-handle tracking on the
-      // transport server adapter — deferred to #303 alongside
-      // session/send streaming primitives.
+      // transport server adapter — see #303 for the streaming
+      // primitives that will land the tracking.
       const sess = ctx.session ?? findSession(ctx, sessionId);
       void sess;
       return null;

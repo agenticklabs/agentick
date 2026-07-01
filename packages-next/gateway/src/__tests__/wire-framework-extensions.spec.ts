@@ -13,10 +13,15 @@ import { describe, expect, it } from "vitest";
 import { defineWireExtension, WireExtensionDefinitionError } from "@agentick/spec-next";
 
 import { GatewayHarness } from "../harness.js";
-import { appWireExtension, gatewayWireExtension, sessionWireExtension } from "../wire/index.js";
+import {
+  appWireExtension,
+  gatewayWireExtension,
+  sessionWireExtension,
+  subscriptionsWireExtension,
+} from "../wire/index.js";
 
 describe("GatewayHarness — framework wire extensions", () => {
-  it("registers gatewayWireExtension, appWireExtension, sessionWireExtension by default", async () => {
+  it("registers gateway/app/session/subscriptions extensions by default", async () => {
     const gw = new GatewayHarness();
     await gw.ready;
 
@@ -27,6 +32,7 @@ describe("GatewayHarness — framework wire extensions", () => {
     expect(names).toContain("@agentick/gateway-next#gateway");
     expect(names).toContain("@agentick/gateway-next#app");
     expect(names).toContain("@agentick/gateway-next#session");
+    expect(names).toContain("@agentick/gateway-next#subscriptions");
 
     // Every framework method resolves.
     expect(registry.resolve("gateway/listApps")?.extension).toBe(gatewayWireExtension);
@@ -34,10 +40,15 @@ describe("GatewayHarness — framework wire extensions", () => {
     expect(registry.resolve("app/createSession")?.extension).toBe(appWireExtension);
     expect(registry.resolve("app/getSession")?.extension).toBe(appWireExtension);
     expect(registry.resolve("app/listSessions")?.extension).toBe(appWireExtension);
+    // session extension covers non-streaming AND streaming methods post-#303.
+    expect(registry.resolve("session/send")?.extension).toBe(sessionWireExtension);
     expect(registry.resolve("session/dispatch")?.extension).toBe(sessionWireExtension);
     expect(registry.resolve("session/abort")?.extension).toBe(sessionWireExtension);
     expect(registry.resolve("session/close")?.extension).toBe(sessionWireExtension);
     expect(registry.resolve("session/respondToElicitation")?.extension).toBe(sessionWireExtension);
+    // sub/* namespace (renamed from bare subscribe/unsubscribe per #300).
+    expect(registry.resolve("sub/subscribe")?.extension).toBe(subscriptionsWireExtension);
+    expect(registry.resolve("sub/unsubscribe")?.extension).toBe(subscriptionsWireExtension);
 
     await gw.closeGateway();
   });
@@ -81,6 +92,19 @@ describe("GatewayHarness — framework wire extensions", () => {
     });
     expect(() => new GatewayHarness({ wireExtensions: [collision] })).toThrow(
       /namespace "session" already registered/,
+    );
+  });
+
+  it("rejects adopter attempts to claim the `sub` namespace", () => {
+    const collision = defineWireExtension({
+      name: "@adopter/rogue-sub",
+      namespace: "sub",
+      methods: {
+        "sub/subscribe": async () => ({ subscriptionId: "x" }),
+      },
+    });
+    expect(() => new GatewayHarness({ wireExtensions: [collision] })).toThrow(
+      /namespace "sub" already registered/,
     );
   });
 

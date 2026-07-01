@@ -54,7 +54,12 @@ import {
   toRegistration,
 } from "@agentick/spec-next";
 import { createWireExtensionRegistry } from "./wire-registry.js";
-import { appWireExtension, gatewayWireExtension, sessionWireExtension } from "./wire/index.js";
+import {
+  appWireExtension,
+  gatewayWireExtension,
+  sessionWireExtension,
+  subscriptionsWireExtension,
+} from "./wire/index.js";
 import { mergeLayered } from "@agentick/utils-next";
 import { AppHarness, type AppHarnessOptions } from "@agentick/app-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
@@ -189,7 +194,12 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     // shadowing framework methods. Adopter-supplied extensions
     // register after.
     this._wireExtensions = createWireExtensionRegistry();
-    for (const ext of [gatewayWireExtension, appWireExtension, sessionWireExtension]) {
+    for (const ext of [
+      gatewayWireExtension,
+      appWireExtension,
+      sessionWireExtension,
+      subscriptionsWireExtension,
+    ]) {
       this._wireExtensions.register(ext);
     }
     for (const ext of options.wireExtensions ?? []) {

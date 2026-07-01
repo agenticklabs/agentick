@@ -24,7 +24,6 @@ import type {
   GatewayListAppsResult,
   SendInput,
   SendMessageInput,
-  SendResult,
   SessionEntry,
   SessionFilter,
   SessionHandle,
@@ -303,7 +302,7 @@ function createSessionExecutionHandle<P>(
     .then((res) => {
       executionId = res.executionId;
       status = "completed";
-      return res.result as unknown as SendResult;
+      return res.result;
     })
     .catch((err) => {
       status = "error";
