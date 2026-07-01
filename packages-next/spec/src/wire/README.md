@@ -304,11 +304,11 @@ extensions can't claim it. The validator rejects.
 - ✅ #300 — `subscribe`/`unsubscribe` → `sub/subscribe` /
   `sub/unsubscribe` rename (**landed**).
 - ✅ #303 — `WireExtensionContext.transport` streaming primitives
-  + `session/send` + `sub/subscribe` + `sub/unsubscribe` refactored
-  into wire extensions (**landed**). Full ADR 46
-  eat-our-own-dogfood commitment realized — the only remaining
-  hardcoded methods are the three bootstrap builtins
-  (`initialize`, `ping`, `_extensions/list`).
+  - `session/send` + `sub/subscribe` + `sub/unsubscribe` refactored
+    into wire extensions (**landed**). Full ADR 46
+    eat-our-own-dogfood commitment realized — the only remaining
+    hardcoded methods are the three bootstrap builtins
+    (`initialize`, `ping`, `_extensions/list`).
 - ⏳ #296 — Capability discovery + `client.capabilities` (Phase D).
 - ⏳ #297 — Composite extension factory shape — `withX` returns
   multi-scope objects (Phase E). Depends on #254 (Gateway extensions

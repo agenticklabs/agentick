@@ -19,7 +19,6 @@
 import {
   ErrorCode,
   isAgentickError,
-  type EventEnvelope,
   type ExtensionsListResult,
   type GatewayHarnessProtocol,
   type HookBridges,
@@ -36,9 +35,6 @@ import {
   type WireExtensionTransport,
   type WireNotificationMethod,
 } from "@agentick/spec-next";
-import * as Effect from "effect/Effect";
-import * as Fiber from "effect/Fiber";
-import * as Stream from "effect/Stream";
 
 /**
  * A `DispatchHost` is anything that satisfies `GatewayHarnessProtocol`.
@@ -66,12 +62,6 @@ export interface DispatchSink {
  * costs nothing and matches the prior implementation.
  */
 let subscriptionCounter = 0;
-
-/**
- * Re-export for tests / external subscription-envelope shape reference.
- * (Consumers previously imported this from spec-conformance-next.)
- */
-export type { EventEnvelope };
 
 export async function dispatchRequest(
   host: DispatchHost,
@@ -106,13 +96,7 @@ export async function dispatchRequest(
     if (registry) {
       const resolution = registry.resolve(req.method);
       if (resolution) {
-        const ctx = buildWireExtensionContext(
-          host,
-          resolution.extension,
-          req.id,
-          req.params,
-          sink,
-        );
+        const ctx = buildWireExtensionContext(host, resolution.extension, req.id, req.params, sink);
         try {
           const result = await resolution.handler(req.params, ctx);
           return success(req.id, result);
@@ -360,10 +344,3 @@ function errorResponse(
     error: { code, message, data },
   };
 }
-
-// Effect-typed helpers may be needed later; the named imports above keep
-// the module ready for streaming dispatchers (Effect.Fiber for cancellation,
-// Stream.toAsyncIterable for bus → wire fan-out) that ship in 33.D.
-void Effect;
-void Fiber;
-void Stream;

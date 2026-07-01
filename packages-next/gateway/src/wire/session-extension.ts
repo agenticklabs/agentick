@@ -61,10 +61,18 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
       // fan out one `notifications/progress` frame per event.
       if (progressToken !== undefined) {
         const reporter = ctx.transport.progress(progressToken);
+        // Envelope-local counter — separate from the wire's outer
+        // `cursor` (which the framework manages inside the reporter).
+        // Preserves the pre-refactor envelope `id: "progress-N"`
+        // shape so downstream consumers that key on `envelope.id`
+        // (devtools inspectors, MCP wire codec) don't regress.
+        let n = 0;
         (async () => {
           try {
             for await (const event of handle) {
+              n++;
               reporter.push({
+                id: `progress-${n}`,
                 surface: "session",
                 name: "session:execution:event",
                 phase: "started",
