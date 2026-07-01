@@ -237,6 +237,24 @@ export interface BaseHarnessOptions<P = unknown, I = unknown> {
    */
   readonly metadata?: Readonly<Record<string, unknown>>;
   /**
+   * Principal scope key — the identity axis of the harness's
+   * construction identity (ADR 48), the twin of `scopeId` (the work
+   * axis). An opaque, hierarchical-by-convention key (e.g.
+   * `"acme/user-42"`) identifying WHOSE behalf this harness acts on.
+   *
+   * Bound at construction (structural identity, ADR 45), never read
+   * ambiently. Harnesses that scope by identity (credentials, tasks,
+   * sandbox, MCP connections) read `this.principal` to namespace their
+   * backing stores; harnesses that don't simply ignore it.
+   *
+   * `undefined` for principal-less deployments (a local single-user
+   * agent, a stdio MCP connection). The one identity dimension
+   * BaseHarness can stamp uniformly — unlike `scopeId`, whose scope
+   * field is surface-specific — so it is centralized here to prevent
+   * per-command drift. See {@link BaseHarness.makeEvent}.
+   */
+  readonly principal?: string;
+  /**
    * Substrate slot overrides — `instance | factory`. When omitted,
    * the harness uses the positional substrate constructor args as-is
    * (the parent-provided defaults, today's behavior preserved).
@@ -292,6 +310,16 @@ export abstract class BaseHarness<
    * downstream readers can rely on stability.
    */
   readonly metadata: Readonly<Record<string, unknown>>;
+
+  /**
+   * Principal scope key — the identity axis of construction identity
+   * (ADR 48), fixed at construction. `undefined` for principal-less
+   * harnesses. Read by identity-scoping harnesses to namespace their
+   * stores; stamped authoritatively onto emitted event scopes by
+   * {@link makeEvent} (an operation cannot override it — no per-op
+   * identity spoofing).
+   */
+  protected readonly principal: string | undefined;
 
   /**
    * In-flight request/response correlation map. Every BaseHarness can
@@ -352,6 +380,7 @@ export abstract class BaseHarness<
     this.parent = options.parent;
     this.input = options.input;
     this.metadata = Object.freeze({ ...(options.metadata ?? {}) });
+    this.principal = options.principal;
 
     // Substrate slot resolution (ADR 31). Build a shell exposing the
     // positional substrate defaults as the parent-side upstream, then
@@ -917,7 +946,17 @@ export abstract class BaseHarness<
       name: op.name,
       phase,
       timestamp: Date.now(),
-      scope,
+      // Stamp the harness's construction-bound principal (ADR 48).
+      // AUTHORITATIVE: a principal-bound harness overrides whatever the
+      // operation carries — an op cannot emit an event claiming a
+      // different principal than its harness (no per-op identity
+      // spoofing, ADR 45). `omitUndefined` keeps the rebuilt scope
+      // clean. Principal-less harnesses pass the op scope through
+      // untouched (zero-cost — the universal hot path is unaffected).
+      scope:
+        this.principal !== undefined
+          ? omitUndefined({ ...scope, principal: this.principal })
+          : scope,
       payload: extra?.payload,
       outcome: extra?.outcome,
       error: extra?.error,

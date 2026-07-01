@@ -97,6 +97,17 @@ export interface EventScope extends EventScopeExtensions {
   readonly nodeId?: string;
   /** Populated by the gateway wrapper when present. */
   readonly gatewayId?: string;
+  /**
+   * Identity scope key — WHO this event's work is on behalf of
+   * (ADR 48). The identity axis, twin of the work-path dimensions
+   * above. Opaque, hierarchical-by-convention (e.g. `"acme/user-42"`);
+   * identity-scoped stores namespace by it and resolve up
+   * (user → tenant → global). Stamped authoritatively by
+   * `BaseHarness` from its construction-bound principal — not
+   * per-operation, so it cannot be spoofed by an op (ADR 45).
+   * Absent for principal-less deployments.
+   */
+  readonly principal?: string;
 }
 
 /**

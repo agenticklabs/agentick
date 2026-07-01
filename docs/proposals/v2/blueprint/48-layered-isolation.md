@@ -40,22 +40,31 @@ So the design question is not "how do we build multi-tenancy" — it's "how do w
 
 ```
 Work path      (execution):  gateway → app → session      (already in EventScope)
-Identity path  (who):        tenant  → user               (added via EventScopeExtensions)
+Identity path  (who):        tenant  → user               (EventScope.principal, stamped by BaseHarness)
 ```
 
-Both are hierarchical keys. Both **fan in / resolve up**. The work path already exists (`EventScope.appId / sessionId / gatewayId / nodeId`). The identity path is the *same shape at a different key*, added through the augmentation seam so `spec-next` stays agnostic:
+Both are hierarchical keys. Both **fan in / resolve up**. The work path already exists (`EventScope.appId / sessionId / gatewayId / nodeId`). The identity path is the *same shape at a different key*.
+
+**`principal` is a core `EventScope` field, not an augmentation-seam entry** (refined during implementation — see below). It graduated to core because it became **foundational on `BaseHarness`**: the base class carries it as construction identity and stamps it onto events, so `spec-next` is no longer agnostic about it — it's a first-class framework identity dimension, alongside `sessionId`/`gatewayId`.
 
 ```ts
-declare module "@agentick/spec-next" {
-  interface EventScopeExtensions {
-    /** Identity scope key — WHO this work belongs to. Opaque to the
-     *  framework; threaded like sessionId; namespaces identity-scoped
-     *  stores; resolves up (user → tenant → global). Fixed at
-     *  construction (ADR 45). */
-    readonly principal?: string;
-  }
+// spec-next/data/events.ts — core EventScope
+interface EventScope extends EventScopeExtensions {
+  // ...work-path dimensions...
+  readonly principal?: string; // identity axis; stamped by BaseHarness
+}
+
+// runtime-next/substrate/base-harness.ts — construction identity
+class BaseHarness {
+  protected readonly principal: string | undefined; // from BaseHarnessOptions.principal
+  // makeEvent stamps it AUTHORITATIVELY onto every emitted event's scope
+  // (an op cannot override it — no per-op identity spoofing).
 }
 ```
+
+**Why core, not the augmentation seam:** `principal` is the *one* identity dimension `BaseHarness` can stamp uniformly — unlike `scopeId`, whose scope field is surface-specific (session→sessionId, app→appId). Centralizing it on the base class (both `this.principal` for impls and the authoritative `makeEvent` stamp) is what prevents per-command drift and makes identity structural rather than ambient. That foundational role is what promotes it from downstream augmentation to core.
+
+*(`EventScopeExtensions` remains the seam for genuinely harness-package-specific dimensions — `sandboxId`, `mcpConnectionId`.)*
 
 ### 2. Isolation = composition, at the scope determined by the state's nature
 
@@ -153,7 +162,7 @@ A durable `TaskStore` adapter *is* durable execution and survives node failover 
 - **`Principal` class / registry / plumbing.** Principal is an opaque scope key; auth material lives in the credential store keyed by it; roles live where the Authorizer reads them. A class holds nothing that isn't handled elsewhere.
 - **Universal `Store<T>` supertype to subclass.** Shapes diverge (namespaced KV vs append-log vs query-by-status); the framework reuses by composition + per-domain interfaces + adapter convention, not inheritance. No polymorphic consumer exists (three-consumers rule fails). Extract a narrow **capability** interface (e.g. a snapshot capability) only when a real consumer needs it — never a base class.
 - **Snapshot-based migration as the primary path.** Dissolved: externalize the source of truth and migration is re-point + read. Snapshot is the in-memory fallback only.
-- **`tenantId` / `principalId` as core `EventScope` fields.** Use the `EventScopeExtensions` augmentation seam; core stays agnostic.
+- **Separate `tenantId` / `userId` / `region` fields on `EventScope`.** One `principal` key (hierarchy by convention), not N identity fields. (`principal` itself *is* a core field — it earned that by being foundational on `BaseHarness`; a proliferation of identity fields is what's rejected.)
 
 ---
 
