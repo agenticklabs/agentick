@@ -41,6 +41,7 @@ code. See ADR 23 §6 (Package layout) and ADR 40 §1.
 | #171a `@agentick/tool-next/transforms` subpath (transform primitives)            | ✅                   |
 | #171b Server subpath + spec types + `McpServerHarness` skeleton                  | ✅                   |
 | #171c stdio + in-memory transport + tools projection + security pipeline         | ✅                   |
+| #310 **Tools `list_changed`** emission on `ToolCatalog` mutations                | ✅                   |
 | #171d.1 **Prompts projection** (`prompts/list` + `prompts/get` + `list_changed`) | ✅                   |
 | #171d.2.1 **Elicitation `ctx.elicit.*` sugar** (form-mode basics)                | ✅                   |
 | #171d.2.2 **Elicitation URL mode + `tryX` variants + `UrlElicitationRequired`**  | ✅                   |
@@ -224,6 +225,30 @@ project its registry via the low-level form.
 tools are invisible to BOTH `tools/list` AND `tools/call`. `transforms`
 rewrites declarations (name/metadata/schema) per-connection — adopters
 build with the helpers in `@agentick/tool-next/transforms`.
+
+**Reactive `registry` — the `ToolCatalog` primitive** — the `registry`
+field of the low-level form accepts EITHER a static `ToolDeclaration[]`
+OR a live `ToolCatalog` from `@agentick/tool-next`. When an adopter
+passes a catalog, the server subscribes to mutations at connection
+accept and emits `notifications/tools/list_changed` to every connected
+client, per MCP protocol. Post-notification `tools/list` sees the
+updated set. Static arrays wrap internally as a no-op-subscribe
+catalog — zero migration cost, no notifications ever fire.
+
+```ts
+import { createToolCatalog } from "@agentick/tool-next";
+
+const catalog = createToolCatalog([Calculator.declaration]);
+tools: { registry: catalog, resolveHandler: myResolver };
+
+// Later — connected clients get `tools/list_changed` and refetch:
+catalog.register(NewTool.declaration);
+catalog.remove("old_tool");
+catalog.setAll([...]);
+```
+
+Symmetric with the prompts `list_changed` path (#171d.1). Resources
+`list_changed` is deferred to #123 (resource runtime does not yet exist).
 
 ### The `prompts` slot — three accepted shapes
 

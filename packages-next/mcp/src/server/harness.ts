@@ -391,7 +391,12 @@ export class McpServerHarness
       {
         tools: !isNull(this.resolvedTools) && this.resolvedTools.registry.list().length > 0,
         prompts: !isNull(this.promptsSource),
-        resources: false, // wired with #123
+        // TODO(phase-#123): resource runtime + resources/list projection
+        // + notifications/resources/list_changed emission. Tools (#310)
+        // and prompts (#171d.1) both fire list_changed on catalog
+        // mutations; resources will follow the same pattern once the
+        // resource substrate exists.
+        resources: false,
         elicitation: this.elicitWired,
         sampling: false, // wired with SamplingHarness
         // #171d.3 — advertise tasks when at least one tool declares

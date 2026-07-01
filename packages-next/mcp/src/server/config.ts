@@ -234,7 +234,13 @@ export interface McpServerOptions {
    * communication). Absent or truthy → default behavior.
    */
   readonly elicit?: boolean | McpServerElicitOptions;
-  /** Resources slot — wired when #123 lands. Absent = resources capability NOT advertised. */
+  /**
+   * Resources slot — wired when #123 lands. Absent = resources capability
+   * NOT advertised.
+   * TODO(phase-#123): symmetric with `tools` (#310) and `prompts`
+   * (#171d.1) — accept a live catalog and emit
+   * `notifications/resources/list_changed` on mutations.
+   */
   readonly resources?: unknown;
   /** Capability opt-OUTS. Defaults derive from what's actually wired. */
   readonly capabilities?: McpServerCapabilitiesOptions;
