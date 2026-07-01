@@ -74,6 +74,7 @@ import type {
   CredentialsHarnessProtocol,
   SessionExtension,
   SessionInstaller,
+  Unsubscribe,
 } from "@agentick/spec-next";
 import type { ContentBlock, ToolDeclaration, ToolHandler } from "@agentick/spec-next";
 import { jsonSchema, toRegistration } from "@agentick/spec-next";
@@ -448,9 +449,10 @@ async function discoverAndRegisterTools(
   installer: SessionInstaller,
   config: McpServerConfig,
   harness: McpClientHarness,
-): Promise<void> {
+): Promise<readonly Unsubscribe[]> {
   const tools = await harness.listTools();
   const prefix = config.toolPrefix ?? `${config.serverId}__`;
+  const unsubscribes: Unsubscribe[] = [];
   for (const tool of tools) {
     const localName = `${prefix}${tool.name}`;
     const handlerRef = mcpHandlerRef(installer.sessionId, config.serverId, tool.name);
@@ -499,15 +501,18 @@ async function discoverAndRegisterTools(
               );
               return mcpContentToBlocks(result.content);
             };
-    installer.registerToolHandler(handlerRef, handler);
-    installer.registerExtensionTool(
-      toRegistration(mcpDeclaration(installer.sessionId, config.serverId, tool, localName), {
-        scope: "extension",
-        extensionName: EXTENSION_NAME,
-        level: "session",
-      }),
+    unsubscribes.push(installer.registerToolHandler(handlerRef, handler));
+    unsubscribes.push(
+      installer.registerExtensionTool(
+        toRegistration(mcpDeclaration(installer.sessionId, config.serverId, tool, localName), {
+          scope: "extension",
+          extensionName: EXTENSION_NAME,
+          level: "session",
+        }),
+      ),
     );
   }
+  return unsubscribes;
 }
 
 /**
@@ -598,9 +603,14 @@ export function withMCP(options: WithMCPOptions): SessionExtension {
         } catch {
           continue;
         }
+        // Track per-harness tool registration teardowns so the
+        // reactive re-discovery path can swap in a fresh set when
+        // the MCP server pushes `notifications/tools/list_changed`
+        // (#309). Also caches the teardowns for session close.
+        let currentUnsubs: readonly Unsubscribe[] = [];
         if (harness.status.kind === "connected") {
           try {
-            await discoverAndRegisterTools(installer, config, harness);
+            currentUnsubs = await discoverAndRegisterTools(installer, config, harness);
           } catch {
             // Tool-discovery failures are non-fatal for the
             // connection-status FSM. Adopters watching for "tools
@@ -608,6 +618,39 @@ export function withMCP(options: WithMCPOptions): SessionExtension {
             // registration stream, not the harness.
           }
         }
+
+        // Reactive re-discovery — the MCP server MAY emit
+        // `notifications/tools/list_changed` when its catalog
+        // mutates. On each such signal, tear down our previous
+        // registrations and re-run discovery. Serialized via a
+        // rolling promise so overlapping notifications don't race
+        // (second re-discovery waits for first to finish clearing
+        // + re-registering).
+        //
+        // Prompt / resource notifications fire too but withMCP does
+        // not project prompts or resources today — ignored here.
+        // Adopters observing at the harness layer via
+        // `harness.onListChanged` still see all three.
+        let rediscoveryInFlight: Promise<void> = Promise.resolve();
+        const unsubListChanged = harness.onListChanged((event) => {
+          if (event.kind !== "tools") return;
+          rediscoveryInFlight = rediscoveryInFlight.then(async () => {
+            for (const u of currentUnsubs) u();
+            try {
+              currentUnsubs = await discoverAndRegisterTools(installer, config, harness);
+            } catch {
+              // Discovery failed on the way back — leave torn down
+              // rather than a partial re-registration. Next
+              // notification triggers another attempt.
+              currentUnsubs = [];
+            }
+          });
+        });
+
+        installer.onClose(() => {
+          unsubListChanged();
+          for (const u of currentUnsubs) u();
+        });
       }
 
       const bridge: McpHookBridgeImpl = {

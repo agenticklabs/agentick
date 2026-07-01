@@ -52,7 +52,10 @@ import {
   GetTaskResultSchema,
   ListTasksResultSchema,
   ProgressNotificationSchema,
+  PromptListChangedNotificationSchema,
+  ResourceListChangedNotificationSchema,
   TaskStatusNotificationSchema,
+  ToolListChangedNotificationSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import type {
   CallToolResult,
@@ -170,6 +173,28 @@ type TaskNotificationEvent =
       readonly notification: ProgressNotification;
     };
 
+/**
+ * Discriminated event fired when an MCP server sends one of the
+ * catalog-change notifications: `notifications/tools/list_changed`,
+ * `notifications/prompts/list_changed`, or
+ * `notifications/resources/list_changed`. Payload carries only the
+ * discriminator — the MCP protocol notification itself has no params;
+ * consumers are expected to re-fetch the affected list (`tools/list`,
+ * etc.) to get the new contents.
+ *
+ * Well-behaved MCP servers emit these when their catalog mutates
+ * server-side. Not every server does; if a server never emits, our
+ * client's cache stays stale until manual refresh. That's the
+ * protocol contract — no polling fallback here.
+ *
+ * @see docs/proposals/v2/blueprint/23-mcp-as-harness.md
+ * @see spec.modelcontextprotocol.io — notifications/*_list_changed
+ */
+export type McpListChangedEvent =
+  | { readonly kind: "tools" }
+  | { readonly kind: "prompts" }
+  | { readonly kind: "resources" };
+
 // ============================================================================
 // Errors
 // ============================================================================
@@ -243,6 +268,23 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
    */
   private readonly taskNotificationBus: LocalPubSub<TaskNotificationEvent> =
     createLocalPubSub<TaskNotificationEvent>();
+  /**
+   * Notifier for `notifications/tools/list_changed`,
+   * `notifications/prompts/list_changed`, and
+   * `notifications/resources/list_changed` — the MCP protocol's
+   * catalog-mutation signals. Callback-based (mirrors the
+   * {@link statusNotifier} pattern) so consumers don't need Effect
+   * ceremony to react.
+   *
+   * The handler fires AFTER the SDK's internal notification dispatch;
+   * subscribers may safely call {@link listTools} to get the refreshed
+   * catalog. Fire-and-forget — subscriber exceptions are trapped by
+   * the notifier and don't affect the harness lifecycle.
+   *
+   * @see McpListChangedEvent
+   */
+  private readonly listChangedNotifier: Notifier<McpListChangedEvent> =
+    createNotifier<McpListChangedEvent>();
 
   /**
    * Adopter-facing connection status — the {@link McpConnectionStatus}
@@ -333,6 +375,31 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
    */
   onStatusChange(listener: (status: McpConnectionStatus) => void): StatusUnsubscribe {
     return this.statusNotifier.subscribe(listener);
+  }
+
+  /**
+   * Subscribe to MCP-protocol catalog-change notifications forwarded
+   * from the connected server:
+   *
+   *   - `notifications/tools/list_changed`     → `{ kind: "tools" }`
+   *   - `notifications/prompts/list_changed`   → `{ kind: "prompts" }`
+   *   - `notifications/resources/list_changed` → `{ kind: "resources" }`
+   *
+   * Payloads carry only the discriminator (the MCP notification
+   * itself has no params); subscribers re-fetch the affected list
+   * (via {@link listTools}) to get the new contents.
+   *
+   * Fire-and-forget — a listener throwing does NOT affect siblings
+   * or the harness lifecycle (the underlying Notifier traps per
+   * listener). Returns an unsubscribe function.
+   *
+   * Not replayed on subscribe — the notification is a transient
+   * signal, not a state snapshot. Subscribe BEFORE `connect()` if
+   * you need to catch every emission from the very start of the
+   * session.
+   */
+  onListChanged(listener: (event: McpListChangedEvent) => void): () => void {
+    return this.listChangedNotifier.subscribe(listener);
   }
 
   /** Internal helper — updates `_status` and notifies subscribers. */
@@ -981,6 +1048,24 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
         taskId,
         notification: note,
       });
+    });
+    // Catalog-mutation notifications from the MCP server. Payloads
+    // are empty per protocol — the notification is JUST a signal, and
+    // clients are expected to re-fetch via `tools/list` (etc.) to get
+    // the new contents. We fan the signal out through the callback
+    // notifier; the withMCP session extension subscribes and re-runs
+    // tool discovery. Prompts + resources emit the signal even though
+    // McpClientHarness doesn't currently expose fetch methods for
+    // them — the wire contract lands here so consumers observing at
+    // the harness layer see all three uniformly (spec conformance).
+    client.setNotificationHandler(ToolListChangedNotificationSchema, () => {
+      this.listChangedNotifier.notify({ kind: "tools" });
+    });
+    client.setNotificationHandler(PromptListChangedNotificationSchema, () => {
+      this.listChangedNotifier.notify({ kind: "prompts" });
+    });
+    client.setNotificationHandler(ResourceListChangedNotificationSchema, () => {
+      this.listChangedNotifier.notify({ kind: "resources" });
     });
     return client;
   }
