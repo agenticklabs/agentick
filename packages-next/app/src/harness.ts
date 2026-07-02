@@ -50,7 +50,6 @@ import {
   isLoopExecutorFactory,
   isReconcilerFactory,
   isToolExecutorFactory,
-  SessionAlreadyExistsError,
   toRegistration,
 } from "@agentick/spec-next";
 import { mergeLayered, omitUndefined } from "@agentick/utils-next";
@@ -1038,8 +1037,17 @@ export class AppHarness<P = unknown>
     }
 
     const sessionId = input.sessionId ?? `session:${ulid()}`;
-    if (this.registry.has(sessionId)) {
-      throw new SessionAlreadyExistsError({ sessionId });
+    // Idempotent open-or-rehydrate (ADR 49 §Hydration): createSession
+    // with an id that's already live returns the existing session — the
+    // same call is create AND resume, which is what stateless-replica
+    // deployments need (any node, any time). The open call's other
+    // options are ignored for an existing session (its construction is
+    // done). Cross-restart resume — id NOT in the registry, durable
+    // store holds entries — is the fresh-construction path below, which
+    // hydrates via `session.timeline` options.
+    const existing = this.registry.get(sessionId);
+    if (existing !== undefined) {
+      return existing.session as SessionHarnessProtocol<P>;
     }
 
     // Per-session elicitation harness. Owns the request/response

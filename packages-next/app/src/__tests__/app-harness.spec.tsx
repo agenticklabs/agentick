@@ -148,13 +148,14 @@ describe("AppHarness — createSession + send", () => {
     await app.closeApp();
   });
 
-  it("createSession with duplicate id throws SessionAlreadyExistsError", async () => {
+  it("createSession with a live id is idempotent open — returns the SAME session (ADR 49)", async () => {
     const app = await mkApp();
-    await app.createSession({ sessionId: "dup" });
-    await expect(app.createSession({ sessionId: "dup" })).rejects.toMatchObject({
-      _tag: "SessionAlreadyExistsError",
-      sessionId: "dup",
-    });
+    const first = await app.createSession({ sessionId: "dup" });
+    const second = await app.createSession({ sessionId: "dup" });
+    // create AND resume are the same call — stateless-replica deployments
+    // open a session by id without knowing whether it's already live.
+    expect(second).toBe(first);
+    expect(app.listSessions().filter((s) => s.id === "dup")).toHaveLength(1);
     await app.closeApp();
   });
 });

@@ -74,7 +74,6 @@ export {
   type GatewayErrorChannel,
   GatewayLifecycleError,
   KnobError,
-  SessionAlreadyExistsError,
   SessionBusyError,
   SessionClosedError,
   SessionError,

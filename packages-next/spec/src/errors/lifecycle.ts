@@ -24,15 +24,9 @@ import { registerAgentickError } from "./registry.js";
 
 export abstract class AppError extends AgentickError {}
 
-export class SessionAlreadyExistsError extends AppError {
-  readonly _tag = "SessionAlreadyExistsError" as const;
-  readonly sessionId: string;
-  constructor(args: { readonly sessionId: string; readonly cause?: unknown }) {
-    super(`session ${args.sessionId} already exists`, { cause: args.cause });
-    this.sessionId = args.sessionId;
-  }
-}
-registerAgentickError("SessionAlreadyExistsError", SessionAlreadyExistsError);
+// `SessionAlreadyExistsError` was removed with ADR 49's idempotent
+// open-or-rehydrate: `createSession({ sessionId })` with a live id
+// returns the existing session instead of throwing.
 
 export class SessionNotFoundError extends AppError {
   readonly _tag = "SessionNotFoundError" as const;
@@ -62,11 +56,7 @@ export class AppExecutionFailed extends AppError {
 }
 registerAgentickError("AppExecutionFailed", AppExecutionFailed);
 
-export type AppErrorChannel =
-  | SessionAlreadyExistsError
-  | SessionNotFoundError
-  | AppClosedError
-  | AppExecutionFailed;
+export type AppErrorChannel = SessionNotFoundError | AppClosedError | AppExecutionFailed;
 
 // ============================================================================
 // GatewayError — gateway-level lifecycle failures

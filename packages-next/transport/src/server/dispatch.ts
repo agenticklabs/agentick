@@ -138,7 +138,6 @@ function agentickErrorToWireCode(err: { readonly _tag: string }): number {
     case "SessionNotFoundError":
       return ErrorCode.SessionNotFound;
     case "AppAlreadyExistsError":
-    case "SessionAlreadyExistsError":
       return ErrorCode.InvalidParams;
     case "AppClosedError":
     case "SessionClosedError":

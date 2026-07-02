@@ -34,7 +34,6 @@ const EXPECTED: ReadonlyArray<readonly [string, () => AgentickError]> = [
   ],
 
   // Lifecycle cluster
-  ["SessionAlreadyExistsError", () => new Errors.SessionAlreadyExistsError({ sessionId: "s1" })],
   ["SessionNotFoundError", () => new Errors.SessionNotFoundError({ sessionId: "s1" })],
   ["AppClosedError", () => new Errors.AppClosedError()],
   ["AppExecutionFailed", () => new Errors.AppExecutionFailed({ cause: new Error("test") })],

@@ -8,11 +8,11 @@
  * bottom of its source file:
  *
  *   ```ts
- *   export class SessionAlreadyExistsError extends SessionError {
- *     readonly _tag = "SessionAlreadyExistsError" as const;
+ *   export class SessionNotFoundError extends AppError {
+ *     readonly _tag = "SessionNotFoundError" as const;
  *     // …
  *   }
- *   registerAgentickError("SessionAlreadyExistsError", SessionAlreadyExistsError);
+ *   registerAgentickError("SessionNotFoundError", SessionNotFoundError);
  *   ```
  *
  * Registration is explicit (caller passes the tag string) — TS class

@@ -42,9 +42,9 @@ import type {
 
 export interface CreateSessionInput<P = unknown> {
   /**
-   * Stable session id. Generated if omitted. Caller-supplied ids must
-   * be unique within the app — duplicate ids reject with
-   * `SessionAlreadyExistsError`.
+   * Stable session id. Generated if omitted. Supplying an id that is
+   * already live returns the existing session (idempotent
+   * open-or-rehydrate, ADR 49) — createSession is create AND resume.
    */
   readonly sessionId?: string;
   /**
@@ -197,7 +197,6 @@ export {
   AppError,
   type AppErrorChannel,
   AppExecutionFailed,
-  SessionAlreadyExistsError,
   SessionNotFoundError,
 } from "../errors/lifecycle.js";
 
@@ -226,13 +225,15 @@ export interface AppHarnessProtocol<P = unknown> {
   readonly id: string;
 
   /**
-   * Create a fresh session. The session mounts the configured agent
-   * JSX into the shared reconciler, registers itself in the app's
-   * session registry, and is ready to accept `send` calls.
+   * Create a session — **idempotent open-or-rehydrate (ADR 49)**. A
+   * fresh id constructs a session (mounting the configured agent JSX,
+   * registering in the app's session registry, hydrating from the
+   * timeline store when one is configured). An id that is already live
+   * returns the existing session — the same call is create AND resume,
+   * which is what stateless-replica deployments need; the open call's
+   * other options are ignored for an existing session.
    *
-   * @throws {AppError} `SessionAlreadyExistsError` if `sessionId`
-   *   collides with an existing session; `AppClosedError` if the app
-   *   is shutting down.
+   * @throws {AppError} `AppClosedError` if the app is shutting down.
    */
   createSession(input?: CreateSessionInput<P>): Promise<SessionHarnessProtocol<P>>;
 
