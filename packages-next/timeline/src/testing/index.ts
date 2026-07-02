@@ -12,7 +12,7 @@
 import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime-next";
 import type { TimelineEntry } from "@agentick/spec-next";
 
-import { TimelineHarness } from "../harness.js";
+import { TimelineHarness, type TimelineHarnessOptions } from "../harness.js";
 
 /**
  * Build a {@link TimelineHarness} with its own in-memory substrate
@@ -22,13 +22,20 @@ import { TimelineHarness } from "../harness.js";
  *
  * `initial` seeds entries eagerly via `importSnapshot({ mode: "as-is" })` —
  * both log and projection start as a live mirror of the supplied array.
+ *
+ * `options` threads through to the harness constructor — pass `{ store }` /
+ * `{ writePolicy }` (ADR 49) to exercise durable-backing behavior.
  */
-export function stubTimelineHarness(initial: readonly TimelineEntry[] = []): TimelineHarness {
+export function stubTimelineHarness(
+  initial: readonly TimelineEntry[] = [],
+  options: TimelineHarnessOptions = {},
+): TimelineHarness {
   const harness = new TimelineHarness(
     `stub:${ulid()}`,
     new MemoryJournal({ capacity: 1024 }),
     new LocalEventBus(),
     new LocalInbox(),
+    options,
   );
   if (initial.length > 0) {
     void harness.importSnapshot({

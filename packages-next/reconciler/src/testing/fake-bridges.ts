@@ -88,6 +88,9 @@ export function fakeTimelineHarness(
       refresh();
       notify();
     },
+    // No durable store behind the fake — memory is the only tier, so the
+    // flush barrier is already satisfied.
+    flush: async () => {},
     queue: async (...inputs: TimelineQueueInput[]) => {
       if (inputs.length === 0) return { ids: [] };
       const ts = Date.now();

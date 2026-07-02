@@ -14,8 +14,16 @@
 // harness package owns its own slot declaration.
 import "./augment.js";
 
-export { TimelineHarness } from "./harness.js";
+export { TimelineHarness, type TimelineHarnessOptions } from "./harness.js";
 export type { TimelineHandle } from "./handle.js";
 export { withTimeline, type WithTimelineOptions } from "./extension.js";
 export { withHandler, type WithHandlerOptions } from "./strategies.js";
 export { runTimelineHarnessConformance } from "./conformance.js";
+
+// ADR 49 — "stores, not snapshots" durability. The persisted-tier store
+// port + bundled in-memory default + its conformance suite.
+export { MemoryTimelineStore, type TimelineStore } from "./store.js";
+export {
+  runTimelineStoreConformance,
+  type TimelineStoreConformanceOptions,
+} from "./store-conformance.js";

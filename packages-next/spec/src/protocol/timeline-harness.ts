@@ -277,6 +277,18 @@ export interface TimelineHarnessProtocol extends SnapshotCapable<TimelineHarness
   append(...entries: TimelineEntry[]): Promise<void>;
 
   /**
+   * Await the durable write-behind barrier (ADR 49). On resolution, every
+   * entry appended so far is durable in the harness's persisted-tier store.
+   * The loop executor awaits this at execution end and `session.close()`
+   * awaits it; a no-op under `writePolicy: "through"` (appends are already
+   * synchronous with the store). Rejects if a buffered store write failed.
+   *
+   * Invariant: any process that subsequently loads the store sees every
+   * completed execution — the resume guarantee that replaces snapshots.
+   */
+  flush(): Promise<void>;
+
+  /**
    * Push one or more pending messages onto the queue. NOT appended yet
    * — drain() is what moves them to the log + projection. Returns the
    * ids the harness assigned (in input order); the same ids land on
