@@ -155,6 +155,23 @@ registerAgentickError("InvalidPayload", InvalidPayload);
 
 export type MessageHandlerErrorChannel = HandlerError | InvalidPayload;
 
+/**
+ * Construction-time command mis-declaration (ADR 51) — duplicate verb,
+ * or a verb whose prefix doesn't match the declaring harness's
+ * surface. Programmer error, thrown from `BaseHarness.command()`.
+ */
+export class CommandDeclarationError extends AgentickError {
+  readonly _tag = "CommandDeclarationError" as const;
+  readonly command: string;
+  readonly reason: string;
+  constructor(args: { readonly command: string; readonly reason: string }) {
+    super(`command "${args.command}": ${args.reason}`, {});
+    this.command = args.command;
+    this.reason = args.reason;
+  }
+}
+registerAgentickError("CommandDeclarationError", CommandDeclarationError);
+
 // ============================================================================
 // LifecycleHandlerError — single-tag substrate-lifecycle failure
 // ============================================================================

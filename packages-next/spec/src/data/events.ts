@@ -108,7 +108,36 @@ export interface EventScope extends EventScopeExtensions {
    * Absent for principal-less deployments.
    */
   readonly principal?: string;
+  /**
+   * Provenance — the gate through which the operation entered the
+   * system (ADR 51). The second core identity dimension, twin of
+   * {@link principal}: stamped **at the gates** (the wire resolver
+   * stamps `"wire"`, inbox command dispatch defaults `"inbox"`, tool
+   * dispatch stamps `"model"`, direct calls default `"host"`) and
+   * trusted downstream — never re-derived. Together with principal
+   * (subject), the event `name` (verb), the scope (target), and the
+   * causal chain, `origin` completes the journal as the authorization
+   * audit log: who, via which gate, did what, to what.
+   *
+   * Carries **facts, never decisions** — nothing consults it for
+   * enforcement; enforcement happened at the boundary that stamped it.
+   */
+  readonly origin?: OperationOrigin;
 }
+
+/**
+ * The gate through which an operation entered the system (ADR 51).
+ *
+ * - `"host"`   — direct in-process call (adopter code holding a reference)
+ * - `"tree"`   — app-internal logic in the rendered tree (via a bridge)
+ * - `"model"`  — a model-originated action (tool dispatch); inside the
+ *                process, intentionally untrusted — the capability-policy
+ *                subject (ADR 51 §5/§6)
+ * - `"inbox"`  — cross-harness / cross-node message delivery
+ * - `"wire"`   — an authenticated client through the projection boundary
+ * - `"system"` — framework-internal housekeeping
+ */
+export type OperationOrigin = "host" | "tree" | "model" | "inbox" | "wire" | "system";
 
 /**
  * Canonical event envelope. Every event published to the bus or

@@ -42,6 +42,7 @@ export { UnknownAgentickError } from "./unknown.js";
 export {
   AddressNotFound,
   AskTimeout,
+  CommandDeclarationError,
   HandlerError,
   InboxClosed,
   InboxError,

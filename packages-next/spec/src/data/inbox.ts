@@ -54,6 +54,14 @@ export interface MessageEnvelope<T = unknown> {
   readonly parentOpId?: string;
   readonly correlationId?: string;
 
+  /**
+   * Provenance — the gate that injected this message (ADR 51). Set by
+   * gates (the wire resolver stamps `"wire"`, tool dispatch `"model"`);
+   * command dispatch defaults absent values to `"inbox"`. Carried onto
+   * the resulting operation's scope; facts, never decisions.
+   */
+  readonly origin?: import("./events.js").OperationOrigin;
+
   /** Typed payload (constrained by `type`). */
   readonly payload?: T;
 
@@ -82,6 +90,8 @@ export interface MessageEnvelopeInput<T = unknown> {
   readonly from?: string;
   readonly parentOpId?: string;
   readonly correlationId?: string;
+  /** Provenance gate for the resulting operation (ADR 51). */
+  readonly origin?: import("./events.js").OperationOrigin;
   readonly payload?: T;
 }
 

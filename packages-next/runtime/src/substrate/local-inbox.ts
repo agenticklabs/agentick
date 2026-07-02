@@ -54,6 +54,7 @@ function stampEnvelope<T>(address: string, input: MessageEnvelopeInput<T>): Mess
       from: input.from,
       parentOpId: input.parentOpId,
       correlationId: input.correlationId,
+      origin: input.origin,
       payload: input.payload,
     }),
   };

@@ -23,10 +23,13 @@
  */
 
 import { Cause, Effect, Exit, Option } from "effect";
-import { unwrapExit, omitUndefined } from "@agentick/utils-next";
+import { unwrapExit, omitUndefined, isThenable } from "@agentick/utils-next";
 import type {
   CommandOutcome,
   EventBus,
+  CommandDescriptor,
+  CommandExposure,
+  CommandInfo,
   EventBusFactory,
   EventPhase,
   EventScope,
@@ -36,22 +39,26 @@ import type {
   JournalError,
   JournalingPolicy,
   MessageEnvelope,
-  MessageHandlerError,
   MessageInbox,
   MessageInboxFactory,
   Operation,
   OperationJournal,
   OperationJournalFactory,
+  OperationOrigin,
   ProtocolEvent,
+  StandardSchemaV1,
   SubstrateError,
   TerminalEvent,
   Unsubscribe,
 } from "@agentick/spec-next";
 import {
   AgentickError,
+  CommandDeclarationError,
   DEFAULT_JOURNALING_POLICY,
   HandlerError,
+  InvalidPayload,
   LifecycleHandlerError,
+  MessageHandlerError,
   registerAgentickError,
 } from "@agentick/spec-next";
 import { resolveSyncSubstrateSlot } from "./resolve-slot.js";
@@ -60,6 +67,23 @@ import { getContext, type RuntimeContext, withContext } from "./runtime-context.
 import { RequestResponseRegistry, type RequestError } from "./request-response-registry.js";
 
 export type { Unsubscribe } from "@agentick/spec-next";
+
+/**
+ * A declared command in a harness's registry (ADR 51): the wire-safe
+ * descriptor plus the bound runner that manufactures the Operation and
+ * routes it through `runOperation`.
+ */
+interface RegisteredCommand {
+  readonly descriptor: CommandDescriptor;
+  readonly run: (
+    input: unknown,
+    opts: {
+      readonly origin: OperationOrigin;
+      readonly parentOpId?: string;
+      readonly correlationId?: string;
+    },
+  ) => Effect.Effect<unknown, unknown, never>;
+}
 
 /**
  * Lifecycle handler. Runs at a phase boundary (typically `before`); may
@@ -772,6 +796,157 @@ export abstract class BaseHarness<
     };
   }
 
+  // ──────── command registry (ADR 51) ────────
+
+  /**
+   * Declared commands, keyed by canonical verb. Built dynamically by
+   * {@link command} — the declaration IS the registration; no parallel
+   * table to maintain. Consulted by {@link dispatchMessage} after
+   * custom handlers, before the `handleMessage` fallthrough.
+   */
+  private readonly commandRegistry = new Map<string, RegisteredCommand>();
+
+  /**
+   * Declare a command — the single declaration site for a harness verb
+   * (ADR 51 §2). The canonical `name` string is simultaneously the
+   * inbox message type, the op-name root, the authz scope label, and
+   * (via `:` → `/`) the wire method name.
+   *
+   * Returns the public method: it manufactures the same Operation the
+   * hand-written pattern builds (`opId: \`${verb}:${ulid()}\``,
+   * `name: \`${surface}:command:${rest}\``) and runs it through
+   * {@link runOperation} unchanged — phase contract, journaling,
+   * idempotency, middleware all apply.
+   *
+   * Declaring also makes the verb **inbox-addressable** (unless
+   * `exposure: "internal"`): a message whose `type` matches the verb
+   * is validated against `input` (once, here — the wire does not
+   * duplicate validation), stamped with the delivering gate's
+   * `origin` (default `"inbox"`), and invoked through the same path.
+   * `ask` replies with the handler's result via the existing inbox
+   * contract; `send` is fire-and-forget.
+   *
+   * The signal-form rule (ADR 51 §1.2): commands carry verbs +
+   * serializable data only. An operation with a required function
+   * parameter must NOT be declared — give it a construction-bound
+   * default and declare the data-only signal form; keep the
+   * function-arg variant as a plain in-process method.
+   */
+  protected command<I, R, E>(def: {
+    /** Canonical verb — must be prefixed `"${this.surface}:"`. */
+    readonly name: string;
+    /** Standard Schema for the payload; validated at inbox dispatch. */
+    readonly input?: StandardSchemaV1<I>;
+    /** Reachability (ADR 51 §2.3). Default `"addressable"`. */
+    readonly exposure?: CommandExposure;
+    readonly description?: string;
+    /**
+     * Work-path scope dims for the Operation (surface-specific — e.g.
+     * timeline supplies `() => ({ sessionId: this.scopeId })`). The
+     * gate's `origin` is merged in; `principal` is stamped by
+     * {@link makeEvent} regardless.
+     */
+    readonly scope?: () => EventScope;
+    readonly handler: (input: I) => Effect.Effect<R, E, never>;
+  }): (input: I, opts?: { readonly origin?: OperationOrigin }) => Promise<R> {
+    const name = def.name;
+    if (!name.startsWith(`${this.surface}:`)) {
+      throw new CommandDeclarationError({
+        command: name,
+        reason: `verb prefix must match the declaring surface "${this.surface}"`,
+      });
+    }
+    if (this.commandRegistry.has(name)) {
+      throw new CommandDeclarationError({ command: name, reason: "duplicate declaration" });
+    }
+    const opName = `${this.surface}:command:${name.slice(this.surface.length + 1)}`;
+    const run = (
+      input: I,
+      opts: {
+        readonly origin: OperationOrigin;
+        readonly parentOpId?: string;
+        readonly correlationId?: string;
+      },
+    ): Effect.Effect<R, E | SubstrateError, never> =>
+      this.runOperation<I, R, E>(
+        {
+          opId: `${name}:${ulid()}`,
+          surface: this.surface,
+          name: opName,
+          ...omitUndefined({ parentOpId: opts.parentOpId, correlationId: opts.correlationId }),
+          scope: omitUndefined({ ...(def.scope?.() ?? {}), origin: opts.origin }),
+          input,
+        },
+        def.handler,
+      );
+    this.commandRegistry.set(name, {
+      descriptor: {
+        name,
+        exposure: def.exposure ?? "addressable",
+        ...omitUndefined({ input: def.input as StandardSchemaV1 | undefined }),
+        ...omitUndefined({ description: def.description }),
+      },
+      run: run as RegisteredCommand["run"],
+    });
+    return (input, opts) => runHarnessProtocol(run(input, { origin: opts?.origin ?? "host" }));
+  }
+
+  /**
+   * Enumerate declared commands (wire-safe summaries). Also served to
+   * remote callers via the `"<surface>:commands"` meta-verb — the
+   * declare-and-discover surface `commands/list` composes over.
+   */
+  commands(): readonly CommandInfo[] {
+    return Array.from(this.commandRegistry.values(), ({ descriptor: d }) => ({
+      name: d.name,
+      exposure: d.exposure,
+      hasInput: d.input !== undefined,
+      ...omitUndefined({ description: d.description }),
+    }));
+  }
+
+  /**
+   * Inbox path for a declared command: validate against the declared
+   * schema (the ONE validation site), stamp the delivering gate's
+   * origin (default `"inbox"`), thread envelope causality, invoke
+   * through the same `runOperation` path the public method uses.
+   */
+  private invokeRegisteredCommand(
+    reg: RegisteredCommand,
+    msg: MessageEnvelope,
+  ): Effect.Effect<unknown, MessageHandlerError, never> {
+    return Effect.gen(this, function* () {
+      let input: unknown = msg.payload;
+      const schema = reg.descriptor.input;
+      if (schema !== undefined) {
+        const raw = schema["~standard"].validate(msg.payload);
+        const result = isThenable(raw)
+          ? yield* Effect.promise(() => raw as Promise<Awaited<typeof raw>>)
+          : raw;
+        if (result.issues !== undefined) {
+          return yield* Effect.fail(
+            new InvalidPayload({
+              reason: `command "${reg.descriptor.name}": ${result.issues
+                .map((i) => i.message)
+                .join("; ")}`,
+            }),
+          );
+        }
+        input = result.value;
+      }
+      return yield* reg
+        .run(input, {
+          origin: msg.origin ?? "inbox",
+          ...omitUndefined({ parentOpId: msg.parentOpId, correlationId: msg.correlationId }),
+        })
+        .pipe(
+          Effect.catchAll((cause) =>
+            Effect.fail(cause instanceof MessageHandlerError ? cause : new HandlerError({ cause })),
+          ),
+        );
+    });
+  }
+
   private dispatchMessage(
     msg: MessageEnvelope,
   ): Effect.Effect<unknown, MessageHandlerError, never> {
@@ -798,6 +973,21 @@ export abstract class BaseHarness<
     const custom = this.customMessageHandlers.get(msg.type);
     if (custom !== undefined) {
       return custom(msg).pipe(Effect.catchAll((cause) => Effect.fail(new HandlerError({ cause }))));
+    }
+    // Command registry (ADR 51): declared, non-internal verbs are
+    // inbox-addressable — validation + origin stamping + the same
+    // runOperation path the public method uses. Replaces per-harness
+    // `handleMessage` switch boilerplate; existing switches keep
+    // working via the fallthrough below and migrate opportunistically.
+    const registered = this.commandRegistry.get(msg.type);
+    if (registered !== undefined && registered.descriptor.exposure !== "internal") {
+      return this.invokeRegisteredCommand(registered, msg);
+    }
+    // Meta-verb (ADR 51 §2.4): enumerate declared commands. Wire-safe
+    // summaries; the declare-and-discover surface. A subclass-declared
+    // command of the same name (checked above) shadows this.
+    if (msg.type === `${this.surface}:commands`) {
+      return Effect.sync(() => this.commands());
     }
     return this.handleMessage(msg).pipe(
       Effect.catchAll((cause) => Effect.fail(new HandlerError({ cause }))),
