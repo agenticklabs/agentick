@@ -10,6 +10,71 @@
 
 This is the lever that unlocks real modularity. Without it, you get a framework that _talks_ modular while _coding_ monolithic, and you hit a wall every time you try to layer something cleanly.
 
+## Amendment — 2026-07-01: the behavioral corollary — harnesses are the behavior; bindings are projections
+
+The package mechanics below (harness packages own their `/react`
+subpath; reconciler-react has no harness deps) have a behavioral
+principle behind them that this amendment makes explicit doctrine:
+
+**The harness is the single source of behavior. Framework components
+are thin, cross-platform projections of the harness protocol — never
+the home of policy.** A React `<Timeline>` and an Angular `Timeline`
+component wrap the same `TimelineHarnessProtocol` bridge; parity across
+frameworks comes from the protocol, not from reimplementation. The
+litmus test for any binding component: **it must contain no behavior
+that isn't reachable through the protocol without it.** If a component
+needs a capability the protocol lacks, the capability goes into the
+harness first; the component stays a projection.
+
+Consequences:
+
+1. **One protocol, every origin — commands are RPC over the actor
+   substrate.** Because harnesses ride the substrate (`scopeId` =
+   address, inbox = mailbox, `handleMessage` = receive, Operation
+   envelope = command protocol), the same operation is invocable as a
+   **command message — verb + target + serializable payload** — from
+   any origin: host code (`session.timeline.compact()`), app-internal
+   logic in the rendered tree, another process/node (inbox addressing
+   under cluster), or a wire client (via a projecting wire extension,
+   ADR 46). Identical envelopes, audit, and idempotency regardless of
+   origin; the harness is origin-indifferent.
+   **The load-bearing invariant: the wire carries verbs + serializable
+   data, never executable configuration.** Strategies, predicates, and
+   validators are construction-bound and server-resident. A remote
+   command *triggers* the target's configured behavior (no-arg signal
+   form — `compact` resolved by the session's `withTimeline({ compact })`
+   default) and may carry *advisory data* (e.g. compaction
+   `instructions`, which the resident strategy is authoritative to
+   honor or ignore); it never supplies the function. Function-arg call
+   forms are in-process-only overrides (inner-scope-wins at the call
+   site). Same boundary as credentials-never-cross-wire; RCE-safe by
+   construction. Corollary: **an op with a required function parameter
+   is unaddressable — give it a construction-bound default and a
+   signal form, and it joins the addressable set.**
+   **Guardrail: addressable ≠ authorized.** The substrate makes every
+   op reachable; which verbs project to clients (curated wire
+   extensions) and which principal may address which target
+   (auth/ADR 48 + the authorization architecture, ADR 51) are separate
+   policy layers enforced at the projection boundary — never inside
+   the harness.
+2. **Host-injected policy vs. tree-owned policy — inner scope wins.**
+   A host-level strategy slot (`withTimeline({ compact })`) is a
+   *default*; a tree-level component that claims the concern overrides
+   it — the same outer-scope-default / inner-scope-override semantics
+   as the extension cascade (ADR 50 amendment §2). Controlled vs.
+   uncontrolled, with a deterministic rule.
+3. **Executable strategy values are portable across altitudes.** A
+   configured strategy (`rollingSummary({ ... })`) is one first-class
+   value usable in the host slot, as a component prop, or composed
+   inside app logic. Policies never fork per mounting point.
+4. **The harness seam is the capability-independent floor.** Framework
+   bindings vary in richness (React has components/context/lifecycle;
+   the ADR 44 functional reconciler has less; a template reconciler
+   has none). Any concern that must work across all reconcilers is
+   expressed at the harness/strategy seam; binding components are
+   per-framework sugar. This is also why the depless-reconciler path
+   stays cheap: the power was never in React.
+
 ## The mistake this corrects
 
 Through ADR 26 we built `KnobsHarness`, `StateHarness`, `TimelineHarness` as full harnesses in their own packages. We added `SandboxHarness` as an optional extension with its own augmentation pattern (`@agentick/sandbox/v2/augment.ts` adds the `sandbox` slot to `HookBridges`).

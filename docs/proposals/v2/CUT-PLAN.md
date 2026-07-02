@@ -173,7 +173,17 @@ Contents:
   exported helpers module (`truncateEdges`, `summarizeBlock`-class helpers
   ernesto had to fork v1 timeline to get). This turns ernesto's
   sliding-window + rolling-summary compaction into configuration over
-  primitives.
+  primitives. Strategy slots take **executable configured values**
+  (`compact: rollingSummary({...})`), never string enums — the loaders
+  idiom (open set, per-factory config types). Hydration is likewise a
+  **hook** with full-load as the default implementation; the framework
+  never defines a checkpoint concept (checkpoint-plus-tail is an
+  adopter recipe over the cursored store). Pin `seq` on the store
+  contract + frozen schema NOW (pre-DB-adapter); everything else is
+  additive. A `<Timeline>` component ships in the React binding as a
+  **thin protocol projection** per the ADR 27 amendment (harnesses are
+  the behavior; bindings are projections; tree-owned policy overrides
+  host-injected policy, inner-scope-wins).
 
 ### A3. State KV store port + tasks lifetime decision
 
