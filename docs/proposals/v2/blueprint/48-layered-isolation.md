@@ -103,7 +103,76 @@ interface AuthConfig {
 
 **The function lives on auth** (deriving identity from wire material is authentication, by definition). **The result lives on scope** (`EventScope.principal`, opaque downstream). These are not in tension — auth produces the key; scope carries it; stores consume it. Layering: gateway-level default, app-level override; **not** session-level (a session inherits its principal from the connection that created it).
 
-### 5. Migration = durable store adapter; snapshot only for in-memory
+### 5. The fusion rule: the session is where the two axes fuse
+
+The work axis and the identity axis are orthogonal **above** the session
+boundary and collapse into one **at and below** it:
+
+- **Gateway and app are principal-plural.** One app serves every
+  principal's sessions. Nothing at these scopes may bind to a principal;
+  anything living here that touches identity-sensitive data partitions
+  **by key** (namespace/key-strategy), never by instance.
+- **Session and everything below is principal-singular.** A session
+  belongs to exactly one principal for its entire life — construction-
+  bound, authoritatively stamped, no per-op override. **Re-auth as a
+  different user is a new session, never a mutation.** Spawned children
+  inherit the parent's principal; identity flows down, never sideways,
+  never re-derived per operation.
+
+The session being the **largest work-scope that is principal-singular**
+is *why* the session is the unit of work, and why per-session
+instantiation of session-lifetime harnesses is correct rather than
+wasteful.
+
+**Corollary — 1:1-with-session harnesses inherit principal; they are
+never independently principal-instantiated.** Timeline, state, knobs,
+tasks, elicitation, loop/tool executors, reconciler mounts: all 1:1 with
+their session, so they carry the session's principal via scope stamping
+at zero mechanism cost. A "per-principal timeline" is a category error —
+the timeline is already per-session and sessions do not span principals.
+
+**The binding decision procedure** (two questions, three mechanisms):
+
+```
+Does the resource outlive a session?
+  NO  → session-bound; principal inherited from the session. (Default.)
+  YES → Does it hold live auth-bearing state (an authenticated
+        connection, an OAuth'd client, a user workspace)?
+        YES → per-principal INSTANCE (structural isolation).
+              e.g. MCP client connections (#152), sandbox runtimes.
+              Test: two sessions of the same principal may share it;
+              two principals must never.
+        NO  → shared instance, principal-KEYED DATA (namespace/
+              key-strategy partitioning). e.g. gateway-level
+              credentials (#283), user memory, user-scoped skills.
+```
+
+Scope stamping on events is the always-on third mechanism — it serves
+observability and fan-in filtering, and is **never** the isolation
+mechanism itself (filter-based isolation is the pattern ADR 47 killed).
+
+**BYOK caveat.** Provider executors are normally global (physical
+resource, shared SDK client). In a bring-your-own-key deployment the
+provider client becomes auth-bearing and flips to per-principal
+instances by the procedure above. Do not "solve" BYOK with a per-call
+key lookup — that is runtime-filter isolation wearing a different hat.
+
+**Multi-actor surfaces (connectors).** A group chat (Telegram, Slack
+channel) is one conversation with multiple humans. The session's
+principal is the **installation/workspace identity** — the thing that
+authorized the connector — and the per-message *actor* rides
+`RuntimeContextUser` / message metadata as a context dimension. It is
+never the session principal; principal-per-sender would break session
+principal-immutability.
+
+**The checkout pattern is designed once.** #152 (MCP connections pooled
+per-principal, sessions checking out and returning) is the template for
+every principal-bound-instance resource — sandbox runtimes next, BYOK
+executors after. The checkout/return contract (lease vs refcount, what
+happens when a principal's last session closes) is a generic primitive,
+not MCP-specific plumbing.
+
+### 6. Migration = durable store adapter; snapshot only for in-memory
 
 If the source of truth is an external durable adapter (Pg/Redis), node failover is: the new node constructs the same harnesses pointed at the same store + scope key, and **reads current state**. No snapshot, no migration protocol. Snapshot/restore is only for in-memory-source-of-truth (local single-node). Live mid-execution (a suspended fiber tree) resumes via **journal replay + idempotency** (the `DurableJournal` seam, `cluster/journal.ts`) or **task checkpoints**, never fiber snapshot.
 

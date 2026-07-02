@@ -235,6 +235,12 @@ connection pool keyed by auth principal (Ryan flagged "weeks"); #123
 resources runtime, #124 roots bridge, #125 capability discovery — the last
 native-foundation items, and #123 gates MCP resource projection.
 
+**#152 is the template, not plumbing (ADR 48 §5):** the per-principal
+checkout/return contract (lease vs refcount; behavior when a principal's
+last session closes) must be designed as the *generic* pattern for every
+principal-bound-instance resource — sandbox runtimes next, BYOK provider
+executors after. Design it once, at that altitude.
+
 ### B5. Cluster: failover = rehydration; validate fan-out on the real workload
 
 - With Workstream A landed, **node death = rehydrate-on-next-send**. Design
@@ -276,6 +282,14 @@ convention: `connector-next` (base) + `connector-telegram-next`, etc. The
 transcript corpus contains zero design discussion of connectors — do not
 assume v1's shape is wanted; write the ADR from v2 primitives and the v1
 lessons.
+
+**Principal rule for multi-actor surfaces (binding — ADR 48 §5):** a
+group chat is one conversation with multiple humans. The session's
+principal is the **installation/workspace identity** (whatever
+authorized the connector); the per-message *actor* rides
+`RuntimeContextUser` / message metadata as a context dimension. Never
+principal-per-sender — that would break session principal-immutability.
+The connectors ADR must state this explicitly.
 
 ### C2. Channels
 

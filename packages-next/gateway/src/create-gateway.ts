@@ -108,6 +108,6 @@ export async function createGateway(options: CreateGatewayOptions = {}): Promise
     gateway.addInternalCloseHandler(clusterClose);
   }
 
-  await gateway.ready;
+  await gateway.gatewayReady;
   return gateway;
 }

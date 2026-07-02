@@ -14,6 +14,41 @@ edge), every `withX` composite factory (#297)
 factories), #298 (`mcpControlWireExtension`), ADR 34/#302 (auth at the
 edge), connectors (CUT-PLAN §C1), MCP server mode B (#171)
 
+## Amendment — 2026-07-01 (B1 landing, spec/ADR/code reconciliation)
+
+The B1 implementation (`GatewayExtension` contract + bundle distribution)
+lands a **subset** of the installer this ADR draws, and the two open
+design points this ADR left implicit are now decided. Recorded here so
+spec, ADR, and code do not drift:
+
+1. **`interceptIngress` is deferred to ADR 34/#302 — NOT shipped in B1.**
+   The B1 `GatewayInstaller` ships `registerNamespace` (hard singleton),
+   `registerWireExtension`, `subscribeBus`, `onClose`, and the `gateway`
+   host handle. It does **not** ship `interceptIngress` / `IngressContext`
+   / `IngressInterceptor`. Rationale: auth (#302/ADR 34) owns the
+   transport-token→`principal` contract *and* the transport-side wiring
+   that fills `IngressContext`. Pinning that shape here, before its only
+   consumer exists, is modeling ahead of the code — an ADR-34 concern that
+   ADR 34 will add to this installer (extends `BaseInstaller`, so the
+   addition is non-breaking). The installer code block below and item 2 of
+   the capability list retain the design intent but are marked deferred.
+
+2. **App-side bridge collisions stay last-writer-wins; gateway stays a
+   hard singleton. The asymmetry is intentional, justified by the
+   cascade.** ADR 48 composes extensions outer→inner
+   (`gateway.createApp` prepends gateway-cascaded app/session parts before
+   the per-call ones). On the app side that is *override semantics*: a
+   gateway sets a default app extension, a specific app overrides it by
+   claiming the same `extensionBridges` slot — last writer (the inner,
+   more-specific scope) wins, by design. The gateway scope has **no outer
+   scope to override it**, so a duplicate `registerNamespace` there is
+   unambiguously two extensions fighting for one global slot — a bug, and
+   it throws. This is why `registerNamespace` throws at the gateway and
+   `extensionBridges` is LWW at the app. The `ExtensionBase.name`
+   last-writer comment is therefore the *documented rule* for the app
+   side, not an accident. No app-side guard lands in this arc; §"occupied
+   slot" below is amended accordingly.
+
 ## TL;DR
 
 **`GatewayExtension` completes the extension triad with the same
@@ -35,6 +70,12 @@ capabilities:
    `RuntimeContextUser` on the runtime context. (Post-ADR-47 the gateway
    holds no connection registry — connection lifecycle is transport-layer;
    the interceptor runs there, not over a gateway `acceptConnection`.)
+   **Deferred — see the 2026-07-01 amendment at the top of this ADR.**
+   The B1 installer ships items 1 and 3; `interceptIngress` (and its
+   `IngressContext` / `IngressInterceptor` shapes) is added by ADR 34/#302,
+   which owns the transport-token→principal contract and the transport
+   wiring. Modeling it here ahead of its only consumer would pin
+   `IngressContext` before the code that fills it exists.
 3. **`registerNamespace(name, value)`** into a new **`GatewayBridges`**
    empty-seed interface (the gateway-scope twin of `HookBridges`),
    with **occupied-slot ⇒ throw**.
@@ -118,12 +159,15 @@ export interface GatewayInstaller extends BaseInstaller {
    *  Valid only before seal; throws after ready. */
   registerWireExtension(extension: WireExtension): void;
 
-  /** Chain-of-responsibility at the transport INGRESS edge. Interceptors
-   *  run in install order; each ENRICHES the ingress context (adds
-   *  principal, RuntimeContextUser, adopter discriminators) or rejects
-   *  the request by throwing a typed AgentickError. Enrichment only —
-   *  see the contract note below. */
-  interceptIngress(interceptor: IngressInterceptor): Unsubscribe;
+  /** DEFERRED to ADR 34/#302 (see 2026-07-01 amendment) — NOT in the B1
+   *  installer. Chain-of-responsibility at the transport INGRESS edge.
+   *  Interceptors run in install order; each ENRICHES the ingress context
+   *  (adds principal, RuntimeContextUser, adopter discriminators) or
+   *  rejects the request by throwing a typed AgentickError. Enrichment
+   *  only — see the contract note below. Added by ADR 34, which owns
+   *  IngressContext + the transport wiring; the addition extends
+   *  BaseInstaller and is non-breaking. */
+  // interceptIngress(interceptor: IngressInterceptor): Unsubscribe;  // ADR 34
 
   /** Same observer surface the other installers have. */
   subscribeBus(
@@ -197,8 +241,12 @@ declare module "@agentick/spec-next" {
 
 Adopter access: `gateway.bridges.credentials`. Runtime registration via
 `registerNamespace` throws on an occupied slot — the runtime mirror of
-the type-level seam (prices the augmentation version-skew risk; same
-guard lands on the app-side `extensionBridges` map in the same arc).
+the type-level seam (prices the augmentation version-skew risk). The
+app-side `extensionBridges` map stays **last-writer-wins**, and that
+asymmetry is deliberate — see amendment §2 (2026-07-01): the app scope
+sits under a cascade, so a duplicate slot there is an *override* (inner
+scope wins); the gateway scope has no outer scope, so a duplicate is a
+*collision* and throws. No app-side guard lands in this arc.
 
 ### `ExtensionBundle` — the #297 composite
 

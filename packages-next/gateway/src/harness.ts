@@ -23,17 +23,25 @@ import { Effect } from "effect";
 import {
   BaseHarness,
   busAsyncIterator,
+  forkBusSubscription,
   runHarnessProtocol,
   ulid,
   type BaseHarnessOptions,
 } from "@agentick/runtime-next";
 import type {
+  AnyExtension,
   AppHarnessProtocol,
   CreateAppInput,
   EventBus,
   EventQuery,
+  Extension,
+  ExtensionBundle,
+  GatewayBridges,
   GatewayError,
+  GatewayExtension,
   GatewayHarnessProtocol,
+  GatewayInstaller,
+  GatewayInstallerHost,
   JournalingPolicy,
   MessageEnvelope,
   MessageHandlerError,
@@ -44,6 +52,7 @@ import type {
   SubscribeOptions,
   ToolDeclaration,
   ToolRegistration,
+  Unsubscribe,
   WireExtension,
   WireExtensionRegistry,
 } from "@agentick/spec-next";
@@ -118,6 +127,23 @@ export interface GatewayHarnessOptions extends BaseHarnessOptions {
    * cannot be registered post-hoc.
    */
   readonly wireExtensions?: ReadonlyArray<WireExtension>;
+
+  /**
+   * Gateway + composite extensions (ADR 50). Accepts bare
+   * {@link GatewayExtension} / {@link AppExtension} /
+   * {@link SessionExtension}, or {@link ExtensionBundle} composites.
+   * Distribution:
+   *   - `gateway` parts install during gateway construction (before the
+   *     wire registry seals);
+   *   - `wire` parts register into the ADR 46 registry now;
+   *   - `app` / `session` parts become cascaded defaults for every
+   *     `gateway.createApp` / `createSession` beneath this gateway
+   *     (composed BEFORE per-call extensions).
+   *
+   * Distinct from {@link wireExtensions} (raw wire-extension array) —
+   * this is the higher-level extension surface. Both may be supplied.
+   */
+  readonly extensions?: ReadonlyArray<AnyExtension>;
 }
 
 // ============================================================================
@@ -129,6 +155,34 @@ const SURFACE = "gateway" as const;
 export class GatewayHarness extends BaseHarness<typeof SURFACE> implements GatewayHarnessProtocol {
   private readonly _apps = new Map<string, AppHarnessProtocol>();
   private gatewayClosed = false;
+
+  /**
+   * Gateway-extension bridges (ADR 50) — the `gateway.bridges.<name>`
+   * bag. Hard singleton: `registerNamespace` throws on an occupied slot.
+   */
+  private readonly _bridges: Record<string, unknown> = {};
+  /** `onClose` handlers registered by gateway extensions (LIFO teardown). */
+  private readonly gatewayExtensionCloseHandlers: Array<() => void | Promise<void>> = [];
+  /**
+   * Live `subscribeBus` fiber-interrupt thunks from gateway extensions.
+   * Interrupted during {@link closeGatewayBody} so an extension that
+   * subscribed but never unsubscribed doesn't leak a fiber past teardown.
+   * Manual unsubscribe splices its own entry out.
+   */
+  private readonly gatewayExtensionBusUnsubs: Array<() => void> = [];
+  /**
+   * App/session extension parts cascaded from gateway-level bundles to
+   * every `createApp` / `createSession` beneath (composed before
+   * per-call extensions).
+   */
+  private readonly cascadeExtensions: readonly Extension[];
+  /**
+   * Resolves once every gateway-target extension has finished
+   * `install()` and the wire registry has sealed. `Promise.resolve()`
+   * when no gateway extensions were supplied (seal happened
+   * synchronously in the constructor). Awaited via {@link gatewayReady}.
+   */
+  private readonly gatewayExtensionsReady: Promise<void>;
   /**
    * Gateway-level tool registrations, pre-tagged with
    * `binding: { scope: "gateway" }`. Forwarded to every app via
@@ -188,12 +242,15 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
       toRegistration(decl, { scope: "gateway" }),
     );
 
-    // Build + seal the wire-extension registry. Framework-supplied
-    // extensions register FIRST — adopter attempts to claim
-    // `gateway` / `app` / `session` namespaces then fail at
-    // construction with a clear conflict error instead of silently
-    // shadowing framework methods. Adopter-supplied extensions
-    // register after.
+    // Distribute the ADR 50 extension surface into its scopes.
+    const { gatewayExts, wireFromBundles, cascade } = splitExtensions(options.extensions ?? []);
+    this.cascadeExtensions = cascade;
+
+    // Build the wire-extension registry. Framework-supplied extensions
+    // register FIRST — adopter attempts to claim `gateway` / `app` /
+    // `session` namespaces then fail at construction with a clear
+    // conflict error instead of silently shadowing framework methods.
+    // Adopter raw wire extensions + bundle `wire` parts register after.
     this._wireExtensions = createWireExtensionRegistry();
     for (const ext of [
       gatewayWireExtension,
@@ -203,10 +260,107 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     ]) {
       this._wireExtensions.register(ext);
     }
-    for (const ext of options.wireExtensions ?? []) {
+    for (const ext of [...(options.wireExtensions ?? []), ...wireFromBundles]) {
       this._wireExtensions.register(ext);
     }
-    this._wireExtensions.seal();
+
+    // Seal timing: with no gateway extensions, seal synchronously (the
+    // pre-ADR-50 path — zero behavior change). With gateway extensions,
+    // their async `install()` may call `registerWireExtension`, so seal
+    // is deferred until after the install phase — awaited via
+    // `gatewayReady`.
+    if (gatewayExts.length === 0) {
+      this._wireExtensions.seal();
+      this.gatewayExtensionsReady = Promise.resolve();
+    } else {
+      const registry = this._wireExtensions;
+      this.gatewayExtensionsReady = (async () => {
+        const installer = this.makeGatewayInstaller();
+        // Seal in `finally`: even if an extension's `install()` throws,
+        // the registry must not be left half-sealed (which would let a
+        // later `registerWireExtension` mutate a registry belonging to a
+        // failed gateway). The rejection still propagates through
+        // `gatewayReady`, failing `createGateway` — no partial gateway.
+        try {
+          for (const ext of gatewayExts) {
+            await ext.install(installer);
+          }
+        } finally {
+          registry.seal();
+        }
+      })();
+    }
+  }
+
+  /**
+   * Resolves once base construction AND gateway-extension installs are
+   * complete (and the wire registry has sealed). `createGateway` awaits
+   * this; direct constructors that install gateway extensions must too
+   * before reading `wireExtensions()` / `bridges`.
+   */
+  get gatewayReady(): Promise<void> {
+    return Promise.all([this.ready, this.gatewayExtensionsReady]).then(() => {});
+  }
+
+  /**
+   * Gateway-extension bridges (ADR 50) — `gateway.bridges.<name>`.
+   * Typed via {@link GatewayBridges} module augmentation.
+   */
+  get bridges(): Readonly<GatewayBridges> {
+    return this._bridges as Readonly<GatewayBridges>;
+  }
+
+  /** Build the {@link GatewayInstaller} handed to each gateway extension. */
+  private makeGatewayInstaller(): GatewayInstaller {
+    const self = this;
+    const host: GatewayInstallerHost = {
+      gatewayId: this.scopeId,
+      metadata: this.metadata,
+      apps: () => Array.from(self._apps.values()),
+    };
+    return {
+      kind: "gateway",
+      hostId: this.scopeId,
+      substrate: { journal: this.journal, bus: this.bus, inbox: this.inbox },
+      gateway: host,
+      registerNamespace(name, value): Unsubscribe {
+        if (Object.prototype.hasOwnProperty.call(self._bridges, name)) {
+          throw new Error(
+            `GatewayBridges slot "${String(name)}" already occupied — gateway namespaces are hard singletons (ADR 50).`,
+          );
+        }
+        self._bridges[name as string] = value;
+        return () => {
+          delete self._bridges[name as string];
+        };
+      },
+      getNamespace<T>(name: string): T | undefined {
+        return self._bridges[name] as T | undefined;
+      },
+      registerWireExtension(extension: WireExtension): void {
+        // Throws via the registry if already sealed (post-ready) — the
+        // ADR 46 sealed-registry rule, reused verbatim.
+        self._wireExtensions.register(extension);
+      },
+      subscribeBus(filter, listener): Unsubscribe {
+        // forkBusSubscription = shared fork/interrupt semantics
+        // (per-event error isolation baked in — the hand-rolled copy
+        // here once shipped the Effect.promise fiber-killing defect).
+        // The gatewayExtensionBusUnsubs tracking (close-time teardown
+        // for subscriptions the extension never unsubscribed) stays a
+        // gateway concern.
+        const unreg = forkBusSubscription(self.bus, filter, listener);
+        self.gatewayExtensionBusUnsubs.push(unreg);
+        return () => {
+          const idx = self.gatewayExtensionBusUnsubs.indexOf(unreg);
+          if (idx >= 0) self.gatewayExtensionBusUnsubs.splice(idx, 1);
+          unreg();
+        };
+      },
+      onClose(handler): void {
+        self.gatewayExtensionCloseHandlers.push(handler);
+      },
+    };
   }
 
   /**
@@ -289,10 +443,19 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
         ? [...this.gatewayTools, ...(input.options.inheritedTools ?? [])]
         : [];
 
+    // Cascade gateway-level app/session extension parts (ADR 50) BEFORE
+    // the app's own — outer scope composes first; the app filters by
+    // target and forwards `session` parts to each session it creates.
+    const cascadedExtensions =
+      this.cascadeExtensions.length > 0
+        ? [...this.cascadeExtensions, ...(input.options.extensions ?? [])]
+        : input.options.extensions;
+
     const appOptions: AppHarnessOptions<P> = {
       ...input.options,
       appId,
       rootElement: input.rootElement,
+      ...(cascadedExtensions !== undefined ? { extensions: cascadedExtensions } : {}),
       // Substrate at the App slot — see AppHarnessOptions.bus/inbox/journal.
       // Cast tolerated here because the spec's parent typing differs
       // (GatewaySubstrateParent vs the AppHarness's installer-substrate
@@ -381,6 +544,28 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     }
     this._apps.clear();
 
+    // Gateway-extension `onClose` handlers, reverse install order
+    // (ADR 50) — after apps close, before the cluster/internal handlers.
+    for (const handler of this.gatewayExtensionCloseHandlers.slice().reverse()) {
+      try {
+        await handler();
+      } catch {
+        // best effort — one extension's teardown failure must not block others
+      }
+    }
+
+    // Interrupt any `subscribeBus` fibers the extensions left open (never
+    // unsubscribed). After their onClose handlers ran, so a handler that
+    // wants to observe final events still can.
+    for (const unreg of this.gatewayExtensionBusUnsubs.slice()) {
+      try {
+        unreg();
+      } catch {
+        // best effort
+      }
+    }
+    this.gatewayExtensionBusUnsubs.length = 0;
+
     // Run internal close handlers (cluster wrappers, etc) in reverse
     // registration order. After apps close (so cluster wrappers see
     // their final outbound writes), before super.close() (which tears
@@ -431,4 +616,47 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     void msg;
     return Effect.succeed(undefined);
   }
+}
+
+// ============================================================================
+// Extension distribution (ADR 50)
+// ============================================================================
+
+/** Is `x` an {@link ExtensionBundle} (composite) vs a bare extension? */
+function isBundle(x: AnyExtension): x is ExtensionBundle {
+  // Bundles have no `target`; bare extensions always do.
+  return !("target" in x);
+}
+
+/**
+ * Split the `extensions` array into its scopes:
+ *   - `gatewayExts`     — install during gateway construction
+ *   - `wireFromBundles` — register into the wire registry now
+ *   - `cascade`         — app/session parts, defaults for every createApp
+ *
+ * A bare {@link GatewayExtension} is a gateway part; bare app/session
+ * extensions cascade; a bundle's parts distribute by field.
+ */
+function splitExtensions(extensions: readonly AnyExtension[]): {
+  readonly gatewayExts: readonly GatewayExtension[];
+  readonly wireFromBundles: readonly WireExtension[];
+  readonly cascade: readonly Extension[];
+} {
+  const gatewayExts: GatewayExtension[] = [];
+  const wireFromBundles: WireExtension[] = [];
+  const cascade: Extension[] = [];
+
+  for (const ext of extensions) {
+    if (isBundle(ext)) {
+      if (ext.gateway) gatewayExts.push(ext.gateway);
+      if (ext.wire) wireFromBundles.push(...ext.wire);
+      if (ext.app) cascade.push(ext.app);
+      if (ext.session) cascade.push(ext.session);
+      continue;
+    }
+    if (ext.target === "gateway") gatewayExts.push(ext);
+    else cascade.push(ext); // app | session — cascade to createApp
+  }
+
+  return { gatewayExts, wireFromBundles, cascade };
 }

@@ -18,11 +18,12 @@
  * @see docs/proposals/v2/blueprint/09-app-harness.md
  */
 
-import { Effect, Fiber, Stream } from "effect";
+import { Effect } from "effect";
 
 import {
   BaseHarness,
   busAsyncIterator,
+  forkBusSubscription,
   type HarnessShell,
   LocalEventBus,
   LocalInbox,
@@ -695,28 +696,10 @@ export class AppHarness<P = unknown>
         };
       },
       subscribeBus(filter, listener): Unsubscribe {
-        // Subscribe via the app's bus Stream + `Stream.runForEach`,
-        // forked as a fiber so unsubscribe is a single `Fiber.interrupt`
-        // call. The previous AsyncIterable + `aborted` boolean pattern
-        // had a microtask leak: between an in-flight `await listener(...)`
-        // and the outer `aborted = true` flip, `iter.next()` could
-        // already be pending and yield one more value AFTER the
-        // unsubscribe call returned. `Fiber.interrupt` is atomic —
-        // upon return, the fiber is guaranteed to receive no further
-        // values.
-        const fiber = Effect.runFork(
-          Stream.runForEach(self.bus.subscribe(filter), (env) =>
-            Effect.tryPromise({
-              // Swallow listener errors so one extension can't kill the
-              // bus subscription.
-              try: () => Promise.resolve(listener(env)),
-              catch: () => undefined,
-            }).pipe(Effect.catchAll(() => Effect.void)),
-          ),
-        );
-        return () => {
-          void Effect.runPromise(Fiber.interrupt(fiber));
-        };
+        // Per-event error isolation + atomic Fiber.interrupt teardown —
+        // see forkBusSubscription (single source of truth for the
+        // fork-a-bus-subscription dance across all installers).
+        return forkBusSubscription(self.bus, filter, listener);
       },
       substrate: {
         journal: self.journal,
@@ -807,20 +790,10 @@ export class AppHarness<P = unknown>
         };
       },
       subscribeBus(filter, listener): Unsubscribe {
-        // Mirror AppInstaller's pattern — Stream.runForEach in a
-        // forked fiber; unsubscribe via Fiber.interrupt for atomic
-        // teardown with no microtask leak.
-        const fiber = Effect.runFork(
-          Stream.runForEach(self.bus.subscribe(filter), (env) =>
-            Effect.tryPromise({
-              try: () => Promise.resolve(listener(env)),
-              catch: () => undefined,
-            }).pipe(Effect.catchAll(() => Effect.void)),
-          ),
-        );
-        const unreg = (): void => {
-          void Effect.runPromise(Fiber.interrupt(fiber));
-        };
+        // forkBusSubscription = shared fork/interrupt semantics; the
+        // busUnregs tracking (session-close teardown for subscriptions
+        // the extension never unsubscribed) stays a session concern.
+        const unreg = forkBusSubscription(self.bus, filter, listener);
         busUnregs.push(unreg);
         return () => {
           const idx = busUnregs.indexOf(unreg);

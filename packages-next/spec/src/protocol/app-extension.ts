@@ -44,13 +44,13 @@ import type { OperationJournal } from "./journal.js";
  * packages add their own (e.g., a reconciler-side extension surface
  * would add `"reconciler"`).
  */
-export type HarnessKind = "app" | "session" | (string & {});
+export type HarnessKind = "gateway" | "app" | "session" | (string & {});
 
 // ============================================================================
 // Extension — discriminated union by target
 // ============================================================================
 
-interface ExtensionBase {
+export interface ExtensionBase {
   /**
    * Identifier for diagnostics + slot routing. Adopters who install
    * two extensions claiming the same `name` get last-writer-wins on
@@ -85,12 +85,56 @@ export interface SessionExtension extends ExtensionBase {
 }
 
 /**
+ * Extension that installs at GatewayHarness construction (ADR 50).
+ * Receives a {@link GatewayInstaller}. Fires during construction,
+ * before `gateway.ready`, before the wire-extension registry seals.
+ * Used by extensions that equip the gateway itself — one shared
+ * harness serving every app (credentials at gateway scope #283),
+ * wire-method packages (MCP control plane #298), connectors, logging.
+ *
+ * Identical discipline to {@link AppExtension} / {@link SessionExtension}:
+ * timing + host, not shape. What an extension *installs* (a harness, a
+ * namespace, a bus subscriber, nothing) is ADR 32's business.
+ */
+export interface GatewayExtension extends ExtensionBase {
+  readonly target: "gateway";
+  install(installer: GatewayInstaller): void | Promise<void>;
+}
+
+/**
  * Open union. Existing variants cover the built-in hosts; new harness
  * packages ship their own variants. The `(string & {})` escape on
  * {@link HarnessKind} lets adopters declare those without touching
  * `@agentick/spec-next`.
+ *
+ * Note: `Extension` covers the app/session hosts (what `createApp`
+ * accepts directly). The gateway host + composite bundles are the
+ * wider {@link AnyExtension} union, which `createGateway` accepts.
  */
 export type Extension = AppExtension | SessionExtension;
+
+/**
+ * Composite produced by a `withX()` factory that spans scopes (#297).
+ * `createGateway({ extensions })` distributes each part to its correct
+ * scope: `gateway` installs during gateway construction, `wire`
+ * registers into the ADR 46 registry now, `app`/`session` become
+ * cascaded defaults for every `gateway.createApp` / `createSession`
+ * beneath. One adoption site, correct scope per part.
+ */
+export interface ExtensionBundle {
+  readonly name: string;
+  readonly gateway?: GatewayExtension;
+  readonly app?: AppExtension;
+  readonly session?: SessionExtension;
+  readonly wire?: readonly import("../wire/extension.js").WireExtension[];
+}
+
+/**
+ * What `createGateway({ extensions })` accepts: bare extensions of any
+ * target, or a composite {@link ExtensionBundle}. A bare
+ * {@link GatewayExtension} is treated as `{ gateway }`.
+ */
+export type AnyExtension = GatewayExtension | AppExtension | SessionExtension | ExtensionBundle;
 
 // ============================================================================
 // Installers — per-host integration contract
@@ -299,6 +343,73 @@ export interface SessionInstaller extends BaseInstaller {
 }
 
 /**
+ * GatewayHarness installer (ADR 50). Mirrors {@link AppInstaller}'s
+ * base surface plus gateway-only capabilities: the programmatic path
+ * into the ADR 46 wire-extension registry, and typed namespace
+ * registration into {@link GatewayBridges}.
+ *
+ * Runs during gateway construction, before `ready`, before the
+ * wire-extension registry seals.
+ *
+ * (The auth seam — `interceptIngress`, token → principal at transport
+ * ingress — is deferred to #302/ADR 34, which owns its context shape
+ * and transport wiring. Recorded in ADR 50's 2026-07-01 amendment §1;
+ * added there as a non-breaking `BaseInstaller` extension.)
+ */
+export interface GatewayInstaller extends BaseInstaller {
+  readonly kind: "gateway";
+
+  /**
+   * Register a namespace into {@link GatewayBridges}, reachable via
+   * `gateway.bridges.<name>`. **Occupied slot ⇒ throw** — the runtime
+   * mirror of the type-level augmentation seam; prices version-skew
+   * risk loudly rather than silently shadowing.
+   *
+   * The gateway slot is a **hard singleton** by decision (ADR 50
+   * amendment §2): it has no outer scope, so a duplicate is two
+   * extensions fighting for one global slot — a bug. The app-side
+   * `extensionBridges` map is intentionally **last-writer-wins**: it
+   * sits under the outer→inner extension cascade, where a duplicate slot
+   * is an *override* (the more-specific scope wins), not a collision.
+   */
+  registerNamespace<K extends keyof GatewayBridges & string>(
+    name: K,
+    value: GatewayBridges[K],
+  ): Unsubscribe;
+
+  /**
+   * Programmatic install into the ADR 46 wire-extension registry —
+   * the third route beside `createGateway({ wireExtensions })` and
+   * framework self-install. Valid only before the registry seals;
+   * throws after `ready` (no dynamic post-ready install in v2.0).
+   */
+  registerWireExtension(extension: import("../wire/extension.js").WireExtension): void;
+
+  /**
+   * Subscribe to the gateway's bus — telemetry / observability /
+   * external-driver extensions.
+   */
+  subscribeBus(
+    filter: EventQuery,
+    listener: (event: ProtocolEvent) => void | Promise<void>,
+  ): Unsubscribe;
+
+  /** Late-binding handle to the GatewayHarness. */
+  readonly gateway: GatewayInstallerHost;
+}
+
+/**
+ * Late-binding handle to the GatewayHarness an installer operates on.
+ * Concrete type lives in `@agentick/gateway-next`; spec keeps it opaque.
+ */
+export interface GatewayInstallerHost {
+  readonly gatewayId: string;
+  readonly metadata: Readonly<Record<string, unknown>>;
+  /** Live apps hosted by this gateway. */
+  readonly apps: () => readonly import("./app-harness.js").AppHarnessProtocol[];
+}
+
+/**
  * The shared substrate primitives the host harness owns. Forwarded to
  * extensions so they can wire sub-harnesses into the same journal /
  * bus / inbox the host uses — sub-harness events appear on
@@ -365,3 +476,21 @@ export interface AppExtensions {}
  * Reachable via `session.extensions.<name>`. Augmented the same way.
  */
 export interface SessionExtensions {}
+
+/**
+ * Gateway-scope twin of {@link AppExtensions} — the typed bag of
+ * gateway-extension-installed harnesses reachable via
+ * `gateway.bridges.<name>` (ADR 50). Empty seed; the gateway-scope
+ * mirror of `HookBridges` (ADR 27). Augmented the same way:
+ *
+ *   declare module "@agentick/spec-next" {
+ *     interface GatewayBridges {
+ *       readonly credentials: CredentialsHarnessProtocol;
+ *     }
+ *   }
+ *
+ * Unlike the app-side last-writer-wins `extensionBridges`, a
+ * `GatewayBridges` slot is a hard singleton: `registerNamespace`
+ * throws on an occupied slot.
+ */
+export interface GatewayBridges {}
