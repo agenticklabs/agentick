@@ -17,6 +17,7 @@ import {
   type Tool,
   type ToolSpecification,
   type ToolConfiguration,
+  type DocumentFormat,
 } from "@aws-sdk/client-bedrock-runtime";
 
 import {
@@ -99,6 +100,28 @@ export function createBedrockModel(config: BedrockAdapterConfig = {}): ModelClas
           ? normalizedInput.tools.map((tool) => mapToolDefinition(tool.metadata))
           : [];
 
+      // Bedrock Converse has no native structured-output / responseSchema field.
+      // The provider's supported mechanism is a *forced tool call*: expose a
+      // single tool whose input schema is the requested JSON Schema and force
+      // the model to call it via toolChoice. The structured object then arrives
+      // as the tool_use block's `input` (read it from output.toolCalls[0].input).
+      let toolChoice: ToolConfiguration["toolChoice"] | undefined;
+      const rf = normalizedInput.responseFormat;
+      if (rf && rf.type === "json_schema") {
+        const name = rf.name ?? "structured_output";
+        tools.push({
+          toolSpec: {
+            name,
+            description:
+              "Return the result by calling this tool with arguments that conform to its input schema.",
+            inputSchema: { json: rf.schema as any },
+          },
+        });
+        // Forcing this specific tool means any other tools are unreachable this
+        // turn — expected for structured-extraction calls, which don't mix the two.
+        toolChoice = { tool: { name } };
+      }
+
       const inferenceConfig: Record<string, unknown> = {
         maxTokens: normalizedInput.maxTokens ?? config.maxTokens ?? 4096,
         temperature: normalizedInput.temperature,
@@ -122,7 +145,10 @@ export function createBedrockModel(config: BedrockAdapterConfig = {}): ModelClas
         messages,
         system: system.length > 0 ? system : undefined,
         inferenceConfig,
-        toolConfig: tools.length > 0 ? ({ tools: tools } as ToolConfiguration) : undefined,
+        toolConfig:
+          tools.length > 0
+            ? ({ tools, ...(toolChoice ? { toolChoice } : {}) } as ToolConfiguration)
+            : undefined,
       };
 
       // Clean undefined top-level values
@@ -292,6 +318,38 @@ function mimeToFormat(mimeType: string): "png" | "jpeg" | "gif" | "webp" {
 }
 
 /**
+ * Resolve a Bedrock Converse document `format` from a MIME type (or an explicit
+ * caller-supplied format). Bedrock accepts: pdf, csv, doc, docx, xls, xlsx,
+ * html, txt, md. Defaults to "pdf".
+ */
+function mimeToDocFormat(mimeType?: string, explicit?: string): DocumentFormat {
+  if (explicit) return explicit as DocumentFormat;
+  const mime = (mimeType ?? "").toLowerCase();
+  if (mime.includes("pdf")) return "pdf";
+  if (mime.includes("csv")) return "csv";
+  if (mime.includes("html")) return "html";
+  if (mime.includes("markdown") || mime.endsWith("/md")) return "md";
+  if (mime.includes("wordprocessingml")) return "docx";
+  if (mime.includes("msword")) return "doc";
+  if (mime.includes("spreadsheetml")) return "xlsx";
+  if (mime.includes("ms-excel")) return "xls";
+  if (mime.includes("text/plain")) return "txt";
+  return "pdf";
+}
+
+/**
+ * Bedrock requires document names to match [a-zA-Z0-9 \-()\[\]]+ (and be
+ * non-empty). Strip anything else so the Converse call isn't rejected.
+ */
+function sanitizeDocName(name: string): string {
+  const cleaned = name
+    .replace(/[^a-zA-Z0-9\s\-()[\]]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return cleaned.length > 0 ? cleaned : "document";
+}
+
+/**
  * Convert Agentick Messages to Bedrock format.
  * Returns both system blocks and conversation messages.
  */
@@ -351,19 +409,41 @@ export function toBedrockMessages(messages: Message[]): {
           }
           break;
 
-        case "document":
-          if ((block as any).source?.bytes) {
+        case "document": {
+          const src = (block as any).source;
+          const format = mimeToDocFormat(
+            (block as any).mimeType ?? src?.mimeType,
+            (block as any).format,
+          );
+          // Bedrock requires the document name to be alphanumeric (plus spaces,
+          // hyphens, parens, brackets). Sanitize the caller-supplied title.
+          const name = sanitizeDocName((block as any).title ?? (block as any).name ?? "document");
+
+          if (src?.bytes) {
+            // Pre-decoded bytes (Uint8Array) — pass through.
+            content.push({ document: { format, name, source: { bytes: src.bytes } } });
+          } else if (src?.type === "base64" && typeof src.data === "string") {
+            // Standard base64 MediaSource — decode to bytes for Converse.
             content.push({
               document: {
-                format: (block as any).format ?? "pdf",
-                name: (block as any).name ?? "document",
-                source: {
-                  bytes: (block as any).source.bytes,
-                },
+                format,
+                name,
+                source: { bytes: new Uint8Array(Buffer.from(src.data, "base64")) },
               },
             });
+          } else if (
+            src?.type === "url" &&
+            typeof src.url === "string" &&
+            src.url.startsWith("s3://")
+          ) {
+            content.push({
+              document: { format, name, source: { s3Location: { uri: src.url } } },
+            } as any);
           }
+          // Non-S3 URLs: Converse can't fetch remote docs; caller should stage
+          // to S3 or pass bytes/base64.
           break;
+        }
 
         case "tool_use":
           content.push({

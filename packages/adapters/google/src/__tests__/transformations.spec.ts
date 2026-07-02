@@ -366,6 +366,46 @@ describe("convertBlocksToGoogleParts", () => {
     });
   });
 
+  describe("document blocks", () => {
+    it("should convert a base64 document to inlineData", () => {
+      const blocks: ContentBlock[] = [
+        {
+          type: "document",
+          source: { type: "base64", data: "JVBERi0xLjc...", mimeType: "application/pdf" },
+          mimeType: "application/pdf",
+        } as any,
+      ];
+      const result = convertBlocksToGoogleParts(blocks);
+
+      expect(result).toEqual([
+        { inlineData: { mimeType: "application/pdf", data: "JVBERi0xLjc..." } },
+      ]);
+    });
+
+    it("should convert a gs:// document url to fileData", () => {
+      const blocks: ContentBlock[] = [
+        {
+          type: "document",
+          source: { type: "url", url: "gs://bucket/ocr-temp/abc.pdf", mimeType: "application/pdf" },
+        } as any,
+      ];
+      const result = convertBlocksToGoogleParts(blocks);
+
+      expect(result).toEqual([
+        { fileData: { mimeType: "application/pdf", fileUri: "gs://bucket/ocr-temp/abc.pdf" } },
+      ]);
+    });
+
+    it("should default the document mime type to application/pdf", () => {
+      const blocks: ContentBlock[] = [
+        { type: "document", source: { type: "base64", data: "AAAA" } } as any,
+      ];
+      const result = convertBlocksToGoogleParts(blocks);
+
+      expect(result[0].inlineData.mimeType).toBe("application/pdf");
+    });
+  });
+
   describe("tool_use blocks", () => {
     it("should convert tool_use block to functionCall", () => {
       const blocks: ContentBlock[] = [
