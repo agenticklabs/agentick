@@ -36,7 +36,8 @@ import type {
   ProtocolEvent,
   SessionExtension,
 } from "@agentick/spec-next";
-import { SPEC_VERSION, defineWireExtension } from "@agentick/spec-next";
+import { SPEC_VERSION, GatewayBridgeSlotOccupied, defineWireExtension } from "@agentick/spec-next";
+import { waitFor } from "@agentick/utils-next/testing";
 import { FakeLanguageModelExecutor } from "@agentick/executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import { ReconcilerHarness } from "@agentick/reconciler-react-next";
@@ -170,7 +171,15 @@ describe("GatewayBridges — hard singleton", () => {
     };
 
     // Second install throws → gatewayReady rejects → createGateway rejects.
-    await expect(createGateway({ extensions: [a, b] })).rejects.toThrow(/already occupied/i);
+    // The rejection is the typed GatewayBridgeSlotOccupied (catchTag-able),
+    // carrying the offending slot, not a bare Error.
+    const err = await createGateway({ extensions: [a, b] }).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(GatewayBridgeSlotOccupied);
+    expect((err as GatewayBridgeSlotOccupied)._tag).toBe("GatewayBridgeSlotOccupied");
+    expect((err as GatewayBridgeSlotOccupied).slot).toBe("testCap");
   });
 
   it("allows distinct slots side by side", async () => {
@@ -439,7 +448,10 @@ describe("GatewayInstaller — subscribeBus", () => {
 
     const gateway = await createGateway({ extensions: [ext] });
     gateway.emitCapabilitiesChanged();
-    await vi.waitFor(() => expect(seen.length).toBeGreaterThan(0));
+    await waitFor(() => (seen.length > 0 ? true : undefined), {
+      description: "extension observes the gateway bus event",
+      timeoutMs: 2_000,
+    });
     await gateway.closeGateway();
   });
 
@@ -461,10 +473,16 @@ describe("GatewayInstaller — subscribeBus", () => {
 
     const gateway = await createGateway({ extensions: [ext] });
     gateway.emitCapabilitiesChanged();
-    await vi.waitFor(() => expect(calls).toBe(1));
+    await waitFor(() => (calls === 1 ? true : undefined), {
+      description: "first (throwing) event delivered",
+      timeoutMs: 2_000,
+    });
     // Second event must still arrive — the throw did not kill the stream.
     gateway.emitCapabilitiesChanged();
-    await vi.waitFor(() => expect(calls).toBe(2));
+    await waitFor(() => (calls === 2 ? true : undefined), {
+      description: "second event still delivered after the throw",
+      timeoutMs: 2_000,
+    });
     await gateway.closeGateway();
   });
 });

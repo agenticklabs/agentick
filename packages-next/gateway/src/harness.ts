@@ -60,6 +60,7 @@ import {
   AppAlreadyExistsError,
   DEFAULT_JOURNALING_POLICY,
   GATEWAY_CAPABILITIES_CHANGED,
+  GatewayBridgeSlotOccupied,
   GatewayClosedError,
   toRegistration,
 } from "@agentick/spec-next";
@@ -325,9 +326,7 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
       gateway: host,
       registerNamespace(name, value): Unsubscribe {
         if (Object.prototype.hasOwnProperty.call(self._bridges, name)) {
-          throw new Error(
-            `GatewayBridges slot "${String(name)}" already occupied — gateway namespaces are hard singletons (ADR 50).`,
-          );
+          throw new GatewayBridgeSlotOccupied({ slot: String(name) });
         }
         self._bridges[name as string] = value;
         return () => {

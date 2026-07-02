@@ -67,6 +67,7 @@ export {
   AppNotFoundError,
   ChannelError,
   ExecutionFailed,
+  GatewayBridgeSlotOccupied,
   GatewayClosedError,
   GatewayError,
   type GatewayErrorChannel,

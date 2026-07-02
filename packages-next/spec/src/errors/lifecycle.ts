@@ -112,11 +112,32 @@ export class GatewayLifecycleError extends GatewayError {
 }
 registerAgentickError("GatewayLifecycleError", GatewayLifecycleError);
 
+/**
+ * A gateway extension tried to claim a `GatewayBridges` namespace already
+ * held by another (ADR 50). Gateway bridges are hard singletons — no outer
+ * scope to override, so a duplicate is a collision, not a last-writer-wins
+ * override (contrast the app-side `extensionBridges`). Thrown from
+ * `GatewayInstaller.registerNamespace`; propagates through `gatewayReady`.
+ */
+export class GatewayBridgeSlotOccupied extends GatewayError {
+  readonly _tag = "GatewayBridgeSlotOccupied" as const;
+  readonly slot: string;
+  constructor(args: { readonly slot: string; readonly cause?: unknown }) {
+    super(
+      `GatewayBridges slot "${args.slot}" already occupied — gateway namespaces are hard singletons (ADR 50).`,
+      { cause: args.cause },
+    );
+    this.slot = args.slot;
+  }
+}
+registerAgentickError("GatewayBridgeSlotOccupied", GatewayBridgeSlotOccupied);
+
 export type GatewayErrorChannel =
   | GatewayClosedError
   | AppAlreadyExistsError
   | AppNotFoundError
-  | GatewayLifecycleError;
+  | GatewayLifecycleError
+  | GatewayBridgeSlotOccupied;
 
 // ============================================================================
 // SessionError — session-level command + state failures
