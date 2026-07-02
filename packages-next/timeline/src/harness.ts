@@ -14,20 +14,24 @@
  *     can diverge. Subsequent appends land at the tail of the projection
  *     too — the natural "compacted prefix + recent" shape.
  *
- * **Inbox routing** — three message types reach the harness over
- * `timeline:{scopeId}`:
+ * **Invocation (ADR 51)** — every verb is a DECLARED COMMAND
+ * (constructor, `this.command()`): `timeline:append`, `timeline:queue`,
+ * `timeline:drain`, `timeline:replaceProjection`,
+ * `timeline:resetProjection`, and `timeline:compact` (the **signal
+ * form**). One canonical string per verb is simultaneously the inbox
+ * message type over `timeline:{scopeId}`, the op-name root, the authz
+ * scope label, and the (matrix-gated) wire method name.
  *
- *   - `"timeline:append"` → invokes {@link append}
- *   - `"timeline:replaceProjection"` → invokes {@link replaceProjection}
- *   - `"timeline:resetProjection"` → invokes {@link resetProjection}
- *
- * `compact` is intentionally NOT inbox-addressable — the strategy carries
- * a function reference (non-serializable) so it can't cross actor
- * boundaries today. Cross-process compaction would route through a
- * higher-level surface (e.g., a session command) once that landing is
- * designed.
+ * `compact` crosses boundaries as a bare verb + optional advisory
+ * `instructions` (serializable data) resolved against the
+ * construction-bound default strategy (`TimelineHarnessOptions.compact`
+ * / `withTimeline({ compact })`). The strategy itself — executable
+ * configuration — never travels; the explicit-arg `compact(strategy)`
+ * form is an in-process-only override and stays a hand-built Operation
+ * by doctrine (ADR 51 §1.2).
  *
  * @see docs/proposals/v2/blueprint/26-harness-api-shape.md
+ * @see docs/proposals/v2/blueprint/51-invocation-and-authorization.md
  */
 
 import { omitUndefined } from "@agentick/utils-next";
@@ -48,11 +52,14 @@ import type {
   CompactStrategy,
   EventBus,
   MessageEnvelope,
+  EventScope,
   MessageHandlerError,
   MessageInbox,
   Operation,
   OperationJournal,
+  OperationOrigin,
   PendingEntry,
+  StandardSchemaV1,
   TimelineAppendInput,
   TimelineDrainResult,
   TimelineEntry,
@@ -71,6 +78,9 @@ import {
   RehydrateStrategyMissing,
   TimelineWriteFailed,
 } from "@agentick/spec-next";
+
+/** A declared command's public invoker (ADR 51). */
+type Cmd<I, R> = (input: I, opts?: { readonly origin?: OperationOrigin }) => Promise<R>;
 
 /**
  * Construction options for {@link TimelineHarness} (ADR 49). Flat, per the
@@ -105,15 +115,37 @@ export interface TimelineHarnessOptions extends BaseHarnessOptions {
   readonly compact?: CompactStrategy;
 }
 
-type TimelineInboxMessage =
-  | { readonly type: "timeline:append"; readonly payload: TimelineAppendInput }
-  | {
-      readonly type: "timeline:replaceProjection";
-      readonly payload: TimelineReplaceProjectionInput;
-    }
-  | { readonly type: "timeline:resetProjection" }
-  | { readonly type: "timeline:queue"; readonly payload: readonly TimelineQueueInput[] }
-  | { readonly type: "timeline:drain" };
+/**
+ * Payload schema for the `timeline:compact` **signal form** (ADR 51):
+ * a bare verb with optional advisory `instructions`. The resident
+ * default strategy is authoritative to honor or ignore them; the
+ * strategy itself never travels.
+ */
+const compactSignalSchema: StandardSchemaV1<{
+  readonly instructions?: string | readonly unknown[];
+}> = {
+  "~standard": {
+    version: 1,
+    vendor: "@agentick/timeline-next",
+    validate: (value) => {
+      if (value === undefined || value === null) return { value: {} };
+      if (typeof value !== "object") {
+        return { issues: [{ message: "compact signal payload must be an object" }] };
+      }
+      const instructions = (value as { instructions?: unknown }).instructions;
+      if (
+        instructions !== undefined &&
+        typeof instructions !== "string" &&
+        !Array.isArray(instructions)
+      ) {
+        return {
+          issues: [{ message: "instructions must be a string or an array of content blocks" }],
+        };
+      }
+      return { value: value as { instructions?: string | readonly unknown[] } };
+    },
+  },
+};
 
 export class TimelineHarness extends BaseHarness<"timeline"> implements TimelineHarnessProtocol {
   // ─── Storage ───
@@ -149,6 +181,17 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
   /** Construction-bound default compaction strategy (ADR 51 signal form). */
   private readonly defaultCompact?: CompactStrategy;
 
+  // ─── Declared commands (ADR 51) — assigned in the constructor ───
+  private readonly appendCmd: Cmd<TimelineAppendInput, void>;
+  private readonly queueCmd: Cmd<readonly TimelineQueueInput[], TimelineQueueResult>;
+  private readonly drainCmd: Cmd<undefined, TimelineDrainResult>;
+  private readonly replaceProjectionCmd: Cmd<TimelineReplaceProjectionInput, void>;
+  private readonly resetProjectionCmd: Cmd<undefined, void>;
+  private readonly compactCmd: Cmd<
+    { readonly instructions?: string | readonly unknown[] },
+    CompactResult
+  >;
+
   get id(): string {
     return this.scopeId;
   }
@@ -167,6 +210,64 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
     // Drain buffered write-behind entries before the harness tears down —
     // ADR 49: session close() awaits the flush barrier.
     this.onClose(() => this.flush());
+
+    // ─── Declared commands (ADR 51) — the single declaration site per
+    // verb. Inbox message types, canonical op naming, enumeration, and
+    // (future, matrix-gated) wire methods all derive from these; the
+    // pre-registry `handleMessage` switch is gone. Payload shapes are
+    // unchanged (zero wire-shape change). Payloads carried no
+    // validation before the registry; schemas stay off for parity —
+    // EXCEPT the new compact signal form, a new surface that validates.
+    const scope = (): EventScope => ({ sessionId: this.scopeId });
+    this.appendCmd = this.command({
+      name: "timeline:append",
+      scope,
+      handler: (i: TimelineAppendInput) => this.appendBody(i),
+    });
+    this.queueCmd = this.command({
+      name: "timeline:queue",
+      scope,
+      handler: (batch: readonly TimelineQueueInput[]) => this.queueBody(batch),
+    });
+    this.drainCmd = this.command({
+      name: "timeline:drain",
+      scope,
+      handler: () => this.drainBody(),
+    });
+    this.replaceProjectionCmd = this.command({
+      name: "timeline:replaceProjection",
+      scope,
+      handler: (i: TimelineReplaceProjectionInput) => this.replaceProjectionBody(i),
+    });
+    this.resetProjectionCmd = this.command({
+      name: "timeline:resetProjection",
+      scope,
+      handler: () => this.resetProjectionBody(),
+    });
+    // The ADR 51 signal form: a bare `timeline:compact` verb — from the
+    // inbox, another node, or (matrix-gated) the wire — runs the
+    // construction-bound default strategy. Optional advisory
+    // `instructions` ride as data; the resident strategy is
+    // authoritative to honor or ignore them. The strategy itself never
+    // travels (the explicit-arg `compact(strategy)` stays an
+    // in-process-only hand-built operation by doctrine).
+    this.compactCmd = this.command({
+      name: "timeline:compact",
+      input: compactSignalSchema,
+      scope,
+      handler: (signal) =>
+        Effect.gen(this, function* () {
+          const base = this.defaultCompact;
+          if (base === undefined) {
+            return yield* Effect.fail(new CompactStrategyMissing());
+          }
+          const effective: CompactStrategy =
+            signal.instructions !== undefined
+              ? { ...base, instructions: signal.instructions as CompactStrategy["instructions"] }
+              : base;
+          return yield* this.compactBody(effective);
+        }),
+    });
   }
 
   /**
@@ -203,58 +304,36 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
 
   append(...entries: TimelineEntry[]): Promise<void> {
     if (entries.length === 0) return Promise.resolve();
-    return runHarnessProtocol(this.appendEffect({ entries }));
+    return this.appendCmd({ entries });
   }
 
   /**
-   * Effect-native append — used by `drain` so that inner appends
-   * compose within the drain's Effect fiber, letting BaseHarness
-   * auto-thread `parentOpId` onto every emitted envelope (Step 3.5).
-   * Going through the Promise-typed `append` would cross
-   * `Effect.runPromise`, lose the FiberRef, and break the causality
-   * tree.
+   * The append command body (runs inside the `timeline:append`
+   * operation — declared in the constructor, ADR 51).
    */
-  private appendEffect(
-    input: TimelineAppendInput,
-  ): Effect.Effect<void, TimelineWriteFailed, never> {
-    const op: Operation<TimelineAppendInput, void, TimelineWriteFailed> = {
-      opId: `timeline:append:${ulid()}`,
-      surface: "timeline",
-      name: "timeline:command:append",
-      scope: { sessionId: this.scopeId },
-      input,
-    };
-    return this.runOperation(
-      op,
-      (i) =>
-        Effect.gen(this, function* () {
-          // Memory is authoritative — update it first, synchronously, inside
-          // the tick loop (no store latency added here).
-          this.applyAppend(i);
-          if (this.writePolicy === "through") {
-            // Zero-loss mode: the append operation does not complete until the
-            // store has the entries. A store-write failure is OPERATIONAL, not
-            // a defect — surface it as a typed `TimelineWriteFailed` in the
-            // error channel so the session barrier can `catchTag` it and
-            // transition to errored (same treatment compact() gives its own
-            // operational failure). The harness wraps whatever the adapter
-            // rejected with, so adapters need not import spec errors.
-            yield* Effect.tryPromise({
-              try: () => Promise.resolve(this.store.append(this.scopeId, i.entries)),
-              catch: (cause) => new TimelineWriteFailed({ cause }),
-            });
-          } else {
-            // Write-behind: buffer + kick the pump; the flush barrier
-            // (execution end / close) awaits durability.
-            this.enqueueWriteBehind(i.entries);
-          }
-        }),
-      // runOperation adds `SubstrateError` to the channel; erase only THAT
-      // (as the original append did) so this composes inside drain's handler
-      // without widening drain's op error. The new `TimelineWriteFailed` stays
-      // visible — it's a real, catchable failure mode the barrier surfaces.
-      // Substrate-level failures still reach callers via runHarnessProtocol.
-    ) as Effect.Effect<void, TimelineWriteFailed, never>;
+  private appendBody(input: TimelineAppendInput): Effect.Effect<void, TimelineWriteFailed, never> {
+    return Effect.gen(this, function* () {
+      // Memory is authoritative — update it first, synchronously, inside
+      // the tick loop (no store latency added here).
+      this.applyAppend(input);
+      if (this.writePolicy === "through") {
+        // Zero-loss mode: the append operation does not complete until the
+        // store has the entries. A store-write failure is OPERATIONAL, not
+        // a defect — surface it as a typed `TimelineWriteFailed` in the
+        // error channel so the session barrier can `catchTag` it and
+        // transition to errored (same treatment compact() gives its own
+        // operational failure). The harness wraps whatever the adapter
+        // rejected with, so adapters need not import spec errors.
+        yield* Effect.tryPromise({
+          try: () => Promise.resolve(this.store.append(this.scopeId, input.entries)),
+          catch: (cause) => new TimelineWriteFailed({ cause }),
+        });
+      } else {
+        // Write-behind: buffer + kick the pump; the flush barrier
+        // (execution end / close) awaits durability.
+        this.enqueueWriteBehind(input.entries);
+      }
+    });
   }
 
   /**
@@ -277,8 +356,8 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
       // TimelineWriteFailed (same error the write-through path fails with),
       // so callers catchTag one thing regardless of write policy. Left set —
       // the harness has diverged from its store and cannot silently "recover".
-      // TODO(A2.2): the session/loop-executor barrier owns the errored-
-      // status transition + adapter retry policy; here we only surface.
+      // The session's execution-end barrier catchTags this and lands the
+      // session on "failed" status (A2.2 — see session-next sendBody).
       throw new TimelineWriteFailed({ cause: this.pumpError });
     }
   }
@@ -286,13 +365,10 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
   /**
    * Load the session's persisted log from the store into the in-memory
    * tiers — the resume path (ADR 49 §Hydration). Called once at session
-   * init, before first render and before any append. Replaces both tiers
-   * with the durable log (the projection reconstructs by re-render / a
-   * subsequent compaction).
-   *
-   * TODO(A2.2): wire this into `app.createSession({ sessionId })` through
-   * `session-next` so open-or-rehydrate is idempotent at the session
-   * boundary; today the harness exposes it for direct/tested use.
+   * init, before first render and before any append (the session's
+   * constructor chains this ahead of the reconciler mount when a store
+   * is injected — A2.2). Replaces both tiers with the durable log (the
+   * projection reconstructs by re-render / a subsequent compaction).
    */
   async hydrate(): Promise<void> {
     const entries = await this.store.load(this.scopeId);
@@ -338,176 +414,175 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
   }
 
   compact(strategy?: CompactStrategy): Promise<CompactResult> {
-    // Signal form (ADR 51): no-arg resolves the construction-bound
-    // default; the explicit call-site argument overrides it
-    // (inner-scope-wins, in-process only — strategies never travel).
-    const resolved = strategy ?? this.defaultCompact;
-    if (resolved === undefined) {
-      return Promise.reject(new CompactStrategyMissing());
+    if (strategy === undefined) {
+      // Signal form (ADR 51): the declared `timeline:compact` command —
+      // same path a bare verb takes over the inbox. Runs the
+      // construction-bound default; rejects with CompactStrategyMissing
+      // when none is configured.
+      return this.compactCmd({});
     }
-    const source: "persisted" | "projection" = resolved.source ?? "persisted";
+    // Explicit-arg form: an in-process-only override (inner-scope-wins).
+    // Stays a hand-built Operation BY DOCTRINE — the input carries a
+    // function (the strategy), so it can never be a declared command
+    // (ADR 51 §1.2: executable configuration is unaddressable).
     const op: Operation<CompactStrategy, CompactResult, CompactHandlerFailed> = {
       opId: `timeline:compact:${ulid()}`,
       surface: "timeline",
       name: "timeline:command:compact",
       scope: { sessionId: this.scopeId },
-      input: resolved,
+      input: strategy,
     };
-    return runHarnessProtocol(
-      this.runOperation(op, (s) =>
-        Effect.gen(this, function* () {
-          const sourceEntries = source === "persisted" ? this._persisted : this._projection;
-          const before = sourceEntries.length;
-          // A compaction strategy's `run` is typically a model call (the
-          // contract says so) — its failure is OPERATIONAL (timeout,
-          // rate-limit), not a programming defect. Surface it as the typed,
-          // catchable CompactHandlerFailed in the error channel, NOT an
-          // orDie defect: an adopter (ernesto's LLM compactor) can catchTag
-          // it and retry / skip compaction / error the session.
-          const next = yield* Effect.tryPromise({
-            try: () =>
-              s.run({
-                entries: sourceEntries,
-                ...omitUndefined({ instructions: s.instructions }),
-              }),
-            catch: (cause) => new CompactHandlerFailed({ cause }),
-          });
-          const entries = [...next];
-          this.applyProjectionReplace(entries, {
-            at: Date.now(),
-            source,
-            entriesBefore: before,
-            entriesAfter: entries.length,
-            ...omitUndefined({ strategyMetadata: s.metadata }),
-          });
-          const result: CompactResult = {
-            entriesBefore: before,
-            entriesAfter: entries.length,
-            source,
-          };
-          return result;
-        }),
-      ),
-    );
+    return runHarnessProtocol(this.runOperation(op, (s) => this.compactBody(s)));
+  }
+
+  /**
+   * The compaction body — shared by the explicit-arg operation above
+   * and the declared signal-form command (constructor). `source`
+   * selects the fold INPUT (full log vs current projection); the
+   * mutation target is always the projection (`applyProjectionReplace`)
+   * — the durable log is never rewritten.
+   */
+  private compactBody(
+    s: CompactStrategy,
+  ): Effect.Effect<CompactResult, CompactHandlerFailed, never> {
+    const source: "persisted" | "projection" = s.source ?? "persisted";
+    return Effect.gen(this, function* () {
+      const sourceEntries = source === "persisted" ? this._persisted : this._projection;
+      const before = sourceEntries.length;
+      // A compaction strategy's `run` is typically a model call (the
+      // contract says so) — its failure is OPERATIONAL (timeout,
+      // rate-limit), not a programming defect. Surface it as the typed,
+      // catchable CompactHandlerFailed in the error channel, NOT an
+      // orDie defect: an adopter (ernesto's LLM compactor) can catchTag
+      // it and retry / skip compaction / error the session.
+      const next = yield* Effect.tryPromise({
+        try: () =>
+          s.run({
+            entries: sourceEntries,
+            ...omitUndefined({ instructions: s.instructions }),
+          }),
+        catch: (cause) => new CompactHandlerFailed({ cause }),
+      });
+      const entries = [...next];
+      this.applyProjectionReplace(entries, {
+        at: Date.now(),
+        source,
+        entriesBefore: before,
+        entriesAfter: entries.length,
+        ...omitUndefined({ strategyMetadata: s.metadata }),
+      });
+      const result: CompactResult = {
+        entriesBefore: before,
+        entriesAfter: entries.length,
+        source,
+      };
+      return result;
+    });
   }
 
   replaceProjection(input: TimelineReplaceProjectionInput): Promise<void> {
-    const op: Operation<TimelineReplaceProjectionInput, void, never> = {
-      opId: `timeline:replaceProjection:${ulid()}`,
-      surface: "timeline",
-      name: "timeline:command:replaceProjection",
-      scope: { sessionId: this.scopeId },
-      input,
-    };
-    return runHarnessProtocol(
-      this.runOperation(op, (i) =>
-        Effect.sync(() => {
-          const entries = [...i.entries];
-          this.applyProjectionReplace(entries, {
-            at: Date.now(),
-            source: "projection",
-            entriesBefore: this._projection.length,
-            entriesAfter: entries.length,
-          });
-        }),
-      ),
-    );
+    return this.replaceProjectionCmd(input);
+  }
+
+  /** The replaceProjection command body (declared in the constructor). */
+  private replaceProjectionBody(
+    i: TimelineReplaceProjectionInput,
+  ): Effect.Effect<void, never, never> {
+    return Effect.sync(() => {
+      const entries = [...i.entries];
+      this.applyProjectionReplace(entries, {
+        at: Date.now(),
+        source: "projection",
+        entriesBefore: this._projection.length,
+        entriesAfter: entries.length,
+      });
+    });
   }
 
   resetProjection(): Promise<void> {
-    const op: Operation<undefined, void, never> = {
-      opId: `timeline:resetProjection:${ulid()}`,
-      surface: "timeline",
-      name: "timeline:command:resetProjection",
-      scope: { sessionId: this.scopeId },
-      input: undefined,
-    };
-    return runHarnessProtocol(
-      this.runOperation(op, () =>
-        Effect.sync(() => {
-          this._projection = [...this._persisted];
-          this._projectionVersion += 1;
-          this._lastCompaction = undefined;
-          this.refreshSnapshot();
-          this.notify();
-        }),
-      ),
-    );
+    return this.resetProjectionCmd(undefined);
+  }
+
+  /** The resetProjection command body (declared in the constructor). */
+  private resetProjectionBody(): Effect.Effect<void, never, never> {
+    return Effect.sync(() => {
+      this._projection = [...this._persisted];
+      this._projectionVersion += 1;
+      this._lastCompaction = undefined;
+      this.refreshSnapshot();
+      this.notify();
+    });
   }
 
   // ─────────── Async surface — pending queue (queue / drain) ───────────
 
   queue(...inputs: TimelineQueueInput[]): Promise<TimelineQueueResult> {
     if (inputs.length === 0) return Promise.resolve({ ids: [] });
-    const op: Operation<readonly TimelineQueueInput[], TimelineQueueResult, never> = {
-      opId: `timeline:queue:${ulid()}`,
-      surface: "timeline",
-      name: "timeline:command:queue",
-      scope: { sessionId: this.scopeId },
-      input: inputs,
-    };
-    return runHarnessProtocol(
-      this.runOperation(op, (batch) =>
-        Effect.sync(() => {
-          const ts = Date.now();
-          const entries: PendingEntry[] = batch.map((m) => ({
-            id: `m_${ulid()}`,
-            role: m.role,
-            content: m.content,
-            ts,
-            ...omitUndefined({ metadata: m.metadata }),
-          }));
-          this._pending = [...this._pending, ...entries];
-          this.notify();
-          return { ids: entries.map((e) => e.id) };
-        }),
-      ),
-    );
+    return this.queueCmd(inputs);
+  }
+
+  /** The queue command body (declared in the constructor). */
+  private queueBody(
+    batch: readonly TimelineQueueInput[],
+  ): Effect.Effect<TimelineQueueResult, never, never> {
+    return Effect.sync(() => {
+      const ts = Date.now();
+      const entries: PendingEntry[] = batch.map((m) => ({
+        id: `m_${ulid()}`,
+        role: m.role,
+        content: m.content,
+        ts,
+        ...omitUndefined({ metadata: m.metadata }),
+      }));
+      this._pending = [...this._pending, ...entries];
+      this.notify();
+      return { ids: entries.map((e) => e.id) };
+    });
   }
 
   drain(): Promise<TimelineDrainResult> {
-    // Error channel widened to TimelineWriteFailed: drain appends via
-    // appendEffect, so in write-through mode the store failure propagates
-    // through the drain op as the same typed error.
-    const op: Operation<undefined, TimelineDrainResult, TimelineWriteFailed> = {
-      opId: `timeline:drain:${ulid()}`,
-      surface: "timeline",
-      name: "timeline:command:drain",
-      scope: { sessionId: this.scopeId },
-      input: undefined,
-    };
-    return runHarnessProtocol(
-      this.runOperation(op, () =>
-        Effect.gen(this, function* () {
-          if (this._pending.length === 0) {
-            return { entries: [] as readonly TimelineEntry[] };
-          }
-          // Snapshot pending atomically (callers may add more between
-          // operations); clear it before appending so subscribers see
-          // pending=[] once the appends start.
-          const draining = this._pending;
-          this._pending = [];
-          this.notify();
+    return this.drainCmd(undefined);
+  }
 
-          const drained: TimelineEntry[] = draining.map((p) => ({
-            kind: "message",
-            message: {
-              id: p.id,
-              role: p.role,
-              content: p.content,
-              ts: p.ts,
-              ...omitUndefined({ metadata: p.metadata }),
-            },
-          }));
-          // appendEffect is Effect-native — staying in this fiber lets
-          // the substrate auto-thread parentOpId onto the emitted
-          // envelope so observers see the causality tree. One envelope
-          // covers the whole batch.
-          yield* this.appendEffect({ entries: drained });
-          return { entries: drained as readonly TimelineEntry[] };
-        }),
-      ),
-    );
+  /**
+   * The drain command body (declared in the constructor). Error channel
+   * is TimelineWriteFailed: drain appends via the nested
+   * `timeline:append` command, so in write-through mode the store
+   * failure propagates through the drain op as the same typed error.
+   */
+  private drainBody(): Effect.Effect<TimelineDrainResult, TimelineWriteFailed, never> {
+    return Effect.gen(this, function* () {
+      if (this._pending.length === 0) {
+        return { entries: [] as readonly TimelineEntry[] };
+      }
+      // Snapshot pending atomically (callers may add more between
+      // operations); clear it before appending so subscribers see
+      // pending=[] once the appends start.
+      const draining = this._pending;
+      this._pending = [];
+      this.notify();
+
+      const drained: TimelineEntry[] = draining.map((p) => ({
+        kind: "message",
+        message: {
+          id: p.id,
+          role: p.role,
+          content: p.content,
+          ts: p.ts,
+          ...omitUndefined({ metadata: p.metadata }),
+        },
+      }));
+      // commandEffect is the fiber-preserving nested-command path — the
+      // substrate auto-threads parentOpId onto the nested append's
+      // envelope so observers see the causality tree. One envelope
+      // covers the whole batch. SubstrateError is erased here exactly
+      // as the pre-registry appendEffect did (it still reaches callers
+      // via runHarnessProtocol at the outer boundary).
+      yield* this.commandEffect<TimelineAppendInput, void, TimelineWriteFailed>("timeline:append", {
+        entries: drained,
+      }) as Effect.Effect<void, TimelineWriteFailed, never>;
+      return { entries: drained as readonly TimelineEntry[] };
+    });
   }
 
   // ─────────── Snapshot / restore ───────────
@@ -571,43 +646,17 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
 
   // ─────────── Inbox routing ───────────
 
+  /**
+   * All timeline verbs are DECLARED COMMANDS (ADR 51) — the command
+   * registry in `BaseHarness.dispatchMessage` routes
+   * `timeline:append/queue/drain/replaceProjection/resetProjection/compact`
+   * before this fallthrough is ever consulted. Only unknown types land
+   * here.
+   */
   protected handleMessage(
     msg: MessageEnvelope,
   ): Effect.Effect<unknown, MessageHandlerError, never> {
-    const m = msg as MessageEnvelope<unknown> & TimelineInboxMessage;
-    switch (m.type) {
-      case "timeline:append":
-        return Effect.tryPromise<void, MessageHandlerError>({
-          try: () => this.append(...m.payload.entries),
-          catch: (cause): MessageHandlerError => new HandlerError({ cause }),
-        });
-      case "timeline:replaceProjection":
-        return Effect.tryPromise<void, MessageHandlerError>({
-          try: () => this.replaceProjection(m.payload),
-          catch: (cause): MessageHandlerError => new HandlerError({ cause }),
-        });
-      case "timeline:resetProjection":
-        return Effect.tryPromise<void, MessageHandlerError>({
-          try: () => this.resetProjection(),
-          catch: (cause): MessageHandlerError => new HandlerError({ cause }),
-        });
-      case "timeline:queue":
-        return Effect.tryPromise<TimelineQueueResult, MessageHandlerError>({
-          try: () => this.queue(...m.payload),
-          catch: (cause): MessageHandlerError => new HandlerError({ cause }),
-        });
-      case "timeline:drain":
-        return Effect.tryPromise<TimelineDrainResult, MessageHandlerError>({
-          try: () => this.drain(),
-          catch: (cause): MessageHandlerError => new HandlerError({ cause }),
-        });
-      default:
-        return Effect.fail(
-          new HandlerError({
-            cause: `Unknown timeline message type: ${(m as { type: string }).type}`,
-          }),
-        );
-    }
+    return Effect.fail(new HandlerError({ cause: `Unknown timeline message type: ${msg.type}` }));
   }
 
   // ─────────── Internals ───────────

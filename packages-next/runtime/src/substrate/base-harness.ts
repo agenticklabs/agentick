@@ -892,6 +892,31 @@ export abstract class BaseHarness<
   }
 
   /**
+   * Effect-native invocation of a declared command — the intra-harness
+   * composition path. A command body that nests another command
+   * (timeline's `drain` appending via `timeline:append`) MUST stay in
+   * the same fiber so the substrate auto-threads `parentOpId` onto the
+   * nested envelopes (crossing `Effect.runPromise` via the public
+   * method would sever the causality tree). Same registry entry, same
+   * Operation manufacture as every other path.
+   */
+  protected commandEffect<I, R, E>(
+    name: string,
+    input: I,
+    opts?: { readonly origin?: OperationOrigin },
+  ): Effect.Effect<R, E | SubstrateError, never> {
+    const reg = this.commandRegistry.get(name);
+    if (reg === undefined) {
+      throw new CommandDeclarationError({ command: name, reason: "not declared on this harness" });
+    }
+    return reg.run(input, { origin: opts?.origin ?? "host" }) as Effect.Effect<
+      R,
+      E | SubstrateError,
+      never
+    >;
+  }
+
+  /**
    * Enumerate declared commands (wire-safe summaries). Also served to
    * remote callers via the `"<surface>:commands"` meta-verb — the
    * declare-and-discover surface `commands/list` composes over.

@@ -12,6 +12,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { Effect } from "effect";
 import type { CompactStrategy, TimelineEntry } from "@agentick/spec-next";
 import { CompactStrategyMissing } from "@agentick/spec-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
@@ -71,6 +72,69 @@ describe("TimelineHarness — construction-bound default compact (ADR 51 signal 
     await timeline.append(entry("a"));
 
     await expect(timeline.compact()).rejects.toBeInstanceOf(CompactStrategyMissing);
+    await timeline.close();
+  });
+});
+
+describe("TimelineHarness — compact as an addressable verb (ADR 51 slice 4)", () => {
+  it("a bare timeline:compact inbox verb runs the construction-bound default", async () => {
+    const journal = new MemoryJournal();
+    const bus = new LocalEventBus();
+    const inbox = new LocalInbox();
+    const timeline = new TimelineHarness("s2:timeline", journal, bus, inbox, {
+      compact: summaryStrategy("signal-summary"),
+    });
+    await timeline.ready;
+    await timeline.append(entry("a"), entry("b"));
+
+    // The signal form: verb + no payload, from ANY origin — this is the
+    // exact message a wire client's `timeline/compact` resolves to.
+    const result = await Effect.runPromise(
+      inbox.ask("timeline:s2:timeline", { type: "timeline:compact", origin: "wire" }),
+    );
+    expect(result).toMatchObject({ entriesBefore: 2, entriesAfter: 1 });
+    expect(timeline.read().entries.map(idOf)).toEqual(["signal-summary"]);
+    await timeline.close();
+  });
+
+  it("advisory instructions ride the signal as data; the resident strategy receives them", async () => {
+    const journal = new MemoryJournal();
+    const bus = new LocalEventBus();
+    const inbox = new LocalInbox();
+    let seenInstructions: unknown;
+    const timeline = new TimelineHarness("s3:timeline", journal, bus, inbox, {
+      compact: {
+        run: async (ctx) => {
+          seenInstructions = ctx.instructions;
+          return [entry("hinted-summary")];
+        },
+      },
+    });
+    await timeline.ready;
+    await timeline.append(entry("a"));
+
+    await Effect.runPromise(
+      inbox.ask("timeline:s3:timeline", {
+        type: "timeline:compact",
+        payload: { instructions: "keep decisions, drop chit-chat" },
+      }),
+    );
+    expect(seenInstructions).toBe("keep decisions, drop chit-chat");
+    expect(timeline.read().entries.map(idOf)).toEqual(["hinted-summary"]);
+    await timeline.close();
+  });
+
+  it("enumerates all six declared verbs via commands()", async () => {
+    const timeline = mkTimeline();
+    await timeline.ready;
+    expect(timeline.commands().map((c) => c.name)).toEqual([
+      "timeline:append",
+      "timeline:queue",
+      "timeline:drain",
+      "timeline:replaceProjection",
+      "timeline:resetProjection",
+      "timeline:compact",
+    ]);
     await timeline.close();
   });
 });
