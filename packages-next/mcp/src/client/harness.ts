@@ -980,6 +980,10 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
    * intercepted by `BaseHarness.dispatchMessage` before this method
    * runs. Anything else is a routing bug — fail loud.
    */
+  // TODO(adr-51-wave): migrate this handleMessage switch + its hand-built
+  // Operation literals to declared commands (this.command()) — the
+  // timeline/state/knobs migrations are the reference pattern (switch
+  // deleted, registry routes identical message types, net-negative LOC).
   protected handleMessage(
     msg: MessageEnvelope,
   ): Effect.Effect<unknown, MessageHandlerError, never> {

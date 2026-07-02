@@ -723,6 +723,10 @@ export class SessionHarness<P = unknown>
 
   // ──────── inbox dispatch ────────
 
+  // TODO(adr-51-wave): migrate this handleMessage switch + its hand-built
+  // Operation literals to declared commands (this.command()) — the
+  // timeline/state/knobs migrations are the reference pattern (switch
+  // deleted, registry routes identical message types, net-negative LOC).
   protected handleMessage(
     _msg: MessageEnvelope,
   ): Effect.Effect<unknown, MessageHandlerError, never> {

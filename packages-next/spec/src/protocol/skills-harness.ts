@@ -14,8 +14,6 @@
  * @see docs/proposals/v2/blueprint/32-extension-shape-spectrum.md
  */
 
-import type { Effect } from "effect";
-import type { JournalError } from "../data/errors.js";
 import type { Unsubscribe } from "./inbox.js";
 
 // ============================================================================
@@ -213,7 +211,3 @@ export type SkillsInboxMessage =
   | { readonly type: "skills:register"; readonly payload: SkillsRegisterInput }
   | { readonly type: "skills:update"; readonly payload: SkillsUpdateInput }
   | { readonly type: "skills:remove"; readonly payload: SkillsRemoveInput };
-
-// Suppress unused-import warnings when this file is consumed as a
-// type-only barrel.
-export type _ImportGuard = Effect.Effect<never, JournalError, never>;

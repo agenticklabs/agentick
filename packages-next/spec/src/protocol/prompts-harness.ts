@@ -20,9 +20,6 @@
  * @see docs/proposals/v2/blueprint/23-mcp-as-harness.md §Prompts
  */
 
-import type { Effect } from "effect";
-
-import type { JournalError } from "../data/errors.js";
 import type { MessageEntry } from "../data/entries.js";
 import type { StandardSchemaV1 } from "../data/standard-schema.js";
 import type { Unsubscribe } from "./inbox.js";
@@ -288,8 +285,3 @@ export type PromptsInboxMessage =
   | { readonly type: "prompts:update"; readonly payload: PromptsUpdateInput }
   | { readonly type: "prompts:remove"; readonly payload: PromptsRemoveInput }
   | { readonly type: "prompts:invoke"; readonly payload: PromptsInvokeInput };
-
-// Suppress unused-import warning when this file is consumed as a
-// type-only barrel. (Module-scoped _PromptsImportGuard avoids name
-// collision with the same pattern in sibling harness files.)
-export type _PromptsImportGuard = Effect.Effect<never, JournalError, never>;

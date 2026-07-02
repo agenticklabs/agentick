@@ -8,29 +8,27 @@
  *
  *   Sync surface   — get / has / list / subscribe / subscribeAll.
  *                     Reads from local Map; no envelopes.
- *   Async surface  — set / delete. Each runs through `runOperation`;
- *                     the terminal envelope IS the change-event audit.
- *
- * Inbox routing — two message types reach the harness over its
- * address (`state:{scopeId}`):
- *
- *   - `"state:set"`    → invokes {@link set}
- *   - `"state:delete"` → invokes {@link delete}
+ *   Async surface  — set / delete. Declared commands (ADR 51): each
+ *                     runs through `runOperation` with canonical
+ *                     naming; the terminal envelope IS the change-event
+ *                     audit; the same verbs are inbox-addressable over
+ *                     `state:{scopeId}` (`"state:set"` / `"state:delete"`)
+ *                     with zero routing code.
  *
  * Snapshot/restore — `exportSnapshot()` / `importSnapshot()` round-trip
  * the entries. Used by SnapshotHarness for hibernate/resume.
  *
  * @see docs/proposals/v2/blueprint/26-harness-api-shape.md
+ * @see docs/proposals/v2/blueprint/51-invocation-and-authorization.md
  */
 
 import { Effect } from "effect";
-import { BaseHarness, runHarnessProtocol, ulid, type Unsubscribe } from "@agentick/runtime-next";
+import { BaseHarness, type Unsubscribe } from "@agentick/runtime-next";
 import type {
   EventBus,
   MessageEnvelope,
   MessageHandlerError,
   MessageInbox,
-  Operation,
   OperationJournal,
   StateDeleteInput,
   StateHarnessProtocol,
@@ -39,13 +37,16 @@ import type {
 import { HandlerError } from "@agentick/spec-next";
 import { createKeyedNotifier, type KeyedNotifier } from "@agentick/pubsub-next";
 
-type StateInboxMessage =
-  | { readonly type: "state:set"; readonly payload: StateSetInput }
-  | { readonly type: "state:delete"; readonly payload: StateDeleteInput };
-
 export class StateHarness extends BaseHarness<"state"> implements StateHarnessProtocol {
   private readonly values = new Map<string, unknown>();
   private readonly notifier: KeyedNotifier = createKeyedNotifier();
+
+  /**
+   * Declared commands (ADR 51) — pure layer logic in the handlers; the
+   * registry owns construction, routing, and enumeration.
+   */
+  readonly set: (input: StateSetInput) => Promise<void>;
+  readonly delete: (input: StateDeleteInput) => Promise<void>;
 
   get id(): string {
     return this.scopeId;
@@ -53,6 +54,17 @@ export class StateHarness extends BaseHarness<"state"> implements StateHarnessPr
 
   constructor(scopeId: string, journal: OperationJournal, bus: EventBus, inbox: MessageInbox) {
     super("state", scopeId, journal, bus, inbox);
+    const scope = () => ({ sessionId: this.scopeId });
+    this.set = this.command({
+      name: "state:set",
+      scope,
+      handler: (i: StateSetInput) => Effect.sync(() => this.applySet(i)),
+    });
+    this.delete = this.command({
+      name: "state:delete",
+      scope,
+      handler: (i: StateDeleteInput) => Effect.sync(() => this.applyDelete(i)),
+    });
   }
 
   // ─────────── Sync surface ───────────
@@ -77,42 +89,6 @@ export class StateHarness extends BaseHarness<"state"> implements StateHarnessPr
     return this.notifier.subscribeAll(listener);
   }
 
-  // ─────────── Async surface — full Operations ───────────
-
-  set(input: StateSetInput): Promise<void> {
-    const op: Operation<StateSetInput, void, never> = {
-      opId: `state:set:${ulid()}`,
-      surface: "state",
-      name: "state:command:set",
-      scope: { sessionId: this.scopeId },
-      input,
-    };
-    return runHarnessProtocol(
-      this.runOperation(op, (i) =>
-        Effect.sync(() => {
-          this.applySet(i);
-        }),
-      ),
-    );
-  }
-
-  delete(input: StateDeleteInput): Promise<void> {
-    const op: Operation<StateDeleteInput, void, never> = {
-      opId: `state:delete:${ulid()}`,
-      surface: "state",
-      name: "state:command:delete",
-      scope: { sessionId: this.scopeId },
-      input,
-    };
-    return runHarnessProtocol(
-      this.runOperation(op, (i) =>
-        Effect.sync(() => {
-          this.applyDelete(i);
-        }),
-      ),
-    );
-  }
-
   // ─────────── Snapshot / restore ───────────
 
   exportSnapshot(): Readonly<Record<string, unknown>> {
@@ -132,28 +108,15 @@ export class StateHarness extends BaseHarness<"state"> implements StateHarnessPr
 
   // ─────────── Inbox routing ───────────
 
+  /**
+   * `state:set` / `state:delete` are declared commands — routed by the
+   * BaseHarness command registry before this fallthrough. Only unknown
+   * types land here.
+   */
   protected handleMessage(
     msg: MessageEnvelope,
   ): Effect.Effect<unknown, MessageHandlerError, never> {
-    const m = msg as MessageEnvelope<unknown> & StateInboxMessage;
-    switch (m.type) {
-      case "state:set":
-        return Effect.tryPromise<void, MessageHandlerError>({
-          try: () => this.set(m.payload),
-          catch: (cause): MessageHandlerError => new HandlerError({ cause }),
-        });
-      case "state:delete":
-        return Effect.tryPromise<void, MessageHandlerError>({
-          try: () => this.delete(m.payload),
-          catch: (cause): MessageHandlerError => new HandlerError({ cause }),
-        });
-      default:
-        return Effect.fail(
-          new HandlerError({
-            cause: `Unknown state message type: ${(m as { type: string }).type}`,
-          }),
-        );
-    }
+    return Effect.fail(new HandlerError({ cause: `Unknown state message type: ${msg.type}` }));
   }
 
   // ─────────── Internals ───────────

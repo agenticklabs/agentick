@@ -32,7 +32,7 @@
  */
 
 import { Effect } from "effect";
-import { BaseHarness, runHarnessProtocol, ulid, type Unsubscribe } from "@agentick/runtime-next";
+import { BaseHarness, type Unsubscribe } from "@agentick/runtime-next";
 import type {
   ContentBlock,
   EventBus,
@@ -47,20 +47,10 @@ import type {
   MessageEnvelope,
   MessageHandlerError,
   MessageInbox,
-  Operation,
   OperationJournal,
 } from "@agentick/spec-next";
 import { HandlerError } from "@agentick/spec-next";
 import { createKeyedNotifier, type KeyedNotifier } from "@agentick/pubsub-next";
-
-// ============================================================================
-// Inbox message types
-// ============================================================================
-
-type KnobsInboxMessage =
-  | { readonly type: "knobs:set"; readonly payload: KnobsSetInput }
-  | { readonly type: "knobs:register"; readonly payload: KnobsRegisterInput }
-  | { readonly type: "knobs:dispatch"; readonly payload: KnobsDispatchInput };
 
 // ============================================================================
 // Harness
@@ -82,8 +72,39 @@ export class KnobsHarness extends BaseHarness<"knobs"> implements KnobsHarnessPr
     return this.scopeId;
   }
 
+  /**
+   * Declared commands (ADR 51) — pure layer logic in the handlers; the
+   * registry owns construction, inbox routing, and enumeration.
+   * `set`'s body is the mutation: lifecycle handlers fire first
+   * (`before` can veto), middleware wraps, the terminal envelope
+   * publishes after — by resolution the value is set, listeners have
+   * fired, and the audit envelope is on the bus + journal.
+   * `dispatch` keeps v1 set_knob semantics: the Operation succeeds
+   * either way; the result blocks distinguish validation failure from
+   * successful mutation.
+   */
+  readonly set: (input: KnobsSetInput) => Promise<void>;
+  readonly register: (input: KnobsRegisterInput) => Promise<void>;
+  readonly dispatch: (input: KnobsDispatchInput) => Promise<readonly ContentBlock[]>;
+
   constructor(scopeId: string, journal: OperationJournal, bus: EventBus, inbox: MessageInbox) {
     super("knobs", scopeId, journal, bus, inbox);
+    const scope = () => ({ sessionId: this.scopeId });
+    this.set = this.command({
+      name: "knobs:set",
+      scope,
+      handler: (i: KnobsSetInput) => Effect.sync(() => this.applySet(i)),
+    });
+    this.register = this.command({
+      name: "knobs:register",
+      scope,
+      handler: (i: KnobsRegisterInput) => Effect.sync(() => this.applyRegister(i)),
+    });
+    this.dispatch = this.command({
+      name: "knobs:dispatch",
+      scope,
+      handler: (i: KnobsDispatchInput) => Effect.sync(() => this.executeDispatch(i)),
+    });
   }
 
   // ─────────── Sync surface ───────────
@@ -120,65 +141,6 @@ export class KnobsHarness extends BaseHarness<"knobs"> implements KnobsHarnessPr
     return this.notifier.subscribeAll(listener);
   }
 
-  // ─────────── Async surface — full Operations ───────────
-
-  set(input: KnobsSetInput): Promise<void> {
-    // The Operation's body is the mutation. Lifecycle handlers fire
-    // first (`before` phase can veto); middleware wraps the body;
-    // terminal envelope publishes after. Pure async — by the time
-    // the Promise resolves, the value is set, listeners have fired,
-    // and the audit envelope is on the bus + journal.
-    const op: Operation<KnobsSetInput, void, never> = {
-      opId: `knobs:set:${ulid()}`,
-      surface: "knobs",
-      name: "knobs:command:set",
-      scope: { sessionId: this.scopeId },
-      input,
-    };
-    return runHarnessProtocol(
-      this.runOperation(op, (i) =>
-        Effect.sync(() => {
-          this.applySet(i);
-        }),
-      ),
-    );
-  }
-
-  register(input: KnobsRegisterInput): Promise<void> {
-    const op: Operation<KnobsRegisterInput, void, never> = {
-      opId: `knobs:register:${ulid()}`,
-      surface: "knobs",
-      name: "knobs:command:register",
-      scope: { sessionId: this.scopeId },
-      input,
-    };
-    return runHarnessProtocol(
-      this.runOperation(op, (i) =>
-        Effect.sync(() => {
-          this.applyRegister(i);
-        }),
-      ),
-    );
-  }
-
-  dispatch(input: KnobsDispatchInput): Promise<readonly ContentBlock[]> {
-    // Validation + apply happen inside the body. Result (success
-    // message or error blocks) is the Operation's result. The
-    // Operation succeeds either way; the result payload distinguishes
-    // validation failure from successful mutation (v1 set_knob
-    // semantics).
-    const op: Operation<KnobsDispatchInput, readonly ContentBlock[], never> = {
-      opId: `knobs:dispatch:${ulid()}`,
-      surface: "knobs",
-      name: "knobs:command:dispatch",
-      scope: { sessionId: this.scopeId },
-      input,
-    };
-    return runHarnessProtocol(
-      this.runOperation(op, (i) => Effect.sync(() => this.executeDispatch(i))),
-    );
-  }
-
   // ─────────── Snapshot / restore ───────────
 
   exportSnapshot(): Readonly<Record<string, KnobPrimitive>> {
@@ -199,33 +161,15 @@ export class KnobsHarness extends BaseHarness<"knobs"> implements KnobsHarnessPr
 
   // ─────────── Inbox routing ───────────
 
+  /**
+   * `knobs:set` / `knobs:register` / `knobs:dispatch` are declared
+   * commands — routed by the BaseHarness command registry before this
+   * fallthrough. Only unknown types land here.
+   */
   protected handleMessage(
     msg: MessageEnvelope,
   ): Effect.Effect<unknown, MessageHandlerError, never> {
-    const m = msg as MessageEnvelope<unknown> & KnobsInboxMessage;
-    switch (m.type) {
-      case "knobs:set":
-        return Effect.tryPromise<void, MessageHandlerError>({
-          try: () => this.set(m.payload),
-          catch: (cause): MessageHandlerError => new HandlerError({ cause }),
-        });
-      case "knobs:register":
-        return Effect.tryPromise<void, MessageHandlerError>({
-          try: () => this.register(m.payload),
-          catch: (cause): MessageHandlerError => new HandlerError({ cause }),
-        });
-      case "knobs:dispatch":
-        return Effect.tryPromise<readonly ContentBlock[], MessageHandlerError>({
-          try: () => this.dispatch(m.payload),
-          catch: (cause): MessageHandlerError => new HandlerError({ cause }),
-        });
-      default:
-        return Effect.fail(
-          new HandlerError({
-            cause: `Unknown knobs message type: ${(m as { type: string }).type}`,
-          }),
-        );
-    }
+    return Effect.fail(new HandlerError({ cause: `Unknown knobs message type: ${msg.type}` }));
   }
 
   // ─────────── Internals ───────────

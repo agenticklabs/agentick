@@ -348,6 +348,10 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
 
   // ─────────── Inbox handler ───────────
 
+  // TODO(adr-51-wave): migrate this handleMessage switch + its hand-built
+  // Operation literals to declared commands (this.command()) — the
+  // timeline/state/knobs migrations are the reference pattern (switch
+  // deleted, registry routes identical message types, net-negative LOC).
   protected handleMessage(
     msg: MessageEnvelope,
   ): Effect.Effect<unknown, MessageHandlerError, never> {
