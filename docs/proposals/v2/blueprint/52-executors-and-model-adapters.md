@@ -114,14 +114,14 @@ literals.
 
 ```ts
 import { openai } from "@agentick/model-openai-next";
-import { generate, streamGenerate } from "@agentick/executor-next";
+import { generate, generateStream } from "@agentick/executor-next";
 
 const model = openai("gpt-5", { apiKey });
 const result = await generate(model, { messages: [...] });   // OCR-service pattern
-for await (const delta of streamGenerate(model, input)) { ... }
+for await (const delta of generateStream(model, input)) { ... }
 ```
 
-`generate`/`streamGenerate` are thin substrate-free helpers over the
+`generate`/`generateStream` are thin substrate-free helpers over the
 adapter round trip (buildParams → call/openStream → mapChunk →
 normalize). No journal, no bus, no harness — a model call is just a
 model call.
@@ -170,7 +170,7 @@ rename (pre-ship window; git-mv + workspace sweep):
 | `executor-google-next` | `model-google-next` | `google(...)` → adapter |
 | `executor-anthropic-next` | `model-anthropic-next` | `anthropic(...)` → adapter — **written adapter-first; the pending subclass body is never completed** |
 | `executor-ai-sdk-next` | `model-ai-sdk-next` (+ a later `executor-ai-sdk-next` for the engine) | `aiSdkModelAdapter(model)` |
-| `executor-next` | unchanged | `LanguageModelExecutor`, `generate`, `streamGenerate`, `runModelAdapterConformance`, `/testing` doubles |
+| `executor-next` | unchanged | `LanguageModelExecutor`, `generate`, `generateStream`, `runModelAdapterConformance`, `/testing` doubles |
 
 The `define*` callback factories and the subclass extension points on
 `BaseLanguageModelExecutor` are deleted (#103 resolved at the root);
@@ -195,7 +195,7 @@ cheap Promise-shaped object holding an SDK client, not to a harness.
    further provider work).
 5. Delete `defineExecutor`/`defineLanguageModelExecutor` + the four
    factory files' substrate dance; `openai(...)` etc. return adapters.
-6. `createApp({ model })` sugar; `generate`/`streamGenerate` helpers;
+6. `createApp({ model })` sugar; `generate`/`generateStream` helpers;
    conformance + doubles; package renames last (one mechanical sweep).
 
 ## What this does NOT propose
@@ -207,16 +207,46 @@ cheap Promise-shaped object holding an SDK client, not to a harness.
 - No constraint that only one executor exists — one *reference*
   implementation; alternative engines are alternative protocol impls.
 
+## Modalities (planned — additive capabilities)
+
+The split's payoff compounds beyond text generation: **modalities are
+optional capabilities on adapters, each with a standalone helper**,
+mirroring the ai-sdk function vocabulary adopters already know:
+
+```ts
+// standalone helpers in @agentick/executor-next — feature-detected,
+// substrate-free, same shape as generate/generateStream:
+embed(adapter, input)            // ernesto's EmbeddingService need
+embedMany(adapter, inputs)
+transcribe(adapter, audio)
+generateSpeech(adapter, input)
+generateImage(adapter, input)
+```
+
+- Each capability is an **optional method group on the adapter**
+  (`adapter.embed?`, `adapter.transcribe?`, ...) with its own
+  wire-safe currency types in spec (`EmbeddingResult`,
+  `TranscriptionResult`, ...). A provider adapter implements what its
+  SDK offers; helpers throw a typed capability error otherwise.
+- **Conformance rows are capability-conditional** — the suite tests
+  what the adapter declares, nothing more.
+- `aiSdkModelAdapter` forwards to the corresponding ai-sdk functions,
+  inheriting their full modality coverage in one wrapper.
+- None of this touches the executor: modality calls are adapter-level
+  round trips (no tick loop, no streaming pipeline) unless/until a
+  streaming modality earns executor involvement — decided then, per
+  capability, never speculatively.
+
+Sequencing: `embed`/`embedMany` land with the ernesto persona port
+(the live consumer); the rest land per demand. The interface pattern is
+pinned now so every modality lands the same way.
+
 ## Open questions
 
 1. **Package role noun** — `model-*-next` (recommended; reads as
    `import { openai } from "@agentick/model-openai-next"`) vs
    `adapter-*-next` (too generic — store/wire adapters exist).
-2. **Embeddings** — ernesto needs `embed()` (its EmbeddingService wraps
-   a v1 EngineModel). Additive: `EmbeddingAdapter` (or an optional
-   `embed()` on model adapters) + a standalone `embed(adapter, input)`
-   helper. Design when ported; the split makes it natural.
-3. **`StreamAccumulatorView` surface** — exactly which accumulator
+2. **`StreamAccumulatorView` surface** — exactly which accumulator
    state adapters may read (`mapChunk`/`reconstructRaw` currently see
    the mutable accumulator). Pin during extraction; read-only is the
    default posture.
