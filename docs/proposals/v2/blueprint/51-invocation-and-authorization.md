@@ -372,6 +372,16 @@ stamp; the scope carries evidence; the journal keeps the receipts.**
 
 ## 8. Implementation (the six changes)
 
+> **Amendment — 2026-07-02 (slices 1+2 landed).** The error/policy
+> types the slice-1 row lists (`AuthError`/`PermissionDenied`,
+> `ToolDeniedByPolicy`, `PolicyRule`/`PolicyDecision`) land with their
+> **consuming** slices (5 and 6 respectively), not ahead of them —
+> the no-dead-code rule beats table fidelity. Slice 1 as landed:
+> `CommandDescriptor`/`CommandExposure`/`CommandInfo`, `origin` on
+> `EventScope` + `MessageEnvelope(Input)`, `CommandDeclarationError`.
+> Command-payload validation failures reuse the existing registered
+> `InvalidPayload` — no new error type was needed.
+
 | # | Package | Change | ~LOC |
 | --- | --- | --- | --- |
 | 1 | spec | `CommandDescriptor` (+`exposure`), `origin` on `EventScope`, `AuthError`/`PermissionDenied`, `ToolDeniedByPolicy`, `PolicyRule`/`PolicyDecision` | 60 |
