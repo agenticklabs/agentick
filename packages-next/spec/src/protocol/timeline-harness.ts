@@ -125,8 +125,10 @@ export type CompactRun = (ctx: {
 }) => Promise<readonly TimelineEntry[]>;
 
 /**
- * Opaque strategy object the harness consumes. Built by factory
- * functions (`withHandler`, `withModel`, `withApp`, adopter-defined).
+ * Opaque strategy object the harness consumes. Built by strategy-value
+ * factories at `@agentick/timeline-next/strategies` (`fromHandler`,
+ * `rollingSummary`, `slidingWindow`, adopter-defined) — NOT `withX`
+ * session extensions; a strategy is a portable configured value.
  * The `metadata` field is preserved on the snapshot so a later
  * `importSnapshot({ mode: "rehydrate" })` can re-run the same strategy.
  */

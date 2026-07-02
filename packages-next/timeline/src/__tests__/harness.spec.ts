@@ -9,7 +9,7 @@ import type { EventQuery, ProtocolEvent, TimelineEntry } from "@agentick/spec-ne
 
 import { TimelineHarness } from "../harness.js";
 import { runTimelineHarnessConformance, messageEntry } from "../conformance.js";
-import { withHandler } from "../strategies.js";
+import { fromHandler } from "../strategies.js";
 
 async function makeHarness(scope = "test"): Promise<{
   harness: TimelineHarness;
@@ -73,7 +73,7 @@ describe("TimelineHarness — Operation envelopes", () => {
       surface: "timeline",
       name: { exact: "timeline:command:compact" },
     });
-    await harness.compact(withHandler({ handler: async ({ entries }) => entries }));
+    await harness.compact(fromHandler({ handler: async ({ entries }) => entries }));
     await settle();
     await stop();
     expect(events.some((e) => e.phase === "requested")).toBe(true);
@@ -120,7 +120,7 @@ describe("TimelineHarness — inbox addressability", () => {
     const { harness, inbox } = await makeHarness("s_reset");
     const e1 = messageEntry("e1", "a");
     await harness.append(e1);
-    await harness.compact(withHandler({ handler: async () => [] }));
+    await harness.compact(fromHandler({ handler: async () => [] }));
     expect(harness.read().entries).toEqual([]);
     await Effect.runPromise(
       inbox.send(`timeline:s_reset`, {
@@ -216,7 +216,7 @@ describe("TimelineHarness — snapshot round-trip across instances", () => {
     await harness.append(messageEntry("e1", "a"));
     await harness.append(messageEntry("e2", "b"));
     await harness.compact(
-      withHandler({
+      fromHandler({
         handler: async ({ entries }) => [messageEntry("summary", `count=${entries.length}`)],
         metadata: { kind: "test-summary" },
       }),

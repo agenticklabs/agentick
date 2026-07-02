@@ -2,7 +2,7 @@
   "name": "@agentick/timeline-next",
   "version": "0.0.0",
   "private": true,
-  "description": "TimelineHarness — the session's conversation log + projection. Append-only log paired with a materialized projection that can diverge via compaction. Per ADR 26, this is a harness (extends BaseHarness). Bundled into the agentick metapackage; not published independently.",
+  "description": "TimelineHarness \u2014 the session's conversation log + projection. Append-only log paired with a materialized projection that can diverge via compaction. Per ADR 26, this is a harness (extends BaseHarness). Bundled into the agentick metapackage; not published independently.",
   "keywords": [
     "agent",
     "agentick",
@@ -35,6 +35,11 @@
       "types": "./src/react/index.ts",
       "import": "./src/react/index.ts",
       "default": "./src/react/index.ts"
+    },
+    "./strategies": {
+      "types": "./src/strategies.ts",
+      "import": "./src/strategies.ts",
+      "default": "./src/strategies.ts"
     },
     "./testing": {
       "types": "./src/testing/index.ts",

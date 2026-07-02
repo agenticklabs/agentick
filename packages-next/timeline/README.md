@@ -17,11 +17,58 @@ compaction strategies, snapshot/restore, the React surface
 **`TimelineStore` port** with a bundled in-memory default, write-behind /
 write-through policies, and a `flush()` barrier.
 
+## Where the behavior lives (ADR 27)
+
+**The harness is the single source of behavior; framework bindings are
+thin projections of its protocol.** The React surface wraps
+`TimelineHarnessProtocol`; an Angular binding would wrap the same one —
+parity comes from the protocol, not reimplementation. Litmus test for any
+binding component: it contains no behavior unreachable through the
+protocol without it.
+
+Because the harness rides the substrate, every operation is reachable
+from four altitudes: host code (`session.timeline.append(...)`),
+tree-internal logic via the bridge, another process via inbox addressing
+(cross-node under cluster), and the wire (a wire extension, ADR 46). What
+differs across altitudes is not reachability but **what travels** — and
+the rule is simple: **the wire carries verbs and data payloads; it never
+carries configuration.**
+
+- **Data-payload ops** (`append`, `queue`) — the payload *is* the
+  operation's content, so it crosses every boundary.
+- **Signal ops** (`compact`, and any "do the thing now" verb) — the signal
+  crosses carrying the verb plus any **serializable advisory data**; the
+  session applies its **construction-bound** strategy. The signal is
+  "compact session X's timeline now, and here is an advisory hint for the
+  strategy if it takes one: `instructions`" — never "compact like *this*".
+  Instructions are advisory: the configured `run` decides whether to honor
+  them (a truncation strategy ignores them; an LLM-summary strategy folds
+  them into its prompt). `session.timeline.compact({ instructions })` at the
+  wire; `session.timeline.compact(oneOffStrategy)` is an in-process escape
+  hatch. A remote caller *triggers* a compaction and may *hint* it; it never
+  *supplies* the strategy.
+- **Configuration** (the strategy value itself, a function) is
+  **server-resident** — bound where the session is constructed
+  (`withTimeline({ compact: rollingSummary({...}) })`), never shipped over
+  the wire. The line is **data vs. executable**: verbs + serializable data
+  (payloads *and* advisory hints) cross; functions, policy, and secrets do
+  not. Same boundary as `credentials-never-cross-wire`, and RCE-safe by
+  construction — a client can never ship code that runs server-side.
+
+Precedence, when both a host-injected strategy slot
+(`withTimeline({ compact })`) and a call-site strategy exist: **inner scope
+wins** — the more-specific mounting point overrides the outer default (the
+ADR 50 §2 cascade rule). That override is an in-process affordance; the
+wire altitude only carries the trigger. A future `<Timeline>` React
+component is a thin projection taking strategy-value props; the same
+`rollingSummary({...})` value works at the host and tree altitudes.
+
 ## The two-tier model
 
 What this is, in CS terms: an **append-only event log paired with a
 materialized projection** (the LSM/WAL + compaction shape; Kafka +
-ksqlDB; git's object-db vs. working-tree).
+ksqlDB; git's object-db vs. working-tree). See ADR 49
+§"Relationship to event sourcing" for the doctrine.
 
 - **Persisted tier** (`_persisted`) — the durable, append-only log. Only
   `append` mutates it; once an entry lands it is never removed or
@@ -31,6 +78,16 @@ ksqlDB; git's object-db vs. working-tree).
   `replaceProjection` it diverges (the "compacted prefix + recent" shape).
   **Compaction operates on the projection only** — the durable log is
   never rewritten.
+
+### State classes (ADR 49)
+
+Every bundled harness declares its state classes; this one:
+
+| State                | Class | Recovery story                                                                                                                                          |
+| -------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Persisted tier**   | **A** | Authoritative. `TimelineStore` port; append-only; recovered by folding the log on hydrate.                                                              |
+| **Projection tier**  | **B** | Re-derived from the persisted tier. Caveat: when compaction is LLM-backed, re-materializing is a **cost event** (a model call), not free — durable memoization of a compaction is an adopter recipe, never a framework concept. |
+| **Pending queue**    | **C** | Ephemeral. Input staged by `queue()` but not yet `drain()`-ed is memory-only — a crash in that window loses it (small in practice: `send` triggers `drain` in the same execution, but it is a real window, stated not discovered). |
 
 ## Durability — "stores, not snapshots" (ADR 49)
 
@@ -107,10 +164,24 @@ The bundled zero-dep default (`Map<sessionId, TimelineEntry[]>`).
 
 The conformance suite every adapter must pass.
 
-### `runTimelineHarnessConformance(deps)`, `withTimeline(options)`, `withHandler(options)`
+### `runTimelineHarnessConformance(deps)`, `withTimeline(options)`
 
-Harness conformance suite, the session-extension factory, and the
-compaction-strategy helper.
+The harness conformance suite and the session-extension factory
+(`withTimeline` installs the harness under the `timeline` bridge slot).
+
+### Compaction strategies — `@agentick/timeline-next/strategies`
+
+Strategy-value factories live at the `/strategies` subpath (parallel to
+`@agentick/skills-next/loaders`) — they return `CompactStrategy` **values**,
+not `withX` extensions. `fromHandler({ handler })` is the raw escape hatch;
+named policies (`rollingSummary`, `slidingWindow`) land there as built.
+Pass the value to `harness.compact(...)` or (once A2.2 threads it) the
+`withTimeline({ compact })` slot.
+
+```ts
+import { fromHandler } from "@agentick/timeline-next/strategies";
+await timeline.compact(fromHandler({ handler: async ({ entries }) => entries.slice(-20) }));
+```
 
 ## Verified by
 
@@ -131,16 +202,37 @@ compaction-strategy helper.
 
 ## Roadmap & known gaps
 
-- **Session hydration wiring (A2.2)**: `app.createSession({ sessionId })`
-  does not yet thread the store down and call `hydrate()` at session
-  init, and the loop executor does not yet await `flush()` at execution
-  end. Today the harness exposes `hydrate()` / `flush()` for direct use;
-  the cross-package `session-next` / loop-executor barrier wiring is the
-  next slice (`TODO(A2.2)` markers at the call sites).
+- **Hydration is a seam, full-load is its default (A2.2)**: `hydrate()`
+  today is the default implementation — load the whole log. A2.2 makes
+  `app.createSession({ sessionId })` open-or-rehydrate through that seam,
+  which will take an **executable strategy value** (loaders idiom, e.g.
+  `hydration: checkpointTimeline({...})`), and whose result may seed both
+  tiers (`{ persisted, projection? }` — a checkpoint recipe seeds the
+  summary projection alongside the persisted tail). **The framework never
+  defines a "checkpoint" concept** — checkpoint-plus-tail is an adopter
+  recipe closing over their own summary storage. Full-load stays the
+  default, not a limitation.
+- **Barrier wiring (A2.2)**: the loop executor does not yet await
+  `flush()` at execution end, and `createSession` does not yet thread the
+  store down. Today the harness exposes `hydrate()` / `flush()` for direct
+  use (`TODO(A2.2)` markers at the call sites).
 - **Errored-status transition + retry on write failure**: `flush()`
-  surfaces a buffered write failure and leaves the error latched, but the
-  session→errored transition and adapter retry policy belong at the
-  session/loop-executor barrier (ADR 49) and are not implemented here.
+  surfaces a buffered write failure (typed `TimelineWriteFailed`) and
+  leaves the error latched, but the session→errored transition
+  (`catchTag`) and adapter retry policy belong at the session/loop-executor
+  barrier (ADR 49) and are not implemented here.
+- **`seq` is implicit, must become first-class before any DB adapter**:
+  `prune` takes `{ seq }` but entries don't carry it and the memory store
+  treats it positionally (renumbers on prune). ADR 49's frozen-schema rule
+  requires `seq` be a **stable, monotonic, append-assigned** ordering key
+  (survives prune, never reused) so all adapters agree and a cursor stays
+  valid — schema-on-read protects opaque payloads, not a missing ordering
+  column. Pinning this is the first item of A2.2; cursored `load` options /
+  `history()` paging stay additive after.
+- **`readPersisted()` is synchronous + full-in-memory** — the one baked
+  opinion that caps session length in RAM. Deliberately deferred; the
+  future fix pages by `seq` (another reason to pin it). Keep new code off
+  new synchronous full-read dependencies so that change stays non-breaking.
 - **Reference adapters**: `@agentick/timeline-fs-next` (JSONL, local
   pole), `@agentick/timeline-sqlite-next` (recommended first durable;
   native dep, never bundled), `@agentick/timeline-postgres-next` (cloud

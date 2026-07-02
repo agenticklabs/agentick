@@ -17,8 +17,11 @@ import "./augment.js";
 export { TimelineHarness, type TimelineHarnessOptions } from "./harness.js";
 export type { TimelineHandle } from "./handle.js";
 export { withTimeline, type WithTimelineOptions } from "./extension.js";
-export { withHandler, type WithHandlerOptions } from "./strategies.js";
 export { runTimelineHarnessConformance } from "./conformance.js";
+
+// Compaction-strategy factories live at the `@agentick/timeline-next/strategies`
+// subpath (parallel to skills' `/loaders`) — they return CompactStrategy
+// VALUES, not `withX` session extensions. See ./strategies.ts.
 
 // ADR 49 — "stores, not snapshots" durability. The persisted-tier store
 // port + bundled in-memory default + its conformance suite.
