@@ -493,6 +493,9 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
       return Promise.resolve();
     }
     this.gatewayClosed = true;
+    // ADR 51 classification: serializable (no input) — a declared-
+    // command candidate; exposure is a verb-matrix decision (remote
+    // gateway shutdown) deferred with slice 5.
     const op: Operation<undefined, void, never> = {
       opId: `gateway:close:${ulid()}`,
       surface: SURFACE,

@@ -2,10 +2,15 @@
  * `SandboxHarness` — `BaseHarness<"sandbox">` wrapping a live
  * `SandboxHandle` produced by a `SandboxProvider`.
  *
- * Every command (exec/readFile/writeFile/editFile/stat/readdir/
- * addMount/removeMount/listMounts/destroy) is a journaled operation
- * with the standard phase contract (`requested → before → terminal`).
- * `exec` additionally streams stdout/stderr as `:delta` envelopes.
+ * All seven verbs (exec/read-file/write-file/edit-file/stat/readdir/
+ * destroy) are declared commands (ADR 51, `this.command()` in the
+ * constructor): each runs through `runOperation` with canonical
+ * naming (`sandbox:command:<rest>`) and the standard phase contract
+ * (`requested → before → terminal`), and the same verbs are
+ * inbox-addressable over `sandbox:{sandboxId}` (`"sandbox:exec"`,
+ * `"sandbox:read-file"`, …) with zero routing code. All sandbox
+ * inputs are pure data, so no operation stays hand-built under the
+ * ADR 51 §1.2 signal-form doctrine.
  *
  * ACL: the harness checks every read/write/exec/mount against the
  * static `acl` config + per-session learned decisions. When neither
@@ -19,19 +24,19 @@
  *
  * @see docs/proposals/v2/blueprint/24-sandbox-as-harness.md
  * @see docs/proposals/v2/blueprint/26-harness-api-shape.md
+ * @see docs/proposals/v2/blueprint/51-invocation-and-authorization.md
  */
 
 import { omitUndefined } from "@agentick/utils-next";
 
 import { Effect } from "effect";
-import { BaseHarness, runHarnessProtocol } from "@agentick/runtime-next";
+import { BaseHarness } from "@agentick/runtime-next";
 import type {
   ElicitationHarnessProtocol,
   EventBus,
   MessageEnvelope,
   MessageHandlerError,
   MessageInbox,
-  Operation,
   OperationJournal,
   SandboxACL,
   SandboxDirEntry,
@@ -104,6 +109,9 @@ export interface SandboxHarnessOptions {
 
 export type SandboxStatus = "creating" | "ready" | "degraded" | "failed" | "destroyed";
 
+/** Public shape of a declared command (ADR 51) as stored on the harness. */
+type Cmd<I, R> = (input: I) => Promise<R>;
+
 export class SandboxHarness extends BaseHarness<"sandbox"> {
   readonly sandboxId: string;
   readonly providerName: string;
@@ -115,6 +123,15 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
   private readonly permissionTimeoutMs: number;
   private readonly elicitation: ElicitationHarnessProtocol;
   private _status: SandboxStatus = "ready";
+
+  // ─── Declared commands (ADR 51) — assigned in the constructor ───
+  private readonly execCmd: Cmd<SandboxExecInput, SandboxExecResult>;
+  private readonly readFileCmd: Cmd<SandboxReadFileInput, string>;
+  private readonly writeFileCmd: Cmd<SandboxWriteFileInput, void>;
+  private readonly editFileCmd: Cmd<SandboxEditFileInput, SandboxEditResult>;
+  private readonly statCmd: Cmd<SandboxStatInput, SandboxStat>;
+  private readonly readdirCmd: Cmd<SandboxReaddirInput, readonly SandboxDirEntry[]>;
+  private readonly destroyCmd: Cmd<undefined, void>;
 
   constructor(
     journal: OperationJournal,
@@ -131,6 +148,49 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
     this.permissionTimeoutDecision = options.permissionTimeoutDecision ?? "deny";
     this.permissionTimeoutMs = options.permissionTimeoutMs ?? 30_000;
     this.elicitation = options.elicitation;
+
+    // ─── Declared commands (ADR 51) — the single declaration site per
+    // verb. Inbox message types, canonical op naming
+    // (`sandbox:command:<rest>`), and enumeration all derive from
+    // these. Payloads carried no validation before the registry;
+    // schemas stay off for parity. The ACL permission gate is LAYER
+    // LOGIC and lives in the command bodies, not the registry.
+    const scope = () => ({ sandboxId: this.sandboxId });
+    this.execCmd = this.command({
+      name: "sandbox:exec",
+      scope,
+      handler: (i: SandboxExecInput) => this.execBody(i),
+    });
+    this.readFileCmd = this.command({
+      name: "sandbox:read-file",
+      scope,
+      handler: (i: SandboxReadFileInput) => this.readFileBody(i),
+    });
+    this.writeFileCmd = this.command({
+      name: "sandbox:write-file",
+      scope,
+      handler: (i: SandboxWriteFileInput) => this.writeFileBody(i),
+    });
+    this.editFileCmd = this.command({
+      name: "sandbox:edit-file",
+      scope,
+      handler: (i: SandboxEditFileInput) => this.editFileBody(i),
+    });
+    this.statCmd = this.command({
+      name: "sandbox:stat",
+      scope,
+      handler: (i: SandboxStatInput) => this.statBody(i),
+    });
+    this.readdirCmd = this.command({
+      name: "sandbox:readdir",
+      scope,
+      handler: (i: SandboxReaddirInput) => this.readdirBody(i),
+    });
+    this.destroyCmd = this.command({
+      name: "sandbox:destroy",
+      scope,
+      handler: () => this.destroyBody(),
+    });
   }
 
   /**
@@ -171,82 +231,34 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
   }
 
   // ──────────────── Public command surface ────────────────
+  // Thin wrappers over the declared commands — signatures FROZEN.
 
   exec(input: SandboxExecInput): Promise<SandboxExecResult> {
-    const op: Operation<SandboxExecInput, SandboxExecResult> = {
-      opId: `sandbox:${this.sandboxId}:exec:${randomOpId()}`,
-      surface: "sandbox",
-      name: "sandbox:command:exec",
-      scope: { sandboxId: this.sandboxId },
-      input,
-    };
-    return runHarnessProtocol(this.runOperation(op, (i) => this.execBody(i)));
+    return this.execCmd(input);
   }
 
   readFile(input: SandboxReadFileInput): Promise<string> {
-    const op: Operation<SandboxReadFileInput, string> = {
-      opId: `sandbox:${this.sandboxId}:read-file:${randomOpId()}`,
-      surface: "sandbox",
-      name: "sandbox:command:read-file",
-      scope: { sandboxId: this.sandboxId },
-      input,
-    };
-    return runHarnessProtocol(this.runOperation(op, (i) => this.readFileBody(i)));
+    return this.readFileCmd(input);
   }
 
   writeFile(input: SandboxWriteFileInput): Promise<void> {
-    const op: Operation<SandboxWriteFileInput, void> = {
-      opId: `sandbox:${this.sandboxId}:write-file:${randomOpId()}`,
-      surface: "sandbox",
-      name: "sandbox:command:write-file",
-      scope: { sandboxId: this.sandboxId },
-      input,
-    };
-    return runHarnessProtocol(this.runOperation(op, (i) => this.writeFileBody(i)));
+    return this.writeFileCmd(input);
   }
 
   editFile(input: SandboxEditFileInput): Promise<SandboxEditResult> {
-    const op: Operation<SandboxEditFileInput, SandboxEditResult> = {
-      opId: `sandbox:${this.sandboxId}:edit-file:${randomOpId()}`,
-      surface: "sandbox",
-      name: "sandbox:command:edit-file",
-      scope: { sandboxId: this.sandboxId },
-      input,
-    };
-    return runHarnessProtocol(this.runOperation(op, (i) => this.editFileBody(i)));
+    return this.editFileCmd(input);
   }
 
   stat(input: SandboxStatInput): Promise<SandboxStat> {
-    const op: Operation<SandboxStatInput, SandboxStat> = {
-      opId: `sandbox:${this.sandboxId}:stat:${randomOpId()}`,
-      surface: "sandbox",
-      name: "sandbox:command:stat",
-      scope: { sandboxId: this.sandboxId },
-      input,
-    };
-    return runHarnessProtocol(this.runOperation(op, (i) => this.statBody(i)));
+    return this.statCmd(input);
   }
 
   readdir(input: SandboxReaddirInput): Promise<readonly SandboxDirEntry[]> {
-    const op: Operation<SandboxReaddirInput, readonly SandboxDirEntry[]> = {
-      opId: `sandbox:${this.sandboxId}:readdir:${randomOpId()}`,
-      surface: "sandbox",
-      name: "sandbox:command:readdir",
-      scope: { sandboxId: this.sandboxId },
-      input,
-    };
-    return runHarnessProtocol(this.runOperation(op, (i) => this.readdirBody(i)));
+    return this.readdirCmd(input);
   }
 
   destroy(): Promise<void> {
-    const op: Operation<undefined, void> = {
-      opId: `sandbox:${this.sandboxId}:destroy:${randomOpId()}`,
-      surface: "sandbox",
-      name: "sandbox:command:destroy",
-      scope: { sandboxId: this.sandboxId },
-      input: undefined,
-    };
-    return runHarnessProtocol(this.runOperation(op, () => this.destroyBody()));
+    return this.destroyCmd(undefined);
   }
 
   // ──────────────── Command bodies ────────────────
@@ -499,29 +511,21 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
 
   // ──────────────── Inbox ────────────────
 
-  // TODO(adr-51-wave): migrate this handleMessage switch + its hand-built
-  // Operation literals to declared commands (this.command()) — the
-  // timeline/state/knobs migrations are the reference pattern (switch
-  // deleted, registry routes identical message types, net-negative LOC).
+  /**
+   * All seven sandbox verbs are declared commands — routed by the
+   * BaseHarness command registry before this fallthrough. Only unknown
+   * types land here.
+   */
   protected handleMessage(
-    _msg: MessageEnvelope,
+    msg: MessageEnvelope,
   ): Effect.Effect<unknown, MessageHandlerError, never> {
-    // Inbox dispatch (abort-exec, destroy, status-probe) is a future
-    // refinement; for now the harness only responds to direct method
-    // calls. Reject unknown messages explicitly.
-    return Effect.fail(
-      new HandlerError({ cause: new Error("sandbox harness inbox dispatch not yet wired") }),
-    );
+    return Effect.fail(new HandlerError({ cause: `Unknown sandbox message type: ${msg.type}` }));
   }
 }
 
 // ============================================================================
 // Helpers
 // ============================================================================
-
-function randomOpId(): string {
-  return Math.random().toString(36).slice(2, 10);
-}
 
 function hashOf(content: string): string {
   // Cheap, deterministic content hash. Not cryptographic — adopters

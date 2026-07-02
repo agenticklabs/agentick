@@ -12,9 +12,9 @@
  *   - `connect()`     — opens the transport, performs `initialize`,
  *                        selects an era codec, transitions to `ready`
  *   - `callTool(...)` — round-trips an MCP `tools/call` through the
- *                        substrate's runOperation pipeline so calls
- *                        are journaled + emit the canonical phase
- *                        contract envelopes
+ *                        substrate's runOperation pipeline (declared
+ *                        command, ADR 51) so calls are journaled +
+ *                        emit the canonical phase contract envelopes
  *   - `listTools()`   — discovery; era codec normalizes the response
  *   - `state`         — lifecycle state; subscribers observe via
  *                        `mcp:<scopeId>:state` bus envelopes
@@ -30,17 +30,19 @@
  *   - `sampling/createMessage`, `roots/list` — pending (#5 onward).
  *
  * @see docs/proposals/v2/blueprint/23-mcp-as-harness.md
+ * @see docs/proposals/v2/blueprint/51-invocation-and-authorization.md
  */
 
 import { Effect, Stream } from "effect";
-import { BaseHarness, runHarnessProtocol, ulid } from "@agentick/runtime-next";
+import { BaseHarness, ulid } from "@agentick/runtime-next";
 import type {
   EventBus,
+  EventScope,
   MessageEnvelope,
   MessageHandlerError,
   MessageInbox,
-  Operation,
   OperationJournal,
+  OperationOrigin,
 } from "@agentick/spec-next";
 import { HandlerError } from "@agentick/spec-next";
 
@@ -195,6 +197,25 @@ export type McpListChangedEvent =
   | { readonly kind: "prompts" }
   | { readonly kind: "resources" };
 
+/** A declared command's public invoker (ADR 51). */
+type Cmd<I, R> = (input: I, opts?: { readonly origin?: OperationOrigin }) => Promise<R>;
+
+/**
+ * Serializable payload of `mcp:call-tool` — the positional
+ * `callTool(name, args)` signature folded into one command input.
+ */
+type McpCallToolInput = {
+  readonly name: string;
+  readonly args: Readonly<Record<string, unknown>> | undefined;
+};
+
+/**
+ * Serializable payload of `mcp:call-tool-as-task` — the `tools/call`
+ * params with the draft `task` augmentation, as built by
+ * {@link buildCallToolAsTaskParams}.
+ */
+type CallToolAsTaskParams = ReturnType<typeof buildCallToolAsTaskParams>;
+
 // ============================================================================
 // Errors
 // ============================================================================
@@ -314,6 +335,15 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
    */
   private inFlightDisconnect: Promise<void> | undefined;
 
+  // ─── Declared commands (ADR 51) — assigned in the constructor ───
+  private readonly listToolsCmd: Cmd<undefined, readonly McpToolDescriptor[]>;
+  private readonly callToolCmd: Cmd<McpCallToolInput, CallToolResult>;
+  private readonly callToolAsTaskCmd: Cmd<CallToolAsTaskParams, CallToolOrTaskOutcome>;
+  private readonly getTaskCmd: Cmd<{ readonly taskId: string }, GetTaskResult>;
+  private readonly getTaskResultCmd: Cmd<{ readonly taskId: string }, CallToolResult>;
+  private readonly listTasksCmd: Cmd<Readonly<Record<string, never>>, ListTasksResult>;
+  private readonly cancelTaskCmd: Cmd<{ readonly taskId: string }, CancelTaskResult>;
+
   constructor(
     scopeId: string,
     journal: OperationJournal,
@@ -352,6 +382,52 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
         if (this._status.kind === lifted.kind) return;
         this.setStatus(lifted);
       },
+    });
+
+    // ─── Declared commands (ADR 51) — the single declaration site per
+    // verb. Inbox message types, canonical op naming (`mcp:command:*`),
+    // enumeration, and (future, matrix-gated) wire methods all derive
+    // from these; the hand-built Operation literals are gone. Payloads
+    // carried no validation before the registry; schemas stay off for
+    // parity. Connection lifecycle (connect / disconnect / reconnect /
+    // reauthenticate) is NOT declared — those verbs bind transports +
+    // auth strategies (non-serializable, construction-bound; ADR 51
+    // §1.2) and never ran through runOperation to begin with.
+    const scope = (): EventScope => ({ sessionId: this.scopeId });
+    this.listToolsCmd = this.command({
+      name: "mcp:list-tools",
+      scope,
+      handler: () => this.listToolsBody(),
+    });
+    this.callToolCmd = this.command({
+      name: "mcp:call-tool",
+      scope,
+      handler: (i: McpCallToolInput) => this.callToolBody(i),
+    });
+    this.callToolAsTaskCmd = this.command({
+      name: "mcp:call-tool-as-task",
+      scope,
+      handler: (i: CallToolAsTaskParams) => this.callToolAsTaskBody(i),
+    });
+    this.getTaskCmd = this.command({
+      name: "mcp:get-task",
+      scope,
+      handler: (i: { readonly taskId: string }) => this.getTaskBody(i),
+    });
+    this.getTaskResultCmd = this.command({
+      name: "mcp:get-task-result",
+      scope,
+      handler: (i: { readonly taskId: string }) => this.getTaskResultBody(i),
+    });
+    this.listTasksCmd = this.command({
+      name: "mcp:list-tasks",
+      scope,
+      handler: () => this.listTasksBody(),
+    });
+    this.cancelTaskCmd = this.command({
+      name: "mcp:cancel-task",
+      scope,
+      handler: (i: { readonly taskId: string }) => this.cancelTaskBody(i),
     });
   }
 
@@ -632,27 +708,20 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
    * the canonical {@link McpToolDescriptor} shape.
    */
   listTools(): Promise<readonly McpToolDescriptor[]> {
-    const op: Operation<undefined, readonly McpToolDescriptor[]> = {
-      opId: `mcp:${this.serverId}:list-tools:${ulid()}`,
-      surface: "mcp",
-      name: "mcp:command:list-tools",
-      scope: { sessionId: this.scopeId },
-      input: undefined,
-    };
-    return runHarnessProtocol(
-      this.runOperation(op, () =>
-        Effect.tryPromise({
-          try: async () => {
-            const c = this.requireReadyClient();
-            const res = await c.listTools();
-            return (res.tools as Tool[]).map((t) =>
-              this.codec.decodeTool(t as unknown as Readonly<Record<string, unknown>>),
-            );
-          },
-          catch: (cause) => cause as McpClientError,
-        }),
-      ),
-    );
+    return this.listToolsCmd(undefined);
+  }
+
+  private listToolsBody(): Effect.Effect<readonly McpToolDescriptor[], McpClientError, never> {
+    return Effect.tryPromise({
+      try: async () => {
+        const c = this.requireReadyClient();
+        const res = await c.listTools();
+        return (res.tools as Tool[]).map((t) =>
+          this.codec.decodeTool(t as unknown as Readonly<Record<string, unknown>>),
+        );
+      },
+      catch: (cause) => cause as McpClientError,
+    });
   }
 
   /**
@@ -666,32 +735,25 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
    * concurrency is solved by construction.
    */
   callTool(name: string, args?: Readonly<Record<string, unknown>>): Promise<CallToolResult> {
-    const op: Operation<{ name: string; args: typeof args }, CallToolResult> = {
-      opId: `mcp:${this.serverId}:call-tool:${ulid()}`,
-      surface: "mcp",
-      name: "mcp:command:call-tool",
-      scope: { sessionId: this.scopeId },
-      input: { name, args },
-    };
-    return runHarnessProtocol(
-      this.runOperation(op, (i) =>
-        Effect.tryPromise({
-          try: async (): Promise<CallToolResult> => {
-            const c = this.requireReadyClient();
-            // SDK's `callTool` return type is a union covering a legacy
-            // `{toolResult}` shape; cast to the modern `{content}`
-            // shape so downstream consumers (ToolBridge) work against
-            // one type.
-            const res = (await c.callTool({
-              name: i.name,
-              arguments: i.args as Record<string, unknown> | undefined,
-            })) as CallToolResult;
-            return res;
-          },
-          catch: (cause) => cause as McpClientError,
-        }),
-      ),
-    );
+    return this.callToolCmd({ name, args });
+  }
+
+  private callToolBody(i: McpCallToolInput): Effect.Effect<CallToolResult, McpClientError, never> {
+    return Effect.tryPromise({
+      try: async (): Promise<CallToolResult> => {
+        const c = this.requireReadyClient();
+        // SDK's `callTool` return type is a union covering a legacy
+        // `{toolResult}` shape; cast to the modern `{content}`
+        // shape so downstream consumers (ToolBridge) work against
+        // one type.
+        const res = (await c.callTool({
+          name: i.name,
+          arguments: i.args as Record<string, unknown> | undefined,
+        })) as CallToolResult;
+        return res;
+      },
+      catch: (cause) => cause as McpClientError,
+    });
   }
 
   // ─────────── Task wire (draft tasks/* extension) ───────────
@@ -716,35 +778,29 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
     args: Readonly<Record<string, unknown>> | undefined,
     opts: CallToolAsTaskOptions = {},
   ): Promise<CallToolOrTaskOutcome> {
-    const params = buildCallToolAsTaskParams(name, args, opts);
-    const op: Operation<typeof params, CallToolOrTaskOutcome> = {
-      opId: `mcp:${this.serverId}:call-tool-as-task:${ulid()}`,
-      surface: "mcp",
-      name: "mcp:command:call-tool-as-task",
-      scope: { sessionId: this.scopeId },
-      input: params,
-    };
-    return runHarnessProtocol(
-      this.runOperation(op, (i) =>
-        Effect.tryPromise({
-          try: async (): Promise<CallToolOrTaskOutcome> => {
-            const c = this.requireReadyClient();
-            // We can't use `c.callTool(...)` here — its SDK signature
-            // strips the `task` param. Use the underlying request()
-            // with the SDK's CallToolResult schema; the server's
-            // response may match either CreateTaskResult or
-            // CallToolResult, so we re-discriminate against the
-            // codec.
-            const raw = await c.request(
-              { method: "tools/call", params: i as Record<string, unknown> },
-              CallToolResultSchema.passthrough(),
-            );
-            return discriminateCallToolResponse(raw);
-          },
-          catch: (cause) => cause as McpClientError,
-        }),
-      ),
-    );
+    return this.callToolAsTaskCmd(buildCallToolAsTaskParams(name, args, opts));
+  }
+
+  private callToolAsTaskBody(
+    i: CallToolAsTaskParams,
+  ): Effect.Effect<CallToolOrTaskOutcome, McpClientError, never> {
+    return Effect.tryPromise({
+      try: async (): Promise<CallToolOrTaskOutcome> => {
+        const c = this.requireReadyClient();
+        // We can't use `c.callTool(...)` here — its SDK signature
+        // strips the `task` param. Use the underlying request()
+        // with the SDK's CallToolResult schema; the server's
+        // response may match either CreateTaskResult or
+        // CallToolResult, so we re-discriminate against the
+        // codec.
+        const raw = await c.request(
+          { method: "tools/call", params: i as Record<string, unknown> },
+          CallToolResultSchema.passthrough(),
+        );
+        return discriminateCallToolResponse(raw);
+      },
+      catch: (cause) => cause as McpClientError,
+    });
   }
 
   /**
@@ -785,27 +841,22 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
    * Send `tasks/get` for a snapshot of the remote task's state.
    */
   getTask(taskId: string): Promise<GetTaskResult> {
-    const op: Operation<{ taskId: string }, GetTaskResult> = {
-      opId: `mcp:${this.serverId}:get-task:${ulid()}`,
-      surface: "mcp",
-      name: "mcp:command:get-task",
-      scope: { sessionId: this.scopeId },
-      input: { taskId },
-    };
-    return runHarnessProtocol(
-      this.runOperation(op, (i) =>
-        Effect.tryPromise({
-          try: async (): Promise<GetTaskResult> => {
-            const c = this.requireReadyClient();
-            return await c.request(
-              { method: TASKS_GET_METHOD, params: { taskId: i.taskId } },
-              GetTaskResultSchema,
-            );
-          },
-          catch: (cause) => cause as McpClientError,
-        }),
-      ),
-    );
+    return this.getTaskCmd({ taskId });
+  }
+
+  private getTaskBody(i: {
+    readonly taskId: string;
+  }): Effect.Effect<GetTaskResult, McpClientError, never> {
+    return Effect.tryPromise({
+      try: async (): Promise<GetTaskResult> => {
+        const c = this.requireReadyClient();
+        return await c.request(
+          { method: TASKS_GET_METHOD, params: { taskId: i.taskId } },
+          GetTaskResultSchema,
+        );
+      },
+      catch: (cause) => cause as McpClientError,
+    });
   }
 
   /**
@@ -815,31 +866,26 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
    * type-safe content blocks.
    */
   getTaskResult(taskId: string): Promise<CallToolResult> {
-    const op: Operation<{ taskId: string }, CallToolResult> = {
-      opId: `mcp:${this.serverId}:get-task-result:${ulid()}`,
-      surface: "mcp",
-      name: "mcp:command:get-task-result",
-      scope: { sessionId: this.scopeId },
-      input: { taskId },
-    };
-    return runHarnessProtocol(
-      this.runOperation(op, (i) =>
-        Effect.tryPromise({
-          try: async (): Promise<CallToolResult> => {
-            const c = this.requireReadyClient();
-            // tasks/result returns the original request's result shape
-            // (loose); for tools/call tasks that means the payload IS
-            // a CallToolResult. Re-parse via the codec for type safety.
-            const raw = await c.request(
-              { method: TASKS_RESULT_METHOD, params: { taskId: i.taskId } },
-              CallToolResultSchema.passthrough(),
-            );
-            return parseTaskPayloadAsCallToolResult(raw);
-          },
-          catch: (cause) => cause as McpClientError,
-        }),
-      ),
-    );
+    return this.getTaskResultCmd({ taskId });
+  }
+
+  private getTaskResultBody(i: {
+    readonly taskId: string;
+  }): Effect.Effect<CallToolResult, McpClientError, never> {
+    return Effect.tryPromise({
+      try: async (): Promise<CallToolResult> => {
+        const c = this.requireReadyClient();
+        // tasks/result returns the original request's result shape
+        // (loose); for tools/call tasks that means the payload IS
+        // a CallToolResult. Re-parse via the codec for type safety.
+        const raw = await c.request(
+          { method: TASKS_RESULT_METHOD, params: { taskId: i.taskId } },
+          CallToolResultSchema.passthrough(),
+        );
+        return parseTaskPayloadAsCallToolResult(raw);
+      },
+      catch: (cause) => cause as McpClientError,
+    });
   }
 
   /**
@@ -855,24 +901,17 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
    * non-tasks-aware MCP server is a normal configuration.
    */
   listTasks(): Promise<ListTasksResult> {
-    const op: Operation<Readonly<Record<string, never>>, ListTasksResult> = {
-      opId: `mcp:${this.serverId}:list-tasks:${ulid()}`,
-      surface: "mcp",
-      name: "mcp:command:list-tasks",
-      scope: { sessionId: this.scopeId },
-      input: {},
-    };
-    return runHarnessProtocol(
-      this.runOperation(op, () =>
-        Effect.tryPromise({
-          try: async (): Promise<ListTasksResult> => {
-            const c = this.requireReadyClient();
-            return await c.request({ method: TASKS_LIST_METHOD }, ListTasksResultSchema);
-          },
-          catch: (cause) => cause as McpClientError,
-        }),
-      ),
-    );
+    return this.listTasksCmd({});
+  }
+
+  private listTasksBody(): Effect.Effect<ListTasksResult, McpClientError, never> {
+    return Effect.tryPromise({
+      try: async (): Promise<ListTasksResult> => {
+        const c = this.requireReadyClient();
+        return await c.request({ method: TASKS_LIST_METHOD }, ListTasksResultSchema);
+      },
+      catch: (cause) => cause as McpClientError,
+    });
   }
 
   /**
@@ -881,27 +920,22 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
    * snapshot without effect.
    */
   cancelTask(taskId: string): Promise<CancelTaskResult> {
-    const op: Operation<{ taskId: string }, CancelTaskResult> = {
-      opId: `mcp:${this.serverId}:cancel-task:${ulid()}`,
-      surface: "mcp",
-      name: "mcp:command:cancel-task",
-      scope: { sessionId: this.scopeId },
-      input: { taskId },
-    };
-    return runHarnessProtocol(
-      this.runOperation(op, (i) =>
-        Effect.tryPromise({
-          try: async (): Promise<CancelTaskResult> => {
-            const c = this.requireReadyClient();
-            return await c.request(
-              { method: TASKS_CANCEL_METHOD, params: { taskId: i.taskId } },
-              CancelTaskResultSchema,
-            );
-          },
-          catch: (cause) => cause as McpClientError,
-        }),
-      ),
-    );
+    return this.cancelTaskCmd({ taskId });
+  }
+
+  private cancelTaskBody(i: {
+    readonly taskId: string;
+  }): Effect.Effect<CancelTaskResult, McpClientError, never> {
+    return Effect.tryPromise({
+      try: async (): Promise<CancelTaskResult> => {
+        const c = this.requireReadyClient();
+        return await c.request(
+          { method: TASKS_CANCEL_METHOD, params: { taskId: i.taskId } },
+          CancelTaskResultSchema,
+        );
+      },
+      catch: (cause) => cause as McpClientError,
+    });
   }
 
   /**
@@ -975,15 +1009,18 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
   // ─────────── inbox ───────────
 
   /**
-   * No subclass-specific inbox messages today. `request-response`
-   * envelopes (for future server-initiated request flows) are
-   * intercepted by `BaseHarness.dispatchMessage` before this method
-   * runs. Anything else is a routing bug — fail loud.
+   * All MCP client verbs are DECLARED COMMANDS (ADR 51) — the command
+   * registry in `BaseHarness.dispatchMessage` routes
+   * `mcp:list-tools/call-tool/call-tool-as-task/get-task/get-task-result/list-tasks/cancel-task`
+   * before this fallthrough is ever consulted. `request-response`
+   * envelopes (elicitation replies routed back from the elicit
+   * harness) are intercepted even earlier by `dispatchMessage`.
+   * Server-initiated inbound traffic (elicitation relays, task
+   * status/progress notifications, list-changed notifications) is SDK
+   * request/notification-handler plumbing on the `Client` — it never
+   * arrives as inbox messages, so it is not command material. Anything
+   * landing here is a routing bug — fail loud.
    */
-  // TODO(adr-51-wave): migrate this handleMessage switch + its hand-built
-  // Operation literals to declared commands (this.command()) — the
-  // timeline/state/knobs migrations are the reference pattern (switch
-  // deleted, registry routes identical message types, net-negative LOC).
   protected handleMessage(
     msg: MessageEnvelope,
   ): Effect.Effect<unknown, MessageHandlerError, never> {

@@ -171,6 +171,10 @@ export class ReconcilerHarness extends BaseHarness<"reconciler"> implements Reco
   // ──────────────────────── ReconcilerProtocol ────────────────────────
 
   mount(input: MountInput): Promise<MountResult> {
+    // HAND-BUILT by doctrine (ADR 51 §1.2): MountInput carries a live
+    // React element + the HookBridges bag — non-serializable input can
+    // never be a declared command. Also preserves the deterministic
+    // mountId-keyed idempotency opId the registry (ulid-minted) can't.
     const op: Operation<MountInput, MountResult> = {
       opId: input.opId ?? `reconciler:mount:${input.mountId}`,
       surface: "reconciler",
@@ -194,6 +198,9 @@ export class ReconcilerHarness extends BaseHarness<"reconciler"> implements Reco
         if (!state) {
           return Effect.fail(new NotMounted({ mountId: input.mountId }));
         }
+        // HAND-BUILT by doctrine (ADR 51 §1.2): RerenderInput carries a
+        // live React element — non-serializable input can never be a
+        // declared command.
         const op: Operation<RerenderInput, void> = {
           opId: input.opId ?? `reconciler:rerender:${input.mountId}`,
           surface: "reconciler",
@@ -220,6 +227,15 @@ export class ReconcilerHarness extends BaseHarness<"reconciler"> implements Reco
         if (!state) {
           return Effect.fail(new NotMounted({ mountId: input.mountId }));
         }
+        // HAND-BUILT — NOT by §1.2 doctrine (payload is JSON-shaped) but
+        // by registry shape: per-input scope (mountId →
+        // state.bridges.session.id + input.executionId) vs the nullary
+        // command-scope fn; caller-supplied `input.opId` idempotency vs
+        // registry-minted `${verb}:${ulid()}`; and the existing
+        // "reconciler:render:" opId prefix can't coexist with the
+        // derived "reconciler:command:render-tree" op name (the registry
+        // derives both from one verb string). See the ADR-51 note above
+        // handleMessage.
         const op: Operation<RenderTreeInput, RenderTreeResult> = {
           opId: input.opId ?? `reconciler:render:${input.mountId}:${ulid()}`,
           surface: "reconciler",
@@ -247,6 +263,10 @@ export class ReconcilerHarness extends BaseHarness<"reconciler"> implements Reco
         if (!state) {
           return Effect.fail(new NotMounted({ mountId: input.mountId }));
         }
+        // HAND-BUILT: same registry-shape blockers as renderTree above
+        // (nullary command-scope fn can't resolve the per-mount
+        // sessionId, caller-supplied `input.opId` would be dropped,
+        // NotMounted must fail before an Operation exists).
         const op: Operation<RenderToStringInput, RenderToStringResult> = {
           opId: input.opId ?? `reconciler:render-to-string:${input.mountId}:${ulid()}`,
           surface: "reconciler",
@@ -314,10 +334,38 @@ export class ReconcilerHarness extends BaseHarness<"reconciler"> implements Reco
 
   // ──────────────────────── inbox dispatch ────────────────────────
 
-  // TODO(adr-51-wave): migrate this handleMessage switch + its hand-built
-  // Operation literals to declared commands (this.command()) — the
-  // timeline/state/knobs migrations are the reference pattern (switch
-  // deleted, registry routes identical message types, net-negative LOC).
+  // ADR 51 status — ZERO reconciler verbs are declarable commands today;
+  // every Operation literal in this file stays hand-built. Per verb:
+  //
+  //  - mount / rerender: input carries a live React element (and, for
+  //    mount, the HookBridges bag) — non-serializable input is
+  //    unaddressable by doctrine (ADR 51 §1.2). Permanent.
+  //  - renderTree / renderToString: JSON-shaped payloads, but blocked by
+  //    the registry's current shape. (a) Scope must be resolved per
+  //    input (mountId → state.bridges.session.id + input.executionId) —
+  //    this harness multiplexes mounts, so scopeId is NOT a sessionId
+  //    and the nullary `scope: () => EventScope` idiom that carried the
+  //    state/timeline/knobs migrations cannot reproduce it. (b) The
+  //    MountScopedInput caller-supplied `opId` idempotency contract
+  //    would be silently dropped — the registry always mints
+  //    `${verb}:${ulid()}`. (c) NotMounted resolves BEFORE the Operation
+  //    is built (a missing mount journals no envelopes); the registry
+  //    path would journal requested → failed pairs.
+  //  - recompile / unmount / invalidate (this switch): the spec-frozen
+  //    `ReconcilerInboxMessage` wire types are UNPREFIXED, while
+  //    `this.command()` hard-requires `${surface}:`-prefixed verbs and
+  //    `dispatchMessage` routes by exact `msg.type` — migrating them is
+  //    a spec wire-type rename, i.e. a wire-shape change. Additionally,
+  //    `invalidate` is deliberately NOT an Operation (sync cache poke,
+  //    zero envelopes) and `recompile` is not 1:1 with renderTree (it
+  //    synthesizes `sessionId: ""`).
+  //
+  // TODO(adr-51-wave): unblock renderTree/renderToString by extending
+  // BaseHarness.command with input-aware scope (`scope?: (input: I) =>
+  // EventScope`) + caller-opId passthrough; unblock this switch by
+  // renaming the ReconcilerInboxMessage types to `reconciler:`-prefixed
+  // canonical verbs in spec-next. Both are cross-package contract
+  // changes — out of scope for a single-harness migration.
   protected handleMessage(
     msg: MessageEnvelope,
   ): Effect.Effect<unknown, MessageHandlerError, never> {

@@ -270,18 +270,3 @@ export interface PromptsSnapshotEntry {
   readonly arguments?: readonly PromptArgument[];
   readonly metadata?: Readonly<Record<string, unknown>>;
 }
-
-// ============================================================================
-// Inbox message catalog
-// ============================================================================
-
-/**
- * Typed inbox messages routed to a PromptsHarness instance. Cluster
- * peers, admin dashboards, sibling harnesses send these via
- * `inbox.send("prompts:<scopeId>", { type, payload, messageId })`.
- */
-export type PromptsInboxMessage =
-  | { readonly type: "prompts:register"; readonly payload: PromptsRegisterInput }
-  | { readonly type: "prompts:update"; readonly payload: PromptsUpdateInput }
-  | { readonly type: "prompts:remove"; readonly payload: PromptsRemoveInput }
-  | { readonly type: "prompts:invoke"; readonly payload: PromptsInvokeInput };

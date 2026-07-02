@@ -5,7 +5,10 @@
  *   - Audit envelopes for every register / update / remove
  *   - Snapshot/restore via `SnapshotCapable` feature detection
  *   - Inbox-addressable for cross-actor mutations (cluster peers,
- *     admin dashboards, sibling harnesses)
+ *     admin dashboards, sibling harnesses) — all three verbs are
+ *     declared commands (ADR 51): `skills:register` / `skills:update`
+ *     / `skills:remove` route through the BaseHarness command
+ *     registry with zero routing code
  *   - Substrate slot pattern inherited from BaseHarness
  *
  * In-memory reference impl. Durable backends (sqlite, remote
@@ -13,33 +16,27 @@
  * the same conformance suite.
  *
  * @see docs/proposals/v2/blueprint/32-extension-shape-spectrum.md
+ * @see docs/proposals/v2/blueprint/51-invocation-and-authorization.md
  * @see packages/spec/src/protocol/skills-harness.ts
  */
 
 import { Effect } from "effect";
-import { BaseHarness, runHarnessProtocol, ulid, type Unsubscribe } from "@agentick/runtime-next";
+import { BaseHarness, type Unsubscribe } from "@agentick/runtime-next";
 import type {
   EventBus,
   MessageEnvelope,
   MessageHandlerError,
   MessageInbox,
-  Operation,
   OperationJournal,
   Skill,
   SkillsError,
   SkillsHarnessProtocol,
-  SkillsInboxMessage,
   SkillsRegisterInput,
   SkillsRemoveInput,
   SkillsSearchInput,
   SkillsUpdateInput,
 } from "@agentick/spec-next";
-import {
-  HandlerError,
-  InvalidPayload,
-  SkillAlreadyExists,
-  SkillNotFound,
-} from "@agentick/spec-next";
+import { HandlerError, SkillAlreadyExists, SkillNotFound } from "@agentick/spec-next";
 import { createKeyedNotifier, type KeyedNotifier } from "@agentick/pubsub-next";
 import { omitUndefined } from "@agentick/utils-next";
 
@@ -79,12 +76,43 @@ export class SkillsHarness extends BaseHarness<SkillsSurface> implements SkillsH
    */
   private loaders: readonly SkillLoader[] = [];
 
+  /**
+   * Declared commands (ADR 51) — pure layer logic in the handlers; the
+   * registry owns Operation construction, inbox routing, and
+   * enumeration. All three inputs are serializable data, so every
+   * skills verb is addressable (no function-carrying operations stay
+   * hand-built here). Payloads carried no validation before the
+   * registry; schemas stay off for parity.
+   */
+  readonly register: (input: SkillsRegisterInput) => Promise<Skill>;
+  readonly update: (input: SkillsUpdateInput) => Promise<Skill>;
+  readonly remove: (input: SkillsRemoveInput) => Promise<void>;
+
   get id(): string {
     return this.scopeId;
   }
 
   constructor(scopeId: string, journal: OperationJournal, bus: EventBus, inbox: MessageInbox) {
     super(SURFACE, scopeId, journal, bus, inbox);
+    const scope = () => ({ sessionId: this.scopeId });
+    this.register = this.command({
+      name: "skills:register",
+      scope,
+      handler: (i: SkillsRegisterInput) => this.applyRegister(i),
+    });
+    this.update = this.command({
+      name: "skills:update",
+      scope,
+      handler: (i: SkillsUpdateInput) => this.applyUpdate(i),
+    });
+    this.remove = this.command({
+      name: "skills:remove",
+      scope,
+      handler: (i: SkillsRemoveInput) =>
+        Effect.sync(() => {
+          this.applyRemove(i);
+        }),
+    });
   }
 
   /**
@@ -234,47 +262,6 @@ export class SkillsHarness extends BaseHarness<SkillsSurface> implements SkillsH
     return this.notifier.subscribeAll(listener);
   }
 
-  // ─────────── Async surface — full Operations ───────────
-
-  register(input: SkillsRegisterInput): Promise<Skill> {
-    const op: Operation<SkillsRegisterInput, Skill, SkillsError> = {
-      opId: `skills:register:${ulid()}`,
-      surface: SURFACE,
-      name: "skills:command:register",
-      scope: { sessionId: this.scopeId },
-      input,
-    };
-    return runHarnessProtocol(this.runOperation(op, (i) => this.applyRegister(i)));
-  }
-
-  update(input: SkillsUpdateInput): Promise<Skill> {
-    const op: Operation<SkillsUpdateInput, Skill, SkillsError> = {
-      opId: `skills:update:${ulid()}`,
-      surface: SURFACE,
-      name: "skills:command:update",
-      scope: { sessionId: this.scopeId },
-      input,
-    };
-    return runHarnessProtocol(this.runOperation(op, (i) => this.applyUpdate(i)));
-  }
-
-  remove(input: SkillsRemoveInput): Promise<void> {
-    const op: Operation<SkillsRemoveInput, void, never> = {
-      opId: `skills:remove:${ulid()}`,
-      surface: SURFACE,
-      name: "skills:command:remove",
-      scope: { sessionId: this.scopeId },
-      input,
-    };
-    return runHarnessProtocol(
-      this.runOperation(op, (i) =>
-        Effect.sync(() => {
-          this.applyRemove(i);
-        }),
-      ),
-    );
-  }
-
   // ─────────── Snapshot / restore ───────────
 
   exportSnapshot(): Readonly<Record<string, Skill>> {
@@ -292,42 +279,17 @@ export class SkillsHarness extends BaseHarness<SkillsSurface> implements SkillsH
     this.notifier.notifyAll();
   }
 
-  // ─────────── Inbox handler ───────────
+  // ─────────── Inbox routing ───────────
 
-  // TODO(adr-51-wave): migrate this handleMessage switch + its hand-built
-  // Operation literals to declared commands (this.command()) — the
-  // timeline/state/knobs migrations are the reference pattern (switch
-  // deleted, registry routes identical message types, net-negative LOC).
+  /**
+   * `skills:register` / `skills:update` / `skills:remove` are declared
+   * commands — routed by the BaseHarness command registry before this
+   * fallthrough. Only unknown types land here.
+   */
   protected handleMessage(
     msg: MessageEnvelope,
   ): Effect.Effect<unknown, MessageHandlerError, never> {
-    // The inbox typing erases the payload's concrete shape (`unknown`).
-    // We discriminate on `msg.type` then narrow the payload via the
-    // SkillsInboxMessage catalog.
-    const inbound = { type: msg.type, payload: msg.payload } as SkillsInboxMessage;
-    switch (inbound.type) {
-      case "skills:register":
-        return Effect.tryPromise({
-          try: () => this.register(inbound.payload),
-          catch: (cause): MessageHandlerError => new HandlerError({ cause }),
-        });
-      case "skills:update":
-        return Effect.tryPromise({
-          try: () => this.update(inbound.payload),
-          catch: (cause): MessageHandlerError => new HandlerError({ cause }),
-        });
-      case "skills:remove":
-        return Effect.tryPromise({
-          try: () => this.remove(inbound.payload),
-          catch: (cause): MessageHandlerError => new HandlerError({ cause }),
-        });
-      default:
-        return Effect.fail(
-          new InvalidPayload({
-            reason: `Unknown skills inbox message type: ${msg.type}`,
-          }),
-        );
-    }
+    return Effect.fail(new HandlerError({ cause: `Unknown skills message type: ${msg.type}` }));
   }
 
   // ─────────── Private mutation helpers ───────────

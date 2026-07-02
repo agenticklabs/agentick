@@ -829,6 +829,12 @@ export class AppHarness<P = unknown>
   // ──────── AppHarnessProtocol ────────
 
   createSession(input: CreateSessionInput<P> = {}): Promise<SessionHarnessProtocol<P>> {
+    // ADR 51 classification: createSession/runOnce inputs may carry a
+    // JSX rootElement + live extension objects — in-process-only by
+    // doctrine (§1.2). The wire reaches these via the app/* porcelain
+    // methods. close-app is serializable (no input) and is a declared-
+    // command candidate; its exposure is a verb-matrix decision
+    // (remote shutdown is powerful) — deferred with slice 5.
     const op: Operation<CreateSessionInput<P>, SessionHarnessProtocol<P>> = {
       opId: `app:create-session:${ulid()}`,
       surface: "app",

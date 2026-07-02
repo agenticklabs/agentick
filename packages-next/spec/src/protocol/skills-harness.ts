@@ -197,17 +197,3 @@ export function isSkillsInstance(v: unknown): v is Skills {
     typeof obj.subscribeAll === "function"
   );
 }
-
-// ============================================================================
-// Inbox message catalog
-// ============================================================================
-
-/**
- * Typed inbox messages routed to a SkillsHarness instance. Cluster
- * peers, admin dashboards, sibling harnesses send these via
- * `inbox.send("skills:<scopeId>", { type, payload, messageId })`.
- */
-export type SkillsInboxMessage =
-  | { readonly type: "skills:register"; readonly payload: SkillsRegisterInput }
-  | { readonly type: "skills:update"; readonly payload: SkillsUpdateInput }
-  | { readonly type: "skills:remove"; readonly payload: SkillsRemoveInput };

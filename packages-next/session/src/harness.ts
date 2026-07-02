@@ -723,10 +723,22 @@ export class SessionHarness<P = unknown>
 
   // ──────── inbox dispatch ────────
 
-  // TODO(adr-51-wave): migrate this handleMessage switch + its hand-built
-  // Operation literals to declared commands (this.command()) — the
-  // timeline/state/knobs migrations are the reference pattern (switch
-  // deleted, registry routes identical message types, net-negative LOC).
+  // TODO(adr-51-session-verbs): session commands are NOT declared
+  // commands yet — and NOT mechanically migratable, for two recorded
+  // reasons (classified during the adr-51 wave):
+  //   1. Session's public commands (send/dispatch/queue/append) do not
+  //      run through `runOperation` at all today (the pre-existing gap
+  //      base-harness.ts §"commands don't currently go through
+  //      runOperation" notes). Declaring them is the fix, but:
+  //   2. `SendInput` carries non-serializable per-call overrides
+  //      (`executor`, `target`, `signal`, tool registrations with live
+  //      handlers) — by ADR 51 §1.2 those are in-process-only. An
+  //      ADDRESSABLE `session:send` needs a designed serializable
+  //      signal form (messages + maxTicks + stream — the subset the
+  //      wire's `session/send` porcelain already carries), same move
+  //      as `timeline:compact`'s signal form. `session:dispatch`
+  //      (name + JSON input) is fully serializable and is the easy
+  //      first declaration. Design rides the slice-5/verb-matrix pass.
   protected handleMessage(
     _msg: MessageEnvelope,
   ): Effect.Effect<unknown, MessageHandlerError, never> {

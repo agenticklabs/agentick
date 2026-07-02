@@ -6,8 +6,16 @@
  *   - Snapshot/restore via `SnapshotCapable` (declarations only —
  *     `template` and `render` aren't serializable; adopter
  *     re-registers content alongside snapshot load)
- *   - Inbox-addressable for cross-actor mutations + invocation
  *   - Substrate slot pattern inherited from BaseHarness
+ *
+ * **Invocation (ADR 51)** — every verb is a DECLARED COMMAND
+ * (constructor, `this.command()`): `prompts:register`, `prompts:update`,
+ * `prompts:remove`, `prompts:invoke`, and `prompts:get`. One canonical
+ * string per verb is simultaneously the inbox message type over
+ * `prompts:{scopeId}`, the op-name root, the authz scope label, and the
+ * (matrix-gated) wire method name. Cross-boundary payloads carry
+ * serializable declarations only (`template` as data); the optional
+ * `render` fn is an in-process convenience that never travels.
  *
  * Renderer dispatch:
  *   - `string` content → `stringToSystemMessage` (built-in)
@@ -22,18 +30,18 @@
  * tests, doc generators).
  *
  * @see docs/proposals/v2/blueprint/32-extension-shape-spectrum.md
+ * @see docs/proposals/v2/blueprint/51-invocation-and-authorization.md
  * @see packages-next/spec/src/protocol/prompts-harness.ts
  */
 
 import { Effect } from "effect";
-import { BaseHarness, runHarnessProtocol, ulid, type Unsubscribe } from "@agentick/runtime-next";
+import { BaseHarness, type Unsubscribe } from "@agentick/runtime-next";
 import type {
   EventBus,
   MessageEntry,
   MessageEnvelope,
   MessageHandlerError,
   MessageInbox,
-  Operation,
   OperationJournal,
   PromptArgument,
   PromptDeclaration,
@@ -41,7 +49,6 @@ import type {
   PromptsGetInput,
   PromptsGetResult,
   PromptsHarnessProtocol,
-  PromptsInboxMessage,
   PromptsInvokeInput,
   PromptsRegisterInput,
   PromptsRemoveInput,
@@ -53,7 +60,6 @@ import type {
 } from "@agentick/spec-next";
 import {
   HandlerError,
-  InvalidPayload,
   PromptAlreadyExists,
   PromptArgumentInvalid,
   PromptArgumentMissing,
@@ -103,6 +109,23 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
   /** Cached snapshot for `list()`. Invalidated on every mutation. */
   private listCache: readonly PromptDeclaration[] | null = null;
 
+  /**
+   * Declared commands (ADR 51) — pure layer logic in the bodies; the
+   * registry owns construction, inbox routing, and enumeration.
+   *
+   * `invoke` renders + queues onto the session timeline (via
+   * `bridges.timeline.queue`, same channel as explicit user input);
+   * `get` renders without queueing (MCP `prompts/get`, snapshot tests,
+   * doc generators). Both perform lookup-on-miss against configured
+   * loaders inside the command body, so inbox-delivered invocations
+   * resolve lazily exactly like in-process calls.
+   */
+  readonly register: (input: PromptsRegisterInput) => Promise<PromptDeclaration>;
+  readonly update: (input: PromptsUpdateInput) => Promise<PromptDeclaration>;
+  readonly remove: (input: PromptsRemoveInput) => Promise<void>;
+  readonly invoke: (input: PromptsInvokeInput) => Promise<PromptsGetResult>;
+  readonly get: (input: PromptsGetInput) => Promise<PromptsGetResult>;
+
   get id(): string {
     return this.scopeId;
   }
@@ -117,6 +140,45 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
     super(SURFACE, scopeId, journal, bus, inbox);
     this.renderers = options.renderers ?? [];
     this.timeline = options.timeline;
+
+    // ─── Declared commands (ADR 51) — the single declaration site per
+    // verb. Inbox message types, canonical op naming, and enumeration
+    // all derive from these; the pre-registry `handleMessage` switch is
+    // gone. Payloads carried no validation before the registry; schemas
+    // stay off for parity. The optional `render` fn on register/update
+    // declarations is in-process-only convenience (ADR 51 §1.2 excludes
+    // ops with REQUIRED function parameters; the addressable form
+    // carries `template` data — same precedent as `knobs:register`'s
+    // optional `validate`).
+    const scope = () => ({ sessionId: this.scopeId });
+    this.register = this.command({
+      name: "prompts:register",
+      scope,
+      handler: (i: PromptsRegisterInput) => this.applyRegister(i),
+    });
+    this.update = this.command({
+      name: "prompts:update",
+      scope,
+      handler: (i: PromptsUpdateInput) => this.applyUpdate(i),
+    });
+    this.remove = this.command({
+      name: "prompts:remove",
+      scope,
+      handler: (i: PromptsRemoveInput) =>
+        Effect.sync(() => {
+          this.applyRemove(i);
+        }),
+    });
+    this.invoke = this.command({
+      name: "prompts:invoke",
+      scope,
+      handler: (i: PromptsInvokeInput) => this.applyInvoke(i),
+    });
+    this.get = this.command({
+      name: "prompts:get",
+      scope,
+      handler: (i: PromptsGetInput) => this.applyGet(i),
+    });
   }
 
   /**
@@ -243,78 +305,6 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
     return this.notifier.subscribeAll(listener);
   }
 
-  // ─────────── Async surface ───────────
-
-  register(input: PromptsRegisterInput): Promise<PromptDeclaration> {
-    const op: Operation<PromptsRegisterInput, PromptDeclaration, PromptsError> = {
-      opId: `prompts:register:${ulid()}`,
-      surface: SURFACE,
-      name: "prompts:command:register",
-      scope: { sessionId: this.scopeId },
-      input,
-    };
-    return runHarnessProtocol(this.runOperation(op, (i) => this.applyRegister(i)));
-  }
-
-  update(input: PromptsUpdateInput): Promise<PromptDeclaration> {
-    const op: Operation<PromptsUpdateInput, PromptDeclaration, PromptsError> = {
-      opId: `prompts:update:${ulid()}`,
-      surface: SURFACE,
-      name: "prompts:command:update",
-      scope: { sessionId: this.scopeId },
-      input,
-    };
-    return runHarnessProtocol(this.runOperation(op, (i) => this.applyUpdate(i)));
-  }
-
-  remove(input: PromptsRemoveInput): Promise<void> {
-    const op: Operation<PromptsRemoveInput, void, never> = {
-      opId: `prompts:remove:${ulid()}`,
-      surface: SURFACE,
-      name: "prompts:command:remove",
-      scope: { sessionId: this.scopeId },
-      input,
-    };
-    return runHarnessProtocol(
-      this.runOperation(op, (i) =>
-        Effect.sync(() => {
-          this.applyRemove(i);
-        }),
-      ),
-    );
-  }
-
-  async invoke(input: PromptsInvokeInput): Promise<PromptsGetResult> {
-    // Lookup-on-miss: if the name isn't yet registered, ask configured
-    // loaders. On hit, the prompt is registered + invoke proceeds; on
-    // miss, the existing path throws `PromptNotFound`.
-    if (!this.prompts.has(input.name) && this.loaders.length > 0) {
-      await this.resolve(input.name);
-    }
-    const op: Operation<PromptsInvokeInput, PromptsGetResult, PromptsError> = {
-      opId: `prompts:invoke:${ulid()}`,
-      surface: SURFACE,
-      name: "prompts:command:invoke",
-      scope: { sessionId: this.scopeId },
-      input,
-    };
-    return runHarnessProtocol(this.runOperation(op, (i) => this.applyInvoke(i)));
-  }
-
-  async get(input: PromptsGetInput): Promise<PromptsGetResult> {
-    if (!this.prompts.has(input.name) && this.loaders.length > 0) {
-      await this.resolve(input.name);
-    }
-    const op: Operation<PromptsGetInput, PromptsGetResult, PromptsError> = {
-      opId: `prompts:get:${ulid()}`,
-      surface: SURFACE,
-      name: "prompts:command:get",
-      scope: { sessionId: this.scopeId },
-      input,
-    };
-    return runHarnessProtocol(this.runOperation(op, (i) => this.applyGet(i)));
-  }
-
   // ─────────── Snapshot / restore ───────────
 
   exportSnapshot(): Readonly<Record<string, PromptsSnapshotEntry>> {
@@ -346,44 +336,17 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
     this.notifier.notifyAll();
   }
 
-  // ─────────── Inbox handler ───────────
+  // ─────────── Inbox routing ───────────
 
-  // TODO(adr-51-wave): migrate this handleMessage switch + its hand-built
-  // Operation literals to declared commands (this.command()) — the
-  // timeline/state/knobs migrations are the reference pattern (switch
-  // deleted, registry routes identical message types, net-negative LOC).
+  /**
+   * `prompts:register/update/remove/invoke/get` are declared commands —
+   * routed by the BaseHarness command registry before this fallthrough.
+   * Only unknown types land here.
+   */
   protected handleMessage(
     msg: MessageEnvelope,
   ): Effect.Effect<unknown, MessageHandlerError, never> {
-    const inbound = { type: msg.type, payload: msg.payload } as PromptsInboxMessage;
-    switch (inbound.type) {
-      case "prompts:register":
-        return Effect.tryPromise({
-          try: () => this.register(inbound.payload),
-          catch: (cause): MessageHandlerError => new HandlerError({ cause }),
-        });
-      case "prompts:update":
-        return Effect.tryPromise({
-          try: () => this.update(inbound.payload),
-          catch: (cause): MessageHandlerError => new HandlerError({ cause }),
-        });
-      case "prompts:remove":
-        return Effect.tryPromise({
-          try: () => this.remove(inbound.payload),
-          catch: (cause): MessageHandlerError => new HandlerError({ cause }),
-        });
-      case "prompts:invoke":
-        return Effect.tryPromise({
-          try: () => this.invoke(inbound.payload),
-          catch: (cause): MessageHandlerError => new HandlerError({ cause }),
-        });
-      default:
-        return Effect.fail(
-          new InvalidPayload({
-            reason: `Unknown prompts inbox message type: ${msg.type}`,
-          }),
-        );
-    }
+    return Effect.fail(new HandlerError({ cause: `Unknown prompts message type: ${msg.type}` }));
   }
 
   // ─────────── Private mutation + invoke ───────────
@@ -437,6 +400,13 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
   ): Effect.Effect<PromptsGetResult, PromptsError, never> {
     return Effect.tryPromise({
       try: async () => {
+        // Lookup-on-miss: if the name isn't yet registered, ask
+        // configured loaders. On hit, the prompt is registered (a
+        // nested `prompts:register` command) + invoke proceeds; on
+        // miss, `renderToMessages` throws `PromptNotFound`.
+        if (!this.prompts.has(input.name) && this.loaders.length > 0) {
+          await this.resolve(input.name);
+        }
         const result = await this.renderToMessages(input.name, input.args);
         // Queue the rendered messages onto the session timeline so
         // they drain into the durable timeline on the next send. When
@@ -460,7 +430,13 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
 
   private applyGet(input: PromptsGetInput): Effect.Effect<PromptsGetResult, PromptsError, never> {
     return Effect.tryPromise({
-      try: () => this.renderToMessages(input.name, input.args),
+      try: async () => {
+        // Same lookup-on-miss path as `applyInvoke`.
+        if (!this.prompts.has(input.name) && this.loaders.length > 0) {
+          await this.resolve(input.name);
+        }
+        return this.renderToMessages(input.name, input.args);
+      },
       catch: (cause): PromptsError =>
         isPromptsError(cause) ? cause : new PromptsBackendError({ cause }),
     });

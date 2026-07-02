@@ -98,6 +98,11 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
   // ──────── LoopExecutorProtocol ────────
 
   runExecution(input: RunExecutionInput): Promise<ExecutionTerminal> {
+    // ADR 51 classification: NOT a declarable command — the input
+    // carries live object refs (reconciler, executor, toolExecutor,
+    // stateApplicator callbacks, onEvent) and is in-process-only by
+    // doctrine (§1.2). The addressable execution surface is the
+    // session's (see session harness TODO(adr-51-session-verbs)).
     const op: Operation<RunExecutionInput, ExecutionTerminal> = {
       opId: `loop:execution:${input.executionId}`,
       surface: "loop",
