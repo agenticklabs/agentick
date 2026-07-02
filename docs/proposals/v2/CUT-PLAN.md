@@ -47,6 +47,23 @@ v2.0-cut-day mechanical sweeps, done LAST); ADR 44 depless reconciler; any
 ALS-first context design (ALS is v1; v2 is Effect fibers with the narrow
 dual-write bridge ADR 45 specifies).
 
+**Tracking (2026-07-03 onward):** live state lives on the GitHub project
+[**agentick v2.0 cut**](https://github.com/users/agenticklabs/projects/2)
+(issues #132–#167 seeded from this plan + the ADR 51/52 track). Division
+of authority: the **board** answers what's next / in flight / gated;
+**STATUS.md** stays the narrative log (why / how it went); this plan and
+the ADRs are the map and the design — they link to issues and never
+track them (no more markdown task lists). Working conventions: every
+deferred concern from a retro becomes an issue at creation time; in-code
+markers cite real issue numbers going forward; ⛔-gated items don't
+leave the Design column without Ryan; commits reference their issue;
+Done requires landed + STATUS entry. **Number disclaimer:** `#NNN`
+references in docs/commits dated BEFORE 2026-07-03 are legacy
+conversational ids from the build sessions, NOT issue numbers — the
+ranges collide (e.g. legacy #152 = MCP connection pool → issue #148;
+issue #152 = standalone generate helpers). Issue bodies carry
+`Legacy id:` annotations where one existed.
+
 ---
 
 ## 1. Grounding: who this is for
