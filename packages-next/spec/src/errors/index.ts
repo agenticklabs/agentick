@@ -90,6 +90,7 @@ export {
   AlreadyMounted,
   BridgeUnavailable,
   CompactHandlerFailed,
+  CompactStrategyMissing,
   CredentialsBackendUnavailable,
   CredentialsCorrupted,
   CredentialsError,

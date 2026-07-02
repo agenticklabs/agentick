@@ -16,12 +16,32 @@
  * by passing a configured variant in `AppHarnessOptions.extensions`.
  */
 
-import type { SessionExtension, SessionInstaller, TimelineEntry } from "@agentick/spec-next";
+import type {
+  CompactStrategy,
+  SessionExtension,
+  SessionInstaller,
+  TimelineEntry,
+} from "@agentick/spec-next";
 import { TimelineHarness } from "./harness.js";
+import type { TimelineStore } from "./store.js";
 
 export interface WithTimelineOptions {
-  /** Initial persisted entries seeded at construction. */
+  /**
+   * Initial persisted entries seeded at construction. Ignored when a
+   * `store` is supplied — the durable log is the authority and is
+   * hydrated instead (ADR 49 open-or-rehydrate).
+   */
   readonly initial?: readonly TimelineEntry[];
+  /** Durable append-log adapter for the persisted tier (ADR 49). */
+  readonly store?: TimelineStore;
+  /** `"behind"` (default; write-behind pump + flush barrier) | `"through"`. */
+  readonly writePolicy?: "behind" | "through";
+  /**
+   * Construction-bound default compaction strategy (ADR 51 signal
+   * form) — `timeline.compact()` with no argument, including a bare
+   * `timeline:compact` verb over the inbox, runs it.
+   */
+  readonly compact?: CompactStrategy;
 }
 
 export function withTimeline(options: WithTimelineOptions = {}): SessionExtension {
@@ -34,10 +54,18 @@ export function withTimeline(options: WithTimelineOptions = {}): SessionExtensio
         installer.substrate.journal,
         installer.substrate.bus,
         installer.substrate.inbox,
+        {
+          ...(options.store !== undefined ? { store: options.store } : {}),
+          ...(options.writePolicy !== undefined ? { writePolicy: options.writePolicy } : {}),
+          ...(options.compact !== undefined ? { compact: options.compact } : {}),
+        },
       );
       await harness.ready;
 
-      if (options.initial && options.initial.length > 0) {
+      if (options.store !== undefined) {
+        // Open-or-rehydrate (ADR 49): the durable log is the authority.
+        await harness.hydrate();
+      } else if (options.initial && options.initial.length > 0) {
         await harness.importSnapshot(
           {
             persisted: options.initial,

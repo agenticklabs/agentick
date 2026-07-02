@@ -66,6 +66,7 @@ import type {
 } from "@agentick/spec-next";
 import {
   CompactHandlerFailed,
+  CompactStrategyMissing,
   HandlerError,
   RehydrateStrategyMissing,
   TimelineWriteFailed,
@@ -93,6 +94,15 @@ export interface TimelineHarnessOptions extends BaseHarnessOptions {
    *     demand zero loss at the cost of per-append latency.
    */
   readonly writePolicy?: "behind" | "through";
+  /**
+   * Construction-bound default compaction strategy (ADR 51 signal-form
+   * rule). With a default configured, `compact()` — the no-arg signal
+   * form, the one that can cross the inbox/wire as a bare verb — runs
+   * this strategy. An explicit `compact(strategy)` call-site argument
+   * overrides it (inner-scope-wins, in-process only: strategies are
+   * executable configuration and never travel).
+   */
+  readonly compact?: CompactStrategy;
 }
 
 type TimelineInboxMessage =
@@ -136,6 +146,8 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
    * durability failure is observed.
    */
   private pumpError: unknown = null;
+  /** Construction-bound default compaction strategy (ADR 51 signal form). */
+  private readonly defaultCompact?: CompactStrategy;
 
   get id(): string {
     return this.scopeId;
@@ -151,6 +163,7 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
     super("timeline", scopeId, journal, bus, inbox, options);
     this.store = options.store ?? new MemoryTimelineStore();
     this.writePolicy = options.writePolicy ?? "behind";
+    this.defaultCompact = options.compact;
     // Drain buffered write-behind entries before the harness tears down —
     // ADR 49: session close() awaits the flush barrier.
     this.onClose(() => this.flush());
@@ -324,14 +337,21 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
     }
   }
 
-  compact(strategy: CompactStrategy): Promise<CompactResult> {
-    const source: "persisted" | "projection" = strategy.source ?? "persisted";
+  compact(strategy?: CompactStrategy): Promise<CompactResult> {
+    // Signal form (ADR 51): no-arg resolves the construction-bound
+    // default; the explicit call-site argument overrides it
+    // (inner-scope-wins, in-process only — strategies never travel).
+    const resolved = strategy ?? this.defaultCompact;
+    if (resolved === undefined) {
+      return Promise.reject(new CompactStrategyMissing());
+    }
+    const source: "persisted" | "projection" = resolved.source ?? "persisted";
     const op: Operation<CompactStrategy, CompactResult, CompactHandlerFailed> = {
       opId: `timeline:compact:${ulid()}`,
       surface: "timeline",
       name: "timeline:command:compact",
       scope: { sessionId: this.scopeId },
-      input: strategy,
+      input: resolved,
     };
     return runHarnessProtocol(
       this.runOperation(op, (s) =>

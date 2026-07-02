@@ -22,7 +22,7 @@ import { ElicitationHarness } from "@agentick/elicitation-next";
 import { KnobsHarness } from "@agentick/knobs-next";
 import { StateHarness } from "@agentick/state-next";
 import { TasksHarness } from "@agentick/tasks-next";
-import { TimelineHarness } from "@agentick/timeline-next";
+import { TimelineHarness, type TimelineHarnessOptions } from "@agentick/timeline-next";
 import type {
   ElicitationHarnessProtocol,
   EventBus,
@@ -101,6 +101,12 @@ export interface BuildSessionBridgesOptions {
    * is constructed on the substrate.
    */
   readonly tasks?: TasksHarnessProtocol;
+  /**
+   * Timeline durability + policy slots (ADR 49 / A2.2) — shared store
+   * adapter, write policy, construction-bound default compaction
+   * strategy. Threaded from `SessionHarnessOptions.timeline`.
+   */
+  readonly timeline?: Pick<TimelineHarnessOptions, "store" | "writePolicy" | "compact">;
 }
 
 export function buildSessionBridges(
@@ -118,6 +124,9 @@ export function buildSessionBridges(
     substrate.journal,
     substrate.bus,
     substrate.inbox,
+    // Durability + policy slots (ADR 49 / A2.2): shared store adapter,
+    // write policy, construction-bound default compaction strategy.
+    options.timeline ?? {},
   );
   const knobs = new KnobsHarness(
     `${store.id}:knobs`,

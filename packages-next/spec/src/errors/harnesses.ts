@@ -365,7 +365,27 @@ export class RehydrateStrategyMissing extends TimelineError {
 }
 registerAgentickError("RehydrateStrategyMissing", RehydrateStrategyMissing);
 
-export type TimelineErrorChannel = CompactHandlerFailed | RehydrateStrategyMissing;
+/**
+ * `compact()` was invoked with no strategy argument and no
+ * construction-bound default (`TimelineHarnessOptions.compact` /
+ * `withTimeline({ compact })`). The no-arg signal form (ADR 51 — the
+ * form that crosses the inbox/wire) requires a configured default.
+ */
+export class CompactStrategyMissing extends TimelineError {
+  readonly _tag = "CompactStrategyMissing" as const;
+  constructor() {
+    super(
+      "compact() requires a strategy: none supplied and no construction-bound default is configured (withTimeline({ compact }))",
+      {},
+    );
+  }
+}
+registerAgentickError("CompactStrategyMissing", CompactStrategyMissing);
+
+export type TimelineErrorChannel =
+  | CompactHandlerFailed
+  | RehydrateStrategyMissing
+  | CompactStrategyMissing;
 
 // ============================================================================
 // ToolExecutorError — tool dispatch failures

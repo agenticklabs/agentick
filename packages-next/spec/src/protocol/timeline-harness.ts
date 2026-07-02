@@ -326,9 +326,17 @@ export interface TimelineHarnessProtocol extends SnapshotCapable<TimelineHarness
    * output; subscribers fire; `lastCompaction` metadata records the
    * strategy's `metadata` for snapshot fidelity.
    *
+   * No-arg is the **signal form** (ADR 51): it runs the
+   * construction-bound default strategy (`withTimeline({ compact })`)
+   * — the form that can cross the inbox/wire as a bare verb, because
+   * it carries no executable configuration. The explicit argument is
+   * the in-process override (inner-scope-wins at the call site).
+   *
    * @throws {TimelineError._tag === "CompactHandlerFailed"}
+   * @throws {TimelineError._tag === "CompactStrategyMissing"} — no-arg
+   *   call with no construction-bound default configured.
    */
-  compact(strategy: CompactStrategy): Promise<CompactResult>;
+  compact(strategy?: CompactStrategy): Promise<CompactResult>;
 
   /**
    * Overwrite the projection with the supplied entries. The log is

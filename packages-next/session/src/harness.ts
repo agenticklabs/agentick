@@ -69,7 +69,7 @@ import { buildSessionElicit } from "@agentick/elicitation-next";
 import { withScope } from "@agentick/tool-executor-next";
 import type { KnobsHandle } from "@agentick/knobs-next";
 import type { StateHandle } from "@agentick/state-next";
-import type { TimelineHandle } from "@agentick/timeline-next";
+import type { TimelineHandle, TimelineHarnessOptions } from "@agentick/timeline-next";
 
 import { buildSessionBridges, type SessionHookBridges } from "./session-bridges.js";
 import { SessionStateStore } from "./session-state.js";
@@ -118,6 +118,22 @@ export interface SessionHarnessOptions<P = unknown> {
   readonly bus?: EventBus | EventBusFactory<SessionSubstrateParent>;
   readonly inbox?: MessageInbox | MessageInboxFactory<SessionSubstrateParent>;
   readonly journal?: OperationJournal | OperationJournalFactory<SessionSubstrateParent>;
+  /**
+   * Timeline durability + policy slots (ADR 49 / A2.2), threaded to the
+   * per-session `TimelineHarness`:
+   *   - `store` — the shared durable append-log adapter (one instance
+   *     serves all sessions, keyed by scope). Supplying it makes
+   *     session construction **open-or-rehydrate**: the persisted tier
+   *     is loaded from the store before first render.
+   *   - `writePolicy` — `"behind"` (default) | `"through"`.
+   *   - `compact` — the construction-bound default compaction strategy
+   *     (ADR 51 signal form): `timeline.compact()` with no argument —
+   *     including a bare `timeline:compact` verb over the inbox/wire —
+   *     runs it.
+   * Flows from `createApp({ session: { timeline } })` via
+   * SessionDefaults.
+   */
+  readonly timeline?: Pick<TimelineHarnessOptions, "store" | "writePolicy" | "compact">;
   /**
    * Adopter-defined metadata bag carried on the session and exposed
    * to substrate factories via `parent.metadata`. Framework defines
@@ -290,6 +306,7 @@ export class SessionHarness<P = unknown>
           extensionBridges: options.extensionBridges,
           elicitation: options.elicitation,
           tasks: options.tasks,
+          timeline: options.timeline,
         }),
       },
     );
@@ -312,17 +329,29 @@ export class SessionHarness<P = unknown>
     this.defaultStreaming = options.defaultStreaming;
     this.mountId = `mount:${options.sessionId}`;
 
+    // Open-or-rehydrate (ADR 49 §Hydration): when a durable store was
+    // injected, load the session's persisted log into the timeline
+    // BEFORE first render — the mount's first render must see the
+    // resumed conversation, and Class B state reconstructs from it.
+    // Without an injected store there is nothing durable to load
+    // (the bundled in-memory default is empty per-construction) and
+    // the chain is a resolved promise — zero-cost hot path.
+    const hydrated: Promise<void> =
+      options.timeline?.store !== undefined ? this.bridges.timeline.hydrate() : Promise.resolve();
+
     // Eagerly mount — the reconciler exposes `.ready` for its own
     // inbox registration; our mount is awaited via `_mountReady`. The
     // element type is opaque here — `MountInput.element: unknown` in
     // the spec — and the bound reconciler impl interprets it.
-    this._mountReady = this.reconciler
-      .mount({
-        mountId: this.mountId,
-        sessionId: options.sessionId,
-        element: options.agent,
-        bridges: this.bridges,
-      })
+    this._mountReady = hydrated
+      .then(() =>
+        this.reconciler.mount({
+          mountId: this.mountId,
+          sessionId: options.sessionId,
+          element: options.agent,
+          bridges: this.bridges,
+        }),
+      )
       .then(() => {});
   }
 
@@ -753,6 +782,11 @@ export class SessionHarness<P = unknown>
 
     // Set up the handle + emit chain BEFORE running the loop so the
     // loop can pump events into it from the first tick.
+    // `durabilityFailed` latches when the ADR 49 flush barrier below
+    // surfaces a store-write failure — the session has diverged from
+    // its durable log and must land on "failed", not "idle" (the
+    // `.finally` runs after our reject and would otherwise clobber it).
+    let durabilityFailed = false;
     const resultDeferred = {} as { resolve: (r: SendResult) => void; reject: (e: unknown) => void };
     const resultPromise = new Promise<SendResult>((resolve, reject) => {
       resultDeferred.resolve = resolve;
@@ -760,7 +794,7 @@ export class SessionHarness<P = unknown>
     }).finally(() => {
       this._currentExecution = null;
       this.store.setCurrentExecutionId(null);
-      this.store.setStatus("idle");
+      this.store.setStatus(durabilityFailed ? "failed" : "idle");
     });
     resultPromise.catch(() => {
       // Prevent unhandled rejections — handle has its own .result.
@@ -811,7 +845,21 @@ export class SessionHarness<P = unknown>
     // Resolve the result promise + emit the final `result` StreamEvent
     // when the loop terminates. Iterator closes after the result event.
     void runPromise.then(
-      (terminal) => {
+      async (terminal) => {
+        // ADR 49 flush barrier — execution end. Invariant: any process
+        // that subsequently loads the store sees every completed
+        // execution. A buffered store-write failure is a durability
+        // divergence: fail the send with the typed TimelineWriteFailed
+        // (catchTag-able) and land the session on "failed" status —
+        // it must not keep running against a log its store doesn't have.
+        try {
+          await this.bridges.timeline.flush();
+        } catch (err) {
+          durabilityFailed = true;
+          resultDeferred.reject(err);
+          close();
+          return;
+        }
         const result = terminal.result;
         if (terminal.outcome === "succeeded" && result) {
           const response = result.output
@@ -836,7 +884,16 @@ export class SessionHarness<P = unknown>
         }
         close();
       },
-      (err) => {
+      async (err) => {
+        // The execution error wins as the rejection reason; the barrier
+        // still runs so a completed-but-unflushed prefix lands in the
+        // store (best-effort — a flush failure here latches "failed"
+        // status but does not mask the execution error).
+        try {
+          await this.bridges.timeline.flush();
+        } catch {
+          durabilityFailed = true;
+        }
         resultDeferred.reject(err);
         close();
       },
