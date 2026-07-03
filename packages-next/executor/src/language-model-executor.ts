@@ -1,13 +1,12 @@
 /**
- * `BaseLanguageModelExecutor<TRaw>` — abstract intermediate class for
- * first-party provider executors.
+ * `LanguageModelExecutor<TRaw, TChunk>` — THE executor harness (ADR 52).
  *
- * Sits between `BaseHarness<"executor">` (substrate phase contract,
- * FiberRef scope, OTel spans, lazy delta emission) and the concrete
- * provider impls (`OpenAIExecutor`, `AnthropicExecutor`,
- * `GoogleExecutor`, `AISDKExecutor`, plus any third-party adopter
- * provider). Owns ~500 LOC of framework scaffolding that was duplicated
- * across the four shipped providers:
+ * One final class: `BaseHarness<"executor">` (substrate phase contract,
+ * FiberRef scope, OTel spans, lazy delta emission) plus the entire
+ * execution engine, consuming a `LanguageModelAdapter` part for
+ * provider normalization. There is no subclass tier — providers ship
+ * adapters (`openai(...)`, `google(...)`, `anthropic(...)`), not
+ * executor classes. This class owns everything Effect:
  *
  *   - `project` / `execute` / `executeStream` / `normalize` / `run` /
  *     `abort` envelope shapes + Operation construction
@@ -17,23 +16,16 @@
  *     plumbing
  *   - The `runBody` skeleton (project → execute → postProcess →
  *     normalize → terminal wrap)
- *   - Default `projectImpl` (canonical RenderedTree fold)
- *   - Default `mapProviderError` + `isAbortError`
- *   - Default `handleMessage` stub
+ *   - Default projection (canonical RenderedTree fold), default
+ *     `mapProviderError` / `isAbortError` — each overridable by the
+ *     adapter's optional hooks
  *
- * Subclasses fill in provider-specific hooks: `buildParams`,
- * `callProvider`, `drainStream`, `normalizeRaw`, plus optional
- * `postProcessForNormalize` for tag-router-style mutations and
- * `isAbortError` for SDKs that throw non-standard abort error types.
+ * The adapter fills in provider specifics: `buildParams`, `call`,
+ * `openStream`, `mapChunk`, `reconstructRaw`, `normalize`, plus the
+ * optional quirk hooks (`postProcessForNormalize`, `adapterTransforms`,
+ * `isAbortError`, ...). See `language-model-adapter.ts`.
  *
- * Adopters writing a one-off model integration should use the
- * callback-style `defineExecutor` factory instead — that surface is
- * shaped for the simple case (single async `run` callback returning
- * the normalized result). This base is for adapters that need to
- * preserve the raw provider response type for telemetry / replay /
- * provider-specific introspection.
- *
- * @see docs/proposals/v2/blueprint/06-executor-harness.md
+ * @see docs/proposals/v2/blueprint/52-executors-and-model-adapters.md
  */
 
 import { omitUndefined } from "@agentick/utils-next";
@@ -181,7 +173,10 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
     return this.adapter.call(params, signal);
   }
 
-  private openStream(params: unknown, signal: AbortSignal | undefined): AsyncIterable<TChunk> {
+  private openStream(
+    params: unknown,
+    signal: AbortSignal | undefined,
+  ): AsyncIterable<TChunk> | Promise<AsyncIterable<TChunk>> {
     return this.adapter.openStream(params, signal);
   }
 

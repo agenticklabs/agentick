@@ -1,9 +1,9 @@
 /**
  * Test-only stub for the `openai` SDK's `Chat.Completions.create()`.
  *
- * The real adapter is dependency-injected via `OpenAIExecutorOptions.client`,
+ * The real adapter is dependency-injected via `OpenAIAdapterOptions.client`,
  * so unit tests don't need the network or `undici.MockAgent`. The stub
- * implements only the shape `OpenAIExecutor` consumes: `chat.completions.create`.
+ * implements only the shape the `openai()` adapter consumes: `chat.completions.create`.
  *
  * Each invocation pulls the next "canned response" from the configured
  * sequence. Responses can be:
@@ -118,7 +118,7 @@ function iterableFrom<T>(items: ReadonlyArray<T>): AsyncIterable<T> {
 
 /**
  * Coerce the stub into the `OpenAI` type. The runtime shape is
- * intentionally minimal — `OpenAIExecutor` only touches
+ * intentionally minimal — the adapter only touches
  * `client.chat.completions.create`, so a structural cast is sound for
  * tests.
  */

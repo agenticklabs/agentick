@@ -1,5 +1,6 @@
 /**
- * Implementation-specific behavior for `OpenAIExecutor`.
+ * Implementation-specific behavior for the `openai()` adapter driven
+ * through `LanguageModelExecutor`.
  *
  * The conformance suite (`conformance.spec.ts`) drives the protocol
  * contract. These tests assert OpenAI-specific behavior — message
@@ -15,7 +16,9 @@ import { describe, expect, it } from "vitest";
 import type { LanguageModelTarget, RenderedTree } from "@agentick/spec-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 
-import { OpenAIExecutor } from "../openai-executor.js";
+import { LanguageModelExecutor } from "@agentick/executor-next";
+
+import { openai } from "../openai-adapter.js";
 import {
   StubOpenAIClient,
   asClient,
@@ -46,16 +49,17 @@ async function makeExecutor(
   const journal = new MemoryJournal();
   const bus = new LocalEventBus();
   const inbox = new LocalInbox();
-  const exec = new OpenAIExecutor("exec-openai-test", journal, bus, inbox, {
-    client: asClient(stub),
-    model: opts.model ?? "gpt-4o-mini",
-    ...omitUndefined({ stream: opts.stream }),
+  const exec = new LanguageModelExecutor("exec-openai-test", journal, bus, inbox, {
+    adapter: openai(opts.model ?? "gpt-4o-mini", {
+      client: asClient(stub),
+      ...omitUndefined({ stream: opts.stream }),
+    }),
   });
   await exec.ready;
   return { exec, journal, bus, inbox };
 }
 
-describe("OpenAIExecutor — non-streaming", () => {
+describe("openai() adapter — non-streaming", () => {
   it("returns a succeeded terminal with normalized output", async () => {
     const stub = new StubOpenAIClient([
       { kind: "non-streaming", completion: mkCompletion({ text: "hello" }) },
@@ -72,7 +76,7 @@ describe("OpenAIExecutor — non-streaming", () => {
     expect(terminal.result.usage?.totalTokens).toBe(12);
   });
 
-  it("forwards the model id from constructor options", async () => {
+  it("forwards the model id from the factory argument", async () => {
     const stub = new StubOpenAIClient([
       { kind: "non-streaming", completion: mkCompletion({ text: "ok" }) },
     ]);
@@ -99,7 +103,7 @@ describe("OpenAIExecutor — non-streaming", () => {
   });
 });
 
-describe("OpenAIExecutor — tool-use round-trip", () => {
+describe("openai() adapter — tool-use round-trip", () => {
   it("extracts toolCalls and emits tool_use ContentBlocks", async () => {
     const stub = new StubOpenAIClient([
       {
@@ -190,7 +194,7 @@ describe("OpenAIExecutor — tool-use round-trip", () => {
   });
 });
 
-describe("OpenAIExecutor — abort", () => {
+describe("openai() adapter — abort", () => {
   it("abort flips the next run to outcome 'canceled'", async () => {
     const stub = new StubOpenAIClient([
       { kind: "non-streaming", completion: mkCompletion({ text: "x" }) },
@@ -208,7 +212,7 @@ describe("OpenAIExecutor — abort", () => {
   });
 });
 
-describe("OpenAIExecutor — streaming", () => {
+describe("openai() adapter — streaming", () => {
   it("emits one executor:delta envelope per content chunk", async () => {
     const stub = new StubOpenAIClient([
       {
@@ -249,7 +253,7 @@ describe("OpenAIExecutor — streaming", () => {
   });
 });
 
-describe("OpenAIExecutor — parseThinkTags preset", () => {
+describe("openai() adapter — parseThinkTags preset", () => {
   it("routes inline <think> blocks to reasoning on non-streaming response", async () => {
     const stub = new StubOpenAIClient([
       {
@@ -262,10 +266,11 @@ describe("OpenAIExecutor — parseThinkTags preset", () => {
     const journal = new MemoryJournal();
     const bus = new LocalEventBus();
     const inbox = new LocalInbox();
-    const exec = new OpenAIExecutor("exec-think-1", journal, bus, inbox, {
-      client: asClient(stub),
-      model: "gpt-4o-mini",
-      parseThinkTags: true,
+    const exec = new LanguageModelExecutor("exec-think-1", journal, bus, inbox, {
+      adapter: openai("gpt-4o-mini", {
+        client: asClient(stub),
+        parseThinkTags: true,
+      }),
     });
     await exec.ready;
 
@@ -305,10 +310,11 @@ describe("OpenAIExecutor — parseThinkTags preset", () => {
     const journal = new MemoryJournal();
     const bus = new LocalEventBus();
     const inbox = new LocalInbox();
-    const exec = new OpenAIExecutor("exec-think-2", journal, bus, inbox, {
-      client: asClient(stub),
-      model: "gpt-4o-mini",
-      parseThinkTags: true,
+    const exec = new LanguageModelExecutor("exec-think-2", journal, bus, inbox, {
+      adapter: openai("gpt-4o-mini", {
+        client: asClient(stub),
+        parseThinkTags: true,
+      }),
     });
     await exec.ready;
 
@@ -333,7 +339,7 @@ describe("OpenAIExecutor — parseThinkTags preset", () => {
   });
 });
 
-describe("OpenAIExecutor — customBlocks", () => {
+describe("openai() adapter — customBlocks", () => {
   it("extracts adopter-declared tags as custom-block deltas (streaming)", async () => {
     const stub = new StubOpenAIClient([
       {
@@ -352,10 +358,11 @@ describe("OpenAIExecutor — customBlocks", () => {
     const journal = new MemoryJournal();
     const bus = new LocalEventBus();
     const inbox = new LocalInbox();
-    const exec = new OpenAIExecutor("exec-cb-1", journal, bus, inbox, {
-      client: asClient(stub),
-      model: "gpt-4o-mini",
-      customBlocks: { citation: {} },
+    const exec = new LanguageModelExecutor("exec-cb-1", journal, bus, inbox, {
+      adapter: openai("gpt-4o-mini", {
+        client: asClient(stub),
+        customBlocks: { citation: {} },
+      }),
     });
     await exec.ready;
 
@@ -392,16 +399,17 @@ describe("OpenAIExecutor — customBlocks", () => {
     const bus = new LocalEventBus();
     const inbox = new LocalInbox();
     const captured: Array<{ content: string; attrs: Record<string, string> }> = [];
-    const exec = new OpenAIExecutor("exec-cb-2", journal, bus, inbox, {
-      client: asClient(stub),
-      model: "gpt-4o-mini",
-      customBlocks: {
-        citation: {
-          onContent(content, attrs) {
-            captured.push({ content, attrs: { ...attrs } });
+    const exec = new LanguageModelExecutor("exec-cb-2", journal, bus, inbox, {
+      adapter: openai("gpt-4o-mini", {
+        client: asClient(stub),
+        customBlocks: {
+          citation: {
+            onContent(content, attrs) {
+              captured.push({ content, attrs: { ...attrs } });
+            },
           },
         },
-      },
+      }),
     });
     await exec.ready;
 
@@ -425,11 +433,12 @@ describe("OpenAIExecutor — customBlocks", () => {
       captured.push(content);
     };
     const captured: string[] = [];
-    const exec = new OpenAIExecutor("exec-cb-3", journal, bus, inbox, {
-      client: asClient(stub),
-      model: "gpt-4o-mini",
-      parseThinkTags: true,
-      customBlocks: { citation: { onContent } },
+    const exec = new LanguageModelExecutor("exec-cb-3", journal, bus, inbox, {
+      adapter: openai("gpt-4o-mini", {
+        client: asClient(stub),
+        parseThinkTags: true,
+        customBlocks: { citation: { onContent } },
+      }),
     });
     await exec.ready;
 
@@ -454,7 +463,7 @@ describe("OpenAIExecutor — customBlocks", () => {
   });
 });
 
-describe("OpenAIExecutor — journaled lifecycle", () => {
+describe("openai() adapter — journaled lifecycle", () => {
   it("run produces requested + terminal envelopes on the journal", async () => {
     const stub = new StubOpenAIClient([
       { kind: "non-streaming", completion: mkCompletion({ text: "ok" }) },

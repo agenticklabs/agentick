@@ -1,5 +1,6 @@
 /**
- * Streaming hot-path benchmarks for `OpenAIExecutor`.
+ * Streaming hot-path benchmarks for `LanguageModelExecutor` + the
+ * `openai()` adapter.
  *
  * Baseline numbers gathered BEFORE any streaming-aggregation refactor.
  * Run with:
@@ -32,7 +33,9 @@ import type { ChatCompletionChunk } from "openai/resources/chat/completions";
 import type { LanguageModelTarget, RenderedTree } from "@agentick/spec-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 
-import { OpenAIExecutor } from "../openai-executor.js";
+import { LanguageModelExecutor } from "@agentick/executor-next";
+
+import { openai } from "../openai-adapter.js";
 import {
   StubOpenAIClient,
   asClient,
@@ -133,10 +136,8 @@ async function makeStreamingExecutor(
   const journal = new MemoryJournal({ capacity: 10_000_000 });
   const bus = new LocalEventBus(busOpts);
   const inbox = new LocalInbox();
-  const exec = new OpenAIExecutor("exec-bench-openai", journal, bus, inbox, {
-    client: asClient(stub),
-    model: "gpt-4o-mini",
-    stream: true,
+  const exec = new LanguageModelExecutor("exec-bench-openai", journal, bus, inbox, {
+    adapter: openai("gpt-4o-mini", { client: asClient(stub), stream: true }),
   });
   await exec.ready;
   return { exec, bus };
@@ -146,7 +147,7 @@ async function makeStreamingExecutor(
 // Scenario 1: 1000 text deltas, no bus subscriber.
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("OpenAIExecutor.run — 1000 text deltas (no subscriber)", () => {
+describe("openai() adapter run — 1000 text deltas (no subscriber)", () => {
   const chunks = buildTextStream(1000);
 
   bench(
@@ -163,7 +164,7 @@ describe("OpenAIExecutor.run — 1000 text deltas (no subscriber)", () => {
 // Scenario 2: 100 text deltas + 1 tool_call, no subscriber.
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("OpenAIExecutor.run — 100 text deltas + 1 tool_call (no subscriber)", () => {
+describe("openai() adapter run — 100 text deltas + 1 tool_call (no subscriber)", () => {
   const chunks = buildTextPlusToolStream(100);
 
   bench(
@@ -180,7 +181,7 @@ describe("OpenAIExecutor.run — 100 text deltas + 1 tool_call (no subscriber)",
 // Scenario 3: 100 text deltas, no bus subscriber (cross-adapter parity).
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("OpenAIExecutor.run — 100 text deltas (no subscriber)", () => {
+describe("openai() adapter run — 100 text deltas (no subscriber)", () => {
   const chunks = buildTextStream(100);
 
   bench(
@@ -197,11 +198,11 @@ describe("OpenAIExecutor.run — 100 text deltas (no subscriber)", () => {
 // Scenario 4: 100 text deltas, 1 subscriber draining `executor:delta`.
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("OpenAIExecutor.run — 100 text deltas (1 subscriber)", () => {
+describe("openai() adapter run — 100 text deltas (1 subscriber)", () => {
   const chunks = buildTextStream(100);
   let consumer: Fiber.RuntimeFiber<void, unknown> | undefined;
   let bus: LocalEventBus | undefined;
-  let exec: OpenAIExecutor | undefined;
+  let exec: LanguageModelExecutor | undefined;
 
   afterAll(async () => {
     if (consumer) await Effect.runPromise(Fiber.interrupt(consumer));
@@ -232,11 +233,11 @@ describe("OpenAIExecutor.run — 100 text deltas (1 subscriber)", () => {
 // the real executor hot path.
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("OpenAIExecutor.run — 100 deltas + 1 sub, batching OFF (Phase B baseline)", () => {
+describe("openai() adapter run — 100 deltas + 1 sub, batching OFF (Phase B baseline)", () => {
   const chunks = buildTextStream(100);
   let consumer: Fiber.RuntimeFiber<void, unknown> | undefined;
   let bus: LocalEventBus | undefined;
-  let exec: OpenAIExecutor | undefined;
+  let exec: LanguageModelExecutor | undefined;
 
   afterAll(async () => {
     if (consumer) await Effect.runPromise(Fiber.interrupt(consumer));
@@ -264,11 +265,11 @@ describe("OpenAIExecutor.run — 100 deltas + 1 sub, batching OFF (Phase B basel
 // Scenario 6 — Phase B A/B: 100 text deltas + 1 subscriber, batching ON.
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("OpenAIExecutor.run — 100 deltas + 1 sub, batching ON (Phase B default)", () => {
+describe("openai() adapter run — 100 deltas + 1 sub, batching ON (Phase B default)", () => {
   const chunks = buildTextStream(100);
   let consumer: Fiber.RuntimeFiber<void, unknown> | undefined;
   let bus: LocalEventBus | undefined;
-  let exec: OpenAIExecutor | undefined;
+  let exec: LanguageModelExecutor | undefined;
 
   afterAll(async () => {
     if (consumer) await Effect.runPromise(Fiber.interrupt(consumer));

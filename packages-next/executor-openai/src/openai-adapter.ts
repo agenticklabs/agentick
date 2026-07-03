@@ -1,27 +1,31 @@
 /**
- * `OpenAIExecutor` — `LanguageModelExecutor` backed by the OpenAI Chat
- * Completions API. The first real provider adapter for v2 (Phase 4c).
+ * `openai(model?, options?)` — the OpenAI `LanguageModelAdapter` (ADR 52).
  *
- * Inherits `BaseHarness<"executor">` for the substrate phase contract,
- * FiberRef-bound scope, OTel spans, and lazy delta emission. Translates
- * `LanguageModelInput` ↔ `ChatCompletionCreateParams` ↔
- * `LanguageModelExecutionResult` at the harness boundary.
+ * A plain Promise/AsyncIterable-shaped object implementing the
+ * provider-normalization part consumed by `LanguageModelExecutor`.
+ * Zero Effect, zero substrate — the executor harness owns
+ * orchestration; this factory owns exactly the OpenAI dialect:
  *
- * Behavior:
- *   - `project()` is identical in shape to `FakeLanguageModelExecutor` —
- *     folds rendered tree → canonical `LanguageModelInput`. Provider
- *     specifics happen later (inside `execute`).
- *   - `execute()` converts to OpenAI params, calls the SDK, returns the
- *     raw `ChatCompletion` (non-streaming) or accumulates chunks
- *     (streaming).
- *   - `normalize()` parses `ChatCompletion` → `LanguageModelExecutionResult`
- *     with stop-reason mapping and `toolCalls` extraction.
- *   - `run()` composes project → execute → normalize, with `executor:delta`
- *     envelopes emitted per streaming chunk via `emitDeltaLazy`.
- *   - `abort()` cancels in-flight requests through an internal
- *     `AbortController` registry.
+ *   - `buildParams` — canonical `LanguageModelInput` →
+ *     `ChatCompletionCreateParams` (+ providerOptions escape hatch).
+ *   - `call` / `openStream` — the SDK calls (non-streaming /
+ *     streaming with usage trailer).
+ *   - `mapChunk` — `ChatCompletionChunk` → typed `AdapterDelta`s,
+ *     deriving open-block state from the accumulator view and
+ *     stashing provider-private fields (id/created/finish_reason)
+ *     in `providerExtra`.
+ *   - `reconstructRaw` / `normalize` — synthesize the canonical
+ *     `ChatCompletion` from final stream state, then parse it into
+ *     `LanguageModelExecutionResult` with stop-reason mapping.
+ *   - Tag routing (`parseThinkTags`, `customBlocks`) via
+ *     `adapterTransforms` (streaming) + `postProcessForNormalize`
+ *     (non-streaming parity).
  *
- * @see docs/proposals/v2/blueprint/06-executor-harness.md
+ * ```ts
+ * const app = await createApp(<Agent />, { executor: openai("gpt-4o") });
+ * ```
+ *
+ * @see docs/proposals/v2/blueprint/52-executors-and-model-adapters.md
  */
 
 import { OpenAI, type ClientOptions } from "openai";
@@ -35,15 +39,14 @@ import type {
 import type { FunctionDefinition } from "openai/resources/shared";
 
 import {
-  BaseLanguageModelExecutor,
   type CustomBlockDefinition,
   type DeltaTransform,
-  type StreamAccumulator,
+  type LanguageModelAdapter,
+  type StreamAccumulatorView,
   StreamTagParser,
   type StreamTagHandler,
   thinkTagTransform,
 } from "@agentick/executor-next";
-import type { EventBus, MessageInbox, OperationJournal } from "@agentick/spec-next";
 import type {
   AdapterDelta,
   ContentBlock,
@@ -101,9 +104,7 @@ declare module "@agentick/spec-next" {
 // Construction options
 // ============================================================================
 
-export interface OpenAIExecutorOptions {
-  /** Default model id (e.g. `"gpt-4o"`). May be overridden per execution. */
-  readonly model?: string;
+export interface OpenAIAdapterOptions {
   /**
    * SDK client construction options — every field `openai`'s `OpenAI`
    * constructor accepts (apiKey, baseURL, organization, project,
@@ -194,12 +195,12 @@ const STOP_REASON_MAP: Record<string, LanguageModelStopReason> = {
 };
 
 // ============================================================================
-// OpenAIExecutor
+// openai() — the adapter factory
 // ============================================================================
 
 /**
- * Provider-private state OpenAIExecutor stashes on the
- * `StreamAccumulator.providerExtra` slot during `mapChunk`. Read back
+ * Provider-private state the adapter stashes on the
+ * `StreamAccumulatorView.providerExtra` slot during `mapChunk`. Read back
  * inside `reconstructRaw` to synthesize the canonical
  * `ChatCompletion`.
  */
@@ -211,214 +212,205 @@ interface OpenAIStreamState {
 
 const RESERVED_REASONING_BLOCK_INDEX = -1; // OpenAI emits reasoning BEFORE text (index 0).
 
-export class OpenAIExecutor extends BaseLanguageModelExecutor<ChatCompletion, ChatCompletionChunk> {
-  readonly target: ExecutionTarget;
+/**
+ * Construct the OpenAI `LanguageModelAdapter`. Pass it wherever an
+ * adapter is accepted — the app's `executor:` slot (wrapped in the ONE
+ * `LanguageModelExecutor`), `generate({ model: openai("gpt-4o"), ... })`,
+ * or a hand-constructed executor:
+ *
+ * ```ts
+ * new LanguageModelExecutor(scopeId, journal, bus, inbox, {
+ *   adapter: openai("gpt-4o", { parseThinkTags: true }),
+ * });
+ * ```
+ *
+ * The SDK client is constructed lazily on first use, so declaring the
+ * adapter in config does not require `OPENAI_API_KEY` to be present
+ * until a call actually happens (inject `options.client` to bypass).
+ */
+export function openai(
+  model?: string,
+  options: OpenAIAdapterOptions = {},
+): LanguageModelAdapter<ChatCompletion, ChatCompletionChunk> {
+  const defaultModel = model;
+  const parseThinkTags = options.parseThinkTags ?? false;
+  const customBlocks = options.customBlocks;
+  const target: ExecutionTarget = options.target ?? {
+    kind: "language-model",
+    provider: "openai",
+    modelId: model ?? "gpt-4o-mini",
+    capabilities: { supportsTools: true, supportsStreaming: true },
+  };
 
-  protected override readonly streamByDefault: boolean;
-  protected override readonly customBlocks:
-    | Readonly<Record<string, CustomBlockDefinition>>
-    | undefined;
+  let clientMemo: OpenAI | undefined = options.client;
+  const client = (): OpenAI => (clientMemo ??= new OpenAI(buildClientOptions(options)));
 
-  private readonly client: OpenAI;
-  private readonly defaultModel: string | undefined;
-  private readonly parseThinkTags: boolean;
+  return {
+    provider: "openai",
+    target,
+    streamByDefault: options.stream ?? false,
+    ...(customBlocks !== undefined ? { customBlocks } : {}),
 
-  constructor(
-    scopeId: string,
-    journal: OperationJournal,
-    bus: EventBus,
-    inbox: MessageInbox,
-    options: OpenAIExecutorOptions = {},
-  ) {
-    super(scopeId, journal, bus, inbox);
-    this.client = options.client ?? new OpenAI(buildClientOptions(options));
-    this.defaultModel = options.model;
-    this.streamByDefault = options.stream ?? false;
-    this.parseThinkTags = options.parseThinkTags ?? false;
-    this.customBlocks = options.customBlocks;
-    this.target = options.target ?? {
-      kind: "language-model",
-      provider: "openai",
-      modelId: options.model ?? "gpt-4o-mini",
-      capabilities: { supportsTools: true, supportsStreaming: true },
-    };
-  }
+    buildParams(input: LanguageModelInput, target: ExecutionTarget): ChatCompletionCreateParams {
+      return toOpenAIParams(input, target, defaultModel);
+    },
 
-  // ──────── Hooks (BaseLanguageModelExecutor) ────────
+    call(params: unknown, signal: AbortSignal | undefined): Promise<ChatCompletion> {
+      return client().chat.completions.create(
+        { ...(params as ChatCompletionCreateParams), stream: false },
+        { signal },
+      ) as unknown as Promise<ChatCompletion>;
+    },
 
-  protected buildParams(
-    input: LanguageModelInput,
-    target: ExecutionTarget,
-  ): ChatCompletionCreateParams {
-    return toOpenAIParams(input, target, this.defaultModel);
-  }
+    openStream(
+      params: unknown,
+      signal: AbortSignal | undefined,
+    ): Promise<AsyncIterable<ChatCompletionChunk>> {
+      const cp = params as ChatCompletionCreateParams;
+      return client().chat.completions.create(
+        { ...cp, stream: true, stream_options: { include_usage: true } },
+        { signal },
+      ) as unknown as Promise<AsyncIterable<ChatCompletionChunk>>;
+    },
 
-  protected callProvider(
-    params: unknown,
-    signal: AbortSignal | undefined,
-  ): Promise<ChatCompletion> {
-    return this.client.chat.completions.create(
-      { ...(params as ChatCompletionCreateParams), stream: false },
-      { signal },
-    ) as unknown as Promise<ChatCompletion>;
-  }
+    /**
+     * Pure chunk → deltas. State (which blocks are open, which tool
+     * calls have emitted -start) is derived from the accumulator;
+     * OpenAI-specific provider state (id, created, finish_reason) is
+     * stashed in `accum.providerExtra` for `reconstructRaw`.
+     */
+    mapChunk(chunk: ChatCompletionChunk, accum: StreamAccumulatorView): readonly AdapterDelta[] {
+      // Capture provider-private fields from the chunk.
+      const extra =
+        (accum.providerExtra as OpenAIStreamState | undefined) ??
+        ((accum.providerExtra = { id: "", created: 0, finishReason: null }),
+        accum.providerExtra as OpenAIStreamState);
+      if (chunk.id && !extra.id) extra.id = chunk.id;
+      if (chunk.created && !extra.created) extra.created = chunk.created;
+      if (chunk.choices?.[0]?.finish_reason) extra.finishReason = chunk.choices[0].finish_reason;
 
-  // ──────── Streaming hooks (BaseLanguageModelExecutor) ────────
+      // Reconstruct mapper state from accumulator: text block 0 open if
+      // we've seen any text-related events; tool blocks set per callId.
+      const textBlockStarted = accum.textByBlock.has(0);
+      const toolBlockStartedByIndex = new Set<number>();
+      for (const tc of accum.toolCalls.values()) toolBlockStartedByIndex.add(tc.blockIndex);
+      const reasoningBlockStarted = accum.reasoningByBlock.has(RESERVED_REASONING_BLOCK_INDEX);
 
-  protected async openStream(
-    params: unknown,
-    signal: AbortSignal,
-  ): Promise<AsyncIterable<ChatCompletionChunk>> {
-    const cp = params as ChatCompletionCreateParams;
-    return this.client.chat.completions.create(
-      { ...cp, stream: true, stream_options: { include_usage: true } },
-      { signal },
-    ) as unknown as Promise<AsyncIterable<ChatCompletionChunk>>;
-  }
+      return mapChunkToAdapterDeltas(chunk, {
+        textBlockStarted,
+        toolBlockStartedByIndex,
+        reasoningBlockStarted,
+        reasoningBlockIndex: RESERVED_REASONING_BLOCK_INDEX,
+      });
+    },
 
-  /**
-   * Pure chunk → deltas. State (which blocks are open, which tool
-   * calls have emitted -start) is derived from the accumulator; OpenAI-
-   * specific provider state (id, created, finish_reason) is stashed in
-   * `accum.providerExtra` for `reconstructRaw`.
-   */
-  protected mapChunk(
-    chunk: ChatCompletionChunk,
-    accum: StreamAccumulator,
-  ): readonly AdapterDelta[] {
-    // Capture provider-private fields from the chunk.
-    const extra =
-      (accum.providerExtra as OpenAIStreamState | undefined) ??
-      ((accum.providerExtra = { id: "", created: 0, finishReason: null }),
-      accum.providerExtra as OpenAIStreamState);
-    if (chunk.id && !extra.id) extra.id = chunk.id;
-    if (chunk.created && !extra.created) extra.created = chunk.created;
-    if (chunk.choices?.[0]?.finish_reason) extra.finishReason = chunk.choices[0].finish_reason;
+    /**
+     * Synthesize a `ChatCompletion` from the final accumulator state.
+     * Pulls text/reasoning/tool_calls from the accumulator; pulls
+     * id/created/finish_reason from the provider-private slot stashed
+     * during `mapChunk`. Usage comes from the accumulator's `usage`
+     * (populated by `message-end`'s usage carry — when the provider
+     * emits a usage-only trailer chunk, `mapChunk` translates it to a
+     * `usage` delta which the executor routes through finalizeStream).
+     */
+    reconstructRaw(accum: StreamAccumulatorView, modelSeen: string | undefined): ChatCompletion {
+      const extra = (accum.providerExtra as OpenAIStreamState | undefined) ?? {
+        id: "",
+        created: 0,
+        finishReason: null,
+      };
+      const text = accum.textByBlock.get(0) ?? "";
+      const reasoning = accum.reasoningByBlock.get(RESERVED_REASONING_BLOCK_INDEX) ?? "";
+      const toolCalls = Array.from(accum.toolCalls.values())
+        .sort((a, b) => a.blockIndex - b.blockIndex)
+        .map((tc) => ({
+          id: tc.callId,
+          type: "function" as const,
+          function: { name: tc.name, arguments: tc.argsBuffer },
+        }));
 
-    // Reconstruct mapper state from accumulator: text block 0 open if
-    // we've seen any text-related events; tool blocks set per callId.
-    const textBlockStarted = accum.textByBlock.has(0);
-    const toolBlockStartedByIndex = new Set<number>();
-    for (const tc of accum.toolCalls.values()) toolBlockStartedByIndex.add(tc.blockIndex);
-    const reasoningBlockStarted = accum.reasoningByBlock.has(RESERVED_REASONING_BLOCK_INDEX);
+      const message = {
+        role: "assistant" as const,
+        content: text.length > 0 ? text : null,
+        refusal: null,
+        ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
+        ...(reasoning.length > 0 ? { reasoning_content: reasoning } : {}),
+      } as ChatCompletion["choices"][0]["message"];
 
-    return mapChunkToAdapterDeltas(chunk, {
-      textBlockStarted,
-      toolBlockStartedByIndex,
-      reasoningBlockStarted,
-      reasoningBlockIndex: RESERVED_REASONING_BLOCK_INDEX,
-    });
-  }
-
-  /**
-   * Synthesize a `ChatCompletion` from the final accumulator state.
-   * Pulls text/reasoning/tool_calls from the accumulator; pulls
-   * id/created/finish_reason from the provider-private slot stashed
-   * during `mapChunk`. Usage comes from the accumulator's `usage`
-   * (populated by `message-end`'s usage carry — when the provider
-   * emits a usage-only trailer chunk, our `mapChunk` translates it to
-   * a `usage` delta which the base routes through finalizeStream).
-   */
-  protected reconstructRaw(
-    accum: StreamAccumulator,
-    modelSeen: string | undefined,
-  ): ChatCompletion {
-    const extra = (accum.providerExtra as OpenAIStreamState | undefined) ?? {
-      id: "",
-      created: 0,
-      finishReason: null,
-    };
-    const text = accum.textByBlock.get(0) ?? "";
-    const reasoning = accum.reasoningByBlock.get(RESERVED_REASONING_BLOCK_INDEX) ?? "";
-    const toolCalls = Array.from(accum.toolCalls.values())
-      .sort((a, b) => a.blockIndex - b.blockIndex)
-      .map((tc) => ({
-        id: tc.callId,
-        type: "function" as const,
-        function: { name: tc.name, arguments: tc.argsBuffer },
-      }));
-
-    const message = {
-      role: "assistant" as const,
-      content: text.length > 0 ? text : null,
-      refusal: null,
-      ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
-      ...(reasoning.length > 0 ? { reasoning_content: reasoning } : {}),
-    } as ChatCompletion["choices"][0]["message"];
-
-    const finish = extra.finishReason ?? "stop";
-    const fallbackModel = this.defaultModel ?? this.target.modelId;
-    return {
-      id: extra.id || `chatcmpl-${extra.created || 0}`,
-      object: "chat.completion",
-      created: extra.created || 0,
-      model: modelSeen ?? fallbackModel,
-      choices: [
-        {
-          index: 0,
-          message,
-          finish_reason: finish,
-          logprobs: null,
-        },
-      ],
-      usage: {
-        prompt_tokens: accum.usage.inputTokens,
-        completion_tokens: accum.usage.outputTokens,
-        total_tokens: accum.usage.totalTokens,
-        ...(accum.usage.cachedInputTokens !== undefined
-          ? { prompt_tokens_details: { cached_tokens: accum.usage.cachedInputTokens } }
-          : {}),
-      },
-    } as ChatCompletion;
-  }
-
-  /**
-   * Tag-routing pipeline: `<think>...</think>` → reasoning deltas when
-   * `parseThinkTags` is on. The base also wires `customBlocks` (the
-   * adopter-declared extraction) AFTER this transform.
-   */
-  protected override adapterTransforms(): readonly DeltaTransform[] {
-    return this.parseThinkTags ? [thinkTagTransform()] : [];
-  }
-
-  protected normalizeRaw(raw: ChatCompletion): LanguageModelExecutionResult {
-    return normalizeImpl({ targetOutput: raw, target: this.target });
-  }
-
-  /**
-   * Non-streaming + tag routing: when the SDK returned a complete
-   * `ChatCompletion` (no stream), the chunk pipeline never ran, so
-   * `<think>...</think>` / customBlock tags are still embedded in
-   * `message.content`. Run the same `StreamTagParser` here to extract
-   * them — mirrors the v1 `applyAdapterTransform` behavior without
-   * carrying the old class.
-   *
-   * Streaming + tag routing is handled by `adapterTransforms()` +
-   * `customBlocks` during the chunk pipeline, so this hook is a no-op
-   * for the streaming path (which already produced cleaned text).
-   */
-  protected override postProcessForNormalize(raw: ChatCompletion): ChatCompletion {
-    if (!this.parseThinkTags && !this.customBlocks) return raw;
-    const choice = raw.choices?.[0];
-    const message = choice?.message;
-    if (!message || typeof message.content !== "string") return raw;
-    const cleaned = applyTagsToText(message.content, this.parseThinkTags, this.customBlocks);
-    if (cleaned === null) return raw;
-    const next = {
-      ...raw,
-      choices: [
-        {
-          ...choice,
-          message: {
-            ...message,
-            content: cleaned.text.length > 0 ? cleaned.text : null,
-            ...(cleaned.reasoning.length > 0 ? { reasoning_content: cleaned.reasoning } : {}),
+      const finish = extra.finishReason ?? "stop";
+      const fallbackModel = defaultModel ?? target.modelId;
+      return {
+        id: extra.id || `chatcmpl-${extra.created || 0}`,
+        object: "chat.completion",
+        created: extra.created || 0,
+        model: modelSeen ?? fallbackModel,
+        choices: [
+          {
+            index: 0,
+            message,
+            finish_reason: finish,
+            logprobs: null,
           },
+        ],
+        usage: {
+          prompt_tokens: accum.usage.inputTokens,
+          completion_tokens: accum.usage.outputTokens,
+          total_tokens: accum.usage.totalTokens,
+          ...(accum.usage.cachedInputTokens !== undefined
+            ? { prompt_tokens_details: { cached_tokens: accum.usage.cachedInputTokens } }
+            : {}),
         },
-      ],
-    } as ChatCompletion;
-    return next;
-  }
+      } as ChatCompletion;
+    },
+
+    /**
+     * Tag-routing pipeline: `<think>...</think>` → reasoning deltas when
+     * `parseThinkTags` is on. The executor also wires `customBlocks`
+     * (the adopter-declared extraction) AFTER this transform.
+     */
+    adapterTransforms(): readonly DeltaTransform[] {
+      return parseThinkTags ? [thinkTagTransform()] : [];
+    },
+
+    normalize(raw: ChatCompletion): LanguageModelExecutionResult {
+      return normalizeImpl({ targetOutput: raw, target });
+    },
+
+    /**
+     * Non-streaming + tag routing: when the SDK returned a complete
+     * `ChatCompletion` (no stream), the chunk pipeline never ran, so
+     * `<think>...</think>` / customBlock tags are still embedded in
+     * `message.content`. Run the same `StreamTagParser` here to extract
+     * them — mirrors the v1 `applyAdapterTransform` behavior without
+     * carrying the old class.
+     *
+     * Streaming + tag routing is handled by `adapterTransforms()` +
+     * `customBlocks` during the chunk pipeline, so this hook is a no-op
+     * for the streaming path (which already produced cleaned text).
+     */
+    postProcessForNormalize(raw: ChatCompletion): ChatCompletion {
+      if (!parseThinkTags && !customBlocks) return raw;
+      const choice = raw.choices?.[0];
+      const message = choice?.message;
+      if (!message || typeof message.content !== "string") return raw;
+      const cleaned = applyTagsToText(message.content, parseThinkTags, customBlocks);
+      if (cleaned === null) return raw;
+      const next = {
+        ...raw,
+        choices: [
+          {
+            ...choice,
+            message: {
+              ...message,
+              content: cleaned.text.length > 0 ? cleaned.text : null,
+              ...(cleaned.reasoning.length > 0 ? { reasoning_content: cleaned.reasoning } : {}),
+            },
+          },
+        ],
+      } as ChatCompletion;
+      return next;
+    },
+  };
 }
 
 /**
@@ -469,7 +461,7 @@ function applyTagsToText(
 // Client construction
 // ============================================================================
 
-function buildClientOptions(opts: OpenAIExecutorOptions): ClientOptions {
+function buildClientOptions(opts: OpenAIAdapterOptions): ClientOptions {
   // Env-var fallbacks fill in any field absent from explicit
   // clientOptions. Explicit values win.
   const base: ClientOptions = {};

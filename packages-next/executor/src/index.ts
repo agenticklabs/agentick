@@ -35,9 +35,8 @@ export {
 } from "./language-model-executor.js";
 // Canonical projection helpers — provider adapters that share the
 // canonical fold (Anthropic/OpenAI/Google/AI SDK) reach for these
-// instead of re-rolling. Adopters writing custom adapters extend
-// `BaseLanguageModelExecutor.projectImpl` and compose with the parts
-// they need.
+// instead of re-rolling. Adapters overriding `project` compose with
+// the parts they need.
 export {
   buildTools,
   buildMessages,

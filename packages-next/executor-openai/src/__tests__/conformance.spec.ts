@@ -1,5 +1,6 @@
 /**
- * Conformance suite invocation for `OpenAIExecutor`.
+ * Conformance suite invocation for `LanguageModelExecutor` + the
+ * `openai()` adapter.
  *
  * The factory installs a stubbed OpenAI client that returns canned
  * ChatCompletion payloads matching the scripted
@@ -14,7 +15,9 @@ import { runExecutorConformance } from "@agentick/spec-conformance-next";
 import type { LanguageModelExecutionResult } from "@agentick/spec-next";
 import type { ChatCompletion, ChatCompletionChunk } from "openai/resources/chat/completions";
 
-import { OpenAIExecutor } from "../openai-executor.js";
+import { LanguageModelExecutor } from "@agentick/executor-next";
+
+import { openai } from "../openai-adapter.js";
 import { StubOpenAIClient, asClient } from "./stub-openai-client.js";
 
 /**
@@ -126,7 +129,7 @@ function streamingChunksFor(
   ];
 }
 
-describe("OpenAIExecutor — ExecutorProtocol conformance", () => {
+describe("openai() adapter — ExecutorProtocol conformance", () => {
   runExecutorConformance(async ({ harnessId, scripted }) => {
     const completion = completionFor(scripted);
     const chunks = streamingChunksFor(scripted);
@@ -144,9 +147,8 @@ describe("OpenAIExecutor — ExecutorProtocol conformance", () => {
     const journal = new MemoryJournal();
     const bus = new LocalEventBus();
     const inbox = new LocalInbox();
-    const exec = new OpenAIExecutor(harnessId, journal, bus, inbox, {
-      client: asClient(stub),
-      model: "gpt-4o-mini",
+    const exec = new LanguageModelExecutor(harnessId, journal, bus, inbox, {
+      adapter: openai("gpt-4o-mini", { client: asClient(stub) }),
     });
     await exec.ready;
     return { executor: exec, bus };

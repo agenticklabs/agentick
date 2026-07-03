@@ -114,8 +114,11 @@ export interface LanguageModelAdapter<TRaw = unknown, TChunk = unknown> {
   buildParams(input: LanguageModelInput, target: ExecutionTarget): unknown;
   /** Non-streaming provider call. */
   call(params: unknown, signal: AbortSignal | undefined): Promise<TRaw>;
-  /** Streaming provider call — the provider SDK's chunk iterable. */
-  openStream(params: unknown, signal: AbortSignal | undefined): AsyncIterable<TChunk>;
+  /** Streaming provider call — the provider SDK's chunk iterable (Promise-wrapped OK). */
+  openStream(
+    params: unknown,
+    signal: AbortSignal | undefined,
+  ): AsyncIterable<TChunk> | Promise<AsyncIterable<TChunk>>;
   /** Provider chunk → canonical deltas. Sync; may stash in `accum.providerExtra`. */
   mapChunk(chunk: TChunk, accum: StreamAccumulatorView): readonly AdapterDelta[];
   /** Synthesize the canonical provider response from final stream state. */
