@@ -15,11 +15,11 @@ substrate, no runtime, no harness machinery.
 
 ```ts
 import { createApp } from "@agentick/app-next";
-import { openai } from "@agentick/executor-openai-next";
+import { openai } from "@agentick/model-openai-next";
 
 // Markdown is the default — no formatter wiring needed.
-const app = createApp(<Agent />, {
-  model: openai("gpt-5"),
+const app = await createApp(<Agent />, {
+  executor: openai("gpt-5"),
 });
 ```
 

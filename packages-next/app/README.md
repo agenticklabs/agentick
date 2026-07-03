@@ -21,11 +21,11 @@ directly and pass their own factory.
 
 ```typescript
 import { createApp } from "@agentick/app-next/react";
-import { aisdk } from "@agentick/ai-sdk-next";
+import { aisdk } from "@agentick/model-ai-sdk-next";
 import { openai } from "@ai-sdk/openai";
 
 const app = await createApp(<Agent />, {
-  executor: aisdk({ model: openai("gpt-4o") }),
+  executor: aisdk(openai("gpt-4o")),
 });
 
 const session = await app.createSession();
@@ -84,7 +84,7 @@ gateway — see
 
 | Field        | Type                               | Notes                                                |
 | ------------ | ---------------------------------- | ---------------------------------------------------- |
-| `executor`   | `LanguageModelExecutor` or factory | Required. Wire to your model adapter.                |
+| `executor`   | `LanguageModelAdapter`, `LanguageModelExecutor`, or factory | Required. An adapter (`openai("gpt-4o")`, `anthropic(...)`, `aisdk(model)`) is the standard form — the app wraps it in the ONE executor on its substrate. |
 | `target`     | `ExecutionTarget`                  | Optional. Defaults to `executor.target`.             |
 | `reconciler` | `ReconcilerHarness` or factory     | Required (omittable via `/react` subpath default).   |
 | `cluster`    | `ClusterFactory`                   | Optional. See "Cluster integration" above.           |

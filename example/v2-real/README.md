@@ -75,12 +75,12 @@ export function Agent() {
 import "dotenv/config";
 import React from "react";
 import { createApp } from "@agentick/app-next";
-import { aisdk } from "@agentick/executor-ai-sdk-next";
+import { aisdk } from "@agentick/model-ai-sdk-next";
 import { openai } from "@ai-sdk/openai";
 import { Agent } from "./agent.js";
 
 const app = await createApp(React.createElement(Agent), {
-  executor: aisdk({ model: openai("gpt-4o-mini") }),
+  executor: aisdk(openai("gpt-4o-mini")),
 });
 
 const result = await app.send("What's 47 * 23?");
@@ -95,7 +95,7 @@ The AI SDK adapter accepts any `ai` package `LanguageModel`. Replace the import 
 ```ts
 import { anthropic } from "@ai-sdk/anthropic";
 // ...
-aisdk({ model: anthropic("claude-3-5-sonnet-latest") });
+aisdk(anthropic("claude-3-5-sonnet-latest"));
 ```
 
 Add the corresponding env var (`ANTHROPIC_API_KEY`) to `.env`.

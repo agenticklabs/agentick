@@ -44,4 +44,4 @@ Per-part `providerMetadata` forwards as AI SDK `providerOptions` 1:1.
 
 - Reasoning / file / source stream parts are not yet mapped
   (`mapChunk` ignores them).
-- `aisdk({ tools })` slot registration with the app handler resolver.
+- `aisdk(model, { tools })` registration with the app handler resolver.

@@ -76,7 +76,7 @@ export function Agent() {
 ```ts
 // src/index.ts (abridged)
 import { createApp } from "@agentick/app-next/react";
-import { aisdk } from "@agentick/executor-ai-sdk-next";
+import { aisdk } from "@agentick/model-ai-sdk-next";
 import { openai } from "@ai-sdk/openai";
 import { jsonSchema } from "@agentick/spec-next";
 import { InMemoryMcpTransport, NoneAuth, withMCP } from "@agentick/mcp-next";
@@ -84,7 +84,7 @@ import { InMemoryMcpTransport, NoneAuth, withMCP } from "@agentick/mcp-next";
 const { clientTransport } = mkMcpEchoServer();
 
 const app = await createApp(React.createElement(Agent), {
-  executor: aisdk({ model: openai("gpt-4o-mini") }),
+  executor: aisdk(openai("gpt-4o-mini")),
 
   // App-level tools — every session sees these.
   tools: [
@@ -150,7 +150,7 @@ If two layers declare a tool with the same `name`, the higher-precedence binding
 ```ts
 import { anthropic } from "@ai-sdk/anthropic";
 // ...
-aisdk({ model: anthropic("claude-3-5-sonnet-latest") });
+aisdk(anthropic("claude-3-5-sonnet-latest"));
 ```
 
 Add `ANTHROPIC_API_KEY` to `.env`.
