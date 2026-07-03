@@ -169,18 +169,33 @@ executor consumes them raw. Any "executor-internal representation" that
 adapters must additionally target is the failure mode of this split and
 must be rejected in review.
 
-## Packaging
+## Packaging (amended 2026-07-03 — the model-layer carve-out, Ryan-ratified)
 
-Per `<role>-<discriminator>-next`, the role changed — the packages
-rename (pre-ship window; git-mv + workspace sweep):
+Per `<role>-<discriminator>-next` with `model` as the role. The
+decisive improvement over the original table: **`@agentick/model-next`
+is carved out as the base model layer** — the adapter contract, the
+accumulator (+view), the single-shot `generate`/`generateStream`
+helpers (options-bag signature: `generate({ model: openai("gpt-5.5"),
+messages })`), future modality helpers, canonical projection + delta
+transform + tag machinery, `fakeModelAdapter`, and
+`runModelAdapterConformance`. The layer is **zero-Effect, zero-harness,
+zero-substrate** — adapter packages and standalone consumers (the OCR
+service) depend on it alone and never drag in the executor. Effect
+begins at `executor-next` and nowhere below.
 
-| Today | Becomes | Exports |
-| --- | --- | --- |
-| `executor-openai-next` | `model-openai-next` | `openai(modelId, opts)` → adapter |
-| `executor-google-next` | `model-google-next` | `google(...)` → adapter |
-| `executor-anthropic-next` | `model-anthropic-next` | `anthropic(...)` → adapter — **written adapter-first; the pending subclass body is never completed** |
-| `executor-ai-sdk-next` | `model-ai-sdk-next` (+ a later `executor-ai-sdk-next` for the engine) | `aiSdkModelAdapter(model)` |
-| `executor-next` | unchanged | `LanguageModelExecutor`, `generate`, `generateStream`, `runModelAdapterConformance`, `/testing` doubles |
+| Package | Contents |
+| --- | --- |
+| `model-next` (new) | contract + view + accumulator + helpers + projection/transform machinery + doubles + conformance |
+| `model-openai-next` | `openai(modelId, opts)` → adapter |
+| `model-google-next` | `google(...)` → adapter |
+| `model-anthropic-next` | `anthropic(...)` → adapter — **written adapter-first; the pending subclass body is never completed** |
+| `model-ai-sdk-next` | `aiSdkModel(languageModelV2)` → adapter (+ a later `executor-ai-sdk-next` for the engine) |
+| `executor-next` | THE harness only: `LanguageModelExecutor` (+ Fake, lifecycle); depends on `model-next` |
+
+The carve-out happens in the packaging commit at the end of the ADR 52
+implementation (one commit: create `model-next`, move the model-layer
+modules, rename `executor-<provider>` → `model-<provider>`, workspace
+sweep per the new-package checklist).
 
 The `define*` callback factories and the subclass extension points on
 `BaseLanguageModelExecutor` are deleted (#103 resolved at the root);
