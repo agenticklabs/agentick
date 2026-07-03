@@ -56,8 +56,14 @@ the ADRs are the map and the design — they link to issues and never
 track them (no more markdown task lists). Working conventions: every
 deferred concern from a retro becomes an issue at creation time; in-code
 markers cite real issue numbers going forward; ⛔-gated items don't
-leave the Design column without Ryan; commits reference their issue;
-Done requires landed + STATUS entry. **Number disclaimer:** `#NNN`
+leave the Design column without Ryan; Done requires landed + STATUS
+entry. **Code visibility per issue:** code-bearing issues get a linked
+branch (`gh issue develop <N> --checkout` → `iss/<N>-<slug>`) and land
+via a PR into `feat/v2` whose body says `Closes #<N>` — the issue's
+Development section then shows branch + PR + full diff, and Ryan
+reviews diffs in the GitHub UI at the ⛔ points. Docs/one-line changes
+may commit directly to `feat/v2` with `(#N)` in the subject and are
+pushed promptly (links only materialize on push). **Number disclaimer:** `#NNN`
 references in docs/commits dated BEFORE 2026-07-03 are legacy
 conversational ids from the build sessions, NOT issue numbers — the
 ranges collide (e.g. legacy #152 = MCP connection pool → issue #148;
