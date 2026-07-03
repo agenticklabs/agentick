@@ -267,6 +267,18 @@ migration functions at load (E11). **No ORM** — the surface is a handful
 of statements; Kysely-vs-raw-SQL is decided when the first SQL adapter
 is written, not here.
 
+**`seq` semantics are pinned on the port (#133, landed):** `seq` is
+**store-assigned, strictly increasing, never reused, and stable across
+`prune`** — a `BIGSERIAL` column, not a positional index. `append` returns
+the assigned seqs; `prune(before: { seq })` erases by *absolute* seq and
+survivors keep theirs. The conformance suite validates this against
+`MemoryTimelineStore` (which tracks `baseSeq + index`), so a Postgres
+serial adapter is conformant out of the box and no cursored recipe is
+inexpressible for want of an ordering column. Cursored reads
+(`load({ fromSeq })`, seq-tagged entries) remain the deferred additive
+extension (open question 1). This is why it was frozen pre-adapter:
+schema-on-read protects opaque payloads, not a missing column.
+
 All certified by `runTimelineStoreConformance`, which runs from plain
 vitest with no Effect imports.
 

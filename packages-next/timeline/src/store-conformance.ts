@@ -74,10 +74,21 @@ export function runTimelineStoreConformance(opts: TimelineStoreConformanceOption
       expect(loaded.map(idOf)).toEqual(["a", "b", "c"]);
     });
 
-    it("append([]) is a no-op", async () => {
+    it("append([]) is a no-op and returns no seqs", async () => {
       const store = await setup();
-      await store.append("s1", []);
+      expect(await store.append("s1", [])).toEqual([]);
       expect(await store.load("s1")).toEqual([]);
+    });
+
+    it("append returns one seq per entry, strictly increasing and never reused", async () => {
+      const store = await setup();
+      const first = await store.append("s1", [entry("a"), entry("b")]);
+      const second = await store.append("s1", [entry("c")]);
+      expect(first).toHaveLength(2);
+      expect(second).toHaveLength(1);
+      const all = [...first, ...second];
+      // Strictly increasing across the whole session.
+      for (let i = 1; i < all.length; i++) expect(all[i]).toBeGreaterThan(all[i - 1]!);
     });
 
     it("isolates entries across sessions (no bleed)", async () => {
@@ -115,14 +126,46 @@ export function runTimelineStoreConformance(opts: TimelineStoreConformanceOption
 
     const prune = opts.capabilities?.prune;
     it.skipIf(prune === false)(
-      "prune() erases leading entries below the given seq, returns the count",
+      "prune() erases entries below an ABSOLUTE seq and returns the count",
       async () => {
         const store = await setup();
         if (!store.prune) return; // capability absent → nothing to assert
-        await store.append("s1", [entry("a"), entry("b"), entry("c")]);
-        const removed = await store.prune("s1", { seq: 2 });
+        const [, , sc] = await store.append("s1", [entry("a"), entry("b"), entry("c"), entry("d")]);
+        // Erase everything strictly below c's seq → a, b.
+        const removed = await store.prune("s1", { seq: sc! });
         expect(removed).toBe(2);
-        expect((await store.load("s1")).map(idOf)).toEqual(["c"]);
+        expect((await store.load("s1")).map(idOf)).toEqual(["c", "d"]);
+      },
+    );
+
+    it.skipIf(prune === false)(
+      "prune() is by absolute seq, not position — survivors keep their seq, appends never reuse",
+      async () => {
+        const store = await setup();
+        if (!store.prune) return;
+        const seqs = await store.append("s1", [entry("a"), entry("b"), entry("c"), entry("d")]);
+        await store.prune("s1", { seq: seqs[2]! }); // erase a, b (seq < c)
+        // A fresh append continues PAST d — never reuses a retired seq.
+        const [se] = await store.append("s1", [entry("e")]);
+        expect(se).toBeGreaterThan(seqs[3]!);
+        // A second prune uses the SAME absolute seq space (positional would
+        // over-erase): erase everything below d → drops c only.
+        const removed2 = await store.prune("s1", { seq: seqs[3]! });
+        expect(removed2).toBe(1);
+        expect((await store.load("s1")).map(idOf)).toEqual(["d", "e"]);
+      },
+    );
+
+    it.skipIf(prune === false)(
+      "prune-to-empty keeps the seq counter — a later append does not restart",
+      async () => {
+        const store = await setup();
+        if (!store.prune) return;
+        const seqs = await store.append("s1", [entry("a"), entry("b")]);
+        await store.prune("s1", { seq: seqs[1]! + 1 }); // erase all
+        expect(await store.load("s1")).toEqual([]);
+        const [sc] = await store.append("s1", [entry("c")]);
+        expect(sc).toBeGreaterThan(seqs[1]!); // continues, no reuse
       },
     );
 
