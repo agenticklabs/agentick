@@ -15,6 +15,14 @@ export {
   type FakeLanguageModelExecutorOptions,
   type MockScriptedRun,
 } from "./fake-language-model-executor.js";
+// The provider-normalization part (ADR 52) — Promise-shaped, zero
+// Effect, standalone-usable. Providers implement this; the ONE
+// LanguageModelExecutor consumes it.
+export {
+  isLanguageModelAdapter,
+  type LanguageModelAdapter,
+  type StreamAccumulatorView,
+} from "./language-model-adapter.js";
 export { defineExecutor, type DefineExecutorInput } from "./define-executor.js";
 export {
   defineLanguageModelExecutor,
