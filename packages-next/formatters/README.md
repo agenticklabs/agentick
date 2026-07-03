@@ -28,8 +28,8 @@ To pick a different default:
 ```ts
 import { xmlFormatter, builtInFormatters } from "@agentick/formatters-next";
 
-const app = createApp(<Agent />, {
-  model: openai("gpt-5"),
+const app = await createApp(<Agent />, {
+  executor: openai("gpt-5"),
   reconciler: {
     formatters: builtInFormatters(),
     defaultFormatterId: xmlFormatter.__identity.id,
