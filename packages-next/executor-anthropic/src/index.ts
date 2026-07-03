@@ -1,16 +1,18 @@
 /**
- * `@agentick/executor-anthropic-next` — Anthropic provider adapter for Agentick v2.
+ * `@agentick/executor-anthropic-next` — Anthropic `LanguageModelAdapter`
+ * for Agentick v2 (ADR 52).
  *
- * Implements `LanguageModelExecutor` from `@agentick/spec-next` against the
+ * Ships `anthropic(model?, options?)`, a factory producing the
+ * provider-normalization part consumed by the ONE
+ * `LanguageModelExecutor` in `@agentick/executor-next`, against the
  * Anthropic Messages API (`@anthropic-ai/sdk`).
  *
- * @see docs/proposals/v2/blueprint/06-executor-harness.md
+ * @see docs/proposals/v2/blueprint/52-executors-and-model-adapters.md
  * @see docs/proposals/v2/anthropic-adapter-plan.md
  */
 
 export {
-  AnthropicExecutor,
-  type AnthropicExecutorOptions,
+  anthropic,
+  type AnthropicAdapterOptions,
   type CustomBlockDefinition,
-} from "./anthropic-executor.js";
-export { anthropic, type AnthropicFactoryOptions } from "./anthropic-factory.js";
+} from "./anthropic-adapter.js";

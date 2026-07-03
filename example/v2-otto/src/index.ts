@@ -93,10 +93,7 @@ async function mkMcpServer(): Promise<{
             "Returns a task reference immediately; poll / await / cancel via the " +
             "`session_tasks_*` tools.",
           inputSchema: z.object({
-            strict: z
-              .boolean()
-              .optional()
-              .describe("If true, treat warnings as errors."),
+            strict: z.boolean().optional().describe("If true, treat warnings as errors."),
           }),
           annotations: { taskSupport: "required" },
           handler: async ({ strict }, { ctx }) => {
@@ -112,9 +109,7 @@ async function mkMcpServer(): Promise<{
                 await new Promise<void>((r) => setTimeout(r, ms));
               }
               const summary = strict ? "0 errors, 0 warnings (strict)" : "0 errors, 3 warnings";
-              return [
-                { type: "text", text: `lint complete — ${summary}` } as ContentBlock,
-              ];
+              return [{ type: "text", text: `lint complete — ${summary}` } as ContentBlock];
             });
           },
         }),
@@ -163,7 +158,7 @@ async function main(): Promise<void> {
 
   // ─── Construct the app with all the layered seams wired:
   const app = await createApp(React.createElement(Agent), {
-    executor: aisdk({ model: openai("gpt-4o-mini") }),
+    executor: aisdk(openai("gpt-4o-mini")),
 
     // App-level tools — every session sees them. Tagged with
     // `binding: { scope: "app", appId }` at construction. Declared

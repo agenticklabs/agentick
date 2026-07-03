@@ -1,5 +1,6 @@
 /**
- * Streaming hot-path benchmarks for `AnthropicExecutor`.
+ * Streaming hot-path benchmarks for `LanguageModelExecutor` + the
+ * `anthropic()` adapter.
  *
  * Baseline numbers gathered BEFORE any streaming-aggregation refactor.
  * Run with:
@@ -26,7 +27,9 @@ import type { RawMessageStreamEvent } from "@anthropic-ai/sdk/resources/messages
 import type { LanguageModelTarget, RenderedTree } from "@agentick/spec-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 
-import { AnthropicExecutor } from "../anthropic-executor.js";
+import { LanguageModelExecutor } from "@agentick/executor-next";
+
+import { anthropic } from "../anthropic-adapter.js";
 import {
   StubAnthropicClient,
   asClient,
@@ -102,10 +105,8 @@ async function makeStreamingExecutor(events: ReadonlyArray<RawMessageStreamEvent
   const journal = new MemoryJournal({ capacity: 10_000_000 });
   const bus = new LocalEventBus();
   const inbox = new LocalInbox();
-  const exec = new AnthropicExecutor("exec-bench-anthropic", journal, bus, inbox, {
-    client: asClient(stub),
-    model: "claude-3-5-sonnet-latest",
-    stream: true,
+  const exec = new LanguageModelExecutor("exec-bench-anthropic", journal, bus, inbox, {
+    adapter: anthropic("claude-3-5-sonnet-latest", { client: asClient(stub), stream: true }),
   });
   await exec.ready;
   return { exec, bus };
@@ -115,7 +116,7 @@ async function makeStreamingExecutor(events: ReadonlyArray<RawMessageStreamEvent
 // Scenario 1: 1000 text deltas, no bus subscriber.
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("AnthropicExecutor.run — 1000 text deltas (no subscriber)", () => {
+describe("anthropic() adapter run — 1000 text deltas (no subscriber)", () => {
   const events = buildTextStream(1000);
 
   bench(
@@ -132,7 +133,7 @@ describe("AnthropicExecutor.run — 1000 text deltas (no subscriber)", () => {
 // Scenario 2: 100 text deltas + 1 tool_call (no subscriber).
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("AnthropicExecutor.run — 100 text deltas + 1 tool_call (no subscriber)", () => {
+describe("anthropic() adapter run — 100 text deltas + 1 tool_call (no subscriber)", () => {
   const events = buildTextPlusToolStream(100);
 
   bench(
@@ -149,7 +150,7 @@ describe("AnthropicExecutor.run — 100 text deltas + 1 tool_call (no subscriber
 // Scenario 3: 100 text deltas, no subscriber (cross-adapter parity).
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("AnthropicExecutor.run — 100 text deltas (no subscriber)", () => {
+describe("anthropic() adapter run — 100 text deltas (no subscriber)", () => {
   const events = buildTextStream(100);
 
   bench(
@@ -166,11 +167,11 @@ describe("AnthropicExecutor.run — 100 text deltas (no subscriber)", () => {
 // Scenario 4: 100 text deltas, 1 subscriber draining `executor:delta`.
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("AnthropicExecutor.run — 100 text deltas (1 subscriber)", () => {
+describe("anthropic() adapter run — 100 text deltas (1 subscriber)", () => {
   const events = buildTextStream(100);
   let consumer: Fiber.RuntimeFiber<void, unknown> | undefined;
   let bus: LocalEventBus | undefined;
-  let exec: AnthropicExecutor | undefined;
+  let exec: LanguageModelExecutor | undefined;
 
   afterAll(async () => {
     if (consumer) await Effect.runPromise(Fiber.interrupt(consumer));

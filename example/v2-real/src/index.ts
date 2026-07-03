@@ -30,7 +30,7 @@ async function main(): Promise<void> {
   }
 
   const app = await createApp(React.createElement(Agent), {
-    executor: aisdk({ model: openai("gpt-4o-mini") }),
+    executor: aisdk(openai("gpt-4o-mini")),
   });
 
   const session = await app.createSession();

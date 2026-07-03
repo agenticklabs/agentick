@@ -1,5 +1,6 @@
 /**
- * Implementation-specific behavior for `AnthropicExecutor`.
+ * Implementation-specific behavior for the `anthropic()` adapter driven
+ * through `LanguageModelExecutor`.
  *
  * The conformance suite (`conformance.spec.ts`) drives the protocol
  * contract. These tests assert Anthropic-specific behavior — system
@@ -17,7 +18,9 @@ import { jsonSchema } from "@agentick/spec-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type { MessageCreateParams } from "@anthropic-ai/sdk/resources/messages";
 
-import { AnthropicExecutor } from "../anthropic-executor.js";
+import { LanguageModelExecutor } from "@agentick/executor-next";
+
+import { anthropic } from "../anthropic-adapter.js";
 import {
   StubAnthropicClient,
   asClient,
@@ -67,18 +70,19 @@ async function makeExecutor(
   const journal = new MemoryJournal();
   const bus = new LocalEventBus();
   const inbox = new LocalInbox();
-  const exec = new AnthropicExecutor("exec-anthropic-test", journal, bus, inbox, {
-    client: asClient(stub),
-    model: opts.model ?? "claude-3-5-sonnet-latest",
-    ...omitUndefined({ stream: opts.stream, maxTokens: opts.maxTokens }),
-    ...(opts.parseThinkTags ? { parseThinkTags: true } : {}),
-    ...(opts.customBlocks ? { customBlocks: opts.customBlocks } : {}),
+  const exec = new LanguageModelExecutor("exec-anthropic-test", journal, bus, inbox, {
+    adapter: anthropic(opts.model ?? "claude-3-5-sonnet-latest", {
+      client: asClient(stub),
+      ...omitUndefined({ stream: opts.stream, maxTokens: opts.maxTokens }),
+      ...(opts.parseThinkTags ? { parseThinkTags: true } : {}),
+      ...(opts.customBlocks ? { customBlocks: opts.customBlocks } : {}),
+    }),
   });
   await exec.ready;
   return { exec, journal, bus, inbox };
 }
 
-describe("AnthropicExecutor — non-streaming", () => {
+describe("anthropic() adapter — non-streaming", () => {
   it("returns a succeeded terminal with normalized output", async () => {
     const stub = new StubAnthropicClient([
       { kind: "non-streaming", message: mkMessage({ text: "hello" }) },
@@ -135,7 +139,7 @@ describe("AnthropicExecutor — non-streaming", () => {
   });
 });
 
-describe("AnthropicExecutor — system extraction + alternation", () => {
+describe("anthropic() adapter — system extraction + alternation", () => {
   it("extracts system messages to top-level `system` param", async () => {
     const stub = new StubAnthropicClient([
       { kind: "non-streaming", message: mkMessage({ text: "ok" }) },
@@ -201,7 +205,7 @@ describe("AnthropicExecutor — system extraction + alternation", () => {
   });
 });
 
-describe("AnthropicExecutor — tool-use round-trip", () => {
+describe("anthropic() adapter — tool-use round-trip", () => {
   it("extracts toolCalls and emits tool_use ContentBlocks", async () => {
     const stub = new StubAnthropicClient([
       {
@@ -321,7 +325,7 @@ describe("AnthropicExecutor — tool-use round-trip", () => {
   });
 });
 
-describe("AnthropicExecutor — abort", () => {
+describe("anthropic() adapter — abort", () => {
   it("abort flips next run to outcome 'canceled'", async () => {
     const stub = new StubAnthropicClient([
       { kind: "non-streaming", message: mkMessage({ text: "x" }) },
@@ -339,7 +343,7 @@ describe("AnthropicExecutor — abort", () => {
   });
 });
 
-describe("AnthropicExecutor — streaming", () => {
+describe("anthropic() adapter — streaming", () => {
   it("emits one executor:delta envelope per emit() call", async () => {
     const stub = new StubAnthropicClient([
       {
@@ -402,7 +406,7 @@ describe("AnthropicExecutor — streaming", () => {
   });
 });
 
-describe("AnthropicExecutor — cache tokens (G2)", () => {
+describe("anthropic() adapter — cache tokens (G2)", () => {
   it("surfaces cache_read_input_tokens as cachedInputTokens", async () => {
     const stub = new StubAnthropicClient([
       {
@@ -540,7 +544,7 @@ describe("AnthropicExecutor — cache tokens (G2)", () => {
   });
 });
 
-describe("AnthropicExecutor — reasoning (G3 native thinking blocks)", () => {
+describe("anthropic() adapter — reasoning (G3 native thinking blocks)", () => {
   it("extracts ReasoningBlock from non-streaming thinking content block", async () => {
     const stub = new StubAnthropicClient([
       {
@@ -594,7 +598,7 @@ describe("AnthropicExecutor — reasoning (G3 native thinking blocks)", () => {
   });
 });
 
-describe("AnthropicExecutor — sampling params (G1)", () => {
+describe("anthropic() adapter — sampling params (G1)", () => {
   it("plumbs temperature/topP/stopSequences/maxOutputTokens to SDK params", async () => {
     const stub = new StubAnthropicClient([
       { kind: "non-streaming", message: mkMessage({ text: "ok" }) },
@@ -666,7 +670,7 @@ describe("AnthropicExecutor — sampling params (G1)", () => {
   });
 });
 
-describe("AnthropicExecutor — providerOptions spread (G5)", () => {
+describe("anthropic() adapter — providerOptions spread (G5)", () => {
   it("spreads anthropic providerOptions onto SDK request", async () => {
     const stub = new StubAnthropicClient([
       { kind: "non-streaming", message: mkMessage({ text: "ok" }) },
@@ -701,7 +705,7 @@ describe("AnthropicExecutor — providerOptions spread (G5)", () => {
   });
 });
 
-describe("AnthropicExecutor — parseThinkTags (G7)", () => {
+describe("anthropic() adapter — parseThinkTags (G7)", () => {
   it("routes <think> in text channel to reasoning deltas (streaming)", async () => {
     const stub = new StubAnthropicClient([
       {
@@ -732,7 +736,7 @@ describe("AnthropicExecutor — parseThinkTags (G7)", () => {
   });
 });
 
-describe("AnthropicExecutor — customBlocks (G12)", () => {
+describe("anthropic() adapter — customBlocks (G12)", () => {
   it("extracts adopter-declared tags as custom-block deltas (streaming)", async () => {
     const stub = new StubAnthropicClient([
       {
@@ -765,7 +769,7 @@ describe("AnthropicExecutor — customBlocks (G12)", () => {
   });
 });
 
-describe("AnthropicExecutor — tool input json round-trip (streaming)", () => {
+describe("anthropic() adapter — tool input json round-trip (streaming)", () => {
   it("accumulates input_json_delta and parses on block_stop", async () => {
     const stub = new StubAnthropicClient([
       {
@@ -795,7 +799,7 @@ describe("AnthropicExecutor — tool input json round-trip (streaming)", () => {
   });
 });
 
-describe("AnthropicExecutor — base64 image (G4)", () => {
+describe("anthropic() adapter — base64 image (G4)", () => {
   it("converts data: URLs to Anthropic base64 source", async () => {
     const stub = new StubAnthropicClient([
       { kind: "non-streaming", message: mkMessage({ text: "ok" }) },
@@ -868,7 +872,7 @@ describe("AnthropicExecutor — base64 image (G4)", () => {
   });
 });
 
-describe("AnthropicExecutor — journaled lifecycle", () => {
+describe("anthropic() adapter — journaled lifecycle", () => {
   it("run produces requested + terminal envelopes on the journal", async () => {
     const stub = new StubAnthropicClient([
       { kind: "non-streaming", message: mkMessage({ text: "ok" }) },

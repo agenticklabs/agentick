@@ -1,7 +1,7 @@
 /**
  * Test-only stub for `Anthropic.messages.create()`.
  *
- * `AnthropicExecutor` consumes only `client.messages.create()` —
+ * the `anthropic()` adapter consumes only `client.messages.create()` —
  * dispatching by the request's `stream` flag for both non-streaming
  * (Promise<Message>) and streaming (AsyncIterable<RawMessageStreamEvent>)
  * paths. The stub records every call (params + abort signal) and pulls

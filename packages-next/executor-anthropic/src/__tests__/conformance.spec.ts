@@ -1,5 +1,6 @@
 /**
- * Conformance suite invocation for `AnthropicExecutor`.
+ * Conformance suite invocation for `LanguageModelExecutor` + the
+ * `anthropic()` adapter.
  *
  * Drives the universal `runExecutorConformance` from
  * `@agentick/spec-conformance-next`. The stub supplies BOTH non-streaming
@@ -18,7 +19,9 @@ import type {
   RawMessageStreamEvent,
 } from "@anthropic-ai/sdk/resources/messages";
 
-import { AnthropicExecutor } from "../anthropic-executor.js";
+import { LanguageModelExecutor } from "@agentick/executor-next";
+
+import { anthropic } from "../anthropic-adapter.js";
 import { StubAnthropicClient, asClient } from "./stub-anthropic-client.js";
 
 function messageFor(scripted: LanguageModelExecutionResult | undefined): AnthropicMessage {
@@ -128,7 +131,7 @@ function streamingEventsFor(
   ];
 }
 
-describe("AnthropicExecutor — ExecutorProtocol conformance", () => {
+describe("anthropic() adapter — ExecutorProtocol conformance", () => {
   runExecutorConformance(async ({ harnessId, scripted }) => {
     const stub = new StubAnthropicClient([
       { kind: "non-streaming", message: messageFor(scripted) },
@@ -137,9 +140,8 @@ describe("AnthropicExecutor — ExecutorProtocol conformance", () => {
     const journal = new MemoryJournal();
     const bus = new LocalEventBus();
     const inbox = new LocalInbox();
-    const exec = new AnthropicExecutor(harnessId, journal, bus, inbox, {
-      client: asClient(stub),
-      model: "claude-3-5-sonnet-latest",
+    const exec = new LanguageModelExecutor(harnessId, journal, bus, inbox, {
+      adapter: anthropic("claude-3-5-sonnet-latest", { client: asClient(stub) }),
     });
     await exec.ready;
     return { executor: exec, bus };

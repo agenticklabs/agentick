@@ -1,13 +1,16 @@
 /**
- * `AnthropicExecutor` — `LanguageModelExecutor` backed by the Anthropic
- * Messages API. Extends `BaseLanguageModelExecutor<AnthropicMessage>`
- * (from `@agentick/executor-next`) and supplies provider-specific
- * translation tables (system extraction, strict user/assistant
- * alternation, native `thinking` blocks for reasoning, separate
- * `cache_*_input_tokens` usage fields).
+ * `anthropic(model?, options?)` — the Anthropic `LanguageModelAdapter`
+ * (ADR 52), backed by the Messages API (`@anthropic-ai/sdk`).
+ *
+ * A plain Promise/AsyncIterable-shaped object consumed by
+ * `LanguageModelExecutor` — zero Effect, zero substrate. Anthropic
+ * dialect handled at this layer: system extraction with strict
+ * user/assistant alternation (custom `project`), native `thinking` /
+ * `redacted_thinking` blocks for reasoning, per-block `cache_control`
+ * via providerMetadata, separate `cache_*_input_tokens` usage fields.
  *
  * @see docs/proposals/v2/anthropic-adapter-plan.md
- * @see docs/proposals/v2/blueprint/06-executor-harness.md
+ * @see docs/proposals/v2/blueprint/52-executors-and-model-adapters.md
  */
 
 import Anthropic, { type ClientOptions } from "@anthropic-ai/sdk";
@@ -32,11 +35,11 @@ import type {
 } from "@anthropic-ai/sdk/resources/messages";
 
 import {
-  BaseLanguageModelExecutor,
   buildTools,
   type CustomBlockDefinition,
   type DeltaTransform,
-  type StreamAccumulator,
+  type LanguageModelAdapter,
+  type StreamAccumulatorView,
   StreamTagParser,
   type StreamTagHandler,
   thinkTagTransform,
@@ -44,7 +47,6 @@ import {
 import type {
   AdapterDelta,
   ContentBlock,
-  EventBus,
   ExecutionTarget,
   LanguageModelExecutionResult,
   LanguageModelInput,
@@ -53,9 +55,7 @@ import type {
   LanguageModelStopReason,
   LanguageModelTool,
   MediaSource,
-  MessageInbox,
   NormalizeInput,
-  OperationJournal,
   ProjectInput,
   RenderedTree,
   SectionEntry,
@@ -115,9 +115,7 @@ declare module "@agentick/spec-next" {
 // Construction options
 // ============================================================================
 
-export interface AnthropicExecutorOptions {
-  /** Default model id (e.g. `"claude-3-5-sonnet-latest"`). */
-  readonly model?: string;
+export interface AnthropicAdapterOptions {
   /**
    * SDK client construction options — every field
    * `@anthropic-ai/sdk`'s `Anthropic` constructor accepts (apiKey,
@@ -162,7 +160,7 @@ const DEFAULT_MAX_TOKENS = 4096;
 const DEFAULT_MODEL = "claude-3-5-sonnet-latest";
 
 // ============================================================================
-// AnthropicExecutor
+// anthropic() — the adapter factory
 // ============================================================================
 
 /**
@@ -180,7 +178,7 @@ interface AnthropicStreamState {
   redactedData: Map<number, string>;
 }
 
-function getAnthropicState(accum: StreamAccumulator): AnthropicStreamState {
+function getAnthropicState(accum: StreamAccumulatorView): AnthropicStreamState {
   let s = accum.providerExtra as AnthropicStreamState | undefined;
   if (!s) {
     s = {
@@ -195,352 +193,337 @@ function getAnthropicState(accum: StreamAccumulator): AnthropicStreamState {
   return s;
 }
 
-export class AnthropicExecutor extends BaseLanguageModelExecutor<
-  AnthropicMessage,
-  RawMessageStreamEvent
-> {
-  readonly target: ExecutionTarget;
+/**
+ * Construct the Anthropic `LanguageModelAdapter`. Pass it wherever an
+ * adapter is accepted — the app's `executor:` slot (wrapped in the ONE
+ * `LanguageModelExecutor`), `generate({ model:
+ * anthropic("claude-sonnet-5"), ... })`, or a hand-constructed
+ * executor.
+ *
+ * The SDK client is constructed lazily on first use, so declaring the
+ * adapter does not require `ANTHROPIC_API_KEY` until a call actually
+ * happens (inject `options.client` to bypass).
+ */
+export function anthropic(
+  model?: string,
+  options: AnthropicAdapterOptions = {},
+): LanguageModelAdapter<AnthropicMessage, RawMessageStreamEvent> {
+  const defaultModel = model;
+  const defaultMaxTokens = options.maxTokens;
+  const parseThinkTags = options.parseThinkTags ?? false;
+  const customBlocks = options.customBlocks;
+  const target: ExecutionTarget = options.target ?? {
+    kind: "language-model",
+    provider: "anthropic",
+    modelId: model ?? DEFAULT_MODEL,
+    capabilities: {
+      supportsTools: true,
+      supportsStreaming: true,
+      supportsVision: true,
+      contextWindow: 200_000,
+      maxOutputTokens: 8_192,
+    },
+  };
 
-  protected override readonly streamByDefault: boolean;
-  protected override readonly customBlocks:
-    | Readonly<Record<string, CustomBlockDefinition>>
-    | undefined;
+  let clientMemo: Anthropic | undefined = options.client;
+  const client = (): Anthropic => (clientMemo ??= new Anthropic(buildClientOptions(options)));
 
-  private readonly client: Anthropic;
-  private readonly defaultModel: string | undefined;
-  private readonly defaultMaxTokens: number | undefined;
-  private readonly parseThinkTags: boolean;
+  return {
+    provider: "anthropic",
+    target,
+    streamByDefault: options.stream ?? false,
+    ...(customBlocks !== undefined ? { customBlocks } : {}),
 
-  constructor(
-    scopeId: string,
-    journal: OperationJournal,
-    bus: EventBus,
-    inbox: MessageInbox,
-    options: AnthropicExecutorOptions = {},
-  ) {
-    super(scopeId, journal, bus, inbox);
-    this.client = options.client ?? new Anthropic(buildClientOptions(options));
-    this.defaultModel = options.model;
-    this.defaultMaxTokens = options.maxTokens;
-    this.streamByDefault = options.stream ?? false;
-    this.parseThinkTags = options.parseThinkTags ?? false;
-    this.customBlocks = options.customBlocks;
-    this.target = options.target ?? {
-      kind: "language-model",
-      provider: "anthropic",
-      modelId: options.model ?? DEFAULT_MODEL,
-      capabilities: {
-        supportsTools: true,
-        supportsStreaming: true,
-        supportsVision: true,
-        contextWindow: 200_000,
-        maxOutputTokens: 8_192,
-      },
-    };
-  }
+    project(input: ProjectInput): LanguageModelInput {
+      return anthropicProjectImpl(input);
+    },
 
-  // ──────── Hooks (BaseLanguageModelExecutor) ────────
+    buildParams(input: LanguageModelInput, target: ExecutionTarget): MessageCreateParams {
+      return toAnthropicParams(input, target, defaultModel, defaultMaxTokens);
+    },
 
-  protected override projectImpl(input: ProjectInput): LanguageModelInput {
-    return anthropicProjectImpl(input);
-  }
+    call(params: unknown, signal: AbortSignal | undefined): Promise<AnthropicMessage> {
+      return client().messages.create(
+        { ...(params as MessageCreateParams), stream: false } as MessageCreateParamsNonStreaming,
+        { signal },
+      ) as unknown as Promise<AnthropicMessage>;
+    },
 
-  protected buildParams(input: LanguageModelInput, target: ExecutionTarget): MessageCreateParams {
-    return toAnthropicParams(input, target, this.defaultModel, this.defaultMaxTokens);
-  }
+    openStream(
+      params: unknown,
+      signal: AbortSignal | undefined,
+    ): Promise<AsyncIterable<RawMessageStreamEvent>> {
+      const cp = params as MessageCreateParams;
+      return client().messages.create({ ...cp, stream: true } as MessageCreateParamsStreaming, {
+        signal,
+      }) as unknown as Promise<AsyncIterable<RawMessageStreamEvent>>;
+    },
 
-  protected callProvider(
-    params: unknown,
-    signal: AbortSignal | undefined,
-  ): Promise<AnthropicMessage> {
-    return this.client.messages.create(
-      { ...(params as MessageCreateParams), stream: false } as MessageCreateParamsNonStreaming,
-      { signal },
-    ) as unknown as Promise<AnthropicMessage>;
-  }
+    /**
+     * Translate one Anthropic stream event into AdapterDeltas. Anthropic's
+     * vocabulary maps almost 1:1 to ours — `message_start` →
+     * `message-start`, `content_block_start`/`_delta`/`_stop` →
+     * `content-*` / `reasoning-*` / `tool-call-*` (dispatched on the
+     * block kind), `message_delta` carries the final usage/stop_reason
+     * into `message-end`. The base's `finalizeStream` emits the assembled
+     * `message` summary from accumulator state.
+     */
+    mapChunk(event: RawMessageStreamEvent, accum: StreamAccumulatorView): readonly AdapterDelta[] {
+      const state = getAnthropicState(accum);
+      const out: AdapterDelta[] = [];
 
-  // ──────── Streaming hooks (BaseLanguageModelExecutor) ────────
-
-  protected async openStream(
-    params: unknown,
-    signal: AbortSignal,
-  ): Promise<AsyncIterable<RawMessageStreamEvent>> {
-    const cp = params as MessageCreateParams;
-    return this.client.messages.create({ ...cp, stream: true } as MessageCreateParamsStreaming, {
-      signal,
-    }) as unknown as Promise<AsyncIterable<RawMessageStreamEvent>>;
-  }
-
-  /**
-   * Translate one Anthropic stream event into AdapterDeltas. Anthropic's
-   * vocabulary maps almost 1:1 to ours — `message_start` →
-   * `message-start`, `content_block_start`/`_delta`/`_stop` →
-   * `content-*` / `reasoning-*` / `tool-call-*` (dispatched on the
-   * block kind), `message_delta` carries the final usage/stop_reason
-   * into `message-end`. The base's `finalizeStream` emits the assembled
-   * `message` summary from accumulator state.
-   */
-  protected mapChunk(
-    event: RawMessageStreamEvent,
-    accum: StreamAccumulator,
-  ): readonly AdapterDelta[] {
-    const state = getAnthropicState(accum);
-    const out: AdapterDelta[] = [];
-
-    switch (event.type) {
-      case "message_start": {
-        const msg = event.message;
-        if (msg.id) state.id = msg.id;
-        out.push({ type: "message-start", role: "assistant", model: msg.model });
-        const u = msg.usage;
-        if (u) {
+      switch (event.type) {
+        case "message_start": {
+          const msg = event.message;
+          if (msg.id) state.id = msg.id;
+          out.push({ type: "message-start", role: "assistant", model: msg.model });
+          const u = msg.usage;
+          if (u) {
+            out.push({
+              type: "usage",
+              usage: {
+                inputTokens: u.input_tokens ?? 0,
+                outputTokens: u.output_tokens ?? 0,
+                totalTokens: (u.input_tokens ?? 0) + (u.output_tokens ?? 0),
+                ...(u.cache_read_input_tokens != null
+                  ? { cachedInputTokens: u.cache_read_input_tokens }
+                  : {}),
+              },
+            });
+          }
+          break;
+        }
+        case "content_block_start": {
+          const block = event.content_block;
+          const idx = event.index;
+          if (block.type === "text") {
+            state.blockKind.set(idx, "text");
+            out.push({ type: "content-start", blockIndex: idx, blockType: "text" });
+          } else if (block.type === "tool_use") {
+            state.blockKind.set(idx, "tool_use");
+            state.toolCallIdByBlock.set(idx, block.id);
+            out.push({
+              type: "tool-call-start",
+              callId: block.id,
+              name: block.name,
+              blockIndex: idx,
+            });
+          } else if (block.type === "thinking") {
+            state.blockKind.set(idx, "thinking");
+            out.push({ type: "reasoning-start", blockIndex: idx });
+          } else if (block.type === "redacted_thinking") {
+            state.blockKind.set(idx, "redacted_thinking");
+            state.redactedData.set(idx, (block as RedactedThinkingBlock).data);
+            out.push({ type: "reasoning-start", blockIndex: idx });
+          }
+          break;
+        }
+        case "content_block_delta": {
+          const idx = event.index;
+          const delta = event.delta;
+          if (delta.type === "text_delta") {
+            out.push({ type: "content-delta", blockIndex: idx, delta: delta.text });
+          } else if (delta.type === "input_json_delta") {
+            const callId = state.toolCallIdByBlock.get(idx) ?? "";
+            out.push({
+              type: "tool-call-delta",
+              callId,
+              delta: delta.partial_json,
+            });
+          } else if (delta.type === "thinking_delta") {
+            out.push({ type: "reasoning-delta", blockIndex: idx, delta: delta.thinking });
+          }
+          // signature_delta + citations_delta: ignored (G3 §10.4/§10.5).
+          break;
+        }
+        case "content_block_stop": {
+          const idx = event.index;
+          const kind = state.blockKind.get(idx);
+          if (kind === "text") {
+            out.push({ type: "content-end", blockIndex: idx });
+            out.push({
+              type: "content",
+              blockIndex: idx,
+              content: { type: "text", text: accum.textByBlock.get(idx) ?? "" } as ContentBlock,
+            });
+          } else if (kind === "tool_use") {
+            const callId = state.toolCallIdByBlock.get(idx) ?? "";
+            const entry = accum.toolCalls.get(callId);
+            let parsedInput: Readonly<Record<string, unknown>> = {};
+            try {
+              parsedInput = entry?.argsBuffer
+                ? (JSON.parse(entry.argsBuffer) as Readonly<Record<string, unknown>>)
+                : {};
+            } catch {
+              /* invalid JSON */
+            }
+            out.push({ type: "tool-call-end", callId });
+            out.push({
+              type: "tool-call",
+              callId,
+              name: entry?.name ?? "",
+              input: parsedInput,
+            });
+          } else if (kind === "thinking" || kind === "redacted_thinking") {
+            out.push({ type: "reasoning-end", blockIndex: idx });
+            out.push({
+              type: "reasoning",
+              blockIndex: idx,
+              reasoning: accum.reasoningByBlock.get(idx) ?? "",
+            });
+          }
+          break;
+        }
+        case "message_delta": {
+          // Carries final stop_reason + last usage update.
+          if (event.delta.stop_sequence != null) state.stopSequence = event.delta.stop_sequence;
+          const u = event.usage;
+          const inputTokens = accum.usage.inputTokens; // already captured at message_start
           out.push({
-            type: "usage",
+            type: "message-end",
+            stopReason: mapFinishReason(event.delta.stop_reason),
             usage: {
-              inputTokens: u.input_tokens ?? 0,
-              outputTokens: u.output_tokens ?? 0,
-              totalTokens: (u.input_tokens ?? 0) + (u.output_tokens ?? 0),
-              ...(u.cache_read_input_tokens != null
-                ? { cachedInputTokens: u.cache_read_input_tokens }
-                : {}),
+              inputTokens,
+              outputTokens: u?.output_tokens ?? accum.usage.outputTokens,
+              totalTokens: inputTokens + (u?.output_tokens ?? accum.usage.outputTokens),
+              ...omitUndefined({ cachedInputTokens: accum.usage.cachedInputTokens }),
             },
           });
+          break;
         }
-        break;
+        case "message_stop":
+          // Final wire frame — no delta needed, base finalize emits `message`.
+          break;
       }
-      case "content_block_start": {
-        const block = event.content_block;
-        const idx = event.index;
-        if (block.type === "text") {
-          state.blockKind.set(idx, "text");
-          out.push({ type: "content-start", blockIndex: idx, blockType: "text" });
-        } else if (block.type === "tool_use") {
-          state.blockKind.set(idx, "tool_use");
-          state.toolCallIdByBlock.set(idx, block.id);
-          out.push({
-            type: "tool-call-start",
-            callId: block.id,
-            name: block.name,
-            blockIndex: idx,
-          });
-        } else if (block.type === "thinking") {
-          state.blockKind.set(idx, "thinking");
-          out.push({ type: "reasoning-start", blockIndex: idx });
-        } else if (block.type === "redacted_thinking") {
-          state.blockKind.set(idx, "redacted_thinking");
-          state.redactedData.set(idx, (block as RedactedThinkingBlock).data);
-          out.push({ type: "reasoning-start", blockIndex: idx });
-        }
-        break;
-      }
-      case "content_block_delta": {
-        const idx = event.index;
-        const delta = event.delta;
-        if (delta.type === "text_delta") {
-          out.push({ type: "content-delta", blockIndex: idx, delta: delta.text });
-        } else if (delta.type === "input_json_delta") {
-          const callId = state.toolCallIdByBlock.get(idx) ?? "";
-          out.push({
-            type: "tool-call-delta",
-            callId,
-            delta: delta.partial_json,
-          });
-        } else if (delta.type === "thinking_delta") {
-          out.push({ type: "reasoning-delta", blockIndex: idx, delta: delta.thinking });
-        }
-        // signature_delta + citations_delta: ignored (G3 §10.4/§10.5).
-        break;
-      }
-      case "content_block_stop": {
-        const idx = event.index;
+      return out;
+    },
+
+    /**
+     * Synthesize the canonical AnthropicMessage from accumulator state.
+     * Iterates blocks by index (text → text, thinking → thinking,
+     * tool_use → tool_use, redacted_thinking → redacted_thinking from the
+     * private slot) and reassembles a structure normalize() can consume.
+     */
+    reconstructRaw(accum: StreamAccumulatorView, modelSeen: string | undefined): AnthropicMessage {
+      const state = getAnthropicState(accum);
+      const content: AnthropicMessage["content"] = [];
+      const allBlockIndices = new Set<number>([
+        ...accum.textByBlock.keys(),
+        ...accum.reasoningByBlock.keys(),
+        ...Array.from(accum.toolCalls.values()).map((c) => c.blockIndex),
+        ...state.redactedData.keys(),
+      ]);
+      const sorted = [...allBlockIndices].sort((a, b) => a - b);
+      for (const idx of sorted) {
         const kind = state.blockKind.get(idx);
-        if (kind === "text") {
-          out.push({ type: "content-end", blockIndex: idx });
-          out.push({
-            type: "content",
-            blockIndex: idx,
-            content: { type: "text", text: accum.textByBlock.get(idx) ?? "" } as ContentBlock,
-          });
-        } else if (kind === "tool_use") {
-          const callId = state.toolCallIdByBlock.get(idx) ?? "";
-          const entry = accum.toolCalls.get(callId);
-          let parsedInput: Readonly<Record<string, unknown>> = {};
-          try {
-            parsedInput = entry?.argsBuffer
-              ? (JSON.parse(entry.argsBuffer) as Readonly<Record<string, unknown>>)
-              : {};
-          } catch {
-            /* invalid JSON */
-          }
-          out.push({ type: "tool-call-end", callId });
-          out.push({
-            type: "tool-call",
-            callId,
-            name: entry?.name ?? "",
-            input: parsedInput,
-          });
-        } else if (kind === "thinking" || kind === "redacted_thinking") {
-          out.push({ type: "reasoning-end", blockIndex: idx });
-          out.push({
-            type: "reasoning",
-            blockIndex: idx,
-            reasoning: accum.reasoningByBlock.get(idx) ?? "",
-          });
-        }
-        break;
-      }
-      case "message_delta": {
-        // Carries final stop_reason + last usage update.
-        if (event.delta.stop_sequence != null) state.stopSequence = event.delta.stop_sequence;
-        const u = event.usage;
-        const inputTokens = accum.usage.inputTokens; // already captured at message_start
-        out.push({
-          type: "message-end",
-          stopReason: mapFinishReason(event.delta.stop_reason),
-          usage: {
-            inputTokens,
-            outputTokens: u?.output_tokens ?? accum.usage.outputTokens,
-            totalTokens: inputTokens + (u?.output_tokens ?? accum.usage.outputTokens),
-            ...omitUndefined({ cachedInputTokens: accum.usage.cachedInputTokens }),
-          },
-        });
-        break;
-      }
-      case "message_stop":
-        // Final wire frame — no delta needed, base finalize emits `message`.
-        break;
-    }
-    return out;
-  }
-
-  /**
-   * Synthesize the canonical AnthropicMessage from accumulator state.
-   * Iterates blocks by index (text → text, thinking → thinking,
-   * tool_use → tool_use, redacted_thinking → redacted_thinking from the
-   * private slot) and reassembles a structure normalize() can consume.
-   */
-  protected reconstructRaw(
-    accum: StreamAccumulator,
-    modelSeen: string | undefined,
-  ): AnthropicMessage {
-    const state = getAnthropicState(accum);
-    const content: AnthropicMessage["content"] = [];
-    const allBlockIndices = new Set<number>([
-      ...accum.textByBlock.keys(),
-      ...accum.reasoningByBlock.keys(),
-      ...Array.from(accum.toolCalls.values()).map((c) => c.blockIndex),
-      ...state.redactedData.keys(),
-    ]);
-    const sorted = [...allBlockIndices].sort((a, b) => a - b);
-    for (const idx of sorted) {
-      const kind = state.blockKind.get(idx);
-      if (kind === "redacted_thinking") {
-        content.push({
-          type: "redacted_thinking",
-          data: state.redactedData.get(idx) ?? "",
-        } as RedactedThinkingBlock);
-        continue;
-      }
-      if (kind === "thinking" || accum.reasoningByBlock.has(idx)) {
-        content.push({
-          type: "thinking",
-          thinking: accum.reasoningByBlock.get(idx) ?? "",
-          signature: "",
-        } as AnthropicThinkingBlock);
-        continue;
-      }
-      const tc = [...accum.toolCalls.values()].find((c) => c.blockIndex === idx);
-      if (tc) {
-        let parsed: unknown = {};
-        try {
-          parsed = tc.argsBuffer ? JSON.parse(tc.argsBuffer) : (tc.input ?? {});
-        } catch {
-          parsed = tc.input ?? {};
-        }
-        content.push({
-          type: "tool_use",
-          id: tc.callId,
-          name: tc.name,
-          input: parsed,
-        } as AnthropicToolUseBlock);
-        continue;
-      }
-      if (accum.textByBlock.has(idx)) {
-        const text = accum.textByBlock.get(idx) ?? "";
-        if (text.length > 0) {
+        if (kind === "redacted_thinking") {
           content.push({
-            type: "text",
-            text,
-            citations: null,
-          } as AnthropicTextBlock);
+            type: "redacted_thinking",
+            data: state.redactedData.get(idx) ?? "",
+          } as RedactedThinkingBlock);
+          continue;
+        }
+        if (kind === "thinking" || accum.reasoningByBlock.has(idx)) {
+          content.push({
+            type: "thinking",
+            thinking: accum.reasoningByBlock.get(idx) ?? "",
+            signature: "",
+          } as AnthropicThinkingBlock);
+          continue;
+        }
+        const tc = [...accum.toolCalls.values()].find((c) => c.blockIndex === idx);
+        if (tc) {
+          let parsed: unknown = {};
+          try {
+            parsed = tc.argsBuffer ? JSON.parse(tc.argsBuffer) : (tc.input ?? {});
+          } catch {
+            parsed = tc.input ?? {};
+          }
+          content.push({
+            type: "tool_use",
+            id: tc.callId,
+            name: tc.name,
+            input: parsed,
+          } as AnthropicToolUseBlock);
+          continue;
+        }
+        if (accum.textByBlock.has(idx)) {
+          const text = accum.textByBlock.get(idx) ?? "";
+          if (text.length > 0) {
+            content.push({
+              type: "text",
+              text,
+              citations: null,
+            } as AnthropicTextBlock);
+          }
         }
       }
-    }
 
-    const fallbackModel = this.defaultModel ?? this.target.modelId;
-    return {
-      id: state.id || `msg_anthropic`,
-      type: "message",
-      role: "assistant",
-      model: modelSeen ?? fallbackModel,
-      content,
-      stop_reason: mapBackStopReason(accum.stopReason),
-      stop_sequence: state.stopSequence,
-      usage: {
-        input_tokens: accum.usage.inputTokens,
-        output_tokens: accum.usage.outputTokens,
-        cache_read_input_tokens: accum.usage.cachedInputTokens ?? null,
-        cache_creation_input_tokens: null,
-      },
-    } as AnthropicMessage;
-  }
+      const fallbackModel = defaultModel ?? target.modelId;
+      return {
+        id: state.id || `msg_anthropic`,
+        type: "message",
+        role: "assistant",
+        model: modelSeen ?? fallbackModel,
+        content,
+        stop_reason: mapBackStopReason(accum.stopReason),
+        stop_sequence: state.stopSequence,
+        usage: {
+          input_tokens: accum.usage.inputTokens,
+          output_tokens: accum.usage.outputTokens,
+          cache_read_input_tokens: accum.usage.cachedInputTokens ?? null,
+          cache_creation_input_tokens: null,
+        },
+      } as AnthropicMessage;
+    },
 
-  protected override adapterTransforms(): readonly DeltaTransform[] {
-    return this.parseThinkTags ? [thinkTagTransform()] : [];
-  }
+    adapterTransforms(): readonly DeltaTransform[] {
+      return parseThinkTags ? [thinkTagTransform()] : [];
+    },
 
-  protected normalizeRaw(raw: AnthropicMessage): LanguageModelExecutionResult {
-    return normalizeImpl({ targetOutput: raw, target: this.target });
-  }
+    normalize(raw: AnthropicMessage): LanguageModelExecutionResult {
+      return normalizeImpl({ targetOutput: raw, target });
+    },
 
-  /**
-   * Non-streaming + tag routing: streaming path's transforms didn't
-   * run, so extract tags from the message's text blocks here. Mirrors
-   * the OpenAI executor's postProcessForNormalize.
-   */
-  protected override postProcessForNormalize(raw: AnthropicMessage): AnthropicMessage {
-    if (!this.parseThinkTags && !this.customBlocks) return raw;
-    if (!Array.isArray(raw.content)) return raw;
-    const newContent: AnthropicMessage["content"] = [];
-    let reasoningCarry = "";
-    for (const block of raw.content) {
-      if (block.type === "text") {
-        const cleaned = applyTagsToText(block.text, this.parseThinkTags, this.customBlocks);
-        if (cleaned) {
-          reasoningCarry += cleaned.reasoning;
-          if (cleaned.text.length > 0) {
-            newContent.push({
-              type: "text",
-              text: cleaned.text,
-              citations: (block as AnthropicTextBlock).citations ?? null,
-            } as AnthropicTextBlock);
+    /**
+     * Non-streaming + tag routing: streaming path's transforms didn't
+     * run, so extract tags from the message's text blocks here. Mirrors
+     * the OpenAI executor's postProcessForNormalize.
+     */
+    postProcessForNormalize(raw: AnthropicMessage): AnthropicMessage {
+      if (!parseThinkTags && !customBlocks) return raw;
+      if (!Array.isArray(raw.content)) return raw;
+      const newContent: AnthropicMessage["content"] = [];
+      let reasoningCarry = "";
+      for (const block of raw.content) {
+        if (block.type === "text") {
+          const cleaned = applyTagsToText(block.text, parseThinkTags, customBlocks);
+          if (cleaned) {
+            reasoningCarry += cleaned.reasoning;
+            if (cleaned.text.length > 0) {
+              newContent.push({
+                type: "text",
+                text: cleaned.text,
+                citations: (block as AnthropicTextBlock).citations ?? null,
+              } as AnthropicTextBlock);
+            }
+          } else {
+            newContent.push(block);
           }
         } else {
           newContent.push(block);
         }
-      } else {
-        newContent.push(block);
       }
-    }
-    if (reasoningCarry.length > 0) {
-      newContent.unshift({
-        type: "thinking",
-        thinking: reasoningCarry,
-        signature: "",
-      } as AnthropicThinkingBlock);
-    }
-    return { ...raw, content: newContent } as AnthropicMessage;
-  }
+      if (reasoningCarry.length > 0) {
+        newContent.unshift({
+          type: "thinking",
+          thinking: reasoningCarry,
+          signature: "",
+        } as AnthropicThinkingBlock);
+      }
+      return { ...raw, content: newContent } as AnthropicMessage;
+    },
+  };
 }
 
 /**
@@ -605,7 +588,7 @@ function applyTagsToText(
 // Client construction
 // ============================================================================
 
-function buildClientOptions(opts: AnthropicExecutorOptions): ClientOptions {
+function buildClientOptions(opts: AnthropicAdapterOptions): ClientOptions {
   // Env-var fallbacks fill in any field absent from explicit
   // clientOptions. Explicit values win.
   const base: ClientOptions = {};
