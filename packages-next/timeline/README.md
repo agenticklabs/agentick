@@ -153,8 +153,11 @@ Construction: `new TimelineHarness(scopeId, journal, bus, inbox, options?)`.
 
 ### `TimelineStore`
 
-The durable persisted-tier port. Implement it for a custom backend;
-`load` / `append` / `sessions` / `delete`, optional `prune`, `backend`.
+The durable persisted-tier port (append-only, ordered by `seq`). Implement
+it for a custom backend; `load` / `append` (returns the assigned seqs) /
+`sessions` / `delete`, optional `prune(before: { seq })` (absolute-seq
+erasure), `backend`. `seq` is store-assigned, strictly increasing, never
+reused, stable across `prune` — a `BIGSERIAL`, not a position.
 
 ### `MemoryTimelineStore`
 
@@ -221,14 +224,12 @@ await timeline.compact(fromHandler({ handler: async ({ entries }) => entries.sli
   leaves the error latched, but the session→errored transition
   (`catchTag`) and adapter retry policy belong at the session/loop-executor
   barrier (ADR 49) and are not implemented here.
-- **`seq` is implicit, must become first-class before any DB adapter**:
-  `prune` takes `{ seq }` but entries don't carry it and the memory store
-  treats it positionally (renumbers on prune). ADR 49's frozen-schema rule
-  requires `seq` be a **stable, monotonic, append-assigned** ordering key
-  (survives prune, never reused) so all adapters agree and a cursor stays
-  valid — schema-on-read protects opaque payloads, not a missing ordering
-  column. Pinning this is the first item of A2.2; cursored `load` options /
-  `history()` paging stay additive after.
+- **`seq` is first-class (landed, #133) — cursored reads are the additive
+  next step.** `append` returns the assigned seqs; `prune(before: { seq })`
+  erases by *absolute* seq (survivors keep theirs, never reused); the
+  conformance suite pins it. What remains additive: cursored reads
+  (`load({ fromSeq })`, seq-tagged entries, `history()` paging) for very
+  long sessions — deferred until an adopter hits the ceiling.
 - **`readPersisted()` is synchronous + full-in-memory** — the one baked
   opinion that caps session length in RAM. Deliberately deferred; the
   future fix pages by `seq` (another reason to pin it). Keep new code off
