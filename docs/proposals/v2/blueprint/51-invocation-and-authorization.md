@@ -88,6 +88,23 @@ no-arg/data-only signal form, and it joins the addressable set. The
 function-arg call form remains an in-process-only override
 (inner-scope-wins at the call site).
 
+**Footnote (wave-ratified, 2026-07-03) — optional function fields do
+NOT trigger the exclusion.** The rule is about *required* function
+parameters. A declaration whose input carries an *optional* function
+field (knobs' `validate`, prompts' `render`) is declarable: the field
+rides in-process invocations and degrades to absent over the
+inbox/wire — the addressable form simply carries the data subset
+(prompts' `template`). Precedent: `knobs:register`, `prompts:register`.
+
+**Footnote (wave-ratified, 2026-07-03) — opIds canonicalize.** The
+registry manufactures `${verb}:${ulid()}` opIds. Pre-registry literals
+that embedded discriminators in the opId (mcp's
+`mcp:${serverId}:call-tool:*`) canonicalize on migration: the
+discriminator's provenance moves to the scope (where it belonged), the
+op *name* keeps its exact identity (the journal/bus-queryable string),
+and the opId remains what it always was — a per-call uniqueness token
+nobody may parse. Verified zero opId-prefix consumers before ratifying.
+
 ### 1.3 Addressing — flat, location-transparent
 
 `address = surface:scopeId` (e.g. `timeline:<sessionId>`). **The
