@@ -1,7 +1,8 @@
 # Verb-coverage matrix (#140) — the ADR 51 exposure decisions
 
-**Status:** DRAFT — the `wire?` column is the ⛔ decision this document
-exists for. Everything else is enumerated from source
+**Status:** RATIFIED 2026-07-03 (Ryan, commit-comment on a7358fa2) — with
+the caveat that `state:*` and some `timeline:*` calls get re-evaluated
+later; grants remain the runtime control either way. Everything else is enumerated from source
 (`harness.commands()` declarations as of `8d6ca9b2`).
 **Feeds:** #141 (slice 5 — the dynamic resolver projects exactly the
 `wire? = yes` rows), ADR 34 (scope labels are the grant vocabulary).
@@ -69,4 +70,5 @@ bare verb resolved by construction-bound config).
 
 ## Sign-off
 
-- [ ] Ryan: `wire?` column ratified (⛔ #140) — then #141 implements exactly these rows.
+- [x] Ryan: `wire?` column ratified (⛔ #140, 2026-07-03) — #141 implements exactly these rows.
+  Caveat recorded: re-evaluate `state:*` + some `timeline:*` post-slice-5.
