@@ -34,6 +34,7 @@ import {
   type CreateAppOptions,
 } from "./create-app.js";
 import { AppHarness } from "./harness.js";
+import { run as baseRun, type RunHandle, type RunOptions } from "./run.js";
 
 export async function createApp<P = unknown>(
   rootElement: unknown,
@@ -46,7 +47,26 @@ export async function createApp<P = unknown>(
   } as CreateAppOptions<P>);
 }
 
+/**
+ * React-defaulted `run()` — one-shot execution with the React
+ * reconciler wired automatically. See `@agentick/app-next`'s `run`.
+ *
+ * ```ts
+ * const result = await run(<Agent />, { model: openai("gpt-4o"), messages }).result;
+ * ```
+ */
+export function run<P = unknown>(
+  rootElement: unknown,
+  options: Omit<RunOptions<P>, "reconciler"> & Partial<Pick<RunOptions<P>, "reconciler">>,
+): RunHandle {
+  return baseRun(rootElement, {
+    reconciler: reactReconciler(),
+    ...options,
+  } as RunOptions<P>);
+}
+
 // Re-export the rest of the public surface so adopters can pull
 // everything from this subpath.
 export { AppHarness, type AppHarnessOptions } from "./harness.js";
 export { type CreateAppOptions } from "./create-app.js";
+export { type RunHandle, type RunOptions } from "./run.js";
