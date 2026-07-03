@@ -5,8 +5,7 @@
  *
  * ```ts
  * const app = await createApp(<MyAgent />, {
- *   executor: new OpenAIExecutor(...),
- *   target: { kind: "language-model", provider: "openai", modelId: "gpt-4o" },
+ *   executor: openai("gpt-4o"),
  * });
  *
  * const session = await app.createSession();

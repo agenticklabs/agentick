@@ -34,6 +34,11 @@ import {
 import { ElicitationHarness } from "@agentick/elicitation-next";
 import { TasksHarness } from "@agentick/tasks-next";
 import { LoopExecutorHarness } from "@agentick/loop-executor-next";
+import {
+  isLanguageModelAdapter,
+  type LanguageModelAdapter,
+  LanguageModelExecutor as TheLanguageModelExecutor,
+} from "@agentick/executor-next";
 import { SessionHarness, type SessionHarnessOptions } from "@agentick/session-next";
 import {
   InMemoryHandlerResolver,
@@ -160,19 +165,23 @@ export interface AppHarnessOptions<P = unknown> {
    */
   readonly rootElement: unknown;
   /**
-   * Language-model executor shared across sessions. Accepts either:
+   * Language-model executor shared across sessions. Accepts:
    *
+   *   - A `LanguageModelAdapter` (e.g., from `openai("gpt-4o")`,
+   *     `google("gemini-2.5-pro")`, `aisdk(model)`) — the app wraps it
+   *     in the ONE `LanguageModelExecutor` on the app's substrate, so
+   *     executor events appear on `app.events(...)` without manual
+   *     wiring. The standard path (ADR 52).
    *   - A pre-built `LanguageModelExecutor` instance — the caller
    *     constructed it with its own substrate; the app uses it as-is.
-   *   - An `ExecutorFactory` (e.g., from `openai(modelId, opts)`) — the
-   *     app calls it at construction with the app's substrate, so the
-   *     executor's events appear on `app.events(...)` without manual
-   *     wiring.
+   *   - An `ExecutorFactory` — legacy substrate-deferred construction;
+   *     survives only until the last factory producer converts to an
+   *     adapter. TODO(#151): drop once anthropic ships adapter-first.
    *
    * The executor is self-describing: its `.target` property is read by
    * the app, so the redundant `target` field below is optional.
    */
-  readonly executor: LanguageModelExecutor | ExecutorFactory;
+  readonly executor: LanguageModelExecutor | ExecutorFactory | LanguageModelAdapter;
   /**
    * Optional override of the executor's self-described target. When
    * omitted, `executor.target` is used. Override at this level when a
@@ -556,17 +565,21 @@ export class AppHarness<P = unknown>
     const inbox = this.inbox;
 
     this.rootElement = options.rootElement;
-    // Executor slot: factory → construct with the app's substrate so
-    // executor events flow through app.events(). Instance → use as-is
-    // (caller owns substrate).
-    this.executor = isExecutorFactory(options.executor)
-      ? options.executor({
-          scopeId: `${appId}:executor`,
-          journal,
-          bus,
-          inbox,
+    // Executor slot: adapter → wrap in the ONE LanguageModelExecutor
+    // on the app's substrate (ADR 52). Factory → construct with the
+    // app's substrate. Instance → use as-is (caller owns substrate).
+    this.executor = isLanguageModelAdapter(options.executor)
+      ? new TheLanguageModelExecutor(`${appId}:executor`, journal, bus, inbox, {
+          adapter: options.executor,
         })
-      : options.executor;
+      : isExecutorFactory(options.executor)
+        ? options.executor({
+            scopeId: `${appId}:executor`,
+            journal,
+            bus,
+            inbox,
+          })
+        : options.executor;
     // Resolve target: caller override > executor.target.
     this.target = options.target ?? this.executor.target;
     this.telemetryLayer = options.telemetry;
