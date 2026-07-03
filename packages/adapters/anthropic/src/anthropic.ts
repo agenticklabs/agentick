@@ -534,18 +534,33 @@ export function toAnthropicMessages(messages: Message[]): {
           }
           break;
 
-        case "document":
-          if ((block as any).source?.type === "base64") {
+        case "document": {
+          const src = (block as any).source;
+          if (src?.type === "base64") {
             content.push({
               type: "document",
               source: {
                 type: "base64",
-                media_type: (block as any).source.mimeType ?? "application/pdf",
-                data: (block as any).source.data,
+                media_type: src.mimeType ?? "application/pdf",
+                data: src.data,
               },
+            });
+          } else if (src?.type === "url") {
+            // Anthropic fetches the document from the URL server-side (parity
+            // with the image url source above).
+            content.push({
+              type: "document",
+              source: { type: "url", url: src.url },
+            });
+          } else if (src?.type === "file" && src.fileId) {
+            // Files API reference.
+            content.push({
+              type: "document",
+              source: { type: "file", file_id: src.fileId },
             });
           }
           break;
+        }
 
         case "tool_use":
           content.push({

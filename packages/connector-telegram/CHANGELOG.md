@@ -1,5 +1,12 @@
 # @agentick/connector-telegram
 
+## 0.15.1
+
+### Patch Changes
+
+- @agentick/shared@0.15.1
+- @agentick/gateway@0.15.1
+
 ## 0.15.0
 
 ### Patch Changes

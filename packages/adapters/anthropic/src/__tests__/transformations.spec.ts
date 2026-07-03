@@ -303,6 +303,64 @@ describe("toAnthropicMessages", () => {
     });
   });
 
+  describe("document blocks", () => {
+    it("should convert a base64 document", () => {
+      const messages: Message[] = [
+        {
+          role: "user",
+          content: [
+            {
+              type: "document",
+              source: { type: "base64", data: "JVBERi0x", mimeType: "application/pdf" },
+              mimeType: "application/pdf",
+            } as any,
+          ],
+        },
+      ];
+      const result = toAnthropicMessages(messages);
+
+      expect((result.messages[0] as any).content[0]).toEqual({
+        type: "document",
+        source: { type: "base64", media_type: "application/pdf", data: "JVBERi0x" },
+      });
+    });
+
+    it("should convert a document with a URL source", () => {
+      const messages: Message[] = [
+        {
+          role: "user",
+          content: [
+            {
+              type: "document",
+              source: { type: "url", url: "https://example.com/doc.pdf" },
+            } as any,
+          ],
+        },
+      ];
+      const result = toAnthropicMessages(messages);
+
+      expect((result.messages[0] as any).content[0]).toEqual({
+        type: "document",
+        source: { type: "url", url: "https://example.com/doc.pdf" },
+      });
+    });
+
+    it("should convert a document with a Files API reference", () => {
+      const messages: Message[] = [
+        {
+          role: "user",
+          content: [{ type: "document", source: { type: "file", fileId: "file_123" } } as any],
+        },
+      ];
+      const result = toAnthropicMessages(messages);
+
+      expect((result.messages[0] as any).content[0]).toEqual({
+        type: "document",
+        source: { type: "file", file_id: "file_123" },
+      });
+    });
+  });
+
   describe("tool_use blocks", () => {
     it("should convert tool_use block with toolUseId to id", () => {
       const messages: Message[] = [

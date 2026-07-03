@@ -271,6 +271,40 @@ describe("toOpenAIMessages", () => {
     });
   });
 
+  describe("document blocks", () => {
+    it("should convert a base64 document to a file part", () => {
+      const message: Message = {
+        role: "user",
+        content: [
+          {
+            type: "document",
+            source: { type: "base64", data: "JVBERi0x", mimeType: "application/pdf" },
+            title: "invoice.pdf",
+          } as any,
+        ],
+      };
+      const result = toOpenAIMessages(message);
+
+      expect((result[0] as any).content[0]).toEqual({
+        type: "file",
+        file: { filename: "invoice.pdf", file_data: "data:application/pdf;base64,JVBERi0x" },
+      });
+    });
+
+    it("should convert a document Files API reference to a file_id part", () => {
+      const message: Message = {
+        role: "user",
+        content: [{ type: "document", source: { type: "file", fileId: "file_abc" } } as any],
+      };
+      const result = toOpenAIMessages(message);
+
+      expect((result[0] as any).content[0]).toEqual({
+        type: "file",
+        file: { file_id: "file_abc" },
+      });
+    });
+  });
+
   describe("tool_use blocks", () => {
     it("should convert tool_use block to tool_calls", () => {
       const message: Message = {

@@ -197,6 +197,90 @@ describe("toBedrockMessages", () => {
     });
   });
 
+  describe("document blocks", () => {
+    it("should convert a base64 document source to bytes", () => {
+      // "SGVsbG8=" is "Hello" in base64
+      const messages: Message[] = [
+        {
+          role: "user",
+          content: [
+            {
+              type: "document",
+              source: { type: "base64", data: "SGVsbG8=", mimeType: "application/pdf" },
+              mimeType: "application/pdf",
+            } as any,
+          ],
+        },
+      ];
+      const result = toBedrockMessages(messages);
+
+      const doc = result.messages[0].content![0] as any;
+      expect(doc.document).toBeDefined();
+      expect(doc.document.format).toBe("pdf");
+      expect(doc.document.source.bytes).toBeInstanceOf(Uint8Array);
+      expect(Buffer.from(doc.document.source.bytes).toString("utf-8")).toBe("Hello");
+    });
+
+    it("should map an s3:// document url to s3Location", () => {
+      const messages: Message[] = [
+        {
+          role: "user",
+          content: [
+            {
+              type: "document",
+              source: {
+                type: "url",
+                url: "s3://my-bucket/invoice.pdf",
+                mimeType: "application/pdf",
+              },
+              title: "Invoice #123",
+            } as any,
+          ],
+        },
+      ];
+      const result = toBedrockMessages(messages);
+
+      const doc = result.messages[0].content![0] as any;
+      expect(doc.document.source.s3Location.uri).toBe("s3://my-bucket/invoice.pdf");
+      expect(doc.document.format).toBe("pdf");
+    });
+
+    it("should sanitize the document name to Bedrock's allowed charset", () => {
+      const messages: Message[] = [
+        {
+          role: "user",
+          content: [
+            {
+              type: "document",
+              source: { type: "base64", data: "AAAA", mimeType: "application/pdf" },
+              title: "quote/2024_final*.pdf",
+            } as any,
+          ],
+        },
+      ];
+      const result = toBedrockMessages(messages);
+
+      const doc = result.messages[0].content![0] as any;
+      // '/', '_', '*' and '.' are all outside Bedrock's allowed charset → spaces, collapsed.
+      expect(doc.document.name).toBe("quote 2024 final pdf");
+    });
+
+    it("should still accept pre-decoded bytes on the source", () => {
+      const bytes = new Uint8Array([1, 2, 3]);
+      const messages: Message[] = [
+        {
+          role: "user",
+          content: [{ type: "document", source: { bytes }, format: "csv" } as any],
+        },
+      ];
+      const result = toBedrockMessages(messages);
+
+      const doc = result.messages[0].content![0] as any;
+      expect(doc.document.source.bytes).toBe(bytes);
+      expect(doc.document.format).toBe("csv");
+    });
+  });
+
   describe("tool_use blocks", () => {
     it("should convert tool_use block to Bedrock toolUse format", () => {
       const messages: Message[] = [

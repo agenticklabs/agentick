@@ -562,6 +562,27 @@ export function toOpenAIMessages(message: Message): ChatCompletionMessageParam[]
         }
         break;
 
+      case "document": {
+        // OpenAI Chat Completions takes documents (e.g. PDFs) as a `file` part:
+        // base64 payloads go inline as a data URI with a filename; a Files API
+        // reference goes by file_id. There is no URL document source in Chat
+        // Completions — callers should stage to base64 or upload for a file_id.
+        const src = (block as any).source;
+        if (src?.type === "base64") {
+          const mime = src.mimeType ?? (block as any).mimeType ?? "application/pdf";
+          content.push({
+            type: "file",
+            file: {
+              filename: (block as any).title ?? (block as any).name ?? "document.pdf",
+              file_data: `data:${mime};base64,${src.data}`,
+            },
+          } as any);
+        } else if (src?.type === "file" && src.fileId) {
+          content.push({ type: "file", file: { file_id: src.fileId } } as any);
+        }
+        break;
+      }
+
       case "tool_use":
         tool_calls.push({
           id: block.toolUseId,

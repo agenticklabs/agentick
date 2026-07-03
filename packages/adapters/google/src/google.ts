@@ -451,6 +451,28 @@ export function convertBlocksToGoogleParts(blocks: ContentBlock[]): any[] {
         }
         break;
 
+      case "document":
+        // Gemini accepts documents (e.g. application/pdf) through the same
+        // inlineData/fileData parts as images. Small payloads go inline as
+        // base64; large ones are referenced by URI (typically a gs:// object
+        // staged by the caller). Mirrors the "image" case above.
+        if (block.source.type === "url") {
+          parts.push({
+            fileData: {
+              mimeType: block.source.mimeType || "application/pdf",
+              fileUri: block.source.url,
+            },
+          });
+        } else if (block.source.type === "base64") {
+          parts.push({
+            inlineData: {
+              mimeType: block.source.mimeType || "application/pdf",
+              data: block.source.data,
+            },
+          });
+        }
+        break;
+
       case "tool_use":
         parts.push({
           functionCall: {
