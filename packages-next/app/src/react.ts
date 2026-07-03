@@ -9,7 +9,7 @@
  * import { createApp } from "@agentick/app-next/react";
  *
  * const app = await createApp(<Agent />, {
- *   executor: openai("gpt-4o"),
+ *   model: openai("gpt-4o"),
  * });
  * ```
  *

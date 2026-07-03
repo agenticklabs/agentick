@@ -37,7 +37,7 @@ unexecuted — looped execution belongs to the executor harness + session.
 ### In an app
 
 ```ts
-const app = await createApp(<Agent />, { executor: openai("gpt-4o") });
+const app = await createApp(<Agent />, { model: openai("gpt-4o") });
 ```
 
 The app wraps the adapter in the ONE `LanguageModelExecutor` on its own

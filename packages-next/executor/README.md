@@ -23,7 +23,7 @@ Most apps never construct this class — pass an adapter to the app's
 `executor:` slot and the app wraps it on its own substrate:
 
 ```ts
-const app = await createApp(<Agent />, { executor: openai("gpt-4o") });
+const app = await createApp(<Agent />, { model: openai("gpt-4o") });
 ```
 
 Hand construction (tests, standalone harness use):

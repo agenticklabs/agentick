@@ -161,11 +161,11 @@ Each tenant has its own `EventLog` instance. Cross-tenant fan-out is impossible 
 
 ```ts
 // Local development — single tenant, ring buffer
-const app = createApp(MyAgent, { executor: openai("gpt-4o") });
+const app = createApp(MyAgent, { model: openai("gpt-4o") });
 
 // Multi-tenant cloud — tenant-isolated cluster bus
 const app = createApp(MyAgent, {
-  executor: openai("gpt-4o"),
+  model: openai("gpt-4o"),
   bus: ClusterEventBus.forTenant("tenant-xyz", clusterConfig),
 });
 ```

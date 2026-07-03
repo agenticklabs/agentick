@@ -21,7 +21,7 @@
  * });
  *
  * const app = await createApp(<Agent />, {
- *   executor: openai("gpt-4o-mini"),
+ *   model: openai("gpt-4o-mini"),
  *   tools: myTools,
  * });
  * ```

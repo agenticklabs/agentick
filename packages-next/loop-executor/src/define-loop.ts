@@ -32,7 +32,7 @@
  * });
  *
  * const app = await createApp(<Agent />, {
- *   executor: openai("gpt-4o"),
+ *   model: openai("gpt-4o"),
  *   loop: myLoop,
  * });
  * ```

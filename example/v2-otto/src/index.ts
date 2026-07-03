@@ -158,7 +158,7 @@ async function main(): Promise<void> {
 
   // ─── Construct the app with all the layered seams wired:
   const app = await createApp(React.createElement(Agent), {
-    executor: aisdk(openai("gpt-4o-mini")),
+    model: aisdk(openai("gpt-4o-mini")),
 
     // App-level tools — every session sees them. Tagged with
     // `binding: { scope: "app", appId }` at construction. Declared

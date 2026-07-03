@@ -25,7 +25,7 @@ import { aisdk } from "@agentick/model-ai-sdk-next";
 import { openai } from "@ai-sdk/openai";
 
 const app = await createApp(<Agent />, {
-  executor: aisdk(openai("gpt-4o")),
+  model: aisdk(openai("gpt-4o")),
 });
 
 const session = await app.createSession();

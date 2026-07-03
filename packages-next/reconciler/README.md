@@ -33,7 +33,7 @@ const myReconciler = defineReconciler({
 
 import { createApp } from "@agentick/app-next";
 const app = await createApp(myAgent, {
-  executor: openai("gpt-4o"),
+  model: openai("gpt-4o"),
   reconciler: myReconciler,
 });
 ```
