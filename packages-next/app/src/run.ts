@@ -62,6 +62,11 @@ export type RunHandle = Promise<SessionExecutionHandle> &
  * sends, and auto-closes the app when the execution settles — stream
  * events are delivered during the execution, so iteration completes
  * before teardown.
+ *
+ * Note: breaking out of the `for await` early does NOT abort the run —
+ * teardown is tied to the execution settling, not to iterator completion,
+ * so the execution runs to completion and then tears down. To cancel
+ * early, pass `signal`.
  */
 export function run<P = unknown>(rootElement: unknown, options: RunOptions<P>): RunHandle {
   const { messages, props, maxTicks, signal, ...appOptions } = options;
