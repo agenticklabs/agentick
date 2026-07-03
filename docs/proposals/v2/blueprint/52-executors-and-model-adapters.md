@@ -126,6 +126,16 @@ adapter round trip (buildParams → call/openStream → mapChunk →
 normalize). No journal, no bus, no harness — a model call is just a
 model call.
 
+**Normative (ratified 2026-07-03): these helpers are SINGLE-SHOT.**
+One provider round trip; `generateStream` is delta transport for that
+one turn. They never loop, never execute tools, never feed results
+back — a `tool_use` response returns as data (`result.toolCalls`) and
+the helper stops. Multi-turn belongs to the loop executor + session
+tier (with its tool executor, capability policy, confirmation gates,
+and journal) or to an alternative engine (`AiSdkExecutor`). Growing
+these helpers a loop would create a second, ungoverned agent loop —
+rejected permanently.
+
 ### App-level ergonomics (the quickstart payoff)
 
 ```ts
@@ -246,10 +256,13 @@ pinned now so every modality lands the same way.
 1. **Package role noun** — `model-*-next` (recommended; reads as
    `import { openai } from "@agentick/model-openai-next"`) vs
    `adapter-*-next` (too generic — store/wire adapters exist).
-2. **`StreamAccumulatorView` surface** — exactly which accumulator
-   state adapters may read (`mapChunk`/`reconstructRaw` currently see
-   the mutable accumulator). Pin during extraction; read-only is the
-   default posture.
+2. **`StreamAccumulatorView` surface** — RESOLVED 2026-07-03 (by
+   audit): read-only accumulation state (usage, toolCalls, stopReason,
+   text/reasoning buffers, `modelSeen`, `totalText()`,
+   `toContentBlocks()`) **plus `providerExtra` as the sanctioned
+   provider-owned mutable scratch slot** — the accumulator already
+   documents it as such and openai/google both stash parser state
+   there. Read-only-except-your-own-pocket.
 
 ## References
 
