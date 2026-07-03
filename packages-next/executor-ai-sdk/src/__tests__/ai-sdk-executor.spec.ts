@@ -2,8 +2,9 @@
  * Smoke tests for the AI SDK bridge.
  *
  * Uses `MockLanguageModelV2` from `ai/test` to canned-response the
- * model layer. The executor harness around it should produce the
- * canonical LanguageModelExecutionResult shape regardless of provider.
+ * model layer. The `aisdk()` adapter driven through
+ * `LanguageModelExecutor` should produce the canonical
+ * LanguageModelExecutionResult shape regardless of provider.
  */
 
 import { describe, expect, it } from "vitest";
@@ -11,10 +12,9 @@ import { describe, expect, it } from "vitest";
 import { MockLanguageModelV2 } from "ai/test";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type { RenderedTree, LanguageModelTarget } from "@agentick/spec-next";
-import { isExecutorFactory } from "@agentick/spec-next";
+import { isLanguageModelAdapter, LanguageModelExecutor } from "@agentick/executor-next";
 
-import { AISDKExecutor } from "../ai-sdk-executor.js";
-import { aisdk } from "../aisdk-factory.js";
+import { aisdk } from "../ai-sdk-adapter.js";
 
 function mkTree(): RenderedTree {
   return {
@@ -49,17 +49,17 @@ function mkMockModel(text: string): MockLanguageModelV2 {
   });
 }
 
-function mkExecutor(model: MockLanguageModelV2): AISDKExecutor {
-  return new AISDKExecutor(
+function mkExecutor(model: MockLanguageModelV2): LanguageModelExecutor {
+  return new LanguageModelExecutor(
     "test-aisdk",
     new MemoryJournal(),
     new LocalEventBus(),
     new LocalInbox(),
-    { model },
+    { adapter: aisdk(model) },
   );
 }
 
-describe("AISDKExecutor — basic", () => {
+describe("aisdk() adapter — basic", () => {
   it("derives target from the model's provider + modelId", async () => {
     const exec = mkExecutor(mkMockModel("hi"));
     await exec.ready;
@@ -147,22 +147,18 @@ describe("AISDKExecutor — basic", () => {
 });
 
 describe("aisdk() factory", () => {
-  it("returns an ExecutorFactory the spec helper recognizes", () => {
-    const f = aisdk({ model: mkMockModel("x") });
-    expect(isExecutorFactory(f)).toBe(true);
+  it("returns a LanguageModelAdapter the structural guard recognizes", () => {
+    expect(isLanguageModelAdapter(aisdk(mkMockModel("x")))).toBe(true);
   });
 
-  it("standalone invocation constructs a self-describing executor", async () => {
-    const f = aisdk({ model: mkMockModel("x") });
-    const exec = f();
-    await exec.ready;
-    expect(exec.family).toBe("language-model");
-    expect(exec.target.provider).toBe("mock-aisdk");
+  it("derives a self-describing target from the model handle", () => {
+    const adapter = aisdk(mkMockModel("x"));
+    expect(adapter.provider).toBe("ai-sdk");
+    expect(adapter.target.provider).toBe("mock-aisdk");
   });
 
-  it("accepts a target override", async () => {
-    const f = aisdk({
-      model: mkMockModel("x"),
+  it("accepts a target override", () => {
+    const adapter = aisdk(mkMockModel("x"), {
       target: {
         kind: "language-model",
         provider: "custom",
@@ -170,8 +166,6 @@ describe("aisdk() factory", () => {
         capabilities: { supportsTools: false, contextWindow: 1_000 },
       },
     });
-    const exec = f();
-    await exec.ready;
-    expect(exec.target.capabilities?.contextWindow).toBe(1_000);
+    expect(adapter.target.capabilities?.contextWindow).toBe(1_000);
   });
 });

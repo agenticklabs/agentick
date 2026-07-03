@@ -1,5 +1,6 @@
 /**
- * Conformance suite invocation for `AISDKExecutor`.
+ * Conformance suite invocation for `LanguageModelExecutor` + the
+ * `aisdk()` adapter.
  *
  * The factory builds a `MockLanguageModelV2` configured to return a
  * canned `doGenerate` response matching the suite's scripted
@@ -15,7 +16,9 @@ import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next
 import { runExecutorConformance } from "@agentick/spec-conformance-next";
 import type { LanguageModelExecutionResult } from "@agentick/spec-next";
 
-import { AISDKExecutor } from "../ai-sdk-executor.js";
+import { LanguageModelExecutor } from "@agentick/executor-next";
+
+import { aisdk } from "../ai-sdk-adapter.js";
 
 /**
  * Reverse-engineer a MockLanguageModelV2 from the scripted result so
@@ -97,13 +100,13 @@ function modelFor(scripted: LanguageModelExecutionResult | undefined): MockLangu
   });
 }
 
-describe("AISDKExecutor — ExecutorProtocol conformance", () => {
+describe("aisdk() adapter — ExecutorProtocol conformance", () => {
   runExecutorConformance(async ({ harnessId, scripted }) => {
     const journal = new MemoryJournal();
     const bus = new LocalEventBus();
     const inbox = new LocalInbox();
-    const exec = new AISDKExecutor(harnessId, journal, bus, inbox, {
-      model: modelFor(scripted),
+    const exec = new LanguageModelExecutor(harnessId, journal, bus, inbox, {
+      adapter: aisdk(modelFor(scripted)),
     });
     await exec.ready;
     return { executor: exec, bus };
