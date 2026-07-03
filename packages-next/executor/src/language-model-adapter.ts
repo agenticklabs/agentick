@@ -53,6 +53,7 @@ export interface StreamAccumulatorView {
   readonly textByBlock: ReadonlyMap<number, string>;
   readonly reasoningByBlock: ReadonlyMap<number, string>;
   readonly toolCalls: ReadonlyMap<string, AccumToolCall>;
+  readonly openBlocks: ReadonlyMap<number, "text" | "reasoning">;
   readonly messageStarted: boolean;
   readonly messageEnded: boolean;
   readonly modelSeen: string | undefined;

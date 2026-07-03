@@ -52,7 +52,7 @@ import type {
   ExecutorStream,
   ExecutorTerminal,
   LanguageModelExecutionResult,
-  LanguageModelExecutor,
+  LanguageModelExecutor as LanguageModelExecutorProtocol,
   LanguageModelInput,
   MessageEnvelope,
   MessageHandlerError,
@@ -75,6 +75,7 @@ import {
 } from "@agentick/spec-next";
 
 import { defaultProject } from "./canonical-projection.js";
+import type { LanguageModelAdapter } from "./language-model-adapter.js";
 import { composeTransforms, identityTransform, type DeltaTransform } from "./delta-transform.js";
 import { ExecutorLifecycle, type ExecutorInFlightEntry } from "./executor-lifecycle.js";
 import { StreamAccumulator } from "./stream-accumulator.js";
@@ -118,28 +119,34 @@ type InFlightEntry = ExecutorInFlightEntry;
 // BaseLanguageModelExecutor
 // ============================================================================
 
-export abstract class BaseLanguageModelExecutor<TRaw, TChunk = unknown>
+export interface LanguageModelExecutorOptions<TRaw = unknown, TChunk = unknown> {
+  /** The provider-normalization part (ADR 52). */
+  readonly adapter: LanguageModelAdapter<TRaw, TChunk>;
+}
+
+export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
   extends BaseHarness<"executor">
-  implements LanguageModelExecutor
+  implements LanguageModelExecutorProtocol
 {
   readonly family = "language-model" as const;
-  abstract readonly target: ExecutionTarget;
 
-  /**
-   * Whether `execute()` (the non-iterating entry point) should still
-   * use the streaming provider call internally to drive bus-level
-   * `executor:delta` envelopes. Default: false (call the non-streaming
-   * provider API). Subclasses override at construction.
-   */
-  protected readonly streamByDefault: boolean = false;
+  /** The provider-normalization part (ADR 52). */
+  private readonly adapter: LanguageModelAdapter<TRaw, TChunk>;
 
-  /**
-   * Whether this provider supports the streaming codepath at all. AI
-   * SDK's `streamText` is its own surface (separate from
-   * `generateText`); when `false`, the base throws if a caller hits
-   * `executeStream`. Default: true.
-   */
-  protected readonly supportsRunStreaming: boolean = true;
+  /** Self-described target — delegated to the adapter. */
+  get target(): ExecutionTarget {
+    return this.adapter.target;
+  }
+
+  /** See {@link LanguageModelAdapter.streamByDefault}. */
+  private get streamByDefault(): boolean {
+    return this.adapter.streamByDefault ?? false;
+  }
+
+  /** See {@link LanguageModelAdapter.supportsStreaming}. */
+  private get supportsRunStreaming(): boolean {
+    return this.adapter.supportsStreaming ?? true;
+  }
 
   private readonly lifecycle = new ExecutorLifecycle();
   // Backward-compat aliases for refs that haven't been renamed yet.
@@ -150,94 +157,45 @@ export abstract class BaseLanguageModelExecutor<TRaw, TChunk = unknown>
     return this.lifecycle.aborted;
   }
 
-  constructor(scopeId: string, journal: OperationJournal, bus: EventBus, inbox: MessageInbox) {
+  constructor(
+    scopeId: string,
+    journal: OperationJournal,
+    bus: EventBus,
+    inbox: MessageInbox,
+    options: LanguageModelExecutorOptions<TRaw, TChunk>,
+  ) {
     super("executor", scopeId, journal, bus, inbox);
+    this.adapter = options.adapter;
   }
 
   // ──────────────────────────────────────────────────────────────────
-  // Required hooks — subclass MUST implement
+  // Adapter delegation — the round trip (ADR 52). Bodies live on the
+  // adapter; these thin privates keep every pipeline call site stable.
   // ──────────────────────────────────────────────────────────────────
 
-  /**
-   * Translate canonical `LanguageModelInput` → provider request shape.
-   * Examples:
-   *   - OpenAI: `LanguageModelInput → ChatCompletionCreateParams`
-   *   - Anthropic: `LanguageModelInput → MessageCreateParams`
-   *   - Google: `LanguageModelInput → GenerateContentParameters`
-   *
-   * Pure. May read `target.providerOptions` for per-provider knobs.
-   */
-  protected abstract buildParams(input: LanguageModelInput, target: ExecutionTarget): unknown;
+  private buildParams(input: LanguageModelInput, target: ExecutionTarget): unknown {
+    return this.adapter.buildParams(input, target);
+  }
 
-  /**
-   * Non-streaming provider call. Returns the raw provider response.
-   * Subclasses propagate `signal` to the SDK so abort works.
-   *
-   * Throws on provider error; base translates via `mapProviderError`.
-   */
-  protected abstract callProvider(params: unknown, signal: AbortSignal | undefined): Promise<TRaw>;
+  private callProvider(params: unknown, signal: AbortSignal | undefined): Promise<TRaw> {
+    return this.adapter.call(params, signal);
+  }
 
-  /**
-   * Open the provider's streaming response. Returns an async-iterable
-   * of provider-specific chunks. The base owns the loop; subclass just
-   * opens the stream.
-   *
-   * Subclasses propagate `signal` to the SDK so abort works. Throws on
-   * provider error; base translates via `mapProviderError`.
-   *
-   * Override `supportsRunStreaming = false` if your provider has no
-   * streaming surface (and this hook will never be called).
-   */
-  protected abstract openStream(
-    params: unknown,
-    signal: AbortSignal,
-  ): Promise<AsyncIterable<TChunk>> | AsyncIterable<TChunk>;
+  private openStream(params: unknown, signal: AbortSignal | undefined): AsyncIterable<TChunk> {
+    return this.adapter.openStream(params, signal);
+  }
 
-  /**
-   * Translate one provider chunk into zero or more `AdapterDelta`s.
-   *
-   * The base feeds every delta through the transform pipeline
-   * (`adapterTransforms` → `customBlocks` → ...) and then routes the
-   * final deltas to:
-   *   1. The `StreamAccumulator` (the base's stream state)
-   *   2. The bus (via `emitDeltaLazy`) for observability
-   *   3. The active `executeStream` iterator (when present)
-   *
-   * Pure with respect to the accumulator — subclasses do NOT mutate
-   * `accum`; the base updates it from the emitted deltas. The
-   * accumulator is passed for read-only context (e.g. "what's the
-   * current text block index?" via `accum.highWaterBlockIndex`).
-   *
-   * Most providers map one chunk to multiple deltas (content-start +
-   * content-delta + tool-call-delta + ...); return them in order.
-   */
-  protected abstract mapChunk(chunk: TChunk, accum: StreamAccumulator): readonly AdapterDelta[];
+  private mapChunk(chunk: TChunk, accum: StreamAccumulator): readonly AdapterDelta[] {
+    return this.adapter.mapChunk(chunk, accum);
+  }
 
-  /**
-   * Synthesize the provider's raw response shape from the final
-   * accumulator state. Called once at the end of `drainStream`.
-   *
-   * Examples:
-   *   - OpenAI → `ChatCompletion` (with `choices[0].message.content` =
-   *     `accum.totalText()`, `tool_calls` from `accum.toolCalls`)
-   *   - Anthropic → `Message` (with `content` array assembled from text
-   *     + tool_use blocks)
-   *   - Google → `GenerateContentResponse` (with `candidates[0].content.parts`
-   *     reassembled from text + functionCall parts)
-   *
-   * The `modelSeen` argument is the model id the provider reported
-   * during the stream (when chunk-carried; e.g. OpenAI's `chunk.model`,
-   * Google's `chunk.modelVersion`). Falls back to whatever the
-   * subclass knows.
-   */
-  protected abstract reconstructRaw(accum: StreamAccumulator, modelSeen: string | undefined): TRaw;
+  private reconstructRaw(accum: StreamAccumulator, modelSeen: string | undefined): TRaw {
+    return this.adapter.reconstructRaw(accum, modelSeen);
+  }
 
-  /**
-   * Convert raw provider response → canonical
-   * `LanguageModelExecutionResult`. Called from `normalize()` and from
-   * `runBody` (after `postProcessForNormalize`).
-   */
-  protected abstract normalizeRaw(raw: TRaw): LanguageModelExecutionResult;
+  private normalizeRaw(raw: TRaw): LanguageModelExecutionResult {
+    return this.adapter.normalize(raw);
+  }
 
   // ──────────────────────────────────────────────────────────────────
   // Optional hooks — sensible defaults; override when needed
@@ -252,8 +210,8 @@ export abstract class BaseLanguageModelExecutor<TRaw, TChunk = unknown>
    * (e.g., Anthropic preserves per-section `providerMetadata` for
    * `cache_control` by emitting one text part per system section).
    */
-  protected projectImpl(input: ProjectInput): LanguageModelInput {
-    return defaultProject(input);
+  private projectImpl(input: ProjectInput): LanguageModelInput {
+    return this.adapter.project ? this.adapter.project(input) : defaultProject(input);
   }
 
   /**
@@ -265,8 +223,8 @@ export abstract class BaseLanguageModelExecutor<TRaw, TChunk = unknown>
    * Order matters: chunk → mapChunk → adapterTransforms[0] →
    * adapterTransforms[1] → ... → customBlocks → emit + accumulate.
    */
-  protected adapterTransforms(): readonly DeltaTransform[] {
-    return [];
+  private adapterTransforms(): readonly DeltaTransform[] {
+    return this.adapter.adapterTransforms?.() ?? [];
   }
 
   /**
@@ -278,8 +236,9 @@ export abstract class BaseLanguageModelExecutor<TRaw, TChunk = unknown>
    * Set as a class field (or via constructor option threaded to a
    * protected setter). Default: undefined (no custom-block extraction).
    */
-  protected readonly customBlocks: Readonly<Record<string, CustomBlockDefinition>> | undefined =
-    undefined;
+  private get customBlocks(): Readonly<Record<string, CustomBlockDefinition>> | undefined {
+    return this.adapter.customBlocks;
+  }
 
   /**
    * Mutate the raw response between `execute` and `normalize` in the
@@ -290,8 +249,8 @@ export abstract class BaseLanguageModelExecutor<TRaw, TChunk = unknown>
    * applyTagRouterToChatCompletion when streamByDefault is false but
    * tag routing should still apply).
    */
-  protected postProcessForNormalize(raw: TRaw): TRaw {
-    return raw;
+  private postProcessForNormalize(raw: TRaw): TRaw {
+    return this.adapter.postProcessForNormalize ? this.adapter.postProcessForNormalize(raw) : raw;
   }
 
   /**
@@ -306,8 +265,8 @@ export abstract class BaseLanguageModelExecutor<TRaw, TChunk = unknown>
    * Default: undefined (no extraction). Return `undefined` to skip;
    * the base no-ops in that case.
    */
-  protected extractMetadata(_raw: TRaw): Readonly<Record<string, unknown>> | undefined {
-    return undefined;
+  private extractMetadata(raw: TRaw): Readonly<Record<string, unknown>> | undefined {
+    return this.adapter.extractMetadata?.(raw);
   }
 
   /**
@@ -316,7 +275,8 @@ export abstract class BaseLanguageModelExecutor<TRaw, TChunk = unknown>
    * error message containing "abort". Override for SDKs with
    * non-standard abort signaling.
    */
-  protected isAbortError(cause: unknown): boolean {
+  private isAbortError(cause: unknown): boolean {
+    if (this.adapter.isAbortError) return this.adapter.isAbortError(cause);
     if (!(cause instanceof Error)) return false;
     return (
       cause.name === "AbortError" ||
@@ -332,7 +292,8 @@ export abstract class BaseLanguageModelExecutor<TRaw, TChunk = unknown>
    * when your provider surfaces structured errors you can extract more
    * detail from.
    */
-  protected mapProviderError(cause: unknown): ExecuteErrorChannel {
+  private mapProviderError(cause: unknown): ExecuteErrorChannel {
+    if (this.adapter.mapProviderError) return this.adapter.mapProviderError(cause);
     if (this.isAbortError(cause)) {
       return new ProviderAborted({ reason: cause instanceof Error ? cause.message : "aborted" });
     }
@@ -359,7 +320,8 @@ export abstract class BaseLanguageModelExecutor<TRaw, TChunk = unknown>
    *
    * Override only if your provider needs a different terminal shape.
    */
-  protected finalizeStream(accum: StreamAccumulator): readonly AdapterDelta[] {
+  private finalizeStream(accum: StreamAccumulator): readonly AdapterDelta[] {
+    if (this.adapter.finalizeStream) return this.adapter.finalizeStream(accum);
     const out: AdapterDelta[] = [];
 
     // 1. Close any blocks still open + emit per-block summary.
@@ -486,7 +448,7 @@ export abstract class BaseLanguageModelExecutor<TRaw, TChunk = unknown>
     if (!this.supportsRunStreaming) {
       const err: ExecuteErrorChannel = new StreamFailed({
         cause: new Error(
-          `${this.constructor.name} does not support executeStream — use execute() instead`,
+          `adapter '${this.adapter.provider}' does not support executeStream — use execute() instead`,
         ),
       });
       const resultPromise: Promise<TRaw> = Promise.reject(err);

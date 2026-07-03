@@ -23,21 +23,16 @@ export {
   type LanguageModelAdapter,
   type StreamAccumulatorView,
 } from "./language-model-adapter.js";
-export { defineExecutor, type DefineExecutorInput } from "./define-executor.js";
+// THE reference executor (ADR 52) — one final class consuming a
+// LanguageModelAdapter part. The old subclass tier
+// (BaseLanguageModelExecutor) and the define* callback factories are
+// gone: providers implement LanguageModelAdapter instead.
 export {
-  defineLanguageModelExecutor,
-  type DefineLanguageModelExecutorInput,
-} from "./define-language-model-executor.js";
-
-// Abstract base for first-party provider executors. Concrete impls
-// (OpenAI, Anthropic, Google, AI SDK) subclass and implement the
-// provider-specific hooks. Adopters writing one-off integrations
-// should use `defineExecutor` (callback-style) instead.
-export {
-  BaseLanguageModelExecutor,
+  LanguageModelExecutor,
+  type LanguageModelExecutorOptions,
   defaultProject,
   mergeSignals,
-} from "./base-language-model-executor.js";
+} from "./language-model-executor.js";
 // Canonical projection helpers — provider adapters that share the
 // canonical fold (Anthropic/OpenAI/Google/AI SDK) reach for these
 // instead of re-rolling. Adopters writing custom adapters extend

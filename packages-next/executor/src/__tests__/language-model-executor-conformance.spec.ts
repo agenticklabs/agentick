@@ -1,16 +1,16 @@
 /**
- * Conformance suite invocation for `defineLanguageModelExecutor`.
+ * Conformance suite invocation for `LanguageModelExecutor` + a
+ * synthetic `LanguageModelAdapter` (ADR 52).
  *
- * Runs the full 15-test executor protocol contract against the callback
- * wrapper to confirm it's equivalent to subclassing
- * `BaseLanguageModelExecutor` directly. The scripted
- * `LanguageModelExecutionResult` is treated as the raw response shape —
- * `openStream` yields synthetic chunks derived from it, `mapChunk`
- * translates them to AdapterDeltas, `reconstructRaw` returns the same
- * scripted result, and `normalizeRaw` is identity.
+ * Runs the full executor protocol contract against THE executor with a
+ * scripted adapter. The scripted `LanguageModelExecutionResult` is
+ * treated as the raw response shape — `openStream` yields synthetic
+ * chunks derived from it, `mapChunk` translates them to AdapterDeltas,
+ * `reconstructRaw` returns the same scripted result, and `normalize`
+ * is identity.
  *
- * If this suite passes, adopters using the callback wrapper get the
- * full conformance guarantees of the class-based path.
+ * If this suite passes, ANY adapter riding the one executor gets the
+ * full conformance guarantees.
  */
 
 import { describe } from "vitest";
@@ -23,8 +23,8 @@ import type {
 } from "@agentick/spec-next";
 import { runExecutorConformance } from "@agentick/spec-conformance-next";
 
-import { defineLanguageModelExecutor } from "../define-language-model-executor.js";
-import type { StreamAccumulator } from "../stream-accumulator.js";
+import { LanguageModelExecutor } from "../language-model-executor.js";
+import type { LanguageModelAdapter, StreamAccumulatorView } from "../language-model-adapter.js";
 
 // ============================================================================
 // Synthetic chunk shape
@@ -77,17 +77,20 @@ function chunksForScripted(scripted: LanguageModelExecutionResult): readonly Syn
   return out;
 }
 
-function factoryFor(scripted: LanguageModelExecutionResult | undefined) {
+function adapterFor(
+  scripted: LanguageModelExecutionResult | undefined,
+): LanguageModelAdapter<LanguageModelExecutionResult, SyntheticChunk> {
   const effective = scripted ?? DEFAULT_SCRIPTED;
-  return defineLanguageModelExecutor<LanguageModelExecutionResult, SyntheticChunk>({
+  return {
+    provider: "adapter-conformance",
     target: DEFAULT_TARGET,
     streamByDefault: true,
     buildParams: () => ({}),
-    callProvider: () => Promise.resolve(effective),
+    call: () => Promise.resolve(effective),
     openStream: async function* (): AsyncIterable<SyntheticChunk> {
       for (const chunk of chunksForScripted(effective)) yield chunk;
     },
-    mapChunk(chunk: SyntheticChunk, _accum: StreamAccumulator): readonly AdapterDelta[] {
+    mapChunk(chunk: SyntheticChunk, _accum: StreamAccumulatorView): readonly AdapterDelta[] {
       switch (chunk.kind) {
         case "text":
           return [
@@ -132,17 +135,18 @@ function factoryFor(scripted: LanguageModelExecutionResult | undefined) {
       }
     },
     reconstructRaw: () => effective,
-    normalizeRaw: (raw) => raw,
-  });
+    normalize: (raw: LanguageModelExecutionResult) => raw,
+  };
 }
 
-describe("defineLanguageModelExecutor — ExecutorProtocol conformance", () => {
+describe("LanguageModelExecutor + adapter — ExecutorProtocol conformance", () => {
   runExecutorConformance(async ({ harnessId, scripted }) => {
     const journal = new MemoryJournal();
     const bus = new LocalEventBus();
     const inbox = new LocalInbox();
-    const factory = factoryFor(scripted);
-    const exec = factory({ scopeId: harnessId, journal, bus, inbox });
+    const exec = new LanguageModelExecutor(harnessId, journal, bus, inbox, {
+      adapter: adapterFor(scripted),
+    });
     await exec.ready;
     return { executor: exec, bus };
   });
