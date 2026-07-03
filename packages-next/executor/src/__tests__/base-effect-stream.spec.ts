@@ -29,7 +29,7 @@ import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next
 import { drainRejection } from "@agentick/utils-next/testing";
 
 import { LanguageModelExecutor } from "../language-model-executor.js";
-import type { LanguageModelAdapter, StreamAccumulatorView } from "../language-model-adapter.js";
+import type { LanguageModelAdapter, StreamAccumulatorView } from "@agentick/model-next";
 
 interface StubRaw {
   readonly text: string;

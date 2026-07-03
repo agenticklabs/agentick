@@ -16,11 +16,8 @@
 import React from "react";
 import { describe, expect, it } from "vitest";
 
-import {
-  FakeLanguageModelExecutor,
-  LanguageModelExecutor,
-  type LanguageModelAdapter,
-} from "@agentick/executor-next";
+import { FakeLanguageModelExecutor, LanguageModelExecutor } from "@agentick/executor-next";
+import type { LanguageModelAdapter } from "@agentick/model-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type {
   EventBus,

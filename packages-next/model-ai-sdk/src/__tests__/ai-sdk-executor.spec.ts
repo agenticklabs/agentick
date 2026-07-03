@@ -12,7 +12,8 @@ import { describe, expect, it } from "vitest";
 import { MockLanguageModelV2 } from "ai/test";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type { RenderedTree, LanguageModelTarget } from "@agentick/spec-next";
-import { isLanguageModelAdapter, LanguageModelExecutor } from "@agentick/executor-next";
+import { LanguageModelExecutor } from "@agentick/executor-next";
+import { isLanguageModelAdapter } from "@agentick/model-next";
 
 import { aisdk } from "../ai-sdk-adapter.js";
 

@@ -1,13 +1,19 @@
 /**
- * `@agentick/executor-next` — reference executor harness.
+ * `@agentick/executor-next` — THE executor harness (ADR 52).
  *
- * Implements `ExecutorProtocol` / `LanguageModelExecutor` from
- * `@agentick/spec-next`. Ships `FakeLanguageModelExecutor` (scripted, no
- * wire) for tests, examples, and the v2 substrate proof. Real
- * provider adapters (OpenAI, Anthropic, Google, AI SDK) live in
- * separate packages — Phase 4c.
+ * Ships the ONE `LanguageModelExecutor` — `BaseHarness<"executor">`
+ * plus the entire Effect execution engine — consuming a
+ * `LanguageModelAdapter` part from `@agentick/model-next`. Also ships
+ * `FakeLanguageModelExecutor` (scripted, no wire) for tests, examples,
+ * and the v2 substrate proof.
  *
- * @see docs/proposals/v2/blueprint/06-executor-harness.md
+ * The model layer (adapter contract, accumulator, transforms,
+ * projection, generate helpers) lives in `@agentick/model-next` —
+ * zero Effect, standalone-usable. Provider adapters
+ * (`@agentick/model-openai-next`, …) implement that contract and never
+ * depend on this package.
+ *
+ * @see docs/proposals/v2/blueprint/52-executors-and-model-adapters.md
  */
 
 export {
@@ -15,49 +21,9 @@ export {
   type FakeLanguageModelExecutorOptions,
   type MockScriptedRun,
 } from "./fake-language-model-executor.js";
-// The provider-normalization part (ADR 52) — Promise-shaped, zero
-// Effect, standalone-usable. Providers implement this; the ONE
-// LanguageModelExecutor consumes it.
-export {
-  defaultFinalizeStream,
-  isLanguageModelAdapter,
-  type LanguageModelAdapter,
-  type StreamAccumulatorView,
-} from "./language-model-adapter.js";
-// THE reference executor (ADR 52) — one final class consuming a
-// LanguageModelAdapter part. The old subclass tier
-// (BaseLanguageModelExecutor) and the define* callback factories are
-// gone: providers implement LanguageModelAdapter instead.
 export {
   LanguageModelExecutor,
   type LanguageModelExecutorOptions,
-  defaultProject,
   mergeSignals,
 } from "./language-model-executor.js";
-// Canonical projection helpers — provider adapters that share the
-// canonical fold (Anthropic/OpenAI/Google/AI SDK) reach for these
-// instead of re-rolling. Adapters overriding `project` compose with
-// the parts they need.
-export {
-  buildTools,
-  buildMessages,
-  buildParameters,
-  collectSectionText,
-  sectionText,
-  messagePartFromBlock,
-  imageUrlFromSource,
-} from "./canonical-projection.js";
-export { StreamAccumulator, type AccumToolCall } from "./stream-accumulator.js";
-export { type DeltaTransform, composeTransforms, identityTransform } from "./delta-transform.js";
-export {
-  thinkTagTransform,
-  customBlockTransform,
-  type CustomBlockDefinition,
-} from "./tag-transforms.js";
-export {
-  StreamTagParser,
-  type StreamTagHandler,
-  type StreamTagParserConfig,
-  type StreamTagEvent,
-} from "./stream-tag-parser.js";
 export { ExecutorLifecycle, type ExecutorInFlightEntry } from "./executor-lifecycle.js";

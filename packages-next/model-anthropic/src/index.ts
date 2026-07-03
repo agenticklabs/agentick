@@ -1,5 +1,5 @@
 /**
- * `@agentick/executor-anthropic-next` — Anthropic `LanguageModelAdapter`
+ * `@agentick/model-anthropic-next` — Anthropic `LanguageModelAdapter`
  * for Agentick v2 (ADR 52).
  *
  * Ships `anthropic(model?, options?)`, a factory producing the

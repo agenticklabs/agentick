@@ -34,11 +34,8 @@ import {
 import { ElicitationHarness } from "@agentick/elicitation-next";
 import { TasksHarness } from "@agentick/tasks-next";
 import { LoopExecutorHarness } from "@agentick/loop-executor-next";
-import {
-  isLanguageModelAdapter,
-  type LanguageModelAdapter,
-  LanguageModelExecutor as TheLanguageModelExecutor,
-} from "@agentick/executor-next";
+import { isLanguageModelAdapter, type LanguageModelAdapter } from "@agentick/model-next";
+import { LanguageModelExecutor as TheLanguageModelExecutor } from "@agentick/executor-next";
 import { SessionHarness, type SessionHarnessOptions } from "@agentick/session-next";
 import {
   InMemoryHandlerResolver,

@@ -1,7 +1,7 @@
 {
-  "name": "@agentick/executor-anthropic-next",
+  "name": "@agentick/model-anthropic-next",
   "version": "0.0.0",
-  "description": "Anthropic provider adapter for Agentick v2 — implements LanguageModelExecutor against the Anthropic Messages API. Companion to @agentick/executor-next (mock + base class).",
+  "description": "Anthropic LanguageModelAdapter for Agentick v2 (ADR 52). anthropic(model?, options?) \u2014 Messages API with native thinking blocks + cache_control. Zero Effect, zero substrate.",
   "keywords": [
     "agent",
     "agentick",
@@ -16,7 +16,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/agenticklabs/agentick.git",
-    "directory": "packages/executor-anthropic"
+    "directory": "packages-next/model-anthropic"
   },
   "files": [
     "dist"
@@ -48,15 +48,15 @@
     "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
   },
   "dependencies": {
-    "@agentick/executor-next": "workspace:*",
-    "@agentick/executor-openai-next": "workspace:*",
-    "@agentick/runtime-next": "workspace:*",
+    "@agentick/model-next": "workspace:*",
     "@agentick/spec-next": "workspace:*",
     "@agentick/utils-next": "workspace:*",
-    "@anthropic-ai/sdk": "^0.39.0",
-    "effect": "^3.21.2"
+    "@anthropic-ai/sdk": "^0.39.0"
   },
   "devDependencies": {
-    "@agentick/spec-conformance-next": "workspace:*"
+    "@agentick/executor-next": "workspace:*",
+    "@agentick/runtime-next": "workspace:*",
+    "@agentick/spec-conformance-next": "workspace:*",
+    "effect": "^3.21.2"
   }
 }

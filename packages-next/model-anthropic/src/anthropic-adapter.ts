@@ -43,7 +43,7 @@ import {
   StreamTagParser,
   type StreamTagHandler,
   thinkTagTransform,
-} from "@agentick/executor-next";
+} from "@agentick/model-next";
 import type {
   AdapterDelta,
   ContentBlock,
@@ -148,8 +148,8 @@ export interface AnthropicAdapterOptions {
 }
 
 // Re-export from @agentick/executor-next so adopters that import from
-// @agentick/executor-anthropic-next keep the same surface.
-export type { CustomBlockDefinition } from "@agentick/executor-next";
+// @agentick/model-anthropic-next keep the same surface.
+export type { CustomBlockDefinition } from "@agentick/model-next";
 
 // ============================================================================
 // Internals

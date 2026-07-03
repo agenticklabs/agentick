@@ -66,27 +66,18 @@ import {
   StreamFailed,
 } from "@agentick/spec-next";
 
-import { defaultProject } from "./canonical-projection.js";
-import { defaultFinalizeStream, type LanguageModelAdapter } from "./language-model-adapter.js";
-import { composeTransforms, identityTransform, type DeltaTransform } from "./delta-transform.js";
-import { ExecutorLifecycle, type ExecutorInFlightEntry } from "./executor-lifecycle.js";
-import { StreamAccumulator } from "./stream-accumulator.js";
 import {
+  composeTransforms,
   customBlockTransform,
-  thinkTagTransform,
+  defaultFinalizeStream,
+  defaultProject,
+  StreamAccumulator,
   type CustomBlockDefinition,
-} from "./tag-transforms.js";
+  type DeltaTransform,
+  type LanguageModelAdapter,
+} from "@agentick/model-next";
 
-// Re-export so consumers of the base module can grab the canonical
-// projection + pipeline primitives without a second import line.
-export { defaultProject } from "./canonical-projection.js";
-export { composeTransforms, identityTransform, type DeltaTransform } from "./delta-transform.js";
-export { StreamAccumulator, type AccumToolCall } from "./stream-accumulator.js";
-export {
-  customBlockTransform,
-  thinkTagTransform,
-  type CustomBlockDefinition,
-} from "./tag-transforms.js";
+import { ExecutorLifecycle, type ExecutorInFlightEntry } from "./executor-lifecycle.js";
 
 // ============================================================================
 // Internals

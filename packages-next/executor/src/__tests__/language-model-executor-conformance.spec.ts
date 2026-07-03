@@ -24,7 +24,7 @@ import type {
 import { runExecutorConformance } from "@agentick/spec-conformance-next";
 
 import { LanguageModelExecutor } from "../language-model-executor.js";
-import type { LanguageModelAdapter, StreamAccumulatorView } from "../language-model-adapter.js";
+import type { LanguageModelAdapter, StreamAccumulatorView } from "@agentick/model-next";
 
 // ============================================================================
 // Synthetic chunk shape

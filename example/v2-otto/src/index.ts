@@ -30,7 +30,7 @@ import React from "react";
 import { z } from "zod";
 
 import { createApp } from "@agentick/app-next/react";
-import { aisdk } from "@agentick/executor-ai-sdk-next";
+import { aisdk } from "@agentick/model-ai-sdk-next";
 import { openai } from "@ai-sdk/openai";
 import type { AppExtension, ContentBlock } from "@agentick/spec-next";
 import { jsonSchema } from "@agentick/spec-next";

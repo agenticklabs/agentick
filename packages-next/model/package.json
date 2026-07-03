@@ -1,20 +1,21 @@
 {
-  "name": "@agentick/executor-next",
+  "name": "@agentick/model-next",
   "version": "0.0.0",
-  "description": "THE executor harness for Agentick v2 (ADR 52). One final LanguageModelExecutor \u2014 BaseHarness plus the Effect execution engine \u2014 consuming a LanguageModelAdapter from @agentick/model-next. Ships FakeLanguageModelExecutor for tests + reference.",
+  "description": "The model layer for Agentick v2 (ADR 52) — zero Effect, zero substrate. Owns the LanguageModelAdapter contract, the stream accumulator + delta-transform pipeline, canonical projection, tag routing, and the standalone generate()/generateStream() helpers. Provider adapters (@agentick/model-openai-next, …) implement this contract; the executor harness consumes it.",
   "keywords": [
     "agent",
     "agentick",
     "ai",
-    "executor",
-    "harness"
+    "model",
+    "adapter",
+    "llm"
   ],
   "license": "MIT",
   "author": "Ryan Lindgren",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/agenticklabs/agentick.git",
-    "directory": "packages/executor"
+    "directory": "packages-next/model"
   },
   "files": [
     "dist"
@@ -45,13 +46,7 @@
     "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
   },
   "dependencies": {
-    "@agentick/model-next": "workspace:*",
-    "@agentick/runtime-next": "workspace:*",
     "@agentick/spec-next": "workspace:*",
-    "effect": "^3.21.2"
-  },
-  "devDependencies": {
-    "@agentick/spec-conformance-next": "workspace:*",
     "@agentick/utils-next": "workspace:*"
   }
 }

@@ -2,7 +2,7 @@
  * Conformance suite invocation for `FakeLanguageModelExecutor`.
  *
  * Drives the spec-defined contract through this package's reference
- * implementation. Future provider adapters (`@agentick/executor-openai-next`,
+ * implementation. Future provider adapters (`@agentick/model-openai-next`,
  * etc.) wire the same suite against their concrete impl.
  */
 

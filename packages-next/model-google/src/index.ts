@@ -1,5 +1,5 @@
 /**
- * `@agentick/executor-google-next` — Google (Gemini)
+ * `@agentick/model-google-next` — Google (Gemini)
  * `LanguageModelAdapter` for Agentick v2 (ADR 52).
  *
  * Ships `google(model?, options?)`, a factory producing the

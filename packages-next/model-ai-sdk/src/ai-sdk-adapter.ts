@@ -38,7 +38,7 @@ import {
 } from "ai";
 
 import { ulid } from "@agentick/utils-next";
-import type { LanguageModelAdapter, StreamAccumulatorView } from "@agentick/executor-next";
+import type { LanguageModelAdapter, StreamAccumulatorView } from "@agentick/model-next";
 import type {
   AdapterDelta,
   ContentBlock,
@@ -132,7 +132,7 @@ function getAISDKState(accum: StreamAccumulatorView): AISDKStreamState {
  *
  * ```ts
  * import { openai } from "@ai-sdk/openai";
- * import { aisdk } from "@agentick/executor-ai-sdk-next";
+ * import { aisdk } from "@agentick/model-ai-sdk-next";
  *
  * const app = await createApp(<Agent />, {
  *   executor: aisdk(openai("gpt-4o")),

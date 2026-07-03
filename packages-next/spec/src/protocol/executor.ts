@@ -9,7 +9,7 @@
  *
  * Implementations:
  *   - `FakeLanguageModelExecutor` (in `@agentick/executor-next`; reference impl)
- *   - `@agentick/executor-openai-next`, `-anthropic`, `-google`, `-ai-sdk`
+ *   - `@agentick/model-openai-next`, `-anthropic`, `-google`, `-ai-sdk`
  *     (Phase 4c — real provider adapters)
  *
  * The protocol exposes three logical phases — `project`, `execute`,

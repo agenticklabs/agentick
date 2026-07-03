@@ -60,7 +60,7 @@ import {
   SPEC_VERSION,
 } from "@agentick/spec-next";
 
-import { buildMessages, buildParameters, buildTools } from "./canonical-projection.js";
+import { buildMessages, buildParameters, buildTools } from "@agentick/model-next";
 import { ExecutorLifecycle } from "./executor-lifecycle.js";
 
 // ============================================================================

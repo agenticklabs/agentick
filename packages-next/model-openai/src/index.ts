@@ -1,5 +1,5 @@
 /**
- * `@agentick/executor-openai-next` — OpenAI `LanguageModelAdapter` for
+ * `@agentick/model-openai-next` — OpenAI `LanguageModelAdapter` for
  * Agentick v2 (ADR 52).
  *
  * Ships `openai(model?, options?)`, a factory producing the
@@ -12,7 +12,7 @@
  */
 
 export { openai, type OpenAIAdapterOptions, type CustomBlockDefinition } from "./openai-adapter.js";
-// StreamTagParser moved to @agentick/executor-next during the v2
-// base-hook refactor — re-export here so adopters importing from
-// @agentick/executor-openai-next keep working without a deep import.
-export { StreamTagParser } from "@agentick/executor-next";
+// StreamTagParser lives in @agentick/model-next — re-export here so
+// adopters importing from this package keep working without a deep
+// import.
+export { StreamTagParser } from "@agentick/model-next";

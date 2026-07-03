@@ -1,7 +1,7 @@
 {
-  "name": "@agentick/executor-google-next",
+  "name": "@agentick/model-google-next",
   "version": "0.0.0",
-  "description": "Google (Gemini) provider adapter for Agentick v2 — implements LanguageModelExecutor against the @google/genai SDK. Companion to @agentick/executor-next (mock + base class).",
+  "description": "Google (Gemini) LanguageModelAdapter for Agentick v2 (ADR 52). google(model?, options?) \u2014 Gemini Developer API + Vertex AI paths. Zero Effect, zero substrate.",
   "keywords": [
     "agent",
     "agentick",
@@ -16,7 +16,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/agenticklabs/agentick.git",
-    "directory": "packages/executor-google"
+    "directory": "packages-next/model-google"
   },
   "files": [
     "dist"
@@ -48,15 +48,15 @@
     "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
   },
   "dependencies": {
-    "@agentick/executor-next": "workspace:*",
-    "@agentick/executor-openai-next": "workspace:*",
-    "@agentick/runtime-next": "workspace:*",
+    "@agentick/model-next": "workspace:*",
     "@agentick/spec-next": "workspace:*",
     "@agentick/utils-next": "workspace:*",
-    "@google/genai": "^1.31.0",
-    "effect": "^3.21.2"
+    "@google/genai": "^1.31.0"
   },
   "devDependencies": {
-    "@agentick/spec-conformance-next": "workspace:*"
+    "@agentick/executor-next": "workspace:*",
+    "@agentick/runtime-next": "workspace:*",
+    "@agentick/spec-conformance-next": "workspace:*",
+    "effect": "^3.21.2"
   }
 }

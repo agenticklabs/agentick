@@ -1,7 +1,7 @@
 {
-  "name": "@agentick/executor-ai-sdk-next",
+  "name": "@agentick/model-ai-sdk-next",
   "version": "0.0.0",
-  "description": "Vercel AI SDK bridge for Agentick v2 — wraps any AI SDK LanguageModel as a LanguageModelExecutor. The progressive-adoption path: bring your existing AI SDK setup, get JSX agents + sessions + observability for free.",
+  "description": "Vercel AI SDK bridge for Agentick v2 (ADR 52). aisdk(model, options?) wraps any ai-package LanguageModel as a LanguageModelAdapter.",
   "keywords": [
     "agent",
     "agentick",
@@ -16,7 +16,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/agenticklabs/agentick.git",
-    "directory": "packages/executor-ai-sdk"
+    "directory": "packages-next/model-ai-sdk"
   },
   "files": [
     "dist"
@@ -47,15 +47,16 @@
     "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
   },
   "dependencies": {
-    "@agentick/executor-next": "workspace:*",
-    "@agentick/runtime-next": "workspace:*",
+    "@agentick/model-next": "workspace:*",
     "@agentick/spec-next": "workspace:*",
     "@agentick/utils-next": "workspace:*",
-    "ai": "^5.0.0",
-    "effect": "^3.21.2"
+    "ai": "^5.0.0"
   },
   "devDependencies": {
+    "@agentick/executor-next": "workspace:*",
+    "@agentick/runtime-next": "workspace:*",
     "@agentick/spec-conformance-next": "workspace:*",
+    "effect": "^3.21.2",
     "msw": "^2.0.0"
   },
   "peerDependencies": {

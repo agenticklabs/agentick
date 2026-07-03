@@ -1,7 +1,7 @@
 {
-  "name": "@agentick/executor-openai-next",
+  "name": "@agentick/model-openai-next",
   "version": "0.0.0",
-  "description": "OpenAI provider adapter for Agentick v2 — implements LanguageModelExecutor against the OpenAI Chat Completions API. Companion to @agentick/executor-next (mock + base class).",
+  "description": "OpenAI LanguageModelAdapter for Agentick v2 (ADR 52). openai(model?, options?) \u2014 the provider-normalization part consumed by @agentick/executor-next's LanguageModelExecutor. Zero Effect, zero substrate.",
   "keywords": [
     "agent",
     "agentick",
@@ -15,7 +15,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/agenticklabs/agentick.git",
-    "directory": "packages/executor-openai"
+    "directory": "packages-next/model-openai"
   },
   "files": [
     "dist"
@@ -47,14 +47,15 @@
     "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
   },
   "dependencies": {
-    "@agentick/executor-next": "workspace:*",
-    "@agentick/runtime-next": "workspace:*",
+    "@agentick/model-next": "workspace:*",
     "@agentick/spec-next": "workspace:*",
     "@agentick/utils-next": "workspace:*",
-    "effect": "^3.21.2",
     "openai": "^6.0.0"
   },
   "devDependencies": {
-    "@agentick/spec-conformance-next": "workspace:*"
+    "@agentick/executor-next": "workspace:*",
+    "@agentick/runtime-next": "workspace:*",
+    "@agentick/spec-conformance-next": "workspace:*",
+    "effect": "^3.21.2"
   }
 }

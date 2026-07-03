@@ -58,7 +58,7 @@ import {
   StreamTagParser,
   type StreamTagHandler,
   thinkTagTransform,
-} from "@agentick/executor-next";
+} from "@agentick/model-next";
 import type { AdapterDelta } from "@agentick/spec-next";
 import { omitUndefined } from "@agentick/utils-next";
 
@@ -136,7 +136,7 @@ export interface GoogleAdapterOptions {
   readonly target?: ExecutionTarget;
 }
 
-export type { CustomBlockDefinition } from "@agentick/executor-next";
+export type { CustomBlockDefinition } from "@agentick/model-next";
 
 // ============================================================================
 // Internals

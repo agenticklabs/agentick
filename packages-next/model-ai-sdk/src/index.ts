@@ -1,5 +1,5 @@
 /**
- * `@agentick/executor-ai-sdk-next` — Vercel AI SDK bridge for Agentick v2.
+ * `@agentick/model-ai-sdk-next` — Vercel AI SDK bridge for Agentick v2.
  *
  * Ships `aisdk(model, options?)`, wrapping any `ai` package
  * `LanguageModel` as a `LanguageModelAdapter` (ADR 52) consumed by the
