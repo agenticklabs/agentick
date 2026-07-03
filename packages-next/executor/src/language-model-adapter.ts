@@ -162,3 +162,88 @@ export function isLanguageModelAdapter(value: unknown): value is LanguageModelAd
     typeof v["run"] !== "function"
   );
 }
+
+/**
+ * The executor's default end-of-stream finalization — exported as an
+ * executable value so adapters overriding `finalizeStream` can compose
+ * with it instead of re-rolling (mutate the view, then delegate):
+ *
+ * ```ts
+ * finalizeStream(accum) {
+ *   if (lateReason) accum.stopReason = mapReason(lateReason);
+ *   return defaultFinalizeStream(accum);
+ * }
+ * ```
+ *
+ * Closes open blocks (+ per-block summaries), closes tool calls that
+ * never saw an explicit end, emits `message-end` (if not observed
+ * in-stream) and the canonical `message` summary.
+ */
+export function defaultFinalizeStream(accum: StreamAccumulatorView): readonly AdapterDelta[] {
+  const out: AdapterDelta[] = [];
+
+  // 1. Close any blocks still open + emit per-block summary.
+  const openSorted = Array.from(accum.openBlocks.entries()).sort((a, b) => a[0] - b[0]);
+  for (const [blockIndex, kind] of openSorted) {
+    if (kind === "text") {
+      out.push({ type: "content-end", blockIndex });
+      const text = accum.textByBlock.get(blockIndex) ?? "";
+      out.push({
+        type: "content",
+        blockIndex,
+        content: { type: "text", text },
+      });
+    } else {
+      out.push({ type: "reasoning-end", blockIndex });
+      const reasoning = accum.reasoningByBlock.get(blockIndex) ?? "";
+      out.push({ type: "reasoning", blockIndex, reasoning });
+    }
+  }
+
+  // 2. Close any tool calls without a tool-call summary yet (OpenAI/
+  //    AI SDK don't emit explicit tool-call-end events).
+  for (const entry of accum.toolCalls.values()) {
+    if (entry.input !== undefined) continue;
+    let parsed: Readonly<Record<string, unknown>> = {};
+    try {
+      parsed = JSON.parse(entry.argsBuffer || "{}") as Readonly<Record<string, unknown>>;
+    } catch {
+      parsed = {};
+    }
+    out.push({ type: "tool-call-end", callId: entry.callId });
+    const tc: AdapterDelta = {
+      type: "tool-call",
+      callId: entry.callId,
+      name: entry.name,
+      input: parsed,
+      ...(entry.providerMetadata
+        ? ({ providerMetadata: entry.providerMetadata } as Record<string, unknown>)
+        : {}),
+    } as AdapterDelta;
+    out.push(tc);
+  }
+
+  // 3. message-end (if not already observed in-stream).
+  if (!accum.messageEnded) {
+    out.push({
+      type: "message-end",
+      stopReason: accum.stopReason,
+      usage: accum.usage,
+    });
+  }
+
+  // 4. message summary — always emit (single canonical assistant
+  //    message synthesized from accumulator state).
+  out.push({
+    type: "message",
+    message: {
+      role: "assistant",
+      content: accum.toContentBlocks(),
+      ...(accum.modelSeen ? { model: accum.modelSeen } : {}),
+    },
+    stopReason: accum.stopReason,
+    usage: accum.usage,
+  });
+
+  return out;
+}

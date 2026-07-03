@@ -1,5 +1,6 @@
 /**
- * Implementation-specific behavior for `GoogleExecutor`.
+ * Implementation-specific behavior for the `google()` adapter driven
+ * through `LanguageModelExecutor`.
  *
  * The conformance suite (`conformance.spec.ts`) drives the
  * `ExecutorProtocol` contract. These tests assert Google-specific
@@ -19,7 +20,9 @@ import { jsonSchema } from "@agentick/spec-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type { GenerateContentParameters } from "@google/genai";
 
-import { GoogleExecutor, sanitizeSchemaForGemini } from "../google-executor.js";
+import { LanguageModelExecutor } from "@agentick/executor-next";
+
+import { google, sanitizeSchemaForGemini } from "../google-adapter.js";
 import {
   StubGoogleClient,
   asClient,
@@ -66,12 +69,13 @@ async function makeExecutor(
   const journal = new MemoryJournal();
   const bus = new LocalEventBus();
   const inbox = new LocalInbox();
-  const exec = new GoogleExecutor("exec-google-test", journal, bus, inbox, {
-    client: asClient(stub),
-    model: opts.model ?? "gemini-2.5-flash",
-    ...omitUndefined({ stream: opts.stream }),
-    ...(opts.parseThinkTags ? { parseThinkTags: true } : {}),
-    ...(opts.customBlocks ? { customBlocks: opts.customBlocks } : {}),
+  const exec = new LanguageModelExecutor("exec-google-test", journal, bus, inbox, {
+    adapter: google(opts.model ?? "gemini-2.5-flash", {
+      client: asClient(stub),
+      ...omitUndefined({ stream: opts.stream }),
+      ...(opts.parseThinkTags ? { parseThinkTags: true } : {}),
+      ...(opts.customBlocks ? { customBlocks: opts.customBlocks } : {}),
+    }),
   });
   await exec.ready;
   return { exec, journal, bus, inbox };
@@ -81,7 +85,7 @@ async function makeExecutor(
 // Non-streaming
 // ============================================================================
 
-describe("GoogleExecutor — non-streaming", () => {
+describe("google() adapter — non-streaming", () => {
   it("returns a succeeded terminal with normalized output", async () => {
     const stub = new StubGoogleClient([
       { kind: "non-streaming", response: mkResponse({ text: "hello" }) },
@@ -151,7 +155,7 @@ describe("GoogleExecutor — non-streaming", () => {
 // System extraction
 // ============================================================================
 
-describe("GoogleExecutor — system extraction", () => {
+describe("google() adapter — system extraction", () => {
   it("collects sections into systemInstruction, leaves contents as user/model only", async () => {
     const stub = new StubGoogleClient([
       { kind: "non-streaming", response: mkResponse({ text: "ok" }) },
@@ -225,7 +229,7 @@ describe("GoogleExecutor — system extraction", () => {
 // Tool-use round-trip
 // ============================================================================
 
-describe("GoogleExecutor — tool-use round-trip", () => {
+describe("google() adapter — tool-use round-trip", () => {
   it("extracts toolCalls and emits tool_use ContentBlocks", async () => {
     const stub = new StubGoogleClient([
       {
@@ -306,7 +310,7 @@ describe("GoogleExecutor — tool-use round-trip", () => {
 // thoughtSignature round-trip (Gemini 3+ thinking)
 // ============================================================================
 
-describe("GoogleExecutor — thoughtSignature round-trip (G18-G)", () => {
+describe("google() adapter — thoughtSignature round-trip (G18-G)", () => {
   it("surfaces thoughtSignature from functionCall to ContentBlock.providerMetadata", async () => {
     const stub = new StubGoogleClient([
       {
@@ -409,7 +413,7 @@ describe("GoogleExecutor — thoughtSignature round-trip (G18-G)", () => {
 // Abort
 // ============================================================================
 
-describe("GoogleExecutor — abort", () => {
+describe("google() adapter — abort", () => {
   it("abort flips next run to outcome 'canceled'", async () => {
     const stub = new StubGoogleClient([
       { kind: "non-streaming", response: mkResponse({ text: "ok" }) },
@@ -430,7 +434,7 @@ describe("GoogleExecutor — abort", () => {
 // Streaming
 // ============================================================================
 
-describe("GoogleExecutor — streaming", () => {
+describe("google() adapter — streaming", () => {
   it("accumulates text across chunks and emits per-delta envelopes", async () => {
     const stub = new StubGoogleClient([
       {
@@ -530,7 +534,7 @@ describe("GoogleExecutor — streaming", () => {
 // Sampling params (G1)
 // ============================================================================
 
-describe("GoogleExecutor — sampling params (G1)", () => {
+describe("google() adapter — sampling params (G1)", () => {
   it("plumbs temperature, topP, maxOutputTokens, stopSequences onto config", async () => {
     const stub = new StubGoogleClient([
       { kind: "non-streaming", response: mkResponse({ text: "ok" }) },
@@ -585,7 +589,7 @@ describe("GoogleExecutor — sampling params (G1)", () => {
 // providerOptions spread (G5)
 // ============================================================================
 
-describe("GoogleExecutor — providerOptions.google (G5)", () => {
+describe("google() adapter — providerOptions.google (G5)", () => {
   it("spreads GenerateContentConfig fields onto request config", async () => {
     const stub = new StubGoogleClient([
       { kind: "non-streaming", response: mkResponse({ text: "ok" }) },
@@ -645,7 +649,7 @@ describe("GoogleExecutor — providerOptions.google (G5)", () => {
 // Per-tool providerOptions (G11)
 // ============================================================================
 
-describe("GoogleExecutor — per-tool providerOptions.google", () => {
+describe("google() adapter — per-tool providerOptions.google", () => {
   it("merges tool.providerOptions.google onto the function declaration", async () => {
     const stub = new StubGoogleClient([
       { kind: "non-streaming", response: mkResponse({ text: "ok" }) },
@@ -682,7 +686,7 @@ describe("GoogleExecutor — per-tool providerOptions.google", () => {
 // parseThinkTags (G7)
 // ============================================================================
 
-describe("GoogleExecutor — parseThinkTags (G7)", () => {
+describe("google() adapter — parseThinkTags (G7)", () => {
   it("routes <think> in text channel to reasoning deltas (streaming)", async () => {
     const stub = new StubGoogleClient([
       {
@@ -710,7 +714,7 @@ describe("GoogleExecutor — parseThinkTags (G7)", () => {
 // customBlocks (G12)
 // ============================================================================
 
-describe("GoogleExecutor — customBlocks (G12)", () => {
+describe("google() adapter — customBlocks (G12)", () => {
   it("extracts adopter-declared tags as custom-block deltas (streaming)", async () => {
     const captured: string[] = [];
     const stub = new StubGoogleClient([
@@ -739,7 +743,7 @@ describe("GoogleExecutor — customBlocks (G12)", () => {
 // Images (G4)
 // ============================================================================
 
-describe("GoogleExecutor — images (G4)", () => {
+describe("google() adapter — images (G4)", () => {
   it("projects base64 data URLs to inlineData parts", async () => {
     const stub = new StubGoogleClient([
       { kind: "non-streaming", response: mkResponse({ text: "ok" }) },
@@ -809,7 +813,7 @@ describe("GoogleExecutor — images (G4)", () => {
 // Cache + reasoning tokens (G2/G3)
 // ============================================================================
 
-describe("GoogleExecutor — usage surfacing (G2/G3)", () => {
+describe("google() adapter — usage surfacing (G2/G3)", () => {
   it("maps cachedContentTokenCount → cachedInputTokens", async () => {
     const stub = new StubGoogleClient([
       {
@@ -906,7 +910,7 @@ describe("sanitizeSchemaForGemini", () => {
 // Journaled lifecycle
 // ============================================================================
 
-describe("GoogleExecutor — journaled lifecycle", () => {
+describe("google() adapter — journaled lifecycle", () => {
   it("run produces requested + terminal envelopes on the journal", async () => {
     const stub = new StubGoogleClient([
       { kind: "non-streaming", response: mkResponse({ text: "hi" }) },
@@ -926,7 +930,7 @@ describe("GoogleExecutor — journaled lifecycle", () => {
 // Type sanity — providerOptions augmentation
 // ============================================================================
 
-describe("GoogleExecutor — type sanity", () => {
+describe("google() adapter — type sanity", () => {
   it("typecheck: target.providerOptions.google accepts GenerateContentConfig fields", () => {
     // Compile-time only — confirms the augmentation lands. The fields
     // referenced here are real on `GenerateContentConfig`.

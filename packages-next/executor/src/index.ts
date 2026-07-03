@@ -19,6 +19,7 @@ export {
 // Effect, standalone-usable. Providers implement this; the ONE
 // LanguageModelExecutor consumes it.
 export {
+  defaultFinalizeStream,
   isLanguageModelAdapter,
   type LanguageModelAdapter,
   type StreamAccumulatorView,

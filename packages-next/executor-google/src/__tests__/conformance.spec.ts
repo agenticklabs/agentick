@@ -1,5 +1,6 @@
 /**
- * Conformance suite invocation for `GoogleExecutor`.
+ * Conformance suite invocation for `LanguageModelExecutor` + the
+ * `google()` adapter.
  *
  * Drives the universal `runExecutorConformance` from
  * `@agentick/spec-conformance-next`. The stub supplies both non-streaming
@@ -14,7 +15,9 @@ import { runExecutorConformance } from "@agentick/spec-conformance-next";
 import type { LanguageModelExecutionResult } from "@agentick/spec-next";
 import type { GenerateContentResponse } from "@google/genai";
 
-import { GoogleExecutor } from "../google-executor.js";
+import { LanguageModelExecutor } from "@agentick/executor-next";
+
+import { google } from "../google-adapter.js";
 import { StubGoogleClient, asClient, mkResponse } from "./stub-google-client.js";
 
 function responseFor(scripted: LanguageModelExecutionResult | undefined): GenerateContentResponse {
@@ -70,7 +73,7 @@ function streamingChunksFor(
   return [response];
 }
 
-describe("GoogleExecutor — ExecutorProtocol conformance", () => {
+describe("google() adapter — ExecutorProtocol conformance", () => {
   runExecutorConformance(async ({ harnessId, scripted }) => {
     const stub = new StubGoogleClient([
       { kind: "non-streaming", response: responseFor(scripted) },
@@ -79,9 +82,8 @@ describe("GoogleExecutor — ExecutorProtocol conformance", () => {
     const journal = new MemoryJournal();
     const bus = new LocalEventBus();
     const inbox = new LocalInbox();
-    const exec = new GoogleExecutor(harnessId, journal, bus, inbox, {
-      client: asClient(stub),
-      model: "gemini-2.5-flash",
+    const exec = new LanguageModelExecutor(harnessId, journal, bus, inbox, {
+      adapter: google("gemini-2.5-flash", { client: asClient(stub) }),
     });
     await exec.ready;
     return { executor: exec, bus };

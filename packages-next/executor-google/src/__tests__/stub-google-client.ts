@@ -1,7 +1,7 @@
 /**
  * Test-only stub for `GoogleGenAI` client.
  *
- * `GoogleExecutor` consumes only `client.models.generateContent()` and
+ * The `google()` adapter consumes only `client.models.generateContent()` and
  * `client.models.generateContentStream()`. The stub records every call
  * (params) and pulls the next matching canned response from its
  * sequence — `non-streaming` matches `generateContent`, `streaming`

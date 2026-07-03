@@ -1,5 +1,6 @@
 /**
- * Streaming hot-path benchmarks for `GoogleExecutor`.
+ * Streaming hot-path benchmarks for `LanguageModelExecutor` + the
+ * `google()` adapter.
  *
  * Baseline numbers gathered BEFORE any streaming-aggregation refactor.
  * Run with:
@@ -20,7 +21,9 @@ import type { GenerateContentResponse } from "@google/genai";
 import type { LanguageModelTarget, RenderedTree } from "@agentick/spec-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 
-import { GoogleExecutor } from "../google-executor.js";
+import { LanguageModelExecutor } from "@agentick/executor-next";
+
+import { google } from "../google-adapter.js";
 import {
   StubGoogleClient,
   asClient,
@@ -84,10 +87,8 @@ async function makeStreamingExecutor(chunks: ReadonlyArray<GenerateContentRespon
   const journal = new MemoryJournal({ capacity: 10_000_000 });
   const bus = new LocalEventBus();
   const inbox = new LocalInbox();
-  const exec = new GoogleExecutor("exec-bench-google", journal, bus, inbox, {
-    client: asClient(stub),
-    model: "gemini-2.5-flash",
-    stream: true,
+  const exec = new LanguageModelExecutor("exec-bench-google", journal, bus, inbox, {
+    adapter: google("gemini-2.5-flash", { client: asClient(stub), stream: true }),
   });
   await exec.ready;
   return { exec, bus };
@@ -97,7 +98,7 @@ async function makeStreamingExecutor(chunks: ReadonlyArray<GenerateContentRespon
 // Scenario 1: 1000 text deltas, no bus subscriber.
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("GoogleExecutor.run — 1000 text deltas (no subscriber)", () => {
+describe("google() adapter run — 1000 text deltas (no subscriber)", () => {
   const chunks = buildTextStream(1000);
 
   bench(
@@ -114,7 +115,7 @@ describe("GoogleExecutor.run — 1000 text deltas (no subscriber)", () => {
 // Scenario 2: 100 text deltas + 1 tool_call, no subscriber.
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("GoogleExecutor.run — 100 text deltas + 1 tool_call (no subscriber)", () => {
+describe("google() adapter run — 100 text deltas + 1 tool_call (no subscriber)", () => {
   const chunks = buildTextPlusToolStream(100);
 
   bench(
@@ -131,7 +132,7 @@ describe("GoogleExecutor.run — 100 text deltas + 1 tool_call (no subscriber)",
 // Scenario 3: 100 text deltas, no subscriber (cross-adapter parity).
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("GoogleExecutor.run — 100 text deltas (no subscriber)", () => {
+describe("google() adapter run — 100 text deltas (no subscriber)", () => {
   const chunks = buildTextStream(100);
 
   bench(
@@ -148,11 +149,11 @@ describe("GoogleExecutor.run — 100 text deltas (no subscriber)", () => {
 // Scenario 4: 100 text deltas, 1 subscriber draining `executor:delta`.
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("GoogleExecutor.run — 100 text deltas (1 subscriber)", () => {
+describe("google() adapter run — 100 text deltas (1 subscriber)", () => {
   const chunks = buildTextStream(100);
   let consumer: Fiber.RuntimeFiber<void, unknown> | undefined;
   let bus: LocalEventBus | undefined;
-  let exec: GoogleExecutor | undefined;
+  let exec: LanguageModelExecutor | undefined;
 
   afterAll(async () => {
     if (consumer) await Effect.runPromise(Fiber.interrupt(consumer));

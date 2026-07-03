@@ -1,9 +1,12 @@
 /**
- * `GoogleExecutor` — `LanguageModelExecutor` backed by the Gemini API
- * (`@google/genai` SDK). Supports the Gemini Developer API (apiKey
- * path) and Vertex AI (project/location/auth path).
+ * `google(model?, options?)` — the Gemini `LanguageModelAdapter`
+ * (ADR 52), backed by the `@google/genai` SDK. Supports the Gemini
+ * Developer API (apiKey path) and Vertex AI (project/location/auth
+ * path).
  *
- * Gemini-specific knobs handled at this layer:
+ * A plain Promise/AsyncIterable-shaped object consumed by
+ * `LanguageModelExecutor` — zero Effect, zero substrate. Gemini
+ * dialect handled at this layer:
  * - `sanitizeSchemaForGemini` — strict JSON-Schema subset for tool input
  * - `thoughtSignature` round-trip (Gemini 3+ thinking; opaque signature
  *   that MUST be sent back on subsequent turns to avoid
@@ -11,8 +14,10 @@
  * - `part.thought` flag routes text parts to the reasoning channel
  *   (Gemini 2.5+ thinking models)
  * - `thoughtsTokenCount` + `cachedContentTokenCount` usage surfacing
+ * - Synthesized block boundaries (Gemini chunks carry none) — see
+ *   `mapChunk`
  *
- * @see docs/proposals/v2/blueprint/06-executor-harness.md
+ * @see docs/proposals/v2/blueprint/52-executors-and-model-adapters.md
  */
 
 import {
@@ -28,9 +33,7 @@ import {
   type FunctionDeclaration,
 } from "@google/genai";
 
-import { ulid } from "@agentick/runtime-next";
-import { BaseLanguageModelExecutor } from "@agentick/executor-next";
-import type { EventBus, MessageInbox, OperationJournal } from "@agentick/spec-next";
+import { ulid } from "@agentick/utils-next";
 import type {
   ContentBlock,
   ExecutionTarget,
@@ -48,8 +51,10 @@ import { SPEC_VERSION } from "@agentick/spec-next";
 
 import {
   type CustomBlockDefinition,
+  defaultFinalizeStream,
   type DeltaTransform,
-  type StreamAccumulator,
+  type LanguageModelAdapter,
+  type StreamAccumulatorView,
   StreamTagParser,
   type StreamTagHandler,
   thinkTagTransform,
@@ -99,9 +104,7 @@ declare module "@agentick/spec-next" {
 // Construction options
 // ============================================================================
 
-export interface GoogleExecutorOptions {
-  /** Default model id. Overridable per call via `target.modelId`. */
-  readonly model?: string;
+export interface GoogleAdapterOptions {
   /**
    * SDK client construction options — every field
    * `@google/genai`'s `GoogleGenAI` constructor accepts (apiKey,
@@ -143,7 +146,7 @@ const SPEC_VERSION_LITERAL = SPEC_VERSION;
 const DEFAULT_MODEL = "gemini-2.5-flash";
 
 // ============================================================================
-// GoogleExecutor
+// google() — the adapter factory
 // ============================================================================
 
 /**
@@ -160,7 +163,7 @@ interface GoogleStreamState {
   thoughtSignatureByCallId: Map<string, string>;
 }
 
-function getGoogleState(accum: StreamAccumulator): GoogleStreamState {
+function getGoogleState(accum: StreamAccumulatorView): GoogleStreamState {
   let s = accum.providerExtra as GoogleStreamState | undefined;
   if (!s) {
     s = {
@@ -174,327 +177,313 @@ function getGoogleState(accum: StreamAccumulator): GoogleStreamState {
   return s;
 }
 
-export class GoogleExecutor extends BaseLanguageModelExecutor<
-  GenerateContentResponse,
-  GenerateContentResponse
-> {
-  readonly target: ExecutionTarget;
+/**
+ * Construct the Gemini `LanguageModelAdapter`. Pass it wherever an
+ * adapter is accepted — the app's `executor:` slot (wrapped in the ONE
+ * `LanguageModelExecutor`), `generate({ model: google("gemini-2.5-pro"),
+ * ... })`, or a hand-constructed executor.
+ *
+ * The SDK client is constructed lazily on first use, so declaring the
+ * adapter does not require `GOOGLE_API_KEY` / `GEMINI_API_KEY` until a
+ * call actually happens (inject `options.client` to bypass).
+ */
+export function google(
+  model?: string,
+  options: GoogleAdapterOptions = {},
+): LanguageModelAdapter<GenerateContentResponse, GenerateContentResponse> {
+  const defaultModel = model;
+  const parseThinkTags = options.parseThinkTags ?? false;
+  const customBlocks = options.customBlocks;
+  const target: ExecutionTarget = options.target ?? {
+    kind: "language-model",
+    provider: "google",
+    modelId: model ?? DEFAULT_MODEL,
+    capabilities: {
+      supportsTools: true,
+      supportsStreaming: true,
+      supportsVision: true,
+      contextWindow: 1_000_000,
+      maxOutputTokens: 8_192,
+    },
+  };
 
-  protected override readonly streamByDefault: boolean;
-  protected override readonly customBlocks:
-    | Readonly<Record<string, CustomBlockDefinition>>
-    | undefined;
+  let clientMemo: GoogleGenAI | undefined = options.client;
+  const client = (): GoogleGenAI => (clientMemo ??= new GoogleGenAI(buildClientOptions(options)));
 
-  private readonly client: GoogleGenAI;
-  private readonly defaultModel: string | undefined;
-  private readonly parseThinkTags: boolean;
+  return {
+    provider: "google",
+    target,
+    streamByDefault: options.stream ?? false,
+    ...(customBlocks !== undefined ? { customBlocks } : {}),
 
-  constructor(
-    scopeId: string,
-    journal: OperationJournal,
-    bus: EventBus,
-    inbox: MessageInbox,
-    options: GoogleExecutorOptions = {},
-  ) {
-    super(scopeId, journal, bus, inbox);
-    this.client = options.client ?? new GoogleGenAI(buildClientOptions(options));
-    this.defaultModel = options.model;
-    this.streamByDefault = options.stream ?? false;
-    this.parseThinkTags = options.parseThinkTags ?? false;
-    this.customBlocks = options.customBlocks;
-    this.target = options.target ?? {
-      kind: "language-model",
-      provider: "google",
-      modelId: options.model ?? DEFAULT_MODEL,
-      capabilities: {
-        supportsTools: true,
-        supportsStreaming: true,
-        supportsVision: true,
-        contextWindow: 1_000_000,
-        maxOutputTokens: 8_192,
-      },
-    };
-  }
+    buildParams(input: LanguageModelInput, target: ExecutionTarget): GenerateContentParameters {
+      return toGoogleParams(input, target, defaultModel);
+    },
 
-  // ──────── Hooks (BaseLanguageModelExecutor) ────────
+    call(params: unknown, _signal: AbortSignal | undefined): Promise<GenerateContentResponse> {
+      // Google SDK doesn't accept an abort signal on the call directly;
+      // aborts surface as the stream iterator throwing. We rely on the
+      // executor's in-flight tracking + the user-supplied AbortController.
+      return client().models.generateContent(params as GenerateContentParameters);
+    },
 
-  protected buildParams(
-    input: LanguageModelInput,
-    target: ExecutionTarget,
-  ): GenerateContentParameters {
-    return toGoogleParams(input, target, this.defaultModel);
-  }
+    openStream(
+      params: unknown,
+      _signal: AbortSignal | undefined,
+    ): Promise<AsyncIterable<GenerateContentResponse>> {
+      // SDK doesn't accept signal here; the iterator throws when the
+      // bridged abort fires.
+      return client().models.generateContentStream(
+        params as GenerateContentParameters,
+      ) as unknown as Promise<AsyncIterable<GenerateContentResponse>>;
+    },
 
-  protected callProvider(
-    params: unknown,
-    _signal: AbortSignal | undefined,
-  ): Promise<GenerateContentResponse> {
-    // Google SDK doesn't accept abort signal on the call directly;
-    // aborts surface as the stream iterator throwing. We rely on the
-    // base's in-flight tracking + the user-supplied AbortController.
-    return this.client.models.generateContent(params as GenerateContentParameters);
-  }
+    /**
+     * Map a Google chunk's parts to deltas. Gemini doesn't use explicit
+     * block boundaries — we synthesize them: when the kind of content
+     * (text vs reasoning vs functionCall) changes, we close the previous
+     * block and open a new one. State (block index, active kind,
+     * `thoughtSignature`) lives on `accum.providerExtra`.
+     */
+    mapChunk(
+      chunk: GenerateContentResponse,
+      accum: StreamAccumulatorView,
+    ): readonly AdapterDelta[] {
+      const state = getGoogleState(accum);
+      const out: AdapterDelta[] = [];
 
-  // ──────── Streaming hooks (BaseLanguageModelExecutor) ────────
-
-  protected async openStream(
-    params: unknown,
-    _signal: AbortSignal,
-  ): Promise<AsyncIterable<GenerateContentResponse>> {
-    // SDK doesn't accept signal here; the iterator throws when the
-    // bridged abort fires.
-    return this.client.models.generateContentStream(
-      params as GenerateContentParameters,
-    ) as unknown as Promise<AsyncIterable<GenerateContentResponse>>;
-  }
-
-  /**
-   * Map a Google chunk's parts to deltas. Gemini doesn't use explicit
-   * block boundaries — we synthesize them: when the kind of content
-   * (text vs reasoning vs functionCall) changes, we close the previous
-   * block and open a new one. State (block index, active kind,
-   * `thoughtSignature`) lives on `accum.providerExtra`.
-   */
-  protected mapChunk(
-    chunk: GenerateContentResponse,
-    accum: StreamAccumulator,
-  ): readonly AdapterDelta[] {
-    const state = getGoogleState(accum);
-    const out: AdapterDelta[] = [];
-
-    // Capture `modelVersion` via synthetic message-start (only first time).
-    if (chunk.modelVersion && !accum.messageStarted) {
-      out.push({ type: "message-start", role: "assistant", model: chunk.modelVersion });
-    }
-
-    const candidate = chunk.candidates?.[0];
-    if (!candidate) return out;
-    const parts = candidate.content?.parts ?? [];
-
-    // closeActive only fires for mid-chunk block transitions (text →
-    // reasoning, text → functionCall, etc.). For the end-of-stream
-    // close, we let the base's `finalizeStream` handle it — at finalize
-    // time the accumulator is fully consistent. The `content` /
-    // `reasoning` summary deltas are NOT emitted here because
-    // accumulator text isn't applied until AFTER mapChunk returns
-    // (Stream.tap runs per-delta); finalize emits them correctly.
-    const closeActive = (): void => {
-      if (state.activeKind === "text") {
-        out.push({ type: "content-end", blockIndex: state.blockIndex });
-      } else if (state.activeKind === "reasoning") {
-        out.push({ type: "reasoning-end", blockIndex: state.blockIndex });
+      // Capture `modelVersion` via synthetic message-start (only first time).
+      if (chunk.modelVersion && !accum.messageStarted) {
+        out.push({ type: "message-start", role: "assistant", model: chunk.modelVersion });
       }
-      state.activeKind = null;
-    };
 
-    for (const part of parts) {
-      const isThought = (part as { thought?: boolean }).thought === true;
+      const candidate = chunk.candidates?.[0];
+      if (!candidate) return out;
+      const parts = candidate.content?.parts ?? [];
 
-      // Text path
-      if (typeof part.text === "string" && part.text.length > 0) {
-        if (isThought) {
-          if (state.activeKind !== "reasoning") {
-            closeActive();
-            state.blockIndex += 1;
-            out.push({ type: "reasoning-start", blockIndex: state.blockIndex });
-            state.activeKind = "reasoning";
+      // closeActive only fires for mid-chunk block transitions (text →
+      // reasoning, text → functionCall, etc.). For the end-of-stream
+      // close, we let the base's `finalizeStream` handle it — at finalize
+      // time the accumulator is fully consistent. The `content` /
+      // `reasoning` summary deltas are NOT emitted here because
+      // accumulator text isn't applied until AFTER mapChunk returns
+      // (Stream.tap runs per-delta); finalize emits them correctly.
+      const closeActive = (): void => {
+        if (state.activeKind === "text") {
+          out.push({ type: "content-end", blockIndex: state.blockIndex });
+        } else if (state.activeKind === "reasoning") {
+          out.push({ type: "reasoning-end", blockIndex: state.blockIndex });
+        }
+        state.activeKind = null;
+      };
+
+      for (const part of parts) {
+        const isThought = (part as { thought?: boolean }).thought === true;
+
+        // Text path
+        if (typeof part.text === "string" && part.text.length > 0) {
+          if (isThought) {
+            if (state.activeKind !== "reasoning") {
+              closeActive();
+              state.blockIndex += 1;
+              out.push({ type: "reasoning-start", blockIndex: state.blockIndex });
+              state.activeKind = "reasoning";
+            }
+            out.push({ type: "reasoning-delta", blockIndex: state.blockIndex, delta: part.text });
+          } else {
+            if (state.activeKind !== "text") {
+              closeActive();
+              state.blockIndex += 1;
+              out.push({ type: "content-start", blockIndex: state.blockIndex, blockType: "text" });
+              state.activeKind = "text";
+            }
+            out.push({ type: "content-delta", blockIndex: state.blockIndex, delta: part.text });
           }
-          out.push({ type: "reasoning-delta", blockIndex: state.blockIndex, delta: part.text });
-        } else {
-          if (state.activeKind !== "text") {
-            closeActive();
-            state.blockIndex += 1;
-            out.push({ type: "content-start", blockIndex: state.blockIndex, blockType: "text" });
-            state.activeKind = "text";
+          continue;
+        }
+
+        // Function call path
+        if (part.functionCall) {
+          closeActive();
+          const fc = part.functionCall;
+          const callId = fc.id ?? `call_${ulid()}`;
+          const name = fc.name ?? "";
+          const args = (fc.args ?? {}) as Record<string, unknown>;
+          const signature = (part as { thoughtSignature?: string }).thoughtSignature;
+          if (signature !== undefined) state.thoughtSignatureByCallId.set(callId, signature);
+          state.blockIndex += 1;
+          out.push({
+            type: "tool-call-start",
+            callId,
+            name,
+            blockIndex: state.blockIndex,
+          });
+          const jsonDelta = JSON.stringify(args);
+          if (jsonDelta !== "{}") {
+            out.push({ type: "tool-call-delta", callId, delta: jsonDelta });
           }
-          out.push({ type: "content-delta", blockIndex: state.blockIndex, delta: part.text });
+          out.push({ type: "tool-call-end", callId });
+          const toolDelta: AdapterDelta = {
+            type: "tool-call",
+            callId,
+            name,
+            input: args,
+            ...(signature !== undefined
+              ? ({ providerMetadata: { google: { thoughtSignature: signature } } } as Record<
+                  string,
+                  unknown
+                >)
+              : {}),
+          } as AdapterDelta;
+          out.push(toolDelta);
         }
-        continue;
       }
 
-      // Function call path
-      if (part.functionCall) {
-        closeActive();
-        const fc = part.functionCall;
-        const callId = fc.id ?? `call_${ulid()}`;
-        const name = fc.name ?? "";
-        const args = (fc.args ?? {}) as Record<string, unknown>;
-        const signature = (part as { thoughtSignature?: string }).thoughtSignature;
-        if (signature !== undefined) state.thoughtSignatureByCallId.set(callId, signature);
-        state.blockIndex += 1;
-        out.push({
-          type: "tool-call-start",
-          callId,
-          name,
-          blockIndex: state.blockIndex,
-        });
-        const jsonDelta = JSON.stringify(args);
-        if (jsonDelta !== "{}") {
-          out.push({ type: "tool-call-delta", callId, delta: jsonDelta });
+      if (candidate.finishReason) {
+        state.finishReasonRaw = candidate.finishReason;
+        // Don't close blocks or emit message-end here — `finalizeStream`
+        // does both with consistent accumulator state. We just emit a
+        // `usage` delta so the base's finalize message-end carries the
+        // right token counts.
+        const usage = toUsageStats(chunk.usageMetadata);
+        out.push({ type: "usage", usage });
+      }
+      return out;
+    },
+
+    /**
+     * Late stop-reason mapping: the executor's default finalize would
+     * emit `message-end` with `"end"` because no in-stream delta
+     * carried Google's `finishReason`. Map it onto the view, then run
+     * the executor's default finalization.
+     */
+    finalizeStream(accum: StreamAccumulatorView): readonly AdapterDelta[] {
+      const state = getGoogleState(accum);
+      if (state.finishReasonRaw && accum.stopReason === "end") {
+        accum.stopReason = mapFinishReason(state.finishReasonRaw);
+      }
+      return defaultFinalizeStream(accum);
+    },
+
+    /**
+     * Reconstruct a canonical `GenerateContentResponse` from accumulator
+     * state. Reassembles `candidates[0].content.parts` by walking blocks
+     * in index order; preserves `thoughtSignature` on tool-call parts.
+     */
+    reconstructRaw(
+      accum: StreamAccumulatorView,
+      modelSeen: string | undefined,
+    ): GenerateContentResponse {
+      const state = getGoogleState(accum);
+      const parts: Array<{
+        text?: string;
+        thought?: boolean;
+        functionCall?: { id?: string; name?: string; args?: Record<string, unknown> };
+        thoughtSignature?: string;
+      }> = [];
+
+      const allIndices = new Set<number>([
+        ...accum.textByBlock.keys(),
+        ...accum.reasoningByBlock.keys(),
+        ...Array.from(accum.toolCalls.values()).map((c) => c.blockIndex),
+      ]);
+      const sorted = [...allIndices].sort((a, b) => a - b);
+      for (const idx of sorted) {
+        const text = accum.textByBlock.get(idx);
+        if (text !== undefined && text.length > 0) {
+          parts.push({ text });
+          continue;
         }
-        out.push({ type: "tool-call-end", callId });
-        const toolDelta: AdapterDelta = {
-          type: "tool-call",
-          callId,
-          name,
-          input: args,
-          ...(signature !== undefined
-            ? ({ providerMetadata: { google: { thoughtSignature: signature } } } as Record<
-                string,
-                unknown
-              >)
-            : {}),
-        } as AdapterDelta;
-        out.push(toolDelta);
-      }
-    }
-
-    if (candidate.finishReason) {
-      state.finishReasonRaw = candidate.finishReason;
-      // Don't close blocks or emit message-end here — `finalizeStream`
-      // does both with consistent accumulator state. We just emit a
-      // `usage` delta so the base's finalize message-end carries the
-      // right token counts.
-      const usage = toUsageStats(chunk.usageMetadata);
-      out.push({ type: "usage", usage });
-    }
-    return out;
-  }
-
-  /**
-   * Override the base's terminal-delta synthesis so the `message-end`
-   * carries Google's mapped stop reason. Without this, the base
-   * defaults to `"end"` because no `message-end` delta carried our
-   * `finishReasonRaw` upstream.
-   */
-  protected override finalizeStream(accum: StreamAccumulator): readonly AdapterDelta[] {
-    const state = getGoogleState(accum);
-    if (state.finishReasonRaw && accum.stopReason === "end") {
-      accum.stopReason = mapFinishReason(state.finishReasonRaw);
-    }
-    return super.finalizeStream(accum);
-  }
-
-  /**
-   * Reconstruct a canonical `GenerateContentResponse` from accumulator
-   * state. Reassembles `candidates[0].content.parts` by walking blocks
-   * in index order; preserves `thoughtSignature` on tool-call parts.
-   */
-  protected reconstructRaw(
-    accum: StreamAccumulator,
-    modelSeen: string | undefined,
-  ): GenerateContentResponse {
-    const state = getGoogleState(accum);
-    const parts: Array<{
-      text?: string;
-      thought?: boolean;
-      functionCall?: { id?: string; name?: string; args?: Record<string, unknown> };
-      thoughtSignature?: string;
-    }> = [];
-
-    const allIndices = new Set<number>([
-      ...accum.textByBlock.keys(),
-      ...accum.reasoningByBlock.keys(),
-      ...Array.from(accum.toolCalls.values()).map((c) => c.blockIndex),
-    ]);
-    const sorted = [...allIndices].sort((a, b) => a - b);
-    for (const idx of sorted) {
-      const text = accum.textByBlock.get(idx);
-      if (text !== undefined && text.length > 0) {
-        parts.push({ text });
-        continue;
-      }
-      const reasoning = accum.reasoningByBlock.get(idx);
-      if (reasoning !== undefined && reasoning.length > 0) {
-        parts.push({ text: reasoning, thought: true });
-        continue;
-      }
-      const tc = [...accum.toolCalls.values()].find((c) => c.blockIndex === idx);
-      if (tc) {
-        let parsed: Record<string, unknown> = {};
-        try {
-          parsed = tc.argsBuffer
-            ? (JSON.parse(tc.argsBuffer) as Record<string, unknown>)
-            : ((tc.input as Record<string, unknown>) ?? {});
-        } catch {
-          parsed = (tc.input as Record<string, unknown>) ?? {};
+        const reasoning = accum.reasoningByBlock.get(idx);
+        if (reasoning !== undefined && reasoning.length > 0) {
+          parts.push({ text: reasoning, thought: true });
+          continue;
         }
-        const sig = state.thoughtSignatureByCallId.get(tc.callId);
-        parts.push({
-          functionCall: { id: tc.callId, name: tc.name, args: parsed },
-          ...omitUndefined({ thoughtSignature: sig }),
-        });
+        const tc = [...accum.toolCalls.values()].find((c) => c.blockIndex === idx);
+        if (tc) {
+          let parsed: Record<string, unknown> = {};
+          try {
+            parsed = tc.argsBuffer
+              ? (JSON.parse(tc.argsBuffer) as Record<string, unknown>)
+              : ((tc.input as Record<string, unknown>) ?? {});
+          } catch {
+            parsed = (tc.input as Record<string, unknown>) ?? {};
+          }
+          const sig = state.thoughtSignatureByCallId.get(tc.callId);
+          parts.push({
+            functionCall: { id: tc.callId, name: tc.name, args: parsed },
+            ...omitUndefined({ thoughtSignature: sig }),
+          });
+        }
       }
-    }
 
-    return {
-      candidates: [
-        {
-          content: { role: "model", parts },
-          finishReason: state.finishReasonRaw ?? "STOP",
+      return {
+        candidates: [
+          {
+            content: { role: "model", parts },
+            finishReason: state.finishReasonRaw ?? "STOP",
+          },
+        ],
+        modelVersion: modelSeen ?? defaultModel ?? target.modelId,
+        usageMetadata: {
+          promptTokenCount: accum.usage.inputTokens,
+          candidatesTokenCount: accum.usage.outputTokens,
+          totalTokenCount: accum.usage.totalTokens,
+          ...omitUndefined({
+            thoughtsTokenCount: accum.usage.reasoningTokens,
+            cachedContentTokenCount: accum.usage.cachedInputTokens,
+          }),
         },
-      ],
-      modelVersion: modelSeen ?? this.defaultModel ?? this.target.modelId,
-      usageMetadata: {
-        promptTokenCount: accum.usage.inputTokens,
-        candidatesTokenCount: accum.usage.outputTokens,
-        totalTokenCount: accum.usage.totalTokens,
-        ...omitUndefined({
-          thoughtsTokenCount: accum.usage.reasoningTokens,
-          cachedContentTokenCount: accum.usage.cachedInputTokens,
-        }),
-      },
-    } as unknown as GenerateContentResponse;
-  }
+      } as unknown as GenerateContentResponse;
+    },
 
-  protected override adapterTransforms(): readonly DeltaTransform[] {
-    return this.parseThinkTags ? [thinkTagTransform()] : [];
-  }
+    adapterTransforms(): readonly DeltaTransform[] {
+      return parseThinkTags ? [thinkTagTransform()] : [];
+    },
 
-  protected normalizeRaw(raw: GenerateContentResponse): LanguageModelExecutionResult {
-    return normalizeImpl({ targetOutput: raw, target: this.target });
-  }
+    normalize(raw: GenerateContentResponse): LanguageModelExecutionResult {
+      return normalizeImpl({ targetOutput: raw, target });
+    },
 
-  /**
-   * Non-streaming + tag routing: same pattern as OpenAI/Anthropic.
-   * Streaming path's transforms didn't run, so extract tags from each
-   * text part here.
-   */
-  protected override postProcessForNormalize(
-    raw: GenerateContentResponse,
-  ): GenerateContentResponse {
-    if (!this.parseThinkTags && !this.customBlocks) return raw;
-    const candidate = raw.candidates?.[0];
-    const parts = candidate?.content?.parts;
-    if (!parts) return raw;
-    const newParts: typeof parts = [];
-    let reasoningCarry = "";
-    for (const part of parts) {
-      if (typeof part.text === "string" && (part as { thought?: boolean }).thought !== true) {
-        const cleaned = applyTagsToText(part.text, this.parseThinkTags, this.customBlocks);
-        if (cleaned) {
-          reasoningCarry += cleaned.reasoning;
-          if (cleaned.text.length > 0) newParts.push({ ...part, text: cleaned.text });
+    /**
+     * Non-streaming + tag routing: same pattern as OpenAI/Anthropic.
+     * Streaming path's transforms didn't run, so extract tags from each
+     * text part here.
+     */
+    postProcessForNormalize(raw: GenerateContentResponse): GenerateContentResponse {
+      if (!parseThinkTags && !customBlocks) return raw;
+      const candidate = raw.candidates?.[0];
+      const parts = candidate?.content?.parts;
+      if (!parts) return raw;
+      const newParts: typeof parts = [];
+      let reasoningCarry = "";
+      for (const part of parts) {
+        if (typeof part.text === "string" && (part as { thought?: boolean }).thought !== true) {
+          const cleaned = applyTagsToText(part.text, parseThinkTags, customBlocks);
+          if (cleaned) {
+            reasoningCarry += cleaned.reasoning;
+            if (cleaned.text.length > 0) newParts.push({ ...part, text: cleaned.text });
+          } else {
+            newParts.push(part);
+          }
         } else {
           newParts.push(part);
         }
-      } else {
-        newParts.push(part);
       }
-    }
-    if (reasoningCarry.length > 0) {
-      newParts.unshift({ text: reasoningCarry, thought: true });
-    }
-    return {
-      ...raw,
-      candidates: [
-        {
-          ...candidate,
-          content: { ...candidate?.content, parts: newParts },
-        },
-      ],
-    } as GenerateContentResponse;
-  }
+      if (reasoningCarry.length > 0) {
+        newParts.unshift({ text: reasoningCarry, thought: true });
+      }
+      return {
+        ...raw,
+        candidates: [
+          {
+            ...candidate,
+            content: { ...candidate?.content, parts: newParts },
+          },
+        ],
+      } as GenerateContentResponse;
+    },
+  };
 }
 
 /**
@@ -538,7 +527,7 @@ function applyTagsToText(
 // Client construction
 // ============================================================================
 
-function buildClientOptions(opts: GoogleExecutorOptions): GoogleGenAIOptions {
+function buildClientOptions(opts: GoogleAdapterOptions): GoogleGenAIOptions {
   // Adopter-supplied clientOptions wins; env-var fallbacks fill in any
   // missing fields. Spread last so explicit clientOptions overrides
   // env-derived values.

@@ -1,18 +1,20 @@
 /**
- * `@agentick/executor-google-next` — Google (Gemini) provider adapter for Agentick v2.
+ * `@agentick/executor-google-next` — Google (Gemini)
+ * `LanguageModelAdapter` for Agentick v2 (ADR 52).
  *
- * Implements `LanguageModelExecutor` from `@agentick/spec-next` against the
- * `@google/genai` SDK. Supports both the Gemini Developer API (apiKey)
- * and Vertex AI (project/location/auth) paths.
+ * Ships `google(model?, options?)`, a factory producing the
+ * provider-normalization part consumed by the ONE
+ * `LanguageModelExecutor` in `@agentick/executor-next`. Supports both
+ * the Gemini Developer API (apiKey) and Vertex AI
+ * (project/location/auth) paths.
  *
- * @see docs/proposals/v2/blueprint/06-executor-harness.md
+ * @see docs/proposals/v2/blueprint/52-executors-and-model-adapters.md
  * @see docs/proposals/v2/V1-PARITY-TRACKER.md
  */
 
 export {
-  GoogleExecutor,
-  type GoogleExecutorOptions,
+  google,
+  type GoogleAdapterOptions,
   type CustomBlockDefinition,
   sanitizeSchemaForGemini,
-} from "./google-executor.js";
-export { google, type GoogleFactoryOptions } from "./google-factory.js";
+} from "./google-adapter.js";
