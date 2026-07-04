@@ -91,6 +91,29 @@ export function runTimelineStoreConformance(opts: TimelineStoreConformanceOption
       for (let i = 1; i < all.length; i++) expect(all[i]).toBeGreaterThan(all[i - 1]!);
     });
 
+    it("history() (when implemented) pages by seq: fromSeq + limit, seq-tagged, prune-stable", async (ctx) => {
+      const store = await setup();
+      if (store.history === undefined) return ctx.skip();
+      const sid = "conf-history";
+      const seqs = await store.append(sid, [entry("a"), entry("b"), entry("c"), entry("d")]);
+      // Full read is seq-tagged and ordered.
+      const all = await store.history(sid);
+      expect(all.map((t) => t.seq)).toEqual([...seqs]);
+      expect(all.map((t) => idOf(t.entry))).toEqual(["a", "b", "c", "d"]);
+      // Cursor: inclusive-from semantics (seq >= fromSeq).
+      const fromSecond = await store.history(sid, { fromSeq: seqs[1]! });
+      expect(fromSecond.map((t) => idOf(t.entry))).toEqual(["b", "c", "d"]);
+      // Paging.
+      const page = await store.history(sid, { fromSeq: seqs[1]!, limit: 2 });
+      expect(page.map((t) => idOf(t.entry))).toEqual(["b", "c"]);
+      // Prune-stability: survivors keep their seq; cursor still lands right.
+      if (store.prune) {
+        await store.prune(sid, { seq: seqs[2]! });
+        const after = await store.history(sid, { fromSeq: 0 });
+        expect(after.map((t) => t.seq)).toEqual([seqs[2], seqs[3]]);
+      }
+    });
+
     it("isolates entries across sessions (no bleed)", async () => {
       const store = await setup();
       await store.append("s1", [entry("a")]);
