@@ -83,6 +83,21 @@ executor.
 - `isLanguageModelAdapter(value)` — structural guard used by app-level
   slots.
 
+### Combinators
+
+Adapters are plain values — resilience and routing compose:
+
+```ts
+model: withFallback(openai("gpt-5"), anthropic("claude-sonnet-5"))  // failover; never on abort
+model: withRetry(openai("gpt-4o"), { attempts: 3 })                 // 429/5xx/network, jittered backoff
+model: tapModel(adapter, { onCall, onResult, onDelta })             // observability; never alters behavior
+```
+
+Streaming semantics: retry/failover apply through the FIRST chunk (a
+stream that has produced output is never replayed or switched). Each
+fallback adapter builds its own params; the serving adapter's hooks
+handle its own chunks/normalize.
+
 ## Provider packages
 
 | Package | Factory |
@@ -96,6 +111,9 @@ None of them depend on `@agentick/executor-next` (or Effect) at
 runtime — an adapter is usable standalone via `generate()`.
 
 ## Verified by
+
+- `src/__tests__/combinators.spec.ts` — retry/failover/tap semantics,
+  first-chunk boundary, abort passthrough, composition.
 
 - `src/__tests__/generate.spec.ts` — generate/generateStream fold,
   transform pipeline, synthetic message-start, error propagation.
