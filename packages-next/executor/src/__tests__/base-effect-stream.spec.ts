@@ -294,4 +294,40 @@ describe("BaseLanguageModelExecutor — Effect.Stream pipeline", () => {
     // (we don't await it directly — just confirm we exited cleanly).
     expect(count).toBe(3);
   });
+
+  it("executeStream() settles + .result rejects with the typed ExecuteError on provider failure (#181)", async () => {
+    // Adapter whose provider call fails. Two things this pins:
+    //   1. the stream SETTLES on failure (raceFirst — before the fix
+    //      `withExternalAbort`'s success-biased `race` hung forever), and
+    //   2. `.result` rejects with the typed `StreamFailed` — NOT a raw
+    //      Effect `Cause` (which would carry `_tag: "Fail"`). The default
+    //      mapProviderError wraps a plain Error into `StreamFailed`.
+    const adapter: LanguageModelAdapter<StubRaw, StubChunk> = {
+      ...stubAdapter([{ text: "x" }]),
+      openStream(): Promise<AsyncIterable<StubChunk>> {
+        return Promise.reject(new Error("provider exploded"));
+      },
+    };
+    const exec = new LanguageModelExecutor(
+      "exec-fail",
+      new MemoryJournal(),
+      new LocalEventBus(),
+      new LocalInbox(),
+      { adapter },
+    );
+    await exec.ready;
+    const input = await exec.project(mkInput());
+
+    const stream = exec.executeStream({ targetInput: input, target: mkInput().target });
+    // Iterator terminates cleanly on failure (no hang); the error is on .result.
+    for await (const _ of stream) {
+      /* drain */
+    }
+    const err = await stream.result.then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(Error);
+    expect((err as { _tag?: string })._tag).toBe("StreamFailed");
+  });
 });
