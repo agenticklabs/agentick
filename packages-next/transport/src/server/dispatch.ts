@@ -17,6 +17,7 @@
  */
 
 import {
+  WireRpcError,
   ErrorCode,
   isAgentickError,
   type ExtensionsListResult,
@@ -31,6 +32,7 @@ import {
   type SessionHarnessProtocol,
   type SubscriptionHandle,
   type WireExtension,
+  type IngressIdentity,
   type WireExtensionContext,
   type WireExtensionTransport,
   type WireNotificationMethod,
@@ -67,6 +69,8 @@ export async function dispatchRequest(
   host: DispatchHost,
   req: JsonRpcRequest,
   sink: DispatchSink,
+  /** Ingress identity established at connection/request time (ADR 34/51). */
+  identity?: IngressIdentity,
 ): Promise<JsonRpcResponse> {
   try {
     // Bootstrap methods dispatched directly — must resolve BEFORE the
@@ -96,7 +100,14 @@ export async function dispatchRequest(
     if (registry) {
       const resolution = registry.resolve(req.method);
       if (resolution) {
-        const ctx = buildWireExtensionContext(host, resolution.extension, req.id, req.params, sink);
+        const ctx = buildWireExtensionContext(
+          host,
+          resolution.extension,
+          req.id,
+          req.params,
+          sink,
+          identity,
+        );
         try {
           const result = await resolution.handler(req.params, ctx);
           return success(req.id, result);
@@ -116,6 +127,11 @@ export async function dispatchRequest(
     // InternalError with a `reason` describing the tag. Payload is
     // the error's canonical `toJSON()` projection (kept in sync by
     // the AgentickError base class).
+    // WireRpcError carries its own code/message/data — map verbatim
+    // (the dynamic command lane's Forbidden / MethodNotFound / etc.).
+    if (e instanceof WireRpcError) {
+      return errorResponse(req.id, e.code, e.message, e.data);
+    }
     if (isAgentickError(e)) {
       const wireCode = agentickErrorToWireCode(e);
       return errorResponse(req.id, wireCode, e.message, e.toJSON());
@@ -208,6 +224,7 @@ function buildWireExtensionContext(
   reqId: JsonRpcId,
   rawParams: unknown,
   sink: DispatchSink,
+  identity?: IngressIdentity,
 ): WireExtensionContext {
   const params = (rawParams ?? {}) as Record<string, unknown>;
   const sessionId = typeof params.sessionId === "string" ? params.sessionId : undefined;
@@ -229,6 +246,10 @@ function buildWireExtensionContext(
 
   return {
     gateway: host,
+    // Authn happened ONCE at ingress (ADR 51 §4.1); dispatch only
+    // carries the stamped identity. The dynamic command lane's
+    // Authorizer gate consumes it.
+    ...(identity?.principal !== undefined ? { principal: identity.principal } : {}),
     ...(app ? { app } : {}),
     ...(session ? { session } : {}),
     // TODO(phase-F): resolve HookBridges from the session's session-extension

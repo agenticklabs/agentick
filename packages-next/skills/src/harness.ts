@@ -97,16 +97,22 @@ export class SkillsHarness extends BaseHarness<SkillsSurface> implements SkillsH
     const scope = () => ({ sessionId: this.scopeId });
     this.register = this.command({
       name: "skills:register",
+      // VERB-MATRIX ratified wire row (#140/#141) — grantable, deny-by-default.
+      exposure: "wire",
       scope,
       handler: (i: SkillsRegisterInput) => this.applyRegister(i),
     });
     this.update = this.command({
       name: "skills:update",
+      // VERB-MATRIX ratified wire row (#140/#141) — grantable, deny-by-default.
+      exposure: "wire",
       scope,
       handler: (i: SkillsUpdateInput) => this.applyUpdate(i),
     });
     this.remove = this.command({
       name: "skills:remove",
+      // VERB-MATRIX ratified wire row (#140/#141) — grantable, deny-by-default.
+      exposure: "wire",
       scope,
       handler: (i: SkillsRemoveInput) =>
         Effect.sync(() => {

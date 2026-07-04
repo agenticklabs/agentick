@@ -2,7 +2,7 @@
   "name": "@agentick/gateway-next",
   "version": "0.0.0",
   "private": true,
-  "description": "GatewayHarness — v2 runtime-root harness (formerly @agentick/gateway/v2). Per ADR 31, hosts apps + owns top-level substrate.",
+  "description": "GatewayHarness \u2014 v2 runtime-root harness (formerly @agentick/gateway/v2). Per ADR 31, hosts apps + owns top-level substrate.",
   "type": "module",
   "main": "src/index.ts",
   "exports": {

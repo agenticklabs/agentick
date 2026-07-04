@@ -24,6 +24,8 @@ import type {
   JsonRpcRequest,
   JsonRpcResponse,
 } from "@agentick/spec-next";
+import type { IngressIdentity } from "@agentick/spec-next";
+
 import { dispatchRequest, type DispatchHost } from "./dispatch.js";
 
 export abstract class BaseConnectionContext {
@@ -31,7 +33,15 @@ export abstract class BaseConnectionContext {
   protected readonly inFlight = new Map<JsonRpcId, () => void>();
   protected closed = false;
 
-  constructor(protected readonly gateway: DispatchHost) {}
+  constructor(
+    protected readonly gateway: DispatchHost,
+    /**
+     * Ingress identity for THIS connection — established once by the
+     * transport (AuthSource at handshake/request time, ADR 34) and
+     * carried into every dispatch. Undefined = anonymous (local pole).
+     */
+    protected readonly identity?: IngressIdentity,
+  ) {}
 
   /**
    * Subclasses call this with every decoded inbound JSON-RPC frame.
@@ -47,22 +57,27 @@ export abstract class BaseConnectionContext {
       return null;
     }
     if ("id" in frame && "method" in frame) {
-      return dispatchRequest(this.gateway, frame as JsonRpcRequest, {
-        sendNotification: (n) =>
-          this.sendFrame({ jsonrpc: "2.0", method: n.method, params: n.params }),
-        registerSubscription: (subId, unsubscribe) => {
-          this.subscriptions.set(subId, { unsubscribe });
+      return dispatchRequest(
+        this.gateway,
+        frame as JsonRpcRequest,
+        {
+          sendNotification: (n) =>
+            this.sendFrame({ jsonrpc: "2.0", method: n.method, params: n.params }),
+          registerSubscription: (subId, unsubscribe) => {
+            this.subscriptions.set(subId, { unsubscribe });
+          },
+          unregisterSubscription: (subId) => {
+            this.subscriptions.delete(subId);
+          },
+          registerInFlight: (id, abort) => {
+            this.inFlight.set(id, abort);
+          },
+          unregisterInFlight: (id) => {
+            this.inFlight.delete(id);
+          },
         },
-        unregisterSubscription: (subId) => {
-          this.subscriptions.delete(subId);
-        },
-        registerInFlight: (id, abort) => {
-          this.inFlight.set(id, abort);
-        },
-        unregisterInFlight: (id) => {
-          this.inFlight.delete(id);
-        },
-      });
+        this.identity,
+      );
     }
     return null;
   }
