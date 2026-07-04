@@ -186,3 +186,31 @@ describe("TimelineHarness — store failure surfaces", () => {
     expect(ids(h.readPersisted())).toEqual(["a"]);
   });
 });
+
+describe("timeline.history() — cursored read (#187)", () => {
+  it("flushes write-behind, then pages seq-tagged entries", async () => {
+    const store = new MemoryTimelineStore();
+    const h = stubTimelineHarness([], { store });
+    await h.append(messageEntry("a"), messageEntry("b"), messageEntry("c"));
+    // No explicit flush — history() must flush the write-behind buffer.
+    const all = await h.history();
+    expect(all.map((t) => t.seq)).toEqual([0, 1, 2]);
+    const page = await h.history({ fromSeq: 1, limit: 1 });
+    expect(page).toHaveLength(1);
+    expect(page[0]!.seq).toBe(1);
+  });
+
+  it("throws a clear error when the store lacks cursored reads", async () => {
+    const store = new MemoryTimelineStore();
+    const bare: TimelineStore = {
+      backend: "no-history",
+      load: (sid) => store.load(sid),
+      append: (sid, e) => store.append(sid, e),
+      sessions: () => store.sessions(),
+      delete: (sid) => store.delete(sid),
+    };
+    const h = stubTimelineHarness([], { store: bare });
+    await h.append(messageEntry("a"));
+    await expect(h.history()).rejects.toThrow(/does not implement the optional/);
+  });
+});

@@ -296,6 +296,7 @@ function noopTimelineHandle(): TimelineHandle {
     read: () => ({ entries: [], version: 0 }),
     readPersisted: () => [],
     readPending: () => [],
+    history: async () => [],
     subscribe: () => unsubscribe,
     append: async () => {},
     queue: async () => ({ ids: [] }),
