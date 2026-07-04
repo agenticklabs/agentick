@@ -50,3 +50,13 @@ export {
   imageUrlFromSource,
 } from "./canonical-projection.js";
 export { generate, generateStream, type GenerateOptions } from "./generate.js";
+export {
+  estimateCost,
+  mergePricing,
+  mergeUsageStats,
+  resolvePricing,
+  SEED_PRICING,
+  type CostEstimate,
+  type ModelPricing,
+  type PricingTable,
+} from "./pricing.js";
