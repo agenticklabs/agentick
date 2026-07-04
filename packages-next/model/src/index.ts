@@ -51,6 +51,14 @@ export {
 } from "./canonical-projection.js";
 export { generate, generateStream, type GenerateOptions } from "./generate.js";
 export {
+  withRetry,
+  withFallback,
+  tapModel,
+  isTransientProviderError,
+  type RetryOptions,
+  type ModelTap,
+} from "./combinators.js";
+export {
   generateObject,
   GenerateObjectError,
   type GenerateObjectOptions,
