@@ -19,6 +19,8 @@ export interface TargetCapabilities {
   readonly supportsVision?: boolean;
   readonly supportsReasoning?: boolean;
   readonly supportsStreaming?: boolean;
+  /** Native structured-output support (json_schema responseFormat). */
+  readonly supportsJsonSchema?: boolean;
   readonly contextWindow?: number;
   readonly maxOutputTokens?: number;
   readonly [key: string]: unknown;

@@ -50,3 +50,9 @@ export {
   imageUrlFromSource,
 } from "./canonical-projection.js";
 export { generate, generateStream, type GenerateOptions } from "./generate.js";
+export {
+  generateObject,
+  GenerateObjectError,
+  type GenerateObjectOptions,
+  type GenerateObjectResult,
+} from "./generate-object.js";

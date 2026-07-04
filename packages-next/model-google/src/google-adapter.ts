@@ -201,6 +201,7 @@ export function google(
     capabilities: {
       supportsTools: true,
       supportsStreaming: true,
+      supportsJsonSchema: true,
       supportsVision: true,
       contextWindow: 1_000_000,
       maxOutputTokens: 8_192,
