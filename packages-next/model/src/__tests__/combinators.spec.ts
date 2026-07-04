@@ -7,64 +7,15 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { AdapterDelta, ExecutionTarget } from "@agentick/spec-next";
-
 import { generate, generateStream } from "../generate.js";
-import type { LanguageModelAdapter, StreamAccumulatorView } from "../language-model-adapter.js";
+import { scriptedAdapter } from "../testing/index.js";
 import { isTransientProviderError, tapModel, withFallback, withRetry } from "../combinators.js";
 
 const MESSAGES = [{ role: "user" as const, content: [{ type: "text" as const, text: "hi" }] }];
 
-function mkTarget(provider: string): ExecutionTarget {
-  return {
-    kind: "language-model",
-    provider,
-    modelId: `${provider}-v1`,
-    capabilities: { supportsTools: false, supportsStreaming: true },
-  };
-}
-
-/** Scripted adapter: fails `failures` times (call AND stream open), then serves `text`. */
-function flaky(
-  provider: string,
-  text: string,
-  failures: number,
-  cause: () => unknown = () => Object.assign(new Error("rate limited"), { status: 429 }),
-): LanguageModelAdapter<{ text: string }, string> & { calls: () => number } {
-  let n = 0;
-  return {
-    provider,
-    target: mkTarget(provider),
-    calls: () => n,
-    buildParams: (input) => input,
-    call: async () => {
-      if (n++ < failures) throw cause();
-      return { text };
-    },
-    openStream: async function* (): AsyncIterable<string> {
-      if (n++ < failures) throw cause();
-      yield text.slice(0, 2);
-      yield text.slice(2);
-    } as unknown as LanguageModelAdapter<{ text: string }, string>["openStream"],
-    mapChunk: (chunk, accum: StreamAccumulatorView): readonly AdapterDelta[] => [
-      ...(accum.textByBlock.has(0)
-        ? []
-        : ([{ type: "content-start", blockIndex: 0, blockType: "text" }] as const)),
-      { type: "content-delta", blockIndex: 0, delta: chunk },
-    ],
-    reconstructRaw: (accum) => ({ text: accum.totalText() }),
-    normalize: (raw) => ({
-      specVersion: "2026-05-08",
-      output: [{ type: "text", text: `${provider}:${raw.text}` }],
-      stopReason: "end",
-      usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
-    }),
-  };
-}
-
 describe("withRetry", () => {
   it("retries transient failures then succeeds (non-streaming)", async () => {
-    const inner = flaky("p", "pong", 2);
+    const inner = scriptedAdapter("pong", { provider: "p", failures: 2, tagOutput: true });
     const result = await generate({
       model: withRetry(inner, { attempts: 3, backoffMs: 0 }),
       messages: MESSAGES,
@@ -74,7 +25,12 @@ describe("withRetry", () => {
   });
 
   it("does not retry non-transient failures", async () => {
-    const inner = flaky("p", "x", 5, () => new Error("bad request: schema"));
+    const inner = scriptedAdapter("x", {
+      provider: "p",
+      failures: 5,
+      cause: () => new Error("bad request: schema"),
+      tagOutput: true,
+    });
     await expect(
       generate({ model: withRetry(inner, { attempts: 3, backoffMs: 0 }), messages: MESSAGES }),
     ).rejects.toThrow("bad request");
@@ -82,7 +38,7 @@ describe("withRetry", () => {
   });
 
   it("gives up after `attempts` and rethrows the last transient cause", async () => {
-    const inner = flaky("p", "x", 99);
+    const inner = scriptedAdapter("x", { provider: "p", failures: 99, tagOutput: true });
     await expect(
       generate({ model: withRetry(inner, { attempts: 2, backoffMs: 0 }), messages: MESSAGES }),
     ).rejects.toMatchObject({ status: 429 });
@@ -90,7 +46,7 @@ describe("withRetry", () => {
   });
 
   it("retries the stream OPEN, then the stream serves", async () => {
-    const inner = flaky("p", "pong", 1);
+    const inner = scriptedAdapter("pong", { provider: "p", failures: 1, tagOutput: true });
     const handle = generateStream({
       model: withRetry(inner, { attempts: 2, backoffMs: 0 }),
       messages: MESSAGES,
@@ -102,8 +58,8 @@ describe("withRetry", () => {
 
 describe("withFallback", () => {
   it("secondary serves when the primary's call fails — normalize is the SERVING adapter's", async () => {
-    const primary = flaky("alpha", "a", 99);
-    const secondary = flaky("beta", "b", 0);
+    const primary = scriptedAdapter("a", { provider: "alpha", failures: 99, tagOutput: true });
+    const secondary = scriptedAdapter("b", { provider: "beta", failures: 0, tagOutput: true });
     const result = await generate({
       model: withFallback(primary, secondary),
       messages: MESSAGES,
@@ -112,8 +68,8 @@ describe("withFallback", () => {
   });
 
   it("primary serves when healthy — secondary untouched", async () => {
-    const primary = flaky("alpha", "a", 0);
-    const secondary = flaky("beta", "b", 0);
+    const primary = scriptedAdapter("a", { provider: "alpha", failures: 0, tagOutput: true });
+    const secondary = scriptedAdapter("b", { provider: "beta", failures: 0, tagOutput: true });
     const result = await generate({
       model: withFallback(primary, secondary),
       messages: MESSAGES,
@@ -123,8 +79,8 @@ describe("withFallback", () => {
   });
 
   it("streaming failover: secondary's chunks flow through ITS mapChunk/reconstruct", async () => {
-    const primary = flaky("alpha", "aaaa", 99);
-    const secondary = flaky("beta", "pong", 0);
+    const primary = scriptedAdapter("aaaa", { provider: "alpha", failures: 99, tagOutput: true });
+    const secondary = scriptedAdapter("pong", { provider: "beta", failures: 0, tagOutput: true });
     const handle = generateStream({
       model: withFallback(primary, secondary),
       messages: MESSAGES,
@@ -138,8 +94,13 @@ describe("withFallback", () => {
   it("never falls back on abort", async () => {
     const ac = new AbortController();
     ac.abort();
-    const primary = flaky("alpha", "a", 99, () => new Error("aborted"));
-    const secondary = flaky("beta", "b", 0);
+    const primary = scriptedAdapter("a", {
+      provider: "alpha",
+      failures: 99,
+      cause: () => new Error("aborted"),
+      tagOutput: true,
+    });
+    const secondary = scriptedAdapter("b", { provider: "beta", failures: 0, tagOutput: true });
     await expect(
       generate({
         model: withFallback(primary, secondary),
@@ -153,15 +114,18 @@ describe("withFallback", () => {
   it("exhausted chain rethrows the last cause", async () => {
     await expect(
       generate({
-        model: withFallback(flaky("a", "x", 99), flaky("b", "y", 99)),
+        model: withFallback(
+          scriptedAdapter("x", { provider: "a", failures: 99, tagOutput: true }),
+          scriptedAdapter("y", { provider: "b", failures: 99, tagOutput: true }),
+        ),
         messages: MESSAGES,
       }),
     ).rejects.toMatchObject({ status: 429 });
   });
 
   it("composes with withRetry (retry per adapter, then fail over)", async () => {
-    const primary = flaky("alpha", "a", 99);
-    const secondary = flaky("beta", "b", 1);
+    const primary = scriptedAdapter("a", { provider: "alpha", failures: 99, tagOutput: true });
+    const secondary = scriptedAdapter("b", { provider: "beta", failures: 1, tagOutput: true });
     const result = await generate({
       model: withFallback(
         withRetry(primary, { attempts: 2, backoffMs: 0 }),
@@ -177,18 +141,21 @@ describe("withFallback", () => {
 describe("tapModel", () => {
   it("observes call/result/deltas without altering behavior; tap errors are swallowed", async () => {
     const seen = { calls: 0, results: 0, deltas: 0 };
-    const model = tapModel(flaky("p", "pong", 0), {
-      onCall: () => {
-        seen.calls++;
+    const model = tapModel(
+      scriptedAdapter("pong", { provider: "p", failures: 0, tagOutput: true }),
+      {
+        onCall: () => {
+          seen.calls++;
+        },
+        onResult: () => {
+          seen.results++;
+          throw new Error("tap explodes — must be swallowed");
+        },
+        onDelta: () => {
+          seen.deltas++;
+        },
       },
-      onResult: () => {
-        seen.results++;
-        throw new Error("tap explodes — must be swallowed");
-      },
-      onDelta: () => {
-        seen.deltas++;
-      },
-    });
+    );
     const handle = generateStream({ model, messages: MESSAGES });
     for await (const _ of handle.stream) void _;
     expect((await handle.result).output[0]).toMatchObject({ text: "p:pong" });

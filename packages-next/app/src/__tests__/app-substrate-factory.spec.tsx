@@ -17,7 +17,7 @@ import React from "react";
 import { describe, expect, it } from "vitest";
 
 import { FakeLanguageModelExecutor, LanguageModelExecutor } from "@agentick/executor-next";
-import type { LanguageModelAdapter } from "@agentick/model-next";
+import { scriptedAdapter } from "@agentick/model-next/testing";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type {
   EventBus,
@@ -201,35 +201,8 @@ describe("AppHarness substrate slots — explicit parent passing", () => {
 });
 
 describe("AppHarness model slot — LanguageModelAdapter form (ADR 52)", () => {
-  /** Minimal scripted adapter — the structural contract, no SDK. */
-  function mkAdapter(): LanguageModelAdapter<{ text: string }, never> {
-    const target: ExecutionTarget = {
-      kind: "language-model",
-      provider: "scripted",
-      modelId: "scripted-v1",
-      capabilities: { supportsTools: false, supportsStreaming: false },
-    };
-    return {
-      provider: "scripted",
-      target,
-      buildParams: (input) => input,
-      call: async () => ({ text: "pong from adapter" }),
-      openStream: () => {
-        throw new Error("not streaming");
-      },
-      mapChunk: () => [],
-      reconstructRaw: () => ({ text: "" }),
-      normalize: (raw) => ({
-        specVersion: "2026-05-08",
-        output: [{ type: "text", text: raw.text }],
-        stopReason: "end",
-        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
-      }),
-    };
-  }
-
   it("wraps a bare adapter in the ONE LanguageModelExecutor on the app's substrate", async () => {
-    const adapter = mkAdapter();
+    const adapter = scriptedAdapter("pong from adapter");
     const app = await createApp(React.createElement(MinimalAgent), {
       model: adapter,
     });
@@ -245,7 +218,7 @@ describe("AppHarness model slot — LanguageModelAdapter form (ADR 52)", () => {
 
   it("adapter-backed app round-trips a send", async () => {
     const app = await createApp(React.createElement(MinimalAgent), {
-      model: mkAdapter(),
+      model: scriptedAdapter("pong from adapter"),
     });
     const session = await app.createSession();
     const handle = await session.send({
@@ -261,7 +234,7 @@ describe("AppHarness model/executor slot guards", () => {
   it("rejects both model and executor", async () => {
     await expect(
       createApp(React.createElement(MinimalAgent), {
-        model: mkGuardAdapter(),
+        model: scriptedAdapter("guard"),
         executor: mkExecutor(),
       }),
     ).rejects.toThrow(/not both/);
@@ -276,28 +249,8 @@ describe("AppHarness model/executor slot guards", () => {
   it("rejects a bare adapter on the executor slot", async () => {
     await expect(
       createApp(React.createElement(MinimalAgent), {
-        executor: mkGuardAdapter() as unknown as FakeLanguageModelExecutor,
+        executor: scriptedAdapter("guard") as unknown as FakeLanguageModelExecutor,
       }),
     ).rejects.toThrow(/goes on the `model` slot/);
   });
 });
-
-function mkGuardAdapter(): LanguageModelAdapter {
-  return {
-    provider: "scripted",
-    target: mkTarget(),
-    buildParams: (input) => input,
-    call: async () => ({}),
-    openStream: () => {
-      throw new Error("unused");
-    },
-    mapChunk: () => [],
-    reconstructRaw: () => ({}),
-    normalize: () => ({
-      specVersion: "2026-05-08",
-      output: [],
-      stopReason: "end",
-      usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
-    }),
-  };
-}

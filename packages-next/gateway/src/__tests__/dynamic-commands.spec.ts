@@ -6,41 +6,28 @@
  * exact-beats-dynamic resolution, and the origin: "wire" stamp.
  */
 
-import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { WireRpcError, ErrorCode, type CommandInfo, type MessageInbox } from "@agentick/spec-next";
+import { WireRpcError, ErrorCode, type CommandInfo } from "@agentick/spec-next";
+import { stubInbox, type StubInboxCall } from "@agentick/runtime-next/testing";
 
 import { permissiveAuthorizer, staticAuthorizer, unconfiguredAuthorizer } from "../authorizers.js";
 import { createCommandsListHandler, createDynamicCommandResolver } from "../dynamic-commands.js";
 import { createWireExtensionRegistry } from "../wire-registry.js";
 
-// ── stub inbox: scripted `<surface>:commands` replies + ask recorder ──
+// Canonical substrate stub — @agentick/runtime-next/testing.
 
-interface AskRecord {
-  address: string;
-  type: string;
-  origin?: string;
-  payload?: unknown;
-}
-
-function stubInbox(commandsByAddress: Record<string, readonly CommandInfo[]>): {
-  inbox: MessageInbox;
-  asks: AskRecord[];
-} {
-  const asks: AskRecord[] = [];
-  const inbox = {
-    ask: (address: string, input: { type: string; origin?: string; payload?: unknown }) => {
-      asks.push({ address, type: input.type, origin: input.origin, payload: input.payload });
-      if (input.type.endsWith(":commands")) {
-        const commands = commandsByAddress[address];
-        if (!commands) return Effect.fail(new Error(`no harness at ${address}`));
-        return Effect.succeed({ commands });
+function commandInbox(commandsByAddress: Record<string, readonly CommandInfo[]>) {
+  return stubInbox({
+    fallback: (call: StubInboxCall) => {
+      if (call.type.endsWith(":commands")) {
+        const commands = commandsByAddress[call.address];
+        if (!commands) throw new Error(`no harness at ${call.address}`);
+        return { commands };
       }
-      return Effect.succeed({ ok: true, echoed: input.payload });
+      return { ok: true, echoed: call.payload };
     },
-  } as unknown as MessageInbox;
-  return { inbox, asks };
+  });
 }
 
 const cmd = (name: string, exposure: CommandInfo["exposure"]): CommandInfo => ({
@@ -52,7 +39,7 @@ const cmd = (name: string, exposure: CommandInfo["exposure"]): CommandInfo => ({
 const TIMELINE_ADDR = "timeline:s1:timeline";
 
 function lane(grants: Record<string, readonly string[]> = {}, anonymous: readonly string[] = []) {
-  const { inbox, asks } = stubInbox({
+  const { inbox, asks } = commandInbox({
     [TIMELINE_ADDR]: [
       cmd("timeline:compact", "wire"),
       cmd("timeline:append", "addressable"),

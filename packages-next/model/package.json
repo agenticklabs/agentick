@@ -1,7 +1,7 @@
 {
   "name": "@agentick/model-next",
   "version": "0.0.0",
-  "description": "The model layer for Agentick v2 (ADR 52) — zero Effect, zero substrate. Owns the LanguageModelAdapter contract, the stream accumulator + delta-transform pipeline, canonical projection, tag routing, and the standalone generate()/generateStream() helpers. Provider adapters (@agentick/model-openai-next, …) implement this contract; the executor harness consumes it.",
+  "description": "The model layer for Agentick v2 (ADR 52) \u2014 zero Effect, zero substrate. Owns the LanguageModelAdapter contract, the stream accumulator + delta-transform pipeline, canonical projection, tag routing, and the standalone generate()/generateStream() helpers. Provider adapters (@agentick/model-openai-next, \u2026) implement this contract; the executor harness consumes it.",
   "keywords": [
     "agent",
     "agentick",
@@ -27,6 +27,11 @@
       "types": "./src/index.ts",
       "import": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./testing": {
+      "types": "./src/testing/index.ts",
+      "import": "./src/testing/index.ts",
+      "default": "./src/testing/index.ts"
     }
   },
   "publishConfig": {
