@@ -82,18 +82,33 @@ export function buildParameters(tree: RenderedTree): LanguageModelParameters | u
 
 export function buildMessages(tree: RenderedTree): ReadonlyArray<LanguageModelMessage> {
   const messages: LanguageModelMessage[] = [];
-  const systemText = collectSectionText(tree.context.entries);
-  if (systemText.length > 0) {
-    messages.push({
-      role: "system",
-      content: [{ type: "text", text: systemText }],
-    });
+  const sections = tree.context.entries.filter((e): e is SectionEntry => e.kind === "section");
+  // Cache-hinted sections need their boundaries preserved — emit one
+  // text part per section with the hint on the part (#185). Otherwise
+  // keep the single joined blob (compact, provider-friendly).
+  if (sections.some((sec) => sec.metadata?.cache !== undefined)) {
+    const parts = sections
+      .map((sec) => ({ text: sectionText(sec), cache: sec.metadata?.cache }))
+      .filter((p) => p.text.length > 0)
+      .map((p) => ({
+        type: "text" as const,
+        text: p.text,
+        ...(p.cache !== undefined ? { cache: p.cache } : {}),
+      }));
+    if (parts.length > 0) messages.push({ role: "system", content: parts });
+  } else {
+    const systemText = collectSectionText(tree.context.entries);
+    if (systemText.length > 0) {
+      messages.push({ role: "system", content: [{ type: "text", text: systemText }] });
+    }
   }
   for (const entry of tree.context.entries) {
     if (entry.kind !== "message") continue;
+    const cache = entry.metadata?.cache;
     messages.push({
       role: entry.role as LanguageModelMessage["role"],
       content: entry.content.map(messagePartFromBlock),
+      ...(cache !== undefined ? { cache } : {}),
     });
   }
   return messages;

@@ -46,7 +46,7 @@ import {
 } from "@agentick/runtime-next";
 import { createNotifier, type Notifier } from "@agentick/pubsub-next";
 
-import { MemoryTimelineStore, type TimelineStore } from "./store.js";
+import { MemoryTimelineStore, type SeqTaggedEntry, type TimelineStore } from "./store.js";
 import type {
   CompactResult,
   CompactStrategy,
@@ -295,6 +295,26 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
   }
 
   // ─────────── Sync surface — log (tooling / custom compactors) ───────────
+
+  /**
+   * Cursored, seq-tagged read of the durable log (#187). Flushes the
+   * write-behind buffer first so the read reflects every completed
+   * append, then delegates to the store's optional `history`.
+   */
+  async history(options?: {
+    readonly fromSeq?: number;
+    readonly limit?: number;
+  }): Promise<ReadonlyArray<SeqTaggedEntry>> {
+    await this.flush();
+    if (this.store.history === undefined) {
+      throw new Error(
+        `TimelineStore "${this.store.backend}" does not implement the optional ` +
+          "cursored read (history). Implement it (see runTimelineStoreConformance) " +
+          "or use readPersisted() for the seq-less full read.",
+      );
+    }
+    return this.store.history(this.scopeId, options);
+  }
 
   readPersisted(): readonly TimelineEntry[] {
     return this._persisted;

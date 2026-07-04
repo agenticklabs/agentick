@@ -96,3 +96,44 @@ describe("run() — one-shot execution", () => {
     expect(second.response).toContain("second");
   });
 });
+
+describe("run({ history }) — timeline seeding (#187)", () => {
+  const history = [
+    {
+      kind: "message",
+      message: {
+        id: "h1",
+        role: "user",
+        content: [{ type: "text", text: "REMEMBER: heliotrope" }],
+        ts: 0,
+      },
+    },
+  ] as never[];
+
+  it("run({ history }) executes cleanly over a seeded timeline", async () => {
+    const result = await run(React.createElement(MinimalAgent), {
+      model: scriptedAdapter("ok"),
+      history,
+      messages: [{ role: "user", content: "hi" }],
+    }).result;
+    expect(result.response).toContain("ok");
+  });
+
+  it("the seeding mechanism: a pre-populated store + sessionId hydrates the persisted timeline", async () => {
+    // The exact wiring run() performs, asserted at the session surface
+    // (run() itself tears the app down before the session is reachable).
+    const { MemoryTimelineStore } = await import("@agentick/timeline-next");
+    const { createApp } = await import("../react.js");
+    const store = new MemoryTimelineStore();
+    await store.append("seeded-session:timeline", history);
+    const app = await createApp(React.createElement(MinimalAgent), {
+      model: scriptedAdapter("ok"),
+      session: { timeline: { store } },
+    });
+    const session = await app.createSession({ sessionId: "seeded-session" });
+    await (session as unknown as { mountReady?: Promise<void> }).mountReady;
+    const timeline = session.snapshot().timeline as unknown as Array<{ message?: { id?: string } }>;
+    expect(timeline.map((e) => e.message?.id)).toEqual(["h1"]);
+    await app.closeApp();
+  });
+});

@@ -281,14 +281,18 @@ export function anthropic(
           if (u) {
             out.push({
               type: "usage",
-              usage: {
-                inputTokens: u.input_tokens ?? 0,
-                outputTokens: u.output_tokens ?? 0,
-                totalTokens: (u.input_tokens ?? 0) + (u.output_tokens ?? 0),
-                ...(u.cache_read_input_tokens != null
-                  ? { cachedInputTokens: u.cache_read_input_tokens }
-                  : {}),
-              },
+              // Subset semantics (#186): fold cache reads into inputTokens.
+              usage: (() => {
+                const cached = u.cache_read_input_tokens ?? 0;
+                const inputTokens = (u.input_tokens ?? 0) + cached;
+                const outputTokens = u.output_tokens ?? 0;
+                return {
+                  inputTokens,
+                  outputTokens,
+                  totalTokens: inputTokens + outputTokens,
+                  ...(u.cache_read_input_tokens != null ? { cachedInputTokens: cached } : {}),
+                };
+              })(),
             });
           }
           break;
@@ -469,7 +473,8 @@ export function anthropic(
         stop_reason: mapBackStopReason(accum.stopReason),
         stop_sequence: state.stopSequence,
         usage: {
-          input_tokens: accum.usage.inputTokens,
+          // Back-map subset semantics to Anthropic's disjoint wire shape.
+          input_tokens: accum.usage.inputTokens - (accum.usage.cachedInputTokens ?? 0),
           output_tokens: accum.usage.outputTokens,
           cache_read_input_tokens: accum.usage.cachedInputTokens ?? null,
           cache_creation_input_tokens: null,
@@ -650,6 +655,20 @@ function readBlockCacheControl(part: {
   return undefined;
 }
 
+/**
+ * Canonical CacheHint → Anthropic cache_control (#185). ttl "5m"/"1h"
+ * maps through; anything else falls back to plain ephemeral. Explicit
+ * per-block `providerMetadata.anthropic.cacheControl` always wins over
+ * this translation (escape hatch beats canonical).
+ */
+function cacheControlFromHint(
+  hint: { readonly ttl?: string } | undefined,
+): { type: "ephemeral"; ttl?: "5m" | "1h" } | undefined {
+  if (hint === undefined) return undefined;
+  if (hint.ttl === "5m" || hint.ttl === "1h") return { type: "ephemeral", ttl: hint.ttl };
+  return { type: "ephemeral" };
+}
+
 function toAnthropicMessages(messages: ReadonlyArray<LanguageModelMessage>): {
   system: string | Array<TextBlockParam> | undefined;
   messages: Array<MessageParam>;
@@ -658,7 +677,10 @@ function toAnthropicMessages(messages: ReadonlyArray<LanguageModelMessage>): {
   // itself ephemeral via providerMetadata. If ANY system part is
   // marked, emit the array form so cache_control can land on the
   // right segment.
-  const systemEntries: Array<{ text: string; cache: boolean }> = [];
+  const systemEntries: Array<{
+    text: string;
+    cache: { type: "ephemeral"; ttl?: "5m" | "1h" } | undefined;
+  }> = [];
   const out: Array<MessageParam> = [];
 
   for (const message of messages) {
@@ -667,7 +689,7 @@ function toAnthropicMessages(messages: ReadonlyArray<LanguageModelMessage>): {
         if (part.type !== "text" || !part.text) continue;
         systemEntries.push({
           text: part.text,
-          cache: readBlockCacheControl(part) !== undefined,
+          cache: readBlockCacheControl(part) ?? cacheControlFromHint(part.cache),
         });
       }
       continue;
@@ -676,8 +698,14 @@ function toAnthropicMessages(messages: ReadonlyArray<LanguageModelMessage>): {
     const role: "user" | "assistant" = message.role === "assistant" ? "assistant" : "user";
     const content: ContentBlockParam[] = [];
 
-    for (const part of message.content) {
-      const cache = readBlockCacheControl(part);
+    for (const [i, part] of message.content.entries()) {
+      // Precedence: explicit per-block providerMetadata > canonical
+      // part hint > canonical message hint (marks the LAST block —
+      // Anthropic breakpoints cache the prefix through that block).
+      const messageHint = i === message.content.length - 1 ? message.cache : undefined;
+      const cache =
+        readBlockCacheControl(part) ??
+        cacheControlFromHint((part as { cache?: { ttl?: string } }).cache ?? messageHint);
       switch (part.type) {
         case "text": {
           const block: TextBlockParam = { type: "text", text: part.text };
@@ -737,10 +765,10 @@ function toAnthropicMessages(messages: ReadonlyArray<LanguageModelMessage>): {
   let systemOut: string | Array<TextBlockParam> | undefined;
   if (systemEntries.length === 0) {
     systemOut = undefined;
-  } else if (systemEntries.some((e) => e.cache)) {
+  } else if (systemEntries.some((e) => e.cache !== undefined)) {
     systemOut = systemEntries.map((e) => {
       const block: TextBlockParam = { type: "text", text: e.text };
-      if (e.cache) block.cache_control = { type: "ephemeral" };
+      if (e.cache) block.cache_control = e.cache;
       return block;
     });
   } else {
@@ -856,6 +884,11 @@ function buildAnthropicMessages(tree: RenderedTree): ReadonlyArray<LanguageModel
       (part as { providerMetadata?: Record<string, Record<string, unknown>> }).providerMetadata =
         pm;
     }
+    // Canonical CacheHint rides the part (#185); toAnthropicMessages
+    // translates it (explicit providerMetadata above still wins there).
+    if (e.metadata?.cache !== undefined) {
+      (part as { cache?: unknown }).cache = e.metadata.cache;
+    }
     systemParts.push(part);
   }
   if (systemParts.length > 0) {
@@ -863,9 +896,11 @@ function buildAnthropicMessages(tree: RenderedTree): ReadonlyArray<LanguageModel
   }
   for (const entry of tree.context.entries) {
     if (entry.kind !== "message") continue;
+    const cache = entry.metadata?.cache;
     messages.push({
       role: entry.role as LanguageModelMessage["role"],
       content: entry.content.map(anthropicMessagePartFromBlock),
+      ...(cache !== undefined ? { cache } : {}),
     });
   }
   return messages;
@@ -1047,18 +1082,18 @@ function toUsageStats(usage: Usage | undefined | null): UsageStats {
   if (!usage) {
     return { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
   }
-  const inputTokens = usage.input_tokens ?? 0;
+  // Anthropic reports cache reads/writes DISJOINT from input_tokens;
+  // the canonical UsageStats rule (#186) is subset semantics — fold in.
+  const cached = usage.cache_read_input_tokens ?? 0;
+  const creation = usage.cache_creation_input_tokens ?? 0;
+  const inputTokens = (usage.input_tokens ?? 0) + cached + creation;
   const outputTokens = usage.output_tokens ?? 0;
   return {
     inputTokens,
     outputTokens,
     totalTokens: inputTokens + outputTokens,
-    ...(usage.cache_read_input_tokens != null
-      ? { cachedInputTokens: usage.cache_read_input_tokens }
-      : {}),
-    ...(usage.cache_creation_input_tokens != null
-      ? { cacheCreationTokens: usage.cache_creation_input_tokens }
-      : {}),
+    ...(usage.cache_read_input_tokens != null ? { cachedInputTokens: cached } : {}),
+    ...(usage.cache_creation_input_tokens != null ? { cacheCreationTokens: creation } : {}),
   };
 }
 

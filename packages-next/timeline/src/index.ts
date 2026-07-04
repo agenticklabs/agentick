@@ -25,7 +25,7 @@ export { runTimelineHarnessConformance } from "./conformance.js";
 
 // ADR 49 — "stores, not snapshots" durability. The persisted-tier store
 // port + bundled in-memory default + its conformance suite.
-export { MemoryTimelineStore, type TimelineStore } from "./store.js";
+export { MemoryTimelineStore, type SeqTaggedEntry, type TimelineStore } from "./store.js";
 export {
   runTimelineStoreConformance,
   type TimelineStoreConformanceOptions,

@@ -18,14 +18,20 @@ import type { ContentBlock } from "./content-blocks.js";
 // ============================================================================
 
 export interface UsageStats {
+  /**
+   * ALL prompt tokens the model read — NORMATIVE (#186): cache reads
+   * and cache writes are SUBSETS of this number, never additional to
+   * it. Adapters whose provider reports them disjointly (Anthropic)
+   * fold them in during normalization; cost accounting depends on it.
+   */
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly totalTokens: number;
   /** Anthropic extended thinking, OpenAI o1, etc. */
   readonly reasoningTokens?: number;
-  /** Anthropic prompt-caching reads. */
+  /** Prompt-cache reads — a SUBSET of `inputTokens` (#186). */
   readonly cachedInputTokens?: number;
-  /** Anthropic prompt-caching writes. */
+  /** Prompt-cache writes — a SUBSET of `inputTokens` (#186). */
   readonly cacheCreationTokens?: number;
   /** Engine-level tick count (optional for raw model usage). */
   readonly ticks?: number;
