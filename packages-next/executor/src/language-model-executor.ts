@@ -30,7 +30,7 @@
 
 import { omitUndefined, unwrapExit } from "@agentick/utils-next";
 
-import { Chunk, Effect, Fiber, Option, Queue, Stream } from "effect";
+import { Cause, Chunk, Effect, Exit, Fiber, Option, Queue, Stream } from "effect";
 
 import { BaseHarness, runHarnessProtocol, ulid } from "@agentick/runtime-next";
 import type {
@@ -491,9 +491,21 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
       [Symbol.asyncIterator]() {
         return {
           next: async (): Promise<IteratorResult<AdapterDelta>> => {
-            const { queue } = await ready;
-            const item = await Effect.runPromise(Queue.take(queue));
+            const { queue, fiber } = await ready;
+            const item = await Effect.runPromise(Queue.take(queue)).catch(() =>
+              Option.none<AdapterDelta>(),
+            );
             if (Option.isNone(item)) {
+              // End of stream (#182, Option A): a provider FAILURE throws
+              // the typed error from the iterator — matching generateStream
+              // and ecosystem async-iterable semantics. Abort/interrupt
+              // clean-terminates (cancellation is an outcome, not an
+              // error; `.result` carries the aborted terminal).
+              const exit = await Effect.runPromise(Fiber.await(fiber));
+              if (Exit.isFailure(exit) && !Cause.isInterruptedOnly(exit.cause)) {
+                const cause = Cause.squash(exit.cause);
+                if (!(cause instanceof ProviderAborted)) throw cause;
+              }
               return { value: undefined as unknown as AdapterDelta, done: true };
             }
             return { value: item.value, done: false };

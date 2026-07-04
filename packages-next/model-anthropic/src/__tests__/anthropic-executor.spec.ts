@@ -888,3 +888,93 @@ describe("anthropic() adapter — journaled lifecycle", () => {
     expect([...names].some((n) => n.startsWith("executor:command:run.terminal"))).toBe(true);
   });
 });
+
+describe("anthropic() adapter — canonical CacheHint translation (#185)", () => {
+  it("section metadata.cache → cache_control with ttl on the system block", async () => {
+    const stub = new StubAnthropicClient([
+      { kind: "non-streaming", message: mkMessage({ text: "ok" }) },
+    ]);
+    const { exec } = await makeExecutor(stub);
+    const tree: RenderedTree = {
+      specVersion: "2026-05-08",
+      context: {
+        entries: [
+          {
+            kind: "section",
+            id: "s1",
+            content: [{ type: "text", text: "stable persona" }],
+            metadata: { cache: { ttl: "1h" } },
+          },
+          { kind: "message", id: "m1", role: "user", content: [{ type: "text", text: "hi" }] },
+        ],
+      },
+    };
+    await exec.run({ compiled: tree, target: mkTarget(), tools: [] });
+    const sys = stub.calls[0]!.params.system as Array<{ cache_control?: unknown }>;
+    expect(Array.isArray(sys)).toBe(true);
+    expect(sys[0]!.cache_control).toEqual({ type: "ephemeral", ttl: "1h" });
+  });
+
+  it("message metadata.cache → cache_control on the message's LAST block", async () => {
+    const stub = new StubAnthropicClient([
+      { kind: "non-streaming", message: mkMessage({ text: "ok" }) },
+    ]);
+    const { exec } = await makeExecutor(stub);
+    const tree: RenderedTree = {
+      specVersion: "2026-05-08",
+      context: {
+        entries: [
+          {
+            kind: "message",
+            id: "m1",
+            role: "user",
+            content: [
+              { type: "text", text: "part one" },
+              { type: "text", text: "part two" },
+            ],
+            metadata: { cache: {} },
+          },
+        ],
+      },
+    };
+    await exec.run({ compiled: tree, target: mkTarget(), tools: [] });
+    const msgs = stub.calls[0]!.params.messages as Array<{
+      content: Array<{ cache_control?: unknown }>;
+    }>;
+    expect(msgs[0]!.content[0]!.cache_control).toBeUndefined();
+    expect(msgs[0]!.content[1]!.cache_control).toEqual({ type: "ephemeral" });
+  });
+
+  it("explicit per-block providerMetadata wins over the canonical hint", async () => {
+    const stub = new StubAnthropicClient([
+      { kind: "non-streaming", message: mkMessage({ text: "ok" }) },
+    ]);
+    const { exec } = await makeExecutor(stub);
+    const tree: RenderedTree = {
+      specVersion: "2026-05-08",
+      context: {
+        entries: [
+          {
+            kind: "message",
+            id: "m1",
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: "explicit",
+                providerMetadata: { anthropic: { cacheControl: { type: "ephemeral" } } },
+              },
+            ],
+            metadata: { cache: { ttl: "1h" } },
+          },
+        ],
+      },
+    };
+    await exec.run({ compiled: tree, target: mkTarget(), tools: [] });
+    const msgs = stub.calls[0]!.params.messages as Array<{
+      content: Array<{ cache_control?: unknown }>;
+    }>;
+    // Explicit block-level control (no ttl) beats the canonical 1h hint.
+    expect(msgs[0]!.content[0]!.cache_control).toEqual({ type: "ephemeral" });
+  });
+});

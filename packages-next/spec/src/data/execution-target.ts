@@ -19,6 +19,8 @@ export interface TargetCapabilities {
   readonly supportsVision?: boolean;
   readonly supportsReasoning?: boolean;
   readonly supportsStreaming?: boolean;
+  /** Native structured-output support (json_schema responseFormat). */
+  readonly supportsJsonSchema?: boolean;
   readonly contextWindow?: number;
   readonly maxOutputTokens?: number;
   readonly [key: string]: unknown;
@@ -42,6 +44,18 @@ export interface ExecutionTarget {
    * stay type-safe across provider-specific knobs.
    */
   readonly providerOptions?: ProviderOptions;
+  /**
+   * Self-described pricing (USD/MTok) — the adapter is the authority
+   * on its own model's economics (#186). Consumers resolve
+   * adopter-table > target.pricing > seed. Shape defined in
+   * `@agentick/model-next` (ModelPricing); carried structurally here.
+   */
+  readonly pricing?: {
+    readonly inputPerMTok: number;
+    readonly outputPerMTok: number;
+    readonly cachedInputPerMTok?: number;
+    readonly cacheWritePerMTok?: number;
+  };
 }
 
 export interface LanguageModelTarget extends ExecutionTarget {

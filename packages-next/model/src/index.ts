@@ -58,3 +58,19 @@ export {
   type RetryOptions,
   type ModelTap,
 } from "./combinators.js";
+export {
+  generateObject,
+  GenerateObjectError,
+  type GenerateObjectOptions,
+  type GenerateObjectResult,
+} from "./generate-object.js";
+export {
+  estimateCost,
+  mergePricing,
+  mergeUsageStats,
+  resolvePricing,
+  SEED_PRICING,
+  type CostEstimate,
+  type ModelPricing,
+  type PricingTable,
+} from "./pricing.js";

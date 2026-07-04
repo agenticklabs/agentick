@@ -198,6 +198,14 @@ export interface LanguageModelMessage {
   readonly content: ReadonlyArray<LanguageModelMessagePart>;
   readonly toolCallId?: string;
   readonly name?: string;
+  /**
+   * Canonical prompt-cache hint carried from `MessageEntry.metadata.cache`
+   * (#185). Normalize → translate → escape hatch: adapters translate to
+   * their dialect (Anthropic `cache_control` on the message's last
+   * block; providers with automatic prefix caching no-op); explicit
+   * per-block `providerMetadata.<ns>` always wins over this hint.
+   */
+  readonly cache?: import("../data/entries.js").CacheHint;
 }
 
 /**
@@ -221,6 +229,8 @@ export type LanguageModelMessagePart =
       readonly type: "text";
       readonly text: string;
       readonly providerMetadata?: ProviderMetadataBag;
+      /** Canonical cache hint for THIS part (per-section system boundaries, #185). */
+      readonly cache?: import("../data/entries.js").CacheHint;
     }
   | {
       readonly type: "image";

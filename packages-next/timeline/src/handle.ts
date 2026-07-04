@@ -1,3 +1,4 @@
+import type { SeqTaggedEntry } from "./store.js";
 /**
  * `TimelineHandle` — the user-facing surface of the timeline harness
  * as exposed on `session.timeline`.
@@ -50,4 +51,15 @@ export interface TimelineHandle {
   drain(): Promise<TimelineDrainResult>;
   /** Run a strategy that rewrites the projection; log is untouched. */
   compact(strategy: CompactStrategy): Promise<CompactResult>;
+  /**
+   * Cursored, seq-tagged read of the DURABLE log (#187). Flushes the
+   * write-behind buffer first so the read is complete, then delegates
+   * to the store's optional `history`. Throws when the configured store
+   * does not implement cursored reads — use `readPersisted()` for the
+   * seq-less full read.
+   */
+  history(options?: {
+    readonly fromSeq?: number;
+    readonly limit?: number;
+  }): Promise<ReadonlyArray<SeqTaggedEntry>>;
 }

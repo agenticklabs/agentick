@@ -115,8 +115,29 @@ export interface TimelineStore {
    */
   prune?(sessionId: string, before: { seq: number }): Promise<number>;
 
+  /**
+   * OPTIONAL cursored read (#187) — the additive extension the frozen
+   * `seq` contract (#133/#168) exists for. Returns seq-tagged entries
+   * with absolute `seq >= fromSeq`, in seq order, at most `limit`.
+   * Omitting both options reads everything (seq-tagged `load`).
+   *
+   * Powers `session.history()` paging, replay/eval, resume-UI reads,
+   * and partial rehydration. Stores that skip it degrade gracefully —
+   * consumers fall back to `load` (full read, no seqs).
+   */
+  history?(
+    sessionId: string,
+    options?: { readonly fromSeq?: number; readonly limit?: number },
+  ): Promise<ReadonlyArray<SeqTaggedEntry>>;
+
   /** Self-identifying backend label for observability (e.g. `"memory"`, `"fs"`). */
   readonly backend: string;
+}
+
+/** A persisted entry tagged with its store-assigned ordering identity. */
+export interface SeqTaggedEntry {
+  readonly seq: number;
+  readonly entry: TimelineEntry;
 }
 
 /** Per-session record: the live entries plus the `seq` of `entries[0]`. */
@@ -148,6 +169,26 @@ export class MemoryTimelineStore implements TimelineStore {
     // Defensive copy — callers must not mutate our backing array, and our
     // append must not be visible through a reference the caller retained.
     return Promise.resolve(rec ? [...rec.entries] : []);
+  }
+
+  history(
+    sessionId: string,
+    options?: { readonly fromSeq?: number; readonly limit?: number },
+  ): Promise<ReadonlyArray<SeqTaggedEntry>> {
+    const rec = this.logs.get(sessionId);
+    if (!rec) return Promise.resolve([]);
+    const fromSeq = options?.fromSeq ?? 0;
+    // seq = baseSeq + index; slice from the first index at/after fromSeq.
+    const start = Math.max(fromSeq - rec.baseSeq, 0);
+    const end =
+      options?.limit !== undefined
+        ? Math.min(start + options.limit, rec.entries.length)
+        : rec.entries.length;
+    const out: SeqTaggedEntry[] = [];
+    for (let i = start; i < end; i++) {
+      out.push({ seq: rec.baseSeq + i, entry: rec.entries[i]! });
+    }
+    return Promise.resolve(out);
   }
 
   append(sessionId: string, entries: readonly TimelineEntry[]): Promise<readonly number[]> {
