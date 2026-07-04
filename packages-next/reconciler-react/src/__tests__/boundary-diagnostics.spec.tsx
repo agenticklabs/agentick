@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import { ReconcilerHarness } from "../harness/reconciler-harness.js";
 import { fakeBridges } from "@agentick/reconciler-next";
+import type { TimelineEntry } from "@agentick/spec-next";
 import { useData } from "../react/hooks/use-data.js";
 
 async function makeHarness(scope = `bd-${Math.random()}`) {
@@ -139,6 +140,68 @@ describe("error-boundary-active diagnostic", () => {
     });
     const ebDiags = diagnostics.filter((d) => d.code === "error-boundary-active");
     expect(ebDiags).toHaveLength(1);
+  });
+});
+
+function messageEntry(text: string, role = "user"): TimelineEntry {
+  return {
+    kind: "message",
+    message: { id: `m_${Math.random()}`, role, content: [{ type: "text", text }], ts: Date.now() },
+  } as TimelineEntry;
+}
+
+describe("timeline-not-rendered diagnostic", () => {
+  it("warns when the timeline has messages but no component rendered any", async () => {
+    const harness = await makeHarness();
+    await harness.mount({
+      mountId: "m_dropped",
+      sessionId: "s",
+      // System-only tree: no <Timeline/>, no message entries reach context.
+      element: React.createElement("section", { id: "sys" }, "you are helpful"),
+      bridges: fakeBridges({ timeline: [messageEntry("hello"), messageEntry("world")] }),
+    });
+    const { diagnostics } = await harness.renderTree({
+      mountId: "m_dropped",
+      sessionId: "s",
+    });
+    const diag = diagnostics.find((d) => d.code === "timeline-not-rendered");
+    expect(diag).toBeDefined();
+    expect(diag!.severity).toBe("warning");
+    expect(diag!.message).toContain("<Timeline/>");
+    expect(diag!.message).toContain("2 message entries");
+  });
+
+  it("does not warn when a component renders the timeline messages into context", async () => {
+    const harness = await makeHarness();
+    // A component that projects the seeded timeline messages into the
+    // tree — the collected context ends up with message entries, so the
+    // conversation is NOT dropped.
+    await harness.mount({
+      mountId: "m_rendered",
+      sessionId: "s",
+      element: React.createElement("message", { role: "user" }, "hello"),
+      bridges: fakeBridges({ timeline: [messageEntry("hello")] }),
+    });
+    const { diagnostics } = await harness.renderTree({
+      mountId: "m_rendered",
+      sessionId: "s",
+    });
+    expect(diagnostics.some((d) => d.code === "timeline-not-rendered")).toBe(false);
+  });
+
+  it("does not warn for a system-only agent with an empty timeline", async () => {
+    const harness = await makeHarness();
+    await harness.mount({
+      mountId: "m_empty",
+      sessionId: "s",
+      element: React.createElement("section", { id: "sys" }, "you are helpful"),
+      bridges: fakeBridges(),
+    });
+    const { diagnostics } = await harness.renderTree({
+      mountId: "m_empty",
+      sessionId: "s",
+    });
+    expect(diagnostics.some((d) => d.code === "timeline-not-rendered")).toBe(false);
   });
 });
 

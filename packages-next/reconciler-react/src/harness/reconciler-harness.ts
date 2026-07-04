@@ -588,6 +588,31 @@ export class ReconcilerHarness extends BaseHarness<"reconciler"> implements Reco
       });
     }
 
+    // Dropped-conversation diagnostic. The timeline reaches the model
+    // ONLY when a component (e.g. <Timeline/>) renders its entries into
+    // the tree. If the session's timeline projection carries message
+    // entries but the collected tree projected ZERO messages into
+    // context, the whole conversation is being silently dropped — the
+    // model sees system-only context. That's a bug, and until now
+    // nothing warned. An empty timeline (system-only agent) is fine and
+    // must NOT warn — we gate on the projection carrying ≥1 message.
+    const treeMessageCount = collected.tree.context.entries.filter(
+      (e) => e.kind === "message",
+    ).length;
+    if (treeMessageCount === 0) {
+      const timelineMessages = countTimelineMessages(state.bridges);
+      if (timelineMessages > 0) {
+        diagnostics.push({
+          severity: "warning",
+          code: "timeline-not-rendered",
+          message:
+            `timeline has ${timelineMessages} message ` +
+            `entr${timelineMessages === 1 ? "y" : "ies"} but no component rendered ` +
+            `any message into the context — did you forget <Timeline/>?`,
+        });
+      }
+    }
+
     // Formatter pass — collect produces SemanticContentBlocks (with
     // optional `semanticNode` sidecars on TextBlocks); dispatch them
     // through the active formatter so the returned tree carries
@@ -836,6 +861,31 @@ async function applyBridgeSnapshots(
     }
   }
   if (pending.length > 0) await Promise.all(pending);
+}
+
+/**
+ * Count message-kind entries in the session's timeline projection.
+ *
+ * Accessed STRUCTURALLY, not via the augmented `HookBridges.timeline`
+ * type: reconciler-react has no dependency on `@agentick/timeline-next`
+ * (ADR 27), so timeline-next's `declare module` augmentation isn't in
+ * this package's compilation and the slot is invisible at typecheck.
+ * We duck-type the `read(): { entries }` surface — the same generic
+ * feature-detection posture `captureBridgeSnapshots` uses for
+ * `exportSnapshot`. Returns 0 when no timeline bridge is present
+ * (system-only mounts) or its projection carries no message entries.
+ */
+function countTimelineMessages(bridges: HookBridges): number {
+  const timeline = (bridges as { timeline?: unknown }).timeline;
+  if (timeline === null || timeline === undefined) return 0;
+  const read = (timeline as { read?: () => unknown }).read;
+  if (typeof read !== "function") return 0;
+  const snapshot = read.call(timeline) as
+    | { entries?: readonly { readonly kind?: string }[] }
+    | undefined;
+  const entries = snapshot?.entries;
+  if (!Array.isArray(entries)) return 0;
+  return entries.filter((e) => e?.kind === "message").length;
 }
 
 function isThenable(value: unknown): value is PromiseLike<unknown> {

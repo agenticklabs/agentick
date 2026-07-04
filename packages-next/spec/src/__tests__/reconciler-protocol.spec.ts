@@ -235,8 +235,9 @@ describe("@agentick/spec-next — reconciler protocol", () => {
         "snapshot-incompatible",
         "unstable-tree",
         "error-boundary-active",
+        "timeline-not-rendered",
       ];
-      expect(codes).toHaveLength(9);
+      expect(codes).toHaveLength(10);
     });
   });
 

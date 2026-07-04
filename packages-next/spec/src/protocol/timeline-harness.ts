@@ -72,9 +72,16 @@ export interface TimelineReplaceProjectionInput {
  * metadata.
  *
  * Pending messages are NOT in the timeline yet — they have not been
- * appended. They appear in `readPending()` and (by convention) in the
- * UI via the timeline component until the next drain, when they are
- * appended to log + projection.
+ * appended. They appear in `readPending()` only. They are NOT rendered
+ * to the model: the `<Timeline/>` component reads the projection, not
+ * pending (pending is drained at send-start, before the loop). A
+ * message queued mid-execution is invisible to the model until the
+ * next send drains it into log + projection.
+ *
+ * TODO(trail-pending-render): decide whether to restore v1-style
+ * pending rendering (surface queued messages to the model before the
+ * next drain) or delete the pending tier entirely. Until then the
+ * pending queue is a UI/tooling read surface, not a model-input one.
  */
 export interface TimelineQueueInput {
   readonly role: SessionMessageRole;
@@ -248,9 +255,10 @@ export interface TimelineHarnessProtocol extends SnapshotCapable<TimelineHarness
    * Current pending entries — messages that have been queued but not
    * yet drained into the log + projection. Empty in the steady state.
    *
-   * The Timeline UI component renders pending entries alongside the
-   * projection so consumers see queued messages immediately even
-   * before the next tick executes.
+   * This is a UI/tooling read surface only. The `<Timeline/>` component
+   * does NOT render pending entries — it reads the projection, and
+   * pending is drained into the projection at send-start (before the
+   * loop). See TODO(trail-pending-render) on `TimelineQueueInput`.
    */
   readPending(): readonly PendingEntry[];
 

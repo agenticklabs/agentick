@@ -761,17 +761,20 @@ export class SessionHarness<P = unknown>
 
     await this._mountReady;
 
-    // Queue new input messages onto pending. The model sees them on
-    // the next render via the Timeline component (which reads pending
-    // alongside the projection); the durable timeline catches up below
-    // when we drain.
+    // Queue new input messages onto pending, then drain (below) so the
+    // model sees them. Pending itself is NOT rendered — the <Timeline/>
+    // component reads the projection, not pending — so a message only
+    // reaches the model once drained into the projection.
     for (const m of input.messages ?? []) await this.queueInputMessage(m);
 
     // Drain all pending messages into the timeline before this execution
-    // starts so the loop's first tick sees them in the durable timeline.
-    // Messages queued mid-execution stay in pending until the NEXT
-    // sendBody; the Timeline component still surfaces them to the model
-    // via render. (Per-tick drain is a follow-up — see ADR 26 Step 6+.)
+    // starts so the loop's first tick sees them in the durable timeline
+    // (and thus the projection <Timeline/> renders). Messages queued
+    // mid-execution stay in pending until the NEXT sendBody drains them
+    // — they are invisible to the model for the current execution.
+    // TODO(trail-pending-render): per-tick drain (or reviving v1-style
+    // pending rendering) would make mid-execution queues visible sooner
+    // — see ADR 26 Step 6+.
     await this.bridges.timeline.drain();
 
     const executionId = `exec:${ulid()}`;
@@ -1045,11 +1048,12 @@ export class SessionHarness<P = unknown>
   }
 
   /**
-   * Route a user-input message into the pending queue. The harness's
-   * Timeline component reads `readPending()` and renders pending
-   * entries alongside the projection so the model sees them on the
-   * next render. The actual append (durable timeline write) happens
-   * at the start of the next `sendBody` via `bridges.timeline.drain()`.
+   * Route a user-input message into the pending queue. The message is
+   * NOT yet visible to the model: the `<Timeline/>` component renders
+   * the projection, not `readPending()`. The message reaches the model
+   * only after it is drained into log + projection, which happens at
+   * the start of the next `sendBody` via `bridges.timeline.drain()`.
+   * TODO(trail-pending-render): see the drain call in `sendBody`.
    */
   private async queueInputMessage(m: SendMessageInput): Promise<void> {
     const content =
