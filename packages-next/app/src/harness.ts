@@ -162,23 +162,31 @@ export interface AppHarnessOptions<P = unknown> {
    */
   readonly rootElement: unknown;
   /**
-   * Language-model executor shared across sessions. Accepts:
+   * The model to call — a `LanguageModelAdapter` from any provider
+   * package (`openai("gpt-4o")`, `anthropic(...)`,
+   * `google("gemini-2.5-pro")`, `aisdk(model)`). The standard path
+   * (ADR 52): the app wraps the adapter in the ONE
+   * `LanguageModelExecutor` on the app's substrate, so executor events
+   * appear on `app.events(...)` with zero wiring.
    *
-   *   - A `LanguageModelAdapter` (e.g., from `openai("gpt-4o")`,
-   *     `google("gemini-2.5-pro")`, `aisdk(model)`) — the app wraps it
-   *     in the ONE `LanguageModelExecutor` on the app's substrate, so
-   *     executor events appear on `app.events(...)` without manual
-   *     wiring. The standard path (ADR 52).
+   * Exactly one of `model` / `executor` is required. `model` = what to
+   * call; `executor` = how to execute (BYO engine).
+   */
+  readonly model?: LanguageModelAdapter;
+  /**
+   * BYO execution engine. Accepts:
+   *
    *   - A pre-built `LanguageModelExecutor` instance — the caller
    *     constructed it with its own substrate; the app uses it as-is.
    *   - An `ExecutorFactory` — legacy substrate-deferred construction;
    *     survives only until the last factory producer converts to an
    *     adapter. TODO(#151): drop once anthropic ships adapter-first.
    *
-   * The executor is self-describing: its `.target` property is read by
-   * the app, so the redundant `target` field below is optional.
+   * Bare adapters go on `model`, not here. The executor is
+   * self-describing: its `.target` property is read by the app, so the
+   * redundant `target` field below is optional.
    */
-  readonly executor: LanguageModelExecutor | ExecutorFactory | LanguageModelAdapter;
+  readonly executor?: LanguageModelExecutor | ExecutorFactory;
   /**
    * Optional override of the executor's self-described target. When
    * omitted, `executor.target` is used. Override at this level when a
@@ -562,21 +570,40 @@ export class AppHarness<P = unknown>
     const inbox = this.inbox;
 
     this.rootElement = options.rootElement;
-    // Executor slot: adapter → wrap in the ONE LanguageModelExecutor
-    // on the app's substrate (ADR 52). Factory → construct with the
-    // app's substrate. Instance → use as-is (caller owns substrate).
-    this.executor = isLanguageModelAdapter(options.executor)
-      ? new TheLanguageModelExecutor(`${appId}:executor`, journal, bus, inbox, {
-          adapter: options.executor,
-        })
-      : isExecutorFactory(options.executor)
-        ? options.executor({
-            scopeId: `${appId}:executor`,
-            journal,
-            bus,
-            inbox,
+    // Model/executor slots (ADR 52): `model` takes an adapter — the
+    // app wraps it in the ONE LanguageModelExecutor on the app's
+    // substrate. `executor` takes a BYO engine (instance or legacy
+    // factory). Exactly one of the two.
+    if (options.model !== undefined && options.executor !== undefined) {
+      throw new Error(
+        "createApp: pass either `model` (a LanguageModelAdapter) or " +
+          "`executor` (a LanguageModelExecutor / factory), not both.",
+      );
+    }
+    if (options.model === undefined && options.executor === undefined) {
+      throw new Error(
+        'createApp: a model is required — pass `model: openai("gpt-4o")` ' +
+          "(any LanguageModelAdapter), or `executor` for a BYO engine.",
+      );
+    }
+    if (options.executor !== undefined && isLanguageModelAdapter(options.executor)) {
+      throw new Error(
+        "createApp: a bare LanguageModelAdapter goes on the `model` slot, " + "not `executor`.",
+      );
+    }
+    this.executor =
+      options.model !== undefined
+        ? new TheLanguageModelExecutor(`${appId}:executor`, journal, bus, inbox, {
+            adapter: options.model,
           })
-        : options.executor;
+        : isExecutorFactory(options.executor)
+          ? options.executor({
+              scopeId: `${appId}:executor`,
+              journal,
+              bus,
+              inbox,
+            })
+          : options.executor!;
     // Resolve target: caller override > executor.target.
     this.target = options.target ?? this.executor.target;
     this.telemetryLayer = options.telemetry;

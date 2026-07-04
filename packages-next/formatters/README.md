@@ -19,7 +19,7 @@ import { openai } from "@agentick/model-openai-next";
 
 // Markdown is the default — no formatter wiring needed.
 const app = await createApp(<Agent />, {
-  executor: openai("gpt-5"),
+  model: openai("gpt-5"),
 });
 ```
 
@@ -29,7 +29,7 @@ To pick a different default:
 import { xmlFormatter, builtInFormatters } from "@agentick/formatters-next";
 
 const app = await createApp(<Agent />, {
-  executor: openai("gpt-5"),
+  model: openai("gpt-5"),
   reconciler: {
     formatters: builtInFormatters(),
     defaultFormatterId: xmlFormatter.__identity.id,

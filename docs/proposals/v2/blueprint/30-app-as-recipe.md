@@ -140,19 +140,19 @@ Three modes for any slot:
 
 ```ts
 // Mode 1 — default: per-session in-memory instance
-createApp(<Agent />, { executor: openai("gpt-4o") });
+createApp(<Agent />, { model: openai("gpt-4o") });
 // → each session gets a fresh LocalEventBus, MemoryJournal, LocalInbox, etc.
 
 // Mode 2 — shared instance across sessions (today's behavior, opt-in)
 const sharedBus = new LocalEventBus();
 createApp(<Agent />, {
-  executor: openai("gpt-4o"),
+  model: openai("gpt-4o"),
   bus: sharedBus,           // every session uses this exact instance
 });
 
 // Mode 3 — per-session factory (cluster, per-tenant, custom config)
 createApp(<Agent />, {
-  executor: openai("gpt-4o"),
+  model: openai("gpt-4o"),
   bus: LocalEventBus.createFactory((deps) => ({
     overflow: "drop-oldest",
     bufferSize: 1024,

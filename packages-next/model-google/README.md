@@ -13,12 +13,12 @@ import { google } from "@agentick/model-google-next";
 
 // Gemini Developer API (apiKey path — env fallback GOOGLE_API_KEY / GEMINI_API_KEY)
 const app = await createApp(<Agent />, {
-  executor: google("gemini-2.5-flash"),
+  model: google("gemini-2.5-flash"),
 });
 
 // Vertex AI path
 const app = await createApp(<Agent />, {
-  executor: google("gemini-2.5-flash", {
+  model: google("gemini-2.5-flash", {
     clientOptions: { vertexai: true, project: "my-project", location: "us-central1" },
   }),
 });

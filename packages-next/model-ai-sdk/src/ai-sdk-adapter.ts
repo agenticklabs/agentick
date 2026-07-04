@@ -135,7 +135,7 @@ function getAISDKState(accum: StreamAccumulatorView): AISDKStreamState {
  * import { aisdk } from "@agentick/model-ai-sdk-next";
  *
  * const app = await createApp(<Agent />, {
- *   executor: aisdk(openai("gpt-4o")),
+ *   model: aisdk(openai("gpt-4o")),
  * });
  * ```
  */

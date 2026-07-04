@@ -2,11 +2,11 @@
  * `ExecutorLifecycle` — shared in-flight + abort bookkeeping for
  * `LanguageModelExecutor` implementations.
  *
- * Centralizes the per-execution tracking previously duplicated across
- * `BaseLanguageModelExecutor`, `FakeLanguageModelExecutor`, and
- * `CallbackLanguageModelExecutor` (the `defineExecutor` backend).
- * Each executor instantiates one and delegates `abort()` + the
- * pre-execute aborted check to it.
+ * Shared by the two executors that remain after the ADR 52 collapse —
+ * `LanguageModelExecutor` (the one real executor; `Base`/subclass/
+ * `define*`/`Callback` tiers were deleted) and `FakeLanguageModelExecutor`.
+ * Each instantiates one and delegates `abort()` + the pre-execute aborted
+ * check to it.
  *
  * Holds two collections:
  *   - `inFlight: Map<executionId, ExecutorInFlightEntry>` — currently

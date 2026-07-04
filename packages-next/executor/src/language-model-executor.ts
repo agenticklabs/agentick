@@ -28,9 +28,9 @@
  * @see docs/proposals/v2/blueprint/52-executors-and-model-adapters.md
  */
 
-import { omitUndefined } from "@agentick/utils-next";
+import { omitUndefined, unwrapExit } from "@agentick/utils-next";
 
-import { Chunk, Effect, Exit, Fiber, Option, Queue, Stream } from "effect";
+import { Chunk, Effect, Fiber, Option, Queue, Stream } from "effect";
 
 import { BaseHarness, runHarnessProtocol, ulid } from "@agentick/runtime-next";
 import type {
@@ -455,10 +455,13 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
     );
 
     const resultPromise: Promise<TRaw> = ready.then(({ fiber }) =>
-      Effect.runPromise(Fiber.await(fiber)).then((exit) => {
-        if (Exit.isSuccess(exit)) return exit.value;
-        throw exit.cause;
-      }),
+      // Unwrap via the SAME helper `runHarnessProtocol` uses (which
+      // execute()/run() go through), so `.result` rejects with the typed
+      // `ExecuteErrorChannel` — not a raw Effect `Cause`. Keeps the
+      // streaming path's failure surface identical to the non-streaming
+      // paths and honors "Effect internal, Promise external" at the
+      // ExecutorProtocol boundary (#181).
+      Effect.runPromise(Fiber.await(fiber)).then((exit) => unwrapExit(exit) as TRaw),
     );
     // Silence Node's unhandled-rejection — the caller may not await .result.
     resultPromise.catch(() => {});
@@ -716,7 +719,14 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
     callerSignal: AbortSignal | undefined,
   ): <A>(self: Effect.Effect<A, ExecuteErrorChannel>) => Effect.Effect<A, ExecuteErrorChannel> {
     return <A>(self: Effect.Effect<A, ExecuteErrorChannel>) =>
-      Effect.race(
+      // raceFirst, NOT race: `Effect.race` is success-biased — if `self`
+      // FAILS it waits for the other side to succeed, but the abort
+      // watcher never completes absent an abort, so a provider failure
+      // would hang forever (execute()/executeStream() never settle).
+      // `raceFirst` settles on the first to COMPLETE (success or failure)
+      // and interrupts the loser — provider failure propagates, abort
+      // still wins when it fires. (#181 root cause.)
+      Effect.raceFirst(
         self,
         Effect.async<never, ExecuteErrorChannel>((resume) => {
           const fire = (reason: unknown): void =>

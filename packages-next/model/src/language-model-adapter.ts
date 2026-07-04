@@ -80,6 +80,13 @@ export interface StreamAccumulatorView {
  * Required members are the round trip; optional members are provider
  * quirks with executor-supplied defaults (identical to the defaults
  * the old subclass contract shipped).
+ *
+ * Certification (ADR 52 amendment 2026-07-03): each adapter is certified
+ * by running `runExecutorConformance` against the real
+ * `LanguageModelExecutor` + the adapter + a stubbed provider client (see
+ * `model-openai/src/__tests__/conformance.spec.ts`). The contract itself
+ * is zero-Effect — an author can write and unit-test an adapter with
+ * `generate()` alone — but the shared conformance runs through the executor.
  */
 export interface LanguageModelAdapter<TRaw = unknown, TChunk = unknown> {
   /** Observability identity — "openai", "google", "ai-sdk", ... */

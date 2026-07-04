@@ -22,7 +22,7 @@
  *     (non-streaming parity).
  *
  * ```ts
- * const app = await createApp(<Agent />, { executor: openai("gpt-4o") });
+ * const app = await createApp(<Agent />, { model: openai("gpt-4o") });
  * ```
  *
  * @see docs/proposals/v2/blueprint/52-executors-and-model-adapters.md
