@@ -33,23 +33,19 @@ async function main(): Promise<void> {
     model: aisdk(openai("gpt-4o-mini")),
   });
 
+  // One session end to end — send() queues the message, drain moves it
+  // onto the timeline, and the agent's <Timeline /> renders it into the
+  // model context. (A previous version seeded a session and then called
+  // app.send(), which runs an UNRELATED ephemeral session — the seed
+  // never reached the model.)
   const session = await app.createSession();
-
-  await session.timeline.append({
-    kind: "message",
-    message: {
-      id: "demo-1",
-      ts: Date.now(),
-      role: "user",
-      content: [
-        { type: "text", text: "What's 47 * 23, and tell me a fun fact about that number?" },
-      ],
-    },
-  });
 
   try {
     console.log("→ User: What's 47 * 23, and tell me a fun fact about that number?\n");
-    const result = await app.send("What's 47 * 23, and tell me a fun fact about that number?");
+    const handle = await session.send({
+      messages: [{ role: "user", content: "What's 47 * 23, and tell me a fun fact about that number?" }],
+    });
+    const result = await handle.result;
     console.log("← Assistant:", result.response);
     console.log(
       `\n[${result.ticks} tick(s), ${result.usage.totalTokens} tokens, stop=${result.stopReason}]`,
