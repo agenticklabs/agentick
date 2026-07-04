@@ -319,9 +319,13 @@ describe("BaseLanguageModelExecutor — Effect.Stream pipeline", () => {
     const input = await exec.project(mkInput());
 
     const stream = exec.executeStream({ targetInput: input, target: mkInput().target });
-    // Iterator terminates cleanly on failure (no hang); the error is on .result.
-    for await (const _ of stream) {
-      /* drain */
+    // Iterator THROWS the typed error on failure (#182, Option A) — and
+    // still settles (no hang, the #181 raceFirst fix); the same error is
+    // on .result.
+    try {
+      for await (const _ of stream) void _;
+    } catch {
+      // typed throw expected — pinned in the #182 suite below
     }
     const err = await stream.result.then(
       () => null,
@@ -329,5 +333,45 @@ describe("BaseLanguageModelExecutor — Effect.Stream pipeline", () => {
     );
     expect(err).toBeInstanceOf(Error);
     expect((err as { _tag?: string })._tag).toBe("StreamFailed");
+  });
+});
+
+describe("executeStream iterator failure contract (#182, Option A)", () => {
+  it("the iterator throws the typed error on provider failure (matches generateStream)", async () => {
+    const journal = new MemoryJournal();
+    const bus = new LocalEventBus();
+    const inbox = new LocalInbox();
+    const failing = {
+      ...stubAdapter([]),
+      openStream: () => {
+        throw new Error("provider down");
+      },
+    };
+    const exec = new LanguageModelExecutor("exec-182", journal, bus, inbox, { adapter: failing });
+    await exec.ready;
+    const projected = await exec.project(mkInput());
+    const stream = exec.executeStream({ targetInput: projected, target: mkInput().target });
+    let thrown: unknown;
+    try {
+      for await (const d of stream) void d;
+    } catch (cause) {
+      thrown = cause;
+    }
+    expect((thrown as { _tag?: string } | undefined)?._tag).toBe("StreamFailed");
+    await expect(stream.result).rejects.toMatchObject({ _tag: "StreamFailed" });
+  });
+
+  it("abort clean-terminates the iterator (cancellation is an outcome, not an error)", async () => {
+    const { exec } = await makeStub([{ text: "a" }, { text: "b" }, { text: "c" }], 30);
+    const projected = await exec.project(mkInput());
+    const stream = exec.executeStream({ targetInput: projected, target: mkInput().target });
+    setTimeout(() => void stream.abort("test"), 20);
+    let thrown: unknown;
+    try {
+      for await (const d of stream) void d;
+    } catch (cause) {
+      thrown = cause;
+    }
+    expect(thrown).toBeUndefined();
   });
 });
