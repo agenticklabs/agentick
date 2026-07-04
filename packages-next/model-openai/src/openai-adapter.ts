@@ -239,7 +239,7 @@ export function openai(
     kind: "language-model",
     provider: "openai",
     modelId: model ?? "gpt-4o-mini",
-    capabilities: { supportsTools: true, supportsStreaming: true },
+    capabilities: { supportsTools: true, supportsStreaming: true, supportsJsonSchema: true },
   };
 
   let clientMemo: OpenAI | undefined = options.client;
