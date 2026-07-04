@@ -281,14 +281,18 @@ export function anthropic(
           if (u) {
             out.push({
               type: "usage",
-              usage: {
-                inputTokens: u.input_tokens ?? 0,
-                outputTokens: u.output_tokens ?? 0,
-                totalTokens: (u.input_tokens ?? 0) + (u.output_tokens ?? 0),
-                ...(u.cache_read_input_tokens != null
-                  ? { cachedInputTokens: u.cache_read_input_tokens }
-                  : {}),
-              },
+              // Subset semantics (#186): fold cache reads into inputTokens.
+              usage: (() => {
+                const cached = u.cache_read_input_tokens ?? 0;
+                const inputTokens = (u.input_tokens ?? 0) + cached;
+                const outputTokens = u.output_tokens ?? 0;
+                return {
+                  inputTokens,
+                  outputTokens,
+                  totalTokens: inputTokens + outputTokens,
+                  ...(u.cache_read_input_tokens != null ? { cachedInputTokens: cached } : {}),
+                };
+              })(),
             });
           }
           break;
@@ -469,7 +473,8 @@ export function anthropic(
         stop_reason: mapBackStopReason(accum.stopReason),
         stop_sequence: state.stopSequence,
         usage: {
-          input_tokens: accum.usage.inputTokens,
+          // Back-map subset semantics to Anthropic's disjoint wire shape.
+          input_tokens: accum.usage.inputTokens - (accum.usage.cachedInputTokens ?? 0),
           output_tokens: accum.usage.outputTokens,
           cache_read_input_tokens: accum.usage.cachedInputTokens ?? null,
           cache_creation_input_tokens: null,
@@ -1047,18 +1052,18 @@ function toUsageStats(usage: Usage | undefined | null): UsageStats {
   if (!usage) {
     return { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
   }
-  const inputTokens = usage.input_tokens ?? 0;
+  // Anthropic reports cache reads/writes DISJOINT from input_tokens;
+  // the canonical UsageStats rule (#186) is subset semantics — fold in.
+  const cached = usage.cache_read_input_tokens ?? 0;
+  const creation = usage.cache_creation_input_tokens ?? 0;
+  const inputTokens = (usage.input_tokens ?? 0) + cached + creation;
   const outputTokens = usage.output_tokens ?? 0;
   return {
     inputTokens,
     outputTokens,
     totalTokens: inputTokens + outputTokens,
-    ...(usage.cache_read_input_tokens != null
-      ? { cachedInputTokens: usage.cache_read_input_tokens }
-      : {}),
-    ...(usage.cache_creation_input_tokens != null
-      ? { cacheCreationTokens: usage.cache_creation_input_tokens }
-      : {}),
+    ...(usage.cache_read_input_tokens != null ? { cachedInputTokens: cached } : {}),
+    ...(usage.cache_creation_input_tokens != null ? { cacheCreationTokens: creation } : {}),
   };
 }
 
