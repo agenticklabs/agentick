@@ -1,8 +1,8 @@
 /**
- * Effect.Stream pipeline tests for `BaseLanguageModelExecutor`.
+ * Effect.Stream pipeline tests for `LanguageModelExecutor` (ADR 52).
  *
- * Exercises the streaming side of the base directly using a stub
- * provider that extends `BaseLanguageModelExecutor` with deterministic
+ * Exercises the streaming side directly using a stub
+ * `LanguageModelAdapter` with deterministic
  * `openStream` / `mapChunk` / `reconstructRaw` hooks. Verifies:
  *
  *   - Stream → AdapterDelta pipeline routes deltas in order via
@@ -28,8 +28,8 @@ import type {
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import { drainRejection } from "@agentick/utils-next/testing";
 
-import { BaseLanguageModelExecutor } from "../base-language-model-executor.js";
-import type { StreamAccumulator } from "../stream-accumulator.js";
+import { LanguageModelExecutor } from "../language-model-executor.js";
+import type { LanguageModelAdapter, StreamAccumulatorView } from "@agentick/model-next";
 
 interface StubRaw {
   readonly text: string;
@@ -41,88 +41,84 @@ interface StubChunk {
   readonly model?: string;
 }
 
-class StubExecutor extends BaseLanguageModelExecutor<StubRaw, StubChunk> {
-  readonly target: ExecutionTarget = {
-    kind: "language-model",
+function stubAdapter(
+  chunks: readonly StubChunk[],
+  delayMs = 0,
+): LanguageModelAdapter<StubRaw, StubChunk> {
+  return {
     provider: "stub",
-    modelId: "stub-v1",
+    target: {
+      kind: "language-model",
+      provider: "stub",
+      modelId: "stub-v1",
+    },
+    streamByDefault: true,
+
+    buildParams(_input: LanguageModelInput, _target: ExecutionTarget): unknown {
+      return {};
+    },
+
+    call(_params: unknown, _signal: AbortSignal | undefined): Promise<StubRaw> {
+      return Promise.resolve({ text: chunks.map((c) => c.text).join(""), model: "stub-v1" });
+    },
+
+    async *openStream(_params: unknown, signal: AbortSignal | undefined): AsyncIterable<StubChunk> {
+      for (const c of chunks) {
+        if (signal?.aborted) throw new Error("aborted");
+        if (delayMs > 0) {
+          await new Promise<void>((res, rej) => {
+            const t = setTimeout(res, delayMs);
+            signal?.addEventListener(
+              "abort",
+              () => {
+                clearTimeout(t);
+                rej(new Error("aborted"));
+              },
+              { once: true },
+            );
+          });
+        }
+        yield c;
+      }
+    },
+
+    mapChunk(chunk: StubChunk, accum: StreamAccumulatorView): readonly AdapterDelta[] {
+      const out: AdapterDelta[] = [];
+      if (chunk.model && !accum.modelSeen) {
+        out.push({ type: "message-start", role: "assistant", model: chunk.model });
+      }
+      if (chunk.text.length > 0) {
+        const blockIndex = 0;
+        if (!accum.openBlocks.has(blockIndex) && !accum.textByBlock.has(blockIndex)) {
+          out.push({ type: "content-start", blockIndex, blockType: "text" });
+        }
+        out.push({ type: "content-delta", blockIndex, delta: chunk.text });
+      }
+      return out;
+    },
+
+    reconstructRaw(accum: StreamAccumulatorView, modelSeen: string | undefined): StubRaw {
+      return { text: accum.totalText(), model: modelSeen ?? "stub-v1" };
+    },
+
+    normalize(raw: StubRaw): LanguageModelExecutionResult {
+      return {
+        specVersion: "2026-05-08",
+        output: [{ type: "text", text: raw.text }],
+        stopReason: "end",
+        usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+      };
+    },
   };
-
-  protected override readonly streamByDefault = true;
-
-  constructor(
-    scopeId: string,
-    journal: MemoryJournal,
-    bus: LocalEventBus,
-    inbox: LocalInbox,
-    private readonly chunks: readonly StubChunk[],
-    private readonly delayMs = 0,
-  ) {
-    super(scopeId, journal, bus, inbox);
-  }
-
-  protected buildParams(_input: LanguageModelInput, _target: ExecutionTarget): unknown {
-    return {};
-  }
-
-  protected callProvider(_params: unknown, _signal: AbortSignal | undefined): Promise<StubRaw> {
-    return Promise.resolve({ text: this.chunks.map((c) => c.text).join(""), model: "stub-v1" });
-  }
-
-  protected async *openStream(_params: unknown, signal: AbortSignal): AsyncIterable<StubChunk> {
-    for (const c of this.chunks) {
-      if (signal.aborted) throw new Error("aborted");
-      if (this.delayMs > 0) {
-        await new Promise<void>((res, rej) => {
-          const t = setTimeout(res, this.delayMs);
-          signal.addEventListener(
-            "abort",
-            () => {
-              clearTimeout(t);
-              rej(new Error("aborted"));
-            },
-            { once: true },
-          );
-        });
-      }
-      yield c;
-    }
-  }
-
-  protected mapChunk(chunk: StubChunk, accum: StreamAccumulator): readonly AdapterDelta[] {
-    const out: AdapterDelta[] = [];
-    if (chunk.model && !accum.modelSeen) {
-      out.push({ type: "message-start", role: "assistant", model: chunk.model });
-    }
-    if (chunk.text.length > 0) {
-      const blockIndex = 0;
-      if (!accum.openBlocks.has(blockIndex) && !accum.textByBlock.has(blockIndex)) {
-        out.push({ type: "content-start", blockIndex, blockType: "text" });
-      }
-      out.push({ type: "content-delta", blockIndex, delta: chunk.text });
-    }
-    return out;
-  }
-
-  protected reconstructRaw(accum: StreamAccumulator, modelSeen: string | undefined): StubRaw {
-    return { text: accum.totalText(), model: modelSeen ?? "stub-v1" };
-  }
-
-  protected normalizeRaw(raw: StubRaw): LanguageModelExecutionResult {
-    return {
-      specVersion: "2026-05-08",
-      output: [{ type: "text", text: raw.text }],
-      stopReason: "end",
-      usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
-    };
-  }
 }
 
 async function makeStub(chunks: readonly StubChunk[], delayMs = 0) {
   const journal = new MemoryJournal();
   const bus = new LocalEventBus();
   const inbox = new LocalInbox();
-  const exec = new StubExecutor("exec-stub", journal, bus, inbox, chunks, delayMs);
+  const exec = new LanguageModelExecutor("exec-stub", journal, bus, inbox, {
+    adapter: stubAdapter(chunks, delayMs),
+  });
   await exec.ready;
   return { exec, journal, bus, inbox };
 }

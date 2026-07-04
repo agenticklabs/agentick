@@ -16,7 +16,8 @@
 import React from "react";
 import { describe, expect, it } from "vitest";
 
-import { FakeLanguageModelExecutor } from "@agentick/executor-next";
+import { FakeLanguageModelExecutor, LanguageModelExecutor } from "@agentick/executor-next";
+import type { LanguageModelAdapter } from "@agentick/model-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type {
   EventBus,
@@ -195,6 +196,63 @@ describe("AppHarness substrate slots — explicit parent passing", () => {
     expect(captured[0]).toBe(1); // exactly one positional arg
     expect(typeof captured[1]).toBe("object"); // and it's the shell
     expect((captured[1] as { id: string }).id).toMatch(/^app:/);
+    await app.closeApp();
+  });
+});
+
+describe("AppHarness executor slot — LanguageModelAdapter form (ADR 52)", () => {
+  /** Minimal scripted adapter — the structural contract, no SDK. */
+  function mkAdapter(): LanguageModelAdapter<{ text: string }, never> {
+    const target: ExecutionTarget = {
+      kind: "language-model",
+      provider: "scripted",
+      modelId: "scripted-v1",
+      capabilities: { supportsTools: false, supportsStreaming: false },
+    };
+    return {
+      provider: "scripted",
+      target,
+      buildParams: (input) => input,
+      call: async () => ({ text: "pong from adapter" }),
+      openStream: () => {
+        throw new Error("not streaming");
+      },
+      mapChunk: () => [],
+      reconstructRaw: () => ({ text: "" }),
+      normalize: (raw) => ({
+        specVersion: "2026-05-08",
+        output: [{ type: "text", text: raw.text }],
+        stopReason: "end",
+        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+      }),
+    };
+  }
+
+  it("wraps a bare adapter in the ONE LanguageModelExecutor on the app's substrate", async () => {
+    const adapter = mkAdapter();
+    const app = await createApp(React.createElement(MinimalAgent), {
+      executor: adapter,
+    });
+    const exec = (app as unknown as { executor: unknown }).executor;
+    expect(exec).toBeInstanceOf(LanguageModelExecutor);
+    // Self-described target flows adapter → executor → app.
+    expect((app as unknown as { target: ExecutionTarget }).target).toMatchObject({
+      provider: "scripted",
+      modelId: "scripted-v1",
+    });
+    await app.closeApp();
+  });
+
+  it("adapter-backed app round-trips a send", async () => {
+    const app = await createApp(React.createElement(MinimalAgent), {
+      executor: mkAdapter(),
+    });
+    const session = await app.createSession();
+    const handle = await session.send({
+      messages: [{ role: "user", content: "ping" }],
+    });
+    const result = await handle.result;
+    expect(result.response).toContain("pong from adapter");
     await app.closeApp();
   });
 });

@@ -153,7 +153,7 @@ describe("collect — model + provider options", () => {
         temperature: 0.7,
         maxOutputTokens: 1024,
         // ProviderOptions is an empty seed; the "openai" slot exists
-        // only when @agentick/executor-openai-next is imported (module
+        // only when @agentick/model-openai-next is imported (module
         // augmentation). This test verifies threading, not the slot
         // type — cast through unknown.
         providerOptions: { openai: { user: "abc" } } as unknown as Record<string, unknown>,

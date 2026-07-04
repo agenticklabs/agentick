@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@agentick/app-next": "workspace:*",
-    "@agentick/executor-ai-sdk-next": "workspace:*",
+    "@agentick/model-ai-sdk-next": "workspace:*",
     "@agentick/knobs-next": "workspace:*",
     "@agentick/reconciler-react-next": "workspace:*",
     "@agentick/spec-next": "workspace:*",

@@ -72,7 +72,7 @@ export interface SpecConfig {
  * writing the OpenAI request directly.
  *
  * ```ts
- * // in @agentick/executor-openai-next
+ * // in @agentick/model-openai-next
  * declare module "@agentick/spec-next" {
  *   interface ProviderClientOptions {
  *     openai?: OpenAI.ClientOptions;

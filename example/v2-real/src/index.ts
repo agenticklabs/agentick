@@ -18,7 +18,7 @@
 import "dotenv/config";
 import React from "react";
 import { createApp } from "@agentick/app-next/react";
-import { aisdk } from "@agentick/executor-ai-sdk-next";
+import { aisdk } from "@agentick/model-ai-sdk-next";
 import { openai } from "@ai-sdk/openai";
 
 import { Agent } from "./agent.js";
@@ -30,7 +30,7 @@ async function main(): Promise<void> {
   }
 
   const app = await createApp(React.createElement(Agent), {
-    executor: aisdk({ model: openai("gpt-4o-mini") }),
+    executor: aisdk(openai("gpt-4o-mini")),
   });
 
   const session = await app.createSession();

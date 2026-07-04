@@ -1,7 +1,7 @@
 {
   "name": "@agentick/executor-next",
   "version": "0.0.0",
-  "description": "Reference executor harness for Agentick v2. Implements ExecutorProtocol from @agentick/spec-next — project / execute / normalize / run / abort. Ships FakeLanguageModelExecutor for tests + reference; provider adapters (OpenAI, Anthropic, Google, AI SDK) live in separate packages.",
+  "description": "THE executor harness for Agentick v2 (ADR 52). One final LanguageModelExecutor \u2014 BaseHarness plus the Effect execution engine \u2014 consuming a LanguageModelAdapter from @agentick/model-next. Ships FakeLanguageModelExecutor for tests + reference.",
   "keywords": [
     "agent",
     "agentick",
@@ -45,6 +45,7 @@
     "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
   },
   "dependencies": {
+    "@agentick/model-next": "workspace:*",
     "@agentick/runtime-next": "workspace:*",
     "@agentick/spec-next": "workspace:*",
     "effect": "^3.21.2"

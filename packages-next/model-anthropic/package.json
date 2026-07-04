@@ -1,0 +1,62 @@
+{
+  "name": "@agentick/model-anthropic-next",
+  "version": "0.0.0",
+  "description": "Anthropic LanguageModelAdapter for Agentick v2 (ADR 52). anthropic(model?, options?) \u2014 Messages API with native thinking blocks + cache_control. Zero Effect, zero substrate.",
+  "keywords": [
+    "agent",
+    "agentick",
+    "ai",
+    "anthropic",
+    "claude",
+    "executor",
+    "harness"
+  ],
+  "license": "MIT",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages-next/model-anthropic"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      }
+    }
+  },
+  "scripts": {
+    "bench": "vitest bench --run",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
+  },
+  "dependencies": {
+    "@agentick/model-next": "workspace:*",
+    "@agentick/spec-next": "workspace:*",
+    "@agentick/utils-next": "workspace:*",
+    "@anthropic-ai/sdk": "^0.39.0"
+  },
+  "devDependencies": {
+    "@agentick/executor-next": "workspace:*",
+    "@agentick/runtime-next": "workspace:*",
+    "@agentick/spec-conformance-next": "workspace:*",
+    "effect": "^3.21.2"
+  }
+}

@@ -1,13 +1,19 @@
 /**
- * `@agentick/executor-next` — reference executor harness.
+ * `@agentick/executor-next` — THE executor harness (ADR 52).
  *
- * Implements `ExecutorProtocol` / `LanguageModelExecutor` from
- * `@agentick/spec-next`. Ships `FakeLanguageModelExecutor` (scripted, no
- * wire) for tests, examples, and the v2 substrate proof. Real
- * provider adapters (OpenAI, Anthropic, Google, AI SDK) live in
- * separate packages — Phase 4c.
+ * Ships the ONE `LanguageModelExecutor` — `BaseHarness<"executor">`
+ * plus the entire Effect execution engine — consuming a
+ * `LanguageModelAdapter` part from `@agentick/model-next`. Also ships
+ * `FakeLanguageModelExecutor` (scripted, no wire) for tests, examples,
+ * and the v2 substrate proof.
  *
- * @see docs/proposals/v2/blueprint/06-executor-harness.md
+ * The model layer (adapter contract, accumulator, transforms,
+ * projection, generate helpers) lives in `@agentick/model-next` —
+ * zero Effect, standalone-usable. Provider adapters
+ * (`@agentick/model-openai-next`, …) implement that contract and never
+ * depend on this package.
+ *
+ * @see docs/proposals/v2/blueprint/52-executors-and-model-adapters.md
  */
 
 export {
@@ -15,46 +21,9 @@ export {
   type FakeLanguageModelExecutorOptions,
   type MockScriptedRun,
 } from "./fake-language-model-executor.js";
-export { defineExecutor, type DefineExecutorInput } from "./define-executor.js";
 export {
-  defineLanguageModelExecutor,
-  type DefineLanguageModelExecutorInput,
-} from "./define-language-model-executor.js";
-
-// Abstract base for first-party provider executors. Concrete impls
-// (OpenAI, Anthropic, Google, AI SDK) subclass and implement the
-// provider-specific hooks. Adopters writing one-off integrations
-// should use `defineExecutor` (callback-style) instead.
-export {
-  BaseLanguageModelExecutor,
-  defaultProject,
+  LanguageModelExecutor,
+  type LanguageModelExecutorOptions,
   mergeSignals,
-} from "./base-language-model-executor.js";
-// Canonical projection helpers — provider adapters that share the
-// canonical fold (Anthropic/OpenAI/Google/AI SDK) reach for these
-// instead of re-rolling. Adopters writing custom adapters extend
-// `BaseLanguageModelExecutor.projectImpl` and compose with the parts
-// they need.
-export {
-  buildTools,
-  buildMessages,
-  buildParameters,
-  collectSectionText,
-  sectionText,
-  messagePartFromBlock,
-  imageUrlFromSource,
-} from "./canonical-projection.js";
-export { StreamAccumulator, type AccumToolCall } from "./stream-accumulator.js";
-export { type DeltaTransform, composeTransforms, identityTransform } from "./delta-transform.js";
-export {
-  thinkTagTransform,
-  customBlockTransform,
-  type CustomBlockDefinition,
-} from "./tag-transforms.js";
-export {
-  StreamTagParser,
-  type StreamTagHandler,
-  type StreamTagParserConfig,
-  type StreamTagEvent,
-} from "./stream-tag-parser.js";
+} from "./language-model-executor.js";
 export { ExecutorLifecycle, type ExecutorInFlightEntry } from "./executor-lifecycle.js";
