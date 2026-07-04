@@ -57,7 +57,7 @@ export default agent(({ tick, knobs, props, timeline: tl }) => [
 
 ```ts
 const app = await createApp(myAgent, {
-  executor: openai("gpt-5"),
+  model: openai("gpt-5"),
   reconciler: dataReconciler(),
 });
 ```

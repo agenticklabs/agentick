@@ -10,7 +10,7 @@ substrate.
 import { openai } from "@agentick/model-openai-next";
 
 // In an app — the app wraps it in the ONE LanguageModelExecutor:
-const app = await createApp(<Agent />, { executor: openai("gpt-4o") });
+const app = await createApp(<Agent />, { model: openai("gpt-4o") });
 
 // Standalone — single-shot, no framework:
 import { generate } from "@agentick/model-next";

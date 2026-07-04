@@ -11,7 +11,7 @@ import { anthropic } from "@agentick/model-anthropic-next";
 
 // In an app — the app wraps it in the ONE LanguageModelExecutor:
 const app = await createApp(<Agent />, {
-  executor: anthropic("claude-sonnet-5"),
+  model: anthropic("claude-sonnet-5"),
 });
 
 // Standalone — single-shot, no framework:

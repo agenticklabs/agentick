@@ -25,7 +25,7 @@ import { aisdk } from "@agentick/model-ai-sdk-next";
 import { openai } from "@ai-sdk/openai";
 
 const app = await createApp(<Agent />, {
-  executor: aisdk(openai("gpt-4o")),
+  model: aisdk(openai("gpt-4o")),
 });
 
 const session = await app.createSession();
@@ -47,6 +47,30 @@ const app = await createApp(rootElement, {
   executor: ...,
 });
 ```
+
+### One-shot: `run()`
+
+No persistent app — a temporary app + session is created, the element
+executes once (full loop: tree + model + tools), and everything tears
+down when the execution settles:
+
+```ts
+import { run } from "@agentick/app-next/react";
+
+const result = await run(<Agent />, {
+  model: openai("gpt-4o"),
+  messages: [{ role: "user", content: "What's 47 * 23?" }],
+}).result;
+
+// Or stream it:
+for await (const event of run(<Agent />, { model, messages })) {
+  render(event);
+}
+```
+
+The ergonomics ladder: `generate({ model, messages })` (one model call,
+no tree) → `run(<Agent/>, ...)` (one execution, nothing persists) →
+`createApp` + sessions (persistent). Each tier strictly adds.
 
 ## Cluster integration
 

@@ -200,7 +200,7 @@ describe("AppHarness substrate slots — explicit parent passing", () => {
   });
 });
 
-describe("AppHarness executor slot — LanguageModelAdapter form (ADR 52)", () => {
+describe("AppHarness model slot — LanguageModelAdapter form (ADR 52)", () => {
   /** Minimal scripted adapter — the structural contract, no SDK. */
   function mkAdapter(): LanguageModelAdapter<{ text: string }, never> {
     const target: ExecutionTarget = {
@@ -231,7 +231,7 @@ describe("AppHarness executor slot — LanguageModelAdapter form (ADR 52)", () =
   it("wraps a bare adapter in the ONE LanguageModelExecutor on the app's substrate", async () => {
     const adapter = mkAdapter();
     const app = await createApp(React.createElement(MinimalAgent), {
-      executor: adapter,
+      model: adapter,
     });
     const exec = (app as unknown as { executor: unknown }).executor;
     expect(exec).toBeInstanceOf(LanguageModelExecutor);
@@ -245,7 +245,7 @@ describe("AppHarness executor slot — LanguageModelAdapter form (ADR 52)", () =
 
   it("adapter-backed app round-trips a send", async () => {
     const app = await createApp(React.createElement(MinimalAgent), {
-      executor: mkAdapter(),
+      model: mkAdapter(),
     });
     const session = await app.createSession();
     const handle = await session.send({
@@ -256,3 +256,48 @@ describe("AppHarness executor slot — LanguageModelAdapter form (ADR 52)", () =
     await app.closeApp();
   });
 });
+
+describe("AppHarness model/executor slot guards", () => {
+  it("rejects both model and executor", async () => {
+    await expect(
+      createApp(React.createElement(MinimalAgent), {
+        model: mkGuardAdapter(),
+        executor: mkExecutor(),
+      }),
+    ).rejects.toThrow(/not both/);
+  });
+
+  it("rejects neither model nor executor", async () => {
+    await expect(createApp(React.createElement(MinimalAgent), {})).rejects.toThrow(
+      /model is required/,
+    );
+  });
+
+  it("rejects a bare adapter on the executor slot", async () => {
+    await expect(
+      createApp(React.createElement(MinimalAgent), {
+        executor: mkGuardAdapter() as unknown as FakeLanguageModelExecutor,
+      }),
+    ).rejects.toThrow(/goes on the `model` slot/);
+  });
+});
+
+function mkGuardAdapter(): LanguageModelAdapter {
+  return {
+    provider: "scripted",
+    target: mkTarget(),
+    buildParams: (input) => input,
+    call: async () => ({}),
+    openStream: () => {
+      throw new Error("unused");
+    },
+    mapChunk: () => [],
+    reconstructRaw: () => ({}),
+    normalize: () => ({
+      specVersion: "2026-05-08",
+      output: [],
+      stopReason: "end",
+      usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+    }),
+  };
+}

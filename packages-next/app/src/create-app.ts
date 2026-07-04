@@ -5,7 +5,7 @@
  *
  * ```ts
  * const app = await createApp(<MyAgent />, {
- *   executor: openai("gpt-4o"),
+ *   model: openai("gpt-4o"),
  * });
  *
  * const session = await app.createSession();

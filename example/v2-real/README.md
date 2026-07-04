@@ -80,7 +80,7 @@ import { openai } from "@ai-sdk/openai";
 import { Agent } from "./agent.js";
 
 const app = await createApp(React.createElement(Agent), {
-  executor: aisdk(openai("gpt-4o-mini")),
+  model: aisdk(openai("gpt-4o-mini")),
 });
 
 const result = await app.send("What's 47 * 23?");

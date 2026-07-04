@@ -84,7 +84,7 @@ import { InMemoryMcpTransport, NoneAuth, withMCP } from "@agentick/mcp-next";
 const { clientTransport } = mkMcpEchoServer();
 
 const app = await createApp(React.createElement(Agent), {
-  executor: aisdk(openai("gpt-4o-mini")),
+  model: aisdk(openai("gpt-4o-mini")),
 
   // App-level tools — every session sees these.
   tools: [

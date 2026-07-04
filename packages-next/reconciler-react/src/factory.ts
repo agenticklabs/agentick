@@ -8,7 +8,7 @@
  * import { reactReconciler } from "@agentick/reconciler-react-next";
  *
  * const app = await createApp(<Agent />, {
- *   executor: openai("gpt-4o"),
+ *   model: openai("gpt-4o"),
  *   reconciler: reactReconciler({ contributors: [...customContributors] }),
  * });
  * ```
@@ -18,7 +18,7 @@
  *
  * ```ts
  * import { createApp } from "@agentick/app-next/react";
- * const app = await createApp(<Agent />, { executor: openai("gpt-4o") });
+ * const app = await createApp(<Agent />, { model: openai("gpt-4o") });
  * ```
  */
 

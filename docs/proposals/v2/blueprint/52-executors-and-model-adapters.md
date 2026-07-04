@@ -12,6 +12,34 @@ spec (`LanguageModelAdapter` protocol, observation types unchanged)
 **Resolves:** #103 (duplicated `define*` factory scaffolding — dies at
 the root)
 
+## Amendment — 2026-07-03: as-shipped reconciliation (#150/#152/#171 landed)
+
+The implementation landed green (typecheck 131/131, full suite passing);
+this amendment reconciles the ADR to what shipped so spec/ADR/code stop
+drifting. What holds exactly as designed: the executor/adapter split, the
+zero-Effect **`model-next`** layer, single-shot `generate`/`generateStream`,
+the no-double-normalization currencies, the collapsed **one**
+`LanguageModelExecutor` (`define*`/`Base`/subclass tiers deleted), adapters
+as values, the `model:` slot + `run()` ladder, and an adapter-first
+Anthropic. Three deltas from the original text:
+
+1. **The adapter contract grew** (interface block above updated to match):
+   `target` is a first-class adapter **property** (not only a `buildParams`
+   argument) — it is what powers the `model:` slot's capability defaults —
+   plus `streamByDefault?`, `supportsStreaming?`, `customBlocks?`, and the
+   `postProcessForNormalize?` round-trip hook. All optional-with-defaults
+   except `target`; sound additions for real provider quirks.
+2. **Conformance is executor-level, not standalone.** `runModelAdapterConformance`
+   + `fakeModelAdapter` were not built; each adapter is certified via
+   `runExecutorConformance` (real executor + adapter + stub provider client).
+   The adapter *contract* stays zero-Effect (write + test with `generate()`
+   alone); only the shared conformance runs through the executor. A thin
+   standalone adapter-conformance is a deferred additive if zero-dep
+   certification is ever demanded — not a regression.
+3. **`FakeLanguageModelExecutor` remains a distinct class**, not collapsed
+   into `LanguageModelExecutor` + a fake adapter. "One executor everywhere,
+   including tests" is aspirational; the Fake stays for now.
+
 ## TL;DR
 
 **The current design fuses two things with different natures: the
@@ -64,11 +92,27 @@ throughout; the currencies are the existing canonical types
 export interface LanguageModelAdapter<TRaw = unknown, TChunk = unknown> {
   /** Observability identity — "openai", "google", "ai-sdk", ... */
   readonly provider: string;
+  /**
+   * Self-described execution target (provider + modelId + capabilities).
+   * The executor advertises this as its own `target`; the app reads it for
+   * capability-based defaults. This is what makes `model: openai("gpt-5")`
+   * enough for the `model:` slot — the adapter carries its own target.
+   */
+  readonly target: ExecutionTarget;
+  /** `execute()` drives the streaming call internally (bus deltas). Default false. */
+  readonly streamByDefault?: boolean;
+  /** Whether a streaming codepath exists at all (AI SDK splits the surface). Default true. */
+  readonly supportsStreaming?: boolean;
+  /** Adopter XML-tag custom-block extraction, compiled into the delta pipeline. */
+  readonly customBlocks?: Readonly<Record<string, CustomBlockDefinition>>;
 
   // Required — the round trip:
   buildParams(input: LanguageModelInput, target: ExecutionTarget): unknown;
-  call(params: unknown, signal: AbortSignal): Promise<TRaw>;
-  openStream(params: unknown, signal: AbortSignal): AsyncIterable<TChunk>;
+  call(params: unknown, signal: AbortSignal | undefined): Promise<TRaw>;
+  openStream(
+    params: unknown,
+    signal: AbortSignal | undefined,
+  ): AsyncIterable<TChunk> | Promise<AsyncIterable<TChunk>>;
   mapChunk(chunk: TChunk, accum: StreamAccumulatorView): readonly AdapterDelta[];
   reconstructRaw(accum: StreamAccumulatorView, modelSeen: string | undefined): TRaw;
   normalize(raw: TRaw): LanguageModelExecutionResult;
@@ -76,18 +120,27 @@ export interface LanguageModelAdapter<TRaw = unknown, TChunk = unknown> {
   // Optional — provider quirks (defaults provided by the executor):
   project?(input: ProjectInput): LanguageModelInput;   // e.g. Anthropic per-section cache_control
   adapterTransforms?(): readonly DeltaTransform[];      // e.g. think-tag extraction
+  postProcessForNormalize?(raw: TRaw): TRaw;            // mutate reconstructed raw before normalize
   finalizeStream?(accum: StreamAccumulatorView): readonly AdapterDelta[];
-  extractMetadata?(raw: TRaw): Readonly<Record<string, unknown>>;
+  extractMetadata?(raw: TRaw): Readonly<Record<string, unknown>> | undefined;
   isAbortError?(cause: unknown): boolean;
   mapProviderError?(cause: unknown): ExecuteErrorChannel;
 }
 ```
 
-Conformance: `runModelAdapterConformance(factory)` — runnable from
-plain vitest, zero Effect imports. Test doubles:
-`fakeModelAdapter({ scripted })` replaces the internals of
-`FakeLanguageModelExecutor` (which becomes `LanguageModelExecutor` +
-the fake adapter — one executor everywhere, including tests).
+Conformance (**as-shipped, reconciled 2026-07-03** — see the amendment
+below): each provider adapter is certified by running
+`runExecutorConformance` against the real `LanguageModelExecutor` + that
+adapter + a stubbed provider client (`StubOpenAIClient`, …). This is
+integration-level certification (executor ⇄ adapter), and it covers the
+adapter-first Anthropic. The originally-proposed **standalone, zero-Effect
+`runModelAdapterConformance(factory)` + `fakeModelAdapter({ scripted })`**
+were NOT built — the adapter *contract* is zero-Effect (an author can
+write and test an adapter with `generate()` alone), but its shared
+conformance currently runs through the executor. `FakeLanguageModelExecutor`
+also remains a distinct class (not collapsed into
+`LanguageModelExecutor` + a fake adapter). These are deferred-additive,
+not regressions; see the amendment.
 
 ### `LanguageModelExecutor` (the harness — opinion tier)
 
@@ -114,7 +167,7 @@ literals.
 
 ```ts
 import { openai } from "@agentick/model-openai-next";
-import { generate, generateStream } from "@agentick/executor-next";
+import { generate, generateStream } from "@agentick/model-next";
 
 const model = openai("gpt-5", { apiKey });
 const result = await generate(model, { messages: [...] });   // OCR-service pattern
