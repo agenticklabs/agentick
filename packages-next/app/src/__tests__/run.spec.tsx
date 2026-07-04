@@ -7,39 +7,12 @@
 import React from "react";
 import { describe, expect, it } from "vitest";
 
-import type { ExecutionTarget } from "@agentick/spec-next";
-import type { LanguageModelAdapter } from "@agentick/model-next";
+import { scriptedAdapter } from "@agentick/model-next/testing";
 
 import { run } from "../react.js";
 
 function MinimalAgent() {
   return React.createElement("message" as never, { role: "user" }, "ping");
-}
-
-function scriptedAdapter(text: string): LanguageModelAdapter<{ text: string }, never> {
-  const target: ExecutionTarget = {
-    kind: "language-model",
-    provider: "scripted",
-    modelId: "scripted-v1",
-    capabilities: { supportsTools: false, supportsStreaming: false },
-  };
-  return {
-    provider: "scripted",
-    target,
-    buildParams: (input) => input,
-    call: async () => ({ text }),
-    openStream: () => {
-      throw new Error("not streaming");
-    },
-    mapChunk: () => [],
-    reconstructRaw: () => ({ text: "" }),
-    normalize: (raw) => ({
-      specVersion: "2026-05-08",
-      output: [{ type: "text", text: raw.text }],
-      stopReason: "end",
-      usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
-    }),
-  };
 }
 
 describe("run() — one-shot execution", () => {

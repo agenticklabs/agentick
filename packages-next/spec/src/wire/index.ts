@@ -18,3 +18,4 @@ export * from "./notifications.js";
 export * from "./validate.js";
 export * from "./extension.js";
 export * from "./registry.js";
+export * from "./authorizer.js";

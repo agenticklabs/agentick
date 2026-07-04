@@ -65,6 +65,8 @@ import {
   toRegistration,
 } from "@agentick/spec-next";
 import { createWireExtensionRegistry } from "./wire-registry.js";
+import { unconfiguredAuthorizer } from "./authorizers.js";
+import { createCommandsListHandler, createDynamicCommandResolver } from "./dynamic-commands.js";
 import {
   appWireExtension,
   gatewayWireExtension,
@@ -94,6 +96,14 @@ export interface CreateGatewayAppInput<P = unknown> extends Omit<CreateAppInput<
 }
 
 export interface GatewayHarnessOptions extends BaseHarnessOptions {
+  /**
+   * Identity-authorization policy for the dynamic command lane (ADR 51
+   * §4). Default: `unconfiguredAuthorizer` — unauthenticated callers
+   * (the local pole) pass; any authenticated principal is DENIED until
+   * a policy is configured (deny-by-default). Bundled:
+   * `staticAuthorizer({ grants })`, `permissiveAuthorizer()`.
+   */
+  readonly authorizer?: import("@agentick/spec-next").Authorizer;
   /** Stable gateway id; defaults to `gateway:${ulid()}`. */
   readonly gatewayId?: string;
   /**
@@ -263,6 +273,23 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     }
     for (const ext of [...(options.wireExtensions ?? []), ...wireFromBundles]) {
       this._wireExtensions.register(ext);
+    }
+
+    // ADR 51 slice 5 — the dynamic command lane. The resolver embeds
+    // the Authorizer gate (deny-by-default; it NEVER ships ungated,
+    // §4.3) and registers before seal. Explicit methods above shadow it
+    // mechanically. `commands/list` is the runtime discovery surface.
+    {
+      const authorizer = options.authorizer ?? unconfiguredAuthorizer();
+      const lane = { inbox: this.inbox, authorizer };
+      this._wireExtensions.registerDynamicResolver(createDynamicCommandResolver(lane));
+      this._wireExtensions.register({
+        name: "@agentick/commands",
+        namespace: "commands",
+        methods: {
+          "commands/list": createCommandsListHandler(lane),
+        } as never,
+      });
     }
 
     // Seal timing: with no gateway extensions, seal synchronously (the

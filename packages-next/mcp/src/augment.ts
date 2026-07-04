@@ -1,3 +1,4 @@
+import type { CommandInfo } from "@agentick/spec-next";
 /**
  * Module augmentation — adds the `mcp` slot to `HookBridges` from
  * `@agentick/spec-next`.
@@ -47,5 +48,31 @@ declare module "@agentick/spec-next" {
      * @see docs/proposals/v2/blueprint/45-runtime-context-model.md
      */
     readonly mcpConnectionId?: string;
+  }
+}
+
+// ADR 51 slice 5 (#141) — read/discovery + task status/cancel rows.
+// call-tool / call-tool-as-task are NOT exposed (matrix hold: they
+// bypass the model loop AND the capability-policy gate).
+declare module "@agentick/spec-next" {
+  interface WireMethods {
+    "mcp/list-tools": { params: { sessionId: string; serverId: string }; result: unknown };
+    "mcp/list-tasks": { params: { sessionId: string; serverId: string }; result: unknown };
+    "mcp/get-task": {
+      params: { sessionId: string; serverId: string; taskId: string };
+      result: unknown;
+    };
+    "mcp/get-task-result": {
+      params: { sessionId: string; serverId: string; taskId: string };
+      result: unknown;
+    };
+    "mcp/cancel-task": {
+      params: { sessionId: string; serverId: string; taskId: string };
+      result: unknown;
+    };
+    "mcp/commands": {
+      params: { sessionId: string; serverId: string };
+      result: { commands: readonly CommandInfo[] };
+    };
   }
 }

@@ -12,6 +12,7 @@
 
 import {
   WireExtensionDefinitionError,
+  type DynamicWireResolver,
   type WireExtension,
   type WireExtensionInfo,
   type WireExtensionRegistry,
@@ -46,6 +47,9 @@ export function createWireExtensionRegistry(): WireExtensionRegistry {
   // namespaces (would confuse `_extensions/list` consumers).
   const byName = new Set<string>();
   let sealed = false;
+  // ADR 51 slice 5 — the ONE dynamic fallthrough (framework-registered,
+  // pre-seal). Explicit methods always shadow it.
+  let dynamicResolver: DynamicWireResolver | undefined;
 
   return {
     register(extension: WireExtension): void {
@@ -95,10 +99,30 @@ export function createWireExtensionRegistry(): WireExtensionRegistry {
 
     resolve(method: string): WireExtensionResolution | undefined {
       const entry = byMethod.get(method);
-      if (!entry) return undefined;
-      const handler = entry.methods.get(method);
-      if (!handler) return undefined;
-      return { extension: entry.extension, handler };
+      if (entry) {
+        const handler = entry.methods.get(method);
+        if (handler) return { extension: entry.extension, handler };
+      }
+      // Exact-beats-dynamic (ADR 51 §3.1): the fallthrough is consulted
+      // only when no porcelain method matches.
+      return dynamicResolver?.(method);
+    },
+
+    registerDynamicResolver(resolver: DynamicWireResolver): void {
+      if (sealed) {
+        throw new WireExtensionDefinitionError({
+          extensionName: "@agentick/dynamic-commands",
+          reason:
+            "registry is sealed — the dynamic resolver registers during gateway construction.",
+        });
+      }
+      if (dynamicResolver !== undefined) {
+        throw new WireExtensionDefinitionError({
+          extensionName: "@agentick/dynamic-commands",
+          reason: "a dynamic resolver is already registered — there is exactly ONE.",
+        });
+      }
+      dynamicResolver = resolver;
     },
 
     enumerate(): readonly WireExtensionInfo[] {

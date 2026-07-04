@@ -1,3 +1,4 @@
+import type { CommandInfo } from "@agentick/spec-next";
 /**
  * Module augmentation — registers prompts slots on spec interfaces.
  *
@@ -31,5 +32,21 @@ declare module "@agentick/spec-next" {
      * bundled, not privileged".
      */
     readonly prompts?: PromptsHandle;
+  }
+}
+
+// ADR 51 slice 5 (#141) — prompt CRUD + get (MCP prompts/get analog) +
+// invoke (prompt-driven input, same-principal rule applies).
+declare module "@agentick/spec-next" {
+  interface WireMethods {
+    "prompts/register": { params: { sessionId: string; [key: string]: unknown }; result: unknown };
+    "prompts/update": { params: { sessionId: string; [key: string]: unknown }; result: unknown };
+    "prompts/remove": { params: { sessionId: string; id: string }; result: unknown };
+    "prompts/get": { params: { sessionId: string; id: string }; result: unknown };
+    "prompts/invoke": { params: { sessionId: string; [key: string]: unknown }; result: unknown };
+    "prompts/commands": {
+      params: { sessionId: string };
+      result: { commands: readonly CommandInfo[] };
+    };
   }
 }

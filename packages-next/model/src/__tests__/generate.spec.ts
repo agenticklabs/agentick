@@ -5,59 +5,19 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { AdapterDelta, ExecutionTarget } from "@agentick/spec-next";
-
 import { generate, generateStream } from "../generate.js";
-import type { LanguageModelAdapter, StreamAccumulatorView } from "../language-model-adapter.js";
-import { thinkTagTransform } from "../tag-transforms.js";
+import { scriptedAdapter } from "../testing/index.js";
+import type { LanguageModelAdapter } from "../language-model-adapter.js";
 
 interface ScriptedRaw {
   readonly text: string;
 }
 type ScriptedChunk = string;
 
-const TARGET: ExecutionTarget = {
-  kind: "language-model",
-  provider: "scripted",
-  modelId: "scripted-v1",
-  capabilities: { supportsTools: false, supportsStreaming: true },
-};
-
-function scriptedAdapter(
-  chunks: readonly string[],
-  opts: { thinkTags?: boolean } = {},
-): LanguageModelAdapter<ScriptedRaw, ScriptedChunk> {
-  return {
-    provider: "scripted",
-    target: TARGET,
-    buildParams: (input) => input,
-    call: async () => ({ text: chunks.join("") }),
-    openStream: async function* () {
-      for (const c of chunks) yield c;
-    } as unknown as LanguageModelAdapter<ScriptedRaw, ScriptedChunk>["openStream"],
-    mapChunk: (chunk, accum: StreamAccumulatorView): readonly AdapterDelta[] => {
-      const out: AdapterDelta[] = [];
-      if (!accum.textByBlock.has(0)) {
-        out.push({ type: "content-start", blockIndex: 0, blockType: "text" });
-      }
-      out.push({ type: "content-delta", blockIndex: 0, delta: chunk });
-      return out;
-    },
-    reconstructRaw: (accum) => ({ text: accum.totalText() }),
-    normalize: (raw) => ({
-      specVersion: "2026-05-08",
-      output: [{ type: "text", text: raw.text }],
-      stopReason: "end",
-      usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
-    }),
-    ...(opts.thinkTags ? { adapterTransforms: () => [thinkTagTransform()] } : {}),
-  };
-}
-
 describe("generate()", () => {
   it("runs buildParams → call → normalize and returns the result", async () => {
     const result = await generate({
-      model: scriptedAdapter(["hello ", "world"]),
+      model: scriptedAdapter(["hello ", "world"].join(""), { chunks: ["hello ", "world"] }),
       messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
     });
     expect(result.output[0]).toMatchObject({ type: "text", text: "hello world" });
@@ -65,7 +25,7 @@ describe("generate()", () => {
   });
 
   it("applies postProcessForNormalize when the adapter declares it", async () => {
-    const adapter = scriptedAdapter(["raw"]);
+    const adapter = scriptedAdapter(["raw"].join(""), { chunks: ["raw"] });
     const withPost: LanguageModelAdapter<ScriptedRaw, ScriptedChunk> = {
       ...adapter,
       postProcessForNormalize: (raw) => ({ text: raw.text.toUpperCase() }),
@@ -81,7 +41,7 @@ describe("generate()", () => {
 describe("generateStream()", () => {
   it("yields the canonical delta vocabulary and resolves the result", async () => {
     const handle = generateStream({
-      model: scriptedAdapter(["hel", "lo"]),
+      model: scriptedAdapter(["hel", "lo"].join(""), { chunks: ["hel", "lo"] }),
       messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
     });
     const types: string[] = [];
@@ -105,7 +65,10 @@ describe("generateStream()", () => {
 
   it("runs the adapter's transform pipeline (think tags → reasoning)", async () => {
     const handle = generateStream({
-      model: scriptedAdapter(["<think>plan</think>", "answer"], { thinkTags: true }),
+      model: scriptedAdapter(["<think>plan</think>", "answer"].join(""), {
+        chunks: ["<think>plan</think>", "answer"],
+        thinkTags: true,
+      }),
       messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
     });
     let reasoning = "";
@@ -119,7 +82,7 @@ describe("generateStream()", () => {
   });
 
   it("rejects the result when the provider stream throws", async () => {
-    const adapter = scriptedAdapter(["x"]);
+    const adapter = scriptedAdapter(["x"].join(""), { chunks: ["x"] });
     const failing: LanguageModelAdapter<ScriptedRaw, ScriptedChunk> = {
       ...adapter,
       openStream: () => {

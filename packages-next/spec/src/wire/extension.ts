@@ -193,6 +193,13 @@ export interface WireExtensionTransport {
  * truly gateway-level methods.
  */
 export interface WireExtensionContext {
+  /**
+   * Authenticated caller identity, stamped at ingress (ADR 51 §4.1).
+   * Undefined on unauthenticated connections (the local pole). The
+   * dynamic command lane's Authorizer gate consumes this; porcelain
+   * handlers may read it for principal-scoped behavior.
+   */
+  readonly principal?: string;
   /** Active session, when the method is session-scoped. */
   readonly session?: SessionHarnessProtocol<unknown>;
   /** Active app, when the method is app-scoped or session-scoped. */

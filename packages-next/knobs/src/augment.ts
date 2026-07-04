@@ -1,3 +1,4 @@
+import type { CommandInfo } from "@agentick/spec-next";
 /**
  * Module augmentation — adds the knobs slot to two spec interfaces:
  *
@@ -33,5 +34,20 @@ declare module "@agentick/spec-next" {
      * For per-knob handles, use `session.knob(name)`.
      */
     readonly knobs: KnobsHandle;
+  }
+}
+
+// ADR 51 slice 5 (#141) — knobs/set is the ratified user-facing wire
+// row (v1 precedent: set_knob + UI).
+declare module "@agentick/spec-next" {
+  interface WireMethods {
+    "knobs/set": {
+      params: { sessionId: string; key: string; value: unknown };
+      result: unknown;
+    };
+    "knobs/commands": {
+      params: { sessionId: string };
+      result: { commands: readonly CommandInfo[] };
+    };
   }
 }
