@@ -90,3 +90,19 @@ describe("mergePricing / mergeUsageStats", () => {
     expect("cachedInputTokens" in bare).toBe(false);
   });
 });
+
+describe("estimateCost — adapter authority (target.pricing)", () => {
+  it("target.pricing beats the seed; an explicit table beats target.pricing", () => {
+    const usage = { inputTokens: 1_000_000, outputTokens: 0, totalTokens: 1_000_000 };
+    const target = {
+      provider: "openai",
+      modelId: "gpt-4o",
+      pricing: { inputPerMTok: 7, outputPerMTok: 7 },
+    };
+    // Self-described wins over SEED (2.50).
+    expect(estimateCost(usage, target)!.totalUSD).toBeCloseTo(7);
+    // Adopter table wins over self-described.
+    const table = { openai: { "gpt-4o": { inputPerMTok: 1, outputPerMTok: 1 } } };
+    expect(estimateCost(usage, target, table)!.totalUSD).toBeCloseTo(1);
+  });
+});

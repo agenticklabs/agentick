@@ -121,10 +121,15 @@ export interface CostEstimate {
  */
 export function estimateCost(
   usage: UsageStats,
-  target: Pick<ExecutionTarget, "provider" | "modelId">,
-  table: PricingTable = SEED_PRICING,
+  target: Pick<ExecutionTarget, "provider" | "modelId" | "pricing">,
+  table?: PricingTable,
 ): CostEstimate | undefined {
-  const pricing = resolvePricing(target, table);
+  // Resolution: an explicitly supplied table wins (adopter override);
+  // else the target's self-described pricing (the adapter is the
+  // authority on its own model, ratified 2026-07-04); else the seed.
+  const pricing = table
+    ? resolvePricing(target, table)
+    : (target.pricing ?? resolvePricing(target, SEED_PRICING));
   if (!pricing) return undefined;
   const cached = usage.cachedInputTokens ?? 0;
   const written = usage.cacheCreationTokens ?? 0;
