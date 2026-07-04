@@ -1,3 +1,4 @@
+import type { CommandInfo } from "@agentick/spec-next";
 /**
  * Module augmentation — adds the timeline slot to two spec interfaces:
  *
@@ -33,5 +34,22 @@ declare module "@agentick/spec-next" {
      * owns lifecycle (`close`, `id`, `ready`) and snapshot import/export.
      */
     readonly timeline: TimelineHandle;
+  }
+}
+
+// ADR 51 slice 5 (#141) — wire projection of the ratified VERB-MATRIX
+// rows. Types derive from the same declarations the command registry
+// validates at dispatch; `sessionId` addresses the dynamic lane.
+declare module "@agentick/spec-next" {
+  interface WireMethods {
+    /** The flagship signal form: bare verb + optional advisory instructions. */
+    "timeline/compact": {
+      params: { sessionId: string; instructions?: string };
+      result: unknown;
+    };
+    "timeline/commands": {
+      params: { sessionId: string };
+      result: { commands: readonly CommandInfo[] };
+    };
   }
 }

@@ -90,3 +90,38 @@ export interface ErrorData {
     readonly limit?: number;
   };
 }
+
+/**
+ * Typed throwable for wire-method handlers. Transports map it onto the
+ * JSON-RPC error frame verbatim (`code`/`message`/`data`); anything
+ * else thrown becomes an opaque `InternalError`. Registered here (ADR
+ * 51 slice 5) so the dynamic command lane and porcelain handlers throw
+ * ONE shape.
+ */
+export class WireRpcError extends Error {
+  constructor(
+    readonly code: ErrorCode,
+    message: string,
+    readonly data?: Readonly<Record<string, unknown>>,
+  ) {
+    super(message);
+    this.name = "WireRpcError";
+  }
+
+  /** Authorization denial — the caller lacks a grant for the scope. */
+  static forbidden(scope: string): WireRpcError {
+    return new WireRpcError(ErrorCode.Forbidden, `not authorized for "${scope}"`, { scope });
+  }
+
+  /** Authentication required — no principal on an auth-configured gateway. */
+  static authRequired(): WireRpcError {
+    return new WireRpcError(ErrorCode.AuthRequired, "authentication required");
+  }
+
+  /** Unknown or unexposed method — deny-by-default is indistinguishable from absent. */
+  static methodNotFound(method: string): WireRpcError {
+    return new WireRpcError(ErrorCode.MethodNotFound, `method not found: "${method}"`, {
+      method,
+    });
+  }
+}

@@ -494,7 +494,15 @@ describe("GatewayHarness — no gateway extensions (pre-ADR-50 path)", () => {
     // programmatic registration attempt (were one possible) is moot, but
     // the observable proof is that gatewayReady already resolved and the
     // built-in framework wire extensions are present.
-    expect(gateway.wireExtensions().resolve("gwext/ping")).toBeUndefined();
+    // Post slice-5 (#141) the dynamic command lane answers any `a/b`
+    // shape (denying in-handler, deny-by-default) — so the sealing
+    // proof uses a shape the dynamic lane also rejects at resolve time.
+    expect(gateway.wireExtensions().resolve("no-slash-method")).toBeUndefined();
+    // `gwext/ping` (never registered) resolves to the DYNAMIC lane, not
+    // a porcelain extension:
+    expect(gateway.wireExtensions().resolve("gwext/ping")!.extension.name).toBe(
+      "@agentick/dynamic-commands",
+    );
     // Framework built-ins registered regardless of the extension path.
     expect(gateway.wireExtensions().enumerate().length).toBeGreaterThan(0);
     await gateway.closeGateway();

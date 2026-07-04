@@ -1,3 +1,4 @@
+import type { CommandInfo } from "@agentick/spec-next";
 /**
  * Module augmentation — registers the skills slot on two spec
  * interfaces:
@@ -34,5 +35,19 @@ declare module "@agentick/spec-next" {
      * component lands.
      */
     readonly skills: SkillsHandle;
+  }
+}
+
+// ADR 51 slice 5 (#141) — skill-library management from an admin UI is
+// a designed surface; grants gate who.
+declare module "@agentick/spec-next" {
+  interface WireMethods {
+    "skills/register": { params: { sessionId: string; [key: string]: unknown }; result: unknown };
+    "skills/update": { params: { sessionId: string; [key: string]: unknown }; result: unknown };
+    "skills/remove": { params: { sessionId: string; id: string }; result: unknown };
+    "skills/commands": {
+      params: { sessionId: string };
+      result: { commands: readonly CommandInfo[] };
+    };
   }
 }

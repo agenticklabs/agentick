@@ -48,6 +48,15 @@ import type { WireExtension } from "./extension.js";
  * A single method match on the registry — the extension that owns the
  * namespace and the handler function for the requested method.
  */
+/**
+ * Dynamic fallthrough resolver (ADR 51 §3.1, slice 5). Registered ONCE
+ * by the framework before seal; consulted only when no explicit
+ * extension method matches (explicit-beats-dynamic — porcelain always
+ * shadows the auto-route). Returns a resolution whose handler embeds
+ * the Authorizer gate; the resolver MUST NOT ship without it (§4.3).
+ */
+export type DynamicWireResolver = (method: string) => WireExtensionResolution | undefined;
+
 export interface WireExtensionResolution {
   /** The owning extension — used by the dispatcher to build context (e.g.,
    *  validate `publish` calls against declared notifications). */
@@ -77,6 +86,12 @@ export interface WireExtensionInfo {
  * this interface.
  */
 export interface WireExtensionRegistry {
+  /**
+   * Install the ONE dynamic fallthrough resolver (framework-only,
+   * pre-seal). Throws if sealed or already registered.
+   */
+  registerDynamicResolver(resolver: DynamicWireResolver): void;
+
   /**
    * Install an extension. Throws
    * {@link WireExtensionDefinitionError} on:

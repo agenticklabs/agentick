@@ -12,3 +12,14 @@ export {
 } from "./harness.js";
 export { createGateway } from "./create-gateway.js";
 export { createWireExtensionRegistry } from "./wire-registry.js";
+export {
+  permissiveAuthorizer,
+  staticAuthorizer,
+  unconfiguredAuthorizer,
+  type StaticAuthorizerOptions,
+} from "./authorizers.js";
+export {
+  createCommandsListHandler,
+  createDynamicCommandResolver,
+  type DynamicCommandResolverOptions,
+} from "./dynamic-commands.js";
