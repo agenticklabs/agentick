@@ -26,8 +26,12 @@ import type {
   SendResult,
   SessionExecutionHandle,
   StreamEvent,
+  TimelineEntry,
 } from "@agentick/spec-next";
 import { omitUndefined } from "@agentick/utils-next";
+
+import { MemoryTimelineStore } from "@agentick/timeline-next";
+import { ulid } from "@agentick/utils-next";
 
 import { createApp, type CreateAppOptions } from "./create-app.js";
 
@@ -38,6 +42,13 @@ import { createApp, type CreateAppOptions } from "./create-app.js";
 export interface RunOptions<P = unknown> extends CreateAppOptions<P> {
   /** Messages queued for the single execution. */
   readonly messages?: ReadonlyArray<SendMessageInput>;
+  /**
+   * Seed the session's timeline before the run (#187) — the replay /
+   * eval loop: `snapshot().timeline` from a previous session goes in
+   * here verbatim. Implemented as a pre-populated store handed to the
+   * ADR 49 hydration path (no bespoke seeding machinery).
+   */
+  readonly history?: ReadonlyArray<TimelineEntry>;
   /** Component props for the run (SendInput.props). */
   readonly props?: P;
   /** Tick bound for the single execution. */
@@ -69,12 +80,28 @@ export type RunHandle = Promise<SessionExecutionHandle> &
  * early, pass `signal`.
  */
 export function run<P = unknown>(rootElement: unknown, options: RunOptions<P>): RunHandle {
-  const { messages, props, maxTicks, signal, ...appOptions } = options;
+  const { messages, props, maxTicks, signal, history, ...appOptions } = options;
 
   const handlePromise = (async (): Promise<SessionExecutionHandle> => {
-    const app = await createApp(rootElement, appOptions as CreateAppOptions<P>);
+    let finalOptions = appOptions as CreateAppOptions<P>;
+    const sessionId = `run:${ulid()}`;
+    if (history !== undefined && history.length > 0) {
+      // Pre-populate a store under the run's session id and hand it to
+      // the ADR 49 hydration path — seeding IS resuming.
+      const store = new MemoryTimelineStore();
+      // The timeline harness keys the store by its scopeId — `${sessionId}:timeline`.
+      await store.append(`${sessionId}:timeline`, history);
+      finalOptions = {
+        ...finalOptions,
+        session: {
+          ...finalOptions.session,
+          timeline: { ...finalOptions.session?.timeline, store },
+        },
+      };
+    }
+    const app = await createApp(rootElement, finalOptions);
     try {
-      const session = await app.createSession();
+      const session = await app.createSession({ sessionId });
       const handle = await session.send({
         ...omitUndefined({ messages, props, maxTicks, signal }),
       });
