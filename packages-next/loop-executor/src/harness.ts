@@ -246,8 +246,15 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
             scope: { sessionId: input.sessionId, executionId, tickId },
             ...omitUndefined({ signal: input.signal }),
           });
-          for await (const delta of stream) {
-            input.onEvent?.({ kind: "model", tick: tickIndex, delta });
+          try {
+            for await (const delta of stream) {
+              input.onEvent?.({ kind: "model", tick: tickIndex, delta });
+            }
+          } catch {
+            // #182 Option A: the iterator throws the typed error on
+            // provider failure. The SAME error arrives on `.result`
+            // below — that path owns terminal construction; swallowing
+            // here avoids double-handling.
           }
           let raw: unknown;
           try {
