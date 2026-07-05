@@ -152,6 +152,14 @@ export interface GatewayHarnessProtocol {
   /** Enumerate all registered Apps. */
   apps(): readonly AppHarnessProtocol[];
 
+  /**
+   * The gateway's identity-authorization policy (ADR 51 §4). The wire
+   * dispatch choke point reads it — EVERY wire method (porcelain and
+   * dynamic) is authorized with its verb-derived scope label before the
+   * handler runs (§3.3 anti-bypass: one gate, both lanes).
+   */
+  readonly authorizer?: import("../wire/authorizer.js").Authorizer;
+
   // ─── Lifecycle ──────────────────────────────────────────────────
 
   /**

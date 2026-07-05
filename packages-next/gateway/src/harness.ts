@@ -165,6 +165,9 @@ const SURFACE = "gateway" as const;
 
 export class GatewayHarness extends BaseHarness<typeof SURFACE> implements GatewayHarnessProtocol {
   private readonly _apps = new Map<string, AppHarnessProtocol>();
+  /** ADR 51 §4 — read by the wire dispatch choke point (every method,
+   *  both lanes) and by commands/list's visibility filter. */
+  readonly authorizer!: import("@agentick/spec-next").Authorizer;
   private gatewayClosed = false;
 
   /**
@@ -281,6 +284,7 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     // mechanically. `commands/list` is the runtime discovery surface.
     {
       const authorizer = options.authorizer ?? unconfiguredAuthorizer();
+      this.authorizer = authorizer;
       const lane = { inbox: this.inbox, authorizer };
       this._wireExtensions.registerDynamicResolver(createDynamicCommandResolver(lane));
       this._wireExtensions.register({

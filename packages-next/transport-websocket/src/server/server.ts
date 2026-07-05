@@ -26,11 +26,21 @@ export interface WebSocketServerOptions {
   /**
    * Ingress authentication (ADR 34/51 §4.1) — runs ONCE per connection
    * at upgrade time. Token extracted from `Authorization: Bearer ...`
-   * or the `?token=` query param. Throw to reject the upgrade (401).
-   * Omitted = every connection is anonymous (the local pole; pair with
-   * the gateway's unconfigured/permissive Authorizer deliberately).
+   * (and, only when `allowQueryToken` is set, `?token=`). Throw to
+   * reject the upgrade (401). Omitted = every connection is anonymous
+   * (the local pole; pair with the gateway's unconfigured/permissive
+   * Authorizer deliberately). Authentication is bounded by a 10s
+   * timeout — a hung AuthSource rejects the upgrade instead of leaking
+   * sockets.
    */
   readonly authSource?: import("@agentick/spec-next").AuthSource;
+  /**
+   * Accept the bearer token from the `?token=` query param. DEFAULT
+   * FALSE (review finding): query strings land in proxy access logs,
+   * browser history, and Referer headers — a leak vector for long-lived
+   * credentials. Enable only for clients that cannot set headers.
+   */
+  readonly allowQueryToken?: boolean;
 }
 
 export interface WebSocketServerHandle {

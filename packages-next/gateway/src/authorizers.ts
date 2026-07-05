@@ -100,3 +100,24 @@ export function unconfiguredAuthorizer(): Authorizer {
     },
   };
 }
+
+/**
+ * Credential-claims policy: allow iff the token's scope claims (stamped
+ * at ingress by the AuthSource) match the requested scope. The
+ * OAuth-shaped counterpart of `staticAuthorizer` — grants ride the
+ * credential instead of a server-side table. Same-principal target
+ * rule applies as everywhere.
+ */
+export function claimsAuthorizer(): Authorizer {
+  return {
+    backend: "claims",
+    authorize(input: AuthorizeInput): Promise<AuthorizeResult> {
+      if (!sameTarget(input)) {
+        return Promise.resolve({ allowed: false, reason: "target-principal-mismatch" });
+      }
+      const claims = input.tokenScopes ?? [];
+      const allowed = claims.some((p) => matchesScope(p, input.scope));
+      return Promise.resolve(allowed ? { allowed } : { allowed, reason: "no-claim" });
+    },
+  };
+}

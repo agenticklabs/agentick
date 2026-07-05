@@ -343,7 +343,13 @@ export abstract class BaseHarness<
    * {@link makeEvent} (an operation cannot override it — no per-op
    * identity spoofing).
    */
-  protected readonly principal: string | undefined;
+  /**
+   * Construction-bound owning principal (ADR 48) — PUBLIC structural
+   * identity: the wire dispatch gate reads the TARGET harness's
+   * principal for the same-principal rule (ADR 51 §4.2). Identity is a
+   * fact, not policy; policy stays in the Authorizer.
+   */
+  readonly principal: string | undefined;
 
   /**
    * In-flight request/response correlation map. Every BaseHarness can

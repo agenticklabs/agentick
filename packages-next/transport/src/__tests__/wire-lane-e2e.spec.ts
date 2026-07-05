@@ -153,3 +153,71 @@ describe("staticTokenAuthSource — prototype-key bypass (review finding)", () =
     await expect(auth.authenticate({})).rejects.toThrow(/no token/);
   });
 });
+
+describe("dispatch choke point — one gate, both lanes (review findings)", () => {
+  function stubHost(authorizer: unknown, sessionPrincipal?: string) {
+    const session = { id: "s1", principal: sessionPrincipal } as never;
+    const app = { getSession: (id: string) => (id === "s1" ? session : undefined) } as never;
+    return {
+      authorizer,
+      app: () => app,
+      apps: () => [app],
+      wireExtensions: () => ({
+        resolve: (m: string) =>
+          m === "session/send"
+            ? {
+                extension: { name: "porcelain", namespace: "session", methods: {} },
+                handler: async () => ({ ok: true }),
+              }
+            : undefined,
+        enumerate: () => [],
+      }),
+    } as never;
+  }
+
+  it("PORCELAIN methods are gated: ungranted principal gets Forbidden on session/send", async () => {
+    const host = stubHost(staticAuthorizer({ grants: { alice: ["timeline:*"] } }));
+    const res = await dispatchRequest(
+      host,
+      { jsonrpc: "2.0", id: 1, method: "session/send", params: { sessionId: "s1" } },
+      sink,
+      { principal: "alice" },
+    );
+    if (!("error" in res) || res.error === undefined) throw new Error("expected error");
+    expect(res.error.code).toBe(-32003); // Forbidden
+  });
+
+  it("porcelain scope label defaults to the verb: session:send grant admits session/send", async () => {
+    const host = stubHost(staticAuthorizer({ grants: { alice: ["session:send"] } }));
+    const res = await dispatchRequest(
+      host,
+      { jsonrpc: "2.0", id: 2, method: "session/send", params: { sessionId: "s1" } },
+      sink,
+      { principal: "alice" },
+    );
+    expect("result" in res && res.result).toMatchObject({ ok: true });
+  });
+
+  it("same-principal target rule has REAL input: alice cannot touch bob's session", async () => {
+    const host = stubHost(staticAuthorizer({ grants: { alice: ["*"] } }), "bob");
+    const res = await dispatchRequest(
+      host,
+      { jsonrpc: "2.0", id: 3, method: "session/send", params: { sessionId: "s1" } },
+      sink,
+      { principal: "alice" },
+    );
+    if (!("error" in res) || res.error === undefined) throw new Error("expected error");
+    expect(res.error.code).toBe(-32003);
+  });
+
+  it("owner passes the target rule on their own session", async () => {
+    const host = stubHost(staticAuthorizer({ grants: { bob: ["session:send"] } }), "bob");
+    const res = await dispatchRequest(
+      host,
+      { jsonrpc: "2.0", id: 4, method: "session/send", params: { sessionId: "s1" } },
+      sink,
+      { principal: "bob" },
+    );
+    expect("result" in res && res.result).toMatchObject({ ok: true });
+  });
+});

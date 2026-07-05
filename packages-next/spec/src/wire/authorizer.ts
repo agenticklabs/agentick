@@ -36,6 +36,13 @@ export interface AuthorizeInput {
    * fusion rule); elevation via grants.
    */
   readonly target?: EventScope;
+  /**
+   * Scope claims carried by the caller's credential
+   * (IngressIdentity.scopes) — grant-DERIVATION input. Bundled
+   * `claimsAuthorizer` consumes these; `staticAuthorizer` ignores them
+   * (table-driven by design).
+   */
+  readonly tokenScopes?: readonly string[];
 }
 
 export interface AuthorizeResult {

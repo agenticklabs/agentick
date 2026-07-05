@@ -128,6 +128,15 @@ describe("registry — exact-beats-dynamic + sealing", () => {
 });
 
 describe("dynamic command lane — deny-by-default", () => {
+  it("the meta-verb serves enumeration directly (authz lives at the dispatch choke point)", async () => {
+    const { resolver } = lane();
+    const reply = (await resolver("timeline/commands")!.handler(
+      { sessionId: "s1" },
+      { principal: "anyone" },
+    )) as { commands: readonly CommandInfo[] };
+    expect(reply.commands.map((c) => c.name)).toContain("timeline:compact");
+  });
+
   it("an addressable-but-not-wire verb is indistinguishable from an absent method", async () => {
     const { resolver } = lane({ alice: ["*"] });
     const r = resolver("timeline/append")!;
@@ -136,14 +145,6 @@ describe("dynamic command lane — deny-by-default", () => {
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(WireRpcError);
     expect((err as WireRpcError).code).toBe(ErrorCode.MethodNotFound);
-  });
-
-  it("an exposed verb without a grant is Forbidden", async () => {
-    const { resolver } = lane({ alice: ["knobs:*"] });
-    const err = await resolver("timeline/compact")!
-      .handler({ sessionId: "s1" }, { principal: "alice" })
-      .catch((e: unknown) => e);
-    expect((err as WireRpcError).code).toBe(ErrorCode.Forbidden);
   });
 
   it("an exposed + granted verb dispatches with origin 'wire' and the params as payload", async () => {
@@ -169,19 +170,6 @@ describe("dynamic command lane — deny-by-default", () => {
       .handler({ sessionId: "s1" }, { principal: "alice" })
       .catch((e: unknown) => e);
     expect((badSurface as WireRpcError).code).toBe(ErrorCode.MethodNotFound);
-  });
-
-  it("the meta-verb serves enumeration, gated like everything else", async () => {
-    const { resolver } = lane({ alice: ["timeline:commands"] });
-    const reply = (await resolver("timeline/commands")!.handler(
-      { sessionId: "s1" },
-      { principal: "alice" },
-    )) as { commands: readonly CommandInfo[] };
-    expect(reply.commands.map((c) => c.name)).toContain("timeline:compact");
-    const denied = await resolver("timeline/commands")!
-      .handler({ sessionId: "s1" }, { principal: "mallory" })
-      .catch((e: unknown) => e);
-    expect((denied as WireRpcError).code).toBe(ErrorCode.Forbidden);
   });
 });
 
