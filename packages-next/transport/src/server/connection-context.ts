@@ -24,7 +24,7 @@ import type {
   JsonRpcRequest,
   JsonRpcResponse,
 } from "@agentick/spec-next";
-import type { IngressIdentity } from "@agentick/spec-next";
+import { intersectScopes, type IngressIdentity } from "@agentick/spec-next";
 
 import { dispatchRequest, type DispatchHost } from "./dispatch.js";
 
@@ -66,10 +66,13 @@ export abstract class BaseConnectionContext {
       if (frame.method === "initialize" && this.identity?.scopes !== undefined) {
         const requested = (frame as { params?: { scopes?: readonly string[] } }).params?.scopes;
         if (requested !== undefined) {
-          const requestedSet = new Set(requested);
           this.identity = {
             ...this.identity,
-            scopes: this.identity.scopes.filter((sc) => requestedSet.has(sc)),
+            // Cover-aware (glob claims survive narrowing to their
+            // members; review finding: exact-string intersection locked
+            // out any glob-claim client). Narrowing-only in both
+            // directions by construction.
+            scopes: intersectScopes(this.identity.scopes, requested),
           };
         }
       }

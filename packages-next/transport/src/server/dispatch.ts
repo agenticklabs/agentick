@@ -17,6 +17,7 @@
  */
 
 import {
+  scopeCovers,
   WireRpcError,
   ErrorCode,
   isAgentickError,
@@ -228,22 +229,28 @@ async function authorizeDispatch(
   rawParams: unknown,
   identity: IngressIdentity | undefined,
 ): Promise<void> {
-  const authorizer = host.authorizer;
-  if (!authorizer) return; // hosts without a policy (bare test hosts) are trusted-domain
   const params = (rawParams ?? {}) as Record<string, unknown>;
   const sessionId = typeof params.sessionId === "string" ? params.sessionId : undefined;
+  // NOTE: session resolution keys on the `sessionId` param by
+  // convention — the same convention buildWireExtensionContext uses.
+  // TODO(trail-session-resolution-seam): methods that reach a session
+  // via other params (a future app/runOnce) must route through the
+  // same resolution or the ceiling won't see them.
   const targetSession = sessionId ? findSessionOrUndef(host, sessionId) : undefined;
   // #199 — the target session's scope CEILING is structural (resource-
-  // declared, like its principal) and checked before policy: the
-  // caller's credential claims must cover every required scope. No
-  // authorizer can waive it.
+  // declared, like its principal) and checked BEFORE policy AND before
+  // the no-authorizer short-circuit: no authorizer — including an
+  // absent one — can waive it (review finding: it sat behind the
+  // guard). Cover-aware: a star/glob claim satisfies its members.
   const requiredScopes = targetSession?.requiredScopes;
   if (requiredScopes !== undefined && requiredScopes.length > 0) {
-    const held = new Set(identity?.scopes ?? []);
-    if (!requiredScopes.every((sc) => held.has(sc))) {
+    const held = identity?.scopes ?? [];
+    if (!requiredScopes.every((req) => held.some((claim) => scopeCovers(claim, req)))) {
       throw WireRpcError.forbidden(methodScope(method));
     }
   }
+  const authorizer = host.authorizer;
+  if (!authorizer) return; // hosts without a policy (bare test hosts) are trusted-domain
   const decision = await authorizer.authorize({
     ...(identity?.principal !== undefined ? { principal: identity.principal } : {}),
     ...(identity?.scopes !== undefined ? { tokenScopes: identity.scopes } : {}),

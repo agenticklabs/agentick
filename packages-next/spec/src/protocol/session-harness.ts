@@ -445,8 +445,14 @@ export interface SessionHarnessProtocol<P = unknown> {
   /**
    * Scope ceiling (#199) — construction-bound structural config, same
    * pattern as `principal`: a wire caller whose credential claims do
-   * not cover EVERY listed scope is Forbidden at the dispatch gate,
-   * regardless of grants. Checked structurally BEFORE policy.
+   * not COVER (glob-aware) every listed scope is Forbidden at the
+   * dispatch gate, regardless of grants — checked structurally before
+   * policy and before any authorizer short-circuit. Server-declared
+   * only (CreateSessionInput; deliberately NOT settable over the wire).
+   * Requires claim-carrying identities: under a pure grant-table
+   * deployment no caller carries claims, so a non-empty ceiling makes
+   * the session wire-inaccessible — by design (the ceiling demands
+   * credential-attested scopes).
    */
   readonly requiredScopes?: readonly string[] | undefined;
   /**

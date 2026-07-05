@@ -326,3 +326,77 @@ describe("scope refinement — downscoping (#198) + session ceiling (#199)", () 
     expect("result" in allowed && allowed.result).toBeTruthy();
   });
 });
+
+describe("scope refinement — review-fix coverage (glob semantics, structural ceiling)", () => {
+  it("glob claim survives narrowing to its member (cover-aware intersection)", async () => {
+    const { intersectScopes } = await import("@agentick/spec-next");
+    expect(intersectScopes(["timeline:*"], ["timeline:compact"])).toEqual(["timeline:compact"]);
+    expect(intersectScopes(["timeline:compact"], ["timeline:*"])).toEqual(["timeline:compact"]);
+    expect(intersectScopes(["*"], ["session:send"])).toEqual(["session:send"]);
+    expect(intersectScopes(["knobs:set"], ["timeline:*"])).toEqual([]);
+  });
+
+  it("star/glob claims satisfy the ceiling (cover-aware)", async () => {
+    const session = { id: "s1", requiredScopes: ["kyc:verified"] } as never;
+    const app = { getSession: (id: string) => (id === "s1" ? session : undefined) } as never;
+    const host = {
+      authorizer: staticAuthorizer({ grants: { alice: ["*"] } }),
+      app: () => app,
+      apps: () => [app],
+      wireExtensions: () => ({
+        resolve: () => ({
+          extension: { name: "p", namespace: "x", methods: {} },
+          handler: async () => ({ ok: true }),
+        }),
+        enumerate: () => [],
+      }),
+    } as never;
+    const viaStar = await dispatchRequest(
+      host,
+      { jsonrpc: "2.0", id: 1, method: "timeline/compact", params: { sessionId: "s1" } },
+      sink,
+      { principal: "alice", scopes: ["*"] },
+    );
+    expect("result" in viaStar && viaStar.result).toBeTruthy();
+    const viaGlob = await dispatchRequest(
+      host,
+      { jsonrpc: "2.0", id: 2, method: "timeline/compact", params: { sessionId: "s1" } },
+      sink,
+      { principal: "alice", scopes: ["kyc:*"] },
+    );
+    expect("result" in viaGlob && viaGlob.result).toBeTruthy();
+  });
+
+  it("the ceiling holds even with NO authorizer on the host (truly structural)", async () => {
+    const session = { id: "s1", requiredScopes: ["kyc:verified"] } as never;
+    const app = { getSession: (id: string) => (id === "s1" ? session : undefined) } as never;
+    const host = {
+      // no authorizer at all
+      app: () => app,
+      apps: () => [app],
+      wireExtensions: () => ({
+        resolve: () => ({
+          extension: { name: "p", namespace: "x", methods: {} },
+          handler: async () => ({ ok: true }),
+        }),
+        enumerate: () => [],
+      }),
+    } as never;
+    const anon = await dispatchRequest(
+      host,
+      { jsonrpc: "2.0", id: 1, method: "timeline/compact", params: { sessionId: "s1" } },
+      sink,
+      undefined,
+    );
+    if (!("error" in anon) || anon.error === undefined) throw new Error("expected error");
+    expect(anon.error.code).toBe(-32003);
+  });
+
+  it("re-initialize can only narrow further — dropped scopes are unrecoverable", async () => {
+    const { intersectScopes } = await import("@agentick/spec-next");
+    let scopes: readonly string[] = ["timeline:*", "session:send"];
+    scopes = intersectScopes(scopes, ["timeline:compact"]); // narrow
+    scopes = intersectScopes(scopes, ["timeline:*", "session:send"]); // attempt re-widen
+    expect(scopes).toEqual(["timeline:compact"]);
+  });
+});
