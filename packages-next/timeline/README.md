@@ -68,6 +68,83 @@ const same = await session.send({ messages: [{ role: "user", content: "wait — 
   assistant entry). "Show me turn 3" and "cost per message" are log
   queries, not new systems.
 
+## Fine-grained rendering — the render prop
+
+`<Timeline>` accepts a render function over the kept entries — **total
+control of what the model sees, per entry, per block**. The canonical
+adopter pattern (ported from ernesto's `KnowifyTimeline`): current-turn
+and assistant content verbatim, old heavy tool results collapsed to
+*references the model can chase*:
+
+```tsx
+import { useState } from "react";
+import { Timeline } from "@agentick/timeline-next/react";
+import { Message, Text, useOnExecutionStart } from "@agentick/reconciler-react-next";
+
+const edges = (t: string) =>
+  t.length <= 280 ? t : `${t.slice(0, 140)}\n…\n${t.slice(-140)}`;
+
+export function ReferenceTimeline() {
+  // Provenance beats clock math: the framework stamps
+  // metadata.executionId on every entry it produces (ADR 53) — "is this
+  // from the current turn?" is an exact comparison, not a timestamp
+  // heuristic.
+  const [currentExecution, setCurrentExecution] = useState<string>();
+  useOnExecutionStart((e) => setCurrentExecution(e.executionId));
+
+  return (
+    <Timeline maxTokens={100_000} strategy="sliding-window" preserveRoles={["system", "user"]}>
+      {(entries) =>
+        entries.map(({ message }) => {
+          // ICL safety: assistant output ALWAYS verbatim — summarized
+          // assistant turns teach the model to produce summaries.
+          if (message.role === "assistant") return <Message key={message.id} {...message} />;
+          // Current turn: verbatim.
+          if (message.metadata?.executionId === currentExecution)
+            return <Message key={message.id} {...message} />;
+          // OLD entries: map blocks to compact forms. Heavy tool
+          // results render as a file reference — the tool layer wrote
+          // the full payload to disk and stamped { path, bytes } on the
+          // block's metadata; pair with a read_file tool and the model
+          // can look the result up ON DEMAND instead of carrying it in
+          // every context.
+          return (
+            <Message key={message.id} role={message.role}>
+              {message.content.map((block, i) => {
+                if (block.type === "tool_result") {
+                  const ref = (block as { metadata?: { file?: { path: string; bytes: number } } })
+                    .metadata?.file;
+                  return (
+                    <Text key={i}>
+                      {ref
+                        ? `[${block.name}] full result at ${ref.path} (${ref.bytes}B) — read_file if needed`
+                        : `[${block.name}] ${edges(textOf(block))}`}
+                    </Text>
+                  );
+                }
+                if (block.type === "text") return <Text key={i}>{edges(block.text)}</Text>;
+                return <Text key={i}>{`[${block.type}]`}</Text>;
+              })}
+            </Message>
+          );
+        })
+      }
+    </Timeline>
+  );
+}
+```
+
+The pieces composing here: the render prop (`(entries, budget) =>
+ReactNode`) with `filter`/`roles`/`limit` pre-filters and
+`maxTokens`/`strategy`/`preserveRoles`/`headroom`/`onEvict` budget
+compaction; provenance stamps for exact turn detection; and
+block-level `metadata` as the adopter's decoration channel (the
+"extract heavy payloads to disk, render a reference" pattern is a TOOL
+concern — the timeline just renders what the blocks carry). KV-cache
+discipline is yours to keep: never rewrite old rendered entries between
+ticks — evict whole entries (sliding-window does) so the prefix stays
+cache-stable.
+
 ## Two tiers, one truth
 
 | Tier | What it is |
