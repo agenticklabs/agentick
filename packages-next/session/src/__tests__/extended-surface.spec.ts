@@ -450,3 +450,53 @@ describe("steering — send() during a running execution (ADR 53)", () => {
     await tools.close();
   });
 });
+
+describe("send concurrency guards (review findings on ADR 53 join)", () => {
+  it("two un-awaited fresh sends produce ONE execution — the second joins", async () => {
+    const { session } = await mkSession();
+    const [h1, h2] = await Promise.all([
+      session.send({ messages: [{ role: "user", content: "a" }] }),
+      session.send({ messages: [{ role: "user", content: "b" }] }),
+    ]);
+    expect(h2).toBe(h1);
+    await h1.result;
+    // Exactly one turn ran: one boundary record.
+    const boundaries = session.timeline.readPersisted().filter((e) => e.kind === "boundary");
+    expect(boundaries).toHaveLength(1);
+    await session.close();
+  });
+
+  it("a send after the loop settles runs FRESH — never joins a dead handle", async () => {
+    const { session } = await mkSession();
+    const h1 = await session.send({ messages: [{ role: "user", content: "first" }] });
+    await h1.result;
+    const h2 = await session.send({ messages: [{ role: "user", content: "second" }] });
+    expect(h2).not.toBe(h1);
+    await h2.result;
+    const boundaries = session.timeline.readPersisted().filter((e) => e.kind === "boundary");
+    expect(boundaries).toHaveLength(2);
+    // Nothing trails — both inputs were processed by a live execution.
+    expect(session.timeline.trailingInput()).toEqual([]);
+    await session.close();
+  });
+
+  it("provenance + generation usage are stamped on execution-produced entries", async () => {
+    const { session } = await mkSession();
+    const h = await session.send({ messages: [{ role: "user", content: "hi" }] });
+    await h.result;
+    const assistant = session.timeline
+      .readPersisted()
+      .filter((e) => e.kind === "message" && e.message.role === "assistant");
+    expect(assistant).toHaveLength(1);
+    if (assistant[0]!.kind !== "message") throw new Error("unreachable");
+    const meta = assistant[0]!.message.metadata as {
+      executionId?: string;
+      tickId?: string;
+      usage?: { totalTokens: number };
+    };
+    expect(meta.executionId).toMatch(/^exec:/);
+    expect(meta.tickId).toBeTruthy();
+    expect(meta.usage?.totalTokens).toBe(2);
+    await session.close();
+  });
+});

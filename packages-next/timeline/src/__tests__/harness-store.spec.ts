@@ -204,3 +204,16 @@ describe("timeline.history() — cursored read (#187)", () => {
     await expect(h.history()).rejects.toThrow(/does not implement the optional/);
   });
 });
+
+describe("turnBoundaries: false opt-out (ADR 53)", () => {
+  it("endTurn is a no-op — no boundary rows reach the store", async () => {
+    const store = new MemoryTimelineStore();
+    const h = stubTimelineHarness([], { store, turnBoundaries: false });
+    await h.append(messageEntry("m1"));
+    await h.endTurn({ executionId: "e1", outcome: "succeeded" });
+    await h.flush();
+    expect(h.readPersisted().filter((e) => e.kind === "boundary")).toEqual([]);
+    const loaded = await store.load(h.id.replace(/^timeline:/, ""));
+    expect(loaded.filter((e) => e.kind === "boundary")).toEqual([]);
+  });
+});

@@ -247,6 +247,24 @@ export class SessionHarness<P = unknown>
   private _currentExecution: Promise<unknown> | null = null;
   /** In-flight handle — join target for steering sends (ADR 53 §5). */
   private _currentHandle: import("@agentick/spec-next").SessionExecutionHandle | null = null;
+  /**
+   * SYNCHRONOUS send reservation (review finding: two un-awaited fresh
+   * sends both passed the null-guard across its awaits). Set before the
+   * first await in sendBody; a concurrent send awaits it and JOINS.
+   */
+  private _handleReservation: {
+    promise: Promise<import("@agentick/spec-next").SessionExecutionHandle>;
+    resolve: (h: import("@agentick/spec-next").SessionExecutionHandle) => void;
+    reject: (e: unknown) => void;
+  } | null = null;
+  /**
+   * Latched the instant the loop settles (review finding: a steering
+   * send in the terminal window joined a DEAD handle — the message
+   * appended after the boundary with no execution to see it). Once
+   * true, joins are refused and the sender falls through to a fresh
+   * execution after cleanup.
+   */
+  private _loopDone = false;
   /** The running turn's aggregate usage — the boundary record's payload. */
   private _executionUsage: import("@agentick/spec-next").UsageStats | undefined;
   /** Input entries the running execution has observed (ADR 53 live check). */
@@ -765,16 +783,50 @@ export class SessionHarness<P = unknown>
     if (this._closed) {
       throw new SessionClosedError({ attemptedCommand: "send" });
     }
-    await this._mountReady;
-
-    // JOIN semantics (ADR 53 §5, ratified): a send() while an execution
-    // is running is STEERING — append the messages (visible next tick
-    // via the continuation predicate + <Timeline/>) and return the
-    // in-flight handle. The steering path IS the running turn.
-    if (this._currentExecution !== null && this._currentHandle !== null) {
-      for (const m of input.messages ?? []) await this.appendInputMessage(m);
-      return this._currentHandle;
+    // JOIN semantics (ADR 53 §5): a send() while an execution is
+    // running is STEERING — append the messages (visible next tick via
+    // the continuation predicate + <Timeline/>) and return the
+    // in-flight handle. The reservation check is SYNCHRONOUS (before
+    // any await) so concurrent fresh sends cannot both pass it; a
+    // terminal-window send (loop settled, cleanup pending) is NOT
+    // joinable — it waits out the old execution and runs fresh.
+    while (this._handleReservation !== null) {
+      if (!this._loopDone) {
+        const reservation = this._handleReservation;
+        const handle = await reservation.promise;
+        // Re-check: the loop may have settled while we awaited the
+        // reservation — a dead handle must not be joined.
+        if (!this._loopDone) {
+          for (const m of input.messages ?? []) await this.appendInputMessage(m);
+          return handle;
+        }
+      }
+      // Terminal window: wait for the previous execution's cleanup
+      // (.finally clears the reservation), then run fresh.
+      await (this._currentExecution ?? Promise.resolve()).catch(() => {});
+      await Promise.resolve(); // let .finally clear the reservation
+      if (this._handleReservation === null) break;
     }
+
+    // SYNCHRONOUS reservation — no await between here and the guard
+    // above having passed.
+    let reserveResolve!: (h: import("@agentick/spec-next").SessionExecutionHandle) => void;
+    let reserveReject!: (e: unknown) => void;
+    const reservationPromise = new Promise<import("@agentick/spec-next").SessionExecutionHandle>(
+      (res, rej) => {
+        reserveResolve = res;
+        reserveReject = rej;
+      },
+    );
+    reservationPromise.catch(() => {});
+    this._handleReservation = {
+      promise: reservationPromise,
+      resolve: reserveResolve,
+      reject: reserveReject,
+    };
+    this._loopDone = false;
+
+    await this._mountReady;
 
     // Input appends the moment it arrives (ADR 53 §2.1) — no queue, no
     // drain. The first tick's render sees it via <Timeline/>.
@@ -782,6 +834,7 @@ export class SessionHarness<P = unknown>
 
     // ADR 53: the first render will include everything appended so far.
     this._inputEntriesSeen = this.bridges.timeline.inputEntryCount();
+    this._executionUsage = undefined;
 
     const executionId = `exec:${ulid()}`;
     this.store.setCurrentExecutionId(executionId);
@@ -819,6 +872,7 @@ export class SessionHarness<P = unknown>
     }).finally(() => {
       this._currentExecution = null;
       this._currentHandle = null;
+      this._handleReservation = null;
       this.store.setCurrentExecutionId(null);
       this.store.setStatus(durabilityFailed ? "failed" : "idle");
     });
@@ -869,7 +923,17 @@ export class SessionHarness<P = unknown>
 
     this._currentExecution = runPromise;
     this._currentHandle = handle;
-    this._executionUsage = undefined;
+    this._handleReservation?.resolve(handle);
+    // Latch loop completion SYNCHRONOUSLY on settle — joins during the
+    // terminal window (endTurn/flush/resolve) must be refused.
+    runPromise.then(
+      () => {
+        this._loopDone = true;
+      },
+      () => {
+        this._loopDone = true;
+      },
+    );
 
     // Resolve the result promise + emit the final `result` StreamEvent
     // when the loop terminates. Iterator closes after the result event.
@@ -887,7 +951,15 @@ export class SessionHarness<P = unknown>
         await this.bridges.timeline
           .endTurn({
             executionId,
-            outcome: terminal.outcome === "succeeded" ? "succeeded" : "aborted",
+            // The loop RESOLVES provider failures (outcome "succeeded"
+            // with stopReason "executor_failed") — the boundary record
+            // must not launder them (review finding).
+            outcome:
+              terminal.outcome === "succeeded"
+                ? terminal.result?.stopReason === "executor_failed"
+                  ? "failed"
+                  : "succeeded"
+                : "aborted",
             ...omitUndefined({ usage: this._executionUsage }),
           })
           .catch(() => {});
