@@ -17,7 +17,12 @@ import { dispatchRequest, type DispatchSink } from "../server/dispatch.js";
 
 import { fromHandler } from "@agentick/timeline-next/strategies";
 
-import { createGateway, staticAuthorizer, type GatewayHarness } from "@agentick/gateway-next";
+import {
+  claimsAuthorizer,
+  createGateway,
+  staticAuthorizer,
+  type GatewayHarness,
+} from "@agentick/gateway-next";
 
 function makeAppOptions() {
   return {
@@ -219,5 +224,105 @@ describe("dispatch choke point — one gate, both lanes (review findings)", () =
       { principal: "bob" },
     );
     expect("result" in res && res.result).toMatchObject({ ok: true });
+  });
+});
+
+describe("scope refinement — downscoping (#198) + session ceiling (#199)", () => {
+  it("initialize scope request NARROWS claims: excluded scope is Forbidden afterward", async () => {
+    const { BaseConnectionContext } = await import("../server/connection-context.js");
+    const host = (() => {
+      const session = { id: "s1" } as never;
+      const app = { getSession: (id: string) => (id === "s1" ? session : undefined) } as never;
+      return {
+        authorizer: claimsAuthorizer(),
+        app: () => app,
+        apps: () => [app],
+        wireExtensions: () => ({
+          resolve: (m: string) =>
+            m.startsWith("session/") || m.startsWith("timeline/")
+              ? {
+                  extension: { name: "p", namespace: "x", methods: {} },
+                  handler: async () => ({ ok: true }),
+                }
+              : undefined,
+          enumerate: () => [],
+        }),
+      } as never;
+    })();
+    class TestConn extends BaseConnectionContext {
+      sent: unknown[] = [];
+      protected sendFrame(frame: unknown): void {
+        this.sent.push(frame);
+      }
+      protected closeWire(): void {}
+      async drive(frame: unknown) {
+        return (
+          this as unknown as { dispatchInbound: (f: unknown) => Promise<unknown> }
+        ).dispatchInbound(frame);
+      }
+    }
+    // Credential carries BOTH scopes; the client requests only timeline.
+    const conn = new TestConn(host, {
+      principal: "alice",
+      scopes: ["session:send", "timeline:compact"],
+    });
+    await conn.drive({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: "v1",
+        capabilities: {},
+        clientInfo: { name: "t", version: "0" },
+        scopes: ["timeline:compact"],
+      },
+    });
+    const ok = (await conn.drive({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "timeline/compact",
+      params: { sessionId: "s1" },
+    })) as { result?: unknown };
+    expect(ok.result).toBeTruthy();
+    const denied = (await conn.drive({
+      jsonrpc: "2.0",
+      id: 3,
+      method: "session/send",
+      params: { sessionId: "s1" },
+    })) as { error?: { code: number } };
+    expect(denied.error?.code).toBe(-32003); // claim held by credential, EXCLUDED by request
+  });
+
+  it("session requiredScopes is a structural ceiling no grant can waive", async () => {
+    const session = { id: "s1", requiredScopes: ["kyc:verified"] } as never;
+    const app = { getSession: (id: string) => (id === "s1" ? session : undefined) } as never;
+    const host = {
+      authorizer: staticAuthorizer({ grants: { alice: ["*"] } }), // star grant!
+      app: () => app,
+      apps: () => [app],
+      wireExtensions: () => ({
+        resolve: () => ({
+          extension: { name: "p", namespace: "x", methods: {} },
+          handler: async () => ({ ok: true }),
+        }),
+        enumerate: () => [],
+      }),
+    } as never;
+    const denied = await dispatchRequest(
+      host,
+      { jsonrpc: "2.0", id: 1, method: "timeline/compact", params: { sessionId: "s1" } },
+      sink,
+      { principal: "alice", scopes: ["something:else"] },
+    );
+    if (!("error" in denied) || denied.error === undefined) throw new Error("expected error");
+    expect(denied.error.code).toBe(-32003);
+
+    const allowed = await dispatchRequest(
+      host,
+      { jsonrpc: "2.0", id: 2, method: "timeline/compact", params: { sessionId: "s1" } },
+      sink,
+      { principal: "alice", scopes: ["kyc:verified"] },
+    );
+    expect("result" in allowed && allowed.result).toBeTruthy();
   });
 });

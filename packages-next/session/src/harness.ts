@@ -134,6 +134,9 @@ export interface SessionHarnessOptions<P = unknown> {
    * SessionDefaults.
    */
   readonly timeline?: Pick<TimelineHarnessOptions, "store" | "writePolicy" | "compact">;
+  /** Scope ceiling (#199) — construction-bound, checked at the wire
+   *  dispatch gate. See SessionHarnessProtocol.requiredScopes. */
+  readonly requiredScopes?: readonly string[];
   /**
    * Adopter-defined metadata bag carried on the session and exposed
    * to substrate factories via `parent.metadata`. Framework defines
@@ -244,6 +247,8 @@ export class SessionHarness<P = unknown>
 
   private _closed = false;
   private _mountReady: Promise<void>;
+  /** #199 — structural scope ceiling, surfaced for the dispatch gate. */
+  readonly requiredScopes?: readonly string[] | undefined;
   private _currentExecution: Promise<unknown> | null = null;
   /** In-flight handle — join target for steering sends (ADR 53 §5). */
   private _currentHandle: import("@agentick/spec-next").SessionExecutionHandle | null = null;
@@ -350,6 +355,7 @@ export class SessionHarness<P = unknown>
     this.spawnContext = options.spawnContext;
     this.parentSessionId = options.parentSessionId;
     this.defaultMaxTicks = options.defaultMaxTicks ?? 8;
+    this.requiredScopes = options.requiredScopes;
     this.defaultStreaming = options.defaultStreaming;
     this.mountId = `mount:${options.sessionId}`;
 

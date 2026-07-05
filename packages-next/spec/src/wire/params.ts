@@ -303,6 +303,14 @@ export interface InitializeParams extends WireRequestParams {
   readonly protocolVersion: "v1";
   readonly capabilities: ClientHandshakeCapabilities;
   readonly clientInfo: { readonly name: string; readonly version: string };
+  /**
+   * Scopes this client intends to use (#198, least privilege). The
+   * connection's effective identity scopes become the INTERSECTION of
+   * the credential's claims and this request — a client cannot widen
+   * its grants, only narrow its own blast radius. Omitted = the
+   * credential's claims apply unnarrowed.
+   */
+  readonly scopes?: readonly string[];
 }
 
 export interface InitializeResult {

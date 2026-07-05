@@ -233,6 +233,17 @@ async function authorizeDispatch(
   const params = (rawParams ?? {}) as Record<string, unknown>;
   const sessionId = typeof params.sessionId === "string" ? params.sessionId : undefined;
   const targetSession = sessionId ? findSessionOrUndef(host, sessionId) : undefined;
+  // #199 — the target session's scope CEILING is structural (resource-
+  // declared, like its principal) and checked before policy: the
+  // caller's credential claims must cover every required scope. No
+  // authorizer can waive it.
+  const requiredScopes = targetSession?.requiredScopes;
+  if (requiredScopes !== undefined && requiredScopes.length > 0) {
+    const held = new Set(identity?.scopes ?? []);
+    if (!requiredScopes.every((sc) => held.has(sc))) {
+      throw WireRpcError.forbidden(methodScope(method));
+    }
+  }
   const decision = await authorizer.authorize({
     ...(identity?.principal !== undefined ? { principal: identity.principal } : {}),
     ...(identity?.scopes !== undefined ? { tokenScopes: identity.scopes } : {}),

@@ -47,6 +47,8 @@ export interface CreateSessionInput<P = unknown> {
    * open-or-rehydrate, ADR 49) — createSession is create AND resume.
    */
   readonly sessionId?: string;
+  /** Scope ceiling for the session (#199) — construction-bound. */
+  readonly requiredScopes?: readonly string[];
   /**
    * Adopter-defined metadata bag carried on the session and surfaced
    * to session-level substrate factories via `parent.metadata`.

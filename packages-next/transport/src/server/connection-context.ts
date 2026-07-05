@@ -39,8 +39,10 @@ export abstract class BaseConnectionContext {
      * Ingress identity for THIS connection — established once by the
      * transport (AuthSource at handshake/request time, ADR 34) and
      * carried into every dispatch. Undefined = anonymous (local pole).
+     * Mutated exactly once: the initialize frame's scope request
+     * DOWNSCOPES it (#198) — effective scopes = claims ∩ requested.
      */
-    protected readonly identity?: IngressIdentity,
+    protected identity?: IngressIdentity,
   ) {}
 
   /**
@@ -57,6 +59,20 @@ export abstract class BaseConnectionContext {
       return null;
     }
     if ("id" in frame && "method" in frame) {
+      // #198 — connect-time scope request. Intersection only: a client
+      // can narrow its credential's claims, never widen them. Applied
+      // before dispatch so initialize itself and everything after run
+      // under the effective scopes.
+      if (frame.method === "initialize" && this.identity?.scopes !== undefined) {
+        const requested = (frame as { params?: { scopes?: readonly string[] } }).params?.scopes;
+        if (requested !== undefined) {
+          const requestedSet = new Set(requested);
+          this.identity = {
+            ...this.identity,
+            scopes: this.identity.scopes.filter((sc) => requestedSet.has(sc)),
+          };
+        }
+      }
       return dispatchRequest(
         this.gateway,
         frame as JsonRpcRequest,
