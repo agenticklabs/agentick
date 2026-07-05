@@ -440,8 +440,21 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
 
         acc.lastStopReason = result.stopReason;
 
-        // 5. Continuation decision (default policy).
-        const wantsContinue = result.stopReason === "tool_use" && tickToolResults.length > 0;
+        // 5. Continuation decision. Default policy (tool_use), extended
+        // by the session's tick-end forward decision (ADR 53): new
+        // input arrived mid-execution → keep ticking (steering); an
+        // explicit stop wins over everything.
+        const forward = await input.notifyTickEnd?.({
+          sessionId: input.sessionId,
+          executionId,
+          tickId,
+          outcome: "succeeded",
+        });
+        const wantsContinue =
+          forward?.kind === "stop"
+            ? false
+            : (result.stopReason === "tool_use" && tickToolResults.length > 0) ||
+              forward?.kind === "continue";
         const tickStopReason: string = !wantsContinue
           ? result.stopReason
           : acc.ticks >= input.maxTicks

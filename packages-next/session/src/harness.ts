@@ -59,7 +59,6 @@ import {
   DEFAULT_JOURNALING_POLICY,
   ExecutionFailed,
   HandlerError,
-  SessionBusyError,
   SessionClosedError,
   SPEC_VERSION,
   TimelineWriteFailed,
@@ -67,6 +66,7 @@ import {
 import { mergeLayered, omitUndefined } from "@agentick/utils-next";
 import { buildSessionElicit } from "@agentick/elicitation-next";
 import { withScope } from "@agentick/tool-executor-next";
+import { mergeUsageStats } from "@agentick/model-next";
 import type { KnobsHandle } from "@agentick/knobs-next";
 import type { StateHandle } from "@agentick/state-next";
 import type { TimelineHandle, TimelineHarnessOptions } from "@agentick/timeline-next";
@@ -245,6 +245,30 @@ export class SessionHarness<P = unknown>
   private _closed = false;
   private _mountReady: Promise<void>;
   private _currentExecution: Promise<unknown> | null = null;
+  /** In-flight handle — join target for steering sends (ADR 53 §5). */
+  private _currentHandle: import("@agentick/spec-next").SessionExecutionHandle | null = null;
+  /**
+   * SYNCHRONOUS send reservation (review finding: two un-awaited fresh
+   * sends both passed the null-guard across its awaits). Set before the
+   * first await in sendBody; a concurrent send awaits it and JOINS.
+   */
+  private _handleReservation: {
+    promise: Promise<import("@agentick/spec-next").SessionExecutionHandle>;
+    resolve: (h: import("@agentick/spec-next").SessionExecutionHandle) => void;
+    reject: (e: unknown) => void;
+  } | null = null;
+  /**
+   * Latched the instant the loop settles (review finding: a steering
+   * send in the terminal window joined a DEAD handle — the message
+   * appended after the boundary with no execution to see it). Once
+   * true, joins are refused and the sender falls through to a fresh
+   * execution after cleanup.
+   */
+  private _loopDone = false;
+  /** The running turn's aggregate usage — the boundary record's payload. */
+  private _executionUsage: import("@agentick/spec-next").UsageStats | undefined;
+  /** Input entries the running execution has observed (ADR 53 live check). */
+  private _inputEntriesSeen = 0;
 
   /**
    * Construct a SessionHarness.
@@ -526,10 +550,16 @@ export class SessionHarness<P = unknown>
   }
 
   async notifyLifecycle(_input: NotifyTickEndInput): Promise<TickEndForwardDecision> {
-    // Phase 4e default: forward the tick-end to the reconciler so
-    // any `useOnTickEnd` hooks fire, but don't override the loop's
-    // continuation decision yet. Verdict-merge with in-tree hooks
-    // arrives in a follow-on.
+    // ADR 53 continuation predicate — LIVE, in-memory, load-bearing
+    // nothing durable: input entries appended since this execution's
+    // last-observed count mean the next render has new user input →
+    // continue the loop (steering). Crashes never auto-resume, so no
+    // durability is needed here.
+    const count = this.bridges.timeline.inputEntryCount();
+    if (count > this._inputEntriesSeen) {
+      this._inputEntriesSeen = count;
+      return { kind: "continue" };
+    }
     return undefined;
   }
 
@@ -753,26 +783,58 @@ export class SessionHarness<P = unknown>
     if (this._closed) {
       throw new SessionClosedError({ attemptedCommand: "send" });
     }
-    if (this._currentExecution !== null) {
-      throw new SessionBusyError({
-        reason: "another execution is in flight (single-execution semantics in 4e MVP)",
-      });
+    // JOIN semantics (ADR 53 §5): a send() while an execution is
+    // running is STEERING — append the messages (visible next tick via
+    // the continuation predicate + <Timeline/>) and return the
+    // in-flight handle. The reservation check is SYNCHRONOUS (before
+    // any await) so concurrent fresh sends cannot both pass it; a
+    // terminal-window send (loop settled, cleanup pending) is NOT
+    // joinable — it waits out the old execution and runs fresh.
+    while (this._handleReservation !== null) {
+      if (!this._loopDone) {
+        const reservation = this._handleReservation;
+        const handle = await reservation.promise;
+        // Re-check: the loop may have settled while we awaited the
+        // reservation — a dead handle must not be joined.
+        if (!this._loopDone) {
+          for (const m of input.messages ?? []) await this.appendInputMessage(m);
+          return handle;
+        }
+      }
+      // Terminal window: wait for the previous execution's cleanup
+      // (.finally clears the reservation), then run fresh.
+      await (this._currentExecution ?? Promise.resolve()).catch(() => {});
+      await Promise.resolve(); // let .finally clear the reservation
+      if (this._handleReservation === null) break;
     }
+
+    // SYNCHRONOUS reservation — no await between here and the guard
+    // above having passed.
+    let reserveResolve!: (h: import("@agentick/spec-next").SessionExecutionHandle) => void;
+    let reserveReject!: (e: unknown) => void;
+    const reservationPromise = new Promise<import("@agentick/spec-next").SessionExecutionHandle>(
+      (res, rej) => {
+        reserveResolve = res;
+        reserveReject = rej;
+      },
+    );
+    reservationPromise.catch(() => {});
+    this._handleReservation = {
+      promise: reservationPromise,
+      resolve: reserveResolve,
+      reject: reserveReject,
+    };
+    this._loopDone = false;
 
     await this._mountReady;
 
-    // Queue new input messages onto pending. The model sees them on
-    // the next render via the Timeline component (which reads pending
-    // alongside the projection); the durable timeline catches up below
-    // when we drain.
-    for (const m of input.messages ?? []) await this.queueInputMessage(m);
+    // Input appends the moment it arrives (ADR 53 §2.1) — no queue, no
+    // drain. The first tick's render sees it via <Timeline/>.
+    for (const m of input.messages ?? []) await this.appendInputMessage(m);
 
-    // Drain all pending messages into the timeline before this execution
-    // starts so the loop's first tick sees them in the durable timeline.
-    // Messages queued mid-execution stay in pending until the NEXT
-    // sendBody; the Timeline component still surfaces them to the model
-    // via render. (Per-tick drain is a follow-up — see ADR 26 Step 6+.)
-    await this.bridges.timeline.drain();
+    // ADR 53: the first render will include everything appended so far.
+    this._inputEntriesSeen = this.bridges.timeline.inputEntryCount();
+    this._executionUsage = undefined;
 
     const executionId = `exec:${ulid()}`;
     this.store.setCurrentExecutionId(executionId);
@@ -809,6 +871,8 @@ export class SessionHarness<P = unknown>
       resultDeferred.reject = reject;
     }).finally(() => {
       this._currentExecution = null;
+      this._currentHandle = null;
+      this._handleReservation = null;
       this.store.setCurrentExecutionId(null);
       this.store.setStatus(durabilityFailed ? "failed" : "idle");
     });
@@ -849,6 +913,7 @@ export class SessionHarness<P = unknown>
             applyToolResults: (i) => this.applyToolResults(i).then(() => undefined),
             appendEntry: (i) => this.appendEntry(i).then(() => undefined),
           },
+          notifyTickEnd: (i) => this.notifyLifecycle(i),
           maxTicks: input.maxTicks ?? this.defaultMaxTicks,
           stream: streamForCall,
           onEvent,
@@ -857,6 +922,18 @@ export class SessionHarness<P = unknown>
     );
 
     this._currentExecution = runPromise;
+    this._currentHandle = handle;
+    this._handleReservation?.resolve(handle);
+    // Latch loop completion SYNCHRONOUSLY on settle — joins during the
+    // terminal window (endTurn/flush/resolve) must be refused.
+    runPromise.then(
+      () => {
+        this._loopDone = true;
+      },
+      () => {
+        this._loopDone = true;
+      },
+    );
 
     // Resolve the result promise + emit the final `result` StreamEvent
     // when the loop terminates. Iterator closes after the result event.
@@ -868,6 +945,24 @@ export class SessionHarness<P = unknown>
         // divergence: fail the send with the typed TimelineWriteFailed
         // (catchTag-able) and land the session on "failed" status —
         // it must not keep running against a log its store doesn't have.
+        // ADR 53: emit the turn-boundary RECORD (segmentation +
+        // turn-aggregate usage; load-bearing nowhere) before the flush
+        // barrier so it rides the same durability guarantee.
+        await this.bridges.timeline
+          .endTurn({
+            executionId,
+            // The loop RESOLVES provider failures (outcome "succeeded"
+            // with stopReason "executor_failed") — the boundary record
+            // must not launder them (review finding).
+            outcome:
+              terminal.outcome === "succeeded"
+                ? terminal.result?.stopReason === "executor_failed"
+                  ? "failed"
+                  : "succeeded"
+                : "aborted",
+            ...omitUndefined({ usage: this._executionUsage }),
+          })
+          .catch(() => {});
         try {
           await this.bridges.timeline.flush();
         } catch (err) {
@@ -905,6 +1000,13 @@ export class SessionHarness<P = unknown>
         // still runs so a completed-but-unflushed prefix lands in the
         // store (best-effort — a flush failure here latches "failed"
         // status but does not mask the execution error).
+        await this.bridges.timeline
+          .endTurn({
+            executionId,
+            outcome: "failed",
+            ...omitUndefined({ usage: this._executionUsage }),
+          })
+          .catch(() => {});
         try {
           await this.bridges.timeline.flush();
         } catch {
@@ -1007,9 +1109,20 @@ export class SessionHarness<P = unknown>
       const id = await this.appendMessageEntry({
         role: "assistant",
         content: input.result.output,
+        // ADR 53 §2.2: one tick = one generation = one assistant entry;
+        // stamp provenance + the GENERATION's usage on the record.
+        metadata: {
+          executionId: input.executionId,
+          tickId: input.tickId,
+          ...omitUndefined({ usage: input.result.usage }),
+        },
       });
       ids.push(id);
     }
+    this._executionUsage =
+      this._executionUsage && input.result.usage
+        ? mergeUsageStats(this._executionUsage, input.result.usage)
+        : (input.result.usage ?? this._executionUsage);
     this.store.addUsage(input.result.usage);
     this.store.bumpTick();
     return { appendedEntryIds: ids };
@@ -1030,6 +1143,7 @@ export class SessionHarness<P = unknown>
         content: [block],
         toolCallId: tr.toolCallId,
         name: tr.toolName,
+        metadata: { executionId: input.executionId, tickId: input.tickId },
       });
       ids.push(id);
     }
@@ -1045,21 +1159,18 @@ export class SessionHarness<P = unknown>
   }
 
   /**
-   * Route a user-input message into the pending queue. The harness's
-   * Timeline component reads `readPending()` and renders pending
-   * entries alongside the projection so the model sees them on the
-   * next render. The actual append (durable timeline write) happens
-   * at the start of the next `sendBody` via `bridges.timeline.drain()`.
+   * Append a user-input message directly to the timeline (ADR 53 §2.1)
+   * — the user's words are a fact the moment they arrive. Input carries
+   * no execution provenance (it wasn't produced BY an execution).
    */
-  private async queueInputMessage(m: SendMessageInput): Promise<void> {
+  private async appendInputMessage(m: SendMessageInput): Promise<void> {
     const content =
       typeof m.content === "string" ? [{ type: "text" as const, text: m.content }] : m.content;
-    await this.bridges.timeline.queue({
+    await this.appendMessageEntry({
       role: m.role,
       content,
       ...omitUndefined({ metadata: m.metadata }),
     });
-    // Single-input call → result.ids has length 1; caller doesn't need it.
   }
 
   /**

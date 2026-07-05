@@ -98,16 +98,35 @@ export interface SessionMessage {
   readonly ts: number;
   readonly toolCallId?: string;
   readonly name?: string;
-  readonly metadata?: Readonly<Record<string, unknown>>;
+  readonly metadata?: SessionMessageMetadata;
 }
 
 /**
- * Timeline entry — a persistence-shaped wrapper around a message.
- *
- * `[V1-INHERITED]` of `packages/shared/src/timeline.ts`. Future kinds
- * (state-change records, subscription receipts) extend the union.
+ * Message metadata — an open bag with blessed provenance keys (ADR 53).
+ * The framework stamps `executionId`/`tickId` on entries it creates
+ * during an execution, and `usage` on every execution-produced
+ * ASSISTANT entry (one tick = one generation = one assistant entry).
+ * Imported/seeded entries may omit all three. Adopter keys ride the
+ * index signature as before.
  */
-export interface TimelineEntry {
+export interface SessionMessageMetadata {
+  readonly executionId?: string;
+  readonly tickId?: string;
+  /** The generation's usage — execution-produced assistant entries. */
+  readonly usage?: import("../data/execution-result.js").UsageStats;
+  readonly [key: string]: unknown;
+}
+
+/**
+ * Timeline entries — persistence-shaped records in the conversation log.
+ *
+ * `[V1-INHERITED]` message shape from `packages/shared/src/timeline.ts`;
+ * the union gained its first non-message kind with ADR 53's turn
+ * boundary.
+ */
+export type TimelineEntry = MessageTimelineEntry | TurnBoundaryEntry;
+
+export interface MessageTimelineEntry {
   readonly kind: "message";
   readonly message: SessionMessage;
   /**
@@ -118,6 +137,30 @@ export interface TimelineEntry {
    *   Default: "model".
    */
   readonly visibility?: "model" | "observer" | "log";
+  readonly tags?: readonly string[];
+}
+
+/**
+ * Turn boundary (ADR 53) — a CONVERSATION-domain fact: "a turn ended
+ * here." The framework's execution is the mechanism that produced the
+ * turn, attached as provenance; ticks never become entries. The
+ * committed offset is derived by fold: input entries after the last
+ * `outcome: "succeeded"` boundary are UNCONSUMED — they drive the
+ * loop's continuation predicate and are retried after failures.
+ * Always `visibility: "log"` semantics: never rendered to the model.
+ */
+export interface TurnBoundaryEntry {
+  readonly kind: "boundary";
+  readonly boundary: {
+    readonly executionId: string;
+    readonly outcome: "succeeded" | "failed" | "aborted";
+    /** The TURN's aggregate usage — may exceed the entry-sum when a
+     *  tick billed tokens but appended no assistant entry. */
+    readonly usage?: import("../data/execution-result.js").UsageStats;
+  };
+  /** ISO milliseconds when the turn ended. */
+  readonly ts: number;
+  readonly visibility?: "log";
   readonly tags?: readonly string[];
 }
 

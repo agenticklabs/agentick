@@ -13,6 +13,7 @@ import React from "react";
 import { z } from "zod";
 import { System, createTool } from "@agentick/reconciler-react-next";
 import { Knobs, useKnob } from "@agentick/knobs-next/react";
+import { Timeline } from "@agentick/timeline-next/react";
 
 // ─────────────────────────────────────────────────────────────────────
 // Tool — inline handler, schema-validated input, returns content blocks.
@@ -66,6 +67,11 @@ export function Agent() {
 
       {/* Auto-renders the set_knob tool + the current knob values as a Section the model sees. */}
       <Knobs />
+
+      {/* THE CONVERSATION. Nothing injects history automatically — the
+          timeline reaches the model only because this component renders
+          it into the tree (projection → <Message> nodes → context.entries). */}
+      <Timeline />
     </>
   );
 }

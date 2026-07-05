@@ -113,11 +113,10 @@ describe("defineSession — defaults", () => {
       inbox: new LocalInbox(),
     });
     expect(session.timeline.read().entries).toEqual([]);
-    expect(session.timeline.readPending()).toEqual([]);
+    expect(session.timeline.trailingInput()).toEqual([]);
+    expect(session.timeline.inputEntryCount()).toBe(0);
     await session.timeline.append();
-    const { ids } = await session.timeline.queue({ role: "user", content: [] });
-    expect(ids).toEqual([]);
-    expect(session.knobs.list()).toEqual([]);
-    expect(session.state.list()).toEqual([]);
+    await session.timeline.endTurn({ executionId: "e", outcome: "succeeded" });
+    await session.close();
   });
 });

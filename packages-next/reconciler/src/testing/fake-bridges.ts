@@ -9,7 +9,7 @@
  * **What these are NOT:** they do not exercise the real harness
  * behavior (no journal envelopes, no inbox routing, no operation
  * lifecycle). Tests of "does the real harness work correctly with the
- * reconciler" — knobs validation pipeline, timeline pending/drain,
+ * reconciler" — knobs validation pipeline, timeline reads,
  * state K/V semantics — live in their respective harness packages
  * (`@agentick/<harness>/__tests__/integration-with-reconciler.spec.tsx`)
  * and use the real stub factories from `@agentick/<harness>/testing`.
@@ -30,15 +30,12 @@ import type {
   KnobsRegisterInput,
   KnobsSetInput,
   LoopBridge,
-  PendingEntry,
   SessionBridge,
   StateDeleteInput,
   StateHarnessProtocol,
   StateSetInput,
-  TimelineDrainResult,
   TimelineEntry,
   TimelineHarnessProtocol,
-  TimelineQueueInput,
   TimelineReplaceProjectionInput,
   TimelineSnapshot,
   TimelineHarnessSnapshot,
@@ -60,7 +57,6 @@ export function fakeTimelineHarness(
 ): TimelineHarnessProtocol {
   const persisted: TimelineEntry[] = [...initial];
   let projection: TimelineEntry[] = [...initial];
-  let pending: PendingEntry[] = [];
   let version = 0;
   const listeners = createNotifier();
   const notify = () => listeners.notify();
@@ -77,7 +73,25 @@ export function fakeTimelineHarness(
     ready: Promise.resolve(),
     read: () => snapshot,
     subscribe: (l) => listeners.subscribe(l),
-    readPending: () => pending,
+    trailingInput: () => {
+      let lastAssistant = -1;
+      for (let i = persisted.length - 1; i >= 0; i--) {
+        const e = persisted[i]!;
+        if (e.kind === "message" && e.message.role === "assistant") {
+          lastAssistant = i;
+          break;
+        }
+      }
+      return persisted
+        .slice(lastAssistant + 1)
+        .filter(
+          (e): e is Extract<TimelineEntry, { kind: "message" }> =>
+            e.kind === "message" && e.message.role === "user",
+        );
+    },
+    inputEntryCount: () =>
+      persisted.filter((e) => e.kind === "message" && e.message.role === "user").length,
+    endTurn: async () => {},
     readPersisted: () => persisted,
     append: async (...entries: TimelineEntry[]) => {
       if (entries.length === 0) return;
@@ -91,46 +105,6 @@ export function fakeTimelineHarness(
     // No durable store behind the fake — memory is the only tier, so the
     // flush barrier is already satisfied.
     flush: async () => {},
-    queue: async (...inputs: TimelineQueueInput[]) => {
-      if (inputs.length === 0) return { ids: [] };
-      const ts = Date.now();
-      const queued = inputs.map(({ role, content, metadata }) => ({
-        id: `m_pending_${ts}_${Math.random()}`,
-        role,
-        content,
-        ts,
-        ...(metadata !== undefined ? { metadata } : {}),
-      }));
-      pending = [...pending, ...queued];
-      notify();
-      return { ids: queued.map((q) => q.id) };
-    },
-    drain: async (): Promise<TimelineDrainResult> => {
-      const draining = pending;
-      pending = [];
-      notify();
-      const drained: TimelineEntry[] = [];
-      for (const p of draining) {
-        const entry: TimelineEntry = {
-          kind: "message",
-          message: {
-            id: p.id,
-            role: p.role,
-            content: p.content,
-            ts: p.ts,
-            ...omitUndefined({ metadata: p.metadata }),
-          },
-        };
-        persisted.push(entry);
-        projection.push(entry);
-        drained.push(entry);
-      }
-      if (drained.length > 0) {
-        refresh();
-        notify();
-      }
-      return { entries: drained };
-    },
     compact: async (strategy: CompactStrategy): Promise<CompactResult> => {
       const source = strategy.source ?? "persisted";
       const entries = source === "persisted" ? persisted : projection;

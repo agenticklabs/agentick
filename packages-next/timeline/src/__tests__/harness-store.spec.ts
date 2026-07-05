@@ -68,16 +68,6 @@ describe("TimelineHarness — write-behind (default)", () => {
     expect(ids(await store.load(h.id))).toEqual(["a"]);
   });
 
-  it("persists drained pending entries too (drain routes through the same append path)", async () => {
-    const store = new MemoryTimelineStore();
-    const h = stubTimelineHarness([], { store });
-    await h.queue({ role: "user", content: [{ type: "text", text: "hi" }] });
-    await h.drain();
-    await h.flush();
-    const loaded = await store.load(h.id);
-    expect(loaded).toHaveLength(1);
-  });
-
   it("reports the store's backend identifier", () => {
     const h = stubTimelineHarness([], { store: new MemoryTimelineStore() });
     expect(h.backend).toBe("memory");
@@ -212,5 +202,18 @@ describe("timeline.history() — cursored read (#187)", () => {
     const h = stubTimelineHarness([], { store: bare });
     await h.append(messageEntry("a"));
     await expect(h.history()).rejects.toThrow(/does not implement the optional/);
+  });
+});
+
+describe("turnBoundaries: false opt-out (ADR 53)", () => {
+  it("endTurn is a no-op — no boundary rows reach the store", async () => {
+    const store = new MemoryTimelineStore();
+    const h = stubTimelineHarness([], { store, turnBoundaries: false });
+    await h.append(messageEntry("m1"));
+    await h.endTurn({ executionId: "e1", outcome: "succeeded" });
+    await h.flush();
+    expect(h.readPersisted().filter((e) => e.kind === "boundary")).toEqual([]);
+    const loaded = await store.load(h.id.replace(/^timeline:/, ""));
+    expect(loaded.filter((e) => e.kind === "boundary")).toEqual([]);
   });
 });

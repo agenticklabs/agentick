@@ -23,6 +23,7 @@ import React from "react";
 import { z } from "zod";
 import { System, createTool } from "@agentick/reconciler-react-next";
 import { Knobs, useKnob } from "@agentick/knobs-next/react";
+import { Timeline } from "@agentick/timeline-next/react";
 import type { ContentBlock } from "@agentick/spec-next";
 
 // ─────────────────────────────────────────────────────────────────────
@@ -172,6 +173,9 @@ export function Agent() {
 
       {/* Auto-renders the set_knob tool + the current knob values as a Section the model sees. */}
       <Knobs />
+
+      {/* THE CONVERSATION — timeline reaches the model only via this render. */}
+      <Timeline />
     </>
   );
 }

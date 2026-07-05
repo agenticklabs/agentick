@@ -133,6 +133,11 @@ export type ReconcileDiagnosticSeverity = "info" | "warning" | "error";
  * - `await-timeout`             the render-until-stable loop's `awaitTimeoutMs`
  *                               budget elapsed before an iteration's `useData`
  *                               fetchers resolved
+ * - `timeline-not-rendered`     the timeline projection carries message
+ *                               entries but no component rendered any
+ *                               message into the context — the
+ *                               conversation is being silently dropped
+ *                               (likely a missing `<Timeline/>`)
  */
 export type ReconcileDiagnosticCode =
   | "max-iterations"
@@ -145,6 +150,7 @@ export type ReconcileDiagnosticCode =
   | "snapshot-incompatible"
   | "unstable-tree"
   | "error-boundary-active"
+  | "timeline-not-rendered"
   | (string & {});
 
 /**

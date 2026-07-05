@@ -31,7 +31,7 @@
  */
 
 import type { ContentBlock } from "../data/content-blocks.js";
-import type { SessionMessageRole, TimelineEntry } from "./session-harness.js";
+import type { MessageTimelineEntry, TimelineEntry } from "./session-harness.js";
 import type { Unsubscribe } from "./inbox.js";
 import type { SnapshotCapable } from "./hook-bridges.js";
 
@@ -63,51 +63,15 @@ export interface TimelineReplaceProjectionInput {
   readonly entries: readonly TimelineEntry[];
 }
 
-// ─── queue() / drain() — the pending layer ───
+// ─── Turn boundaries (ADR 53) ───
 
-/**
- * Input to {@link TimelineHarnessProtocol.queue} — a message-shaped
- * entry to be enqueued for execution at the next drain. The harness
- * assigns `id` + `ts`; callers supply role + content + optional
- * metadata.
- *
- * Pending messages are NOT in the timeline yet — they have not been
- * appended. They appear in `readPending()` and (by convention) in the
- * UI via the timeline component until the next drain, when they are
- * appended to log + projection.
- */
-export interface TimelineQueueInput {
-  readonly role: SessionMessageRole;
-  readonly content: readonly ContentBlock[];
-  readonly metadata?: Readonly<Record<string, unknown>>;
-}
-
-export interface TimelineQueueResult {
-  /**
-   * Ids the harness assigned to the queued messages, in input order.
-   * Each id lands on the resulting `TimelineEntry.message.id` at drain
-   * time. Stable from queue through drain.
-   */
-  readonly ids: readonly string[];
-}
-
-/**
- * A queued message awaiting drain. Distinct from `TimelineEntry`
- * because pending entries haven't been appended yet — they have no
- * timeline-level identity until drain. v1 called the equivalent shape
- * `ExecutionMessage`.
- */
-export interface PendingEntry {
-  readonly id: string;
-  readonly role: SessionMessageRole;
-  readonly content: readonly ContentBlock[];
-  readonly ts: number;
-  readonly metadata?: Readonly<Record<string, unknown>>;
-}
-
-export interface TimelineDrainResult {
-  /** The entries that were appended as a result of the drain, in order. */
-  readonly entries: readonly TimelineEntry[];
+/** Input to {@link TimelineHarnessProtocol.endTurn} — emit the
+ *  turn-boundary RECORD (segmentation + turn-aggregate usage).
+ *  Load-bearing NOWHERE (ADR 53 §2.3b). */
+export interface TimelineEndTurnInput {
+  readonly executionId: string;
+  readonly outcome: "succeeded" | "failed" | "aborted";
+  readonly usage?: import("../data/execution-result.js").UsageStats;
 }
 
 // ─── compact() ───
@@ -242,17 +206,22 @@ export interface TimelineHarnessProtocol extends SnapshotCapable<TimelineHarness
    */
   subscribe(listener: () => void): Unsubscribe;
 
-  // ─────────── Sync surface (pending — queued messages awaiting drain) ───────────
+  // ─────────── Derived reads + turn records (ADR 53) ───────────
 
   /**
-   * Current pending entries — messages that have been queued but not
-   * yet drained into the log + projection. Empty in the steady state.
-   *
-   * The Timeline UI component renders pending entries alongside the
-   * projection so consumers see queued messages immediately even
-   * before the next tick executes.
+   * Input entries after the LAST assistant entry — input trailing the last assistant entry (the
+   * fold. UI styling and resume prompts read this; nothing load-bearing
+   * does (consumption is non-destructive: every tick re-renders the
+   * whole log).
    */
-  readPending(): readonly PendingEntry[];
+  trailingInput(): readonly MessageTimelineEntry[];
+
+  /** Count of input (user-role message) entries in the persisted log —
+   *  the session's live continuation check compares this across ticks. */
+  inputEntryCount(): number;
+
+  /** Emit the turn-boundary record. No-op when disabled at construction. */
+  endTurn(input: TimelineEndTurnInput): Promise<void>;
 
   // ─────────── Sync surface (log — for tooling + custom compactors) ───────────
 
@@ -289,36 +258,6 @@ export interface TimelineHarnessProtocol extends SnapshotCapable<TimelineHarness
    * completed execution — the resume guarantee that replaces snapshots.
    */
   flush(): Promise<void>;
-
-  /**
-   * Push one or more pending messages onto the queue. NOT appended yet
-   * — drain() is what moves them to the log + projection. Returns the
-   * ids the harness assigned (in input order); the same ids land on
-   * the corresponding `TimelineEntry.message.id` at drain time.
-   *
-   * Used by `session.send({ messages })` to express "user input
-   * arriving" — messages become visible to UI subscribers immediately
-   * (via `readPending()` + `subscribe()`) but don't enter the timeline
-   * until the next tick's drain. Calling with zero args is a no-op
-   * (returns `{ ids: [] }` without emitting an envelope).
-   */
-  queue(...inputs: TimelineQueueInput[]): Promise<TimelineQueueResult>;
-
-  /**
-   * Drain pending entries into the log + projection. Each pending
-   * entry becomes a `TimelineEntry { kind: "message", message: {...} }`
-   * with the same id assigned at queue time. After drain, `readPending()`
-   * is empty.
-   *
-   * Emits a single `timeline:command:drain` envelope at the boundary;
-   * internally each entry is appended through the normal append path,
-   * so per-entry append envelopes appear in the journal (parent-linked
-   * via FiberRef to the drain operation).
-   *
-   * Typically called at tick start. Idempotent on empty pending —
-   * returns an empty result without emitting work.
-   */
-  drain(): Promise<TimelineDrainResult>;
 
   /**
    * Run a strategy that produces a new projection. The log is

@@ -24,8 +24,7 @@ bare verb resolved by construction-bound config).
 | --- | --- | --- | --- |
 | `timeline:compact` | signal + advisory (`instructions?`) | **yes** | The flagship signal form; safe by construction (strategy is resident). |
 | `timeline:append` | data | no | Bypasses the loop + pending queue; admin/import tooling can earn it later with a dedicated scope. |
-| `timeline:queue` | data | no | Client input belongs on the `session/send` porcelain (which drains); a second input path invites ordering confusion. |
-| `timeline:drain` | signal | no | Execution-lifecycle internal; the loop owns drain timing. |
+| ~~`timeline:queue`~~ / ~~`timeline:drain`~~ | — | — | DELETED by ADR 53 (offsets-not-tiers): the pending tier is gone; input appends directly. |
 | `timeline:replaceProjection` | data | no | Arbitrary projection overwrite — powerful; offline-curation tooling can earn a scope later. |
 | `timeline:resetProjection` | signal | no | Pairs with replaceProjection; same posture. |
 | `state:set` / `state:delete` | data | no | Session-internal K/V; not a client surface. Adopters project explicitly if they want it. |
