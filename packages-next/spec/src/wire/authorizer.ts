@@ -36,6 +36,13 @@ export interface AuthorizeInput {
    * fusion rule); elevation via grants.
    */
   readonly target?: EventScope;
+  /**
+   * Scope claims carried by the caller's credential
+   * (IngressIdentity.scopes) — grant-DERIVATION input. Bundled
+   * `claimsAuthorizer` consumes these; `staticAuthorizer` ignores them
+   * (table-driven by design).
+   */
+  readonly tokenScopes?: readonly string[];
 }
 
 export interface AuthorizeResult {
@@ -47,5 +54,40 @@ export interface AuthorizeResult {
 export interface Authorizer {
   authorize(input: AuthorizeInput): Promise<AuthorizeResult>;
   /** Self-identifying label for observability (`"static"`, `"permissive"`). */
+  readonly backend: string;
+}
+
+/**
+ * Identity established at the transport ingress edge (ADR 51 §4.1 /
+ * ADR 34). Authentication happens ONCE per connection (or per request
+ * on stateless transports); the identity is stamped structurally from
+ * there — `WireExtensionContext.principal` for wire dispatch, scope
+ * principal for downstream provenance.
+ */
+export interface IngressIdentity {
+  readonly principal?: string;
+  /** Adopter-shaped user record (RuntimeContextUser concern, ADR 34). */
+  readonly user?: Readonly<Record<string, unknown>>;
+  /**
+   * Scope grants carried by the credential (OAuth-style claims).
+   * Grant DERIVATION input — an Authorizer may consume these instead
+   * of (or layered over) a static grants table.
+   */
+  readonly scopes?: readonly string[];
+}
+
+/**
+ * `AuthSource` — transport token → identity (ADR 34). Runs at the
+ * ingress edge, once per connection/request. Promise-shaped. Throwing
+ * REJECTS the connection/request (authentication failure); returning
+ * `{}` admits an anonymous (local-pole) caller.
+ */
+export interface AuthSource {
+  authenticate(input: {
+    /** Bearer credential extracted by the transport (header, query, subprotocol). */
+    readonly token?: string;
+    /** Raw transport headers, for adopter schemes beyond bearer tokens. */
+    readonly headers?: Readonly<Record<string, string | undefined>>;
+  }): Promise<IngressIdentity>;
   readonly backend: string;
 }

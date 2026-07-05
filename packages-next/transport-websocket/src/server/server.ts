@@ -23,6 +23,24 @@ export interface WebSocketServerOptions {
   readonly allowedOrigins?: readonly string[] | "*";
   /** Idle ping interval in ms. WS-level ping/pong, not application ping. */
   readonly heartbeatIntervalMs?: number;
+  /**
+   * Ingress authentication (ADR 34/51 §4.1) — runs ONCE per connection
+   * at upgrade time. Token extracted from `Authorization: Bearer ...`
+   * (and, only when `allowQueryToken` is set, `?token=`). Throw to
+   * reject the upgrade (401). Omitted = every connection is anonymous
+   * (the local pole; pair with the gateway's unconfigured/permissive
+   * Authorizer deliberately). Authentication is bounded by a 10s
+   * timeout — a hung AuthSource rejects the upgrade instead of leaking
+   * sockets.
+   */
+  readonly authSource?: import("@agentick/spec-next").AuthSource;
+  /**
+   * Accept the bearer token from the `?token=` query param. DEFAULT
+   * FALSE (review finding): query strings land in proxy access logs,
+   * browser history, and Referer headers — a leak vector for long-lived
+   * credentials. Enable only for clients that cannot set headers.
+   */
+  readonly allowQueryToken?: boolean;
 }
 
 export interface WebSocketServerHandle {
@@ -55,9 +73,29 @@ export function websocketServer(options: WebSocketServerOptions): WebSocketServe
       socket.destroy();
       return;
     }
-    wss.handleUpgrade(req, socket, head, (ws) => {
-      wss.emit("connection", ws, req);
-    });
+    const finishUpgrade = (identity?: import("@agentick/spec-next").IngressIdentity): void => {
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        (ws as WSConnection & { identity?: unknown }).identity = identity;
+        wss.emit("connection", ws, req);
+      });
+    };
+    if (options.authSource) {
+      const auth = req.headers.authorization;
+      const bearer = auth?.startsWith("Bearer ") ? auth.slice(7) : undefined;
+      const query = new URL(url, "http://localhost").searchParams.get("token") ?? undefined;
+      void options.authSource
+        .authenticate({
+          ...((bearer ?? query) ? { token: bearer ?? query } : {}),
+          headers: req.headers as Record<string, string | undefined>,
+        })
+        .then((identity) => finishUpgrade(identity))
+        .catch(() => {
+          socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+          socket.destroy();
+        });
+    } else {
+      finishUpgrade();
+    }
   };
 
   options.httpServer.on("upgrade", upgradeHandler);
@@ -67,7 +105,11 @@ export function websocketServer(options: WebSocketServerOptions): WebSocketServe
 
   wss.on("connection", (ws: WSConnection) => {
     liveSockets.add(ws);
-    const ctx = new ConnectionContext(ws, options.gateway);
+    const ctx = new ConnectionContext(
+      ws,
+      options.gateway,
+      (ws as WSConnection & { identity?: import("@agentick/spec-next").IngressIdentity }).identity,
+    );
 
     let alive = true;
     ws.on("pong", () => {
@@ -125,8 +167,9 @@ class ConnectionContext extends BaseConnectionContext {
   constructor(
     private readonly ws: WSConnection,
     gateway: DispatchHost,
+    identity?: import("@agentick/spec-next").IngressIdentity,
   ) {
-    super(gateway);
+    super(gateway, identity);
   }
 
   async handleMessage(raw: unknown): Promise<void> {

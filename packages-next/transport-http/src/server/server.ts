@@ -131,6 +131,11 @@ export function httpServer(options: HttpServerOptions): HttpServerHandle {
 // SessionConnection — per-session-id server state
 // ============================================================================
 
+// TODO(trail-http-per-request-auth): HTTP is stateless per request but the
+// connection context persists per transport-session — per-request identity
+// needs the dispatch-level identity parameter driven from each request's
+// Authorization header (the parameter exists since ADR 34 slice; the wiring
+// here is the follow-up). Until then HTTP connections are anonymous.
 class SessionConnection extends BaseConnectionContext {
   readonly id: string;
   private notificationStream: ServerResponse | null = null;

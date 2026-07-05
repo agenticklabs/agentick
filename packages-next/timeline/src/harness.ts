@@ -253,6 +253,8 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
     // in-process-only hand-built operation by doctrine).
     this.compactCmd = this.command({
       name: "timeline:compact",
+      // VERB-MATRIX ratified wire row (#140/#141) — grantable, deny-by-default.
+      exposure: "wire",
       input: compactSignalSchema,
       scope,
       handler: (signal) =>

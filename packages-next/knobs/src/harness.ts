@@ -92,6 +92,8 @@ export class KnobsHarness extends BaseHarness<"knobs"> implements KnobsHarnessPr
     const scope = () => ({ sessionId: this.scopeId });
     this.set = this.command({
       name: "knobs:set",
+      // VERB-MATRIX ratified wire row (#140/#141) — grantable, deny-by-default.
+      exposure: "wire",
       scope,
       handler: (i: KnobsSetInput) => Effect.sync(() => this.applySet(i)),
     });

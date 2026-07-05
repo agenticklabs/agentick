@@ -83,7 +83,7 @@ const DYNAMIC_EXTENSION: WireExtension = {
 export function createDynamicCommandResolver(
   options: DynamicCommandResolverOptions,
 ): DynamicWireResolver {
-  const { inbox, authorizer } = options;
+  const { inbox } = options;
 
   const askCommands = async (address: string): Promise<readonly CommandInfo[]> => {
     const surface = address.slice(0, address.indexOf(":"));
@@ -105,17 +105,15 @@ export function createDynamicCommandResolver(
     if (rest.length === 0) return undefined;
     const verb = `${surface}:${rest}`;
 
-    const handler = async (params: unknown, rawCtx: unknown): Promise<unknown> => {
-      const ctx = (rawCtx ?? {}) as WireExtensionContext;
+    const handler = async (params: unknown, _rawCtx: unknown): Promise<unknown> => {
       const p = (params ?? {}) as DynamicParams;
 
       const address = resolveAddress(surface, p);
       if (address === undefined) throw WireRpcError.methodNotFound(method);
 
       // `<surface>/commands` is itself the ratified discovery meta-verb —
-      // authorize then serve the enumeration directly.
+      // the dispatch choke point already authorized it; serve directly.
       if (rest === "commands") {
-        await gate(verb, ctx, p);
         return { commands: await askCommands(address) };
       }
 
@@ -127,22 +125,10 @@ export function createDynamicCommandResolver(
         throw WireRpcError.methodNotFound(method);
       }
 
-      await gate(verb, ctx, p);
-
+      // Authorization happened at the dispatch choke point (ADR 51
+      // §3.3 — ONE gate, both lanes); this handler owns only exposure
+      // semantics (deny-by-default: non-wire == absent).
       return Effect.runPromise(inbox.ask(address, { type: verb, origin: "wire", payload: p }));
-    };
-
-    const gate = async (
-      scope: string,
-      ctx: WireExtensionContext,
-      p: DynamicParams,
-    ): Promise<void> => {
-      const decision = await authorizer.authorize({
-        ...(ctx.principal !== undefined ? { principal: ctx.principal } : {}),
-        scope,
-        ...(typeof p.sessionId === "string" ? { target: { sessionId: p.sessionId } } : {}),
-      });
-      if (!decision.allowed) throw WireRpcError.forbidden(scope);
     };
 
     return { extension: DYNAMIC_EXTENSION, handler };
@@ -162,8 +148,17 @@ export function createCommandsListHandler(options: DynamicCommandResolverOptions
     if (typeof p.sessionId !== "string" || p.sessionId.length === 0) {
       throw WireRpcError.methodNotFound("commands/list");
     }
+    const ctx = (rawCtx ?? {}) as WireExtensionContext;
     const out: Array<{ method: string; command: CommandInfo }> = [];
     for (const surface of SESSION_SURFACES) {
+      // Visibility filter (not a gate — the choke point gated
+      // commands/list itself): discovery lists only surfaces whose
+      // meta-verb scope this caller holds.
+      const visible = await options.authorizer.authorize({
+        ...(ctx.principal !== undefined ? { principal: ctx.principal } : {}),
+        scope: `${surface}:commands`,
+      });
+      if (!visible.allowed) continue;
       const resolution = resolver(`${surface}/commands`);
       if (!resolution) continue;
       try {

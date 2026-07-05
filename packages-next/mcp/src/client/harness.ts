@@ -396,6 +396,8 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
     const scope = (): EventScope => ({ sessionId: this.scopeId });
     this.listToolsCmd = this.command({
       name: "mcp:list-tools",
+      // VERB-MATRIX ratified wire row (#140/#141) — grantable, deny-by-default.
+      exposure: "wire",
       scope,
       handler: () => this.listToolsBody(),
     });
@@ -411,21 +413,29 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
     });
     this.getTaskCmd = this.command({
       name: "mcp:get-task",
+      // VERB-MATRIX ratified wire row (#140/#141) — grantable, deny-by-default.
+      exposure: "wire",
       scope,
       handler: (i: { readonly taskId: string }) => this.getTaskBody(i),
     });
     this.getTaskResultCmd = this.command({
       name: "mcp:get-task-result",
+      // VERB-MATRIX ratified wire row (#140/#141) — grantable, deny-by-default.
+      exposure: "wire",
       scope,
       handler: (i: { readonly taskId: string }) => this.getTaskResultBody(i),
     });
     this.listTasksCmd = this.command({
       name: "mcp:list-tasks",
+      // VERB-MATRIX ratified wire row (#140/#141) — grantable, deny-by-default.
+      exposure: "wire",
       scope,
       handler: () => this.listTasksBody(),
     });
     this.cancelTaskCmd = this.command({
       name: "mcp:cancel-task",
+      // VERB-MATRIX ratified wire row (#140/#141) — grantable, deny-by-default.
+      exposure: "wire",
       scope,
       handler: (i: { readonly taskId: string }) => this.cancelTaskBody(i),
     });

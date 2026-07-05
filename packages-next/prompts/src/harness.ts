@@ -153,16 +153,22 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
     const scope = () => ({ sessionId: this.scopeId });
     this.register = this.command({
       name: "prompts:register",
+      // VERB-MATRIX ratified wire row (#140/#141) — grantable, deny-by-default.
+      exposure: "wire",
       scope,
       handler: (i: PromptsRegisterInput) => this.applyRegister(i),
     });
     this.update = this.command({
       name: "prompts:update",
+      // VERB-MATRIX ratified wire row (#140/#141) — grantable, deny-by-default.
+      exposure: "wire",
       scope,
       handler: (i: PromptsUpdateInput) => this.applyUpdate(i),
     });
     this.remove = this.command({
       name: "prompts:remove",
+      // VERB-MATRIX ratified wire row (#140/#141) — grantable, deny-by-default.
+      exposure: "wire",
       scope,
       handler: (i: PromptsRemoveInput) =>
         Effect.sync(() => {
@@ -171,11 +177,15 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
     });
     this.invoke = this.command({
       name: "prompts:invoke",
+      // VERB-MATRIX ratified wire row (#140/#141) — grantable, deny-by-default.
+      exposure: "wire",
       scope,
       handler: (i: PromptsInvokeInput) => this.applyInvoke(i),
     });
     this.get = this.command({
       name: "prompts:get",
+      // VERB-MATRIX ratified wire row (#140/#141) — grantable, deny-by-default.
+      exposure: "wire",
       scope,
       handler: (i: PromptsGetInput) => this.applyGet(i),
     });

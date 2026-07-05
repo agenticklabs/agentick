@@ -17,6 +17,7 @@
  */
 
 import {
+  WireRpcError,
   ErrorCode,
   isAgentickError,
   type ExtensionsListResult,
@@ -31,6 +32,7 @@ import {
   type SessionHarnessProtocol,
   type SubscriptionHandle,
   type WireExtension,
+  type IngressIdentity,
   type WireExtensionContext,
   type WireExtensionTransport,
   type WireNotificationMethod,
@@ -67,6 +69,8 @@ export async function dispatchRequest(
   host: DispatchHost,
   req: JsonRpcRequest,
   sink: DispatchSink,
+  /** Ingress identity established at connection/request time (ADR 34/51). */
+  identity?: IngressIdentity,
 ): Promise<JsonRpcResponse> {
   try {
     // Bootstrap methods dispatched directly — must resolve BEFORE the
@@ -96,7 +100,24 @@ export async function dispatchRequest(
     if (registry) {
       const resolution = registry.resolve(req.method);
       if (resolution) {
-        const ctx = buildWireExtensionContext(host, resolution.extension, req.id, req.params, sink);
+        // ── THE authorization choke point (ADR 51 §3.3/§4.3, review
+        // finding: the porcelain lane shipped ungated). EVERY resolved
+        // method — porcelain and dynamic — is authorized here with its
+        // verb-derived scope label (`session/send` → `session:send`),
+        // BEFORE the handler runs. The target session's owning
+        // principal (structural identity, ADR 48) feeds the
+        // same-principal rule. Bootstrap methods (initialize / ping /
+        // _extensions/list) returned above and are deliberately
+        // pre-auth.
+        await authorizeDispatch(host, req.method, req.params, identity);
+        const ctx = buildWireExtensionContext(
+          host,
+          resolution.extension,
+          req.id,
+          req.params,
+          sink,
+          identity,
+        );
         try {
           const result = await resolution.handler(req.params, ctx);
           return success(req.id, result);
@@ -116,6 +137,11 @@ export async function dispatchRequest(
     // InternalError with a `reason` describing the tag. Payload is
     // the error's canonical `toJSON()` projection (kept in sync by
     // the AgentickError base class).
+    // WireRpcError carries its own code/message/data — map verbatim
+    // (the dynamic command lane's Forbidden / MethodNotFound / etc.).
+    if (e instanceof WireRpcError) {
+      return errorResponse(req.id, e.code, e.message, e.data);
+    }
     if (isAgentickError(e)) {
       const wireCode = agentickErrorToWireCode(e);
       return errorResponse(req.id, wireCode, e.message, e.toJSON());
@@ -182,6 +208,49 @@ function initialize(_params: InitializeParams): InitializeResult {
 // WireExtension context builder — ADR 46
 // ============================================================================
 
+/** Verb-derived scope label: `a/b` → `a:b` (ADR 51 §3.3 — one label
+ *  covers both lanes; grants are written once). */
+function methodScope(method: string): string {
+  const slash = method.indexOf("/");
+  return slash > 0 ? `${method.slice(0, slash)}:${method.slice(slash + 1)}` : method;
+}
+
+/**
+ * The single wire authorization gate. Resolves the TARGET session's
+ * owning principal (when params name a session) so the Authorizer's
+ * same-principal rule has real input — before this fix the gate only
+ * ever saw `{ sessionId }` and the rule was structurally dead (review
+ * finding: cross-principal access under surface-glob grants).
+ */
+async function authorizeDispatch(
+  host: DispatchHost,
+  method: string,
+  rawParams: unknown,
+  identity: IngressIdentity | undefined,
+): Promise<void> {
+  const authorizer = host.authorizer;
+  if (!authorizer) return; // hosts without a policy (bare test hosts) are trusted-domain
+  const params = (rawParams ?? {}) as Record<string, unknown>;
+  const sessionId = typeof params.sessionId === "string" ? params.sessionId : undefined;
+  const targetSession = sessionId ? findSessionOrUndef(host, sessionId) : undefined;
+  const decision = await authorizer.authorize({
+    ...(identity?.principal !== undefined ? { principal: identity.principal } : {}),
+    ...(identity?.scopes !== undefined ? { tokenScopes: identity.scopes } : {}),
+    scope: methodScope(method),
+    ...(sessionId !== undefined
+      ? {
+          target: {
+            sessionId,
+            ...(targetSession?.principal !== undefined
+              ? { principal: targetSession.principal }
+              : {}),
+          },
+        }
+      : {}),
+  });
+  if (!decision.allowed) throw WireRpcError.forbidden(methodScope(method));
+}
+
 /**
  * Build the {@link WireExtensionContext} that gets passed to a wire
  * extension handler. Resolves `session` / `app` from
@@ -208,6 +277,7 @@ function buildWireExtensionContext(
   reqId: JsonRpcId,
   rawParams: unknown,
   sink: DispatchSink,
+  identity?: IngressIdentity,
 ): WireExtensionContext {
   const params = (rawParams ?? {}) as Record<string, unknown>;
   const sessionId = typeof params.sessionId === "string" ? params.sessionId : undefined;
@@ -229,6 +299,10 @@ function buildWireExtensionContext(
 
   return {
     gateway: host,
+    // Authn happened ONCE at ingress (ADR 51 §4.1); dispatch only
+    // carries the stamped identity. The dynamic command lane's
+    // Authorizer gate consumes it.
+    ...(identity?.principal !== undefined ? { principal: identity.principal } : {}),
     ...(app ? { app } : {}),
     ...(session ? { session } : {}),
     // TODO(phase-F): resolve HookBridges from the session's session-extension

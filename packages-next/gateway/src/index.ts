@@ -13,6 +13,7 @@ export {
 export { createGateway } from "./create-gateway.js";
 export { createWireExtensionRegistry } from "./wire-registry.js";
 export {
+  claimsAuthorizer,
   permissiveAuthorizer,
   staticAuthorizer,
   unconfiguredAuthorizer,

@@ -17,3 +17,4 @@
 
 export * from "./client/index.js";
 export * from "./server/index.js";
+export { staticTokenAuthSource, type StaticTokenAuthSourceOptions } from "./server/auth-source.js";
