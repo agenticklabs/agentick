@@ -141,3 +141,15 @@ describe("wire lane e2e — real gateway + session, ingress identity, Authorizer
     expect("code" in res.error).toBe(true);
   });
 });
+
+describe("staticTokenAuthSource — prototype-key bypass (review finding)", () => {
+  it("inherited object members are NOT valid tokens", async () => {
+    const { staticTokenAuthSource } = await import("../server/auth-source.js");
+    const auth = staticTokenAuthSource({ tokens: { good: "alice" } });
+    for (const evil of ["toString", "constructor", "__proto__", "hasOwnProperty"]) {
+      await expect(auth.authenticate({ token: evil })).rejects.toThrow(/unknown token/);
+    }
+    expect((await auth.authenticate({ token: "good" })).principal).toBe("alice");
+    await expect(auth.authenticate({})).rejects.toThrow(/no token/);
+  });
+});

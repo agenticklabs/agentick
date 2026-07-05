@@ -27,10 +27,13 @@ export function staticTokenAuthSource(options: StaticTokenAuthSourceOptions): Au
         if (options.allowAnonymous) return Promise.resolve({});
         return Promise.reject(new Error("authentication required: no token presented"));
       }
-      const entry = options.tokens[token];
-      if (entry === undefined) {
+      // Object.hasOwn — a plain index would resolve inherited members
+      // ("toString", "constructor", "__proto__") and admit an attacker
+      // as anonymous (review finding: prototype-key bypass).
+      if (!Object.hasOwn(options.tokens, token)) {
         return Promise.reject(new Error("authentication failed: unknown token"));
       }
+      const entry = options.tokens[token]!;
       return Promise.resolve(typeof entry === "string" ? { principal: entry } : entry);
     },
   };
