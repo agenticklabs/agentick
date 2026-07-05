@@ -80,9 +80,31 @@ Timeline entries gain typed optional provenance in `MessageMetadata`:
 interface MessageMetadata {
   readonly executionId?: string;  // execution that created this entry
   readonly tickId?: string;       // tick that created it (model/tool output)
+  readonly usage?: UsageStats;    // the GENERATION's usage — assistant
+                                  // entries only (see below)
   // ... existing: cache, providerMetadata, index signature
 }
 ```
+
+**Per-generation usage (ratified 2026-07-05):** one tick = one model
+call = one canonical assistant entry (the accumulator synthesizes a
+single assistant message per generation), so every execution-produced
+assistant entry is stamped with that generation's `UsageStats` at
+`applyExecutorResult` (the session already holds it there). Normative
+for the loop path — the framework stamps it, adopters do nothing.
+Optional on the type: imported/seeded assistant entries have no
+generation behind them. User and tool-result entries carry none (not
+generations).
+
+This yields three accounting levels, each with distinct authority:
+entry = per-generation attribution; boundary = the TURN's ground-truth
+aggregate; session state = lifetime. The boundary aggregate is NOT
+redundant with the entry sum: a tick that fails mid-turn billed tokens
+but appended no assistant entry — only the boundary (and session
+lifetime) capture that usage. Cost queries over the record: per-message
+from entries, per-turn from boundaries, discrepancy between the two =
+paid-but-unmaterialized generations (retries, aborted streams) — a
+diagnostic in itself.
 
 Stamped by the session at append (it already knows both — they ride
 `EventScope` on every operation). "Entries from the current execution",
