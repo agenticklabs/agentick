@@ -1,6 +1,6 @@
 # ADR 53 — Offsets, not tiers: timeline consumption semantics
 
-**Status:** DRAFT — pending Ryan sign-off (⛔)
+**Status:** RATIFIED 2026-07-05 (Ryan) — incl. §5 join semantics; boundary reframed as TURN boundary (conversation-domain)
 **Date:** 2026-07-04
 **Depends on:** ADR 49 (stores-not-snapshots, fold = re-render), #133/#168
 (frozen `seq`), ADR 51 (command registry; verb deletions), ADR 48 §5
@@ -112,7 +112,18 @@ Stamped by the session at append (it already knows both — they ride
 3" become queries over the log. Eval, replay, devtools turn-views, and
 `<Timeline>` filters all read the same facts. No tier.
 
-### 2.3 Execution-boundary entries — the committed offset
+### 2.3 Turn-boundary entries — the committed offset
+
+**Entity framing (Ryan, 2026-07-05):** the store models NOTHING
+(opaque ordered entries per session); the entry union is the question.
+The boundary is a **turn boundary — conversation-domain, not
+framework-domain**: every chat product has turns, and a conversation
+record marking where turns end is recording conversation truth. The
+framework's execution is the mechanism that produced the turn,
+attached as provenance — not the entity itself. Ticks NEVER become
+entries (provenance stamps only). The framework owns this one marker
+because the continuation predicate and crash-retry fold cannot ride
+adopter-modeled entities.
 
 At execution completion (terminal outcome, after the final
 `applyExecutorResult`/`applyToolResults` appends), the session appends:
