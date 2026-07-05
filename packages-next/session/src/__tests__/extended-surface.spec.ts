@@ -156,7 +156,7 @@ describe("SessionHarness — timeline handle (top-level)", () => {
       .filter((b): b is { type: "text"; text: string } => b.type === "text")
       .map((b) => b.text);
     expect(userTexts).toContain("hello");
-    // The scripted executor answered — nothing is unanswered.
+    // The scripted executor replied — the trailing set is empty.
     expect(session.timeline.trailingInput()).toEqual([]);
     // A turn-boundary RECORD was emitted at execution end.
     const boundaries = session.timeline.readPersisted().filter((e) => e.kind === "boundary");
@@ -437,7 +437,7 @@ describe("steering — send() during a running execution (ADR 53)", () => {
     // steering input.
     expect(runCalls).toBe(2);
     expect(result.response).toContain("steered answer");
-    // Both user messages are in the log; nothing is unanswered.
+    // Both user messages are in the log; the trailing set is empty.
     const users = session.timeline
       .read()
       .entries.filter((e) => e.kind === "message" && e.message.role === "user");

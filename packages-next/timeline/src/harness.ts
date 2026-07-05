@@ -542,7 +542,7 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
    * Input entries after the LAST assistant entry — the trailing-input fold (ADR 53 §2.3b). UI styling and resume prompts read
    * this; NOTHING load-bearing does. Multi-tick turns append one
    * assistant entry per generation; "after the last" still detects
-   * unanswered correctly.
+   * the trailing set correctly.
    */
   trailingInput(): readonly MessageTimelineEntry[] {
     let lastAssistant = -1;
