@@ -64,3 +64,5 @@ packages/*/docs/
 
 # ignore MCP
 .mcp.json
+
+.codex/
