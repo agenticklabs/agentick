@@ -143,6 +143,37 @@ discipline is yours to keep: never rewrite old rendered entries between
 ticks — evict whole entries (sliding-window does) so the prefix stays
 cache-stable.
 
+## Adaptive auto-compaction (`useContextInfo`)
+
+`compact()` and the `<Timeline>` budget props are the levers; **`useContextInfo`
+is the gauge** — real-time context-window utilization, so an adopter can
+compress harder as the window fills (the ernesto `KnowifyTimeline`
+pattern, now portable because the model registry supplies the window,
+#204):
+
+```tsx
+import { useContextInfo } from "@agentick/reconciler-next/react";
+import { Timeline } from "@agentick/timeline-next/react";
+
+function AdaptiveTimeline() {
+  const { utilization } = useContextInfo();       // 0..1, or undefined until known
+  const tight = (utilization ?? 0) > 0.75;
+  return (
+    <Timeline
+      strategy="sliding-window"
+      preserveRoles={["system", "user"]}
+      headroom={tight ? 4096 : 8192}               // reserve more as the window fills
+    />
+  );
+}
+```
+
+`useContextInfo` reads `usedTokens` (ADR 53's per-generation usage
+stamps) against the model's `contextWindow` (the #204 registry). Set an
+auto-compaction policy once and it rides every tick — verbatim when
+roomy, aggressive summarization when tight — with KV-cache discipline
+intact (evict whole entries; never rewrite old ones).
+
 ## Two tiers, one truth
 
 | Tier              | What it is                                                                                                                                         |
