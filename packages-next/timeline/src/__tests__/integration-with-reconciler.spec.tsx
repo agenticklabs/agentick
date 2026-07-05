@@ -10,7 +10,7 @@ import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next
 import { extractText } from "@agentick/spec-next";
 import type { HookBridges, MessageEntry, TimelineEntry } from "@agentick/spec-next";
 
-import { ReconcilerHarness } from "@agentick/reconciler-react-next";
+import { Message, ReconcilerHarness } from "@agentick/reconciler-react-next";
 import { fakeBridges, fakeTimelineHarness } from "@agentick/reconciler-next";
 import { Timeline } from "@agentick/timeline-next/react";
 import {
@@ -323,5 +323,109 @@ describe("compactEntries", () => {
     expect(guidance).toBe("drop oldest");
     expect(result.kept).toEqual([entries[1]!]);
     expect(result.evicted).toEqual([entries[0]!]);
+  });
+});
+
+describe("<Timeline> — fine-grained rendering (README reference pattern)", () => {
+  // Old tool-result entry whose heavy payload the tool layer extracted
+  // to disk, stamping a file reference on the block metadata.
+  function toolResultEntry(
+    id: string,
+    execId: string,
+    ref: { path: string; bytes: number },
+  ): MessageTimelineEntry {
+    return {
+      kind: "message",
+      message: {
+        id,
+        role: "tool",
+        content: [
+          {
+            type: "tool_result",
+            toolUseId: "tc1",
+            name: "query_jobs",
+            content: [{ type: "text", text: "HUGE 48KB payload ..." }],
+            metadata: { file: ref },
+          } as never,
+        ],
+        ts: 0,
+        metadata: { executionId: execId },
+      },
+    };
+  }
+
+  function currentUser(id: string, text: string, execId: string): MessageTimelineEntry {
+    return {
+      kind: "message",
+      message: {
+        id,
+        role: "user",
+        content: [{ type: "text", text }],
+        ts: 0,
+        metadata: { executionId: execId },
+      },
+    };
+  }
+
+  it("collapses OLD tool results to a chaseable file reference; keeps CURRENT-turn verbatim", async () => {
+    const CUR = "exec:current";
+    const timeline = fakeTimelineHarness([
+      toolResultEntry("t_old", "exec:old", { path: "/tmp/r/abc.json", bytes: 48_000 }),
+      currentUser("u_cur", "and now summarize", CUR),
+    ]);
+    const bridges: HookBridges = { ...fakeBridges(), timeline };
+    const harness = await makeHarness();
+
+    // The README pattern, real exports: build a content array per
+    // entry and pass it via the `content` prop (v2 has no <Text>
+    // component — content blocks are the currency).
+    function ReferenceTimeline() {
+      const currentExecution = CUR; // in real use: useOnExecutionStart
+      return React.createElement(Timeline, {
+        children: (entries: readonly MessageTimelineEntry[]) =>
+          entries.map(({ message }) => {
+            if (
+              message.role === "assistant" ||
+              message.metadata?.executionId === currentExecution
+            ) {
+              return React.createElement(Message, { key: message.id, ...message });
+            }
+            const content = message.content.map((block) => {
+              if (block.type === "tool_result") {
+                const ref = (block as { metadata?: { file?: { path: string; bytes: number } } })
+                  .metadata?.file;
+                return {
+                  type: "text" as const,
+                  text: ref
+                    ? `[${block.name}] full result at ${ref.path} (${ref.bytes}B) — read_file if needed`
+                    : `[${block.name}]`,
+                };
+              }
+              return block;
+            });
+            return React.createElement(Message, { key: message.id, role: message.role, content });
+          }),
+      });
+    }
+
+    await harness.mount({
+      mountId: "m_ref",
+      sessionId: "s",
+      element: React.createElement(ReferenceTimeline),
+      bridges,
+    });
+    const { tree } = await harness.renderTree({ mountId: "m_ref", sessionId: "s" });
+    const messages = asMessageEntries(tree.context.entries);
+
+    // Old tool result → a reference the model can chase, NOT the payload.
+    const toolMsg = messages.find((m) => m.role === "tool")!;
+    const toolText = joinText(toolMsg.content);
+    expect(toolText).toContain("/tmp/r/abc.json");
+    expect(toolText).toContain("read_file if needed");
+    expect(toolText).not.toContain("HUGE 48KB payload");
+
+    // Current-turn user message → verbatim.
+    const userMsg = messages.find((m) => m.role === "user")!;
+    expect(joinText(userMsg.content)).toBe("and now summarize");
   });
 });
