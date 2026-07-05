@@ -19,6 +19,7 @@ export {
   type ConversationHistoryOptions,
   type TimelineBudgetOptions,
 } from "./timeline.js";
+export { Transcript, type TranscriptProps } from "./transcript.js";
 export {
   compactEntries,
   getEntryTokens,

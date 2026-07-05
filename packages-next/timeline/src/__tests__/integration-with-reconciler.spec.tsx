@@ -429,3 +429,23 @@ describe("<Timeline> — fine-grained rendering (README reference pattern)", () 
     expect(joinText(userMsg.content)).toBe("and now summarize");
   });
 });
+
+describe("<Transcript> — conversational alias (#205)", () => {
+  it("is the same component as Timeline and renders identically", async () => {
+    const { Transcript } = await import("@agentick/timeline-next/react");
+    expect(Transcript).toBe(Timeline);
+
+    const seed = [userEntry("e1", "hello"), assistantEntry("e2", "world")];
+    const bridges: HookBridges = { ...fakeBridges(), timeline: fakeTimelineHarness(seed) };
+    const harness = await makeHarness();
+    await harness.mount({
+      mountId: "m_tr",
+      sessionId: "s",
+      element: React.createElement(Transcript),
+      bridges,
+    });
+    const { tree } = await harness.renderTree({ mountId: "m_tr", sessionId: "s" });
+    const messages = asMessageEntries(tree.context.entries);
+    expect(messages.map((m) => joinText(m.content))).toEqual(["hello", "world"]);
+  });
+});
