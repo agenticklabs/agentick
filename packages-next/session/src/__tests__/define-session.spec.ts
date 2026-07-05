@@ -113,7 +113,7 @@ describe("defineSession — defaults", () => {
       inbox: new LocalInbox(),
     });
     expect(session.timeline.read().entries).toEqual([]);
-    expect(session.timeline.unansweredInput()).toEqual([]);
+    expect(session.timeline.trailingInput()).toEqual([]);
     expect(session.timeline.inputEntryCount()).toBe(0);
     await session.timeline.append();
     await session.timeline.endTurn({ executionId: "e", outcome: "succeeded" });

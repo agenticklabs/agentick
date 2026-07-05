@@ -209,12 +209,12 @@ export interface TimelineHarnessProtocol extends SnapshotCapable<TimelineHarness
   // ─────────── Derived reads + turn records (ADR 53) ───────────
 
   /**
-   * Input entries after the LAST assistant entry — "unanswered" by the
+   * Input entries after the LAST assistant entry — input trailing the last assistant entry (the
    * fold. UI styling and resume prompts read this; nothing load-bearing
    * does (consumption is non-destructive: every tick re-renders the
    * whole log).
    */
-  unansweredInput(): readonly MessageTimelineEntry[];
+  trailingInput(): readonly MessageTimelineEntry[];
 
   /** Count of input (user-role message) entries in the persisted log —
    *  the session's live continuation check compares this across ticks. */

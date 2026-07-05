@@ -143,7 +143,7 @@ describe("SessionHarness — dispatch (host-side tool invocation)", () => {
 });
 
 describe("SessionHarness — timeline handle (top-level)", () => {
-  it("send() appends input directly; unansweredInput follows the assistant fold (ADR 53)", async () => {
+  it("send() appends input directly; trailingInput follows the assistant fold (ADR 53)", async () => {
     const { session } = await mkSession();
     const handle = await session.send({
       messages: [{ role: "user", content: "hello" }],
@@ -157,7 +157,7 @@ describe("SessionHarness — timeline handle (top-level)", () => {
       .map((b) => b.text);
     expect(userTexts).toContain("hello");
     // The scripted executor answered — nothing is unanswered.
-    expect(session.timeline.unansweredInput()).toEqual([]);
+    expect(session.timeline.trailingInput()).toEqual([]);
     // A turn-boundary RECORD was emitted at execution end.
     const boundaries = session.timeline.readPersisted().filter((e) => e.kind === "boundary");
     expect(boundaries.length).toBe(1);
@@ -442,7 +442,7 @@ describe("steering — send() during a running execution (ADR 53)", () => {
       .read()
       .entries.filter((e) => e.kind === "message" && e.message.role === "user");
     expect(users).toHaveLength(2);
-    expect(session.timeline.unansweredInput()).toEqual([]);
+    expect(session.timeline.trailingInput()).toEqual([]);
     // Exactly one turn: one boundary record, outcome succeeded.
     const boundaries = session.timeline.readPersisted().filter((e) => e.kind === "boundary");
     expect(boundaries).toHaveLength(1);

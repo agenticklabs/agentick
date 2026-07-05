@@ -335,7 +335,7 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
     });
   });
 
-  describe("TimelineHarness — turn boundaries + unanswered fold (ADR 53)", () => {
+  describe("TimelineHarness — turn boundaries + trailing-input fold (ADR 53)", () => {
     const userEntry = (id: string): TimelineEntry => ({
       kind: "message",
       message: { id, role: "user", content: [{ type: "text", text: id }], ts: 0 },
@@ -345,15 +345,15 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
       message: { id, role: "assistant", content: [{ type: "text", text: id }], ts: 0 },
     });
 
-    it("unansweredInput() is the input-after-last-assistant fold", async () => {
+    it("trailingInput() is the input-after-last-assistant fold", async () => {
       const h = await deps.make();
-      expect(h.unansweredInput()).toEqual([]);
+      expect(h.trailingInput()).toEqual([]);
       await h.append(userEntry("u1"));
-      expect(h.unansweredInput().map((e) => e.message.id)).toEqual(["u1"]);
+      expect(h.trailingInput().map((e) => e.message.id)).toEqual(["u1"]);
       await h.append(assistantEntry("a1"));
-      expect(h.unansweredInput()).toEqual([]);
+      expect(h.trailingInput()).toEqual([]);
       await h.append(userEntry("u2"), userEntry("u3"));
-      expect(h.unansweredInput().map((e) => e.message.id)).toEqual(["u2", "u3"]);
+      expect(h.trailingInput().map((e) => e.message.id)).toEqual(["u2", "u3"]);
       expect(h.inputEntryCount()).toBe(3);
       await h.close();
     });
@@ -368,9 +368,9 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
       if (boundary.kind !== "boundary") throw new Error("unreachable");
       expect(boundary.boundary.outcome).toBe("succeeded");
       expect(boundary.visibility).toBe("log");
-      // The fold ignores boundaries — u1 is still unanswered (no
+      // The fold ignores boundaries — u1 still trails (no
       // assistant entry): the record commits nothing.
-      expect(h.unansweredInput().map((e) => e.message.id)).toEqual(["u1"]);
+      expect(h.trailingInput().map((e) => e.message.id)).toEqual(["u1"]);
       await h.close();
     });
 

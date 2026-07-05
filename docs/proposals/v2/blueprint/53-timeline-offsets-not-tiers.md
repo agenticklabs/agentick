@@ -179,7 +179,7 @@ Consumption is non-destructive, so no offset is ever load-bearing:
 - **Continuation (steering)** is a LIVE in-memory check — "did input
   entries append since this execution last rendered?" (session-tracked
   count; no durability needed — crashes never auto-resume executions).
-- **"Unanswered input"** derives from Ryan's fold: input entries after
+- **Trailing input** (`trailingInput()`) derives from Ryan's fold: input entries after
   the LAST ASSISTANT entry. (Precision: multi-tick turns append one
   assistant entry PER TICK/generation; "after the last" still detects
   unanswered correctly.)

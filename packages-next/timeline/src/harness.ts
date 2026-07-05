@@ -531,7 +531,7 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
   // Consumption is NON-DESTRUCTIVE — the loop re-renders the whole log
   // every tick — so nothing here is load-bearing. The boundary entry is
   // an emitted RECORD (segmentation + turn-aggregate usage); the
-  // "unanswered" fold is a derived convenience.
+  // trailing-input fold is a derived convenience.
 
   /** Input predicate (ADR 53 §2.5) — a named constant, not config. */
   private static isInputEntry(e: TimelineEntry): e is MessageTimelineEntry {
@@ -539,13 +539,12 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
   }
 
   /**
-   * Input entries after the LAST assistant entry — "unanswered" by
-   * Ryan's fold (ADR 53 §2.3b). UI styling and resume prompts read
+   * Input entries after the LAST assistant entry — the trailing-input fold (ADR 53 §2.3b). UI styling and resume prompts read
    * this; NOTHING load-bearing does. Multi-tick turns append one
    * assistant entry per generation; "after the last" still detects
    * unanswered correctly.
    */
-  unansweredInput(): readonly MessageTimelineEntry[] {
+  trailingInput(): readonly MessageTimelineEntry[] {
     let lastAssistant = -1;
     for (let i = this._persisted.length - 1; i >= 0; i--) {
       const e = this._persisted[i]!;

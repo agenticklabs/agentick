@@ -32,8 +32,8 @@ export interface TimelineHandle {
   read(): TimelineSnapshot;
   /** Read the durable append-only log (uncompacted ground truth). */
   readPersisted(): readonly TimelineEntry[];
-  /** Input entries after the last assistant entry — "unanswered" (ADR 53). */
-  unansweredInput(): readonly MessageTimelineEntry[];
+  /** Input entries trailing the last assistant entry (ADR 53). */
+  trailingInput(): readonly MessageTimelineEntry[];
   /** Count of input entries in the persisted log (live continuation check). */
   inputEntryCount(): number;
   /** Fires on any projection OR pending mutation. */

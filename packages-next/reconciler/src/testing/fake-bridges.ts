@@ -73,7 +73,7 @@ export function fakeTimelineHarness(
     ready: Promise.resolve(),
     read: () => snapshot,
     subscribe: (l) => listeners.subscribe(l),
-    unansweredInput: () => {
+    trailingInput: () => {
       let lastAssistant = -1;
       for (let i = persisted.length - 1; i >= 0; i--) {
         const e = persisted[i]!;
