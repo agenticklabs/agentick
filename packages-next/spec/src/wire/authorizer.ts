@@ -91,3 +91,35 @@ export interface AuthSource {
   }): Promise<IngressIdentity>;
   readonly backend: string;
 }
+
+/**
+ * THE scope-matching semantic (review finding: exact-string checks in
+ * the downscoping filter and the ceiling gate disagreed with the glob
+ * semantics authorizers use — one matcher, one meaning, everywhere).
+ * Patterns: exact (`"timeline:compact"`), surface glob (`"timeline:*"`),
+ * or `"*"`.
+ */
+export function scopeCovers(pattern: string, scope: string): boolean {
+  if (pattern === "*") return true;
+  if (pattern.endsWith(":*")) return scope.startsWith(pattern.slice(0, -1));
+  return pattern === scope;
+}
+
+/**
+ * Cover-aware scope intersection (#198 downscoping): the effective set
+ * is every requested scope some claim covers, PLUS every claim some
+ * requested pattern covers. Both directions, so `claims: ["timeline:*"],
+ * requested: ["timeline:compact"]` → `["timeline:compact"]` and
+ * `claims: ["timeline:compact"], requested: ["timeline:*"]` →
+ * `["timeline:compact"]`. Always ⊆ the privilege of BOTH inputs —
+ * narrowing only.
+ */
+export function intersectScopes(
+  claims: readonly string[],
+  requested: readonly string[],
+): readonly string[] {
+  const out = new Set<string>();
+  for (const r of requested) if (claims.some((c) => scopeCovers(c, r))) out.add(r);
+  for (const c of claims) if (requested.some((r) => scopeCovers(r, c))) out.add(c);
+  return [...out];
+}

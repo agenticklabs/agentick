@@ -18,12 +18,9 @@
 
 import type { AuthorizeInput, AuthorizeResult, Authorizer } from "@agentick/spec-next";
 
-/** Scope patterns: exact (`"timeline:compact"`), surface glob (`"timeline:*"`), or `"*"`. */
-function matchesScope(pattern: string, scope: string): boolean {
-  if (pattern === "*") return true;
-  if (pattern.endsWith(":*")) return scope.startsWith(pattern.slice(0, -1));
-  return pattern === scope;
-}
+// ONE scope semantic — the shared matcher from spec (review finding:
+// local matchers drifted from the downscope/ceiling checks).
+import { scopeCovers as matchesScope } from "@agentick/spec-next";
 
 /**
  * Same-principal target rule (ADR 48 fusion rule): when the target

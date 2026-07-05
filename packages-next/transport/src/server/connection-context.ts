@@ -24,7 +24,7 @@ import type {
   JsonRpcRequest,
   JsonRpcResponse,
 } from "@agentick/spec-next";
-import type { IngressIdentity } from "@agentick/spec-next";
+import { intersectScopes, type IngressIdentity } from "@agentick/spec-next";
 
 import { dispatchRequest, type DispatchHost } from "./dispatch.js";
 
@@ -39,8 +39,10 @@ export abstract class BaseConnectionContext {
      * Ingress identity for THIS connection — established once by the
      * transport (AuthSource at handshake/request time, ADR 34) and
      * carried into every dispatch. Undefined = anonymous (local pole).
+     * Mutated exactly once: the initialize frame's scope request
+     * DOWNSCOPES it (#198) — effective scopes = claims ∩ requested.
      */
-    protected readonly identity?: IngressIdentity,
+    protected identity?: IngressIdentity,
   ) {}
 
   /**
@@ -57,6 +59,23 @@ export abstract class BaseConnectionContext {
       return null;
     }
     if ("id" in frame && "method" in frame) {
+      // #198 — connect-time scope request. Intersection only: a client
+      // can narrow its credential's claims, never widen them. Applied
+      // before dispatch so initialize itself and everything after run
+      // under the effective scopes.
+      if (frame.method === "initialize" && this.identity?.scopes !== undefined) {
+        const requested = (frame as { params?: { scopes?: readonly string[] } }).params?.scopes;
+        if (requested !== undefined) {
+          this.identity = {
+            ...this.identity,
+            // Cover-aware (glob claims survive narrowing to their
+            // members; review finding: exact-string intersection locked
+            // out any glob-claim client). Narrowing-only in both
+            // directions by construction.
+            scopes: intersectScopes(this.identity.scopes, requested),
+          };
+        }
+      }
       return dispatchRequest(
         this.gateway,
         frame as JsonRpcRequest,

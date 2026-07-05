@@ -1231,6 +1231,7 @@ export class AppHarness<P = unknown>
       tasks,
       target: this.target,
       defaultMaxTicks: input.maxTicks ?? this.sessionDefaults.defaultMaxTicks ?? 8,
+      ...(input.requiredScopes !== undefined ? { requiredScopes: input.requiredScopes } : {}),
       // Streaming cascade: per-session input.streaming > app-level
       // streamingDefault (sessionDefaults.defaultStreaming) > undefined
       // (executor-capability default resolved per-send in SessionHarness).

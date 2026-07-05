@@ -303,6 +303,20 @@ export interface InitializeParams extends WireRequestParams {
   readonly protocolVersion: "v1";
   readonly capabilities: ClientHandshakeCapabilities;
   readonly clientInfo: { readonly name: string; readonly version: string };
+  /**
+   * Scopes this client intends to use (#198, least privilege). The
+   * connection's effective identity scopes become the cover-aware
+   * INTERSECTION of the credential's claims and this request — a client
+   * cannot widen its grants, only narrow its own blast radius. Omitted
+   * = the credential's claims apply unnarrowed.
+   *
+   * Effective on transports that establish a connection identity
+   * (WebSocket today); HTTP/UDS connections are currently anonymous
+   * (TODO(trail-http-per-request-auth)) so there is nothing to narrow.
+   * Meaningful under claims-consuming authorizers; the grant-table
+   * staticAuthorizer ignores identity scopes by design.
+   */
+  readonly scopes?: readonly string[];
 }
 
 export interface InitializeResult {
