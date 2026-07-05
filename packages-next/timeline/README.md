@@ -3,7 +3,7 @@
 **The timeline IS the conversation.** One append-only log per session —
 every user message, every model generation, every tool result, every
 turn — durable, replayable, and rendered back to the model on every
-tick. Agentick's core bet is that context is *re-rendered from facts*
+tick. Agentick's core bet is that context is _re-rendered from facts_
 each tick rather than accumulated in a prompt string, and the timeline
 is where those facts live.
 
@@ -32,14 +32,14 @@ type into the void — a bug class severe enough that the reconciler now
 emits a `timeline-not-rendered` diagnostic when the timeline holds
 messages no component rendered. This inversion is deliberate: the
 component boundary is where filtering, compaction, and formatting
-become *your* declarative choices instead of framework policy.
+become _your_ declarative choices instead of framework policy.
 
 ## Consumption semantics (ADR 53 — offsets, not tiers)
 
 There is no pending queue. Input **appends the moment it arrives** —
 at `send()` and mid-execution — and consumption is **non-destructive**:
 every tick re-renders the whole log, so nothing is ever "consumed away."
-The distinctions other frameworks model as tiers are *derived facts*:
+The distinctions other frameworks model as tiers are _derived facts_:
 
 - **`trailingInput()`** — input entries after the last assistant entry
   (the structural "not yet replied to" set; style it, prompt resume
@@ -74,16 +74,19 @@ const same = await session.send({ messages: [{ role: "user", content: "wait — 
 control of what the model sees, per entry, per block**. The canonical
 adopter pattern (ported from ernesto's `KnowifyTimeline`): current-turn
 and assistant content verbatim, old heavy tool results collapsed to
-*references the model can chase*:
+_references the model can chase_:
 
 ```tsx
 import { useState } from "react";
 import { Timeline } from "@agentick/timeline-next/react";
-import { Message, Text, useOnExecutionStart } from "@agentick/reconciler-react-next";
+import { Message, useOnExecutionStart } from "@agentick/reconciler-next/react";
 
 const edges = (t: string) =>
   t.length <= 280 ? t : `${t.slice(0, 140)}\n…\n${t.slice(-140)}`;
 
+// v2 has no <Text> component — content blocks are the currency. Build a
+// ContentBlock[] and pass it via the `content` prop (verified by
+// integration-with-reconciler.spec.tsx "README reference pattern").
 export function ReferenceTimeline() {
   // Provenance beats clock math: the framework stamps
   // metadata.executionId on every entry it produces (ADR 53) — "is this
@@ -94,7 +97,7 @@ export function ReferenceTimeline() {
 
   return (
     <Timeline maxTokens={100_000} strategy="sliding-window" preserveRoles={["system", "user"]}>
-      {(entries) =>
+      {(entries) => {
         entries.map(({ message }) => {
           // ICL safety: assistant output ALWAYS verbatim — summarized
           // assistant turns teach the model to produce summaries.
@@ -108,25 +111,20 @@ export function ReferenceTimeline() {
           // block's metadata; pair with a read_file tool and the model
           // can look the result up ON DEMAND instead of carrying it in
           // every context.
-          return (
-            <Message key={message.id} role={message.role}>
-              {message.content.map((block, i) => {
-                if (block.type === "tool_result") {
-                  const ref = (block as { metadata?: { file?: { path: string; bytes: number } } })
-                    .metadata?.file;
-                  return (
-                    <Text key={i}>
-                      {ref
-                        ? `[${block.name}] full result at ${ref.path} (${ref.bytes}B) — read_file if needed`
-                        : `[${block.name}] ${edges(textOf(block))}`}
-                    </Text>
-                  );
-                }
-                if (block.type === "text") return <Text key={i}>{edges(block.text)}</Text>;
-                return <Text key={i}>{`[${block.type}]`}</Text>;
-              })}
-            </Message>
-          );
+          const content = message.content.map((block) => {
+            if (block.type === "tool_result") {
+              const ref = block.metadata?.file; // { path, bytes } stamped by the tool layer
+              return {
+                type: "text" as const,
+                text: ref
+                  ? `[${block.name}] full result at ${ref.path} (${ref.bytes}B) — read_file if needed`
+                  : `[${block.name}]`,
+              };
+            }
+            if (block.type === "text") return { type: "text" as const, text: edges(block.text) };
+            return { type: "text" as const, text: `[${block.type}]` };
+          });
+          return <Message key={message.id} role={message.role} content={content} />;
         })
       }
     </Timeline>
@@ -147,10 +145,10 @@ cache-stable.
 
 ## Two tiers, one truth
 
-| Tier | What it is |
-| --- | --- |
-| **Persisted log** | Append-only ground truth. Never rewritten. |
-| **Projection** | The model-visible view. `compact()` rewrites it (fold, summarize, evict) — the log is untouched, so compaction is always reversible re-derivation. |
+| Tier              | What it is                                                                                                                                         |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Persisted log** | Append-only ground truth. Never rewritten.                                                                                                         |
+| **Projection**    | The model-visible view. `compact()` rewrites it (fold, summarize, evict) — the log is untouched, so compaction is always reversible re-derivation. |
 
 `<Timeline/>` renders the projection. `readPersisted()` is the
 uncompacted record. `history({ fromSeq, limit })` pages the durable log
@@ -180,13 +178,13 @@ eval/replay loop).
 ## API sketch
 
 ```ts
-session.timeline.read()            // projection snapshot { entries, version }
-session.timeline.readPersisted()   // the uncompacted log
-session.timeline.trailingInput()   // input after the last assistant entry
-session.timeline.append(...e)      // admin/import path (bypasses the loop)
-session.timeline.compact(strategy) // rewrite the projection; log untouched
-session.timeline.history(opts)     // seq-cursored durable reads (store-optional)
-session.timeline.subscribe(fn)     // any projection/log mutation
+session.timeline.read(); // projection snapshot { entries, version }
+session.timeline.readPersisted(); // the uncompacted log
+session.timeline.trailingInput(); // input after the last assistant entry
+session.timeline.append(...e); // admin/import path (bypasses the loop)
+session.timeline.compact(strategy); // rewrite the projection; log untouched
+session.timeline.history(opts); // seq-cursored durable reads (store-optional)
+session.timeline.subscribe(fn); // any projection/log mutation
 ```
 
 Declared commands (ADR 51): `timeline:append`, `timeline:compact`
