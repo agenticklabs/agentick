@@ -68,16 +68,6 @@ describe("TimelineHarness — write-behind (default)", () => {
     expect(ids(await store.load(h.id))).toEqual(["a"]);
   });
 
-  it("persists drained pending entries too (drain routes through the same append path)", async () => {
-    const store = new MemoryTimelineStore();
-    const h = stubTimelineHarness([], { store });
-    await h.queue({ role: "user", content: [{ type: "text", text: "hi" }] });
-    await h.drain();
-    await h.flush();
-    const loaded = await store.load(h.id);
-    expect(loaded).toHaveLength(1);
-  });
-
   it("reports the store's backend identifier", () => {
     const h = stubTimelineHarness([], { store: new MemoryTimelineStore() });
     expect(h.backend).toBe("memory");

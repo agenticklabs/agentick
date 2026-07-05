@@ -295,12 +295,12 @@ function noopTimelineHandle(): TimelineHandle {
   return {
     read: () => ({ entries: [], version: 0 }),
     readPersisted: () => [],
-    readPending: () => [],
+    unansweredInput: () => [],
+    inputEntryCount: () => 0,
+    endTurn: async () => {},
     history: async () => [],
     subscribe: () => unsubscribe,
     append: async () => {},
-    queue: async () => ({ ids: [] }),
-    drain: async () => ({ entries: [] }),
     compact: async (strategy) => ({
       entriesBefore: 0,
       entriesAfter: 0,

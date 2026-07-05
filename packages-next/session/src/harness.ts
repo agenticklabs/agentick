@@ -59,7 +59,6 @@ import {
   DEFAULT_JOURNALING_POLICY,
   ExecutionFailed,
   HandlerError,
-  SessionBusyError,
   SessionClosedError,
   SPEC_VERSION,
   TimelineWriteFailed,
@@ -67,6 +66,7 @@ import {
 import { mergeLayered, omitUndefined } from "@agentick/utils-next";
 import { buildSessionElicit } from "@agentick/elicitation-next";
 import { withScope } from "@agentick/tool-executor-next";
+import { mergeUsageStats } from "@agentick/model-next";
 import type { KnobsHandle } from "@agentick/knobs-next";
 import type { StateHandle } from "@agentick/state-next";
 import type { TimelineHandle, TimelineHarnessOptions } from "@agentick/timeline-next";
@@ -245,6 +245,12 @@ export class SessionHarness<P = unknown>
   private _closed = false;
   private _mountReady: Promise<void>;
   private _currentExecution: Promise<unknown> | null = null;
+  /** In-flight handle — join target for steering sends (ADR 53 §5). */
+  private _currentHandle: import("@agentick/spec-next").SessionExecutionHandle | null = null;
+  /** The running turn's aggregate usage — the boundary record's payload. */
+  private _executionUsage: import("@agentick/spec-next").UsageStats | undefined;
+  /** Input entries the running execution has observed (ADR 53 live check). */
+  private _inputEntriesSeen = 0;
 
   /**
    * Construct a SessionHarness.
@@ -526,10 +532,16 @@ export class SessionHarness<P = unknown>
   }
 
   async notifyLifecycle(_input: NotifyTickEndInput): Promise<TickEndForwardDecision> {
-    // Phase 4e default: forward the tick-end to the reconciler so
-    // any `useOnTickEnd` hooks fire, but don't override the loop's
-    // continuation decision yet. Verdict-merge with in-tree hooks
-    // arrives in a follow-on.
+    // ADR 53 continuation predicate — LIVE, in-memory, load-bearing
+    // nothing durable: input entries appended since this execution's
+    // last-observed count mean the next render has new user input →
+    // continue the loop (steering). Crashes never auto-resume, so no
+    // durability is needed here.
+    const count = this.bridges.timeline.inputEntryCount();
+    if (count > this._inputEntriesSeen) {
+      this._inputEntriesSeen = count;
+      return { kind: "continue" };
+    }
     return undefined;
   }
 
@@ -753,29 +765,23 @@ export class SessionHarness<P = unknown>
     if (this._closed) {
       throw new SessionClosedError({ attemptedCommand: "send" });
     }
-    if (this._currentExecution !== null) {
-      throw new SessionBusyError({
-        reason: "another execution is in flight (single-execution semantics in 4e MVP)",
-      });
-    }
-
     await this._mountReady;
 
-    // Queue new input messages onto pending, then drain (below) so the
-    // model sees them. Pending itself is NOT rendered — the <Timeline/>
-    // component reads the projection, not pending — so a message only
-    // reaches the model once drained into the projection.
-    for (const m of input.messages ?? []) await this.queueInputMessage(m);
+    // JOIN semantics (ADR 53 §5, ratified): a send() while an execution
+    // is running is STEERING — append the messages (visible next tick
+    // via the continuation predicate + <Timeline/>) and return the
+    // in-flight handle. The steering path IS the running turn.
+    if (this._currentExecution !== null && this._currentHandle !== null) {
+      for (const m of input.messages ?? []) await this.appendInputMessage(m);
+      return this._currentHandle;
+    }
 
-    // Drain all pending messages into the timeline before this execution
-    // starts so the loop's first tick sees them in the durable timeline
-    // (and thus the projection <Timeline/> renders). Messages queued
-    // mid-execution stay in pending until the NEXT sendBody drains them
-    // — they are invisible to the model for the current execution.
-    // TODO(trail-pending-render): per-tick drain (or reviving v1-style
-    // pending rendering) would make mid-execution queues visible sooner
-    // — see ADR 26 Step 6+.
-    await this.bridges.timeline.drain();
+    // Input appends the moment it arrives (ADR 53 §2.1) — no queue, no
+    // drain. The first tick's render sees it via <Timeline/>.
+    for (const m of input.messages ?? []) await this.appendInputMessage(m);
+
+    // ADR 53: the first render will include everything appended so far.
+    this._inputEntriesSeen = this.bridges.timeline.inputEntryCount();
 
     const executionId = `exec:${ulid()}`;
     this.store.setCurrentExecutionId(executionId);
@@ -812,6 +818,7 @@ export class SessionHarness<P = unknown>
       resultDeferred.reject = reject;
     }).finally(() => {
       this._currentExecution = null;
+      this._currentHandle = null;
       this.store.setCurrentExecutionId(null);
       this.store.setStatus(durabilityFailed ? "failed" : "idle");
     });
@@ -852,6 +859,7 @@ export class SessionHarness<P = unknown>
             applyToolResults: (i) => this.applyToolResults(i).then(() => undefined),
             appendEntry: (i) => this.appendEntry(i).then(() => undefined),
           },
+          notifyTickEnd: (i) => this.notifyLifecycle(i),
           maxTicks: input.maxTicks ?? this.defaultMaxTicks,
           stream: streamForCall,
           onEvent,
@@ -860,6 +868,8 @@ export class SessionHarness<P = unknown>
     );
 
     this._currentExecution = runPromise;
+    this._currentHandle = handle;
+    this._executionUsage = undefined;
 
     // Resolve the result promise + emit the final `result` StreamEvent
     // when the loop terminates. Iterator closes after the result event.
@@ -871,6 +881,16 @@ export class SessionHarness<P = unknown>
         // divergence: fail the send with the typed TimelineWriteFailed
         // (catchTag-able) and land the session on "failed" status —
         // it must not keep running against a log its store doesn't have.
+        // ADR 53: emit the turn-boundary RECORD (segmentation +
+        // turn-aggregate usage; load-bearing nowhere) before the flush
+        // barrier so it rides the same durability guarantee.
+        await this.bridges.timeline
+          .endTurn({
+            executionId,
+            outcome: terminal.outcome === "succeeded" ? "succeeded" : "aborted",
+            ...omitUndefined({ usage: this._executionUsage }),
+          })
+          .catch(() => {});
         try {
           await this.bridges.timeline.flush();
         } catch (err) {
@@ -908,6 +928,13 @@ export class SessionHarness<P = unknown>
         // still runs so a completed-but-unflushed prefix lands in the
         // store (best-effort — a flush failure here latches "failed"
         // status but does not mask the execution error).
+        await this.bridges.timeline
+          .endTurn({
+            executionId,
+            outcome: "failed",
+            ...omitUndefined({ usage: this._executionUsage }),
+          })
+          .catch(() => {});
         try {
           await this.bridges.timeline.flush();
         } catch {
@@ -1010,9 +1037,20 @@ export class SessionHarness<P = unknown>
       const id = await this.appendMessageEntry({
         role: "assistant",
         content: input.result.output,
+        // ADR 53 §2.2: one tick = one generation = one assistant entry;
+        // stamp provenance + the GENERATION's usage on the record.
+        metadata: {
+          executionId: input.executionId,
+          tickId: input.tickId,
+          ...omitUndefined({ usage: input.result.usage }),
+        },
       });
       ids.push(id);
     }
+    this._executionUsage =
+      this._executionUsage && input.result.usage
+        ? mergeUsageStats(this._executionUsage, input.result.usage)
+        : (input.result.usage ?? this._executionUsage);
     this.store.addUsage(input.result.usage);
     this.store.bumpTick();
     return { appendedEntryIds: ids };
@@ -1033,6 +1071,7 @@ export class SessionHarness<P = unknown>
         content: [block],
         toolCallId: tr.toolCallId,
         name: tr.toolName,
+        metadata: { executionId: input.executionId, tickId: input.tickId },
       });
       ids.push(id);
     }
@@ -1048,22 +1087,18 @@ export class SessionHarness<P = unknown>
   }
 
   /**
-   * Route a user-input message into the pending queue. The message is
-   * NOT yet visible to the model: the `<Timeline/>` component renders
-   * the projection, not `readPending()`. The message reaches the model
-   * only after it is drained into log + projection, which happens at
-   * the start of the next `sendBody` via `bridges.timeline.drain()`.
-   * TODO(trail-pending-render): see the drain call in `sendBody`.
+   * Append a user-input message directly to the timeline (ADR 53 §2.1)
+   * — the user's words are a fact the moment they arrive. Input carries
+   * no execution provenance (it wasn't produced BY an execution).
    */
-  private async queueInputMessage(m: SendMessageInput): Promise<void> {
+  private async appendInputMessage(m: SendMessageInput): Promise<void> {
     const content =
       typeof m.content === "string" ? [{ type: "text" as const, text: m.content }] : m.content;
-    await this.bridges.timeline.queue({
+    await this.appendMessageEntry({
       role: m.role,
       content,
       ...omitUndefined({ metadata: m.metadata }),
     });
-    // Single-input call → result.ids has length 1; caller doesn't need it.
   }
 
   /**

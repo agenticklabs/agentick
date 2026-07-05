@@ -119,6 +119,15 @@ export interface RunExecutionInput {
   readonly stateApplicator: StateApplicator;
 
   /** Bound on the number of ticks. Required — no implicit default. */
+  /**
+   * Tick-end forwarding (ADR 53): the session's continuation predicate.
+   * `{ kind: "continue" }` keeps the loop ticking even when the model
+   * stopped (steering — new input arrived mid-execution); `stop` forces
+   * termination; undefined defers to the default policy.
+   */
+  readonly notifyTickEnd?: (
+    input: import("./session-harness.js").NotifyTickEndInput,
+  ) => Promise<import("./session-harness.js").TickEndForwardDecision>;
   readonly maxTicks: number;
 
   /** Optional caller abort. The harness also exposes an inbox `halt` message. */

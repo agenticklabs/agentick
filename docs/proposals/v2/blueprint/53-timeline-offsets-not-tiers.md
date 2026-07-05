@@ -1,6 +1,10 @@
 # ADR 53 — Offsets, not tiers: timeline consumption semantics
 
-**Status:** RATIFIED 2026-07-05 (Ryan) — incl. §5 join semantics; boundary reframed as TURN boundary (conversation-domain)
+**Status:** RATIFIED 2026-07-05 (Ryan) — SIMPLIFIED same day: consumption
+is NON-DESTRUCTIVE (the loop re-renders the whole log every tick), so
+there is NO committed offset and the boundary entry is NON-LOAD-BEARING
+emitted data. The Kafka-offset framing in earlier sections is
+superseded by §2.3-2.4 as amended; retained for design history.
 **Date:** 2026-07-04
 **Depends on:** ADR 49 (stores-not-snapshots, fold = re-render), #133/#168
 (frozen `seq`), ADR 51 (command registry; verb deletions), ADR 48 §5
@@ -166,6 +170,29 @@ Only `outcome: "succeeded"` boundaries advance the offset. Failed and
 aborted executions append their boundary (the *attempt* is a fact — it
 carries usage and segmentation) but do not commit consumption.
 
+### 2.3b SIMPLIFICATION (ratified 2026-07-05) — non-destructive consumption
+
+The Kafka analogy fails in the way that matters: Kafka consumers SKIP
+committed messages; our loop re-renders the ENTIRE log every tick.
+Consumption is non-destructive, so no offset is ever load-bearing:
+
+- **Continuation (steering)** is a LIVE in-memory check — "did input
+  entries append since this execution last rendered?" (session-tracked
+  count; no durability needed — crashes never auto-resume executions).
+- **"Unanswered input"** derives from Ryan's fold: input entries after
+  the LAST ASSISTANT entry. (Precision: multi-tick turns append one
+  assistant entry PER TICK/generation; "after the last" still detects
+  unanswered correctly.)
+- **Crash-retry** is automatic: the next send renders everything.
+- **The turn-boundary entry is a pure RECORD** — turn segmentation,
+  outcome, turn-aggregate usage (#186's carrier incl. the
+  paid-but-unmaterialized diagnostic). Default-emitted, one-boolean
+  opt-out (`timeline.turnBoundaries: false`), read by NOTHING for
+  behavior. Adopters who want the model failure-aware append their own
+  messages.
+- The §2.4 atomic check-and-append EVAPORATES — nothing commits, so
+  there is no sharp edge. `_committedOffset` does not exist.
+
 ### 2.4 The continuation predicate
 
 The seam already exists: `TickEndForwardDecision`
@@ -269,6 +296,12 @@ Wave 3 (delegable): VERB-MATRIX + ADR 49/51 cross-reference updates;
 examples gain a steering demo.
 
 ## 5. Open questions (non-blocking)
+
+- TODO(trail-entry-kinds): the entry union SHOULD grow richer kinds —
+  today `kind: "message"` conflates true conversation messages with
+  system events (`role: "event"`). Deliberately NOT pulled now (Ryan,
+  2026-07-05: "unravels too much for no real value" yet); the boundary
+  kind establishes the union pattern future kinds follow.
 
 - Boundary entries for **spawned/child sessions** — same mechanism per
   session (each session is its own consumer); cross-session

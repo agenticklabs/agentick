@@ -143,18 +143,12 @@ describe("SessionHarness — dispatch (host-side tool invocation)", () => {
 });
 
 describe("SessionHarness — timeline handle (top-level)", () => {
-  it("queue + drain on send: queued user messages land in the timeline at execution start", async () => {
+  it("send() appends input directly; unansweredInput follows the assistant fold (ADR 53)", async () => {
     const { session } = await mkSession();
-    await session.timeline.queue({
-      role: "user",
-      content: [{ type: "text", text: "hello" }],
+    const handle = await session.send({
+      messages: [{ role: "user", content: "hello" }],
     });
-    expect(session.timeline.readPending().length).toBe(1);
-    await (
-      await session.send({ messages: [] })
-    ).result;
-    expect(session.timeline.readPending().length).toBe(0);
-
+    await handle.result;
     const userTexts = session.timeline
       .read()
       .entries.filter((e) => e.kind === "message" && e.message.role === "user")
@@ -162,6 +156,14 @@ describe("SessionHarness — timeline handle (top-level)", () => {
       .filter((b): b is { type: "text"; text: string } => b.type === "text")
       .map((b) => b.text);
     expect(userTexts).toContain("hello");
+    // The scripted executor answered — nothing is unanswered.
+    expect(session.timeline.unansweredInput()).toEqual([]);
+    // A turn-boundary RECORD was emitted at execution end.
+    const boundaries = session.timeline.readPersisted().filter((e) => e.kind === "boundary");
+    expect(boundaries.length).toBe(1);
+    if (boundaries[0]!.kind === "boundary") {
+      expect(boundaries[0]!.boundary.outcome).toBe("succeeded");
+    }
     await session.close();
   });
 
@@ -183,23 +185,17 @@ describe("SessionHarness — timeline handle (top-level)", () => {
     await session.close();
   });
 
-  it("subscribe fires on queue, append, and drain", async () => {
+  it("subscribe fires on append", async () => {
     const { session } = await mkSession();
     let notifications = 0;
     const unsub = session.timeline.subscribe(() => {
       notifications += 1;
     });
-    await session.timeline.queue({
-      role: "user",
-      content: [{ type: "text", text: "q1" }],
-    });
-    expect(notifications).toBeGreaterThanOrEqual(1);
-    const before = notifications;
     await session.timeline.append({
       kind: "message",
       message: { id: "m-app", role: "user", content: [{ type: "text", text: "a1" }], ts: 0 },
     });
-    expect(notifications).toBeGreaterThan(before);
+    expect(notifications).toBeGreaterThanOrEqual(1);
     unsub();
     await session.close();
   });
@@ -363,5 +359,94 @@ describe("SessionHarness — spawn", () => {
     // The returned value is the child session (no auto-send).
     expect(child).toBeDefined();
     await session.close();
+  });
+});
+
+describe("steering — send() during a running execution (ADR 53)", () => {
+  it("joins the in-flight handle and the loop continues to answer the new input", async () => {
+    const { session, tools } = await mkSession();
+    // Two scripted generations + a gate holding tick 1 open so the
+    // steering send can land mid-execution.
+    const exec = new FakeLanguageModelExecutor(
+      `exec-steer-${Math.random()}`,
+      new MemoryJournal(),
+      new LocalEventBus(),
+      new LocalInbox(),
+      {
+        scripted: [
+          {
+            result: {
+              specVersion: "2026-05-08",
+              output: [{ type: "text", text: "first answer" }],
+              stopReason: "end",
+              usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+            },
+          },
+          {
+            result: {
+              specVersion: "2026-05-08",
+              output: [{ type: "text", text: "steered answer" }],
+              stopReason: "end",
+              usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+            },
+          },
+        ],
+      },
+    );
+    await exec.ready;
+    let releaseTick1!: () => void;
+    const gate = new Promise<void>((r) => {
+      releaseTick1 = r;
+    });
+    // The loop takes the streaming path when the executor exposes
+    // executeStream — gate BOTH entry points and count generations.
+    let runCalls = 0;
+    const origRun = exec.run.bind(exec);
+    (exec as { run: typeof exec.run }).run = async (i) => {
+      runCalls += 1;
+      if (runCalls === 1) await gate;
+      return origRun(i);
+    };
+    const origStream = exec.executeStream.bind(exec);
+    (exec as { executeStream: typeof exec.executeStream }).executeStream = (i) => {
+      runCalls += 1;
+      const inner = origStream(i);
+      if (runCalls === 1) {
+        const gatedResult = gate.then(() => inner.result);
+        return new Proxy(inner, {
+          get: (t, k) => (k === "result" ? gatedResult : Reflect.get(t, k)),
+        });
+      }
+      return inner;
+    };
+
+    const handle1 = await session.send({
+      messages: [{ role: "user", content: "original ask" }],
+      executor: exec,
+    });
+    // Steering: a second send while tick 1 is in flight JOINS.
+    const handle2 = await session.send({
+      messages: [{ role: "user", content: "wait — also do this" }],
+    });
+    expect(handle2).toBe(handle1);
+
+    releaseTick1();
+    const result = await handle1.result;
+
+    // The loop continued: two generations ran, the second answered the
+    // steering input.
+    expect(runCalls).toBe(2);
+    expect(result.response).toContain("steered answer");
+    // Both user messages are in the log; nothing is unanswered.
+    const users = session.timeline
+      .read()
+      .entries.filter((e) => e.kind === "message" && e.message.role === "user");
+    expect(users).toHaveLength(2);
+    expect(session.timeline.unansweredInput()).toEqual([]);
+    // Exactly one turn: one boundary record, outcome succeeded.
+    const boundaries = session.timeline.readPersisted().filter((e) => e.kind === "boundary");
+    expect(boundaries).toHaveLength(1);
+    await session.close();
+    await tools.close();
   });
 });

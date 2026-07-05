@@ -69,7 +69,7 @@ import {
   PromptsBackendError,
 } from "@agentick/spec-next";
 import { createKeyedNotifier, type KeyedNotifier } from "@agentick/pubsub-next";
-import { omitUndefined } from "@agentick/utils-next";
+import { omitUndefined, ulid } from "@agentick/utils-next";
 
 import type { PromptLoader } from "./loaders.js";
 import { isMessageEntryArray, stringToSystemMessage, type PromptRenderer } from "./renderer.js";
@@ -408,16 +408,23 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
           await this.resolve(input.name);
         }
         const result = await this.renderToMessages(input.name, input.args);
-        // Queue the rendered messages onto the session timeline so
-        // they drain into the durable timeline on the next send. When
-        // no timeline is wired (e.g., test setup without session),
-        // skip queueing — adopters use `get()` for that path.
+        // Append the rendered messages directly to the session timeline
+        // (ADR 53 — input appends the moment it exists; no queue/drain
+        // tier). The next render sees them via <Timeline/>. When no
+        // timeline is wired (e.g., test setup without session), skip —
+        // adopters use `get()` for that path.
         if (this.timeline) {
+          const ts = Date.now();
           for (const msg of result.messages) {
-            await this.timeline.queue({
-              role: msg.role,
-              content: msg.content,
-              ...omitUndefined({ metadata: msg.metadata }),
+            await this.timeline.append({
+              kind: "message",
+              message: {
+                id: `m_${ulid()}`,
+                role: msg.role,
+                content: msg.content,
+                ts,
+                ...omitUndefined({ metadata: msg.metadata }),
+              },
             });
           }
         }

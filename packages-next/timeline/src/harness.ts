@@ -15,8 +15,7 @@
  *     too — the natural "compacted prefix + recent" shape.
  *
  * **Invocation (ADR 51)** — every verb is a DECLARED COMMAND
- * (constructor, `this.command()`): `timeline:append`, `timeline:queue`,
- * `timeline:drain`, `timeline:replaceProjection`,
+ * (constructor, `this.command()`): `timeline:append`, `timeline:replaceProjection`,
  * `timeline:resetProjection`, and `timeline:compact` (the **signal
  * form**). One canonical string per verb is simultaneously the inbox
  * message type over `timeline:{scopeId}`, the op-name root, the authz
@@ -58,18 +57,17 @@ import type {
   Operation,
   OperationJournal,
   OperationOrigin,
-  PendingEntry,
   StandardSchemaV1,
   TimelineAppendInput,
-  TimelineDrainResult,
   TimelineEntry,
   TimelineHarnessProtocol,
   TimelineHarnessSnapshot,
   TimelineImportSnapshotOptions,
-  TimelineQueueInput,
-  TimelineQueueResult,
   TimelineReplaceProjectionInput,
   TimelineSnapshot,
+  MessageTimelineEntry,
+  TurnBoundaryEntry,
+  UsageStats,
 } from "@agentick/spec-next";
 import {
   CompactHandlerFailed,
@@ -87,6 +85,12 @@ type Cmd<I, R> = (input: I, opts?: { readonly origin?: OperationOrigin }) => Pro
  * `withX` options convention — construction types live with the runtime.
  */
 export interface TimelineHarnessOptions extends BaseHarnessOptions {
+  /**
+   * Emit a turn-boundary record at each execution end (ADR 53) —
+   * segmentation + turn-aggregate usage, load-bearing NOWHERE.
+   * Default true; set false to keep boundary rows out of your store.
+   */
+  readonly turnBoundaries?: boolean;
   /**
    * Durable backing for the persisted tier. Defaults to a bundled
    * {@link MemoryTimelineStore} (`:memory:`, lost on exit). Inject a
@@ -151,7 +155,6 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
   // ─── Storage ───
   private _persisted: TimelineEntry[] = [];
   private _projection: TimelineEntry[] = [];
-  private _pending: PendingEntry[] = [];
   private _persistedVersion = 0;
   private _projectionVersion = 0;
   private _lastCompaction?: TimelineHarnessSnapshot["lastCompaction"];
@@ -165,6 +168,8 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
   // ─── Durable backing (ADR 49) ───
   /** Append-only durable store for the persisted tier; keyed by scopeId (= sessionId). */
   private readonly store: TimelineStore;
+  /** Emit turn-boundary records (ADR 53). Default true. */
+  private readonly turnBoundaries: boolean;
   private readonly writePolicy: "behind" | "through";
   /** Write-behind buffer — entries appended to memory, not yet drained to the store. */
   private writeBuffer: TimelineEntry[] = [];
@@ -183,8 +188,6 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
 
   // ─── Declared commands (ADR 51) — assigned in the constructor ───
   private readonly appendCmd: Cmd<TimelineAppendInput, void>;
-  private readonly queueCmd: Cmd<readonly TimelineQueueInput[], TimelineQueueResult>;
-  private readonly drainCmd: Cmd<undefined, TimelineDrainResult>;
   private readonly replaceProjectionCmd: Cmd<TimelineReplaceProjectionInput, void>;
   private readonly resetProjectionCmd: Cmd<undefined, void>;
   private readonly compactCmd: Cmd<
@@ -205,6 +208,7 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
   ) {
     super("timeline", scopeId, journal, bus, inbox, options);
     this.store = options.store ?? new MemoryTimelineStore();
+    this.turnBoundaries = options?.turnBoundaries ?? true;
     this.writePolicy = options.writePolicy ?? "behind";
     this.defaultCompact = options.compact;
     // Drain buffered write-behind entries before the harness tears down —
@@ -223,16 +227,6 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
       name: "timeline:append",
       scope,
       handler: (i: TimelineAppendInput) => this.appendBody(i),
-    });
-    this.queueCmd = this.command({
-      name: "timeline:queue",
-      scope,
-      handler: (batch: readonly TimelineQueueInput[]) => this.queueBody(batch),
-    });
-    this.drainCmd = this.command({
-      name: "timeline:drain",
-      scope,
-      handler: () => this.drainBody(),
     });
     this.replaceProjectionCmd = this.command({
       name: "timeline:replaceProjection",
@@ -289,10 +283,6 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
   }
 
   // ─────────── Sync surface — pending (queued, awaiting drain) ───────────
-
-  readPending(): readonly PendingEntry[] {
-    return this._pending;
-  }
 
   // ─────────── Sync surface — log (tooling / custom compactors) ───────────
 
@@ -536,73 +526,74 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
 
   // ─────────── Async surface — pending queue (queue / drain) ───────────
 
-  queue(...inputs: TimelineQueueInput[]): Promise<TimelineQueueResult> {
-    if (inputs.length === 0) return Promise.resolve({ ids: [] });
-    return this.queueCmd(inputs);
-  }
+  // ─────────── Turn boundaries (ADR 53, simplified) ───────────
+  //
+  // Consumption is NON-DESTRUCTIVE — the loop re-renders the whole log
+  // every tick — so nothing here is load-bearing. The boundary entry is
+  // an emitted RECORD (segmentation + turn-aggregate usage); the
+  // "unanswered" fold is a derived convenience.
 
-  /** The queue command body (declared in the constructor). */
-  private queueBody(
-    batch: readonly TimelineQueueInput[],
-  ): Effect.Effect<TimelineQueueResult, never, never> {
-    return Effect.sync(() => {
-      const ts = Date.now();
-      const entries: PendingEntry[] = batch.map((m) => ({
-        id: `m_${ulid()}`,
-        role: m.role,
-        content: m.content,
-        ts,
-        ...omitUndefined({ metadata: m.metadata }),
-      }));
-      this._pending = [...this._pending, ...entries];
-      this.notify();
-      return { ids: entries.map((e) => e.id) };
-    });
-  }
-
-  drain(): Promise<TimelineDrainResult> {
-    return this.drainCmd(undefined);
+  /** Input predicate (ADR 53 §2.5) — a named constant, not config. */
+  private static isInputEntry(e: TimelineEntry): e is MessageTimelineEntry {
+    return e.kind === "message" && e.message.role === "user";
   }
 
   /**
-   * The drain command body (declared in the constructor). Error channel
-   * is TimelineWriteFailed: drain appends via the nested
-   * `timeline:append` command, so in write-through mode the store
-   * failure propagates through the drain op as the same typed error.
+   * Input entries after the LAST assistant entry — "unanswered" by
+   * Ryan's fold (ADR 53 §2.3b). UI styling and resume prompts read
+   * this; NOTHING load-bearing does. Multi-tick turns append one
+   * assistant entry per generation; "after the last" still detects
+   * unanswered correctly.
    */
-  private drainBody(): Effect.Effect<TimelineDrainResult, TimelineWriteFailed, never> {
-    return Effect.gen(this, function* () {
-      if (this._pending.length === 0) {
-        return { entries: [] as readonly TimelineEntry[] };
+  unansweredInput(): readonly MessageTimelineEntry[] {
+    let lastAssistant = -1;
+    for (let i = this._persisted.length - 1; i >= 0; i--) {
+      const e = this._persisted[i]!;
+      if (e.kind === "message" && e.message.role === "assistant") {
+        lastAssistant = i;
+        break;
       }
-      // Snapshot pending atomically (callers may add more between
-      // operations); clear it before appending so subscribers see
-      // pending=[] once the appends start.
-      const draining = this._pending;
-      this._pending = [];
-      this.notify();
+    }
+    const out: MessageTimelineEntry[] = [];
+    for (let i = lastAssistant + 1; i < this._persisted.length; i++) {
+      const e = this._persisted[i]!;
+      if (TimelineHarness.isInputEntry(e)) out.push(e);
+    }
+    return out;
+  }
 
-      const drained: TimelineEntry[] = draining.map((p) => ({
-        kind: "message",
-        message: {
-          id: p.id,
-          role: p.role,
-          content: p.content,
-          ts: p.ts,
-          ...omitUndefined({ metadata: p.metadata }),
-        },
-      }));
-      // commandEffect is the fiber-preserving nested-command path — the
-      // substrate auto-threads parentOpId onto the nested append's
-      // envelope so observers see the causality tree. One envelope
-      // covers the whole batch. SubstrateError is erased here exactly
-      // as the pre-registry appendEffect did (it still reaches callers
-      // via runHarnessProtocol at the outer boundary).
-      yield* this.commandEffect<TimelineAppendInput, void, TimelineWriteFailed>("timeline:append", {
-        entries: drained,
-      }) as Effect.Effect<void, TimelineWriteFailed, never>;
-      return { entries: drained as readonly TimelineEntry[] };
-    });
+  /** Count of input entries in the persisted log — the session's live
+   *  continuation check compares this across ticks. O(n); fine at
+   *  conversation scale, revisit with a counter if it ever shows up. */
+  inputEntryCount(): number {
+    let n = 0;
+    for (const e of this._persisted) if (TimelineHarness.isInputEntry(e)) n++;
+    return n;
+  }
+
+  /**
+   * Emit the turn-boundary RECORD (ADR 53 §2.3b) — segmentation,
+   * outcome, and the turn's aggregate usage (which may exceed the
+   * entry-sum when a tick billed tokens but appended nothing). Read by
+   * NOTHING for behavior; disable via `options.turnBoundaries: false`.
+   */
+  endTurn(input: {
+    readonly executionId: string;
+    readonly outcome: "succeeded" | "failed" | "aborted";
+    readonly usage?: UsageStats;
+  }): Promise<void> {
+    if (!this.turnBoundaries) return Promise.resolve();
+    const entry: TurnBoundaryEntry = {
+      kind: "boundary",
+      boundary: {
+        executionId: input.executionId,
+        outcome: input.outcome,
+        ...omitUndefined({ usage: input.usage }),
+      },
+      ts: Date.now(),
+      visibility: "log",
+    };
+    return this.append(entry);
   }
 
   // ─────────── Snapshot / restore ───────────

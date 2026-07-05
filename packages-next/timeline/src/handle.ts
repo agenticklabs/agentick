@@ -19,15 +19,11 @@ import type { SeqTaggedEntry } from "./store.js";
  * @see docs/proposals/v2/blueprint/27-modular-built-ins.md
  */
 
-import type { Unsubscribe } from "@agentick/spec-next";
+import type { Unsubscribe, MessageTimelineEntry, TimelineEndTurnInput } from "@agentick/spec-next";
 import type {
   CompactResult,
   CompactStrategy,
-  PendingEntry,
-  TimelineDrainResult,
   TimelineEntry,
-  TimelineQueueInput,
-  TimelineQueueResult,
   TimelineSnapshot,
 } from "@agentick/spec-next";
 
@@ -36,8 +32,10 @@ export interface TimelineHandle {
   read(): TimelineSnapshot;
   /** Read the durable append-only log (uncompacted ground truth). */
   readPersisted(): readonly TimelineEntry[];
-  /** Currently queued (not-yet-drained) messages. */
-  readPending(): readonly PendingEntry[];
+  /** Input entries after the last assistant entry — "unanswered" (ADR 53). */
+  unansweredInput(): readonly MessageTimelineEntry[];
+  /** Count of input entries in the persisted log (live continuation check). */
+  inputEntryCount(): number;
   /** Fires on any projection OR pending mutation. */
   subscribe(listener: () => void): Unsubscribe;
   /**
@@ -45,10 +43,8 @@ export interface TimelineHandle {
    * with zero args is a no-op.
    */
   append(...entries: TimelineEntry[]): Promise<void>;
-  /** Push a pending message; drain() moves it onto log + projection. */
-  queue(input: TimelineQueueInput): Promise<TimelineQueueResult>;
-  /** Move every pending entry to log + projection. Idempotent on empty. */
-  drain(): Promise<TimelineDrainResult>;
+  /** Emit the turn-boundary record (ADR 53). */
+  endTurn(input: TimelineEndTurnInput): Promise<void>;
   /** Run a strategy that rewrites the projection; log is untouched. */
   compact(strategy: CompactStrategy): Promise<CompactResult>;
   /**

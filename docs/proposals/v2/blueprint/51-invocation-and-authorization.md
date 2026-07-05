@@ -67,7 +67,7 @@ receive, the Operation envelope is the command protocol. The harness is
 **origin-indifferent**: a command from host code, tree logic, another
 node, or a wire client is the same envelope into the same mailbox with
 the same phase contract, journaling, and idempotency. Timeline already
-routes `timeline:append` / `timeline:queue` / `timeline:drain` this way;
+routes `timeline:append` / `timeline:compact` this way (queue/drain deleted by ADR 53);
 the design below removes the hand-written switches, not the mechanism.
 
 ### 1.2 The data-vs-executable boundary (load-bearing invariant)
