@@ -19,6 +19,7 @@ import type {
   FormatPurpose,
   FormatterRef,
   MCPDeclaration,
+  ModelDeclaration,
   OutputDeclaration,
   ProviderOptions,
   RenderedTree,
@@ -338,6 +339,10 @@ function foldFragments(fragments: readonly IRFragment[]): CollectResult {
   const resources: ResourceDeclaration[] = [];
   const outputs: OutputDeclaration[] = [];
   const mcps: MCPDeclaration[] = [];
+  // ADR 56: single tree-declared model per tick. Last-wins in walk order
+  // (depth-first pre-order) → nearest-scope / last-wins when a tree nests
+  // several `<model-declaration>`s.
+  let model: ModelDeclaration | undefined;
   const freeRootBlocks: ContentBlock[] = [];
   const diagnostics: FormatDiagnostic[] = [];
   const metadata: Record<string, unknown> = {};
@@ -351,6 +356,9 @@ function foldFragments(fragments: readonly IRFragment[]): CollectResult {
         break;
       case "tool-declaration":
         tools.push(frag.tool);
+        break;
+      case "model-declaration":
+        model = frag.model;
         break;
       case "resource-declaration":
         resources.push(frag.resource);
@@ -397,13 +405,14 @@ function foldFragments(fragments: readonly IRFragment[]): CollectResult {
     specVersion: SPEC_VERSION,
     ...(features.length > 0 ? { features } : {}),
     context: { entries },
-    ...(tools.length || resources.length || outputs.length || mcps.length
+    ...(tools.length || resources.length || outputs.length || mcps.length || model
       ? {
           declarations: {
             ...(tools.length ? { tools } : {}),
             ...(resources.length ? { resources } : {}),
             ...(outputs.length ? { outputs } : {}),
             ...(mcps.length ? { mcp: mcps } : {}),
+            ...(model ? { model } : {}),
           },
         }
       : {}),

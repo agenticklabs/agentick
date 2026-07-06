@@ -14,6 +14,8 @@ export { useOnError } from "./use-on-error.js";
 export { useOnMount, useOnUnmount } from "./use-on-mount.js";
 export { useOnLifecycleCustom } from "./use-on-lifecycle-custom.js";
 export { useToolBridge } from "./use-tool-bridge.js";
+export { useModelBridge } from "./use-model-bridge.js";
+export { useModelRegistration } from "./use-model-registration.js";
 
 // Note: useKnob / useTimeline / useSessionState moved to per-harness
 // /react subpaths per ADR 27. Adopters import:

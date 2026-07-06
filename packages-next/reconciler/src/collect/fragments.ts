@@ -14,6 +14,7 @@ import type {
   ContextEntry,
   FormatDiagnostic,
   MCPDeclaration,
+  ModelDeclaration,
   OutputDeclaration,
   ProviderOptions,
   ResourceDeclaration,
@@ -25,6 +26,7 @@ import type {
 export type IRFragment =
   | { readonly kind: "context-entry"; readonly entry: ContextEntry }
   | { readonly kind: "tool-declaration"; readonly tool: ToolDeclaration }
+  | { readonly kind: "model-declaration"; readonly model: ModelDeclaration }
   | { readonly kind: "resource-declaration"; readonly resource: ResourceDeclaration }
   | { readonly kind: "output-declaration"; readonly output: OutputDeclaration }
   | { readonly kind: "mcp-declaration"; readonly mcp: MCPDeclaration }

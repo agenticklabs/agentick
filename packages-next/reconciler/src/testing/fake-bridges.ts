@@ -44,6 +44,7 @@ import type {
 } from "@agentick/spec-next";
 import { createKeyedNotifier, createNotifier } from "@agentick/pubsub-next";
 import { InMemoryDataBridge } from "../bridges/in-memory-data-bridge.js";
+import { InMemoryModelBridge } from "../bridges/in-memory-model-bridge.js";
 import { omitUndefined } from "@agentick/utils-next";
 
 /**
@@ -311,6 +312,10 @@ export function fakeBridges(options: FakeBridgesOptions = {}): HookBridges {
     data: new InMemoryDataBridge({ onSettled: options.onDataSettled }),
     loop: stubLoopBridge(),
     session: stubSessionBridge(options.sessionId),
+    // ADR 56: a fresh `ModelBridge` so `fakeBridges()` callers exercising
+    // `useModelRegistration` get a real registry. Undeclared mounts never
+    // touch it (the loop falls back to its send/session executor).
+    models: new InMemoryModelBridge(),
     timeline: fakeTimelineHarness(options.timeline),
     knobs: fakeKnobsHarness(options.knobs),
     state: mockStateHarness(options.state),

@@ -952,6 +952,13 @@ export class SessionHarness<P = unknown>
             };
             return rc;
           },
+          // ADR 56 — resolve tree-declared per-tick model refs against the
+          // mount's ModelBridge. `useModelRegistration` registers models
+          // here at render time; the loop looks up `declarations.model
+          // .modelRef` per tick. No default registration — the loop's
+          // fallback (this.executor/target via executorForCall/
+          // targetForCall) covers the undeclared case.
+          resolveModel: (ref) => this.bridges.models.resolve(ref),
           maxTicks: input.maxTicks ?? this.defaultMaxTicks,
           stream: streamForCall,
           onEvent,

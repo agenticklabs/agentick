@@ -125,6 +125,19 @@ declare module "react" {
       };
 
       /**
+       * Tree-declared per-tick model (ADR 56). Compiles to
+       * `RenderedTree.declarations.model`. Distinct from `<model>` above,
+       * which drives `RenderedTree.config` (model selection + generation
+       * knobs). `useModelRegistration` renders this — adopters use the
+       * (deferred) `<Model>` sugar rather than the lowercase form.
+       */
+      "model-declaration": {
+        readonly modelRef: string;
+        readonly parameters?: Readonly<Record<string, unknown>>;
+        readonly key?: ReactKey;
+      };
+
+      /**
        * Resource declaration. Compiles to
        * `RenderedTree.declarations.resources`.
        */

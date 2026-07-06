@@ -16,6 +16,7 @@ import { resourceContributor } from "./resource.js";
 import { outputContributor } from "./output.js";
 import { mcpContributor } from "./mcp.js";
 import { modelContributor } from "./model.js";
+import { modelDeclarationContributor } from "./model-declaration.js";
 // Content blocks
 import {
   audioContributor,
@@ -51,6 +52,7 @@ export function createBuiltInRegistry(): ContributorRegistry {
   r.register(outputContributor);
   r.register(mcpContributor);
   r.register(modelContributor);
+  r.register(modelDeclarationContributor);
   // Content blocks
   r.register(imageContributor);
   r.register(documentContributor);

@@ -20,6 +20,9 @@
  */
 
 import type { Unsubscribe } from "./inbox.js";
+import type { ExecutorProtocol } from "./executor.js";
+import type { LanguageModelExecutionResult } from "../data/execution-result.js";
+import type { ExecutionTarget } from "../data/execution-target.js";
 
 export type { Unsubscribe };
 
@@ -73,6 +76,24 @@ export interface HookBridges {
    * time so they close over React-Context-derived deps.
    */
   readonly tools?: ToolBridge;
+  /**
+   * Model registration bridge — the live side of ADR 56's tree-declared
+   * per-tick model. Mirrors {@link tools} exactly: the IR carries a
+   * serializable `RuntimeDeclarations.model` (`{ modelRef, parameters }`)
+   * while the run-ready {@link RegisteredModel} (executor + target)
+   * registers here under that `modelRef`. The loop resolves the ref per
+   * tick and runs the resolved model, taking precedence over the send
+   * override and the session/app default.
+   *
+   * Exposed when the session wires a `ModelBridge` into the mount
+   * (reference impl `InMemoryModelBridge` in `@agentick/reconciler-next`).
+   * `reconciler-react`'s `useModelRegistration` registers through it at
+   * render time; whoever owns the adapter (the session default, the
+   * deferred `<Model>` sugar) constructs the `RegisteredModel`.
+   *
+   * @see docs/proposals/v2/blueprint/56-tree-declared-model-per-tick.md
+   */
+  readonly models?: ModelBridge;
   // Foundational and optional harness slots (timeline, knobs, state,
   // sandbox, mcp, ...) are added by their respective packages via
   // `declare module "@agentick/spec-next"` augmentation. They do NOT live in
@@ -414,4 +435,43 @@ export interface ToolBridge {
     validator?: import("../data/validator.js").Validator,
   ): Unsubscribe;
   unregister(handlerRef: string): void;
+}
+
+// ============================================================================
+// Model bridge — render-time model registration (ADR 56)
+// ============================================================================
+
+/**
+ * The resolved, run-ready model a `modelRef` maps to. Both fields are
+ * already spec types, so the loop executor and `reconciler-react` thread
+ * a `RegisteredModel` WITHOUT importing `@agentick/model-next` — the spec
+ * firewall holds. Post-ADR-52 there is ONE executor that consumes an
+ * adapter, so a "per-model executor" is just that one executor
+ * constructed with that model's adapter; whoever owns the adapter builds
+ * the `RegisteredModel` and registers it.
+ *
+ * @see docs/proposals/v2/blueprint/56-tree-declared-model-per-tick.md
+ */
+export interface RegisteredModel {
+  readonly executor: ExecutorProtocol<unknown, unknown, LanguageModelExecutionResult>;
+  readonly target: ExecutionTarget;
+}
+
+/**
+ * The live side of ADR 56 — the exact analogue of {@link ToolBridge}
+ * (`handlerRef` in the IR ↔ live handler on the bridge). Maps a
+ * serializable `modelRef` (carried in `RuntimeDeclarations.model`) to a
+ * live {@link RegisteredModel}. The loop's `resolveModel` closes over an
+ * instance and looks the ref up per tick.
+ *
+ * Implementations MAY accept re-registration on the same `modelRef`
+ * (last-writer wins) — needed when a component re-renders with a new
+ * captured model value.
+ *
+ * @see docs/proposals/v2/blueprint/56-tree-declared-model-per-tick.md
+ */
+export interface ModelBridge {
+  register(modelRef: string, model: RegisteredModel): Unsubscribe;
+  unregister(modelRef: string): void;
+  resolve(modelRef: string): RegisteredModel | undefined;
 }

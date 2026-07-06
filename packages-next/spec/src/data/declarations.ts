@@ -232,6 +232,33 @@ export interface MCPDeclaration {
 }
 
 // ============================================================================
+// Model declaration — tree-declared per-tick model (ADR 56)
+// ============================================================================
+
+/**
+ * The serializable model selection a render contributes to the IR (ADR
+ * 56). The `modelRef` names a {@link import("../protocol/hook-bridges.js").RegisteredModel}
+ * on the mount's {@link import("../protocol/hook-bridges.js").ModelBridge};
+ * the loop resolves it per tick and runs that model, taking precedence
+ * over the send override and the session/app default.
+ *
+ * This is the model analogue of {@link ToolDeclaration.handlerRef} — pure
+ * data across the spec firewall, the live executor+target lives on the
+ * bridge. Single per tick (one model per model call); nearest-scope /
+ * last-wins if a tree nests several declarations.
+ *
+ * `parameters` overlays the compiled tree's generation config
+ * (temperature, maxOutputTokens, …) for this tick — the same knobs
+ * `RenderedTree.config` carries.
+ *
+ * @see docs/proposals/v2/blueprint/56-tree-declared-model-per-tick.md
+ */
+export interface ModelDeclaration {
+  readonly modelRef: string;
+  readonly parameters?: Readonly<Record<string, unknown>>;
+}
+
+// ============================================================================
 // Aggregate
 // ============================================================================
 
@@ -240,4 +267,11 @@ export interface RuntimeDeclarations {
   readonly resources?: readonly ResourceDeclaration[];
   readonly outputs?: readonly OutputDeclaration[];
   readonly mcp?: readonly MCPDeclaration[];
+  /**
+   * Tree-declared model for the tick (ADR 56). Single — one model per
+   * model call. When a tree nests several `<Model>` declarations, the
+   * collector keeps the nearest-scope / last-wins one. Absent ⇒ the loop
+   * falls back to the send/session executor+target.
+   */
+  readonly model?: ModelDeclaration;
 }

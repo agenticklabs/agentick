@@ -32,6 +32,7 @@ import type {
 import type { LoopExecutorError } from "../errors/harnesses.js";
 import type { FormatterRef } from "../data/formatter.js";
 import type { ExecutorProtocol } from "./executor.js";
+import type { RegisteredModel } from "./hook-bridges.js";
 import type { ReconcilerProtocol } from "./reconciler.js";
 import type { RenderContext } from "./render-context.js";
 import type { ToolExecutorProtocol } from "./tool-executor.js";
@@ -124,6 +125,18 @@ export interface RunExecutionInput {
    */
   readonly resolveRenderContext?: () => RenderContext | undefined;
   readonly mountId: string;
+
+  /**
+   * Resolve a tree-declared model ref to its run-ready
+   * {@link RegisteredModel} (ADR 56) — symmetric with
+   * {@link resolveRenderContext}. The session supplies it, closing over
+   * the mount's {@link import("./hook-bridges.js").ModelBridge}. When a
+   * tick's IR carries `declarations.model`, the loop resolves
+   * `modelRef → RegisteredModel` and runs THAT executor + target for the
+   * tick (precedence: tick-IR > send > session). Undefined, or a ref that
+   * resolves to `undefined`, falls back to {@link executor} / {@link target}.
+   */
+  readonly resolveModel?: (modelRef: string) => RegisteredModel | undefined;
 
   /** Executor harness for the model run. */
   readonly executor: ExecutorProtocol<unknown, unknown, LanguageModelExecutionResult>;

@@ -41,6 +41,7 @@ import type {
   MessageInbox,
   OperationJournal,
   RunExecutionInput,
+  SpecConfig,
   ToolCall,
   UsageStats,
 } from "@agentick/spec-next";
@@ -227,6 +228,45 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           ...(renderContext !== undefined ? { renderContext } : {}),
         });
 
+        // ADR 56 — tree-declared per-tick model. If THIS render's IR
+        // declared a model, resolve its ref (via the session-supplied
+        // `resolveModel`, closing over the mount's ModelBridge) to the
+        // run-ready RegisteredModel and run THAT executor + target for
+        // this tick INSTEAD of input.executor/input.target. Absent, or a
+        // ref that doesn't resolve, falls back to input.executor/target —
+        // today's behavior, untouched. This IS the precedence: tick-IR >
+        // send > session.
+        //
+        // TODO(adr-56-slice-1: adapter <Model> sugar) — the adopter face
+        // (`<Model model={adapter}>` deriving {executor,target} from a
+        // live model-next adapter, then calling useModelRegistration)
+        // lands in a binding package that deps BOTH reconciler-react +
+        // model-next. Until then the ref is registered directly on the
+        // ModelBridge. See ADR 56 §Deferred (1).
+        // TODO(adr-56-slice-2: force-render activeModel) — reflecting the
+        // IR-declared model back into the render-context `activeModel`
+        // (ADR 55) needs render → resolve → re-render convergence. This
+        // per-tick EXECUTION model resolves post-render (no chicken-and-
+        // egg), so it is orthogonal to that slice. See ADR 56 §Deferred (2).
+        const modelDecl = renderResult.tree.declarations?.model;
+        const resolvedModel = modelDecl ? input.resolveModel?.(modelDecl.modelRef) : undefined;
+        const tickExecutor = resolvedModel?.executor ?? input.executor;
+        const tickTarget = resolvedModel?.target ?? input.target;
+        // `decl.parameters` overlay the compiled tree's generation config
+        // for this tick (temperature, maxOutputTokens, …) — the same
+        // knobs RenderedTree.config carries and the executor reads via
+        // buildParameters. Merge IR params over the render's config.
+        const tickCompiled =
+          modelDecl?.parameters !== undefined
+            ? {
+                ...renderResult.tree,
+                config: {
+                  ...renderResult.tree.config,
+                  ...modelDecl.parameters,
+                } as SpecConfig,
+              }
+            : renderResult.tree;
+
         // 2. Layered-tools compile (#138).
         //
         // The reconciler emitted tool declarations in `renderResult.tree
@@ -249,26 +289,26 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         //    target's capabilities don't explicitly disable it.
         const wantsStreaming =
           (input.stream ?? false) &&
-          typeof input.executor.executeStream === "function" &&
-          (input.target.capabilities?.supportsStreaming ?? true);
+          typeof tickExecutor.executeStream === "function" &&
+          (tickTarget.capabilities?.supportsStreaming ?? true);
 
         let executorTerminal: ExecutorTerminal<LanguageModelExecutionResult>;
 
-        if (wantsStreaming && input.executor.executeStream) {
+        if (wantsStreaming && tickExecutor.executeStream) {
           // Streaming path. The adapter emits AdapterDeltas (including
           // the symmetric summary events: message, content, tool-call,
           // reasoning, message-end). We forward each delta through
           // onEvent — NO loop-side synthesis on this path (adapter
           // already owns symmetric event emission).
-          const projected = await input.executor.project({
-            compiled: renderResult.tree,
-            target: input.target,
+          const projected = await tickExecutor.project({
+            compiled: tickCompiled,
+            target: tickTarget,
             scope: { sessionId: input.sessionId, executionId, tickId },
             tools: modelTools,
           });
-          const stream = input.executor.executeStream({
+          const stream = tickExecutor.executeStream({
             targetInput: projected,
-            target: input.target,
+            target: tickTarget,
             scope: { sessionId: input.sessionId, executionId, tickId },
             ...omitUndefined({ signal: input.signal }),
           });
@@ -294,17 +334,17 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
             stopReason = "executor_failed";
             break;
           }
-          const normalized = await input.executor.normalize({
+          const normalized = await tickExecutor.normalize({
             targetOutput: raw,
-            target: input.target,
+            target: tickTarget,
             scope: { sessionId: input.sessionId, executionId, tickId },
           });
           executorTerminal = { outcome: "succeeded", result: normalized };
         } else {
           // Non-streaming path: classic project → execute → normalize via run.
-          executorTerminal = await input.executor.run({
-            compiled: renderResult.tree,
-            target: input.target,
+          executorTerminal = await tickExecutor.run({
+            compiled: tickCompiled,
+            target: tickTarget,
             scope: { sessionId: input.sessionId, executionId, tickId },
             tools: modelTools,
             ...omitUndefined({ signal: input.signal }),

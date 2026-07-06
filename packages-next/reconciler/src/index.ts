@@ -90,6 +90,7 @@ export { contentPassthroughContributor } from "./collect/contributors/content-pa
 // Bridges — reference (production) impl
 export { InMemoryDataBridge } from "./bridges/in-memory-data-bridge.js";
 export type { InMemoryDataBridgeOptions } from "./bridges/in-memory-data-bridge.js";
+export { InMemoryModelBridge } from "./bridges/in-memory-model-bridge.js";
 
 // Test doubles — re-exported from the package root for ergonomics.
 // Adopters writing new tests should prefer the `@agentick/reconciler-next/testing`

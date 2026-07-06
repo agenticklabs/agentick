@@ -17,7 +17,7 @@
  * cluster nodes) can address them at `inbox://{surface}:{sessionId}:{surface}`.
  */
 
-import { InMemoryDataBridge } from "@agentick/reconciler-next";
+import { InMemoryDataBridge, InMemoryModelBridge } from "@agentick/reconciler-next";
 import { ElicitationHarness } from "@agentick/elicitation-next";
 import { KnobsHarness } from "@agentick/knobs-next";
 import { StateHarness } from "@agentick/state-next";
@@ -71,6 +71,13 @@ export interface SessionHookBridges extends HookBridges {
   readonly state: StateHarness;
   readonly tasks: TasksHarnessProtocol;
   readonly data: InMemoryDataBridge;
+  /**
+   * Model registration bridge (ADR 56). The session builds one per
+   * mount; `useModelRegistration` registers tree-declared models on it
+   * and the loop's `resolveModel` closes over it. Non-optional here (the
+   * session always wires it) even though `HookBridges.models` is optional.
+   */
+  readonly models: InMemoryModelBridge;
 }
 
 export interface BuildSessionBridgesOptions {
@@ -162,6 +169,7 @@ export function buildSessionBridges(
     elicitation,
     tasks,
     data: new InMemoryDataBridge(),
+    models: new InMemoryModelBridge(),
     loop: loopBridgeStub(),
     session: sessionBridgeFor(store),
     ...omitUndefined({ tools: options.toolBridge }),

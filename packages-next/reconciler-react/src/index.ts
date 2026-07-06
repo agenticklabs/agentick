@@ -73,6 +73,8 @@ export {
   useOnUnmount,
   useOnLifecycleCustom,
   useToolBridge,
+  useModelBridge,
+  useModelRegistration,
 } from "./react/hooks/index.js";
 export type { ContextInfo } from "./react/hooks/index.js";
 
