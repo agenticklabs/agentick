@@ -63,6 +63,7 @@ import type {
   RenderToStringPayload,
 } from "../data/reconciler-snapshot.js";
 import type { HookBridges } from "./hook-bridges.js";
+import type { RenderContext } from "./render-context.js";
 
 // ============================================================================
 // Common input fragments
@@ -94,14 +95,17 @@ export interface MountInput extends MountScopedInput {
 
   readonly sessionId: string;
   /**
-   * Current-render model info (ADR 54) — the active model's
-   * `contextWindow` (+ optional prior `usedTokens`). Resolved by the
-   * session per render; the reconciler provides it synchronously to
-   * `useContextInfo` so adaptive-compaction components react to the
-   * window WHILE producing the IR. `contextWindow` is a synchronous
-   * render input, NOT an async lifecycle observation.
+   * Per-render facts the tree reads synchronously while producing the IR
+   * (ADR 55) — the augmentable {@link RenderContext} envelope. Resolved by
+   * the session per render and provided by the reconciler as a React
+   * context. Its seeded `contextInfo` slot carries the active model's
+   * `contextWindow` (+ optional prior `usedTokens`) so adaptive-compaction
+   * components react to the window WHILE producing the IR — a synchronous
+   * render input, NOT an async lifecycle observation (ADR 54). Packages
+   * augment the envelope with further per-render facts (active model,
+   * budget, principal).
    */
-  readonly contextInfo?: { readonly contextWindow?: number; readonly usedTokens?: number };
+  readonly renderContext?: RenderContext;
   readonly executionId?: string;
 
   /** Runtime-supplied bridges. See `HookBridges`. */
@@ -171,9 +175,10 @@ export interface RenderTreeInput extends MountScopedInput {
   readonly sessionId: string;
   readonly executionId?: string;
   readonly purpose?: RenderPurpose;
-  /** Current-render model info (ADR 54) — refreshes the render-context
-   *  window for this render. See {@link MountInput.contextInfo}. */
-  readonly contextInfo?: { readonly contextWindow?: number; readonly usedTokens?: number };
+  /** Per-render facts for this render (ADR 55) — refreshes the
+   *  {@link RenderContext} envelope (window today; active model / budget /
+   *  principal via augmented slots). See {@link MountInput.renderContext}. */
+  readonly renderContext?: RenderContext;
   /**
    * Stability budget. The render-until-stable loop terminates with a
    * `max-iterations` diagnostic when exceeded. Default: 10.
@@ -282,6 +287,8 @@ export type LifecycleEvent =
   | LifecycleTickEnd
   | LifecycleExecutionStart
   | LifecycleExecutionEnd
+  | LifecycleToolStart
+  | LifecycleToolEnd
   | LifecycleError
   | LifecycleCustom;
 
@@ -319,6 +326,39 @@ export interface LifecycleExecutionEnd {
    * executor protocol (typically the canonical `CommandOutcome`).
    */
   readonly outcome: unknown;
+  readonly metadata?: Readonly<Record<string, unknown>>;
+}
+
+/**
+ * A tool dispatch STARTED. Backward-looking (the dispatch is already
+ * under way when the loop bridges this) — drives spinners, scratchpad
+ * "searching…" affordances, per-tool side-effects. Lights up
+ * `useOnToolStart`. `via` records how the call was initiated
+ * (`"model"` | `"dispatch"` | …).
+ */
+export interface LifecycleToolStart {
+  readonly kind: "tool-start";
+  readonly tickId: string;
+  readonly callId: string;
+  readonly name: string;
+  readonly via: string;
+  readonly executionId?: string;
+  readonly metadata?: Readonly<Record<string, unknown>>;
+}
+
+/**
+ * A tool dispatch FINISHED. Carries the terminal `outcome` and
+ * `durationMs`. Lights up `useOnToolEnd` (inject corrective context on
+ * failure, record results after a search).
+ */
+export interface LifecycleToolEnd {
+  readonly kind: "tool-end";
+  readonly tickId: string;
+  readonly callId: string;
+  readonly name: string;
+  readonly outcome: "succeeded" | "failed";
+  readonly durationMs: number;
+  readonly executionId?: string;
   readonly metadata?: Readonly<Record<string, unknown>>;
 }
 

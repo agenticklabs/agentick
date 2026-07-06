@@ -126,6 +126,8 @@ describe("LifecycleStore — dispatch + catch-up unit tests", () => {
       "tick-end": 0,
       "execution-start": 0,
       "execution-end": 0,
+      "tool-start": 0,
+      "tool-end": 0,
       error: 1,
     });
   });

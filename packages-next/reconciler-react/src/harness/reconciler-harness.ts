@@ -38,6 +38,7 @@ import type {
   ReconcilerInboxMessage,
   ReconcilerProtocol,
   ReconcilerSnapshot,
+  RenderContext,
   RenderTreeInput,
   RenderTreeResult,
   RenderToStringInput,
@@ -71,7 +72,7 @@ import {
 import { createReconciler, type FiberRoot, type Reconciler } from "../react/reconciler.js";
 import { BridgeContext } from "../react/bridge-context.js";
 import { LifecycleContext } from "../react/lifecycle-context.js";
-import { ContextInfoContext } from "../react/context-info-context.js";
+import { RenderContextContext } from "../react/render-context-context.js";
 import {
   builtInFormatters,
   formatTree,
@@ -90,9 +91,10 @@ interface MountState {
   readonly registry: ContributorRegistry;
   readonly rootScope: HostScope;
   readonly lifecycle: LifecycleStore;
-  /** Current-render model info (ADR 54 (b)) — refreshed each render from
-   *  Mount/RenderTree input; provided synchronously via ContextInfoContext. */
-  contextInfo: import("../react/context-info-context.js").RenderContextInfo | null;
+  /** Current render's RenderContext envelope (ADR 54 / 55) — refreshed
+   *  each render from Mount/RenderTree input; provided synchronously via
+   *  RenderContextContext. */
+  renderContext: RenderContext | null;
   /**
    * Captures the first render error surfaced via the host config's
    * `onUncaughtError` callback. Cleared at the start of each render
@@ -422,7 +424,7 @@ export class ReconcilerHarness extends BaseHarness<"reconciler"> implements Reco
       registry: this.registry,
       rootScope,
       lifecycle: new LifecycleStore(),
-      contextInfo: input.contextInfo ?? null,
+      renderContext: input.renderContext ?? null,
       renderError: null,
       errorBoundaryFiredInLastRender: false,
     };
@@ -485,10 +487,10 @@ export class ReconcilerHarness extends BaseHarness<"reconciler"> implements Reco
     input: RenderTreeInput,
     state: MountState,
   ): Promise<RenderTreeResult> {
-    // ADR 54 (b) — refresh the current render's model info BEFORE
-    // rendering, so useContextInfo reads THIS tick's window
-    // synchronously while the IR is produced.
-    if (input.contextInfo !== undefined) state.contextInfo = input.contextInfo;
+    // ADR 54 / 55 — refresh the current render's RenderContext envelope
+    // BEFORE rendering, so useContextInfo / useRenderContext read THIS
+    // render's facts synchronously while the IR is produced.
+    if (input.renderContext !== undefined) state.renderContext = input.renderContext;
     const maxIterations = input.maxIterations ?? DEFAULT_MAX_ITERATIONS;
     const diagnostics: ReconcileDiagnostic[] = [];
     let iterations = 0;
@@ -760,8 +762,8 @@ export class ReconcilerHarness extends BaseHarness<"reconciler"> implements Reco
         LifecycleContext.Provider,
         { value: state.lifecycle },
         React.createElement(
-          ContextInfoContext.Provider,
-          { value: state.contextInfo },
+          RenderContextContext.Provider,
+          { value: state.renderContext },
           state.element,
         ),
       ),

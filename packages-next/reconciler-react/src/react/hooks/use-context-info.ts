@@ -5,48 +5,36 @@
  *
  * ## Data source
  *
- * A pure READER over the lifecycle carrier. Lifecycle events are the
- * spec's "carriers of state that user-supplied hooks need to observe";
- * their `metadata` bag is the open-ended extension slot. This hook
- * registers `useOnTickEnd` + `useOnExecutionEnd` and reads the latest:
+ * This hook merges the seam's two channels (ADR 54 / 55):
  *
- *   - `usedTokens`     ← `metadata.usage.inputTokens` (the last
- *                        tick's / turn's input tokens; UsageStats is
- *                        stamped by the loop→reconciler lifecycle bridge)
- *   - `contextWindow`  ← `metadata.contextWindow` (pre-resolved
+ *   - `contextWindow`  ← the synchronous {@link RenderContext} envelope
+ *                        (`renderContext.contextInfo`), resolved
  *                        session-side via `effectiveModelInfo(target,
- *                        registry)` — see the STOP note below)
+ *                        registry)` — see the render-input note below.
+ *   - `usedTokens`     ← the async lifecycle bridge: registers
+ *                        `useOnTickEnd` + `useOnExecutionEnd` and reads
+ *                        the latest `metadata.usage.inputTokens` (the
+ *                        prior tick's / turn's input tokens; UsageStats
+ *                        is stamped by the loop→reconciler bridge).
  *
  * `utilization` is the `usedTokens / contextWindow` ratio in `[0, 1]`,
  * computed inline so this hook stays dependency-free (no `@agentick/
  * model-next` runtime dep). It mirrors `contextUtilization` from
- * model-next; the trivial ratio isn't worth a cross-package dep,
- * especially while `contextWindow` isn't threaded yet (below).
+ * model-next; the trivial ratio isn't worth a cross-package dep.
  *
- * ## STOP-and-report: `contextWindow` plumbing is Wave 2
+ * ## The window is a synchronous render input (ADR 54 / 55)
  *
- * The `ExecutionTarget` (and any adopter `ModelRegistry`) does NOT reach
- * the reconciler mount today: it lives on the session harness but is not
- * threaded onto `SessionBridge`, `MountInput`, `RenderTreeInput`, or the
- * lifecycle event types (all reconciler-reachable surfaces carry no
- * typed target). The v2-correct wiring mirrors v1 (`Session.
- * broadcastContextInfo` → `compiler.contextInfoStore`): the session —
- * which owns the target + adopter registry — resolves
- * `effectiveModelInfo(target, registry)` and stamps
- * `{ usage, contextWindow }` into the lifecycle event's `metadata` bag
- * (or a dedicated bridge). That producer spans `@agentick/spec-next` +
- * `@agentick/session-next` and is out of scope for this wave.
+ * The active model's `contextWindow` rides the {@link RenderContext}
+ * envelope (`renderContext.contextInfo`), NOT the async lifecycle bridge:
+ * the session — which owns the target + injected `models` registry —
+ * resolves `effectiveModelInfo(target, registry)` per render and threads
+ * it through the loop into `renderTree({ renderContext })`; the reconciler
+ * provides it via `RenderContextContext`, and this hook reads it
+ * synchronously so adaptive-compaction components react to the window
+ * WHILE producing the IR. `usedTokens` is a past fact — it rides the async
+ * tick-end / execution-end bridge (one-tick-behind is correct).
  *
- * Until then this hook reports whatever the carrier provides: with no
- * producer stamping `metadata`, it returns `{ usedTokens: 0 }` and an
- * undefined window/utilization. It lights up the moment the producer
- * lands — no hook change required.
- *
- * // TODO(wave-2): session-side producer stamps resolved
- * // { usage, contextWindow } (via effectiveModelInfo(target, registry))
- * // onto the tick-end / execution-end lifecycle metadata so this hook
- * // yields a live window + utilization.
- *
+ * @see docs/proposals/v2/blueprint/55-render-context-seam.md
  * @see packages/core/src/hooks/context-info.ts (v1 prior art)
  * @see packages-next/model/src/model-info.ts (contextUtilization / effectiveModelInfo)
  */
@@ -55,7 +43,7 @@ import { useContext, useState } from "react";
 import type { LifecycleExecutionEnd, LifecycleTickEnd, UsageStats } from "@agentick/spec-next";
 import { useOnExecutionEnd } from "./use-on-execution-end.js";
 import { useOnTickEnd } from "./use-on-tick-end.js";
-import { ContextInfoContext } from "../context-info-context.js";
+import { RenderContextContext } from "../render-context-context.js";
 
 export interface ContextInfo {
   /** Model context window in tokens; `undefined` when unknown. */
@@ -79,20 +67,20 @@ function readMetadata(
 }
 
 export function useContextInfo(): ContextInfo {
-  // The CURRENT render's window is a synchronous render input (ADR 54
-  // (b)) — read it from context, not an async lifecycle setState (which
-  // races the reconciler's sync render and never reaches this IR).
-  const rendered = useContext(ContextInfoContext);
+  // The CURRENT render's window is a synchronous render input (ADR 54 /
+  // 55) — read it from the RenderContext envelope, not an async lifecycle
+  // setState (which races the reconciler's sync render and never reaches
+  // this IR). `contextInfo` is the seeded foundational slot.
+  const rendered = useContext(RenderContextContext)?.contextInfo;
   const [observed, setObserved] = useState<{ usedTokens: number }>({ usedTokens: 0 });
 
-  // MERGE, not replace: `contextWindow` arrives at tick-START (before the
-  // render, so it's live DURING this render — the setState here drives the
-  // stabilization re-render that lets adaptive-compaction components react
-  // to a changed window before the IR freezes). `usedTokens` arrives at
-  // tick-END / execution-END (the prior turn's consumed tokens). Each
-  // updates its own field; utilization recomputes from the merged pair.
-  // Past facts (usedTokens) flow via the async lifecycle bridge —
-  // historical, non-blocking, one-tick-behind is correct.
+  // MERGE, not replace: `contextWindow` rides the RenderContext envelope
+  // (synchronous — live DURING this render, read above; a changed window
+  // reaches adaptive-compaction components before the IR freezes).
+  // `usedTokens` is a PAST fact — it arrives at tick-END / execution-END
+  // via the async lifecycle bridge (the prior turn's consumed tokens;
+  // one-tick-behind is correct). Each updates its own field; utilization
+  // recomputes from the merged pair.
   const observe = (event: LifecycleTickEnd | LifecycleExecutionEnd): void => {
     const used = readMetadata(event)?.usage?.inputTokens;
     if (used === undefined) return;

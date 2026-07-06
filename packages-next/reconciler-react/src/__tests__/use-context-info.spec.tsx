@@ -40,7 +40,7 @@ describe("useContextInfo", () => {
       sessionId: "s",
       element: React.createElement(App),
       bridges: fakeBridges(),
-      contextInfo: { contextWindow: 128000 },
+      renderContext: { contextInfo: { contextWindow: 128000 } },
     });
     await flush();
     // Window present immediately (no tick needed); no usage yet.
@@ -77,7 +77,7 @@ describe("useContextInfo", () => {
       sessionId: "s",
       element: React.createElement(App),
       bridges: fakeBridges(),
-      // no contextInfo → no window
+      // no renderContext → no window
     });
     await flush();
     expect(latest).toEqual({ usedTokens: 0 });

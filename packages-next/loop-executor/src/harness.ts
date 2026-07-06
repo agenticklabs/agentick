@@ -172,8 +172,15 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         | "vetoed"
         | "executor_failed" = "end";
 
-      // Emit execution-start to consumer (typed handle iterator).
+      // Emit execution-start to consumer (typed handle iterator) AND
+      // bridge it to the reconciler hook store (ADR 55) so
+      // useOnExecutionStart fires. Fire-and-forget — a hook throw must
+      // never fail the run (the store isolates per-listener throws).
       input.onEvent?.({ kind: "execution-start", tick: 0 });
+      void input.reconciler.notifyLifecycle({
+        mountId: input.mountId,
+        event: { kind: "execution-start", executionId },
+      });
       const executionStartedAt = Date.now();
 
       // Default continuation policy: continue when the last tick
@@ -194,28 +201,30 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         // Tick-start orchestration event (public stream).
         input.onEvent?.({ kind: "tick-start", tick: tickIndex, tickIndex });
 
+        // Resolve THIS render's RenderContext envelope (ADR 55) — the
+        // session's per-render fact producer (window today via
+        // effectiveModelInfo; future: active model, budget, principal).
+        // The loop is a dumb conduit — it threads the whole envelope into
+        // renderTree below with no per-fact knowledge.
+        const renderContext = input.resolveRenderContext?.();
+
         // Lifecycle bridge (#206) — dispatch tick-start to the reconciler
-        // hook store AWAITED, BEFORE render, carrying the current tick's
-        // model window. This is what makes useContextInfo correct DURING
-        // the render: a window change setStates the hook, the
-        // stabilization loop re-renders, and adaptive-compaction
-        // components react before the IR freezes. Without this bridge the
+        // hook store AWAITED, BEFORE render. Without this bridge the
         // entire useOn* family is inert (no producer).
-        const contextWindow = input.resolveContextWindow?.();
         await input.reconciler.notifyLifecycle({
           mountId: input.mountId,
           event: { kind: "tick-start", tickId, executionId },
         });
 
-        // 1. Render. The active model's window rides render-context
-        // (ADR 54 (b)) so useContextInfo reads it SYNCHRONOUSLY during
-        // this render — adaptive-compaction components react before the
-        // IR freezes.
+        // 1. Render. The RenderContext envelope rides render-context
+        // (ADR 54 / 55) so useContextInfo / useRenderContext read it
+        // SYNCHRONOUSLY during this render — adaptive-compaction components
+        // react before the IR freezes.
         const renderResult = await input.reconciler.renderTree({
           mountId: input.mountId,
           sessionId: input.sessionId,
           executionId,
-          ...(contextWindow !== undefined ? { contextInfo: { contextWindow } } : {}),
+          ...(renderContext !== undefined ? { renderContext } : {}),
         });
 
         // 2. Layered-tools compile (#138).
@@ -368,6 +377,20 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
             name: tc.name,
             via: "model",
           });
+          // Bridge to the reconciler hook store (ADR 55) — lights up
+          // useOnToolStart. Fire-and-forget (a hook throw must not fail
+          // the run).
+          void input.reconciler.notifyLifecycle({
+            mountId: input.mountId,
+            event: {
+              kind: "tool-start",
+              tickId,
+              callId: tc.id,
+              name: tc.name,
+              via: "model",
+              executionId,
+            },
+          });
           try {
             const dispatched = await input.toolExecutor.dispatch({
               toolCallId: tc.id,
@@ -396,6 +419,18 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
               outcome: dispatched.succeeded ? "succeeded" : "failed",
               durationMs,
             });
+            void input.reconciler.notifyLifecycle({
+              mountId: input.mountId,
+              event: {
+                kind: "tool-end",
+                tickId,
+                callId: tc.id,
+                name: tc.name,
+                outcome: dispatched.succeeded ? "succeeded" : "failed",
+                durationMs,
+                executionId,
+              },
+            });
             input.onEvent?.({
               kind: "tool-dispatch",
               tick: tickIndex,
@@ -422,6 +457,18 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
               name: tc.name,
               outcome: "failed",
               durationMs,
+            });
+            void input.reconciler.notifyLifecycle({
+              mountId: input.mountId,
+              event: {
+                kind: "tool-end",
+                tickId,
+                callId: tc.id,
+                name: tc.name,
+                outcome: "failed",
+                durationMs,
+                executionId,
+              },
             });
             input.onEvent?.({
               kind: "tool-dispatch",
@@ -547,12 +594,18 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           }
         : { outcome: "succeeded", result: runResult };
 
-      // Emit execution-end + execution summary events.
+      // Emit execution-end + execution summary events. Bridge to the
+      // reconciler hook store (ADR 55) so useOnExecutionEnd fires —
+      // fire-and-forget (a hook throw must not fail the run).
       input.onEvent?.({
         kind: "execution-end",
         tick: acc.ticks,
         stopReason,
         ...(wasAborted ? { aborted: true } : {}),
+      });
+      void input.reconciler.notifyLifecycle({
+        mountId: input.mountId,
+        event: { kind: "execution-end", executionId, outcome: terminal.outcome },
       });
       // execution summary
       void executionStartedAt;

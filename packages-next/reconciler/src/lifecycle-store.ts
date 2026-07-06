@@ -28,6 +28,8 @@ import type {
   LifecycleExecutionStart,
   LifecycleTickEnd,
   LifecycleTickStart,
+  LifecycleToolEnd,
+  LifecycleToolStart,
 } from "@agentick/spec-next";
 import { createKeyedNotifier, type KeyedNotifier } from "@agentick/pubsub-next";
 
@@ -40,6 +42,8 @@ export type LifecycleHandlerKind =
   | "tick-end"
   | "execution-start"
   | "execution-end"
+  | "tool-start"
+  | "tool-end"
   | "error";
 
 /** Map a handler kind to the narrowed event type it receives. */
@@ -51,9 +55,13 @@ type EventForKind<K extends LifecycleHandlerKind> = K extends "tick-start"
       ? LifecycleExecutionStart
       : K extends "execution-end"
         ? LifecycleExecutionEnd
-        : K extends "error"
-          ? LifecycleError
-          : never;
+        : K extends "tool-start"
+          ? LifecycleToolStart
+          : K extends "tool-end"
+            ? LifecycleToolEnd
+            : K extends "error"
+              ? LifecycleError
+              : never;
 
 type Handler<E extends LifecycleEvent> = (event: E) => void | Promise<void>;
 
@@ -65,6 +73,8 @@ export class LifecycleStore {
     "tick-end": new Set(),
     "execution-start": new Set(),
     "execution-end": new Set(),
+    "tool-start": new Set(),
+    "tool-end": new Set(),
     error: new Set(),
   };
 
@@ -182,6 +192,14 @@ export class LifecycleStore {
         for (const h of [...this.handlers["execution-end"]]) await h(event);
         return;
       }
+      case "tool-start": {
+        for (const h of [...this.handlers["tool-start"]]) await h(event);
+        return;
+      }
+      case "tool-end": {
+        for (const h of [...this.handlers["tool-end"]]) await h(event);
+        return;
+      }
       case "error": {
         for (const h of [...this.handlers.error]) await h(event);
         return;
@@ -218,6 +236,8 @@ export class LifecycleStore {
       "tick-end": this.handlers["tick-end"].size,
       "execution-start": this.handlers["execution-start"].size,
       "execution-end": this.handlers["execution-end"].size,
+      "tool-start": this.handlers["tool-start"].size,
+      "tool-end": this.handlers["tool-end"].size,
       error: this.handlers.error.size,
     };
   }

@@ -33,6 +33,7 @@ import type { LoopExecutorError } from "../errors/harnesses.js";
 import type { FormatterRef } from "../data/formatter.js";
 import type { ExecutorProtocol } from "./executor.js";
 import type { ReconcilerProtocol } from "./reconciler.js";
+import type { RenderContext } from "./render-context.js";
 import type { ToolExecutorProtocol } from "./tool-executor.js";
 
 // ============================================================================
@@ -107,19 +108,21 @@ export interface RunExecutionInput {
   /** Reconciler harness whose `mountId` the loop will render each tick. */
   readonly reconciler: ReconcilerProtocol;
   /**
-   * The active model's context window for the CURRENT tick (#206) —
-   * resolved by the session (which owns target + injected registry) via
-   * `effectiveModelInfo`. Called per tick BEFORE render and dispatched
-   * as `tick-start` lifecycle metadata so `useContextInfo` has the
-   * window DURING the render (letting adaptive-compaction components
-   * react before the IR freezes). Re-called each tick — correct when
-   * the model changes tick-to-tick.
+   * Resolve the whole {@link RenderContext} envelope for the CURRENT
+   * render (ADR 55) — the session's per-render fact producer. It owns
+   * `target` + the injected `models` registry (window today via
+   * `effectiveModelInfo`) and later folds further slots (active model,
+   * budget, principal) into the returned envelope. Called per tick BEFORE
+   * render; the loop threads the result straight into
+   * `renderTree({ renderContext })` so `useContextInfo` (and future
+   * per-slot readers) see it SYNCHRONOUSLY while producing the IR. The
+   * loop stays a dumb conduit — no per-fact knowledge.
    * // TODO(trail-per-tick-model): under #169 the active model is
    * // IR-derived (post-render); a model change then forces a re-render
    * // via the stabilization loop. Today the model is construction-bound
    * // (session.target) so this is stable across ticks.
    */
-  readonly resolveContextWindow?: () => number | undefined;
+  readonly resolveRenderContext?: () => RenderContext | undefined;
   readonly mountId: string;
 
   /** Executor harness for the model run. */

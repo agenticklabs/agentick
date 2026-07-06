@@ -24,6 +24,7 @@ export * from "./command.js";
 export * from "./channels.js";
 export * from "./reconciler.js";
 export * from "./hook-bridges.js";
+export * from "./render-context.js";
 export * from "./tool-executor.js";
 export * from "./executor.js";
 export * from "./loop-executor.js";

@@ -931,10 +931,16 @@ export class SessionHarness<P = unknown>
             appendEntry: (i) => this.appendEntry(i).then(() => undefined),
           },
           notifyTickEnd: (i) => this.notifyLifecycle(i),
-          // #206 — the active model's window for useContextInfo. Today
-          // the model is construction-bound (this.target); TODO(trail-
+          // ADR 55 — the session is the per-render fact producer. It folds
+          // every RenderContext slot it can supply; today just the active
+          // model's window (via effectiveModelInfo) into `contextInfo`.
+          // Future slots (activeModel, budget, principal) add a field here.
+          // Today the model is construction-bound (this.target); TODO(trail-
           // per-tick-model): under #169 it's IR-derived per tick.
-          resolveContextWindow: () => effectiveModelInfo(targetForCall, this.models)?.contextWindow,
+          resolveRenderContext: () => {
+            const contextWindow = effectiveModelInfo(targetForCall, this.models)?.contextWindow;
+            return contextWindow !== undefined ? { contextInfo: { contextWindow } } : undefined;
+          },
           maxTicks: input.maxTicks ?? this.defaultMaxTicks,
           stream: streamForCall,
           onEvent,
