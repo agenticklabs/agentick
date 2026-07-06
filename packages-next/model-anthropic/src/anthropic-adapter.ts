@@ -958,8 +958,7 @@ function anthropicProjectImpl(input: ProjectInput): LanguageModelInput {
   return {
     messages,
     ...(tools.length > 0 ? { tools } : {}),
-    ...(parameters !== undefined ? { parameters } : {}),
-    ...(providerOptions !== undefined ? { providerOptions } : {}),
+    ...omitUndefined({ parameters, providerOptions }),
   };
 }
 
