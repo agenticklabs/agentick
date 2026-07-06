@@ -122,14 +122,14 @@ export class LifecycleStore {
 
     if (kind === "tick-start" && this.activeTickStart && !this.firedForTickStart.has(wrapped)) {
       this.firedForTickStart.add(wrapped);
-      void wrapped(this.activeTickStart);
+      void this.invokeSafely(wrapped, this.activeTickStart);
     } else if (
       kind === "execution-start" &&
       this.activeExecutionStart &&
       !this.firedForExecutionStart.has(wrapped)
     ) {
       this.firedForExecutionStart.add(wrapped);
-      void wrapped(this.activeExecutionStart);
+      void this.invokeSafely(wrapped, this.activeExecutionStart);
     }
 
     return () => {
@@ -160,6 +160,29 @@ export class LifecycleStore {
    * with a configurable join policy. For now serial gives deterministic
    * ordering for tests + matches v1's lifecycle semantics.
    */
+  /**
+   * Invoke ONE handler in isolation. A user-supplied lifecycle observer
+   * that throws (or rejects) must never fail the run or float an
+   * unhandled rejection: the loop AWAITS `tick-start` / `tick-end`
+   * dispatch (a propagated throw would abort the tick), and the rest are
+   * fire-and-forget (a propagated throw would float). Catch, log with the
+   * kind for triage, and continue — one bad observer never takes down the
+   * loop or its siblings. Mirrors React's "an effect that throws is
+   * surfaced, not fatal" posture.
+   */
+  private async invokeSafely(handler: AnyHandler, event: LifecycleEvent): Promise<void> {
+    try {
+      await handler(event);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error(
+        `[@agentick/reconciler] a lifecycle handler for "${event.kind}" threw; ` +
+          `isolated so the run continues.`,
+        err,
+      );
+    }
+  }
+
   async dispatch(event: LifecycleEvent): Promise<void> {
     switch (event.kind) {
       case "tick-start": {
@@ -168,13 +191,13 @@ export class LifecycleStore {
         this.firedForTickStart = new Set();
         for (const h of [...this.handlers["tick-start"]]) {
           this.firedForTickStart.add(h);
-          await h(ev);
+          await this.invokeSafely(h, ev);
         }
         return;
       }
       case "tick-end": {
         this.activeTickStart = null;
-        for (const h of [...this.handlers["tick-end"]]) await h(event);
+        for (const h of [...this.handlers["tick-end"]]) await this.invokeSafely(h, event);
         return;
       }
       case "execution-start": {
@@ -183,25 +206,25 @@ export class LifecycleStore {
         this.firedForExecutionStart = new Set();
         for (const h of [...this.handlers["execution-start"]]) {
           this.firedForExecutionStart.add(h);
-          await h(ev);
+          await this.invokeSafely(h, ev);
         }
         return;
       }
       case "execution-end": {
         this.activeExecutionStart = null;
-        for (const h of [...this.handlers["execution-end"]]) await h(event);
+        for (const h of [...this.handlers["execution-end"]]) await this.invokeSafely(h, event);
         return;
       }
       case "tool-start": {
-        for (const h of [...this.handlers["tool-start"]]) await h(event);
+        for (const h of [...this.handlers["tool-start"]]) await this.invokeSafely(h, event);
         return;
       }
       case "tool-end": {
-        for (const h of [...this.handlers["tool-end"]]) await h(event);
+        for (const h of [...this.handlers["tool-end"]]) await this.invokeSafely(h, event);
         return;
       }
       case "error": {
-        for (const h of [...this.handlers.error]) await h(event);
+        for (const h of [...this.handlers.error]) await this.invokeSafely(h, event);
         return;
       }
       default: {

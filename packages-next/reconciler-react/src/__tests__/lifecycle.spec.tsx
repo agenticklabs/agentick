@@ -116,6 +116,42 @@ describe("LifecycleStore — dispatch + catch-up unit tests", () => {
     expect(calls).toBe(1);
   });
 
+  it("a throwing handler is isolated: dispatch resolves, siblings still fire", async () => {
+    // The loop AWAITS tick-start / tick-end dispatch; a propagated throw
+    // would abort the tick. A user observer that throws must never do
+    // that — it's caught, logged, and siblings still run.
+    const store = new LifecycleStore();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const seen: string[] = [];
+    store.register("tick-end", () => {
+      throw new Error("observer blew up");
+    });
+    store.register("tick-end", () => void seen.push("sibling"));
+
+    // Does NOT reject even though a handler threw.
+    await expect(
+      store.dispatch({ kind: "tick-end", tickId: "t1", result: 0 }),
+    ).resolves.toBeUndefined();
+    expect(seen).toEqual(["sibling"]);
+    expect(errorSpy).toHaveBeenCalledOnce();
+    errorSpy.mockRestore();
+  });
+
+  it("a throwing catch-up handler is isolated (register does not throw/float)", async () => {
+    const store = new LifecycleStore();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    await store.dispatch({ kind: "tick-start", tickId: "t1" });
+    // Registering mid-tick triggers catch-up; the handler throws.
+    expect(() =>
+      store.register("tick-start", () => {
+        throw new Error("catch-up blew up");
+      }),
+    ).not.toThrow();
+    await flush();
+    expect(errorSpy).toHaveBeenCalledOnce();
+    errorSpy.mockRestore();
+  });
+
   it("counts() reports registered handler totals", () => {
     const store = new LifecycleStore();
     store.register("tick-start", () => {});
