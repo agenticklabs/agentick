@@ -38,6 +38,16 @@ export interface CacheHint {
 export interface MessageMetadata {
   readonly cache?: CacheHint;
   readonly providerMetadata?: Record<string, Record<string, unknown>>;
+  /**
+   * Provenance convention (NOT a typed field — see below). Messages
+   * entering a session from an external chat surface carry their
+   * origin under `metadata.source`, typed against the module-augmentable
+   * {@link MessageSource} empty-seed interface. It lives in the open bag
+   * (this index signature) rather than as a declared field so a
+   * connector-provenance concept is never hardcoded into the
+   * foundational message shape (ADR 27 / ADR 58 §MessageSource). Readers
+   * cast `metadata.source as MessageSource`.
+   */
   readonly [key: string]: unknown;
 }
 

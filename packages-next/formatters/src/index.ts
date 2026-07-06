@@ -26,6 +26,15 @@ export { markdownFormatter } from "./markdown.js";
 export { xmlFormatter } from "./xml.js";
 export { textFormatter } from "./text.js";
 
+// Content-reduction policies (v2 home of v1's connector content-pipeline).
+export {
+  textOnlyFormatter,
+  summarizedFormatter,
+  createSummarizedFormatter,
+  createToolSummarizer,
+  type ToolSummarizer,
+} from "./content-policy.js";
+
 // Tree-level IR → string serialization. The single entry point for
 // "I have a RenderedTree, give me the final formatted string."
 // Both `ReconcilerHarness.renderToString` and

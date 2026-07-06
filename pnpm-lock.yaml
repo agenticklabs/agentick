@@ -523,6 +523,40 @@ importers:
         specifier: ^8.5.10
         version: 8.18.1
 
+  packages-next/connector:
+    dependencies:
+      '@agentick/formatters-next':
+        specifier: workspace:*
+        version: link:../formatters
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../spec
+      '@agentick/utils-next':
+        specifier: workspace:*
+        version: link:../utils
+    devDependencies:
+      '@agentick/elicitation-next':
+        specifier: workspace:*
+        version: link:../elicitation
+      '@agentick/executor-next':
+        specifier: workspace:*
+        version: link:../executor
+      '@agentick/gateway-next':
+        specifier: workspace:*
+        version: link:../gateway
+      '@agentick/model-next':
+        specifier: workspace:*
+        version: link:../model
+      '@agentick/reconciler-react-next':
+        specifier: workspace:*
+        version: link:../reconciler-react
+      '@agentick/runtime-next':
+        specifier: workspace:*
+        version: link:../runtime
+      react:
+        specifier: ^19.0.0
+        version: 19.2.4
+
   packages-next/credentials:
     dependencies:
       '@agentick/pubsub-next':
@@ -1088,6 +1122,9 @@ importers:
       '@agentick/loop-executor-next':
         specifier: workspace:*
         version: link:../loop-executor
+      '@agentick/model-next':
+        specifier: workspace:*
+        version: link:../model
       '@agentick/pubsub-next':
         specifier: workspace:*
         version: link:../pubsub

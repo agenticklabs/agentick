@@ -210,3 +210,28 @@ Compose, don't tier.
 - Event-queue / bus-subscription connector (one-way, `dispatch`/`run` action).
 - Wire the scheduler (#159) as a cron-trigger connector rather than a separate mechanism.
 - The `dispatch` / `run` ingress actions (only `send` ships in the base).
+
+### Amendment 2026-07-06 (b) — delivery restraint: the base is just "a session handle + send"
+
+Further Ryan direction: *"we don't really care how the connector handles incoming
+messages... it's just a session under the hood and anyone (internally at least) with access
+can send a message to a session. We should not bias hard on the delivery mechanism until we
+have a good lay of the land."*
+
+**This descopes the "four v1 behaviors" section above.** Do NOT reflexively port v1's
+delivery machinery. The base package is deliberately lean:
+
+- **Core:** `defineConnector` → GatewayExtension; inbound event → `apps().getSession()` →
+  `session.send` (with `metadata.source` + the `TODO(#302)` seam). *That is the whole
+  primitive* — an external event source that holds a session handle and sends. `send` is a
+  verb anyone with session access can call; a connector is just an external caller of it.
+- **Outbound:** an OPTIONAL thin `deliver?(output)` callback. Nothing more.
+- **DEFERRED riders (NOT base scope — build when the landscape is clear):** `DeliveryBuffer`
+  cadence strategies, content-policy pipeline wiring, `RateLimiter`, retry backoff, and
+  (if it grows into machinery) confirmation-routing. The four-behaviors table above is the
+  *eventual* menu, not the base deliverable.
+
+`summarizedFormatter`/`textOnlyFormatter` (formatters-next) and `splitMessage` (utils-next,
+#210) still land as **standalone generic primitives** — they're just not *wired into* the
+connector base yet. Delivery sophistication is a rider that earns its way in once real
+sources (webhook, queue, chat) show what's actually needed.

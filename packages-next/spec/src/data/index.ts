@@ -38,6 +38,7 @@ export * from "./streaming.js";
 export * from "./semantic.js";
 export * from "./formatter.js";
 export * from "./entries.js";
+export * from "./message-source.js";
 export * from "./declarations.js";
 export * from "./rendered-tree.js";
 export * from "./execution-result.js";

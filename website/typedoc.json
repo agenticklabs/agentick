@@ -61,6 +61,7 @@
     "../packages-next/spec-conformance",
     "../packages-next/sandbox",
     "../packages-next/credentials",
+    "../packages-next/connector",
     "../packages-next/gateway",
     "../packages-next/utils",
     "../packages-next/pubsub",

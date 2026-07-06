@@ -7,4 +7,5 @@ export * from "./merge-layered.js";
 export * from "./omit-undefined.js";
 export * from "./predicates.js";
 export * from "./resolvable.js";
+export * from "./split-message.js";
 export * from "./ulid.js";
