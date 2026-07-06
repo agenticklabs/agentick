@@ -1,6 +1,9 @@
 /**
- * Usage → cost accounting (#186). One data table and one fold — the
- * spine that budgets, quotas, and devtools cost displays ride on.
+ * Usage → cost accounting (#186). The pricing spine — a thin PROJECTION
+ * over the ModelInfo registry (`./model-info.ts`), so there is ONE
+ * source of numbers. `SEED_PRICING` is `SEED_MODELS` mapped to its
+ * `pricing` rows; `resolvePricing` lifts a pricing-only table back into
+ * the registry shape and reuses the single longest-prefix resolver.
  *
  * ```ts
  * const cost = estimateCost(result.usage, adapter.target);
@@ -19,64 +22,43 @@
 
 import type { ExecutionTarget, UsageStats } from "@agentick/spec-next";
 
-/** USD per MILLION tokens (industry convention). */
-export interface ModelPricing {
-  readonly inputPerMTok: number;
-  readonly outputPerMTok: number;
-  /** Prompt-cache READ rate. Default: `inputPerMTok` (no discount). */
-  readonly cachedInputPerMTok?: number;
-  /** Prompt-cache WRITE rate. Default: `inputPerMTok` (no surcharge). */
-  readonly cacheWritePerMTok?: number;
-}
+import {
+  resolveModelInfo,
+  SEED_MODELS,
+  type ModelInfo,
+  type ModelPricing,
+  type ModelRegistry,
+} from "./model-info.js";
+
+/** USD per MILLION tokens (industry convention). Canonical shape in `./model-info.ts`. */
+export type { ModelPricing } from "./model-info.js";
 
 /**
  * provider → modelId PREFIX → pricing. Longest-prefix match, so
  * `"gpt-4o"` covers `"gpt-4o-2024-11-20"` while `"gpt-4o-mini"` wins
- * for minis.
+ * for minis. A pricing-only projection of {@link ModelRegistry}.
  */
 export type PricingTable = Readonly<Record<string, Readonly<Record<string, ModelPricing>>>>;
 
+/** Project a registry down to its priced rows (drops rows without pricing). */
+function projectPricing(registry: ModelRegistry): PricingTable {
+  const out: Record<string, Record<string, ModelPricing>> = {};
+  for (const [provider, models] of Object.entries(registry)) {
+    const priced: Record<string, ModelPricing> = {};
+    for (const [prefix, info] of Object.entries(models)) {
+      if (info.pricing) priced[prefix] = info.pricing;
+    }
+    if (Object.keys(priced).length > 0) out[provider] = priced;
+  }
+  return out;
+}
+
 /**
- * APPROXIMATE seed rates (USD/MTok) as a convenience default —
- * providers change prices; verify against current provider pricing and
- * override via the `table` parameter for anything cost-sensitive.
+ * APPROXIMATE seed rates (USD/MTok). The pricing projection of
+ * {@link SEED_MODELS} — override via the `table` parameter for anything
+ * cost-sensitive.
  */
-export const SEED_PRICING: PricingTable = {
-  openai: {
-    "gpt-4o-mini": { inputPerMTok: 0.15, outputPerMTok: 0.6, cachedInputPerMTok: 0.075 },
-    "gpt-4o": { inputPerMTok: 2.5, outputPerMTok: 10, cachedInputPerMTok: 1.25 },
-  },
-  anthropic: {
-    "claude-haiku": {
-      inputPerMTok: 1,
-      outputPerMTok: 5,
-      cachedInputPerMTok: 0.1,
-      cacheWritePerMTok: 1.25,
-    },
-    "claude-sonnet": {
-      inputPerMTok: 3,
-      outputPerMTok: 15,
-      cachedInputPerMTok: 0.3,
-      cacheWritePerMTok: 3.75,
-    },
-    "claude-3-5-sonnet": {
-      inputPerMTok: 3,
-      outputPerMTok: 15,
-      cachedInputPerMTok: 0.3,
-      cacheWritePerMTok: 3.75,
-    },
-    "claude-opus": {
-      inputPerMTok: 5,
-      outputPerMTok: 25,
-      cachedInputPerMTok: 0.5,
-      cacheWritePerMTok: 6.25,
-    },
-  },
-  google: {
-    "gemini-2.5-flash": { inputPerMTok: 0.3, outputPerMTok: 2.5 },
-    "gemini-2.5-pro": { inputPerMTok: 1.25, outputPerMTok: 10 },
-  },
-};
+export const SEED_PRICING: PricingTable = projectPricing(SEED_MODELS);
 
 /** Layer adopter rates over a base table (per-provider shallow merge). */
 export function mergePricing(base: PricingTable, overrides: PricingTable): PricingTable {
@@ -88,21 +70,23 @@ export function mergePricing(base: PricingTable, overrides: PricingTable): Prici
   return out;
 }
 
-/** Longest-prefix pricing lookup for a target. */
+/**
+ * Longest-prefix pricing lookup for a target. Lifts the pricing-only
+ * `table` into the registry shape and delegates to the single resolver
+ * (`resolveModelInfo`), then projects the match back to its pricing.
+ */
 export function resolvePricing(
   target: Pick<ExecutionTarget, "provider" | "modelId">,
   table: PricingTable = SEED_PRICING,
 ): ModelPricing | undefined {
-  if (!target.provider || !target.modelId) return undefined;
-  const models = table[target.provider];
-  if (!models) return undefined;
-  let best: { prefix: string; pricing: ModelPricing } | undefined;
-  for (const [prefix, pricing] of Object.entries(models)) {
-    if (target.modelId.startsWith(prefix) && (!best || prefix.length > best.prefix.length)) {
-      best = { prefix, pricing };
+  const registry: Record<string, Record<string, ModelInfo>> = {};
+  for (const [provider, models] of Object.entries(table)) {
+    registry[provider] = {};
+    for (const [prefix, pricing] of Object.entries(models)) {
+      registry[provider][prefix] = { pricing };
     }
   }
-  return best?.pricing;
+  return resolveModelInfo(target, registry)?.pricing;
 }
 
 export interface CostEstimate {

@@ -5,6 +5,7 @@ export { useOnTickStart } from "./use-on-tick-start.js";
 export { useOnTickEnd } from "./use-on-tick-end.js";
 export { useOnExecutionStart } from "./use-on-execution-start.js";
 export { useOnExecutionEnd } from "./use-on-execution-end.js";
+export { useContextInfo, type ContextInfo } from "./use-context-info.js";
 export { useOnError } from "./use-on-error.js";
 export { useOnMount, useOnUnmount } from "./use-on-mount.js";
 export { useOnLifecycleCustom } from "./use-on-lifecycle-custom.js";

@@ -98,6 +98,46 @@ stream that has produced output is never replayed or switched). Each
 fallback adapter builds its own params; the serving adapter's hooks
 handle its own chunks/normalize.
 
+## Model registry — capabilities, pricing, context window (#204)
+
+One table, keyed **`serving-provider → modelId-prefix → ModelInfo`**
+(pricing, `contextWindow`, `maxOutputTokens`, `capabilities`,
+`tokenEstimator`). `SEED_MODELS` ships approximate defaults; adopters
+layer real numbers with `mergeRegistry`. Resolution is longest-prefix,
+and `effectiveModelInfo(target, registry?)` folds per field with the
+ratified precedence **adopter registry > target self-description
+(`target.pricing` / `target.capabilities`) > seed** — `undefined` when
+no layer knows the model (never fabricated).
+
+```ts
+import { effectiveModelInfo, contextUtilization, estimateTokens } from "@agentick/model-next";
+
+const info = effectiveModelInfo(adapter.target, myRegistry);   // { contextWindow, pricing, ... }
+contextUtilization(usedTokens, info);                          // 0..1, or undefined if no window
+estimateTokens(input, info);                                   // info.tokenEstimator ?? char/4
+```
+
+### The `provider` is the SERVING provider, not the model author
+
+The same underlying model re-served through different providers is
+different data — different pricing (markup / cut), different model-id
+strings, sometimes a different window. Because the registry keys on the
+serving provider, each gets its own row and never collides:
+
+```ts
+const registry = mergeRegistry(SEED_MODELS, {
+  bedrock:    { "anthropic.claude-sonnet-4": { contextWindow: 200_000, pricing: { inputPerMTok: 3.3,  outputPerMTok: 16.5  } } },
+  openrouter: { "anthropic/claude-sonnet-4": { contextWindow: 200_000, pricing: { inputPerMTok: 3.15, outputPerMTok: 15.75 } } },
+});
+// resolveModelInfo({ provider: "bedrock",    modelId: "anthropic.claude-sonnet-4-v1:0" }) → the Bedrock row
+// resolveModelInfo({ provider: "openrouter", modelId: "anthropic/claude-sonnet-4"      }) → the OpenRouter row
+```
+
+Vertex, Bedrock, OpenRouter, Azure OpenAI — each is a serving provider
+with its own table entries. `pricing.ts` (`estimateCost`,
+`SEED_PRICING`) is now a thin projection of this one registry — a single
+source of numbers.
+
 ## Provider packages
 
 | Package | Factory |
@@ -111,6 +151,11 @@ None of them depend on `@agentick/executor-next` (or Effect) at
 runtime — an adapter is usable standalone via `generate()`.
 
 ## Verified by
+
+- `src/__tests__/model-info.spec.ts` — resolution, longest-prefix,
+  `effectiveModelInfo` precedence, indirect-provider keying
+  (same model, distinct specs per serving provider), utilization,
+  token estimation, single-source pricing parity.
 
 - `src/__tests__/combinators.spec.ts` — retry/failover/tap semantics,
   first-chunk boundary, abort passthrough, composition.

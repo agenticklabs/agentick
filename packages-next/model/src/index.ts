@@ -71,6 +71,16 @@ export {
   resolvePricing,
   SEED_PRICING,
   type CostEstimate,
-  type ModelPricing,
   type PricingTable,
 } from "./pricing.js";
+export {
+  contextUtilization,
+  effectiveModelInfo,
+  estimateTokens,
+  mergeRegistry,
+  resolveModelInfo,
+  SEED_MODELS,
+  type ModelInfo,
+  type ModelPricing,
+  type ModelRegistry,
+} from "./model-info.js";
