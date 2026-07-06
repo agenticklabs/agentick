@@ -51,10 +51,11 @@
  * @see packages-next/model/src/model-info.ts (contextUtilization / effectiveModelInfo)
  */
 
-import { useState } from "react";
+import { useContext, useState } from "react";
 import type { LifecycleExecutionEnd, LifecycleTickEnd, UsageStats } from "@agentick/spec-next";
 import { useOnExecutionEnd } from "./use-on-execution-end.js";
 import { useOnTickEnd } from "./use-on-tick-end.js";
+import { ContextInfoContext } from "../context-info-context.js";
 
 export interface ContextInfo {
   /** Model context window in tokens; `undefined` when unknown. */
@@ -78,33 +79,37 @@ function readMetadata(
 }
 
 export function useContextInfo(): ContextInfo {
-  const [info, setInfo] = useState<ContextInfo>({ usedTokens: 0 });
+  // The CURRENT render's window is a synchronous render input (ADR 54
+  // (b)) — read it from context, not an async lifecycle setState (which
+  // races the reconciler's sync render and never reaches this IR).
+  const rendered = useContext(ContextInfoContext);
+  const [observed, setObserved] = useState<{ usedTokens: number }>({ usedTokens: 0 });
 
+  // MERGE, not replace: `contextWindow` arrives at tick-START (before the
+  // render, so it's live DURING this render — the setState here drives the
+  // stabilization re-render that lets adaptive-compaction components react
+  // to a changed window before the IR freezes). `usedTokens` arrives at
+  // tick-END / execution-END (the prior turn's consumed tokens). Each
+  // updates its own field; utilization recomputes from the merged pair.
+  // Past facts (usedTokens) flow via the async lifecycle bridge —
+  // historical, non-blocking, one-tick-behind is correct.
   const observe = (event: LifecycleTickEnd | LifecycleExecutionEnd): void => {
-    const meta = readMetadata(event);
-    if (!meta) return;
-    const usedTokens = meta.usage?.inputTokens ?? 0;
-    const contextWindow = meta.contextWindow;
-    const utilization =
-      contextWindow && contextWindow > 0
-        ? Math.min(1, Math.max(0, usedTokens / contextWindow))
-        : undefined;
-    setInfo((prev) => {
-      if (
-        prev.usedTokens === usedTokens &&
-        prev.contextWindow === contextWindow &&
-        prev.utilization === utilization
-      ) {
-        return prev; // no-op: avoid a re-render churn cycle
-      }
-      return contextWindow !== undefined
-        ? { usedTokens, contextWindow, ...(utilization !== undefined ? { utilization } : {}) }
-        : { usedTokens };
-    });
+    const used = readMetadata(event)?.usage?.inputTokens;
+    if (used === undefined) return;
+    setObserved((prev) => (prev.usedTokens === used ? prev : { usedTokens: used }));
   };
-
   useOnTickEnd(observe);
   useOnExecutionEnd(observe);
 
-  return info;
+  // Merge: render-context (current window + optional session-provided
+  // usedTokens) over the async-observed usedTokens.
+  const contextWindow = rendered?.contextWindow;
+  const usedTokens = rendered?.usedTokens ?? observed.usedTokens;
+  const utilization =
+    contextWindow && contextWindow > 0
+      ? Math.min(1, Math.max(0, usedTokens / contextWindow))
+      : undefined;
+  return contextWindow !== undefined
+    ? { usedTokens, contextWindow, ...(utilization !== undefined ? { utilization } : {}) }
+    : { usedTokens };
 }

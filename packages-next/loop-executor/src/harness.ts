@@ -191,14 +191,31 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         const tickIndex = acc.ticks;
         const tickStartedAt = Date.now();
 
-        // Tick-start orchestration event.
+        // Tick-start orchestration event (public stream).
         input.onEvent?.({ kind: "tick-start", tick: tickIndex, tickIndex });
 
-        // 1. Render.
+        // Lifecycle bridge (#206) — dispatch tick-start to the reconciler
+        // hook store AWAITED, BEFORE render, carrying the current tick's
+        // model window. This is what makes useContextInfo correct DURING
+        // the render: a window change setStates the hook, the
+        // stabilization loop re-renders, and adaptive-compaction
+        // components react before the IR freezes. Without this bridge the
+        // entire useOn* family is inert (no producer).
+        const contextWindow = input.resolveContextWindow?.();
+        await input.reconciler.notifyLifecycle({
+          mountId: input.mountId,
+          event: { kind: "tick-start", tickId, executionId },
+        });
+
+        // 1. Render. The active model's window rides render-context
+        // (ADR 54 (b)) so useContextInfo reads it SYNCHRONOUSLY during
+        // this render — adaptive-compaction components react before the
+        // IR freezes.
         const renderResult = await input.reconciler.renderTree({
           mountId: input.mountId,
           sessionId: input.sessionId,
           executionId,
+          ...(contextWindow !== undefined ? { contextInfo: { contextWindow } } : {}),
         });
 
         // 2. Layered-tools compile (#138).
@@ -469,6 +486,19 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           shouldContinue,
           stopReason: tickStopReason,
           usage: result.usage,
+        });
+        // Lifecycle bridge (#206) — tick-end carries this tick's usage
+        // (a past fact; becomes "prior usedTokens" for the next render's
+        // utilization) + the window.
+        await input.reconciler.notifyLifecycle({
+          mountId: input.mountId,
+          event: {
+            kind: "tick-end",
+            tickId,
+            executionId,
+            result,
+            ...(result.usage !== undefined ? { metadata: { usage: result.usage } } : {}),
+          },
         });
         input.onEvent?.({
           kind: "tick",

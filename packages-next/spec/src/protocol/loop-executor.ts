@@ -106,6 +106,20 @@ export interface RunExecutionInput {
 
   /** Reconciler harness whose `mountId` the loop will render each tick. */
   readonly reconciler: ReconcilerProtocol;
+  /**
+   * The active model's context window for the CURRENT tick (#206) —
+   * resolved by the session (which owns target + injected registry) via
+   * `effectiveModelInfo`. Called per tick BEFORE render and dispatched
+   * as `tick-start` lifecycle metadata so `useContextInfo` has the
+   * window DURING the render (letting adaptive-compaction components
+   * react before the IR freezes). Re-called each tick — correct when
+   * the model changes tick-to-tick.
+   * // TODO(trail-per-tick-model): under #169 the active model is
+   * // IR-derived (post-render); a model change then forces a re-render
+   * // via the stabilization loop. Today the model is construction-bound
+   * // (session.target) so this is stable across ticks.
+   */
+  readonly resolveContextWindow?: () => number | undefined;
   readonly mountId: string;
 
   /** Executor harness for the model run. */

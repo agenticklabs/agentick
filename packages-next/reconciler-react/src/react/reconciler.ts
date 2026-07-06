@@ -27,6 +27,14 @@ export interface Reconciler {
   createRoot(): FiberRoot;
   /** Queue a synchronous update + run all work + run passive effects. */
   render(element: ReactNode, root: FiberRoot): void;
+  /**
+   * Synchronously flush pending passive effects (`useEffect`). React
+   * schedules these via the Scheduler (setImmediate in Node), so a
+   * plain `render()` leaves them pending; the lifecycle-hook family
+   * (ADR 54) registers via `useEffect` and MUST be live before the
+   * first tick — mount calls this before resolving `mountReady`.
+   */
+  flushPassiveEffects(): void;
 }
 
 /**
@@ -105,6 +113,9 @@ export function createReconciler(deps: HostConfigDeps): Reconciler {
       }
       const flushSyncWork = (instance as unknown as { flushSyncWork?: () => void }).flushSyncWork;
       if (flushSyncWork) flushSyncWork();
+    },
+    flushPassiveEffects: () => {
+      (instance as unknown as { flushPassiveEffects?: () => void }).flushPassiveEffects?.();
     },
   };
 }
