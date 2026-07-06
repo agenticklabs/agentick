@@ -6,7 +6,9 @@
 
 > This is the triage surface for the cut. Nothing here is filed as a GitHub issue yet except where noted — Ryan triages, then we file + tag the board (workstream + cut-blocking) → roadmap view.
 
-## ⭐ HEADLINE: content-block projection is structurally broken (the document-block class, VERIFIED)
+## ⭐ HEADLINE: content-block projection is structurally broken (the document-block class, VERIFIED) — ✅ RESOLVED by ADR 57 (commit 5ca42995)
+
+> **RESOLVED 2026-07-06.** ADR 57 (`blueprint/57-executor-input-currency.md`) added document/audio/video/reasoning variants to `LanguageModelMessagePart`, so all four adapters project native provider parts. **CB-BLOCKER-1** (Anthropic thinking+tool round-trip — signature/redacted-data) and **CB-BLOCKER-2** (document dropped) both fixed + tested. Also folded in: the **#176** providerOptions orphan (closed) and the providerOptions/providerMetadata input/output naming split. Deferred (TODO trailheads): ai-sdk/Google *output* multimodal, executable_code, staged/file-id sources, custom→formatter (#174). Original finding retained below for the record.
 
 **Root cause — one boundary type, not per-adapter.** v2 projects IR→provider in two stages. Stage 1 (`model/src/canonical-projection.ts:136` `messagePartFromBlock`) folds the 22-member `ContentBlock` union onto `LanguageModelMessagePart` (`spec/src/protocol/executor.ts:227-254`), which has **exactly four variants: `text`, `image`, `tool_use`, `tool_result`** (verified). Every `document`/`audio`/`video`/`reasoning`/`generated_*`/`executable_code` block is annihilated in Stage 1 — the adapter switch never sees it. The Stage-1 `default` (verified, canonical-projection.ts:187-193) emits `text: "text" in block ? block.text : JSON.stringify(block)`, so a `DocumentBlock` is sent to the model as `JSON.stringify({type:"document",source:{…}})` user text. **This is v1's document-block bug reintroduced structurally and made worse — it hits all four adapters uniformly because it happens above them.** Anthropic overrides `project` but re-implements the identical collapse.
 
