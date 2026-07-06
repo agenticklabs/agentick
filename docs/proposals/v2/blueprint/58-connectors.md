@@ -1,7 +1,9 @@
-# ADR 58 — Connectors: a chat surface bound to a session, as one gateway-extension shape
+# ADR 58 — Connectors: an external event source bound to an agentic action, as one gateway-extension shape
 
 **Status:** PROPOSED 2026-07-06 (Fable, for Ryan). Fork-1 (identity) proceeding on
 **ship-now + backfill actors** per the cut-ASAP directive — confirm or redirect.
+**Amended 2026-07-06** (Ryan): generalized from "chat surface" to **ingress edge** — see
+the amendment at the end. The base contract stays; outbound becomes optional.
 **Depends on:** ADR 50 (GatewayExtension / GatewayInstaller), ADR 42/45 (runtime context,
 actor slot), the ElicitationHarness (confirmation channel), #210 (splitMessage → utils-next)
 **Gated (actor attribution ONLY):** #146 / #302 / ADR 34 (`interceptIngress`,
@@ -149,3 +151,62 @@ base connector + service-account attribution are not). Land `summarizedFormatter
 Fork 1 (block vs. ship-now-backfill) is proceeding as **ship-now-backfill**. If you'd rather
 the authenticated-actor story be correct from day one, we block connectors on #302 and they
 slip past it — say so and I'll flip the identity section.
+
+## Amendment 2026-07-06 — connectors are the ingress EDGE (reply-optional, action-pluggable)
+
+The body above frames a connector as a **chat surface** with inbound + outbound. That is
+one *instance* of a more general primitive, and the general one is what the base package
+must model. Ryan's framing: **anything that ingresses can be a connector** — an event
+queue, a webhook, a bus subscriber, a cron trigger. There is **no reason to require a
+reply.** A connector is fundamentally *an external event source bound to an agentic
+action*; the outbound/delivery half is the **conversational specialization**, not part of
+the core.
+
+### The decomposition
+
+| Axis | Options |
+| --- | --- |
+| **Trigger** — what ingresses | chat surface · webhook · event-queue / MQ consumer · bus subscription · cron / scheduler (#159) · file-watch |
+| **Action** — what the ingress drives | `session.send` (conversational append) · `session.dispatch` (fire a procedure — a non-conversational *agentic process*) · `app.run` (one-shot workflow) · spawn |
+| **Outbound** — the reply/emit path | reply to the source (chat) · emit to a *different* sink (fan-out) · **none** (one-way) |
+
+**One-way is the base case; bidirectional chat is the specialization.** A webhook that
+fires a workflow and returns nothing, an MQ consumer that dispatches a procedure per
+message, a cron trigger that spawns a one-shot run — all are connectors with `Outbound =
+none` and `Action ≠ send`. That is **reactive / event-driven agents as a first-class
+shape**: an event fires, an agent runs, maybe it writes to a sink, nobody is chatting.
+
+### The unification (why this matters beyond chat)
+
+This collapses three things we were treating separately — **connectors, the scheduler's
+event-source extension (#159), and webhooks are the same primitive**: a `GatewayExtension`
+whose `install()` binds an external event source to a session action. "Connector" stays the
+right general name — it *connects an external system to agentick*; chat is one instance.
+
+### Contract impact (broaden the framing — NOT a new tier)
+
+The ADR-58 contract is already almost this general; it was framed conversationally. The
+adjustments, all additive:
+
+- **`ConnectorPlatform.deliver` is OPTIONAL.** Emit-inbound is required (it's the source);
+  deliver-outbound is opt-in. `install()` only wires the `DeliveryBuffer` / content-policy /
+  confirmation subscription when `deliver` is present. No `deliver` ⇒ clean inbound-only.
+- **The ingress action is pluggable.** Default `session.send`; the seam must not *preclude*
+  `session.dispatch` / `app.run`. (Only the `send` default lands now; the seam stays clean.)
+- **Core names/docs are not "conversational."** The base contract is "external source →
+  session action"; the chat delivery machinery is the optional layer it always was.
+- **Identity is unchanged:** a one-way source still holds the construction-bound
+  service-account principal; a per-event actor (if any) rides the event and backfills via
+  #302 — same `TODO(#302)` seam.
+
+**Steel-man (why no new subsystem):** we do *not* introduce an `IngressSource` supertype or
+a parallel tier. The existing `ConnectorPlatform` *is* the ingress source; making its egress
+optional + keeping the action seam open covers webhooks/queues/cron without a new abstraction.
+Compose, don't tier.
+
+### Rider issues (file after the base lands)
+
+- `connector-webhook-next` (HTTP ingress → session action, one-way or request/response).
+- Event-queue / bus-subscription connector (one-way, `dispatch`/`run` action).
+- Wire the scheduler (#159) as a cron-trigger connector rather than a separate mechanism.
+- The `dispatch` / `run` ingress actions (only `send` ships in the base).
