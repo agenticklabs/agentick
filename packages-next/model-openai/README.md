@@ -41,7 +41,12 @@ Provider-options escape hatch (typed via module augmentation):
 
 Reasoning support: native `reasoning_content` / `reasoning` fields
 (vLLM, LM Studio) map to reasoning deltas automatically — no option
-needed.
+needed. `usage.completion_tokens_details.reasoning_tokens` surfaces as
+`UsageStats.reasoningTokens` (#217).
+
+Model selection: `target.modelId` (the per-tick `<Model>` override, ADR
+56) wins over the construction-time `openai(model)` default; the default
+applies only when the target names no model (#214).
 
 ## Multimodal & providerOptions (ADR 57)
 
@@ -78,6 +83,8 @@ content parts:
 
 - `src/__tests__/openai-executor.spec.ts` — dialect behavior (message
   conversion, finish_reason mapping, abort, streaming deltas, think
-  tags, custom blocks).
+  tags, custom blocks, `target.modelId` precedence #214).
+- `src/__tests__/multimodal-projection.spec.ts` — wire-native modality
+  projection, model-override precedence (#214), `reasoningTokens` (#217).
 - `src/__tests__/conformance.spec.ts` — `runExecutorConformance`
   against `LanguageModelExecutor` + this adapter.

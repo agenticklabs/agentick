@@ -55,6 +55,10 @@ export interface SpecConfig {
   readonly responseFormat?: ResponseFormat;
   readonly maxOutputTokens?: number;
   readonly temperature?: number;
+  readonly topP?: number;
+  readonly frequencyPenalty?: number;
+  readonly presencePenalty?: number;
+  readonly stopSequences?: ReadonlyArray<string>;
   readonly metadata?: Record<string, unknown>;
 }
 

@@ -619,26 +619,16 @@ describe("anthropic() adapter — sampling params (G1)", () => {
       config: {
         temperature: 0.42,
         maxOutputTokens: 200,
+        topP: 0.9,
+        stopSequences: ["STOP"],
+        frequencyPenalty: 0.5, // must be dropped — Anthropic has no native support
+        presencePenalty: 0.5, // must be dropped
       },
     };
-    await exec.project({ compiled: tree, target: mkTarget(), tools: [] });
+    // #211 — topP/stopSequences/penalties now live in tree.config and flow
+    // through the canonical projection; no manual parameter injection.
     const projected = await exec.project({ compiled: tree, target: mkTarget(), tools: [] });
-    // Manually call execute since stopSequences/topP aren't in tree.config schema.
-    await exec.execute({
-      targetInput: {
-        ...projected,
-        parameters: {
-          ...(projected.parameters ?? {}),
-          temperature: 0.42,
-          maxOutputTokens: 200,
-          topP: 0.9,
-          stopSequences: ["STOP"],
-          frequencyPenalty: 0.5, // must be dropped
-          presencePenalty: 0.5, // must be dropped
-        },
-      },
-      target: mkTarget(),
-    });
+    await exec.execute({ targetInput: projected, target: mkTarget() });
     const p = stub.calls[0]!.params as MessageCreateParams & {
       frequency_penalty?: number;
       presence_penalty?: number;

@@ -38,6 +38,7 @@ import type {
 } from "@anthropic-ai/sdk/resources/messages";
 
 import {
+  buildParameters,
   buildTools,
   type CustomBlockDefinition,
   type DeltaTransform,
@@ -946,7 +947,12 @@ function anthropicProjectImpl(input: ProjectInput): LanguageModelInput {
   // override above exists ONLY because Anthropic preserves per-section
   // cache_control; tools have no such concern.
   const tools = buildTools(input.tools);
-  const parameters = buildAnthropicParameters(input.compiled);
+  // Generation params are the canonical fold — Anthropic's projection
+  // override exists ONLY to preserve per-section cache_control on the
+  // system message; the SpecConfig → LanguageModelParameters lift is
+  // identical to the base, so reuse it rather than duplicate (and keep
+  // topP/frequencyPenalty/presencePenalty/stopSequences reachable, #211).
+  const parameters = buildParameters(input.compiled);
   // #176: fold tree.providerOptions over target.providerOptions (tree
   // wins) — same as the canonical `defaultProject`. The Anthropic
   // override replaces the base projection wholesale, so it must carry
@@ -993,9 +999,13 @@ function buildAnthropicMessages(tree: RenderedTree): ReadonlyArray<LanguageModel
   for (const entry of tree.context.entries) {
     if (entry.kind !== "message") continue;
     const cache = entry.metadata?.cache;
+    // Message-level provider knobs ride the INPUT channel (#173) — same
+    // send/return split as the canonical projection.
+    const providerOptions = entry.metadata?.providerMetadata;
     messages.push({
       role: entry.role as LanguageModelMessage["role"],
       content: entry.content.map(anthropicMessagePartFromBlock),
+      ...(providerOptions !== undefined ? { providerOptions } : {}),
       ...(cache !== undefined ? { cache } : {}),
     });
   }
@@ -1133,34 +1143,6 @@ function anthropicImageUrlFromSource(source: MediaSource, mimeType: string | und
   }
 }
 
-function buildAnthropicParameters(tree: RenderedTree) {
-  const cfg = tree.config;
-  if (!cfg) return undefined;
-  const params: {
-    temperature?: number;
-    maxOutputTokens?: number;
-    responseFormat?: {
-      type: "text" | "json" | "json_schema";
-      schema?: Record<string, unknown>;
-    };
-  } = {};
-  if (cfg.temperature !== undefined) params.temperature = cfg.temperature;
-  if (cfg.maxOutputTokens !== undefined) {
-    params.maxOutputTokens = cfg.maxOutputTokens;
-  }
-  if (cfg.responseFormat !== undefined) {
-    if (cfg.responseFormat.type === "json_schema") {
-      params.responseFormat = {
-        type: "json_schema",
-        schema: cfg.responseFormat.schema as Record<string, unknown>,
-      };
-    } else {
-      params.responseFormat = { type: cfg.responseFormat.type };
-    }
-  }
-  return Object.keys(params).length > 0 ? params : undefined;
-}
-
 // ============================================================================
 // Anthropic Message → LanguageModelExecutionResult
 // ============================================================================
@@ -1291,6 +1273,14 @@ function mapFinishReason(reason: string | null | undefined): LanguageModelStopRe
       return "stop_sequence";
     case "tool_use":
       return "tool_use";
+    case "refusal":
+      // Anthropic declined to generate (safety) — surface as a distinct
+      // content-filter event, NOT a clean completion (#216).
+      return "content_filter";
+    case "pause_turn":
+      // Long-running turn paused (server tools) — no clean canonical
+      // equivalent; carry as `other` so it isn't masked as `end` (#216).
+      return "other";
     default:
       return "end";
   }

@@ -69,6 +69,10 @@ export function buildParameters(tree: RenderedTree): LanguageModelParameters | u
   const params: {
     temperature?: number;
     maxOutputTokens?: number;
+    topP?: number;
+    frequencyPenalty?: number;
+    presencePenalty?: number;
+    stopSequences?: ReadonlyArray<string>;
     responseFormat?: {
       type: "text" | "json" | "json_schema";
       schema?: Record<string, unknown>;
@@ -76,6 +80,10 @@ export function buildParameters(tree: RenderedTree): LanguageModelParameters | u
   } = {};
   if (cfg.temperature !== undefined) params.temperature = cfg.temperature;
   if (cfg.maxOutputTokens !== undefined) params.maxOutputTokens = cfg.maxOutputTokens;
+  if (cfg.topP !== undefined) params.topP = cfg.topP;
+  if (cfg.frequencyPenalty !== undefined) params.frequencyPenalty = cfg.frequencyPenalty;
+  if (cfg.presencePenalty !== undefined) params.presencePenalty = cfg.presencePenalty;
+  if (cfg.stopSequences !== undefined) params.stopSequences = cfg.stopSequences;
   if (cfg.responseFormat !== undefined) {
     if (cfg.responseFormat.type === "json_schema") {
       params.responseFormat = {
@@ -114,9 +122,15 @@ export function buildMessages(tree: RenderedTree): ReadonlyArray<LanguageModelMe
   for (const entry of tree.context.entries) {
     if (entry.kind !== "message") continue;
     const cache = entry.metadata?.cache;
+    // Message-level `providerMetadata` (adopter-stamped input knobs) rides
+    // the INPUT channel `providerOptions` at the wire boundary — same
+    // send/return split as per-block `providerMetadata` → part
+    // `providerOptions` (#173, ADR 57 §2).
+    const providerOptions = entry.metadata?.providerMetadata;
     messages.push({
       role: entry.role as LanguageModelMessage["role"],
       content: entry.content.map(messagePartFromBlock),
+      ...(providerOptions !== undefined ? { providerOptions } : {}),
       ...(cache !== undefined ? { cache } : {}),
     });
   }

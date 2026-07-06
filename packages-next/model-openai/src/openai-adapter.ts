@@ -357,6 +357,9 @@ export function openai(
           prompt_tokens: accum.usage.inputTokens,
           completion_tokens: accum.usage.outputTokens,
           total_tokens: accum.usage.totalTokens,
+          ...(accum.usage.reasoningTokens !== undefined
+            ? { completion_tokens_details: { reasoning_tokens: accum.usage.reasoningTokens } }
+            : {}),
           ...(accum.usage.cachedInputTokens !== undefined
             ? { prompt_tokens_details: { cached_tokens: accum.usage.cachedInputTokens } }
             : {}),
@@ -493,7 +496,11 @@ function toOpenAIParams(
   const tools = input.tools && input.tools.length > 0 ? input.tools.map(toOpenAITool) : undefined;
 
   const params: ChatCompletionCreateParams = {
-    model: defaultModel ?? "gpt-4o-mini",
+    // Per-tick `<Model>` override (ADR 56) flows via `target.modelId` and
+    // MUST win over the construction-time default — parity with the
+    // Anthropic and Google adapters (both `target.modelId ?? defaultModel
+    // ?? DEFAULT_MODEL`). (#214)
+    model: target.modelId ?? defaultModel ?? "gpt-4o-mini",
     messages,
   };
   const p = input.parameters;
@@ -792,6 +799,9 @@ function normalizeImpl(input: NormalizeInput<unknown>): LanguageModelExecutionRe
       inputTokens: raw.usage?.prompt_tokens ?? 0,
       outputTokens: raw.usage?.completion_tokens ?? 0,
       totalTokens: raw.usage?.total_tokens ?? 0,
+      ...(raw.usage?.completion_tokens_details?.reasoning_tokens !== undefined
+        ? { reasoningTokens: raw.usage.completion_tokens_details.reasoning_tokens }
+        : {}),
       ...(raw.usage?.prompt_tokens_details?.cached_tokens !== undefined
         ? { cachedInputTokens: raw.usage.prompt_tokens_details.cached_tokens }
         : {}),
@@ -835,6 +845,9 @@ function mapChunkToAdapterDeltas(
         inputTokens: chunk.usage.prompt_tokens ?? 0,
         outputTokens: chunk.usage.completion_tokens ?? 0,
         totalTokens: chunk.usage.total_tokens ?? 0,
+        ...(chunk.usage.completion_tokens_details?.reasoning_tokens !== undefined
+          ? { reasoningTokens: chunk.usage.completion_tokens_details.reasoning_tokens }
+          : {}),
         ...(chunk.usage.prompt_tokens_details?.cached_tokens !== undefined
           ? { cachedInputTokens: chunk.usage.prompt_tokens_details.cached_tokens }
           : {}),

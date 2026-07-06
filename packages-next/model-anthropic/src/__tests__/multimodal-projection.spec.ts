@@ -13,6 +13,8 @@ import type {
   ExecutionTarget,
   LanguageModelInput,
   LanguageModelMessagePart,
+  ProjectInput,
+  RenderedTree,
 } from "@agentick/spec-next";
 import { messagePartFromBlock } from "@agentick/model-next";
 
@@ -109,6 +111,50 @@ describe("anthropic() adapter — ADR 57 multimodal projection", () => {
       thinking: "reasoning...",
       signature: "sig-round-trip",
     });
+  });
+
+  it("#216 — stop_reason 'refusal' maps to content_filter (not a clean 'end')", () => {
+    const raw = {
+      type: "message",
+      role: "assistant",
+      content: [{ type: "text", text: "" }],
+      stop_reason: "refusal",
+      usage: { input_tokens: 5, output_tokens: 0 },
+    };
+    expect(adapter.normalize(raw as never).stopReason).toBe("content_filter");
+  });
+
+  it("#216 — stop_reason 'pause_turn' maps to 'other' (not masked as 'end')", () => {
+    const raw = {
+      type: "message",
+      role: "assistant",
+      content: [{ type: "text", text: "partial" }],
+      stop_reason: "pause_turn",
+      usage: { input_tokens: 5, output_tokens: 3 },
+    };
+    expect(adapter.normalize(raw as never).stopReason).toBe("other");
+  });
+
+  it("#211 — a config-declared topP/stopSequences reaches the wire params via project → buildParams", () => {
+    // The canonical SpecConfig → LanguageModelParameters lift now carries
+    // these; Anthropic reuses `buildParameters` in its projection override,
+    // so the previously-dead adapter read (top_p / stop_sequences) is live.
+    const compiled: RenderedTree = {
+      specVersion: "test",
+      context: {
+        entries: [
+          { kind: "message", id: "m1", role: "user", content: [{ type: "text", text: "hi" }] },
+        ],
+      },
+      config: { topP: 0.8, stopSequences: ["STOP"], maxOutputTokens: 64 },
+    } as RenderedTree;
+    // `project` is optional on the adapter surface; Anthropic overrides it
+    // (the per-section cache_control preservation), so it is present here.
+    if (!adapter.project) throw new Error("expected anthropic() to override project");
+    const projected = adapter.project({ compiled, target, tools: [] } as ProjectInput);
+    const params = adapter.buildParams(projected, target);
+    expect((params as { top_p?: number }).top_p).toBe(0.8);
+    expect((params as { stop_sequences?: string[] }).stop_sequences).toEqual(["STOP"]);
   });
 
   it("round-trips redacted_thinking opaque data through normalize → wire", () => {

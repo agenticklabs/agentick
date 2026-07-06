@@ -133,6 +133,31 @@ describe("aisdk() adapter — basic", () => {
     });
   });
 
+  it("#213/#217 — surfaces a reasoning ContentBlock and reasoningTokens (v1 parity)", async () => {
+    const model = new MockLanguageModelV2({
+      provider: "mock-aisdk",
+      modelId: "mock-1",
+      doGenerate: async () => ({
+        content: [
+          { type: "reasoning", text: "let me think" },
+          { type: "text", text: "the answer" },
+        ],
+        finishReason: "stop",
+        usage: { inputTokens: 8, outputTokens: 12, totalTokens: 20, reasoningTokens: 7 },
+        warnings: [],
+      }),
+    });
+    const exec = mkExecutor(model);
+    await exec.ready;
+    const terminal = await exec.run({ compiled: mkTree(), target: mkTarget(), tools: [] });
+    if (terminal.outcome !== "succeeded") throw new Error("expected success");
+    // Reasoning rides before text (#213).
+    expect(terminal.result.output[0]).toMatchObject({ type: "reasoning", text: "let me think" });
+    expect(terminal.result.output[1]).toMatchObject({ type: "text", text: "the answer" });
+    // reasoningTokens surfaced (#217).
+    expect(terminal.result.usage?.reasoningTokens).toBe(7);
+  });
+
   it("abort() flips the next run to outcome 'canceled'", async () => {
     const exec = mkExecutor(mkMockModel("never"));
     await exec.ready;

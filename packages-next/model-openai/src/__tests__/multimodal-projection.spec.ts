@@ -85,6 +85,48 @@ describe("openai() adapter — ADR 57 multimodal projection", () => {
     expect((params as { store?: boolean }).store).toBe(true);
   });
 
+  it("#214 — target.modelId (per-tick <Model> override, ADR 56) wins over the construction-time default", () => {
+    const params = adapter.buildParams(userInput([{ type: "text", text: "hi" }]), {
+      ...target,
+      modelId: "gpt-4o",
+    });
+    expect((params as { model: string }).model).toBe("gpt-4o");
+  });
+
+  it("#214 — falls back to the construction-time default when the target names no model", () => {
+    const params = adapter.buildParams(userInput([{ type: "text", text: "hi" }]), {
+      kind: "language-model",
+      provider: "openai",
+    } as ExecutionTarget);
+    // adapter was constructed with openai("gpt-4o-mini").
+    expect((params as { model: string }).model).toBe("gpt-4o-mini");
+  });
+
+  it("#217 — surfaces usage.completion_tokens_details.reasoning_tokens as reasoningTokens", () => {
+    const raw = {
+      id: "chatcmpl-x",
+      object: "chat.completion",
+      created: 1700000000,
+      model: "gpt-4o",
+      choices: [
+        {
+          index: 0,
+          message: { role: "assistant", content: "done", refusal: null },
+          finish_reason: "stop",
+          logprobs: null,
+        },
+      ],
+      usage: {
+        prompt_tokens: 10,
+        completion_tokens: 40,
+        total_tokens: 50,
+        completion_tokens_details: { reasoning_tokens: 32 },
+      },
+    };
+    const result = adapter.normalize(raw as never);
+    expect(result.usage?.reasoningTokens).toBe(32);
+  });
+
   it("a generated_image is NOT a base64 text bomb — projects to image_url data URI", () => {
     const bigData = "A".repeat(2048);
     const params = adapter.buildParams(

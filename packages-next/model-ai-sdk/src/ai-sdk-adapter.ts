@@ -108,9 +108,15 @@ type AISDKStreamPart = { type: string } & Record<string, unknown>;
 interface AISDKStreamState {
   blockIndex: number;
   textBlockStarted: boolean;
+  reasoningBlockStarted: boolean;
   toolCallNameByCallId: Map<string, string>;
   finishReason: FinishReason | null;
 }
+
+// AI SDK emits reasoning BEFORE text — reserve a distinct block index so
+// it never collides with the text block (0) or tool-call blocks. Mirrors
+// the OpenAI adapter's RESERVED_REASONING_BLOCK_INDEX (#213).
+const RESERVED_REASONING_BLOCK_INDEX = -1;
 
 function getAISDKState(accum: StreamAccumulatorView): AISDKStreamState {
   let s = accum.providerExtra as AISDKStreamState | undefined;
@@ -118,6 +124,7 @@ function getAISDKState(accum: StreamAccumulatorView): AISDKStreamState {
     s = {
       blockIndex: 0,
       textBlockStarted: false,
+      reasoningBlockStarted: false,
       toolCallNameByCallId: new Map(),
       finishReason: null,
     };
@@ -272,6 +279,39 @@ export function aisdk(
           });
           break;
         }
+        case "reasoning-start": {
+          // AI SDK 5 reasoning stream (#213). One reserved reasoning block
+          // holds the concatenated thinking; the accumulator surfaces it
+          // as a `reasoning` ContentBlock on finalize.
+          if (!state.reasoningBlockStarted) {
+            state.reasoningBlockStarted = true;
+            out.push({ type: "reasoning-start", blockIndex: RESERVED_REASONING_BLOCK_INDEX });
+          }
+          break;
+        }
+        case "reasoning-delta":
+        case "reasoning": {
+          const delta =
+            (part as { delta?: string }).delta ?? (part as { text?: string }).text ?? "";
+          if (!state.reasoningBlockStarted) {
+            state.reasoningBlockStarted = true;
+            out.push({ type: "reasoning-start", blockIndex: RESERVED_REASONING_BLOCK_INDEX });
+          }
+          if (delta.length > 0) {
+            out.push({
+              type: "reasoning-delta",
+              blockIndex: RESERVED_REASONING_BLOCK_INDEX,
+              delta,
+            });
+          }
+          break;
+        }
+        case "reasoning-end": {
+          if (state.reasoningBlockStarted) {
+            out.push({ type: "reasoning-end", blockIndex: RESERVED_REASONING_BLOCK_INDEX });
+          }
+          break;
+        }
         case "finish":
         case "finish-step": {
           const fin = part.finishReason as FinishReason | undefined;
@@ -280,6 +320,7 @@ export function aisdk(
                 inputTokens?: number;
                 outputTokens?: number;
                 totalTokens?: number;
+                reasoningTokens?: number;
                 cachedInputTokens?: number;
                 cacheCreationTokens?: number;
               }
@@ -293,6 +334,7 @@ export function aisdk(
                 outputTokens: us.outputTokens ?? 0,
                 totalTokens: us.totalTokens ?? 0,
                 ...omitUndefined({
+                  reasoningTokens: us.reasoningTokens,
                   cachedInputTokens: us.cachedInputTokens,
                   cacheCreationTokens: us.cacheCreationTokens,
                 }),
@@ -310,7 +352,8 @@ export function aisdk(
           break;
         }
         default:
-          // Reasoning, files, sources, source-document — not yet mapped.
+          // Files, sources, source-document — not yet mapped. (Reasoning
+          // is handled above, #213.)
           break;
       }
       return out;
@@ -335,13 +378,24 @@ export function aisdk(
         }
         return { toolCallId: tc.callId, toolName: tc.name, input: parsed };
       });
+      // Re-embed accumulated reasoning so `normalize` surfaces it on the
+      // streaming path too (#213) — mirrors OpenAI reconstructing
+      // `reasoning_content`. Shaped as the AI SDK `reasoning` parts +
+      // `reasoningText` string that `normalizeImpl` reads.
+      const reasoningText = accum.totalReasoning();
       return {
         text,
         finishReason: (state.finishReason ?? mapBackFinishReason(accum.stopReason)) as FinishReason,
+        ...(reasoningText.length > 0
+          ? { reasoning: [{ type: "reasoning", text: reasoningText }], reasoningText }
+          : {}),
         usage: {
           inputTokens: accum.usage.inputTokens,
           outputTokens: accum.usage.outputTokens,
           totalTokens: accum.usage.totalTokens,
+          ...(accum.usage.reasoningTokens !== undefined
+            ? { reasoningTokens: accum.usage.reasoningTokens }
+            : {}),
         },
         toolCalls,
       };
@@ -418,6 +472,21 @@ function partProviderOptions(part: {
     : {};
 }
 
+/**
+ * Message-level provider knobs (#173). Carried from
+ * `MessageEntry.metadata.providerMetadata` onto `LanguageModelMessage.
+ * providerOptions` at projection; AI SDK's `ModelMessage.providerOptions`
+ * is the 1:1 destination (the other adapters have no message-level slot
+ * and ignore it).
+ */
+function messageProviderOptions(m: {
+  readonly providerOptions?: ProviderOptions;
+}): { providerOptions: NonNullable<ModelMessage["providerOptions"]> } | object {
+  return m.providerOptions !== undefined
+    ? { providerOptions: m.providerOptions as NonNullable<ModelMessage["providerOptions"]> }
+    : {};
+}
+
 function toAISDKMessage(m: LanguageModelMessage): ModelMessage[] {
   // AI SDK splits messages by role with specific content shapes.
   switch (m.role) {
@@ -429,12 +498,14 @@ function toAISDKMessage(m: LanguageModelMessage): ModelMessage[] {
             .filter((p): p is { type: "text"; text: string } => p.type === "text")
             .map((p) => p.text)
             .join("\n"),
+          ...messageProviderOptions(m),
         },
       ];
     case "user":
       return [
         {
           role: "user",
+          ...messageProviderOptions(m),
           content: m.content.map((p) => {
             if (p.type === "text") {
               return { type: "text", text: p.text, ...partProviderOptions(p) };
@@ -484,7 +555,7 @@ function toAISDKMessage(m: LanguageModelMessage): ModelMessage[] {
           });
         }
       }
-      return [{ role: "assistant", content: parts } as ModelMessage];
+      return [{ role: "assistant", content: parts, ...messageProviderOptions(m) } as ModelMessage];
     }
     case "tool": {
       // Each tool_result block becomes its own tool-result part. AI SDK
@@ -505,7 +576,9 @@ function toAISDKMessage(m: LanguageModelMessage): ModelMessage[] {
           });
         }
       }
-      return parts.length > 0 ? [{ role: "tool", content: parts } as ModelMessage] : [];
+      return parts.length > 0
+        ? [{ role: "tool", content: parts, ...messageProviderOptions(m) } as ModelMessage]
+        : [];
     }
     default:
       return [];
@@ -523,6 +596,23 @@ function normalizeImpl(input: NormalizeInput<unknown>): LanguageModelExecutionRe
   }
 
   const output: ContentBlock[] = [];
+  // Reasoning rides before text — v1 parity (adapter.ts:354) and matches
+  // the other three adapters (#213). AI SDK 5 surfaces reasoning parts on
+  // `raw.reasoning` (typed) with `reasoningText` as the concatenation;
+  // preserve per-block signatures where present.
+  const reasoningParts = (raw as { reasoning?: ReadonlyArray<{ text?: string }> }).reasoning;
+  if (Array.isArray(reasoningParts) && reasoningParts.length > 0) {
+    for (const rp of reasoningParts) {
+      if (typeof rp.text === "string" && rp.text.length > 0) {
+        output.push({ type: "reasoning", text: rp.text });
+      }
+    }
+  } else {
+    const reasoningText = (raw as { reasoningText?: unknown }).reasoningText;
+    if (typeof reasoningText === "string" && reasoningText.length > 0) {
+      output.push({ type: "reasoning", text: reasoningText });
+    }
+  }
   if (typeof raw.text === "string" && raw.text.length > 0) {
     output.push({ type: "text", text: raw.text });
   }
@@ -556,6 +646,7 @@ function normalizeImpl(input: NormalizeInput<unknown>): LanguageModelExecutionRe
         inputTokens?: number;
         outputTokens?: number;
         totalTokens?: number;
+        reasoningTokens?: number;
         cachedInputTokens?: number;
         cacheCreationTokens?: number;
       }
@@ -568,6 +659,10 @@ function normalizeImpl(input: NormalizeInput<unknown>): LanguageModelExecutionRe
       inputTokens: rawUsage?.inputTokens ?? 0,
       outputTokens: rawUsage?.outputTokens ?? 0,
       totalTokens: rawUsage?.totalTokens ?? 0,
+      // v1 surfaced reasoningTokens (adapter.ts:391) — restore parity (#217).
+      ...(rawUsage?.reasoningTokens !== undefined
+        ? { reasoningTokens: rawUsage.reasoningTokens }
+        : {}),
       ...(rawUsage?.cachedInputTokens !== undefined
         ? { cachedInputTokens: rawUsage.cachedInputTokens }
         : {}),

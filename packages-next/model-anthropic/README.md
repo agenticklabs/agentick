@@ -46,6 +46,10 @@ The SDK client is constructed lazily on first use. Env fallbacks:
   `providerMetadata.anthropic.cacheControl` on the specific content
   block; per-tool via `ProviderToolOptions["anthropic"].cache_control`.
 - **Usage**: `cache_read_input_tokens` surfaces as `cachedInputTokens`.
+- **Stop reasons**: `end_turn`→`end`, `max_tokens`→`max_tokens`,
+  `stop_sequence`→`stop_sequence`, `tool_use`→`tool_use`,
+  `refusal`→`content_filter`, `pause_turn`→`other` (#216 — `refusal` and
+  `pause_turn` were previously masked as a clean `end`).
 
 ## Multimodal & providerOptions (ADR 57)
 
@@ -90,6 +94,9 @@ generic `data` slot).
 
 - `src/__tests__/anthropic-executor.spec.ts` — dialect behavior
   (alternation, thinking blocks, stop-reason mapping, streaming
-  vocabulary, tag routing).
+  vocabulary, tag routing, sampling params from `tree.config` #211).
+- `src/__tests__/multimodal-projection.spec.ts` — wire-native modality
+  projection, thinking round-trip, stop-reason `refusal`/`pause_turn`
+  (#216), config-declared `topP`/`stopSequences` reaching the wire (#211).
 - `src/__tests__/conformance.spec.ts` — `runExecutorConformance`
   against `LanguageModelExecutor` + this adapter.

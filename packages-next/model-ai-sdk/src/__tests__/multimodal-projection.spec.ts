@@ -79,4 +79,24 @@ describe("aisdk() adapter — ADR 57 multimodal projection", () => {
       openai: { reasoningEffort: "high" },
     });
   });
+
+  it("#173 — message-level providerOptions carries onto the projected ModelMessage (AI SDK 1:1)", () => {
+    const adapter = mkAdapter();
+    const params = adapter.buildParams(
+      {
+        messages: [
+          {
+            role: "user",
+            content: [{ type: "text", text: "hi" }],
+            providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
+          },
+        ],
+      } as unknown as LanguageModelInput,
+      target,
+    );
+    const messages = (params as { messages: Array<{ role: string; providerOptions?: unknown }> })
+      .messages;
+    const user = messages.find((m) => m.role === "user");
+    expect(user?.providerOptions).toEqual({ anthropic: { cacheControl: { type: "ephemeral" } } });
+  });
 });

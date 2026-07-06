@@ -76,13 +76,28 @@ describe("openai() adapter — non-streaming", () => {
     expect(terminal.result.usage?.totalTokens).toBe(12);
   });
 
-  it("forwards the model id from the factory argument", async () => {
+  it("forwards the factory-argument model id when the target names no model", async () => {
+    // #214 — `target.modelId` (per-tick <Model> override) wins when
+    // present; the construction-time default applies only as a fallback.
+    const stub = new StubOpenAIClient([
+      { kind: "non-streaming", completion: mkCompletion({ text: "ok" }) },
+    ]);
+    const { exec } = await makeExecutor(stub, { model: "gpt-5-mini" });
+    await exec.run({
+      compiled: emptyTree(),
+      target: { kind: "language-model", provider: "openai" } as LanguageModelTarget,
+      tools: [],
+    });
+    expect(stub.calls[0]!.params.model).toBe("gpt-5-mini");
+  });
+
+  it("#214 — target.modelId (per-tick override) wins over the factory-argument default", async () => {
     const stub = new StubOpenAIClient([
       { kind: "non-streaming", completion: mkCompletion({ text: "ok" }) },
     ]);
     const { exec } = await makeExecutor(stub, { model: "gpt-5-mini" });
     await exec.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
-    expect(stub.calls[0]!.params.model).toBe("gpt-5-mini");
+    expect(stub.calls[0]!.params.model).toBe("gpt-4o-mini");
   });
 
   it("maps finish_reason=length to stopReason=max_tokens", async () => {

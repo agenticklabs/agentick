@@ -227,8 +227,15 @@ const overrides = mergeProviderOptions(target.providerOptions, input.providerOpt
 `LanguageModelInput.providerOptions` (the #176 fold) is the
 request-level escape hatch — thinking config, seed, safetySettings,
 `cache_control`, response format overrides. It is deliberately separate
-from `parameters`, which stays pure canonical generation knobs
-(temperature / maxOutputTokens / responseFormat).
+from `parameters`, which stays pure canonical generation knobs. As of
+#211 `buildParameters` lifts the full cross-provider set off `SpecConfig`
+— `temperature`, `maxOutputTokens`, `topP`, `frequencyPenalty`,
+`presencePenalty`, `stopSequences`, `responseFormat` — so every adapter
+reads them from `parameters` (each drops the knobs its provider lacks:
+Anthropic/Gemini ignore the penalties). Message-level provider knobs
+carried from `MessageEntry.metadata.providerMetadata` project onto
+`LanguageModelMessage.providerOptions` (the send channel, #173),
+mirroring the per-block `providerMetadata → providerOptions` rule.
 
 ## Model registry — capabilities, pricing, context window (#204)
 
@@ -297,7 +304,9 @@ runtime — an adapter is usable standalone via `generate()`.
 - `src/__tests__/generate-object.spec.ts` — `responseFormat` wiring,
   JSON parse + schema validation, `GenerateObjectError` on failure.
 - `src/__tests__/canonical-projection.spec.ts` — projection parts,
-  wire-native multimodal variants, `providerMetadata → providerOptions`.
+  wire-native multimodal variants, `providerMetadata → providerOptions`,
+  `SpecConfig` generation params lift (#211), message-level
+  `providerMetadata → providerOptions` carry (#173).
 - `src/__tests__/cache-hints.spec.ts` — `CacheHint` (#185) threading
   through section boundaries and message parts.
 - `src/__tests__/stream-tag-parser.spec.ts` — tag routing.

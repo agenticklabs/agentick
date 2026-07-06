@@ -211,6 +211,15 @@ export interface LanguageModelMessage {
   readonly toolCallId?: string;
   readonly name?: string;
   /**
+   * Message-level provider knobs — the **input** channel (ADR 57 §2:
+   * "what you send"). Carried from `MessageEntry.metadata.providerMetadata`
+   * at projection (#173), mirroring how per-block `providerMetadata`
+   * projects onto a part's `providerOptions`. Adapters map it where the
+   * SDK has a message-level slot (AI SDK `ModelMessage.providerOptions`
+   * is 1:1); providers without a message-level knob ignore it.
+   */
+  readonly providerOptions?: ProviderOptions;
+  /**
    * Canonical prompt-cache hint carried from `MessageEntry.metadata.cache`
    * (#185). Normalize → translate → escape hatch: adapters translate to
    * their dialect (Anthropic `cache_control` on the message's last

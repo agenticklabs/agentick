@@ -123,4 +123,43 @@ describe("google() adapter — ADR 57 multimodal projection", () => {
     );
     expect((params as { config?: { seed?: number } }).config?.seed).toBe(11);
   });
+
+  it("#212 — a canonical CacheHint is a deliberate NO-OP: hinted text still projects, no `cachedContent` synthesized", () => {
+    // Gemini caching is implicit (automatic prefix, no translation) or
+    // explicit (requires a pre-created CachedContent RESOURCE NAME the
+    // hint cannot supply). So the inline hint must NOT crash and must NOT
+    // fabricate a `cachedContent` — the system text still folds through.
+    const params = adapter.buildParams(
+      {
+        messages: [
+          {
+            role: "system",
+            content: [{ type: "text", text: "STABLE PREFIX", cache: { ttl: "1h" } }],
+            cache: { ttl: "1h" },
+          },
+          { role: "user", content: [{ type: "text", text: "hi" }] },
+        ],
+      } as unknown as LanguageModelInput,
+      target,
+    );
+    const config = (params as { config?: { systemInstruction?: unknown; cachedContent?: unknown } })
+      .config;
+    // The hint text survives into systemInstruction…
+    expect(JSON.stringify(config?.systemInstruction)).toContain("STABLE PREFIX");
+    // …but no cachedContent is fabricated from the hint.
+    expect(config?.cachedContent).toBeUndefined();
+  });
+
+  it("#212 — explicit caching is reachable via the providerOptions.google.cachedContent escape hatch", () => {
+    const params = adapter.buildParams(
+      {
+        messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+        providerOptions: { google: { cachedContent: "cachedContents/abc123" } },
+      } as unknown as LanguageModelInput,
+      target,
+    );
+    expect((params as { config?: { cachedContent?: string } }).config?.cachedContent).toBe(
+      "cachedContents/abc123",
+    );
+  });
 });

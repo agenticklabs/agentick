@@ -82,6 +82,20 @@ Gemini is natively multimodal — the adapter projects `image`,
   part's `providerOptions.google.thoughtSignature` (projected from the
   block's `providerMetadata`).
 
+### Prompt caching — deliberate no-op for the inline `CacheHint` (#212)
+
+The canonical `CacheHint` (`{ ttl, scope }`, #185) is **intentionally
+not translated** for Gemini. Gemini caching is either **implicit**
+(automatic prefix caching on 2.5 models — no translation needed, the
+same posture as OpenAI's automatic prefix cache) or **explicit**, which
+requires a pre-created `CachedContent` **resource name** the canonical
+hint cannot synthesize. Adopters wiring explicit caching pass that
+resource via the `providerOptions.google.cachedContent` escape hatch
+(folded onto `config` in `toGoogleParams`). The hint's text still
+projects into `systemInstruction`; only the untranslatable hint metadata
+is dropped. (In #185's normalize→translate→escape-hatch matrix: Anthropic
+translates, OpenAI + Google no-op, AI SDK relies on the passthrough.)
+
 **Deferred (`TODO(adr-57-followup)`):**
 
 - **`s3` document/audio/video sources** — no native Gemini `fileData`
@@ -99,5 +113,8 @@ Gemini is natively multimodal — the adapter projects `image`,
 - `src/__tests__/google-executor.spec.ts` — dialect behavior (schema
   sanitization, thought routing, thoughtSignature carry, block
   synthesis, stop-reason mapping).
+- `src/__tests__/multimodal-projection.spec.ts` — wire-native modality
+  projection, `thoughtSignature` round-trip, `CacheHint` no-op +
+  `cachedContent` escape hatch (#212).
 - `src/__tests__/conformance.spec.ts` — `runExecutorConformance`
   against `LanguageModelExecutor` + this adapter.

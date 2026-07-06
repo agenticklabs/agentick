@@ -16,7 +16,12 @@ import type {
   TaskRefBlock,
 } from "@agentick/spec-next";
 
-import { defaultProject, messagePartFromBlock } from "../canonical-projection.js";
+import {
+  buildMessages,
+  buildParameters,
+  defaultProject,
+  messagePartFromBlock,
+} from "../canonical-projection.js";
 
 describe("messagePartFromBlock — task_ref drop-in projection (#160)", () => {
   it("projects a task_ref block to a text part carrying the legacy `_kind: 'session_task_ref'` JSON shape", async () => {
@@ -191,5 +196,84 @@ describe("defaultProject — #176 providerOptions fold", () => {
   it("omits providerOptions entirely when neither tree nor target declares any", () => {
     const out = projectFor({});
     expect(out.providerOptions).toBeUndefined();
+  });
+});
+
+describe("buildParameters — SpecConfig generation params (#211)", () => {
+  function paramsFor(config: RenderedTree["config"]) {
+    const tree: RenderedTree = {
+      specVersion: "test",
+      context: { entries: [] },
+      config,
+    } as RenderedTree;
+    return buildParameters(tree);
+  }
+
+  it("lifts topP/frequencyPenalty/presencePenalty/stopSequences off tree.config (previously unreachable — dead adapter reads)", () => {
+    // Before #211 these lived on `LanguageModelParameters` and every
+    // adapter read them, but `SpecConfig` never carried them, so
+    // `input.parameters.topP` was ALWAYS undefined on the canonical path
+    // (anthropic-executor.spec.ts:626 smoking gun). They must now land.
+    const params = paramsFor({
+      temperature: 0.5,
+      maxOutputTokens: 128,
+      topP: 0.9,
+      frequencyPenalty: 0.25,
+      presencePenalty: -0.1,
+      stopSequences: ["STOP", "END"],
+    });
+    expect(params).toEqual({
+      temperature: 0.5,
+      maxOutputTokens: 128,
+      topP: 0.9,
+      frequencyPenalty: 0.25,
+      presencePenalty: -0.1,
+      stopSequences: ["STOP", "END"],
+    });
+  });
+
+  it("omits the params object entirely when tree.config carries none of them", () => {
+    expect(paramsFor({})).toBeUndefined();
+  });
+});
+
+describe("buildMessages — message-level providerMetadata carry (#173)", () => {
+  it("projects MessageEntry.metadata.providerMetadata onto the message's INPUT-channel providerOptions", () => {
+    // Entry-level provider knobs were silently dropped at the executor
+    // boundary — LanguageModelMessage had no slot. Now carried onto
+    // `providerOptions` (send channel, ADR 57 §2), mirroring how a
+    // block's `providerMetadata` projects onto a part's `providerOptions`.
+    const messages = buildMessages({
+      specVersion: "test",
+      context: {
+        entries: [
+          {
+            kind: "message",
+            id: "m1",
+            role: "assistant",
+            content: [{ type: "text", text: "hi" }],
+            metadata: {
+              providerMetadata: { openai: { reasoningEffort: "high" } },
+            },
+          },
+        ],
+      },
+    } as RenderedTree);
+    expect(messages[0]).toMatchObject({
+      role: "assistant",
+      providerOptions: { openai: { reasoningEffort: "high" } },
+    });
+  });
+
+  it("omits providerOptions when the entry carries no providerMetadata", () => {
+    const messages = buildMessages({
+      specVersion: "test",
+      context: {
+        entries: [
+          { kind: "message", id: "m1", role: "user", content: [{ type: "text", text: "hi" }] },
+        ],
+      },
+    } as RenderedTree);
+    expect(messages[0]).not.toHaveProperty("providerOptions");
   });
 });

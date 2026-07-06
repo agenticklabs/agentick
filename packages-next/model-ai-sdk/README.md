@@ -52,12 +52,21 @@ The adapter projects agentick's wire-native parts to AI SDK 5
   `SharedV2ProviderOptions`.
 - **Per-part** — a part's own `providerOptions` forwards 1:1 onto its
   AI SDK part's `providerOptions` (`partProviderOptions`).
+- **Per-message** — a message's own `providerOptions` (carried from
+  `MessageEntry.metadata.providerMetadata`, #173) forwards 1:1 onto the
+  AI SDK `ModelMessage.providerOptions` (`messageProviderOptions`).
+
+**Reasoning output** (#213). AI SDK 5 `reasoning` / `reasoning-delta` /
+`reasoning-start` / `reasoning-end` stream parts map to reasoning deltas,
+and `raw.reasoning` / `raw.reasoningText` surface as a `reasoning`
+`ContentBlock` (before text — v1 ordering) on the non-streaming path.
+`usage.reasoningTokens` surfaces on `UsageStats` (#217).
 
 **Deferred (`TODO(adr-57-followup)` / known gaps):**
 
-- **Output multimodal** — `mapChunk` maps text / tool-call / finish
-  parts; **reasoning / file / source** stream parts from the model are
-  not yet mapped (silently ignored).
+- **Output multimodal** — `mapChunk` maps text / reasoning / tool-call /
+  finish parts; **file / source** stream parts from the model are not yet
+  mapped (silently ignored).
 - **`aisdk(model, { tools })`** registration with the app handler
   resolver.
 
@@ -65,6 +74,8 @@ The adapter projects agentick's wire-native parts to AI SDK 5
 
 - `src/__tests__/ai-sdk-executor.spec.ts` — bridge behavior against
   `MockLanguageModelV2` (target derivation, tool-call extraction,
-  finish-reason vocabulary, abort).
+  finish-reason vocabulary, abort, reasoning output + `reasoningTokens`).
+- `src/__tests__/multimodal-projection.spec.ts` — wire-native modality
+  projection, request- and message-level `providerOptions` carry.
 - `src/__tests__/conformance.spec.ts` — `runExecutorConformance`
   against `LanguageModelExecutor` + this adapter.
