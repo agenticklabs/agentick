@@ -43,6 +43,58 @@ const app = await createApp(<Agent />, { model: openai("gpt-4o") });
 The app wraps the adapter in the ONE `LanguageModelExecutor` on its own
 substrate — executor events flow through `app.events()` automatically.
 
+### Structured output — `generateObject` (#184)
+
+```ts
+import { generateObject } from "@agentick/model-next";
+import { z } from "zod";
+
+const invoice = z.object({ total: z.number(), currency: z.string() });
+
+const { object, result } = await generateObject({
+  model: openai("gpt-4o"),
+  schema: invoice, // any StandardSchemaV1 — zod, effect/schema, jsonSchema()
+  messages: [{ role: "user", content: [{ type: "text", text: "Parse: $42 USD" }] }],
+});
+// object: { total: 42, currency: "USD" } — parsed + validated
+// result: the underlying LanguageModelExecutionResult
+```
+
+`generateObject` sets `responseFormat: { type: "json_schema" }` from the
+schema, then parses and validates the model's text output (throwing
+`GenerateObjectError` on non-JSON or schema-validation failure).
+`responseFormat` is normative today on **OpenAI + Google** only;
+Anthropic and AI SDK are reopened as #184 (they currently drop the
+canonical `responseFormat` knob — prompt-engineer the JSON contract for
+those providers).
+
+### Multimodal — sending an image / document
+
+```ts
+const result = await generate({
+  model: openai("gpt-4o"),
+  messages: [
+    {
+      role: "user",
+      content: [
+        { type: "text", text: "What's in this image, and summarize the PDF." },
+        { type: "image", imageUrl: "https://example.com/chart.png" },
+        {
+          type: "document",
+          source: { type: "base64", data: pdfBase64, mimeType: "application/pdf" },
+          mediaType: "application/pdf",
+        },
+      ],
+    },
+  ],
+});
+```
+
+`image`/`document`/`audio`/`video` parts are **wire-native** — each
+adapter projects the `MediaSource` to its provider's structural
+representation (base64 / URL / file-id) with no lossy pre-flattening.
+See [Multimodal & the provider-knob split](#multimodal--the-provider-knob-split-adr-57).
+
 ## API
 
 ### `LanguageModelAdapter<TRaw, TChunk>`
@@ -97,6 +149,86 @@ Streaming semantics: retry/failover apply through the FIRST chunk (a
 stream that has produced output is never replayed or switched). Each
 fallback adapter builds its own params; the serving adapter's hooks
 handle its own chunks/normalize.
+
+## Multimodal & the provider-knob split (ADR 57)
+
+### Projection: the IR taxonomy → `LanguageModelMessagePart`
+
+The reconciler's content-block taxonomy projects onto the executor's
+wire-safe `LanguageModelMessagePart` set at the executor boundary, via
+`messagePartFromBlock` (part of `defaultProject`). Two classes of block:
+
+- **Wire-native modalities** get a first-class part variant so adapters
+  emit the provider's native structural representation, no lossy
+  pre-flatten: `text`, `image`, `document`, `audio`, `video`,
+  `reasoning`, `tool_use`, `tool_result`.
+- **Textual blocks** (`json` / `xml` / `csv` / `html` / `code` /
+  `custom` / event blocks) are flattened to `text` by the **format
+  harness** before they ever reach the executor. The executor surface
+  never sees them.
+
+`document` / `audio` / `video` carry a canonical `MediaSource`
+(`base64` / `url` / `reference` (file-id) / `s3` / `gcs`) rather than a
+pre-encoded string, so each adapter chooses the wire form its provider
+accepts. Replayed model output round-trips too: `generated_image` →
+`image` (data URI), `generated_file` → `document` (URL source).
+
+Support is per-provider — see each adapter README's "Multimodal &
+providerOptions" section for the exact matrix and deferred sources.
+
+### The provider-knob split: `providerOptions` vs `providerMetadata`
+
+ADR 57 §2 splits the per-part provider-escape channel by direction:
+
+| Field | Direction | Meaning |
+| --- | --- | --- |
+| `providerOptions` | **input — what you send** | Adopter-stamped per-block knobs (Anthropic `cacheControl`) *and* model-produced opaque data replayed verbatim (Gemini `thoughtSignature`). Typed/augmentable, keyed by provider namespace. |
+| `providerMetadata` | **output — what the provider returned** | Written by `normalize` onto output parts (returned cache/reasoning tokens, `thoughtSignature` as produced). |
+
+At the projection boundary a canonical block carries only one knob
+channel (`BaseContentBlock.providerMetadata`); `messagePartFromBlock`
+projects it onto the **input** part's `providerOptions` (what you send).
+Adapters read `part.providerOptions[<ns>]` in `buildParams`.
+
+Four structural escape tiers share the same augmentable provider
+namespaces (`ProviderClientOptions` / `ProviderOptions` /
+`ProviderToolOptions` in spec, plus per-part `providerMetadata`):
+
+- **`ProviderClientOptions`** — SDK client construction (per-executor).
+- **`ProviderOptions`** — per-call request shape; lives on
+  `RenderedTree.providerOptions`, `ExecutionTarget.providerOptions`, and
+  each message part.
+- **`ProviderToolOptions`** — per-tool-definition
+  (`ToolDeclaration.providerOptions`).
+- **per-part `providerMetadata`** — the output carrier described above.
+
+### `mergeProviderOptions` — the one canonical fold
+
+`ProviderOptions` bags are folded by a single function (imported from
+`@agentick/spec-next`): `patch` wins per provider-namespace key,
+one-level-deep shallow merge (two adopters decorating the same block
+under different namespaces never collide). Four call sites share these
+semantics — never hand-roll:
+
+1. the reconciler folds multiple `<ProviderOptions>` declarations during
+   tree collection;
+2. projection folds `RenderedTree.providerOptions` **over**
+   `ExecutionTarget.providerOptions` into `LanguageModelInput.providerOptions`
+   (#176 — tree / per-render wins), computed at project time;
+3. adapters fold `input.providerOptions` over `target.providerOptions`
+   defensively in `buildParams`.
+
+```ts
+import { mergeProviderOptions } from "@agentick/spec-next";
+// what an adapter's buildParams does with the request-level channel:
+const overrides = mergeProviderOptions(target.providerOptions, input.providerOptions)?.openai;
+```
+
+`LanguageModelInput.providerOptions` (the #176 fold) is the
+request-level escape hatch — thinking config, seed, safetySettings,
+`cache_control`, response format overrides. It is deliberately separate
+from `parameters`, which stays pure canonical generation knobs
+(temperature / maxOutputTokens / responseFormat).
 
 ## Model registry — capabilities, pricing, context window (#204)
 
@@ -162,7 +294,12 @@ runtime — an adapter is usable standalone via `generate()`.
 
 - `src/__tests__/generate.spec.ts` — generate/generateStream fold,
   transform pipeline, synthetic message-start, error propagation.
-- `src/__tests__/canonical-projection.spec.ts` — projection parts.
+- `src/__tests__/generate-object.spec.ts` — `responseFormat` wiring,
+  JSON parse + schema validation, `GenerateObjectError` on failure.
+- `src/__tests__/canonical-projection.spec.ts` — projection parts,
+  wire-native multimodal variants, `providerMetadata → providerOptions`.
+- `src/__tests__/cache-hints.spec.ts` — `CacheHint` (#185) threading
+  through section boundaries and message parts.
 - `src/__tests__/stream-tag-parser.spec.ts` — tag routing.
 - Each provider package's conformance suite runs the shared
   `runExecutorConformance` against `LanguageModelExecutor` + its

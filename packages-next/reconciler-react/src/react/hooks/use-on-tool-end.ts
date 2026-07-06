@@ -11,6 +11,11 @@ import { useLifecycleStore } from "../lifecycle-context.js";
  * No catch-up. Components that mount AFTER tool-end fired for a call
  * cannot retroactively observe it; they observe the next tool-end
  * normally.
+ *
+ * @example
+ * useOnToolEnd((e) => {
+ *   if (e.outcome === "failed") setLastError(`${e.name}: ${e.durationMs}ms`);
+ * });
  */
 export function useOnToolEnd(callback: (event: LifecycleToolEnd) => void | Promise<void>): void {
   const store = useLifecycleStore();

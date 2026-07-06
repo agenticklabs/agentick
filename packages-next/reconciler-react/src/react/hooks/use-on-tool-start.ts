@@ -10,6 +10,9 @@ import { useLifecycleStore } from "../lifecycle-context.js";
  * No catch-up. Components that mount AFTER tool-start fired for a call
  * cannot retroactively observe it; they observe the next tool-start
  * normally.
+ *
+ * @example
+ * useOnToolStart((e) => setInflight((m) => ({ ...m, [e.callId]: `${e.name}…` })));
  */
 export function useOnToolStart(
   callback: (event: LifecycleToolStart) => void | Promise<void>,

@@ -58,6 +58,42 @@ The SDK client is constructed lazily on first use.
 - **Usage**: `thoughtsTokenCount` → `reasoningTokens`,
   `cachedContentTokenCount` → `cachedInputTokens`.
 
+## Multimodal & providerOptions (ADR 57)
+
+Gemini is natively multimodal — the adapter projects `image`,
+`document`, `audio`, and `video` parts to Gemini `Part`s:
+
+| Source | Projection |
+| --- | --- |
+| `base64` | `inlineData` (mimeType + data) |
+| `url` | `fileData` (`fileUri` = the URL) |
+| `gcs` | `fileData` (`fileUri` = `gs://bucket/object`) |
+| `reference` | `fileData` (`fileUri` = the file id) |
+
+`providerOptions` fold via `mergeProviderOptions`:
+
+- **Request-level** — `ProviderOptions["google"]` merges into the
+  `GenerateContentConfig` (thinking config, `safetySettings`, seed, …).
+  Folded from `target.providerOptions` over `input.providerOptions`
+  (#176). Don't set `systemInstruction` / `tools` / `abortSignal` here.
+- **Per-tool** — `ProviderToolOptions["google"]` overrides the
+  function declaration.
+- **Per-part** — the `thoughtSignature` round-trip rides a `tool_use`
+  part's `providerOptions.google.thoughtSignature` (projected from the
+  block's `providerMetadata`).
+
+**Deferred (`TODO(adr-57-followup)`):**
+
+- **`s3` document/audio/video sources** — no native Gemini `fileData`
+  form; stage to GCS or base64 first.
+- **Replayed `reasoning` input** — Gemini round-trips thinking via the
+  `thoughtSignature` on the `functionCall` part, not a replayed
+  reasoning content part; a bare reasoning part is dropped (never
+  flattened to a text bomb).
+- **Output multimodal** — `normalize` maps `text` / thinking /
+  `functionCall` parts; returned `inlineData` (model-generated images)
+  is not yet surfaced as a `generated_image` block.
+
 ## Verified by
 
 - `src/__tests__/google-executor.spec.ts` — dialect behavior (schema

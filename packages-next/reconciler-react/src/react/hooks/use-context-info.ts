@@ -34,6 +34,11 @@
  * WHILE producing the IR. `usedTokens` is a past fact — it rides the async
  * tick-end / execution-end bridge (one-tick-behind is correct).
  *
+ * @example
+ * // Adaptive compaction: render less as the window fills.
+ * const { utilization = 0 } = useContextInfo();
+ * const kept = entries.slice(-(utilization > 0.8 ? 5 : 50));
+ *
  * @see docs/proposals/v2/blueprint/55-render-context-seam.md
  * @see packages/core/src/hooks/context-info.ts (v1 prior art)
  * @see packages-next/model/src/model-info.ts (contextUtilization / effectiveModelInfo)

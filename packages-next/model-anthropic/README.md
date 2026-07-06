@@ -47,6 +47,45 @@ The SDK client is constructed lazily on first use. Env fallbacks:
   block; per-tool via `ProviderToolOptions["anthropic"].cache_control`.
 - **Usage**: `cache_read_input_tokens` surfaces as `cachedInputTokens`.
 
+## Multimodal & providerOptions (ADR 57)
+
+The adapter projects `image`, `document`, and `reasoning` parts to
+native Messages content blocks (alongside `text` / `tool_use` /
+`tool_result`):
+
+| Part | Projection | Sources supported |
+| --- | --- | --- |
+| `image` | `image` block | base64 / URL (via `imageSourceFromUrl`) |
+| `document` | `document` block | `base64` (inline), `url` (server-side fetch) |
+| `reasoning` | `thinking` / `redacted_thinking` block | signed thinking replayed verbatim; redacted payload round-trips opaquely |
+
+The `reasoning` round-trip is a hard Anthropic requirement (extended
+thinking + tool use): a signed block must replay unchanged on the next
+turn — `signature` + `thinking` for a normal block, `data` for a
+redacted one (read from `providerOptions.anthropic.redactedData` or the
+generic `data` slot).
+
+`providerOptions` fold via `mergeProviderOptions`:
+
+- **Request-level** — `ProviderOptions["anthropic"]` merges into the
+  Messages request (thinking budget, `top_k`, `metadata`, …). Folded
+  `target.providerOptions` over `input.providerOptions` (#176).
+- **Per-tool** — `ProviderToolOptions["anthropic"]` supplies per-tool
+  `cache_control`.
+- **Per-block** — `providerOptions.anthropic.cacheControl`
+  (`{ type: "ephemeral" }`) sets a cache breakpoint on that specific
+  content block. Precedence: explicit per-block `cacheControl` > the
+  canonical `CacheHint` (#185) the executor translates onto the last
+  block.
+
+**Deferred (`TODO(adr-57-followup)`):**
+
+- **`audio` / `video` input** — Messages has no native audio/video
+  content part; dropped rather than flattened to a text bomb.
+- **`reference` (file-id) / `s3` / `gcs` document sources** — the SDK's
+  document `source` union is base64 / url / text / content only; not
+  expressible until the SDK exposes them.
+
 ## Verified by
 
 - `src/__tests__/anthropic-executor.spec.ts` — dialect behavior

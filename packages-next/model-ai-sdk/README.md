@@ -30,7 +30,36 @@ This adapter uses the AI SDK as a **provider library** — one
 the loop. The "AI SDK as execution engine" archetype (their loop, their
 tool dispatch) is a separate ADR 52 follow-up.
 
-Per-part `providerMetadata` forwards as AI SDK `providerOptions` 1:1.
+## Multimodal & providerOptions (ADR 57)
+
+The adapter projects agentick's wire-native parts to AI SDK 5
+`ModelMessage` parts:
+
+| Part | AI SDK part | Sources supported |
+| --- | --- | --- |
+| `image` | `image` | any URL / data URI |
+| `document`, `audio`, `video` | `file` (data + `mediaType`) | `base64` (raw), `url` / `gcs` / `s3` / `reference` (as a URL the SDK fetches/forwards) |
+| `reasoning` | `reasoning` | signed payload rides `providerOptions` |
+| `tool_use` / `tool_result` | `tool-call` / `tool-result` | — |
+
+`providerOptions` fold via `mergeProviderOptions`:
+
+- **Request-level** — folded `target.providerOptions` over
+  `input.providerOptions` (#176) forwards to the AI SDK
+  `generateText` / `streamText` call's `providerOptions` (Anthropic
+  cache control, OpenAI reasoning effort, …). The spec carries the
+  looser `Record<string, unknown>`; runtime shape matches AI SDK's
+  `SharedV2ProviderOptions`.
+- **Per-part** — a part's own `providerOptions` forwards 1:1 onto its
+  AI SDK part's `providerOptions` (`partProviderOptions`).
+
+**Deferred (`TODO(adr-57-followup)` / known gaps):**
+
+- **Output multimodal** — `mapChunk` maps text / tool-call / finish
+  parts; **reasoning / file / source** stream parts from the model are
+  not yet mapped (silently ignored).
+- **`aisdk(model, { tools })`** registration with the app handler
+  resolver.
 
 ## Verified by
 
@@ -39,9 +68,3 @@ Per-part `providerMetadata` forwards as AI SDK `providerOptions` 1:1.
   finish-reason vocabulary, abort).
 - `src/__tests__/conformance.spec.ts` — `runExecutorConformance`
   against `LanguageModelExecutor` + this adapter.
-
-## Roadmap & known gaps
-
-- Reasoning / file / source stream parts are not yet mapped
-  (`mapChunk` ignores them).
-- `aisdk(model, { tools })` registration with the app handler resolver.

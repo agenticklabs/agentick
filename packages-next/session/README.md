@@ -107,6 +107,102 @@ once per session at create-time and surfaced both:
 The two views point at the SAME instance. `session.elicitation ===
 bridges.elicitation` always.
 
+## Constructing a `SessionHarness`
+
+The reference `SessionHarness` takes the **substrate positionally**
+(`journal`, `bus`, `inbox` — typically the AppHarness's, inherited as
+defaults) and **everything else in an options bag**. The positional
+shape makes the "substrate flows from parent by default" semantic
+visible at every call site (ADR 31 §Two-phase construction).
+
+```ts
+import { SessionHarness } from "@agentick/session-next";
+
+const session = new SessionHarness(journal, bus, inbox, {
+  sessionId: "s:1",
+  agent: <MyAgent />, // opaque — forwarded to reconciler.mount({ element })
+  reconciler, // ReconcilerProtocol
+  loop, // LoopExecutorProtocol
+  executor, // ExecutorProtocol
+  toolExecutor, // ToolExecutorProtocol
+  target, // ExecutionTarget — the default model; overridable per send
+  defaultMaxTicks: 8,
+});
+
+const handle = await session.send({
+  messages: [{ role: "user", content: "Hello" }],
+});
+for await (const event of handle) {
+  /* StreamEvent: tick-start | model deltas | tool-dispatch | result | ... */
+}
+const result = await handle.result; // SendResult
+```
+
+`send` returns a `SessionExecutionHandle` — an
+`AsyncIterable<StreamEvent>` with `.result: Promise<SendResult>`,
+`.status`, and `.abort(reason?)`. A `send()` while an execution is
+running is **steering** (ADR 53): the messages append to the timeline
+(visible next tick), and the _in-flight_ handle is returned rather than
+starting a fresh run.
+
+### Injecting a model registry (`models`, #206)
+
+Supply a `ModelRegistry` (provider → prefix → `ModelInfo`, merged over
+`SEED_MODELS`) so the session can resolve the active model's
+`contextWindow` for `useContextInfo`. Registries are federated: adapters
+export fragments, the app merges and injects.
+
+```ts
+import { mergeRegistry, SEED_MODELS } from "@agentick/model-next";
+
+new SessionHarness(journal, bus, inbox, {
+  /* ... */,
+  models: mergeRegistry(SEED_MODELS, { anthropic: { "claude-": myModelInfo } }),
+});
+```
+
+### `requiredScopes` — the wire dispatch ceiling (#199)
+
+A construction-bound scope ceiling checked at the wire dispatch gate —
+structural, before policy and before any authorizer short-circuit. A
+caller whose claims do not COVER (glob-aware) every listed scope is
+Forbidden regardless of grants. Server-declared only (via
+`CreateSessionInput`); deliberately **not** settable over the wire. It
+requires claim-carrying identities — under a pure grant-table deployment
+a non-empty ceiling makes the session wire-inaccessible, by design.
+
+## The render ↔ runtime feedback loop
+
+The session is the **per-render fact producer** and the **model
+resolver** for the loop. Each `send` hands the loop two resolvers it
+calls per tick — this is how the JSX tree renders _for the model it is
+about to call_, _within the window it has left_:
+
+- **`resolveRenderContext()`** (ADR 55) — the session folds every
+  `RenderContext` slot it can supply into one envelope: the active
+  model's window (via `effectiveModelInfo(target, models)`) into
+  `contextInfo`, and the active model itself (a projection of the target)
+  into `activeModel`. The loop threads the whole envelope into
+  `renderTree({ renderContext })`; `useContextInfo` / `useActiveModel`
+  read it **synchronously** while producing the IR. Future per-render
+  facts (budget, principal) fold in here as augmented slots — no spec
+  widening per fact.
+- **`resolveModel(modelRef)`** (ADR 56) — resolves against the mount's
+  `ModelBridge` (`bridges.models`). `useModelRegistration` registers
+  tree-declared models on that bridge at render time; the loop looks up
+  `declarations.model.modelRef` per tick and runs _that_ executor +
+  target. No default registration — the loop falls back to the session's
+  `executor`/`target` for the undeclared case. Precedence: **tick-IR >
+  send > session**.
+
+The loop stays a dumb conduit — no per-fact knowledge. The **backward**
+half of the loop is the state applicator: after each tick the loop calls
+`applyExecutorResult` (append the assistant message + this generation's
+usage) and `applyToolResults` (append tool messages) so the _next_
+render sees them via `<Timeline/>`. `notifyLifecycle` is the session's
+continuation predicate (ADR 53): input appended mid-execution → return
+`{ kind: "continue" }` to keep ticking (steering).
+
 ## `defineSession` — adopter-facing factory
 
 Most adopters use `createApp(MyAgent, options)` which constructs
@@ -147,17 +243,47 @@ substrate primitives through to `bridges.*` for in-tree code.
 - ✅ `session.elicit` sugar surface (#272 / ADR 43)
 - ✅ Session execution handle (`send` → `ProcedurePromise<SessionExecutionHandle>`)
 - ✅ Session snapshot / restore protocol
+- ✅ Per-tick `RenderContext` production (`contextInfo` + `activeModel`,
+  ADR 55) and model resolution against the `ModelBridge` (ADR 56)
+- ✅ Lifecycle bridge driving the reconciler `useOn*` hook family (#206)
+- ✅ Model registry injection (`models`, #206) + `requiredScopes`
+  ceiling (#199)
 - ⏳ `session.prompts` — depends on whether withPrompts is mounted (ADR 42 audit)
+
+## Roadmap & known gaps
+
+- **`activeModel` is construction-bound.** The model is `session.target`,
+  so `RenderContext.activeModel` is stable across ticks. Under #169 it
+  becomes IR-derived per tick (`TODO(trail-per-tick-model)`).
+- **Session commands are not declarable yet.** `send`/`dispatch`/`queue`/
+  `append` don't run through `runOperation`, and `SendInput` carries
+  non-serializable per-call overrides (`executor`, `target`, `signal`,
+  live tool handlers). An addressable `session:send` needs a designed
+  serializable signal form — `TODO(adr-51-session-verbs)`. `session/send`
+  and `session/respondToElicitation` are already routed via the gateway.
+- **Inbox dispatch not wired.** `handleMessage` rejects with
+  `HandlerError` (Phase 4e+).
+- **Snapshot carries the persisted log only.** The (potentially
+  compacted) projection is not yet round-tripped via `SessionSnapshot` —
+  the composed per-harness `SnapshotHarness` is a later step.
 
 ## Verified by
 
-- `src/__tests__/harness.spec.ts` — construction, lifecycle, bridge
-  surface, snapshot/restore.
-- `src/__tests__/dispatch.spec.ts` — session.dispatch routing through
-  ToolExecutor.
-- `src/__tests__/define-session.spec.ts` — defineSession factory wiring.
-- See also the workspace-wide session integration tests in
-  `@agentick/app-next/__tests__/`.
+- `src/__tests__/conformance.spec.ts` — `SessionHarnessProtocol`
+  conformance suite.
+- `src/__tests__/define-session.spec.ts` — `defineSession` factory wiring.
+- `src/__tests__/model-bridge.spec.tsx` — tree-declared per-tick model,
+  real loop resolving the `ModelBridge` (ADR 56); tick-IR precedence over
+  the session default.
+- `src/__tests__/lifecycle-bridge.spec.tsx` — the real loop driving the
+  whole `useOn*` hook family + `useContextInfo` yielding a live window
+  and utilization (#206 / ADR 55).
+- `src/__tests__/snapshot-restore.spec.tsx` — snapshot / restore.
+- `src/__tests__/streaming-handle.spec.tsx` — `SessionExecutionHandle`
+  streaming iterator.
+- `src/__tests__/extended-surface.spec.ts`,
+  `layered-tools.spec.ts`, `timeline-durability.spec.ts` — spawn/dispatch/
+  channel surface, layered tool registry, timeline durability.
 
 ## See also
 
