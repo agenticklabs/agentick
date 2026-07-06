@@ -93,6 +93,15 @@ export interface MountInput extends MountScopedInput {
   readonly element: unknown;
 
   readonly sessionId: string;
+  /**
+   * Current-render model info (ADR 54) — the active model's
+   * `contextWindow` (+ optional prior `usedTokens`). Resolved by the
+   * session per render; the reconciler provides it synchronously to
+   * `useContextInfo` so adaptive-compaction components react to the
+   * window WHILE producing the IR. `contextWindow` is a synchronous
+   * render input, NOT an async lifecycle observation.
+   */
+  readonly contextInfo?: { readonly contextWindow?: number; readonly usedTokens?: number };
   readonly executionId?: string;
 
   /** Runtime-supplied bridges. See `HookBridges`. */
@@ -162,6 +171,9 @@ export interface RenderTreeInput extends MountScopedInput {
   readonly sessionId: string;
   readonly executionId?: string;
   readonly purpose?: RenderPurpose;
+  /** Current-render model info (ADR 54) — refreshes the render-context
+   *  window for this render. See {@link MountInput.contextInfo}. */
+  readonly contextInfo?: { readonly contextWindow?: number; readonly usedTokens?: number };
   /**
    * Stability budget. The render-until-stable loop terminates with a
    * `max-iterations` diagnostic when exceeded. Default: 10.

@@ -66,7 +66,7 @@ import {
 import { mergeLayered, omitUndefined } from "@agentick/utils-next";
 import { buildSessionElicit } from "@agentick/elicitation-next";
 import { withScope } from "@agentick/tool-executor-next";
-import { mergeUsageStats } from "@agentick/model-next";
+import { effectiveModelInfo, mergeUsageStats, type ModelRegistry } from "@agentick/model-next";
 import type { KnobsHandle } from "@agentick/knobs-next";
 import type { StateHandle } from "@agentick/state-next";
 import type { TimelineHandle, TimelineHarnessOptions } from "@agentick/timeline-next";
@@ -137,6 +137,14 @@ export interface SessionHarnessOptions<P = unknown> {
   /** Scope ceiling (#199) — construction-bound, checked at the wire
    *  dispatch gate. See SessionHarnessProtocol.requiredScopes. */
   readonly requiredScopes?: readonly string[];
+  /**
+   * Model registry (#206) — provider→prefix→ModelInfo, merged over
+   * SEED_MODELS. The session resolves the active model's contextWindow
+   * from it for `useContextInfo` (dispatched as tick-start lifecycle
+   * metadata). Federated: adapters export fragments, the adopter/app
+   * merges and injects.
+   */
+  readonly models?: ModelRegistry;
   /**
    * Adopter-defined metadata bag carried on the session and exposed
    * to substrate factories via `parent.metadata`. Framework defines
@@ -249,6 +257,8 @@ export class SessionHarness<P = unknown>
   private _mountReady: Promise<void>;
   /** #199 — structural scope ceiling, surfaced for the dispatch gate. */
   readonly requiredScopes?: readonly string[] | undefined;
+  /** Injected model registry (#206) — window resolution for useContextInfo. */
+  private readonly models: ModelRegistry | undefined;
   private _currentExecution: Promise<unknown> | null = null;
   /** In-flight handle — join target for steering sends (ADR 53 §5). */
   private _currentHandle: import("@agentick/spec-next").SessionExecutionHandle | null = null;
@@ -356,6 +366,7 @@ export class SessionHarness<P = unknown>
     this.parentSessionId = options.parentSessionId;
     this.defaultMaxTicks = options.defaultMaxTicks ?? 8;
     this.requiredScopes = options.requiredScopes;
+    this.models = options.models;
     this.defaultStreaming = options.defaultStreaming;
     this.mountId = `mount:${options.sessionId}`;
 
@@ -920,6 +931,10 @@ export class SessionHarness<P = unknown>
             appendEntry: (i) => this.appendEntry(i).then(() => undefined),
           },
           notifyTickEnd: (i) => this.notifyLifecycle(i),
+          // #206 — the active model's window for useContextInfo. Today
+          // the model is construction-bound (this.target); TODO(trail-
+          // per-tick-model): under #169 it's IR-derived per tick.
+          resolveContextWindow: () => effectiveModelInfo(targetForCall, this.models)?.contextWindow,
           maxTicks: input.maxTicks ?? this.defaultMaxTicks,
           stream: streamForCall,
           onEvent,

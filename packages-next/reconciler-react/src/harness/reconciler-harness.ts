@@ -71,6 +71,7 @@ import {
 import { createReconciler, type FiberRoot, type Reconciler } from "../react/reconciler.js";
 import { BridgeContext } from "../react/bridge-context.js";
 import { LifecycleContext } from "../react/lifecycle-context.js";
+import { ContextInfoContext } from "../react/context-info-context.js";
 import {
   builtInFormatters,
   formatTree,
@@ -89,6 +90,9 @@ interface MountState {
   readonly registry: ContributorRegistry;
   readonly rootScope: HostScope;
   readonly lifecycle: LifecycleStore;
+  /** Current-render model info (ADR 54 (b)) — refreshed each render from
+   *  Mount/RenderTree input; provided synchronously via ContextInfoContext. */
+  contextInfo: import("../react/context-info-context.js").RenderContextInfo | null;
   /**
    * Captures the first render error surfaced via the host config's
    * `onUncaughtError` callback. Cleared at the start of each render
@@ -418,6 +422,7 @@ export class ReconcilerHarness extends BaseHarness<"reconciler"> implements Reco
       registry: this.registry,
       rootScope,
       lifecycle: new LifecycleStore(),
+      contextInfo: input.contextInfo ?? null,
       renderError: null,
       errorBoundaryFiredInLastRender: false,
     };
@@ -459,6 +464,12 @@ export class ReconcilerHarness extends BaseHarness<"reconciler"> implements Reco
     // commit. With a restored snapshot, useData hits cached values
     // immediately (no fetch starts on first render).
     this.renderOnce(state);
+    // ADR 54 (a) — flush passive effects so useEffect-registered
+    // lifecycle listeners (useOnTickEnd, useContextInfo, …) are LIVE
+    // before the first tick dispatches. Without this the whole useOn*
+    // family is inert in production (render() leaves effects scheduled
+    // on the Scheduler, not run).
+    state.reconciler.flushPassiveEffects();
 
     // Suspense heuristic — warn the FIRST time we see a `<Suspense>`
     // boundary in the input element tree. The DataBridge contract is
@@ -474,6 +485,10 @@ export class ReconcilerHarness extends BaseHarness<"reconciler"> implements Reco
     input: RenderTreeInput,
     state: MountState,
   ): Promise<RenderTreeResult> {
+    // ADR 54 (b) — refresh the current render's model info BEFORE
+    // rendering, so useContextInfo reads THIS tick's window
+    // synchronously while the IR is produced.
+    if (input.contextInfo !== undefined) state.contextInfo = input.contextInfo;
     const maxIterations = input.maxIterations ?? DEFAULT_MAX_ITERATIONS;
     const diagnostics: ReconcileDiagnostic[] = [];
     let iterations = 0;
@@ -741,10 +756,21 @@ export class ReconcilerHarness extends BaseHarness<"reconciler"> implements Reco
     const wrapped = React.createElement(
       BridgeContext.Provider,
       { value: state.bridges },
-      React.createElement(LifecycleContext.Provider, { value: state.lifecycle }, state.element),
+      React.createElement(
+        LifecycleContext.Provider,
+        { value: state.lifecycle },
+        React.createElement(
+          ContextInfoContext.Provider,
+          { value: state.contextInfo },
+          state.element,
+        ),
+      ),
     );
     try {
       state.reconciler.render(wrapped, state.root);
+      // Flush passive effects post-commit (ADR 54 (a)) — a component
+      // mounting mid-run registers its lifecycle listeners here.
+      state.reconciler.flushPassiveEffects();
     } catch (err) {
       // Promises from useData are tracked via the bridge; the loop
       // detects them via hasPending(). Plain errors are real failures.

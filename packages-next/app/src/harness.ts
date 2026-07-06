@@ -194,6 +194,12 @@ export interface AppHarnessOptions<P = unknown> {
    * provider options per app.
    */
   readonly target?: ExecutionTarget;
+  /**
+   * Model registry (#206) — merged over SEED_MODELS and passed to every
+   * session for context-window resolution (useContextInfo). Federated:
+   * merge adapter fragments (`openaiModels`, …) + your overrides.
+   */
+  readonly models?: import("@agentick/model-next").ModelRegistry;
 
   // ────────── Sub-harness slots (shared across sessions) ──────────
 
@@ -420,6 +426,8 @@ export class AppHarness<P = unknown>
   // Per-session defaults resolved from the cascade
   // (session-longhand > shorthand > built-in).
   private readonly sessionDefaults: SessionDefaults<P>;
+  /** App-level model registry (#206), merged over SEED_MODELS, passed to every session. */
+  private readonly models: import("@agentick/model-next").ModelRegistry | undefined;
   /**
    * Options forwarded to the default `ToolExecutorHarness` constructed
    * per-session. Undefined when the caller supplied a
@@ -613,6 +621,7 @@ export class AppHarness<P = unknown>
     // `options.initialKnobs`). Per-call `createSession.*` wins over both
     // and applies at session construction.
     this.sessionDefaults = mergeSessionDefaults(options);
+    this.models = options.models;
     // Tool executor slot: factory → defer construction to per-session
     // via `toolFactory`; options/undefined → forward to the bundled
     // `ToolExecutorHarness` via `toolDefaults`.
@@ -1232,6 +1241,7 @@ export class AppHarness<P = unknown>
       target: this.target,
       defaultMaxTicks: input.maxTicks ?? this.sessionDefaults.defaultMaxTicks ?? 8,
       ...(input.requiredScopes !== undefined ? { requiredScopes: input.requiredScopes } : {}),
+      ...(this.models !== undefined ? { models: this.models } : {}),
       // Streaming cascade: per-session input.streaming > app-level
       // streamingDefault (sessionDefaults.defaultStreaming) > undefined
       // (executor-capability default resolved per-send in SessionHarness).
