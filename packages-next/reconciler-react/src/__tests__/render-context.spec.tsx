@@ -13,6 +13,7 @@ import { fakeBridges } from "@agentick/reconciler-next";
 import { ReconcilerHarness } from "../harness/reconciler-harness.js";
 import { useRenderContext } from "../react/hooks/use-render-context.js";
 import { useContextInfo, type ContextInfo } from "../react/hooks/use-context-info.js";
+import { useActiveModel, type ActiveModel } from "../react/hooks/use-active-model.js";
 import { flush } from "../testing/flush.js";
 
 // The seam's CENTRAL claim (ADR 55): a package can contribute a slot to
@@ -84,6 +85,58 @@ describe("RenderContext envelope", () => {
 
     // (c) unmounted-from-runtime / no envelope → empty object, never null.
     expect(envelope).toEqual({});
+  });
+
+  it("useActiveModel reads the seeded activeModel slot synchronously", async () => {
+    const harness = await makeHarness("h_rc_am");
+    let model: ActiveModel | undefined;
+
+    function App() {
+      model = useActiveModel();
+      return React.createElement("message", { role: "user" }, "ok");
+    }
+
+    await harness.mount({
+      mountId: "m_rc_am",
+      sessionId: "s",
+      element: React.createElement(App),
+      bridges: fakeBridges(),
+      renderContext: {
+        activeModel: {
+          provider: "anthropic",
+          modelId: "claude-opus-4-8",
+          capabilities: { supportsTools: true, contextWindow: 200000 },
+        },
+      },
+    });
+    await flush();
+
+    expect(model).toEqual({
+      provider: "anthropic",
+      modelId: "claude-opus-4-8",
+      capabilities: { supportsTools: true, contextWindow: 200000 },
+    });
+  });
+
+  it("useActiveModel returns undefined when no active model was supplied", async () => {
+    const harness = await makeHarness("h_rc_am2");
+    let model: ActiveModel | undefined = { provider: "sentinel" };
+
+    function App() {
+      model = useActiveModel();
+      return React.createElement("message", { role: "user" }, "ok");
+    }
+
+    await harness.mount({
+      mountId: "m_rc_am2",
+      sessionId: "s",
+      element: React.createElement(App),
+      bridges: fakeBridges(),
+      renderContext: { contextInfo: { contextWindow: 1000 } },
+    });
+    await flush();
+
+    expect(model).toBeUndefined();
   });
 
   it("an augmented slot round-trips (proves packages can extend the envelope)", async () => {

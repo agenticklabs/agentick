@@ -67,6 +67,7 @@ export {
   useOnToolEnd,
   useContextInfo,
   useRenderContext,
+  useActiveModel,
   useOnError,
   useOnMount,
   useOnUnmount,

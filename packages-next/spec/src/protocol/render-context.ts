@@ -38,6 +38,8 @@
  * @see docs/proposals/v2/blueprint/03-reconciler-harness.md §Hooks model
  */
 
+import type { ExecutionTarget } from "../data/execution-target.js";
+
 export interface RenderContext {
   /**
    * The active model's window facts for THIS render (ADR 54/55).
@@ -50,4 +52,19 @@ export interface RenderContext {
     readonly contextWindow?: number;
     readonly usedTokens?: number;
   };
+
+  /**
+   * The model the loop is about to call THIS render (ADR 55) — a
+   * projection of the active {@link ExecutionTarget}. A seeded
+   * framework-core slot (identity + capabilities are spec-resident, no
+   * model-next dep), so `reconciler-react`'s `useActiveModel` reads it
+   * with zero model-layer coupling — the same choice `contextInfo` made
+   * for the window. Enables *rendering for the model you'll call*
+   * (per-model tool descriptions / formatting / reasoning scaffolds).
+   *
+   * Today the model is construction-bound (`session.target`), so this is
+   * stable across ticks. TODO(trail-per-tick-model): under #169 it's
+   * IR-derived per tick and a change re-resolves this slot.
+   */
+  readonly activeModel?: Pick<ExecutionTarget, "provider" | "modelId" | "capabilities">;
 }

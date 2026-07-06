@@ -40,6 +40,7 @@ import type {
   OperationJournal,
   OperationJournalFactory,
   ProtocolEvent,
+  RenderContext,
   SendInput,
   SendMessageInput,
   SendResult,
@@ -932,14 +933,24 @@ export class SessionHarness<P = unknown>
           },
           notifyTickEnd: (i) => this.notifyLifecycle(i),
           // ADR 55 — the session is the per-render fact producer. It folds
-          // every RenderContext slot it can supply; today just the active
-          // model's window (via effectiveModelInfo) into `contextInfo`.
-          // Future slots (activeModel, budget, principal) add a field here.
+          // every RenderContext slot it can supply: the active model's
+          // window (via effectiveModelInfo) into `contextInfo`, and the
+          // active model itself (a projection of the target) into
+          // `activeModel`. Future slots (budget, caller) add a field here.
           // Today the model is construction-bound (this.target); TODO(trail-
-          // per-tick-model): under #169 it's IR-derived per tick.
+          // per-tick-model): under #169 it's IR-derived per tick and this
+          // re-resolves per render.
           resolveRenderContext: () => {
             const contextWindow = effectiveModelInfo(targetForCall, this.models)?.contextWindow;
-            return contextWindow !== undefined ? { contextInfo: { contextWindow } } : undefined;
+            const rc: RenderContext = {
+              ...(contextWindow !== undefined ? { contextInfo: { contextWindow } } : {}),
+              activeModel: {
+                provider: targetForCall.provider,
+                modelId: targetForCall.modelId,
+                capabilities: targetForCall.capabilities,
+              },
+            };
+            return rc;
           },
           maxTicks: input.maxTicks ?? this.defaultMaxTicks,
           stream: streamForCall,
