@@ -30,7 +30,7 @@ import type {
   SpecFeatureName,
   ToolDeclaration,
 } from "@agentick/spec-next";
-import { SPEC_VERSION } from "@agentick/spec-next";
+import { mergeProviderOptions, SPEC_VERSION } from "@agentick/spec-next";
 
 import {
   resolveFormatter,
@@ -424,23 +424,6 @@ function foldFragments(fragments: readonly IRFragment[]): CollectResult {
   };
 
   return { tree, diagnostics };
-}
-
-function mergeProviderOptions(
-  existing: ProviderOptions | undefined,
-  patch: ProviderOptions,
-): ProviderOptions {
-  if (!existing) return { ...patch };
-  // ProviderOptions is a module-augmentable interface (empty seed
-  // contributed-to by adapter packages). We can't index it generically
-  // at the type level — cast to a record for the per-key merge.
-  const out = { ...existing } as Record<string, Record<string, unknown> | undefined>;
-  const patchRec = patch as Record<string, Record<string, unknown> | undefined>;
-  for (const [k, v] of Object.entries(patchRec)) {
-    if (v === undefined) continue;
-    out[k] = { ...(out[k] ?? {}), ...v };
-  }
-  return out as ProviderOptions;
 }
 
 function computeFeatures(input: {

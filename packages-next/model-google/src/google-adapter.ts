@@ -43,11 +43,12 @@ import type {
   LanguageModelMessagePart,
   LanguageModelStopReason,
   LanguageModelTool,
+  MediaSource,
   NormalizeInput,
   ToolCall,
   UsageStats,
 } from "@agentick/spec-next";
-import { SPEC_VERSION } from "@agentick/spec-next";
+import { mergeProviderOptions, SPEC_VERSION } from "@agentick/spec-next";
 
 import {
   type CustomBlockDefinition,
@@ -582,8 +583,11 @@ function toGoogleParams(
   if (systemInstruction !== undefined) config.systemInstruction = systemInstruction;
   if (tools !== undefined) config.tools = tools;
 
-  // G5 — adopter escape hatch. Spread last onto config.
-  const overrides = target.providerOptions?.google;
+  // G5 — adopter escape hatch. `input.providerOptions` (project-time
+  // fold of tree over target, #176) wins over the target's own bag;
+  // merged defensively so a direct `buildParams(input, target)` still
+  // applies the escape hatch. Spread last onto config.
+  const overrides = mergeProviderOptions(target.providerOptions, input.providerOptions)?.google;
   if (overrides && typeof overrides === "object") {
     Object.assign(config, overrides);
   }
@@ -626,8 +630,32 @@ function toGoogleContents(messages: ReadonlyArray<LanguageModelMessage>): {
           if (partOut) parts.push(partOut);
           break;
         }
+        case "document": {
+          const partOut = googlePartFromSource(part.source, part.mediaType, "application/pdf");
+          if (partOut) parts.push(partOut);
+          break;
+        }
+        case "audio": {
+          const partOut = googlePartFromSource(part.source, part.mediaType, "audio/mpeg");
+          if (partOut) parts.push(partOut);
+          break;
+        }
+        case "video": {
+          const partOut = googlePartFromSource(part.source, part.mediaType, "video/mp4");
+          if (partOut) parts.push(partOut);
+          break;
+        }
+        // TODO(adr-57-followup: google reasoning input): Gemini carries
+        // reasoning round-trip via `thoughtSignature` on the functionCall
+        // part (below), not a replayed reasoning content part — a bare
+        // reasoning part is dropped rather than flattened to a text bomb.
         case "tool_use": {
-          const signature = part.providerMetadata?.["google"]?.["thoughtSignature"];
+          // Round-trip: `thoughtSignature` rides the INPUT part's
+          // `providerOptions.google` (ADR 57 §2 — projected from the
+          // block's `providerMetadata` at `messagePartFromBlock`).
+          const signature = (
+            part.providerOptions as Record<string, Record<string, unknown>> | undefined
+          )?.["google"]?.["thoughtSignature"];
           const functionCallPart: Part = {
             functionCall: {
               id: part.id,
@@ -698,6 +726,47 @@ function lookupToolName(contents: ReadonlyArray<Content>, toolUseId: string): st
     }
   }
   return undefined;
+}
+
+/**
+ * Project a document/audio/video {@link MediaSource} to a Gemini `Part`.
+ * Ports v1's `google.ts:454` shape: base64 → `inlineData`; url / gcs /
+ * files-API reference → `fileData` with a `fileUri`. Mirrors the image
+ * path (`imagePartFromUrl`).
+ */
+function googlePartFromSource(
+  source: MediaSource,
+  mediaType: string | undefined,
+  defaultMime: string,
+): Part | null {
+  switch (source.type) {
+    case "base64":
+      return {
+        inlineData: { mimeType: source.mimeType ?? mediaType ?? defaultMime, data: source.data },
+      };
+    case "url":
+      return {
+        fileData: { mimeType: source.mimeType ?? mediaType ?? defaultMime, fileUri: source.url },
+      };
+    case "gcs":
+      return {
+        fileData: {
+          mimeType: source.mimeType ?? mediaType ?? defaultMime,
+          fileUri: `gs://${source.bucket}/${source.object}`,
+        },
+      };
+    case "reference":
+      return {
+        fileData: {
+          mimeType: source.mimeType ?? mediaType ?? defaultMime,
+          fileUri: source.fileId,
+        },
+      };
+    default:
+      // s3 has no native Gemini source — TODO(adr-57-followup: google s3
+      // staged sources).
+      return null;
+  }
 }
 
 function imagePartFromUrl(imageUrl: string, mimeType: string | undefined): Part | null {

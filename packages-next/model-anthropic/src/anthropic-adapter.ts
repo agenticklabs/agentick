@@ -15,6 +15,7 @@
 
 import Anthropic, { type ClientOptions } from "@anthropic-ai/sdk";
 import type {
+  DocumentBlockParam,
   ImageBlockParam,
   Message as AnthropicMessage,
   MessageCreateParams,
@@ -23,9 +24,11 @@ import type {
   MessageParam,
   RawMessageStreamEvent,
   RedactedThinkingBlock,
+  RedactedThinkingBlockParam,
   TextBlock as AnthropicTextBlock,
   TextBlockParam,
   ThinkingBlock as AnthropicThinkingBlock,
+  ThinkingBlockParam,
   Tool as AnthropicTool,
   ToolResultBlockParam,
   ToolUseBlock as AnthropicToolUseBlock,
@@ -57,12 +60,13 @@ import type {
   MediaSource,
   NormalizeInput,
   ProjectInput,
+  ProviderOptions,
   RenderedTree,
   SectionEntry,
   ToolCall,
   UsageStats,
 } from "@agentick/spec-next";
-import { SPEC_VERSION } from "@agentick/spec-next";
+import { mergeProviderOptions, SPEC_VERSION } from "@agentick/spec-next";
 import { omitUndefined } from "@agentick/utils-next";
 
 // ============================================================================
@@ -636,19 +640,25 @@ function toAnthropicParams(
   // Anthropic has no native support (G1 caveat from the skill).
 
   // Adopter escape hatch — spread last so explicit overrides win.
-  const overrides = target.providerOptions?.anthropic;
+  // `input.providerOptions` (project-time fold of tree over target, #176)
+  // wins over the target's own bag; merged defensively so a direct
+  // `buildParams(input, target)` still applies the escape hatch.
+  const overrides = mergeProviderOptions(target.providerOptions, input.providerOptions)?.anthropic;
   if (overrides && typeof overrides === "object") {
     Object.assign(params, overrides);
   }
   return params;
 }
 
-/** Read `providerMetadata.anthropic.cacheControl` from a part as a
- *  validated SDK `cache_control` value, or undefined. */
+/** Read `providerOptions.anthropic.cacheControl` from an INPUT part as a
+ *  validated SDK `cache_control` value, or undefined. (ADR 57 §2 — the
+ *  adopter-stamped per-block knob rides `providerOptions` on the send
+ *  path; projected from the block's `providerMetadata`.) */
 function readBlockCacheControl(part: {
-  readonly providerMetadata?: Record<string, Record<string, unknown>>;
+  readonly providerOptions?: ProviderOptions;
 }): { type: "ephemeral" } | undefined {
-  const v = part.providerMetadata?.["anthropic"]?.["cacheControl"];
+  const bag = part.providerOptions as Record<string, Record<string, unknown>> | undefined;
+  const v = bag?.["anthropic"]?.["cacheControl"];
   if (v && typeof v === "object" && "type" in v && (v as { type?: unknown }).type === "ephemeral") {
     return { type: "ephemeral" };
   }
@@ -743,6 +753,39 @@ function toAnthropicMessages(messages: ReadonlyArray<LanguageModelMessage>): {
           content.push(block);
           break;
         }
+        case "document": {
+          // Anthropic native document block (port of v1 anthropic.ts:537).
+          const source = anthropicDocumentSource(part.source, part.mediaType);
+          if (source) {
+            const block = { type: "document", source } as DocumentBlockParam;
+            if (cache) (block as { cache_control?: { type: "ephemeral" } }).cache_control = cache;
+            content.push(block);
+          }
+          break;
+        }
+        case "reasoning": {
+          // Round-trip signed thinking verbatim (CB-BLOCKER-1). A
+          // redacted block replays its opaque `data`; a normal block
+          // replays `thinking` + `signature`. Anthropic requires the
+          // signed block replayed unchanged on the next turn.
+          const redactedData = reasoningRedactedData(part);
+          if (redactedData !== undefined) {
+            content.push({
+              type: "redacted_thinking",
+              data: redactedData,
+            } as RedactedThinkingBlockParam);
+          } else {
+            content.push({
+              type: "thinking",
+              thinking: part.text,
+              signature: part.signature ?? "",
+            } as ThinkingBlockParam);
+          }
+          break;
+        }
+        // TODO(adr-57-followup: anthropic audio/video input): Anthropic
+        // Messages has no native audio/video content part — dropped
+        // rather than flattened to a text bomb.
       }
     }
     if (content.length === 0) continue;
@@ -816,6 +859,50 @@ function toAnthropicTools(tools: ReadonlyArray<LanguageModelTool>): Array<Anthro
   });
 }
 
+/**
+ * Project a document {@link MediaSource} to an Anthropic document block
+ * `source` (port of v1 `anthropic.ts:537`): base64 → inline; url →
+ * server-side fetch; files-API reference → `file` by id.
+ */
+function anthropicDocumentSource(
+  source: MediaSource,
+  mediaType: string | undefined,
+): DocumentBlockParam["source"] | null {
+  switch (source.type) {
+    case "base64":
+      return {
+        type: "base64",
+        media_type: (source.mimeType ?? mediaType ?? "application/pdf") as "application/pdf",
+        data: source.data,
+      };
+    case "url":
+      return { type: "url", url: source.url };
+    default:
+      // reference (Files API) / s3 / gcs are not expressible in this
+      // SDK version's document `source` union (base64 / url / text /
+      // content only) — TODO(adr-57-followup: anthropic file-id +
+      // staged document sources once the SDK exposes them).
+      return null;
+  }
+}
+
+/**
+ * Extract a redacted-thinking opaque payload from a reasoning INPUT
+ * part, if present. It rides either the generic `data` slot or the
+ * Anthropic provider namespace (`providerOptions.anthropic.redactedData`,
+ * projected from the block's `providerMetadata` — where `normalize`
+ * stashes it, since the canonical `ReasoningBlock` has no `data` field).
+ */
+function reasoningRedactedData(part: {
+  readonly data?: unknown;
+  readonly providerOptions?: ProviderOptions;
+}): string | undefined {
+  if (typeof part.data === "string") return part.data;
+  const bag = part.providerOptions as Record<string, Record<string, unknown>> | undefined;
+  const v = bag?.["anthropic"]?.["redactedData"];
+  return typeof v === "string" ? v : undefined;
+}
+
 function imageSourceFromUrl(
   imageUrl: string,
   mimeType: string | undefined,
@@ -860,10 +947,19 @@ function anthropicProjectImpl(input: ProjectInput): LanguageModelInput {
   // cache_control; tools have no such concern.
   const tools = buildTools(input.tools);
   const parameters = buildAnthropicParameters(input.compiled);
+  // #176: fold tree.providerOptions over target.providerOptions (tree
+  // wins) — same as the canonical `defaultProject`. The Anthropic
+  // override replaces the base projection wholesale, so it must carry
+  // the fold itself or every tree-declared knob is orphaned here.
+  const providerOptions = mergeProviderOptions(
+    input.target.providerOptions,
+    input.compiled.providerOptions,
+  );
   return {
     messages,
     ...(tools.length > 0 ? { tools } : {}),
     ...(parameters !== undefined ? { parameters } : {}),
+    ...(providerOptions !== undefined ? { providerOptions } : {}),
   };
 }
 
@@ -871,8 +967,10 @@ function buildAnthropicMessages(tree: RenderedTree): ReadonlyArray<LanguageModel
   const messages: LanguageModelMessage[] = [];
   // Emit one text part per section (not a single joined string) so
   // per-section `metadata.providerMetadata` survives projection. The
-  // executor reads each part's providerMetadata in
-  // `toAnthropicMessages` to decide string vs array system form.
+  // executor reads each part's `providerOptions` in `toAnthropicMessages`
+  // to decide string vs array system form. (ADR 57 §2 — the section's
+  // adopter-stamped `providerMetadata` knob projects onto the INPUT
+  // part's `providerOptions`.)
   const systemParts: LanguageModelMessagePart[] = [];
   for (const e of tree.context.entries) {
     if (e.kind !== "section") continue;
@@ -881,11 +979,10 @@ function buildAnthropicMessages(tree: RenderedTree): ReadonlyArray<LanguageModel
     const part: LanguageModelMessagePart = { type: "text", text };
     const pm = e.metadata?.providerMetadata;
     if (pm !== undefined) {
-      (part as { providerMetadata?: Record<string, Record<string, unknown>> }).providerMetadata =
-        pm;
+      (part as { providerOptions?: Record<string, Record<string, unknown>> }).providerOptions = pm;
     }
     // Canonical CacheHint rides the part (#185); toAnthropicMessages
-    // translates it (explicit providerMetadata above still wins there).
+    // translates it (explicit providerOptions above still wins there).
     if (e.metadata?.cache !== undefined) {
       (part as { cache?: unknown }).cache = e.metadata.cache;
     }
@@ -916,17 +1013,65 @@ function anthropicSectionText(section: SectionEntry): string {
 }
 
 function anthropicMessagePartFromBlock(block: ContentBlock): LanguageModelMessagePart {
-  const pm =
-    block.providerMetadata !== undefined ? { providerMetadata: block.providerMetadata } : {};
+  // Per-block `providerMetadata` (the canonical block's knob channel)
+  // projects onto the INPUT part's `providerOptions` (ADR 57 §2). Mirrors
+  // the canonical `messagePartFromBlock`; the Anthropic override exists
+  // only for the system-section shape, not the block mapping.
+  const po =
+    block.providerMetadata !== undefined ? { providerOptions: block.providerMetadata } : {};
   switch (block.type) {
     case "text":
-      return { type: "text", text: block.text, ...pm };
+      return { type: "text", text: block.text, ...po };
     case "image":
       return {
         type: "image",
         imageUrl: anthropicImageUrlFromSource(block.source, block.mimeType),
         ...omitUndefined({ mediaType: block.mimeType }),
-        ...pm,
+        ...po,
+      };
+    case "document":
+      return {
+        type: "document",
+        source: block.source,
+        ...omitUndefined({ mediaType: block.mimeType }),
+        ...po,
+      };
+    case "audio":
+      return {
+        type: "audio",
+        source: block.source,
+        ...omitUndefined({ mediaType: block.mimeType }),
+        ...po,
+      };
+    case "video":
+      return {
+        type: "video",
+        source: block.source,
+        ...omitUndefined({ mediaType: block.mimeType }),
+        ...po,
+      };
+    case "reasoning":
+      return {
+        type: "reasoning",
+        text: block.text,
+        ...omitUndefined({ signature: block.signature }),
+        ...po,
+      };
+    case "generated_image":
+      // Replay as an image (ADR 57 §Taxonomy) — data URI, not a
+      // JSON.stringify base64 token-bomb.
+      return {
+        type: "image",
+        imageUrl: `data:${block.mimeType};base64,${block.data}`,
+        ...omitUndefined({ mediaType: block.mimeType }),
+        ...po,
+      };
+    case "generated_file":
+      return {
+        type: "document",
+        source: { type: "url", url: block.uri, ...omitUndefined({ mimeType: block.mimeType }) },
+        ...omitUndefined({ mediaType: block.mimeType }),
+        ...po,
       };
     case "tool_use":
       return {
@@ -934,7 +1079,7 @@ function anthropicMessagePartFromBlock(block: ContentBlock): LanguageModelMessag
         id: block.toolUseId,
         name: block.name,
         input: block.input,
-        ...pm,
+        ...po,
       };
     case "tool_result":
       return {
@@ -942,7 +1087,26 @@ function anthropicMessagePartFromBlock(block: ContentBlock): LanguageModelMessag
         toolUseId: block.toolUseId,
         content: block.content.map(anthropicMessagePartFromBlock),
         ...omitUndefined({ isError: block.isError }),
-        ...pm,
+        ...po,
+      };
+    case "task_ref":
+      // Match the base mapper's drop-in text projection (task_ref stays
+      // canonical `{_kind}` JSON — ADR 57 §Taxonomy). Previously this
+      // override lacked the case and fell to the raw `JSON.stringify`
+      // default below.
+      return {
+        type: "text",
+        text: JSON.stringify({
+          _kind: "session_task_ref",
+          taskId: block.taskId,
+          status: block.status,
+          ...omitUndefined({
+            statusMessage: block.statusMessage,
+            ttl: block.ttl,
+            pollInterval: block.pollInterval,
+          }),
+        }),
+        ...po,
       };
     default:
       return {
@@ -1054,19 +1218,36 @@ function anthropicContentToContentBlocks(
         });
         break;
       }
-      case "thinking":
+      case "thinking": {
+        // CB-BLOCKER-1: capture the signature (previously dropped) so
+        // the signed thinking block replays verbatim on the next turn
+        // (Anthropic requires this for extended-thinking + tool use).
+        const t = block as AnthropicThinkingBlock;
         output.push({
           type: "reasoning",
-          text: (block as AnthropicThinkingBlock).thinking,
+          text: t.thinking,
+          ...(t.signature ? { signature: t.signature } : {}),
         });
         break;
-      case "redacted_thinking":
+      }
+      case "redacted_thinking": {
+        // CB-BLOCKER-1: carry the opaque `data` (previously discarded).
+        // The canonical `ReasoningBlock` has no `data` field, so stash it
+        // in the provider namespace — `providerMetadata` is exactly the
+        // "model-produced opaque data to resend verbatim" channel. It
+        // rides back to `providerOptions.anthropic.redactedData` at
+        // re-projection (`reasoningRedactedData`).
+        const r = block as RedactedThinkingBlock;
         output.push({
           type: "reasoning",
           text: "[redacted]",
+          isRedacted: true,
+          ...(r.data !== undefined
+            ? { providerMetadata: { anthropic: { redactedData: r.data } } }
+            : {}),
         });
-        void (block as RedactedThinkingBlock);
         break;
+      }
     }
   }
   return output;

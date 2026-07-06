@@ -21,7 +21,8 @@
  * @see docs/proposals/v2/blueprint/06-executor-harness.md
  */
 
-import type { ProviderToolOptions, RenderedTree } from "../data/rendered-tree.js";
+import type { ProviderOptions, ProviderToolOptions, RenderedTree } from "../data/rendered-tree.js";
+import type { MediaSource } from "../data/content-blocks.js";
 import type { ExecutionTarget, LanguageModelTarget } from "../data/execution-target.js";
 import type {
   ExecutionResult,
@@ -191,6 +192,17 @@ export interface LanguageModelInput {
    * `target.providerOptions`.
    */
   readonly parameters?: LanguageModelParameters;
+  /**
+   * Request-level provider escape hatch — the folded result of
+   * `RenderedTree.providerOptions` **over** `ExecutionTarget.providerOptions`
+   * (tree/per-render wins), computed at project time (#176). Mirrors the
+   * `config` + `providerOptions` siblings on `RenderedTree`. Adapters read
+   * this (merged over `target.providerOptions` defensively) for
+   * thinking config, seed, safetySettings, cache_control, etc. Keep
+   * `parameters` as pure canonical generation knobs — this is the
+   * separate provider-specific dimension.
+   */
+  readonly providerOptions?: ProviderOptions;
 }
 
 export interface LanguageModelMessage {
@@ -210,24 +222,41 @@ export interface LanguageModelMessage {
 
 /**
  * Message content parts. Mirrors the shape provider adapters consume
- * internally — text, images, tool calls. The full content-block
- * taxonomy from the IR collapses to this smaller set at the executor
- * boundary; richer types (csv, html, json) flatten to text by the
- * format harness before reaching the executor.
+ * internally. The full content-block taxonomy from the IR projects onto
+ * this set at the executor boundary: **wire-native modalities**
+ * (`text`/`image`/`document`/`audio`/`video`/`reasoning`/`tool_use`/
+ * `tool_result`) get a first-class variant so adapters can emit the
+ * provider's native structural representation; **textual blocks**
+ * (`json`/`xml`/`csv`/`html`/`code`/`custom`/events) are flattened to
+ * `text` by the format harness before reaching the executor (ADR 57
+ * §Taxonomy).
  */
 /**
- * Per-part provider metadata carrier. Mirrors
- * {@link BaseContentBlock.providerMetadata} on the executor boundary so
- * round-trip data (Gemini 3+ `thoughtSignature`, Anthropic
- * `cache_control` on a specific block, OpenAI logprobs reference, etc.)
- * survives projection. Keyed by provider namespace.
+ * Per-part provider metadata carrier — the **output** channel. Mirrors
+ * {@link BaseContentBlock.providerMetadata}: what `normalize` writes back
+ * from a provider response (returned cache/reasoning tokens,
+ * `thoughtSignature` as returned, etc.). Keyed by provider namespace.
+ *
+ * The **input** channel is `providerOptions` (what you send). See the
+ * per-variant fields below and ADR 57 §2 for the send/return split.
  */
 export type ProviderMetadataBag = Record<string, Record<string, unknown>>;
 
+/**
+ * The provider-knob input/output split carried on every message part
+ * (ADR 57 §2):
+ *   - `providerOptions` — **what you send.** Adopter-stamped per-block
+ *     knobs (Anthropic `cacheControl`) and model-produced opaque data
+ *     replayed verbatim (Gemini `thoughtSignature`) both ride here on
+ *     the input path. Typed/augmentable — same target/tree use.
+ *   - `providerMetadata` — **what the provider returned.** Set by
+ *     `normalize` on output parts. Keyed by provider namespace.
+ */
 export type LanguageModelMessagePart =
   | {
       readonly type: "text";
       readonly text: string;
+      readonly providerOptions?: ProviderOptions;
       readonly providerMetadata?: ProviderMetadataBag;
       /** Canonical cache hint for THIS part (per-section system boundaries, #185). */
       readonly cache?: import("../data/entries.js").CacheHint;
@@ -236,6 +265,49 @@ export type LanguageModelMessagePart =
       readonly type: "image";
       readonly imageUrl: string;
       readonly mediaType?: string;
+      readonly providerOptions?: ProviderOptions;
+      readonly providerMetadata?: ProviderMetadataBag;
+    }
+  | {
+      /**
+       * Wire-native document (PDF etc.). Carries a {@link MediaSource}
+       * so adapters project to their wire form (base64 / url / file-id)
+       * without lossy pre-flattening.
+       */
+      readonly type: "document";
+      readonly source: MediaSource;
+      readonly mediaType?: string;
+      readonly providerOptions?: ProviderOptions;
+      readonly providerMetadata?: ProviderMetadataBag;
+    }
+  | {
+      /** Wire-native audio (OpenAI `input_audio` / Gemini audio). */
+      readonly type: "audio";
+      readonly source: MediaSource;
+      readonly mediaType?: string;
+      readonly providerOptions?: ProviderOptions;
+      readonly providerMetadata?: ProviderMetadataBag;
+    }
+  | {
+      /** Wire-native video (Gemini). */
+      readonly type: "video";
+      readonly source: MediaSource;
+      readonly mediaType?: string;
+      readonly providerOptions?: ProviderOptions;
+      readonly providerMetadata?: ProviderMetadataBag;
+    }
+  | {
+      /**
+       * Signed reasoning / thinking that must round-trip verbatim
+       * (Anthropic extended thinking + tool use). `signature` is the
+       * provider-supplied signature; `data` carries the opaque payload
+       * of a redacted reasoning block.
+       */
+      readonly type: "reasoning";
+      readonly text: string;
+      readonly signature?: string;
+      readonly data?: unknown;
+      readonly providerOptions?: ProviderOptions;
       readonly providerMetadata?: ProviderMetadataBag;
     }
   | {
@@ -243,6 +315,7 @@ export type LanguageModelMessagePart =
       readonly id: string;
       readonly name: string;
       readonly input: unknown;
+      readonly providerOptions?: ProviderOptions;
       readonly providerMetadata?: ProviderMetadataBag;
     }
   | {
@@ -250,6 +323,7 @@ export type LanguageModelMessagePart =
       readonly toolUseId: string;
       readonly content: ReadonlyArray<LanguageModelMessagePart>;
       readonly isError?: boolean;
+      readonly providerOptions?: ProviderOptions;
       readonly providerMetadata?: ProviderMetadataBag;
     };
 

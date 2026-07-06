@@ -114,6 +114,41 @@ export interface ProviderOptions {}
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface ProviderToolOptions {}
 
+/**
+ * Merge two {@link ProviderOptions} bags with `patch` winning per
+ * provider-namespace key (one-level-deep, so two adopters decorating
+ * the same block under different namespaces never collide, and the
+ * same namespace's keys shallow-merge with the patch on top).
+ *
+ * The single canonical merge for the layered provider-escape channel:
+ *   - the reconciler folds multiple `<ProviderOptions>` declarations
+ *     during tree collection;
+ *   - projection folds `RenderedTree.providerOptions` **over**
+ *     `ExecutionTarget.providerOptions` into `LanguageModelInput`
+ *     (#176 — tree/per-render wins);
+ *   - adapters fold `input.providerOptions` over `target.providerOptions`
+ *     defensively in `buildParams`.
+ *
+ * All four call sites share these semantics — do not hand-roll.
+ */
+export function mergeProviderOptions(
+  base: ProviderOptions | undefined,
+  patch: ProviderOptions | undefined,
+): ProviderOptions | undefined {
+  if (!base) return patch ? { ...patch } : undefined;
+  if (!patch) return { ...base };
+  // ProviderOptions is a module-augmentable empty-seed interface — it
+  // can't be indexed generically at the type level, so cast to a record
+  // for the per-namespace merge.
+  const out = { ...base } as Record<string, Record<string, unknown> | undefined>;
+  const patchRec = patch as Record<string, Record<string, unknown> | undefined>;
+  for (const [k, v] of Object.entries(patchRec)) {
+    if (v === undefined) continue;
+    out[k] = { ...(out[k] ?? {}), ...v };
+  }
+  return out as ProviderOptions;
+}
+
 // ============================================================================
 // Feature registry (initial set, sign-off pending)
 // ============================================================================

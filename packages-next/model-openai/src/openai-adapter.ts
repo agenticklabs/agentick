@@ -56,10 +56,11 @@ import type {
   LanguageModelMessage,
   LanguageModelStopReason,
   LanguageModelTool,
+  MediaSource,
   NormalizeInput,
   ToolCall,
 } from "@agentick/spec-next";
-import { SPEC_VERSION } from "@agentick/spec-next";
+import { mergeProviderOptions, SPEC_VERSION } from "@agentick/spec-next";
 
 // ============================================================================
 // ProviderOptions augmentation — typed OpenAI escape hatch
@@ -525,8 +526,11 @@ function toOpenAIParams(
   }
   // Adopter escape hatch — spread provider-specific options after canonical
   // mapping. Lets callers set logprobs, seed, store, n, prediction, etc.
-  // without us hardcoding every OpenAI knob.
-  const overrides = target.providerOptions?.openai;
+  // without us hardcoding every OpenAI knob. `input.providerOptions` (the
+  // project-time fold of tree over target, #176) wins over the target's
+  // own bag; merged defensively so a direct `buildParams` call with only
+  // a target still applies the escape hatch.
+  const overrides = mergeProviderOptions(target.providerOptions, input.providerOptions)?.openai;
   if (overrides && typeof overrides === "object") {
     Object.assign(params, overrides);
   }
@@ -537,10 +541,9 @@ function toOpenAIMessages(m: LanguageModelMessage): ChatCompletionMessageParam[]
   // Tool result messages must go on their own `role: "tool"` entry.
   const toolResults: ChatCompletionMessageParam[] = [];
   const textParts: { type: "text"; text: string }[] = [];
-  const imageParts: {
-    type: "image_url";
-    image_url: { url: string };
-  }[] = [];
+  // Non-text content parts (image / file / input_audio). OpenAI Chat
+  // Completions carries them inline in the message `content` array.
+  const mediaParts: unknown[] = [];
   const toolCalls: {
     id: string;
     type: "function";
@@ -553,11 +556,29 @@ function toOpenAIMessages(m: LanguageModelMessage): ChatCompletionMessageParam[]
         textParts.push({ type: "text", text: part.text });
         break;
       case "image":
-        imageParts.push({
+        mediaParts.push({
           type: "image_url",
           image_url: { url: part.imageUrl },
         });
         break;
+      case "document": {
+        // OpenAI Chat Completions takes documents (e.g. PDFs) as a `file`
+        // part: base64 payloads go inline as a data URI with a filename;
+        // a Files API reference goes by file_id. No URL document source
+        // in Chat Completions — port of v1 openai.ts:565.
+        const filePart = openAIFilePartFromSource(part.source, part.mediaType);
+        if (filePart) mediaParts.push(filePart);
+        break;
+      }
+      case "audio": {
+        // OpenAI takes audio as an `input_audio` part (base64 + format).
+        const audioPart = openAIAudioPartFromSource(part.source, part.mediaType);
+        if (audioPart) mediaParts.push(audioPart);
+        break;
+      }
+      // TODO(adr-57-followup: openai video + reasoning input): Chat
+      // Completions has no native video part and does not accept replayed
+      // reasoning as input — dropped for now (no annihilating text bomb).
       case "tool_use":
         toolCalls.push({
           id: part.id,
@@ -588,16 +609,16 @@ function toOpenAIMessages(m: LanguageModelMessage): ChatCompletionMessageParam[]
   if (
     toolResults.length > 0 &&
     textParts.length === 0 &&
-    imageParts.length === 0 &&
+    mediaParts.length === 0 &&
     toolCalls.length === 0
   ) {
     return toolResults;
   }
 
   const content: ChatCompletionMessageParam["content"] =
-    imageParts.length === 0
+    mediaParts.length === 0
       ? textParts.map((p) => p.text).join("") || null
-      : ([...textParts, ...imageParts] as unknown as Exclude<
+      : ([...textParts, ...mediaParts] as unknown as Exclude<
           ChatCompletionMessageParam["content"],
           string | null
         >);
@@ -612,6 +633,50 @@ function toOpenAIMessages(m: LanguageModelMessage): ChatCompletionMessageParam[]
   const out: ChatCompletionMessageParam[] = [base];
   if (toolResults.length > 0) out.push(...toolResults);
   return out;
+}
+
+/**
+ * Project a document {@link MediaSource} to an OpenAI Chat Completions
+ * `file` content part. Ports v1's `openai.ts:565` shape: base64 → inline
+ * data URI with a filename; Files API reference → `file_id`. There is no
+ * URL document source in Chat Completions — callers stage to base64 or
+ * upload for a file_id.
+ */
+function openAIFilePartFromSource(source: MediaSource, mediaType: string | undefined): unknown {
+  switch (source.type) {
+    case "base64": {
+      const mime = source.mimeType ?? mediaType ?? "application/pdf";
+      const fn = source.metadata?.["filename"];
+      return {
+        type: "file",
+        file: {
+          filename: typeof fn === "string" ? fn : "document.pdf",
+          file_data: `data:${mime};base64,${source.data}`,
+        },
+      };
+    }
+    case "reference":
+      return { type: "file", file: { file_id: source.fileId } };
+    default:
+      // url / s3 / gcs are not first-class Chat Completions document
+      // sources — TODO(adr-57-followup: openai staged document sources).
+      return null;
+  }
+}
+
+/**
+ * Project an audio {@link MediaSource} to an OpenAI `input_audio` part.
+ * OpenAI takes base64 audio + a `format` discriminator (wav / mp3).
+ */
+function openAIAudioPartFromSource(source: MediaSource, mediaType: string | undefined): unknown {
+  if (source.type !== "base64") {
+    // Only inline base64 audio is a first-class Chat Completions part —
+    // TODO(adr-57-followup: openai staged audio sources).
+    return null;
+  }
+  const mime = source.mimeType ?? mediaType ?? "audio/wav";
+  const format = mime.includes("mp3") || mime.includes("mpeg") ? "mp3" : "wav";
+  return { type: "input_audio", input_audio: { data: source.data, format } };
 }
 
 function toOpenAITool(t: LanguageModelTool): ChatCompletionTool {

@@ -8,9 +8,15 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { ContentBlock, TaskRefBlock } from "@agentick/spec-next";
+import type {
+  ContentBlock,
+  ExecutionTarget,
+  ProjectInput,
+  RenderedTree,
+  TaskRefBlock,
+} from "@agentick/spec-next";
 
-import { messagePartFromBlock } from "../canonical-projection.js";
+import { defaultProject, messagePartFromBlock } from "../canonical-projection.js";
 
 describe("messagePartFromBlock — task_ref drop-in projection (#160)", () => {
   it("projects a task_ref block to a text part carrying the legacy `_kind: 'session_task_ref'` JSON shape", async () => {
@@ -69,12 +75,13 @@ describe("messagePartFromBlock — task_ref drop-in projection (#160)", () => {
     expect(Object.keys(parsed)).not.toContain("pollInterval");
   });
 
-  it("forwards providerMetadata onto the projected text part", async () => {
-    // Round-trip data stamped on the structured block (e.g. an MCP
-    // adapter tagging the task for a specific cache namespace) must
-    // survive projection — otherwise the provider step loses the
-    // metadata and we re-introduce the bug that providerMetadata
-    // exists to prevent.
+  it("projects the block's providerMetadata onto the INPUT part's providerOptions (ADR 57 §2)", async () => {
+    // Round-trip data + adopter-stamped per-block knobs live on the
+    // canonical block's `providerMetadata` (its only knob channel). On
+    // the SEND path they must land on the part's `providerOptions` —
+    // that is where every adapter now reads them (cacheControl,
+    // thoughtSignature). The part's own `providerMetadata` is reserved
+    // for what `normalize` writes back.
     const block: ContentBlock = {
       type: "task_ref",
       taskId: "task:meta",
@@ -82,8 +89,107 @@ describe("messagePartFromBlock — task_ref drop-in projection (#160)", () => {
       providerMetadata: { anthropic: { cacheControl: { type: "ephemeral" } } },
     };
     const part = messagePartFromBlock(block);
-    expect(part.providerMetadata).toEqual({
+    expect((part as { providerOptions?: unknown }).providerOptions).toEqual({
       anthropic: { cacheControl: { type: "ephemeral" } },
     });
+  });
+});
+
+describe("messagePartFromBlock — wire-native modalities (ADR 57)", () => {
+  it("projects a document block to a document part carrying the MediaSource (no JSON.stringify bomb)", () => {
+    const block: ContentBlock = {
+      type: "document",
+      source: { type: "base64", data: "JVBERi0=", mimeType: "application/pdf" },
+      mimeType: "application/pdf",
+    };
+    const part = messagePartFromBlock(block);
+    expect(part.type).toBe("document");
+    if (part.type !== "document") return;
+    expect(part.source).toEqual({
+      type: "base64",
+      data: "JVBERi0=",
+      mimeType: "application/pdf",
+    });
+    expect(part.mediaType).toBe("application/pdf");
+  });
+
+  it("projects audio and video blocks to their native parts", () => {
+    const audio = messagePartFromBlock({
+      type: "audio",
+      source: { type: "base64", data: "AAAA", mimeType: "audio/mpeg" },
+    } as ContentBlock);
+    expect(audio.type).toBe("audio");
+    const video = messagePartFromBlock({
+      type: "video",
+      source: { type: "url", url: "https://x/y.mp4" },
+    } as ContentBlock);
+    expect(video.type).toBe("video");
+  });
+
+  it("projects a reasoning block to a reasoning part carrying the signature", () => {
+    const part = messagePartFromBlock({
+      type: "reasoning",
+      text: "step by step",
+      signature: "sig-abc",
+    } as ContentBlock);
+    expect(part.type).toBe("reasoning");
+    if (part.type !== "reasoning") return;
+    expect(part.text).toBe("step by step");
+    expect(part.signature).toBe("sig-abc");
+  });
+
+  it("a generated_image reuses the image variant — NOT a JSON.stringify base64 text bomb (regression)", () => {
+    // The old `default` case emitted `JSON.stringify(block)` — for a
+    // generated_image that dumped the entire base64 payload into a text
+    // token. It must now project to an image part (data URI).
+    const bigData = "A".repeat(4096);
+    const part = messagePartFromBlock({
+      type: "generated_image",
+      data: bigData,
+      mimeType: "image/png",
+    } as ContentBlock);
+    expect(part.type).toBe("image");
+    if (part.type !== "image") return;
+    expect(part.imageUrl).toBe(`data:image/png;base64,${bigData}`);
+    // Belt-and-suspenders: no text part anywhere carrying the raw base64.
+    expect((part as { text?: string }).text).toBeUndefined();
+  });
+});
+
+describe("defaultProject — #176 providerOptions fold", () => {
+  const emptyTarget: ExecutionTarget = { kind: "language-model", modelId: "m" } as ExecutionTarget;
+
+  function projectFor(
+    tree: Partial<RenderedTree>,
+    target: ExecutionTarget = emptyTarget,
+  ): ReturnType<typeof defaultProject> {
+    const compiled: RenderedTree = {
+      specVersion: "test",
+      context: { entries: [] },
+      ...tree,
+    } as RenderedTree;
+    const input: ProjectInput = { compiled, target, tools: [] };
+    return defaultProject(input);
+  }
+
+  it("folds tree.providerOptions over target.providerOptions (tree wins) onto input.providerOptions", () => {
+    const target = {
+      ...emptyTarget,
+      providerOptions: { openai: { seed: 1, store: true }, anthropic: { thinking: "off" } },
+    } as ExecutionTarget;
+    const out = projectFor(
+      { providerOptions: { openai: { seed: 42 } } as RenderedTree["providerOptions"] },
+      target,
+    );
+    expect(out.providerOptions).toEqual({
+      // tree's seed wins; target's store survives; anthropic untouched.
+      openai: { seed: 42, store: true },
+      anthropic: { thinking: "off" },
+    });
+  });
+
+  it("omits providerOptions entirely when neither tree nor target declares any", () => {
+    const out = projectFor({});
+    expect(out.providerOptions).toBeUndefined();
   });
 });

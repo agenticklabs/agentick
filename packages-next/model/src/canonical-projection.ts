@@ -29,7 +29,7 @@ import type {
   SectionEntry,
   ToolDeclaration,
 } from "@agentick/spec-next";
-import { toJsonSchema } from "@agentick/spec-next";
+import { mergeProviderOptions, toJsonSchema } from "@agentick/spec-next";
 import { omitUndefined } from "@agentick/utils-next";
 
 export function defaultProject(input: ProjectInput): LanguageModelInput {
@@ -41,10 +41,20 @@ export function defaultProject(input: ProjectInput): LanguageModelInput {
   // model's visible tool list. See `ProjectInput.tools` for context.
   const tools = buildTools(input.tools);
   const parameters = buildParameters(input.compiled);
+  // #176: fold `tree.providerOptions` OVER `target.providerOptions`
+  // (tree/per-render wins) onto the request-level channel. Previously
+  // orphaned — the reconciler collected `<ProviderOptions>` into
+  // `RenderedTree.providerOptions` but nothing threaded it into the
+  // executor input; adapters saw only `target.providerOptions`.
+  const providerOptions = mergeProviderOptions(
+    input.target.providerOptions,
+    input.compiled.providerOptions,
+  );
   return {
     messages,
     ...(tools.length > 0 ? { tools } : {}),
     ...(parameters !== undefined ? { parameters } : {}),
+    ...(providerOptions !== undefined ? { providerOptions } : {}),
   };
 }
 
@@ -134,17 +144,70 @@ export function sectionText(section: SectionEntry): string {
 }
 
 export function messagePartFromBlock(block: ContentBlock): LanguageModelMessagePart {
-  const pm =
-    block.providerMetadata !== undefined ? { providerMetadata: block.providerMetadata } : {};
+  // Per-block `providerMetadata` (the canonical block's only knob
+  // channel — adopter-stamped cacheControl AND model-produced opaque
+  // round-trip data like `thoughtSignature`) projects onto the INPUT
+  // part's `providerOptions` field (ADR 57 §2 — providerOptions is
+  // "what you send"). The part's own `providerMetadata` is reserved for
+  // the OUTPUT direction (`normalize`).
+  const po =
+    block.providerMetadata !== undefined ? { providerOptions: block.providerMetadata } : {};
   switch (block.type) {
     case "text":
-      return { type: "text", text: block.text, ...pm };
+      return { type: "text", text: block.text, ...po };
     case "image":
       return {
         type: "image",
         imageUrl: imageUrlFromSource(block.source, block.mimeType),
         ...omitUndefined({ mediaType: block.mimeType }),
-        ...pm,
+        ...po,
+      };
+    case "document":
+      return {
+        type: "document",
+        source: block.source,
+        ...omitUndefined({ mediaType: block.mimeType }),
+        ...po,
+      };
+    case "audio":
+      return {
+        type: "audio",
+        source: block.source,
+        ...omitUndefined({ mediaType: block.mimeType }),
+        ...po,
+      };
+    case "video":
+      return {
+        type: "video",
+        source: block.source,
+        ...omitUndefined({ mediaType: block.mimeType }),
+        ...po,
+      };
+    case "reasoning":
+      return {
+        type: "reasoning",
+        text: block.text,
+        ...omitUndefined({ signature: block.signature }),
+        ...po,
+      };
+    case "generated_image":
+      // Replayed as input → reuse the `image` variant (ADR 57
+      // §Taxonomy). Emit a data URI, NOT `JSON.stringify(block)` — the
+      // latter dumped the entire base64 payload into a text token-bomb.
+      return {
+        type: "image",
+        imageUrl: `data:${block.mimeType};base64,${block.data}`,
+        ...omitUndefined({ mediaType: block.mimeType }),
+        ...po,
+      };
+    case "generated_file":
+      // Replayed as input → reuse the `document` variant (ADR 57
+      // §Taxonomy). The generated file is addressed by URI.
+      return {
+        type: "document",
+        source: { type: "url", url: block.uri, ...omitUndefined({ mimeType: block.mimeType }) },
+        ...omitUndefined({ mediaType: block.mimeType }),
+        ...po,
       };
     case "tool_use":
       return {
@@ -152,7 +215,7 @@ export function messagePartFromBlock(block: ContentBlock): LanguageModelMessageP
         id: block.toolUseId,
         name: block.name,
         input: block.input,
-        ...pm,
+        ...po,
       };
     case "tool_result":
       return {
@@ -160,7 +223,7 @@ export function messagePartFromBlock(block: ContentBlock): LanguageModelMessageP
         toolUseId: block.toolUseId,
         content: block.content.map(messagePartFromBlock),
         ...omitUndefined({ isError: block.isError }),
-        ...pm,
+        ...po,
       };
     case "task_ref":
       // Drop-in projection — the executor surface still only knows
@@ -182,7 +245,7 @@ export function messagePartFromBlock(block: ContentBlock): LanguageModelMessageP
             pollInterval: block.pollInterval,
           }),
         }),
-        ...pm,
+        ...po,
       };
     default:
       return {

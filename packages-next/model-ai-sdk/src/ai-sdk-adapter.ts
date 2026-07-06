@@ -47,10 +47,12 @@ import type {
   LanguageModelInput,
   LanguageModelMessage,
   LanguageModelStopReason,
+  MediaSource,
   NormalizeInput,
+  ProviderOptions,
   ToolCall,
 } from "@agentick/spec-next";
-import { SPEC_VERSION } from "@agentick/spec-next";
+import { mergeProviderOptions, SPEC_VERSION } from "@agentick/spec-next";
 import { omitUndefined } from "@agentick/utils-next";
 
 // ============================================================================
@@ -370,26 +372,50 @@ function toAISDKInput(input: LanguageModelInput, target: ExecutionTarget): AISDK
   if (p?.stopSequences !== undefined) {
     generation.stopSequences = [...p.stopSequences];
   }
+  // #176: fold `input.providerOptions` (project-time tree-over-target)
+  // over the target's own bag; merged defensively so a direct
+  // `buildParams(input, target)` still forwards the escape hatch.
+  const providerOptions = mergeProviderOptions(target.providerOptions, input.providerOptions);
   const result: AISDKProjectedInput = {
     messages,
     generation,
-    ...(target.providerOptions !== undefined
-      ? { providerOptions: target.providerOptions as never }
-      : {}),
+    ...(providerOptions !== undefined ? { providerOptions: providerOptions as never } : {}),
   };
   return result;
 }
 
 /**
- * v2 spec carries per-part `providerMetadata` keyed by provider
+ * v2 spec carries the per-part **input** provider-knob channel as
+ * `providerOptions` (ADR 57 §2 — "what you send"), keyed by provider
  * namespace (`anthropic`, `openai`, `google`). AI SDK 5 accepts the
- * same per-part shape under the field name `providerOptions`. The
- * two are 1:1 — forward by renaming the carrier field.
+ * same per-part shape under the same field name — forward it verbatim.
  */
-function pmToProviderOptions(part: {
-  readonly providerMetadata?: Record<string, Record<string, unknown>>;
+/**
+ * Project a {@link MediaSource} to AI SDK 5's `file` part `data` field.
+ * base64 payloads pass through as the raw string; every other source
+ * (url / gcs / s3 / reference) becomes a URL the SDK fetches or forwards.
+ */
+function aiSDKFileData(source: MediaSource): { data: string } {
+  switch (source.type) {
+    case "base64":
+      return { data: source.data };
+    case "url":
+      return { data: source.url };
+    case "gcs":
+      return { data: `gs://${source.bucket}/${source.object}` };
+    case "s3":
+      return { data: `s3://${source.bucket}/${source.key}` };
+    case "reference":
+      return { data: source.fileId };
+  }
+}
+
+function partProviderOptions(part: {
+  readonly providerOptions?: ProviderOptions;
 }): { providerOptions: Record<string, Record<string, unknown>> } | object {
-  return part.providerMetadata !== undefined ? { providerOptions: part.providerMetadata } : {};
+  return part.providerOptions !== undefined
+    ? { providerOptions: part.providerOptions as Record<string, Record<string, unknown>> }
+    : {};
 }
 
 function toAISDKMessage(m: LanguageModelMessage): ModelMessage[] {
@@ -411,14 +437,24 @@ function toAISDKMessage(m: LanguageModelMessage): ModelMessage[] {
           role: "user",
           content: m.content.map((p) => {
             if (p.type === "text") {
-              return { type: "text", text: p.text, ...pmToProviderOptions(p) };
+              return { type: "text", text: p.text, ...partProviderOptions(p) };
             }
             if (p.type === "image") {
               return {
                 type: "image",
                 image: p.imageUrl,
                 ...omitUndefined({ mediaType: p.mediaType }),
-                ...pmToProviderOptions(p),
+                ...partProviderOptions(p),
+              };
+            }
+            if (p.type === "document" || p.type === "audio" || p.type === "video") {
+              // AI SDK 5 carries all non-image binary modalities as a
+              // `file` part (data + mediaType).
+              return {
+                type: "file",
+                ...aiSDKFileData(p.source),
+                mediaType: p.mediaType ?? p.source.mimeType ?? "application/octet-stream",
+                ...partProviderOptions(p),
               };
             }
             // Fallback — flatten to text.
@@ -433,14 +469,18 @@ function toAISDKMessage(m: LanguageModelMessage): ModelMessage[] {
       const parts: unknown[] = [];
       for (const p of m.content) {
         if (p.type === "text") {
-          parts.push({ type: "text", text: p.text, ...pmToProviderOptions(p) });
+          parts.push({ type: "text", text: p.text, ...partProviderOptions(p) });
+        } else if (p.type === "reasoning") {
+          // AI SDK 5 replays reasoning as a `reasoning` part; the signed
+          // payload rides `providerOptions` for providers that require it.
+          parts.push({ type: "reasoning", text: p.text, ...partProviderOptions(p) });
         } else if (p.type === "tool_use") {
           parts.push({
             type: "tool-call",
             toolCallId: p.id,
             toolName: p.name,
             input: p.input,
-            ...pmToProviderOptions(p),
+            ...partProviderOptions(p),
           });
         }
       }
@@ -461,7 +501,7 @@ function toAISDKMessage(m: LanguageModelMessage): ModelMessage[] {
             toolCallId: p.toolUseId,
             toolName: "unknown",
             output: { type: "text", value: textOnly || "[done]" },
-            ...pmToProviderOptions(p),
+            ...partProviderOptions(p),
           });
         }
       }
