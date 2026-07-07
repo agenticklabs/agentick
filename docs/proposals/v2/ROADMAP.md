@@ -76,3 +76,47 @@ tracks run concurrently as delegated-and-judged workstreams. The only hard order
 metapackages + cut gates are genuinely last (they bundle + rename what everything else
 produces). Personas run as soon as their dependencies (sandbox, stores, auth) are green and
 feed fixes back into Phase 1.
+
+## Strategic update 2026-07-07 — prod runtime = Lambda microVM; the cut is PROD-readiness
+
+**Lambda microVM (#226) is reprioritized: post-cut sketch → CUT-CRITICAL prod runtime.**
+Ryan: "we'll likely mostly use Lambda microVMs in prod; local + docker in testing/staging."
+That makes the sandbox tiers an **isolation + environment hierarchy**, and it moves the
+center of gravity of the cut from "does it work locally" to "does it run in prod."
+
+### Sandbox provider hierarchy (isolation strength ↑ = environment)
+| Provider | Env | Isolation | Shape |
+|---|---|---|---|
+| `sandbox-local-next` | local dev | seatbelt / bwrap / unshare + cgroup (#240) — *weakest*; dev-safety | same-host, in-process handle |
+| `sandbox-docker-next` | test / staging | container (`NetworkMode`, cgroups) — *medium* | same-host, in-process handle |
+| **`sandbox-lambda-next`** | **prod** | **Firecracker microVM — *strongest*, the microVM IS the jail** | **REMOTE** (invoke boundary), **ephemeral** |
+
+Consequences that reshape earlier decisions:
+- **Prod isolation = Lambda's Firecracker microVM**, so local's OS-jail (#240) is *dev-safety*,
+  not the prod security story — it drops in urgency (still do it, but it's not cut-gating).
+- Lambda is a **REMOTE, ephemeral** provider: handle ops cross the invoke boundary (RPC-shaped —
+  the async `SandboxHandle` contract already supports it); no persistent fs (EFS mount = the
+  capability-tier for mounts); egress control = VPC/security-group, not a 127.0.0.1 proxy (the
+  network capability-tier); **hibernate = recreate** (this is the "remote provider" that the
+  #223 deferral was waiting for — confirms deferring true checkpoint was right).
+- The **contract we're repackaging must hold for a remote provider** — it does (async handle,
+  capability-tiers, `SandboxUnsupportedError`). The conformance suite is the guardrail.
+
+### The critical path to a PROD-ready cut (reordered)
+1. **Sandbox foundation:** repackaging (in flight) → **`sandbox-lambda-next` (prod)** + `sandbox-docker-next` (test/staging), in parallel → `#240` local isolation (dev-safety, non-gating).
+2. **Auth ingress (#302):** prod needs real principal→actor; also unblocks connector actors.
+3. **Durable stores (#132 fs/postgres TimelineStore + KV):** the cloud persona needs them.
+4. **Cloud persona #163 (ernesto) = THE PROD-READINESS GATE** — proves Lambda sandbox + auth +
+   durable stores + gateway work end-to-end. If ernesto runs, we can cut. This is the truth test.
+5. MCP resources (#237), connector ports (#233/#234) — as prod needs them.
+6. Metapackages (#161) + cut gates (#167/#164) — last.
+
+### Can't-ship-crap guardrails (non-negotiable through all of it)
+Every provider passes `runSandboxProviderConformance` against the REAL backend (no fakes — the
+stat/readdir lesson). The cloud persona is the integration truth, not a demo. Adversarial judge
+on every delegation. Fresh `pnpm -w typecheck` gate (the vitest-strips-types false-green trap).
+Mirror the nearest subsystem's packaging (the sandbox-drift lesson). No silent downgrades of v1
+capability.
+
+**Lambda is a net-new REMOTE provider (bigger than the docker port)** — it earns a survey → ADR
+before delegation, same as connectors/sandbox. Docker is a more mechanical v1 port.
