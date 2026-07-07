@@ -211,10 +211,17 @@ http). Connector conformance (slice 2) adds the federated `platform` credential 
    Locks the prod HTTP edge.
 2. **Connectors** — the `credential.kind:"platform"` branch, federated map, per-message actor;
    resolves the `define-connector.ts:132` TODO; connector conformance.
-3. **`GatewayInstaller.interceptIngress`** — the full multi-interceptor registration surface (ADR
-   50 item 2) + a `withAuth(...)` gateway extension that registers the auth interceptor; unblocks
-   non-authn enrichers (rate-limit, tenant-resolution). Slice 1 uses `AuthSource` directly at the
-   edge; this generalizes the single interceptor into the installed chain.
+3. **`GatewayInstaller.interceptIngress` chain + `withAuth` — DEFERRED (corrected 2026-07-07).**
+   Slice 1's **per-transport `authSource` option is THE design** — a transport *is* the ingress
+   edge; configuring auth there is clean and sufficient. Relocating it to a gateway-composed chain
+   was specced and then **withdrawn** as churn-without-a-consumer: it would have removed working,
+   just-shipped code to chase a more-"composable" form, and per-transport-option + gateway-`withAuth`
+   are two ways to configure one thing (violates one-code-path). Per steel-man-the-null: **do not
+   build the `interceptIngress` chain abstraction until a concrete NON-auth interceptor
+   (rate-limit, tenant-resolution, request-enrichment) needs it** — at which point the chain earns
+   its keep as genuine multi-interceptor infrastructure, and auth moves onto it then. Until then,
+   auth stays per-transport. `IngressInterceptor` remains defined in spec (harmless seed) with a
+   `// TODO(#146)` trailhead.
 
 ## Deferred / open
 - **Peer-credential enrichment** for unix-socket (SO_PEERCRED → principal) — a later interceptor.
