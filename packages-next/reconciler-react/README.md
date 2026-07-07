@@ -92,14 +92,24 @@ The IR is assembled from two kinds of contribution:
   component that **overrides** it for a key.
 
 Defaults are **on** and **lazy**. Collect ships two: `tools` (advertise
-every registered `<Tool>`) and `timeline` (fold the conversation). A
-default runs only when its key wasn't overridden — so an agent that
-writes nothing still gets its tools and conversation in context, and an
-agent that renders `<Timeline>{fn}` overrides the timeline fold (the
-default never runs; no double-fold). Overriding is done by rendering
-inside `<Project projectionKey="timeline">…</Project>` — the React
-front-end onto the compiler-general projection seam (`<Timeline>{fn}` ≡
-`ctx.project("timeline", fn)` in a functional compiler).
+the registered `<Tool>`s) and `timeline` (fold the conversation). Note
+the two axes: `<Tool>` still **registers** its source (that's unchanged);
+the `tools` default just **surfaces** the accumulated registry — you no
+longer need a surfacing component to advertise them. A default runs only
+when its key wasn't overridden, so:
+
+- Write no surfacing component → the default runs. An agent that renders
+  only `<System>` + a couple of `<Tool>`s still gets its conversation
+  folded and its tools advertised (`default:timeline` / `default:tools`).
+- Render `<Timeline>{fn}` → it **overrides** the timeline fold. The
+  default never runs (lazy — no double-fold) and the entries are tagged
+  `authored:timeline`.
+
+Overriding is done by rendering inside
+`<Project projectionKey="timeline">…</Project>` — the React front-end
+onto the compiler-general projection seam (`<Timeline>{fn}` ≡
+`ctx.project("timeline", fn)` in a functional compiler). Presence of the
+override — even one that projects zero entries — suppresses the default.
 
 Every contribution is **provenance-tagged** on `RenderedTree.provenance`
 (`default:<key>` vs `authored:<key>`, index-aligned with `context.entries`
