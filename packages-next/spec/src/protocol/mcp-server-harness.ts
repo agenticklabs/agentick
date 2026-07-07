@@ -61,7 +61,42 @@ export type { McpAuthenticatedUser, McpRequestExtras };
 export type McpRequestContext = ToolHandlerCtx & {
   readonly transport: "mcp";
   readonly mcp: McpRequestExtras;
+  /**
+   * MCP structured-logging sink — emits a `notifications/message` to
+   * the connected client, subject to the level the client set via
+   * `logging/setLevel`. Present iff the server advertises the `logging`
+   * capability (ON by default; opt out with `capabilities.logging =
+   * false`). `undefined` when the adopter opted out — handlers MUST
+   * check before use.
+   *
+   * The sink is a fire-and-forget: below-threshold levels are dropped
+   * silently, and a send failure (connection closed mid-flight) is
+   * swallowed. This is diagnostics plumbing, never a control path.
+   */
+  readonly log?: McpLogSink;
 };
+
+/**
+ * Syslog-derived severity levels for MCP structured logging, ordered
+ * least→most severe. Mirrors the wire `logging/setLevel` +
+ * `notifications/message` `level` enum (MCP spec).
+ */
+export type McpLogLevel =
+  | "debug"
+  | "info"
+  | "notice"
+  | "warning"
+  | "error"
+  | "critical"
+  | "alert"
+  | "emergency";
+
+/**
+ * Structured-logging sink installed on {@link McpRequestContext.log}.
+ * `data` is arbitrary JSON-serializable diagnostic payload; `logger`
+ * is an optional logical channel name (the wire `logger` field).
+ */
+export type McpLogSink = (level: McpLogLevel, data: unknown, logger?: string) => void;
 
 // ============================================================================
 // Protocol — the harness surface

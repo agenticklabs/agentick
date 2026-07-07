@@ -63,6 +63,7 @@ interface McpServerOptions {
   readonly tools?: McpServerToolsOptions; // see "The tools slot"
   readonly prompts?: McpServerPromptsOptions; // see "The prompts slot"
   readonly elicit?: boolean | { enabled: boolean }; // see "Elicitation"
+  readonly completions?: McpServerCompletionsOptions; // see "Argument completion"
   readonly resources?: unknown; // lands with #123
 
   readonly capabilities?: McpServerCapabilitiesOptions; // opt-OUTs only
@@ -255,6 +256,67 @@ originating tool call. See ADR 43 + the elicitation-next README.
 
 ---
 
+## Argument completion (`completions`)
+
+Wires the `completion/complete` request to per-argument
+`CompletionHandler`s built with the sugar factories re-exported from this
+subpath (`completeFromList`, `completeFromEnum`, `completePrefixMatch`,
+`completeDependent`, `completeFromAsync`). The `completions` capability is
+advertised iff at least one handler is wired.
+
+```ts
+completions: {
+  prompts: {
+    summarize: {
+      // ref/prompt "summarize", argument "style"
+      style: completeFromList(["concise", "detailed", "bullet"]),
+      // dependent arg: sees sibling values via ctx.resolvedArguments
+      section: completeDependent({ requires: ["docId"] }, async (typed, { docId }) => {
+        return (await loadSections(docId)).filter((s) => s.startsWith(typed));
+      }),
+    },
+  },
+},
+```
+
+Handlers live at the wire (a server-config slot), NOT on
+`PromptDeclaration` — argument completion is an MCP-wire concept, and the
+100-value cap + sugar belong at the wire edge while prompt declarations stay
+framework-neutral. Unknown prompts / arguments resolve to an empty value
+list (clients probe freely, no protocol error). `ref/resource`
+(resource-template completion) resolves to empty until the resource
+substrate lands (Wave 4).
+
+---
+
+## Structured logging (`ctx.log`)
+
+Every MCP request context carries a `ctx.log(level, data, logger?)` sink
+that emits `notifications/message` to the connected client. The `logging`
+capability is advertised **by default**; opt out with
+`capabilities: { logging: false }` (which also makes `ctx.log` undefined).
+
+```ts
+const tool = createTool({
+  name: "reindex",
+  handler: async (input, { ctx }) => {
+    ctx.log?.("info", { phase: "start", input });
+    // ... work ...
+    ctx.log?.("debug", { rows: 1234 }, "indexer"); // optional logger channel
+    return [{ type: "text", text: "done" }];
+  },
+});
+```
+
+Clients set their minimum severity with `logging/setLevel`; the server
+stores it per-connection and filters emissions below it (syslog ordering:
+`debug < info < notice < warning < error < critical < alert < emergency`).
+Before any `setLevel`, the connection defaults to `debug` (emit
+everything). The sink is fire-and-forget — below-threshold levels and
+send failures (connection closed mid-flight) drop silently.
+
+---
+
 ## Security pipeline
 
 Five named stages, each independently overridable. Defaults are
@@ -326,7 +388,10 @@ The `initialize` response advertises capabilities **derived from what was
 actually wired** — never from adopter declaration. `tools` advertises when
 `tools` is set AND the resolved registry is non-empty. `prompts` advertises
 when the prompts source has declarations. `elicitation` advertises when
-`elicit` is enabled.
+`elicit` is enabled. `tasks` advertises when at least one tool declares
+`taskSupport: "required" | "supported"`. `completions` advertises when the
+`completions` slot carries a handler. `logging` advertises by default (every
+request context gets a `ctx.log` sink).
 
 Adopters can OPT OUT of advertising a capability that IS wired
 (`capabilities: { tools: false }`) — useful for staged rollouts — but cannot
@@ -382,23 +447,25 @@ with #171g.
 
 ## What this subpath exports
 
-| Symbol                                                                                                | Purpose                                                                                         |
-| ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `McpServerHarness`                                                                                    | Construct + lifecycle the harness directly                                                      |
-| `spawnStandaloneMcpServer` / `SpawnStandaloneOptions` / `StandaloneServerHandle`                      | Mode-A shell                                                                                    |
-| `validateOptions` / `McpServerOptions`                                                                | Eager options validation; flat adopter API                                                      |
-| `McpServerToolsOptions` / `McpServerToolsConfig` / `resolveToolsOption`                               | Tools slot trichotomy + resolved internal shape (ADR 42)                                        |
-| `McpServerPromptsOptions` / `McpServerPromptsConfig` / `resolvePromptsOption`                         | Prompts slot trichotomy (#171d.1b)                                                              |
-| `McpServerElicitOptions` / `resolveElicitOption`                                                      | Elicit opt-out resolution (#171d.2)                                                             |
-| `installToolsHandlers` / `installPromptsHandlers`                                                     | Low-level projection installers — adopters with custom Server instances can call these directly |
-| `buildMcpElicit` / `inspectElicitationCapabilities`                                                   | MCP-flavored `Elicit` sugar factory (ADR 43)                                                    |
-| `bearerTokenAuth` / `allowListGuard` / `roleBasedAuthz` / `slidingWindowLimiter`                      | Built-in security stages                                                                        |
-| `inMemoryServerTransport`                                                                             | In-process transport for tests                                                                  |
-| `ElicitationCancelled` / `ElicitationDeclined` / `ElicitationNotSupported` / `UrlElicitationRequired` | Elicit error classes (re-exports)                                                               |
+| Symbol                                                                                                                     | Purpose                                                                                         |
+| -------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `McpServerHarness`                                                                                                         | Construct + lifecycle the harness directly                                                      |
+| `spawnStandaloneMcpServer` / `SpawnStandaloneOptions` / `StandaloneServerHandle`                                           | Mode-A shell                                                                                    |
+| `validateOptions` / `McpServerOptions`                                                                                     | Eager options validation; flat adopter API                                                      |
+| `McpServerToolsOptions` / `McpServerToolsConfig` / `resolveToolsOption`                                                    | Tools slot trichotomy + resolved internal shape (ADR 42)                                        |
+| `McpServerPromptsOptions` / `McpServerPromptsConfig` / `resolvePromptsOption`                                              | Prompts slot trichotomy (#171d.1b)                                                              |
+| `McpServerElicitOptions` / `resolveElicitOption`                                                                           | Elicit opt-out resolution (#171d.2)                                                             |
+| `McpServerCompletionsOptions` / `McpServerCompletionsConfig` / `resolveCompletionsOption`                                  | Argument-completion slot + resolved internal shape (Wave 3a)                                    |
+| `completeFromList` / `completeFromEnum` / `completePrefixMatch` / `completeDependent` / `completeFromAsync`                | Completion sugar builders (re-exported from the protocol layer)                                 |
+| `installToolsHandlers` / `installPromptsHandlers` / `installCompletionsHandlers` / `installLoggingHandler` / `buildMcpLog` | Low-level projection installers — adopters with custom Server instances can call these directly |
+| `buildMcpElicit` / `inspectElicitationCapabilities`                                                                        | MCP-flavored `Elicit` sugar factory (ADR 43)                                                    |
+| `bearerTokenAuth` / `allowListGuard` / `roleBasedAuthz` / `slidingWindowLimiter`                                           | Built-in security stages                                                                        |
+| `inMemoryServerTransport`                                                                                                  | In-process transport for tests                                                                  |
+| `ElicitationCancelled` / `ElicitationDeclined` / `ElicitationNotSupported` / `UrlElicitationRequired`                      | Elicit error classes (re-exports)                                                               |
 
 Spec types are re-exported for adopters' convenience: `McpRequestContext`,
 `McpServerConnectionInfo`, `McpAuthenticatedUser`, `McpServerError`,
-`McpServerHarnessProtocol`.
+`McpServerHarnessProtocol`, `McpLogLevel`, `McpLogSink`.
 
 ---
 
@@ -421,6 +488,13 @@ Spec types are re-exported for adopters' convenience: `McpRequestContext`,
   URL-mode deferred-auth path.
 - `__tests__/projection-prompts.spec.ts` — `prompts/list` + `prompts/get`
   projection.
+- `__tests__/projection-completions-logging.spec.ts` — Wave 3a: argument
+  completion round-trip (ref/prompt routing, `context.arguments`
+  pass-through, unknown-ref + ref/resource → empty), `ctx.log`
+  round-trip with level filtering (`setLoggingLevel("info")` filters
+  `debug`; default level emits both), capability gating for
+  `completions`/`logging`, and the `lifecycle.ts` tasks-vs-resources
+  gating regression.
 - `__tests__/spawn.spec.ts` — Mode-A shell ergonomics.
 - `security/__tests__/pipeline.spec.ts` — 35 tests covering every stage in
   isolation + the composed pipeline.

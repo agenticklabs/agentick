@@ -47,6 +47,7 @@ import type {
 } from "./security/stages.js";
 import type { ServerTransport } from "./transports/types.js";
 import type { ToolHandlerResolver } from "./projection/tools.js";
+import type { CompletionHandler } from "../protocol/completions.js";
 
 /**
  * Per-connection visibility predicate for tools. Hidden tools are
@@ -168,7 +169,58 @@ export interface McpServerCapabilitiesOptions {
   readonly prompts?: boolean;
   readonly resources?: boolean;
   readonly elicitation?: boolean;
+  /**
+   * Pattern-B tasks capability. Advertised when at least one tool
+   * declares `taskSupport: "required" | "supported"`. Opt out with
+   * `false`.
+   */
+  readonly tasks?: boolean;
+  /**
+   * Argument-completion capability. Advertised when the `completions`
+   * slot carries at least one handler. Opt out with `false`.
+   */
+  readonly completions?: boolean;
+  /**
+   * Structured-logging capability (`notifications/message` +
+   * `logging/setLevel`). Advertised ON by default — every MCP request
+   * context gets a `ctx.log` sink. Opt out with `false` (drops the
+   * capability AND makes `ctx.log` undefined).
+   */
+  readonly logging?: boolean;
 }
+
+/**
+ * Argument-completion slot. Maps a prompt name to a per-argument map
+ * of {@link CompletionHandler}s — the sugar builders in
+ * `@agentick/mcp-next` (`completeFromList`, `completeFromEnum`,
+ * `completeDependent`, ...) produce these. When a client issues
+ * `completion/complete` for `ref/prompt` + argument name, the matching
+ * handler runs; unknown refs / arguments resolve to an empty value
+ * list (no protocol error — clients probe freely).
+ *
+ * Kept as a server-config slot rather than a field on
+ * `PromptDeclaration` because argument completion is an MCP-wire
+ * concept: the sugar + the 100-cap live at the wire edge, and prompt
+ * declarations stay framework-neutral (usable by non-MCP surfaces
+ * that have no completion notion).
+ */
+export interface McpServerCompletionsConfig {
+  /**
+   * Prompt-argument completion handlers, keyed by prompt name, then by
+   * argument name.
+   */
+  readonly prompts?: Readonly<Record<string, Readonly<Record<string, CompletionHandler>>>>;
+  // TODO(phase-#123): `resourceTemplates` keyed by uriTemplate → variable
+  // → handler, once the resource substrate (Wave 4) exists. The
+  // CompleteRequestSchema handler already routes `ref/resource` to a
+  // no-op empty result until then.
+}
+
+/**
+ * The completions slot. Currently a single config-object shape (prompt
+ * argument handlers); resource-template completion joins it with Wave 4.
+ */
+export type McpServerCompletionsOptions = McpServerCompletionsConfig;
 
 /**
  * Elicit slot — opt-OUT for `ctx.elicit`. Elicitation is ON by
@@ -242,6 +294,12 @@ export interface McpServerOptions {
    * `notifications/resources/list_changed` on mutations.
    */
   readonly resources?: unknown;
+  /**
+   * Argument-completion handlers. Absent = completions capability NOT
+   * advertised. Keyed by prompt name → argument name → handler; use
+   * the `complete*` sugar builders from `@agentick/mcp-next`.
+   */
+  readonly completions?: McpServerCompletionsOptions;
   /** Capability opt-OUTS. Defaults derive from what's actually wired. */
   readonly capabilities?: McpServerCapabilitiesOptions;
   /** Security pipeline. Defaults are transport-aware; adopters override stages individually. */
@@ -301,6 +359,9 @@ export function validateOptions(options: McpServerOptions): McpServerOptions {
     } else {
       throw invalid("elicit must be a boolean or { enabled: boolean }", ["elicit"]);
     }
+  }
+  if (options.completions !== undefined) {
+    validateCompletionsOption(options.completions);
   }
   if (
     options.capabilities !== undefined &&
@@ -380,6 +441,66 @@ export function resolveElicitOption(option: boolean | McpServerElicitOptions | u
   if (option === undefined) return true;
   if (typeof option === "boolean") return option;
   return option.enabled;
+}
+
+/**
+ * Internal-shape view onto a resolved {@link McpServerCompletionsOptions}.
+ * The projection layer consumes `prompts` directly; `hasHandlers`
+ * drives whether the `completions` capability is advertised.
+ */
+export interface ResolvedCompletionsOptions {
+  readonly prompts: Readonly<Record<string, Readonly<Record<string, CompletionHandler>>>>;
+  readonly hasHandlers: boolean;
+}
+
+/**
+ * Normalize the completions option into its internal resolved shape.
+ * Throws {@link McpServerConfigInvalid} on shape violations. `hasHandlers`
+ * is `true` iff at least one prompt carries at least one argument
+ * handler — the gate for advertising the `completions` capability.
+ */
+export function resolveCompletionsOption(
+  option: McpServerCompletionsOptions,
+): ResolvedCompletionsOptions {
+  const prompts = option.prompts ?? {};
+  let hasHandlers = false;
+  for (const argMap of Object.values(prompts)) {
+    if (Object.keys(argMap).length > 0) {
+      hasHandlers = true;
+      break;
+    }
+  }
+  return { prompts, hasHandlers };
+}
+
+function validateCompletionsOption(option: McpServerCompletionsOptions): void {
+  if (typeof option !== "object" || option === null) {
+    throw invalid("completions must be an object", ["completions"]);
+  }
+  if (option.prompts !== undefined) {
+    if (typeof option.prompts !== "object" || option.prompts === null) {
+      throw invalid("completions.prompts must be an object keyed by prompt name", [
+        "completions",
+        "prompts",
+      ]);
+    }
+    for (const [promptName, argMap] of Object.entries(option.prompts)) {
+      if (typeof argMap !== "object" || argMap === null) {
+        throw invalid(
+          `completions.prompts.${promptName} must be an object keyed by argument name`,
+          ["completions", "prompts", promptName],
+        );
+      }
+      for (const [argName, handler] of Object.entries(argMap)) {
+        if (typeof handler !== "function") {
+          throw invalid(
+            `completions.prompts.${promptName}.${argName} must be a CompletionHandler function`,
+            ["completions", "prompts", promptName, argName],
+          );
+        }
+      }
+    }
+  }
 }
 
 /**

@@ -38,16 +38,24 @@ import { Server as SdkServer } from "@modelcontextprotocol/sdk/server/index.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 
 import {
+  resolveCompletionsOption,
   resolveElicitOption,
   resolvePromptsOption,
   resolveToolsOption,
   type McpServerOptions,
   type PromptsFilter,
+  type ResolvedCompletionsOptions,
   type ResolvedToolsOptions,
   validateOptions,
 } from "./config.js";
 import { buildCapabilities } from "./protocol/lifecycle.js";
 import { buildMcpElicit } from "./projection/elicitation.js";
+import { installCompletionsHandlers } from "./projection/completions.js";
+import {
+  buildMcpLog,
+  createConnectionLogState,
+  installLoggingHandler,
+} from "./projection/logging.js";
 import { installPromptsHandlers } from "./projection/prompts.js";
 import { createServerTaskRegistry, installTasksHandlers } from "./projection/tasks.js";
 import { installToolsHandlers } from "./projection/tools.js";
@@ -134,6 +142,28 @@ export class McpServerHarness
 
   /** True when `options.elicit` opted into the elicitation capability. */
   private readonly elicitWired: boolean;
+
+  /**
+   * Resolved argument-completion handlers, or `null` when no
+   * `completions` slot was provided. Consumed per-connection by the
+   * completions projection.
+   */
+  private readonly resolvedCompletions: ResolvedCompletionsOptions | null;
+  /**
+   * True iff the `completions` capability is advertised — the slot
+   * carried at least one handler AND the adopter didn't opt out. Gates
+   * both the capability advertisement and installing the
+   * `completion/complete` request handler (the SDK asserts the
+   * capability on registration).
+   */
+  private readonly completionsAdvertised: boolean;
+
+  /**
+   * True iff structured logging is enabled (ON by default; `false` only
+   * when `capabilities.logging === false`). Gates the `logging`
+   * capability, the `logging/setLevel` handler, and `ctx.log`.
+   */
+  private readonly loggingEnabled: boolean;
 
   /** Server identity for the MCP `initialize` response. */
   private readonly serverInfo: { name: string; version: string };
@@ -233,6 +263,16 @@ export class McpServerHarness
     }
 
     this.elicitWired = resolveElicitOption(this.options.elicit);
+
+    this.resolvedCompletions =
+      this.options.completions !== undefined
+        ? resolveCompletionsOption(this.options.completions)
+        : null;
+    this.completionsAdvertised =
+      (this.resolvedCompletions?.hasHandlers ?? false) &&
+      this.options.capabilities?.completions !== false;
+
+    this.loggingEnabled = this.options.capabilities?.logging !== false;
 
     this.serverInfo = this.options.serverInfo ?? {
       name: this.options.name,
@@ -403,6 +443,11 @@ export class McpServerHarness
         // taskSupport: "required" | "supported". Pattern B clients
         // gate the task wire on this capability.
         tasks: this.hasTasksWired,
+        // Wave 3a — completions advertised when the slot carries a
+        // handler; logging advertised by default (every ctx gets a
+        // `log` sink). Both subject to `capabilities.*` opt-out.
+        completions: this.resolvedCompletions?.hasHandlers ?? false,
+        logging: this.loggingEnabled,
       },
       this.options.capabilities,
     );
@@ -423,6 +468,18 @@ export class McpServerHarness
     this._registerConnection(connectionRecord);
 
     // 4. Install request-handler projections.
+
+    // Per-connection structured logging (Wave 3a). The level holder is
+    // mutated by the `logging/setLevel` handler and read by the
+    // `ctx.log` sink. Both are gated on `loggingEnabled` — the SDK
+    // asserts the `logging` capability before letting either the
+    // setLevel handler register or `sendLoggingMessage` fire.
+    const logState = createConnectionLogState();
+    const logSink = this.loggingEnabled ? buildMcpLog(sdkServer, logState) : undefined;
+    if (this.loggingEnabled) {
+      installLoggingHandler(sdkServer, logState);
+    }
+
     const buildRequestContext = (): McpRequestContext => {
       // Pull the client's negotiated capabilities + identity from the
       // SDK Server post-initialize. Undefined before initialize
@@ -475,6 +532,10 @@ export class McpServerHarness
           origin: info.origin,
           remoteAddress: info.remoteAddress,
         }),
+        // Wave 3a — structured-logging sink. Present iff logging is
+        // enabled AND the client didn't opt the server out. `undefined`
+        // otherwise; handlers must check before use.
+        ...(logSink ? { log: logSink } : {}),
       };
 
       // Attach `elicit` sugar when wired AND the client advertised
@@ -525,6 +586,18 @@ export class McpServerHarness
       const unsubscribe = installPromptsHandlers(sdkServer, {
         source: this.promptsSource,
         ...(this.promptsFilter ? { filter: this.promptsFilter } : {}),
+        security: this.security,
+        buildContext: buildRequestContext,
+      });
+      cleanup.push(unsubscribe);
+    }
+
+    // Wave 3a — argument completion. Installed only when the capability
+    // is advertised (slot carries a handler AND no opt-out); the SDK
+    // asserts the `completions` capability on handler registration.
+    if (this.completionsAdvertised && this.resolvedCompletions !== null) {
+      const unsubscribe = installCompletionsHandlers(sdkServer, {
+        prompts: this.resolvedCompletions.prompts,
         security: this.security,
         buildContext: buildRequestContext,
       });

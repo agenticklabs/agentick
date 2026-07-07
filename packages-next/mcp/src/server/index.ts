@@ -28,17 +28,21 @@ import "./augment.js";
 export { McpServerHarness } from "./harness.js";
 export { type McpServerHandle, toHandle } from "./handle.js";
 export {
+  resolveCompletionsOption,
   resolveElicitOption,
   resolvePromptsOption,
   validateOptions,
   type McpServerAuthOptions,
   type McpServerCapabilitiesOptions,
+  type McpServerCompletionsConfig,
+  type McpServerCompletionsOptions,
   type McpServerElicitOptions,
   type McpServerOptions,
   type McpServerPromptsConfig,
   type McpServerPromptsOptions,
   type McpServerToolsOptions,
   type PromptsFilter,
+  type ResolvedCompletionsOptions,
   type ResolvedPromptsOptions,
 } from "./config.js";
 export {
@@ -74,11 +78,38 @@ export {
   toWirePromptMessages,
   type PromptsProjectionOptions,
 } from "./projection/prompts.js";
+export {
+  installCompletionsHandlers,
+  type CompletionsProjectionOptions,
+} from "./projection/completions.js";
+// Completion sugar builders — re-exported so server adopters build
+// `completions` handlers from the same import path as the harness.
+export {
+  COMPLETION_MAX_VALUES,
+  completeDependent,
+  completeFromAsync,
+  completeFromEnum,
+  completeFromList,
+  completePrefixMatch,
+  normalizeCompletionResult,
+  type CompletionContext,
+  type CompletionHandler,
+  type CompletionResult,
+} from "../protocol/completions.js";
+export {
+  buildMcpLog,
+  createConnectionLogState,
+  installLoggingHandler,
+  LOG_LEVEL_SEVERITY,
+  type ConnectionLogState,
+} from "./projection/logging.js";
 
 // Re-export the spec types so adopters don't need to import from
 // `@agentick/spec-next` directly for the common case.
 export type {
   McpAuthenticatedUser,
+  McpLogLevel,
+  McpLogSink,
   McpRequestContext,
   McpServerConnectionInfo,
   McpServerError,

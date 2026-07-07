@@ -27,6 +27,10 @@ export interface WiredCapabilities {
   readonly elicitation: boolean;
   readonly sampling: boolean;
   readonly tasks: boolean;
+  /** True iff the `completions` slot carries at least one handler. */
+  readonly completions: boolean;
+  /** True iff structured logging is enabled (default ON). */
+  readonly logging: boolean;
 }
 
 /**
@@ -68,11 +72,26 @@ export function buildCapabilities(
   // SDK's `assertRequestHandlerCapability` check (tasks/get + friends)
   // requires this key be present on the server. Pattern B clients gate
   // their `tools/call` task-mode opt-in on this advertisement.
-  if (wired.tasks && override?.resources !== false) {
+  if (wired.tasks && override?.tasks !== false) {
     // The capability shape is intentionally empty — listChanged
     // notifications would be a future extension; not required by
     // current spec.
     (out as ServerCapabilities & { tasks?: Record<string, unknown> }).tasks = {};
+  }
+
+  // Completions — advertised when the `completions` slot carries at
+  // least one argument handler. The SDK gates the `completion/complete`
+  // request handler on this key. Empty shape per spec.
+  if (wired.completions && override?.completions !== false) {
+    out.completions = {};
+  }
+
+  // Logging — advertised by default (every request context gets a
+  // `ctx.log` sink). The SDK gates both the `logging/setLevel` request
+  // handler AND `notifications/message` emission on this key. Empty
+  // shape per spec.
+  if (wired.logging && override?.logging !== false) {
+    out.logging = {};
   }
 
   return out;
