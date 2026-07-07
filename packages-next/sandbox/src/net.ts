@@ -3,15 +3,17 @@
  *
  * Evaluates an egress request against an ordered list of {@link NetworkRule}s.
  * First matching rule wins; the default action is **deny**. OS-free — no
- * sockets, no proxy server — so every egress-enforcing provider (the local
- * HTTP proxy, a future docker/remote enforcer) shares one matcher without a
+ * sockets, no proxy server. It lives in the BASE package
+ * `@agentick/sandbox-next` (re-exported from the index) so every
+ * egress-enforcing provider (the local HTTP proxy, a future docker/remote
+ * enforcer) — which deps the base — shares one matcher without a
  * wrong-direction dependency on any one provider.
  *
  * Ported faithfully from v1 `@agentick/sandbox-local/network/rules.ts`,
  * retyped against the shared `spec-next` wire vocabulary.
  *
  * @see docs/proposals/v2/blueprint/59-sandbox-providers.md
- * @verifiedBy packages-next/sandbox-net-next/src/__tests__/rules.spec.ts
+ * @verifiedBy packages-next/sandbox-next/src/__tests__/net.spec.ts
  */
 
 import type { NetworkRule, ProxiedRequest } from "@agentick/spec-next";

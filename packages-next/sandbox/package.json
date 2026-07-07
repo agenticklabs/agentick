@@ -2,7 +2,7 @@
   "name": "@agentick/sandbox-next",
   "version": "0.0.0",
   "private": true,
-  "description": "SandboxHarness — v2 sandbox-as-harness surface (formerly @agentick/sandbox/v2). Per ADR 24, bridges to SandboxProvider impls; each <Sandbox> mount creates one SandboxHarness instance.",
+  "description": "Base sandbox package (ADR 59) — the SandboxHarness + bridge + ACL, the SandboxProvider construction contract + SandboxHandle interface, the applyEdits transform, and the pure network matcher. Providers dep this base (mirroring model-openai-next → model-next). React bindings ship from /react; the conformance suite + fake from /testing.",
   "type": "module",
   "sideEffects": [
     "./src/index.ts",
@@ -19,6 +19,11 @@
       "types": "./src/react/index.ts",
       "import": "./src/react/index.ts",
       "default": "./src/react/index.ts"
+    },
+    "./testing": {
+      "types": "./src/testing/index.ts",
+      "import": "./src/testing/index.ts",
+      "default": "./src/testing/index.ts"
     }
   },
   "scripts": {
@@ -34,21 +39,23 @@
     "@agentick/reconciler-next": "workspace:*",
     "@agentick/reconciler-react-next": "workspace:*",
     "@agentick/runtime-next": "workspace:*",
-    "@agentick/sandbox-edit-next": "workspace:*",
     "@agentick/spec-next": "workspace:*",
     "@agentick/tool-next": "workspace:*",
     "@agentick/utils-next": "workspace:*",
     "effect": "^3.21.2"
   },
   "devDependencies": {
-    "@agentick/spec-conformance-next": "workspace:*",
     "@types/react": "^19.2.5"
   },
   "peerDependencies": {
-    "react": "^19.0.0"
+    "react": "^19.0.0",
+    "vitest": "^4.0.0"
   },
   "peerDependenciesMeta": {
     "react": {
+      "optional": true
+    },
+    "vitest": {
       "optional": true
     }
   }

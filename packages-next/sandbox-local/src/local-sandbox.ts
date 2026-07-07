@@ -8,9 +8,9 @@
  * (add/remove/list); `destroy` reaps child processes, stops the egress
  * proxy, and removes an auto-created workspace.
  *
- * The `applyEdits` transform and the network matcher are shared, pure,
- * OS-free packages (`sandbox-edit-next`, `sandbox-net-next`) — this handle
- * owns only the I/O around them.
+ * The `applyEdits` transform and the network matcher are pure, OS-free
+ * code re-exported from the base package `@agentick/sandbox-next` — this
+ * handle owns only the I/O around them.
  *
  * NOTE — isolation tier: this reference provider confines the FILE API by
  * path resolution and routes egress through the proxy, but `exec` runs as
@@ -37,7 +37,7 @@ import {
   writeFile as fsWriteFile,
 } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
-import { applyEdits } from "@agentick/sandbox-edit-next";
+import { applyEdits } from "@agentick/sandbox-next";
 import type {
   SandboxEdit,
   SandboxEditResult,
@@ -45,8 +45,8 @@ import type {
   SandboxExecResult,
   SandboxHandle,
   SandboxMount,
-} from "@agentick/spec-next";
-import { SandboxIoError } from "@agentick/spec-next";
+} from "@agentick/sandbox-next";
+import { SandboxIoError } from "@agentick/sandbox-next";
 import { filterEnv, resolveSafePath } from "./paths.js";
 import { resolveMount, type ResolvedMount } from "./workspace.js";
 import type { NetworkProxyServer } from "./proxy.js";

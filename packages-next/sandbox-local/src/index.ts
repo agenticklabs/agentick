@@ -3,9 +3,11 @@
  *
  * Spawns commands in a temp workspace, path-confines the file API, writes
  * atomically, mounts host dirs dynamically, and routes egress through a
- * 127.0.0.1 proxy. Depends on `spec-next` + the shared pure packages
- * (`sandbox-edit-next`, `sandbox-net-next`) only — never on the harness
- * package `@agentick/sandbox-next` (ADR 59).
+ * 127.0.0.1 proxy. Deps the base package `@agentick/sandbox-next` and
+ * implements its `SandboxProvider` — mirroring `model-openai-next →
+ * model-next` (ADR 59). The base re-exports the spec wire types, the
+ * `applyEdits` transform, and the `matchRequest` matcher, so this
+ * provider has ONE import source.
  *
  * @see docs/proposals/v2/blueprint/59-sandbox-providers.md
  */

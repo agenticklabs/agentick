@@ -9,7 +9,7 @@
 
 import { createServer, request as httpRequest, type Server } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
-import type { NetworkRule } from "@agentick/spec-next";
+import type { NetworkRule } from "@agentick/sandbox-next";
 import { NetworkProxyServer } from "../proxy.js";
 import { localProvider } from "../provider.js";
 

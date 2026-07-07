@@ -63,13 +63,12 @@ import type {
   SandboxExecDelta,
   SandboxExecInput,
   SandboxExecResult,
-  SandboxHandle,
   SandboxPermissionRequest,
-  SandboxProvider,
   SandboxReadFileInput,
   SandboxRemoveMountInput,
   SandboxWriteFileInput,
 } from "@agentick/spec-next";
+import type { SandboxCreateOptions, SandboxHandle, SandboxProvider } from "./contract.js";
 import { HandlerError } from "@agentick/spec-next";
 
 import {
@@ -243,7 +242,7 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
     init: {
       readonly sandboxId: string;
       readonly provider: SandboxProvider;
-      readonly options: import("@agentick/spec-next").SandboxCreateOptions;
+      readonly options: SandboxCreateOptions;
       readonly acl?: SandboxACL;
       readonly elicitation: ElicitationHarnessProtocol;
       readonly permissionTimeoutDecision?: "allow-once" | "deny";
@@ -408,7 +407,7 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
   ): Effect.Effect<SandboxEditResult, SandboxError, never> {
     // Delegate to the handle's real `editFile` after the write-permission
     // check. The handle owns edit truth — the layered-matching `applyEdits`
-    // transform (crown jewel; @agentick/sandbox-edit-next) plus provider-side atomicity
+    // transform (crown jewel; `applyEdits` in this base package) plus provider-side atomicity
     // (temp + rename). No more `applyEditsLocal` lite regression.
     return Effect.gen(this, function* () {
       const allowed = yield* this.checkPermission("write", input.path);

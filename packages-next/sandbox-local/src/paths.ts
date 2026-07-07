@@ -9,7 +9,7 @@
 
 import { realpath } from "node:fs/promises";
 import { resolve, isAbsolute } from "node:path";
-import { SandboxEscapeError } from "@agentick/spec-next";
+import { SandboxEscapeError } from "@agentick/sandbox-next";
 import type { ResolvedMount } from "./workspace.js";
 
 /** Environment variables that must never be inherited (loader hijacks). */

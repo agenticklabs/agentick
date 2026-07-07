@@ -20,7 +20,8 @@
 
 import * as React from "react";
 import { useBridges, useData, useOnUnmount } from "@agentick/reconciler-react-next";
-import type { SandboxACL, SandboxCreateOptions, SandboxProvider } from "@agentick/spec-next";
+import type { SandboxACL } from "@agentick/spec-next";
+import type { SandboxCreateOptions, SandboxProvider } from "../contract.js";
 
 import "../augment.js";
 import type { SandboxBridge } from "../bridge.js";

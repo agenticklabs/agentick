@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { NetworkRule } from "@agentick/spec-next";
-import { matchDomain, matchRequest, type NetworkRequest } from "../rules.js";
+import { matchDomain, matchRequest, type NetworkRequest } from "../net.js";
 
 const req = (over: Partial<NetworkRequest> = {}): NetworkRequest => ({
   host: "api.github.com",

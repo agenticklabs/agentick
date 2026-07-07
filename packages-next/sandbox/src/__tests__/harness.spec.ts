@@ -14,7 +14,6 @@ import { ElicitationHarness } from "@agentick/elicitation-next";
 import type {
   SandboxMount,
   ProtocolEvent,
-  SandboxHandle,
   SandboxACL,
   SandboxEdit,
   SandboxEditResult,
@@ -23,8 +22,9 @@ import type {
   SandboxExecResult,
 } from "@agentick/spec-next";
 
+import type { SandboxHandle } from "../contract.js";
 import { SandboxHarness } from "../harness.js";
-import { applyEdits } from "@agentick/sandbox-edit-next";
+import { applyEdits } from "../edit.js";
 import { inMemorySandboxBridge } from "../bridge.js";
 
 function makeHandle(

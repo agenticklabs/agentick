@@ -11,8 +11,8 @@ import { constants } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
-import { SandboxMountError } from "@agentick/spec-next";
-import type { SandboxMount } from "@agentick/spec-next";
+import { SandboxMountError } from "@agentick/sandbox-next";
+import type { SandboxMount } from "@agentick/sandbox-next";
 
 /** A mount whose host path has been validated + realpath-resolved. */
 export interface ResolvedMount {

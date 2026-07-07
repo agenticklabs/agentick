@@ -14,9 +14,10 @@
  *     add/list/remove round-trip; when not, the methods are absent.
  *   - `destroy`: releases the instance (subsequent ops reject).
  *
- * Provider-agnostic: it drives only the spec `SandboxHandle` surface, so
- * it lives here (shared) rather than in any one provider package. This
- * also keeps provider packages free of a dependency on `sandbox-next`.
+ * Provider-agnostic: it drives only the `SandboxHandle` surface. It ships
+ * from `@agentick/sandbox-next/testing` — the double + conformance live
+ * WITH the contract they pin (ADR 59), so every provider deps the base
+ * and imports this suite from one place.
  *
  * @see docs/proposals/v2/blueprint/59-sandbox-providers.md
  */
@@ -26,7 +27,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import type { SandboxHandle, SandboxProvider } from "@agentick/spec-next";
+import type { SandboxHandle, SandboxProvider } from "../contract.js";
 
 export interface SandboxProviderConformanceOptions {
   /** Suite label (defaults to the provider `name`). */

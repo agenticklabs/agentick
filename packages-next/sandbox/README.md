@@ -1,16 +1,32 @@
 # @agentick/sandbox-next
 
-The **sandbox-as-harness** surface (ADR 24, ADR 59). Wraps a live
+The **BASE sandbox package** (ADR 24, ADR 59). Wraps a live
 `SandboxHandle` produced by a `SandboxProvider` in a
 `BaseHarness<"sandbox">` — every operation runs through the substrate
 phase contract (journaled, observable, inbox-addressable) and passes an
 ACL permission gate backed by the session's elicitation harness.
 
-This package owns the **bridge, harness, tools, and the real edit
-transform**. It depends on `@agentick/spec-next` only — it does **not**
-depend on any provider package. Concrete providers
-(`sandbox-local-next`, `sandbox-docker-next`) implement the spec
-`SandboxProvider` and are installed separately (ADR 59 Wave 2).
+This package owns:
+
+- the **bridge + harness + ACL**;
+- the **`SandboxProvider` construction contract** + the **`SandboxHandle`**
+  live-object interface (`src/contract.ts`) — the provider↔harness
+  internal contracts (NOT wire types; those stay in `spec-next`);
+- the **crown-jewel `applyEdits`** transform (`src/edit.ts`) and the
+  **pure egress matcher** `matchRequest`/`matchDomain` (`src/net.ts`);
+- a **`/react` subpath** (React-only bindings) and a **`/testing`
+  subpath** (the `runSandboxProviderConformance` suite + the in-memory
+  `fakeSandboxProvider`).
+
+The main entry is **React-free**. It re-exports the spec sandbox wire
+types alongside its own contracts, so a provider has **one import
+source**.
+
+It depends on `@agentick/spec-next` only — **not** on any provider.
+Concrete providers (`sandbox-local-next`, `sandbox-docker-next`) **dep
+this base** and implement `SandboxProvider`, mirroring
+`model-openai-next → model-next` (ADR 59). They are installed
+separately.
 
 ## The model-facing tool surface — four tools + bash
 
@@ -112,12 +128,17 @@ provider) invokes it, so it works uniformly across every provider.
 
 | Export                                  | What                                                          |
 | --------------------------------------- | ------------------------------------------------------------ |
+| `SandboxProvider` / `SandboxHandle`     | The construction contract + live-object interface providers implement/return (`src/contract.ts`). |
+| `SandboxCreateOptions` / `SandboxSnapshot` / `SandboxIntent` | Provider create-options + the (deferred #223) snapshot seam. |
 | `SandboxHarness`                        | `BaseHarness<"sandbox">` — 8 commands (exec/read-file/write-file/edit-file/add-mount/remove-mount/list-mounts/destroy). |
 | `withSandbox(options?)`                 | `AppExtension` — constructs the bridge on the app substrate.  |
-| `createSandboxBridge` / `inMemorySandboxBridge` | Bridge factory + in-memory test bridge.              |
+| `inMemorySandboxBridge`                 | In-memory bridge for tests.                                  |
 | `applyEdits(source, edits)` / `EditError` | The pure edit transform + its diagnostic error.            |
+| `matchRequest` / `matchDomain`          | The pure first-match-wins egress matcher (default-deny, `*.domain` wildcards). |
 | `SessionACL`, `matchesACLPattern`       | Per-session learned allow/deny state + glob matcher.         |
+| Spec wire types (re-exported)           | `SandboxExec*`/`SandboxEdit*`/mount inputs, `SandboxPermissions`, `NetworkRule`, `ProxiedRequest` — one import source for providers. |
 | `/react` subpath                        | `<Sandbox>`, `useSandbox()`, and the `Bash`/`ReadFile`/`WriteFile`/`EditFile` tools. |
+| `/testing` subpath                      | `runSandboxProviderConformance` (#218) + `fakeSandboxProvider`. |
 
 ## Verified by
 
@@ -134,17 +155,15 @@ provider) invokes it, so it works uniformly across every provider.
 
 ## Roadmap & known gaps
 
-- **Concrete providers (ADR 59 Wave 2)** — `sandbox-local-next` (exec/fs/
-  editFile + network proxy/setup), `sandbox-docker-next` (+ `NetworkMode`),
-  `sandbox-net-next` (the pure first-match-wins egress matcher), plus a
-  `runSandboxProviderConformance` suite every provider passes (#218).
-  The network wire types (`NetworkRule`, `ProxiedRequest`) already live in
-  spec; the matcher + proxy are Wave 2.
-- **`applyEdits` relocation** — providers implement `handle.editFile` and
-  need this transform, but depend on spec only and cannot import this
-  harness package. Wave 2 relocates `applyEdits` to a shared OS-free
-  package (mirroring the `sandbox-net-next` matcher split). Tracked as a
-  `TODO(ADR 59, Wave 2)` in `src/edit.ts`.
+- **`sandbox-docker-next` provider** — deps this base (like
+  `sandbox-local-next`), enforces egress via `NetworkMode`, and runs
+  `runSandboxProviderConformance` from `/testing`. Not yet shipped.
+- **OS isolation in `sandbox-local` (#240)** — the reference provider
+  confines the FILE API by path resolution and routes egress through the
+  proxy, but `exec` runs as an ordinary child process (no
+  seatbelt/bwrap/namespace jail). Porting v1's isolation executor
+  strategies is a separate FUNCTIONAL gap in the provider, independent of
+  this packaging.
 - **Hibernate / restore (#223)** — `SandboxProvider.restore` +
   `SandboxSnapshot` are an unwired contract seam; the bridge only calls
   `create`. No provider has a true checkpoint yet.

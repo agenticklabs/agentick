@@ -7,23 +7,24 @@
  * map, and `editFile` runs the real `applyEdits` transform, so edit
  * behavior is faithful. `exec` is programmable via `execHandler` (default:
  * empty stdout, exit 0) — a fake shell, not a real one, so this double does
- * NOT claim `runSandboxProviderConformance` (that pins the REAL local
- * provider against real temp dirs + a real shell).
+ * NOT claim `runSandboxProviderConformance` (that pins a REAL provider —
+ * e.g. `sandbox-local-next` — against real temp dirs + a real shell).
  *
- * @see packages-next/sandbox-local-next/README.md
+ * Ships from `@agentick/sandbox-next/testing` — the double lives WITH the
+ * `SandboxProvider` contract it implements (ADR 59).
+ *
+ * @see packages-next/sandbox-next/README.md
  */
 
-import { applyEdits } from "@agentick/sandbox-edit-next";
 import type {
-  SandboxCreateOptions,
   SandboxEdit,
   SandboxEditResult,
   SandboxExecOptions,
   SandboxExecResult,
-  SandboxHandle,
   SandboxMount,
-  SandboxProvider,
 } from "@agentick/spec-next";
+import { applyEdits } from "../edit.js";
+import type { SandboxCreateOptions, SandboxHandle, SandboxProvider } from "../contract.js";
 
 export interface FakeSandboxOptions {
   /** Seed the in-memory filesystem (sandbox-relative path → content). */

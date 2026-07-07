@@ -4,7 +4,7 @@
  * real atomic writes, real runtime mounts. Not a fake (ADR 59).
  */
 
-import { runSandboxProviderConformance } from "@agentick/spec-conformance-next";
+import { runSandboxProviderConformance } from "@agentick/sandbox-next/testing";
 import { localProvider } from "../provider.js";
 
 runSandboxProviderConformance(() => localProvider(), { label: "local" });

@@ -1,80 +1,27 @@
 /**
- * Sandbox protocol types — wire shapes for the sandbox abstraction.
+ * Sandbox protocol types — the SERIALIZED wire shapes for the sandbox
+ * abstraction (the inbox-addressable command payloads/results, the
+ * network firewall vocabulary, the ACL/telemetry shapes).
  *
- * v1 lives in `@agentick/sandbox/types.ts`. v2 mirrors the shapes here
- * so any reconciler (React, Angular, Vue) can integrate sandboxes via
- * the `SandboxBridge` without depending on v1's component runtime.
+ * The provider construction + live-object contracts are NOT wire types —
+ * they live in the base package `@agentick/sandbox-next` (`contract.ts`)
+ * alongside the harness/bridge impl, mirroring `LanguageModelAdapter` in
+ * `model-next`. The split test is "is it serialized across the
+ * inbox/wire?" (ADR 59).
  *
- * Provider adapters (`@agentick/sandbox-local`, `sandbox-docker`,
- * `sandbox-secure-exec`, …) implement {@link SandboxProvider}. Each
- * reconciler ships a framework-specific component (`<Sandbox>` in
- * React, `@Injectable()` SandboxService in Angular, etc.) that uses
- * the provider to create a {@link SandboxHandle} and registers it
- * with the session's {@link SandboxBridge}.
+ * These shapes let any reconciler (React, Angular, Vue) integrate
+ * sandboxes via the `SandboxBridge` without depending on v1's component
+ * runtime. Provider adapters (`@agentick/sandbox-local-next`,
+ * `sandbox-docker-next`, …) dep the base and implement its provider
+ * contract.
  *
+ * @see docs/proposals/v2/blueprint/59-sandbox-providers.md
  * @see docs/proposals/v2/blueprint/22-state-formatters-reconciler-shape.md
  */
 
 // ============================================================================
-// Runtime handle
+// Exec — command options + result
 // ============================================================================
-
-/**
- * Live sandbox instance. Created by a {@link SandboxProvider},
- * registered with the {@link SandboxBridge} by a framework-specific
- * component, queried by tools at dispatch time.
- *
- * Handles are NOT serializable — they hold provider-specific resources
- * (file descriptors, container ids, process handles). Hibernate-resume
- * recreates handles by replaying the provider create-call from the
- * snapshot's declared {@link SandboxIntent}.
- */
-export interface SandboxHandle {
-  /** Unique sandbox instance id within the session. */
-  readonly id: string;
-  /** Absolute path to the workspace root inside the sandbox. */
-  readonly workspacePath: string;
-  /** Execute a shell command. */
-  exec(command: string, options?: SandboxExecOptions): Promise<SandboxExecResult>;
-  /** Read a file from the sandbox filesystem. */
-  readFile(path: string): Promise<string>;
-  /** Write a file to the sandbox filesystem. */
-  writeFile(path: string, content: string): Promise<void>;
-  /**
-   * Apply surgical edits to a file — the real, layered-matching edit
-   * op (see `@agentick/sandbox-next`'s `applyEdits`). Providers own
-   * atomicity (temp + rename); the harness delegates its `editFile`
-   * command here after the ACL permission check.
-   *
-   * There is deliberately no `stat` / `readdir` on the handle: `bash`
-   * (`exec`) subsumes listing + metadata (`ls`, `stat`, `find`, …).
-   * A fabricated `stat` is worse than none (ADR 59). The model shells
-   * out for those.
-   */
-  editFile(path: string, edits: readonly SandboxEdit[]): Promise<SandboxEditResult>;
-  /**
-   * Mount a host directory into the sandbox at runtime — a host-side
-   * PRIVILEGED op the sandboxed process cannot perform from inside, so
-   * (unlike stat/readdir) `bash` does NOT subsume it: it earns a real
-   * handle method + harness command.
-   *
-   * CAPABILITY-TIERED + OPTIONAL: a provider that cannot remount a
-   * running instance (e.g. docker) leaves these `undefined` OR throws
-   * {@link SandboxUnsupportedError}. NEVER fake success — an honest
-   * "unsupported" beats a silent no-op (ADR 59). The harness
-   * feature-detects and surfaces `SandboxUnsupportedError`.
-   *
-   * The harness gates `addMount` against the construction-time
-   * {@link SandboxCreateOptions.mountAllow} ceiling before calling this.
-   */
-  addMount?(mount: SandboxMount): Promise<void>;
-  /** Remove a runtime mount by its sandbox mount point. Capability-tiered (see {@link addMount}). */
-  removeMount?(sandboxPath: string): Promise<void>;
-  /** List the sandbox's current mounts. Capability-tiered (see {@link addMount}). */
-  listMounts?(): Promise<readonly SandboxMount[]>;
-  /** Tear down the sandbox and release provider-side resources. */
-  destroy(): Promise<void>;
-}
 
 export interface SandboxExecOptions {
   readonly cwd?: string;
@@ -102,60 +49,8 @@ export interface SandboxExecResult {
 }
 
 // ============================================================================
-// Provider
+// Mounts
 // ============================================================================
-
-export interface SandboxProvider {
-  /** Provider name (e.g. "local", "docker", "e2b"). */
-  readonly name: string;
-  create(options: SandboxCreateOptions): Promise<SandboxHandle>;
-  /**
-   * Optional: restore a sandbox from a prior snapshot. Implementations
-   * MAY no-op (or throw `SnapshotIncompatibleError`) when persistence
-   * isn't supported — the bridge falls back to `create()`.
-   *
-   * TODO(#223): hibernate/restore deferred — no provider has a real
-   * checkpoint yet (ADR 59). The bridge only ever calls `create`;
-   * `restore` / {@link SandboxSnapshot} remain an unwired contract seam
-   * until a remote/CRIU-style provider implements true checkpointing.
-   */
-  restore?(snapshot: SandboxSnapshot): Promise<SandboxHandle>;
-}
-
-export interface SandboxCreateOptions {
-  /** Workspace path on the host. `true` = auto-allocate a temp dir. */
-  readonly workspace?: string | true;
-  /**
-   * Initial filesystem mounts (host ↔ sandbox path pairs), applied at
-   * create time. Runtime mounts are added dynamically via the harness's
-   * `add-mount` command — constrained to {@link mountAllow}.
-   */
-  readonly mounts?: readonly SandboxMount[];
-  /**
-   * Construction-time mount **allow-list** — the host-path patterns
-   * (glob / `regex:` / exact, per the ACL matcher) that MAY be mounted
-   * at runtime via `add-mount`. The ceiling: the harness rejects
-   * `add-mount` for any host path outside it (same ceiling-plus-dynamic
-   * shape as session `requiredScopes` + downscoping). `undefined` →
-   * runtime mounting is denied (default-deny; declare the ceiling to
-   * opt in). Create-time {@link mounts} are honored regardless — they
-   * are the operator's explicit initial authorization.
-   */
-  readonly mountAllow?: readonly string[];
-  /** Advisory capability set (filesystem + network the sandbox allows). */
-  readonly allow?: SandboxPermissions;
-  /** Environment variables. Resolved to strings before reaching the provider. */
-  readonly env?: Readonly<Record<string, string>>;
-  /** Resource constraints (memory, cpu, disk, time). */
-  readonly limits?: SandboxResourceLimits;
-  /**
-   * Post-create bootstrap hook (#225). Invoked once, after the provider
-   * has produced the handle and before the sandbox is marked ready —
-   * clone a repo, install deps, seed fixtures. The bridge (not the
-   * provider) runs it, so it works uniformly across every provider.
-   */
-  readonly setup?: (handle: SandboxHandle) => Promise<void>;
-}
 
 /**
  * A host ↔ sandbox directory mount. Ported from v1
@@ -178,9 +73,9 @@ export interface SandboxPermissions {
    *   - `NetworkRule[]` — evaluated in order, first match wins, default deny
    *
    * The rule matcher + egress proxy are provider-side (ADR 59: the pure
-   * matcher ships from `@agentick/sandbox-net-next`, the local HTTP proxy
-   * from `sandbox-local-next`, docker enforces via `NetworkMode`). These
-   * are the shared wire types only.
+   * matcher ships from `@agentick/sandbox-next` (base), the local HTTP
+   * proxy from `sandbox-local-next`, docker enforces via `NetworkMode`).
+   * These are the shared wire types only.
    */
   readonly network?: boolean | readonly NetworkRule[];
   readonly fileSystem?: "none" | "workspace" | "host";
@@ -197,10 +92,10 @@ export interface SandboxPermissions {
  * `@agentick/sandbox/types.ts`.
  *
  * The pure matcher (`matchRequest` / `matchDomain`, first-match-wins,
- * `*.domain` wildcards) lives in `@agentick/sandbox-net-next` so every
- * egress-enforcing provider (local proxy, docker, remote) shares it
- * without a wrong-direction dependency. These types are the vocabulary
- * that matcher, providers, and observability all speak.
+ * `*.domain` wildcards) lives in `@agentick/sandbox-next` (base) so every
+ * egress-enforcing provider (local proxy, docker, remote) — which deps
+ * the base — shares it. These types are the vocabulary that matcher,
+ * providers, and observability all speak.
  */
 export interface NetworkRule {
   /** "allow" or "deny". Rules evaluated in order; first match wins. */
@@ -437,36 +332,4 @@ export interface SandboxAddMountInput {
 export interface SandboxRemoveMountInput {
   /** The sandbox mount point to unmount. */
   readonly sandboxPath: string;
-}
-
-// ============================================================================
-// Snapshot / intent
-// ============================================================================
-
-/**
- * Declarative shape captured by the snapshot. The framework component
- * declared a `<Sandbox provider={p} ...>` mount; the bridge records the
- * intent so hibernate-resume can recreate the handle.
- */
-export interface SandboxIntent {
-  readonly id: string;
-  readonly providerName: string;
-  readonly options: SandboxCreateOptions;
-  /** Optional provider-private snapshot blob for `provider.restore`. */
-  readonly providerSnapshot?: SandboxSnapshot;
-}
-
-/**
- * Provider-specific snapshot blob. Opaque to the bridge; only the
- * provider that produced it can interpret it.
- *
- * TODO(#223): hibernate/restore deferred (ADR 59). This type and
- * {@link SandboxProvider.restore} are an unwired contract seam — no
- * provider implements a true checkpoint yet, and the bridge only calls
- * `create`. Kept in the contract so a future remote/CRIU-style provider
- * can slot in without a spec change.
- */
-export interface SandboxSnapshot {
-  readonly providerName: string;
-  readonly data: Readonly<Record<string, unknown>>;
 }

@@ -1,6 +1,7 @@
 /**
  * Local egress proxy — a 127.0.0.1 HTTP proxy + CONNECT tunnel that
- * enforces {@link NetworkRule}s via the shared `sandbox-net-next` matcher.
+ * enforces {@link NetworkRule}s via the `matchRequest` matcher re-exported
+ * from the base package `@agentick/sandbox-next`.
  *
  * HTTPS is handled at the CONNECT level: allowed connections get a
  * passthrough tunnel, denied ones are rejected. No MITM / TLS termination
@@ -15,8 +16,8 @@ import { createServer, request as httpRequest } from "node:http";
 import { connect as netConnect } from "node:net";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import type { Socket } from "node:net";
-import type { NetworkRule, ProxiedRequest } from "@agentick/spec-next";
-import { matchRequest } from "@agentick/sandbox-net-next";
+import type { NetworkRule, ProxiedRequest } from "@agentick/sandbox-next";
+import { matchRequest } from "@agentick/sandbox-next";
 
 export interface ProxyServerConfig {
   /** Port to bind. 0 = auto-assign (default). */

@@ -21,10 +21,9 @@ import type {
   AppSubstrate,
   ElicitationHarnessProtocol,
   SandboxACL,
-  SandboxCreateOptions,
-  SandboxProvider,
   Unsubscribe,
 } from "@agentick/spec-next";
+import type { SandboxCreateOptions, SandboxProvider } from "./contract.js";
 import { createNotifier } from "@agentick/pubsub-next";
 
 import { SandboxHarness } from "./harness.js";

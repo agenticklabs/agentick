@@ -10,13 +10,19 @@ pins the contract against, and the baseline every other provider
 
 ## Dependency posture
 
-Depends on `@agentick/spec-next` and the shared **pure** packages only:
+Deps the **base package** `@agentick/sandbox-next` — and nothing else —
+mirroring `model-openai-next → model-next` (ADR 59). The base re-exports
+everything this provider needs from a **single import source**:
 
-- `@agentick/sandbox-edit-next` — the layered-matching `applyEdits` transform.
-- `@agentick/sandbox-net-next` — the egress rule matcher.
+- the `SandboxProvider` / `SandboxHandle` / `SandboxCreateOptions`
+  construction contracts;
+- the spec sandbox wire types (`SandboxExec*`, `SandboxEdit*`,
+  `SandboxMount`, `NetworkRule`, `ProxiedRequest`) + the error classes;
+- the layered-matching `applyEdits` transform;
+- the pure egress matcher `matchRequest` / `matchDomain`.
 
-It does **not** depend on the harness package `@agentick/sandbox-next`
-(providers must be importable without pulling the harness in).
+The conformance suite it runs (`runSandboxProviderConformance`) ships from
+`@agentick/sandbox-next/testing`.
 
 ## Quick Start
 
@@ -54,16 +60,17 @@ await sandbox.destroy();
   harness gates `addMount` against the construction-time `mountAllow`
   ceiling; the provider just performs the mount.
 - **Network proxy** — when `allow.network` is a `NetworkRule[]`, a
-  127.0.0.1 HTTP proxy + CONNECT tunnel enforces the rules via
-  `sandbox-net-next`, injects `HTTP(S)_PROXY` into the spawned env, and
-  keeps a `ProxiedRequest` audit log. No MITM (HTTPS is tunneled opaquely).
+  127.0.0.1 HTTP proxy + CONNECT tunnel enforces the rules via the base's
+  `matchRequest`, injects `HTTP(S)_PROXY` into the spawned env, and keeps a
+  `ProxiedRequest` audit log. No MITM (HTTPS is tunneled opaquely).
 
 ## Testing double
 
-`@agentick/sandbox-local-next/testing` exports `fakeSandboxProvider()` — an
-in-memory provider (real `applyEdits`, programmable `exec`) for wiring
-harness/bridge tests without spawning processes. It is a fake, not a
-conformance-grade provider.
+The in-memory `fakeSandboxProvider()` (real `applyEdits`, programmable
+`exec`) ships from the base package's `@agentick/sandbox-next/testing`
+subpath — the double lives WITH the `SandboxProvider` contract it
+implements (ADR 59). It is a fake for wiring harness/bridge tests without
+spawning processes, not a conformance-grade provider.
 
 ## API
 

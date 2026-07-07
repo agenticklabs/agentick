@@ -20,7 +20,7 @@ import type {
   SandboxCreateOptions,
   SandboxHandle,
   SandboxProvider,
-} from "@agentick/spec-next";
+} from "@agentick/sandbox-next";
 import { LocalSandbox } from "./local-sandbox.js";
 import { NetworkProxyServer, type ProxyServerConfig } from "./proxy.js";
 import { createWorkspace, destroyWorkspace, resolveMounts } from "./workspace.js";

@@ -15,8 +15,9 @@ import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next
 import { ReconcilerHarness } from "@agentick/reconciler-react-next";
 import { fakeBridges } from "@agentick/reconciler-next";
 import { ElicitationHarness } from "@agentick/elicitation-next";
-import type { HookBridges, SandboxHandle, SandboxProvider } from "@agentick/spec-next";
+import type { HookBridges } from "@agentick/spec-next";
 
+import type { SandboxHandle, SandboxProvider } from "../../contract.js";
 import { inMemorySandboxBridge, type SandboxBridge } from "../../bridge.js";
 import { Sandbox } from "../component.js";
 import { useSandbox } from "../hook.js";

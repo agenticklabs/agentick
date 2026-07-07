@@ -7,19 +7,19 @@
  * delete, insert (before/after/start/end), and range modes.
  *
  * This module ships the PURE transform only (`applyEdits`) — no I/O,
- * OS-free — so it can be shared by BOTH the sandbox harness
- * (`@agentick/sandbox-next`, which re-exports it) and every provider
- * (`sandbox-local-next`, `sandbox-docker-next`) without a
- * wrong-direction dependency. Providers depend on `spec-next` +
- * this package only; they can never import from the harness package.
+ * OS-free. It lives in the BASE package `@agentick/sandbox-next`
+ * (re-exported from the index) so BOTH the harness and every provider
+ * (`sandbox-local-next`, `sandbox-docker-next`) — which dep the base —
+ * share one implementation, mirroring `model-openai-next → model-next`
+ * (ADR 59).
  *
  * The `editFile` file-wrapper (read → transform → atomic temp+rename)
  * deliberately lives in the PROVIDER, not here: temp+rename is a
- * filesystem concern owned by the provider layer. This package is the
- * pure text transform, nothing more (ADR 59, Wave 2).
+ * filesystem concern owned by the provider layer. This module is the
+ * pure text transform, nothing more.
  *
  * @see docs/proposals/v2/blueprint/59-sandbox-providers.md
- * @verifiedBy packages-next/sandbox-edit-next/src/__tests__/edit.spec.ts
+ * @verifiedBy packages-next/sandbox-next/src/__tests__/edit.spec.ts
  */
 
 import type { SandboxEdit, SandboxEditChange, SandboxEditResult } from "@agentick/spec-next";
