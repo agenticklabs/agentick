@@ -44,6 +44,7 @@ export interface KnobInfo {
   required?: boolean;
   momentary?: boolean;
   inline?: boolean;
+  readOnly?: boolean;
 }
 
 export interface KnobGroup {
@@ -105,6 +106,7 @@ function buildKnobInfo(reg: KnobRegistration): KnobInfo {
     required: reg.required,
     momentary: reg.momentary,
     inline: reg.inline,
+    readOnly: reg.readOnly,
   };
 }
 
@@ -161,6 +163,7 @@ function formatKnobLine(knob: KnobInfo): string {
   if (knob.pattern !== undefined) hints.push(`pattern: ${knob.pattern}`);
   if (knob.required) hints.push("required");
   if (knob.momentary) hints.push("resets after use");
+  if (knob.readOnly) hints.push("read-only");
 
   if (hints.length > 0) {
     parts.push(` (${hints.join(", ")})`);
@@ -263,18 +266,33 @@ function executeSetKnob(
     if (!knob) {
       return error(`Unknown knob "${input.name}". Available: ${[...knobs.keys()].join(", ")}`);
     }
+    if (knob.readOnly) {
+      return error(
+        `Knob "${input.name}" is read-only — it is managed by the application and cannot be set.`,
+      );
+    }
     const err = validateAndSetKnob(knob, input.value);
     if (err) return error(err);
     return [{ type: "text" as const, text: `Set ${input.name} to ${formatValue(input.value)}.` }];
   }
 
-  // Group dispatch
+  // Group dispatch — read-only knobs are excluded from group writes
   const targets: KnobRegistration[] = [];
+  let readOnlyCount = 0;
   for (const [, reg] of knobs) {
-    if (reg.group === input.group) targets.push(reg);
+    if (reg.group !== input.group) continue;
+    if (reg.readOnly) {
+      readOnlyCount++;
+      continue;
+    }
+    targets.push(reg);
   }
   if (targets.length === 0) {
-    return error(`No knobs found in group "${input.group}".`);
+    return error(
+      readOnlyCount > 0
+        ? `All knobs in group "${input.group}" are read-only — they are managed by the application and cannot be set.`
+        : `No knobs found in group "${input.group}".`,
+    );
   }
   // Validate all types match before setting any
   const expectedType = targets[0].valueType;

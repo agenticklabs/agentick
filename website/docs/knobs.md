@@ -214,6 +214,23 @@ function Agent() {
 
 The model sees `planning [momentary toggle]: false — Account planning workflow (resets after use)`. The reset happens after the tick loop but before the snapshot is persisted, so restored sessions always start clean.
 
+## Read-Only Knobs
+
+Read-only knobs are model-visible but not model-settable. The knob renders in the knobs section so the model can read the state, but `set_knob` rejects writes by name, and group writes skip read-only members. Only application code can change the value:
+
+```tsx
+function Agent() {
+  const [phase, setPhase] = useKnob("phase", "collecting", {
+    description: "Pipeline phase (managed by the application)",
+    options: ["collecting", "processing", "done"],
+    readOnly: true,
+  });
+  // ... call setPhase() from tool handlers as work progresses
+}
+```
+
+The model sees `phase [select]: "collecting" — Pipeline phase (managed by the application) (options: "collecting", "processing", "done", read-only)`. [Verified gates](/docs/gates#verified-gates--code-decides) use this internally: their state should inform the model, never be settable by it.
+
 ## Conditional Context (Accordion Pattern)
 
 Like accordions in a UI — the model sees section headers and expands what it needs. Combine `useKnob` + `momentary` + conditional rendering:

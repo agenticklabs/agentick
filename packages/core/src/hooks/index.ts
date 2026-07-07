@@ -65,7 +65,15 @@ export {
 } from "./knobs-component.js";
 
 // Gates
-export { gate, useGate, type GateDescriptor, type GateState, type GateValue } from "./gate.js";
+export {
+  gate,
+  useGate,
+  type GateDescriptor,
+  type LatchGateDescriptor,
+  type VerifiedGateDescriptor,
+  type GateState,
+  type GateValue,
+} from "./gate.js";
 
 // Expandable content
 export { Expandable, type ExpandableProps } from "./expandable.js";

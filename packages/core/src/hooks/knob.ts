@@ -48,6 +48,12 @@ export type KnobOpts<T extends KnobPrimitive> = KnobConstraints<T> & {
   validate?: (value: T) => true | string;
   momentary?: boolean;
   inline?: boolean;
+  /**
+   * Model-visible but not model-settable. The knob renders in the knobs
+   * section (so the model can read the state) but set_knob rejects writes —
+   * only application code can change the value via the setter.
+   */
+  readOnly?: boolean;
 };
 
 // ============================================================================
@@ -73,6 +79,7 @@ export interface KnobDescriptor<T extends KnobPrimitive = KnobPrimitive, R = T> 
   validate?: (value: T) => true | string;
   momentary?: boolean;
   inline?: boolean;
+  readOnly?: boolean;
   // Number constraints
   min?: number;
   max?: number;
@@ -116,6 +123,7 @@ export function knob(
     validate: opts.validate,
     momentary: opts.momentary,
     inline: opts.inline,
+    readOnly: opts.readOnly,
     min: (opts as any).min,
     max: (opts as any).max,
     step: (opts as any).step,
@@ -208,6 +216,7 @@ export function useKnob(
   let validate: ((value: any) => true | string) | undefined;
   let momentary: boolean | undefined;
   let inline: boolean | undefined;
+  let readOnly: boolean | undefined;
   let min: number | undefined;
   let max: number | undefined;
   let step: number | undefined;
@@ -225,6 +234,7 @@ export function useKnob(
     validate = defaultOrDescriptor.validate;
     momentary = defaultOrDescriptor.momentary;
     inline = defaultOrDescriptor.inline;
+    readOnly = defaultOrDescriptor.readOnly;
     min = defaultOrDescriptor.min;
     max = defaultOrDescriptor.max;
     step = defaultOrDescriptor.step;
@@ -242,6 +252,7 @@ export function useKnob(
     validate = opts.validate;
     momentary = opts.momentary;
     inline = opts.inline;
+    readOnly = opts.readOnly;
     min = (opts as any).min;
     max = (opts as any).max;
     step = (opts as any).step;
@@ -277,6 +288,7 @@ export function useKnob(
       pattern,
       momentary,
       inline,
+      readOnly,
     });
   }, [name]);
 

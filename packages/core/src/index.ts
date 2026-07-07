@@ -95,6 +95,8 @@ export {
   gate,
   useGate,
   type GateDescriptor,
+  type LatchGateDescriptor,
+  type VerifiedGateDescriptor,
   type GateState,
   type GateValue,
   // Knobs

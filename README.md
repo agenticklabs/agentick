@@ -388,14 +388,14 @@ Knobs are reactive values the model can see _and set_ via tool calls:
 
 #### Gates (Continuation Conditions)
 
-Gates are named checkpoints that block the model from completing until cleared. Built on knobs + continuation — a three-state knob (`inactive`/`active`/`deferred`) with an auto-activation trigger and an exit blocker.
+Gates are named checkpoints that block the model from completing until cleared. Built on knobs + continuation — a knob with an exit blocker. Two species: **latch gates** (`activateWhen` — edge-triggered, the model attests and clears via `set_knob`) and **verified gates** (`satisfied` — a code predicate evaluated every tick that auto-clears when it passes; the knob is read-only to the model, so verification can't be bypassed; add `activateWhen` as an arming scope so the invariant only applies once triggered).
 
 | API                         | Description                                                                       |
 | --------------------------- | --------------------------------------------------------------------------------- |
-| `gate(descriptor)`          | Create a gate descriptor with `description`, `instructions`, and `activateWhen`.  |
+| `gate(descriptor)`          | Create a gate descriptor: `description`, `instructions`, and `activateWhen` (latch) or `satisfied` (verified). |
 | `useGate(name, descriptor)` | Hook returning `GateState`: `{active, deferred, engaged, clear, defer, element}`. |
 
-The model clears gates via the existing `set_knob` tool. See [hooks README](packages/core/src/hooks/README.md#gates-continuation-conditions) for full documentation.
+The model clears latch gates via the existing `set_knob` tool; verified gates clear themselves when their predicate passes. See [hooks README](packages/core/src/hooks/README.md#gates-continuation-conditions) for full documentation.
 
 #### Context & Environment
 

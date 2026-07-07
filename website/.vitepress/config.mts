@@ -234,6 +234,7 @@ export default defineConfig({
             { text: "Stateful Tools", link: "/docs/stateful-tools" },
             { text: "Multi-turn Conversations", link: "/docs/multi-turn" },
             { text: "Knobs & Controls", link: "/docs/knobs" },
+            { text: "Gates", link: "/docs/gates" },
             { text: "Model Adapters", link: "/docs/adapters" },
             { text: "Custom Blocks", link: "/docs/custom-blocks" },
             { text: "Sandbox", link: "/docs/sandbox" },

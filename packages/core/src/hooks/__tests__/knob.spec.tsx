@@ -1691,3 +1691,171 @@ describe("Expandable", () => {
     expect(capturedValue).toBe(false);
   });
 });
+
+// ============================================================================
+// Read-Only Knobs
+// ============================================================================
+
+describe("useKnob — readOnly", () => {
+  it("set_knob by name rejects writes to a read-only knob", async () => {
+    let toolResultText: string | undefined;
+    let capturedValue: string | undefined;
+
+    const model = createTestAdapter({ defaultResponse: "Done" });
+    model.respondWith([{ tool: { name: "set_knob", input: { name: "status", value: "done" } } }]);
+
+    function Agent() {
+      const [status] = useKnob("status", "pending", {
+        description: "Application-managed status",
+        options: ["pending", "done"],
+        readOnly: true,
+      });
+      capturedValue = status;
+
+      useContinuation((result) => {
+        if (result.toolResults.length > 0) {
+          const content = result.toolResults[0].content;
+          if (content?.[0]?.type === "text") {
+            toolResultText = content[0].text;
+          }
+        }
+        return false;
+      });
+
+      return (
+        <>
+          <Model model={model} />
+          <Timeline />
+          <Knobs />
+        </>
+      );
+    }
+
+    const app = createApp(Agent, { maxTicks: 5 });
+    const session = await app.session();
+    await session.send({
+      messages: [{ role: "user", content: [{ type: "text", text: "Test" }] }],
+    }).result;
+    session.close();
+
+    expect(toolResultText).toContain("read-only");
+    expect(capturedValue).toBe("pending");
+  });
+
+  it("set_knob by group skips read-only knobs", async () => {
+    let toolResultText: string | undefined;
+    let readOnlyValue: string | undefined;
+    let writableValue: string | undefined;
+
+    const model = createTestAdapter({ defaultResponse: "Done" });
+    model.respondWith([{ tool: { name: "set_knob", input: { group: "flags", value: "on" } } }]);
+
+    function Agent() {
+      const [locked] = useKnob("locked", "off", {
+        description: "Application-managed flag",
+        options: ["off", "on"],
+        group: "flags",
+        readOnly: true,
+      });
+      const [open] = useKnob("open", "off", {
+        description: "Model-adjustable flag",
+        options: ["off", "on"],
+        group: "flags",
+      });
+      readOnlyValue = locked;
+      writableValue = open;
+
+      useContinuation((result) => {
+        if (result.toolResults.length > 0) {
+          const content = result.toolResults[0].content;
+          if (content?.[0]?.type === "text") {
+            toolResultText = content[0].text;
+          }
+        }
+        // No forced stop — the updated knob value is only observable on the
+        // next tick's render, after the set_knob write.
+      });
+
+      return (
+        <>
+          <Model model={model} />
+          <Timeline />
+          <Knobs />
+        </>
+      );
+    }
+
+    const app = createApp(Agent, { maxTicks: 5 });
+    const session = await app.session();
+    await session.send({
+      messages: [{ role: "user", content: [{ type: "text", text: "Test" }] }],
+    }).result;
+    session.close();
+
+    expect(writableValue).toBe("on");
+    expect(readOnlyValue).toBe("off");
+    expect(toolResultText).toContain("open");
+    expect(toolResultText).not.toContain("locked");
+  });
+
+  it("set_knob by group errors when all knobs in the group are read-only", async () => {
+    let toolResultText: string | undefined;
+
+    const model = createTestAdapter({ defaultResponse: "Done" });
+    model.respondWith([
+      { tool: { name: "set_knob", input: { group: "gates", value: "inactive" } } },
+    ]);
+
+    function Agent() {
+      useKnob("g1", "active", {
+        description: "Gate one",
+        options: ["inactive", "active"],
+        group: "gates",
+        readOnly: true,
+      });
+
+      useContinuation((result) => {
+        if (result.toolResults.length > 0) {
+          const content = result.toolResults[0].content;
+          if (content?.[0]?.type === "text") {
+            toolResultText = content[0].text;
+          }
+        }
+        return false;
+      });
+
+      return (
+        <>
+          <Model model={model} />
+          <Timeline />
+          <Knobs />
+        </>
+      );
+    }
+
+    const app = createApp(Agent, { maxTicks: 5 });
+    const session = await app.session();
+    await session.send({
+      messages: [{ role: "user", content: [{ type: "text", text: "Test" }] }],
+    }).result;
+    session.close();
+
+    expect(toolResultText).toContain("read-only");
+  });
+
+  it("renders read-only hint in the knobs section", async () => {
+    function Agent() {
+      useKnob("status", "pending", {
+        description: "Application-managed status",
+        readOnly: true,
+      });
+      return <Knobs />;
+    }
+
+    const result = await compileAgent(Agent);
+    const section = result.getSection("knobs");
+
+    expect(section).toBeDefined();
+    expect(section).toContain("read-only");
+  });
+});

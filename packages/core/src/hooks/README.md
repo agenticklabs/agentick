@@ -682,19 +682,20 @@ function Agent() {
 
 Read-only snapshot of a knob, passed to render props and available via context:
 
-| Field                  | Type                                                    | Description                       |
-| ---------------------- | ------------------------------------------------------- | --------------------------------- |
-| `name`                 | `string`                                                | Knob name                         |
-| `description`          | `string`                                                | Human/model-readable summary      |
-| `value`                | `string \| number \| boolean`                           | Current primitive value           |
-| `defaultValue`         | `string \| number \| boolean`                           | Initial value                     |
-| `semanticType`         | `"toggle" \| "range" \| "number" \| "select" \| "text"` | Inferred from value + constraints |
-| `valueType`            | `"string" \| "number" \| "boolean"`                     | Primitive type                    |
-| `group`                | `string?`                                               | Group name                        |
-| `options`              | `(string \| number \| boolean)[]?`                      | Valid values (select/enum)        |
-| `min`, `max`, `step`   | `number?`                                               | Number constraints                |
-| `maxLength`, `pattern` | `string? / number?`                                     | String constraints                |
-| `required`             | `boolean?`                                              | Whether value is required         |
+| Field                  | Type                                                    | Description                          |
+| ---------------------- | ------------------------------------------------------- | ------------------------------------ |
+| `name`                 | `string`                                                | Knob name                            |
+| `description`          | `string`                                                | Human/model-readable summary         |
+| `value`                | `string \| number \| boolean`                           | Current primitive value              |
+| `defaultValue`         | `string \| number \| boolean`                           | Initial value                        |
+| `semanticType`         | `"toggle" \| "range" \| "number" \| "select" \| "text"` | Inferred from value + constraints    |
+| `valueType`            | `"string" \| "number" \| "boolean"`                     | Primitive type                       |
+| `group`                | `string?`                                               | Group name                           |
+| `options`              | `(string \| number \| boolean)[]?`                      | Valid values (select/enum)           |
+| `min`, `max`, `step`   | `number?`                                               | Number constraints                   |
+| `maxLength`, `pattern` | `string? / number?`                                     | String constraints                   |
+| `required`             | `boolean?`                                              | Whether value is required            |
+| `readOnly`             | `boolean?`                                              | Model-visible but not model-settable |
 
 ### KnobsContextValue
 
@@ -748,19 +749,44 @@ function Agent() {
 
 Momentary knobs display as `[momentary toggle]` with a `(resets after use)` hint in the model-visible section. The model sets the knob to expand context, acts on it, and the knob resets at execution end — before the snapshot is persisted, so restored sessions start clean.
 
+### Read-Only Knobs
+
+Read-only knobs are model-visible but not model-settable — the knob renders in the knobs section (so the model can read the state), but `set_knob` rejects writes by name, and group writes skip read-only members. Only application code can change the value via the setter.
+
+```tsx
+function Agent() {
+  const [phase, setPhase] = useKnob("phase", "collecting", {
+    description: "Pipeline phase (managed by the application)",
+    options: ["collecting", "processing", "done"],
+    readOnly: true,
+  });
+  // ... setPhase() from tool handlers / lifecycle hooks as work progresses
+}
+```
+
+Read-only knobs display with a `(read-only)` hint. Verified gates use this internally: their state should inform the model, never be settable by it.
+
 ### When no knobs exist
 
 All three modes render nothing when no knobs are registered — no tool, no section, no context. `<Knobs.Provider>` still renders its children (just without context).
 
 ## Gates (Continuation Conditions)
 
-Gates are knob-backed continuation conditions. A gate is a named checkpoint that activates when a condition is met, blocks the model from completing until it actively addresses the gate, and auto-renders instructions when active.
+Gates are knob-backed continuation conditions. A gate is a named checkpoint that blocks the model from completing until it is cleared, and auto-renders instructions while active.
 
-Gates compose two existing primitives — a knob (three-state: `inactive`/`active`/`deferred`) and a continuation callback (blocks exit when engaged). The model controls the gate via `set_knob`.
+Gates compose two existing primitives — a knob and a continuation callback (blocks exit when engaged). There are two species, discriminated by the descriptor:
+
+|            | Latch gate (`activateWhen`)                                                        | Verified gate (`satisfied`)                               |
+| ---------- | ---------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| Trigger    | Edge — predicate arms the gate once, checked only while inactive                   | Level — predicate evaluated at the end of **every** tick  |
+| Cleared by | The model (`set_knob`) or code (`clear()`)                                         | The predicate alone — auto-clears when it passes          |
+| Knob       | Model-settable (`inactive`/`active`/`deferred`)                                    | Read-only to the model (`inactive`/`active`)              |
+| Defer      | Supported                                                                          | No-op                                                     |
+| Use when   | The condition isn't checkable in code; the model must attest ("verify your edits") | Code can check the condition ("output passes validation") |
 
 ### gate() — Descriptor Factory
 
-Create a gate descriptor at module level:
+Create a gate descriptor at module level. A **latch gate** declares `activateWhen`:
 
 ```tsx
 import { gate } from "@agentick/core";
@@ -775,6 +801,32 @@ Set to "deferred" if you plan to verify after other work.`,
     result.toolCalls.some((tc) => ["write_file", "edit_file"].includes(tc.name)),
 });
 ```
+
+A **verified gate** declares `satisfied` — a (possibly async) predicate over the tick result. The gate engages whenever the predicate fails, clears the moment it passes, and re-engages if a later tick regresses the condition:
+
+```tsx
+const invariantGate = gate({
+  description: "Submitted output must pass validation",
+  instructions: `GATE: your submission failed validation.
+See the submit tool result for diagnostics. Fix the failing parts and resubmit.`,
+  satisfied: (result) => lastSubmission.current?.valid === true,
+});
+```
+
+Because the predicate runs after tool results are ingested (the tick's tool phase precedes tick-end callbacks), it can inspect `result.toolResults` directly — or read state a tool handler wrote earlier in the same tick. The backing knob is read-only to the model, so a verified gate cannot be bypassed with `set_knob`; the predicate is the only authority. Explicit `stop()` requests from other tick-end callbacks still win over the gate's forced continuation (stop beats continue), so budget guards can always terminate a gated loop.
+
+A verified gate may ALSO declare `activateWhen` — as an **arming scope**, not a latch trigger. While unarmed, the gate is dormant: `satisfied` is never evaluated and the gate never blocks. The first tick where `activateWhen` fires arms it (sticky for the rest of the execution) and verification takes over immediately, same tick. Use it for conditional invariants — a typecheck-pass gate shouldn't block a turn that edited nothing:
+
+```tsx
+const typecheckGate = gate({
+  description: "Typecheck must pass after edits",
+  instructions: "GATE: the typecheck is failing. Fix the errors before finishing.",
+  activateWhen: (r) => r.toolCalls.some((tc) => ["write_file", "edit_file"].includes(tc.name)),
+  satisfied: () => lastTypecheck.current?.clean === true,
+});
+```
+
+Omitting `activateWhen` on a verified gate means "armed from tick 1" — the obligation always applies.
 
 ### useGate() — Hook
 
@@ -805,6 +857,8 @@ function CodingAgent() {
 | `active`   | `true`   | `false`    | `true`    | Yes         | Yes (Ephemeral)    |
 | `deferred` | `false`  | `true`     | `true`    | Yes         | No                 |
 
+Verified gates use only `inactive`/`active` — there is no deferred state, because the lifecycle is owned entirely by the predicate.
+
 ### How It Works
 
 ```
@@ -822,6 +876,18 @@ Tick N+1 ends:
 ```
 
 The gate only forces continuation when the model would otherwise **stop**. During multi-step work (tool calls pending, tasks in progress), `shouldContinue` is already `true` — the gate is irrelevant. It only catches the exit.
+
+A verified gate's flow differs only in who clears it:
+
+```
+Tick N: Model calls submit tool → handler records the submission
+  └─ tick end: satisfied(result) → false → knob = "active"
+  └─ continuation: model would stop → gate forces continue
+
+Tick N+1: Model sees Ephemeral + the tool result diagnostics, fixes, resubmits
+  └─ tick end: satisfied(result) → true → knob = "inactive" (automatic)
+  └─ no continuation forced → execution completes
+```
 
 ### Defer
 
@@ -841,33 +907,44 @@ The model can set a gate to `"deferred"` to acknowledge it without addressing it
 
 ### Activation Rules
 
+Latch gates (`activateWhen`):
+
 - `activateWhen` only fires when the gate is `inactive`
 - Once engaged (`active` or `deferred`), the model controls it via `set_knob`
 - If the model clears the gate AND `activateWhen` fires in the same tick, the gate re-activates
 - Activation doesn't fire from `deferred` state — preventing unwanted re-engagement
 
+Verified gates (`satisfied`):
+
+- With an `activateWhen` arming scope: dormant until the arming predicate first fires (no verification, no blocking); arming is sticky per execution
+- Once armed (or always, without `activateWhen`): the predicate runs at the end of every tick, whatever the current state
+- `false` → `active`; `true` → `inactive` — no other transitions exist
+- `clear()` is transient: the predicate re-engages the gate at the next tick end if still unsatisfied
+- The predicate must not throw — a thrown error propagates out of the tick loop and fails the execution
+
 ### GateState
 
 Returned by `useGate()`:
 
-| Field      | Type                  | Description                               |
-| ---------- | --------------------- | ----------------------------------------- |
-| `active`   | `boolean`             | Gate is in `"active"` state               |
-| `deferred` | `boolean`             | Gate is in `"deferred"` state             |
-| `engaged`  | `boolean`             | `active \|\| deferred` — gate is blocking |
-| `clear()`  | `() => void`          | Set gate to `"inactive"`                  |
-| `defer()`  | `() => void`          | Set gate to `"deferred"`                  |
-| `element`  | `JSX.Element \| null` | Ephemeral with instructions (when active) |
+| Field      | Type                  | Description                                            |
+| ---------- | --------------------- | ------------------------------------------------------ |
+| `active`   | `boolean`             | Gate is in `"active"` state                            |
+| `deferred` | `boolean`             | Gate is in `"deferred"` state                          |
+| `engaged`  | `boolean`             | `active \|\| deferred` — gate is blocking              |
+| `clear()`  | `() => void`          | Set gate to `"inactive"` (transient on verified gates) |
+| `defer()`  | `() => void`          | Set gate to `"deferred"` (no-op on verified gates)     |
+| `element`  | `JSX.Element \| null` | Ephemeral with instructions (when active)              |
 
 ### GateDescriptor
 
-Passed to `gate()` and `useGate()`:
+Passed to `gate()` and `useGate()`. Declare exactly one of `activateWhen` (latch) or `satisfied` (verified):
 
-| Field          | Type                              | Description                           |
-| -------------- | --------------------------------- | ------------------------------------- |
-| `description`  | `string`                          | Shown in knob menu                    |
-| `instructions` | `string`                          | Ephemeral content when gate is active |
-| `activateWhen` | `(result: TickResult) => boolean` | Condition that triggers activation    |
+| Field          | Type                                                  | Description                                                                                                         |
+| -------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `description`  | `string`                                              | Shown in knob menu                                                                                                  |
+| `instructions` | `string`                                              | Ephemeral content when gate is active                                                                               |
+| `activateWhen` | `(result: TickResult) => boolean`                     | Latch gates: arming condition (edge-triggered). Optional on verified gates: arming scope — dormant until first true |
+| `satisfied`    | `(result: TickResult) => boolean \| Promise<boolean>` | Verified gates: invariant checked every tick (level-triggered, auto-clears)                                         |
 
 ### Multiple Gates
 
