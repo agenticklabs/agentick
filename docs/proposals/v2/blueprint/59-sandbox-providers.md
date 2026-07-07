@@ -202,3 +202,31 @@ sandbox-docker-next  provider — deps `sandbox-next`   (Wave 2b)
 
 ### Principle (one line)
 Provider contract + shared code in the **base**; concrete impls dep the base; **spec holds only firewall wire/bridge types**; conformance + doubles ship with the contract. OS isolation (seatbelt/bwrap/unshare/cgroup, #240) is a separate FUNCTIONAL gap in `sandbox-local`, independent of this repackaging.
+
+## Amendment 2026-07-07 (2) — CORRECTION: `SandboxHandle` is NOT a wire type; it moves to the base too
+
+The (1) amendment kept `SandboxHandle` in spec on the claim that the reconciler bridge
+references it. **That claim is false** (verified): `SandboxBridge` registers
+`Map<string, SandboxHarness>` — *harnesses*, not handles — and `reconciler-react`
+references `SandboxHandle` **zero** times. The handle is a live, non-serializable object
+(fds/container id/workspace) consumed only server-side by the harness that wraps it 1:1.
+
+**What `SandboxHandle` is:** the provider's live created-instance. `SandboxProvider`
+(factory) → `create()` → `SandboxHandle` (instance) → `SandboxHarness` (wraps one handle +
+substrate + ACL + addressability). The harness commands are a 1:1 delegating mirror of the
+handle methods (raw capability vs governed sandbox). The handle is real and needed, but it
+is the **provider↔harness internal contract**, not a wire/bridge type.
+
+**Corrected spec ↔ base split — the test is "is it serialized across the inbox/wire?":**
+- **`spec-next` keeps ONLY the serialized shapes:** the harness command payloads/results
+  (the inbox-addressable data — `SandboxExec*`/`SandboxEdit*`/mount inputs/results),
+  `NetworkRule`, `ProxiedRequest`, the sandbox error tags. (Note: `onOutput`/`signal` on
+  exec are runtime-only; the *serialized* command input is their subset.)
+- **`sandbox-next` (base) holds the CONSTRUCTION contracts + live-object interfaces:**
+  `SandboxProvider`, **`SandboxHandle`**, `SandboxCreateOptions`, `SandboxSnapshot`, plus
+  the harness/bridge impl, `applyEdits`, the net matcher. `SandboxBridge` is already here.
+- Providers dep `sandbox-next`, implement `SandboxProvider`, return a `SandboxHandle`.
+
+This SUPERSEDES amendment (1)'s "`SandboxHandle` stays in spec." Everything else in (1)
+stands (providers dep the base; delete sandbox-edit/net; React in `/react`; conformance +
+fake in `sandbox-next/testing`).
