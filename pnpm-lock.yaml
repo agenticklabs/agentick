@@ -1193,12 +1193,24 @@ importers:
       '@agentick/spec-conformance-next':
         specifier: workspace:*
         version: link:../spec-conformance
+      '@agentick/timeline-fs-next':
+        specifier: workspace:*
+        version: link:../timeline-fs
+      '@agentick/timeline-postgres-next':
+        specifier: workspace:*
+        version: link:../timeline-postgres
       '@agentick/tool-executor-next':
         specifier: workspace:*
         version: link:../tool-executor
+      '@types/pg':
+        specifier: ^8.11.10
+        version: 8.20.0
       '@types/react':
         specifier: ^19.2.5
         version: 19.2.13
+      pg:
+        specifier: ^8.13.1
+        version: 8.22.0
 
   packages-next/skills:
     dependencies:

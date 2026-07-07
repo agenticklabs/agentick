@@ -26,6 +26,11 @@
       "types": "./src/index.ts",
       "import": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./testing": {
+      "types": "./src/testing/index.ts",
+      "import": "./src/testing/index.ts",
+      "default": "./src/testing/index.ts"
     }
   },
   "publishConfig": {
@@ -34,6 +39,11 @@
         "types": "./dist/index.d.ts",
         "import": "./dist/index.js",
         "default": "./dist/index.js"
+      },
+      "./testing": {
+        "types": "./dist/testing/index.d.ts",
+        "import": "./dist/testing/index.js",
+        "default": "./dist/testing/index.js"
       }
     }
   },
@@ -64,8 +74,12 @@
     "@agentick/executor-next": "workspace:*",
     "@agentick/reconciler-react-next": "workspace:*",
     "@agentick/spec-conformance-next": "workspace:*",
+    "@agentick/timeline-fs-next": "workspace:*",
+    "@agentick/timeline-postgres-next": "workspace:*",
     "@agentick/tool-executor-next": "workspace:*",
-    "@types/react": "^19.2.5"
+    "@types/pg": "^8.11.10",
+    "@types/react": "^19.2.5",
+    "pg": "^8.13.1"
   },
   "peerDependencies": {
     "react": "^19.0.0"
