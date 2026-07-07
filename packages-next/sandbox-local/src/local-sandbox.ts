@@ -1,30 +1,31 @@
 /**
  * `LocalSandbox` — a {@link SandboxHandle} backed by local OS primitives.
  *
- * exec spawns `bash -c` in the workspace (streaming stdout/stderr through
- * `onOutput` as chunks arrive); fs ops are path-confined to the workspace +
- * allowed mounts; `writeFile`/`editFile` write atomically (temp + rename —
- * the file-wrapper the ADR says the PROVIDER owns); mounts are dynamic
- * (add/remove/list); `destroy` reaps child processes, stops the egress
- * proxy, and removes an auto-created workspace.
+ * `exec` spawns the command THROUGH a platform jail ({@link CommandExecutor}):
+ * macOS seatbelt, Linux bwrap/unshare, or — where no jail primitive exists —
+ * an honest unjailed passthrough. Whichever was selected is surfaced on
+ * {@link isolation} so a caller can never mistake passthrough for confinement
+ * (ADR 59: a jail that doesn't confine is worse than none). Streaming
+ * (`onOutput`), `timeoutMs`/`signal` abort → `exitCode:124 signaled:true`,
+ * `cwd`/`env`/`stdin`, and process-group tree-kill are owned by the handle,
+ * not the jail.
  *
- * The `applyEdits` transform and the network matcher are pure, OS-free
- * code re-exported from the base package `@agentick/sandbox-next` — this
- * handle owns only the I/O around them.
+ * fs ops are path-confined to the workspace + allowed mounts; `writeFile` /
+ * `editFile` write atomically (temp + rename — the file-wrapper the ADR says
+ * the PROVIDER owns); mounts are dynamic. Resource limits map honestly:
+ * `wallClockSec` → the per-exec timeout, `memoryMb`/`cpuPercent` → the Linux
+ * {@link CgroupManager}, `diskMb` → the best-effort {@link DiskMonitor}.
+ * `destroy` reaps processes, stops the proxy + disk monitor, tears down the
+ * cgroup, disposes the executor, and removes an auto-created workspace.
  *
- * NOTE — isolation tier: this reference provider confines the FILE API by
- * path resolution and routes egress through the proxy, but `exec` runs as
- * an ordinary child process (no seatbelt/bwrap/namespace jail). It is the
- * capability baseline the conformance suite pins; hardened OS isolation is
- * a separate provider concern.
- * TODO(ADR 59): port v1's seatbelt/bwrap/unshare executor strategies +
- * cgroup resource enforcement as an opt-in isolation tier (see
- * `packages/sandbox-local/src/executor/*`, `linux/cgroup.ts`).
+ * The `applyEdits` transform and the network matcher are pure, OS-free code
+ * re-exported from the base package `@agentick/sandbox-next` — this handle
+ * owns only the I/O around them.
  *
  * @see docs/proposals/v2/blueprint/59-sandbox-providers.md
  */
 
-import { spawn, type ChildProcess } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import {
   lstat,
@@ -39,6 +40,7 @@ import {
 import { dirname, isAbsolute, join } from "node:path";
 import { applyEdits } from "@agentick/sandbox-next";
 import type {
+  NetworkRule,
   SandboxEdit,
   SandboxEditResult,
   SandboxExecOptions,
@@ -47,9 +49,13 @@ import type {
   SandboxMount,
 } from "@agentick/sandbox-next";
 import { SandboxIoError } from "@agentick/sandbox-next";
+import type { CommandExecutor } from "./executor/types.js";
+import type { CgroupManager } from "./linux/cgroup.js";
 import { filterEnv, resolveSafePath } from "./paths.js";
-import { resolveMount, type ResolvedMount } from "./workspace.js";
+import type { SandboxStrategy } from "./platform/types.js";
 import type { NetworkProxyServer } from "./proxy.js";
+import { DiskMonitor } from "./resources.js";
+import { resolveMount, type ResolvedMount } from "./workspace.js";
 
 /** Maximum captured output per stream (stdout/stderr) — 10MB. */
 const MAX_OUTPUT_BYTES = 10 * 1024 * 1024;
@@ -59,7 +65,21 @@ export interface LocalSandboxInit {
   readonly workspacePath: string;
   readonly env: Record<string, string>;
   readonly mounts: ResolvedMount[];
+  /** The jail that wraps `exec`. Selected by the provider per host capability. */
+  readonly executor: CommandExecutor;
+  /** The effective isolation tier (mirrors `executor.strategy`; surfaced honestly). */
+  readonly isolation: SandboxStrategy;
+  /**
+   * Egress policy passed to the jail. `false` → jail-level network deny
+   * (seatbelt `deny network*` / no bwrap `--share-net`); `true`/`NetworkRule[]`
+   * → jail allows egress (per-domain rules enforced by {@link proxy}).
+   */
+  readonly network: boolean | readonly NetworkRule[];
   readonly proxy?: NetworkProxyServer;
+  /** Linux cgroup enforcing memoryMb/cpuPercent, torn down on destroy. */
+  readonly cgroup?: CgroupManager;
+  /** diskMb ceiling — enforced best-effort by a {@link DiskMonitor} poller. */
+  readonly diskMb?: number;
   /** Default per-exec wall-clock ceiling (ms). Best-effort. */
   readonly defaultTimeoutMs?: number;
   readonly destroyWorkspace: () => Promise<void>;
@@ -68,23 +88,44 @@ export interface LocalSandboxInit {
 export class LocalSandbox implements SandboxHandle {
   readonly id: string;
   readonly workspacePath: string;
+  /**
+   * The OS-isolation tier `exec` actually runs under. `"none"` means the
+   * command is UNCONFINED (path-confined fs + proxied egress only) — read it
+   * before trusting `exec` to confine. Never a false claim (ADR 59).
+   */
+  readonly isolation: SandboxStrategy;
 
   private readonly env: Record<string, string>;
   private readonly mounts: ResolvedMount[];
+  private readonly executor: CommandExecutor;
+  private readonly network: boolean | readonly NetworkRule[];
   private readonly proxy?: NetworkProxyServer;
+  private readonly cgroup?: CgroupManager;
   private readonly defaultTimeoutMs?: number;
   private readonly _destroyWorkspace: () => Promise<void>;
+  private readonly diskMonitor?: DiskMonitor;
   private readonly activeProcesses = new Set<ChildProcess>();
   private destroyed = false;
 
   constructor(init: LocalSandboxInit) {
     this.id = init.id;
     this.workspacePath = init.workspacePath;
+    this.isolation = init.isolation;
     this.env = init.env;
     this.mounts = init.mounts;
+    this.executor = init.executor;
+    this.network = init.network;
     this.proxy = init.proxy;
+    this.cgroup = init.cgroup;
     this.defaultTimeoutMs = init.defaultTimeoutMs;
     this._destroyWorkspace = init.destroyWorkspace;
+
+    if (init.diskMb !== undefined) {
+      this.diskMonitor = new DiskMonitor(this.workspacePath, init.diskMb, () =>
+        this.killAll("SIGKILL"),
+      );
+      this.diskMonitor.start();
+    }
   }
 
   async exec(command: string, options?: SandboxExecOptions): Promise<SandboxExecResult> {
@@ -97,11 +138,13 @@ export class LocalSandbox implements SandboxHandle {
 
     const env = filterEnv({ ...this.env, ...(options?.env ?? {}) });
 
-    const child = spawn("bash", ["-c", command], {
+    // Spawn THROUGH the selected jail (seatbelt / bwrap / unshare / none).
+    const child = this.executor.spawn(command, {
       cwd,
       env,
-      stdio: ["pipe", "pipe", "pipe"],
-      detached: true, // own process group → we can kill the whole tree
+      workspacePath: this.workspacePath,
+      mounts: this.mounts,
+      network: this.network,
     });
     this.activeProcesses.add(child);
 
@@ -260,11 +303,13 @@ export class LocalSandbox implements SandboxHandle {
     if (this.destroyed) return;
     this.destroyed = true;
 
-    for (const child of this.activeProcesses) this.killTree(child, "SIGTERM");
+    this.diskMonitor?.stop();
+
+    this.killAll("SIGTERM");
     if (this.activeProcesses.size > 0) {
       await new Promise<void>((resolve) => {
         const timer = setTimeout(() => {
-          for (const child of this.activeProcesses) this.killTree(child, "SIGKILL");
+          this.killAll("SIGKILL");
           resolve();
         }, 5000);
         timer.unref();
@@ -280,7 +325,14 @@ export class LocalSandbox implements SandboxHandle {
     }
 
     await this.proxy?.stop();
+    await this.cgroup?.destroy();
+    this.executor.dispose?.();
     await this._destroyWorkspace();
+  }
+
+  /** Kill every active child's process group. */
+  private killAll(signal: NodeJS.Signals): void {
+    for (const child of this.activeProcesses) this.killTree(child, signal);
   }
 
   /** Kill the child's whole process group (spawned detached). */

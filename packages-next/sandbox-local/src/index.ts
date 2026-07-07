@@ -1,7 +1,8 @@
 /**
  * `@agentick/sandbox-local-next` — the local reference {@link SandboxProvider}.
  *
- * Spawns commands in a temp workspace, path-confines the file API, writes
+ * Spawns commands THROUGH a platform jail (seatbelt / bwrap / unshare, or an
+ * honest passthrough where none exists), path-confines the file API, writes
  * atomically, mounts host dirs dynamically, and routes egress through a
  * 127.0.0.1 proxy. Deps the base package `@agentick/sandbox-next` and
  * implements its `SandboxProvider` — mirroring `model-openai-next →
@@ -23,3 +24,14 @@ export {
   type ResolvedMount,
 } from "./workspace.js";
 export { resolveSafePath, filterEnv, ENV_BLOCKLIST } from "./paths.js";
+
+// ── OS-isolation jail (ADR 59, #240) ──
+// The effective isolation tier a handle runs under is `LocalSandbox.isolation`.
+// These helpers let an operator probe host capability BEFORE creating a
+// sandbox (e.g. to fail closed when no jail is available).
+export { detectCapabilities, selectStrategy, resetCapabilitiesCache } from "./platform/detect.js";
+export type { PlatformCapabilities, SandboxStrategy } from "./platform/types.js";
+export { CgroupManager } from "./linux/cgroup.js";
+export { DiskMonitor } from "./resources.js";
+export { selectExecutor } from "./executor/select.js";
+export type { CommandExecutor, SpawnOptions } from "./executor/types.js";

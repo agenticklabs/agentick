@@ -1,11 +1,15 @@
 /**
  * `localProvider` — the reference {@link SandboxProvider} (ADR 59).
  *
- * `create()` allocates a workspace, resolves create-time mounts, starts a
- * 127.0.0.1 egress proxy when `allow.network` is a rule list (injecting
- * `HTTP(S)_PROXY`), and returns a {@link LocalSandbox} handle. The harness
- * (not the provider) runs `setup` and enforces the `mountAllow` ceiling —
- * the provider just does the work.
+ * `create()` detects the host's isolation capability and selects a jail
+ * strategy (darwin→seatbelt, linux→bwrap/unshare, else→honest passthrough),
+ * allocates a workspace, resolves create-time mounts, starts a 127.0.0.1
+ * egress proxy when `allow.network` is a rule list (injecting `HTTP(S)_PROXY`),
+ * wires a Linux cgroup for `memoryMb`/`cpuPercent`, and returns a
+ * {@link LocalSandbox} handle whose `exec` runs THROUGH the jail. The handle
+ * surfaces the effective tier on `isolation` (never a false claim). The
+ * harness (not the provider) runs `setup` and enforces the `mountAllow`
+ * ceiling — the provider just does the work.
  *
  * `restore` is intentionally absent: no local checkpoint exists, and the
  * bridge only ever calls `create` (TODO(#223) — hibernate/restore deferred
@@ -21,11 +25,21 @@ import type {
   SandboxHandle,
   SandboxProvider,
 } from "@agentick/sandbox-next";
+import { selectExecutor } from "./executor/select.js";
+import { CgroupManager } from "./linux/cgroup.js";
 import { LocalSandbox } from "./local-sandbox.js";
+import { detectCapabilities, selectStrategy } from "./platform/detect.js";
+import type { SandboxStrategy } from "./platform/types.js";
 import { NetworkProxyServer, type ProxyServerConfig } from "./proxy.js";
 import { createWorkspace, destroyWorkspace, resolveMounts } from "./workspace.js";
 
 export interface LocalProviderConfig {
+  /**
+   * Isolation strategy. `"auto"` (default) picks the strongest jail the host
+   * supports. An explicit strategy the host cannot honor THROWS at `create`
+   * (never silently downgrades to passthrough — ADR 59).
+   */
+  readonly strategy?: SandboxStrategy | "auto";
   /** Egress proxy configuration (port binding, audit hooks). */
   readonly network?: ProxyServerConfig;
   /** Base directory for auto-allocated temp workspaces. Default: os.tmpdir(). */
@@ -54,6 +68,11 @@ export function localProvider(config?: LocalProviderConfig): SandboxProvider {
     name: "local",
 
     async create(options: SandboxCreateOptions): Promise<SandboxHandle> {
+      // Detect host isolation capability + select the jail. An explicit
+      // unsupported override throws HERE (before allocating resources).
+      const caps = await detectCapabilities();
+      const strategy = selectStrategy(caps, config?.strategy);
+
       const workspace = await createWorkspace(options.workspace, config?.tmpBase);
       const mounts = await resolveMounts(options.mounts);
 
@@ -65,10 +84,10 @@ export function localProvider(config?: LocalProviderConfig): SandboxProvider {
       };
 
       // Egress proxy — engaged only when a rule list is supplied. `true`
-      // (allow-all) and `false`/absent (deny-all, but unenforced at the
-      // process level here) don't start a proxy.
+      // (allow-all) and `false`/absent (deny-all — enforced at the jail
+      // level for seatbelt/bwrap, see below) don't start a proxy.
       let proxy: NetworkProxyServer | undefined;
-      const network = options.allow?.network;
+      const network = options.allow?.network ?? false;
       if (Array.isArray(network) && network.length > 0) {
         proxy = new NetworkProxyServer(network as readonly NetworkRule[], config?.network);
         await proxy.start();
@@ -78,15 +97,40 @@ export function localProvider(config?: LocalProviderConfig): SandboxProvider {
         env.https_proxy = proxy.proxyUrl;
       }
 
+      // Linux cgroup for memoryMb/cpuPercent (best-effort; no-op where
+      // cgroups v2 isn't writable). diskMb + wallClockSec are enforced by
+      // the handle (disk poller + per-exec timeout), not the cgroup.
+      // TODO(#240): macOS has no cgroups — memoryMb/cpuPercent are documented
+      // unsupported (README). A future best-effort path could prepend
+      // `ulimit -v/-t` inside the seatbelt bash invocation; deferred because
+      // macOS RLIMIT_AS enforcement is unreliable and would risk a false claim.
+      let cgroup: CgroupManager | undefined;
+      const limits = options.limits;
+      if (
+        caps.hasCgroupsV2 &&
+        limits &&
+        (limits.memoryMb !== undefined || limits.cpuPercent !== undefined)
+      ) {
+        cgroup = new CgroupManager(randomBytes(4).toString("hex"));
+        await cgroup.create(limits);
+      }
+
+      const executor = selectExecutor(strategy, cgroup);
+
       const init: ConstructorParameters<typeof LocalSandbox>[0] = {
         id: randomBytes(8).toString("hex"),
         workspacePath: workspace.path,
         env,
         mounts,
+        executor,
+        isolation: strategy,
+        network,
         destroyWorkspace: () => destroyWorkspace(workspace.path, workspace.autoCreated && cleanup),
         ...(proxy ? { proxy } : {}),
-        ...(options.limits?.wallClockSec !== undefined
-          ? { defaultTimeoutMs: options.limits.wallClockSec * 1000 }
+        ...(cgroup ? { cgroup } : {}),
+        ...(limits?.diskMb !== undefined ? { diskMb: limits.diskMb } : {}),
+        ...(limits?.wallClockSec !== undefined
+          ? { defaultTimeoutMs: limits.wallClockSec * 1000 }
           : {}),
       };
       return new LocalSandbox(init);
