@@ -1,7 +1,11 @@
 # Agentick v2 — Implementation Status
 
 **Branch:** `feat/v2`
-**Last updated:** 2026-07-07 — **Durable stores #132 LANDED (`dcc5565b`): `timeline-fs-next` + `timeline-postgres-next` reference adapters, conformance-proven (pg vs real Postgres 16). Ingress authn ADR 61 slice 1 landed (`59b66185`); sandbox ADR 60 + `sandbox-lambda-next` (`9ab97cd6`).**
+**Last updated:** 2026-07-07 — **Resume proven end-to-end: #139 kill-and-resume acceptance LANDED (`30e448ce`) — real send→kill→reopen cycle at both poles, hydrated history reaches the MODEL (closes the flagged gap). Durable stores #132 (`dcc5565b`); ingress authn ADR 61 slice 1 (`59b66185`); sandbox ADR 60 + `sandbox-lambda-next` (`9ab97cd6`).**
+
+**2026-07-07 (later) — #139 kill-and-resume acceptance, both poles (`30e448ce`).**
+
+End-to-end proof of ADR 49 "open-or-rehydrate" against the REAL store adapters. `runKillResumeAcceptance` (new `session-next/testing` subpath, the conformance idiom — parameterized `makeStore` + `skip?`) drives a genuine cycle: session1 `send()` (real write-behind + flush barrier) → `close()` (kill) → fresh session2, SAME id, store over the same durable backing → `hydrate()` before render. Four cases: (1) completed turn survives the fresh open; (2) **MODEL-VISIBILITY (load-bearing)** — a Meszaros `SpyLanguageModelExecutor` overrides `project()` to capture the compiled `LanguageModelInput`; asserts the hydrated prior turn ("PLUM", written only by session1) lands as a USER message the model received on session2's FIRST render → **closes the flagged STATUS gap** ("does hydrated history reach the MODEL, not just the timeline?"); (3) flush barrier (resolution ⟹ durability, asserted synchronously post-`await`); (4) `delete` ends the session (fresh open hydrates empty). Run at Memory + `fsTimelineStore` (real temp dir) GREEN; `postgresTimelineStore` gated on `TIMELINE_PG_URL` (skipped here, honest). `session-next` gains `./testing` + test-only devDeps on the two adapters; NO fakes of the resume pipe (scripted model only); mirrors `timeline-durability.spec.ts` wiring, which stays untouched. Gate (mine): fresh uncached session tsc clean; `npx vitest run packages-next/session` = 70 passed / 4 skipped; oxfmt+oxlint clean. **The durable-stores + resume foundation is now cut-proven at both poles** — the cloud persona #163 (ernesto) stands on verified sandbox + auth-ingress + durable-timeline + resume.
 
 **2026-07-07 (later) — TimelineStore reference adapters #132 (`dcc5565b`; ADR-49 amendment `865158f9`).**
 
