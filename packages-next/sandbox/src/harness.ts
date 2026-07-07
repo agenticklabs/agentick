@@ -2,15 +2,30 @@
  * `SandboxHarness` — `BaseHarness<"sandbox">` wrapping a live
  * `SandboxHandle` produced by a `SandboxProvider`.
  *
- * All seven verbs (exec/read-file/write-file/edit-file/stat/readdir/
- * destroy) are declared commands (ADR 51, `this.command()` in the
- * constructor): each runs through `runOperation` with canonical
- * naming (`sandbox:command:<rest>`) and the standard phase contract
- * (`requested → before → terminal`), and the same verbs are
- * inbox-addressable over `sandbox:{sandboxId}` (`"sandbox:exec"`,
- * `"sandbox:read-file"`, …) with zero routing code. All sandbox
- * inputs are pure data, so no operation stays hand-built under the
- * ADR 51 §1.2 signal-form doctrine.
+ * All eight verbs (exec/read-file/write-file/edit-file/add-mount/
+ * remove-mount/list-mounts/destroy) are declared commands (ADR 51,
+ * `this.command()` in the constructor): each runs through
+ * `runOperation` with canonical naming (`sandbox:command:<rest>`) and
+ * the standard phase contract (`requested → before → terminal`), and
+ * the same verbs are inbox-addressable over `sandbox:{sandboxId}`
+ * (`"sandbox:exec"`, `"sandbox:read-file"`, …) with zero routing code.
+ * All sandbox inputs are pure data, so no operation stays hand-built
+ * under the ADR 51 §1.2 signal-form doctrine.
+ *
+ * There is deliberately no `stat` / `readdir` verb: `bash` (`exec`)
+ * subsumes listing + metadata. The v1 fakes (fabricated `stat` mtime,
+ * `ls`-parsed `readdir` labelling every entry a file) are DELETED, not
+ * rebuilt — a lying primitive is worse than an absent one (ADR 59).
+ * `exec` streams live output: the provider's `onOutput` callback is
+ * bridged to the `sandbox:command:exec` `delta` phase (#219).
+ *
+ * MOUNTS, by contrast, ARE real verbs (ADR 59, superseding the
+ * create-time-only draft): mounting a host directory is a host-side
+ * privileged op the sandboxed process can't reach through `bash`. They
+ * are capability-tiered on the handle (a provider that can't remount a
+ * running instance throws `SandboxUnsupportedError`) and gated by the
+ * construction-time `mountAllow` ceiling. They are NOT model-facing
+ * tools — mounting is a privilege boundary the model must not cross.
  *
  * ACL: the harness checks every read/write/exec/mount against the
  * static `acl` config + per-session learned decisions. When neither
@@ -30,27 +45,29 @@
 import { omitUndefined } from "@agentick/utils-next";
 
 import { Effect } from "effect";
-import { BaseHarness } from "@agentick/runtime-next";
+import { BaseHarness, getContext } from "@agentick/runtime-next";
 import type {
   ElicitationHarnessProtocol,
   EventBus,
+  EventScope,
   MessageEnvelope,
   MessageHandlerError,
   MessageInbox,
+  MountSpec,
+  Operation,
   OperationJournal,
   SandboxACL,
-  SandboxDirEntry,
+  SandboxAddMountInput,
   SandboxEditFileInput,
   SandboxEditResult,
+  SandboxExecDelta,
   SandboxExecInput,
   SandboxExecResult,
   SandboxHandle,
   SandboxPermissionRequest,
   SandboxProvider,
   SandboxReadFileInput,
-  SandboxReaddirInput,
-  SandboxStat,
-  SandboxStatInput,
+  SandboxRemoveMountInput,
   SandboxWriteFileInput,
 } from "@agentick/spec-next";
 import { HandlerError } from "@agentick/spec-next";
@@ -61,7 +78,7 @@ import {
   type SandboxPermissionReply,
 } from "./permission-schema.js";
 
-import { SessionACL, type SessionACLSnapshot } from "./acl.js";
+import { matches, SessionACL, type SessionACLSnapshot } from "./acl.js";
 import {
   sandboxExecError,
   sandboxIoError,
@@ -70,7 +87,9 @@ import {
   type SandboxError,
   type SandboxExecError,
   type SandboxIoError,
+  SandboxMountError,
   type SandboxPermissionDeniedError,
+  SandboxUnsupportedError,
 } from "./errors.js";
 
 // ============================================================================
@@ -83,6 +102,13 @@ export interface SandboxHarnessOptions {
   readonly providerName: string;
   /** Static ACL config from `<Sandbox allow={...}>`. Optional. */
   readonly acl?: SandboxACL;
+  /**
+   * Runtime-mount allow-list ceiling (host-path patterns). The
+   * `add-mount` command rejects any host path outside it; `undefined`
+   * denies runtime mounting entirely. Sourced from
+   * {@link SandboxCreateOptions.mountAllow}.
+   */
+  readonly mountAllow?: readonly string[];
   /**
    * Default decision when the permission elicitation times out and no
    * policy answered. Default: `"deny"`.
@@ -118,6 +144,7 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
   readonly workspacePath: string;
   private readonly handle: SandboxHandle;
   private readonly acl?: SandboxACL;
+  private readonly mountAllow?: readonly string[];
   private readonly sessionACL = new SessionACL();
   private readonly permissionTimeoutDecision: "allow-once" | "deny";
   private readonly permissionTimeoutMs: number;
@@ -129,8 +156,9 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
   private readonly readFileCmd: Cmd<SandboxReadFileInput, string>;
   private readonly writeFileCmd: Cmd<SandboxWriteFileInput, void>;
   private readonly editFileCmd: Cmd<SandboxEditFileInput, SandboxEditResult>;
-  private readonly statCmd: Cmd<SandboxStatInput, SandboxStat>;
-  private readonly readdirCmd: Cmd<SandboxReaddirInput, readonly SandboxDirEntry[]>;
+  private readonly addMountCmd: Cmd<SandboxAddMountInput, void>;
+  private readonly removeMountCmd: Cmd<SandboxRemoveMountInput, void>;
+  private readonly listMountCmd: Cmd<undefined, readonly MountSpec[]>;
   private readonly destroyCmd: Cmd<undefined, void>;
 
   constructor(
@@ -145,6 +173,7 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
     this.handle = options.handle;
     this.workspacePath = options.handle.workspacePath;
     this.acl = options.acl;
+    this.mountAllow = options.mountAllow;
     this.permissionTimeoutDecision = options.permissionTimeoutDecision ?? "deny";
     this.permissionTimeoutMs = options.permissionTimeoutMs ?? 30_000;
     this.elicitation = options.elicitation;
@@ -176,15 +205,24 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
       scope,
       handler: (i: SandboxEditFileInput) => this.editFileBody(i),
     });
-    this.statCmd = this.command({
-      name: "sandbox:stat",
+    // Mounts are dynamic harness commands, NOT model-facing tools —
+    // mounting a host dir is a privilege boundary the model must not
+    // cross (ADR 59, superseding "mounts = create-time only"). Gated by
+    // the `mountAllow` ceiling; capability-tiered on the handle.
+    this.addMountCmd = this.command({
+      name: "sandbox:add-mount",
       scope,
-      handler: (i: SandboxStatInput) => this.statBody(i),
+      handler: (i: SandboxAddMountInput) => this.addMountBody(i),
     });
-    this.readdirCmd = this.command({
-      name: "sandbox:readdir",
+    this.removeMountCmd = this.command({
+      name: "sandbox:remove-mount",
       scope,
-      handler: (i: SandboxReaddirInput) => this.readdirBody(i),
+      handler: (i: SandboxRemoveMountInput) => this.removeMountBody(i),
+    });
+    this.listMountCmd = this.command({
+      name: "sandbox:list-mounts",
+      scope,
+      handler: () => this.listMountBody(),
     });
     this.destroyCmd = this.command({
       name: "sandbox:destroy",
@@ -213,6 +251,10 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
     },
   ): Promise<SandboxHarness> {
     const handle = await init.provider.create(init.options);
+    // #225 — post-create bootstrap. Run by the bridge/factory (not the
+    // provider) so it works uniformly across every provider, and before
+    // the harness is handed back / marked ready.
+    await init.options.setup?.(handle);
     return new SandboxHarness(journal, bus, inbox, {
       sandboxId: init.sandboxId,
       handle,
@@ -220,6 +262,9 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
       elicitation: init.elicitation,
       ...omitUndefined({
         acl: init.acl,
+        // The runtime-mount ceiling is a construction-time authorization,
+        // sourced from the create options.
+        mountAllow: init.options.mountAllow,
         permissionTimeoutDecision: init.permissionTimeoutDecision,
         permissionTimeoutMs: init.permissionTimeoutMs,
       }),
@@ -249,12 +294,16 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
     return this.editFileCmd(input);
   }
 
-  stat(input: SandboxStatInput): Promise<SandboxStat> {
-    return this.statCmd(input);
+  addMount(input: SandboxAddMountInput): Promise<void> {
+    return this.addMountCmd(input);
   }
 
-  readdir(input: SandboxReaddirInput): Promise<readonly SandboxDirEntry[]> {
-    return this.readdirCmd(input);
+  removeMount(input: SandboxRemoveMountInput): Promise<void> {
+    return this.removeMountCmd(input);
+  }
+
+  listMounts(): Promise<readonly MountSpec[]> {
+    return this.listMountCmd(undefined);
   }
 
   destroy(): Promise<void> {
@@ -269,9 +318,22 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
       if (!allowed) {
         return yield* Effect.fail(sandboxPermissionDenied("exec", input.command, "user-denied"));
       }
+      // Capture the ambient operation context so the provider's plain
+      // `onOutput` callback (which fires outside this Effect fiber) can
+      // emit deltas correlated to THIS exec op. #219: the harness bridges
+      // provider streaming → the `sandbox:command:exec` `delta` phase.
+      const ctx = yield* getContext;
+      const emitOutput = (chunk: SandboxExecDelta): void => {
+        Effect.runFork(
+          this.emitDeltaLazy(this.execDeltaOp(ctx), () => chunk).pipe(
+            Effect.catchAll(() => Effect.void),
+          ),
+        );
+      };
       return yield* Effect.tryPromise<SandboxExecResult, SandboxExecError>({
         try: () =>
           this.handle.exec(input.command, {
+            onOutput: emitOutput,
             ...omitUndefined({
               cwd: input.cwd,
               env: input.env,
@@ -282,6 +344,35 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
         catch: (cause): SandboxExecError => sandboxExecError(input.command, -1, { cause }),
       });
     });
+  }
+
+  /**
+   * Synthesize the exec Operation shell that {@link BaseHarness.emitDeltaLazy}
+   * needs to stamp a `delta` envelope onto the in-flight `sandbox:command:exec`
+   * op — reconstructed from the captured {@link getContext} because the
+   * provider's `onOutput` callback runs outside the command fiber.
+   */
+  private execDeltaOp(ctx: {
+    readonly opId?: string;
+    readonly parentOpId?: string;
+    readonly sessionId?: string;
+    readonly executionId?: string;
+    readonly tickId?: string;
+  }): Operation<unknown, unknown, unknown> {
+    const scope: EventScope = omitUndefined({
+      sessionId: ctx.sessionId,
+      executionId: ctx.executionId,
+      tickId: ctx.tickId,
+      sandboxId: this.sandboxId,
+    });
+    return {
+      opId: ctx.opId ?? `sandbox:exec:${this.sandboxId}`,
+      surface: "sandbox",
+      name: "sandbox:command:exec",
+      scope,
+      input: undefined,
+      ...omitUndefined({ parentOpId: ctx.parentOpId }),
+    };
   }
 
   private readFileBody(input: SandboxReadFileInput): Effect.Effect<string, SandboxError, never> {
@@ -315,81 +406,79 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
   private editFileBody(
     input: SandboxEditFileInput,
   ): Effect.Effect<SandboxEditResult, SandboxError, never> {
-    // Defer to v1's `applyEdits` after permission check. Adopters who
-    // need richer edit semantics extend by composing read+write.
+    // Delegate to the handle's real `editFile` after the write-permission
+    // check. The handle owns edit truth — the layered-matching `applyEdits`
+    // transform (crown jewel; see ./edit.ts) plus provider-side atomicity
+    // (temp + rename). No more `applyEditsLocal` lite regression.
     return Effect.gen(this, function* () {
       const allowed = yield* this.checkPermission("write", input.path);
       if (!allowed) {
         return yield* Effect.fail(sandboxPermissionDenied("write", input.path, "user-denied"));
       }
-      // Read current → apply pure transform → write atomically.
-      const current = yield* Effect.tryPromise<string, SandboxIoError>({
-        try: () => this.handle.readFile(input.path),
-        catch: (cause): SandboxIoError => sandboxIoError(input.path, "edit", "read failed", cause),
-      });
-      const applied = applyEditsLocal(current, input.edits);
-      yield* Effect.tryPromise<void, SandboxIoError>({
-        try: () => this.handle.writeFile(input.path, applied.content),
-        catch: (cause): SandboxIoError => sandboxIoError(input.path, "edit", "write failed", cause),
-      });
-      return {
-        applied: applied.applied,
-        skipped: applied.skipped,
-        content: applied.content,
-        hash: hashOf(applied.content),
-      } satisfies SandboxEditResult;
-    });
-  }
-
-  private statBody(input: SandboxStatInput): Effect.Effect<SandboxStat, SandboxError, never> {
-    // stat piggybacks on read permission (see ADR 24 OQ24.8).
-    return Effect.gen(this, function* () {
-      const allowed = yield* this.checkPermission("read", input.path);
-      if (!allowed) {
-        return yield* Effect.fail(sandboxPermissionDenied("read", input.path, "user-denied"));
-      }
-      // The provider's `SandboxHandle` doesn't expose stat directly in
-      // the v2 spec; adopters override at the harness subclass level
-      // until the provider surface grows. For now, attempt readFile
-      // and infer existence — a minimal stat for the MVP.
-      return yield* Effect.tryPromise<SandboxStat, SandboxIoError>({
-        try: async () => {
-          const text = await this.handle.readFile(input.path);
-          return {
-            path: input.path,
-            size: text.length,
-            kind: "file" as const,
-            mtime: Date.now(),
-          };
-        },
-        catch: (cause): SandboxIoError => sandboxIoError(input.path, "stat", "stat failed", cause),
+      return yield* Effect.tryPromise<SandboxEditResult, SandboxIoError>({
+        try: () => this.handle.editFile(input.path, input.edits),
+        catch: (cause): SandboxIoError => sandboxIoError(input.path, "edit", "edit failed", cause),
       });
     });
   }
 
-  private readdirBody(
-    input: SandboxReaddirInput,
-  ): Effect.Effect<readonly SandboxDirEntry[], SandboxError, never> {
+  private addMountBody(input: SandboxAddMountInput): Effect.Effect<void, SandboxError, never> {
     return Effect.gen(this, function* () {
-      const allowed = yield* this.checkPermission("read", input.path);
-      if (!allowed) {
-        return yield* Effect.fail(sandboxPermissionDenied("read", input.path, "user-denied"));
+      const addMount = this.handle.addMount;
+      if (addMount === undefined) {
+        return yield* Effect.fail(new SandboxUnsupportedError({ capability: "addMount" }));
       }
-      // Best-effort: use shell to list. Replace with provider-native
-      // readdir once SandboxHandle exposes it.
-      return yield* Effect.tryPromise<readonly SandboxDirEntry[], SandboxIoError>({
-        try: async () => {
-          const result = await this.handle.exec(`ls -1A '${input.path.replace(/'/g, "'\\''")}'`);
-          if (result.exitCode !== 0) {
-            throw new Error(result.stderr || "ls failed");
-          }
-          return result.stdout
-            .split("\n")
-            .filter((s) => s.length > 0)
-            .map((name): SandboxDirEntry => ({ name, kind: "file" }));
-        },
-        catch: (cause): SandboxIoError =>
-          sandboxIoError(input.path, "readdir", "readdir failed", cause),
+      // Ceiling check: the host path MUST match the construction-time
+      // allow-list. Undefined ceiling ⇒ default-deny. The model never
+      // reaches this — mounts are not a model-facing tool.
+      const hostPath = input.mount.hostPath;
+      const allowed = (this.mountAllow ?? []).some((p) => matches(p, hostPath));
+      if (!allowed) {
+        return yield* Effect.fail(sandboxPermissionDenied("mount", hostPath, "policy"));
+      }
+      return yield* Effect.tryPromise<void, SandboxMountError>({
+        try: () => addMount.call(this.handle, input.mount),
+        catch: (cause): SandboxMountError =>
+          new SandboxMountError({
+            hostPath,
+            sandboxPath: input.mount.sandboxPath,
+            reason: "add mount failed",
+            cause,
+          }),
+      });
+    });
+  }
+
+  private removeMountBody(
+    input: SandboxRemoveMountInput,
+  ): Effect.Effect<void, SandboxError, never> {
+    return Effect.gen(this, function* () {
+      const removeMount = this.handle.removeMount;
+      if (removeMount === undefined) {
+        return yield* Effect.fail(new SandboxUnsupportedError({ capability: "removeMount" }));
+      }
+      return yield* Effect.tryPromise<void, SandboxMountError>({
+        try: () => removeMount.call(this.handle, input.hostPath),
+        catch: (cause): SandboxMountError =>
+          new SandboxMountError({
+            hostPath: input.hostPath,
+            reason: "remove mount failed",
+            cause,
+          }),
+      });
+    });
+  }
+
+  private listMountBody(): Effect.Effect<readonly MountSpec[], SandboxError, never> {
+    return Effect.gen(this, function* () {
+      const listMounts = this.handle.listMounts;
+      if (listMounts === undefined) {
+        return yield* Effect.fail(new SandboxUnsupportedError({ capability: "listMounts" }));
+      }
+      return yield* Effect.tryPromise<readonly MountSpec[], SandboxMountError>({
+        try: () => listMounts.call(this.handle),
+        catch: (cause): SandboxMountError =>
+          new SandboxMountError({ reason: "list mounts failed", cause }),
       });
     });
   }
@@ -512,7 +601,7 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
   // ──────────────── Inbox ────────────────
 
   /**
-   * All seven sandbox verbs are declared commands — routed by the
+   * All eight sandbox verbs are declared commands — routed by the
    * BaseHarness command registry before this fallthrough. Only unknown
    * types land here.
    */
@@ -526,62 +615,6 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
 // ============================================================================
 // Helpers
 // ============================================================================
-
-function hashOf(content: string): string {
-  // Cheap, deterministic content hash. Not cryptographic — adopters
-  // who need crypto-grade hashing override `editFile` at the
-  // application level or wrap the harness in middleware.
-  let h = 0x811c9dc5;
-  for (let i = 0; i < content.length; i++) {
-    h ^= content.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  return (h >>> 0).toString(16);
-}
-
-/**
- * Minimal in-process edit applier — supports `replace`, `delete`,
- * `insert-before`, `insert-after`. Mirrors a subset of v1's
- * `applyEdits`; adopters using rich edit modes (range, indentation
- * recovery, CRLF tolerance) should compose with v1's full
- * `applyEdits` via a custom `editFile` middleware wrapper.
- */
-function applyEditsLocal(
-  current: string,
-  edits: readonly import("@agentick/spec-next").SandboxEdit[],
-): { applied: number; skipped: number; content: string } {
-  let content = current;
-  let applied = 0;
-  let skipped = 0;
-  for (const edit of edits) {
-    const mode = edit.mode ?? (edit.new !== undefined ? "replace" : "delete");
-    if (!edit.old) {
-      skipped += 1;
-      continue;
-    }
-    const target = edit.old;
-    if (!content.includes(target)) {
-      skipped += 1;
-      continue;
-    }
-    if (mode === "replace") {
-      content = edit.all
-        ? content.split(target).join(edit.new ?? "")
-        : content.replace(target, edit.new ?? "");
-    } else if (mode === "delete") {
-      content = edit.all ? content.split(target).join("") : content.replace(target, "");
-    } else if (mode === "insert-before") {
-      content = content.replace(target, `${edit.new ?? ""}${target}`);
-    } else if (mode === "insert-after") {
-      content = content.replace(target, `${target}${edit.new ?? ""}`);
-    } else {
-      skipped += 1;
-      continue;
-    }
-    applied += 1;
-  }
-  return { applied, skipped, content };
-}
 
 /**
  * Translate an elicitation result back into a sandbox permission

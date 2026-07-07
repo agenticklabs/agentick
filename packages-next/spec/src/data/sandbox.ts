@@ -40,6 +40,38 @@ export interface SandboxHandle {
   readFile(path: string): Promise<string>;
   /** Write a file to the sandbox filesystem. */
   writeFile(path: string, content: string): Promise<void>;
+  /**
+   * Apply surgical edits to a file — the real, layered-matching edit
+   * op (see `@agentick/sandbox-next`'s `applyEdits`). Providers own
+   * atomicity (temp + rename); the harness delegates its `editFile`
+   * command here after the ACL permission check.
+   *
+   * There is deliberately no `stat` / `readdir` on the handle: `bash`
+   * (`exec`) subsumes listing + metadata (`ls`, `stat`, `find`, …).
+   * A fabricated `stat` is worse than none (ADR 59). The model shells
+   * out for those.
+   */
+  editFile(path: string, edits: readonly SandboxEdit[]): Promise<SandboxEditResult>;
+  /**
+   * Mount a host directory into the sandbox at runtime — a host-side
+   * PRIVILEGED op the sandboxed process cannot perform from inside, so
+   * (unlike stat/readdir) `bash` does NOT subsume it: it earns a real
+   * handle method + harness command.
+   *
+   * CAPABILITY-TIERED + OPTIONAL: a provider that cannot remount a
+   * running instance (e.g. docker) leaves these `undefined` OR throws
+   * {@link SandboxUnsupportedError}. NEVER fake success — an honest
+   * "unsupported" beats a silent no-op (ADR 59). The harness
+   * feature-detects and surfaces `SandboxUnsupportedError`.
+   *
+   * The harness gates `addMount` against the construction-time
+   * {@link SandboxCreateOptions.mountAllow} ceiling before calling this.
+   */
+  addMount?(mount: SandboxMount): Promise<void>;
+  /** Remove a runtime mount by host path. Capability-tiered (see {@link addMount}). */
+  removeMount?(hostPath: string): Promise<void>;
+  /** List the sandbox's current mounts. Capability-tiered (see {@link addMount}). */
+  listMounts?(): Promise<readonly SandboxMount[]>;
   /** Tear down the sandbox and release provider-side resources. */
   destroy(): Promise<void>;
 }
@@ -50,6 +82,15 @@ export interface SandboxExecOptions {
   readonly timeoutMs?: number;
   readonly signal?: AbortSignal;
   readonly stdin?: string;
+  /**
+   * Live output callback (#219). The provider invokes it for each
+   * stdout/stderr chunk as the command runs; the harness wires this to
+   * forward chunks onto the `sandbox:command:exec` `delta` phase
+   * ({@link SandboxExecDelta}) so subscribers can tail output. Providers
+   * that can't stream simply never call it — `stdout`/`stderr` on the
+   * final {@link SandboxExecResult} remain authoritative.
+   */
+  readonly onOutput?: (chunk: SandboxExecDelta) => void;
 }
 
 export interface SandboxExecResult {
@@ -72,6 +113,11 @@ export interface SandboxProvider {
    * Optional: restore a sandbox from a prior snapshot. Implementations
    * MAY no-op (or throw `SnapshotIncompatibleError`) when persistence
    * isn't supported — the bridge falls back to `create()`.
+   *
+   * TODO(#223): hibernate/restore deferred — no provider has a real
+   * checkpoint yet (ADR 59). The bridge only ever calls `create`;
+   * `restore` / {@link SandboxSnapshot} remain an unwired contract seam
+   * until a remote/CRIU-style provider implements true checkpointing.
    */
   restore?(snapshot: SandboxSnapshot): Promise<SandboxHandle>;
 }
@@ -79,26 +125,115 @@ export interface SandboxProvider {
 export interface SandboxCreateOptions {
   /** Workspace path on the host. `true` = auto-allocate a temp dir. */
   readonly workspace?: string | true;
-  /** Filesystem mounts (host ↔ sandbox path pairs). */
+  /**
+   * Initial filesystem mounts (host ↔ sandbox path pairs), applied at
+   * create time. Runtime mounts are added dynamically via the harness's
+   * `add-mount` command — constrained to {@link mountAllow}.
+   */
   readonly mounts?: readonly SandboxMount[];
-  /** Advisory capability set (which syscalls / network the sandbox allows). */
+  /**
+   * Construction-time mount **allow-list** — the host-path patterns
+   * (glob / `regex:` / exact, per the ACL matcher) that MAY be mounted
+   * at runtime via `add-mount`. The ceiling: the harness rejects
+   * `add-mount` for any host path outside it (same ceiling-plus-dynamic
+   * shape as session `requiredScopes` + downscoping). `undefined` →
+   * runtime mounting is denied (default-deny; declare the ceiling to
+   * opt in). Create-time {@link mounts} are honored regardless — they
+   * are the operator's explicit initial authorization.
+   */
+  readonly mountAllow?: readonly string[];
+  /** Advisory capability set (filesystem + network the sandbox allows). */
   readonly allow?: SandboxPermissions;
   /** Environment variables. Resolved to strings before reaching the provider. */
   readonly env?: Readonly<Record<string, string>>;
   /** Resource constraints (memory, cpu, disk, time). */
   readonly limits?: SandboxResourceLimits;
+  /**
+   * Post-create bootstrap hook (#225). Invoked once, after the provider
+   * has produced the handle and before the sandbox is marked ready —
+   * clone a repo, install deps, seed fixtures. The bridge (not the
+   * provider) runs it, so it works uniformly across every provider.
+   */
+  readonly setup?: (handle: SandboxHandle) => Promise<void>;
 }
 
+/**
+ * A host ↔ sandbox directory mount. Ported from v1
+ * `@agentick/sandbox/types.ts` (`Mount`).
+ */
 export interface SandboxMount {
+  /** Absolute host filesystem path. */
   readonly hostPath: string;
+  /** Absolute path inside the sandbox. */
   readonly sandboxPath: string;
-  readonly mode?: "ro" | "rw";
+  /** Mount read-only. Default: read-write. */
+  readonly readOnly?: boolean;
 }
 
 export interface SandboxPermissions {
-  readonly network?: boolean;
+  /**
+   * Network egress policy.
+   *   - `false` — deny all (default)
+   *   - `true` — allow all
+   *   - `NetworkRule[]` — evaluated in order, first match wins, default deny
+   *
+   * The rule matcher + egress proxy are provider-side (ADR 59: the pure
+   * matcher ships from `@agentick/sandbox-net-next`, the local HTTP proxy
+   * from `sandbox-local-next`, docker enforces via `NetworkMode`). These
+   * are the shared wire types only.
+   */
+  readonly network?: boolean | readonly NetworkRule[];
   readonly fileSystem?: "none" | "workspace" | "host";
   readonly extra?: Readonly<Record<string, unknown>>;
+}
+
+// ============================================================================
+// Network firewall — shared wire vocabulary (ADR 59)
+// ============================================================================
+
+/**
+ * A single egress rule. Rules are evaluated in order; first match wins;
+ * unmatched requests are denied (default-deny). Ported from v1
+ * `@agentick/sandbox/types.ts`.
+ *
+ * The pure matcher (`matchRequest` / `matchDomain`, first-match-wins,
+ * `*.domain` wildcards) lives in `@agentick/sandbox-net-next` so every
+ * egress-enforcing provider (local proxy, docker, remote) shares it
+ * without a wrong-direction dependency. These types are the vocabulary
+ * that matcher, providers, and observability all speak.
+ */
+export interface NetworkRule {
+  /** "allow" or "deny". Rules evaluated in order; first match wins. */
+  readonly action: "allow" | "deny";
+  /** Domain pattern. Supports wildcards: "*.example.com", "api.github.com". */
+  readonly domain?: string;
+  /** URL regex pattern. Matched against the full URL. */
+  readonly urlPattern?: string;
+  /** HTTP methods to match. Default: all. */
+  readonly methods?: readonly string[];
+  /** Port to match. */
+  readonly port?: number;
+}
+
+/**
+ * Audit record for a request that transited the egress proxy. Emitted
+ * by egress-enforcing providers for observability. Ported from v1.
+ */
+export interface ProxiedRequest {
+  /** Full URL of the request. */
+  readonly url: string;
+  /** HTTP method. */
+  readonly method: string;
+  /** Target host. */
+  readonly host: string;
+  /** Target port. */
+  readonly port: number;
+  /** Unix timestamp (ms) when the request was made. */
+  readonly timestamp: number;
+  /** Whether the request was blocked. */
+  readonly blocked: boolean;
+  /** The rule that matched, if any. */
+  readonly matchedRule?: NetworkRule;
 }
 
 export interface SandboxResourceLimits {
@@ -235,56 +370,72 @@ export interface SandboxWriteFileInput {
 export interface SandboxEditFileInput {
   readonly path: string;
   readonly edits: readonly SandboxEdit[];
-  /** Optional optimistic-concurrency check. */
-  readonly expectedHash?: string;
 }
 
 /**
- * Surgical edit shape — port of v1's `Edit`. The harness's `editFile`
- * applies these atomically (read → transform → write tempfile → rename
- * → fsync), preserving v1's behavior.
+ * Surgical edit — the shape of v1's `Edit` (ported faithfully). Mode is
+ * detected by field presence (precedence: range > insert > delete >
+ * replace), NOT by an explicit discriminator:
+ *
+ *   - Range: `from` + `to` + `content` — replace block between markers
+ *   - Insert before/after: `old` + `insert` + `content` — relative to anchor
+ *   - Insert start/end: `insert` + `content` — prepend/append to file
+ *   - Delete: `old` + `delete: true` — remove matched text
+ *   - Replace: `old` + `new` — find and replace
+ *
+ * The matcher lives in `@agentick/sandbox-next`'s `applyEdits`:
+ * layered exact → line-normalized → indent-adjusted matching, CRLF
+ * normalization, smart-line-deletion, atomic overlap detection.
  */
 export interface SandboxEdit {
+  /** Text to find. Required for replace, delete, insert before/after. */
   readonly old?: string;
+  /** Replacement text. Required for replace mode. */
   readonly new?: string;
+  /** Replace/delete/insert ALL occurrences. Default false. */
   readonly all?: boolean;
-  readonly mode?:
-    | "replace"
-    | "delete"
-    | "insert-before"
-    | "insert-after"
-    | "insert-start"
-    | "insert-end"
-    | "range";
-  readonly startLine?: number;
-  readonly endLine?: number;
+  /** Delete the matched text (sugar for `new: ""`). */
+  readonly delete?: boolean;
+  /**
+   * Insert position. `before`/`after` use `old` as anchor;
+   * `start`/`end` target file boundaries.
+   */
+  readonly insert?: "before" | "after" | "start" | "end";
+  /** Content to insert (insert mode) or replacement block (range mode). */
+  readonly content?: string;
+  /** Start boundary for range replacement (inclusive). */
+  readonly from?: string;
+  /** End boundary for range replacement (inclusive). */
+  readonly to?: string;
+}
+
+/** One applied change, in document order. */
+export interface SandboxEditChange {
+  /** 1-based line where the change starts. */
+  readonly line: number;
+  /** Lines removed. */
+  readonly removed: number;
+  /** Lines added. */
+  readonly added: number;
 }
 
 export interface SandboxEditResult {
-  readonly applied: number;
-  readonly skipped: number;
+  /** Resulting content after all edits. */
   readonly content: string;
-  readonly hash: string;
+  /** Total number of replacements applied. */
+  readonly applied: number;
+  /** Per-replacement details in document order. */
+  readonly changes: readonly SandboxEditChange[];
 }
 
-export interface SandboxStatInput {
-  readonly path: string;
+/** Input for the `add-mount` harness command. */
+export interface SandboxAddMountInput {
+  readonly mount: SandboxMount;
 }
 
-export interface SandboxStat {
-  readonly path: string;
-  readonly size: number;
-  readonly kind: "file" | "directory" | "symlink" | "other";
-  readonly mtime: number;
-}
-
-export interface SandboxReaddirInput {
-  readonly path: string;
-}
-
-export interface SandboxDirEntry {
-  readonly name: string;
-  readonly kind: "file" | "directory" | "symlink" | "other";
+/** Input for the `remove-mount` harness command. */
+export interface SandboxRemoveMountInput {
+  readonly hostPath: string;
 }
 
 // ============================================================================
@@ -307,6 +458,12 @@ export interface SandboxIntent {
 /**
  * Provider-specific snapshot blob. Opaque to the bridge; only the
  * provider that produced it can interpret it.
+ *
+ * TODO(#223): hibernate/restore deferred (ADR 59). This type and
+ * {@link SandboxProvider.restore} are an unwired contract seam — no
+ * provider implements a true checkpoint yet, and the bridge only calls
+ * `create`. Kept in the contract so a future remote/CRIU-style provider
+ * can slot in without a spec change.
  */
 export interface SandboxSnapshot {
   readonly providerName: string;

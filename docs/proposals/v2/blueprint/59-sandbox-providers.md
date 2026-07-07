@@ -125,3 +125,28 @@ conformance suite. **Out:** hibernate wiring, diff-preview UX, secure-exec, Lamb
 - **`applyEditsLocal` as an MVP editFile.** A silent correctness regression on the highest-
   value tool. Port the real matcher.
 - **Runtime `addMount`/`removeMount` tools.** Mounts are create-time config.
+
+## Amendment 2026-07-06 — mounts are dynamic (allow-list gated), not create-time-only
+
+The body above said "mounts become create-time config, drop addMount/removeMount/listMounts."
+**Corrected (Ryan): mounts are a DYNAMIC harness capability, gated by a construction-time
+allow-list.** Rationale: mounting a host dir is a **host-side privileged operation the
+sandboxed process cannot perform from inside** — so `bash` does NOT subsume it (unlike
+`stat`/`readdir`, which it does; those stay deleted). Mounts genuinely need a harness
+command.
+
+- **Handle:** `addMount?` / `removeMount?` / `listMounts?` are **optional, capability-tiered**
+  methods (feature-detect; a provider that can't do runtime mounts — e.g. docker on a
+  running container — throws `SandboxUnsupportedError`, never fakes). `local` implements
+  them; `docker` may not.
+- **Harness commands:** add/remove/list-mount are harness commands (peers of exec/readFile)
+  — dynamic at runtime, reachable programmatically / via dispatch.
+- **NOT model tools.** The model surface stays `readFile`/`writeFile`/`editFile`/`bash`.
+  Mounting host paths is a privilege boundary the model must not cross.
+- **Allow-list ceiling.** `SandboxCreateOptions` carries a construction-time mount
+  **allow-list** (host paths that MAY be mounted); create-time `mounts` is the initial
+  subset; runtime `addMount` is constrained to the allow-list. Same ceiling-plus-dynamic
+  shape as session `requiredScopes` + downscoping.
+
+This SUPERSEDES the "create-time config" framing and the "Runtime addMount/removeMount
+tools" rejection above (rejected as *model tools*; correct as *harness commands*).

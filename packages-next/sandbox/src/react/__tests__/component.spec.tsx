@@ -32,6 +32,9 @@ function makeHandle(): SandboxHandle {
       return "";
     },
     async writeFile() {},
+    async editFile() {
+      return { content: "", applied: 0, changes: [] };
+    },
     async destroy() {},
   };
 }

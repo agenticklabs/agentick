@@ -7,27 +7,60 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { Chunk, Effect, Stream } from "effect";
+import { Chunk, Effect, Fiber, Stream } from "effect";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import { ElicitationHarness } from "@agentick/elicitation-next";
 
 import type {
+  MountSpec,
   ProtocolEvent,
   SandboxHandle,
   SandboxACL,
+  SandboxEdit,
+  SandboxEditResult,
+  SandboxExecDelta,
   SandboxExecOptions,
   SandboxExecResult,
 } from "@agentick/spec-next";
 
 import { SandboxHarness } from "../harness.js";
+import { applyEdits } from "../edit.js";
 import { inMemorySandboxBridge } from "../bridge.js";
 
-function makeHandle(opts: { execMap?: Record<string, string> } = {}): SandboxHandle {
+function makeHandle(
+  opts: {
+    execMap?: Record<string, string>;
+    streamChunks?: readonly SandboxExecDelta[];
+    /** When true, expose the capability-tiered runtime-mount methods. */
+    withMounts?: boolean;
+  } = {},
+): SandboxHandle {
   const files = new Map<string, string>();
+  const mounts: MountSpec[] = [];
+  const mountMethods: Partial<SandboxHandle> = opts.withMounts
+    ? {
+        async addMount(mount: MountSpec): Promise<void> {
+          mounts.push(mount);
+        },
+        async removeMount(hostPath: string): Promise<void> {
+          const i = mounts.findIndex((m) => m.hostPath === hostPath);
+          if (i >= 0) mounts.splice(i, 1);
+        },
+        async listMounts(): Promise<readonly MountSpec[]> {
+          return [...mounts];
+        },
+      }
+    : {};
   return {
+    ...mountMethods,
     id: "h",
     workspacePath: "/tmp/h",
-    async exec(command: string, _o?: SandboxExecOptions): Promise<SandboxExecResult> {
+    async exec(command: string, o?: SandboxExecOptions): Promise<SandboxExecResult> {
+      // Simulate a streaming provider: forward the canned chunks to the
+      // harness-supplied onOutput callback as they'd arrive live.
+      if (opts.streamChunks && o?.onOutput) {
+        for (const chunk of opts.streamChunks) o.onOutput(chunk);
+      }
       const stdout = opts.execMap?.[command] ?? "";
       return {
         stdout,
@@ -44,6 +77,14 @@ function makeHandle(opts: { execMap?: Record<string, string> } = {}): SandboxHan
     },
     async writeFile(path: string, content: string): Promise<void> {
       files.set(path, content);
+    },
+    // Real edit op: layered-matching applyEdits over the in-memory file.
+    async editFile(path: string, edits: readonly SandboxEdit[]): Promise<SandboxEditResult> {
+      const current = files.get(path);
+      if (current === undefined) throw new Error("ENOENT");
+      const result = applyEdits(current, edits);
+      files.set(path, result.content);
+      return result;
     },
     async destroy(): Promise<void> {},
   };
@@ -198,7 +239,7 @@ describe("SandboxHarness — write + edit", () => {
     expect(out).toBe("hello");
   });
 
-  it("editFile applies replace + reports counts", async () => {
+  it("editFile applies replace + reports changes", async () => {
     const h = makeHarness({ read: ["/tmp/*"], write: ["/tmp/*"] });
     await h.ready;
     await h.writeFile({ path: "/tmp/log.txt", content: "alpha\nbeta\ngamma" });
@@ -207,9 +248,161 @@ describe("SandboxHarness — write + edit", () => {
       edits: [{ old: "beta", new: "BETA" }],
     });
     expect(result.applied).toBe(1);
-    expect(result.skipped).toBe(0);
     expect(result.content).toBe("alpha\nBETA\ngamma");
+    expect(result.changes).toEqual([{ line: 2, removed: 1, added: 1 }]);
     expect(await h.readFile({ path: "/tmp/log.txt" })).toBe("alpha\nBETA\ngamma");
+  });
+
+  // The crown jewel: the real ported `applyEdits` runs through the
+  // harness (delegated via handle.editFile), not the deleted
+  // `applyEditsLocal` lite regression. Fuzzy indent-adjusted matching
+  // + range mode are the two behaviors the lite version never had.
+  it("editFile matches indent-adjusted anchors (real applyEdits, not the lite fake)", async () => {
+    const h = makeHarness({ read: ["/tmp/*"], write: ["/tmp/*"] });
+    await h.ready;
+    const source = ["class Foo {", "  method() {", "    return 1;", "  }", "}"].join("\n");
+    await h.writeFile({ path: "/tmp/foo.ts", content: source });
+    // The model supplies an UNINDENTED anchor; strategy 3 recovers it
+    // and adjusts the replacement's indentation to match the source.
+    const result = await h.editFile({
+      path: "/tmp/foo.ts",
+      edits: [{ old: "method() {\n  return 1;\n}", new: "method() {\n  return 2;\n}" }],
+    });
+    expect(result.applied).toBe(1);
+    expect(await h.readFile({ path: "/tmp/foo.ts" })).toBe(
+      ["class Foo {", "  method() {", "    return 2;", "  }", "}"].join("\n"),
+    );
+  });
+
+  it("editFile supports range mode (replace block between from/to, inclusive)", async () => {
+    const h = makeHarness({ read: ["/tmp/*"], write: ["/tmp/*"] });
+    await h.ready;
+    const source = [
+      "function calculate() {",
+      "  const x = 1;",
+      "  const y = 2;",
+      "  return x + y;",
+      "}",
+    ].join("\n");
+    await h.writeFile({ path: "/tmp/calc.ts", content: source });
+    const result = await h.editFile({
+      path: "/tmp/calc.ts",
+      edits: [
+        {
+          from: "function calculate() {",
+          to: "}",
+          content: "function calculate() {\n  return 42;\n}",
+        },
+      ],
+    });
+    expect(result.applied).toBe(1);
+    expect(await h.readFile({ path: "/tmp/calc.ts" })).toBe(
+      "function calculate() {\n  return 42;\n}",
+    );
+  });
+});
+
+describe("SandboxHarness — exec streaming (#219)", () => {
+  it("bridges the provider onOutput callback to the exec delta phase", async () => {
+    const chunks: readonly SandboxExecDelta[] = [
+      { stream: "stdout", chunk: "building...\n" },
+      { stream: "stderr", chunk: "warn: deprecated\n" },
+      { stream: "stdout", chunk: "done\n" },
+    ];
+    const handle = makeHandle({ execMap: { "build.sh": "done\n" }, streamChunks: chunks });
+    const { harness, bus } = await makeHarnessBundle({ exec: { allow: ["*"] } }, handle);
+
+    // Fork the collector, then let the subscription register (setImmediate)
+    // BEFORE exec fires onOutput — emitDeltaLazy probes hasSubscriberFor.
+    const fiber = Effect.runFork(
+      Stream.runCollect(
+        Stream.take(
+          bus.subscribe({
+            surface: "sandbox",
+            name: { exact: "sandbox:command:exec" },
+            phase: "delta",
+          }) as Stream.Stream<ProtocolEvent, unknown, never>,
+          chunks.length,
+        ),
+      ),
+    );
+    await new Promise((r) => setImmediate(r));
+
+    const result = await harness.exec({ command: "build.sh" });
+    expect(result.exitCode).toBe(0);
+
+    const deltas = Array.from(Chunk.toReadonlyArray(await Effect.runPromise(Fiber.join(fiber))));
+    expect(deltas.map((d) => d.payload)).toEqual(chunks);
+    // Deltas are correlated to the exec op (same opId across the stream).
+    expect(new Set(deltas.map((d) => d.opId)).size).toBe(1);
+  });
+});
+
+describe("SandboxHarness — dynamic mounts (allow-list gated, capability-tiered)", () => {
+  function mountHarness(mountAllow?: readonly string[], withMounts = true): SandboxHarness {
+    const journal = new MemoryJournal();
+    const bus = new LocalEventBus();
+    const inbox = new LocalInbox();
+    const elicitation = new ElicitationHarness("test-sb:elicitation", journal, bus, inbox);
+    return new SandboxHarness(journal, bus, inbox, {
+      sandboxId: "test-sb",
+      handle: makeHandle({ withMounts }),
+      providerName: "test",
+      elicitation,
+      permissionTimeoutDecision: "deny",
+      permissionTimeoutMs: 10,
+      ...(mountAllow !== undefined ? { mountAllow } : {}),
+    });
+  }
+
+  it("adds a mount whose host path matches the allow-list ceiling", async () => {
+    const h = mountHarness(["/host/**"]);
+    await h.ready;
+    await h.addMount({ mount: { hostPath: "/host/data", sandboxPath: "/data", readonly: true } });
+    expect(await h.listMounts()).toEqual([
+      { hostPath: "/host/data", sandboxPath: "/data", readonly: true },
+    ]);
+  });
+
+  it("rejects a mount outside the allow-list ceiling", async () => {
+    const h = mountHarness(["/host/**"]);
+    await h.ready;
+    await expect(
+      h.addMount({ mount: { hostPath: "/etc", sandboxPath: "/etc" } }),
+    ).rejects.toMatchObject({
+      _tag: "SandboxPermissionDeniedError",
+      kind: "mount",
+      target: "/etc",
+    });
+  });
+
+  it("denies all runtime mounts when no allow-list is declared (default-deny)", async () => {
+    const h = mountHarness(undefined);
+    await h.ready;
+    await expect(
+      h.addMount({ mount: { hostPath: "/host/data", sandboxPath: "/data" } }),
+    ).rejects.toMatchObject({ _tag: "SandboxPermissionDeniedError", kind: "mount" });
+  });
+
+  it("removeMount takes effect", async () => {
+    const h = mountHarness(["/host/**"]);
+    await h.ready;
+    await h.addMount({ mount: { hostPath: "/host/a", sandboxPath: "/a" } });
+    await h.removeMount({ hostPath: "/host/a" });
+    expect(await h.listMounts()).toEqual([]);
+  });
+
+  it("throws SandboxUnsupportedError when the provider can't do runtime mounts", async () => {
+    // Ceiling allows it, but the handle omits the capability methods.
+    const h = mountHarness(["/host/**"], false);
+    await h.ready;
+    await expect(
+      h.addMount({ mount: { hostPath: "/host/data", sandboxPath: "/data" } }),
+    ).rejects.toMatchObject({ _tag: "SandboxUnsupportedError", capability: "addMount" });
+    await expect(h.listMounts()).rejects.toMatchObject({
+      _tag: "SandboxUnsupportedError",
+      capability: "listMounts",
+    });
   });
 });
 

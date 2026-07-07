@@ -91,22 +91,68 @@ export const WriteFile = createTool({
 });
 
 /**
- * `<EditFile />` — apply surgical edits to a file. Edits are a list
- * of `{ old, new }` pairs; the harness applies them atomically.
+ * `<EditFile />` — apply surgical edits to a file. Carries the full v1
+ * mode set (replace / delete / insert before|after|start|end / range),
+ * mode detected by field presence. All edits resolve against the
+ * original content and apply atomically.
+ *
+ * TODO(#220): structured `confirmationPreview: { type: "diff" }` UX is
+ * deferred — the tool-executor confirmation seam surfaces the pending
+ * input but has no diff-preview slot yet. ACL-elicitation covers the
+ * approval path in the meantime.
  */
 export const EditFile = createTool({
   name: "edit_file",
-  description:
-    "Apply surgical find/replace edits to a file. Edits run in order; either all apply or the operation reports skipped.",
+  description: `Apply surgical text edits to a file. Supports replace, delete, insert, and range operations.
+
+MODES (detected by which fields you set):
+- Replace: { old: "target text", new: "replacement" } — find and replace
+- Delete: { old: "text to remove", delete: true } — find and delete (trailing newline auto-consumed for complete lines)
+- Insert: { old: "anchor", insert: "after", content: "new lines" } — insert before/after anchor
+- Append: { insert: "end", content: "new content" } — append to end of file
+- Prepend: { insert: "start", content: "new content" } — prepend to start of file
+- Rename: { old: "name", new: "newName", all: true } — replace every occurrence
+- Range: { from: "start marker", to: "end marker", content: "replacement" } — replace block between markers (inclusive)
+
+MATCHING:
+- old/from/to must uniquely match one location (unless all: true)
+- Include 1-3 surrounding lines of context for unique identification
+- Whitespace- and indentation-tolerant; copy exact text from the file`,
   inputSchema: z.object({
-    path: z.string(),
+    path: z.string().describe("Path to the file to edit."),
     edits: z
       .array(
         z.object({
-          old: z.string(),
-          new: z.string().optional(),
-          all: z.boolean().optional(),
-          mode: z.enum(["replace", "delete", "insert-before", "insert-after"]).optional(),
+          old: z
+            .string()
+            .optional()
+            .describe(
+              "Text to find. Required for replace, delete, and insert before/after (the anchor, not replaced).",
+            ),
+          new: z
+            .string()
+            .optional()
+            .describe("Replacement text. Required for replace. Use delete: true for removal."),
+          all: z
+            .boolean()
+            .optional()
+            .describe("Apply to all occurrences. Default: false (requires unique match)."),
+          delete: z.boolean().optional().describe("Delete the matched text. Sugar for new: ''."),
+          insert: z
+            .enum(["before", "after", "start", "end"])
+            .optional()
+            .describe(
+              "Insert mode. 'before'/'after' relative to anchor (old); 'start'/'end' prepend/append to file.",
+            ),
+          content: z
+            .string()
+            .optional()
+            .describe("Content to insert (insert mode) or replacement block (range mode)."),
+          from: z
+            .string()
+            .optional()
+            .describe("Start boundary for range replacement (inclusive). Used with 'to'."),
+          to: z.string().optional().describe("End boundary for range replacement (inclusive)."),
         }),
       )
       .min(1),
@@ -117,10 +163,13 @@ export const EditFile = createTool({
       return [{ type: "text", text: "Error: no sandbox available in scope" }];
     }
     const result = await use.sandbox.editFile({ path, edits });
+    const summary = result.changes
+      .map((c) => `line ${c.line}: -${c.removed}/+${c.added}`)
+      .join(", ");
     return [
       {
         type: "text",
-        text: `Edits to ${path}: ${result.applied} applied, ${result.skipped} skipped`,
+        text: `Applied ${result.applied} edit(s) to ${path}.${summary ? ` Changes: ${summary}` : ""}`,
       },
     ];
   },

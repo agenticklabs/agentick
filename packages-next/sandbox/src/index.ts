@@ -20,6 +20,8 @@ export { inMemorySandboxBridge, type SandboxBridge, type SandboxRegistration } f
 
 export { SandboxHarness, type SandboxHarnessOptions, type SandboxStatus } from "./harness.js";
 
+export { applyEdits, EditError } from "./edit.js";
+
 export {
   SessionACL,
   matches as matchesACLPattern,

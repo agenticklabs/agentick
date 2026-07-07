@@ -24,6 +24,7 @@ export {
   SandboxMountError,
   SandboxPermissionDeniedError,
   SandboxResourceLimitError,
+  SandboxUnsupportedError,
 } from "@agentick/spec-next";
 
 import {

@@ -4,7 +4,7 @@
  *
  *   - `UnknownTaskError`         (tasks-harness; single-tag)
  *   - `ChannelPublishError`      (channels; 2 concretes)
- *   - `SandboxError`             (sandbox; 7 concretes — these classes
+ *   - `SandboxError`             (sandbox; 8 concretes — these classes
  *                                 mirror what previously lived in
  *                                 `@agentick/sandbox-next/errors`)
  *   - `McpClientError`           (mcp client; 2 concretes — these
@@ -74,7 +74,8 @@ export abstract class SandboxError extends AgentickError {
     | "SandboxEscapeError"
     | "SandboxResourceLimitError"
     | "SandboxPermissionDeniedError"
-    | "SandboxConnectionError";
+    | "SandboxConnectionError"
+    | "SandboxUnsupportedError";
 }
 
 export class SandboxExecError extends SandboxError {
@@ -104,12 +105,12 @@ registerAgentickError("SandboxExecError", SandboxExecError);
 export class SandboxIoError extends SandboxError {
   readonly _tag = "SandboxIoError" as const;
   readonly path: string;
-  readonly op: "read" | "write" | "edit" | "stat" | "readdir";
+  readonly op: "read" | "write" | "edit";
   readonly reason: string;
   override readonly cause?: unknown;
   constructor(args: {
     readonly path: string;
-    readonly op: "read" | "write" | "edit" | "stat" | "readdir";
+    readonly op: "read" | "write" | "edit";
     readonly reason: string;
     readonly cause?: unknown;
   }) {
@@ -216,6 +217,26 @@ export class SandboxConnectionError extends SandboxError {
 }
 registerAgentickError("SandboxConnectionError", SandboxConnectionError);
 
+/**
+ * A capability-tiered handle method the provider does not support
+ * (e.g. runtime `addMount` on a docker container that can't remount a
+ * running container). Providers throw this instead of faking — a
+ * fabricated success is worse than an honest "unsupported" (ADR 59).
+ */
+export class SandboxUnsupportedError extends SandboxError {
+  readonly _tag = "SandboxUnsupportedError" as const;
+  readonly capability: string;
+  override readonly cause?: unknown;
+  constructor(args: { readonly capability: string; readonly cause?: unknown }) {
+    super(`sandbox capability not supported by provider: ${args.capability}`, {
+      cause: args.cause,
+    });
+    this.capability = args.capability;
+    if (args.cause !== undefined) this.cause = args.cause;
+  }
+}
+registerAgentickError("SandboxUnsupportedError", SandboxUnsupportedError);
+
 export type SandboxErrorChannel =
   | SandboxExecError
   | SandboxIoError
@@ -223,7 +244,8 @@ export type SandboxErrorChannel =
   | SandboxEscapeError
   | SandboxResourceLimitError
   | SandboxPermissionDeniedError
-  | SandboxConnectionError;
+  | SandboxConnectionError
+  | SandboxUnsupportedError;
 
 // ============================================================================
 // McpClientError — MCP client harness failures
