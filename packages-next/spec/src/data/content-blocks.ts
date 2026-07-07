@@ -513,12 +513,14 @@ export type EventAllowedBlock = TextBlock | UserActionBlock | SystemEventBlock |
 // silent-correctness bug the type system cannot catch (a `default:` defeats
 // exhaustiveness). These folds centralize that risk.
 //
-// **House rule:** any block→X conversion where a dropped block loses content
-// (model-input projection, wire codecs) MUST use {@link foldContentBlock} (the
-// exhaustive form) so a new `BlockType` is a compile-error sweep, not a silent
-// drop. Narrow sites that genuinely handle only a few types use
-// {@link foldContentBlockWith} — its fallback is a CONSCIOUS, greppable
-// decision, never a buried `default:`.
+// **House rule — no silent drop.** Content-block dispatch must never silently
+// drop a block. Either be exhaustive ({@link foldContentBlock}), or degrade
+// EXPLICITLY — a text-ifying `default:` / {@link foldContentBlockWith} fallback
+// is fine and often correct (the model-input normalizer `messagePartFromBlock`
+// does exactly this: an unhandled block becomes text, never vanishes). The
+// exhaustive fold is a TOOL for the rare site that wants compile-time totality
+// (a wire codec with no sane text degrade), NOT a blanket mandate — 23 handlers
+// per call site is too heavy where a text degrade is the right answer.
 
 /**
  * Handler map for {@link foldContentBlock} — exactly one handler PER

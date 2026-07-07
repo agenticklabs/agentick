@@ -161,6 +161,31 @@ describe("messagePartFromBlock — wire-native modalities (ADR 57)", () => {
   });
 });
 
+describe("messagePartFromBlock — resource projection (ADR 62)", () => {
+  it("inlines a text resource's content as a text part (not the {type,resource} wrapper JSON)", () => {
+    const part = messagePartFromBlock({
+      type: "resource",
+      resource: { uri: "config://app", mimeType: "application/json", text: '{"k":1}' },
+    } as unknown as ContentBlock);
+    expect(part.type).toBe("text");
+    expect((part as { text: string }).text).toBe('{"k":1}');
+    // Regression: NOT a JSON.stringify of the whole wrapper.
+    expect((part as { text: string }).text).not.toContain('"type":"resource"');
+  });
+
+  it("surfaces a blob resource as a uri+mimeType descriptor (no binary text-dump)", () => {
+    const part = messagePartFromBlock({
+      type: "resource",
+      resource: { uri: "file://x.png", mimeType: "image/png", blob: "QUFBQQ==" },
+    } as unknown as ContentBlock);
+    expect(part.type).toBe("text");
+    const text = (part as { text: string }).text;
+    expect(text).toContain("file://x.png");
+    expect(text).toContain("image/png");
+    expect(text).not.toContain("QUFBQQ=="); // blob is not dumped as text
+  });
+});
+
 describe("defaultProject — #176 providerOptions fold", () => {
   const emptyTarget: ExecutionTarget = { kind: "language-model", modelId: "m" } as ExecutionTarget;
 

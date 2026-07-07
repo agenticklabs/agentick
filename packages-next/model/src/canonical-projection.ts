@@ -260,7 +260,28 @@ export function messagePartFromBlock(block: ContentBlock): LanguageModelMessageP
         }),
         ...po,
       };
+    case "resource": {
+      // Resource → text for model consumption (ADR 62). MCP resource content
+      // isn't natively model-consumable: a text resource inlines its text; a
+      // blob surfaces a `uri` + `mimeType` descriptor (binary can't be inlined
+      // as text usefully). Was previously falling through to the default and
+      // JSON-dumping the whole `{ type, resource }` wrapper.
+      // TODO(#237 / ADR 62 follow-on): add a `supportsDocuments` capability +
+      // thread it here so a blob resource → a `document` part when supported,
+      // else this text descriptor.
+      const r = block.resource;
+      return {
+        type: "text",
+        text:
+          "text" in r
+            ? r.text
+            : `[resource ${r.uri}${r.mimeType !== undefined ? ` (${r.mimeType})` : ""}]`,
+        ...po,
+      };
+    }
     default:
+      // Safe degrade — text-ify any block without a native part rather than
+      // dropping it (the no-silent-drop invariant; see content-blocks.ts).
       return {
         type: "text",
         text:
