@@ -42,19 +42,64 @@ Analogy: the difference between a compiler with **implicit side-effects** (bad) 
 that ships a **default layout you compose with and can replace** (good — you didn't hand-write it,
 but you can see and override it).
 
-## Mechanism (sketch; compiler-general)
+## Mechanism (finalized 2026-07-07, with Ryan)
 
-- **The compose point** is the root: `createApp/run(rootElement)` composes `rootElement` with the
-  framework default surfacing layer before the compiler folds it. Implementation options (decided
-  at build): a default root wrapper the user root nests in, OR per-primitive **default folds** the
-  compiler applies for any primitive the tree did not explicitly render. Either keeps the output a
-  real tree.
-- **Override = most-specific-wins.** An explicit component for a primitive replaces that primitive's
-  default node (e.g. any `<Timeline>` in the tree suppresses the default timeline fold). Same
-  cascade discipline as everywhere else.
-- **Compiler-general.** React's *absence of a component* and the functional compiler's *`ctx`
-  default* are the same concept — the default surfacing is a compiler-level notion, not React's.
-  `<Timeline>` (React) and `ctx.timeline(fn)` (functional) are equal override front-ends.
+The mechanism is **harness projection**, NOT a new channel/combination-strategy layer. Two false
+starts clarified it:
+1. A single keyed "slot" that gets *replaced* — wrong, because **tools aggregate** from many
+   sources (`<Tool>` + MCP + skills) rather than being source-exclusive like the timeline.
+2. Keyed channels with per-channel `replace|accumulate|append` strategies — **over-machinery**: it
+   re-invents accumulation the *harnesses already do* (the tool-executor unions tools; the timeline
+   harness holds the log; the ResourcesHarness holds the registry).
+
+**The fundamental: accumulation lives in the harnesses; surfacing just projects them. And
+registration ≠ surfacing.**
+
+- **Registration** (`<Tool>`, `<Resource>`, MCP client, a skill) feeds a *source* into its harness
+  — the accumulation, upstream, with its existing API. Not a surfacing op.
+- **Surfacing** = the compiler projecting each surfacing-capable harness → IR. Each harness has
+  **exactly one projection**: the harness's **default** projection, or a component that **overrides
+  that harness's projection**. So the `replace/accumulate/append` taxonomy dissolves — a harness is
+  inherently one-or-many by its *own* nature (tool-executor accumulates, timeline is singular);
+  the surfacing layer is uniform: *project (default) or custom-project (override)*.
+- **Raw content** (`<Message>`/`<Section>`/`<Text>`) is the one true append stream — direct
+  content contributions, no harness.
+
+```ts
+function compileTick(tree, ctx): RenderedTree {
+  const content: ContextEntry[] = [];               // direct content — append, tree order
+  const overrides = new Map<string, ProjectFn>();   // a component overriding ITS harness's projection
+
+  collect(tree, {
+    content: (entry)  => content.push(entry),        // <Message>/<Section>/<Text>
+    project: (key, fn) => overrides.set(key, fn),    // <Timeline>{fn} / <Tools filter=…>
+    // <Tool>/<Resource> are NOT here — they register into their harness (a source), upstream.
+  });
+
+  const projected = ctx.surfacingHarnesses.map((h) =>       // ONE projection per harness
+    overrides.has(h.key) ? overrides.get(h.key)!(ctx) : h.project(ctx),  // custom else default (lazy)
+  );
+  return assemble(projected, content);               // provenance-tagged: authored:<key> vs default:<key>
+}
+```
+
+- **Compiler-general.** React's override component and the functional compiler's `ctx` call are the
+  same concept — both override a harness's projection by key. `<Timeline>{fn}` ≡ `ctx.timeline(fn)`.
+- **Lazy defaults.** A harness's default `project` runs only when un-overridden (an overridden
+  timeline is never folded).
+- **Provenance** (`authored:<key>` / `default:<key>`) → devtools shows which layer produced each
+  piece; ADR 49's inspectable-IR invariant holds.
+
+### Per-connected-MCP-server (keyed by adopter alias, not the server's self-name)
+
+A connected MCP server is **just another source** feeding agentick's harnesses (per the
+fundamental), **namespaced by the adopter's connection alias** — the alias is agentick-assigned at
+`withMCP({ servers: { github, linear } })`, so it's stable, unique, and **trust-safe** (the
+server's self-reported `name` is untrusted — a server could claim `"github"`; the alias can't be
+spoofed). The server's tools register into the tool-executor as `${alias}.${tool}`; its resources
+into the ResourcesHarness as `mcp://${alias}/${uri}`; both route calls/reads back to that server's
+`McpClientHarness`. The server's self-reported `name`/`description`/`instructions` are a **display
+label** rendered by the one MCP-specific projection (`mcpServerInfo`, keyed by alias), never a key.
 
 ## Per-primitive defaults (uniform mechanism, different default)
 
@@ -85,11 +130,20 @@ schema is still the (composed) tree, and it's visible.
 - **The dep-less compiler** inherits the same default-surfacing concept via `ctx`.
 - Boilerplate drops (minimal agents write nothing) without any magic.
 
-## Open / build-time decisions
-1. The exact compose mechanism (default root wrapper vs per-primitive default folds).
-2. Resources default: catalog-list vs nothing-in-IR (leaning catalog-list — the model needs to
-   know what it can pull; ADR 62's client-consumption composes with it).
-3. Override granularity (whole-primitive vs partial — e.g. `<Message>` reshaping only some blocks).
+## Resolved (2026-07-07, with Ryan)
+1. **Compose mechanism — RESOLVED:** harness projection (default/override) + content append; no
+   channel/strategy layer (accumulation is the harnesses' job); registration ≠ surfacing. See
+   Mechanism above.
+2. **Resources default — RESOLVED:** catalog-list (the model needs to know what it can pull; ADR
+   62's client-consumption composes).
+3. **MCP per-server — RESOLVED:** alias-keyed sources feeding the existing harnesses; `mcpServerInfo`
+   the one dedicated per-server projection; self-name is an untrusted display label.
+
+### Still open (build-time)
+- Override granularity within a projection (`<Message>` reshaping only some blocks vs whole-timeline
+  custom projection) — the projection function's internal composition.
+- The exact `collect` / `ContributorRegistry` signature the `content`/`project` split maps onto
+  (verify as build step one).
 
 ## Scope
 The surfacing model. Realized incrementally: default folds for the primitives that already have
