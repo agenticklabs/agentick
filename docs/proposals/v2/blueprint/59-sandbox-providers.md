@@ -150,3 +150,55 @@ command.
 
 This SUPERSEDES the "create-time config" framing and the "Runtime addMount/removeMount
 tools" rejection above (rejected as *model tools*; correct as *harness commands*).
+
+## Amendment 2026-07-07 — packaging correction: providers dep the BASE (`sandbox-next`), mirror `model-next`
+
+**AUTHORITATIVE.** This supersedes the earlier "Packages" section and its `sandbox-edit`/
+`sandbox-net`/`spec-only-provider` structure. That structure deviated from our own grain and
+is being cleaned up by hand.
+
+### How we deviated (so it doesn't recur)
+A locally-reasonable chain drifted, unchecked against precedent: `SandboxHandle` correctly
+belongs in spec (it's the reconciler↔harness **bridge** type — `reconciler-react` references
+it without depending on the harness, same firewall reason as `HookBridges`). From there:
+"handle in spec" → "the whole provider contract in spec" → "providers dep **spec-only**, not
+the harness" → "providers still need `applyEdits`/matcher, which the spec-only rule forbids
+sourcing from the harness → invent `sandbox-edit`/`sandbox-net` shared packages." Each step
+looked fine; the chain landed against the grain. **Root cause: the packaging was derived
+from first principles instead of mirrored from the nearest existing subsystem (the model
+layer).** The rule: when packaging a subsystem, copy the closest precedent's shape first,
+then justify any divergence — don't re-derive.
+
+### The grain (model layer, the mirror)
+`@agentick/model-openai-next` **deps** `@agentick/model-next`. The `LanguageModelAdapter`
+contract + shared code live in `model-next` (the base), NOT spec. Sandbox mirrors this
+exactly.
+
+### Target topology + dep graph
+```
+spec-next            SandboxHandle, SandboxBridge, Sandbox{Exec,Edit,Mount,Create,Snapshot} wire types,
+   ↑                 NetworkRule, ProxiedRequest, sandbox error tags.  ← reconciler-react reaches THESE; never the harness.
+sandbox-next  BASE   harness + bridge impl + ACL  ·  the SandboxProvider CONTRACT  ·
+   ↑                 applyEdits + EditError  ·  matchRequest/matchDomain  ·
+   │                 React <Sandbox>/tools → `sandbox-next/react` subpath  ·  conformance + fakeProvider → `/testing`
+sandbox-local-next   provider — deps `sandbox-next`, implements SandboxProvider   (⟂ model-openai-next → model-next)
+sandbox-docker-next  provider — deps `sandbox-next`   (Wave 2b)
+```
+
+### Moves (exhaustive)
+1. `SandboxProvider` interface: **spec → `sandbox-next`** (server-side factory, not a wire type; reconciler never constructs it). Everything else in `spec/data/sandbox.ts` STAYS (handle/bridge/exec/edit/mount/create/snapshot/network/errors).
+2. `applyEdits` + `EditError`: `sandbox-edit` → `sandbox-next/src/edit.ts`. **Delete `sandbox-edit`.**
+3. `matchRequest`/`matchDomain`: `sandbox-net` → `sandbox-next/src/net.ts`. **Delete `sandbox-net`.** (`NetworkRule`/`ProxiedRequest` types stay in spec.)
+4. `runSandboxProviderConformance` + `fakeSandboxProvider`: → **`sandbox-next/testing`** (conformance + double live with the contract). Remove the sandbox suite from `spec-conformance-next`.
+5. `sandbox-local-next`: dep `spec-only` → **`@agentick/sandbox-next`**; repoint imports (`sandbox-next` re-exports the spec wire types so providers have one import source).
+6. `sandbox-next` main entry **React-free**: move the stray React ref + `react/tools.tsx` + `<Sandbox>` behind the **`sandbox-next/react`** subpath.
+
+### Invariants (green checks)
+- `sandbox-local-next/package.json` deps `@agentick/sandbox-next` — not `-edit`/`-net`, not spec-only.
+- `sandbox-edit` + `sandbox-net` gone everywhere (dirs, lockfile, `website/typedoc.json`, `config.mts`).
+- `sandbox-next` main entry imports zero React (React only via `/react`).
+- `reconciler-react` still deps only spec for the sandbox bridge — unchanged.
+- No cycle: `sandbox-next` deps no provider. Fresh typecheck + vitest + lint green.
+
+### Principle (one line)
+Provider contract + shared code in the **base**; concrete impls dep the base; **spec holds only firewall wire/bridge types**; conformance + doubles ship with the contract. OS isolation (seatbelt/bwrap/unshare/cgroup, #240) is a separate FUNCTIONAL gap in `sandbox-local`, independent of this repackaging.
