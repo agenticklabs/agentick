@@ -1088,9 +1088,6 @@ importers:
       '@agentick/runtime-next':
         specifier: workspace:*
         version: link:../runtime
-      '@agentick/sandbox-edit-next':
-        specifier: workspace:*
-        version: link:../sandbox-edit
       '@agentick/spec-next':
         specifier: workspace:*
         version: link:../spec
@@ -1106,41 +1103,19 @@ importers:
       react:
         specifier: ^19.0.0
         version: 19.2.4
+      vitest:
+        specifier: ^4.0.0
+        version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@25.0.9)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.4)
     devDependencies:
-      '@agentick/spec-conformance-next':
-        specifier: workspace:*
-        version: link:../spec-conformance
       '@types/react':
         specifier: ^19.2.5
         version: 19.2.13
 
-  packages-next/sandbox-edit:
-    dependencies:
-      '@agentick/spec-next':
-        specifier: workspace:*
-        version: link:../spec
-
   packages-next/sandbox-local:
     dependencies:
-      '@agentick/sandbox-edit-next':
+      '@agentick/sandbox-next':
         specifier: workspace:*
-        version: link:../sandbox-edit
-      '@agentick/sandbox-net-next':
-        specifier: workspace:*
-        version: link:../sandbox-net
-      '@agentick/spec-next':
-        specifier: workspace:*
-        version: link:../spec
-    devDependencies:
-      '@agentick/spec-conformance-next':
-        specifier: workspace:*
-        version: link:../spec-conformance
-
-  packages-next/sandbox-net:
-    dependencies:
-      '@agentick/spec-next':
-        specifier: workspace:*
-        version: link:../spec
+        version: link:../sandbox
 
   packages-next/session:
     dependencies:

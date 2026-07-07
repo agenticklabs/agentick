@@ -32,12 +32,12 @@ separately.
 
 The agent gets exactly four tools; `bash` is the universal escape hatch:
 
-| Tool         | Purpose                                                                 |
-| ------------ | ----------------------------------------------------------------------- |
+| Tool         | Purpose                                                                                   |
+| ------------ | ----------------------------------------------------------------------------------------- |
 | `bash`       | Execute a shell command. Subsumes listing/metadata (`ls`, `stat`, `find`, git, installs). |
-| `read_file`  | Read a file (structured output, no shell parsing).                      |
-| `write_file` | Write arbitrary content without shell-escaping.                         |
-| `edit_file`  | Surgical edits — the one tool that beats `sed` (see **editFile** below). |
+| `read_file`  | Read a file (structured output, no shell parsing).                                        |
+| `write_file` | Write arbitrary content without shell-escaping.                                           |
+| `edit_file`  | Surgical edits — the one tool that beats `sed` (see **editFile** below).                  |
 
 There is **no `stat` / `readdir` tool or handle method**. `bash` covers
 the model's need, and a fabricated `stat` (v1's harness returned a
@@ -126,19 +126,19 @@ provider) invokes it, so it works uniformly across every provider.
 
 ## API
 
-| Export                                  | What                                                          |
-| --------------------------------------- | ------------------------------------------------------------ |
-| `SandboxProvider` / `SandboxHandle`     | The construction contract + live-object interface providers implement/return (`src/contract.ts`). |
-| `SandboxCreateOptions` / `SandboxSnapshot` / `SandboxIntent` | Provider create-options + the (deferred #223) snapshot seam. |
-| `SandboxHarness`                        | `BaseHarness<"sandbox">` — 8 commands (exec/read-file/write-file/edit-file/add-mount/remove-mount/list-mounts/destroy). |
-| `withSandbox(options?)`                 | `AppExtension` — constructs the bridge on the app substrate.  |
-| `inMemorySandboxBridge`                 | In-memory bridge for tests.                                  |
-| `applyEdits(source, edits)` / `EditError` | The pure edit transform + its diagnostic error.            |
-| `matchRequest` / `matchDomain`          | The pure first-match-wins egress matcher (default-deny, `*.domain` wildcards). |
-| `SessionACL`, `matchesACLPattern`       | Per-session learned allow/deny state + glob matcher.         |
-| Spec wire types (re-exported)           | `SandboxExec*`/`SandboxEdit*`/mount inputs, `SandboxPermissions`, `NetworkRule`, `ProxiedRequest` — one import source for providers. |
-| `/react` subpath                        | `<Sandbox>`, `useSandbox()`, and the `Bash`/`ReadFile`/`WriteFile`/`EditFile` tools. |
-| `/testing` subpath                      | `runSandboxProviderConformance` (#218) + `fakeSandboxProvider`. |
+| Export                                                       | What                                                                                                                                 |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `SandboxProvider` / `SandboxHandle`                          | The construction contract + live-object interface providers implement/return (`src/contract.ts`).                                    |
+| `SandboxCreateOptions` / `SandboxSnapshot` / `SandboxIntent` | Provider create-options + the (deferred #223) snapshot seam.                                                                         |
+| `SandboxHarness`                                             | `BaseHarness<"sandbox">` — 8 commands (exec/read-file/write-file/edit-file/add-mount/remove-mount/list-mounts/destroy).              |
+| `withSandbox(options?)`                                      | `AppExtension` — constructs the bridge on the app substrate.                                                                         |
+| `inMemorySandboxBridge`                                      | In-memory bridge for tests.                                                                                                          |
+| `applyEdits(source, edits)` / `EditError`                    | The pure edit transform + its diagnostic error.                                                                                      |
+| `matchRequest` / `matchDomain`                               | The pure first-match-wins egress matcher (default-deny, `*.domain` wildcards).                                                       |
+| `SessionACL`, `matchesACLPattern`                            | Per-session learned allow/deny state + glob matcher.                                                                                 |
+| Spec wire types (re-exported)                                | `SandboxExec*`/`SandboxEdit*`/mount inputs, `SandboxPermissions`, `NetworkRule`, `ProxiedRequest` — one import source for providers. |
+| `/react` subpath                                             | `<Sandbox>`, `useSandbox()`, and the `Bash`/`ReadFile`/`WriteFile`/`EditFile` tools.                                                 |
+| `/testing` subpath                                           | `runSandboxProviderConformance` (#218) + `fakeSandboxProvider`.                                                                      |
 
 ## Verified by
 
@@ -174,4 +174,3 @@ provider) invokes it, so it works uniformly across every provider.
   deferred to avoid a fake until the handle grows a range-aware read.
 - **secure-exec provider** — deferred; validate the contract on local +
   docker first, then port secure-exec as the capability-tier test case.
-```

@@ -60,8 +60,6 @@
     "../packages-next/subscriptions",
     "../packages-next/spec-conformance",
     "../packages-next/sandbox",
-    "../packages-next/sandbox-edit",
-    "../packages-next/sandbox-net",
     "../packages-next/sandbox-local",
     "../packages-next/credentials",
     "../packages-next/connector",

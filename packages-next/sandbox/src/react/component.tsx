@@ -24,6 +24,12 @@ import type { SandboxACL } from "@agentick/spec-next";
 import type { SandboxCreateOptions, SandboxProvider } from "../contract.js";
 
 import "../augment.js";
+// Side-effect: pulls the `HookBridges.elicitation` module augmentation into
+// the build program. This component reads `bridges.elicitation` below, and
+// the main entry is React-free (so it can't carry this), so the /react
+// build (which excludes tests) needs the augment loaded here — mirroring
+// `mcp/src/integration/with-mcp.ts`.
+import "@agentick/elicitation-next";
 import type { SandboxBridge } from "../bridge.js";
 import { SandboxContext } from "./context.js";
 
