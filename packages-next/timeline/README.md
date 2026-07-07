@@ -10,9 +10,10 @@ is where those facts live.
 ## The one thing you must know: `<Timeline/>` OVERRIDES the default fold (ADR 63)
 
 The conversation reaches the model by **default** — the compiler ships a
-`timeline` surfacing projection that folds the whole log into context
-whenever your tree doesn't override it. Write nothing and the
-conversation still surfaces:
+`timeline` surfacing projection that folds the timeline's current
+projection (`read()` — post-compaction, minus `visibility: "log"`
+entries) into context whenever your tree doesn't override it. Write
+nothing and the conversation still surfaces:
 
 ```tsx
 function MinimalAgent() {
