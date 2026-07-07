@@ -282,6 +282,56 @@ schema-on-read protects opaque payloads, not a missing column.
 All certified by `runTimelineStoreConformance`, which runs from plain
 vitest with no Effect imports.
 
+### Adapter construction — NO `define*` helper (amendment 2026-07-07)
+
+A `defineTimelineStore(hooks)` / generic `defineStore` helper was weighed
+and **rejected**. Adapters follow the `CredentialsStore` precedent exactly
+(the port this generalizes from ships **no** `defineCredentialsStore`): a
+per-backend factory returning an object that `implements TimelineStore`
+directly —
+
+```ts
+export function fsTimelineStore(opts): TimelineStore { /* … */ }
+export function postgresTimelineStore(opts): TimelineStore { /* … */ }
+```
+
+Reasoning (weighed across elegance / idiom / performance):
+
+- **No shared code to hoist.** The two archetypes (append-log, current-state
+  KV) share a *pattern* (the 7 points) + the *conformance discipline*, not
+  code — a `defineStore` supertype would abstract over ~3 lines (`backend`
+  label, reject-on-error, enumeration). False unification.
+- **A helper can't own the one hard invariant.** `seq` is *backend-assigned*
+  (`BIGSERIAL` / line ordinal); a helper that owned `seq` would hold an
+  in-process per-session counter and forbid DB-assigned serials — breaking
+  the stateless-replica resume story. It could own only trivia
+  (load↔history derivation, codec), which is ~5 lines and differs per
+  backend anyway. Indirection without leverage.
+- **The interface is already the custom seam.** "Go fully custom" = implement
+  the 4 load-bearing methods (`append`/`load`/`sessions`/`delete`; `prune`/
+  `history` optional) — minimal, and exactly how adopters extend
+  `CredentialsStore` today. The `define*` idiom in this repo is reserved for
+  spec→factory transforms with real assembly (`defineConnector`,
+  `defineCluster`); a store is I/O behind an interface → `create*`/
+  `<backend>X(opts)`, not `define*`.
+- If author ergonomics ever demand it, ship **pure utilities** (a load↔history
+  seq-tag deriver, a default codec) from `timeline-next` — primitives, not a
+  wrapper — and only when a *fourth* backend asks (three-consumers rule).
+
+**Escape hatches live in the Postgres factory's options — the library never
+owns your schema:** `postgresTimelineStore({ executor /* BYO pg.Pool | {query} */,
+table, columns /* map onto existing columns */, sql /* per-op FULL override */,
+codec /* jsonb + schema_ver */, migrate: "off" /* default; "create-if-absent"
+opt-in — never forced */ })`. Default DDL is *shipped for manual apply*, not
+auto-run.
+
+**Performance:** the write-behind pump hands `append(sessionId, entries[])` a
+**batch** → one multi-row `INSERT … RETURNING seq` (one round-trip per flush,
+not per entry); reads are cold (hydration once per open; `history` paging on
+demand) over the indexed PK `(session_id, seq)`; the default codec is
+near-zero (pg passes the entry to the driver as `jsonb`; fs `JSON.stringify`s a
+line it writes anyway). No wrapper sits in the append path.
+
 ## KeyValueStore (state harness, opt-in)
 
 Same pattern, trivial surface: `get/set/delete/has/keys` scoped by
