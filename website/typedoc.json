@@ -50,6 +50,8 @@
     "../packages-next/knobs",
     "../packages-next/state",
     "../packages-next/timeline",
+    "../packages-next/timeline-fs",
+    "../packages-next/timeline-postgres",
     "../packages-next/skills",
     "../packages-next/prompts",
     "../packages-next/prompts-react",

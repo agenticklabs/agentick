@@ -1,0 +1,41 @@
+{
+  "name": "@agentick/timeline-fs-next",
+  "version": "0.0.0",
+  "private": true,
+  "description": "fsTimelineStore — zero-dependency JSONL TimelineStore adapter (ADR 49). One append-only transcript file per session; human-greppable; the local-pole durable shape. Node built-ins only.",
+  "keywords": [
+    "agent",
+    "agentick",
+    "ai",
+    "jsonl",
+    "store",
+    "timeline"
+  ],
+  "license": "MIT",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages-next/timeline-fs"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "main": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
+  },
+  "dependencies": {
+    "@agentick/timeline-next": "workspace:*"
+  }
+}

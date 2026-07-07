@@ -33,6 +33,16 @@ export interface TimelineStoreConformanceOptions {
   readonly label: string;
   /** Fresh, isolated store per test. */
   readonly factory: () => TimelineStore | Promise<TimelineStore>;
+  /**
+   * Skip the whole suite (registers it as skipped, never constructs a
+   * store). For adapters whose backend may be absent in the test env —
+   * e.g. `@agentick/timeline-postgres-next` gating on a `TIMELINE_PG_URL`
+   * probe — compute the availability boolean at the call site and pass
+   * `skip: !available`. Threading it as an option (rather than wrapping the
+   * call in an `if`) keeps the gate out of the test-body conditionals the
+   * linter forbids.
+   */
+  readonly skip?: boolean;
   /** Capabilities the suite skips if unsupported. */
   readonly capabilities?: {
     /** `prune` (destructive erasure) supported — defaults to `typeof store.prune === "function"`. */
@@ -53,8 +63,9 @@ const idOf = (e: TimelineEntry): string => (e as { message: { id: string } }).me
 
 export function runTimelineStoreConformance(opts: TimelineStoreConformanceOptions): void {
   const setup = async (): Promise<TimelineStore> => opts.factory();
+  const suite = opts.skip ? describe.skip : describe;
 
-  describe(`TimelineStore conformance — ${opts.label}`, () => {
+  suite(`TimelineStore conformance — ${opts.label}`, () => {
     it("reports a stable, non-empty backend identifier", async () => {
       const store = await setup();
       expect(typeof store.backend).toBe("string");

@@ -26,6 +26,10 @@ export { runTimelineHarnessConformance } from "./conformance.js";
 // ADR 49 — "stores, not snapshots" durability. The persisted-tier store
 // port + bundled in-memory default + its conformance suite.
 export { MemoryTimelineStore, type SeqTaggedEntry, type TimelineStore } from "./store.js";
+// Re-exported so store adapters (`@agentick/timeline-fs-next`,
+// `-postgres-next`, adopter-written) get the entry type from the same
+// package as the port they implement — one dep, not two.
+export type { TimelineEntry } from "@agentick/spec-next";
 export {
   runTimelineStoreConformance,
   type TimelineStoreConformanceOptions,
