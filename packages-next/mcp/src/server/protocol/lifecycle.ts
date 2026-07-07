@@ -73,10 +73,19 @@ export function buildCapabilities(
   // requires this key be present on the server. Pattern B clients gate
   // their `tools/call` task-mode opt-in on this advertisement.
   if (wired.tasks && override?.tasks !== false) {
-    // The capability shape is intentionally empty — listChanged
-    // notifications would be a future extension; not required by
-    // current spec.
-    (out as ServerCapabilities & { tasks?: Record<string, unknown> }).tasks = {};
+    // The shape MUST mirror the SDK `ServerTasksCapabilitySchema`
+    // (types.d.ts): `list` (tasks/list), `cancel` (tasks/cancel), and
+    // `requests.tools.call` (task creation for tools/call). The last is
+    // load-bearing: the SDK's `assertToolsCallTaskCapability` rejects a
+    // task-augmented `tools/call` unless `tasks.requests.tools.call` is
+    // present — an empty `{}` here made our OWN client's `callToolAsTask`
+    // fail against our OWN server. All three request types the server
+    // serves are advertised.
+    (out as ServerCapabilities & { tasks?: Record<string, unknown> }).tasks = {
+      list: {},
+      cancel: {},
+      requests: { tools: { call: {} } },
+    };
   }
 
   // Completions — advertised when the `completions` slot carries at

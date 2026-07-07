@@ -783,6 +783,9 @@ importers:
       '@agentick/spec-next':
         specifier: workspace:*
         version: link:../spec
+      '@agentick/tasks-next':
+        specifier: workspace:*
+        version: link:../tasks
       '@agentick/tool-executor-next':
         specifier: workspace:*
         version: link:../tool-executor
@@ -817,9 +820,6 @@ importers:
       '@agentick/spec-conformance-next':
         specifier: workspace:*
         version: link:../spec-conformance
-      '@agentick/tasks-next':
-        specifier: workspace:*
-        version: link:../tasks
       '@types/react':
         specifier: ^19.2.5
         version: 19.2.13

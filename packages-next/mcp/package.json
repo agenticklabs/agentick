@@ -69,6 +69,7 @@
     "@agentick/pubsub-next": "workspace:*",
     "@agentick/runtime-next": "workspace:*",
     "@agentick/spec-next": "workspace:*",
+    "@agentick/tasks-next": "workspace:*",
     "@agentick/tool-executor-next": "workspace:*",
     "@agentick/tool-next": "workspace:*",
     "@agentick/utils-next": "workspace:*",
@@ -82,7 +83,6 @@
     "@agentick/reconciler-next": "workspace:*",
     "@agentick/resources-next": "workspace:*",
     "@agentick/spec-conformance-next": "workspace:*",
-    "@agentick/tasks-next": "workspace:*",
     "@agentick/utils-next": "workspace:*",
     "@types/react": "^19.2.5",
     "react": "^19.2.4"

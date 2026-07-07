@@ -19,7 +19,7 @@ published independently.
 | `@agentick/mcp-next`         | **Client** harness + `withMCP` extension. Outbound: Agentick → MCP servers. |
 | `@agentick/mcp-next/server`  | **Server** harness. Inbound: MCP clients → Agentick.                        |
 | `@agentick/mcp-next/oauth`   | OAuth 2.1 utilities shared by both sides.                                   |
-| `@agentick/mcp-next/testing` | In-memory transport + stub harnesses for tests.                             |
+| `@agentick/mcp-next/testing` | `runMcpConformance` — the executable conformance suite (loopback + real-peer + version matrix). |
 
 Subpath isolation is deliberate — browser / edge bundles that only
 consume the client subpath don't pull server-side Node `fs` / transport
@@ -451,6 +451,63 @@ wired. **No "we support X but it returns empty" lies on the wire.**
 Adopter `options.capabilities` can opt **OUT** of an otherwise-wired
 capability (`{ tools: false }` hides a populated tools registry) but
 cannot opt IN to something that isn't wired.
+
+## Conformance
+
+`@agentick/mcp-next/testing` ships `runMcpConformance` — the executable
+suite that drives every landed capability. Unlike the sibling harness
+conformance suites (which validate a single implementation of a
+protocol interface), MCP has TWO roles that must interoperate, so the
+suite is organized in three parts. It is the finalizer/verifier track:
+**adding a capability = adding a section**, never a rewrite.
+
+```ts
+// packages-next/mcp/src/testing/__tests__/conformance.spec.ts
+import { runMcpConformance } from "@agentick/mcp-next/testing";
+runMcpConformance();
+```
+
+- **Part A — LOOPBACK.** A real `McpServerHarness` ↔ a real
+  `McpClientHarness` over the linked in-memory transport. Both roles
+  live here; both wrap `@modelcontextprotocol/sdk`. Exercises OUR
+  translation layers on both sides — no fakes (real transport, real
+  harnesses, real substrate; only the "model" is scripted, via direct
+  verb calls). Covers initialize + negotiation, tools (list / call /
+  list_changed), prompts (list / get / list_changed), resources (list /
+  read text+blob / templates / list_changed), completion (prompt-arg),
+  logging (setLevel + `ctx.log` + level filter), elicitation (form + url
+  round-trips through a client-side `ElicitationHarness`), and tasks
+  (Pattern B: `callToolAsTask` → get / result / list / cancel).
+
+  The suite imports NO concrete sibling harness — the caller injects
+  `ResourcesHarness` / `PromptsHarness` / `ElicitationHarness` via
+  `McpConformanceFactories` (the `runTimelineStoreConformance` pattern),
+  so `@agentick/resources-next` stays a dev dependency instead of leaking
+  into mcp-next's runtime graph.
+- **Part B — REAL-PEER.**
+  - **B1 (always on):** the raw SDK reference `Client` drives OUR server.
+    It applies no agentick client-side normalization, so it exercises the
+    pure wire shape and reaches verbs our client harness doesn't expose
+    (`resources/subscribe` → `updated`, `unsubscribe`, `ping`, capability
+    negotiation via `getServerCapabilities`).
+  - **B2 (gated → skipped by default):** the SDK reference server
+    `@modelcontextprotocol/server-everything` drives OUR client harness
+    over stdio. This is the ONLY peer that catches wire-shape drift the
+    shared-SDK loopback can't (both loopback sides share the SDK). Enable
+    it by installing the package (auto-detected via `require.resolve`) or
+    setting `MCP_REFERENCE_SERVER=1`. Run the official inspector against
+    our server the same way:
+    `npx @modelcontextprotocol/inspector node ./src/server/bin.ts`.
+- **Part C — VERSION MATRIX.** Part A re-run against both `draft` and
+  `2025-11-25` client eras via the era codec. Because `selectCodec`
+  currently collapses every version to the `draft` passthrough, this is
+  a forward guard: it proves the loopback is stable whichever era is
+  configured and gives a real `2025-11-25` codec a landing spot with
+  tests when it ships.
+
+Skipped-by-design sections (each a `describe.skip` seam):
+server→client **sampling** (no `SamplingHarness` yet) and the Part B2
+reference-server round-trip (until the package is a dev dep).
 
 ## Verified by
 
