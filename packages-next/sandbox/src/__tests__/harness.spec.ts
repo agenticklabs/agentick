@@ -12,7 +12,7 @@ import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next
 import { ElicitationHarness } from "@agentick/elicitation-next";
 
 import type {
-  MountSpec,
+  SandboxMount,
   ProtocolEvent,
   SandboxHandle,
   SandboxACL,
@@ -24,7 +24,7 @@ import type {
 } from "@agentick/spec-next";
 
 import { SandboxHarness } from "../harness.js";
-import { applyEdits } from "../edit.js";
+import { applyEdits } from "@agentick/sandbox-edit-next";
 import { inMemorySandboxBridge } from "../bridge.js";
 
 function makeHandle(
@@ -36,17 +36,17 @@ function makeHandle(
   } = {},
 ): SandboxHandle {
   const files = new Map<string, string>();
-  const mounts: MountSpec[] = [];
+  const mounts: SandboxMount[] = [];
   const mountMethods: Partial<SandboxHandle> = opts.withMounts
     ? {
-        async addMount(mount: MountSpec): Promise<void> {
+        async addMount(mount: SandboxMount): Promise<void> {
           mounts.push(mount);
         },
-        async removeMount(hostPath: string): Promise<void> {
-          const i = mounts.findIndex((m) => m.hostPath === hostPath);
+        async removeMount(sandboxPath: string): Promise<void> {
+          const i = mounts.findIndex((m) => m.sandboxPath === sandboxPath);
           if (i >= 0) mounts.splice(i, 1);
         },
-        async listMounts(): Promise<readonly MountSpec[]> {
+        async listMounts(): Promise<readonly SandboxMount[]> {
           return [...mounts];
         },
       }
@@ -358,9 +358,9 @@ describe("SandboxHarness — dynamic mounts (allow-list gated, capability-tiered
   it("adds a mount whose host path matches the allow-list ceiling", async () => {
     const h = mountHarness(["/host/**"]);
     await h.ready;
-    await h.addMount({ mount: { hostPath: "/host/data", sandboxPath: "/data", readonly: true } });
+    await h.addMount({ mount: { hostPath: "/host/data", sandboxPath: "/data", readOnly: true } });
     expect(await h.listMounts()).toEqual([
-      { hostPath: "/host/data", sandboxPath: "/data", readonly: true },
+      { hostPath: "/host/data", sandboxPath: "/data", readOnly: true },
     ]);
   });
 
@@ -384,11 +384,11 @@ describe("SandboxHarness — dynamic mounts (allow-list gated, capability-tiered
     ).rejects.toMatchObject({ _tag: "SandboxPermissionDeniedError", kind: "mount" });
   });
 
-  it("removeMount takes effect", async () => {
+  it("removeMount (keyed by sandbox mount point) takes effect", async () => {
     const h = mountHarness(["/host/**"]);
     await h.ready;
     await h.addMount({ mount: { hostPath: "/host/a", sandboxPath: "/a" } });
-    await h.removeMount({ hostPath: "/host/a" });
+    await h.removeMount({ sandboxPath: "/a" });
     expect(await h.listMounts()).toEqual([]);
   });
 

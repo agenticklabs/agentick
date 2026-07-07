@@ -7,23 +7,19 @@
  * delete, insert (before/after/start/end), and range modes.
  *
  * This module ships the PURE transform only (`applyEdits`) — no I/O,
- * OS-free. The v2 `SandboxHarness.editFile` command runs it after the
- * ACL permission check, reading via the handle and writing back through
- * the provider (which owns atomicity). The v1 `editFile` file-wrapper
- * (node:fs read → transform → atomic temp+rename) was intentionally NOT
- * ported here: temp+rename is a filesystem concern that belongs to the
- * provider layer, not this harness package.
+ * OS-free — so it can be shared by BOTH the sandbox harness
+ * (`@agentick/sandbox-next`, which re-exports it) and every provider
+ * (`sandbox-local-next`, `sandbox-docker-next`) without a
+ * wrong-direction dependency. Providers depend on `spec-next` +
+ * this package only; they can never import from the harness package.
  *
- * TODO(ADR 59, Wave 2): a shared OS-free home. When real providers land
- * (`sandbox-local-next`, `sandbox-docker-next`), each implements
- * `SandboxHandle.editFile` and needs this transform. Providers depend on
- * `spec-next` only — they CANNOT import from this harness package. Mirror
- * the network split (matcher → `@agentick/sandbox-net-next`) and relocate
- * `applyEdits` to a shared `sandbox-*-next` helper both the harness and
- * every provider can consume without a wrong-direction dependency.
+ * The `editFile` file-wrapper (read → transform → atomic temp+rename)
+ * deliberately lives in the PROVIDER, not here: temp+rename is a
+ * filesystem concern owned by the provider layer. This package is the
+ * pure text transform, nothing more (ADR 59, Wave 2).
  *
  * @see docs/proposals/v2/blueprint/59-sandbox-providers.md
- * @verifiedBy packages-next/sandbox/src/__tests__/edit.spec.ts
+ * @verifiedBy packages-next/sandbox-edit-next/src/__tests__/edit.spec.ts
  */
 
 import type { SandboxEdit, SandboxEditChange, SandboxEditResult } from "@agentick/spec-next";

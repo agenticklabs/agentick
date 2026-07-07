@@ -20,7 +20,11 @@ export { inMemorySandboxBridge, type SandboxBridge, type SandboxRegistration } f
 
 export { SandboxHarness, type SandboxHarnessOptions, type SandboxStatus } from "./harness.js";
 
-export { applyEdits, EditError } from "./edit.js";
+// The crown-jewel edit transform now lives in the shared, OS-free
+// `@agentick/sandbox-edit-next` so providers (which can't import this
+// harness package) share one implementation. Re-exported here so the
+// harness's own import path is unchanged (ADR 59, Wave 2).
+export { applyEdits, EditError } from "@agentick/sandbox-edit-next";
 
 export {
   SessionACL,

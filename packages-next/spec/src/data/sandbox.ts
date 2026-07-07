@@ -68,8 +68,8 @@ export interface SandboxHandle {
    * {@link SandboxCreateOptions.mountAllow} ceiling before calling this.
    */
   addMount?(mount: SandboxMount): Promise<void>;
-  /** Remove a runtime mount by host path. Capability-tiered (see {@link addMount}). */
-  removeMount?(hostPath: string): Promise<void>;
+  /** Remove a runtime mount by its sandbox mount point. Capability-tiered (see {@link addMount}). */
+  removeMount?(sandboxPath: string): Promise<void>;
   /** List the sandbox's current mounts. Capability-tiered (see {@link addMount}). */
   listMounts?(): Promise<readonly SandboxMount[]>;
   /** Tear down the sandbox and release provider-side resources. */
@@ -435,7 +435,8 @@ export interface SandboxAddMountInput {
 
 /** Input for the `remove-mount` harness command. */
 export interface SandboxRemoveMountInput {
-  readonly hostPath: string;
+  /** The sandbox mount point to unmount. */
+  readonly sandboxPath: string;
 }
 
 // ============================================================================

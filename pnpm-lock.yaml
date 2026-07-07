@@ -1088,6 +1088,9 @@ importers:
       '@agentick/runtime-next':
         specifier: workspace:*
         version: link:../runtime
+      '@agentick/sandbox-edit-next':
+        specifier: workspace:*
+        version: link:../sandbox-edit
       '@agentick/spec-next':
         specifier: workspace:*
         version: link:../spec
@@ -1110,6 +1113,34 @@ importers:
       '@types/react':
         specifier: ^19.2.5
         version: 19.2.13
+
+  packages-next/sandbox-edit:
+    dependencies:
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../spec
+
+  packages-next/sandbox-local:
+    dependencies:
+      '@agentick/sandbox-edit-next':
+        specifier: workspace:*
+        version: link:../sandbox-edit
+      '@agentick/sandbox-net-next':
+        specifier: workspace:*
+        version: link:../sandbox-net
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../spec
+    devDependencies:
+      '@agentick/spec-conformance-next':
+        specifier: workspace:*
+        version: link:../spec-conformance
+
+  packages-next/sandbox-net:
+    dependencies:
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../spec
 
   packages-next/session:
     dependencies:

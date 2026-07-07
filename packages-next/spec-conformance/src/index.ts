@@ -85,3 +85,12 @@ export {
   type TransportConformanceFactory,
   type TestHandler,
 } from "./transport.js";
+
+// Sandbox provider (ADR 59, #218) — every SandboxProvider impl
+// (local/docker/remote) runs this against a REAL instance to prove the
+// contract: exec (+ onOutput streaming), fs round-trip, atomic layered
+// editFile, capability-tiered mounts, destroy.
+export {
+  runSandboxProviderConformance,
+  type SandboxProviderConformanceOptions,
+} from "./sandbox-provider.js";

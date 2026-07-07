@@ -1,0 +1,25 @@
+{
+  "name": "@agentick/sandbox-net-next",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Pure, OS-free network egress matcher (matchRequest/matchDomain) — first-match-wins, default-deny, *.domain wildcards — shared by every egress-enforcing sandbox provider (ADR 59).",
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
+  },
+  "dependencies": {
+    "@agentick/spec-next": "workspace:*"
+  }
+}

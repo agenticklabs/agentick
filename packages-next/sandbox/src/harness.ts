@@ -53,7 +53,7 @@ import type {
   MessageEnvelope,
   MessageHandlerError,
   MessageInbox,
-  MountSpec,
+  SandboxMount,
   Operation,
   OperationJournal,
   SandboxACL,
@@ -158,7 +158,7 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
   private readonly editFileCmd: Cmd<SandboxEditFileInput, SandboxEditResult>;
   private readonly addMountCmd: Cmd<SandboxAddMountInput, void>;
   private readonly removeMountCmd: Cmd<SandboxRemoveMountInput, void>;
-  private readonly listMountCmd: Cmd<undefined, readonly MountSpec[]>;
+  private readonly listMountCmd: Cmd<undefined, readonly SandboxMount[]>;
   private readonly destroyCmd: Cmd<undefined, void>;
 
   constructor(
@@ -302,7 +302,7 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
     return this.removeMountCmd(input);
   }
 
-  listMounts(): Promise<readonly MountSpec[]> {
+  listMounts(): Promise<readonly SandboxMount[]> {
     return this.listMountCmd(undefined);
   }
 
@@ -408,7 +408,7 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
   ): Effect.Effect<SandboxEditResult, SandboxError, never> {
     // Delegate to the handle's real `editFile` after the write-permission
     // check. The handle owns edit truth — the layered-matching `applyEdits`
-    // transform (crown jewel; see ./edit.ts) plus provider-side atomicity
+    // transform (crown jewel; @agentick/sandbox-edit-next) plus provider-side atomicity
     // (temp + rename). No more `applyEditsLocal` lite regression.
     return Effect.gen(this, function* () {
       const allowed = yield* this.checkPermission("write", input.path);
@@ -458,10 +458,10 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
         return yield* Effect.fail(new SandboxUnsupportedError({ capability: "removeMount" }));
       }
       return yield* Effect.tryPromise<void, SandboxMountError>({
-        try: () => removeMount.call(this.handle, input.hostPath),
+        try: () => removeMount.call(this.handle, input.sandboxPath),
         catch: (cause): SandboxMountError =>
           new SandboxMountError({
-            hostPath: input.hostPath,
+            sandboxPath: input.sandboxPath,
             reason: "remove mount failed",
             cause,
           }),
@@ -469,13 +469,13 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
     });
   }
 
-  private listMountBody(): Effect.Effect<readonly MountSpec[], SandboxError, never> {
+  private listMountBody(): Effect.Effect<readonly SandboxMount[], SandboxError, never> {
     return Effect.gen(this, function* () {
       const listMounts = this.handle.listMounts;
       if (listMounts === undefined) {
         return yield* Effect.fail(new SandboxUnsupportedError({ capability: "listMounts" }));
       }
-      return yield* Effect.tryPromise<readonly MountSpec[], SandboxMountError>({
+      return yield* Effect.tryPromise<readonly SandboxMount[], SandboxMountError>({
         try: () => listMounts.call(this.handle),
         catch: (cause): SandboxMountError =>
           new SandboxMountError({ reason: "list mounts failed", cause }),
