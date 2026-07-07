@@ -175,6 +175,49 @@ export type SpecFeatureName =
   | (string & {});
 
 // ============================================================================
+// Surfacing provenance (ADR 63)
+// ============================================================================
+
+/**
+ * Which surfacing layer produced a contribution, and under which harness
+ * key. ADR 63: every context entry and tool declaration in the IR is
+ * traceable to either a **default** projection (framework-supplied,
+ * ran because the tree did not override that harness's projection) or an
+ * **authored** contribution (a component the adopter wrote).
+ *
+ * The key is the surfacing-capable harness's key — `"timeline"`,
+ * `"tools"`, … — or `"content"` for the raw append stream
+ * (`<Message>` / `<Section>` / `<Text>` written directly, not through a
+ * projection).
+ *
+ * @example `"default:timeline"` — the timeline default fold ran (no
+ *          `<Timeline>` in the tree).
+ * @example `"authored:timeline"` — an adopter's `<Timeline>` overrode the
+ *          default projection.
+ * @example `"authored:content"` — a bare `<Section>` / `<Message>`.
+ */
+export type SurfacingProvenance = `authored:${string}` | `default:${string}`;
+
+/**
+ * Provenance sidecar for a {@link RenderedTree}. Index-aligned with the
+ * wire arrays it annotates — `entries[i]` tags `context.entries[i]`;
+ * `tools[i]` tags `declarations.tools[i]`. Lives OUTSIDE the wire shapes
+ * (`ContextEntry` / `ToolDeclaration`) so provenance never leaks to a
+ * provider — it is IR-inspection metadata devtools reads to answer "what
+ * did the model see, and which layer put it there?" (ADR 49's
+ * inspectable-IR invariant under ADR 63 defaults).
+ *
+ * The alignment survives the harness's post-collect formatter pass
+ * (which maps `context.entries` 1:1) and is never reordered.
+ */
+export interface RenderedTreeProvenance {
+  /** Provenance per context entry, index-aligned with `context.entries`. */
+  readonly entries?: readonly SurfacingProvenance[];
+  /** Provenance per tool declaration, index-aligned with `declarations.tools`. */
+  readonly tools?: readonly SurfacingProvenance[];
+}
+
+// ============================================================================
 // RenderedTree
 // ============================================================================
 
@@ -220,4 +263,12 @@ export interface RenderedTree {
 
   readonly diagnostics?: FormatDiagnostics;
   readonly metadata?: Record<string, unknown>;
+
+  /**
+   * Surfacing provenance (ADR 63) — which layer (default vs authored)
+   * produced each context entry / tool declaration. Omitted when the
+   * producing compiler does not track provenance. Never sent to a
+   * provider; inspection-only.
+   */
+  readonly provenance?: RenderedTreeProvenance;
 }

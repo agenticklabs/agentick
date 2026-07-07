@@ -7,6 +7,9 @@ export type { MessageProps } from "./message.js";
 export { Section } from "./section.js";
 export type { SectionProps } from "./section.js";
 
+export { Project } from "./project.js";
+export type { ProjectProps } from "./project.js";
+
 // Semantic role + block wrappers — short aliases over the intrinsics.
 export { System, User, Assistant, Paragraph, H1, H2, H3 } from "./semantic.js";
 

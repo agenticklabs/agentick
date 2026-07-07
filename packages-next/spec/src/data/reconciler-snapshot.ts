@@ -133,11 +133,10 @@ export type ReconcileDiagnosticSeverity = "info" | "warning" | "error";
  * - `await-timeout`             the render-until-stable loop's `awaitTimeoutMs`
  *                               budget elapsed before an iteration's `useData`
  *                               fetchers resolved
- * - `timeline-not-rendered`     the timeline projection carries message
- *                               entries but no component rendered any
- *                               message into the context — the
- *                               conversation is being silently dropped
- *                               (likely a missing `<Timeline/>`)
+ *
+ * (ADR 63 retired `timeline-not-rendered`: the timeline now surfaces via a
+ * default projection when no `<Timeline>` overrides it, so a conversation
+ * can no longer be silently dropped by omitting the component.)
  */
 export type ReconcileDiagnosticCode =
   | "max-iterations"
@@ -150,7 +149,6 @@ export type ReconcileDiagnosticCode =
   | "snapshot-incompatible"
   | "unstable-tree"
   | "error-boundary-active"
-  | "timeline-not-rendered"
   | (string & {});
 
 /**

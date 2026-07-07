@@ -55,9 +55,19 @@ const app = await createApp(myAgent, {
 - **Layer B — Contributor protocol + collect walker + built-in
   contributors.** Turns a host tree into the spec's `RenderedTree` IR.
   Built-ins cover `<Section>`, `<Message>`, `<Tool>`, `<Resource>`,
-  `<Output>`, `<MCP>`, `<Model>`, all content blocks (text, image,
-  audio, video, document, code, json, …), event roles, custom blocks,
-  and semantic HTML.
+  `<Output>`, `<MCP>`, `<Model>`, `<project>` (surfacing override), all
+  content blocks (text, image, audio, video, document, code, json, …),
+  event roles, custom blocks, and semantic HTML.
+- **Surfacing projections (ADR 63).** `collect` splits contributions
+  into **content** (append stream) and **projections** (one per
+  surfacing-capable harness key: its `DefaultProjection`, or a
+  `<project projectionKey>` override). Defaults are lazy — a key's
+  default runs only when un-overridden. Ships the compiler-agnostic
+  `builtInToolsProjection` (advertise `<Tool>` sources); the `timeline`
+  default is supplied by the reconciler binding. Every contribution is
+  provenance-tagged (`default:<key>` / `authored:<key>`) on
+  `RenderedTree.provenance`. This seam is compiler-general — a functional
+  compiler drives the same `DefaultProjection` / override split.
 - **Bridges.** `InMemoryDataBridge` (reference impl), plus
   protocol-conforming mocks (`fakeBridges`, `fakeTimelineHarness`,
   `fakeKnobsHarness`, `mockStateHarness`) used by tests across the

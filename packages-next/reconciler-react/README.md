@@ -81,6 +81,38 @@ The host tree never crosses the harness boundary; only `RenderedTree`,
 See `docs/proposals/v2/blueprint/21-reconciler-implementation.md` for
 the full design.
 
+### Surfacing: defaults + overrides (ADR 63)
+
+The IR is assembled from two kinds of contribution:
+
+- **content** — `<Section>` / `<Message>` / `<Text>` written directly in
+  the tree append to the ordered entry stream (tagged `authored:content`).
+- **projections** — each surfacing-capable harness (timeline, tools, …)
+  has exactly ONE projection into the IR: its framework **default**, or a
+  component that **overrides** it for a key.
+
+Defaults are **on** and **lazy**. Collect ships two: `tools` (advertise
+every registered `<Tool>`) and `timeline` (fold the conversation). A
+default runs only when its key wasn't overridden — so an agent that
+writes nothing still gets its tools and conversation in context, and an
+agent that renders `<Timeline>{fn}` overrides the timeline fold (the
+default never runs; no double-fold). Overriding is done by rendering
+inside `<Project projectionKey="timeline">…</Project>` — the React
+front-end onto the compiler-general projection seam (`<Timeline>{fn}` ≡
+`ctx.project("timeline", fn)` in a functional compiler).
+
+Every contribution is **provenance-tagged** on `RenderedTree.provenance`
+(`default:<key>` vs `authored:<key>`, index-aligned with `context.entries`
+/ `declarations.tools`) so devtools can answer "what did the model see,
+and which layer put it there?" — ADR 49's inspectable-IR invariant holds
+verbatim: defaults are real contributions the compiler ran, never
+injected behind the tree's back.
+
+The `tools` default and the projection seam live in
+`@agentick/reconciler-next` (compiler-general); the `timeline` default is
+supplied here, reading `HookBridges.timeline` structurally (no dependency
+on `@agentick/timeline-next`, per ADR 27).
+
 ### React feature semantics
 
 | Feature                                   | Behavior                                                    |
@@ -106,6 +138,7 @@ author API (no `JSX.IntrinsicElements` augmentation needed).
 | `<System>` `<User>` `<Assistant>` | Sugar for `<Message role="…">`                           |
 | `<Paragraph>` `<H1>` `<H2>` `<H3>` | Block-level semantic wrappers                            |
 | `<FormatScope>` `<Markdown>` `<XML>` `<PlainText>` | Per-subtree formatter framing            |
+| `<Project projectionKey>`       | Override a harness's surfacing projection (ADR 63); suppresses that key's default fold |
 
 ### Hooks
 

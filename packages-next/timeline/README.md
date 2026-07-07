@@ -7,10 +7,24 @@ tick. Agentick's core bet is that context is _re-rendered from facts_
 each tick rather than accumulated in a prompt string, and the timeline
 is where those facts live.
 
-## The one thing you must know: `<Timeline/>` IS the mechanism
+## The one thing you must know: `<Timeline/>` OVERRIDES the default fold (ADR 63)
 
-Nothing injects conversation history automatically. The timeline
-reaches the model **only** because your agent renders it:
+The conversation reaches the model by **default** — the compiler ships a
+`timeline` surfacing projection that folds the whole log into context
+whenever your tree doesn't override it. Write nothing and the
+conversation still surfaces:
+
+```tsx
+function MinimalAgent() {
+  return <System>You are a helpful assistant.</System>;
+  // The timeline surfaces via the default projection (default:timeline).
+}
+```
+
+`<Timeline/>` is how you **override** that default to filter, compact, or
+reshape the fold — it is the one projection of the timeline harness, and
+rendering it suppresses the default (lazy — the log is never folded
+twice):
 
 ```tsx
 import { Timeline } from "@agentick/timeline-next/react";
@@ -20,19 +34,20 @@ function Agent() {
     <>
       <System>You are a helpful assistant.</System>
       <Calculator.Tool />
-      {/* THE CONVERSATION — projection → <Message> nodes → model context. */}
-      <Timeline />
+      {/* OVERRIDE the default projection — filter / compact / reshape. */}
+      <Timeline maxTokens={100_000} roles={["user", "assistant"]} />
     </>
   );
 }
 ```
 
-Omit it and the model receives a system-only context while your users
-type into the void — a bug class severe enough that the reconciler now
-emits a `timeline-not-rendered` diagnostic when the timeline holds
-messages no component rendered. This inversion is deliberate: the
-component boundary is where filtering, compaction, and formatting
-become _your_ declarative choices instead of framework policy.
+Under the hood `<Timeline>` renders its fold inside
+`<Project projectionKey="timeline">`, so the compiler tags its entries
+`authored:timeline` and skips the default fold. The component boundary is
+where filtering, compaction, and formatting become _your_ declarative
+choices — but omitting it no longer drops the conversation. (ADR 63
+retired the old `timeline-not-rendered` diagnostic for exactly this
+reason: there is no longer a way to silently forget the timeline.)
 
 ## Consumption semantics (ADR 53 — offsets, not tiers)
 

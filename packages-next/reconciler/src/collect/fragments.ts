@@ -25,6 +25,18 @@ import type {
 
 export type IRFragment =
   | { readonly kind: "context-entry"; readonly entry: ContextEntry }
+  /**
+   * A component overriding its harness's projection for `key` (ADR 63).
+   * Emitted by the `<project>` contributor; carries the entries (and/or
+   * tools) the override produced. Presence of this fragment for a key
+   * SUPPRESSES that harness's lazy default projection (last-writer-wins
+   * per key). `<Timeline>{fn}` ≡ `ctx.project("timeline", fn)`.
+   */
+  | {
+      readonly kind: "projection-override";
+      readonly key: string;
+      readonly result: import("./projection.js").ProjectionResult;
+    }
   | { readonly kind: "tool-declaration"; readonly tool: ToolDeclaration }
   | { readonly kind: "model-declaration"; readonly model: ModelDeclaration }
   | { readonly kind: "resource-declaration"; readonly resource: ResourceDeclaration }

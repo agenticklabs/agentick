@@ -92,6 +92,19 @@ declare module "react" {
       // Adopters use `<Section>` (the uppercase wrapper).
 
       /**
+       * Projection override (ADR 63). Declares that its subtree overrides
+       * a surfacing-capable harness's projection for `projectionKey`,
+       * suppressing that harness's lazy default. Adopters use the
+       * uppercase `<Project>` wrapper, or a harness's own surfacing
+       * component (`<Timeline>` renders `<project projectionKey="timeline">`).
+       */
+      project: {
+        readonly projectionKey: string;
+        readonly children?: ReactChildren;
+        readonly key?: ReactKey;
+      };
+
+      /**
        * Tool declaration. Compiles to a `ToolDeclaration` on
        * `RenderedTree.declarations.tools`.
        */

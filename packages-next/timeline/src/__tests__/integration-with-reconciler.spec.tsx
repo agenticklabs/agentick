@@ -101,6 +101,35 @@ describe("<Timeline> — default rendering", () => {
 
     expect(asMessageEntries(tree.context.entries)).toEqual([]);
   });
+
+  it("OVERRIDES the timeline projection — suppresses the default fold (ADR 63)", async () => {
+    // <Timeline> reshapes the conversation (roles filter). The default
+    // timeline fold must NOT also run — otherwise the filtered-out
+    // `system` entry would reappear via the default (double-fold).
+    const timeline = fakeTimelineHarness([
+      systemEntry("s1", "you are helpful"),
+      userEntry("u1", "hi"),
+      assistantEntry("a1", "yo"),
+    ]);
+    const bridges: HookBridges = { ...fakeBridges(), timeline };
+    const harness = await makeHarness();
+
+    await harness.mount({
+      mountId: "m_override",
+      sessionId: "s",
+      element: React.createElement(Timeline, { roles: ["user", "assistant"] }),
+      bridges,
+    });
+    const { tree } = await harness.renderTree({ mountId: "m_override", sessionId: "s" });
+
+    const messages = asMessageEntries(tree.context.entries);
+    // Only the 2 kept roles — the system entry is gone AND was not
+    // re-added by the default fold.
+    expect(messages.map((m) => m.role)).toEqual(["user", "assistant"]);
+    // Authored override, no default:timeline anywhere.
+    expect(tree.provenance?.entries?.every((t) => t === "authored:timeline")).toBe(true);
+    expect(tree.provenance?.entries ?? []).not.toContain("default:timeline");
+  });
 });
 
 describe("<Timeline> — filtering", () => {

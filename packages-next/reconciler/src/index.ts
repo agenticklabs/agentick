@@ -56,9 +56,17 @@ export { NO_FRAGMENTS } from "./collect/fragments.js";
 export { ContributorRegistry } from "./collect/registry.js";
 export { collect } from "./collect/collect.js";
 export type { CollectInput, CollectResult } from "./collect/collect.js";
+// Surfacing projections (ADR 63)
+export { builtInToolsProjection, builtInDefaultProjections } from "./collect/projection.js";
+export type {
+  DefaultProjection,
+  ProjectionResult,
+  ProjectionSources,
+} from "./collect/projection.js";
 export { createBuiltInRegistry } from "./collect/contributors/built-ins.js";
 export { sectionContributor } from "./collect/contributors/section.js";
 export { messageContributor } from "./collect/contributors/message.js";
+export { projectContributor } from "./collect/contributors/project.js";
 export { toolContributor } from "./collect/contributors/tool.js";
 export { resourceContributor } from "./collect/contributors/resource.js";
 export { outputContributor } from "./collect/contributors/output.js";

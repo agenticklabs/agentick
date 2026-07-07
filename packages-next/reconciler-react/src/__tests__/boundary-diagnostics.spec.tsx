@@ -150,46 +150,58 @@ function messageEntry(text: string, role = "user"): TimelineEntry {
   } as TimelineEntry;
 }
 
-describe("timeline-not-rendered diagnostic", () => {
-  it("warns when the timeline has messages but no component rendered any", async () => {
+// ADR 63 retired the `timeline-not-rendered` diagnostic. The timeline
+// now surfaces via a DEFAULT projection whenever no `<Timeline>`
+// overrides it, so a conversation can no longer be silently dropped by
+// omitting the component — the "did you forget <Timeline/>?" warning has
+// no premise. These tests (formerly asserting the warning) now assert
+// the default-on behavior that replaces it.
+describe("ADR 63 — default timeline surfacing (no timeline-not-rendered warning)", () => {
+  it("surfaces the timeline by default when no <Timeline> is in the tree", async () => {
     const harness = await makeHarness();
     await harness.mount({
       mountId: "m_dropped",
       sessionId: "s",
-      // System-only tree: no <Timeline/>, no message entries reach context.
+      // System-only tree: no <Timeline/>. Pre-ADR-63 this dropped the
+      // conversation; now the default projection folds it.
       element: React.createElement("section", { id: "sys" }, "you are helpful"),
       bridges: fakeBridges({ timeline: [messageEntry("hello"), messageEntry("world")] }),
     });
-    const { diagnostics } = await harness.renderTree({
+    const { tree, diagnostics } = await harness.renderTree({
       mountId: "m_dropped",
       sessionId: "s",
     });
-    const diag = diagnostics.find((d) => d.code === "timeline-not-rendered");
-    expect(diag).toBeDefined();
-    expect(diag!.severity).toBe("warning");
-    expect(diag!.message).toContain("<Timeline/>");
-    expect(diag!.message).toContain("2 message entries");
+
+    // The conversation surfaced — no warning, and the messages are in IR.
+    expect(diagnostics.some((d) => d.code === "timeline-not-rendered")).toBe(false);
+    const messages = tree.context.entries.filter((e) => e.kind === "message");
+    expect(messages).toHaveLength(2);
+    // Tagged as default-produced.
+    const tags = tree.provenance?.entries ?? [];
+    expect(tags.filter((t) => t === "default:timeline")).toHaveLength(2);
   });
 
-  it("does not warn when a component renders the timeline messages into context", async () => {
+  it("keeps authored content AND the default timeline when both are present", async () => {
     const harness = await makeHarness();
-    // A component that projects the seeded timeline messages into the
-    // tree — the collected context ends up with message entries, so the
-    // conversation is NOT dropped.
+    // A raw <message> is authored content; the seeded timeline still
+    // surfaces via the default projection (no <Timeline> override).
     await harness.mount({
       mountId: "m_rendered",
       sessionId: "s",
-      element: React.createElement("message", { role: "user" }, "hello"),
+      element: React.createElement("message", { role: "user" }, "hi there"),
       bridges: fakeBridges({ timeline: [messageEntry("hello")] }),
     });
-    const { diagnostics } = await harness.renderTree({
+    const { tree, diagnostics } = await harness.renderTree({
       mountId: "m_rendered",
       sessionId: "s",
     });
     expect(diagnostics.some((d) => d.code === "timeline-not-rendered")).toBe(false);
+    const tags = tree.provenance?.entries ?? [];
+    expect(tags).toContain("authored:content");
+    expect(tags).toContain("default:timeline");
   });
 
-  it("does not warn for a system-only agent with an empty timeline", async () => {
+  it("surfaces nothing (and does not warn) for a system-only agent with an empty timeline", async () => {
     const harness = await makeHarness();
     await harness.mount({
       mountId: "m_empty",
@@ -197,11 +209,12 @@ describe("timeline-not-rendered diagnostic", () => {
       element: React.createElement("section", { id: "sys" }, "you are helpful"),
       bridges: fakeBridges(),
     });
-    const { diagnostics } = await harness.renderTree({
+    const { tree, diagnostics } = await harness.renderTree({
       mountId: "m_empty",
       sessionId: "s",
     });
     expect(diagnostics.some((d) => d.code === "timeline-not-rendered")).toBe(false);
+    expect(tree.context.entries.filter((e) => e.kind === "message")).toHaveLength(0);
   });
 });
 

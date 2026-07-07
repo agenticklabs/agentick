@@ -28,6 +28,7 @@ import type {
   SemanticNode,
   SpecConfig,
   SpecFeatureName,
+  SurfacingProvenance,
   ToolDeclaration,
 } from "@agentick/spec-next";
 import { mergeProviderOptions, SPEC_VERSION } from "@agentick/spec-next";
@@ -42,6 +43,11 @@ import { isElementInstance, isTextInstance, type HostInstance } from "../host/ho
 import type { CollectContext } from "./contributor.js";
 import type { IRFragment } from "./fragments.js";
 import { ContributorRegistry } from "./registry.js";
+import {
+  builtInDefaultProjections,
+  type DefaultProjection,
+  type ProjectionSources,
+} from "./projection.js";
 
 export interface CollectInput {
   /** Root host children to walk. Usually the container's children. */
@@ -50,6 +56,14 @@ export interface CollectInput {
   readonly registry: ContributorRegistry;
   /** Default formatter when contributors don't pin one. */
   readonly rootScope: HostScope;
+  /**
+   * Surfacing default projections (ADR 63). Each runs LAZILY — only when
+   * the tree did not override its `key`. Defaults to
+   * {@link builtInDefaultProjections} (the compiler-agnostic `tools`
+   * default) so tools surface with zero configuration; the reconciler
+   * binding passes an augmented list that also folds the timeline.
+   */
+  readonly defaults?: readonly DefaultProjection[];
 }
 
 export interface CollectResult {
@@ -62,6 +76,7 @@ export interface CollectResult {
  */
 export function collect(input: CollectInput): CollectResult {
   const { roots, registry, rootScope } = input;
+  const defaults = input.defaults ?? builtInDefaultProjections;
 
   const allFragments: IRFragment[] = [];
   const ctxFactory = makeContextFactory(registry, rootScope);
@@ -72,7 +87,7 @@ export function collect(input: CollectInput): CollectResult {
     }
   }
 
-  return foldFragments(allFragments);
+  return foldFragments(allFragments, defaults);
 }
 
 // ============================================================================
@@ -333,9 +348,24 @@ function deriveFormatScope(
 // Fragment folder — assembles a RenderedTree from an IRFragment stream.
 // ============================================================================
 
-function foldFragments(fragments: readonly IRFragment[]): CollectResult {
+function foldFragments(
+  fragments: readonly IRFragment[],
+  defaults: readonly DefaultProjection[],
+): CollectResult {
+  // ── Surfacing accumulators (ADR 63) ──
+  // `entries` is built with a parallel `entryProvenance` array; the two
+  // grow together so indices stay aligned through to the sidecar.
   const entries: ContextEntry[] = [];
+  const entryProvenance: SurfacingProvenance[] = [];
   const tools: ToolDeclaration[] = [];
+  const toolProvenance: SurfacingProvenance[] = [];
+  /** Accumulated tool SOURCES (each `<Tool>` registration) — the input a
+   *  default `tools` projection advertises. NOT surfaced until a
+   *  projection reads them. */
+  const toolSources: ToolDeclaration[] = [];
+  /** Keys a component overrode — suppresses that key's lazy default. */
+  const overriddenKeys = new Set<string>();
+
   const resources: ResourceDeclaration[] = [];
   const outputs: OutputDeclaration[] = [];
   const mcps: MCPDeclaration[] = [];
@@ -352,10 +382,31 @@ function foldFragments(fragments: readonly IRFragment[]): CollectResult {
   for (const frag of fragments) {
     switch (frag.kind) {
       case "context-entry":
+        // Raw content append stream — `<Message>` / `<Section>` written
+        // directly in the tree (not through a projection override).
         entries.push(frag.entry as ContextEntry);
+        entryProvenance.push("authored:content");
         break;
+      case "projection-override": {
+        // A component overriding its harness's projection for `key`.
+        // Suppresses that key's lazy default; its entries/tools land at
+        // this tree position, tagged authored:<key>.
+        overriddenKeys.add(frag.key);
+        const prov: SurfacingProvenance = `authored:${frag.key}`;
+        for (const e of frag.result.entries ?? []) {
+          entries.push(e);
+          entryProvenance.push(prov);
+        }
+        for (const t of frag.result.tools ?? []) {
+          tools.push(t);
+          toolProvenance.push(prov);
+        }
+        break;
+      }
       case "tool-declaration":
-        tools.push(frag.tool);
+        // A tool SOURCE (registration), not a surfacing op. Surfaced by
+        // the `tools` projection (default, or a `<Tools>` override).
+        toolSources.push(frag.tool);
         break;
       case "model-declaration":
         model = frag.model;
@@ -392,6 +443,28 @@ function foldFragments(fragments: readonly IRFragment[]): CollectResult {
     }
   }
 
+  // ── Lazy default projections (ADR 63) ──
+  // Each default runs ONLY when its key wasn't overridden by a component
+  // (an overridden timeline is never folded). Default contributions are
+  // appended AFTER the tree-order stream — they have no tree position —
+  // and tagged default:<key>. They are real contributions the compiler
+  // ran, not injection: the IR still contains only what the compiler
+  // produced (ADR 49 preserved).
+  const sources: ProjectionSources = { tools: toolSources };
+  for (const def of defaults) {
+    if (overriddenKeys.has(def.key)) continue;
+    const result = def.project(sources);
+    const prov: SurfacingProvenance = `default:${def.key}`;
+    for (const e of result.entries ?? []) {
+      entries.push(e);
+      entryProvenance.push(prov);
+    }
+    for (const t of result.tools ?? []) {
+      tools.push(t);
+      toolProvenance.push(prov);
+    }
+  }
+
   const features = computeFeatures({
     entries,
     tools,
@@ -421,6 +494,14 @@ function foldFragments(fragments: readonly IRFragment[]): CollectResult {
     ...(freeRootBlocks.length ? { content: freeRootBlocks } : {}),
     ...(diagnostics.length ? { diagnostics: { diagnostics } } : {}),
     ...(Object.keys(metadata).length ? { metadata } : {}),
+    ...(entryProvenance.length || toolProvenance.length
+      ? {
+          provenance: {
+            ...(entryProvenance.length ? { entries: entryProvenance } : {}),
+            ...(toolProvenance.length ? { tools: toolProvenance } : {}),
+          },
+        }
+      : {}),
   };
 
   return { tree, diagnostics };

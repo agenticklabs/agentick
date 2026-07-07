@@ -11,6 +11,7 @@ import { ContributorRegistry } from "../registry.js";
 // Structural / declarative primitives
 import { sectionContributor } from "./section.js";
 import { messageContributor } from "./message.js";
+import { projectContributor } from "./project.js";
 import { toolContributor } from "./tool.js";
 import { resourceContributor } from "./resource.js";
 import { outputContributor } from "./output.js";
@@ -47,6 +48,7 @@ export function createBuiltInRegistry(): ContributorRegistry {
   // Structural
   r.register(sectionContributor);
   r.register(messageContributor);
+  r.register(projectContributor);
   r.register(toolContributor);
   r.register(resourceContributor);
   r.register(outputContributor);

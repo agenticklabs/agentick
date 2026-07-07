@@ -25,7 +25,7 @@ import React, { useEffect, useMemo, useRef, type ReactNode } from "react";
 import type { JSX } from "react";
 import type { TimelineEntry } from "@agentick/spec-next";
 import { useTimeline } from "./use-timeline.js";
-import { Message } from "@agentick/reconciler-react-next";
+import { Message, Project } from "@agentick/reconciler-react-next";
 import { compactEntries, type CompactionStrategy, type TokenBudgetInfo } from "./token-budget.js";
 
 const h = React.createElement;
@@ -194,13 +194,23 @@ export function Timeline(props: TimelineProps): JSX.Element {
     }
   }, [evicted]);
 
+  // ADR 63: `<Timeline>` OVERRIDES the `timeline` surfacing projection.
+  // It renders its fold inside `<Project projectionKey="timeline">`, which
+  // suppresses the compiler's default timeline fold (lazy — never
+  // double-folded) and tags these entries `authored:timeline`. Absence of
+  // `<Timeline>` leaves the default projection to surface the
+  // conversation instead.
   if (typeof props.children === "function") {
-    return h(React.Fragment, null, (props.children as TimelineRenderFn)(kept, budget));
+    return h(
+      Project,
+      { projectionKey: "timeline" },
+      (props.children as TimelineRenderFn)(kept, budget),
+    );
   }
 
   return h(
-    React.Fragment,
-    null,
+    Project,
+    { projectionKey: "timeline" },
     ...kept.map((entry, i) =>
       h(Message, { key: entry.message.id ?? `entry-${i}`, ...entry.message }),
     ),
