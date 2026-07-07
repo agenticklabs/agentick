@@ -85,20 +85,24 @@ interface ReconnectPolicy {
 ```ts
 interface WebSocketServerOptions {
   httpServer: http.Server;
-  gateway: GatewayHarnessProtocol;
+  gateway: GatewayHarnessProtocol; // DispatchHost
   path?: string;
   allowedOrigins?: readonly string[] | "*";
   /** WS-level ping/pong interval. Default 30_000 ms. */
   heartbeatIntervalMs?: number;
+  /** Ingress authentication (ADR 61). Runs ONCE per connection at
+   *  upgrade; rejection destroys the socket with 401. Omitted = every
+   *  connection is anonymous (the local pole). */
+  authSource?: AuthSource;
+  /** Accept the bearer token from `?token=`. DEFAULT FALSE (query
+   *  strings leak into proxy logs / history). */
+  allowQueryToken?: boolean;
 }
 ```
 
-**Server-initiated notifications (#311).** Every accepted WS
-connection is automatically registered with `gateway.acceptConnection`
-using metadata `{ transport: "websocket", connectionId: "ws:<ulid>" }`.
-`gateway.notify(...)` fans out to every currently-connected client;
-`options.to` filters by that metadata. Zero adopter opt-in — passing
-a `gateway` to `websocketServer` is enough.
+Server auth extracts the bearer from `Authorization: Bearer ...` (and,
+only when `allowQueryToken` is set, `?token=`), then runs it through
+the shared `authenticateIngress` helper before completing the upgrade.
 
 ## Patterns
 
@@ -177,12 +181,13 @@ Phase 33.C of the v2 implementation plan — see
 
 **High severity (will land in a 33.C hardening pass):**
 
-- **No backpressure** on subscription / progress streams.
-  `MultiplexedStream` is unbounded — a slow consumer with a fast
-  emitter leaks memory. ADR 33 rev-3 specified bounded queue with
-  `drop-oldest` / `close-subscription` / `unbounded` policy; not
-  implemented. Hardening pass lands when the backpressure design is
-  settled across all transports for consistency.
+- **Backpressure not wired at this transport.** The bounded-buffer
+  primitive now lives in the base `MultiplexedStream`
+  (`@agentick/transport-next`: `drop-oldest` / `drop-newest` /
+  `close-on-overflow` / `unbounded`), but the WS transport constructs
+  its subscription / progress streams with the default `unbounded`
+  policy and does not yet expose a per-stream backpressure option — a
+  slow consumer with a fast emitter still grows the buffer unbounded.
 - **No real `session/send` end-to-end test.** The dispatcher handles
   `session/send` with progress notifications; no test runs against a
   real session with a real model adapter. The shape is verified by
@@ -211,6 +216,12 @@ Phase 33.C of the v2 implementation plan — see
   server side as shape-1 (`GatewayExtension` with substrate audit + per-
   connection state). Deferred until the shared dispatcher gets
   extracted (Phase 33.D cleanup).
+- **No server-initiated notification fan-out (#311).** The server
+  tracks live sockets for teardown but does NOT register connections
+  with the gateway (`gateway.acceptConnection`) or fan a
+  `gateway.notify(...)` broadcast out to connected clients. Notifications
+  today only flow within a dispatch (subscription events, progress).
+  Broadcast fan-out with connection-metadata targeting is unbuilt.
 
 **Done in this phase:**
 
@@ -222,11 +233,13 @@ Phase 33.C of the v2 implementation plan — see
 - ✓ Custom `WebSocket` constructor override (e.g., `ws` library) (`custom-ws-ctor.spec.ts`)
 - ✓ Spec-validator integration at the wire boundary (`wire-conformance.spec.ts`)
 - ✓ Wire conformance suite passes (`wire-conformance.spec.ts`)
+- ✓ Shared transport conformance — `runTransportConformance` (`transport-conformance.spec.ts`)
+- ✓ Per-connection ingress authn (`ingress-authn.spec.ts` via `runIngressAuthnConformance`)
+- ✓ Full-jitter backoff distribution — verified upstream on the shared `computeFullJitterBackoff` in `@agentick/transport-next` (`backoff-jitter.spec.ts`); this transport inherits it
 
 **Claimed but not yet under test (moved from "done" to here; promoted back when verified):**
 
 - ✗ **Cursor-aware resubscribe under retention.** Reconnect machinery works; the cursor-aware replay path is wired but not exercised under retention pressure. Needs a `LocalEventBus` with a tight `retention.maxEvents`, a subscription that falls behind, and an assertion that the new subscription receives `notifications/subscription/evicted`. Lands in the 33.C hardening pass.
-- ✗ **Full-jitter backoff distribution.** Reconnect happens; the AWS Builder's Library jitter properties (uniform `[0, exp)` distribution) aren't asserted. Property-based test against `computeBackoff` would prove it; deferred.
 - ✗ **WS-level ping/pong heartbeat.** Server schedules pings; client receives them; the "idle client terminated on missed pong" branch is unverified. Needs a misbehaving client that ignores ping. Deferred.
 - ✗ **Bilingual MCP subprotocol negotiation.** Client accepts `extraSubprotocols`; no integration test against a bilingual server. Lands with `@agentick/mcp-surface-next` (Phase 33.I).
 - ✗ **Real `session/send` end-to-end with model adapter.** Wire path is verified; session/send dispatch into a real session with progress events flowing is not (needs a real model adapter). Lands in the hardening pass.
@@ -253,6 +266,7 @@ discipline: a `✓` claim has a test or it doesn't ship with the `✓`.
 | Concern                                                                | Test file                                |
 | ---------------------------------------------------------------------- | ---------------------------------------- |
 | End-to-end smoke (WS connect, ping, listApps, multiplexed RPCs)        | `src/__tests__/smoke.spec.ts`            |
+| Shared transport conformance (`runTransportConformance`)               | `src/__tests__/transport-conformance.spec.ts` |
 | Reconnect state machine                                                | `src/__tests__/reconnect.spec.ts`        |
 | Wire conformance (envelope roundtrips, validator integration, batches) | `src/__tests__/wire-conformance.spec.ts` |
 | Subprotocol enforcement (`agentick-rpc-v1`-only)                       | `src/__tests__/security.spec.ts`         |

@@ -23,7 +23,9 @@ by tool dispatch, snapshot/restore workflows), reach for the
 session surface directly:
 
 ```ts
-const session = await app.createSession({ messages: [...] });
+// createSession takes no messages — it opens (or rehydrates) a session.
+// Messages are handed to session.send below.
+const session = await app.createSession({ sessionId: "s:1" });
 
 // Reactive primitives — every session has these (per ADR 27).
 session.timeline      // TimelineHandle — durable conversation history
@@ -213,14 +215,24 @@ shapes (testing, alternative runtime topologies), call directly:
 import { defineSession } from "@agentick/session-next";
 
 const factory = defineSession({
-  // every callback is optional — defaults provided
-  onSend: async ({ messages }) => {
+  // ── Required: lifecycle + core verbs ──
+  send: async (input) => {
+    /* returns a SessionExecutionHandle */
+  },
+  snapshot: () => ({
+    /* SessionSnapshot */
+  }),
+  // ── Required: the state-applicator triple the loop calls ──
+  applyExecutorResult: async (input) => ({ appendedEntryIds: [] }),
+  applyToolResults: async (input) => ({ appendedEntryIds: [] }),
+  appendEntry: async (input) => ({ appendedEntryIds: [] }),
+
+  // ── Optional: everything below has a default ──
+  close: async () => {
     /* ... */
   },
-  onDispatch: async (name, input) => {
-    /* ... */
-  },
-  // harness surfaces — provide explicitly or accept defaults
+  dispatch: async (name, input) => [], // unconfigured → throws "not configured"
+  // Top-level handles — override to expose real state; otherwise no-op stubs.
   timeline: customTimelineHandle,
   knobs: customKnobsHandle,
   state: customStateHandle,
@@ -231,9 +243,16 @@ const factory = defineSession({
 const session = factory({ scopeId: "test-session" });
 ```
 
-The factory eagerly constructs all session-scoped harnesses (so the
-SessionHarnessProtocol slots are immediately populated) and wires the
-substrate primitives through to `bridges.*` for in-tree code.
+`send`, `snapshot`, and the state-applicator triple
+(`applyExecutorResult` / `applyToolResults` / `appendEntry`) are
+**required**; every other callback defaults to throwing a "not
+configured" error, and the extended verbs (`spawn`, `dispatch`,
+`channel`, `knob`) do the same. `timeline` / `knobs` / `state` default
+to **no-op handle stubs** unless you supply real ones. `elicitation`
+and `tasks` are the only session-scoped harnesses the factory builds
+eagerly on the supplied substrate when omitted; there is no
+`bridges.*` wiring — that plumbing is exclusive to the reference
+`SessionHarness`.
 
 ## Status
 
@@ -241,8 +260,9 @@ substrate primitives through to `bridges.*` for in-tree code.
 - ✅ Per-session timeline / knobs / state / elicitation / tasks
 - ✅ ToolBridge integration with layered tool registry (#135-#141)
 - ✅ `session.elicit` sugar surface (#272 / ADR 43)
-- ✅ Session execution handle (`send` → `ProcedurePromise<SessionExecutionHandle>`)
-- ✅ Session snapshot / restore protocol
+- ✅ Session execution handle (`send` → `Promise<SessionExecutionHandle>`)
+- ✅ Session snapshot (`snapshot()` → `SessionSnapshot`, persisted log)
+- ✅ Open-or-rehydrate resume from an injected `TimelineStore` (ADR 49)
 - ✅ Per-tick `RenderContext` production (`contextInfo` + `activeModel`,
   ADR 55) and model resolution against the `ModelBridge` (ADR 56)
 - ✅ Lifecycle bridge driving the reconciler `useOn*` hook family (#206)
@@ -278,12 +298,23 @@ substrate primitives through to `bridges.*` for in-tree code.
 - `src/__tests__/lifecycle-bridge.spec.tsx` — the real loop driving the
   whole `useOn*` hook family + `useContextInfo` yielding a live window
   and utilization (#206 / ADR 55).
-- `src/__tests__/snapshot-restore.spec.tsx` — snapshot / restore.
+- `src/__tests__/snapshot-restore.spec.tsx` — `InMemoryDataBridge`
+  export/import round-trip (the data bridge the session wires into
+  `bridges.data`); not the session `snapshot()` itself.
 - `src/__tests__/streaming-handle.spec.tsx` — `SessionExecutionHandle`
-  streaming iterator.
+  streaming iterator (event order, dense monotonic sequence,
+  id/sessionId/executionId stamping, streaming vs non-streaming paths).
 - `src/__tests__/extended-surface.spec.ts`,
-  `layered-tools.spec.ts`, `timeline-durability.spec.ts` — spawn/dispatch/
-  channel surface, layered tool registry, timeline durability.
+  `layered-tools.spec.ts` — host-side `dispatch` (incl.
+  `ToolPermissionError`), timeline handle append/`trailingInput`,
+  layered execution-scoped vs session-scoped tool registry (#139).
+- `src/__tests__/timeline-durability.spec.ts` — open-or-rehydrate
+  hydration + the execution-end flush barrier (`TimelineWriteFailed`
+  → `status=failed`); also exercises `session.snapshot().timeline`.
+- `src/__tests__/kill-resume.spec.ts` +
+  `src/testing/kill-resume-acceptance.tsx` — the end-to-end
+  kill-and-resume acceptance (`runKillResumeAcceptance`) across the
+  memory / fs / postgres store poles (ADR 49).
 
 ## See also
 

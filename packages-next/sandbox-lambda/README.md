@@ -104,8 +104,9 @@ Bin: `agentick-sandbox-agent` (the image `CMD`).
 | --- | --- |
 | `exec` (streaming, no ceiling) | ✅ WebSocket frames → `onOutput` + terminal exit frame |
 | `readFile` / `writeFile` / `editFile` | ✅ HTTP; `editFile` runs `applyEdits` IN-VM, atomic write-back |
-| `network: true` / `false` | ✅ egress connector ARN (public / deny-all) |
-| `network: NetworkRule[]` | ✅ **in-VM egress proxy** (domain rules) — **richer than docker** |
+| `network: true` | ✅ attaches the `internetEgressConnector` ARN (public) when configured |
+| `network: false` / undefined | ⚠️ attaches **no** egress connector — _intended_ deny-all, **not yet verified** on a real microVM (see known gaps) |
+| `network: NetworkRule[]` | ✅ **in-VM egress proxy** (domain rules) + optional `vpcEgressConnector` — **richer than docker** |
 | runtime host mounts (`addMount` …) | ❌ `SandboxUnsupportedError` — a host path has no referent in a remote microVM |
 | hibernate / `restore` | ⏳ fast-follow (#223) — native `suspend`/`resume` |
 
@@ -138,18 +139,23 @@ responsibility (documented integration point).
   task role — never static keys). The JWE microVM token is minted server-side by
   `create-microvm-auth-token`, held by the (server-side) `EndpointClient`, and
   **never projected to the client**.
-- **IAM / IMDS lock (highest severity).** The in-VM proxy blocks IMDS
-  (`169.254.169.254`) so the sandboxed shell cannot lift any ambient execution
-  role. Confirm on a real microVM whether Lambda injects a per-microVM runtime
-  role before shipping (the guide documents only a build role + a connector
-  operator role).
+- **IAM / IMDS (highest severity — NOT yet a hard lock).** There is no
+  dedicated IMDS (`169.254.169.254`) block in the code. IMDS is reached only
+  when the in-VM egress proxy is engaged (i.e. a `NetworkRule[]` was supplied)
+  AND then only by its **default-deny** of unlisted hosts — and even that is a
+  **soft** boundary: the proxy is enforced via `HTTP(S)_PROXY` env injection, so
+  a process that ignores those vars bypasses it (see the `TODO(#226)` in
+  `provider.ts`). A coarse-`network` sandbox (no rule list) starts **no** proxy
+  at all. A hard IMDS lock — plus confirming whether Lambda injects a per-microVM
+  runtime role — is an open pre-ship item (see known gaps).
 
 ## Status
 
 **Wave: ADR 60 core contract.** Provider (`create`/`exec`/`readFile`/
 `writeFile`/`editFile`/`destroy`) + coarse network switch + in-VM egress proxy
 for domain rules + mounts capability-tier. AWS SDK client
-(`@aws-sdk/client-lambda-microvms@^3.1080`) is published and wired.
+(`@aws-sdk/client-lambda-microvms@^3.1080.0`) is a dependency and wired into
+`awsLambdaMicrovmsControlPlane`.
 
 ### Roadmap & known gaps
 
@@ -164,8 +170,19 @@ for domain rules + mounts capability-tier. AWS SDK client
   bridge is a follow-on.
 - **Image-build helper CLI** — out of scope (adopter DevOps); may follow if it
   earns its keep.
-- **Large-file `readFile` streaming** — currently a single buffered body with a
-  64 MB backstop; SSE/WS streaming for very large reads is a follow-on.
+- **`network: false` deny-all — UNVERIFIED (security-critical).** `resolveNetwork`
+  attaches no egress connector for `false`/undefined, on the assumption that
+  omission = deny-all. AWS networking docs suggest microVMs may have public
+  egress BY DEFAULT; if so, `network: false` silently grants full internet.
+  Needs confirmation on a real microVM, and likely an explicit deny/no-egress
+  connector. `// TODO(#226)` in `provider.ts`.
+- **Hard IMDS lock + per-microVM runtime role** — the current IMDS story is a
+  soft, proxy-only, default-deny (above). A dedicated hard block and
+  confirmation of Lambda's runtime-role injection are pre-ship items.
+- **Large-file `readFile`** — `agentReadFile` buffers the whole file into the
+  response body with **no** size backstop (the 64 MB `MAX_BODY_BYTES` limit
+  gates only inbound `writeFile`/`editFile` REQUEST bodies, not read responses).
+  SSE/WS streaming for very large reads is a follow-on.
 
 ## Verified by
 

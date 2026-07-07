@@ -28,12 +28,15 @@ ordering identity is durable in the file and stable across `prune`.
 ## Quick start
 
 ```ts
-import { withTimeline } from "agentick";
+import { createApp } from "agentick";
 import { fsTimelineStore } from "@agentick/timeline-fs-next";
 
-const app = createApp(MyAgent, {
+// Inject the store on the session's timeline slot. Supplying a store makes
+// session construction open-or-rehydrate (ADR 49): a `sessionId` whose
+// entries already live in the store hydrates the log before first render.
+const app = await createApp(MyAgent, {
   model,
-  extensions: [withTimeline({ store: fsTimelineStore({ dir: "./.agentick/transcripts" }) })],
+  session: { timeline: { store: fsTimelineStore({ dir: "./.agentick/transcripts" }) } },
 });
 ```
 

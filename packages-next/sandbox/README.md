@@ -135,7 +135,7 @@ provider) invokes it, so it works uniformly across every provider.
 | `inMemorySandboxBridge`                                      | In-memory bridge for tests.                                                                                                          |
 | `applyEdits(source, edits)` / `EditError`                    | The pure edit transform + its diagnostic error.                                                                                      |
 | `matchRequest` / `matchDomain`                               | The pure first-match-wins egress matcher (default-deny, `*.domain` wildcards).                                                       |
-| `SessionACL`, `matchesACLPattern`                            | Per-session learned allow/deny state + glob matcher.                                                                                 |
+| `SessionACL`, `matchesACLPattern`                            | Per-session learned allow/deny state + the glob / `regex:` pattern matcher.                                                          |
 | Spec wire types (re-exported)                                | `SandboxExec*`/`SandboxEdit*`/mount inputs, `SandboxPermissions`, `NetworkRule`, `ProxiedRequest` — one import source for providers. |
 | `/react` subpath                                             | `<Sandbox>`, `useSandbox()`, and the `Bash`/`ReadFile`/`WriteFile`/`EditFile` tools.                                                 |
 | `/testing` subpath                                           | `runSandboxProviderConformance` (#218) + `fakeSandboxProvider`.                                                                      |
@@ -148,8 +148,16 @@ provider) invokes it, so it works uniformly across every provider.
   `src/__tests__/harness.spec.ts` › _write + edit_.
 - **exec streaming → `exec` delta phase (#219)** —
   `src/__tests__/harness.spec.ts` › _exec streaming_.
+- **Static ACL (allow/deny, exec deny wins) + session-learned snapshot round-trip** —
+  `src/__tests__/harness.spec.ts` › _static ACL_ / _session-learned ACL via snapshot import_.
 - **ACL gate via elicitation (allow/deny/session-pattern/timeout)** —
   `src/__tests__/harness.spec.ts` › _permission gate_.
+- **Dynamic mounts — allow-list ceiling gate + capability-tiered `SandboxUnsupportedError`** —
+  `src/__tests__/harness.spec.ts` › _dynamic mounts_.
+- **Four-tool model surface (exactly `bash`/`read_file`/`write_file`/`edit_file`, no mount tools)** —
+  `src/react/__tests__/tools.spec.ts`.
+- **Pure egress matcher (`matchDomain` wildcards, first-match-wins, default-deny, per-field predicates)** —
+  `src/__tests__/net.spec.ts`.
 - **`<Sandbox>` + `useSandbox()` with the real reconciler** —
   `src/react/__tests__/component.spec.tsx`.
 

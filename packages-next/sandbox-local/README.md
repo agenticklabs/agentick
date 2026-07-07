@@ -53,7 +53,7 @@ await sandbox.destroy();
   mounts (symlink-resolved, traversal/null-byte rejected via
   `SandboxEscapeError`). `writeFile` creates parent dirs and writes
   **atomically** (temp + rename, with a direct-write fallback for
-  NFS/FUSE `EIO`/`EXDEV`).
+  NFS/FUSE `EIO`/`ENOENT`/`EXDEV`).
 - **`editFile`** — the provider-owned file-wrapper: read → the shared
   pure `applyEdits` (fuzzy layered matching, all modes) → the same atomic
   write. This is the temp+rename the ADR says the provider owns, not the
@@ -81,7 +81,7 @@ jail primitive reports `"none"` (unconfined) rather than a false claim.
 | ---------- | -------- | ---------------------------------------------------------------- | -------------------------------------------------------------- |
 | `seatbelt` | macOS    | `sandbox-exec -f <SBPL profile>`                                 | Kernel-enforced: reads (deny home/keychains/volumes), writes (workspace+mounts+tmp only), network deny |
 | `bwrap`    | Linux    | `bubblewrap` — `--unshare-all`, ro system binds, private /proc+/dev+tmpfs | Namespace-enforced: only bound paths exist; network off unless `--share-net` |
-| `unshare`  | Linux    | `unshare --mount --pid --user --map-root-user` (+ `--net` on deny) | Namespace isolation (fallback when `bwrap` absent + userns available) |
+| `unshare`  | Linux    | `unshare --mount --pid --fork --user --map-root-user` (+ `--net` on deny) | Namespace isolation (fallback when `bwrap` absent + userns available) |
 | `none`     | any      | bare `bash -c`                                                   | **UNCONFINED** — path-confined fs + proxied egress only; surfaced as `isolation: "none"` |
 
 Probe host capability up front with the exported `detectCapabilities()` /

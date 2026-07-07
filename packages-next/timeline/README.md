@@ -79,7 +79,7 @@ _references the model can chase_:
 ```tsx
 import { useState } from "react";
 import { Timeline } from "@agentick/timeline-next/react";
-import { Message, useOnExecutionStart } from "@agentick/reconciler-next/react";
+import { Message, useOnExecutionStart } from "@agentick/reconciler-react-next";
 
 const edges = (t: string) =>
   t.length <= 280 ? t : `${t.slice(0, 140)}\n…\n${t.slice(-140)}`;
@@ -97,7 +97,7 @@ export function ReferenceTimeline() {
 
   return (
     <Timeline maxTokens={100_000} strategy="sliding-window" preserveRoles={["system", "user"]}>
-      {(entries) => {
+      {(entries) =>
         entries.map(({ message }) => {
           // ICL safety: assistant output ALWAYS verbatim — summarized
           // assistant turns teach the model to produce summaries.
@@ -152,7 +152,7 @@ pattern, now portable because the model registry supplies the window,
 #204):
 
 ```tsx
-import { useContextInfo } from "@agentick/reconciler-next/react";
+import { useContextInfo } from "@agentick/reconciler-react-next";
 import { Timeline } from "@agentick/timeline-next/react";
 
 function AdaptiveTimeline() {
@@ -242,6 +242,9 @@ is the frozen ordering identity (#133/#168). Reference impl:
 
 - `TODO(trail-pending-render)` is CLOSED by ADR 53; `TODO(trail-entry-kinds)`
   remains (richer non-message kinds; `role: "event"` conflation deferred).
-- SQLite/Postgres store adapters (#132).
+- Store adapters (#132): `@agentick/timeline-fs-next` (JSONL) and
+  `@agentick/timeline-postgres-next` have SHIPPED; a SQLite adapter
+  (`@agentick/timeline-sqlite-next`, the recommended first durable) is the
+  remaining gap.
 - `<Timeline/>` trailing-input styling + boundary turn-separators
   (ADR 53 wave 2).

@@ -5,9 +5,13 @@ Shared plumbing every `@agentick/transport-*-next` package depends on.
 `BaseClientTransport` (abstract) owns the bulk of transport behavior;
 concrete transports (in-process, WebSocket, HTTP, Unix-socket) subclass
 and supply wire-specific connection management. The shared
-`dispatchRequest` translates JSON-RPC frames into
-`GatewayHarnessProtocol` method calls — same dispatcher reused across
-every transport.
+`dispatchRequest` resolves JSON-RPC frames through the gateway's
+`WireExtension` registry (three bootstrap builtins — `initialize`,
+`ping`, `_extensions/list` — dispatch directly; every other method,
+including `session/send` and `sub/subscribe`, is a registered
+`WireExtension`), authorizes each resolved method at the dispatch choke
+point, then invokes its handler — same dispatcher reused across every
+transport.
 
 ## What this package is
 
@@ -105,15 +109,27 @@ export function myTransport(opts: { ... }): ClientTransport {
 ### Client
 
 - `BaseClientTransport` — abstract base class
-- `MultiplexedStream<T>` — AsyncIterable used by subscription + progress streams
+- `DEFAULT_RECONNECT_POLICY`, `computeFullJitterBackoff`, `ReconnectPolicy` —
+  full-jitter reconnect backoff (exported for property-based testing)
+- `MultiplexedStream<T>` — AsyncIterable used by subscription + progress
+  streams. Per-stream backpressure via `BackpressureOptions<T>`:
+  `policy` (`"unbounded"` default / `"drop-oldest"` / `"drop-newest"` /
+  `"close-on-overflow"`), `capacity` (required when bounded), `onDrop`,
+  `onOverflow`. `close-on-overflow` terminates the stream with a
+  `BackpressureError` (`{ kind: "backpressure" }`).
+- `BackpressurePolicy`, `BackpressureOptions<T>`, `BackpressureError` — backpressure types
 - `ActiveSubscription` — bookkeeping shape for cursor-aware resubscribe
 
 ### Server
 
-- `dispatchRequest(host, req, sink)` — transport-agnostic JSON-RPC →
-  `GatewayHarnessProtocol` dispatcher. WS, HTTP, Unix-socket adapters
-  all call this; per-connection state (auth, subscriptions, in-flight
-  ids) lives on the adapter, not in the dispatcher.
+- `dispatchRequest(host, req, sink, identity?)` — transport-agnostic
+  JSON-RPC dispatcher. Resolves each method through the gateway's
+  `WireExtension` registry and authorizes it (verb-derived scope label,
+  target-session ceiling) before running the handler. `identity` is the
+  ingress identity stamped at the edge (see below); WS, HTTP,
+  Unix-socket adapters all call this. Per-connection state (auth,
+  subscriptions, in-flight ids) lives on the adapter, not in the
+  dispatcher.
 - `DispatchHost = GatewayHarnessProtocol` — type alias
 - `DispatchSink` — contract every connection adapter implements:
   - `sendNotification(notification)` — emit a notification frame to the client
@@ -186,6 +202,9 @@ connector) credential are later slices.
 | State machine, RPC correlation, multiplex, cancellation, subscription routing, progress streams | `../spec-conformance/src/transport.ts` (`runTransportConformance` — invoked by every transport) |
 | Ingress authn seam — fail-closed, local-pole default, prototype-key guard, once-per-crossing     | `src/testing/index.ts` (`runIngressAuthnConformance` — run by every transport against a real server) |
 | `staticTokenAuthSource` credential-kind switch + platform rejection + prototype-key bypass       | `src/__tests__/wire-lane-e2e.spec.ts`                                                           |
+| `MultiplexedStream` backpressure — drop-oldest / drop-newest / close-on-overflow / capacity guard | `src/__tests__/multiplexed-stream-backpressure.spec.ts`                                        |
+| Full-jitter reconnect backoff bounds                                                             | `src/__tests__/backoff-jitter.spec.ts`                                                          |
+| WireExtension registry dispatch, bootstrap short-circuit, `_extensions/list`, `ctx.publish` declared-notification guard | `src/__tests__/wire-extension-dispatch.spec.ts`                              |
 
 `runTransportConformance(name, factory)` in
 `@agentick/spec-conformance-next` ships the shared behavioral suite.
@@ -199,10 +218,6 @@ Phase 33.C.1 of the v2 implementation plan — see
 
 ## Roadmap & known gaps
 
-- **Backpressure on `MultiplexedStream`** — unbounded buffer today.
-  ADR 33 rev-3 specified bounded queue + `drop-oldest` /
-  `close-subscription` / `unbounded` policy; lands in the 33.C
-  hardening pass alongside transport-wide backpressure design.
 - **Cursor-aware resubscribe under retention pressure** —
   resubscribe wire path works (verified by reconnect tests); the
   cursor-evicted-on-resubscribe path is wired in the base class but
@@ -213,15 +228,18 @@ Phase 33.C.1 of the v2 implementation plan — see
   websocket server adapter wires it; in-process server adapter pattern
   doesn't have a single adapter (handlers are user-provided), so
   cancellation propagation depends on adopter handler design.
-- **JSON-RPC batch requests** — wire format supports them; dispatcher
-  handles single frames today. Batch dispatch is mechanical follow-up.
+- **JSON-RPC batch requests** — `dispatchRequest` is per-frame by
+  design; the WS / HTTP / Unix server adapters fan a batch array into
+  per-frame dispatch and collect the responses, so batch works
+  end-to-end. What's missing is a dedicated batch-semantics test in
+  this package (adapters exercise it incidentally).
 
 ## Development plan
 
-| Step                               | Lands when                                                 |
+| Step                               | Status                                                     |
 | ---------------------------------- | ---------------------------------------------------------- |
-| Phase 33.C.1 — extraction          | This commit                                                |
-| Backpressure on MultiplexedStream  | 33.C hardening pass                                        |
-| Phase 33.D — HTTP transport        | Subclasses `BaseClientTransport`; reuses `dispatchRequest` |
-| Phase 33.E — Unix-socket transport | Same                                                       |
-| Batch request dispatch             | When a real workload surfaces the need                     |
+| Phase 33.C.1 — extraction          | Landed                                                     |
+| Backpressure on MultiplexedStream  | Landed (per-stream policy on `MultiplexedStream`)          |
+| Phase 33.D — HTTP transport        | Landed (`@agentick/transport-http-next`)                   |
+| Phase 33.E — Unix-socket transport | Landed (`@agentick/transport-unix-socket-next`)            |
+| Batch request dispatch             | Works via adapter fan-out (`initialize` advertises `batch: true`); dedicated batch-semantics test still deferred |

@@ -61,19 +61,20 @@ interface UnixSocketTransportOptions {
 ```ts
 interface UnixSocketServerOptions {
   path: string;
-  gateway: GatewayHarnessProtocol;
+  gateway: GatewayHarnessProtocol; // DispatchHost
+  /** Optional ingress auth (ADR 61). A unix socket is host-local
+   *  trust: the default crossing is `credential.kind: "none"` (local
+   *  pole, no principal). Supplying an AuthSource runs the shared
+   *  `authenticateIngress` helper for parity with the network
+   *  transports; a rejection destroys the socket (fail closed). */
+  authSource?: AuthSource;
 }
 ```
 
-Caller owns the socket file's lifecycle. To rebind cleanly after a
-daemon restart, `fs.unlink(path)` before `unixSocketServer({ path })`
-when an existing file is found.
-
-**Server-initiated notifications (#311).** Every accepted UDS
-connection is automatically registered with `gateway.acceptConnection`
-using metadata `{ transport: "unix-socket", connectionId: "uds:<ulid>" }`.
-`gateway.notify(...)` fans out to every connected client. Zero
-adopter opt-in — passing a `gateway` to `unixSocketServer` is enough.
+`unixSocketServer` returns a `UnixSocketServerHandle` (`{ server, close }`) —
+`server` is the underlying `net.Server`. Caller owns the socket file's
+lifecycle. To rebind cleanly after a daemon restart, `fs.unlink(path)`
+before `unixSocketServer({ path })` when an existing file is found.
 
 ## Wire format
 
@@ -130,6 +131,7 @@ Phase 33.E of the v2 implementation plan — see
 | ------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
 | End-to-end ping, listApps, RPC error → TransportError, multiplexed RPCs, close transition                                                              | `src/__tests__/smoke.spec.ts`                                                                                        |
 | State machine, RPC correlation, multiplexed concurrent RPCs, `notifications/cancelled` emit, subscription routing + close + eviction, progress streams | `src/__tests__/transport-conformance.spec.ts` (via `runTransportConformance` from `@agentick/spec-conformance-next`) |
+| Ingress authn (ADR 61) — host-local `none` credential → local pole; configured `authSource` rejecting `none` fails closed; `allowAnonymous` admits with no principal | `src/__tests__/ingress-authn.spec.ts` (`runIngressAuthnConformance`) |
 
 ## Roadmap & known gaps
 
@@ -149,12 +151,13 @@ Phase 33.E of the v2 implementation plan — see
 - ✗ **`SO_PEERCRED` peer-credential enrichment** — deriving the connecting uid → principal is a later ingress interceptor (`TODO(#146)` at the server). Today the crossing is `credential.kind: "none"`; an adopter `AuthSource` sees `none`, not peer creds.
 - ✗ **Socket file lifecycle helpers** — adopters currently handle `fs.unlink` of stale socket files themselves. A `unixSocketServer({ unlinkBeforeBind: true })` knob would be useful.
 - ✗ **Per-message framing limits** — no max-frame-size; a malicious peer could send an unbounded NDJSON line. Defense-in-depth deferred.
+- ✗ **Server-initiated notification fan-out (#311)** — the server tracks live connections for teardown but does NOT register them with the gateway (`gateway.acceptConnection`) or fan a `gateway.notify(...)` broadcast to connected clients. Notifications today only flow within a dispatch. Broadcast fan-out is unbuilt.
 
 ## Development plan
 
 | Step                               | Lands when                                                                  |
 | ---------------------------------- | --------------------------------------------------------------------------- |
-| Phase 33.E MVP                     | This commit                                                                 |
-| 33.C hardening pass                | After all transports settle so backpressure design covers them consistently |
+| Phase 33.E MVP                     | Landed                                                                      |
+| Backpressure wiring                | Primitive landed in `@agentick/transport-next` (`MultiplexedStream`); this transport still uses the default `unbounded` policy |
 | `SO_PEERCRED` peer-cred enrichment | ADR 61 later interceptor (`TODO(#146)`)                                     |
 | Reconnect-over-daemon-restart test | Optional; the base-class machinery is the same path WS exercises            |

@@ -24,14 +24,16 @@ every SQL concern is an escape hatch on the factory.
 
 ```ts
 import { Pool } from "pg";
-import { withTimeline } from "agentick";
+import { createApp } from "agentick";
 import { postgresTimelineStore } from "@agentick/timeline-postgres-next";
 
 // BYO pool — the adapter never creates or closes it.
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
+// Inject the store on the session's timeline slot: any node rehydrates a
+// session with `load(sessionId)`, so session construction is open-or-rehydrate.
 const store = postgresTimelineStore({ executor: pool });
-withTimeline({ store });
+const app = await createApp(MyAgent, { model, session: { timeline: { store } } });
 ```
 
 Apply the schema with your own migration tooling (the recommended path):

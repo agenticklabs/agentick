@@ -184,7 +184,7 @@ under "Roadmap & known gaps" with an explicit marker.
 
 | Step                                | Lands when                                                                               |
 | ----------------------------------- | ---------------------------------------------------------------------------------------- |
-| Phase 33.D MVP                      | This commit                                                                              |
-| 33.C hardening pass                 | After 33.E lands so backpressure design covers all three network transports consistently |
-| Notification-channel reconnect test | When `transport-base-next` ships reconnect coverage that all transports share            |
+| Phase 33.D MVP                      | Landed                                                                                   |
+| Backpressure wiring                 | Primitive landed in `@agentick/transport-next` (`MultiplexedStream`); this transport still uses the default `unbounded` policy |
+| Notification-channel reconnect test | Base reconnect machinery lives in `@agentick/transport-next`; an HTTP server-bounce test (parallel to WS `reconnect.spec.ts`) is still missing |
 | Bilingual MCP support               | Phase 33.I                                                                               |
