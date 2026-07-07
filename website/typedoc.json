@@ -62,6 +62,7 @@
     "../packages-next/sandbox",
     "../packages-next/sandbox-local",
     "../packages-next/sandbox-docker",
+    "../packages-next/sandbox-lambda",
     "../packages-next/credentials",
     "../packages-next/connector",
     "../packages-next/gateway",

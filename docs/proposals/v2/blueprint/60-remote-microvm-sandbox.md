@@ -133,14 +133,20 @@ into the AWS account with **no local/docker analog**. Non-negotiable:
    **server-side only** (instance profile / IRSA / task role — never static keys, never cross the
    wire). The JWE microVM token is likewise server-side only.
 
-## Remaining decisions (small; none gate the shape)
+## Decisions
+- **RESOLVED (Ryan, 2026-07-07) — image build ownership:** `sandbox-lambda-next` ships the
+  **in-VM agent bundle + a documented Dockerfile scaffold ONLY**. The adopter runs
+  `create-microvm-image` (→ S3 → poll) as their own DevOps/CI. No build-helper CLI in v1 — it can
+  follow if it earns its keep. The microVM **image ARN is provider config**.
+- **RESOLVED (Ryan, 2026-07-07) — #223 hibernate is a FAST-FOLLOW.** First delegation lands the
+  **core contract** (create/exec-stream/readFile/writeFile/editFile/net-proxy/destroy) +
+  conformance against a real microVM. A tight second delegation adds hibernate
+  (`suspend`/`resume`, retain-on-`destroy`, `SandboxSnapshot = {microvmId}`, `resume` on restore).
+
+### Remaining decisions (small; none gate the shape)
 1. **Ephemeral vs retained default** on `destroy()` — terminate (cheap) vs suspend-retain
-   (restore-capable). Config knob; default terminate.
-2. **Image build ownership** — does `sandbox-lambda-next` ship a CLI/helper to build the microVM
-   image (Dockerfile scaffold + `create-microvm-image` wrapper), or is that adopter DevOps with a
-   documented Dockerfile? Lean: ship the agent bundle + a documented Dockerfile + an optional
-   build helper; the image ARN is provider config.
-3. **`SandboxCreateOptions.setup`** — bake into the image (rebuild) vs a post-`run` `exec` on
+   (restore-capable). Config knob; default terminate. (Settled in the hibernate fast-follow.)
+2. **`SandboxCreateOptions.setup`** — bake into the image (rebuild) vs a post-`run` `exec` on
    first create. Lean: image for static setup, `exec` for per-session.
 4. **`readFile` large-file protocol** — endpoint bandwidth is 1–16 MB/s by size; stream large
    reads over the open connection (SSE/WS) rather than a single buffered body; hard ceiling+error

@@ -96,6 +96,7 @@ const PACKAGE_GROUPS: Array<{ label: string; packages: string[] }> = [
       "@agentick/sandbox-next",
       "@agentick/sandbox-local-next",
       "@agentick/sandbox-docker-next",
+      "@agentick/sandbox-lambda-next",
       "@agentick/credentials-next",
       "@agentick/connector-next",
       "@agentick/gateway-next",
