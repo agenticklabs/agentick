@@ -27,10 +27,18 @@
  *     construction and routes through the per-call
  *     {@link ElicitationHarnessProtocol} slot (`opts.elicitResolver`
  *     on {@link callTool}). Translation lives in `./elicit-bridge.ts`.
- *   - `sampling/createMessage`, `roots/list` — pending (#5 onward).
+ *   - `sampling/createMessage` — handled (#146) when an adopter
+ *     `samplingHandler` is configured; advertises `sampling`. Absent a
+ *     handler, the SDK responds method-not-found (no fake model call).
+ *   - `roots/list` — handled (#146) when a `roots` source is
+ *     configured; advertises `roots: { listChanged }`. Roots ultimately
+ *     project from the sandbox (ADR 62) — kept decoupled here.
+ *   - `notifications/message` (logging) — surfaced via `onLogMessage`
+ *     + the `mcp:<scopeId>:log` bus envelope.
  *
  * @see docs/proposals/v2/blueprint/23-mcp-as-harness.md
  * @see docs/proposals/v2/blueprint/51-invocation-and-authorization.md
+ * @see docs/proposals/v2/blueprint/62-resources-harness.md
  */
 
 import { Effect, Stream } from "effect";
@@ -50,9 +58,12 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import {
   CallToolResultSchema,
   CancelTaskResultSchema,
+  CreateMessageRequestSchema,
   ElicitRequestSchema,
   GetTaskResultSchema,
+  ListRootsRequestSchema,
   ListTasksResultSchema,
+  LoggingMessageNotificationSchema,
   ProgressNotificationSchema,
   PromptListChangedNotificationSchema,
   ResourceListChangedNotificationSchema,
@@ -64,10 +75,13 @@ import type {
   CancelTaskResult,
   GetTaskResult,
   ListTasksResult,
+  LoggingMessageNotification,
   ProgressNotification,
   TaskStatusNotification,
   Tool,
 } from "@modelcontextprotocol/sdk/types.js";
+
+import { mapResourceContents, mcpContentToBlocks } from "../integration/content-mapper.js";
 
 import {
   buildCallToolAsTaskParams,
@@ -92,7 +106,19 @@ import {
 } from "@agentick/pubsub-next";
 
 import { McpLifecycle } from "./lifecycle.js";
-import type { McpClientHarnessOptions, McpClientState, McpToolDescriptor } from "./types.js";
+import type {
+  McpClientHarnessOptions,
+  McpClientState,
+  McpGetPromptResult,
+  McpLogMessage,
+  McpLoggingLevel,
+  McpPromptPage,
+  McpResourcePage,
+  McpResourceTemplatePage,
+  McpRoot,
+  McpToolDescriptor,
+  ResourceContents,
+} from "./types.js";
 import type { McpConnectionStatus, StatusUnsubscribe } from "./connection-status.js";
 import type { EraCodec } from "./era-codec.js";
 import { DraftPassthroughCodec, selectCodec } from "./era-codec.js";
@@ -216,6 +242,34 @@ type McpCallToolInput = {
  */
 type CallToolAsTaskParams = ReturnType<typeof buildCallToolAsTaskParams>;
 
+/** Serializable payload of the paginated list verbs. */
+type McpCursorInput = { readonly cursor: string | undefined };
+
+/** Serializable payload of `mcp:read-resource`. */
+type McpReadResourceInput = { readonly uri: string };
+
+/** Serializable payload of `mcp:get-prompt`. */
+type McpGetPromptInput = {
+  readonly name: string;
+  readonly args: Readonly<Record<string, string>> | undefined;
+};
+
+/**
+ * Serializable payload of `mcp:complete` — the completion `ref`
+ * discriminant plus the argument being completed. Covers both
+ * `ref/prompt` (prompt argument) and `ref/resource` (resource-template
+ * variable) completions.
+ */
+type McpCompleteInput = {
+  readonly ref:
+    | { readonly type: "ref/prompt"; readonly name: string }
+    | { readonly type: "ref/resource"; readonly uri: string };
+  readonly argument: { readonly name: string; readonly value: string };
+};
+
+/** Serializable payload of `mcp:set-logging-level`. */
+type McpSetLoggingLevelInput = { readonly level: McpLoggingLevel };
+
 // ============================================================================
 // Errors
 // ============================================================================
@@ -308,6 +362,16 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
     createNotifier<McpListChangedEvent>();
 
   /**
+   * Notifier for inbound `notifications/message` server logs. The SDK
+   * `LoggingMessageNotificationSchema` handler (registered in
+   * {@link makeClient}) fans each entry to subscribers via
+   * {@link onLogMessage}. Callback-based (mirrors {@link listChangedNotifier})
+   * so consumers don't need Effect ceremony. Also mirrored to the bus
+   * as `mcp:<scopeId>:log` for substrate observers.
+   */
+  private readonly logNotifier: Notifier<McpLogMessage> = createNotifier<McpLogMessage>();
+
+  /**
    * Adopter-facing connection status — the {@link McpConnectionStatus}
    * union. Layered above the wire-level {@link McpClientState}; the
    * harness's lifecycle callback (constructor) lifts each transition
@@ -343,6 +407,14 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
   private readonly getTaskResultCmd: Cmd<{ readonly taskId: string }, CallToolResult>;
   private readonly listTasksCmd: Cmd<Readonly<Record<string, never>>, ListTasksResult>;
   private readonly cancelTaskCmd: Cmd<{ readonly taskId: string }, CancelTaskResult>;
+  // ─── Wave 2: resources / prompts / completion / logging ───
+  private readonly listResourcesCmd: Cmd<McpCursorInput, McpResourcePage>;
+  private readonly listResourceTemplatesCmd: Cmd<McpCursorInput, McpResourceTemplatePage>;
+  private readonly readResourceCmd: Cmd<McpReadResourceInput, readonly ResourceContents[]>;
+  private readonly listPromptsCmd: Cmd<McpCursorInput, McpPromptPage>;
+  private readonly getPromptCmd: Cmd<McpGetPromptInput, McpGetPromptResult>;
+  private readonly completeCmd: Cmd<McpCompleteInput, readonly string[]>;
+  private readonly setLoggingLevelCmd: Cmd<McpSetLoggingLevelInput, void>;
 
   constructor(
     scopeId: string,
@@ -438,6 +510,49 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
       exposure: "wire",
       scope,
       handler: (i: { readonly taskId: string }) => this.cancelTaskBody(i),
+    });
+
+    // ─── Wave 2 reads (#146) — resources / prompts / completion /
+    // logging. Declared as ADDRESSABLE commands (journaled + inbox-
+    // reachable), NOT `exposure: "wire"`: the client-read verbs were
+    // never ratified into the #140/#141 VERB-MATRIX, so exposing them
+    // to remote grantees is a separate security-surface decision.
+    // TODO(#146-later): promote to `exposure: "wire"` once a verb-matrix
+    // row is ratified for external resource/prompt reads.
+    this.listResourcesCmd = this.command({
+      name: "mcp:list-resources",
+      scope,
+      handler: (i: McpCursorInput) => this.listResourcesBody(i),
+    });
+    this.listResourceTemplatesCmd = this.command({
+      name: "mcp:list-resource-templates",
+      scope,
+      handler: (i: McpCursorInput) => this.listResourceTemplatesBody(i),
+    });
+    this.readResourceCmd = this.command({
+      name: "mcp:read-resource",
+      scope,
+      handler: (i: McpReadResourceInput) => this.readResourceBody(i),
+    });
+    this.listPromptsCmd = this.command({
+      name: "mcp:list-prompts",
+      scope,
+      handler: (i: McpCursorInput) => this.listPromptsBody(i),
+    });
+    this.getPromptCmd = this.command({
+      name: "mcp:get-prompt",
+      scope,
+      handler: (i: McpGetPromptInput) => this.getPromptBody(i),
+    });
+    this.completeCmd = this.command({
+      name: "mcp:complete",
+      scope,
+      handler: (i: McpCompleteInput) => this.completeBody(i),
+    });
+    this.setLoggingLevelCmd = this.command({
+      name: "mcp:set-logging-level",
+      scope,
+      handler: (i: McpSetLoggingLevelInput) => this.setLoggingLevelBody(i),
     });
   }
 
@@ -948,6 +1063,277 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
     });
   }
 
+  // ═════════════════════════════════════════════════════════════════
+  // Wave 2 — Resources (read)
+  // ═════════════════════════════════════════════════════════════════
+
+  /**
+   * List the resources the server advertises. Pagination `cursor` is
+   * passed through untouched; the returned `nextCursor` (when present)
+   * feeds the next call.
+   */
+  listResources(cursor?: string): Promise<McpResourcePage> {
+    return this.listResourcesCmd({ cursor });
+  }
+
+  private listResourcesBody(i: McpCursorInput): Effect.Effect<McpResourcePage, McpClientError> {
+    return Effect.tryPromise({
+      try: async (): Promise<McpResourcePage> => {
+        const c = this.requireReadyClient();
+        const res = await c.listResources(
+          i.cursor !== undefined ? { cursor: i.cursor } : undefined,
+        );
+        return {
+          resources: res.resources.map((r) => ({
+            uri: r.uri,
+            name: r.name,
+            ...omitUndefined({
+              title: r.title,
+              description: r.description,
+              mimeType: r.mimeType,
+              size: r.size,
+            }),
+          })),
+          ...(res.nextCursor !== undefined ? { nextCursor: res.nextCursor } : {}),
+        };
+      },
+      catch: (cause) => cause as McpClientError,
+    });
+  }
+
+  /**
+   * List the parameterized resource templates the server advertises.
+   * Same pagination contract as {@link listResources}.
+   */
+  listResourceTemplates(cursor?: string): Promise<McpResourceTemplatePage> {
+    return this.listResourceTemplatesCmd({ cursor });
+  }
+
+  private listResourceTemplatesBody(
+    i: McpCursorInput,
+  ): Effect.Effect<McpResourceTemplatePage, McpClientError> {
+    return Effect.tryPromise({
+      try: async (): Promise<McpResourceTemplatePage> => {
+        const c = this.requireReadyClient();
+        const res = await c.listResourceTemplates(
+          i.cursor !== undefined ? { cursor: i.cursor } : undefined,
+        );
+        return {
+          templates: res.resourceTemplates.map((t) => ({
+            uriTemplate: t.uriTemplate,
+            name: t.name,
+            ...omitUndefined({
+              title: t.title,
+              description: t.description,
+              mimeType: t.mimeType,
+            }),
+          })),
+          ...(res.nextCursor !== undefined ? { nextCursor: res.nextCursor } : {}),
+        };
+      },
+      catch: (cause) => cause as McpClientError,
+    });
+  }
+
+  /**
+   * Read a resource by URI. Contents map through the content-typing
+   * layer to the spec {@link ResourceContents} shape — `text` for UTF-8
+   * bodies, `blob` (base64) for binary — so a read round-trips without
+   * loss into agentick's content model.
+   */
+  readResource(uri: string): Promise<readonly ResourceContents[]> {
+    return this.readResourceCmd({ uri });
+  }
+
+  private readResourceBody(
+    i: McpReadResourceInput,
+  ): Effect.Effect<readonly ResourceContents[], McpClientError> {
+    return Effect.tryPromise({
+      try: async (): Promise<readonly ResourceContents[]> => {
+        const c = this.requireReadyClient();
+        const res = await c.readResource({ uri: i.uri });
+        return mapResourceContents(res.contents);
+      },
+      catch: (cause) => cause as McpClientError,
+    });
+  }
+
+  // ═════════════════════════════════════════════════════════════════
+  // Wave 2 — Prompts (read)
+  // ═════════════════════════════════════════════════════════════════
+
+  /** List the prompts the server advertises. Cursor pagination. */
+  listPrompts(cursor?: string): Promise<McpPromptPage> {
+    return this.listPromptsCmd({ cursor });
+  }
+
+  private listPromptsBody(i: McpCursorInput): Effect.Effect<McpPromptPage, McpClientError> {
+    return Effect.tryPromise({
+      try: async (): Promise<McpPromptPage> => {
+        const c = this.requireReadyClient();
+        const res = await c.listPrompts(i.cursor !== undefined ? { cursor: i.cursor } : undefined);
+        return {
+          prompts: res.prompts.map((p) => ({
+            name: p.name,
+            ...omitUndefined({ title: p.title, description: p.description }),
+            ...(p.arguments
+              ? {
+                  arguments: p.arguments.map((a) => ({
+                    name: a.name,
+                    ...omitUndefined({ description: a.description, required: a.required }),
+                  })),
+                }
+              : {}),
+          })),
+          ...(res.nextCursor !== undefined ? { nextCursor: res.nextCursor } : {}),
+        };
+      },
+      catch: (cause) => cause as McpClientError,
+    });
+  }
+
+  /**
+   * Get a prompt by name with optional string arguments. The prompt's
+   * messages map through the content-typing layer (embedded resources
+   * become {@link ResourceContents} blocks, not text JSON).
+   */
+  getPrompt(name: string, args?: Readonly<Record<string, string>>): Promise<McpGetPromptResult> {
+    return this.getPromptCmd({ name, args });
+  }
+
+  private getPromptBody(i: McpGetPromptInput): Effect.Effect<McpGetPromptResult, McpClientError> {
+    return Effect.tryPromise({
+      try: async (): Promise<McpGetPromptResult> => {
+        const c = this.requireReadyClient();
+        const res = await c.getPrompt({
+          name: i.name,
+          ...(i.args !== undefined ? { arguments: i.args as Record<string, string> } : {}),
+        });
+        return {
+          ...omitUndefined({ description: res.description }),
+          messages: res.messages.map((m) => ({
+            role: m.role,
+            // A PromptMessage carries a SINGLE content object; wrap in a
+            // one-element array so the shared block mapper handles the
+            // text/image/audio/resource/resource_link union uniformly.
+            content: mcpContentToBlocks([m.content] as unknown as CallToolResult["content"]),
+          })),
+        };
+      },
+      catch: (cause) => cause as McpClientError,
+    });
+  }
+
+  // ═════════════════════════════════════════════════════════════════
+  // Wave 2 — Completion
+  // ═════════════════════════════════════════════════════════════════
+
+  /**
+   * Request argument completions for a prompt argument
+   * (`ref/prompt`). Returns the server's suggested completion values.
+   */
+  completePromptArgument(
+    promptName: string,
+    argumentName: string,
+    value: string,
+  ): Promise<readonly string[]> {
+    return this.completeCmd({
+      ref: { type: "ref/prompt", name: promptName },
+      argument: { name: argumentName, value },
+    });
+  }
+
+  /**
+   * Request completions for a resource-template variable
+   * (`ref/resource`). Returns the server's suggested completion values.
+   */
+  completeResourceTemplate(
+    uriTemplate: string,
+    argumentName: string,
+    value: string,
+  ): Promise<readonly string[]> {
+    return this.completeCmd({
+      ref: { type: "ref/resource", uri: uriTemplate },
+      argument: { name: argumentName, value },
+    });
+  }
+
+  private completeBody(i: McpCompleteInput): Effect.Effect<readonly string[], McpClientError> {
+    return Effect.tryPromise({
+      try: async (): Promise<readonly string[]> => {
+        const c = this.requireReadyClient();
+        const res = await c.complete({ ref: i.ref, argument: i.argument });
+        return res.completion.values;
+      },
+      catch: (cause) => cause as McpClientError,
+    });
+  }
+
+  // ═════════════════════════════════════════════════════════════════
+  // Wave 2 — Logging
+  // ═════════════════════════════════════════════════════════════════
+
+  /**
+   * Set the minimum severity level the server should emit as
+   * `notifications/message` log entries. Subscribe via
+   * {@link onLogMessage} to receive them.
+   */
+  setLoggingLevel(level: McpLoggingLevel): Promise<void> {
+    return this.setLoggingLevelCmd({ level });
+  }
+
+  private setLoggingLevelBody(i: McpSetLoggingLevelInput): Effect.Effect<void, McpClientError> {
+    return Effect.tryPromise({
+      try: async (): Promise<void> => {
+        const c = this.requireReadyClient();
+        await c.setLoggingLevel(i.level);
+      },
+      catch: (cause) => cause as McpClientError,
+    });
+  }
+
+  /**
+   * Subscribe to inbound `notifications/message` server logs. Listener
+   * fires per log entry; returns an unsubscribe function. Fire-and-
+   * forget — a throwing listener cannot corrupt siblings (the Notifier
+   * traps per listener). Not replayed on subscribe.
+   */
+  onLogMessage(listener: (message: McpLogMessage) => void): () => void {
+    return this.logNotifier.subscribe(listener);
+  }
+
+  // ═════════════════════════════════════════════════════════════════
+  // Wave 2 — Roots (client → server)
+  // ═════════════════════════════════════════════════════════════════
+
+  /**
+   * Notify the server that the client's roots list changed
+   * (`notifications/roots/list_changed`). Only meaningful when the
+   * harness was constructed with a `roots` source (the `roots:
+   * { listChanged }` capability is advertised then). No-op-safe to call
+   * repeatedly; the server re-requests `roots/list` at its discretion.
+   */
+  async notifyRootsListChanged(): Promise<void> {
+    const c = this.requireReadyClient();
+    await c.sendRootsListChanged();
+  }
+
+  /**
+   * Resolve the configured roots source to a concrete list. A provider
+   * function is re-evaluated on each `roots/list` so a future
+   * sandbox-backed provider reflects live mount changes.
+   *
+   * TODO(#146-later / ADR-62): the sandbox-backed roots projection
+   * supplies this source (workspace + mounts). Kept decoupled from
+   * `@agentick/sandbox` here — Wave 2 accepts a list or provider fn.
+   */
+  private async resolveRoots(): Promise<readonly McpRoot[]> {
+    const src = this.options.roots;
+    if (src === undefined) return [];
+    const list = typeof src === "function" ? await src() : src;
+    return list.map((r) => (r.name !== undefined ? { uri: r.uri, name: r.name } : { uri: r.uri }));
+  }
+
   /**
    * Terminal shutdown. Cancels any pending reconnect, closes the SDK
    * client + transport, transitions lifecycle to `closed`. Idempotent.
@@ -1044,14 +1430,21 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
   // ─────────── internals ───────────
 
   private makeClient(): Client {
-    const capabilities = (this.options.capabilities ?? {
-      // Substrate-required: both form and URL elicitation modes are
-      // declared so MCP servers can elicit from the user via either
-      // path. Routing happens at handler dispatch time through the
-      // per-call elicit resolver slot. Roots / sampling capabilities
-      // mix in when those bridges are wired (#5+).
-      elicitation: { form: {}, url: {} },
-    }) as Record<string, unknown>;
+    const capabilities = {
+      ...((this.options.capabilities as Record<string, unknown> | undefined) ?? {
+        // Substrate-required: both form and URL elicitation modes are
+        // declared so MCP servers can elicit from the user via either
+        // path. Routing happens at handler dispatch time through the
+        // per-call elicit resolver slot.
+        elicitation: { form: {}, url: {} },
+      }),
+    } as Record<string, unknown>;
+    // Advertise ONLY what is actually wired (#146). Sampling depends on
+    // an adopter-provided handler; roots on a configured source. An
+    // unwired capability is never claimed — an inbound request for it
+    // gets the SDK's automatic method-not-found (we never fake).
+    if (this.options.samplingHandler) capabilities.sampling = {};
+    if (this.options.roots !== undefined) capabilities.roots = { listChanged: true };
     const client = new Client(
       {
         name: this.options.clientInfo?.name ?? "@agentick/mcp-client",
@@ -1118,7 +1511,62 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
     client.setNotificationHandler(ResourceListChangedNotificationSchema, () => {
       this.listChangedNotifier.notify({ kind: "resources" });
     });
+
+    // ─── Wave 2 (#146) inbound server→client seams ───
+
+    // Sampling — the server asks THIS client's model to generate. Only
+    // registered when an adopter handler is configured; otherwise the
+    // SDK responds method-not-found (we don't fake a model call). The
+    // handler seam takes a provided handler; routing sampling to
+    // agentick's own executor by default is a Wave-3 ADR concern.
+    const samplingHandler = this.options.samplingHandler;
+    if (samplingHandler) {
+      client.setRequestHandler(CreateMessageRequestSchema, (request, extra) =>
+        samplingHandler(request.params, { signal: extra.signal }),
+      );
+    }
+
+    // Roots — the server asks the client which filesystem roots it may
+    // operate on. Registered only when a `roots` source is configured.
+    if (this.options.roots !== undefined) {
+      client.setRequestHandler(ListRootsRequestSchema, async () => ({
+        roots: await this.resolveRoots(),
+      }));
+    }
+
+    // Logging — surface inbound `notifications/message` entries to
+    // subscribers (onLogMessage) + mirror to the bus. Always registered;
+    // harmless when the server never logs.
+    client.setNotificationHandler(LoggingMessageNotificationSchema, (note) => {
+      this.publishLogMessage(note);
+    });
     return client;
+  }
+
+  /**
+   * Fan an inbound `notifications/message` out to {@link onLogMessage}
+   * subscribers and mirror it to the bus as `mcp:<scopeId>:log`.
+   */
+  private publishLogMessage(note: LoggingMessageNotification): void {
+    const message: McpLogMessage = {
+      level: note.params.level as McpLoggingLevel,
+      ...(note.params.logger !== undefined ? { logger: note.params.logger } : {}),
+      data: note.params.data,
+    };
+    this.logNotifier.notify(message);
+    void Effect.runPromise(
+      this.bus.append({
+        id: ulid(),
+        surface: "mcp",
+        name: `mcp:${this.scopeId}:log`,
+        phase: "delta",
+        timestamp: Date.now(),
+        scope: { sessionId: this.scopeId },
+        payload: { serverId: this.serverId, ...message },
+      } as import("@agentick/spec-next").ProtocolEvent),
+    ).catch(() => {
+      // Substrate emit failures aren't actionable in a log fan-out.
+    });
   }
 
   private wireClientEvents(client: Client): void {

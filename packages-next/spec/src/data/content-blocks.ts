@@ -26,6 +26,7 @@ export type BlockType =
   | "tool_use"
   | "tool_result"
   | "task_ref"
+  | "resource"
   | "json"
   | "xml"
   | "csv"
@@ -309,6 +310,55 @@ export interface TaskRefBlock extends BaseContentBlock {
 }
 
 // ============================================================================
+// Resource block (MCP embedded resources + resource reads — ADR 62)
+// ============================================================================
+
+/**
+ * Contents of a single resource read — the text/blob union MCP uses
+ * for `resources/read` results and embedded `resource` content blocks.
+ * Mirrors the MCP `ResourceContents` wire shape (`TextResourceContents`
+ * / `BlobResourceContents`) so a read round-trips without loss.
+ *
+ * `blob` is base64-encoded binary; `text` is UTF-8. Exactly one is
+ * present — the discriminant is structural (`"text" in c` /
+ * `"blob" in c`), matching the wire.
+ *
+ * @see docs/proposals/v2/blueprint/62-resources-harness.md §Resource content block
+ */
+export interface TextResourceContents {
+  readonly uri: string;
+  readonly mimeType?: string;
+  readonly text: string;
+  readonly _meta?: Record<string, unknown>;
+}
+
+export interface BlobResourceContents {
+  readonly uri: string;
+  readonly mimeType?: string;
+  /** Base64-encoded binary payload. */
+  readonly blob: string;
+  readonly _meta?: Record<string, unknown>;
+}
+
+export type ResourceContents = TextResourceContents | BlobResourceContents;
+
+/**
+ * Embedded resource content block. Carries a resolved {@link ResourceContents}
+ * inline so an MCP tool/prompt result's embedded resource — and a
+ * `ResourcesHarness` read (ADR 62) — round-trips through agentick's
+ * content model instead of being flattened to a `text` JSON blob.
+ *
+ * Distinct from a `resource_link` (a URI reference the consumer would
+ * fetch): a `resource` block carries the CONTENT, not just a pointer.
+ *
+ * @see docs/proposals/v2/blueprint/62-resources-harness.md
+ */
+export interface ResourceBlock extends BaseContentBlock {
+  readonly type: "resource";
+  readonly resource: ResourceContents;
+}
+
+// ============================================================================
 // AI-generated blocks
 // ============================================================================
 
@@ -400,6 +450,7 @@ export type ContentBlock =
   | ToolUseBlock
   | ToolResultBlock
   | TaskRefBlock
+  | ResourceBlock
   | JsonBlock
   | XmlBlock
   | CsvBlock

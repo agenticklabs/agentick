@@ -2,7 +2,12 @@
  * AppHarness integration — `withMCP` extension + content mapping.
  */
 
-export { mcpContentToBlocks } from "./content-mapper.js";
+export {
+  mcpContentToBlocks,
+  mapCallToolResult,
+  mapResourceContents,
+  type MappedCallToolResult,
+} from "./content-mapper.js";
 export {
   withMCP,
   type McpServerConfig,

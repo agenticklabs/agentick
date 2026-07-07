@@ -49,6 +49,7 @@ import type {
   ProtocolEvent,
   ReasoningBlock,
   RenderedTree,
+  ResourceBlock,
   ResourceDeclaration,
   SectionEntry,
   SemanticContentBlock,
@@ -98,6 +99,9 @@ export function isToolResultBlock(b: ContentBlock): b is ToolResultBlock {
 }
 export function isTaskRefBlock(b: ContentBlock): b is TaskRefBlock {
   return b.type === "task_ref";
+}
+export function isResourceBlock(b: ContentBlock): b is ResourceBlock {
+  return b.type === "resource";
 }
 export function isJsonBlock(b: ContentBlock): b is JsonBlock {
   return b.type === "json";

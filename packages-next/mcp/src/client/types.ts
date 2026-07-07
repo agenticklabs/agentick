@@ -7,6 +7,8 @@
  */
 
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import type { CreateMessageRequest, CreateMessageResult } from "@modelcontextprotocol/sdk/types.js";
+import type { ContentBlock, ResourceContents } from "@agentick/spec-next";
 import type { McpAuth } from "./auth.js";
 import type { EraCodec } from "./era-codec.js";
 
@@ -145,7 +147,177 @@ export interface McpClientHarnessOptions {
   readonly rebuildTransport?: (deps: {
     readonly interactive: boolean;
   }) => Promise<Transport> | Transport;
+
+  /**
+   * Handler for inbound `sampling/createMessage` requests (server →
+   * client). When set, the harness registers a `CreateMessageRequestSchema`
+   * handler and advertises the `sampling` client capability. The
+   * handler receives the server's sampling request params and returns
+   * a `CreateMessageResult` (the generated message).
+   *
+   * Omitted → the `sampling` capability is NOT advertised and inbound
+   * `sampling/createMessage` requests get the SDK's automatic
+   * method-not-found error. The harness does not fake a response.
+   *
+   * Routing sampling to agentick's OWN executor by default is a Wave 3
+   * concern (needs an ADR); Wave 2 restores only the handler seam
+   * taking an adopter-provided handler.
+   */
+  readonly samplingHandler?: McpSamplingHandler;
+
+  /**
+   * Filesystem roots offered to the server on `roots/list` (client →
+   * server, server-initiated). When set, the harness registers a
+   * `ListRootsRequestSchema` handler and advertises
+   * `roots: { listChanged: true }`. Accepts either a static list or a
+   * provider function (re-evaluated on each `roots/list`).
+   *
+   * Omitted → the `roots` capability is NOT advertised.
+   *
+   * TODO(#146-later / ADR-62): roots ultimately PROJECT FROM THE
+   * SANDBOX (workspace + mounts). Wave 2 keeps the client harness
+   * decoupled from `@agentick/sandbox` — the sandbox-backed adapter is
+   * a thin follow-on that supplies this `roots` provider fn.
+   */
+  readonly roots?: McpRootsSource;
 }
+
+// ============================================================================
+// Sampling (server → client)
+// ============================================================================
+
+/**
+ * Adopter-provided handler for inbound `sampling/createMessage`
+ * requests. Typed against the SDK request params / result — sampling
+ * is inherently an MCP-protocol seam, so the wire shapes ARE the
+ * contract (matching the v1 client's `samplingHandler`).
+ *
+ * `extra.signal` aborts if the server cancels the request or the
+ * connection drops.
+ */
+export type McpSamplingHandler = (
+  params: CreateMessageRequest["params"],
+  extra: { readonly signal: AbortSignal },
+) => Promise<CreateMessageResult> | CreateMessageResult;
+
+// ============================================================================
+// Roots (client → server)
+// ============================================================================
+
+/** A single MCP root — a directory/file boundary the agent may operate on. */
+export interface McpRoot {
+  readonly uri: string;
+  readonly name?: string;
+}
+
+/**
+ * Source of the roots list. Either a fixed array or a provider
+ * function re-evaluated on each `roots/list` request (so a
+ * sandbox-backed provider can reflect live mount changes).
+ */
+export type McpRootsSource =
+  | readonly McpRoot[]
+  | (() => readonly McpRoot[] | Promise<readonly McpRoot[]>);
+
+// ============================================================================
+// Logging (server → client notifications)
+// ============================================================================
+
+/** MCP `logging/setLevel` severity levels (RFC 5424 syslog ordering). */
+export type McpLoggingLevel =
+  | "debug"
+  | "info"
+  | "notice"
+  | "warning"
+  | "error"
+  | "critical"
+  | "alert"
+  | "emergency";
+
+/** A single `notifications/message` log entry forwarded by the server. */
+export interface McpLogMessage {
+  readonly level: McpLoggingLevel;
+  readonly logger?: string;
+  readonly data: unknown;
+}
+
+// ============================================================================
+// Resource descriptors (canonical shapes)
+// ============================================================================
+
+/** A resource advertised by the server on `resources/list`. */
+export interface McpResourceDescriptor {
+  readonly uri: string;
+  readonly name: string;
+  readonly title?: string;
+  readonly description?: string;
+  readonly mimeType?: string;
+  readonly size?: number;
+}
+
+/** A parameterized resource advertised on `resources/templates/list`. */
+export interface McpResourceTemplateDescriptor {
+  readonly uriTemplate: string;
+  readonly name: string;
+  readonly title?: string;
+  readonly description?: string;
+  readonly mimeType?: string;
+}
+
+/** One page of a `resources/list` response (cursor first-class). */
+export interface McpResourcePage {
+  readonly resources: readonly McpResourceDescriptor[];
+  readonly nextCursor?: string;
+}
+
+/** One page of a `resources/templates/list` response. */
+export interface McpResourceTemplatePage {
+  readonly templates: readonly McpResourceTemplateDescriptor[];
+  readonly nextCursor?: string;
+}
+
+// ============================================================================
+// Prompt descriptors (canonical shapes)
+// ============================================================================
+
+/** A single argument a prompt accepts. */
+export interface McpPromptArgumentDescriptor {
+  readonly name: string;
+  readonly description?: string;
+  readonly required?: boolean;
+}
+
+/** A prompt advertised by the server on `prompts/list`. */
+export interface McpPromptDescriptor {
+  readonly name: string;
+  readonly title?: string;
+  readonly description?: string;
+  readonly arguments?: readonly McpPromptArgumentDescriptor[];
+}
+
+/** One page of a `prompts/list` response (cursor first-class). */
+export interface McpPromptPage {
+  readonly prompts: readonly McpPromptDescriptor[];
+  readonly nextCursor?: string;
+}
+
+/** A single message in a `prompts/get` result, content-typed. */
+export interface McpPromptMessage {
+  readonly role: "user" | "assistant";
+  readonly content: readonly ContentBlock[];
+}
+
+/** A `prompts/get` result — description + content-typed messages. */
+export interface McpGetPromptResult {
+  readonly description?: string;
+  readonly messages: readonly McpPromptMessage[];
+}
+
+/**
+ * Re-export of the spec resource-contents union for adopters reading
+ * `resources/read` results without importing spec directly.
+ */
+export type { ResourceContents };
 
 export interface ReconnectPolicy {
   /** Maximum reconnect attempts before transitioning to `degraded`. Default: 10. */

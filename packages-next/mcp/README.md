@@ -36,6 +36,7 @@ code. See ADR 23 §6 (Package layout) and ADR 40 §1.
 | #4 ElicitationBridge — server→client `elicitation/create` routing                | ✅                   |
 | #134a URL-mode elicit transport layer                                            | ✅                   |
 | #134b OAuth-via-elicit — URL-mode elicit on auth-needed                          | ✅                   |
+| #146 Client completeness — resources / prompts / completion / sampling / roots / logging | ✅ (Wave 2)  |
 | #154 `withMCP` auto-wires OAuth elicit via transport factory                     | ⏳                   |
 | **Server** (inbound, `@agentick/mcp-next/server`)                                |                      |
 | #171a `@agentick/tool-next/transforms` subpath (transform primitives)            | ✅                   |
@@ -472,6 +473,17 @@ cannot opt IN to something that isn't wired.
   (`taskSupport: "supported"` capability negotiation + per-call opt-in).
 - `src/__tests__/skeleton.spec.ts` — every ported public export
   resolves; sanitization patterns; completion-builder 100-cap.
+- `src/__tests__/wave2-client.spec.ts` — **Wave 2 (#146) client
+  completeness** against a REAL in-memory SDK `Server`: `listResources`
+  / `listResourceTemplates` / `readResource` (text + blob typing),
+  `listPrompts` / `getPrompt` (embedded resource → resource block),
+  `completePromptArgument` / `completeResourceTemplate`, sampling
+  handler INVOKED on server-issued `sampling/createMessage` (+
+  method-not-found when unconfigured), roots handler returns the
+  configured list (+ provider re-evaluation), `setLoggingLevel` reaches
+  the server and `notifications/message` surfaces via `onLogMessage`.
+  Plus a `content-mapper` unit block: `structuredContent` / `isError` /
+  embedded-resource-block preservation.
 
 ### Server
 
@@ -535,6 +547,18 @@ Defer until production load demands it; design space documented in
 
 ### Client
 
+- **Client protocol completeness (#146)** — **landed (Wave 2).**
+  `McpClientHarness` now exposes `listResources` / `listResourceTemplates`
+  / `readResource`, `listPrompts` / `getPrompt`, `completePromptArgument`
+  / `completeResourceTemplate`, `setLoggingLevel` + `onLogMessage`, plus
+  the inbound `samplingHandler` and `roots` seams (`notifyRootsListChanged`).
+  Follow-ons: (a) the read verbs are declared as **addressable** commands,
+  NOT `exposure: "wire"` — remote-grantee exposure needs a ratified
+  verb-matrix row; (b) `roots` accepts a static list or provider fn —
+  the **sandbox-backed roots projection** (workspace + mounts, ADR 62)
+  is a thin follow-on that supplies that provider; (c) routing sampling
+  to agentick's own executor by default is a Wave-3 ADR concern (the
+  seam here takes an adopter-provided handler).
 - **`#154 withMCP auto-wires OAuth elicit`** via transport factory
   pattern. Today adopters wire it manually through the OAuth provider
   slot.
