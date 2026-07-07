@@ -92,8 +92,24 @@ interface HttpServerOptions {
   path?: string;
   allowedOrigins?: readonly string[] | "*";
   heartbeatIntervalMs?: number;
+  /**
+   * Ingress authentication (ADR 61). HTTP is stateless, so this runs
+   * PER REQUEST — each POST authenticates from its own
+   * `Authorization: Bearer` header and that request's identity governs
+   * only that request's dispatch (no cross-request bleed). GET/SSE
+   * authenticates at stream-open. Rejection → 401. Omitted = anonymous
+   * (the local pole).
+   */
+  authSource?: AuthSource;
 }
 ```
+
+> **Server-side auth (prod edge).** `authSource` authenticates the
+> INBOUND request. It is unrelated to the client-side `fetch` example
+> below (which attaches the caller's credential). Two POSTs on one
+> `Mcp-Session-Id` with different tokens resolve to their own
+> principals — the per-session connection state deliberately caches no
+> identity.
 
 ## Patterns
 
@@ -142,6 +158,7 @@ under "Roadmap & known gaps" with an explicit marker.
 | End-to-end ping, listApps, RPC error → TransportError, multiplexed RPCs, close transition                                                              | `src/__tests__/smoke.spec.ts`                                                                                    |
 | State machine, RPC correlation, multiplexed concurrent RPCs, `notifications/cancelled` emit, subscription routing + close + eviction, progress streams | `src/__tests__/transport-conformance.spec.ts` (`runTransportConformance` from `@agentick/spec-conformance-next`) |
 | SSE codec — `encodeSseFrame` + `parseSseFrames`                                                                                                        | covered via the conformance suite's streaming-response path                                                      |
+| Per-request ingress authn — valid/invalid/missing bearer, prototype-key guard, no cross-request identity bleed (two POSTs, one session)                | `src/__tests__/ingress-authn.spec.ts` (`runIngressAuthnConformance`)                                             |
 
 ## Roadmap & known gaps
 

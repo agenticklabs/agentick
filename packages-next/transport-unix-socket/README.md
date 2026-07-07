@@ -141,11 +141,12 @@ Phase 33.E of the v2 implementation plan — see
 - ✓ Reconnect with exponential backoff + full jitter (shared base)
 - ✓ Cursor-aware resubscribe on reconnect (shared base)
 - ✓ `notifications/cancelled` client emit + server handle
+- ✓ Ingress authn (ADR 61) — host-local trust: the crossing carries `credential.kind: "none"` by default (local pole, no principal). An optional `authSource?` runs the shared `authenticateIngress` helper for parity with the network transports; a rejection destroys the socket (fail closed). Verified by `src/__tests__/ingress-authn.spec.ts` (`runIngressAuthnConformance`).
 
 **Claimed but not yet under test (✗):**
 
 - ✗ **Reconnect over daemon restart** — reconnect machinery is inherited from `BaseClientTransport`; not exercised by a server-bounce test (parallel to WS's `reconnect.spec.ts`).
-- ✗ **`SO_PEERCRED` peer-credential auth** — the `AuthSourceFor<"unix-socket">` type includes `unixPeerCred` for this; not implemented end-to-end. Lands with ADR 34 (auth subsystem).
+- ✗ **`SO_PEERCRED` peer-credential enrichment** — deriving the connecting uid → principal is a later ingress interceptor (`TODO(#146)` at the server). Today the crossing is `credential.kind: "none"`; an adopter `AuthSource` sees `none`, not peer creds.
 - ✗ **Socket file lifecycle helpers** — adopters currently handle `fs.unlink` of stale socket files themselves. A `unixSocketServer({ unlinkBeforeBind: true })` knob would be useful.
 - ✗ **Per-message framing limits** — no max-frame-size; a malicious peer could send an unbounded NDJSON line. Defense-in-depth deferred.
 
@@ -155,5 +156,5 @@ Phase 33.E of the v2 implementation plan — see
 | ---------------------------------- | --------------------------------------------------------------------------- |
 | Phase 33.E MVP                     | This commit                                                                 |
 | 33.C hardening pass                | After all transports settle so backpressure design covers them consistently |
-| `unixPeerCred` auth                | ADR 34 auth subsystem                                                       |
+| `SO_PEERCRED` peer-cred enrichment | ADR 61 later interceptor (`TODO(#146)`)                                     |
 | Reconnect-over-daemon-restart test | Optional; the base-class machinery is the same path WS exercises            |

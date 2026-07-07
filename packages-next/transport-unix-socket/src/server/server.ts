@@ -14,18 +14,32 @@
 import { createServer as netCreateServer, type Server, type Socket } from "node:net";
 import {
   ErrorCode,
+  type AuthSource,
+  type IngressIdentity,
   type JsonRpcError,
   type JsonRpcFrame,
   type JsonRpcId,
   type JsonRpcRequest,
   type JsonRpcResponse,
 } from "@agentick/spec-next";
-import { dispatchRequest, type DispatchHost } from "@agentick/transport-next";
+import { authenticateIngress, dispatchRequest, type DispatchHost } from "@agentick/transport-next";
 import { NdjsonDecoder, encodeNdjson } from "../shared/ndjson.js";
 
 export interface UnixSocketServerOptions {
   readonly path: string;
   readonly gateway: DispatchHost;
+  /**
+   * Ingress authentication (ADR 61). A unix socket is host-local trust,
+   * so the default crossing carries `credential.kind: "none"` — no
+   * principal, the local pole. An adopter MAY supply an AuthSource for
+   * parity with the network transports; a rejection destroys the socket
+   * (fail closed).
+   *
+   * TODO(#146): peer-credential enrichment (SO_PEERCRED → principal) is
+   * a later ingress interceptor — the host verifies the connecting uid,
+   * not a bearer token.
+   */
+  readonly authSource?: AuthSource;
 }
 
 export interface UnixSocketServerHandle {
@@ -37,15 +51,29 @@ export function unixSocketServer(options: UnixSocketServerOptions): UnixSocketSe
   const liveConnections = new Set<ConnectionContext>();
 
   const server = netCreateServer((socket) => {
-    const ctx = new ConnectionContext(socket, options.gateway);
-    liveConnections.add(ctx);
-    socket.on("close", () => {
-      liveConnections.delete(ctx);
-      void ctx.close();
-    });
-    socket.on("error", () => {
-      /* swallow — close handler does cleanup */
-    });
+    // Authenticate the crossing once per connection (ADR 61). Default
+    // credential is `none` (host-local trust). Incoming bytes buffer on
+    // the paused socket until the ConnectionContext attaches its `data`
+    // listener a microtask later, so no frames are lost.
+    void authenticateIngress(
+      { transportKind: "unix", credential: { kind: "none" } },
+      options.authSource,
+    )
+      .then((ingress) => {
+        const ctx = new ConnectionContext(socket, options.gateway, ingress.identity);
+        liveConnections.add(ctx);
+        socket.on("close", () => {
+          liveConnections.delete(ctx);
+          void ctx.close();
+        });
+        socket.on("error", () => {
+          /* swallow — close handler does cleanup */
+        });
+      })
+      .catch(() => {
+        // Fail closed — a configured AuthSource rejected the crossing.
+        socket.destroy();
+      });
   });
 
   server.listen(options.path);
@@ -75,6 +103,12 @@ class ConnectionContext {
   constructor(
     private readonly socket: Socket,
     private readonly gateway: DispatchHost,
+    /**
+     * Ingress identity for this connection (ADR 61). Undefined = the
+     * local pole (the host-local-trust default). Threaded into every
+     * dispatch; never re-authenticated inward.
+     */
+    private readonly identity?: IngressIdentity,
   ) {
     socket.on("data", (chunk: Buffer) => {
       void this.handleData(chunk);
@@ -107,21 +141,27 @@ class ConnectionContext {
       return null;
     }
     if ("id" in frame && "method" in frame) {
-      return dispatchRequest(this.gateway, frame as JsonRpcRequest, {
-        sendNotification: (n) => this.send({ jsonrpc: "2.0", method: n.method, params: n.params }),
-        registerSubscription: (subId, unsubscribe) => {
-          this.subscriptions.set(subId, { unsubscribe });
+      return dispatchRequest(
+        this.gateway,
+        frame as JsonRpcRequest,
+        {
+          sendNotification: (n) =>
+            this.send({ jsonrpc: "2.0", method: n.method, params: n.params }),
+          registerSubscription: (subId, unsubscribe) => {
+            this.subscriptions.set(subId, { unsubscribe });
+          },
+          unregisterSubscription: (subId) => {
+            this.subscriptions.delete(subId);
+          },
+          registerInFlight: (id, abort) => {
+            this.inFlight.set(id, abort);
+          },
+          unregisterInFlight: (id) => {
+            this.inFlight.delete(id);
+          },
         },
-        unregisterSubscription: (subId) => {
-          this.subscriptions.delete(subId);
-        },
-        registerInFlight: (id, abort) => {
-          this.inFlight.set(id, abort);
-        },
-        unregisterInFlight: (id) => {
-          this.inFlight.delete(id);
-        },
-      });
+        this.identity,
+      );
     }
     return null;
   }

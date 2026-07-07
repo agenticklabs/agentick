@@ -259,3 +259,4 @@ discipline: a `✓` claim has a test or it doesn't ship with the `✓`.
 | Origin validation (`allowedOrigins`)                                   | `src/__tests__/security.spec.ts`         |
 | `notifications/cancelled` client emit + server handle                  | `src/__tests__/cancellation.spec.ts`     |
 | Custom WebSocket constructor (`ws` library)                            | `src/__tests__/custom-ws-ctor.spec.ts`   |
+| Ingress authn (ADR 61) — per-connection bearer auth, fail-closed 401, prototype-key guard, once-per-socket, local pole when no `authSource` | `src/__tests__/ingress-authn.spec.ts` (`runIngressAuthnConformance`) |

@@ -12,8 +12,12 @@
 
 import type { Server as HttpServer } from "node:http";
 import { WebSocketServer, type WebSocket as WSConnection } from "ws";
-import { ErrorCode, type JsonRpcFrame } from "@agentick/spec-next";
-import { BaseConnectionContext, type DispatchHost } from "@agentick/transport-next";
+import { ErrorCode, type IngressIdentity, type JsonRpcFrame } from "@agentick/spec-next";
+import {
+  authenticateIngress,
+  BaseConnectionContext,
+  type DispatchHost,
+} from "@agentick/transport-next";
 import { AGENTICK_SUBPROTOCOL, decodeFrame, encodeFrame } from "../shared/codec.js";
 
 export interface WebSocketServerOptions {
@@ -24,14 +28,13 @@ export interface WebSocketServerOptions {
   /** Idle ping interval in ms. WS-level ping/pong, not application ping. */
   readonly heartbeatIntervalMs?: number;
   /**
-   * Ingress authentication (ADR 34/51 §4.1) — runs ONCE per connection
-   * at upgrade time. Token extracted from `Authorization: Bearer ...`
-   * (and, only when `allowQueryToken` is set, `?token=`). Throw to
-   * reject the upgrade (401). Omitted = every connection is anonymous
-   * (the local pole; pair with the gateway's unconfigured/permissive
-   * Authorizer deliberately). Authentication is bounded by a 10s
-   * timeout — a hung AuthSource rejects the upgrade instead of leaking
-   * sockets.
+   * Ingress authentication (ADR 34/51 §4.1, ADR 61) — runs ONCE per
+   * connection at upgrade time via the shared ingress helper. Token
+   * extracted from `Authorization: Bearer ...` (and, only when
+   * `allowQueryToken` is set, `?token=`). Rejection destroys the socket
+   * with a 401. Omitted = every connection is anonymous (the local
+   * pole; pair with the gateway's unconfigured/permissive Authorizer
+   * deliberately).
    */
   readonly authSource?: import("@agentick/spec-next").AuthSource;
   /**
@@ -73,29 +76,42 @@ export function websocketServer(options: WebSocketServerOptions): WebSocketServe
       socket.destroy();
       return;
     }
-    const finishUpgrade = (identity?: import("@agentick/spec-next").IngressIdentity): void => {
+    const finishUpgrade = (identity?: IngressIdentity): void => {
       wss.handleUpgrade(req, socket, head, (ws) => {
         (ws as WSConnection & { identity?: unknown }).identity = identity;
         wss.emit("connection", ws, req);
       });
     };
-    if (options.authSource) {
-      const auth = req.headers.authorization;
-      const bearer = auth?.startsWith("Bearer ") ? auth.slice(7) : undefined;
-      const query = new URL(url, "http://localhost").searchParams.get("token") ?? undefined;
-      void options.authSource
-        .authenticate({
-          ...((bearer ?? query) ? { token: bearer ?? query } : {}),
+    // Build the ingress context from the native WS-upgrade credential.
+    // Bearer from the Authorization header; query token ONLY when the
+    // adopter opted in (query strings leak into proxy logs / history).
+    // TODO(#146): bound this authn with a timeout — a hung AuthSource
+    // currently leaves the upgrade pending and leaks the socket (there is
+    // no wall-clock ceiling here or on the HTTP edge). Reject on timeout.
+    const auth = req.headers.authorization;
+    const bearer = auth?.startsWith("Bearer ") ? auth.slice(7) : undefined;
+    const query = options.allowQueryToken
+      ? (new URL(url, "http://localhost").searchParams.get("token") ?? undefined)
+      : undefined;
+    const token = bearer ?? query;
+    void authenticateIngress(
+      {
+        transportKind: "websocket",
+        credential: {
+          kind: "bearer",
+          ...(token !== undefined ? { token } : {}),
           headers: req.headers as Record<string, string | undefined>,
-        })
-        .then((identity) => finishUpgrade(identity))
-        .catch(() => {
-          socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
-          socket.destroy();
-        });
-    } else {
-      finishUpgrade();
-    }
+        },
+      },
+      options.authSource,
+    )
+      .then((ctx) => finishUpgrade(ctx.identity))
+      .catch(() => {
+        // Fail closed — a configured AuthSource that rejected. The
+        // no-AuthSource path never reaches here (helper resolves).
+        socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+        socket.destroy();
+      });
   };
 
   options.httpServer.on("upgrade", upgradeHandler);

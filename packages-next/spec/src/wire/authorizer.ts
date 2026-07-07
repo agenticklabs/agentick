@@ -77,18 +77,83 @@ export interface IngressIdentity {
 }
 
 /**
- * `AuthSource` — transport token → identity (ADR 34). Runs at the
- * ingress edge, once per connection/request. Promise-shaped. Throwing
- * REJECTS the connection/request (authentication failure); returning
- * `{}` admits an anonymous (local-pole) caller.
+ * What the transport supplies at a single trust-boundary crossing
+ * (ADR 61). Discriminated by `credential.kind` — one seam normalizes
+ * every ingress edge (client transports AND connectors) through the
+ * same `AuthSource` broker. In-process calls (`session.send`) are the
+ * trusted interior and NEVER build one of these.
+ */
+export interface IngressContext {
+  /**
+   * Which edge produced this crossing. `connector:${string}` covers the
+   * federated edge (ADR 58) — one template literal, one broker.
+   */
+  readonly transportKind: "websocket" | "http" | "unix" | `connector:${string}`;
+  /** The native credential the edge extracted. */
+  readonly credential: IngressCredential;
+  /**
+   * Connection id where the transport has one (stateful, e.g. ws);
+   * absent for stateless/per-request edges (http).
+   */
+  readonly connectionId?: string;
+  /**
+   * Accumulated as the ingress chain runs; the terminal auth
+   * interceptor sets it. `undefined` after the chain = the local pole.
+   */
+  readonly identity?: IngressIdentity;
+}
+
+/**
+ * The polymorphic ingress credential — one seam, many shapes (ADR 61).
+ *
+ *   - `bearer`   — client transports: a token (+ raw headers for adopter
+ *                  schemes beyond bearer).
+ *   - `platform` — the federated connector edge (slice 2): the platform
+ *                  already authenticated the user; the AuthSource maps
+ *                  the asserted platform identity → principal after the
+ *                  connector verifies the delivery is genuinely the
+ *                  platform.
+ *   - `none`     — host-local trust (unix socket) or an explicitly
+ *                  anonymous crossing.
+ */
+export type IngressCredential =
+  | {
+      readonly kind: "bearer";
+      /** Bearer credential extracted by the transport (header, query, subprotocol). */
+      readonly token?: string;
+      /** Raw transport headers, for adopter schemes beyond bearer tokens. */
+      readonly headers: Readonly<Record<string, string | undefined>>;
+    }
+  | {
+      readonly kind: "platform";
+      readonly platform: string;
+      readonly platformUserId: string;
+      readonly assertion?: unknown;
+    }
+  | { readonly kind: "none" };
+
+/**
+ * Enrichment-only ingress interceptor (ADR 61 / ADR 50 `interceptIngress`).
+ * Runs in install order; enriches the context or throws a typed
+ * `AgentickError` to REJECT the crossing. Never a runtime authorization
+ * filter — that is the {@link Authorizer}'s job at dispatch.
+ *
+ * Slice 1 (#146) calls {@link AuthSource} directly at each edge — the
+ * degenerate single-interceptor form. The multi-interceptor
+ * registration surface is slice 3.
+ */
+export type IngressInterceptor = (ctx: IngressContext) => IngressContext | Promise<IngressContext>;
+
+/**
+ * `AuthSource` — ingress credential → identity (ADR 34 / ADR 61). Runs
+ * at the ingress edge, once per crossing (per-connection for stateful
+ * transports, per-request for stateless). The normalizing identity
+ * broker: one implementation handles every {@link IngressCredential}
+ * shape. Promise-shaped. Throwing REJECTS the crossing (authentication
+ * failure); returning `{}` admits an anonymous (local-pole) caller.
  */
 export interface AuthSource {
-  authenticate(input: {
-    /** Bearer credential extracted by the transport (header, query, subprotocol). */
-    readonly token?: string;
-    /** Raw transport headers, for adopter schemes beyond bearer tokens. */
-    readonly headers?: Readonly<Record<string, string | undefined>>;
-  }): Promise<IngressIdentity>;
+  authenticate(credential: IngressCredential): Promise<IngressIdentity>;
   readonly backend: string;
 }
 

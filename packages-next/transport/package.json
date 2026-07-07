@@ -34,6 +34,11 @@
       "types": "./src/server/index.ts",
       "import": "./src/server/index.ts",
       "default": "./src/server/index.ts"
+    },
+    "./testing": {
+      "types": "./src/testing/index.ts",
+      "import": "./src/testing/index.ts",
+      "default": "./src/testing/index.ts"
     }
   },
   "scripts": {
@@ -47,6 +52,14 @@
     "@agentick/pubsub-next": "workspace:*",
     "@agentick/spec-next": "workspace:*",
     "@agentick/utils-next": "workspace:*"
+  },
+  "peerDependencies": {
+    "vitest": "^4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "vitest": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@agentick/gateway-next": "workspace:*",

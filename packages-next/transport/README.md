@@ -147,6 +147,36 @@ Subsequent `notifications/subscription/event` frames route by the
 server id. Adopters who close the stream early get the unsubscribe RPC
 sent under the real id.
 
+### Ingress authentication (ADR 61)
+
+Every transport edge authenticates a trust-boundary crossing through one
+shared helper:
+
+```ts
+import { authenticateIngress, staticTokenAuthSource } from "@agentick/transport-next";
+
+const enriched = await authenticateIngress(
+  { transportKind: "http", credential: { kind: "bearer", token, headers } },
+  options.authSource, // an AuthSource, or undefined
+);
+// enriched.identity → stamp on the connection / thread into dispatch
+```
+
+Rules the helper enforces: **no `AuthSource` → the local/trusted pole**
+(identity undefined, admitted); **configured `AuthSource` → run it and
+FAIL CLOSED** (a rejection propagates; the edge maps it to a 401 / dropped
+connection — it never falls through to the pole). The helper is
+**enrichment-only** — it never authorizes (that is the `Authorizer` at
+dispatch). `staticTokenAuthSource` is the bundled reference `AuthSource`:
+a token → identity table with a prototype-key-bypass guard. The seam is
+**server-side only** — `AuthSource` and tokens never project to the
+client.
+
+Slice 1 (#146) calls `authenticateIngress` directly at each edge — the
+degenerate single-interceptor form. The multi-interceptor
+`GatewayInstaller.interceptIngress` chain and the `platform` (federated
+connector) credential are later slices.
+
 ## Verified by
 
 | Concern                                                                                         | Test file                                                                                       |
@@ -154,6 +184,8 @@ sent under the real id.
 | End-to-end via in-process transport                                                             | `../transport-in-process/src/__tests__/transport-conformance.spec.ts`                           |
 | End-to-end via WebSocket transport                                                              | `../transport-websocket/src/__tests__/transport-conformance.spec.ts`                            |
 | State machine, RPC correlation, multiplex, cancellation, subscription routing, progress streams | `../spec-conformance/src/transport.ts` (`runTransportConformance` — invoked by every transport) |
+| Ingress authn seam — fail-closed, local-pole default, prototype-key guard, once-per-crossing     | `src/testing/index.ts` (`runIngressAuthnConformance` — run by every transport against a real server) |
+| `staticTokenAuthSource` credential-kind switch + platform rejection + prototype-key bypass       | `src/__tests__/wire-lane-e2e.spec.ts`                                                           |
 
 `runTransportConformance(name, factory)` in
 `@agentick/spec-conformance-next` ships the shared behavioral suite.

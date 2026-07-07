@@ -248,6 +248,82 @@ export type SandboxErrorChannel =
   | SandboxUnsupportedError;
 
 // ============================================================================
+// IngressAuthError — trust-boundary authentication failures (ADR 61)
+// ============================================================================
+
+/**
+ * Authentication failures at the ingress edge (ADR 61). An `AuthSource`
+ * throws one of these to REJECT a crossing; the transport edge maps the
+ * rejection to its native failure (WS/HTTP 401, connector drop) and
+ * NEVER falls through to the local pole (fail-closed invariant).
+ */
+export abstract class IngressAuthError extends AgentickError {
+  abstract override readonly _tag:
+    | "IngressAuthRequired"
+    | "IngressAuthFailed"
+    | "IngressCredentialUnsupported";
+}
+
+/** No credential was presented and the AuthSource does not admit anonymous. */
+export class IngressAuthRequired extends IngressAuthError {
+  readonly _tag = "IngressAuthRequired" as const;
+  readonly backend: string;
+  constructor(args: { readonly backend: string; readonly cause?: unknown }) {
+    super("authentication required: no credential presented", { cause: args.cause });
+    this.backend = args.backend;
+  }
+}
+registerAgentickError("IngressAuthRequired", IngressAuthRequired);
+
+/** A credential was presented but the AuthSource rejected it. */
+export class IngressAuthFailed extends IngressAuthError {
+  readonly _tag = "IngressAuthFailed" as const;
+  readonly backend: string;
+  /** Machine-readable reason. Never surfaced verbatim to the client. */
+  readonly reason: string;
+  constructor(args: {
+    readonly backend: string;
+    readonly reason: string;
+    readonly cause?: unknown;
+  }) {
+    super(`authentication failed: ${args.reason}`, { cause: args.cause });
+    this.backend = args.backend;
+    this.reason = args.reason;
+  }
+}
+registerAgentickError("IngressAuthFailed", IngressAuthFailed);
+
+/**
+ * The AuthSource does not support the presented credential shape — e.g.
+ * a `platform` credential handed to the static-token source (that is the
+ * federated connector path, ADR 61 slice 2). Fail-closed, not a silent
+ * pass-through.
+ */
+export class IngressCredentialUnsupported extends IngressAuthError {
+  readonly _tag = "IngressCredentialUnsupported" as const;
+  readonly backend: string;
+  readonly credentialKind: string;
+  constructor(args: {
+    readonly backend: string;
+    readonly credentialKind: string;
+    readonly cause?: unknown;
+  }) {
+    super(
+      `authentication source "${args.backend}" does not support credential kind "${args.credentialKind}"`,
+      { cause: args.cause },
+    );
+    this.backend = args.backend;
+    this.credentialKind = args.credentialKind;
+  }
+}
+registerAgentickError("IngressCredentialUnsupported", IngressCredentialUnsupported);
+
+export type IngressAuthErrorChannel =
+  | IngressAuthRequired
+  | IngressAuthFailed
+  | IngressCredentialUnsupported;
+
+// ============================================================================
 // McpClientError — MCP client harness failures
 // ============================================================================
 

@@ -152,10 +152,33 @@ describe("staticTokenAuthSource — prototype-key bypass (review finding)", () =
     const { staticTokenAuthSource } = await import("../server/auth-source.js");
     const auth = staticTokenAuthSource({ tokens: { good: "alice" } });
     for (const evil of ["toString", "constructor", "__proto__", "hasOwnProperty"]) {
-      await expect(auth.authenticate({ token: evil })).rejects.toThrow(/unknown token/);
+      await expect(auth.authenticate({ kind: "bearer", token: evil, headers: {} })).rejects.toThrow(
+        /unknown token/,
+      );
     }
-    expect((await auth.authenticate({ token: "good" })).principal).toBe("alice");
-    await expect(auth.authenticate({})).rejects.toThrow(/no token/);
+    expect(
+      (await auth.authenticate({ kind: "bearer", token: "good", headers: {} })).principal,
+    ).toBe("alice");
+    await expect(auth.authenticate({ kind: "bearer", headers: {} })).rejects.toThrow(
+      /no credential/,
+    );
+    await expect(auth.authenticate({ kind: "none" })).rejects.toThrow(/no credential/);
+  });
+
+  it("rejects the federated platform credential (slice 2 — unsupported by static-token)", async () => {
+    const { staticTokenAuthSource } = await import("../server/auth-source.js");
+    const { IngressCredentialUnsupported } = await import("@agentick/spec-next");
+    const auth = staticTokenAuthSource({ tokens: { good: "alice" } });
+    await expect(
+      auth.authenticate({ kind: "platform", platform: "telegram", platformUserId: "42" }),
+    ).rejects.toBeInstanceOf(IngressCredentialUnsupported);
+  });
+
+  it("allowAnonymous admits the `none` credential as the local pole", async () => {
+    const { staticTokenAuthSource } = await import("../server/auth-source.js");
+    const auth = staticTokenAuthSource({ tokens: {}, allowAnonymous: true });
+    expect(await auth.authenticate({ kind: "none" })).toEqual({});
+    expect(await auth.authenticate({ kind: "bearer", headers: {} })).toEqual({});
   });
 });
 

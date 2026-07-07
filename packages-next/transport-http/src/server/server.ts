@@ -29,6 +29,8 @@
 import type { Server as HttpServerNode, IncomingMessage, ServerResponse } from "node:http";
 import {
   ErrorCode,
+  type AuthSource,
+  type IngressIdentity,
   type JsonRpcError,
   type JsonRpcFrame,
   type JsonRpcId,
@@ -36,6 +38,7 @@ import {
   type JsonRpcResponse,
 } from "@agentick/spec-next";
 import {
+  authenticateIngress,
   BaseConnectionContext,
   dispatchRequest,
   type DispatchHost,
@@ -49,6 +52,15 @@ export interface HttpServerOptions {
   readonly allowedOrigins?: readonly string[] | "*";
   /** Idle ping interval on the persistent GET stream (ms). Default 30s. */
   readonly heartbeatIntervalMs?: number;
+  /**
+   * Ingress authentication (ADR 61) — HTTP is stateless, so this runs
+   * PER REQUEST: each POST authenticates from its OWN
+   * `Authorization: Bearer ...` header and that request's identity
+   * governs only that request's dispatch (no cross-request bleed). The
+   * persistent GET stream authenticates at open. Rejection → 401.
+   * Omitted = every request is anonymous (the local pole).
+   */
+  readonly authSource?: AuthSource;
 }
 
 export interface HttpServerHandle {
@@ -93,7 +105,7 @@ export function httpServer(options: HttpServerOptions): HttpServerHandle {
     const sessionId = (req.headers[SESSION_ID_HEADER] as string | undefined) ?? null;
 
     if (req.method === "POST") {
-      void handlePost(req, res, sessions, sessionId, options.gateway);
+      void handlePost(req, res, sessions, sessionId, options.gateway, options.authSource);
       return;
     }
     if (req.method === "GET") {
@@ -103,10 +115,22 @@ export function httpServer(options: HttpServerOptions): HttpServerHandle {
         res.end();
         return;
       }
-      handleGet(req, res, sessions, sessionId, heartbeatMs, options.gateway);
+      void handleGet(
+        req,
+        res,
+        sessions,
+        sessionId,
+        heartbeatMs,
+        options.gateway,
+        options.authSource,
+      );
       return;
     }
     if (req.method === "DELETE") {
+      // TODO(#146): DELETE releases per-session fan-out state without an
+      // authn gate — a configured AuthSource should also govern who may
+      // tear down a session. ADR 61 slice 1 specifies POST + GET; wire
+      // DELETE through `authenticateHttpRequest` in a follow-up.
       handleDelete(sessions, sessionId);
       res.statusCode = 204;
       res.end();
@@ -131,11 +155,14 @@ export function httpServer(options: HttpServerOptions): HttpServerHandle {
 // SessionConnection — per-session-id server state
 // ============================================================================
 
-// TODO(trail-http-per-request-auth): HTTP is stateless per request but the
-// connection context persists per transport-session — per-request identity
-// needs the dispatch-level identity parameter driven from each request's
-// Authorization header (the parameter exists since ADR 34 slice; the wiring
-// here is the follow-up). Until then HTTP connections are anonymous.
+// HTTP is stateless per request (ADR 61): the per-session-id
+// SessionConnection holds ONLY shared fan-out state (subscriptions,
+// in-flight registry, notification stream). It deliberately does NOT
+// carry an ingress identity — each POST/GET authenticates from its own
+// Authorization header and threads that request's identity directly
+// into `dispatchRequest`. Caching identity on the connection would let
+// one request's principal govern another's dispatch (cross-request
+// bleed) — the invariant this transport must never violate.
 class SessionConnection extends BaseConnectionContext {
   readonly id: string;
   private notificationStream: ServerResponse | null = null;
@@ -228,7 +255,19 @@ async function handlePost(
   sessions: Map<string, SessionConnection>,
   sessionIdHeader: string | null,
   gateway: DispatchHost,
+  authSource: AuthSource | undefined,
 ): Promise<void> {
+  // Authenticate THIS request first (ADR 61 — per-request, header-based,
+  // independent of body). A configured AuthSource that rejects → 401.
+  // The resulting identity is a request-scoped local — it is threaded
+  // into this request's dispatch calls and never stored on the session.
+  const authResult = await authenticateHttpRequest(req, authSource, sessionIdHeader ?? undefined);
+  if (!authResult.ok) {
+    writeUnauthorized(res);
+    return;
+  }
+  const identity = authResult.identity;
+
   const body = await readBody(req);
   let parsed: unknown;
   try {
@@ -248,10 +287,11 @@ async function handlePost(
   res.setHeader("Mcp-Session-Id", sessionId);
 
   if (Array.isArray(parsed)) {
-    // Batch — respond with a JSON array of responses.
+    // Batch — respond with a JSON array of responses. Every frame in
+    // the batch runs under THIS request's identity.
     const responses: JsonRpcResponse[] = [];
     for (const frame of parsed) {
-      const r = await dispatchSingle(frame, session, gateway);
+      const r = await dispatchSingle(frame, session, gateway, identity);
       if (r !== null) responses.push(r);
     }
     res.writeHead(200, { "Content-Type": "application/json" });
@@ -293,20 +333,25 @@ async function handlePost(
       "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
     });
-    const response = await dispatchRequest(gateway, request, {
-      sendNotification: (n) => {
-        try {
-          res.write(encodeSseFrame({ jsonrpc: "2.0", method: n.method, params: n.params }));
-        } catch {
-          /* swallow */
-        }
+    const response = await dispatchRequest(
+      gateway,
+      request,
+      {
+        sendNotification: (n) => {
+          try {
+            res.write(encodeSseFrame({ jsonrpc: "2.0", method: n.method, params: n.params }));
+          } catch {
+            /* swallow */
+          }
+        },
+        registerSubscription: (subId, unsubscribe) =>
+          session.registerSubscription(subId, unsubscribe),
+        unregisterSubscription: (subId) => session.unregisterSubscription(subId),
+        registerInFlight: (id, abort) => session.registerInFlight(id, abort),
+        unregisterInFlight: (id) => session.unregisterInFlight(id),
       },
-      registerSubscription: (subId, unsubscribe) =>
-        session.registerSubscription(subId, unsubscribe),
-      unregisterSubscription: (subId) => session.unregisterSubscription(subId),
-      registerInFlight: (id, abort) => session.registerInFlight(id, abort),
-      unregisterInFlight: (id) => session.unregisterInFlight(id),
-    });
+      identity,
+    );
     try {
       res.write(encodeSseFrame(response));
       res.end();
@@ -317,13 +362,19 @@ async function handlePost(
   }
 
   // Non-streaming — single JSON response.
-  const response = await dispatchRequest(gateway, request, {
-    sendNotification: (n) => session.sendNotification(n),
-    registerSubscription: (subId, unsubscribe) => session.registerSubscription(subId, unsubscribe),
-    unregisterSubscription: (subId) => session.unregisterSubscription(subId),
-    registerInFlight: (id, abort) => session.registerInFlight(id, abort),
-    unregisterInFlight: (id) => session.unregisterInFlight(id),
-  });
+  const response = await dispatchRequest(
+    gateway,
+    request,
+    {
+      sendNotification: (n) => session.sendNotification(n),
+      registerSubscription: (subId, unsubscribe) =>
+        session.registerSubscription(subId, unsubscribe),
+      unregisterSubscription: (subId) => session.unregisterSubscription(subId),
+      registerInFlight: (id, abort) => session.registerInFlight(id, abort),
+      unregisterInFlight: (id) => session.unregisterInFlight(id),
+    },
+    identity,
+  );
   res.writeHead(200, { "Content-Type": "application/json" });
   res.end(JSON.stringify(response));
 }
@@ -332,6 +383,7 @@ async function dispatchSingle(
   frame: JsonRpcFrame,
   session: SessionConnection,
   gateway: DispatchHost,
+  identity: IngressIdentity | undefined,
 ): Promise<JsonRpcResponse | null> {
   if ("method" in frame && !("id" in frame)) {
     if (frame.method === "notifications/cancelled") {
@@ -343,14 +395,19 @@ async function dispatchSingle(
     return null;
   }
   if ("id" in frame && "method" in frame) {
-    return dispatchRequest(gateway, frame as JsonRpcRequest, {
-      sendNotification: (n) => session.sendNotification(n),
-      registerSubscription: (subId, unsubscribe) =>
-        session.registerSubscription(subId, unsubscribe),
-      unregisterSubscription: (subId) => session.unregisterSubscription(subId),
-      registerInFlight: (id, abort) => session.registerInFlight(id, abort),
-      unregisterInFlight: (id) => session.unregisterInFlight(id),
-    });
+    return dispatchRequest(
+      gateway,
+      frame as JsonRpcRequest,
+      {
+        sendNotification: (n) => session.sendNotification(n),
+        registerSubscription: (subId, unsubscribe) =>
+          session.registerSubscription(subId, unsubscribe),
+        unregisterSubscription: (subId) => session.unregisterSubscription(subId),
+        registerInFlight: (id, abort) => session.registerInFlight(id, abort),
+        unregisterInFlight: (id) => session.unregisterInFlight(id),
+      },
+      identity,
+    );
   }
   return null;
 }
@@ -359,14 +416,24 @@ async function dispatchSingle(
 // GET handler — persistent SSE notification channel
 // ============================================================================
 
-function handleGet(
-  _req: IncomingMessage,
+async function handleGet(
+  req: IncomingMessage,
   res: ServerResponse,
   sessions: Map<string, SessionConnection>,
   sessionIdHeader: string | null,
   heartbeatMs: number,
   gateway: DispatchHost,
-): void {
+  authSource: AuthSource | undefined,
+): Promise<void> {
+  // Authenticate at stream-open (ADR 61). The notification stream
+  // dispatches no requests, but a configured AuthSource must still gate
+  // who may open it — fail closed.
+  const authResult = await authenticateHttpRequest(req, authSource, sessionIdHeader ?? undefined);
+  if (!authResult.ok) {
+    writeUnauthorized(res);
+    return;
+  }
+
   const sessionId = sessionIdHeader ?? newSessionId();
   const session = sessions.get(sessionId) ?? new SessionConnection(sessionId, gateway);
   if (!sessions.has(sessionId)) sessions.set(sessionId, session);
@@ -401,6 +468,44 @@ function handleDelete(sessions: Map<string, SessionConnection>, sessionId: strin
 // ============================================================================
 // helpers
 // ============================================================================
+
+/**
+ * Authenticate one HTTP crossing (ADR 61). Extracts the bearer token
+ * from THIS request's `Authorization` header and runs the shared
+ * ingress helper. Returns `{ ok: false }` on rejection (fail closed);
+ * `{ ok: true, identity }` otherwise (identity undefined = local pole).
+ */
+async function authenticateHttpRequest(
+  req: IncomingMessage,
+  authSource: AuthSource | undefined,
+  connectionId: string | undefined,
+): Promise<{ ok: true; identity?: IngressIdentity } | { ok: false }> {
+  const auth = req.headers.authorization;
+  const bearer = auth?.startsWith("Bearer ") ? auth.slice(7) : undefined;
+  try {
+    const ctx = await authenticateIngress(
+      {
+        transportKind: "http",
+        credential: {
+          kind: "bearer",
+          ...(bearer !== undefined ? { token: bearer } : {}),
+          headers: req.headers as Record<string, string | undefined>,
+        },
+        ...(connectionId !== undefined ? { connectionId } : {}),
+      },
+      authSource,
+    );
+    return ctx.identity !== undefined ? { ok: true, identity: ctx.identity } : { ok: true };
+  } catch {
+    return { ok: false };
+  }
+}
+
+function writeUnauthorized(res: ServerResponse): void {
+  res.statusCode = 401;
+  res.setHeader("WWW-Authenticate", "Bearer");
+  res.end();
+}
 
 async function readBody(req: IncomingMessage): Promise<string> {
   const chunks: Buffer[] = [];
