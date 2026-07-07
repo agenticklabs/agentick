@@ -501,3 +501,57 @@ export type AssistantAllowedBlock =
   | CustomContentBlock;
 
 export type EventAllowedBlock = TextBlock | UserActionBlock | SystemEventBlock | StateChangeBlock;
+
+// ============================================================================
+// Exhaustive fold — the safety net for the discriminated union
+// ============================================================================
+//
+// `ContentBlock` is dispatched by ~30 hand-rolled `switch (block.type)` sites
+// across adapters, formatters, projections, etc. Most carry a swallowing
+// `default:`, so adding a member to `BlockType` compiles fine everywhere and
+// is SILENTLY DROPPED at every site that didn't explicitly handle it — a
+// silent-correctness bug the type system cannot catch (a `default:` defeats
+// exhaustiveness). These folds centralize that risk.
+//
+// **House rule:** any block→X conversion where a dropped block loses content
+// (model-input projection, wire codecs) MUST use {@link foldContentBlock} (the
+// exhaustive form) so a new `BlockType` is a compile-error sweep, not a silent
+// drop. Narrow sites that genuinely handle only a few types use
+// {@link foldContentBlockWith} — its fallback is a CONSCIOUS, greppable
+// decision, never a buried `default:`.
+
+/**
+ * Handler map for {@link foldContentBlock} — exactly one handler PER
+ * {@link BlockType}. Every key is required, so adding a member to `BlockType`
+ * breaks every exhaustive fold at compile time (missing key).
+ */
+export type ContentBlockFold<R> = {
+  [K in BlockType]: (block: Extract<ContentBlock, { readonly type: K }>) => R;
+};
+
+/**
+ * Exhaustively fold a {@link ContentBlock} — the safety net. A `BlockType`
+ * addition forces every call site to add its handler (a guided compile sweep)
+ * instead of silently dropping the new block. Use for content-preserving
+ * conversions (model input, wire).
+ */
+export function foldContentBlock<R>(block: ContentBlock, fold: ContentBlockFold<R>): R {
+  // The fold has a handler for every discriminant; dispatch is total.
+  return (fold[block.type] as (b: ContentBlock) => R)(block);
+}
+
+/**
+ * Partial fold with an EXPLICIT `fallback` — for narrow sites that handle only
+ * a few block types. Unlike {@link foldContentBlock}, a new `BlockType` does
+ * NOT break this (the fallback catches it), so `fallback` is a deliberate,
+ * greppable "ignore the rest" — not a silent `default:`. Prefer the exhaustive
+ * form wherever a dropped block loses content.
+ */
+export function foldContentBlockWith<R>(
+  block: ContentBlock,
+  handlers: Partial<ContentBlockFold<R>>,
+  fallback: (block: ContentBlock) => R,
+): R {
+  const handler = handlers[block.type] as ((b: ContentBlock) => R) | undefined;
+  return handler ? handler(block) : fallback(block);
+}
