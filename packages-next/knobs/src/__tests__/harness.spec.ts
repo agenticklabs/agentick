@@ -204,6 +204,92 @@ describe("KnobsHarness — snapshot round-trip", () => {
   });
 });
 
+describe("KnobsHarness — read-only knobs", () => {
+  it("dispatch by name rejects writes to a read-only knob", async () => {
+    const { harness } = await makeHarness();
+    await harness.register({
+      id: "phase",
+      descriptor: {
+        defaultValue: "collecting",
+        valueType: "string",
+        options: ["collecting", "processing", "done"],
+        readOnly: true,
+      },
+    });
+
+    const blocks = await harness.dispatch({ name: "phase", value: "done" });
+
+    expect((blocks[0] as { text?: string }).text).toContain("read-only");
+    expect(harness.get("phase")).toBe("collecting");
+    await harness.close();
+  });
+
+  it("group dispatch skips read-only members and mutates the rest", async () => {
+    const { harness } = await makeHarness();
+    await harness.register({
+      id: "locked",
+      descriptor: {
+        defaultValue: "off",
+        valueType: "string",
+        options: ["off", "on"],
+        group: "flags",
+        readOnly: true,
+      },
+    });
+    await harness.register({
+      id: "open",
+      descriptor: {
+        defaultValue: "off",
+        valueType: "string",
+        options: ["off", "on"],
+        group: "flags",
+      },
+    });
+
+    const blocks = await harness.dispatch({ group: "flags", value: "on" });
+    const text = (blocks[0] as { text?: string }).text ?? "";
+
+    expect(harness.get("open")).toBe("on");
+    expect(harness.get("locked")).toBe("off");
+    expect(text).toContain("open");
+    expect(text).not.toContain("locked");
+    await harness.close();
+  });
+
+  it("group dispatch errors when every member is read-only", async () => {
+    const { harness } = await makeHarness();
+    await harness.register({
+      id: "g1",
+      descriptor: {
+        defaultValue: "active",
+        valueType: "string",
+        options: ["inactive", "active"],
+        group: "gates",
+        readOnly: true,
+      },
+    });
+
+    const blocks = await harness.dispatch({ group: "gates", value: "inactive" });
+
+    expect((blocks[0] as { text?: string }).text).toContain("read-only");
+    expect(harness.get("g1")).toBe("active");
+    await harness.close();
+  });
+
+  it("harness.set() still mutates a read-only knob (application-owned writes)", async () => {
+    const { harness } = await makeHarness();
+    await harness.register({
+      id: "phase",
+      descriptor: { defaultValue: "collecting", valueType: "string", readOnly: true },
+    });
+
+    await harness.set({ id: "phase", value: "done" });
+
+    expect(harness.get("phase")).toBe("done");
+    await harness.close();
+  });
+});
+
 // ============================================================================
 // Conformance suite — runs the full protocol-contract test set
 // ============================================================================

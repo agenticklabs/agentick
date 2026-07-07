@@ -311,6 +311,15 @@ export interface KnobRegistration {
    */
   readonly inline?: boolean;
   /**
+   * Model-visible but not model-settable. The knob renders in the
+   * `<Knobs />` section (with a `read-only` hint) so the model can read
+   * the state, but the `set_knob` dispatch pipeline rejects writes by
+   * name and skips it in group writes. Only application code mutates it
+   * (via `harness.set` / the `useKnob` setter). Verified gates rely on
+   * this to keep their state unforgeable.
+   */
+  readonly readOnly?: boolean;
+  /**
    * Custom validator. Return `true` if valid, or an error message
    * string to surface to the model. Non-serializable — cross-process
    * bridges drop this field.

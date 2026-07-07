@@ -212,16 +212,27 @@ export class KnobsHarness extends BaseHarness<"knobs"> implements KnobsHarnessPr
       if (!knob) {
         return err(`Unknown knob "${input.name}". Available: ${all.map((k) => k.id).join(", ")}`);
       }
+      if (knob.readOnly) {
+        return err(
+          `Knob "${knob.id}" is read-only — it is managed by the application and cannot be set.`,
+        );
+      }
       const reason = validateValue(knob, input.value);
       if (reason) return err(reason);
       this.applySet({ id: knob.id, value: input.value });
       return [{ type: "text", text: `Set ${knob.id} to ${fmt(input.value)}.` }];
     }
 
-    // Group dispatch: type-check the whole group first; mutate atomically.
-    const targets = all.filter((k) => k.group === input.group);
+    // Group dispatch: read-only knobs are excluded from group writes;
+    // type-check the remaining group first; mutate atomically.
+    const members = all.filter((k) => k.group === input.group);
+    const targets = members.filter((k) => !k.readOnly);
     if (targets.length === 0) {
-      return err(`No knobs found in group "${input.group}".`);
+      return err(
+        members.length > 0
+          ? `All knobs in group "${input.group}" are read-only — they are managed by the application and cannot be set.`
+          : `No knobs found in group "${input.group}".`,
+      );
     }
     const expected = targets[0]!.valueType;
     for (const t of targets) {

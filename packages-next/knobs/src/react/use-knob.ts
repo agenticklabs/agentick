@@ -50,6 +50,11 @@ export interface UseKnobOptions {
   readonly required?: boolean;
   readonly momentary?: boolean;
   readonly inline?: boolean;
+  /**
+   * Model-visible but not model-settable — `set_knob` rejects writes;
+   * only application code mutates via the returned setter.
+   */
+  readonly readOnly?: boolean;
   readonly validate?: (value: KnobPrimitive) => true | string;
   readonly schema?: StandardSchemaV1;
 }
@@ -121,6 +126,7 @@ function buildRegistration(
     ...(options?.required !== undefined ? { required: options.required } : {}),
     ...(options?.momentary !== undefined ? { momentary: options.momentary } : {}),
     ...(options?.inline !== undefined ? { inline: options.inline } : {}),
+    ...(options?.readOnly !== undefined ? { readOnly: options.readOnly } : {}),
     ...(options?.validate !== undefined ? { validate: options.validate } : {}),
     ...(options?.schema !== undefined ? { schema: options.schema } : {}),
   };

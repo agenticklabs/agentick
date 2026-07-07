@@ -1,7 +1,17 @@
 # Agentick v2 — Implementation Status
 
 **Branch:** `feat/v2`
-**Last updated:** 2026-07-07 — **MCP push started: gap-mapped (v2 ahead architecturally, regressed on coverage vs v1); Wave 1 HTTP transports LANDED (`08470a28`) — real-loopback conformance, OAuth reachable; ADR 62 (ResourcesHarness) + ADR 61 correction drafted. Earlier: #240 sandbox-local OS-jail (`73e70e16`) — exec runs jailed (seatbelt/bwrap/unshare/cgroup), confinement PROVEN; closes the silent v1 regression. Auth: slice-3 relocation WITHDRAWN (`25800124`) — per-transport authSource stays. Resume #139 (`30e448ce`); stores #132 (`dcc5565b`); ingress authn slice 1 (`59b66185`); sandbox `sandbox-lambda-next` (`9ab97cd6`).**
+**Last updated:** 2026-07-07 — **Verified gates + read-only knobs landed (gates/knobs/spec) — see dated entry below. Earlier: MCP push started: gap-mapped (v2 ahead architecturally, regressed on coverage vs v1); Wave 1 HTTP transports LANDED (`08470a28`) — real-loopback conformance, OAuth reachable; ADR 62 (ResourcesHarness) + ADR 61 correction drafted. Earlier: #240 sandbox-local OS-jail (`73e70e16`) — exec runs jailed (seatbelt/bwrap/unshare/cgroup), confinement PROVEN; closes the silent v1 regression. Auth: slice-3 relocation WITHDRAWN (`25800124`) — per-transport authSource stays. Resume #139 (`30e448ce`); stores #132 (`dcc5565b`); ingress authn slice 1 (`59b66185`); sandbox `sandbox-lambda-next` (`9ab97cd6`).**
+
+**2026-07-07 (gates) — Verified gates + read-only knobs (parity+ with v1 work of same date).**
+
+Ported the new gate species from `packages/` (v1, uncommitted on this branch — ships separately with its own changeset) and brought `packages-next` to parity plus the arming extension:
+
+- **`@agentick/spec-next`**: `KnobRegistration.readOnly` — model-visible, not model-settable.
+- **`@agentick/knobs-next`**: `dispatch()` (set_knob pipeline) rejects read-only knobs by name; group writes skip read-only members (error when the whole group is read-only). `harness.set()` untouched — application writes always work. React: `UseKnobOptions.readOnly` threaded; `<Knobs />` formatter emits a `read-only` hint.
+- **`@agentick/gates-next`**: `GateDescriptor` is now a union — latch gates (`activateWhen`, unchanged) | verified gates (`satisfied`): level-triggered code predicate evaluated at every tick-end, auto-clears on pass, re-engages on regression, backing knob registered read-only (unforgeable), `defer()` no-op, **fail-closed on predicate throw** (v2's LifecycleStore isolates handler errors, so the hook must catch and treat as unsatisfied — differs from v1 where a throw propagates). Optional `activateWhen` on a verified gate is an ARMING SCOPE: dormant (no verification, no blocking) until the arming predicate first fires; sticky per mount; verification takes over same-tick.
+- **Tests**: +10 gates specs (engage/block, auto-clear, regression, async, fail-closed, read-only knob registration, dispatch bypass rejection, defer no-op, dormant/arming) and +4 knobs harness specs (read-only name/group/all-read-only/application-set). Full `packages-next` suite green (3203 passed); per-pkg tsc clean (spec, knobs, gates).
+- Judged by me: fresh per-pkg tsc, real stubKnobsHarness dispatch round-trips (not mocks), adversarial coverage on the bypass path.
 
 **2026-07-07 (later) — MCP push: Waves 1–4a landed + content-block safety net.**
 

@@ -168,6 +168,7 @@ function formatKnobLine(knob: KnobInfo): string {
   if (knob.pattern !== undefined) hints.push(`pattern: ${knob.pattern}`);
   if (knob.required) hints.push("required");
   if (knob.momentary) hints.push("resets after use");
+  if (knob.readOnly) hints.push("read-only");
   return hints.length > 0 ? `${head} (${hints.join(", ")})` : head;
 }
 

@@ -9,5 +9,10 @@
 export { useGate, type GateState } from "./use-gate.js";
 
 // Re-export descriptor types so adopters can pull everything from /react.
-export { gate, GATE_OPTIONS } from "../descriptor.js";
-export type { GateDescriptor, GateValue } from "../descriptor.js";
+export { gate, isVerifiedGate, GATE_OPTIONS, VERIFIED_GATE_OPTIONS } from "../descriptor.js";
+export type {
+  GateDescriptor,
+  LatchGateDescriptor,
+  VerifiedGateDescriptor,
+  GateValue,
+} from "../descriptor.js";
