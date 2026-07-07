@@ -353,6 +353,17 @@ function buildWireExtensionContext(
  */
 function buildTransportSlot(reqId: JsonRpcId, sink: DispatchSink): WireExtensionTransport {
   return {
+    // TODO(#19-progress-wire): bridge `progress` bus events → this
+    // ProgressReporter (ADR 64). A tool's `ctx.progress` now emits a
+    // `<surface>:signal:progress` bus event scoped to its execution; the
+    // MCP-server projection already forwards those to the wire, but the
+    // agentick client path does NOT yet. When `session/send` dispatch
+    // carries the caller's `_meta.progressToken`, subscribe to progress
+    // signal events scoped to that execution and call `reporter.push()`
+    // here. Deferred because the clean stitch lives in the send-dispatch
+    // path (execution id + progressToken correlation), not in this slot
+    // builder — it is not a ≤20-line addition and spans the gateway send
+    // path. Log is the load-bearing ADR-64 deliverable and has landed.
     progress(progressToken): ProgressReporter {
       let cursor = 0;
       return {

@@ -430,9 +430,35 @@ Then:
    the projected view (`prompts.transforms` lands later — see roadmap).
 
 The `McpRequestContext` flowing into a handler carries `user`,
-`clientInfo`, `clientCapabilities`, `signal` (for cancellation),
-`sendProgress` (when client supports it), and adopter `metadata`. See
+`clientInfo`, `clientCapabilities`, `signal` (for cancellation), the
+universal `log` / `progress` signal slots (ADR 64, below), and adopter
+`metadata`. See
 [`spec/protocol/mcp-server-harness.ts`](../spec/src/protocol/mcp-server-harness.ts).
+
+### Runtime signals — `ctx.log` / `ctx.progress` are bus events, not sinks (ADR 64)
+
+Wave 3a's `ctx.log` wrote the wire directly (`sendLoggingMessage`), so
+a tool's log went nowhere unless it ran as an MCP server. ADR 64
+reworks this. `ctx.log` / `ctx.progress` are now **universal
+always-present** slots on every `ToolHandlerCtx`; each emits ONE
+discrete bus event (`<surface>:signal:log` / `:progress`) scoped to the
+connection. The MCP server side is now a **bus subscriber**:
+
+- `installLogProjection({ sdkServer, state, bus, connectionScope })` —
+  subscribes to `log` events for this connection and forwards to
+  `notifications/message`, filtered by the client's `logging/setLevel`
+  (installed only when the `logging` capability is advertised).
+- `installProgressProjection({ sdkServer, bus, connectionScope })` —
+  subscribes to `progress` events and forwards to
+  `notifications/progress`. Progress is **not** capability-gated in the
+  MCP spec (no `setLevel` equivalent), so it installs unconditionally
+  per connection.
+
+Both fire-and-forget and swallow send-on-closed. The old direct log
+sink and the `McpRequestExtras.sendProgress` callback are retired — one
+emit seam, projections subscribe. Verified by
+`src/server/__tests__/projection-completions-logging.spec.ts` (log) and
+`src/server/__tests__/progress.spec.ts` (progress).
 
 ## Capability negotiation
 
@@ -553,6 +579,15 @@ reference-server round-trip (until the package is a dev dep).
   register/update/remove, per-connection filter hides prompts from
   BOTH list AND get, `system → user` role flattening on the wire,
   unsubscribe-on-close prevents notification leak.
+- `src/server/__tests__/projection-completions-logging.spec.ts` —
+  argument completion + logging projection: `ctx.log` → bus →
+  `installLogProjection` → `notifications/message`, level filter via
+  `logging/setLevel`, default-level emits everything, opt-out installs
+  no projection (ADR 64 re-sourcing of Wave 3a through the bus).
+- `src/server/__tests__/progress.spec.ts` — `ctx.progress` → bus →
+  `installProgressProjection` → `notifications/progress` (token +
+  fields), and progress fires with logging opted out (no capability
+  gate).
 - `src/server/__tests__/skeleton.spec.ts` — `validateOptions`
   rejection paths (bad transports / tools / prompts shape) + connection
   tracking + lifecycle idempotency.

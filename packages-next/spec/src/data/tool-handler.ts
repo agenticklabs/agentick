@@ -16,6 +16,7 @@ import type { Effect } from "effect";
 
 import type { Elicit } from "../protocol/elicit-api.js";
 import type { ContentBlock } from "./content-blocks.js";
+import type { LogLevel, ProgressToken } from "./signals.js";
 
 // ============================================================================
 // Channel emit seed
@@ -71,6 +72,37 @@ export interface ToolHandlerCtx {
   readonly signal: AbortSignal;
   setState(key: string, value: unknown): void;
   emit(seed: HandlerChannelSeed): void;
+
+  /**
+   * Emit a structured `log` signal — an out-of-band diagnostic
+   * (ADR 64). ALWAYS present on every transport: emitting a bus event
+   * is always possible; whether a wire projects it is the subscriber's
+   * concern (the MCP-server projection forwards to
+   * `notifications/message` filtered by the client's `logging/setLevel`;
+   * the agentick client receives via `subscribe` / `onLog`).
+   *
+   * Fire-and-forget — NEVER a control path. A dropped or failed
+   * projection never blocks the handler; the call returns immediately
+   * and never throws. This is diagnostics plumbing, not model-visible
+   * content (use the handler's return value / `emit` for content).
+   *
+   * @see docs/proposals/v2/blueprint/64-runtime-signal-family.md
+   */
+  log(level: LogLevel, data: unknown, logger?: string): void;
+
+  /**
+   * Emit a structured `progress` signal — out-of-band liveness for
+   * long-running work (ADR 64). ALWAYS present on every transport (see
+   * {@link log} for the emit-once / project-everywhere rationale). The
+   * MCP-server projection forwards to `notifications/progress`
+   * correlated by `token`; the agentick client receives via the
+   * existing per-token progress stream.
+   *
+   * Fire-and-forget — NEVER a control path; never awaited, never throws.
+   *
+   * @see docs/proposals/v2/blueprint/64-runtime-signal-family.md
+   */
+  progress(token: ProgressToken, p: { progress: number; total?: number; message?: string }): void;
 
   /**
    * Caller-resolved task mode for THIS dispatch. Mirrors
@@ -190,8 +222,11 @@ export interface McpRequestExtras {
   readonly clientInfo: { readonly name: string; readonly version: string } | null;
   /** Capability map the client advertised in `initialize`. */
   readonly clientCapabilities: Readonly<Record<string, unknown>> | null;
-  /** Send a `notifications/progress` to this connection for the in-flight request. */
-  readonly sendProgress?: (progress: number, total?: number, message?: string) => Promise<void>;
+  // NOTE(ADR 64): the direct `sendProgress` callback was retired in
+  // favor of the universal `ctx.progress` signal (emits one bus event
+  // the MCP-server progress projection forwards to
+  // `notifications/progress`). Parallel to retiring the direct `log`
+  // sink — one emit seam, projections subscribe.
 }
 
 /**

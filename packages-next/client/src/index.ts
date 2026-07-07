@@ -14,6 +14,13 @@ export { composeRequest, composeSubscribe } from "./pipeline.js";
 export { ClientHandlerRegistry } from "./handler-registry.js";
 export { effectMiddleware, type EffectRequestMiddleware } from "./effect-middleware.js";
 export { makeAppHandle, makeGatewayHandle, makeSessionHandle } from "./handles.js";
+export {
+  onLog,
+  onProgress,
+  type OnSignalOptions,
+  type ReceivedLog,
+  type ReceivedProgress,
+} from "./signals.js";
 
 // Re-export protocol types adopters need to write extensions, for the
 // "one import" ergonomic. Spec is the canonical source.

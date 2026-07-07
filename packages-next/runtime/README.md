@@ -203,6 +203,34 @@ the carrier.
 
 ---
 
+## Runtime signals — `emitLog` / `emitProgress` (ADR 64)
+
+`BaseHarness` exposes two protected helpers for the runtime signal
+family — the shared emit seam behind `ctx.log` / `ctx.progress` and any
+harness / loop that wants structured out-of-band diagnostics:
+
+```ts
+protected emitLog(scope, level, data, logger?): Effect<void, JournalError, never>
+protected emitProgress(scope, p: ProgressEventPayload): Effect<void, JournalError, never>
+```
+
+Each builds one discrete envelope (`<surface>:signal:log` /
+`:progress`, phase `terminal`, the `*EventPayload`, the caller's scope
+plus the harness principal) and appends it to the bus. They are
+**structurally bus-only** — they bypass `publish` / the journaling
+policy and append straight to the bus, so signals are NEVER journaled
+even though `terminal` is an `alwaysJournal` phase (routing diagnostic
+spam into the recovery spine would bloat it for zero durability
+benefit). A subscriber probe keeps the no-listener cost to one map
+lookup. Fire-and-forget: callers launch them via `Effect.runFork`.
+
+Consumers subscribe via the bus (the MCP-server projection, the
+gateway→client projection). There is intentionally NO ambient global
+`Context.log` — non-tool components that log ARE harnesses and emit via
+these helpers (see `TODO(#19-ambient)`).
+
+Verified by `src/__tests__/signals.spec.ts`.
+
 ## Lifting between Promise-land and Effect-land
 
 Adopter code is typically `async (input, deps) => result`. Substrate

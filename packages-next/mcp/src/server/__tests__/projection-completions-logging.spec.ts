@@ -15,7 +15,13 @@
  *    handler (proven by the filter flipping); `ctx.log("info")`
  *    surfaces while a below-level `ctx.log("debug")` is filtered when
  *    level=info; default level emits everything; opt-out suppresses the
- *    capability + `ctx.log`.
+ *    capability + the wire notifications.
+ *
+ * ADR 64 re-sourcing: `ctx.log` is now a UNIVERSAL slot that emits ONE
+ * bus event; `installLogProjection` (a bus subscriber) forwards it to
+ * `notifications/message`. These assertions are unchanged on the wire —
+ * they now prove the emit→bus→projection→wire path end-to-end rather
+ * than the retired direct `sendLoggingMessage` sink.
  *  - lifecycle bug: `capabilities.tasks:false` suppresses tasks and does
  *    NOT depend on `resources`.
  */
@@ -91,8 +97,10 @@ function logToolDeclaration(): ToolDeclaration {
 const logHandlerResolver: ToolHandlerResolver = (ref) => {
   if (ref !== "handler:emit_logs") return null;
   return async (_input, ctx) => {
-    ctx.log?.("info", { msg: "info-line" }, "test-logger");
-    ctx.log?.("debug", { msg: "debug-line" });
+    // ADR 64 — `ctx.log` is a universal always-present slot; it emits a
+    // bus event the log projection forwards to `notifications/message`.
+    ctx.log("info", { msg: "info-line" }, "test-logger");
+    ctx.log("debug", { msg: "debug-line" });
     const content: ContentBlock[] = [{ type: "text", text: "done" }];
     return { kind: "inline", content };
   };
@@ -268,7 +276,7 @@ describe("logging projection — ctx.log round-trip + level filter", () => {
     await cleanup();
   });
 
-  it("ctx.log is undefined when logging is opted out — no notifications fire", async () => {
+  it("logging opt-out installs no projection — ctx.log still emits, but no notifications fire", async () => {
     const { client, cleanup } = await makeConnectedClient({
       name: "log-off",
       capabilities: { logging: false },
@@ -278,7 +286,10 @@ describe("logging projection — ctx.log round-trip + level filter", () => {
     client.setNotificationHandler(LoggingMessageNotificationSchema, async (n) => {
       received.push(n);
     });
-    // Handler runs (ctx.log?.() is a no-op since ctx.log is undefined).
+    // ADR 64 — `ctx.log` is always present, so the handler still emits a
+    // bus event. But `installLogProjection` is gated on `loggingEnabled`,
+    // so with logging opted out there's no subscriber (the emit is a
+    // cheap no-op probe) and nothing reaches the wire.
     const result = await client.callTool({ name: "emit_logs", arguments: {} });
     await new Promise((r) => setTimeout(r, 10));
     expect(result.isError ?? false).toBe(false);

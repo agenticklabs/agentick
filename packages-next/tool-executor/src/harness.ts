@@ -34,6 +34,7 @@ import type {
   DispatchResult,
   ElicitationHarnessProtocol,
   EventBus,
+  EventScope,
   MessageEnvelope,
   MessageHandlerError,
   MessageInbox,
@@ -551,6 +552,14 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
       const channelEmits: HandlerChannelSeed[] = [];
       const publisher = this.channelPublisher;
       const opIdForCausality = input.opId ?? `tool:dispatch:${input.toolCallId}`;
+      // Scope stamped on every signal (`ctx.log` / `ctx.progress`) this
+      // dispatch emits — the work-path coordinates from the caller's
+      // context. Subscribers filter on these (e.g. `{ executionId }`).
+      const dispatchScope: EventScope = omitUndefined({
+        sessionId: input.context.sessionId,
+        executionId: input.context.executionId,
+        tickId: input.context.tickId,
+      });
       const ctx: ToolHandlerCtx = {
         toolCallId: input.toolCallId,
         ...omitUndefined({
@@ -607,6 +616,26 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
               }),
             );
           }
+        },
+        // ADR 64 — universal `log` / `progress` signals. Each emits ONE
+        // discrete bus event (`tool:signal:log` / `tool:signal:progress`,
+        // phase `terminal`, bus-only) scoped to this dispatch. Projections
+        // subscribe (MCP server → notifications/message + progress; the
+        // agentick client → subscribe / progress stream). Fire-and-forget:
+        // launched with `Effect.runFork`, never awaited, never throws into
+        // the handler.
+        log: (level, data, logger): void => {
+          void Effect.runFork(this.emitLog(dispatchScope, level, data, logger));
+        },
+        progress: (token, p): void => {
+          void Effect.runFork(
+            this.emitProgress(dispatchScope, {
+              token,
+              progress: p.progress,
+              ...(p.total !== undefined ? { total: p.total } : {}),
+              ...(p.message !== undefined ? { message: p.message } : {}),
+            }),
+          );
         },
       };
 

@@ -161,6 +161,8 @@ function fakeCtx(): McpRequestContext {
     transport: "mcp",
     setState: () => {},
     emit: () => {},
+    log: () => {},
+    progress: () => {},
     mcp: {
       serverId: "srv:test",
       connectionId: "conn:test",

@@ -109,9 +109,10 @@ export {
   type CompletionResult,
 } from "../protocol/completions.js";
 export {
-  buildMcpLog,
   createConnectionLogState,
   installLoggingHandler,
+  installLogProjection,
+  installProgressProjection,
   LOG_LEVEL_SEVERITY,
   type ConnectionLogState,
 } from "./projection/logging.js";
@@ -121,7 +122,6 @@ export {
 export type {
   McpAuthenticatedUser,
   McpLogLevel,
-  McpLogSink,
   McpRequestContext,
   McpServerConnectionInfo,
   McpServerError,

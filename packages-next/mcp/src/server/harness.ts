@@ -21,6 +21,7 @@ import { Effect } from "effect";
 import { BaseHarness, ulid, type Unsubscribe } from "@agentick/runtime-next";
 import type {
   EventBus,
+  EventScope,
   McpServerConnectionInfo,
   McpServerHarnessProtocol,
   McpRequestContext,
@@ -54,9 +55,10 @@ import { buildCapabilities } from "./protocol/lifecycle.js";
 import { buildMcpElicit } from "./projection/elicitation.js";
 import { installCompletionsHandlers } from "./projection/completions.js";
 import {
-  buildMcpLog,
   createConnectionLogState,
   installLoggingHandler,
+  installLogProjection,
+  installProgressProjection,
 } from "./projection/logging.js";
 import { installPromptsHandlers } from "./projection/prompts.js";
 import { installResourcesHandlers, type ResourcesFilter } from "./projection/resources.js";
@@ -507,11 +509,26 @@ export class McpServerHarness
     // `ctx.log` sink. Both are gated on `loggingEnabled` — the SDK
     // asserts the `logging` capability before letting either the
     // setLevel handler register or `sendLoggingMessage` fire.
+    // ADR 64 — `ctx.log` / `ctx.progress` no longer write the wire
+    // directly. Tool / prompt / completion handlers emit ONE discrete
+    // bus event (via `this.emitLog` / `this.emitProgress` below, scoped
+    // to this connection); these projections subscribe to that event and
+    // forward it to the wire. `connectionScope` is the per-connection
+    // filter both projections + the request-ctx emit share.
+    const connectionScope: Partial<EventScope> = {
+      mcpConnectionId: connectionId,
+      mcpServerId: this.scopeId,
+    };
     const logState = createConnectionLogState();
-    const logSink = this.loggingEnabled ? buildMcpLog(sdkServer, logState) : undefined;
     if (this.loggingEnabled) {
       installLoggingHandler(sdkServer, logState);
+      cleanup.push(
+        installLogProjection({ sdkServer, state: logState, bus: this.bus, connectionScope }),
+      );
     }
+    // Progress is not capability-gated in the MCP spec (no `setLevel`
+    // equivalent) — install unconditionally per connection.
+    cleanup.push(installProgressProjection({ sdkServer, bus: this.bus, connectionScope }));
 
     const buildRequestContext = (): McpRequestContext => {
       // Pull the client's negotiated capabilities + identity from the
@@ -541,6 +558,24 @@ export class McpServerHarness
         emit: () => {
           /* no-op for MCP-server ctx — sessions own channel emit */
         },
+        // ADR 64 — universal signal slots. Each emits ONE discrete bus
+        // event scoped to THIS connection; `installLogProjection` /
+        // `installProgressProjection` (above) subscribe and forward to
+        // the wire. Fire-and-forget — launched via `Effect.runFork`,
+        // never awaited, never throws into the handler.
+        log: (level, data, logger): void => {
+          void Effect.runFork(this.emitLog(connectionScope, level, data, logger));
+        },
+        progress: (token, p): void => {
+          void Effect.runFork(
+            this.emitProgress(connectionScope, {
+              token,
+              progress: p.progress,
+              ...(p.total !== undefined ? { total: p.total } : {}),
+              ...(p.message !== undefined ? { message: p.message } : {}),
+            }),
+          );
+        },
         task: "auto",
         transport: "mcp" as const,
         // #171d.3 — the server's TasksHarness. Handlers calling
@@ -565,10 +600,6 @@ export class McpServerHarness
           origin: info.origin,
           remoteAddress: info.remoteAddress,
         }),
-        // Wave 3a — structured-logging sink. Present iff logging is
-        // enabled AND the client didn't opt the server out. `undefined`
-        // otherwise; handlers must check before use.
-        ...(logSink ? { log: logSink } : {}),
       };
 
       // Attach `elicit` sugar when wired AND the client advertised

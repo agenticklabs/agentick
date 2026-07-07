@@ -75,6 +75,8 @@ function ctx(overrides: CtxOverrides = {}): McpRequestContext {
     signal: overrides.signal ?? new AbortController().signal,
     setState: () => {},
     emit: () => {},
+    log: () => {},
+    progress: () => {},
     task: "auto",
     transport: "mcp",
     mcp: {

@@ -247,6 +247,14 @@ nominal sugar.
 - **`Elicit`** (`protocol/elicit-api.ts`) — sugar interface exposed on
   `ctx.elicit` (tool handlers) and `session.elicit`. Same surface
   regardless of routing transport.
+- **Runtime signals** (`data/signals.ts`, ADR 64) — the firewall types
+  for the `log` + `progress` family: `LogLevel`, `ProgressToken`,
+  `LogEventPayload`, `ProgressEventPayload`, plus the canonical
+  `<surface>:signal:<action>` name builders (`logEventName` /
+  `progressEventName`) and cross-surface subscriber queries
+  (`logEventQuery` / `progressEventQuery`). `ctx.log` / `ctx.progress`
+  (universal slots on `ToolHandlerCtx`) emit ONE bus event; projections
+  subscribe. `McpLogLevel` is a re-export alias of `LogLevel`.
 - **`AgentickError`** (`errors/base.ts`) — abstract root of the v2
   typed-error class hierarchy (ADR 41). Concrete subclasses register via
   `registerAgentickError(tag, cls)` and serialize through
@@ -294,6 +302,10 @@ nominal sugar.
 - `src/__tests__/event-log.spec.ts`, `version.spec.ts` — event log
   contract, spec version.
 - `src/errors/__tests__/` — error base, codec, registry, Effect interop.
+- `src/__tests__/signals.spec.ts` — signal name builders + query shape
+  (ADR 64). The cross-surface query *matching* is verified against the
+  real matcher in `@agentick/runtime-next`
+  (`runtime/src/__tests__/signals.spec.ts`).
 
 The augmentation seams themselves are exercised by the packages that
 widen them (`@agentick/timeline-next`, `@agentick/model-openai-next`, …)

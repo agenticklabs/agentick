@@ -87,6 +87,10 @@ const handler: ToolHandler = async (input, { ctx, use }) => {
   // Raw protocol access (power users)
   await ctx.elicitation?.elicit({mode, message, schema}); // raw ElicitationHarness
 
+  // Runtime signals — out-of-band diagnostics + liveness (ADR 64)
+  ctx.log("info", { step: "started" }, "my-tool"); // → tool:signal:log bus event
+  ctx.progress("job-1", { progress: 3, total: 10, message: "…" }); // → tool:signal:progress
+
   // MCP-specific extras — undefined unless transport === "mcp"
   ctx.mcp?.connectionId;
   ctx.mcp?.clientCapabilities;
@@ -99,6 +103,25 @@ In-process ctx is built once per dispatch in the executor. The
 `ctx.elicit` sugar is constructed via `buildSessionElicit({ harness:
 this.elicitation })` (see `@agentick/elicitation-next`); identical
 factory + interface to the session-level `session.elicit`.
+
+### `ctx.log` / `ctx.progress` — the runtime signal family (ADR 64)
+
+`log` and `progress` are **universal, always-present** slots (like
+`emit` / `setState`) — not optional. Each call emits exactly ONE
+discrete bus event (`tool:signal:log` / `tool:signal:progress`, phase
+`terminal`, scoped to the dispatch's `{ sessionId, executionId,
+tickId }`) via `BaseHarness.emitLog` / `emitProgress`. The emit is
+**fire-and-forget** (launched with `Effect.runFork`) — never awaited,
+never throws into the handler, never a control path.
+
+Signals are **not sent to any wire directly**. Projections subscribe
+to the bus and forward: the MCP-server projection →
+`notifications/message` + `notifications/progress`; the agentick client
+→ `subscribe` / `onLog` (see `@agentick/client-next`). Emit once
+(framework), receive everywhere. Signals are structurally **bus-only**
+— never journaled — so diagnostic spam can't bloat the recovery spine.
+
+Verified by `src/__tests__/signals.spec.ts`.
 
 ## Conformance
 

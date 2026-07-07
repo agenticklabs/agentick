@@ -40,12 +40,24 @@ declare module "@agentick/spec-next" {
 
   interface EventScopeExtensions {
     /**
-     * MCP client connection identifier — populated by McpClientHarness
-     * operations so subscribers can filter events to a specific
-     * (session, server) connection via
-     * `app.events({ scope: { mcpConnectionId: "..." } })`.
+     * MCP connection identifier — the per-connection routing dimension
+     * for the MCP wire, used on BOTH roles:
+     *
+     *  - CLIENT (outbound): McpClientHarness operations stamp their
+     *    `(session, server)` connection so subscribers filter via
+     *    `app.events({ scope: { mcpConnectionId: "..." } })`.
+     *  - SERVER (inbound, ADR 64): McpServerHarness stamps each accepted
+     *    connection's id on `log` / `progress` signal events so the
+     *    per-connection log + progress projections subscribe to exactly
+     *    their connection's signals.
+     *
+     * The two roles never share an id space (client connection ids and
+     * server `conn:*` ids are disjoint), and every projection also
+     * filters by `surface` + signal name, so the shared dimension name
+     * carries no cross-role ambiguity.
      *
      * @see docs/proposals/v2/blueprint/45-runtime-context-model.md
+     * @see docs/proposals/v2/blueprint/64-runtime-signal-family.md
      */
     readonly mcpConnectionId?: string;
   }

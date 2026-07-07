@@ -35,6 +35,8 @@ export interface FakeToolHandlerCtxOverrides {
   readonly metadata?: Readonly<Record<string, unknown>>;
   readonly setState?: (key: string, value: unknown) => void;
   readonly emit?: ToolHandlerCtx["emit"];
+  readonly log?: ToolHandlerCtx["log"];
+  readonly progress?: ToolHandlerCtx["progress"];
 }
 
 /**
@@ -55,6 +57,9 @@ export function fakeToolHandlerCtx(overrides: FakeToolHandlerCtxOverrides = {}):
     signal: overrides.signal ?? new AbortController().signal,
     setState: overrides.setState ?? (() => {}),
     emit: overrides.emit ?? (() => {}),
+    // ADR 64 — universal signal slots; no-op defaults (override to spy).
+    log: overrides.log ?? (() => {}),
+    progress: overrides.progress ?? (() => {}),
     task: overrides.task ?? "auto",
     transport,
     ...(overrides.sessionId !== undefined ? { sessionId: overrides.sessionId } : {}),

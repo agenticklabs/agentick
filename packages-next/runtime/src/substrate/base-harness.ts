@@ -38,6 +38,8 @@ import type {
   InboxError,
   JournalError,
   JournalingPolicy,
+  LogLevel,
+  ProgressEventPayload,
   MessageEnvelope,
   MessageInbox,
   MessageInboxFactory,
@@ -55,6 +57,8 @@ import {
   AgentickError,
   CommandDeclarationError,
   DEFAULT_JOURNALING_POLICY,
+  logEventName,
+  progressEventName,
   HandlerError,
   InvalidPayload,
   LifecycleHandlerError,
@@ -724,6 +728,98 @@ export abstract class BaseHarness<
       return Effect.void;
     }
     return this.publish(this.makeEvent(op, "delta", op.scope ?? {}, { payload: buildPayload() }));
+  }
+
+  // ──────── ⑤b Signals (log + progress) — ADR 64 ────────
+
+  // TODO(#19-ambient): there is intentionally NO ambient global
+  // `Context.log` / `Context.progress` (a FiberRef-resolved emitter any
+  // code could call). Non-tool components that log ARE harnesses (the
+  // loop, the session) → they emit via `emitLog` / `emitProgress`
+  // directly. A FiberRef-ambient global would be a second entry point
+  // with known Promise-bridge propagation hazards (the emit fiber loses
+  // the ambient scope across `await`). Revisit only if a concrete
+  // non-harness caller appears; until then the two protected helpers are
+  // the sole seam.
+
+  /**
+   * Emit a `log` signal — a structured out-of-band diagnostic (ADR 64).
+   * The canonical entry point behind `ctx.log`; non-tool components (the
+   * loop, session, any harness) call this directly.
+   *
+   * Name is `<surface>:signal:log`; phase is `"terminal"` (a discrete
+   * notification, no opId); payload is a {@link LogEventPayload}.
+   *
+   * **Structurally bus-only.** Signals are ephemeral diagnostics — they
+   * are NEVER journaled, regardless of the harness's
+   * {@link JournalingPolicy}. This is why the helper bypasses `publish`
+   * / `decideFromShape` (which would route `terminal` to the journal per
+   * `DEFAULT_JOURNALING_POLICY.alwaysJournal`) and appends straight to
+   * the bus. Routing signal spam into the recovery/audit spine would
+   * bloat it for zero durability benefit. The subscriber-probe keeps the
+   * no-listener cost to one map lookup (fire-and-forget parity with
+   * `emitLazy`).
+   *
+   * @see docs/proposals/v2/blueprint/64-runtime-signal-family.md
+   */
+  protected emitLog(
+    scope: EventScope,
+    level: LogLevel,
+    data: unknown,
+    logger?: string,
+  ): Effect.Effect<void, JournalError, never> {
+    return this.emitSignal(
+      logEventName(this.surface),
+      scope,
+      logger !== undefined ? { level, data, logger } : { level, data },
+    );
+  }
+
+  /**
+   * Emit a `progress` signal — out-of-band liveness for long-running
+   * work (ADR 64). The canonical entry point behind `ctx.progress`.
+   *
+   * Name is `<surface>:signal:progress`; phase is `"terminal"`; payload
+   * is a {@link ProgressEventPayload}. Structurally bus-only for the
+   * same reason as {@link emitLog}.
+   *
+   * @see docs/proposals/v2/blueprint/64-runtime-signal-family.md
+   */
+  protected emitProgress(
+    scope: EventScope,
+    p: ProgressEventPayload,
+  ): Effect.Effect<void, JournalError, never> {
+    return this.emitSignal(progressEventName(this.surface), scope, p);
+  }
+
+  /**
+   * Shared bus-only append for the signal family. Probes the subscriber
+   * index first (no listener → one map lookup, no envelope), then
+   * appends the discrete `terminal` envelope directly to the bus —
+   * never the journal. Stamps the harness's construction-bound principal
+   * like {@link makeEvent} does.
+   */
+  private emitSignal(
+    name: string,
+    scope: EventScope,
+    payload: unknown,
+  ): Effect.Effect<void, JournalError, never> {
+    if (!this.bus.hasSubscriberFor({ surface: this.surface, name, phase: "terminal" })) {
+      return Effect.void;
+    }
+    const envelope: ProtocolEvent = {
+      id: ulid(),
+      surface: this.surface,
+      name,
+      phase: "terminal",
+      timestamp: Date.now(),
+      scope:
+        this.principal !== undefined
+          ? omitUndefined({ ...scope, principal: this.principal })
+          : scope,
+      payload,
+    } as ProtocolEvent;
+    return this.bus.append(envelope);
   }
 
   // ──────── ② Inbox dispatch ────────

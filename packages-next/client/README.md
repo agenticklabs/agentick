@@ -104,6 +104,32 @@ Returns a `Client` (= `ClientProtocol` widened with any extension-registered nam
 
 Shapes mirror the in-process `GatewayHarnessProtocol` / `AppHarnessProtocol` / `SessionHarnessProtocol`.
 
+### Runtime signals — `onLog` / `onProgress` (ADR 64)
+
+Tools and harnesses emit `log` / `progress` signals as bus events; the
+gateway projects matching events to subscribed clients over the
+existing `subscribe` channel. `onLog` / `onProgress` are typed sugar
+over `client.transport.subscribe(scope, query)` — they build the
+cross-surface wildcard query and map each envelope to its decoded
+payload plus origin scope, so app code doesn't hand-roll it:
+
+```ts
+import { onLog, onProgress } from "@agentick/client-next";
+
+const off = onLog(client, { kind: "session", id: sessionId }, (e) => {
+  // e: { level, data, logger?, scope }
+  console.log(e.level, e.data);
+});
+onProgress(client, { kind: "session", id: sessionId }, (e) => {
+  // e: { token, progress, total?, message?, scope }
+});
+off(); // closes the underlying subscription
+```
+
+A `useLog` React hook is deferred until a `client-react` surface exists
+(see `TODO(#19-react)` in `src/signals.ts`); `onLog` is the framework-
+agnostic primitive it will wrap.
+
 ### Capabilities + server info
 
 `client.connect()` runs a two-step handshake — `initialize` (protocol version + framework flags + server info) then `_extensions/list` (wire-extension enumeration for feature-gating). Both populate `client.capabilities` and `client.serverInfo`.
@@ -252,6 +278,7 @@ under "Roadmap & known gaps" with an explicit marker.
 | `ClientHandlerRegistry` per-event merge kinds (`observer` / `first-non-null-wins` / `any-reconnect-wins`) | `src/__tests__/handler-registry.spec.ts`                      |
 | `effectMiddleware` Effect↔Promise adapter, error propagation, interleave with Promise middleware          | `src/__tests__/effect-middleware.spec.ts`                     |
 | `client.send(sessionId, input)` shortcut shape equivalence with `client.session(id).send(input)`          | `../transport-in-process/src/__tests__/send-shortcut.spec.ts` |
+| `onLog` / `onProgress` cross-surface query + envelope→payload mapping + unsubscribe closes stream (ADR 64) | `src/__tests__/signals.spec.ts`                               |
 
 ## Roadmap & known gaps
 
