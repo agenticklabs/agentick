@@ -1111,6 +1111,12 @@ importers:
         specifier: ^19.2.5
         version: 19.2.13
 
+  packages-next/sandbox-docker:
+    dependencies:
+      '@agentick/sandbox-next':
+        specifier: workspace:*
+        version: link:../sandbox
+
   packages-next/sandbox-local:
     dependencies:
       '@agentick/sandbox-next':

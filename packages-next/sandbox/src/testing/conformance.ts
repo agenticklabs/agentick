@@ -27,11 +27,21 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { SandboxUnsupportedError } from "../errors.js";
 import type { SandboxHandle, SandboxProvider } from "../contract.js";
 
 export interface SandboxProviderConformanceOptions {
   /** Suite label (defaults to the provider `name`). */
   readonly label?: string;
+  /**
+   * Skip the whole suite (registers it as skipped, never constructs a
+   * provider). For providers whose backend may be absent in the test env
+   * — e.g. `sandbox-docker-next` gating on a `docker info` probe — compute
+   * the availability boolean at the call site and pass `skip: !available`.
+   * Threading it as an option (rather than wrapping the call in an `if`)
+   * keeps the gate out of the test-body conditionals the linter forbids.
+   */
+  readonly skip?: boolean;
 }
 
 /**
@@ -51,8 +61,9 @@ export function runSandboxProviderConformance(
   options: SandboxProviderConformanceOptions = {},
 ): void {
   const label = options.label;
+  const suite = options.skip ? describe.skip : describe;
 
-  describe(`SandboxProvider conformance${label ? ` — ${label}` : ""}`, () => {
+  suite(`SandboxProvider conformance${label ? ` — ${label}` : ""}`, () => {
     const live: SandboxHandle[] = [];
     const hostDirs: string[] = [];
 
@@ -141,12 +152,12 @@ export function runSandboxProviderConformance(
 
     // ─── mounts (capability-tiered) ───
 
-    it("mounts: add/list/remove round-trip when supported, else absent", async () => {
+    it("mounts: add/list/remove round-trip when supported, else capability-tiered", async () => {
       const sb = await create();
 
       if (!sb.addMount || !sb.listMounts || !sb.removeMount) {
-        // Capability-tier: a provider that can't remount a running
-        // instance leaves these undefined. That's a valid, honest answer.
+        // Capability-tier, honest answer #1: a provider that can't remount
+        // a running instance leaves these undefined.
         expect(sb.addMount).toBeUndefined();
         return;
       }
@@ -155,7 +166,18 @@ export function runSandboxProviderConformance(
       hostDirs.push(hostDir);
       await writeFile(join(hostDir, "host.txt"), "from-host");
 
-      await sb.addMount({ hostPath: hostDir, sandboxPath: "mnt" });
+      // Capability-tier, honest answer #2 (e.g. docker): the methods exist
+      // but throw SandboxUnsupportedError rather than faking success. Both
+      // answers are contract-valid (ADR 59); NEVER a silent no-op.
+      try {
+        await sb.addMount({ hostPath: hostDir, sandboxPath: "mnt" });
+      } catch (err) {
+        expect(err).toBeInstanceOf(SandboxUnsupportedError);
+        await expect(sb.listMounts()).rejects.toBeInstanceOf(SandboxUnsupportedError);
+        await expect(sb.removeMount("mnt")).rejects.toBeInstanceOf(SandboxUnsupportedError);
+        return;
+      }
+
       const mounts = await sb.listMounts();
       expect(mounts.some((m) => m.sandboxPath === "mnt")).toBe(true);
 
