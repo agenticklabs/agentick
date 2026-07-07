@@ -82,12 +82,12 @@ a config before constructing the harness.
 The harness mounts every transport at `start()`; each can accept many
 concurrent connections.
 
-| Factory                                    | Wire     | Notes                                                                                             |
-| ------------------------------------------ | -------- | ------------------------------------------------------------------------------------------------- |
-| `stdioServerTransport()` (#171c follow-up) | stdio    | Default for `spawnStandaloneMcpServer`. One process = one connection. Adopter owns SIGINT.        |
-| `inMemoryServerTransport()`                | in-proc  | Adopter-driven test fixture. Returns `.connect()` that yields the client end.                     |
-| `httpServerTransport()` (future)           | HTTP+SSE | Streamable HTTP per MCP 2025-11-25. OAuth-aware (lands #134).                                     |
-| Custom                                     | any      | Implement `ServerTransport`; the harness only cares about `listen(accept) → close()` + transport. |
+| Factory                                    | Wire     | Notes                                                                                                                                                                                                      |
+| ------------------------------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `stdioServerTransport()` (#171c follow-up) | stdio    | Default for `spawnStandaloneMcpServer`. One process = one connection. Adopter owns SIGINT.                                                                                                                 |
+| `inMemoryServerTransport()`                | in-proc  | Adopter-driven test fixture. Returns `.connect()` that yields the client end.                                                                                                                              |
+| `httpTransport({ port })`                  | HTTP+SSE | **Landed** — Streamable HTTP listener (multi-connection). Wraps the SDK `StreamableHTTPServerTransport`; per-`Mcp-Session-Id` routing; `port: 0` binds ephemeral. Accepts a caller-supplied `http.Server`. |
+| Custom                                     | any      | Implement `ServerTransport`; the harness only cares about `listen(accept) → close()` + transport.                                                                                                          |
 
 Transports carry their own `kind` discriminator (`"stdio"` / `"http"` / etc.)
 which the security pipeline reads for transport-aware defaults — stdio +
@@ -408,6 +408,13 @@ Spec types are re-exported for adopters' convenience: `McpRequestContext`,
   validation, connection tracking primitives.
 - `__tests__/end-to-end.spec.ts` — initialize + tools/list + tools/call
   with a real `McpClient` over `inMemoryServerTransport`.
+- `transports/__tests__/http-transport.spec.ts` — `httpTransport` over
+  **real loopback HTTP** (ephemeral port): full initialize → tools/list →
+  tools/call round-trip via the SDK `StreamableHTTPClientTransport`;
+  bearer auth reading the HTTP `Authorization` header through the security
+  pipeline; two concurrent clients each getting a distinct
+  `Mcp-Session-Id`; and the client `streamableHttpTransport` factory
+  wiring an OAuth `authProvider` whose redirect fires the URL elicit.
 - `__tests__/tools-slot.spec.ts` — trichotomy contract for the tools slot
   (every form + the xor-discrimination boundary cases).
 - `__tests__/projection-elicit.spec.ts` — `ctx.elicit` sugar surface +

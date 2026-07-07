@@ -47,7 +47,7 @@ code. See ADR 23 §6 (Package layout) and ADR 40 §1.
 | #171d.2.2 **Elicitation URL mode + `tryX` variants + `UrlElicitationRequired`**  | ✅                   |
 | #171d.2.3 Elicitation schema-flatness validation + advanced shapes               | ⏳                   |
 | #171d.3 Tasks projection (`tasks/list` + `tasks/get` + notifications)            | ⏳ (scoping pending) |
-| #171e Streamable HTTP transport + OAuth Resource Server                          | ⏳                   |
+| #171e Streamable HTTP transport (client + server, OAuth-threaded)                | ✅ (Wave 1)          |
 | #171f WebSocket transport                                                        | ⏳                   |
 | #171g Direct projection (`mcp://gateway/<name>` URL form)                        | ⏳                   |
 | #171h Embedded Authorization Server (optional)                                   | ⏳                   |
@@ -540,9 +540,15 @@ Defer until production load demands it; design space documented in
   slot.
 - **Connection pool (deferred, coming weeks)** — see "Connection
   lifecycle (client)" above.
-- **Streamable HTTP transport** is the production transport. Today
-  the client supports stdio + in-memory. Streamable HTTP lands
-  alongside the server-side HTTP transport (#171e).
+- **Streamable HTTP transport (client)** — **landed** (Wave 1).
+  `streamableHttpTransport({ url, oauth })` (from the package root)
+  builds the SDK `StreamableHTTPClientTransport` and threads the
+  `DefaultOAuthProvider` (elicit + credentials + interactive) into its
+  `authProvider`, so the SDK's 401 → authorize → `finishAuth` → retry
+  flow is reachable. Drop it into `withMCP({ servers: [{ transport }] })`.
+  Not yet exercised: a full end-to-end OAuth dance against a live IdP
+  (needs an authorization server; the wiring + elicit-fire path are
+  unit-verified).
 
 ### Server
 
@@ -555,9 +561,14 @@ Defer until production load demands it; design space documented in
   with v1's retry-loop sugar. Blocks on a `SamplingHarness` landing.
 - **Roots (`ctx.roots.*`)** — workspace bridge (#124).
 - **Resources (`resources/list` + `resources/read`)** — #123.
-- **Streamable HTTP transport + OAuth Resource Server** — #171e. Today
-  the server supports stdio + in-memory only. HTTP unlocks
-  production deployment.
+- **Streamable HTTP transport (server)** — **landed** (Wave 1).
+  `httpTransport({ port })` (from `@agentick/mcp-next/server`) is a
+  multi-connection Streamable-HTTP listener wrapping the SDK
+  `StreamableHTTPServerTransport`; per-`Mcp-Session-Id` routing, ephemeral
+  ports (`port: 0`), and mounting on a caller-supplied `http.Server`. The
+  existing security pipeline runs for HTTP connections (`McpConnectionInfo`
+  built from the request). **OAuth Resource Server** (protected-resource
+  metadata, token introspection at the server edge) is still future.
 - **WebSocket transport** — #171f.
 - **Direct projection** — `mcp://gateway/<name>` URL form lets
   in-process clients call the projection layer without serialization.

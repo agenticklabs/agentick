@@ -16,10 +16,12 @@
  *   ✅ OAuth provider interface + DefaultOAuthProvider + OAuthCallbackServer (#1)
  *   ✅ protocol/errors (sanitization, builders) + completions (sugar) (#1)
  *   ✅ in-memory + stdio transports
+ *   ✅ Streamable HTTP transport — client (`streamableHttpTransport`)
+ *      + server (`@agentick/mcp-next/server` `httpTransport`), OAuth-threaded
  *   ✅ McpClientHarness — Transport / Auth / Protocol / Lifecycle (#2)
  *   ✅ withMCP extension + ToolBridge integration (#3)
  *   ✅ ElicitationBridge — server-to-client elicit/create routing (#4)
- *   ⏳ OAuth + URL-mode elicitation + Streamable HTTP (#5)
+ *   ✅ OAuth provider wired into the client HTTP transport (#5 client)
  *
  * @see docs/proposals/v2/blueprint/23-mcp-as-harness.md
  */

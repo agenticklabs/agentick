@@ -19,4 +19,9 @@ export {
   type TransportFactory,
   type TransportFactoryDeps,
 } from "./transport-factory.js";
+export {
+  streamableHttpTransport,
+  type StreamableHttpTransportOptions,
+  type StreamableHttpOAuthOptions,
+} from "./http-transport.js";
 export * from "../wire/task-codec.js";
