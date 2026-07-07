@@ -692,6 +692,60 @@ export type PromptsErrorChannel =
   | PromptsBackendError;
 
 // ============================================================================
+// ResourcesError — resource registry (URI → resolver) failures (ADR 62)
+// ============================================================================
+
+export abstract class ResourcesError extends AgentickError {}
+
+export class ResourceNotFound extends ResourcesError {
+  readonly _tag = "ResourceNotFound" as const;
+  readonly uri: string;
+  constructor(args: { readonly uri: string; readonly cause?: unknown }) {
+    super(`resource ${args.uri} not found`, { cause: args.cause });
+    this.uri = args.uri;
+  }
+}
+registerAgentickError("ResourceNotFound", ResourceNotFound);
+
+export class ResourceAlreadyRegistered extends ResourcesError {
+  readonly _tag = "ResourceAlreadyRegistered" as const;
+  readonly uri: string;
+  constructor(args: { readonly uri: string; readonly cause?: unknown }) {
+    super(`resource ${args.uri} already registered`, { cause: args.cause });
+    this.uri = args.uri;
+  }
+}
+registerAgentickError("ResourceAlreadyRegistered", ResourceAlreadyRegistered);
+
+export class ResourceResolverFailed extends ResourcesError {
+  readonly _tag = "ResourceResolverFailed" as const;
+  readonly uri: string;
+  override readonly cause: unknown;
+  constructor(args: { readonly uri: string; readonly cause: unknown }) {
+    super(`resource ${args.uri} resolver failed: ${String(args.cause)}`, { cause: args.cause });
+    this.uri = args.uri;
+    this.cause = args.cause;
+  }
+}
+registerAgentickError("ResourceResolverFailed", ResourceResolverFailed);
+
+export class ResourcesBackendError extends ResourcesError {
+  readonly _tag = "ResourcesBackendError" as const;
+  override readonly cause: unknown;
+  constructor(args: { readonly cause: unknown }) {
+    super(`resources backend error: ${String(args.cause)}`, { cause: args.cause });
+    this.cause = args.cause;
+  }
+}
+registerAgentickError("ResourcesBackendError", ResourcesBackendError);
+
+export type ResourcesErrorChannel =
+  | ResourceNotFound
+  | ResourceAlreadyRegistered
+  | ResourceResolverFailed
+  | ResourcesBackendError;
+
+// ============================================================================
 // SkillsError — skill registry failures
 // ============================================================================
 

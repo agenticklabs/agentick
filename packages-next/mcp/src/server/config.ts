@@ -22,11 +22,13 @@
 
 import {
   isPromptsInstance,
+  isResourcesInstance,
   isTaskHandle,
   McpServerConfigInvalid,
   type McpRequestContext,
   type PromptDeclaration,
   type Prompts,
+  type Resources,
   type ToolDeclaration,
 } from "@agentick/spec-next";
 import {
@@ -47,6 +49,7 @@ import type {
 } from "./security/stages.js";
 import type { ServerTransport } from "./transports/types.js";
 import type { ToolHandlerResolver } from "./projection/tools.js";
+import type { ResourcesFilter } from "./projection/resources.js";
 import type { CompletionHandler } from "../protocol/completions.js";
 
 /**
@@ -157,6 +160,33 @@ export type McpServerPromptsOptions =
   | readonly PromptDeclaration[]
   | Prompts
   | McpServerPromptsConfig;
+
+/**
+ * Config-object form of the resources slot. Supply `use` (an
+ * adopter-owned `Resources` source — the server never closes it) plus an
+ * optional per-connection `filter`. There is no `declarations` form:
+ * unlike prompts, a resource binding needs a resolver function, so the
+ * adopter constructs the source.
+ */
+export interface McpServerResourcesConfig {
+  /** Adopter-supplied Resources source. Server does NOT close it. */
+  readonly use?: Resources;
+  /** Per-connection visibility predicate for fixed resources. */
+  readonly filter?: ResourcesFilter;
+}
+
+/**
+ * The resources slot accepts two shapes:
+ *
+ *   1. `Resources` — instance shorthand. Adopter-supplied; the server
+ *      uses it as-is and never closes it.
+ *   2. {@link McpServerResourcesConfig} — config object wrapping an
+ *      existing instance plus an optional per-connection `filter`.
+ *
+ * Discrimination is structural — anything with the `Resources` method
+ * surface goes to form 1, plain objects go to form 2.
+ */
+export type McpServerResourcesOptions = Resources | McpServerResourcesConfig;
 
 /**
  * Capability-advertisement opt-OUTS. The harness drives defaults from
@@ -287,13 +317,14 @@ export interface McpServerOptions {
    */
   readonly elicit?: boolean | McpServerElicitOptions;
   /**
-   * Resources slot — wired when #123 lands. Absent = resources capability
-   * NOT advertised.
-   * TODO(phase-#123): symmetric with `tools` (#310) and `prompts`
-   * (#171d.1) — accept a live catalog and emit
-   * `notifications/resources/list_changed` on mutations.
+   * Resources slot — a `ResourcesHarness` (or `{ use, filter }` config)
+   * whose registry the server projects over `resources/*` (ADR 62).
+   * Absent = resources capability NOT advertised. Adopter-owned: unlike
+   * `prompts`, there is no declarative-array shorthand — a resource
+   * binding needs a resolver function, so the adopter builds the source
+   * and hands it in.
    */
-  readonly resources?: unknown;
+  readonly resources?: McpServerResourcesOptions;
   /**
    * Argument-completion handlers. Absent = completions capability NOT
    * advertised. Keyed by prompt name → argument name → handler; use
@@ -346,6 +377,9 @@ export function validateOptions(options: McpServerOptions): McpServerOptions {
   }
   if (options.prompts !== undefined) {
     validatePromptsOption(options.prompts);
+  }
+  if (options.resources !== undefined) {
+    validateResourcesOption(options.resources);
   }
   if (options.elicit !== undefined) {
     if (typeof options.elicit === "boolean") {
@@ -430,6 +464,45 @@ function validatePromptsOption(option: McpServerPromptsOptions): void {
   // Resolve to surface shape errors at validation time; discard result
   // (the harness re-resolves at construction time).
   resolvePromptsOption(option);
+}
+
+/**
+ * Internal-shape view onto a resolved {@link McpServerResourcesOptions}.
+ * The harness consumes this. Resolution happens via
+ * {@link resolveResourcesOption}.
+ */
+export interface ResolvedResourcesOptions {
+  readonly use: Resources | null;
+  readonly filter: ResourcesFilter | null;
+}
+
+/**
+ * Normalize the resources option into its internal resolved shape.
+ * Throws {@link McpServerConfigInvalid} on shape violations. Uses
+ * `isResourcesInstance` from `@agentick/spec-next` (the canonical
+ * structural guard).
+ */
+export function resolveResourcesOption(
+  option: McpServerResourcesOptions,
+): ResolvedResourcesOptions {
+  if (isResourcesInstance(option)) {
+    return { use: option, filter: null };
+  }
+  const cfg = option as McpServerResourcesConfig;
+  if (cfg === null || typeof cfg !== "object") {
+    throw invalid("resources must be a Resources instance or a config object", ["resources"]);
+  }
+  if (cfg.use === undefined) {
+    throw invalid("resources config must set `use`", ["resources", "use"]);
+  }
+  if (!isResourcesInstance(cfg.use)) {
+    throw invalid("resources.use must be a Resources instance", ["resources", "use"]);
+  }
+  return { use: cfg.use, filter: cfg.filter ?? null };
+}
+
+function validateResourcesOption(option: McpServerResourcesOptions): void {
+  resolveResourcesOption(option);
 }
 
 /**

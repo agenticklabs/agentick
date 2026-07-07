@@ -31,6 +31,7 @@ export {
   resolveCompletionsOption,
   resolveElicitOption,
   resolvePromptsOption,
+  resolveResourcesOption,
   validateOptions,
   type McpServerAuthOptions,
   type McpServerCapabilitiesOptions,
@@ -40,10 +41,13 @@ export {
   type McpServerOptions,
   type McpServerPromptsConfig,
   type McpServerPromptsOptions,
+  type McpServerResourcesConfig,
+  type McpServerResourcesOptions,
   type McpServerToolsOptions,
   type PromptsFilter,
   type ResolvedCompletionsOptions,
   type ResolvedPromptsOptions,
+  type ResolvedResourcesOptions,
 } from "./config.js";
 export {
   buildMcpElicit,
@@ -78,6 +82,14 @@ export {
   toWirePromptMessages,
   type PromptsProjectionOptions,
 } from "./projection/prompts.js";
+export {
+  installResourcesHandlers,
+  toWireResource,
+  toWireResourceTemplate,
+  toWireContents,
+  type ResourcesFilter,
+  type ResourcesProjectionOptions,
+} from "./projection/resources.js";
 export {
   installCompletionsHandlers,
   type CompletionsProjectionOptions,

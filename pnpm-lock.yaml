@@ -811,6 +811,9 @@ importers:
       '@agentick/reconciler-next':
         specifier: workspace:*
         version: link:../reconciler
+      '@agentick/resources-next':
+        specifier: workspace:*
+        version: link:../resources
       '@agentick/spec-conformance-next':
         specifier: workspace:*
         version: link:../spec-conformance
@@ -1054,6 +1057,24 @@ importers:
       '@types/react-reconciler':
         specifier: 0.33.0
         version: 0.33.0(@types/react@19.2.13)
+
+  packages-next/resources:
+    dependencies:
+      '@agentick/pubsub-next':
+        specifier: workspace:*
+        version: link:../pubsub
+      '@agentick/runtime-next':
+        specifier: workspace:*
+        version: link:../runtime
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../spec
+      '@agentick/utils-next':
+        specifier: workspace:*
+        version: link:../utils
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
 
   packages-next/runtime:
     dependencies:

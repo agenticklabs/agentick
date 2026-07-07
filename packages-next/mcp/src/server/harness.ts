@@ -29,6 +29,7 @@ import type {
   MessageInbox,
   OperationJournal,
   Prompts,
+  Resources,
 } from "@agentick/spec-next";
 import { HandlerError, McpServerClosed } from "@agentick/spec-next";
 import { createNotifier, type Notifier } from "@agentick/pubsub-next";
@@ -41,6 +42,7 @@ import {
   resolveCompletionsOption,
   resolveElicitOption,
   resolvePromptsOption,
+  resolveResourcesOption,
   resolveToolsOption,
   type McpServerOptions,
   type PromptsFilter,
@@ -57,6 +59,7 @@ import {
   installLoggingHandler,
 } from "./projection/logging.js";
 import { installPromptsHandlers } from "./projection/prompts.js";
+import { installResourcesHandlers, type ResourcesFilter } from "./projection/resources.js";
 import { createServerTaskRegistry, installTasksHandlers } from "./projection/tasks.js";
 import { installToolsHandlers } from "./projection/tools.js";
 import { resolveSecurity, type ResolvedSecurity } from "./security/index.js";
@@ -140,6 +143,16 @@ export class McpServerHarness
   /** Per-connection prompts visibility predicate (resolved from options). */
   private readonly promptsFilter: PromptsFilter | null;
 
+  /**
+   * Adopter-supplied Resources source projected over `resources/*`
+   * (ADR 62), or `null` when no resources slot was wired. Always
+   * adopter-owned — the server never constructs one (a resource binding
+   * needs a resolver function), so `close()` never closes it.
+   */
+  private readonly resourcesSource: Resources | null;
+  /** Per-connection resources visibility predicate (resolved from options). */
+  private readonly resourcesFilter: ResourcesFilter | null;
+
   /** True when `options.elicit` opted into the elicitation capability. */
   private readonly elicitWired: boolean;
 
@@ -189,6 +202,16 @@ export class McpServerHarness
    */
   get prompts(): Prompts | null {
     return this.promptsSource;
+  }
+
+  /**
+   * The Resources source this server projects over `resources/*`, or
+   * `null` if no resources slot was wired (ADR 62). Adopter-owned —
+   * register/unregister bindings on it at runtime; the server observes
+   * via the notifier and re-projects.
+   */
+  get resources(): Resources | null {
+    return this.resourcesSource;
   }
 
   /**
@@ -260,6 +283,18 @@ export class McpServerHarness
       this.ownsPromptsSource = false;
       this.pendingPromptDeclarations = [];
       this.promptsFilter = null;
+    }
+
+    // Resources are always adopter-owned (no internal construction — a
+    // binding needs a resolver function). Resolve the source + filter;
+    // the harness only projects the registry, never mutates it.
+    if (!isFalsey(this.options.resources)) {
+      const resolvedResources = resolveResourcesOption(this.options.resources);
+      this.resourcesSource = resolvedResources.use;
+      this.resourcesFilter = resolvedResources.filter;
+    } else {
+      this.resourcesSource = null;
+      this.resourcesFilter = null;
     }
 
     this.elicitWired = resolveElicitOption(this.options.elicit);
@@ -431,12 +466,10 @@ export class McpServerHarness
       {
         tools: !isNull(this.resolvedTools) && this.resolvedTools.registry.list().length > 0,
         prompts: !isNull(this.promptsSource),
-        // TODO(phase-#123): resource runtime + resources/list projection
-        // + notifications/resources/list_changed emission. Tools (#310)
-        // and prompts (#171d.1) both fire list_changed on catalog
-        // mutations; resources will follow the same pattern once the
-        // resource substrate exists.
-        resources: false,
+        // ADR 62 / #237 — advertise `resources: { subscribe, listChanged }`
+        // only when a ResourcesHarness is wired. The projection reads the
+        // registry and fires updated / list_changed off its notifier.
+        resources: !isNull(this.resourcesSource),
         elicitation: this.elicitWired,
         sampling: false, // wired with SamplingHarness
         // #171d.3 — advertise tasks when at least one tool declares
@@ -586,6 +619,16 @@ export class McpServerHarness
       const unsubscribe = installPromptsHandlers(sdkServer, {
         source: this.promptsSource,
         ...(this.promptsFilter ? { filter: this.promptsFilter } : {}),
+        security: this.security,
+        buildContext: buildRequestContext,
+      });
+      cleanup.push(unsubscribe);
+    }
+
+    if (this.resourcesSource !== null) {
+      const unsubscribe = installResourcesHandlers(sdkServer, {
+        source: this.resourcesSource,
+        ...(this.resourcesFilter ? { filter: this.resourcesFilter } : {}),
         security: this.security,
         buildContext: buildRequestContext,
       });

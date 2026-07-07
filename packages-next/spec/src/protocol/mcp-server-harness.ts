@@ -30,6 +30,7 @@ import type {
 import type { McpServerError } from "../errors/harnesses.js";
 import type { Unsubscribe } from "./inbox.js";
 import type { Prompts } from "./prompts-harness.js";
+import type { Resources } from "./resources-harness.js";
 
 // Re-export from data/tool-handler so adopters who import McpAuthenticatedUser
 // / McpRequestExtras from this module's historical path keep working.
@@ -133,6 +134,15 @@ export interface McpServerHarnessProtocol {
    * for runtime mutation (`register` / `update` / `remove` / `reload`).
    */
   readonly prompts: Prompts | null;
+
+  /**
+   * The Resources source this server projects onto the wire, or `null`
+   * if no resources are wired (ADR 62). Adopter-owned — the server
+   * never constructs one internally (a resource binding needs a
+   * resolver function, so there is no declarative-array shorthand as
+   * there is for prompts). Read surface for runtime registration.
+   */
+  readonly resources: Resources | null;
 
   /**
    * Direct-projection handle for in-process clients. Returns a
