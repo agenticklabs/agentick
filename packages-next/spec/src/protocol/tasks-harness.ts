@@ -208,6 +208,16 @@ export interface TaskCreationInput {
    * in-process default.
    */
   readonly handlerRef?: string;
+  /**
+   * Which registered {@link import("./tasks-store.js").TaskExecutor} runs
+   * this task (ADR 68 Build B). Omitted → `"in-process"` (the bundled
+   * default). A by-ref executor (e.g. `"child-process"`) additionally
+   * requires {@link handlerRef} — the closure can't cross the process
+   * boundary, so the far side resolves the work from its handler
+   * registry. Selection is per-submit; the harness dispatches on
+   * `record.executorKind` at hydration / reattach.
+   */
+  readonly executorKind?: string;
 }
 
 // ============================================================================
@@ -356,6 +366,16 @@ export interface TasksHarnessProtocol {
   submit<T = readonly ContentBlock[], E = unknown>(
     work: (ctx: TaskWorkContext) => Effect.Effect<T, E, never>,
     opts?: TaskCreationInput,
+  ): TaskHandle<T>;
+  /**
+   * By-ref submit (ADR 68 Build B) — no closure. A by-ref executor
+   * (`executorKind: "child-process"`, …) resolves `handlerRef` from its
+   * own handler registry on the far side; the closure overloads can't be
+   * used because a closure doesn't cross a process / node boundary. Both
+   * `handlerRef` and `executorKind` are mandatory in this form.
+   */
+  submit<T = readonly ContentBlock[]>(
+    opts: TaskCreationInput & { readonly handlerRef: string; readonly executorKind: string },
   ): TaskHandle<T>;
 
   /** Snapshot. Returns `undefined` for unknown / expired task ids. */

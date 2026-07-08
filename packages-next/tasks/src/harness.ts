@@ -78,7 +78,12 @@ import type {
   TaskWorkContext,
   TasksHarnessProtocol,
 } from "@agentick/spec-next";
-import { HandlerError, UnknownTaskError } from "@agentick/spec-next";
+import {
+  HandlerError,
+  TaskHandlerRefRequiredError,
+  UnknownTaskError,
+  UnknownTaskExecutorError,
+} from "@agentick/spec-next";
 
 import { TASK_PROGRESS_CHANNEL, TASK_STATUS_CHANNEL } from "./channel.js";
 import { InMemoryTaskStore } from "./store.js";
@@ -165,11 +170,19 @@ export interface TasksHarnessOptions {
    */
   readonly store?: TaskStore;
   /**
-   * Execution strategy (ADR 68). Defaults to {@link InProcessTaskExecutor}
-   * (the current fiber model). A child-process / worker executor conforms
-   * to the same {@link TaskExecutor} seam.
+   * Execution strategies (ADR 68 Build B) — a registry keyed by each
+   * executor's self-reported `.kind`. The bundled default
+   * {@link InProcessTaskExecutor} is ALWAYS present; the provided list is
+   * merged over it (a provided executor whose `.kind` is `"in-process"`
+   * wins — one way, no back-compat shim). A submit selects per-task via
+   * `opts.executorKind` (omitted → `"in-process"`); hydration / reattach
+   * dispatch on `record.executorKind`.
+   *
+   * The typical wiring: the AppHarness constructs ONE app-scoped
+   * `ChildProcessTaskExecutor` (its child map must outlive sessions for
+   * detached-survives-close) and passes `[childExecutor]` here.
    */
-  readonly executor?: TaskExecutor;
+  readonly executors?: readonly TaskExecutor[];
 }
 
 // ============================================================================
@@ -183,7 +196,13 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
   /** `parentScope ?? {}` — stamped on records + used as the store filter. */
   private readonly scope: EventScope;
   private readonly store: TaskStore;
-  private readonly executor: TaskExecutor;
+  /**
+   * Executor registry keyed by `.kind` (ADR 68 Build B). Always contains
+   * the bundled `"in-process"` default; provided executors merge over it.
+   * `submit` resolves by `opts.executorKind`; hydration dispatches by
+   * `record.executorKind`.
+   */
+  private readonly executors: Map<string, TaskExecutor>;
 
   /**
    * Resolves once hydration (orphan accounting, ADR 68) has run — chained
@@ -208,7 +227,14 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
     this.parentScope = options.parentScope;
     this.scope = options.parentScope ?? {};
     this.store = options.store ?? new InMemoryTaskStore();
-    this.executor = options.executor ?? new InProcessTaskExecutor();
+    // Registry = bundled default FIRST, provided list merged over it
+    // (provided wins on `.kind` collision). Keyed by each executor's own
+    // `.kind` — the adopter never writes a Record whose keys would just
+    // duplicate `.kind`.
+    this.executors = new Map<string, TaskExecutor>([["in-process", new InProcessTaskExecutor()]]);
+    for (const executor of options.executors ?? []) {
+      this.executors.set(executor.kind, executor);
+    }
     // Hydration reads the store AFTER inbox registration. `ready` is a
     // readonly BaseHarness field (can't reassign), so this is a sibling
     // barrier. TODO(#134-followup): fold into `ready` if BaseHarness gains
@@ -218,6 +244,8 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
 
   // ─────────── submit ───────────
 
+  // Closure path (unchanged — inference-first so existing call sites are
+  // untouched; PARITY).
   submit<T = readonly ContentBlock[]>(
     work: (ctx: TaskWorkContext) => Promise<T> | T,
     opts?: TaskCreationInput,
@@ -226,17 +254,50 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
     work: (ctx: TaskWorkContext) => Effect.Effect<T, E, never>,
     opts?: TaskCreationInput,
   ): TaskHandle<T>;
+  // By-ref path (ADR 68 Build B) — no closure; a by-ref executor resolves
+  // `handlerRef` on the far side. Both `handlerRef` + `executorKind`
+  // mandatory in this form so the caller needn't pass a dummy closure.
   submit<T = readonly ContentBlock[]>(
-    work: (ctx: TaskWorkContext) => Promise<T> | T | Effect.Effect<T, unknown, never>,
-    opts: TaskCreationInput = {},
+    opts: TaskCreationInput & { readonly handlerRef: string; readonly executorKind: string },
+  ): TaskHandle<T>;
+  submit<T = readonly ContentBlock[]>(
+    workOrOpts:
+      | ((ctx: TaskWorkContext) => Promise<T> | T | Effect.Effect<T, unknown, never>)
+      | (TaskCreationInput & { handlerRef: string; executorKind: string })
+      | undefined,
+    maybeOpts: TaskCreationInput = {},
   ): TaskHandle<T> {
+    // Discriminate the two call forms: a function first arg is the closure
+    // (opts is the 2nd arg); anything else (an opts object, or an explicit
+    // `undefined` for `submit(undefined, opts)`) is the by-ref form.
+    const work: TaskWork | undefined =
+      typeof workOrOpts === "function" ? (workOrOpts as TaskWork) : undefined;
+    const opts: TaskCreationInput =
+      typeof workOrOpts === "function" ? maybeOpts : (workOrOpts ?? maybeOpts);
+
+    // Resolve the executor by kind (default "in-process") — fail loud on
+    // an unregistered kind (developer misuse, not a task outcome).
+    const executorKind = opts.executorKind ?? "in-process";
+    const executor = this.executors.get(executorKind);
+    if (executor === undefined) {
+      throw new UnknownTaskExecutorError({ kind: executorKind });
+    }
+    // By-ref validation: a by-ref executor ignores the closure and MUST
+    // have a `handlerRef` to resolve work on the far side. The second
+    // clause catches the runtime-only misuse of the by-ref overload with a
+    // closure executor (no closure AND no ref → nothing to run) — the
+    // typed overloads already forbid it, this is the honest runtime guard.
+    if (opts.handlerRef === undefined && (executor.byRef === true || work === undefined)) {
+      throw new TaskHandlerRefRequiredError({ kind: executorKind });
+    }
+
     const taskId = `task:${ulid()}`;
     const now = Date.now();
     const record: TaskRecord = {
       taskId,
       status: "working",
       scope: this.scope,
-      executorKind: this.executor.kind,
+      executorKind: executor.kind,
       detached: opts.detached ?? false,
       ttl: opts.ttl ?? null,
       createdAt: now,
@@ -267,9 +328,11 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
     this.persist(record);
     this.publishStatus(live);
 
-    // Start the executor. It invokes `work` synchronously (so signal
-    // listeners register before submit returns) and drives `report`.
-    const execution = this.executor.start(
+    // Start the resolved executor. A closure executor invokes `work`
+    // synchronously (so signal listeners register before submit returns);
+    // a by-ref executor ignores `work` (undefined here) and resolves
+    // `record.handlerRef` on the far side. Both drive the ONE `report`.
+    const execution = executor.start(
       record,
       work as TaskWork,
       this.makeReport(live),
@@ -407,7 +470,8 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
     if (live.execution !== undefined) {
       const execution = live.execution;
       live.execution = undefined;
-      await this.executor.cancel(execution, reason);
+      // Dispatch teardown to the executor that ran this record.
+      await this.executors.get(live.record.executorKind)?.cancel(execution, reason);
     }
   }
 
@@ -703,8 +767,13 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
         this.adoptHydrated(record); // terminal from a prior run
         continue;
       }
-      // Try to reattach; an in-process executor can't → interrupted.
-      const reattached = this.executor.reattach?.(record, this.makeReportFor(record.taskId));
+      // Dispatch reattach to the executor named on the record. An
+      // in-process executor can't reattach; a record whose `executorKind`
+      // isn't loaded in THIS app's registry resolves to `undefined`
+      // (honest — the strategy that ran it isn't here) → interrupted.
+      const reattached = this.executors
+        .get(record.executorKind)
+        ?.reattach?.(record, this.makeReportFor(record.taskId));
       if (reattached !== undefined) {
         const live = this.adoptHydrated(record);
         live.execution = reattached;
@@ -775,13 +844,19 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
 // TODO(#120-followup): auto-transition to `input_required` when a task's
 // work fn pauses on an elicit/sampling/roots request.
 //
-// TODO(ADR-68 Build B): the child-process executor implements the same
+// ADR-68 Build B (LANDED): `ChildProcessTaskExecutor` implements the same
 // `TaskExecutor` seam over IPC (serializable descriptor: `handlerRef` +
-// `input`; reports status/progress/result back → parent → `report`). Its
-// `TaskExecution` stashes the child handle; `cancel` sends a kill/IPC-
-// cancel and returns the exit-ack Promise. `reattach` (with a durable
-// store) re-adopts a still-live child by `executorState`.
+// `input`; reports status/progress/result back → parent → `report`). It's
+// selected per-submit via `opts.executorKind` from the `executors`
+// registry; hydration + cancel dispatch on `record.executorKind`. Its
+// `TaskExecution` stashes the child's `taskId`; `cancel` sends an
+// IPC-cancel + SIGKILL backstop and returns the exit-ack Promise;
+// `reattach` re-adopts a still-live child WITHIN the app process (the
+// app-scoped instance's map outlives the session).
 //
 // TODO(ADR-68 pg): `@agentick/tasks-postgres-next` conforms to `TaskStore`
 // — durability across app-process restart + real `interrupted`-on-restart
 // exercise (hydration is a same-process no-op with the in-memory store).
+// A durable store also unlocks cross-restart child reattach: persist the
+// child pid on `record.executorState` and adopt a still-live child by pid
+// on hydration (today's `reattach` is same-process only).

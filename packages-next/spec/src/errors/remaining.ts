@@ -35,6 +35,53 @@ export class UnknownTaskError extends AgentickError {
 registerAgentickError("UnknownTaskError", UnknownTaskError);
 
 // ============================================================================
+// UnknownTaskExecutorError — submit named an unregistered executor kind
+// ============================================================================
+
+/**
+ * Thrown by `TasksHarness.submit` when `opts.executorKind` names a
+ * {@link TaskExecutor} that isn't in this harness's registry (ADR 68
+ * Build B). Mirrors {@link UnknownTaskError} — developer misuse (typo,
+ * or an executor the app didn't inject), not a task outcome. Also the
+ * signal at hydration that a stored record's `executorKind` isn't loaded
+ * in this process (that path treats the record as non-reattachable →
+ * `interrupted` rather than throwing).
+ */
+export class UnknownTaskExecutorError extends AgentickError {
+  readonly _tag = "UnknownTaskExecutorError" as const;
+  readonly kind: string;
+  constructor(args: { readonly kind: string; readonly cause?: unknown }) {
+    super(`unknown task executor: ${args.kind}`, { cause: args.cause });
+    this.kind = args.kind;
+  }
+}
+registerAgentickError("UnknownTaskExecutorError", UnknownTaskExecutorError);
+
+// ============================================================================
+// TaskHandlerRefRequiredError — by-ref executor submit without a handlerRef
+// ============================================================================
+
+/**
+ * Thrown by `TasksHarness.submit` when a task is routed to a by-ref
+ * executor (`TaskExecutor.byRef === true`, e.g. `"child-process"`) but no
+ * `handlerRef` was supplied (ADR 68 Build B). A by-ref executor resolves
+ * the work from a handler registry on the far side — a closure can't
+ * cross the process boundary — so the reference is mandatory. Developer
+ * misuse, caught at `submit` before anything is persisted / forked.
+ */
+export class TaskHandlerRefRequiredError extends AgentickError {
+  readonly _tag = "TaskHandlerRefRequiredError" as const;
+  readonly kind: string;
+  constructor(args: { readonly kind: string; readonly cause?: unknown }) {
+    super(`task executor "${args.kind}" is by-ref and requires a handlerRef`, {
+      cause: args.cause,
+    });
+    this.kind = args.kind;
+  }
+}
+registerAgentickError("TaskHandlerRefRequiredError", TaskHandlerRefRequiredError);
+
+// ============================================================================
 // ChannelPublishError — channel publisher failures
 // ============================================================================
 

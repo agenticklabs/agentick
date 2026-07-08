@@ -30,6 +30,27 @@ export { withTasks, type WithTasksOptions } from "./extension.js";
 export { InMemoryTaskStore } from "./store.js";
 export { runTaskStoreConformance, type TaskStoreConformanceOptions } from "./store-conformance.js";
 export { InProcessTaskExecutor } from "./executor.js";
+// ADR 68 Build B — the child-process (isolation) executor + its by-ref
+// worker runtime. The transport-agnostic handler registry
+// (`registerTaskHandler` / `TaskHandlerRegistry`) is reused by any future
+// by-ref executor; `runTaskWorker` is the child-process-IPC driver on top.
+export {
+  ChildProcessTaskExecutor,
+  type ChildProcessTaskExecutorOptions,
+} from "./child-executor.js";
+export {
+  registerTaskHandler,
+  defaultTaskHandlerRegistry,
+  TaskHandlerRegistry,
+  type TaskHandlerWork,
+} from "./handler-registry.js";
+export { runTaskWorker } from "./worker.js";
+export {
+  runTaskExecutorConformance,
+  type TaskExecutorCase,
+  type TaskExecutorConformanceHarness,
+  type TaskExecutorConformanceOptions,
+} from "./executor-conformance.js";
 // Re-export the ports from the same package as the bundled impls so store
 // / executor adapters get the contract + reference from one dep.
 export type {

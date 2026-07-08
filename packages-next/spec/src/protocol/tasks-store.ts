@@ -192,6 +192,17 @@ export interface TaskExecutor {
   /** Strategy label stamped on `record.executorKind`. */
   readonly kind: string;
   /**
+   * `true` = this executor resolves the work **by reference**
+   * (`record.handlerRef` → a registered handler on the far side) and
+   * IGNORES the `work` closure handed to {@link start} (a closure can't
+   * cross a process / node boundary). The bundled in-process executor
+   * leaves this falsy — it runs the closure directly. The harness reads
+   * this flag to validate generically: a submit routed to a by-ref
+   * executor MUST carry a `handlerRef`, else it throws
+   * `TaskHandlerRefRequiredError` before starting.
+   */
+  readonly byRef?: boolean;
+  /**
    * Begin executing `work` (or, for a by-ref executor, resolve
    * `record.handlerRef`). MUST invoke the work synchronously enough that
    * the work body has registered its `signal` listeners before returning

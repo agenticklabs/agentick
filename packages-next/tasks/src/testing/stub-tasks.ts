@@ -54,10 +54,19 @@ export function stubTasks(options: StubTasksOptions = {}): TasksHarnessProtocol 
   const makeId = (): string => `task:stub:${counter++}`;
 
   function submitImpl<T = readonly ContentBlock[]>(
-    work: (ctx: TaskWorkContext) => Promise<T> | T | Effect.Effect<T, unknown, never>,
-    opts: TaskCreationInput = {},
+    workOrOpts:
+      | ((ctx: TaskWorkContext) => Promise<T> | T | Effect.Effect<T, unknown, never>)
+      | (TaskCreationInput & { handlerRef: string; executorKind: string })
+      | undefined,
+    maybeOpts: TaskCreationInput = {},
   ): TaskHandle<T> {
-    options.onSubmit?.(work, opts);
+    // Mirror the harness's two call forms: closure (work, opts?) vs by-ref
+    // (opts only). The stub runs nothing either way — it hands back a
+    // canned terminal handle.
+    const work = typeof workOrOpts === "function" ? workOrOpts : undefined;
+    const opts: TaskCreationInput =
+      typeof workOrOpts === "function" ? maybeOpts : (workOrOpts ?? maybeOpts);
+    if (work !== undefined) options.onSubmit?.(work, opts);
     const taskId = makeId();
     const now = Date.now();
     const info: TaskInfo = {

@@ -62,7 +62,7 @@ not published independently.
 | A.2   | Model-facing `session_tasks_*` tools — auto-registered `session_tasks_list / get / cancel / await` so the model can manage Pattern B tasks (#157)                  | ✅     |
 | B     | MCP wire codec — `tools/call` task opt-in, `notifications/tasks/status` translation, inbound `tasks/cancel`                                                        | ✅     |
 | 68-A  | Record-as-source-of-truth — `TaskStore` port + `InMemoryTaskStore`, `TaskExecutor` seam + `InProcessTaskExecutor`, `detached` lifetime, `interrupted` on hydration | ✅     |
-| 68-B  | Child-process executor over IPC (isolation / detached) — conforms to the `TaskExecutor` seam                                                                       | ⏳     |
+| 68-B  | Child-process executor over IPC (isolation / detached) + executor registry keyed by `.kind`, per-submit selection — conforms to the `TaskExecutor` seam            | ✅     |
 | 68-pg | `@agentick/tasks-postgres-next` durable store — durability + reattach across app-process restart                                                                   | ⏳     |
 | D     | Effect-native internals refactor — `Stream<TaskEvent>` for events, `Effect<TaskHandle>` work overload with real fiber interruptibility (#155)                      | ⏳     |
 
@@ -423,8 +423,8 @@ import {
   type TaskExecutor,
 } from "@agentick/tasks-next";
 
-// Inject a custom store / executor at construction:
-new TasksHarness(id, journal, bus, inbox, { store, executor });
+// Inject a custom store + executor registry at construction:
+new TasksHarness(id, journal, bus, inbox, { store, executors: [childExecutor] });
 ```
 
 `TaskStore` — `put` / `get` / `list(query?)` / `delete` / `prune?` +
@@ -515,9 +515,107 @@ class QueueTaskExecutor implements TaskExecutor {
 }
 ```
 
-The bundled `child-process` executor (ADR 68 Build B) is a worked instance of
-exactly this seam; a `@agentick/tasks-postgres-next` store is a worked instance
-of the store port.
+The bundled `ChildProcessTaskExecutor` (below) is a worked instance of exactly
+this seam; a `@agentick/tasks-postgres-next` store is a worked instance of the
+store port.
+
+## Executor registry + selecting an executor (ADR 68 Build B)
+
+An app runs MOST tasks in-process (cheap — a fiber) and opts SPECIFIC tasks out
+to an isolated child (crash-risky / CPU-heavy work). The harness holds a
+**registry of executors keyed by `.kind`**; a submit selects one **per task**
+via `executorKind` (omitted → `"in-process"`, the bundled default). Hydration
+and cancel dispatch on the record's `executorKind`.
+
+The registry is the bundled in-process default MERGED with the provided list —
+a provided executor wins on `.kind` collision, and each entry is keyed by its
+own self-reported `.kind` (you never write a `Record` whose keys duplicate
+`.kind`):
+
+```ts
+// App-scoped wiring (createApp) — NOT a cascade. Detached tasks + child
+// reattach need shared singletons that outlive any one session, so the
+// store + executors are owned by the app for its whole lifetime.
+createApp(RootAgent, {
+  model,
+  reconciler,
+  tasks: {
+    // store defaults to a node-local InMemoryTaskStore; swap a durable one.
+    executors: [
+      new ChildProcessTaskExecutor({
+        workerModule: path.resolve("./dist/task-worker.js"),
+      }),
+    ],
+  },
+});
+```
+
+Select per submit from a tool handler:
+
+```ts
+// in-process (default) — a closure runs on the main event loop
+ctx.tasks.submit(async ({ onProgress }) => {
+  onProgress({ current: 1, total: 1 });
+  return [{ type: "text", text: "done" }];
+});
+
+// child-process — a by-ref submit; no closure crosses the boundary
+ctx.tasks.submit({ executorKind: "child-process", handlerRef: "deploy", input });
+```
+
+A submit routed to a by-ref executor (`byRef: true`) without a `handlerRef`
+throws `TaskHandlerRefRequiredError` at `submit`, before anything forks; an
+unregistered `executorKind` throws `UnknownTaskExecutorError`.
+
+## The child-process executor (ADR 68 Build B)
+
+`ChildProcessTaskExecutor` (`byRef = true`) forks a Node child per submit for
+**execution isolation** and — because the store is app-scoped — survival of the
+spawning session's close. A closure can't cross a process boundary, so the
+executor IGNORES the `work` closure and hands the child a **serializable
+descriptor** (the `TaskRecord` — `handlerRef` + `input` live on it). The child
+resolves the handler from a registry, runs it, and reports
+status / progress / result back over IPC → parent → the uniform `report` seam.
+
+**The worker-module pattern.** The adopter authors a `workerModule` — register
+handlers, then call `runTaskWorker()`:
+
+```ts
+// task-worker.ts — the adopter's workerModule
+import { registerTaskHandler, runTaskWorker } from "@agentick/tasks-next";
+
+registerTaskHandler<{ target: string }>("deploy", async (ctx, input) => {
+  ctx.onProgress({ current: 0, total: 1, message: `deploying ${input.target}` });
+  await deploy(input.target, ctx.signal); // honor the abort signal for cancel
+  return [{ type: "text", text: "deployed" }];
+});
+
+runTaskWorker(); // one fork = one task; reports the terminal transition, exits
+```
+
+`registerTaskHandler` + `TaskHandlerRegistry` are **transport-agnostic** —
+resolve-work-by-ref with input/result generics the non-generic `TaskExecutor`
+port can't give. `runTaskWorker` is the child-process-IPC driver bolted on top;
+a future distributed executor reuses the SAME registry + `(ctx, input) => …`
+contract with its own driver (a queue-consumer loop) in place of it.
+
+**The adopter owns the loader.** `forkOptions` is passed straight to `fork` —
+the executor hardcodes no `execArgv`. A built JS worker needs nothing; a TS
+worker under `tsx` passes `{ execArgv: ["--import", "tsx"] }`.
+
+**Constraint (by-ref).** No closures cross the boundary — work is resolved from
+`handlerRef`. Both `input` and the returned result must be structured-cloneable
+(they round-trip through JSON IPC); `TaskFailure.cause` does NOT cross (an
+arbitrary thrown value doesn't serialize) — failures lossy-encode to `reason`,
+the same wire-boundary asymmetry the MCP codec documents.
+
+**What it delivers vs. defers.** Delivers: isolation, independent killability
+(graceful IPC-cancel → `SIGKILL` backstop after `killGracePeriodMs`), crash →
+`failed` (a child that dies mid-work surfaces honestly), and — because the
+executor instance is app-scoped — a `detached` child that survives its
+session's close and can be reattached WITHIN the app process. Defers: reattach
+across **app-process restart** (needs a durable store + the child pid on
+`record.executorState` — `TODO(ADR-68 pg)`).
 
 ## Test doubles
 
@@ -626,6 +724,19 @@ runTasksHarnessConformance(async ({ harnessId }) => {
   persisted, shared-store cross-session isolation, and
   `interrupted`-on-hydration (orphaned `working` → `interrupted`;
   terminal prior-run records surfaced read-only).
+- `src/__tests__/child-executor.spec.ts` — 10 tests that ACTUALLY fork a
+  `tsx`-loaded child and round-trip over IPC (no fakes for the process
+  boundary): echo result round-trip, ordered progress over IPC, thrower →
+  `failed`, graceful cancel (child exits), `SIGKILL` backstop for a child
+  that ignores cancel, `TaskHandlerRefRequiredError` on a by-ref submit
+  without `handlerRef` (before forking), `UnknownTaskExecutorError` on an
+  unregistered kind, registry merge (in-process + child both resolvable),
+  detached-survives-`close()` + reattach-within-process + cancel, and
+  non-detached killed on `close()`.
+- `src/__tests__/executor-conformance.spec.ts` — `runTaskExecutorConformance`
+  green for BOTH bundled strategies: `InProcessTaskExecutor` (closures) and
+  `ChildProcessTaskExecutor` (by-ref over a real fork). The proof the seam
+  is honestly uniform.
 - `src/__tests__/cluster-inbox.spec.ts` — 6 tests covering
   cluster-portable cancel / get / result via inbox addressing.
 - `src/__tests__/conformance.spec.ts` — drives
@@ -648,16 +759,13 @@ runTasksHarnessConformance(async ({ harnessId }) => {
 
 ## Roadmap & known gaps
 
-- **ADR 68 Build B (child-process executor)** — a `TaskExecutor` that
-  forks a child Node process, hands it a serializable descriptor
-  (`handlerRef` + `input`), and reports status/progress/result back over
-  IPC → parent → `report`. Delivers execution isolation (CPU-heavy /
-  crash-risky work off the main loop, independently killable). Conforms
-  to the existing seam — no harness change.
 - **ADR 68 pg (`@agentick/tasks-postgres-next`)** — a durable `TaskStore`
   conforming to the same port. Adds durability + reattach across
   app-process restart, and is what actually exercises the (already
-  wired) `interrupted`-on-hydration path.
+  wired) `interrupted`-on-hydration path. Also unlocks cross-restart
+  child reattach: persist the child pid on `record.executorState` and
+  adopt a still-live child by pid on hydration (today's child reattach is
+  same-process only).
 - **Phase D (Effect-native internals, #155)** — convert the
   per-subscriber `Queue<TaskEvent>` fan-out to `Stream.fromQueue`,
   expose an `Effect<TaskHandle>` work overload that runs as a real

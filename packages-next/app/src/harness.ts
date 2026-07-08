@@ -33,7 +33,7 @@ import {
 } from "@agentick/runtime-next";
 import { ElicitationHarness } from "@agentick/elicitation-next";
 import { TasksHarness, InMemoryTaskStore } from "@agentick/tasks-next";
-import type { TaskStore } from "@agentick/tasks-next";
+import type { TaskExecutor, TaskStore } from "@agentick/tasks-next";
 import { ResourcesHarness } from "@agentick/resources-next";
 import { LoopExecutorHarness } from "@agentick/loop-executor-next";
 import { isLanguageModelAdapter, type LanguageModelAdapter } from "@agentick/model-next";
@@ -232,6 +232,32 @@ export interface AppHarnessOptions<P = unknown> {
    *     shared substrate.
    */
   readonly loop?: LoopExecutorProtocol | LoopExecutorFactory;
+
+  /**
+   * Persistent-tasks substrate (ADR 68) — the durable `store` and the
+   * execution `executors` registry, both constructed ONCE at app scope
+   * and injected into every session's `TasksHarness`.
+   *
+   * **App-scoped, NOT a cascade.** This is deliberate: `detached` tasks
+   * and child-process reattach require SHARED singletons that outlive any
+   * one session. A session can't own its own store/executor — a detached
+   * task would die with its spawning session. So there is no per-session
+   * / per-createSession override; the app owns these for its whole
+   * lifetime.
+   *
+   *   - `store` — defaults to a node-local `InMemoryTaskStore`. Swap a
+   *     durable store (`@agentick/tasks-postgres-next`, same port) for
+   *     survival across app restart.
+   *   - `executors` — extra `TaskExecutor` strategies merged over the
+   *     bundled in-process default. Pass ONE app-scoped
+   *     `ChildProcessTaskExecutor` here so its child map outlives sessions
+   *     (detached-survives-close). Tasks select per-submit via
+   *     `executorKind`.
+   */
+  readonly tasks?: {
+    readonly store?: TaskStore;
+    readonly executors?: readonly TaskExecutor[];
+  };
 
   // ────────── Per-session defaults (constructed per createSession) ──────────
 
@@ -471,16 +497,23 @@ export class AppHarness<P = unknown>
   private _closed = false;
 
   /**
-   * App/gateway-scoped {@link TaskStore} (ADR 68). Constructed ONCE and
+   * App/gateway-scoped {@link TaskStore} (ADR 68). Constructed ONCE (from
+   * `options.tasks.store`, else a node-local `InMemoryTaskStore`) and
    * injected into every session's `TasksHarness` so `detached` task
    * records survive their spawning session's `close()` (the store
-   * outlives the per-session harness). The in-memory default is
-   * node-local + lost on process exit; a durable store (pg) swapped in
-   * here — same port — adds survival across app restart. Adopter override
-   * seam: TODO(ADR-68) expose `createApp({ taskStore })` when the durable
-   * adapters land.
+   * outlives the per-session harness). A durable store (pg) swapped in
+   * here — same port — adds survival across app restart.
    */
-  private readonly taskStore: TaskStore = new InMemoryTaskStore();
+  private readonly taskStore: TaskStore;
+  /**
+   * App/gateway-scoped {@link TaskExecutor} strategies (ADR 68 Build B),
+   * from `options.tasks.executors`. Constructed ONCE and injected into
+   * every session's `TasksHarness` (merged over its bundled in-process
+   * default). App-scoped so a child-process executor's child map outlives
+   * sessions (detached-survives-close). Empty by default (in-process
+   * only).
+   */
+  private readonly taskExecutors: readonly TaskExecutor[];
 
   /**
    * Stored `TelemetryLayer` (4f.7 placeholder slot). Accepted for
@@ -661,6 +694,13 @@ export class AppHarness<P = unknown>
     this.loop = isLoopExecutorFactory(options.loop)
       ? options.loop({ scopeId: appId, journal, bus, inbox })
       : (options.loop ?? new LoopExecutorHarness(appId, journal, bus, inbox));
+
+    // Persistent-tasks substrate (ADR 68) — app-scoped store + executor
+    // registry, constructed ONCE (NOT a cascade — detached tasks +
+    // child-process reattach need shared singletons that outlive any one
+    // session). Injected into every session's TasksHarness below.
+    this.taskStore = options.tasks?.store ?? new InMemoryTaskStore();
+    this.taskExecutors = options.tasks?.executors ?? [];
 
     this.handlerResolver = new InMemoryHandlerResolver();
     if (options.toolHandlers) {
@@ -1140,9 +1180,12 @@ export class AppHarness<P = unknown>
     // tool's `taskSupport` annotation (#156).
     const tasks = new TasksHarness(`${sessionId}:tasks`, this.journal, this.bus, this.inbox, {
       parentScope: { sessionId },
-      // ADR 68 — the shared app-scoped store, so detached tasks outlive
-      // the per-session harness. Scope-filtered by `{ sessionId }` above.
+      // ADR 68 — the shared app-scoped store + executor registry, so
+      // detached tasks outlive the per-session harness and child-process
+      // reattach finds its still-live children. Scope-filtered by
+      // `{ sessionId }` above.
       store: this.taskStore,
+      executors: this.taskExecutors,
     });
 
     // Per-session resources harness (ADR 62) — the application-controlled
