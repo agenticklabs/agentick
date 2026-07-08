@@ -31,6 +31,13 @@
  *        b. Records the tool's declaration + handlerRef via
  *           `installer.registerExtensionTool(...)` with binding
  *           `{ scope: "extension", level: "session" }`.
+ *   3b. Surfaces the server's RESOURCES (ADR 62): discovers
+ *      `resources/list` + `resources/templates/list` and proxy-registers
+ *      each into the session's `ResourcesHarness` (`installer.resources`)
+ *      under the adopter alias (`mcp://<serverId>/<originalUri>`), so the
+ *      model reads them via `resource_read` and our own MCP-server
+ *      projection re-exposes them. Re-surfaced on
+ *      `notifications/resources/list_changed`. See `resource-surface.ts`.
  *   4. Exposes the per-session clients on the `bridges.mcp` slot via
  *      `installer.registerNamespace("mcp", { client, clients })`.
  *   5. `installer.onClose` cascades — each harness's `close()` runs
@@ -97,6 +104,7 @@ import type { EraCodec } from "../client/era-codec.js";
 
 import { mcpContentToBlocks } from "./content-mapper.js";
 import { mcpTaskEffect } from "./task-bridge.js";
+import { surfaceRemoteResources } from "./resource-surface.js";
 import {
   isTransportFactory,
   type CredentialField,
@@ -608,6 +616,11 @@ export function withMCP(options: WithMCPOptions): SessionExtension {
         // the MCP server pushes `notifications/tools/list_changed`
         // (#309). Also caches the teardowns for session close.
         let currentUnsubs: readonly Unsubscribe[] = [];
+        // Symmetric teardown set for surfaced remote RESOURCES (ADR 62).
+        // The server's resources are proxy-registered into the session's
+        // ResourcesHarness (`installer.resources`) under the adopter
+        // alias — see `surfaceRemoteResources`.
+        let currentResourceUnsubs: readonly Unsubscribe[] = [];
         if (harness.status.kind === "connected") {
           try {
             currentUnsubs = await discoverAndRegisterTools(installer, config, harness);
@@ -617,39 +630,64 @@ export function withMCP(options: WithMCPOptions): SessionExtension {
             // registered" subscribe to the ToolExecutor's
             // registration stream, not the harness.
           }
+          try {
+            currentResourceUnsubs = await surfaceRemoteResources(
+              installer.resources,
+              config.serverId,
+              harness,
+            );
+          } catch {
+            // Resource surfacing failures are non-fatal — a server that
+            // doesn't support `resources/*` (or errors listing) simply
+            // surfaces no resources. Tools + the connection remain live.
+          }
         }
 
         // Reactive re-discovery — the MCP server MAY emit
-        // `notifications/tools/list_changed` when its catalog
-        // mutates. On each such signal, tear down our previous
-        // registrations and re-run discovery. Serialized via a
-        // rolling promise so overlapping notifications don't race
-        // (second re-discovery waits for first to finish clearing
+        // `notifications/{tools,resources}/list_changed` when its
+        // catalog mutates. On each such signal, tear down our previous
+        // registrations for THAT kind and re-run discovery. Serialized
+        // via a rolling promise so overlapping notifications don't race
+        // (a second re-discovery waits for the first to finish clearing
         // + re-registering).
         //
-        // Prompt / resource notifications fire too but withMCP does
-        // not project prompts or resources today — ignored here.
-        // Adopters observing at the harness layer via
-        // `harness.onListChanged` still see all three.
+        // Prompt notifications fire too but withMCP does not project
+        // prompts today — ignored here. Adopters observing at the
+        // harness layer via `harness.onListChanged` still see all three.
         let rediscoveryInFlight: Promise<void> = Promise.resolve();
         const unsubListChanged = harness.onListChanged((event) => {
-          if (event.kind !== "tools") return;
-          rediscoveryInFlight = rediscoveryInFlight.then(async () => {
-            for (const u of currentUnsubs) u();
-            try {
-              currentUnsubs = await discoverAndRegisterTools(installer, config, harness);
-            } catch {
-              // Discovery failed on the way back — leave torn down
-              // rather than a partial re-registration. Next
-              // notification triggers another attempt.
-              currentUnsubs = [];
-            }
-          });
+          if (event.kind === "tools") {
+            rediscoveryInFlight = rediscoveryInFlight.then(async () => {
+              for (const u of currentUnsubs) u();
+              try {
+                currentUnsubs = await discoverAndRegisterTools(installer, config, harness);
+              } catch {
+                // Discovery failed on the way back — leave torn down
+                // rather than a partial re-registration. Next
+                // notification triggers another attempt.
+                currentUnsubs = [];
+              }
+            });
+          } else if (event.kind === "resources") {
+            rediscoveryInFlight = rediscoveryInFlight.then(async () => {
+              for (const u of currentResourceUnsubs) u();
+              try {
+                currentResourceUnsubs = await surfaceRemoteResources(
+                  installer.resources,
+                  config.serverId,
+                  harness,
+                );
+              } catch {
+                currentResourceUnsubs = [];
+              }
+            });
+          }
         });
 
         installer.onClose(() => {
           unsubListChanged();
           for (const u of currentUnsubs) u();
+          for (const u of currentResourceUnsubs) u();
         });
       }
 

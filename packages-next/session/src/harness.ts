@@ -219,6 +219,16 @@ export interface SessionHarnessOptions<P = unknown> {
    */
   readonly tasks?: import("@agentick/spec-next").TasksHarnessProtocol;
   /**
+   * Optional pre-constructed resources harness (ADR 62). Same wiring
+   * rationale as `elicitation` / `tasks` — the AppHarness shares ONE
+   * instance between the per-session `ToolExecutorHarness`
+   * (`ctx.resource`), the session bridges (`bridges.resources`), and
+   * the SessionInstaller (`installer.resources`). When omitted,
+   * `buildSessionBridges` constructs a fresh one on the substrate (the
+   * standalone / test path).
+   */
+  readonly resources?: import("@agentick/spec-next").Resources;
+  /**
    * Spawn context for child sessions. Typically injected by the
    * AppHarness when it constructs a session — the session keeps a
    * narrow back-reference to its parent app so `spawn()` works.
@@ -346,6 +356,7 @@ export class SessionHarness<P = unknown>
           extensionBridges: options.extensionBridges,
           elicitation: options.elicitation,
           tasks: options.tasks,
+          resources: options.resources,
           timeline: options.timeline,
         }),
       },
@@ -444,6 +455,19 @@ export class SessionHarness<P = unknown>
    */
   get tasks(): import("@agentick/spec-next").TasksHarnessProtocol {
     return this.bridges.tasks;
+  }
+
+  /**
+   * Per-session resources harness (ADR 62) — the SAME instance the
+   * tool-executor's `ctx.resource` reaches, that `bridges.resources`
+   * exposes, and that `withMCP` proxy-registers remote resources into.
+   * Augmented onto `SessionHarnessProtocol` via the
+   * `@agentick/resources-next` package's module augmentation. Adopter /
+   * server-side code reads resources without a tool ctx:
+   * `await session.resources.read(uri)`.
+   */
+  get resources(): import("@agentick/spec-next").Resources {
+    return this.bridges.resources;
   }
 
   // ──────── SessionHarnessProtocol ────────

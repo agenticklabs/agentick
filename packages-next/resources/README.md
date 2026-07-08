@@ -146,11 +146,73 @@ resources stays content-agnostic (it owns the seam, not the backend).
 `(scopeId, journal, bus, inbox, options?)`. Options: `pageSize`
 (default 100), `backend` (default `"memory"`).
 
-### `withResources()` — `SessionExtension`
+### `withResources(options?)` — `SessionExtension`
 
-Wave 4a no-op (documented). Session surfacing — constructing a per-session
-harness, wiring `bridges.resources` / `ctx.resource`, and the React
-`<Resource>` front-end — is Wave 4b (`TODO(#237-4b)`).
+Opt into the model-facing surface. The AppHarness constructs the
+per-session `ResourcesHarness` at the single construction site (#159,
+like tasks/elicitation) and wires it into `ctx.resource`,
+`bridges.resources`, `session.resources`, and `installer.resources` — so
+`withResources()` does **not** construct a harness. It auto-registers two
+model tools (default-on):
+
+- `resource_list` — enumerate available resources + templates (paginated).
+- `resource_read` — read one uri; returns first-class `resource` content
+  blocks (text/blob round-trip). A failed read surfaces the harness's
+  typed error, not a silent empty.
+
+`WithResourcesOptions.registerModelTools: false` installs the substrate
+without the model surface (e.g. resources exposed only over the MCP
+server projection, or read exclusively from adopter code).
+
+```ts
+createApp(<Agent />, { model, extensions: [withResources()] });
+```
+
+## Front-ends
+
+One registry, three equal front-ends over `register` (ADR 62) — an
+adopter cannot tell which came first:
+
+| Front-end                       | Where                              |
+| ------------------------------- | ---------------------------------- |
+| `ctx.resource.read(uri)`        | tool handlers (like `ctx.tasks`)   |
+| `session.resources.read(uri)`   | adopter / server-side code         |
+| `<Resource>` (`/react` subpath) | inside a JSX agent tree            |
+
+### `<Resource>` (`@agentick/resources-next/react`)
+
+Reads like `<Tool>`: registers a `uri → resolver` binding on mount,
+unregisters on unmount. Depends on `@agentick/reconciler-react-next`'s
+`useBridges` (no cycle — reconciler-react never imports this package).
+
+```tsx
+import { Resource } from "@agentick/resources-next/react";
+
+// static content (string or ResourceContents)
+<Resource uri="config://app" name="App config" content={JSON.stringify(cfg)} />
+
+// resolver prop (lazy, may be async)
+<Resource uri="db://count" resolver={async () => `${await count()}`} />
+
+// children-as-resolver
+<Resource uri="file://readme" mimeType="text/markdown">{() => readme}</Resource>
+
+// template — the resolver receives the CONCRETE matched uri
+<Resource uriTemplate="file://{path}">{(uri) => readFile(uri)}</Resource>
+```
+
+Precedence when more than one is given: `resolver` prop > function child >
+`content`. `useResourceBridge()` is exported for custom components.
+
+### Catalog surfacing (default projection, ADR 63)
+
+`<Resource>` does **not** render a host intrinsic. Instead the reconciler
+runs a `resources` **default projection** that folds the registry into a
+compact CATALOG section (uris + names + descriptions — NOT content;
+resources are pulled on demand). It reads `bridges.resources` structurally
+(no cross-harness import) and is lazy/overridable: a
+`<Project projectionKey="resources">` suppresses it. Absent any resources,
+it contributes nothing.
 
 ### `runResourcesHarnessConformance(label, factory)`
 
@@ -161,6 +223,16 @@ notifyUpdated fan, and list_changed on mutation against any impl.
 ### `compileUriTemplate(t)` / `matchesTemplate(re, uri)`
 
 The URI-template matcher, exported for reuse.
+
+### `snapshot()`
+
+Synchronous, unpaginated registry snapshot (`{ resources, templates }`,
+sorted) — the sync-read counterpart to `list` / `listTemplates` that the
+`resources` default projection folds during a synchronous render.
+
+### `/react`
+
+`<Resource>` + `useResourceBridge()`. See **Front-ends** above.
 
 ### `/testing`
 
@@ -178,18 +250,22 @@ substrate (preferred for consumer tests). `stubResources({ contents })`
 
 ## Status
 
-Wave 4a (ADR 62 / #237) — the harness + conformance + spec wire types +
-the MCP server projection + capability advertisement. Green.
+Wave 4b pt2 (ADR 62 / 63 / #237) — the front-ends
+(`ctx.resource` · `session.resources` · `<Resource>` · `withResources`
+model tools), the `resources` catalog default projection, and `withMCP`
+remote-resource surfacing (keyed by adopter alias) all landed on top of
+Wave 4a (harness + conformance + MCP server projection). Green.
 
 ## Roadmap & known gaps
 
-- **Wave 4b (ADR 65) — roots/mounts seam + file-resolver: landed.**
+- **Roots/mounts seam + file-resolver (ADR 65): landed.**
   `sandboxRootsSource` / `bindSandboxRootsToClient` (outbound roots),
   inbound `ctx.mcp.clientRoots`, and `sandboxFileResolver` /
   `fsFileResolver` / `registerFileResolver` (file → resource) ship from
-  `@agentick/sandbox-next/mcp`. **Still open (`TODO(#237-4b)`):** the
-  React `<Resource>` component / `ctx.resource` front-ends and `withMCP`
-  session surfacing of resources.
+  `@agentick/sandbox-next/mcp`.
+- **Remote MCP resource surfacing (`withMCP`): landed.** A connected
+  server's resources are proxy-registered under `mcp://<alias>/<uri>` —
+  see `@agentick/mcp-next`'s README (resource surfacing + alias trust).
 - **Client-side external-resource consumption** landed in Wave 2
   (`McpClientHarness`); compose it via wrapping resolvers, not folded
   into this registry.
@@ -213,6 +289,23 @@ the MCP server projection + capability advertisement. Green.
   `ResourceResolverFailed` on throwing + rejecting resolvers,
   declared-command journaling (`read` emits requested + terminal on the
   resources surface), URI-template match semantics. (11 tests)
+- `src/__tests__/tools.spec.ts` — `resource_list` / `resource_read`
+  handlers (enumerate fixed + templates, first-class `resource` blocks,
+  typed error surfaced not swallowed, honest degrade when no harness) +
+  `withResources` registers both tools by default / suppresses them under
+  `registerModelTools:false`. (6 tests)
+- `src/react/__tests__/resource.spec.tsx` — `<Resource>` register/read
+  via all three content sources, template concrete-uri resolution,
+  unmount unregisters, and the `resources` catalog default projection
+  (folds a `SectionEntry` tagged `default:resources`; empty registry
+  contributes nothing; `<Project>` override suppresses). (7 tests)
+- `@agentick/app-next` `substrate-single-construction-site.spec.ts` —
+  `installer.resources` === `session.resources` (single site) +
+  `resource_read` reaches the same harness via `ctx.resource`
+  (dispatch round-trip).
+- `@agentick/mcp-next` `resource-surface.spec.ts` +
+  `with-mcp-resources-e2e.spec.ts` — alias-keyed remote surfacing +
+  the adversarial alias-trust test (see that package's README).
 
 @see [`docs/proposals/v2/blueprint/62-resources-harness.md`](../../docs/proposals/v2/blueprint/62-resources-harness.md)
 @see [`docs/proposals/v2/blueprint/27-modular-built-ins.md`](../../docs/proposals/v2/blueprint/27-modular-built-ins.md)

@@ -59,6 +59,7 @@
     "@agentick/elicitation-next": "workspace:*",
     "@agentick/loop-executor-next": "workspace:*",
     "@agentick/model-next": "workspace:*",
+    "@agentick/resources-next": "workspace:*",
     "@agentick/runtime-next": "workspace:*",
     "@agentick/session-next": "workspace:*",
     "@agentick/spec-next": "workspace:*",

@@ -51,6 +51,7 @@ import type {
   ResourcesListTemplatesInput,
   ResourcesListTemplatesResult,
   ResourcesReadInput,
+  ResourcesSnapshot,
   ResourceTemplateDescriptor,
   ResourceTemplateMeta,
   TemplateResolver,
@@ -210,6 +211,18 @@ export class ResourcesHarness
 
   has(uri: string): boolean {
     return this.fixed.has(uri);
+  }
+
+  /**
+   * Synchronous, unpaginated registry snapshot (sorted, cached). The
+   * sync-read counterpart to {@link list} / {@link listTemplates} used
+   * by the `resources` compiler-surfacing default projection.
+   */
+  snapshot(): ResourcesSnapshot {
+    return {
+      resources: this.snapshotResources(),
+      templates: this.snapshotTemplates(),
+    };
   }
 
   // ─────────── Reads (public positional wrappers) ───────────

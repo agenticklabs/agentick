@@ -22,6 +22,13 @@
 import "./augment.js";
 
 export { ResourcesHarness, type ResourcesHarnessOptions } from "./harness.js";
-export { withResources } from "./extension.js";
+export { withResources, type WithResourcesOptions } from "./extension.js";
+export { EXTENSION_NAME } from "./extension-name.js";
+export {
+  buildResourcesTools,
+  type ResourcesToolsBundle,
+  RESOURCE_LIST,
+  RESOURCE_READ,
+} from "./tools.js";
 export { compileUriTemplate, matchesTemplate } from "./uri-template.js";
 export { runResourcesHarnessConformance } from "./conformance.js";

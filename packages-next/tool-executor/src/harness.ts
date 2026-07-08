@@ -42,6 +42,7 @@ import type {
   OperationJournal,
   RegisterToolInput,
   RemoveBoundToolsInput,
+  Resources,
   ReplaceReconcilerToolsInput,
   TaskHandle,
   TasksHarnessProtocol,
@@ -97,6 +98,7 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
   private readonly channelPublisher?: ChannelPublisher;
   private readonly elicitation: ElicitationHarnessProtocol;
   private readonly tasks: TasksHarnessProtocol | undefined;
+  private readonly resources: Resources | undefined;
 
   constructor(
     scopeId: string,
@@ -112,6 +114,7 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
     this.channelPublisher = options.channelPublisher;
     this.elicitation = options.elicitation;
     this.tasks = options.tasks;
+    this.resources = options.resources;
 
     // Eager registrations applied synchronously so callers can dispatch
     // immediately after `await harness.ready`.
@@ -591,6 +594,10 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
         // `ctx.elicit.text(...)` work identically across transports.
         elicit: buildSessionElicit({ harness: this.elicitation }),
         ...omitUndefined({ tasks: this.tasks }),
+        // ADR 62 — the session's read-projection seam. Handlers resolve
+        // readable content by URI (`ctx.resource.read(uri)`); the
+        // AppHarness wired the single per-session ResourcesHarness here.
+        ...omitUndefined({ resource: this.resources }),
         setState: (key: string, value: unknown): void => {
           this.stateStore.set(key, value);
         },

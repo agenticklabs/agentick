@@ -71,7 +71,11 @@ import {
   type HostScope,
   type ReconcilerContainer,
 } from "@agentick/reconciler-next";
-import { timelineDefaultProjection } from "./default-projections.js";
+import {
+  mcpServerInfoDefaultProjection,
+  resourcesDefaultProjection,
+  timelineDefaultProjection,
+} from "./default-projections.js";
 import { createReconciler, type FiberRoot, type Reconciler } from "../react/reconciler.js";
 import { BridgeContext } from "../react/bridge-context.js";
 import { LifecycleContext } from "../react/lifecycle-context.js";
@@ -605,6 +609,11 @@ export class ReconcilerHarness extends BaseHarness<"reconciler"> implements Reco
     const defaults: readonly DefaultProjection[] = [
       builtInToolsProjection,
       timelineDefaultProjection(state.bridges),
+      // Wave 4b (ADR 62 / 63) — both read their bridge structurally
+      // (no harness import) and contribute nothing when the bridge is
+      // absent / empty, so mounts without resources / MCP are unaffected.
+      resourcesDefaultProjection(state.bridges),
+      mcpServerInfoDefaultProjection(state.bridges),
     ];
     const collected = collect({
       roots: state.container.children,

@@ -64,6 +64,9 @@ export function stubResources(options: StubResourcesOptions = {}): ResourcesHarn
     has(uri: string): boolean {
       return uri in contents;
     },
+    snapshot() {
+      return { resources, templates };
+    },
     list(): Promise<ResourcesListResult> {
       return Promise.resolve({ resources });
     },

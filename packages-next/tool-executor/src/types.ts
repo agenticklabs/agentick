@@ -18,6 +18,7 @@
 import type {
   ChannelPublisher,
   ElicitationHarnessProtocol,
+  Resources,
   TasksHarnessProtocol,
   ToolHandler,
   ToolRegistration,
@@ -129,4 +130,18 @@ export interface ToolExecutorHarnessOptions {
    * tools.
    */
   readonly tasks?: TasksHarnessProtocol;
+
+  /**
+   * Resources harness (ADR 62) — surfaced on `ctx.resource` so tool
+   * handlers resolve readable content by URI (`ctx.resource.read(uri)`
+   * / `.list()`). Optional today: the AppHarness constructs ONE per
+   * session at the single construction site and threads that instance
+   * here + into `bridges.resources`, so production always has one; the
+   * optional field covers substrate-stripped test fixtures.
+   *
+   * When omitted: `ctx.resource` is `undefined`; handlers must
+   * null-coalesce. Same "substrate primitive on ctx" rationale as
+   * {@link tasks} / {@link elicitation}.
+   */
+  readonly resources?: Resources;
 }

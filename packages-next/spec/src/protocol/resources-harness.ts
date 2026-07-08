@@ -133,6 +133,21 @@ export interface ResourcesListTemplatesResult {
   readonly nextCursor?: string;
 }
 
+/**
+ * Synchronous, unpaginated snapshot of the whole registry — every fixed
+ * resource + every template descriptor, in the same sorted order `list`
+ * / `listTemplates` page through. The sync-read counterpart to the
+ * (async, journaled, paginated) `list` command, mirroring how the
+ * timeline harness exposes a sync `read()` alongside its async surface.
+ *
+ * Used by the compiler-surfacing `resources` default projection (ADR 63)
+ * which must fold the catalog into the IR synchronously during render.
+ */
+export interface ResourcesSnapshot {
+  readonly resources: readonly ResourceDescriptor[];
+  readonly templates: readonly ResourceTemplateDescriptor[];
+}
+
 // ============================================================================
 // Declared-command input shapes (ADR 51)
 // ============================================================================
@@ -214,6 +229,12 @@ export interface ResourcesHarnessProtocol {
 
   /** True iff a fixed resource with this uri is registered. */
   has(uri: string): boolean;
+  /**
+   * Synchronous, unpaginated snapshot of the whole registry. Powers the
+   * `resources` compiler-surfacing default projection (ADR 63), which
+   * folds the catalog into the IR during a synchronous render.
+   */
+  snapshot(): ResourcesSnapshot;
 
   // ─── Change stream (notifier-based; plain methods) ───────────────
 
@@ -251,6 +272,7 @@ export function isResourcesInstance(v: unknown): v is Resources {
     typeof obj.list === "function" &&
     typeof obj.listTemplates === "function" &&
     typeof obj.read === "function" &&
+    typeof obj.snapshot === "function" &&
     typeof obj.subscribe === "function" &&
     typeof obj.subscribeListChanged === "function" &&
     typeof obj.notifyUpdated === "function"

@@ -157,6 +157,21 @@ export interface ToolHandlerCtx {
    * substrate-stripped test fixtures.
    */
   readonly tasks?: import("../protocol/tasks-harness.js").TasksHarnessProtocol;
+  /**
+   * The session's resources harness (ADR 62) — the application-controlled
+   * read-projection seam. A tool handler resolves readable content by URI
+   * through it: `await ctx.resource!.read(uri)` / `ctx.resource!.list()`.
+   * The registry is populated by the React `<Resource>` front-end, adopter
+   * code, and remote MCP servers surfaced by `withMCP` (each proxied under
+   * its adopter alias).
+   *
+   * Same "substrate primitive on ctx" rationale as {@link tasks}: the
+   * AppHarness constructs ONE per session at the single construction site
+   * and threads that instance here + into `bridges.resources`. `undefined`
+   * only on substrate-stripped test fixtures; production sessions always
+   * have one.
+   */
+  readonly resource?: import("../protocol/resources-harness.js").Resources;
 
   // ── Transport discriminator + extras (NEW — ADR 43) ───────────────
 

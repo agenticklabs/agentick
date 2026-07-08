@@ -313,6 +313,25 @@ export interface SessionInstaller extends BaseInstaller {
   readonly tasks: import("./tasks-harness.js").TasksHarnessProtocol;
 
   /**
+   * The session's resources harness (ADR 62) — constructed by the host
+   * BEFORE session-extension installs run, symmetrically with
+   * {@link SessionInstaller.tasks} and {@link SessionInstaller.elicitation}.
+   * Extensions that surface readable content over the registry read this
+   * instance directly: `withResources` registers model-facing
+   * `resource_*` tools whose handlers reach it via `ctx.resource`;
+   * `withMCP` proxy-registers each remote server's resources into it
+   * (keyed by the adopter alias) at install time.
+   *
+   * Single-construction-site invariant (#159): this is THE SAME instance
+   * used by the session's `ToolExecutor` (`ctx.resource`) and
+   * `bridges.resources`. Extensions must NOT construct their own
+   * `ResourcesHarness` against the substrate — addresses would collide
+   * (both registering `resources:${sessionId}:resources`) and bridges +
+   * tool-executor would resolve to different registries.
+   */
+  readonly resources: import("./resources-harness.js").Resources;
+
+  /**
    * Pre-register a tool handler resolvable from THIS session's
    * dispatch. Routed into the session's tool-executor handler
    * registry. Mirrors {@link AppInstaller.registerToolHandler} but

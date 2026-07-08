@@ -354,6 +354,9 @@ importers:
       '@agentick/model-next':
         specifier: workspace:*
         version: link:../model
+      '@agentick/resources-next':
+        specifier: workspace:*
+        version: link:../resources
       '@agentick/runtime-next':
         specifier: workspace:*
         version: link:../runtime
@@ -1063,6 +1066,9 @@ importers:
       '@agentick/pubsub-next':
         specifier: workspace:*
         version: link:../pubsub
+      '@agentick/reconciler-react-next':
+        specifier: workspace:*
+        version: link:../reconciler-react
       '@agentick/runtime-next':
         specifier: workspace:*
         version: link:../runtime
@@ -1075,6 +1081,13 @@ importers:
       effect:
         specifier: ^3.21.2
         version: 3.21.2
+      react:
+        specifier: ^19.0.0
+        version: 19.2.4
+    devDependencies:
+      '@types/react':
+        specifier: ^19.2.5
+        version: 19.2.13
 
   packages-next/runtime:
     dependencies:
@@ -1186,6 +1199,9 @@ importers:
       '@agentick/reconciler-next':
         specifier: workspace:*
         version: link:../reconciler
+      '@agentick/resources-next':
+        specifier: workspace:*
+        version: link:../resources
       '@agentick/runtime-next':
         specifier: workspace:*
         version: link:../runtime

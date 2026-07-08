@@ -33,6 +33,7 @@ import {
 } from "@agentick/runtime-next";
 import { ElicitationHarness } from "@agentick/elicitation-next";
 import { TasksHarness } from "@agentick/tasks-next";
+import { ResourcesHarness } from "@agentick/resources-next";
 import { LoopExecutorHarness } from "@agentick/loop-executor-next";
 import { isLanguageModelAdapter, type LanguageModelAdapter } from "@agentick/model-next";
 import { LanguageModelExecutor as TheLanguageModelExecutor } from "@agentick/executor-next";
@@ -596,7 +597,7 @@ export class AppHarness<P = unknown>
     }
     if (options.executor !== undefined && isLanguageModelAdapter(options.executor)) {
       throw new Error(
-        "createApp: a bare LanguageModelAdapter goes on the `model` slot, " + "not `executor`.",
+        "createApp: a bare LanguageModelAdapter goes on the `model` slot, not `executor`.",
       );
     }
     this.executor =
@@ -779,6 +780,7 @@ export class AppHarness<P = unknown>
     sessionId: string,
     elicitation: ElicitationHarness,
     tasks: TasksHarness,
+    resources: ResourcesHarness,
     bridges: Map<string, unknown>,
     extensionTools: ToolRegistration[],
     closeHandlers: Array<() => void | Promise<void>>,
@@ -797,6 +799,7 @@ export class AppHarness<P = unknown>
       sessionId,
       elicitation,
       tasks,
+      resources,
       registerNamespace(name, harness): Unsubscribe {
         const prior = bridges.get(name);
         bridges.set(name, harness);
@@ -1126,6 +1129,20 @@ export class AppHarness<P = unknown>
       parentScope: { sessionId },
     });
 
+    // Per-session resources harness (ADR 62) — the application-controlled
+    // read-projection seam. Constructed at the single site symmetrically
+    // with elicitation + tasks (#159). The SAME instance is threaded into
+    // the ToolExecutor's `ctx.resource`, the session bridges
+    // (`bridges.resources`), and the SessionInstaller (`installer.resources`)
+    // so `withResources` (model tools) and `withMCP` (remote-resource
+    // proxy-registration) all reach one registry. Lifecycle owned here.
+    const resources = new ResourcesHarness(
+      `${sessionId}:resources`,
+      this.journal,
+      this.bus,
+      this.inbox,
+    );
+
     // ── Session extension lifecycle (#150) ────────────────────────
     //
     // Run cached session-target extensions BEFORE constructing the
@@ -1144,6 +1161,7 @@ export class AppHarness<P = unknown>
         sessionId,
         elicitation,
         tasks,
+        resources,
         sessionExtensionBridges,
         sessionExtensionTools,
         sessionCloseHandlers,
@@ -1221,6 +1239,7 @@ export class AppHarness<P = unknown>
           handlerResolver: this.handlerResolver,
           elicitation,
           tasks,
+          resources,
         });
 
     // Cascade: per-call `createSession.*` > per-app `session.*` >
@@ -1238,6 +1257,7 @@ export class AppHarness<P = unknown>
       toolExecutor: tools,
       elicitation,
       tasks,
+      resources,
       target: this.target,
       defaultMaxTicks: input.maxTicks ?? this.sessionDefaults.defaultMaxTicks ?? 8,
       ...(input.requiredScopes !== undefined ? { requiredScopes: input.requiredScopes } : {}),

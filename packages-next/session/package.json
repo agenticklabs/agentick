@@ -61,6 +61,7 @@
     "@agentick/model-next": "workspace:*",
     "@agentick/pubsub-next": "workspace:*",
     "@agentick/reconciler-next": "workspace:*",
+    "@agentick/resources-next": "workspace:*",
     "@agentick/runtime-next": "workspace:*",
     "@agentick/spec-next": "workspace:*",
     "@agentick/state-next": "workspace:*",

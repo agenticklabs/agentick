@@ -22,6 +22,7 @@ import { ElicitationHarness } from "@agentick/elicitation-next";
 import { KnobsHarness } from "@agentick/knobs-next";
 import { StateHarness } from "@agentick/state-next";
 import { TasksHarness } from "@agentick/tasks-next";
+import { ResourcesHarness } from "@agentick/resources-next";
 import { TimelineHarness, type TimelineHarnessOptions } from "@agentick/timeline-next";
 import type {
   ElicitationHarnessProtocol,
@@ -30,6 +31,7 @@ import type {
   LoopBridge,
   MessageInbox,
   OperationJournal,
+  Resources,
   SessionBridge,
   TasksHarnessProtocol,
   ToolBridge,
@@ -70,6 +72,7 @@ export interface SessionHookBridges extends HookBridges {
   readonly knobs: KnobsHarness;
   readonly state: StateHarness;
   readonly tasks: TasksHarnessProtocol;
+  readonly resources: Resources;
   readonly data: InMemoryDataBridge;
   /**
    * Model registration bridge (ADR 56). The session builds one per
@@ -108,6 +111,15 @@ export interface BuildSessionBridgesOptions {
    * is constructed on the substrate.
    */
   readonly tasks?: TasksHarnessProtocol;
+  /**
+   * Pre-constructed resources harness (ADR 62). Same wiring rationale
+   * as `elicitation` / `tasks` — the AppHarness shares ONE instance
+   * with the per-session `ToolExecutorHarness` (`ctx.resource`), the
+   * session bridges (`bridges.resources`), and the SessionInstaller
+   * (`installer.resources`). When omitted, a fresh harness is
+   * constructed on the substrate (the standalone / test path).
+   */
+  readonly resources?: Resources;
   /**
    * Timeline durability + policy slots (ADR 49 / A2.2) — shared store
    * adapter, write policy, construction-bound default compaction
@@ -161,6 +173,14 @@ export function buildSessionBridges(
     new TasksHarness(`${store.id}:tasks`, substrate.journal, substrate.bus, substrate.inbox, {
       parentScope: { sessionId: store.id },
     });
+  const resources =
+    options.resources ??
+    new ResourcesHarness(
+      `${store.id}:resources`,
+      substrate.journal,
+      substrate.bus,
+      substrate.inbox,
+    );
 
   const base: SessionHookBridges = {
     timeline,
@@ -168,6 +188,7 @@ export function buildSessionBridges(
     state,
     elicitation,
     tasks,
+    resources,
     data: new InMemoryDataBridge(),
     models: new InMemoryModelBridge(),
     loop: loopBridgeStub(),

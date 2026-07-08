@@ -42,6 +42,7 @@ import { FakeLanguageModelExecutor } from "@agentick/executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import { withElicitation } from "@agentick/elicitation-next";
 import { withTasks } from "@agentick/tasks-next";
+import { withResources } from "@agentick/resources-next";
 import type { ContentBlock, SessionExtension, SessionInstaller } from "@agentick/spec-next";
 
 const Agent = (): React.ReactElement => React.createElement("message", { role: "user" }, "hello");
@@ -161,6 +162,57 @@ describe("#159 substrate primitives — single construction site", () => {
 
     // Clean up the in-flight task before closing the session.
     await session.tasks.cancel(handle.taskId, "test cleanup");
+
+    await session.close();
+    await app.close();
+  });
+});
+
+describe("#159 resources — single construction site + ctx.resource", () => {
+  it("installer.resources is the SAME instance session.resources exposes", async () => {
+    let captured: unknown;
+    const capture: SessionExtension = {
+      name: "capture-resources",
+      target: "session",
+      install: (installer: SessionInstaller) => {
+        captured = installer.resources;
+      },
+    };
+    const app = await createApp(React.createElement(Agent), {
+      executor: await mkExecutor(),
+      extensions: [capture, withResources()],
+    });
+    const session = await app.createSession({ sessionId: "s-res-identity" });
+
+    expect(captured).toBeDefined();
+    // Single-construction-site: installer slot, session accessor all one ref.
+    expect(session.resources).toBe(captured);
+
+    await session.close();
+    await app.close();
+  });
+
+  it("resource_read reaches the same harness via ctx.resource (dispatch round-trip)", async () => {
+    // Register a resource on the session's harness (the one
+    // bridges.resources exposes), then dispatch the model-facing
+    // `resource_read` tool whose handler reads `ctx.resource`. If
+    // bridges.resources and ctx.resource pointed at different
+    // instances, the read would miss.
+    const app = await createApp(React.createElement(Agent), {
+      executor: await mkExecutor(),
+      extensions: [withResources()],
+    });
+    const session = await app.createSession({ sessionId: "s-res-dispatch" });
+
+    session.resources.register("mem://greeting", () => [
+      { uri: "mem://greeting", text: "hello from ctx.resource" },
+    ]);
+
+    const blocks = await session.dispatch("resource_read", { uri: "mem://greeting" });
+    expect(blocks[0]).toMatchObject({
+      type: "resource",
+      resource: { uri: "mem://greeting", text: "hello from ctx.resource" },
+    });
 
     await session.close();
     await app.close();

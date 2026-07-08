@@ -224,6 +224,34 @@ export type McpListChangedEvent =
   | { readonly kind: "prompts" }
   | { readonly kind: "resources" };
 
+/**
+ * Synchronous snapshot of one connected server's identity + advertised
+ * capabilities — keyed by the ADOPTER ALIAS (`serverId`, the config
+ * `id`), NOT the server's self-reported name. Powers the `mcpServerInfo`
+ * compiler-surfacing default projection (ADR 63) and adopter dashboards.
+ *
+ * **Trust boundary.** `serverId` is adopter-assigned and trust-safe —
+ * it governs every namespace (tool prefixes, surfaced resource aliases,
+ * this projection's key). `implementation.name` / `.version` come from
+ * the server's `initialize` handshake and are an UNTRUSTED DISPLAY
+ * LABEL: a server may report any name (including one colliding with
+ * another server's alias) and it can never shadow another alias's
+ * namespace.
+ *
+ * `implementation` / `capabilities` are `null` before a successful
+ * handshake (disconnected / connecting / errored).
+ */
+export interface McpServerInfo {
+  /** Adopter alias (config `serverId`) — the trust-safe namespace key. */
+  readonly serverId: string;
+  /** Current adopter-facing connection status. */
+  readonly status: McpConnectionStatus;
+  /** Server's self-reported name/version. UNTRUSTED display label. */
+  readonly implementation: { readonly name: string; readonly version: string } | null;
+  /** Capability map the server advertised in `initialize`, if connected. */
+  readonly capabilities: Readonly<Record<string, unknown>> | null;
+}
+
 /** A declared command's public invoker (ADR 51). */
 type Cmd<I, R> = (input: I, opts?: { readonly origin?: OperationOrigin }) => Promise<R>;
 
@@ -564,6 +592,24 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
   /** Current adopter-facing connection status. */
   get status(): McpConnectionStatus {
     return this._status;
+  }
+
+  /**
+   * Synchronous {@link McpServerInfo} snapshot — identity + advertised
+   * capabilities keyed by the adopter alias (`serverId`). See
+   * {@link McpServerInfo} for the trust boundary (self-reported name is
+   * an untrusted display label). Read by the `mcpServerInfo` default
+   * projection + adopter status UIs.
+   */
+  get serverInfo(): McpServerInfo {
+    const impl = this.client?.getServerVersion();
+    const caps = this.client?.getServerCapabilities();
+    return {
+      serverId: this.serverId,
+      status: this._status,
+      implementation: impl !== undefined ? { name: impl.name, version: impl.version } : null,
+      capabilities: caps !== undefined ? (caps as Readonly<Record<string, unknown>>) : null,
+    };
   }
 
   /**

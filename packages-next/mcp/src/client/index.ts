@@ -7,6 +7,8 @@ export {
   type McpClientError,
   type McpClientNotReadyError,
   type McpTransportError,
+  type McpListChangedEvent,
+  type McpServerInfo,
 } from "./harness.js";
 
 export {

@@ -32,6 +32,11 @@
       "import": "./src/index.ts",
       "default": "./src/index.ts"
     },
+    "./react": {
+      "types": "./src/react/index.ts",
+      "import": "./src/react/index.ts",
+      "default": "./src/react/index.ts"
+    },
     "./testing": {
       "types": "./src/testing/index.ts",
       "import": "./src/testing/index.ts",
@@ -47,9 +52,22 @@
   },
   "dependencies": {
     "@agentick/pubsub-next": "workspace:*",
+    "@agentick/reconciler-react-next": "workspace:*",
     "@agentick/runtime-next": "workspace:*",
     "@agentick/spec-next": "workspace:*",
     "@agentick/utils-next": "workspace:*",
     "effect": "^3.21.2"
+  },
+  "devDependencies": {
+    "@agentick/reconciler-next": "workspace:*",
+    "@types/react": "^19.2.5"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
   }
 }

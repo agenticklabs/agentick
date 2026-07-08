@@ -463,6 +463,49 @@ the `connectionScope` discipline for signals). It is fire-and-forget:
 before the first pull resolves), and a failed pull is never a control
 path.
 
+### Consuming a remote server's resources (ADR 62)
+
+`withMCP` surfaces each connected server's **resources** into the
+session's one `ResourcesHarness` (`session.resources` / `ctx.resource` /
+`bridges.resources`). After tool discovery, for each server it pulls
+`resources/list` + `resources/templates/list` and **proxy-registers**
+every entry:
+
+```
+register("mcp://<alias>/<originalUri>", () => client.readResource(originalUri))
+```
+
+so the model reads them with the `resource_read` tool (from
+`withResources()`), adopter code reads them via `session.resources`, and
+our own MCP-server projection can re-expose them — all through one
+interface (composition, not conflation). Re-surfaced on
+`notifications/resources/list_changed`; unregistered on session close.
+`withMCP` reaches the harness via `installer.resources` (the
+AppHarness-wired single instance) — it does NOT construct one.
+
+**Alias trust model (non-negotiable).** Every surfaced uri is keyed by
+the **adopter alias** — the server's config `serverId`, assigned by
+whoever wrote `withMCP({ servers })`. The convention is
+`mcp://<alias>/<originalUri>` (alias = URI authority; original uri = the
+path, round-tripped losslessly). The server's **self-reported name is an
+UNTRUSTED display label** and is NEVER used for keying. A malicious or
+buggy server that reports a name colliding with another server's alias
+therefore cannot shadow that alias's namespace — tools
+(`<alias>__<tool>`), resources (`mcp://<alias>/…`), and the server-info
+projection all derive from the trusted alias alone.
+
+### `mcpServerInfo` default projection (ADR 63)
+
+The reconciler surfaces one summary of connected servers into the model's
+context, keyed by alias: display name/version (untrusted label),
+connection state, and an advertised-capability summary
+(tools/resources/prompts/…). It reads `bridges.mcp` **structurally** (no
+`@agentick/mcp-next` import in the reconciler binding — ADR 27), is lazy +
+overridable (`<Project projectionKey="mcpServerInfo">`), and
+provenance-tagged `default:mcpServerInfo`. The sync snapshot behind it is
+`McpClientHarness.serverInfo` (`{ serverId, status, implementation,
+capabilities }`).
+
 ### Runtime signals — `ctx.log` / `ctx.progress` are bus events, not sinks (ADR 64)
 
 Wave 3a's `ctx.log` wrote the wire directly (`sendLoggingMessage`), so
@@ -602,6 +645,23 @@ reference-server round-trip (until the package is a dev dep).
 - `src/__tests__/with-mcp-e2e.spec.ts` — `withMCP` end-to-end through
   a session: tools discovered on session start, model-issued `callTool`
   routes through the harness.
+- `src/integration/__tests__/resource-surface.spec.ts` — alias helpers
+  round-trip; `surfaceRemoteResources` proxy-registers under
+  `mcp://<alias>/<uri>` (read round-trips to `client.readResource` with
+  the ORIGINAL uri), templates strip the alias, pagination drains,
+  teardown unsubscribes. **ADVERSARIAL alias-trust (differential):** two
+  servers advertise the SAME uri and one self-reports the other's alias
+  as its name — reads under each alias route to that server, neither
+  shadows the other (the trusted `serverId` governs, not the self-name).
+- `src/__tests__/with-mcp-resources-e2e.spec.ts` — real MCP server
+  resources surfaced under the alias, readable via `session.resources`
+  AND the `resource_read` tool; `resources/list_changed` re-surfaces;
+  session close unregisters.
+- `@agentick/reconciler-react-next` `default-projections.spec.tsx` — the
+  `mcpServerInfo` projection surfaces servers keyed by alias
+  (provenance `default:mcpServerInfo`, override suppresses), plus the
+  adversarial server-info alias-trust differential (self-reported name
+  is display-only, never a second/shadowing entry).
 - `src/__tests__/elicit-bridge.spec.ts` — inbound `elicitation/create`
   → `ElicitationHarness.elicit` round-trip, accept/decline/cancel,
   schema validation.

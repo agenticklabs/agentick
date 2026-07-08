@@ -80,7 +80,13 @@ import type { StateHandle } from "@agentick/state-next";
 import type { TimelineHandle } from "@agentick/timeline-next";
 import { buildSessionElicit, ElicitationHarness } from "@agentick/elicitation-next";
 import { TasksHarness } from "@agentick/tasks-next";
-import type { Elicit, ElicitationHarnessProtocol, TasksHarnessProtocol } from "@agentick/spec-next";
+import { ResourcesHarness } from "@agentick/resources-next";
+import type {
+  Elicit,
+  ElicitationHarnessProtocol,
+  Resources,
+  TasksHarnessProtocol,
+} from "@agentick/spec-next";
 import { ExecutionFailed, HandlerError } from "@agentick/spec-next";
 
 // ============================================================================
@@ -128,6 +134,13 @@ export interface DefineSessionInput<P = unknown> {
    * semantics as `elicitation` — factory spins one up if absent.
    */
   readonly tasks?: TasksHarnessProtocol;
+  /**
+   * Pre-constructed resources harness for the augmented
+   * `SessionHarnessProtocol.resources` slot (ADR 62). Same omission
+   * semantics as `elicitation` / `tasks` — the factory spins one up on
+   * the supplied substrate if absent.
+   */
+  readonly resources?: Resources;
 }
 
 export function defineSession<P = unknown>(spec: DefineSessionInput<P>): SessionHarnessFactory<P> {
@@ -160,6 +173,7 @@ class CallbackSessionHarness<P = unknown>
   readonly elicitation: ElicitationHarnessProtocol;
   readonly elicit: Elicit;
   readonly tasks: TasksHarnessProtocol;
+  readonly resources: Resources;
 
   constructor(
     scopeId: string,
@@ -189,6 +203,8 @@ class CallbackSessionHarness<P = unknown>
       new TasksHarness(`${scopeId}:tasks`, journal, bus, inbox, {
         parentScope: { sessionId: scopeId },
       });
+    this.resources =
+      spec.resources ?? new ResourcesHarness(`${scopeId}:resources`, journal, bus, inbox);
   }
 
   // ──────── SessionHarnessProtocol — core ────────

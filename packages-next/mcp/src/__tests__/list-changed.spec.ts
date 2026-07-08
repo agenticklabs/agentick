@@ -169,9 +169,10 @@ describe("withMCP — notifications/tools/list_changed reactivity", () => {
   });
 
   it("harness.onListChanged fires for prompts/resources notifications too", async () => {
-    // Even though withMCP doesn't project prompts or resources today,
-    // the harness fans out all three notification kinds — adopters
-    // watching at the harness layer see uniform coverage.
+    // withMCP projects tools + resources; prompts is still harness-layer
+    // only. Regardless, the harness fans out all three notification
+    // kinds — adopters watching at the harness layer see uniform
+    // coverage independent of what withMCP surfaces.
     const [clientTransport, serverTransport] = InMemoryMcpTransport.createLinkedPair();
     const server = new Server(
       { name: "notifier-mcp-server", version: "1.0.0" },

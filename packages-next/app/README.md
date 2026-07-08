@@ -128,6 +128,21 @@ Constructs a `SessionHarness` bound to this app. Sessions share the
 app's substrate + sub-harnesses; only session-scope state (timeline,
 knobs, extensions targeting `"session"`) is per-session.
 
+**Single construction site for substrate primitives (#159).** The
+AppHarness is the ONE place the per-session `ElicitationHarness`,
+`TasksHarness`, and `ResourcesHarness` (ADR 62) are constructed — BEFORE
+session-extension installs run. Each is threaded, as a single shared
+instance, into the ToolExecutor (`ctx.elicitation` / `ctx.tasks` /
+`ctx.resource`), the session bridges (`bridges.*`), the session accessors
+(`session.elicitation` / `session.tasks` / `session.resources`), and the
+`SessionInstaller` (`installer.elicitation` / `.tasks` / `.resources`).
+Extensions (`withTasks`, `withResources`, `withMCP`, …) must NOT
+construct their own — that would collide on the inbox address and fork
+the registry that `ctx.*` vs `bridges.*` vs `session.*` resolve to. They
+consume the wired instance instead (e.g. `withResources` registers the
+`resource_*` model tools; `withMCP` proxy-registers remote resources into
+`installer.resources`).
+
 ### `app.closeApp()` / `app.close()`
 
 Closes every registered session, fires extension close handlers in
