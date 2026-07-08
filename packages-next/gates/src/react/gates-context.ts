@@ -37,7 +37,12 @@ import { useBridges, useLifecycleStore, useLoopControl } from "@agentick/reconci
 // is typed here (gates reads the session's KnobsHarness off the bundle).
 import "@agentick/knobs-next";
 
-import { GatesController, type LoopControlSeam, type TickEndSeam } from "../controller.js";
+import {
+  GatesController,
+  type GatesHandle,
+  type LoopControlSeam,
+  type TickEndSeam,
+} from "../controller.js";
 
 export const GatesContext = createContext<GatesController | null>(null);
 GatesContext.displayName = "AgentickGatesContext";
@@ -63,10 +68,28 @@ function transportedController(bridges: HookBridges): GatesController | undefine
 }
 
 /**
- * Resolve the in-scope {@link GatesController} and attach this mount's
- * tick-end source to it. Called by {@link useGate}; also usable directly
- * to wire the controller when a session has programmatic-only gates and
- * no `useGate` in the tree (mount {@link GatesRuntime}).
+ * PUBLIC accessor — resolve the in-scope gates surface as the curated
+ * {@link GatesHandle} (`register` / `get` / `list` / `clear`), the SAME
+ * shape `session.gates` exposes. Mirrors `useKnob` → `session.knobs`.
+ * Attaches this mount's tick-end source (via {@link useGatesController}),
+ * so calling it also wires the controller.
+ *
+ * The raw {@link GatesController} is intentionally NOT returned — it is an
+ * internal impl surface (`unregister`, `attach`, `handleTickEnd`, …).
+ * `Controller` is not a public v2 noun; the vocabulary is
+ * Harness/Bridge/Handle/Store.
+ */
+export function useGates(): GatesHandle {
+  return useGatesController();
+}
+
+/**
+ * INTERNAL accessor — resolve the in-scope {@link GatesController} and
+ * attach this mount's tick-end source to it. Not exported from the
+ * package index (`/react`); the PUBLIC hook is {@link useGates}, which
+ * returns the curated {@link GatesHandle}. Kept for the fuller controller
+ * surface intra-package callers need — {@link useGate} (`register` /
+ * `unregister` / `get`) and {@link GatesRuntime} (wiring only).
  */
 export function useGatesController(): GatesController {
   const ctxController = useContext(GatesContext);

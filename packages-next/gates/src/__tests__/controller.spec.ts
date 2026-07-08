@@ -11,7 +11,8 @@ import type { TickResult } from "@agentick/spec-next";
 import { stubKnobsHarness } from "@agentick/knobs-next/testing";
 
 import { gate } from "../descriptor.js";
-import { fakeGatesController } from "../testing/index.js";
+import { GatesController } from "../controller.js";
+import { fakeGatesController, spyLoopControl } from "../testing/index.js";
 
 function tickResult(
   overrides: Partial<TickResult> & Pick<TickResult, "shouldContinue">,
@@ -240,6 +241,92 @@ describe("GatesController — unified registry", () => {
       verified: true,
       description: "V",
     });
+  });
+
+  it("list()/get() unify over a parent layer; self shadows parent by name", () => {
+    const parent = fakeGatesController();
+    parent.controller.register(
+      "parent-only",
+      gate({ description: "P", instructions: "x", activateWhen: () => false }),
+    );
+    parent.controller.register(
+      "shared",
+      gate({ description: "parent-shared", instructions: "x", activateWhen: () => false }),
+    );
+
+    const child = new GatesController({
+      knobs: stubKnobsHarness(),
+      loopControl: spyLoopControl(),
+      parent: parent.controller,
+    });
+    child.register(
+      "child-only",
+      gate({ description: "C", instructions: "x", satisfied: () => true }),
+    );
+    child.register(
+      "shared",
+      gate({ description: "child-shared", instructions: "x", satisfied: () => true }),
+    );
+
+    const byName = new Map(child.list().map((g) => [g.name, g]));
+    expect([...byName.keys()].sort()).toEqual(["child-only", "parent-only", "shared"]);
+    // Self shadows the parent's `shared` row entirely (child's species + description win).
+    expect(byName.get("shared")).toMatchObject({ verified: true, description: "child-shared" });
+    // Parent-only rows fall through.
+    expect(byName.get("parent-only")).toMatchObject({ verified: false, description: "P" });
+
+    // get(): self shadows, else falls through to the parent's handle.
+    expect(child.get("shared")!.verified).toBe(true);
+    expect(child.get("parent-only")).toBe(parent.controller.get("parent-only"));
+  });
+
+  it("an inherited (parent) gate still evaluates against the child's tick", async () => {
+    const parent = fakeGatesController();
+    // Verified, never satisfied → engages + blocks when evaluated.
+    parent.controller.register(
+      "inherited-inv",
+      gate({ description: "x", instructions: "x", satisfied: () => false }),
+    );
+
+    const childLoop = spyLoopControl();
+    const child = new GatesController({
+      knobs: stubKnobsHarness(),
+      loopControl: childLoop,
+      parent: parent.controller,
+    });
+
+    await child.handleTickEnd(tickResult({ shouldContinue: false }));
+
+    // Evaluated in the PARENT's own layer — its knob + its loop, not the child's.
+    expect(parent.knobs.get("inherited-inv")).toBe("active");
+    expect(parent.loop.continueCalls).toEqual(["gate:inherited-inv"]);
+    expect(childLoop.continueCalls).toEqual([]);
+  });
+
+  it("a self gate shadows a same-named parent gate during evaluation (parent skipped)", async () => {
+    const parent = fakeGatesController();
+    // Would engage + block if it ran.
+    parent.controller.register(
+      "shared",
+      gate({ description: "P", instructions: "x", satisfied: () => false }),
+    );
+
+    const childKnobs = stubKnobsHarness();
+    const childLoop = spyLoopControl();
+    const child = new GatesController({
+      knobs: childKnobs,
+      loopControl: childLoop,
+      parent: parent.controller,
+    });
+    // The effective (self) gate by that name is satisfied → does not block.
+    child.register("shared", gate({ description: "C", instructions: "x", satisfied: () => true }));
+
+    await child.handleTickEnd(tickResult({ shouldContinue: false }));
+
+    expect(childKnobs.get("shared")).toBe("inactive");
+    // The shadowed parent gate was SKIPPED — never engaged, never blocked.
+    expect(parent.knobs.get("shared")).toBe("inactive");
+    expect(parent.loop.continueCalls).toEqual([]);
   });
 
   it("attach is ref-counted — the tick-end source subscribes once", () => {

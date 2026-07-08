@@ -28,6 +28,20 @@
  * the value cells. Descriptors are NOT snapshotted (components re-
  * declare on remount).
  *
+ * Layer chain (ADR 34 cascade) — the harness optionally resolves over an
+ * ordered `[parent, self]` chain: a read-only fallback `parentLayer`
+ * shadowed by this (self) layer. Reads (`get` / `has` / `list`) fall
+ * through to the parent when self has no entry; self always shadows
+ * parent by id. Writes (`set` / `register`) mutate SELF ONLY — the parent
+ * is never touched. Critically, `exportSnapshot()` captures the SELF layer
+ * ONLY: a session snapshot must not embed inherited (app-scoped) state,
+ * which is snapshotted at the parent's own scope. Today the parent is
+ * absent everywhere (the session constructs its knobs with
+ * `parentLayer` undefined), so the chain is just `[self]` and behavior is
+ * byte-identical to a single layer — the seam merely lets a future app
+ * tier drop in with no rewrite. (Named `parentLayer` to disambiguate from
+ * `BaseHarness.parent`, the ADR 31 harness-hierarchy parent reference.)
+ *
  * @see docs/proposals/v2/blueprint/26-harness-api-shape.md
  */
 
@@ -62,6 +76,18 @@ export class KnobsHarness extends BaseHarness<"knobs"> implements KnobsHarnessPr
   private readonly notifier: KeyedNotifier = createKeyedNotifier();
 
   /**
+   * Optional read-only fallback LAYER (ADR 34 cascade). Reads fall
+   * through here when self has no entry; self shadows it by id. Never
+   * mutated — writes hit SELF only. Absent today ⇒ single-layer behavior
+   * (see class doc).
+   *
+   * Distinct from `BaseHarness.parent` (ADR 31 harness hierarchy — the
+   * parent *harness* reference): this is the parent *knob layer* in a
+   * value-resolution cascade, hence the disambiguating name.
+   */
+  private readonly parentLayer?: KnobsHarnessProtocol;
+
+  /**
    * Cached snapshot for `list()`. Invalidated on every mutation so that
    * `useSyncExternalStore` consumers see stable references between
    * mutations (and a fresh reference after one).
@@ -87,8 +113,15 @@ export class KnobsHarness extends BaseHarness<"knobs"> implements KnobsHarnessPr
   readonly register: (input: KnobsRegisterInput) => Promise<void>;
   readonly dispatch: (input: KnobsDispatchInput) => Promise<readonly ContentBlock[]>;
 
-  constructor(scopeId: string, journal: OperationJournal, bus: EventBus, inbox: MessageInbox) {
+  constructor(
+    scopeId: string,
+    journal: OperationJournal,
+    bus: EventBus,
+    inbox: MessageInbox,
+    parentLayer?: KnobsHarnessProtocol,
+  ) {
     super("knobs", scopeId, journal, bus, inbox);
+    this.parentLayer = parentLayer;
     const scope = () => ({ sessionId: this.scopeId });
     this.set = this.command({
       name: "knobs:set",
@@ -112,25 +145,34 @@ export class KnobsHarness extends BaseHarness<"knobs"> implements KnobsHarnessPr
   // ─────────── Sync surface ───────────
 
   get(id: string): KnobPrimitive | undefined {
-    return this.values.get(id);
+    // Self shadows parent; fall through only when self has no cell.
+    return this.values.has(id) ? this.values.get(id) : this.parentLayer?.get(id);
   }
 
   has(id: string): boolean {
-    return this.values.has(id);
+    return this.values.has(id) || (this.parentLayer?.has(id) ?? false);
   }
 
   list(): readonly KnobDescriptor[] {
     if (this.listCache !== null) return this.listCache;
-    const out: KnobDescriptor[] = [];
+    // Ordered layer chain `[parent, self]`: parent rows first, then self
+    // rows override in place (self shadows parent by id, self wins). A
+    // Map keyed by id preserves the parent's position on override and
+    // appends self-only ids. Absent parent ⇒ just self (unchanged).
+    const byId = new Map<string, KnobDescriptor>();
+    if (this.parentLayer) {
+      for (const descriptor of this.parentLayer.list()) byId.set(descriptor.id, descriptor);
+    }
     // Descriptor-known ids first (registration order), then value-only
     // ids (set without a prior descriptor registration).
     for (const [id, descriptor] of this.descriptors) {
-      out.push({ id, value: this.values.get(id), ...descriptor });
+      byId.set(id, { id, value: this.values.get(id), ...descriptor });
     }
     for (const [id, value] of this.values) {
       if (this.descriptors.has(id)) continue;
-      out.push({ id, value });
+      byId.set(id, { id, value });
     }
+    const out = [...byId.values()];
     this.listCache = out;
     return out;
   }

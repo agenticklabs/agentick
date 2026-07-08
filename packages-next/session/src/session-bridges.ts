@@ -166,6 +166,12 @@ export function buildSessionBridges(
     substrate.journal,
     substrate.bus,
     substrate.inbox,
+    // Layer-chain parent (ADR 34 cascade). Absent today — no app tier
+    // exists yet, so the chain is just `[self]`. Threaded explicitly so
+    // the seam is present at the single construction site; a future
+    // app-scoped KnobsHarness drops in here with no rewrite. Session
+    // snapshots capture the self layer only (never inherited app state).
+    undefined,
   );
   const state = new StateHarness(
     `${store.id}:state`,
@@ -214,12 +220,16 @@ export function buildSessionBridges(
   // + a live getter over the loop bridge (so the same loop the tree sees
   // via `useLoopControl` drives continuation) + a bus-backed audit sink
   // for the trusted-host `.override()` escape. NOT a harness slot — the
-  // tick-end seam is attached from the reconciler mount (see gates-next
-  // `useGatesController`); the controller carries no independent state.
+  // tick-end seam is attached from the reconciler mount (via `useGates` /
+  // `<GatesRuntime />`); the controller carries no independent state.
+  // `parent` (ADR 34 cascade) is absent today — no app-tier gate layer
+  // exists yet; threaded explicitly so a future one drops in with no
+  // rewrite (inherited gates then evaluate through this session's tick).
   const gates = new GatesController({
     knobs,
     loopControl: () => base.loop,
     audit: makeGateAudit(substrate.bus, store.id),
+    parent: undefined,
   });
   (base as { gates: GatesController }).gates = gates;
 

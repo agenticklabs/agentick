@@ -149,13 +149,25 @@ sets every settable knob in that group atomically after a shared type-check.
 ### `@agentick/knobs-next`
 
 - **`KnobsHarness`** — `BaseHarness<"knobs">` impl of `KnobsHarnessProtocol`.
-  Construct with `(scopeId, journal, bus, inbox)`.
+  Construct with `(scopeId, journal, bus, inbox, parentLayer?)`.
   - Sync reads: `get(id)` · `has(id)` · `list()` · `subscribe(id, fn)` ·
     `subscribeAll(fn)`.
   - Async commands: `set({ id, value })` · `register({ id, descriptor })` ·
     `dispatch(input)` (the `set_knob` pipeline → `ContentBlock[]`).
   - Snapshot: `exportSnapshot()` / `importSnapshot(values)` round-trip the
     value cells (descriptors are re-declared on remount, not snapshotted).
+  - **Layer-aware resolution (ADR 34 cascade).** The optional `parentLayer`
+    is a read-only fallback `KnobsHarnessProtocol`: reads (`get` / `has` /
+    `list`) fall through to it when self has no entry, **self shadows parent
+    by id**, and writes (`set` / `register`) mutate **SELF ONLY** — the parent
+    is never touched. Critically, `exportSnapshot()` captures the **SELF layer
+    ONLY**: a session snapshot must not embed inherited (app-scoped) state,
+    which is snapshotted at the parent's own scope. Named `parentLayer` to
+    disambiguate from `BaseHarness.parent` (the ADR 31 harness-hierarchy
+    parent). **Absent everywhere today** — the session constructs its knobs
+    with no parent, so the chain is `[self]` and behavior is byte-identical to
+    a single layer; the seam lets a future **app tier** drop in as a session's
+    parent layer with no rewrite.
 - **`withKnobs(options?)`** — `SessionExtension` factory.
   `WithKnobsOptions.initial` seeds values at construction (via
   `importSnapshot`).
@@ -221,11 +233,15 @@ Extracted per ADR 26 Step 2, modularized per ADR 27. Green.
 
 ## Verified by
 
-- `src/__tests__/harness.spec.ts` (12 tests) — Operation envelopes
+- `src/__tests__/harness.spec.ts` (18 tests) — Operation envelopes
   (`set` / `register` / `dispatch` emit requested + terminal), inbox
   addressability (`knobs:set` / `knobs:register` / `knobs:dispatch` over the
-  harness address), snapshot round-trip, and read-only enforcement
-  (`dispatch` rejects `set_knob` by name + skips read-only in group writes).
+  harness address), snapshot round-trip, read-only enforcement
+  (`dispatch` rejects `set_knob` by name + skips read-only in group writes),
+  and **layered resolution over a `parentLayer`** — `get` fall-through, self
+  shadows parent by id, `set` / `register` write self only, `list` union with
+  self-shadowing, and **`exportSnapshot` captures the self layer only** (never
+  inherited parent state).
 - `src/__tests__/integration-with-reconciler.spec.tsx` (10 tests) — `useKnob`
   descriptor registration, momentary reset at execution end, `<Knobs />`
   default rendering + render prop, and reactivity (external `set` re-renders

@@ -108,6 +108,39 @@ export interface GatesControllerDeps {
    * omitted, overrides still apply — they just aren't recorded.
    */
   readonly audit?: (event: GateOverrideAudit) => void;
+  /**
+   * Optional parent (inherited) gate layer (ADR 34 cascade). Its gates
+   * fall through into this controller's reads (`get` / `list`, self
+   * shadows parent by name) and are evaluated by THIS controller's
+   * tick-end pass — the parent owns no tick-end source of its own; a
+   * child layer drives it. Absent today (the session constructs its
+   * controller with `parent: undefined`) ⇒ single-layer behavior,
+   * byte-identical to no chain. The seam lets a future app tier drop in.
+   */
+  readonly parent?: GatesParentLayer;
+}
+
+/**
+ * The read + inherited-evaluation surface a child {@link GatesController}
+ * consumes from its parent (app) layer. A `GatesController` satisfies it
+ * directly, so any controller can be another's parent. Kept structural so
+ * an app tier can be any conforming source. `GatesHandle` is the CURATED
+ * session surface; this is the (internal-ish) LAYER contract, so it also
+ * carries {@link evaluateInherited} — how a child drives its parent's
+ * evaluation against the child's tick.
+ */
+export interface GatesParentLayer {
+  get(name: string): GateHandle | undefined;
+  list(): readonly GateInfo[];
+  /**
+   * Evaluate THIS layer's own gates against a child layer's tick,
+   * skipping any `shadowed` names (a descendant owns the effective gate
+   * by that name). Recurses to its own parent, accumulating shadowed
+   * names, so a multi-level chain evaluates each name exactly once. The
+   * parent's own knobs + loop + notifiers are used (correct layer
+   * ownership — an app gate's state lives in the app layer).
+   */
+  evaluateInherited(result: TickResult, shadowed: ReadonlySet<string>): Promise<void>;
 }
 
 // ============================================================================
@@ -262,23 +295,34 @@ export class GatesController {
     this.gates.delete(name);
   }
 
-  /** The gate's handle, or undefined when unknown. */
+  /**
+   * The gate's handle, or undefined when unknown. Falls through to the
+   * parent layer when self has no gate by that name (self shadows parent).
+   */
   get(name: string): GateHandle | undefined {
-    return this.gates.get(name)?.handle;
+    return this.gates.get(name)?.handle ?? this.deps.parent?.get(name);
   }
 
-  /** Unified snapshot over ALL registered gates (tree-declared + programmatic). */
+  /**
+   * Unified snapshot over ALL registered gates (tree-declared +
+   * programmatic), across the layer chain — parent gates first, then self
+   * gates override in place (self shadows parent by name). Absent parent
+   * ⇒ just self (unchanged).
+   */
   list(): readonly GateInfo[] {
-    const out: GateInfo[] = [];
+    const byName = new Map<string, GateInfo>();
+    if (this.deps.parent) {
+      for (const info of this.deps.parent.list()) byName.set(info.name, info);
+    }
     for (const entry of this.gates.values()) {
-      out.push({
+      byName.set(entry.name, {
         name: entry.name,
         value: entry.value,
         verified: entry.verified,
         description: entry.descriptor.description,
       });
     }
-    return out;
+    return [...byName.values()];
   }
 
   /** Release a gate by name (host-side clear). No-op when unknown. */
@@ -329,6 +373,28 @@ export class GatesController {
     // doesn't perturb this tick's pass.
     for (const entry of [...this.gates.values()]) {
       await this.evaluate(entry, result);
+    }
+    // Then the inherited layer(s) — self gates shadow parent gates by
+    // name, so pass this layer's names as already-handled. No-op when no
+    // parent (the seam is present, unused, until an app tier is wired).
+    await this.deps.parent?.evaluateInherited(result, new Set(this.gates.keys()));
+  }
+
+  /**
+   * Evaluate this layer's own gates against a descendant's tick (see
+   * {@link GatesParentLayer.evaluateInherited}). Skips `shadowed` names,
+   * then recurses to its own parent accumulating this layer's names.
+   */
+  async evaluateInherited(result: TickResult, shadowed: ReadonlySet<string>): Promise<void> {
+    for (const entry of [...this.gates.values()]) {
+      if (shadowed.has(entry.name)) continue;
+      await this.evaluate(entry, result);
+    }
+    if (this.deps.parent) {
+      await this.deps.parent.evaluateInherited(
+        result,
+        new Set([...shadowed, ...this.gates.keys()]),
+      );
     }
   }
 

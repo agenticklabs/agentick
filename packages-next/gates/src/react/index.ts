@@ -2,9 +2,12 @@
  * `@agentick/gates-next/react` — React front-end for the gate pattern.
  *
  * `useGate` is a thin binding over the reconciler-agnostic
- * {@link GatesController}. The context surface (`GatesContext`,
- * `GatesProvider`, `useGatesController`, `GatesRuntime`) resolves + wires
- * the controller; adopters rarely touch it directly. Re-exports the
+ * {@link GatesController}. `useGates()` returns the curated
+ * {@link GatesHandle} — the in-scope gates surface, the SAME shape
+ * `session.gates` exposes. The remaining context surface (`GatesContext`,
+ * `GatesProvider`, `GatesRuntime`) resolves + wires the controller;
+ * adopters rarely touch it directly. The raw `GatesController` accessor
+ * is intentionally internal (not exported here). Re-exports the
  * descriptor types + controller types so everything is reachable from
  * this subpath.
  */
@@ -14,7 +17,7 @@ export {
   GatesContext,
   GatesProvider,
   GatesRuntime,
-  useGatesController,
+  useGates,
   type GatesProviderProps,
 } from "./gates-context.js";
 
@@ -30,6 +33,7 @@ export type {
 export { GatesController } from "../controller.js";
 export type {
   GatesControllerDeps,
+  GatesParentLayer,
   GateKnobs,
   LoopControlSeam,
   TickEndSeam,

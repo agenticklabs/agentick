@@ -37,6 +37,7 @@ export type {
 export { GatesController } from "./controller.js";
 export type {
   GatesControllerDeps,
+  GatesParentLayer,
   GateKnobs,
   LoopControlSeam,
   TickEndSeam,

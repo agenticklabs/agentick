@@ -21,8 +21,8 @@ import { ElicitationHarness } from "@agentick/elicitation-next";
 import { InMemoryHandlerResolver, ToolExecutorHarness } from "@agentick/tool-executor-next";
 import { LoopExecutorHarness } from "@agentick/loop-executor-next";
 import { ReconcilerHarness, System } from "@agentick/reconciler-react-next";
-import { useGate, useGatesController } from "@agentick/gates-next/react";
-import type { GatesController } from "@agentick/gates-next";
+import { useGate, useGates } from "@agentick/gates-next/react";
+import type { GatesHandle } from "@agentick/gates-next";
 import type { ExecutionTarget } from "@agentick/spec-next";
 
 import { SessionHarness } from "../harness.js";
@@ -57,10 +57,10 @@ function endExec() {
 
 describe("gates ↔ session — one controller, two front-ends", () => {
   it("unified registry + reference equality + real-tick evaluation", async () => {
-    const captured: { controller: GatesController | null } = { controller: null };
+    const captured: { gates: GatesHandle | null } = { gates: null };
 
     function Agent() {
-      captured.controller = useGatesController();
+      captured.gates = useGates();
       const g = useGate("tree-inv", {
         description: "Tree invariant",
         instructions: "GATE: fix the invariant.",
@@ -108,9 +108,9 @@ describe("gates ↔ session — one controller, two front-ends", () => {
     await session.ready;
     await session.mountReady;
 
-    // Reference equality — the tree's controller IS session.gates.
-    expect(captured.controller).not.toBeNull();
-    expect(captured.controller).toBe(session.gates);
+    // Reference equality — the surface `useGates()` returns IS session.gates.
+    expect(captured.gates).not.toBeNull();
+    expect(captured.gates).toBe(session.gates);
 
     // Programmatic registration lands in the SAME registry.
     session.gates.register("prog-latch", {

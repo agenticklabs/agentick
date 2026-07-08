@@ -161,6 +161,23 @@ captured. The controller rides the existing `BridgeContext` — a
 reconciler-react React context — as a runtime transport property, which is how
 `session.gates` and every `useGate` resolve the same instance.
 
+### Layer-aware resolution (app tier — a future layer the seam enables)
+
+The controller optionally resolves over an ordered `[parent, self]` layer
+chain (ADR 34 cascade). A `parent` `GatesParentLayer` supplies **inherited**
+gates: `get` / `list` unify across the chain with **self shadowing parent by
+name**, and this controller's tick-end pass evaluates self gates **and** the
+inherited ones (the parent owns no tick-end source of its own — a child layer
+drives it, against the child's tick, in the parent's own knob + loop layer).
+Shadowed names are evaluated once, by the effective (self) gate.
+
+Today the parent is **absent everywhere** — no app tier exists yet, so the
+session constructs its controller with `parent: undefined` and the chain is
+just `[self]` (behavior byte-identical to no chain). The seam is present,
+unused: a future **app-scoped** gate layer drops in as the session
+controller's `parent` with no rewrite, and app-declared gates then evaluate
+through each session's tick automatically.
+
 ## API
 
 ### Root (`@agentick/gates-next`) — reconciler-agnostic
@@ -169,14 +186,20 @@ reconciler-react React context — as a runtime transport property, which is how
 - `isVerifiedGate(descriptor)`, `GATE_OPTIONS`, `VERIFIED_GATE_OPTIONS`.
 - Types: `GateDescriptor`, `LatchGateDescriptor`, `VerifiedGateDescriptor`,
   `GateValue`.
-- `GatesController` + `GatesControllerDeps`, `GateKnobs`, `LoopControlSeam`,
-  `TickEndSeam`, `GateOverrideAudit`, `GateInfo`, `GateHandle`, `GatesHandle`.
+- `GatesController` + `GatesControllerDeps`, `GatesParentLayer`, `GateKnobs`,
+  `LoopControlSeam`, `TickEndSeam`, `GateOverrideAudit`, `GateInfo`,
+  `GateHandle`, `GatesHandle`.
 
 ### `/react`
 
 - `useGate(name, descriptor): GateState` — the React front-end.
-- `useGatesController()`, `<GatesProvider>`, `<GatesRuntime />`,
-  `GatesContext` — controller resolution/wiring (rarely needed directly).
+- `useGates(): GatesHandle` — the in-scope gates surface (the SAME curated
+  shape `session.gates` exposes: `register`/`get`/`list`/`clear`). Mirrors
+  `useKnob` → `session.knobs`. The raw `GatesController` is intentionally
+  **not** returned — `Controller` is an internal impl surface, not a public v2
+  noun (the vocabulary is Harness/Bridge/Handle/Store).
+- `<GatesProvider>`, `<GatesRuntime />`, `GatesContext` — controller
+  resolution/wiring (rarely needed directly).
 
 ### `/testing`
 
@@ -205,6 +228,9 @@ Every claim above is exercised by a test:
 | `.override()` releases a verified gate AND emits an audit envelope; throws on latch; not a model path | `controller.spec.ts`                           |
 | Async verified predicates are awaited                                                                 | `gate.spec.tsx`                                |
 | `attach` is ref-counted — the tick-end source subscribes once                                         | `controller.spec.ts`                           |
+| Layer chain: `list`/`get` unify over a parent, self shadows parent by name                            | `controller.spec.ts`                           |
+| An inherited (parent) gate still evaluates against the child's tick (parent's own knob + loop)        | `controller.spec.ts`                           |
+| A self gate shadows a same-named parent gate during evaluation (parent skipped)                       | `controller.spec.ts`                           |
 | Unified registry: tree-declared + programmatic gates both in `session.gates.list()`                   | `session/__tests__/gates-integration.spec.tsx` |
 | Single construction site: `useGate`'s controller IS `session.gates` (reference equality)              | `session/__tests__/gates-integration.spec.tsx` |
 | Real tick drives tick-end through the shared controller — both gates evaluate                         | `session/__tests__/gates-integration.spec.tsx` |

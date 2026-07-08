@@ -291,6 +291,98 @@ describe("KnobsHarness — read-only knobs", () => {
 });
 
 // ============================================================================
+// Layer chain (ADR 34 cascade) — parent fallback + self shadowing
+// ============================================================================
+
+describe("KnobsHarness — layered resolution over a parent", () => {
+  async function makeLayered(): Promise<{ parent: KnobsHarness; child: KnobsHarness }> {
+    const journal = new MemoryJournal({ capacity: 10_000 });
+    const bus = new LocalEventBus();
+    const inbox = new LocalInbox();
+    const parent = new KnobsHarness(`parent-${ulid()}`, journal, bus, inbox);
+    const child = new KnobsHarness(`child-${ulid()}`, journal, bus, inbox, parent);
+    await Promise.all([parent.ready, child.ready]);
+    return { parent, child };
+  }
+
+  it("get() falls through to the parent when self has no cell", async () => {
+    const { parent, child } = await makeLayered();
+    await parent.set({ id: "inherited", value: "from-parent" });
+
+    expect(child.get("inherited")).toBe("from-parent");
+    expect(child.has("inherited")).toBe(true);
+    expect(child.get("absent")).toBeUndefined();
+    expect(child.has("absent")).toBe(false);
+  });
+
+  it("self shadows the parent for the same id (self wins)", async () => {
+    const { parent, child } = await makeLayered();
+    await parent.set({ id: "shared", value: "parent-value" });
+    await child.set({ id: "shared", value: "child-value" });
+
+    expect(child.get("shared")).toBe("child-value");
+    // Parent still holds its own value — self shadows, does not mutate.
+    expect(parent.get("shared")).toBe("parent-value");
+  });
+
+  it("set() writes SELF only and leaves the parent untouched", async () => {
+    const { parent, child } = await makeLayered();
+    await child.set({ id: "child-only", value: 42 });
+
+    expect(child.get("child-only")).toBe(42);
+    expect(parent.get("child-only")).toBeUndefined();
+    expect(parent.has("child-only")).toBe(false);
+  });
+
+  it("register() writes SELF only and leaves the parent untouched", async () => {
+    const { parent, child } = await makeLayered();
+    await child.register({
+      id: "child-desc",
+      descriptor: { defaultValue: "def", valueType: "string", description: "child" },
+    });
+
+    expect(child.get("child-desc")).toBe("def");
+    expect(parent.list().some((k) => k.id === "child-desc")).toBe(false);
+  });
+
+  it("list() unions parent + self with self shadowing by id", async () => {
+    const { parent, child } = await makeLayered();
+    await parent.register({
+      id: "shared",
+      descriptor: { defaultValue: "parent", valueType: "string", description: "from parent" },
+    });
+    await parent.set({ id: "parent-only", value: "p" });
+    await child.register({
+      id: "shared",
+      descriptor: { defaultValue: "child", valueType: "string", description: "from child" },
+    });
+    await child.set({ id: "child-only", value: "c" });
+
+    const byId = new Map(child.list().map((k) => [k.id, k]));
+    expect([...byId.keys()].sort()).toEqual(["child-only", "parent-only", "shared"]);
+    // Self shadows the parent's `shared` row entirely.
+    expect(byId.get("shared")).toMatchObject({ value: "child", description: "from child" });
+    // Parent-only rows fall through.
+    expect(byId.get("parent-only")).toMatchObject({ value: "p" });
+  });
+
+  it("exportSnapshot() captures the SELF layer ONLY (never inherited parent state)", async () => {
+    const { parent, child } = await makeLayered();
+    await parent.set({ id: "inherited", value: "from-parent" });
+    await child.set({ id: "child-only", value: "mine" });
+
+    const snap = child.exportSnapshot();
+    // The inherited value is readable via get() (fall-through) but MUST
+    // NOT be embedded in the child's snapshot — the parent snapshots at
+    // its own scope; a session snapshot must not carry app-scoped state.
+    expect(snap).toEqual({ "child-only": "mine" });
+    expect("inherited" in snap).toBe(false);
+    // Sanity: fall-through read still works despite the snapshot omission.
+    expect(child.get("inherited")).toBe("from-parent");
+  });
+});
+
+// ============================================================================
 // Conformance suite — runs the full protocol-contract test set
 // ============================================================================
 
