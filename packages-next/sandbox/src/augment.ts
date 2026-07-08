@@ -2,8 +2,8 @@
  * Module augmentation — adds `bridges.sandbox` to `HookBridges` AND
  * `sandboxId` to `EventScopeExtensions`.
  *
- * Adopters who import anything from `@agentick/sandbox/v2` (or
- * `@agentick/sandbox/v2/react`) bring both augmentations in, and
+ * Adopters who import anything from `@agentick/sandbox-next` (or
+ * `@agentick/sandbox-next/react`) bring both augmentations in, and
  * `useBridges().sandbox` + `eventScope.sandboxId` are typed correctly.
  * Adopters who don't, never see the slot.
  *

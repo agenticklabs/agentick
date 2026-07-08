@@ -53,9 +53,9 @@ for the full reasoning. Summary:**
         integration-with-reconciler.spec.ts   — uses real ReconcilerHarness
   ```
 - **`@agentick/reconciler-react-next` has NO dependency on any harness
-  package.** It owns the JSX → IR pipeline, the bridge context
-  (`BridgeProvider` / `useBridges`), and the reference
-  `InMemoryDataBridge`. Snapshot/restore iterates `HookBridges`
+  package.** It owns the JSX → IR pipeline and the bridge context
+  (`BridgeProvider` / `useBridges`); the reference `InMemoryDataBridge`
+  lives in `@agentick/reconciler-next`. Snapshot/restore iterates `HookBridges`
   generically via `SnapshotCapable` feature detection — no hardcoded
   slot names. Any harness can add a `/react` subpath that depends on
   reconciler-react WITHOUT creating a cycle.

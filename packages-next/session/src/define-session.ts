@@ -11,9 +11,9 @@
  * and the default impl handles a lot of plumbing. `defineSession` is
  * for the cases where that plumbing is the wrong fit.
  *
- * Required callbacks: `send`, `snapshot`, `close`, and the state
- * applicator triple (`applyExecutorResult`/`applyToolResults`/
- * `appendEntry`). Other methods default to throwing
+ * Required callbacks: `send`, `snapshot`, and the state applicator
+ * triple (`applyExecutorResult`/`applyToolResults`/`appendEntry`).
+ * Other methods (including the optional `close`) default to throwing
  * "method not configured" — adopters override what they need.
  *
  * Top-level handles (`timeline`/`knobs`/`state` per ADR 27 augmentation)

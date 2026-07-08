@@ -1,9 +1,9 @@
 /**
- * `@agentick/sandbox/v2/react` — React bindings for the sandbox harness.
+ * `@agentick/sandbox-next/react` — React bindings for the sandbox harness.
  *
  * Adopters import from here when they're using the
  * `@agentick/reconciler-react-next` reconciler. The agnostic surface
- * (bridge, harness, types) ships from `@agentick/sandbox/v2`.
+ * (bridge, harness, types) ships from `@agentick/sandbox-next`.
  *
  * @see docs/proposals/v2/blueprint/24-sandbox-as-harness.md
  */
@@ -15,9 +15,9 @@ export { Sandbox, type SandboxProps } from "./component.js";
 export { useSandbox } from "./hook.js";
 export { SandboxContext } from "./context.js";
 
-// Re-export from /v2 for ergonomic single-import adoption: adopters
-// who import from `@agentick/sandbox/v2/react` get the factory + the
-// components in one place.
+// Re-export for ergonomic single-import adoption: adopters who import
+// from `@agentick/sandbox-next/react` get the factory + the components
+// in one place.
 export { withSandbox } from "../extension.js";
 export type { WithSandboxOptions } from "../extension.js";
 export { inMemorySandboxBridge, type SandboxBridge, type SandboxRegistration } from "../bridge.js";

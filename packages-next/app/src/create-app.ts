@@ -26,7 +26,8 @@
  * One cluster per process. Multiple `createApp` calls with the same
  * `ClusterFactory` produce INDEPENDENT clusters (double connections,
  * double-delivery). For multi-app deployments, use a gateway — the
- * gateway owns the cluster and apps inherit. See ADR 35 §10.
+ * gateway owns the cluster and apps inherit. See ADR 38 (cluster
+ * lifecycle & ownership).
  */
 
 import type { ClusterFactory, ClusterParent } from "@agentick/cluster-next";
