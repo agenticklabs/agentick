@@ -5,7 +5,7 @@
  * continuation blocking, ephemeral rendering, adversarial edge cases.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { createApp } from "../../app.js";
 import { System } from "../../jsx/components/messages.js";
 import { Model, Tool } from "../../jsx/components/primitives.js";
@@ -784,5 +784,345 @@ describe("useGate — compilation", () => {
     expect(section).toBeDefined();
     expect(section).toContain("verification");
     expect(section).toContain("inactive");
+  });
+});
+
+// ============================================================================
+// Verified Gates (level-triggered, code-cleared)
+// ============================================================================
+
+describe("useGate — verified gates", () => {
+  it("blocks completion while unsatisfied, auto-clears when the predicate passes", async () => {
+    let tickCount = 0;
+    const model = createTestAdapter({
+      responseGenerator: () => {
+        tickCount++;
+        return "done";
+      },
+      stopReason: StopReason.STOP,
+    });
+
+    const Agent = () => {
+      const g = useGate("invariant", {
+        description: "Extraction must reconcile",
+        instructions: "GATE: the invariant does not hold — fix and resubmit",
+        satisfied: (r) => r.tick >= 2,
+      });
+
+      return (
+        <>
+          <Model model={model} />
+          <System>Test</System>
+          <Timeline />
+          <Knobs />
+          {g.element}
+        </>
+      );
+    };
+
+    const app = createApp(Agent, { maxTicks: 10 });
+    const session = await app.session();
+    await send(session);
+    session.close();
+
+    // tick 1: unsatisfied → forced continue; tick 2: satisfied → completes.
+    // No clear() anywhere — the predicate alone releases the gate. Completing
+    // at exactly tick 2 (not maxTicks) proves both the block and the release.
+    expect(tickCount).toBe(2);
+  });
+
+  it("supports async predicates", async () => {
+    let tickCount = 0;
+    const model = createTestAdapter({
+      responseGenerator: () => {
+        tickCount++;
+        return "done";
+      },
+      stopReason: StopReason.STOP,
+    });
+
+    const Agent = () => {
+      const g = useGate("invariant", {
+        description: "Async invariant",
+        instructions: "GATE: not satisfied yet",
+        satisfied: async (r) => {
+          await new Promise((resolve) => setTimeout(resolve, 1));
+          return r.tick >= 3;
+        },
+      });
+
+      return (
+        <>
+          <Model model={model} />
+          <System>Test</System>
+          <Timeline />
+          <Knobs />
+          {g.element}
+        </>
+      );
+    };
+
+    const app = createApp(Agent, { maxTicks: 10 });
+    const session = await app.session();
+    await send(session);
+    session.close();
+
+    expect(tickCount).toBe(3);
+  });
+
+  it("re-engages when the condition regresses on a later tick", async () => {
+    const activePerRender: boolean[] = [];
+    const model = createTestAdapter({
+      responseGenerator: () => "working",
+      stopReason: StopReason.STOP,
+    });
+
+    const Agent = () => {
+      const g = useGate("invariant", {
+        description: "Flaky invariant",
+        instructions: "GATE: broken again",
+        // Satisfied only at tick 2 — regresses afterwards.
+        satisfied: (r) => r.tick === 2,
+      });
+      activePerRender.push(g.active);
+
+      useContinuation((result) => {
+        // Keep the loop alive past the satisfied tick with a tool call so
+        // the regression is observable.
+        if (result.tick === 1) {
+          model.respondWith([{ tool: { name: "touch", input: {} } }]);
+        }
+      });
+
+      return (
+        <>
+          <Model model={model} />
+          <System>Test</System>
+          <Timeline />
+          <Tool
+            name="touch"
+            description="No-op"
+            input={z.object({})}
+            handler={async () => [{ type: "text" as const, text: "ok" }]}
+          />
+          <Knobs />
+          {g.element}
+        </>
+      );
+    };
+
+    const app = createApp(Agent, { maxTicks: 5 });
+    const session = await app.session();
+    await send(session);
+    session.close();
+
+    // Render at tick N reflects state set at tick N-1's end:
+    // tick 2 render → active (tick 1 unsatisfied)
+    // tick 3 render → inactive (tick 2 satisfied — auto-cleared)
+    // tick 4 render → active again (tick 3 regressed)
+    expect(activePerRender[1]).toBe(true);
+    expect(activePerRender[2]).toBe(false);
+    expect(activePerRender[3]).toBe(true);
+  });
+
+  it("model cannot bypass a verified gate via set_knob", async () => {
+    let toolResultText: string | undefined;
+    const model = createTestAdapter({
+      responseGenerator: () => "done",
+      stopReason: StopReason.STOP,
+    });
+    // Model tries to knob the gate off on tick 1
+    model.respondWith([
+      { tool: { name: "set_knob", input: { name: "invariant", value: "inactive" } } },
+    ]);
+
+    const Agent = () => {
+      const g = useGate("invariant", {
+        description: "Unforgeable invariant",
+        instructions: "GATE: cannot be knobbed off",
+        satisfied: () => false,
+      });
+
+      useContinuation((result) => {
+        if (result.toolResults.length > 0) {
+          const content = result.toolResults[0].content;
+          if (content?.[0]?.type === "text") {
+            toolResultText = content[0].text;
+          }
+        }
+        // Bound the test: explicit stop beats the gate's forced continue.
+        if (result.tick >= 2) return { stop: true, reason: "test-bound" };
+      });
+
+      return (
+        <>
+          <Model model={model} />
+          <System>Test</System>
+          <Timeline />
+          <Knobs />
+          {g.element}
+        </>
+      );
+    };
+
+    const app = createApp(Agent, { maxTicks: 10 });
+    const session = await app.session();
+    await send(session);
+    session.close();
+
+    expect(toolResultText).toContain("read-only");
+  });
+
+  it("defer is a no-op on verified gates", async () => {
+    let sawDeferred = false;
+    const model = createTestAdapter({
+      responseGenerator: () => "working",
+      stopReason: StopReason.STOP,
+    });
+
+    const Agent = () => {
+      const g = useGate("invariant", {
+        description: "Non-deferrable invariant",
+        instructions: "GATE: must be fixed, not postponed",
+        satisfied: () => false,
+      });
+      if (g.deferred) sawDeferred = true;
+
+      useContinuation((result) => {
+        g.defer();
+        if (g.deferred) sawDeferred = true;
+        if (result.tick >= 3) return { stop: true, reason: "test-bound" };
+      });
+
+      return (
+        <>
+          <Model model={model} />
+          <System>Test</System>
+          <Timeline />
+          <Knobs />
+          {g.element}
+        </>
+      );
+    };
+
+    const app = createApp(Agent, { maxTicks: 10 });
+    const session = await app.session();
+    await send(session);
+    session.close();
+
+    expect(sawDeferred).toBe(false);
+  });
+
+  it("renders read-only hint in the knobs section", async () => {
+    const Agent = () => {
+      useGate("invariant", {
+        description: "Verified invariant",
+        instructions: "GATE",
+        satisfied: () => false,
+      });
+      return <Knobs />;
+    };
+
+    const result = await compileAgent(Agent);
+    const section = result.getSection("knobs");
+
+    expect(section).toBeDefined();
+    expect(section).toContain("invariant");
+    expect(section).toContain("read-only");
+  });
+});
+
+// ============================================================================
+// Verified Gates with arming (activateWhen + satisfied)
+// ============================================================================
+
+describe("useGate — verified gates with arming", () => {
+  it("dormant gate does not block completion when unarmed", async () => {
+    let tickCount = 0;
+    const model = createTestAdapter({
+      responseGenerator: () => {
+        tickCount++;
+        return "done";
+      },
+      stopReason: StopReason.STOP,
+    });
+    const satisfied = vi.fn(() => false);
+
+    const Agent = () => {
+      const g = useGate("typecheck", {
+        description: "Typecheck must pass after edits",
+        instructions: "GATE",
+        activateWhen: (r) => r.toolCalls.some((tc) => tc.name === "edit_file"),
+        satisfied,
+      });
+
+      return (
+        <>
+          <Model model={model} />
+          <System>Test</System>
+          <Timeline />
+          <Knobs />
+          {g.element}
+        </>
+      );
+    };
+
+    const app = createApp(Agent, { maxTicks: 10 });
+    const session = await app.session();
+    await send(session);
+    session.close();
+
+    // No edit ever happens: the gate stays dormant, never verifies, never
+    // blocks — execution completes on tick 1 despite satisfied() being false.
+    expect(tickCount).toBe(1);
+    expect(satisfied).not.toHaveBeenCalled();
+  });
+
+  it("arms on the trigger tick and blocks until satisfied", async () => {
+    const satisfiedTicks: number[] = [];
+    const model = createTestAdapter({
+      responseGenerator: () => "done",
+      stopReason: StopReason.STOP,
+    });
+    // Tick 1 performs the arming edit.
+    model.respondWith([{ tool: { name: "edit_file", input: { path: "a", content: "b" } } }]);
+
+    const Agent = () => {
+      const g = useGate("typecheck", {
+        description: "Typecheck must pass after edits",
+        instructions: "GATE: fix the typecheck",
+        activateWhen: (r) => r.toolCalls.some((tc) => tc.name === "edit_file"),
+        satisfied: (r) => {
+          satisfiedTicks.push(r.tick);
+          return r.tick >= 3;
+        },
+      });
+
+      return (
+        <>
+          <Model model={model} />
+          <System>Test</System>
+          <Timeline />
+          <Tool
+            name="edit_file"
+            description="Edit"
+            input={z.object({ path: z.string(), content: z.string() })}
+            handler={async () => [{ type: "text" as const, text: "ok" }]}
+          />
+          <Knobs />
+          {g.element}
+        </>
+      );
+    };
+
+    const app = createApp(Agent, { maxTicks: 10 });
+    const session = await app.session();
+    await send(session);
+    session.close();
+
+    // Tick 1: the edit arms the gate AND verification runs same-tick
+    // (unsatisfied). Tick 2: still unsatisfied → forced continue. Tick 3:
+    // satisfied → completes. The predicate ran on exactly those ticks.
+    expect(satisfiedTicks).toEqual([1, 2, 3]);
   });
 });

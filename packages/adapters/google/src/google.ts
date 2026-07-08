@@ -670,12 +670,16 @@ export function mapToolDefinition(tool: any): any {
 
   if ("name" in tool && "input" in tool) {
     const toolDef = tool as ToolDefinition;
+    // Prefer the pre-converted JSON Schema (set by core's enrichMetadata) —
+    // `input` may be a raw Zod schema, which the sanitizer would walk as a
+    // plain object and reduce to a fieldless declaration.
+    const rawSchema = (tool as any).inputSchema ?? toolDef.input;
     const baseTool = {
       functionDeclarations: [
         {
           name: toolDef.name,
           description: toolDef.description || "",
-          parameters: ensureObjectSchema(sanitizeSchemaForGemini(toolDef.input)),
+          parameters: ensureObjectSchema(sanitizeSchemaForGemini(rawSchema)),
         },
       ],
     };

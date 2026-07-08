@@ -146,6 +146,10 @@ useContinuation((result) => {
 });
 ```
 
+### Gates
+
+For reusable continuation conditions — "the model may not finish until X" — use `useGate`, which packages a knob, a tick-end callback, and rendered instructions into one named checkpoint. See [Gates](/docs/gates).
+
 ### `result.stop()` and `result.continue()`
 
 These methods are available on the `TickResult` passed to both `useContinuation` and `useOnTickEnd`. They accept an optional reason string or options object:
@@ -194,5 +198,6 @@ useOnTickEnd((result, ctx) => {});
 useAfterCompile((compiled, ctx) => {});
 useOnExecutionEnd((ctx) => {});
 useContinuation((result, ctx) => boolean | void); // result.shouldContinue shows framework default
+useGate(name, { description, instructions, activateWhen | satisfied }); // see /docs/gates
 useOnMessage((message, ctx, state) => {});
 ```

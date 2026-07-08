@@ -1329,3 +1329,22 @@ describe("toGoogleMessages", () => {
     });
   });
 });
+
+describe("mapToolDefinition — enriched inputSchema preference", () => {
+  it("prefers metadata.inputSchema (JSON Schema) over raw zod input", async () => {
+    const { mapToolDefinition } = await import("../google.js");
+    const jsonSchema = {
+      type: "object",
+      properties: { ItemsTsv: { type: "string" } },
+      required: ["ItemsTsv"],
+    };
+    const zodLike = { _def: { typeName: "ZodObject" }, safeParse: () => ({ success: true }) };
+    const mapped = mapToolDefinition({
+      name: "submit_extraction",
+      description: "d",
+      input: zodLike,
+      inputSchema: jsonSchema,
+    } as never) as { functionDeclarations: Array<{ parameters: { properties?: unknown } }> };
+    expect(mapped.functionDeclarations[0].parameters.properties).toEqual(jsonSchema.properties);
+  });
+});

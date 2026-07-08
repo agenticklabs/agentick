@@ -690,10 +690,12 @@ describe("mapBedrockStreamChunk", () => {
       };
       const result = mapBedrockStreamChunk(event, toolCallState);
 
+      // No `input` on the end event — the stream accumulator must parse the
+      // accumulated toolUse JSON deltas (a non-nullish input would win the
+      // `delta.input ?? parse(...)` fallback and discard the arguments).
       expect(result).toEqual({
         type: "tool_call_end",
         id: "tool-123",
-        input: {},
       });
       expect(toolCallState.has(0)).toBe(false);
     });
@@ -922,5 +924,68 @@ describe("processConverseOutput", () => {
       type: "text",
       text: "Response",
     });
+  });
+});
+
+describe("mapToolDefinition — enriched inputSchema preference", () => {
+  it("prefers metadata.inputSchema (JSON Schema) over raw zod input", async () => {
+    const { mapToolDefinition } = await import("../bedrock.js");
+    const jsonSchema = {
+      type: "object",
+      properties: { ItemsTsv: { type: "string" } },
+      required: ["ItemsTsv"],
+    };
+    const zodLike = { _def: { typeName: "ZodObject" }, safeParse: () => ({ success: true }) };
+    const mapped = mapToolDefinition({
+      name: "submit_extraction",
+      description: "d",
+      input: zodLike,
+      inputSchema: jsonSchema,
+    } as never) as { toolSpec: { inputSchema: { json: unknown } } };
+    expect(mapped.toolSpec.inputSchema.json).toEqual(jsonSchema);
+  });
+
+  it("falls back to input when no inputSchema is present", async () => {
+    const { mapToolDefinition } = await import("../bedrock.js");
+    const plain = { type: "object", properties: {} };
+    const mapped = mapToolDefinition({
+      name: "t",
+      description: "d",
+      input: plain,
+    } as never) as { toolSpec: { inputSchema: { json: unknown } } };
+    expect(mapped.toolSpec.inputSchema.json).toEqual(plain);
+  });
+});
+
+describe("mapBedrockStreamChunk — toolUse input accumulation", () => {
+  it("tool_call_end does not override accumulated input with {}", async () => {
+    const { mapBedrockStreamChunk } = await import("../bedrock.js");
+    const state = new Map();
+    mapBedrockStreamChunk(
+      {
+        contentBlockStart: {
+          contentBlockIndex: 0,
+          start: { toolUse: { toolUseId: "t1", name: "submit" } },
+        },
+      } as never,
+      state,
+    );
+    mapBedrockStreamChunk(
+      {
+        contentBlockDelta: { contentBlockIndex: 0, delta: { toolUse: { input: '{"a":1}' } } },
+      } as never,
+      state,
+    );
+    const end = mapBedrockStreamChunk(
+      { contentBlockStop: { contentBlockIndex: 0 } } as never,
+      state,
+    ) as {
+      type: string;
+      input?: unknown;
+    };
+    expect(end.type).toBe("tool_call_end");
+    // `input` must be absent (nullish) so the stream accumulator parses the
+    // accumulated JSON deltas instead of receiving a hardcoded empty object.
+    expect(end.input).toBeUndefined();
   });
 });

@@ -95,6 +95,8 @@ export interface KnobRegistration {
   pattern?: string;
   momentary?: boolean;
   inline?: boolean;
+  /** Model-visible but not model-settable — set_knob rejects writes. */
+  readOnly?: boolean;
 }
 
 // ============================================================
