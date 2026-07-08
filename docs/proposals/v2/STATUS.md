@@ -1683,9 +1683,24 @@ blueprint's design decisions; this is execution-level).
   that outlive any one session, so the store + executors are app-owned
   for the app's lifetime (a session-scoped store would lose detached
   tasks on close). Contrast knobs/gates, which DO cascade (policy).
-- **Deferred (seam-ready):** `@agentick/tasks-postgres-next` durable
-  store + cross-app-restart reattach (child pid on `record.executorState`)
-  — `TODO(ADR-68 pg)` trailheads at child-executor.ts + harness.ts. A
+- **ADR 68 pg tier landed** (`4e3b43d3`). `@agentick/tasks-postgres-next` —
+  a durable Postgres `TaskStore`, the flexible cloud-pole sibling of
+  `timeline-postgres` (BYO executor, table/columns/sql/codec/migrate escape
+  hatches, factory implements the port directly per ADR 49). Schema: task_id
+  PK + scope jsonb (GIN) + status + updated_at + payload jsonb + schema_ver;
+  UPSERT put, `scope @>` containment list, terminal-only prune. Passes
+  `runTaskStoreConformance`. The unlock the in-memory store structurally
+  can't demonstrate — a cross-process resume proof (verified 12/12 on a real
+  postgres:16): `interrupted`-on-restart FIRES FOR REAL (abandon harness #1
+  without close → fresh harness #2 over the same pool+table marks the orphan
+  `interrupted`) + terminal adoption (result decoded from pg, not a live
+  fiber). NOTE: the earlier scout finding stands — with the in-memory store,
+  same-process session-resume re-hydration was already a no-op the ADR 68
+  machinery covered; this pg store is what makes cross-process resume real.
+- **Still deferred (seam-ready):** cross-restart CHILD reattach-by-pid
+  (needs the executor to persist its pid into `record.executorState` +
+  pid-based re-adoption) — `TODO(ADR-68 child-reattach)`; and the
+  `input_required` transition (`#120-followup`). A
   distributed/queue executor (pg-boss-style) is the ambitious tier: it's
   the child-process executor with the pipe swapped for a queue + the
   cluster bus (report goes through the durable + cluster planes rather
