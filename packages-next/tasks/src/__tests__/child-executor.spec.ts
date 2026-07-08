@@ -46,6 +46,30 @@ describe("ChildProcessTaskExecutor — fork + IPC round-trip", () => {
     expect(bundle.harness.status(handle.taskId)).toBe("completed");
   });
 
+  it("round-trips a Date / Map / typed-array intact (structured-clone default)", async () => {
+    // Proves the executor's `serialization: "advanced"` default: a value
+    // JSON would mangle survives BOTH directions (input → child, result →
+    // parent) with instances intact. The README's structured-clone claim.
+    bundle = await fakeTasks({ executors: [childExecutor()] });
+    const input = {
+      when: new Date("2026-07-08T00:00:00.000Z"),
+      tags: new Map<string, number>([["a", 1]]),
+      bytes: new Uint8Array([1, 2, 3]),
+    };
+    const handle = bundle.harness.submit<typeof input>({
+      executorKind: "child-process",
+      handlerRef: "roundtrip",
+      input,
+    });
+    const result = await handle.result;
+    expect(result.when).toBeInstanceOf(Date);
+    expect(result.when.toISOString()).toBe("2026-07-08T00:00:00.000Z");
+    expect(result.tags).toBeInstanceOf(Map);
+    expect(result.tags.get("a")).toBe(1);
+    expect(result.bytes).toBeInstanceOf(Uint8Array);
+    expect(Array.from(result.bytes)).toEqual([1, 2, 3]);
+  });
+
   it("progress events arrive over IPC in order", async () => {
     bundle = await fakeTasks({ executors: [childExecutor()] });
     const handle = bundle.harness.submit({

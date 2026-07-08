@@ -604,10 +604,14 @@ the executor hardcodes no `execArgv`. A built JS worker needs nothing; a TS
 worker under `tsx` passes `{ execArgv: ["--import", "tsx"] }`.
 
 **Constraint (by-ref).** No closures cross the boundary — work is resolved from
-`handlerRef`. Both `input` and the returned result must be structured-cloneable
-(they round-trip through JSON IPC); `TaskFailure.cause` does NOT cross (an
-arbitrary thrown value doesn't serialize) — failures lossy-encode to `reason`,
-the same wire-boundary asymmetry the MCP codec documents.
+`handlerRef`. Both `input` and the returned result cross by **V8 structured
+clone** (the executor forks with `serialization: "advanced"` — so `Date`,
+`Map` / `Set`, `Buffer` / typed-arrays survive intact, which matters for image /
+binary `ContentBlock` results; functions and class prototypes do NOT). Override
+`forkOptions.serialization` if you need JSON-wire semantics. `TaskFailure.cause`
+is deliberately NOT sent (an arbitrary thrown value may not clone) — failures
+lossy-encode to `reason`, the same wire-boundary asymmetry the MCP codec
+documents.
 
 **What it delivers vs. defers.** Delivers: isolation, independent killability
 (graceful IPC-cancel → `SIGKILL` backstop after `killGracePeriodMs`), crash →

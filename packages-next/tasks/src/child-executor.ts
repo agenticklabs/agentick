@@ -55,9 +55,13 @@ export interface ChildProcessTaskExecutorOptions {
    */
   readonly workerModule: string;
   /**
-   * Passed straight to `fork`. The ADOPTER controls `execArgv` / loaders
-   * for their build (the executor hardcodes none). Example for a TS
-   * worker under `tsx`: `{ execArgv: ["--import", "tsx"] }`.
+   * Merged over the executor's defaults (`{ serialization: "advanced" }`)
+   * and passed to `fork` — the ADOPTER controls `execArgv` / loaders for
+   * their build (the executor hardcodes no loader). Example for a TS worker
+   * under `tsx`: `{ execArgv: ["--import", "tsx"] }`. Fork does NOT set
+   * `silent` — a chatty worker's stdout/stderr flow to the parent; pass
+   * `{ silent: true }` to isolate them. Override `serialization: "json"`
+   * only if you specifically need JSON-wire semantics.
    */
   readonly forkOptions?: ForkOptions;
   /**
@@ -120,7 +124,12 @@ export class ChildProcessTaskExecutor implements TaskExecutor {
     report: TaskReport,
     signal: AbortSignal,
   ): TaskExecution {
-    const child = fork(this.workerModule, [], this.forkOptions);
+    // `serialization: "advanced"` (V8 structured clone) as the DEFAULT, not
+    // fork's `"json"` default: task `input` + result are commonly
+    // `ContentBlock[]` (image/binary blocks, `Date`s, `Map`s) — JSON would
+    // silently mangle those. Structured clone round-trips them faithfully.
+    // The adopter can still override via `forkOptions.serialization`.
+    const child = fork(this.workerModule, [], { serialization: "advanced", ...this.forkOptions });
 
     let resolveExit!: () => void;
     const exited = new Promise<void>((resolve) => {

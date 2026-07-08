@@ -17,6 +17,12 @@ registerTaskHandler<unknown, readonly ContentBlock[]>("echo", (_ctx, input) => [
   { type: "text", text: String(input) },
 ]);
 
+// `roundtrip` — echoes its `input` back as the result. With the executor's
+// `serialization: "advanced"` default, a `Date` / `Map` / typed-array in the
+// input must survive BOTH directions (parent→child input, child→parent
+// result) with instances intact — the structured-clone claim, proven.
+registerTaskHandler<unknown, unknown>("roundtrip", (_ctx, input) => input);
+
 // `progress` — emits three ordered progress updates then completes.
 registerTaskHandler<unknown, readonly ContentBlock[]>("progress", async (ctx) => {
   ctx.onProgress({ current: 1, total: 3 });

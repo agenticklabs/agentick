@@ -299,6 +299,12 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
       scope: this.scope,
       executorKind: executor.kind,
       detached: opts.detached ?? false,
+      // TODO(ADR-68 ttl): `ttl` is persisted + surfaced on `TaskInfo` but NOT
+      // yet enforced — nothing reaps a task whose `ttl` elapsed, so a hung
+      // detached child (ignores cancel) outlives its ttl until app exit or an
+      // explicit cancel. A reaper (harness timer or store-side `prune`) that
+      // marks elapsed non-terminal tasks `failed { kind: "timeout" }` is the
+      // missing piece; `get` should also treat an elapsed record as expired.
       ttl: opts.ttl ?? null,
       createdAt: now,
       updatedAt: now,
