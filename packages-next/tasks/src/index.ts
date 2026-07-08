@@ -23,6 +23,25 @@ import "./augment.js";
 
 export { TasksHarness, type TasksHarnessOptions } from "./harness.js";
 export { withTasks, type WithTasksOptions } from "./extension.js";
+// ADR 68 — record-as-source-of-truth durability. The CRUD store port +
+// bundled in-memory default + its conformance suite, and the default
+// in-process executor. A `@agentick/tasks-postgres-next` store and a
+// child-process executor conform to the SAME spec-next ports later.
+export { InMemoryTaskStore } from "./store.js";
+export { runTaskStoreConformance, type TaskStoreConformanceOptions } from "./store-conformance.js";
+export { InProcessTaskExecutor } from "./executor.js";
+// Re-export the ports from the same package as the bundled impls so store
+// / executor adapters get the contract + reference from one dep.
+export type {
+  TaskExecution,
+  TaskExecutor,
+  TaskRecord,
+  TaskReport,
+  TaskStore,
+  TaskStoreQuery,
+  TaskTransition,
+  TaskWork,
+} from "@agentick/spec-next";
 export { EXTENSION_NAME as TASKS_EXTENSION_NAME } from "./extension-name.js";
 export {
   SESSION_TASKS_LIST,

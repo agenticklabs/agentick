@@ -36,6 +36,7 @@ export * from "./credentials-harness.js";
 export * from "./elicitation-harness.js";
 export * from "./elicit-api.js";
 export * from "./tasks-harness.js";
+export * from "./tasks-store.js";
 export * from "./knobs-harness.js";
 export * from "./skills-harness.js";
 export * from "./prompts-harness.js";

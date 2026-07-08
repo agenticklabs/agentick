@@ -44,14 +44,16 @@ import { TASK_STATUS_NOTIFICATION_METHOD } from "../../wire/task-codec.js";
 /**
  * Map a framework {@link TaskStatus} to the MCP wire status string.
  * The MCP spec uses `working / input_required / completed / failed /
- * cancelled` — identical to our internal enum, so this is currently
- * an identity map. Kept as a named function so a future MCP spec
- * extension that adds intermediate states only touches this one site.
+ * cancelled`. Every state EXCEPT `interrupted` (ADR 68 orphan
+ * accounting) maps 1:1. `interrupted` has NO MCP-wire representation —
+ * the enum stops at `cancelled` — so it lossy-maps to `failed` (the
+ * closest terminal that signals "did not complete successfully"). The
+ * lossy edge lives here at the wire boundary, not in the substrate.
  */
 function toWireStatus(
   status: TaskStatus,
 ): "working" | "input_required" | "completed" | "failed" | "cancelled" {
-  return status;
+  return status === "interrupted" ? "failed" : status;
 }
 
 function wireTaskFromInfo(info: TaskInfo): {

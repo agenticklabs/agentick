@@ -32,7 +32,8 @@ import {
   ulid,
 } from "@agentick/runtime-next";
 import { ElicitationHarness } from "@agentick/elicitation-next";
-import { TasksHarness } from "@agentick/tasks-next";
+import { TasksHarness, InMemoryTaskStore } from "@agentick/tasks-next";
+import type { TaskStore } from "@agentick/tasks-next";
 import { ResourcesHarness } from "@agentick/resources-next";
 import { LoopExecutorHarness } from "@agentick/loop-executor-next";
 import { isLanguageModelAdapter, type LanguageModelAdapter } from "@agentick/model-next";
@@ -468,6 +469,18 @@ export class AppHarness<P = unknown>
 
   private readonly registry = new Map<string, InternalSessionEntry<P>>();
   private _closed = false;
+
+  /**
+   * App/gateway-scoped {@link TaskStore} (ADR 68). Constructed ONCE and
+   * injected into every session's `TasksHarness` so `detached` task
+   * records survive their spawning session's `close()` (the store
+   * outlives the per-session harness). The in-memory default is
+   * node-local + lost on process exit; a durable store (pg) swapped in
+   * here — same port — adds survival across app restart. Adopter override
+   * seam: TODO(ADR-68) expose `createApp({ taskStore })` when the durable
+   * adapters land.
+   */
+  private readonly taskStore: TaskStore = new InMemoryTaskStore();
 
   /**
    * Stored `TelemetryLayer` (4f.7 placeholder slot). Accepted for
@@ -1127,6 +1140,9 @@ export class AppHarness<P = unknown>
     // tool's `taskSupport` annotation (#156).
     const tasks = new TasksHarness(`${sessionId}:tasks`, this.journal, this.bus, this.inbox, {
       parentScope: { sessionId },
+      // ADR 68 — the shared app-scoped store, so detached tasks outlive
+      // the per-session harness. Scope-filtered by `{ sessionId }` above.
+      store: this.taskStore,
     });
 
     // Per-session resources harness (ADR 62) — the application-controlled

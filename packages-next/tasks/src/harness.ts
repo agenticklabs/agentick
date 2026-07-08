@@ -1,67 +1,57 @@
 /**
- * TasksHarness — substrate-level long-running tool primitive.
+ * TasksHarness — substrate-level long-running tool primitive, refactored
+ * to **record-as-source-of-truth** (ADR 68).
  *
- * Extends {@link BaseHarness} so every task participates in the
- * runtime's journaling + bus envelope contract. The harness owns:
+ * The pivot (ADR 68): a task is no longer *primarily* an in-process fiber
+ * with the record as a view. Inverted — a task is a persisted
+ * {@link TaskRecord} state machine living in a {@link TaskStore}; **how it
+ * runs** is a swappable {@link TaskExecutor} strategy behind the record.
+ * The harness orchestrates:
  *
- *   - The in-process task registry (taskId → live record).
- *   - The Promise that drives each task's work function.
- *   - Per-task fan-out via a single `LocalPubSub<TaskEvent>`. All
- *     status transitions AND progress updates flow through this one
- *     bus, preserving CAUSAL ORDER across the two event kinds.
- *     `events(taskId)` synthesizes the initial snapshot at subscribe
- *     time (`Stream.concat(Stream.make(snapshot), bus.subscribe())`)
- *     then closes on the terminal status frame via
- *     `Stream.takeUntil`, materialized to `AsyncIterable<TaskEvent>`
- *     via `Stream.toAsyncIterable`.
+ *   - `submit` writes a `working` record to the store and starts an
+ *     executor, handing it the ONE `report` callback.
+ *   - The executor **reports transitions** ({@link TaskTransition}); the
+ *     harness applies each to the record, `store.put`s the new record,
+ *     AND emits the EXISTING `task-status` / `task-progress` bus events.
+ *     **The bus stays the LIVE plane; the store is the DURABLE plane —
+ *     the wire behavior is UNCHANGED.**
+ *   - `get` / `list` / `status` read a synchronous **projection** the
+ *     harness keeps in lockstep with its store writes (the protocol
+ *     reads are sync; the store port is async — CQRS materialized view).
+ *     The store is the durable authority (rebuilt into the projection on
+ *     hydration); the projection is the live read-model.
  *
- *     (An earlier #162 attempt split state from events via
- *     `SubscriptionRef<TaskInfo>` + a progress-only `LocalPubSub`
- *     and merged them with `Stream.merge`. `Stream.merge`'s fair
- *     scheduling between sources DROPS events when both have items
- *     pending — the progress-then-terminal sequence is the textbook
- *     hit. Single-bus + synthesized snapshot is the correct
- *     primitive composition for this use case; we lose
- *     "replay-via-SubscriptionRef" but gain causal ordering, which
- *     adopters depend on.)
- *   - The bus channels (`task-status`, `task-progress`) that surface
- *     state transitions and progress updates to subscribers across
- *     the substrate.
- *   - The cluster-friendly inbox seam — `tasks-cancel`, `tasks-get`,
- *     `tasks-result` messages route here so cross-harness /
- *     cross-process callers drive task ops by address without
- *     holding an in-process reference.
+ * The bundled default executor is {@link InProcessTaskExecutor} — the
+ * current Promise/Effect fiber model, refactored onto the report seam,
+ * BEHAVIOR-IDENTICAL for the caller. The child-process executor (isolation
+ * / detached) and a `@agentick/tasks-postgres-next` durable store conform
+ * to the SAME seams later — not built here.
  *
- * The MCP wire codec (Phase B) integrates by listening on the bus
- * channels and emitting `notifications/tasks/status` /
- * `notifications/progress` over the wire. Inbound MCP task ops
- * (`tasks/cancel`) land via the harness's inbox.
+ * Per-task fan-out is unchanged: a single `LocalPubSub<TaskEvent>` per
+ * task carries status transitions AND progress in causal order;
+ * `events(taskId)` synthesizes the initial snapshot then closes on the
+ * terminal frame via `Stream.takeUntil`. The MCP wire codec integrates
+ * exactly as before (listens on the bus channels).
  *
- * **Two work runners — Promise-flavor and Effect-flavor.** Work
- * may return `Promise<T> | T` OR `Effect<T, E, never>`. The runner
- * branches on `Effect.isEffect(work(ctx))`:
+ * ## Lifetime (ADR 68)
  *
- *   - **Promise path.** Direct `workPromise.then().catch()` +
- *     `AbortController.abort()`. Honest because `Fiber.interrupt`
- *     doesn't propagate to a wrapped Promise — the underlying
- *     microtasks keep running until they observe the AbortSignal.
- *     Wrapping in `Effect.tryPromise` + `runFork` costs a
- *     `Cause`-unwrap layer for no cancellation benefit.
+ * The {@link TaskStore} is APP/GATEWAY-scoped (the AppHarness constructs
+ * one and injects it into every session's harness), so a `detached` task
+ * survives its spawning session's `close()`: non-detached tasks are
+ * aborted on close (today's behavior, IDENTICAL); detached tasks are left
+ * running + persisted. On construction (hydration) any store record still
+ * `working` with no reattachable executor is marked `interrupted` (honest
+ * orphan accounting — a same-process no-op for the in-memory store, the
+ * logic the durable store exercises across restart).
  *
- *   - **Effect path.** `Effect.runFork` + `Fiber` tracking; cancel
- *     calls `Fiber.interrupt` for real interruptibility — `Effect.sleep`,
- *     `Effect.async`, generator-based work, etc., all bail
- *     synchronously on interruption. Typed failure surfaces as
- *     `status: "failed"`; defect (`Effect.die`) likewise; interruption
- *     surfaces as `status: "cancelled"`.
- *
+ * @see docs/proposals/v2/blueprint/68-persistent-tasks.md
  * @see docs/proposals/v2/blueprint/23-mcp-as-harness.md §Tasks
  */
 
-import { Cause, Effect, Fiber, Stream } from "effect";
+import { Effect, Stream } from "effect";
 import { BaseHarness, ulid } from "@agentick/runtime-next";
 import { createLocalPubSub, type LocalPubSub } from "@agentick/pubsub-next";
-import { causeValue, reasonOf, omitUndefined } from "@agentick/utils-next";
+import { omitUndefined } from "@agentick/utils-next";
 import type {
   ContentBlock,
   EventBus,
@@ -73,17 +63,26 @@ import type {
   ProgressUpdate,
   TaskCreationInput,
   TaskEvent,
+  TaskExecution,
+  TaskExecutor,
   TaskFailure,
   TaskHandle,
   TaskInfo,
+  TaskRecord,
   TaskRejection,
+  TaskReport,
   TaskStatus,
+  TaskStore,
+  TaskTransition,
+  TaskWork,
   TaskWorkContext,
   TasksHarnessProtocol,
 } from "@agentick/spec-next";
 import { HandlerError, UnknownTaskError } from "@agentick/spec-next";
 
 import { TASK_PROGRESS_CHANNEL, TASK_STATUS_CHANNEL } from "./channel.js";
+import { InMemoryTaskStore } from "./store.js";
+import { InProcessTaskExecutor } from "./executor.js";
 import {
   TASKS_CANCEL_MESSAGE_TYPE,
   TASKS_GET_MESSAGE_TYPE,
@@ -95,61 +94,46 @@ import {
 } from "./inbox-protocol.js";
 
 // ============================================================================
-// Internal record
+// Live task — the in-process runtime handle for a record this harness owns
 // ============================================================================
 
-interface TaskRecord {
-  readonly taskId: string;
-  status: TaskStatus;
-  readonly createdAt: number;
-  lastUpdatedAt: number;
-  readonly ttl: number | null;
-  readonly pollInterval: number | undefined;
-  statusMessage: string | undefined;
-  failure: TaskFailure | undefined;
+/**
+ * The runtime companion to a {@link TaskRecord}: the live handles that do
+ * NOT serialize (AbortController, per-task event bus, result Promise,
+ * executor handle). `record` is the current serializable state — a strict
+ * mirror of the last `store.put`; reassigned (new immutable object) on
+ * every transition so the sync `get` / `list` projection stays current.
+ */
+interface LiveTask {
+  record: TaskRecord;
   /**
-   * Drives cancellation for promise-typed work. `signal` is surfaced
-   * on {@link TaskWorkContext.signal} so work fns can bail out early.
-   * Also aborted on cancel of an Effect-typed task as defence in
-   * depth (so any embedded Promise-flavor side-effects in the Effect
-   * still see the abort).
+   * Universal cancellation signal surfaced on {@link TaskWorkContext.signal}.
+   * Aborted on `cancel()` / non-detached `close()`. The executor-specific
+   * teardown (Effect `Fiber.interrupt`, child kill) runs alongside via
+   * {@link TaskExecutor.cancel}.
    */
   readonly controller: AbortController;
   /**
-   * Only set on the Effect-flavor work path. `cancel()` calls
-   * `Fiber.interrupt(fiber)` for real interruptibility — `Effect.sleep`,
-   * `Effect.async` registered cleanup, etc., all bail synchronously.
-   * `undefined` on the Promise/sync path (where the AbortController
-   * is the only signal).
-   */
-  fiber: Fiber.RuntimeFiber<unknown, unknown> | undefined;
-  /**
-   * Single fan-out channel — all task events (status transitions +
-   * progress updates) flow through this one bus. One queue per
-   * subscriber means causal order is preserved across event kinds.
-   * `subscribeToTask` synthesizes the initial snapshot via
-   * `Stream.concat(Stream.make(snapshot), bus.subscribe())` so late
-   * subscribers see the current state before live events.
+   * Single fan-out channel — status + progress in causal order. The
+   * `onPublish` hook mirrors each event onto the substrate channel.
    */
   readonly eventBus: LocalPubSub<TaskEvent>;
   /**
-   * Resolves with the work's return value on `completed`. Rejects
-   * with a `TaskRejection` on `failed` / `cancelled`. Hand-rolled
-   * Promise deferred — direct equivalent to `Promise.withResolvers()`
-   * (ES2024; not yet in our TS lib target).
+   * Resolves with the work's value on `completed`; rejects with a
+   * {@link TaskRejection} on `failed` / `cancelled` / `interrupted`.
    */
-  readonly resultDeferred: {
-    readonly promise: Promise<unknown>;
-    resolve(value: unknown): void;
-    reject(reason: TaskRejection): void;
-  };
+  readonly resultDeferred: Deferred<unknown>;
+  /** Executor handle (for cancel). `undefined` once terminal / for orphans. */
+  execution: TaskExecution | undefined;
 }
 
-function makeDeferred<T>(): {
+interface Deferred<T> {
   readonly promise: Promise<T>;
   resolve(value: T): void;
   reject(reason: unknown): void;
-} {
+}
+
+function makeDeferred<T>(): Deferred<T> {
   let resolve!: (value: T) => void;
   let reject!: (reason: unknown) => void;
   const promise = new Promise<T>((res, rej) => {
@@ -165,13 +149,27 @@ function makeDeferred<T>(): {
 
 export interface TasksHarnessOptions {
   /**
-   * Scope stamped on every published task envelope. Session-scoped
+   * Scope stamped on every published task envelope AND on every
+   * {@link TaskRecord} (the store's scope-filter key). Session-scoped
    * client subscriptions filter on `scope.sessionId`, so per-session
-   * harnesses MUST pass `{ sessionId }` here. Construction sites in
-   * production (`AppHarness.createSession`, `withTasks`) thread the
-   * owning session's id through.
+   * harnesses MUST pass `{ sessionId }`. Harnesses that share an
+   * app-scoped {@link TaskStore} MUST pass a distinguishing scope so
+   * hydration + `list` don't bleed across sessions.
    */
   readonly parentScope?: EventScope;
+  /**
+   * Durable backing for the task FSM (ADR 68). Defaults to a fresh
+   * per-harness {@link InMemoryTaskStore}. The AppHarness constructs ONE
+   * app-scoped store and injects it into every session's harness so
+   * `detached` records survive session close.
+   */
+  readonly store?: TaskStore;
+  /**
+   * Execution strategy (ADR 68). Defaults to {@link InProcessTaskExecutor}
+   * (the current fiber model). A child-process / worker executor conforms
+   * to the same {@link TaskExecutor} seam.
+   */
+  readonly executor?: TaskExecutor;
 }
 
 // ============================================================================
@@ -179,8 +177,21 @@ export interface TasksHarnessOptions {
 // ============================================================================
 
 export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessProtocol {
-  private readonly tasks = new Map<string, TaskRecord>();
+  /** In-process projection of the store, scoped to this harness's tasks. */
+  private readonly live = new Map<string, LiveTask>();
   private readonly parentScope: EventScope | undefined;
+  /** `parentScope ?? {}` — stamped on records + used as the store filter. */
+  private readonly scope: EventScope;
+  private readonly store: TaskStore;
+  private readonly executor: TaskExecutor;
+
+  /**
+   * Resolves once hydration (orphan accounting, ADR 68) has run — chained
+   * AFTER {@link BaseHarness.ready}. Impl-specific (not on the protocol);
+   * tests + rehydration paths that must observe `interrupted` marking
+   * await this. For a fresh session the store is empty → a no-op.
+   */
+  readonly hydrated: Promise<void>;
 
   get id(): string {
     return this.scopeId;
@@ -195,6 +206,14 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
   ) {
     super("tasks", scopeId, journal, bus, inbox);
     this.parentScope = options.parentScope;
+    this.scope = options.parentScope ?? {};
+    this.store = options.store ?? new InMemoryTaskStore();
+    this.executor = options.executor ?? new InProcessTaskExecutor();
+    // Hydration reads the store AFTER inbox registration. `ready` is a
+    // readonly BaseHarness field (can't reassign), so this is a sibling
+    // barrier. TODO(#134-followup): fold into `ready` if BaseHarness gains
+    // a post-construction async hook.
+    this.hydrated = this.ready.then(() => this.hydrateOrphans());
   }
 
   // ─────────── submit ───────────
@@ -213,269 +232,214 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
   ): TaskHandle<T> {
     const taskId = `task:${ulid()}`;
     const now = Date.now();
-    const controller = new AbortController();
-    const resultDeferred = makeDeferred<unknown>();
-
     const record: TaskRecord = {
       taskId,
       status: "working",
-      createdAt: now,
-      lastUpdatedAt: now,
+      scope: this.scope,
+      executorKind: this.executor.kind,
+      detached: opts.detached ?? false,
       ttl: opts.ttl ?? null,
-      pollInterval: opts.pollInterval,
-      statusMessage: opts.statusMessage,
-      failure: undefined,
-      controller,
-      fiber: undefined,
-      // Fan-out + substrate fan-in in one primitive. The onPublish
-      // hook translates each TaskEvent into the appropriate substrate
-      // channel envelope; harness owns the translation, pubsub-next
-      // stays agnostic. Errors in onPublish are isolated by the bus
-      // — a substrate emit failure CANNOT block in-process subscribers.
+      createdAt: now,
+      updatedAt: now,
+      ...omitUndefined({
+        input: opts.input,
+        handlerRef: opts.handlerRef,
+        statusMessage: opts.statusMessage,
+        pollInterval: opts.pollInterval,
+      }),
+    };
+    const live: LiveTask = {
+      record,
+      controller: new AbortController(),
+      // Fan-out + substrate fan-in in one primitive. Errors in onPublish
+      // are isolated by the bus — a substrate emit failure CANNOT block
+      // in-process subscribers.
       eventBus: createLocalPubSub<TaskEvent>({
         onPublish: (event) => this.fanOutToSubstrate(event),
       }),
-      resultDeferred,
+      resultDeferred: makeDeferred<unknown>(),
+      execution: undefined,
     };
-    this.tasks.set(taskId, record);
+    this.live.set(taskId, live);
 
-    // Initial status fan-out (bus + per-subscriber queues).
-    this.publishStatus(record);
+    // Durable-write + live-emit the initial `working` snapshot BEFORE the
+    // executor starts (so subscribers see `working` first).
+    this.persist(record);
+    this.publishStatus(live);
 
-    const ctx: TaskWorkContext = {
-      signal: controller.signal,
-      onProgress: (update: ProgressUpdate) => {
-        if (this.isTerminal(record.status)) return;
-        record.lastUpdatedAt = Date.now();
-        this.publishProgress(record, update);
-      },
-      setStatusMessage: (message: string) => {
-        if (this.isTerminal(record.status)) return;
-        record.statusMessage = message;
-        record.lastUpdatedAt = Date.now();
-        this.publishStatus(record);
-      },
-    };
-
-    // Invoke work SYNCHRONOUSLY so its body runs (registering signal
-    // listeners, etc.) before submit() returns. If we deferred with
-    // `Promise.resolve().then(() => work(...))`, a synchronous
-    // `cancel()` or `close()` called immediately after submit would
-    // abort the signal BEFORE the work has had a chance to register
-    // its `signal.addEventListener("abort", ...)` — and AbortSignal
-    // listeners do NOT fire when attached post-abort.
-    let ret: Promise<T> | T | Effect.Effect<T, unknown, never>;
-    try {
-      ret = work(ctx);
-    } catch (syncThrow) {
-      this.finishAsFailed(record, syncThrow);
-      return this.makeHandle<T>(record);
-    }
-
-    if (Effect.isEffect(ret)) {
-      this.runEffectWork<T>(record, ret as Effect.Effect<T, unknown, never>);
-    } else {
-      const workPromise: Promise<T> = ret instanceof Promise ? ret : Promise.resolve(ret);
-      this.runPromiseWork<T>(record, workPromise);
-    }
-
-    return this.makeHandle<T>(record);
-  }
-
-  private runPromiseWork<T>(record: TaskRecord, workPromise: Promise<T>): void {
-    void workPromise
-      .then((value) => {
-        if (record.status === "cancelled") {
-          // Caller-driven cancel raced the work's resolution. Honor
-          // cancelled terminal; the rejection was already wired by
-          // the cancel path.
-          return;
-        }
-        this.transition(record, "completed");
-        record.resultDeferred.resolve(value);
-      })
-      .catch((cause: unknown) => {
-        if (record.controller.signal.aborted && record.status === "cancelled") {
-          // Cancel already set status + rejected the deferred via
-          // the cancel path. No-op.
-          return;
-        }
-        this.finishAsFailed(record, cause);
-      });
-  }
-
-  private runEffectWork<T>(record: TaskRecord, effect: Effect.Effect<T, unknown, never>): void {
-    // Pure-Effect runner — no Promise bridge. `matchCauseEffect` runs
-    // onSuccess / onFailure INSIDE the forked program, so the
-    // imperative side-effects (transition / resolve / finishAs*)
-    // live in `Effect.sync` blocks instead of a `.then` callback.
-    //
-    // Race semantics preserved from the prior impl: if `cancel()`
-    // already set `status === "cancelled"`, the handler short-
-    // circuits without overriding the cancel state. External
-    // `Fiber.interrupt` (from cancelInternal) AND internal
-    // `Effect.interrupt` both surface as interrupt-only causes;
-    // `Cause.isInterruptedOnly` distinguishes them from typed
-    // failures + defects.
-    const program = effect.pipe(
-      Effect.matchCauseEffect({
-        onSuccess: (value) =>
-          Effect.sync(() => {
-            record.fiber = undefined;
-            if (record.status === "cancelled") return;
-            this.transition(record, "completed");
-            record.resultDeferred.resolve(value);
-          }),
-        onFailure: (cause) =>
-          Effect.sync(() => {
-            record.fiber = undefined;
-            if (record.status === "cancelled") return;
-            if (Cause.isInterruptedOnly(cause)) {
-              this.finishAsCancelled(record, "interrupted");
-              return;
-            }
-            // Extract the originating value from the Cause so
-            // `failure.cause` carries the typed E (Effect.fail) or the
-            // defect (Effect.die) verbatim. `finishAsFailed` derives
-            // `failure.reason` from this same value via `reasonOf`.
-            // Falls back to the Cause itself for empty / exotic shapes
-            // so adopters still get _something_ inspectable.
-            this.finishAsFailed(record, causeValue(cause) ?? cause);
-          }),
-      }),
+    // Start the executor. It invokes `work` synchronously (so signal
+    // listeners register before submit returns) and drives `report`.
+    const execution = this.executor.start(
+      record,
+      work as TaskWork,
+      this.makeReport(live),
+      live.controller.signal,
     );
-    const fiber = Effect.runFork(program);
-    // For sync-completing work (e.g. `Effect.succeed(x)`), the
-    // handler above may have already run before `runFork` returns —
-    // setting `record.fiber = undefined` and transitioning to
-    // terminal. Only stash the fiber handle if work is still live;
-    // otherwise we'd hold a dead handle on a terminal record.
-    if (!this.isTerminal(record.status)) {
-      record.fiber = fiber;
+    // Sync-completing work (e.g. `Effect.succeed`) may have already driven
+    // the record terminal during `start` — don't stash a dead handle.
+    live.execution = this.isTerminal(live.record.status) ? undefined : execution;
+
+    return this.makeHandle<T>(live);
+  }
+
+  /** The ONE uniform transition path from an executor back to the harness. */
+  private makeReport(live: LiveTask): TaskReport {
+    return (transition) => this.applyTransition(live, transition);
+  }
+
+  /**
+   * Apply an executor-reported transition: mutate the projection record,
+   * persist to the store, emit the matching bus event, and settle the
+   * result deferred on a terminal. Post-terminal reports are ignored —
+   * this is what preserves "caller cancel wins the race" against a work
+   * fn that resolves/rejects after cancel.
+   */
+  private applyTransition(live: LiveTask, t: TaskTransition): void {
+    const record = live.record;
+    if (this.isTerminal(record.status)) return;
+    const now = Date.now();
+
+    // Progress-only — the `onProgress` seam. Status unchanged.
+    if (t.progress !== undefined && t.status === undefined && t.statusMessage === undefined) {
+      const p = t.progress;
+      live.record = {
+        ...record,
+        updatedAt: now,
+        progress: {
+          progress: p.current,
+          ...omitUndefined({ total: p.total, message: p.message }),
+        },
+      };
+      this.persist(live.record);
+      this.publishProgress(live, p);
+      return;
+    }
+
+    // Status-message-only — the `setStatusMessage` seam. Still `working`.
+    if (t.statusMessage !== undefined && t.status === undefined) {
+      live.record = { ...record, updatedAt: now, statusMessage: t.statusMessage };
+      this.persist(live.record);
+      this.publishStatus(live);
+      return;
+    }
+
+    // Status transition (possibly terminal).
+    if (t.status !== undefined) {
+      live.record = {
+        ...record,
+        status: t.status,
+        updatedAt: now,
+        ...(t.failure !== undefined ? { failure: t.failure } : {}),
+        ...(t.statusMessage !== undefined ? { statusMessage: t.statusMessage } : {}),
+        ...(t.result !== undefined ? { result: t.result } : {}),
+      };
+      this.persist(live.record);
+      this.publishStatus(live);
+      if (this.isTerminal(live.record.status)) this.settle(live);
     }
   }
 
-  private finishAsFailed(record: TaskRecord, cause: unknown): void {
-    if (this.isTerminal(record.status)) return;
-    // Preserve the original failure value on `cause` so adopters
-    // branching on structured E (`_tag` discrimination, error payloads,
-    // etc.) keep access to the full shape. `reason` stays as the
-    // single-line summary derived via `reasonOf`.
-    const failure: TaskFailure = {
-      kind: "error",
-      reason: reasonOf(cause),
-      cause,
-    };
-    record.failure = failure;
-    this.transition(record, "failed");
-    record.resultDeferred.reject(this.rejectionOf(record, "failed", failure));
+  /** Resolve / reject the result deferred from the (now terminal) record. */
+  private settle(live: LiveTask): void {
+    const { record, resultDeferred } = live;
+    if (record.status === "completed") {
+      resultDeferred.resolve(record.result);
+      return;
+    }
+    resultDeferred.reject(
+      this.rejectionOf(
+        record.taskId,
+        record.status as "failed" | "cancelled" | "interrupted",
+        record.failure,
+      ),
+    );
   }
 
-  private finishAsCancelled(record: TaskRecord, reason: string): void {
-    if (this.isTerminal(record.status)) return;
-    const failure: TaskFailure = { kind: "aborted", reason };
-    record.failure = failure;
-    this.transition(record, "cancelled");
-    record.resultDeferred.reject(this.rejectionOf(record, "cancelled", failure));
-  }
-
-  // ─────────── lookups ───────────
+  // ─────────── lookups (served from the projection — the store read-model) ───────────
 
   get(taskId: string): TaskInfo | undefined {
-    const record = this.tasks.get(taskId);
-    return record ? this.snapshot(record) : undefined;
+    const live = this.live.get(taskId);
+    return live ? this.snapshot(live.record) : undefined;
   }
 
   list(): readonly TaskInfo[] {
     const out: TaskInfo[] = [];
-    for (const record of this.tasks.values()) {
-      out.push(this.snapshot(record));
-    }
+    for (const live of this.live.values()) out.push(this.snapshot(live.record));
     return out;
   }
 
   status(taskId: string): TaskStatus | undefined {
-    return this.tasks.get(taskId)?.status;
+    return this.live.get(taskId)?.record.status;
   }
 
   async result<T = readonly ContentBlock[]>(taskId: string): Promise<T> {
-    const record = this.tasks.get(taskId);
-    if (!record) {
+    const live = this.live.get(taskId);
+    if (!live) {
       throw new UnknownTaskError({ taskId });
     }
-    return (await record.resultDeferred.promise) as T;
+    return (await live.resultDeferred.promise) as T;
   }
 
   // ─────────── cancel ───────────
 
   async cancel(taskId: string, reason?: string): Promise<void> {
-    const record = this.tasks.get(taskId);
-    if (!record) {
+    const live = this.live.get(taskId);
+    if (!live) {
       throw new UnknownTaskError({ taskId });
     }
-    if (this.isTerminal(record.status)) return; // idempotent
-    await this.cancelInternal(record, reason ?? "cancelled");
+    if (this.isTerminal(live.record.status)) return; // idempotent
+    await this.cancelInternal(live, reason ?? "cancelled");
   }
 
   /**
-   * Internal cancel — used by `cancel()` (single id, throws on
-   * unknown) and `close()` (cascade, skips terminals at the call
-   * site). Sets failure + status, rejects the deferred, aborts the
-   * AbortController so promise-typed work fns watching the signal
-   * bail out.
+   * Internal cancel — used by `cancel()` and by the `close()` cascade.
+   * Applies the `cancelled` transition FIRST (persist + reject deferred +
+   * emit) so the caller's reason wins over any executor-reported
+   * interrupt reason (which becomes a no-op post-terminal), then aborts
+   * the AbortController and triggers executor-specific teardown. `await`s
+   * the executor's cancel Promise when it returns one (the interruptible-
+   * fiber settled-cancel guarantee) — the Promise path returns void, so
+   * this returns immediately, exactly as before.
    */
-  private async cancelInternal(record: TaskRecord, reason: string): Promise<void> {
-    record.failure = { kind: "aborted", reason };
-    this.transition(record, "cancelled");
-    record.resultDeferred.reject(this.rejectionOf(record, "cancelled", record.failure));
-    record.controller.abort(reason);
-    if (record.fiber !== undefined) {
-      // Effect path — Fiber.interrupt propagates through Effect.sleep,
-      // Effect.async finalizers, Effect.gen yields, etc. We AWAIT it:
-      // when `await cancel(taskId)` returns, the fiber's finalizers
-      // have run and the runtime has fully detached. This makes
-      // `close()` deterministic (no background fiber cleanup leaking
-      // past the harness shutdown) and gives single-task cancel the
-      // same "settled" guarantee. `.catch` is defensive — Fiber.interrupt
-      // is total in practice but we never want a finalizer defect to
-      // wedge the cancel call.
-      const fiber = record.fiber;
-      record.fiber = undefined;
-      await Effect.runPromise(Fiber.interrupt(fiber)).catch(() => undefined);
+  private async cancelInternal(live: LiveTask, reason: string): Promise<void> {
+    this.applyTransition(live, { status: "cancelled", failure: { kind: "aborted", reason } });
+    live.controller.abort(reason);
+    if (live.execution !== undefined) {
+      const execution = live.execution;
+      live.execution = undefined;
+      await this.executor.cancel(execution, reason);
     }
   }
 
   // ─────────── events ───────────
 
   events(taskId: string): AsyncIterable<TaskEvent> {
-    const record = this.tasks.get(taskId);
-    if (!record) {
+    const live = this.live.get(taskId);
+    if (!live) {
       throw new UnknownTaskError({ taskId });
     }
-    return this.subscribeToTask(record);
+    return this.subscribeToTask(live);
   }
 
   // ─────────── close ───────────
 
   override async close(): Promise<void> {
-    // Cancel every in-flight task BEFORE the inbox subscription is
-    // torn down so subscribers see the terminal state through the
-    // normal failure path. The cancel cascade transitions records to
-    // "cancelled" which propagates via SubscriptionRef.changes —
-    // events() subscribers see the terminal frame and their streams
-    // close via Stream.takeUntil.
+    // Abort non-detached in-flight tasks BEFORE the inbox teardown so
+    // subscribers see the terminal state through the normal failure path.
+    // DETACHED tasks are left running + persisted (ADR 68) — the shared
+    // app-scoped store keeps their records; their executor keeps running.
     const pending: Array<Promise<void>> = [];
-    for (const record of this.tasks.values()) {
-      if (this.isTerminal(record.status)) continue;
-      pending.push(this.cancelInternal(record, "harness_closed"));
+    for (const live of this.live.values()) {
+      if (this.isTerminal(live.record.status)) continue;
+      if (live.record.detached) continue;
+      pending.push(this.cancelInternal(live, "harness_closed"));
     }
     await Promise.all(pending);
-    // Drain + shut down each task's event bus. The cancel cascade
-    // above already published terminal status frames, so subscriber
-    // streams should already be closing via Stream.takeUntil; the
-    // bus.close() backs up the cleanup deterministically.
-    for (const record of this.tasks.values()) {
-      await record.eventBus.close();
+    // Drain event buses — EXCEPT those of still-running detached tasks,
+    // which keep emitting after this harness closes.
+    for (const live of this.live.values()) {
+      if (live.record.detached && !this.isTerminal(live.record.status)) continue;
+      await live.eventBus.close();
     }
     await super.close();
   }
@@ -485,15 +449,10 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
   /**
    * Inbox dispatch:
    *
-   *   - `request-response`  → auto-intercepted by `BaseHarness`. Not
-   *                            seen here.
-   *   - `tasks-cancel`      → cancel-by-id; no reply. Idempotent on
-   *                            unknown / terminal ids.
-   *   - `tasks-get`         → snapshot lookup; reply via
-   *                            `request-response`.
-   *   - `tasks-result`      → await terminal; reply via
-   *                            `request-response` with
-   *                            `TasksResultReply`.
+   *   - `request-response`  → auto-intercepted by `BaseHarness`.
+   *   - `tasks-cancel`      → cancel-by-id; no reply. Idempotent.
+   *   - `tasks-get`         → snapshot lookup; reply via `request-response`.
+   *   - `tasks-result`      → await terminal; reply via `request-response`.
    *   - Anything else       → routing bug; fail loud.
    */
   protected handleMessage(
@@ -508,9 +467,7 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
         return this.handleResultInbox(msg as MessageEnvelope<TasksResultInboxPayload>);
       default:
         return Effect.fail(
-          new HandlerError({
-            cause: `Unknown tasks message type: ${String(msg.type)}`,
-          }),
+          new HandlerError({ cause: `Unknown tasks message type: ${String(msg.type)}` }),
         );
     }
   }
@@ -522,9 +479,9 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
       try: async () => {
         if (msg.payload === undefined) return undefined;
         const { taskId, reason } = msg.payload;
-        const record = this.tasks.get(taskId);
-        if (!record || this.isTerminal(record.status)) return undefined;
-        await this.cancelInternal(record, reason ?? "remote_cancel");
+        const live = this.live.get(taskId);
+        if (!live || this.isTerminal(live.record.status)) return undefined;
+        await this.cancelInternal(live, reason ?? "remote_cancel");
         return undefined;
       },
       catch: (cause): MessageHandlerError => new HandlerError({ cause }),
@@ -559,9 +516,9 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
       try: async () => {
         if (msg.payload === undefined) return undefined;
         const { taskId, replyTo, correlationId } = msg.payload;
-        const record = this.tasks.get(taskId);
+        const live = this.live.get(taskId);
         let reply: TasksResultReply<unknown>;
-        if (!record) {
+        if (!live) {
           reply = {
             kind: "rejection",
             rejection: {
@@ -573,7 +530,7 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
           };
         } else {
           try {
-            const value = await record.resultDeferred.promise;
+            const value = await live.resultDeferred.promise;
             reply = { kind: "value", value };
           } catch (caught) {
             reply = { kind: "rejection", rejection: caught as TaskRejection };
@@ -600,8 +557,8 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
    */
   pendingCount(): number {
     let count = 0;
-    for (const record of this.tasks.values()) {
-      if (!this.isTerminal(record.status)) count++;
+    for (const live of this.live.values()) {
+      if (!this.isTerminal(live.record.status)) count++;
     }
     return count;
   }
@@ -609,21 +566,12 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
   // ─────────── internals ───────────
 
   private isTerminal(status: TaskStatus): boolean {
-    return status === "completed" || status === "failed" || status === "cancelled";
-  }
-
-  private transition(record: TaskRecord, next: TaskStatus): void {
-    if (this.isTerminal(record.status)) return;
-    record.status = next;
-    record.lastUpdatedAt = Date.now();
-    // Update the SubscriptionRef — every active subscriber sees the
-    // new TaskInfo on their .changes stream. Terminal frames trigger
-    // Stream.takeUntil in subscribeToTask, ending the merged stream
-    // cleanly without a manual close-and-race-the-pending-event
-    // dance. The progress bus stays open until harness.close()
-    // drains it (no terminal-cascade shutdown needed — Stream.merge
-    // closes its sources when the consumed stream ends).
-    this.publishStatus(record);
+    return (
+      status === "completed" ||
+      status === "failed" ||
+      status === "cancelled" ||
+      status === "interrupted"
+    );
   }
 
   private snapshot(record: TaskRecord): TaskInfo {
@@ -631,7 +579,7 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
       taskId: record.taskId,
       status: record.status,
       createdAt: record.createdAt,
-      lastUpdatedAt: record.lastUpdatedAt,
+      lastUpdatedAt: record.updatedAt,
       ttl: record.ttl,
       ...omitUndefined({
         statusMessage: record.statusMessage,
@@ -642,45 +590,49 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
   }
 
   private rejectionOf(
-    record: TaskRecord,
-    status: "failed" | "cancelled",
+    taskId: string,
+    status: "failed" | "cancelled" | "interrupted",
     failure: TaskFailure | undefined,
   ): TaskRejection {
     return {
       _tag: "TaskRejection",
-      taskId: record.taskId,
+      taskId,
       status,
       ...(failure !== undefined ? { failure } : {}),
     };
   }
 
-  private publishStatus(record: TaskRecord): void {
-    // Single call site — eventBus.publish fans out to in-process
-    // subscribers AND, via the onPublish hook wired at bus
-    // construction, into the substrate's protocol bus.
-    record.eventBus.publish({ kind: "status", info: this.snapshot(record) });
+  /**
+   * Fire-and-forget durable write. Reads are served from the synchronous
+   * projection (updated by the caller before this runs), so the store
+   * write is off the critical path. Errors are swallowed — a store write
+   * failure MUST NOT crash the harness. TODO(#134-followup): a durable
+   * store (pg) wants a flush barrier + typed write-failed surfacing;
+   * the in-memory default resolves synchronously so there's nothing to
+   * await today.
+   */
+  private persist(record: TaskRecord): void {
+    void this.store.put(record).catch(() => undefined);
   }
 
-  private publishProgress(record: TaskRecord, update: ProgressUpdate): void {
-    record.eventBus.publish({
+  private publishStatus(live: LiveTask): void {
+    live.eventBus.publish({ kind: "status", info: this.snapshot(live.record) });
+  }
+
+  private publishProgress(live: LiveTask, update: ProgressUpdate): void {
+    live.eventBus.publish({
       kind: "progress",
-      taskId: record.taskId,
+      taskId: live.record.taskId,
       current: update.current,
       ...omitUndefined({ total: update.total, message: update.message }),
     });
   }
 
   /**
-   * Substrate fan-in hook — runs synchronously on every event the
-   * task's eventBus publishes. Translates each `TaskEvent` to its
-   * canonical substrate channel envelope and emits via
-   * `publishOnChannel`. Errors are swallowed by the bus's onPublish
-   * isolation; logged here for diagnostic visibility.
-   *
-   * Centralizing the translation here means a single call site for
-   * "publish a task event" (`record.eventBus.publish(...)`) handles
-   * both in-process fan-out AND substrate journaling. The bus stays
-   * agnostic about substrate shape; the harness owns the codec.
+   * Substrate fan-in hook — runs synchronously on every event a task's
+   * eventBus publishes. Translates each `TaskEvent` to its canonical
+   * substrate channel envelope. UNCHANGED from the pre-ADR-68 impl — the
+   * wire payloads are byte-identical.
    */
   private fanOutToSubstrate(event: TaskEvent): void {
     if (event.kind === "status") {
@@ -689,7 +641,6 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
       );
       return;
     }
-    // progress event
     void Effect.runPromise(
       this.publishOnChannel(TASK_PROGRESS_CHANNEL, {
         taskId: event.taskId,
@@ -711,56 +662,126 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
     } as Parameters<typeof this.bus.append>[0]);
   }
 
-  private makeHandle<T>(record: TaskRecord): TaskHandle<T> {
+  private makeHandle<T>(live: LiveTask): TaskHandle<T> {
     return {
-      taskId: record.taskId,
-      initialStatus: record.status,
-      result: record.resultDeferred.promise as Promise<T>,
-      info: () => this.snapshot(record),
-      events: () => this.subscribeToTask(record),
-      cancel: (reason?: string) => this.cancel(record.taskId, reason),
+      taskId: live.record.taskId,
+      initialStatus: live.record.status,
+      result: live.resultDeferred.promise as Promise<T>,
+      info: () => this.snapshot(live.record),
+      events: () => this.subscribeToTask(live),
+      cancel: (reason?: string) => this.cancel(live.record.taskId, reason),
     };
   }
 
   /**
-   * Subscribe to a task's event stream.
-   *
-   *   - Initial frame: `Stream.make` synthesizes a `status` event
-   *     from the current `TaskInfo` snapshot at subscribe time.
-   *     Subscribers attaching after terminal still see the terminal
-   *     snapshot before the stream closes.
-   *   - Live frames: `record.eventBus.subscribe()` streams every
-   *     `TaskEvent` published after subscription. The bus is a
-   *     single channel so status and progress events preserve
-   *     causal order (no Stream.merge fairness-induced drops).
-   *   - Termination: `Stream.takeUntil` (inclusive — emits the
-   *     matching item then closes) on the first terminal status
-   *     frame ends the stream.
+   * Subscribe to a task's event stream — synthesize the initial snapshot
+   * (`Stream.make`) then live frames (`eventBus.subscribe()`), closing on
+   * the first terminal status frame (`Stream.takeUntil`, inclusive).
+   * Single-bus ordering preserved (no `Stream.merge` fairness drops).
    */
-  private subscribeToTask(record: TaskRecord): AsyncIterable<TaskEvent> {
-    const initial: TaskEvent = { kind: "status", info: this.snapshot(record) };
-    const stream = Stream.concat(Stream.make(initial), record.eventBus.subscribe()).pipe(
+  private subscribeToTask(live: LiveTask): AsyncIterable<TaskEvent> {
+    const initial: TaskEvent = { kind: "status", info: this.snapshot(live.record) };
+    const stream = Stream.concat(Stream.make(initial), live.eventBus.subscribe()).pipe(
       Stream.takeUntil((event) => event.kind === "status" && this.isTerminal(event.info.status)),
     );
     return Stream.toAsyncIterable(stream);
   }
+
+  /**
+   * Hydration (ADR 68 orphan accounting). On construction, read this
+   * harness's scope-filtered records from the store. Any still-`working`
+   * record with no reattachable executor is marked `interrupted` (a lost
+   * in-process fiber can't reattach — `executor.reattach` returns
+   * `undefined`). Terminal records from a prior run are surfaced read-only
+   * in the projection. For a fresh session the store is empty → no-op.
+   */
+  private async hydrateOrphans(): Promise<void> {
+    const records = await this.store.list({ scope: this.scope });
+    for (const record of records) {
+      if (this.live.has(record.taskId)) continue; // this harness owns it live
+      if (record.status !== "working" && record.status !== "input_required") {
+        this.adoptHydrated(record); // terminal from a prior run
+        continue;
+      }
+      // Try to reattach; an in-process executor can't → interrupted.
+      const reattached = this.executor.reattach?.(record, this.makeReportFor(record.taskId));
+      if (reattached !== undefined) {
+        const live = this.adoptHydrated(record);
+        live.execution = reattached;
+        continue;
+      }
+      const interrupted: TaskRecord = {
+        ...record,
+        status: "interrupted",
+        failure: { kind: "aborted", reason: "interrupted" },
+        updatedAt: Date.now(),
+      };
+      this.persist(interrupted);
+      const live = this.adoptHydrated(interrupted);
+      this.publishStatus(live); // record-source-of-truth: every transition emits
+    }
+  }
+
+  /** Report path bound to a taskId that will be adopted into the projection. */
+  private makeReportFor(taskId: string): TaskReport {
+    return (transition) => {
+      const live = this.live.get(taskId);
+      if (live) this.applyTransition(live, transition);
+    };
+  }
+
+  /**
+   * Bring a store record into the projection (hydration). Builds the live
+   * companion with a pre-settled result deferred for terminal records so
+   * `result(taskId)` resolves/rejects honestly.
+   */
+  private adoptHydrated(record: TaskRecord): LiveTask {
+    const resultDeferred = makeDeferred<unknown>();
+    if (record.status === "completed") {
+      resultDeferred.resolve(record.result);
+    } else if (record.status !== "working" && record.status !== "input_required") {
+      resultDeferred.reject(
+        this.rejectionOf(
+          record.taskId,
+          record.status as "failed" | "cancelled" | "interrupted",
+          record.failure,
+        ),
+      );
+    }
+    // Avoid an unhandled-rejection warning for the pre-settled reject —
+    // a real `result(taskId)` caller still observes the rejection.
+    void resultDeferred.promise.catch(() => undefined);
+    const live: LiveTask = {
+      record,
+      controller: new AbortController(),
+      eventBus: createLocalPubSub<TaskEvent>({
+        onPublish: (event) => this.fanOutToSubstrate(event),
+      }),
+      resultDeferred,
+      execution: undefined,
+    };
+    this.live.set(record.taskId, live);
+    return live;
+  }
 }
 
-// Reason-string helpers (reasonOf / reasonOfCause) live in
-// @agentick/utils-next/cause — single canonical impl shared by every
-// harness. See packages-next/utils/src/cause.ts.
-
-// TODO(#134b/#134d): MCP wire codec for tasks. The bus channels
-// (`task-status`, `task-progress`) already carry payloads in the
-// shape MCP's `notifications/tasks/status` + `notifications/progress`
-// expect; the codec layer in `@agentick/mcp-next` translates 1:1.
-// Inbound MCP `tasks/cancel` lands on this harness's inbox via the
-// existing `TASKS_CANCEL_MESSAGE_TYPE` handler. Tracked under MCP
-// follow-ups.
+// Reason-string helpers (reasonOf / causeValue) live in
+// @agentick/utils-next/cause — used by the executor, not the harness.
 //
-// TODO(#120-followup): auto-transition to `input_required` when a
-// task's work fn pauses on an elicit/sampling/roots request. The
-// FSM state is declared in spec; the transition isn't wired —
-// today, work fns calling `bridges.elicitation.elicit(...)` stay
-// `working` for the elicit's duration. Phase B integration (when
-// elicitations route through a task-aware harness ctx).
+// TODO(#134b/#134d): MCP wire codec for tasks — unchanged; the bus
+// channels carry the same payloads. Inbound MCP `tasks/cancel` lands on
+// the inbox via `TASKS_CANCEL_MESSAGE_TYPE`.
+//
+// TODO(#120-followup): auto-transition to `input_required` when a task's
+// work fn pauses on an elicit/sampling/roots request.
+//
+// TODO(ADR-68 Build B): the child-process executor implements the same
+// `TaskExecutor` seam over IPC (serializable descriptor: `handlerRef` +
+// `input`; reports status/progress/result back → parent → `report`). Its
+// `TaskExecution` stashes the child handle; `cancel` sends a kill/IPC-
+// cancel and returns the exit-ack Promise. `reattach` (with a durable
+// store) re-adopts a still-live child by `executorState`.
+//
+// TODO(ADR-68 pg): `@agentick/tasks-postgres-next` conforms to `TaskStore`
+// — durability across app-process restart + real `interrupted`-on-restart
+// exercise (hydration is a same-process no-op with the in-memory store).

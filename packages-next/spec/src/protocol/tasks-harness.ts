@@ -46,8 +46,21 @@ import type { ContentBlock } from "../data/content-blocks.js";
  *                      summary, `failure` carries structured detail.
  *   cancelled        — terminal; caller-driven via `cancel()` OR
  *                      caused by `close()` / signal abort.
+ *   interrupted      — terminal; ADR 68 orphan accounting. A `working`
+ *                      record whose live executor is gone (harness
+ *                      re-hydrated a store record with no reattachable
+ *                      execution). Honest "we lost track of this," not
+ *                      silently completed/failed. Has NO MCP-wire
+ *                      representation (the MCP enum stops at `cancelled`)
+ *                      — a codec crossing the wire lossy-maps it.
  */
-export type TaskStatus = "working" | "input_required" | "completed" | "failed" | "cancelled";
+export type TaskStatus =
+  | "working"
+  | "input_required"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "interrupted";
 
 // ============================================================================
 // Shapes
@@ -173,6 +186,28 @@ export interface TaskCreationInput {
   readonly pollInterval?: number;
   /** Optional human-readable initial status. */
   readonly statusMessage?: string;
+  /**
+   * ADR 68 lifetime opt-out. `false` (default) — the task is aborted on
+   * the spawning session's `close()` (today's behavior). `true` — NOT
+   * aborted on close; the executor + durable record persist
+   * independently (the session can stop and it continues, as long as the
+   * app process is alive with the in-memory store; across app restart
+   * needs a durable store).
+   */
+  readonly detached?: boolean;
+  /**
+   * Submit input persisted on the {@link TaskRecord} for audit / replay,
+   * and the payload a by-ref executor (child / worker) resolves work
+   * with. Ignored by the in-process executor (it runs the closure).
+   */
+  readonly input?: unknown;
+  /**
+   * Reference a registered handler for an out-of-process executor —
+   * child / worker tasks require a referenceable handler, not an inline
+   * closure (closures can't cross the process boundary). Unused by the
+   * in-process default.
+   */
+  readonly handlerRef?: string;
 }
 
 // ============================================================================
@@ -236,7 +271,7 @@ export function isTaskHandle(value: unknown): value is TaskHandle<readonly Conte
 export interface TaskRejection {
   readonly _tag: "TaskRejection";
   readonly taskId: string;
-  readonly status: "failed" | "cancelled";
+  readonly status: "failed" | "cancelled" | "interrupted";
   readonly failure?: TaskFailure;
 }
 

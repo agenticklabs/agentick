@@ -9,12 +9,44 @@ the lifecycle FSM, progress envelope, correlation engine, and
 cancellation semantics live in exactly one place.
 
 Same FSM as MCP's task model (`working / input_required / completed /
-failed / cancelled`); cluster-friendly via inbox-routed cancel / get /
-result and bus-channel status + progress notifications. Per ADR-23
-§OQ23.15 ("substrate-aware Tasks bridge"), local invocations and
-MCP-wire invocations of a `taskSupport: required` tool both return the
-same `TaskHandle` shape — the MCP wire codec layers on top via a
-separate phase.
+failed / cancelled`) plus `interrupted` (ADR 68 orphan accounting);
+cluster-friendly via inbox-routed cancel / get / result and bus-channel
+status + progress notifications. Per ADR-23 §OQ23.15 ("substrate-aware
+Tasks bridge"), local invocations and MCP-wire invocations of a
+`taskSupport: required` tool both return the same `TaskHandle` shape —
+the MCP wire codec layers on top via a separate phase.
+
+## Record-as-source-of-truth (ADR 68)
+
+A task is **not** primarily an in-process fiber with the record as a
+view. It is inverted: a task is a persisted **`TaskRecord`** state
+machine living in a **`TaskStore`**; **how it runs** is a swappable
+**`TaskExecutor`** strategy behind the record. The harness orchestrates
+— `submit` writes a `working` record and starts an executor; the
+executor **reports transitions** back through one uniform `report`
+callback; the harness turns each transition into a `store.put` PLUS the
+existing `task-status` / `task-progress` bus emit.
+
+**The bus stays the LIVE plane; the store is the DURABLE plane** — the
+wire payloads are byte-identical to the pre-ADR-68 harness, and the
+bundled in-process executor is behavior-identical for the caller. The
+seam is what unlocks the later tiers without a rewrite:
+
+| Piece          | Bundled default (here)           | Conforms to the same port later                  |
+| -------------- | -------------------------------- | ------------------------------------------------ |
+| `TaskStore`    | `InMemoryTaskStore` (node-local) | `@agentick/tasks-postgres-next` (across-restart) |
+| `TaskExecutor` | `InProcessTaskExecutor` (fiber)  | child-process (isolation) / sandbox / worker     |
+
+- The store/executor **port types** live in `@agentick/spec-next`
+  (`TaskRecord`, `TaskStore`, `TaskExecutor`, `TaskTransition`,
+  `TaskStoreQuery`); the bundled impls + `runTaskStoreConformance` live
+  here (mirroring `TimelineStore`).
+- `get` / `list` / `status` read a synchronous **projection** the
+  harness keeps in lockstep with its store writes (CQRS materialized
+  view — the protocol reads are sync, the store port is async).
+- **The store is app/gateway-scoped**: the AppHarness constructs one and
+  injects it into every session's harness, so a `detached` task survives
+  its spawning session's `close()`. See [Lifetime](#lifetime-semantics-adr-68).
 
 Private workspace package. Bundled into the `agentick` metapackage;
 not published independently.
@@ -23,13 +55,16 @@ not published independently.
 
 🚧 In active development as part of v2 (`feat/v2`).
 
-| Phase | What                                                                                                                                              | Status |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
-| A     | Substrate primitive — harness, registry, progress, cancel, conformance                                                                            | ✅     |
-| A.1   | ToolExecutor integration — `ctx.tasks` on every handler, TaskHandle-return detection, Pattern A vs B branching on `taskSupport` annotation (#156) | ✅     |
-| A.2   | Model-facing `session_tasks_*` tools — auto-registered `session_tasks_list / get / cancel / await` so the model can manage Pattern B tasks (#157) | ✅     |
-| B     | MCP wire codec — `tools/call` task opt-in, `notifications/tasks/status` translation, inbound `tasks/cancel`                                       | ⏳     |
-| D     | Effect-native internals refactor — `Stream<TaskEvent>` for events, `Effect<TaskHandle>` work overload with real fiber interruptibility (#155)     | ⏳     |
+| Phase | What                                                                                                                                                               | Status |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------ |
+| A     | Substrate primitive — harness, registry, progress, cancel, conformance                                                                                             | ✅     |
+| A.1   | ToolExecutor integration — `ctx.tasks` on every handler, TaskHandle-return detection, Pattern A vs B branching on `taskSupport` annotation (#156)                  | ✅     |
+| A.2   | Model-facing `session_tasks_*` tools — auto-registered `session_tasks_list / get / cancel / await` so the model can manage Pattern B tasks (#157)                  | ✅     |
+| B     | MCP wire codec — `tools/call` task opt-in, `notifications/tasks/status` translation, inbound `tasks/cancel`                                                        | ✅     |
+| 68-A  | Record-as-source-of-truth — `TaskStore` port + `InMemoryTaskStore`, `TaskExecutor` seam + `InProcessTaskExecutor`, `detached` lifetime, `interrupted` on hydration | ✅     |
+| 68-B  | Child-process executor over IPC (isolation / detached) — conforms to the `TaskExecutor` seam                                                                       | ⏳     |
+| 68-pg | `@agentick/tasks-postgres-next` durable store — durability + reattach across app-process restart                                                                   | ⏳     |
+| D     | Effect-native internals refactor — `Stream<TaskEvent>` for events, `Effect<TaskHandle>` work overload with real fiber interruptibility (#155)                      | ⏳     |
 
 ## Quick start
 
@@ -248,10 +283,15 @@ const result = await handle.result; // resolves with ContentBlock[]
 - **Inbox message types** — `tasks-cancel`, `tasks-get`,
   `tasks-result`. Cluster-portable cross-harness operations route
   through these against `harness.address`.
-- **Conformance suite** — `runTasksHarnessConformance(factory)`
-  exported from the package root. Any impl of
-  `TasksHarnessProtocol` can be driven through the same 12-test
-  battery to prove protocol compliance.
+- **`InMemoryTaskStore`** — the bundled default `TaskStore` (ADR 68);
+  `Map`-backed, node-local, `:memory:` semantics.
+- **`InProcessTaskExecutor`** — the bundled default `TaskExecutor`; the
+  current Promise/Effect fiber model on the report seam.
+- **Conformance suites** —
+  - `runTasksHarnessConformance(factory)` — the protocol battery, any
+    `TasksHarnessProtocol` impl.
+  - `runTaskStoreConformance({ label, factory })` — the store-port
+    battery, any `TaskStore` impl (mirrors `runTimelineStoreConformance`).
 - **Test doubles** under `/testing` — `fakeTasks()` + `stubTasks()`,
   per the Meszaros vocabulary (see "Test doubles" below).
 
@@ -262,7 +302,14 @@ const result = await handle.result; // resolves with ContentBlock[]
 ```ts
 submit<T = readonly ContentBlock[]>(
   work: (ctx: TaskWorkContext) => Promise<T> | T,
-  opts?: { ttl?: number; pollInterval?: number; statusMessage?: string },
+  opts?: {
+    ttl?: number;
+    pollInterval?: number;
+    statusMessage?: string;
+    detached?: boolean; // ADR 68 — survive spawning session close
+    input?: unknown; // audit / replay; payload a by-ref executor resolves work with
+    handlerRef?: string; // by-ref work for an out-of-process executor
+  },
 ): TaskHandle<T>
 ```
 
@@ -314,34 +361,33 @@ handle — there's nothing to manage between request and response.
 The handle shape is for work where the caller may want to observe
 progress, cancel mid-flight, or persist across boundaries.
 
-### Lifetime semantics (current behavior)
+### Lifetime semantics (ADR 68)
 
-`TasksHarness` is per-session (#159). Today's lifetime model is
-effectively:
+`TasksHarness` is per-session (#159), but the `TaskStore` is
+app/gateway-scoped:
 
-- **Per-task**: `handle.cancel(reason?)` interrupts the work fiber
-  (`Effect.runFork`-rooted via `Fiber.interrupt`) and finalizes the
-  task as `cancelled`.
-- **Per-session**: `harness.close()` cancels ALL in-flight tasks via
-  the cascading interrupt path. The harness is owned by the session
-  per the single-construction-site rule (#159); session close
-  cascades to harness close cascades to task interrupt.
+- **Per-task**: `handle.cancel(reason?)` applies the `cancelled`
+  transition, aborts the AbortSignal, and (Effect path) interrupts the
+  work fiber via `Fiber.interrupt` — `await cancel()` waits for
+  finalizers (settled-cancel).
+- **Per-session (default, `detached: false`)**: `harness.close()`
+  cancels ALL non-detached in-flight tasks via the cascading interrupt
+  path — today's behavior, IDENTICAL.
+- **Detached (`submit(work, { detached: true })`)**: NOT aborted on
+  session close. The executor keeps running and the record persists in
+  the shared app-scoped store, so the session can stop and the task
+  continues — as long as the app process is alive (with the in-memory
+  store). Survival across app-process **restart** needs a durable store
+  (`@agentick/tasks-postgres-next`, same port, not built here).
+- **Orphan accounting (`interrupted`)**: on construction the harness
+  reads its scope-filtered store records; any still-`working` record
+  with no reattachable executor is marked `interrupted` (a lost
+  in-process fiber can't reattach). With the in-memory store this is a
+  same-process no-op; the durable store exercises it across restart.
 
-There is no app-level or daemon-level lifetime today — a task started
-in session A cannot survive session A's close. Adding those modes
-requires:
-
-- **App lifetime**: an app-level TasksHarness instance OR session→app
-  forwarding (no infrastructure today).
-- **Daemon lifetime**: a process-level fiber pool decoupled from
-  harness cleanup (no infrastructure today).
-
-These are tracked under #292 (TasksHarness lifetime selection)
-pending a design pass. The fiber primitive — `Effect.runFork`,
-`Effect.forkIn(scope)`, `Effect.forkDaemon` — supports all three
-shapes; what's missing is the substrate to host non-session-scoped
-tasks. Adopters who need daemon behavior today can manage their own
-detached fibers outside the harness.
+Truly **distributed** execution (a task running on a different node) is
+the ambitious tier — a distributed-worker `TaskExecutor` + a shared
+store — and is not built here. The seam is ready for it.
 
 ### Lookups by id
 
@@ -351,11 +397,127 @@ unknown ids — same shape across local and cluster paths.
 
 ### `TaskStatus`
 
-`"working" | "input_required" | "completed" | "failed" | "cancelled"` —
-maps 1:1 to MCP's task FSM. `input_required` is declared for
-forward-compat with MCP but Phase A doesn't auto-transition into it;
-tools that pause on `ctx.elicitation` stay `working` until Phase B's
-auto-pause integration ships.
+`"working" | "input_required" | "completed" | "failed" | "cancelled" |
+"interrupted"`. The first five map 1:1 to MCP's task FSM.
+`input_required` is declared for forward-compat with MCP but Phase A
+doesn't auto-transition into it; tools that pause on `ctx.elicitation`
+stay `working` until Phase B's auto-pause integration ships.
+`interrupted` (ADR 68) is the orphan-accounting terminal — a `working`
+record whose live executor is gone (harness re-hydrated a store record
+with no reattachable execution). It has **no MCP-wire representation**
+(the MCP enum stops at `cancelled`); the server codec lossy-maps it to
+`failed` at the wire boundary.
+
+### `TaskStore`, `TaskExecutor` (ADR 68)
+
+The durability + execution seams. Port types in `@agentick/spec-next`,
+re-exported here; bundled impls (`InMemoryTaskStore`,
+`InProcessTaskExecutor`) exported from the package root.
+
+```ts
+import {
+  InMemoryTaskStore,
+  InProcessTaskExecutor,
+  runTaskStoreConformance,
+  type TaskStore,
+  type TaskExecutor,
+} from "@agentick/tasks-next";
+
+// Inject a custom store / executor at construction:
+new TasksHarness(id, journal, bus, inbox, { store, executor });
+```
+
+`TaskStore` — `put` / `get` / `list(query?)` / `delete` / `prune?` +
+`backend`. `TaskExecutor` — `start(record, work, report, signal)` →
+`TaskExecution`, `reattach?`, `cancel(exec, reason?)`. Any custom store
+proves compliance via `runTaskStoreConformance({ label, factory })`.
+
+#### Build your own store — back tasks with your stack
+
+The record is the **source of truth**, so `put` is a whole-record upsert on
+every transition; reads serve `get` / `list`. The in-memory default is just
+one impl — a SQL, Redis, or DynamoDB store swaps in identically.
+
+```ts
+import type { TaskStore, TaskRecord, TaskStoreQuery } from "@agentick/tasks-next";
+import { runTaskStoreConformance } from "@agentick/tasks-next";
+
+class SqlTaskStore implements TaskStore {
+  readonly backend = "sql";
+  constructor(private readonly db: Db) {}
+
+  put(r: TaskRecord) {
+    return this.db.upsert("tasks", r.taskId, r);
+  } // full record
+  get(id: string) {
+    return this.db.find("tasks", id);
+  }
+  list(q?: TaskStoreQuery) {
+    return this.db.query("tasks", q?.scope, q?.status);
+  }
+  delete(id: string) {
+    return this.db.remove("tasks", id);
+  }
+  prune(before: number) {
+    return this.db.removeTerminalsBefore("tasks", before);
+  }
+}
+
+// Prove it with the SAME suite the in-memory default passes:
+runTaskStoreConformance({ label: "sql", factory: () => new SqlTaskStore(testDb()) });
+```
+
+#### Build your own executor — run work where you want
+
+`report` is the **one path back**: every transition (progress, terminal)
+flows through it → the harness persists the record + emits the events.
+`reattach` re-adopts a still-running job after a restart (durability); return
+`undefined` and the harness marks the orphan `interrupted`.
+
+```ts
+import type {
+  TaskExecutor,
+  TaskExecution,
+  TaskRecord,
+  TaskWork,
+  TaskReport,
+} from "@agentick/tasks-next";
+
+class QueueTaskExecutor implements TaskExecutor {
+  readonly kind = "queue";
+  constructor(private readonly queue: Queue) {}
+
+  start(
+    record: TaskRecord,
+    _work: TaskWork,
+    report: TaskReport,
+    signal: AbortSignal,
+  ): TaskExecution {
+    const job = this.queue.enqueue(record.handlerRef!, record.input);
+    job.onProgress((progress) => report({ progress }));
+    job.onDone((result) => report({ status: "completed", result }));
+    job.onError((e) => report({ status: "failed", failure: { kind: "error", reason: String(e) } }));
+    signal.addEventListener("abort", () => this.queue.cancel(job.id));
+    return { kind: this.kind, jobId: job.id }; // → persisted on record.executorState
+  }
+
+  reattach(record: TaskRecord, report: TaskReport): TaskExecution | undefined {
+    const jobId = (record.executorState as { jobId?: string }).jobId;
+    const job = jobId ? this.queue.adopt(jobId) : undefined; // still alive after restart?
+    if (!job) return undefined; // gone → harness marks it `interrupted`
+    job.onDone((result) => report({ status: "completed", result }));
+    return { kind: this.kind, jobId };
+  }
+
+  cancel(exec: TaskExecution, reason?: string): void {
+    this.queue.cancel((exec as { jobId: string }).jobId, reason);
+  }
+}
+```
+
+The bundled `child-process` executor (ADR 68 Build B) is a worked instance of
+exactly this seam; a `@agentick/tasks-postgres-next` store is a worked instance
+of the store port.
 
 ## Test doubles
 
@@ -418,12 +580,11 @@ compile time — no silent drift.
 ## Conformance
 
 `runTasksHarnessConformance(factory)` drives any
-`TasksHarnessProtocol` impl through a 12-test suite covering: submit
-
-- result, work-fn errors, cancel, progress envelope, events stream,
-  unknown-id errors, harness-close cancellation of in-flight tasks.
-  Lives at the package root so adopter impls (cluster-shimmed variants,
-  custom registries) import it without reaching into `/testing`:
+`TasksHarnessProtocol` impl through the protocol suite covering: submit
+→ result, work-fn errors, cancel, progress envelope, events stream,
+unknown-id errors, harness-close cancellation of in-flight tasks.
+Lives at the package root so adopter impls (cluster-shimmed variants,
+custom registries) import it without reaching into `/testing`:
 
 ```ts
 import { runTasksHarnessConformance } from "@agentick/tasks-next";
@@ -438,41 +599,65 @@ runTasksHarnessConformance(async ({ harnessId }) => {
 
 - **MCP wire encoding** — lives in `@agentick/mcp-next`, layers on top.
   This package's harness is wire-agnostic.
-- **Persistence across process restart** — tasks survive the
-  session's process lifetime only. Cross-restart resumption is a
-  substrate concern (future cluster-store integration).
+- **Persistence across process restart** — the bundled
+  `InMemoryTaskStore` is node-local + lost on process exit. `detached`
+  tasks survive their spawning session's close (same process), but
+  survival across an app-process restart needs a durable store
+  (`@agentick/tasks-postgres-next`, same `TaskStore` port — not built
+  here). The `interrupted`-on-hydration logic is wired and ready for it.
+- **The child-process / distributed executors** — ADR 68 Build B and
+  the ambitious tier. They implement the same `TaskExecutor` seam; not
+  built here.
 - **ToolExecutor return-shape detection** — the executor's logic for
   detecting a `TaskHandle` return and branching on `taskSupport`
   lives in `@agentick/tool-executor-next` (#156).
 
 ## Verified by
 
-- `src/__tests__/harness.spec.ts` — 18 tests covering submit /
+- `src/__tests__/harness.spec.ts` — 30 tests covering submit /
   result / progress envelope / cancel / close / events / errors /
   identity / subscriber fan-out / synchronous-first-tick abort
-  semantics.
-- `src/__tests__/cluster-inbox.spec.ts` — 4 tests covering
+  semantics / Effect-typed work (interrupt, Cause handling, settled
+  cancel). The bus-envelope tests pin the byte-identical
+  `task-status` / `task-progress` wire payloads (ADR 68 parity gate).
+- `src/__tests__/store.spec.ts` — 15 tests: `runTaskStoreConformance`
+  against `InMemoryTaskStore` (10) + the ADR 68 durability behaviors —
+  detached-survives-close (non-detached still aborts), every-transition
+  persisted, shared-store cross-session isolation, and
+  `interrupted`-on-hydration (orphaned `working` → `interrupted`;
+  terminal prior-run records surfaced read-only).
+- `src/__tests__/cluster-inbox.spec.ts` — 6 tests covering
   cluster-portable cancel / get / result via inbox addressing.
 - `src/__tests__/conformance.spec.ts` — drives
-  `runTasksHarnessConformance` against `TasksHarness` (13 protocol
-  tests).
-- `src/__tests__/session-tasks-tools.spec.ts` — 15 tests covering
+  `runTasksHarnessConformance` against `TasksHarness` (17 protocol
+  tests) — the in-process default is behavior-identical to pre-ADR-68.
+- `src/__tests__/session-tasks-tools.spec.ts` — 19 tests covering
   every model-facing tool's handler directly (no tool-executor in
   the dep tree to avoid `tasks ↔ tool-executor` cycle): list / get
   / cancel / await against known + unknown ids, structured failure
   shape, bundle structural assertions, sessionId-scoped handler
   refs, extension factory smoke.
 - `packages-next/tool-executor/src/__tests__/task-handle.spec.ts`
-  (sibling package) — 6 tests covering `ctx.tasks` wiring, Pattern A
-  (await transparently), Pattern B (return task-ref), and abort
-  propagation from dispatch into the in-flight task.
+  (sibling package) — `ctx.tasks` wiring, Pattern A (await
+  transparently), Pattern B (return task-ref), and abort propagation
+  from dispatch into the in-flight task.
+- `packages-next/mcp/src/__tests__/task-bridge.spec.ts` +
+  `mcp/src/server/__tests__/tasks-projection.spec.ts` (sibling
+  package) — the MCP wire round-trip is unchanged under the refactor
+  (byte-identical `task-status` / `task-progress` payloads).
 
 ## Roadmap & known gaps
 
-- **Phase B (MCP wire codec)** — `mcp-next` translates inbound MCP
-  `tools/call` with `task: {ttl}` into `submit`; outbound MCP wire
-  serializes our TasksHarness state into `notifications/tasks/status`
-  - `notifications/progress`. Tracked separately.
+- **ADR 68 Build B (child-process executor)** — a `TaskExecutor` that
+  forks a child Node process, hands it a serializable descriptor
+  (`handlerRef` + `input`), and reports status/progress/result back over
+  IPC → parent → `report`. Delivers execution isolation (CPU-heavy /
+  crash-risky work off the main loop, independently killable). Conforms
+  to the existing seam — no harness change.
+- **ADR 68 pg (`@agentick/tasks-postgres-next`)** — a durable `TaskStore`
+  conforming to the same port. Adds durability + reattach across
+  app-process restart, and is what actually exercises the (already
+  wired) `interrupted`-on-hydration path.
 - **Phase D (Effect-native internals, #155)** — convert the
   per-subscriber `Queue<TaskEvent>` fan-out to `Stream.fromQueue`,
   expose an `Effect<TaskHandle>` work overload that runs as a real
