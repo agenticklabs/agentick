@@ -222,11 +222,23 @@ export interface McpRequestExtras {
   readonly clientInfo: { readonly name: string; readonly version: string } | null;
   /** Capability map the client advertised in `initialize`. */
   readonly clientCapabilities: Readonly<Record<string, unknown>> | null;
-  // NOTE(ADR 64): the direct `sendProgress` callback was retired in
-  // favor of the universal `ctx.progress` signal (emits one bus event
-  // the MCP-server progress projection forwards to
-  // `notifications/progress`). Parallel to retiring the direct `log`
-  // sink — one emit seam, projections subscribe.
+  /**
+   * The client-supplied `_meta.progressToken` for THIS request, if any
+   * (ADR 64). Pass it to `ctx.progress(...)` so the MCP progress
+   * projection correlates to the client's call — the wire
+   * `notifications/progress` echoes this exact token, which the client
+   * SDK maps back to the in-flight request (its `onprogress` fires).
+   * `undefined` when the client didn't opt into progress for this call.
+   *
+   * NOTE(ADR 64): the direct `sendProgress` callback was retired in
+   * favor of the universal `ctx.progress` signal (emits one bus event
+   * the MCP-server progress projection forwards to
+   * `notifications/progress`). This token is the ONLY progress-related
+   * datum that survives on `ctx.mcp` — it's per-request correlation
+   * input, not a sink. Parallel to retiring the direct `log` sink —
+   * one emit seam, projections subscribe.
+   */
+  readonly progressToken?: ProgressToken;
 }
 
 /**

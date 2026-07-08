@@ -495,6 +495,17 @@ Spec types are re-exported for adopters' convenience: `McpRequestContext`,
   `debug`; default level emits both), capability gating for
   `completions`/`logging`, and the `lifecycle.ts` tasks-vs-resources
   gating regression.
+- `__tests__/progress.spec.ts` — `ctx.progress` → `notifications/progress`
+  correlated to the client's `_meta.progressToken` (surfaced on
+  `ctx.mcp.progressToken`): explicit-token wire equality + real SDK
+  `onprogress` round-trip; no capability gate.
+- `__tests__/cross-connection-isolation.spec.ts` — TWO clients on ONE
+  server; a tool's `ctx.log` + `ctx.progress` over connection A reach
+  NEITHER of B's notification handlers (mutation-checked against the
+  `connectionScope` filter — the multi-tenant guarantee).
+- `__tests__/below-level-log-bus-emit.spec.ts` — a below-level `debug`
+  log the MCP projection drops is STILL observed by an independent bus
+  subscriber; each projection applies its own threshold.
 - `__tests__/spawn.spec.ts` — Mode-A shell ergonomics.
 - `security/__tests__/pipeline.spec.ts` — 35 tests covering every stage in
   isolation + the composed pipeline.

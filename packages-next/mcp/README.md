@@ -456,9 +456,36 @@ connection. The MCP server side is now a **bus subscriber**:
 
 Both fire-and-forget and swallow send-on-closed. The old direct log
 sink and the `McpRequestExtras.sendProgress` callback are retired — one
-emit seam, projections subscribe. Verified by
-`src/server/__tests__/projection-completions-logging.spec.ts` (log) and
-`src/server/__tests__/progress.spec.ts` (progress).
+emit seam, projections subscribe.
+
+**Client-token correlation (`ctx.mcp.progressToken`).** A `tools/call`
+carrying `_meta.progressToken` surfaces that token on
+`ctx.mcp.progressToken`. A handler passes it straight to
+`ctx.progress(token, …)`; the progress projection echoes it verbatim
+onto the wire, so the client SDK correlates the notification back to its
+in-flight call (its `onprogress` fires). Only `tools/call` carries a
+progress token in the MCP spec — `prompts/get` and
+`completion/complete` have no `_meta.progressToken`, so the token is
+threaded only on the tool-call path.
+
+**Cross-connection isolation is structural.** Each connection's
+projections subscribe with a `connectionScope` filter
+(`{ mcpConnectionId, mcpServerId }`) and the per-request ctx stamps that
+scope on every signal, so a tool's log/progress over connection A never
+reaches connection B — the load-bearing multi-tenant guarantee.
+
+Verified by:
+- `src/server/__tests__/projection-completions-logging.spec.ts` — log
+  round-trip + level filter.
+- `src/server/__tests__/progress.spec.ts` — `ctx.progress` →
+  `notifications/progress` correlated to the client's `_meta.progressToken`
+  (explicit-token wire equality + real SDK `onprogress`).
+- `src/server/__tests__/cross-connection-isolation.spec.ts` — two
+  clients on one server; A's log + progress never reach B
+  (mutation-checked: dropping the `connectionScope` filter makes B leak).
+- `src/server/__tests__/below-level-log-bus-emit.spec.ts` — a below-level
+  `debug` log is dropped by the MCP projection yet still observable on
+  the bus (each projection applies its own threshold).
 
 ## Capability negotiation
 
@@ -585,9 +612,18 @@ reference-server round-trip (until the package is a dev dep).
   `logging/setLevel`, default-level emits everything, opt-out installs
   no projection (ADR 64 re-sourcing of Wave 3a through the bus).
 - `src/server/__tests__/progress.spec.ts` — `ctx.progress` → bus →
-  `installProgressProjection` → `notifications/progress` (token +
-  fields), and progress fires with logging opted out (no capability
-  gate).
+  `installProgressProjection` → `notifications/progress` correlated to
+  the client's `_meta.progressToken` (via `ctx.mcp.progressToken`):
+  explicit-token wire equality + real SDK `onprogress` round-trip, and
+  progress fires with logging opted out (no capability gate).
+- `src/server/__tests__/cross-connection-isolation.spec.ts` — two
+  clients on ONE server; a tool's `ctx.log` + `ctx.progress` over
+  connection A reach NEITHER of connection B's notification handlers
+  (mutation-checked against the `connectionScope` filter).
+- `src/server/__tests__/below-level-log-bus-emit.spec.ts` — a
+  below-level `debug` log the MCP projection drops (client set
+  `warning`) is STILL observable by an independent bus subscriber; each
+  projection applies its own threshold.
 - `src/server/__tests__/skeleton.spec.ts` — `validateOptions`
   rejection paths (bad transports / tools / prompts shape) + connection
   tracking + lifecycle idempotency.

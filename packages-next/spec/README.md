@@ -239,7 +239,9 @@ nominal sugar.
 - **`ToolHandlerCtx`** (`data/tool-handler.ts`) — the unified ctx every
   tool handler sees, in-process AND MCP-server. Carries
   `transport: "in-process" | "mcp"` discriminator + optional
-  `mcp?: McpRequestExtras` sub-slot for MCP wire identity. See ADR 43.
+  `mcp?: McpRequestExtras` sub-slot for MCP wire identity (including the
+  per-request `mcp.progressToken` — the client's `_meta.progressToken`
+  for correlating `ctx.progress`, ADR 64). See ADR 43.
 - **`McpRequestContext`** (`protocol/mcp-server-harness.ts`) — type alias
   of `ToolHandlerCtx & { transport: "mcp"; mcp: McpRequestExtras }`.
   Import this from MCP-server-specific code paths; structurally identical

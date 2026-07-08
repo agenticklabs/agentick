@@ -148,6 +148,18 @@ consume the `ctx.transport` slot on `WireExtensionContext` —
 `notifications/cancelled` seam, `registerSubscription(...)` for
 subscription fan-out.
 
+`session/send` fans TWO sources onto the caller's `_meta.progressToken`
+(ADR 64 / #19-progress-wire): (1) the handle's execution-event stream,
+and (2) `ctx.progress` SIGNALS — a tool (or any harness) emitting
+`<surface>:signal:progress` bus events scoped to the in-flight
+execution. The gateway bus is the fan-in root, so the send handler
+observes a tool's `ctx.progress` via `ctx.gateway.events(...)` scoped to
+`{ executionId }` and forwards each onto the reporter — the agentick
+client receives it on `client.transport.progress(token)`, exactly as an
+MCP client would receive `notifications/progress`. Verified end-to-end
+by `@agentick/transport-in-process-next`'s
+`src/__tests__/progress-signal-e2e.spec.ts`.
+
 Only three methods dispatch outside the extension registry —
 `initialize`, `ping`, `_extensions/list` — because they need to
 resolve BEFORE the registry itself is queryable.

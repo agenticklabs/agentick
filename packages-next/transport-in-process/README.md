@@ -182,6 +182,8 @@ confidence.
 | Extension `install()` namespace registration                                                  | `src/__tests__/smoke.spec.ts`            |
 | `onClose` handler LIFO order                                                                  | `src/__tests__/smoke.spec.ts`            |
 | Wire conformance (envelope roundtrips, validator integration, batches, empty batch rejection) | `src/__tests__/wire-conformance.spec.ts` |
+| Full `session/send` client → gateway → executor roundtrip                                     | `src/__tests__/session-send-e2e.spec.ts` |
+| `ctx.progress` during an in-flight send reaches `client.transport.progress(token)` (ADR 64)   | `src/__tests__/progress-signal-e2e.spec.ts` |
 
 ## Status
 

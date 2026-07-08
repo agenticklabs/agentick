@@ -153,12 +153,28 @@ export function installToolsHandlers(
     async (request: CallToolRequest): Promise<CallToolResult> => {
       const baseCtx = options.buildContext();
       const op = { type: "tool_call" as const, name: request.params.name };
-      const { ctx, toolInput } = await evaluateRequestPipeline(
+      const { ctx: authedCtx, toolInput } = await evaluateRequestPipeline(
         options.security,
         baseCtx,
         op,
         (request.params.arguments ?? {}) as Record<string, unknown>,
       );
+
+      // ADR 64 / A1 — surface the client's per-call `_meta.progressToken`
+      // on `ctx.mcp.progressToken`. A handler that calls
+      // `ctx.progress(ctx.mcp!.progressToken!, ...)` emits a progress
+      // signal whose token the progress projection echoes verbatim onto
+      // the wire — so the client SDK's `onprogress` (keyed by the token
+      // it generated) correlates to THIS request. Only `tools/call`
+      // carries a progress token in the MCP spec (no `_meta.progressToken`
+      // on `prompts/get` or `completion/complete`), so this is the sole
+      // augmentation site. `undefined` when the client didn't opt in —
+      // the spread then leaves `ctx.mcp` untouched.
+      const progressToken = request.params._meta?.progressToken;
+      const ctx: McpRequestContext =
+        progressToken !== undefined
+          ? { ...authedCtx, mcp: { ...authedCtx.mcp, progressToken } }
+          : authedCtx;
 
       // Re-project so per-connection filter/transforms decide
       // visibility for this specific call. A tool hidden from `list`

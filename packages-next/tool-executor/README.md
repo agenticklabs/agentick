@@ -121,7 +121,11 @@ to the bus and forward: the MCP-server projection →
 (framework), receive everywhere. Signals are structurally **bus-only**
 — never journaled — so diagnostic spam can't bloat the recovery spine.
 
-Verified by `src/__tests__/signals.spec.ts`.
+Verified by `src/__tests__/signals.spec.ts` (emit shape + scope) and
+`src/__tests__/signal-fire-and-forget.spec.ts` (a bus whose `append`
+dies for signal events never blocks or fails the dispatch — the
+handler's return value survives intact, proving the `Effect.runFork`
+detachment).
 
 ## Conformance
 

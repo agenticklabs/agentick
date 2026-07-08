@@ -14,7 +14,9 @@
 
 import {
   defineWireExtension,
+  progressEventQuery,
   SessionNotFoundError,
+  type ProtocolEvent,
   type SessionHarnessProtocol,
   type WireExtension,
 } from "@agentick/spec-next";
@@ -57,15 +59,23 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
       });
 
       // LSP-style progress: opt-in via `_meta.progressToken`. When
-      // set, drain the handle's AsyncIterable in the background and
-      // fan out one `notifications/progress` frame per event.
+      // set, fan out `notifications/progress` frames from TWO sources
+      // onto the same caller-supplied token:
+      //   (1) the handle's execution-event stream (lifecycle liveness);
+      //   (2) ADR 64 `ctx.progress` SIGNALS — a tool (or any harness)
+      //       emitting `<surface>:signal:progress` bus events scoped to
+      //       THIS execution. Both ride the existing per-token progress
+      //       stream (no new transport plumbing — ADR 64 §"progress
+      //       reuses the existing stream").
+      let stopSignalDrain: (() => void) | undefined;
       if (progressToken !== undefined) {
         const reporter = ctx.transport.progress(progressToken);
-        // Envelope-local counter — separate from the wire's outer
-        // `cursor` (which the framework manages inside the reporter).
-        // Preserves the pre-refactor envelope `id: "progress-N"`
-        // shape so downstream consumers that key on `envelope.id`
-        // (devtools inspectors, MCP wire codec) don't regress.
+
+        // (1) Execution-event fan-out. Envelope-local counter — separate
+        // from the wire's outer `cursor` (managed inside the reporter).
+        // Preserves the pre-refactor envelope `id: "progress-N"` shape so
+        // downstream consumers keying on `envelope.id` (devtools
+        // inspectors, MCP wire codec) don't regress.
         let n = 0;
         (async () => {
           try {
@@ -85,14 +95,52 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
             /* result-Promise below carries the failure — progress is best-effort */
           }
         })();
+
+        // (2) Progress-SIGNAL fan-out (ADR 64 / #19-progress-wire). The
+        // gateway bus is the fan-in root — every child harness's signal
+        // reaches it, so `ctx.gateway.events(...)` observes a tool's
+        // `ctx.progress(...)`. Scope to the execution id so concurrent
+        // executions on the same session never cross-contaminate. Push
+        // the raw signal envelope (self-describing: `name` is
+        // `<surface>:signal:progress`, `payload` is the ProgressEventPayload)
+        // so the client can discriminate it from execution events. Torn
+        // down when the send settles — the gateway bus outlives this RPC,
+        // so the subscription must be explicitly stopped.
+        const signalEvents = ctx.gateway.events({
+          ...progressEventQuery(),
+          scope: { executionId: handle.executionId },
+        });
+        const signalIter = signalEvents[Symbol.asyncIterator]();
+        stopSignalDrain = () => {
+          void signalIter.return?.(undefined);
+        };
+        (async () => {
+          try {
+            for (
+              let step = await signalIter.next();
+              step.done !== true;
+              step = await signalIter.next()
+            ) {
+              reporter.push(step.value as ProtocolEvent);
+            }
+          } catch {
+            /* best-effort — progress is never a control path (ADR 64) */
+          }
+        })();
       }
 
-      const result = await handle.result;
-      return {
-        executionId: handle.executionId,
-        finalCursor: { value: 0 },
-        result,
-      };
+      try {
+        const result = await handle.result;
+        return {
+          executionId: handle.executionId,
+          finalCursor: { value: 0 },
+          result,
+        };
+      } finally {
+        // Stop the signal drain regardless of success/failure so the
+        // background subscription doesn't outlive the RPC.
+        stopSignalDrain?.();
+      }
     },
     "session/dispatch": async ({ sessionId, tool, input }, ctx) => {
       const sess = ctx.session ?? findSession(ctx, sessionId);
