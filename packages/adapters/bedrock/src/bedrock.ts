@@ -519,10 +519,14 @@ export function mapToolDefinition(tool: any): Tool {
 
   if ("name" in tool && "input" in tool) {
     const toolDef = tool as ToolDefinition;
+    // Prefer the pre-converted JSON Schema (set by core's enrichMetadata) —
+    // `input` may be a raw Zod schema, which Bedrock cannot interpret and
+    // which yields empty tool-call arguments from Converse models.
+    const rawSchema = (tool as any).inputSchema ?? toolDef.input;
     const spec: ToolSpecification = {
       name: toolDef.name ?? "unknown",
       description: toolDef.description || "",
-      inputSchema: { json: (toolDef.input ?? {}) as any },
+      inputSchema: { json: (rawSchema ?? {}) as any },
     };
 
     if (toolDef.providerOptions?.bedrock) {
@@ -619,7 +623,10 @@ export function mapBedrockStreamChunk(
     if (toolCallState.has(index)) {
       const tracked = toolCallState.get(index)!;
       toolCallState.delete(index);
-      return { type: "tool_call_end", id: tracked.id, input: {} };
+      // Do NOT pass `input` here: the accumulator uses `delta.input ??
+      // parse(accumulatedJson)`, so a hardcoded `{}` (non-nullish) would
+      // discard every argument the toolUse deltas streamed.
+      return { type: "tool_call_end", id: tracked.id };
     }
 
     return null;
