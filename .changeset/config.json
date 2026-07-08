@@ -37,12 +37,17 @@
       "@agentick/sandbox-secure-exec",
       "@agentick/scheduler",
       "@agentick/secrets",
-      "@agentick/mcp"
+      "@agentick/mcp",
+      "@agentick/eval"
     ]
   ],
   "linked": [],
   "access": "public",
   "baseBranch": "master",
   "updateInternalDependencies": "patch",
-  "ignore": ["example-express", "example-react", "example-agent"]
+  "ignore": [
+    "example-express",
+    "example-react",
+    "example-agent"
+  ]
 }

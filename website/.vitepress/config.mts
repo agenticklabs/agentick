@@ -240,6 +240,7 @@ export default defineConfig({
             { text: "Sandbox", link: "/docs/sandbox" },
             { text: "Terminal UI (TUI)", link: "/docs/tui" },
             { text: "Testing", link: "/docs/testing" },
+            { text: "Evals", link: "/docs/evals" },
           ],
         },
         {
