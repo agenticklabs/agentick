@@ -93,7 +93,12 @@ export type AdapterDelta =
       providerMetadata?: Record<string, Record<string, unknown>>;
     }
   | { type: "tool_call_delta"; id: string; delta: string }
-  | { type: "tool_call_end"; id: string; input: unknown }
+  // `input` is optional: when nullish, the accumulator parses the JSON
+  // accumulated from tool_call_delta chunks. Adapters that receive the
+  // complete input on their end event may pass it; adapters that stream
+  // arguments (e.g. Bedrock Converse) must NOT pass a placeholder — a
+  // non-nullish value wins over the accumulated JSON.
+  | { type: "tool_call_end"; id: string; input?: unknown }
   // Complete tool call (non-streamed, some providers send complete)
   | {
       type: "tool_call";
