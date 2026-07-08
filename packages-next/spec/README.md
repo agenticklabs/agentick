@@ -225,11 +225,13 @@ Per ADR 42 §"Naming rules": no "Harness" or "Protocol" in
 adopter-visible types. Every harness exposes a noun alias alongside its
 `*HarnessProtocol`/`*Protocol` interface so adopter code reads naturally:
 
-| Adopter alias              | Underlying protocol                         | Where used                              |
-| -------------------------- | ------------------------------------------- | --------------------------------------- |
-| `Prompts`                  | `PromptsHarnessProtocol`                    | `server.prompts`, `withPrompts(...)`    |
-| `Elicit`                   | (sugar surface in `protocol/elicit-api.ts`) | `ctx.elicit`, `session.elicit`          |
-| `Tools`, `Skills`, `Tasks` | (pending — ADR 42 Slices 2–3)               | `server.tools`, `withSkills(...)`, etc. |
+| Adopter alias | Underlying protocol                         | Where used                           |
+| ------------- | ------------------------------------------- | ------------------------------------ |
+| `Prompts`     | `PromptsHarnessProtocol`                    | `server.prompts`, `withPrompts(...)` |
+| `Tools`       | `ToolExecutorProtocol`                      | `server.tools`, tool wiring          |
+| `Skills`      | `SkillsHarnessProtocol`                     | `withSkills(...)`                    |
+| `Tasks`       | `TasksHarnessProtocol`                      | `session.tasks`, `withTasks(...)`    |
+| `Elicit`      | (sugar surface in `protocol/elicit-api.ts`) | `ctx.elicit`, `session.elicit`       |
 
 The protocol shapes stay for power-user access; the aliases are strictly
 nominal sugar.
@@ -287,8 +289,6 @@ nominal sugar.
   `[PLACEHOLDER]` — sign-off pending.
 - **`SpecFeatureName`** is an initial, extensible registry
   (`[PLACEHOLDER]`), tracked in `17-open-questions.md`.
-- Some `Tools` / `Skills` / `Tasks` adopter aliases are pending ADR 42
-  Slices 2–3.
 
 ## Verified by
 
@@ -305,7 +305,7 @@ nominal sugar.
   contract, spec version.
 - `src/errors/__tests__/` — error base, codec, registry, Effect interop.
 - `src/__tests__/signals.spec.ts` — signal name builders + query shape
-  (ADR 64). The cross-surface query *matching* is verified against the
+  (ADR 64). The cross-surface query _matching_ is verified against the
   real matcher in `@agentick/runtime-next`
   (`runtime/src/__tests__/signals.spec.ts`).
 

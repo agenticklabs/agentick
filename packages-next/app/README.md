@@ -40,11 +40,12 @@ await app.closeApp();
 
 ```typescript
 import { createApp } from "@agentick/app-next";
+import { openai } from "@agentick/model-openai-next";
 import { myReconciler } from "./my-reconciler";
 
 const app = await createApp(rootElement, {
+  model: openai("gpt-4o"),
   reconciler: myReconciler(),
-  executor: ...,
 });
 ```
 
@@ -56,6 +57,7 @@ down when the execution settles:
 
 ```ts
 import { run } from "@agentick/app-next/react";
+import { openai } from "@agentick/model-openai-next";
 
 const result = await run(<Agent />, {
   model: openai("gpt-4o"),
@@ -69,8 +71,9 @@ for await (const event of run(<Agent />, { model, messages })) {
 ```
 
 The ergonomics ladder: `generate({ model, messages })` (one model call,
-no tree) → `run(<Agent/>, ...)` (one execution, nothing persists) →
-`createApp` + sessions (persistent). Each tier strictly adds.
+no tree — from `@agentick/model-next`) → `run(<Agent/>, ...)` (one
+execution, nothing persists — this package) → `createApp` + sessions
+(persistent). Each tier strictly adds.
 
 ## Cluster integration
 
@@ -83,7 +86,7 @@ import { createApp } from "@agentick/app-next/react";
 import { defineUnixCluster } from "@agentick/cluster-net-next";
 
 const app = await createApp(<Agent />, {
-  executor: ...,
+  model: openai("gpt-4o"),
   cluster: defineUnixCluster({ socketPath: "/tmp/cluster.sock" }),
 });
 
@@ -106,21 +109,34 @@ gateway — see
 
 ### `createApp(rootElement, options)`
 
-| Field        | Type                               | Notes                                                |
-| ------------ | ---------------------------------- | ---------------------------------------------------- |
-| `executor`   | `LanguageModelAdapter`, `LanguageModelExecutor`, or factory | Required. An adapter (`openai("gpt-4o")`, `anthropic(...)`, `aisdk(model)`) is the standard form — the app wraps it in the ONE executor on its substrate. |
-| `target`     | `ExecutionTarget`                  | Optional. Defaults to `executor.target`.             |
-| `reconciler` | `ReconcilerHarness` or factory     | Required (omittable via `/react` subpath default).   |
-| `cluster`    | `ClusterFactory`                   | Optional. See "Cluster integration" above.           |
-| `tools`      | `ToolDeclaration[]`                | App-scope tool registry. Threads to every session.   |
-| `extensions` | `Extension[]`                      | App + session extensions. Composed at construction.  |
-| `bus`        | `EventBus` or factory              | Optional substrate override.                         |
-| `inbox`      | `MessageInbox` or factory          | Optional substrate override.                         |
-| `journal`    | `OperationJournal` or factory      | Optional substrate override.                         |
-| `metadata`   | `Record<string, unknown>`          | Adopter-defined bag carried on the harness instance. |
-| `appId`      | `string`                           | Defaults to `app:${ulid()}`.                         |
+**`model` vs `executor` (ADR 52).** `model` is _what to call_ — a bare
+`LanguageModelAdapter`; the app wraps it in the ONE
+`LanguageModelExecutor` on its substrate, so executor events land on
+`app.events(...)` with zero wiring. `executor` is _how to execute_ — a
+BYO engine you constructed yourself. **Exactly one is required**, and
+they are mutually exclusive; passing a bare adapter to `executor`
+throws (it belongs on `model`).
 
-Returns `Promise<AppHarness>` after substrate readiness signals.
+| Field        | Type                                         | Notes                                                                                                                                    |
+| ------------ | -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `model`      | `LanguageModelAdapter`                       | The model to call — `openai("gpt-4o")`, `aisdk(model)`, `google(...)`, etc. Standard path. Exactly one of `model` / `executor` required. |
+| `executor`   | `LanguageModelExecutor` or `ExecutorFactory` | BYO execution engine. A bare adapter goes on `model`, not here.                                                                          |
+| `target`     | `ExecutionTarget`                            | Optional. Defaults to `executor.target`.                                                                                                 |
+| `reconciler` | `ReconcilerProtocol` or `ReconcilerFactory`  | Required (omittable via `/react` subpath default).                                                                                       |
+| `loop`       | `LoopExecutorProtocol` or factory            | Optional. Defaults to the bundled `LoopExecutorHarness`.                                                                                 |
+| `cluster`    | `ClusterFactory`                             | Optional. See "Cluster integration" above.                                                                                               |
+| `tools`      | `ToolDeclaration[]`                          | App-scope tool registry. Threads to every session.                                                                                       |
+| `extensions` | `Extension[]`                                | App + session extensions. Composed at construction.                                                                                      |
+| `bus`        | `EventBus` or factory                        | Optional substrate override.                                                                                                             |
+| `inbox`      | `MessageInbox` or factory                    | Optional substrate override.                                                                                                             |
+| `journal`    | `OperationJournal` or factory                | Optional substrate override.                                                                                                             |
+| `metadata`   | `Record<string, unknown>`                    | Adopter-defined bag carried on the harness instance.                                                                                     |
+| `appId`      | `string`                                     | Defaults to `app:${ulid()}`.                                                                                                             |
+
+Returns `Promise<AppHarness>` after substrate readiness signals. Not
+exhaustive — see [typedoc](https://agentick.dev) / `AppHarnessOptions`
+in `src/harness.ts` for every slot (`models`, `session`, `toolExecutor`,
+`defaultMaxTicks`, `streaming`, `telemetry`, …).
 
 ### `app.createSession(opts?)`
 
@@ -154,6 +170,9 @@ was used), then tears down the substrate. Idempotent.
 ### Tools at the app scope
 
 ```typescript
+import { createTool } from "@agentick/tool-next";
+import { z } from "zod";
+
 const calculator = createTool({
   name: "calculator",
   input: z.object({ a: z.number(), b: z.number() }),
@@ -161,14 +180,14 @@ const calculator = createTool({
 });
 
 const app = await createApp(<Agent />, {
-  executor: ...,
+  model: openai("gpt-4o"),
   tools: [calculator],
 });
 ```
 
 Tools at this scope are available to every session created from this
-app. Per-session scoping happens via `session.createSession({tools})`
-overrides.
+app. Per-session scoping happens via `app.createSession({ tools })`
+overrides (`CreateSessionInput.tools`, session scope wins over app).
 
 ### Extensions
 
@@ -180,7 +199,7 @@ the same `extensions: [...]` array; the harness routes by `target`.
 import { withMCP } from "@agentick/mcp-next";
 
 const app = await createApp(<Agent />, {
-  executor: ...,
+  model: openai("gpt-4o"),
   extensions: [
     withMCP({ servers: [...] }), // target: "session" — re-installs per session
   ],

@@ -2,9 +2,11 @@
 
 Generic, reconciler-agnostic tool authoring for Agentick v2.
 
-`createTool()` returns a registration bundle (`declaration` + `handler` + `validator`) that drops directly into any `ToolExecutorHarness` + `HandlerResolver`. Zero render-time concerns; no React hooks; no DI plumbing.
+## What it is
 
-Reconciler-specific variants (e.g., React tools with `use()`) extend this base in their respective packages.
+`createTool()` is the base tool factory. It takes a spec (`name`, `description`, a Standard-Schema `inputSchema`, a `handler`) and returns a registration **bundle** — `{ declaration, handlerRef, handler, validator }` — that drops directly into any `ToolExecutorHarness` + `HandlerResolver` pair, or into any consumer that accepts the `CreatedTool[]` shorthand (e.g. the MCP server projection).
+
+Zero render-time concerns; no React hooks; no DI plumbing. It depends only on `@agentick/spec-next`. Reconciler-specific variants extend this base in their own packages — e.g. `@agentick/reconciler-react-next` ships its own `createTool` that adds a `use()` hook slot for capturing tree-scoped context (sandbox, MCP refs) during the reconciler's collect walk, rendered as `<Tool>`. This package is what those variants are built on, and what you reach for when you need a tool with no reconciler at all.
 
 ## Quick start
 
@@ -23,12 +25,27 @@ const askName = createTool({
     return [{ type: "text", text: `Hello, ${name ?? "anonymous"}` }];
   },
 });
-
-// Drop into a session / app / gateway:
-const app = createApp(<Agent />, { tools: [askName] });
 ```
 
-`createTool` validates input against `inputSchema` before the handler runs; invalid input surfaces a `ToolValidationError` (typed) instead of reaching the handler.
+`askName` is a `CreatedTool` bundle, not a bare declaration. Where it goes:
+
+```ts
+// Consumer that accepts the CreatedTool[] shorthand — the MCP server projection
+// splits each bundle into a wire declaration + a resolvable handler for you:
+import { spawnStandaloneMcpServer, stdioTransport } from "@agentick/mcp-next/server";
+
+await spawnStandaloneMcpServer({
+  name: "example-server",
+  transports: [stdioTransport()],
+  tools: [askName], // readonly CreatedTool[]
+});
+```
+
+For low-level wiring, register the pieces yourself: `declaration` → `ToolExecutorHarness.register({ registration })`, and `handlerRef` + `handler` + `validator` → the `HandlerResolver`. For a JSX agent, author with the `createTool` from `@agentick/reconciler-react-next` and render `<Tool>` — the adopter `tools:` slots on sessions/apps take `ToolDeclaration[]`, which the reconciler produces from the tree.
+
+### Validation
+
+The returned `validator` is what the tool executor runs against dispatched input **before** the handler is invoked; invalid input surfaces a typed `ToolValidationError` (from `@agentick/spec-next`) instead of reaching the handler. `createTool` itself performs no validation — it packages the validator (a `StandardSchemaV1` adapter when `inputSchema` is set, or a permissive pass-through when it is omitted). Any Standard-Schema library works: Zod 4, Valibot, ArkType, Effect Schema, or a raw JSON Schema wrapped via `jsonSchema({ ... })` from spec.
 
 ## Tool handler ctx is transport-portable
 
@@ -36,27 +53,44 @@ Per ADR 43, every `ToolHandler` receives a `ToolHandlerCtx` with a `transport: "
 
 ```ts
 handler: async (input, { ctx }) => {
-  ctx.transport;        // "in-process" or "mcp"
-  ctx.signal;           // AbortSignal — cancellation
+  ctx.transport;                        // "in-process" or "mcp"
+  ctx.signal;                           // AbortSignal — cancellation
   await ctx.elicit?.confirm("Apply?");  // sugar, both transports
-  ctx.tasks?.submit(...);               // raw protocol, both transports
+  ctx.tasks?.submit(...);               // raw substrate primitive, both transports
   ctx.mcp?.clientCapabilities;          // MCP-only extras, undefined in-process
   return [...];
 },
 ```
 
-Branch on `ctx.transport` only when the handler genuinely needs different behavior per transport (rare). Common code stays portable.
+Substrate primitives every session has (`elicit`/`elicitation`, `tasks`, `resource`) live on `ctx`; extension- or provider-scoped things flow through the JSX `use:` capture of the reconciler variant. Branch on `ctx.transport` only when the handler genuinely needs different behavior per transport (rare). Common code stays portable.
 
-## Subpaths
+## API
 
-| Subpath                          | Purpose                                                                                     |
-| -------------------------------- | ------------------------------------------------------------------------------------------- |
-| `@agentick/tool-next`            | `createTool` + `Validator` + JSON-Schema helpers                                            |
-| `@agentick/tool-next/transforms` | `ToolTransform<C>` primitives for per-context tool-list projection (rename / filter / etc.) |
+Exhaustive detail is in the generated typedoc. Key exports:
+
+### `@agentick/tool-next`
+
+| Export                               | Purpose                                                                                       |
+| ------------------------------------ | --------------------------------------------------------------------------------------------- |
+| `createTool(spec)`                   | Base factory → `CreatedTool` bundle                                                           |
+| `isCreatedTool(value)`               | Structural guard discriminating a bundle from a raw `ToolDeclaration`                         |
+| `ToolSpec` / `CreatedTool` (types)   | Factory input spec / returned bundle shape                                                    |
+| `permissiveValidator`                | `Validator` that accepts every input unchanged (used when no `inputSchema`)                   |
+| `fromStandardSchema(schema)`         | Adapt any `StandardSchemaV1` to the spec `Validator` interface                                |
+| `createToolCatalog(initial?)`        | Build a `MutableToolCatalog` — mutable tool source with change notifications                  |
+| `staticToolCatalog(decls)`           | Wrap a fixed array as a read-only, never-changing `ToolCatalog`                               |
+| `isToolCatalog(x)`                   | Duck-typed guard (`list` + `subscribeAll`)                                                    |
+| `ToolCatalog` / `MutableToolCatalog` | Read (`list` + `subscribeAll`) and mutation (`register`/`remove`/`replace`/`setAll`) surfaces |
+
+`ToolCatalog` exists for consumers that need to observe a tool set over time — the MCP server projection re-fetches on every `tools/list` and fires `notifications/tools/list_changed` when the catalog mutates. Static-array adopters don't need it; the projection normalizes a plain array through `staticToolCatalog` internally.
+
+### `@agentick/tool-next/transforms`
+
+`ToolTransform<C>` primitives that map / filter / rewrite `ToolDeclaration` lists per arbitrary context (see below).
 
 ## Transforms — `@agentick/tool-next/transforms`
 
-Library of `ToolTransform<C>` primitives that map / filter / rewrite `ToolDeclaration` lists per arbitrary context. Used by the MCP server projection (per-connection tool views), eval-next (ablation), in-app rebranding (audience-specific descriptions), and anywhere else a tool list needs adaptation.
+Library of `ToolTransform<C>` primitives that map / filter / rewrite `ToolDeclaration` lists per arbitrary context. Used by the MCP server projection (per-connection tool views), eval ablation, in-app rebranding (audience-specific descriptions), and anywhere else a tool list needs adaptation.
 
 ```ts
 import {
@@ -95,7 +129,7 @@ const projectedTools = applyTransform(projection, gatewayTools, ctx);
 
 ### Scope rules
 
-1. **Transforms operate on `ToolDeclaration` only.** Handler-aware transforms (middleware, retry, logging) require the full registration bundle (`CreatedTool`); they ship as `wrapHandler` separately (not yet — coming with #171 server-side projection work).
+1. **Transforms operate on `ToolDeclaration` only.** Handler-aware transforms (middleware, retry, logging) require the full registration bundle (`CreatedTool`); a `wrapHandler` primitive for those is not yet shipped (see Status).
 2. **Semantic annotations are NEVER mutated.** `readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`, and v2's own `annotations` slot flow through projection unchanged. Lying about destructiveness per-audience is a safety footgun. See [ADR 40 §4](../../docs/proposals/v2/blueprint/40-mcp-server-harness.md).
 3. **Transforms are stateless + pure.** Create once at module init; reuse across many calls. `apply` must not mutate the input.
 
@@ -136,13 +170,21 @@ composeTransforms(prefix("api_"), rename({ a: "b" }));
 
 When a transform returns `null` (filter rejection, `rename(false)`), the chain short-circuits — subsequent transforms don't see the dropped tool.
 
+## Status & roadmap
+
+- **`createTool` + validators** — stable. Bundle shape, exposure defaults, annotation/metadata forwarding, and Standard-Schema validation are covered by `create-tool.spec.ts`.
+- **Transforms** — stable. Every primitive plus composition + drop semantics is covered.
+- **`ToolCatalog`** — shipped and consumed by the MCP server projection, but this package has no dedicated spec for it; its behavior is exercised through the MCP server's `tools-slot` / `tools-list-changed` suites. A local spec is a known gap.
+- **`wrapHandler` (handler-aware transforms: middleware/retry/logging over the full `CreatedTool` bundle)** — not yet shipped. Transforms today are declaration-only. Tracked with the server-side projection work.
+
 ## Verified by
 
-- `src/__tests__/create-tool.spec.ts` — `createTool` registration shape, validation, defaults
+- `src/__tests__/create-tool.spec.ts` — bundle shape, exposure default, `handlerRef` override, annotation/metadata forwarding, permissive-vs-Standard-Schema validation, handler invocation contract
 - `src/transforms/__tests__/transforms.spec.ts` — 28 tests covering every primitive + composition + drop semantics + end-to-end MCP-shaped projection
 
 ## See also
 
-- [ADR 40 — MCP server harness shape](../../docs/proposals/v2/blueprint/40-mcp-server-harness.md) §4 — how the MCP server uses these
+- [ADR 43 — Unified `ToolHandlerCtx`](../../docs/proposals/v2/blueprint/43-unified-tool-handler-ctx.md) — one ctx across transports
+- [ADR 40 — MCP server harness shape](../../docs/proposals/v2/blueprint/40-mcp-server-harness.md) §4 — how the MCP server uses transforms
 - [`@agentick/tool-executor-next`](../tool-executor) — registry + dispatch runtime
-- [`@agentick/spec-next`](../spec) — `ToolDeclaration` + `ToolRegistration` shapes
+- [`@agentick/spec-next`](../spec) — `ToolDeclaration`, `ToolHandlerCtx`, `Validator`, `ToolValidationError` shapes

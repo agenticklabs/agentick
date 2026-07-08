@@ -21,7 +21,7 @@ This package is the React binding of the reconciler-agnostic core in
 
 Per ADR 27 it depends on **no** harness package. Any harness
 (`knobs-next`, `timeline-next`, `state-next`, …) adds a `/react`
-subpath that depends on *this* package without creating a cycle;
+subpath that depends on _this_ package without creating a cycle;
 snapshot/restore iterates `HookBridges` generically via feature
 detection — no hardcoded slot names.
 
@@ -85,8 +85,8 @@ the full design.
 
 The IR is assembled from two kinds of contribution:
 
-- **content** — `<Section>` / `<Message>` / `<Text>` written directly in
-  the tree append to the ordered entry stream (tagged `authored:content`).
+- **content** — `<Section>` / `<Message>` written directly in the tree
+  append to the ordered entry stream (tagged `authored:content`).
 - **projections** — each surfacing-capable harness (timeline, tools, …)
   has exactly ONE projection into the IR: its framework **default**, or a
   component that **overrides** it for a key.
@@ -136,60 +136,63 @@ on `@agentick/timeline-next`, per ADR 27).
 
 ## API
 
+The tables below name the key exports; see the generated typedoc for the
+exhaustive prop / option / return types.
+
 ### Components
 
 Typed PascalCase wrappers over the host intrinsics — the canonical
 author API (no `JSX.IntrinsicElements` augmentation needed).
 
-| Component                       | Purpose                                                    |
-| ------------------------------- | ---------------------------------------------------------- |
-| `<Section>`                     | Structured context entry (`id`, `title`, `priority`, …)    |
-| `<Message role>`                | Role-bearing entry; spread a persisted record: `{...entry.message}` |
-| `<System>` `<User>` `<Assistant>` | Sugar for `<Message role="…">`                           |
-| `<Paragraph>` `<H1>` `<H2>` `<H3>` | Block-level semantic wrappers                            |
-| `<FormatScope>` `<Markdown>` `<XML>` `<PlainText>` | Per-subtree formatter framing            |
-| `<Project projectionKey>`       | Override a harness's surfacing projection (ADR 63); suppresses that key's default fold |
+| Component                                          | Purpose                                                                                |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `<Section>`                                        | Structured context entry (`id`, `title`, `priority`, …)                                |
+| `<Message role>`                                   | Role-bearing entry; spread a persisted record: `{...entry.message}`                    |
+| `<System>` `<User>` `<Assistant>`                  | Sugar for `<Message role="…">`                                                         |
+| `<Paragraph>` `<H1>` `<H2>` `<H3>`                 | Block-level semantic wrappers                                                          |
+| `<FormatScope>` `<Markdown>` `<XML>` `<PlainText>` | Per-subtree formatter framing                                                          |
+| `<Project projectionKey>`                          | Override a harness's surfacing projection (ADR 63); suppresses that key's default fold |
 
 ### Hooks
 
 **Data · session · loop** (thin readers over `HookBridges`):
 
-| Hook                                | Returns / signature                                  |
-| ----------------------------------- | ---------------------------------------------------- |
-| `useData<T>(key, fetcher, opts?)`   | `T` — blocking async resolve (throws Promise while pending; NOT Suspense) |
-| `useSession()`                      | `SessionBridge` — `{ id, status, currentTick?, executionId? }` (read-only) |
-| `useLoopControl()`                  | `LoopBridge` — `{ continueAfterTick(reason?), stopAfterTick(reason?) }` |
-| `useToolBridge()`                   | `ToolBridge \| undefined` — handler registration bridge |
-| `useModelBridge()`                  | `ModelBridge \| undefined` — per-tick model registration (ADR 56) |
+| Hook                              | Returns / signature                                                        |
+| --------------------------------- | -------------------------------------------------------------------------- |
+| `useData<T>(key, fetcher, opts?)` | `T` — blocking async resolve (throws Promise while pending; NOT Suspense)  |
+| `useSession()`                    | `SessionBridge` — `{ id, status, currentTick?, executionId? }` (read-only) |
+| `useLoopControl()`                | `LoopBridge` — `{ continueAfterTick(reason?), stopAfterTick(reason?) }`    |
+| `useToolBridge()`                 | `ToolBridge \| undefined` — handler registration bridge                    |
+| `useModelBridge()`                | `ModelBridge \| undefined` — per-tick model registration (ADR 56)          |
 
 **Lifecycle observers** (ADR 54/55) — register a callback fired when
 the loop/executor bridges the matching event. All accept
 `(event) => void | Promise<void>` and unregister on unmount:
 
-| Hook                              | Event                    | Catch-up? |
-| --------------------------------- | ------------------------ | --------- |
-| `useOnTickStart(cb)`              | `LifecycleTickStart`     | **yes** — mid-tick mounts fire immediately |
-| `useOnTickEnd(cb)`                | `LifecycleTickEnd`       | no        |
-| `useOnExecutionStart(cb)`         | `LifecycleExecutionStart`| **yes**   |
-| `useOnExecutionEnd(cb)`           | `LifecycleExecutionEnd`  | no        |
-| `useOnToolStart(cb)`              | `LifecycleToolStart`     | no        |
-| `useOnToolEnd(cb)`                | `LifecycleToolEnd`       | no        |
-| `useOnError(cb)`                  | `LifecycleError`         | no        |
-| `useOnLifecycleCustom(kind, cb)`  | `LifecycleCustom` (namespaced `kind`) | no |
-| `useOnMount(cb)` / `useOnUnmount(cb)` | React commit boundaries | n/a    |
+| Hook                                  | Event                                 | Catch-up?                                  |
+| ------------------------------------- | ------------------------------------- | ------------------------------------------ |
+| `useOnTickStart(cb)`                  | `LifecycleTickStart`                  | **yes** — mid-tick mounts fire immediately |
+| `useOnTickEnd(cb)`                    | `LifecycleTickEnd`                    | no                                         |
+| `useOnExecutionStart(cb)`             | `LifecycleExecutionStart`             | **yes**                                    |
+| `useOnExecutionEnd(cb)`               | `LifecycleExecutionEnd`               | no                                         |
+| `useOnToolStart(cb)`                  | `LifecycleToolStart`                  | no                                         |
+| `useOnToolEnd(cb)`                    | `LifecycleToolEnd`                    | no                                         |
+| `useOnError(cb)`                      | `LifecycleError`                      | no                                         |
+| `useOnLifecycleCustom(kind, cb)`      | `LifecycleCustom` (namespaced `kind`) | no                                         |
+| `useOnMount(cb)` / `useOnUnmount(cb)` | React commit boundaries               | n/a                                        |
 
 Event shapes (from `@agentick/spec-next`): `LifecycleToolEnd` carries
 `{ name, outcome: "succeeded" | "failed", durationMs, callId, tickId }`;
 `LifecycleError` carries `{ phase, error: { name, message, data? } }`.
 
 **Render-context readers** (ADR 55) — synchronous per-render facts the
-tree reads *while producing the IR* (not async observations):
+tree reads _while producing the IR_ (not async observations):
 
-| Hook                | Returns                                                          |
-| ------------------- | --------------------------------------------------------------- |
-| `useRenderContext()`| `RenderContext` — the full augmentable envelope (`{}` outside a run) |
-| `useContextInfo()`  | `ContextInfo` — `{ contextWindow?, usedTokens, utilization? }`  |
-| `useActiveModel()`  | `ActiveModel \| undefined` — `{ provider?, modelId?, capabilities? }` |
+| Hook                 | Returns                                                               |
+| -------------------- | --------------------------------------------------------------------- |
+| `useRenderContext()` | `RenderContext` — the full augmentable envelope (`{}` outside a run)  |
+| `useContextInfo()`   | `ContextInfo` — `{ contextWindow?, usedTokens, utilization? }`        |
+| `useActiveModel()`   | `ActiveModel \| undefined` — `{ provider?, modelId?, capabilities? }` |
 
 `useContextInfo` merges two channels by tense: the **window** rides the
 synchronous `RenderContext` envelope (live during this render);
@@ -199,8 +202,8 @@ clamped `usedTokens / contextWindow` ratio.
 
 **Per-tick model** (ADR 56):
 
-| Hook                                     | Returns                                       |
-| ---------------------------------------- | --------------------------------------------- |
+| Hook                                       | Returns                                    |
+| ------------------------------------------ | ------------------------------------------ |
 | `useModelRegistration(modelRef, resolved)` | `ReactElement` — **the caller renders it** |
 
 `useModelRegistration` mirrors `createTool`'s `Tool` component exactly:
@@ -229,7 +232,7 @@ const { Tool: Shell } = createTool({
   name: "shell",
   description: "Run a command in the sandbox",
   inputSchema: z.object({ command: z.string() }),
-  use: () => ({ sandbox: useSandbox() }),        // render-time hook
+  use: () => ({ sandbox: useSandbox() }), // render-time hook
   handler: async ({ command }, { use }) => {
     const { stdout } = await use.sandbox.exec(command);
     return [{ type: "text", text: stdout }];
@@ -247,21 +250,21 @@ infrastructure as `createApp` (same compile-until-stable loop, same
 scaffolding. See [Static-template rendering](#static-template-rendering)
 below.
 
-| Function                            | Returns                                          |
-| ----------------------------------- | ------------------------------------------------ |
-| `compileTemplate(element, opts?)`   | `{ tree, diagnostics, iterations }` — `RenderedTree` IR |
-| `renderTemplate(element, opts?)`    | `{ output, diagnostics, iterations }` — formatted string |
+| Function                          | Returns                                                  |
+| --------------------------------- | -------------------------------------------------------- |
+| `compileTemplate(element, opts?)` | `{ tree, diagnostics, iterations }` — `RenderedTree` IR  |
+| `renderTemplate(element, opts?)`  | `{ output, diagnostics, iterations }` — formatted string |
 
 ### Harness · factory · bridges
 
-| Export                                          | Purpose                                       |
-| ----------------------------------------------- | --------------------------------------------- |
-| `ReconcilerHarness` / `ReconcilerHarnessOptions`| Layer C harness (`BaseHarness` subclass)      |
-| `reactReconciler(opts?)`                        | `ReconcilerFactory` — wires the harness into `createApp` |
-| `createReconciler` / `createHostConfig`         | Low-level `react-reconciler` integration      |
-| `BridgeProvider` / `useBridges` / `BridgeContext`| React-context wrappers over `HookBridges`    |
-| `LifecycleProvider` / `useLifecycleStore` / `LifecycleContext` | wrappers over the lifecycle store |
-| `enableReactDevTools` / `isReactDevToolsConnected` / `disableReactDevTools` | React DevTools bridge |
+| Export                                                                      | Purpose                                                  |
+| --------------------------------------------------------------------------- | -------------------------------------------------------- |
+| `ReconcilerHarness` / `ReconcilerHarnessOptions`                            | Layer C harness (`BaseHarness` subclass)                 |
+| `reactReconciler(opts?)`                                                    | `ReconcilerFactory` — wires the harness into `createApp` |
+| `createReconciler` / `createHostConfig`                                     | Low-level `react-reconciler` integration                 |
+| `BridgeProvider` / `useBridges` / `BridgeContext`                           | React-context wrappers over `HookBridges`                |
+| `LifecycleProvider` / `useLifecycleStore` / `LifecycleContext`              | wrappers over the lifecycle store                        |
+| `enableReactDevTools` / `isReactDevToolsConnected` / `disableReactDevTools` | React DevTools bridge                                    |
 
 ### `/testing` subpath
 
@@ -293,7 +296,7 @@ function Agent() {
 ### 2. Adaptive compaction from `useContextInfo().utilization`
 
 Render less as the window fills — the window is a synchronous render
-input, so the component reacts to it *while producing the IR*.
+input, so the component reacts to it _while producing the IR_.
 
 ```tsx
 import { Section, useContextInfo } from "@agentick/reconciler-react-next";
@@ -314,7 +317,7 @@ function History({ entries }: { entries: string[] }) {
 
 ### 3. Per-model render via `useActiveModel()`
 
-Render *for the model you'll call* — switch scaffolds by provider, or
+Render _for the model you'll call_ — switch scaffolds by provider, or
 gate a section on a capability.
 
 ```tsx
@@ -421,10 +424,10 @@ Two different reactive state bridges, **each now living in its own
 harness's `/react` subpath** (ADR 27 — they are no longer exported by
 this package):
 
-| Hook                            | Import from                    | Bridge        | Visibility             | Purpose                                                                 |
-| ------------------------------- | ------------------------------ | ------------- | ---------------------- | ----------------------------------------------------------------------- |
-| `useKnob(id, initial)`          | `@agentick/knobs-next/react`   | `KnobBridge`  | **Model-visible**      | Surface in `knobs.list()`; settable via the executor's `set_knob` tool. Agent config the model can tweak. |
-| `useSessionState(key, initial)` | `@agentick/state-next/react`   | `StateBridge` | **Framework-internal** | Component state that survives mounts / hibernate-resume but is NOT visible to the model. |
+| Hook                            | Import from                  | Bridge        | Visibility             | Purpose                                                                                                   |
+| ------------------------------- | ---------------------------- | ------------- | ---------------------- | --------------------------------------------------------------------------------------------------------- |
+| `useKnob(id, initial)`          | `@agentick/knobs-next/react` | `KnobBridge`  | **Model-visible**      | Surface in `knobs.list()`; settable via the executor's `set_knob` tool. Agent config the model can tweak. |
+| `useSessionState(key, initial)` | `@agentick/state-next/react` | `StateBridge` | **Framework-internal** | Component state that survives mounts / hibernate-resume but is NOT visible to the model.                  |
 
 Both persist through the session's snapshot/restore round-trip.
 `reconciler-react`'s snapshot/restore iterates the bridges generically —
@@ -557,5 +560,5 @@ Claims above are exercised by tests in `src/__tests__/`:
 - `compileTemplate` / `renderTemplate` — `template.spec.tsx`
 - Bridge-backed hooks (`useData`, `useSession`, `useLoopControl`) — `hooks.spec.tsx`
 - Harness phase contract — `reconciler-harness.spec.tsx`, `conformance.spec.tsx`
-</content>
-</invoke>
+  </content>
+  </invoke>

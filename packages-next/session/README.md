@@ -27,11 +27,16 @@ session surface directly:
 // Messages are handed to session.send below.
 const session = await app.createSession({ sessionId: "s:1" });
 
-// Reactive primitives — every session has these (per ADR 27).
+// Built-in harness surfaces. Each is added via TypeScript module
+// augmentation by its own package (ADR 27); the `agentick` metapackage
+// bundles all of them, so every session in the metapackage has them.
 session.timeline      // TimelineHandle — durable conversation history
 session.knobs         // KnobsHandle — model-facing reactive config
-session.state         // StateHandle — persisted session state
-session.tasks         // TasksHarnessProtocol — long-running work registry
+session.state         // StateHandle — adopter-stash K/V (not model-visible)
+session.tasks         // Tasks — long-running work registry
+session.resources     // Resources — resource read-projection (ADR 62)
+session.gates         // GatesHandle — unified gate registry
+session.gate("write") // GateHandle | undefined — per-gate handle
 
 // Elicitation — ask the user for typed input.
 session.elicitation   // ElicitationHarnessProtocol — raw substrate
@@ -41,6 +46,13 @@ session.elicit        // Elicit — sugar surface (preferred)
 await session.dispatch("rename-file", { from: "a", to: "b" });
 await session.send({ messages: [{ role: "user", content: [...] }] });
 ```
+
+Each surface is contributed by a bundled harness package
+(`@agentick/timeline-next`, `-knobs-`, `-state-`, `-tasks-`,
+`-resources-`, `-gates-`, `-elicitation-`) via `declare module
+"@agentick/spec-next"` — no slot is hardcoded in spec. On the reference
+`SessionHarness` each is also reachable as `bridges.<name>` inside the
+reconciler/executor flow; the two views point at the SAME instance.
 
 ## `session.elicit` vs. `session.elicitation`
 
@@ -62,7 +74,9 @@ shape; reach for the raw protocol only when the sugar is too narrow.
 const name = await session.elicit.text("Your name?");
 const role = await session.elicit.select("Role?", ["admin", "user"] as const);
 
-// Decline / cancel throw typed errors
+// Decline / cancel throw typed errors (exported from @agentick/spec-next)
+import { ElicitationCancelled, ElicitationDeclined } from "@agentick/spec-next";
+
 try {
   await session.elicit.confirm("Apply changes?");
 } catch (err) {
@@ -93,10 +107,12 @@ SessionHarness
 ├── toolExecutor (session-scoped)          — dispatch handlers; ctx.elicit, ctx.tasks
 ├── timeline (session-scoped, durable)     — message + section + event log
 ├── knobs (session-scoped, reactive)       — model-visible config
-├── state (session-scoped, persisted)      — internal session state
+├── state (session-scoped, persisted)      — adopter-stash K/V (not model-visible)
+├── gates (session-scoped, reactive)       — unified gate registry; session.gate(name)
 ├── elicitation (session-scoped)           — raw substrate primitive
 │   └── elicit                             — sugar surface (Elicit interface)
 ├── tasks (session-scoped)                 — long-running work registry
+├── resources (session-scoped)             — resource read-projection (ADR 62)
 └── prompts (session-scoped, optional)     — when withPrompts mounted
 ```
 
@@ -254,10 +270,36 @@ eagerly on the supplied substrate when omitted; there is no
 `bridges.*` wiring — that plumbing is exclusive to the reference
 `SessionHarness`.
 
+## API
+
+Full surface in the [typedoc]. The package root exports the thin set an
+adopter or the app harness actually constructs against:
+
+| Export                                     | What                                                                      |
+| ------------------------------------------ | ------------------------------------------------------------------------- |
+| `SessionHarness` / `SessionHarnessOptions` | Reference `SessionHarnessProtocol` impl + its construction options bag.   |
+| `defineSession` / `DefineSessionInput`     | Callback-style factory for custom / test session topologies.              |
+| `SessionStateStore`                        | Per-session status / tick / usage store (advanced; the harness owns one). |
+| `SessionSubstrateParent`                   | Re-exported from spec — portable factory-typing for substrate overrides.  |
+
+`session.send` / `dispatch` / `snapshot` / `spawn` / `channel` / `knob` /
+`gate` and the harness surfaces (`timeline`, `knobs`, `state`, `gates`,
+`tasks`, `resources`, `elicitation`, `elicit`) are all defined on
+`SessionHarnessProtocol` in `@agentick/spec-next` (built up by each
+harness package's module augmentation) — see the individual harness
+package READMEs for each surface's contract.
+
+**`@agentick/session-next/testing`** — `runKillResumeAcceptance` +
+`KillResumeAcceptanceOptions`, the parameterized ADR 49 open-or-rehydrate
+acceptance suite that store adapters (memory / fs / postgres) run against
+their backing.
+
+[typedoc]: https://example.com/typedoc/session-next
+
 ## Status
 
 - ✅ SessionHarness construction + lifecycle
-- ✅ Per-session timeline / knobs / state / elicitation / tasks
+- ✅ Per-session timeline / knobs / state / gates / elicitation / tasks / resources
 - ✅ ToolBridge integration with layered tool registry (#135-#141)
 - ✅ `session.elicit` sugar surface (#272 / ADR 43)
 - ✅ Session execution handle (`send` → `Promise<SessionExecutionHandle>`)

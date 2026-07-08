@@ -232,33 +232,40 @@ wrappers.
 
 ## Patterns
 
-### Multi-transport with selector
+### Talk to a remote gateway over WebSocket
 
 ```ts
-import { selector } from "@agentick/client-next";
+import { createClient } from "@agentick/client-next";
+import { websocket } from "@agentick/transport-websocket-next/client";
 
 const client = await createClient({
-  transport: selector([websocket({ url: "wss://..." }), httpTransport({ url: "https://..." })], {
-    policy: "fallback-on-connect-failure",
-  }),
+  transport: websocket({ url: "wss://example.com/agentick" }),
 });
+
+await client.connect(); // runs the handshake, populates capabilities
+
+// The transport reconnects with exponential backoff + full jitter on a
+// drop; the client re-runs the handshake and swaps the capability
+// snapshot, so feature gates stay live across reconnects.
+client.onCapabilitiesChange((caps) => refreshFeatureGates(caps));
+
+await client.send("sess-123", {
+  messages: [{ role: "user", content: "hello" }],
+}).result;
 ```
 
-### Multi-tab via multiplexer
+On a runtime without a global `WebSocket` (Node 18/20, or when you need
+custom upgrade headers) pass the constructor explicitly:
 
 ```ts
-import { multiplexer } from "@agentick/transport-multiplexer-next";
-
-const client = await createClient({
-  transport: multiplexer(websocket({ url, auth }), {
-    leader: webLocksLeader("my-app"),
-    bridge: broadcastChannelBridge("my-app"),
-  }),
-});
+websocket({ url, WebSocket: (await import("ws")).WebSocket });
 ```
 
-Leader election + cross-tab message bridge — only one tab holds the
-real connection; followers proxy via `BroadcastChannel`.
+> **Multi-transport `selector()` and multi-tab multiplexing are declared
+> in ADR 33 but not yet shipped** — see [Roadmap & known gaps](#roadmap--known-gaps)
+> and the [Development plan](#development-plan) (phases 33.D / 33.G).
+> The `createClient({ transport })` seam is the extension point either
+> will slot into with no application-code change.
 
 ## Status
 
@@ -269,15 +276,15 @@ Phase 33.B of the v2 implementation plan — see `docs/proposals/v2/STATUS.md` a
 Every claim in this README has a corresponding test, or appears below
 under "Roadmap & known gaps" with an explicit marker.
 
-| Concern                                                                                                   | Test file                                                     |
-| --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| `createClient`, `connect`, `close`, request dispatch                                                      | `../transport-in-process/src/__tests__/smoke.spec.ts`         |
-| Extension `request` middleware composition (outer→inner)                                                  | `../transport-in-process/src/__tests__/smoke.spec.ts`         |
-| Extension `install()` namespace registration                                                              | `../transport-in-process/src/__tests__/smoke.spec.ts`         |
-| `onClose` handler LIFO order                                                                              | `../transport-in-process/src/__tests__/smoke.spec.ts`         |
-| `ClientHandlerRegistry` per-event merge kinds (`observer` / `first-non-null-wins` / `any-reconnect-wins`) | `src/__tests__/handler-registry.spec.ts`                      |
-| `effectMiddleware` Effect↔Promise adapter, error propagation, interleave with Promise middleware          | `src/__tests__/effect-middleware.spec.ts`                     |
-| `client.send(sessionId, input)` shortcut shape equivalence with `client.session(id).send(input)`          | `../transport-in-process/src/__tests__/send-shortcut.spec.ts` |
+| Concern                                                                                                    | Test file                                                     |
+| ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `createClient`, `connect`, `close`, request dispatch                                                       | `../transport-in-process/src/__tests__/smoke.spec.ts`         |
+| Extension `request` middleware composition (outer→inner)                                                   | `../transport-in-process/src/__tests__/smoke.spec.ts`         |
+| Extension `install()` namespace registration                                                               | `../transport-in-process/src/__tests__/smoke.spec.ts`         |
+| `onClose` handler LIFO order                                                                               | `../transport-in-process/src/__tests__/smoke.spec.ts`         |
+| `ClientHandlerRegistry` per-event merge kinds (`observer` / `first-non-null-wins` / `any-reconnect-wins`)  | `src/__tests__/handler-registry.spec.ts`                      |
+| `effectMiddleware` Effect↔Promise adapter, error propagation, interleave with Promise middleware           | `src/__tests__/effect-middleware.spec.ts`                     |
+| `client.send(sessionId, input)` shortcut shape equivalence with `client.session(id).send(input)`           | `../transport-in-process/src/__tests__/send-shortcut.spec.ts` |
 | `onLog` / `onProgress` cross-surface query + envelope→payload mapping + unsubscribe closes stream (ADR 64) | `src/__tests__/signals.spec.ts`                               |
 
 ## Roadmap & known gaps

@@ -71,22 +71,25 @@ withReactPrompts({
 }),
 ```
 
-## Mixing frameworks in one library
+## Mixing renderers + loaders in one library
 
-Drop to the full `withPrompts` surface; supply multiple renderers + multiple loaders:
+Drop to the full `withPrompts` surface: supply multiple renderers and multiple loaders. Each renderer claims the content shapes it `handles`; each loader sources a slice of the library.
 
 ```ts
+import { withPrompts } from "@agentick/prompts-next";
+import { fromArray, fromModule } from "@agentick/prompts-next/loaders";
+import { reactPromptRenderer } from "@agentick/prompts-react-next";
+
 withPrompts({
-  renderers: [reactPromptRenderer, angularPromptRenderer],
+  renderers: [reactPromptRenderer, myCustomRenderer], // React JSX + a domain renderer
   loaders: [
-    fromDirectory("./prompts/text/"), // markdown — framework-agnostic
-    fromReactDirectory("./prompts/react/"), // compiled .tsx
-    fromAngularDirectory("./prompts/angular/"), // future
+    fromArray(bundledTextPrompts), // literal — functions intact
+    fromModule({ specifier: "./prompts/react.js" }), // dynamic import — compiled .tsx
   ],
 });
 ```
 
-Each prompt's `render(args)` returns the content shape its renderer handles. The harness dispatches at invoke time via `renderer.handles(content)`.
+Each prompt's `render(args)` returns the content shape its renderer handles. The harness dispatches at invoke time via `renderer.handles(content)`. On-disk directory loaders (a `fromDirectory` over `.tsx`) need a bundler / transform pipeline and are a framework-binding concern — see the [Loaders](#loaders) note below.
 
 ## The `withPrompts` slot — three accepted shapes
 
@@ -106,7 +109,7 @@ withPrompts(mySharedPromptsHarness);
 // Form C — config object
 withPrompts({
   initial: [/* PromptsRegisterInput[] */],
-  loaders: [fromArray([...]), fromModule(() => import("./prompts.js"))],
+  loaders: [fromArray([...]), fromModule({ specifier: "./prompts.js" })],
   renderers: [reactPromptRenderer],
 
   // OR — adopter-supplied instance (mutually exclusive with
@@ -176,7 +179,8 @@ Adopter supplies EITHER `template` (static; args unused) OR `render` (dynamic; r
 ## Authoring `PromptRenderer`
 
 ```ts
-import type { PromptRenderer, MessageEntry } from "@agentick/prompts-next";
+import type { PromptRenderer } from "@agentick/prompts-next";
+import type { MessageEntry } from "@agentick/spec-next";
 
 const myRenderer: PromptRenderer = {
   name: "my-format",

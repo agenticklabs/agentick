@@ -1,14 +1,29 @@
 # @agentick/tool-executor-next
 
-Reference implementation of `ToolExecutorProtocol` from `@agentick/spec-next`.
+**Reference implementation of `ToolExecutorProtocol`** from
+`@agentick/spec-next`.
 
 The tool executor is the boundary that turns tool calls into tool
 results. It hosts the runtime's tool registry, validates inputs against
 declared schemas, runs the confirmation flow when required, invokes
-handlers, and emits the full lifecycle event sequence on
-`surface: "tool"`.
+handlers (sync / async / Effect / `TaskHandle`-returning), threads abort
+and timeout, and emits the canonical phase-contract envelope sequence
+(`requested → before → terminal`) on `surface: "tool"`.
 
-## Two doors
+Private workspace package. Bundled into the `agentick` metapackage; not
+published independently. The adopter-facing entry point is
+`createApp({ tools })` — you rarely construct the harness by hand.
+
+## Mental model
+
+One harness sits between everything that emits a tool call and the
+handler that services it. Whether the call comes from the model, from
+host code, from the reconciler's per-tick tool set, or across the inbox
+from another cluster node, it funnels through the same
+validate → authorize → confirm → invoke → emit pipeline so the lifecycle,
+exposure rules, and event stream live in exactly one place.
+
+### Two doors
 
 One harness; two callers.
 
@@ -22,10 +37,11 @@ Same validation, same confirmation flow, same interceptors. `via` is
 observable to middleware so policies can branch on door without
 inspecting private fields.
 
-## Exposure routing
+### Exposure routing
 
-`ToolDeclaration.exposure` (from `@agentick/spec-next/data/declarations`)
-decides which door is reachable:
+`ToolDeclaration.exposure` (a `ToolExposure[]` from
+`@agentick/spec-next`, values `"model" | "dispatch" | "runtime"`) decides
+which door is reachable:
 
 | `exposure`              | Reachable from             |
 | ----------------------- | -------------------------- |
@@ -34,58 +50,112 @@ decides which door is reachable:
 | `["model", "dispatch"]` | both doors                 |
 | `["runtime"]`           | internal use; neither door |
 
-The harness enforces exposure at dispatch time
-(`ToolPermissionError` for the wrong door).
+The harness enforces exposure at dispatch time (`ToolPermissionError`
+for the wrong door).
 
-## Status
+## Quick start
 
-Phase 4a scaffold landed 2026-05-15. Substantive implementation lands
-incrementally in 4a.4 (harness + dispatch happy path), 4a.5
-(confirmation flow), 4a.6 (middleware + lifecycle handlers), and 4a.7
-(inbox dispatcher). See
-[`docs/proposals/v2/STATUS.md`](../../docs/proposals/v2/STATUS.md).
-
-## API surface (planned)
+Most adopters never touch this package directly — they hand a tool set
+to `createApp` and the AppHarness constructs the executor on the shared
+substrate. For a fully custom executor (remote tool service, alternate
+registry storage), use the callback factory `defineToolExecutor`:
 
 ```ts
-import { ToolExecutorHarness } from "@agentick/tool-executor-next";
+import { createApp } from "@agentick/app-next";
+import { defineToolExecutor } from "@agentick/tool-executor-next";
 
-const exec = new ToolExecutorHarness(scopeId, journal, bus, inbox, {
-  // resolve handlerRef → ToolHandler via this map (or a provider)
-  handlers: handlerRegistry,
+const tools = defineToolExecutor({
+  async dispatch(input) {
+    const result = await remoteToolService.run(input.name, input.input);
+    return {
+      toolCallId: input.toolCallId,
+      name: input.name,
+      succeeded: true,
+      content: [{ type: "text", text: result.text }],
+    };
+  },
 });
 
-await exec.register({ registration: { declaration, handlerRef } });
+const app = await createApp(<Agent />, { model, tools });
+```
+
+`defineToolExecutor` returns a `ToolExecutorFactory` (a callable tagged
+with `toolExecutorFactory: true`). `dispatch` is required; `list` /
+`register` / `unregister` / `abort` / `compileForTick` /
+`replaceReconcilerTools` / `removeBoundTools` are optional — when omitted
+they fall through to a bundled `InMemoryToolRegistry`. The MVP factory
+does **not** replicate the validation pipeline or confirmation flow;
+subclass `ToolExecutorHarness` if you need those.
+
+### Constructing the reference harness directly
+
+`ToolExecutorHarness` is a `BaseHarness<"tool">` — it needs a substrate
+(journal / bus / inbox) and its construction options:
+
+```ts
+import {
+  ToolExecutorHarness,
+  InMemoryHandlerResolver,
+  fromStandardSchema,
+} from "@agentick/tool-executor-next";
+import { z } from "zod";
+
+const resolver = new InMemoryHandlerResolver();
+resolver.register(
+  "h.calc_add",
+  async ({ a, b }) => [{ type: "text", text: String(a + b) }],
+  fromStandardSchema(z.object({ a: z.number(), b: z.number() })),
+);
+
+const exec = new ToolExecutorHarness(scopeId, journal, bus, inbox, {
+  handlerResolver: resolver, // required — resolves handlerRef → handler + validator
+  elicitation, // required — backs the confirmation gate + ctx.elicit
+  // optional: tasks, resources, channelPublisher, initialTools,
+  //           defaultTimeoutMs, defaultConfirmationTimeoutMs
+  initialTools: [
+    { declaration: calcAddDeclaration, handlerRef: "h.calc_add", binding: { scope: "runtime" } },
+  ],
+});
+await exec.ready;
 
 const result = await exec.dispatch({
   toolCallId: "c_1",
-  name: "calc.add",
+  name: "calc_add",
   input: { a: 1, b: 2 },
   context: { via: "dispatch", sessionId: "s_1" },
 });
-// → { toolCallId, name, succeeded: true, content: [{ type: "text", text: "3" }] }
+// → { toolCallId: "c_1", name: "calc_add", succeeded: true,
+//     content: [{ type: "text", text: "3" }], executedBy: "agentick", durationMs: … }
 ```
+
+To skip the substrate boilerplate in tests, use `createTestHarness` from
+the `/testing` subpath (see [Testing](#testing)).
 
 ## Tool handler ctx surface
 
-Tool handlers receive a unified `ToolHandlerCtx` (per ADR 43) — the
-same shape whether invoked in-process by this executor OR by an
-MCP-server projection. Adopter code is portable across transports.
+Tool handlers receive a unified `ToolHandlerCtx` (per ADR 43) — the same
+shape whether invoked in-process by this executor OR by an MCP-server
+projection. Adopter code is portable across transports.
 
 ```ts
+import type { ToolHandler } from "@agentick/tool-executor-next";
+
 const handler: ToolHandler = async (input, { ctx, use }) => {
   // Universal fields — every transport populates these
-  ctx.toolCallId;     // string
-  ctx.signal;         // AbortSignal
-  ctx.transport;      // "in-process" (here) or "mcp" (MCP-server projection)
-  ctx.task;           // "auto" | "ref" | "inline"
+  ctx.toolCallId; // string
+  ctx.signal; // AbortSignal (fires on caller abort / timeout / inbox abort)
+  ctx.transport; // "in-process" (here) or "mcp" (MCP-server projection)
+  ctx.task; // "auto" | "ref" | "inline" — resolved task mode for this dispatch
+  ctx.setState("last", input); // stateful-tool render pattern
+  ctx.emit(seed); // publish a channel seed (routed when a publisher is wired)
 
   // Sugar surfaces — cross-transport portable
-  await ctx.elicit?.text("Your name?");      // Elicit sugar (same as session.elicit + MCP ctx.elicit)
-  const task = ctx.tasks?.submit(...);       // Tasks raw protocol
+  await ctx.elicit?.text("Your name?"); // Elicit sugar (= session.elicit + MCP ctx.elicit)
+  const task = ctx.tasks?.submit(runLongJob); // Tasks raw protocol
+  await ctx.resource?.read(uri); // Resources read-projection (ADR 62)
 
   // Raw protocol access (power users)
-  await ctx.elicitation?.elicit({mode, message, schema}); // raw ElicitationHarness
+  await ctx.elicitation?.elicit({ message, schema }); // raw ElicitationHarness
 
   // Runtime signals — out-of-band diagnostics + liveness (ADR 64)
   ctx.log("info", { step: "started" }, "my-tool"); // → tool:signal:log bus event
@@ -104,38 +174,178 @@ In-process ctx is built once per dispatch in the executor. The
 this.elicitation })` (see `@agentick/elicitation-next`); identical
 factory + interface to the session-level `session.elicit`.
 
+`use` is the second arg's `use` field — render-time deps captured by the
+reconciler when the tool was declared via `<Tool use={() => ({…})}>`,
+merged over the registration's `useDeps`.
+
 ### `ctx.log` / `ctx.progress` — the runtime signal family (ADR 64)
 
-`log` and `progress` are **universal, always-present** slots (like
-`emit` / `setState`) — not optional. Each call emits exactly ONE
-discrete bus event (`tool:signal:log` / `tool:signal:progress`, phase
-`terminal`, scoped to the dispatch's `{ sessionId, executionId,
-tickId }`) via `BaseHarness.emitLog` / `emitProgress`. The emit is
-**fire-and-forget** (launched with `Effect.runFork`) — never awaited,
-never throws into the handler, never a control path.
+`log` and `progress` are **universal, always-present** slots (like `emit`
+/ `setState`) — not optional. Each call emits exactly ONE discrete bus
+event (`tool:signal:log` / `tool:signal:progress`, phase `terminal`,
+scoped to the dispatch's `{ sessionId, executionId, tickId }`) via
+`BaseHarness.emitLog` / `emitProgress`. The emit is **fire-and-forget**
+(launched with `Effect.runFork`) — never awaited, never throws into the
+handler, never a control path.
 
-Signals are **not sent to any wire directly**. Projections subscribe
-to the bus and forward: the MCP-server projection →
-`notifications/message` + `notifications/progress`; the agentick client
-→ `subscribe` / `onLog` (see `@agentick/client-next`). Emit once
-(framework), receive everywhere. Signals are structurally **bus-only**
-— never journaled — so diagnostic spam can't bloat the recovery spine.
+Signals are **not sent to any wire directly**. Projections subscribe to
+the bus and forward: the MCP-server projection → `notifications/message`
 
-Verified by `src/__tests__/signals.spec.ts` (emit shape + scope) and
-`src/__tests__/signal-fire-and-forget.spec.ts` (a bus whose `append`
-dies for signal events never blocks or fails the dispatch — the
-handler's return value survives intact, proving the `Effect.runFork`
-detachment).
+- `notifications/progress`; the agentick client → `subscribe` / `onLog`
+  (see `@agentick/client-next`). Emit once (framework), receive everywhere.
+  Signals are structurally **bus-only** — never journaled — so diagnostic
+  spam can't bloat the recovery spine.
+
+## Task modes — `TaskHandle`-returning handlers
+
+When a handler returns a `TaskHandle` (from `ctx.tasks!.submit(...)`),
+the executor branches on the tool's `annotations.taskSupport` combined
+with the caller's `DispatchInput.task` option (default `"auto"`):
+
+- **Pattern A (await transparently)** — the executor awaits
+  `handle.result` and returns its content blocks. The model never sees a
+  task id. This is the default for host dispatch and for any
+  `taskSupport !== "required"` tool.
+- **Pattern B (return a task-ref)** — the executor returns immediately
+  with a first-class `{ type: "task_ref", taskId, status, … }` content
+  block. Reached when `task === "ref"`, or when `task === "auto"` on the
+  model door for a `taskSupport: "required"` tool. The model then manages
+  the task via the `session_tasks_*` tools (see `@agentick/tasks-next`).
+
+Contradictory overrides are rejected **before the handler runs** with
+`ToolTaskModeConflictError`: `"ref"` against `taskSupport: "unsupported"`,
+and `"inline"` against `taskSupport: "required"`. On Pattern A, a
+dispatch abort cancels the in-flight task rather than orphaning it.
+
+## Confirmation flow
+
+Tools annotated `requiresConfirmation: true` route through the
+`ElicitationHarness` before the handler runs. The wire envelope is the
+standard elicitation shape (`session:channel:elicitation`, `hints.kind
+=== "tool_confirmation"`); the reply is validated against the internal
+`TOOL_CONFIRMATION_REPLY_SCHEMA`. Approval requires `accepted` +
+`reply.approved === true` — every other outcome (declined, cancelled,
+aborted, schema-violation, accepted-with-`approved:false`) becomes a
+denial-shaped `DispatchResult` (`succeeded: false`). A `reply.always ===
+true` marks the tool session-allowed so subsequent calls skip the gate; a
+`reply.modifiedArguments` payload is re-validated before the handler
+runs. Timeout surfaces as `ToolConfirmationTimeoutError`.
+
+## API
+
+Exhaustive detail is in the generated typedoc. Key exports from the
+package root:
+
+| Export                                       | What                                                                                 |
+| -------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `ToolExecutorHarness`                        | `BaseHarness<"tool">` reference impl of `ToolExecutorProtocol`                       |
+| `defineToolExecutor`                         | Callback-style `ToolExecutorFactory` factory (bring a `dispatch` callback)           |
+| `InMemoryToolRegistry`                       | Multi-binding registry with per-tick precedence resolution                           |
+| `InMemoryHandlerResolver`                    | `handlerRef → { handler, validator }` lookup table                                   |
+| `withScope`                                  | Bind declarations to a scope for the duration of an async body; cleanup in `finally` |
+| `permissiveValidator` / `fromStandardSchema` | Validators — accept-anything, and a Standard Schema v1 adapter (Zod/Valibot/…)       |
+
+Types: `ToolExecutorHarnessOptions`, `HandlerResolver`, `HandlerEntry`,
+`HandlerChannelSeed`, `ToolHandler`, `ToolHandlerCtx`, `Validator`,
+`ValidatorResult` (the handler + validator types are re-exported from
+`@agentick/spec-next`, where they live so the authoring layer can consume
+them without depending on this runtime package).
+
+The registry also exports the precedence ladder as data —
+`PRECEDENCE_RANK`, `precedenceOf`, `bindingKey`, `sameBindingKey` — from
+`./registry.js`. Precedence (low → high): `runtime < gateway < app <
+session < execution < reconciler`; an `extension` binding takes the rank
+of the level at which it was installed.
+
+## Testing
+
+`/testing` subpath (`@agentick/tool-executor-next/testing`):
+
+- `createTestHarness({ tools?, handlers?, elicitation?, tasks?, … })` —
+  wires an in-memory substrate (journal / bus / inbox), a real
+  `ElicitationHarness` and `TasksHarness` on the **same** substrate (so
+  bus subscriptions see envelopes from all three), and a
+  `ToolExecutorHarness`. Returns the bundle (`harness`, `journal`, `bus`,
+  `inbox`, `resolver`, `elicitation`, `tasks`), all `ready`.
+- `fakeRegistration({ declaration, handlerRef?, useDeps?, binding? })` —
+  build a `ToolRegistration` with sensible defaults (`binding` defaults
+  to `{ scope: "runtime" }`).
+
+```ts
+import { createTestHarness } from "@agentick/tool-executor-next/testing";
+
+const { harness } = await createTestHarness({
+  tools: [{ declaration, handlerRef: "h.echo", binding: { scope: "runtime" } }],
+  handlers: [
+    { handlerRef: "h.echo", handler: async (i) => [{ type: "text", text: JSON.stringify(i) }] },
+  ],
+});
+
+const res = await harness.dispatch({
+  toolCallId: "c_1",
+  name: "echo",
+  input: { hi: true },
+  context: { via: "dispatch" },
+});
+```
 
 ## Conformance
 
-Reference implementation passes
-`runToolExecutorConformance` from
-`@agentick/spec-conformance-next/tool-executor`.
+The reference implementation is driven through
+`runToolExecutorConformance` from `@agentick/spec-conformance-next`
+(package root — there is no `/tool-executor` subpath export). See
+`src/__tests__/conformance.spec.ts` for the factory that translates
+fixture behaviors into concrete handlers.
+
+## Verified by
+
+- `src/__tests__/conformance.spec.ts` — drives the shared
+  `runToolExecutorConformance` suite against `ToolExecutorHarness`.
+- `src/__tests__/harness.spec.ts` — registry + dispatch happy path,
+  abort, handler errors, exposure enforcement.
+- `src/__tests__/confirmation.spec.ts` — the confirmation gate
+  (approve / deny / always / modifiedArguments / timeout).
+- `src/__tests__/dispatch-task-mode-matrix.spec.ts` — Pattern A vs B and
+  the `ToolTaskModeConflictError` pre-flight matrix.
+- `src/__tests__/task-handle.spec.ts` — `ctx.tasks` wiring, await-vs-ref,
+  abort propagation into the in-flight task.
+- `src/__tests__/signals.spec.ts` + `signal-fire-and-forget.spec.ts` —
+  `ctx.log` / `ctx.progress` emit shape + scope, and that a dying bus
+  never blocks or fails the dispatch.
+- `src/__tests__/registry.spec.ts` + `layered-tools.spec.ts` —
+  multi-binding storage, precedence resolution, idempotency.
+- `src/__tests__/middleware-and-hooks.spec.ts` — `use(middleware)` +
+  `onBeforeDispatch` verdicts.
+- `src/__tests__/define-tool-executor.spec.ts`,
+  `with-scope.spec.ts`, `validator.spec.ts`, `handler-resolver.spec.ts` —
+  the factory, scope helper, validators, and resolver.
+
+## Status & roadmap
+
+🚧 In active development as part of v2 (`feat/v2`). The core surface —
+registry, dispatch (both doors), validation, confirmation gate, abort +
+timeout, task-mode branching, lifecycle handlers, runtime signals — has
+landed and passes conformance.
+
+Known gaps / deferred:
+
+- **`defineToolExecutor` inbox dispatch** — `handleMessage` on the
+  callback executor is not yet wired (FAÇADE.6 MVP); the reference
+  `ToolExecutorHarness` handles the inbox `abort` message.
+- **`taskSupport: "supported"` capability negotiation** — the "supported"
+  branch of the task-mode matrix is resolved conservatively (Pattern A
+  outside the model-required path). Phase C (#174) refines it.
+- **Custom-registry factory parity** — `defineToolExecutor` replicates
+  storage callbacks but not the validation / confirmation pipeline;
+  those require subclassing `ToolExecutorHarness`.
 
 ## See also
 
-- `@agentick/spec-next` — the protocol definition (`protocol/tool-executor.ts`).
+- `@agentick/spec-next` — the protocol definition
+  (`protocol/tool-executor.ts`, `data/tool-handler.ts`,
+  `data/declarations.ts`).
 - `@agentick/reconciler-react-next` — produces `ToolDeclaration[]` and
   captures `use:` deps at render time; the tool executor consumes them.
+- `@agentick/tasks-next` — the `TaskHandle` primitive and the
+  `session_tasks_*` model tools that manage Pattern B refs.
 - `docs/proposals/v2/blueprint/07-tool-executor.md` — full design.
