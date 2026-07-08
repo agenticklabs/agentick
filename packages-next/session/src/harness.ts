@@ -53,6 +53,7 @@ import type {
   SpawnInput,
   StateApplyError,
   TickEndForwardDecision,
+  TickResult,
   TimelineEntry,
   ToolExecutorProtocol,
 } from "@agentick/spec-next";
@@ -615,15 +616,45 @@ export class SessionHarness<P = unknown>
     );
   }
 
-  async notifyLifecycle(_input: NotifyTickEndInput): Promise<TickEndForwardDecision> {
-    // ADR 53 continuation predicate — LIVE, in-memory, load-bearing
-    // nothing durable: input entries appended since this execution's
-    // last-observed count mean the next render has new user input →
-    // continue the loop (steering). Crashes never auto-resume, so no
-    // durability is needed here.
+  async notifyLifecycle(input: NotifyTickEndInput): Promise<TickEndForwardDecision> {
+    // The session's continuation decision (ADR 67). The loop calls this
+    // AFTER the reconciler tick-end has settled the tree, with the settled
+    // `TickResult`. We fold every session-owned continuation predicate
+    // into ONE `TickEndForwardDecision`, in tier order (mirroring the
+    // loop's own resolution): stop-force > continue-force > abstain. The
+    // loop still enforces `maxTicks` as the tier-1 hard cap on top.
+    const result = input.result as TickResult | undefined;
+
+    // (a) Gates — evaluate the unified registry against the settled
+    // `TickResult`. This drives arming / satisfied / fail-closed /
+    // auto-clear / read-only (unchanged controller logic); a blocking gate
+    // holds the loop open by calling `continueAfterTick` on the session's
+    // loop bridge (below). We evaluate BEFORE draining so a gate's hold is
+    // captured in the same drain as any tree request.
+    if (result !== undefined) {
+      await this.bridges.gates.handleTickEnd(result);
+    }
+
+    // (b) Tree + gate loop-control requests recorded on the live loop
+    // bridge across this tick (`useLoopControl().stop/continueAfterTick`
+    // from tree effects, plus the gate holds from (a)). Provenance (ADR
+    // 51): only trusted tree code ever emits `stop` — gates only ever
+    // `continue` — so a drained `stop` is legitimately a tier-1 halt.
+    const loopReq = this.bridges.loop.drainLoopRequests();
+
+    // (c) Steering (ADR 53) — new input appended since this execution's
+    // last-observed count means the next render has new user input →
+    // continue. LIVE, in-memory, nothing durable (crashes never
+    // auto-resume).
     const count = this.bridges.timeline.inputEntryCount();
-    if (count > this._inputEntriesSeen) {
-      this._inputEntriesSeen = count;
+    const steering = count > this._inputEntriesSeen;
+    if (steering) this._inputEntriesSeen = count;
+
+    // Tier resolution.
+    if (loopReq.stop !== undefined) {
+      return { kind: "stop", reason: loopReq.stop };
+    }
+    if (loopReq.continue !== undefined || steering) {
       return { kind: "continue" };
     }
     return undefined;

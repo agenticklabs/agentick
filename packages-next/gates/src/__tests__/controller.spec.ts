@@ -328,25 +328,4 @@ describe("GatesController — unified registry", () => {
     expect(parent.knobs.get("shared")).toBe("inactive");
     expect(parent.loop.continueCalls).toEqual([]);
   });
-
-  it("attach is ref-counted — the tick-end source subscribes once", () => {
-    const { controller } = fakeGatesController();
-    let subs = 0;
-    let unsubs = 0;
-    const seam = () => {
-      subs += 1;
-      return () => {
-        unsubs += 1;
-      };
-    };
-    const d1 = controller.attach(seam);
-    const d2 = controller.attach(seam);
-    expect(subs).toBe(1);
-    expect(controller.wired).toBe(true);
-    d1();
-    expect(unsubs).toBe(0);
-    d2();
-    expect(unsubs).toBe(1);
-    expect(controller.wired).toBe(false);
-  });
 });

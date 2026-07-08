@@ -13,20 +13,21 @@
  * Gates are NOT a harness. A gate owns no independent state — its value
  * IS a knob value in the session's {@link KnobsHarnessProtocol}. The
  * controller holds only the gate registry (descriptors + armed flags +
- * a synchronous value mirror) and the single tick-end subscription. It
- * takes its collaborators INJECTED (no React, no context reads):
+ * a synchronous value mirror). It takes its collaborators INJECTED (no
+ * React, no context reads):
  *
  *   - `knobs`       — register/set/get/subscribe the backing knob.
  *   - `loopControl` — block/continue the loop (a value or a getter, so
  *                     a per-execution loop bridge is tracked live).
  *   - `audit`       — optional sink for the host `.override()` escape.
  *
- * The tick-end seam is attached separately via {@link attach} because
- * the only source carrying the full {@link TickResult} (executed tool
- * results + `shouldContinue`) is the per-mount lifecycle store, which
- * exists inside the reconciler mount. `attach` is ref-counted: the
- * controller subscribes exactly once regardless of how many front-ends
- * attach it.
+ * Tick-end evaluation is DRIVEN (ADR 67), not subscribed: the session's
+ * continuation decision (`session.notifyLifecycle`) calls
+ * {@link handleTickEnd} with the settled {@link TickResult} once per
+ * tick. A blocking gate holds the loop open by calling `continueAfterTick`
+ * on the injected `loopControl` seam; the session drains that seam and
+ * folds the hold into its `TickEndForwardDecision`. There is no per-mount
+ * subscription — the reconciler owns no gate wiring.
  *
  * @see ./descriptor.ts (pure descriptor types + `gate()`)
  * @see ./react/use-gate.ts (React front-end)
@@ -71,14 +72,6 @@ export interface LoopControlSeam {
  * `fakeKnobsHarness`, or `stubKnobsHarness` interchangeably.
  */
 export type GateKnobs = Pick<KnobsHarnessProtocol, "register" | "set" | "get" | "subscribe">;
-
-/**
- * Tick-end subscription seam — hand the controller a full
- * {@link TickResult} at the end of every tick. In React this wraps the
- * per-mount lifecycle store's `register("tick-end", …)`; in a headless
- * host it wraps whatever tick-end source the host drives.
- */
-export type TickEndSeam = (cb: (result: TickResult) => void | Promise<void>) => Unsubscribe;
 
 /**
  * Audit record emitted by the trusted-host {@link GateHandle.override}
@@ -229,10 +222,6 @@ export class GatesController {
   private readonly deps: GatesControllerDeps;
   private readonly gates = new Map<string, GateEntry>();
 
-  // Single tick-end subscription, ref-counted across front-ends.
-  private tickEndUnsub: Unsubscribe | undefined;
-  private attachCount = 0;
-
   constructor(deps: GatesControllerDeps) {
     this.deps = deps;
   }
@@ -330,43 +319,15 @@ export class GatesController {
     this.gates.get(name)?.handle.clear();
   }
 
-  /**
-   * Attach a tick-end source. Ref-counted: the controller installs its
-   * single tick-end handler on the FIRST attach and tears it down when
-   * the LAST attacher detaches. Returns a detach function.
-   *
-   * The verification wiring lives behind this one subscription — every
-   * front-end that attaches drives the SAME {@link handleTickEnd}, so
-   * there is never duplicated verification logic.
-   */
-  attach(onTickEnd: TickEndSeam): Unsubscribe {
-    this.attachCount += 1;
-    if (this.attachCount === 1) {
-      this.tickEndUnsub = onTickEnd((result) => this.handleTickEnd(result));
-    }
-    let detached = false;
-    return () => {
-      if (detached) return;
-      detached = true;
-      this.attachCount -= 1;
-      if (this.attachCount === 0 && this.tickEndUnsub) {
-        this.tickEndUnsub();
-        this.tickEndUnsub = undefined;
-      }
-    };
-  }
-
-  /** True while a tick-end source is attached. Diagnostic. */
-  get wired(): boolean {
-    return this.tickEndUnsub !== undefined;
-  }
-
   // ─────────── The single wiring logic (shared by both front-ends) ───────────
 
   /**
-   * Evaluate every registered gate at tick-end. Serial — the lifecycle
-   * store awaits this handler, so async verified predicates are awaited
-   * in order (deterministic, matches v1 lifecycle semantics).
+   * Evaluate every registered gate against a settled tick (ADR 67).
+   * Driven by `session.notifyLifecycle` once per tick-end. Serial — the
+   * caller awaits it, so async verified predicates are awaited in order
+   * (deterministic, matches v1 lifecycle semantics). A blocking gate
+   * calls `continueAfterTick` on the injected loop seam; the session
+   * drains that seam to compose its continuation decision.
    */
   async handleTickEnd(result: TickResult): Promise<void> {
     // Snapshot the entries so a gate registered/unregistered mid-eval

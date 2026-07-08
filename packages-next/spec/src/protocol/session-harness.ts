@@ -36,6 +36,7 @@
 import type { CommandOutcome, TerminalEvent } from "../data/outcomes.js";
 import type { ContentBlock } from "../data/content-blocks.js";
 import type { LanguageModelStopReason, UsageStats } from "../data/execution-result.js";
+import type { TickResult } from "./loop-executor.js";
 import type { StreamEvent } from "../data/streaming.js";
 import type { SessionStatus as BridgeSessionStatus } from "./hook-bridges.js";
 import type { LoopToolResult } from "./loop-executor.js";
@@ -419,7 +420,17 @@ export interface NotifyTickEndInput {
   readonly executionId: string;
   readonly tickId: string;
   readonly outcome: CommandOutcome;
-  readonly result?: unknown;
+  /**
+   * The settled {@link TickResult} for the tick that just completed
+   * (ADR 67). The loop builds it — the executor terminal, this tick's
+   * tool results, and the loop's provisional continuation disposition
+   * (`shouldContinue`, pre-predicate) — and passes it here AFTER the
+   * reconciler tick-end has settled the tree. The session's continuation
+   * predicates (gates, steering) read it to compose the returned
+   * {@link TickEndForwardDecision}. Optional only because a headless
+   * host may call `notifyLifecycle` without a tick body.
+   */
+  readonly result?: TickResult;
 }
 
 export type TickEndForwardDecision =
@@ -500,14 +511,22 @@ export interface SessionHarnessProtocol<P = unknown> {
   appendEntry(input: AppendEntryInput): Promise<ApplyResult>;
 
   /**
-   * Tick-end forwarding hook. The loop executor calls this between
-   * ticks; the session forwards to the reconciler's `notifyLifecycle`
-   * so the JSX tree's `useOnTickEnd` hooks observe the tick. The
-   * returned `TickEndForwardDecision` lets in-tree hooks override
-   * the loop's default continuation policy.
+   * The session's continuation decision (ADR 67). The loop calls this
+   * once per tick — AFTER the reconciler tick-end has settled the tree —
+   * with the settled {@link TickResult}. The session folds its
+   * continuation predicates into ONE {@link TickEndForwardDecision}:
    *
-   * Phase 4e default impl: returns `undefined` (use loop default).
-   * Full hook integration arrives with the lifecycle wiring pass.
+   *   - a trusted tree `stopAfterTick` request → **stop-force**
+   *     (`{ kind: "stop" }`) — tier-1, beats everything;
+   *   - an active/blocking gate, a tree `continueAfterTick`, or steering
+   *     (new input mid-execution) → **continue-force**
+   *     (`{ kind: "continue" }`) — holds the loop open;
+   *   - otherwise `undefined` (abstain → the loop's own default).
+   *
+   * Precedence mirrors the loop's own resolution: stop-force >
+   * continue-force > abstain, all under the `maxTicks` hard cap the loop
+   * still enforces. Gate evaluation (arming / satisfied / fail-closed /
+   * read-only) is driven here, not from the reconciler mount.
    */
   notifyLifecycle(input: NotifyTickEndInput): Promise<TickEndForwardDecision>;
 

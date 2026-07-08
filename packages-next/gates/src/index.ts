@@ -40,7 +40,6 @@ export type {
   GatesParentLayer,
   GateKnobs,
   LoopControlSeam,
-  TickEndSeam,
   GateOverrideAudit,
   GateInfo,
   GateHandle,

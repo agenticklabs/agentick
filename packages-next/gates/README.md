@@ -135,11 +135,11 @@ model's `set_knob` path stays refused by the read-only knob.
         │  register / read              │  register / get / list / clear
         └──────────────┬───────────────┘
                  GatesController         ← ONE registry, ONE wiring
-                 (knobs · loop · tick-end)
+                 (knobs · loop)
 ```
 
 The `GatesController` (in the reconciler-agnostic package root) holds the gate
-registry and the single tick-end handler that arms, evaluates, fails closed,
+registry and the `handleTickEnd` pass that arms, evaluates, fails closed,
 auto-clears, and drives loop continuation. It takes its collaborators
 **injected**:
 
@@ -147,13 +147,17 @@ auto-clears, and drives loop continuation. It takes its collaborators
 - `loopControl` — block/continue the loop.
 - `audit` — sink for the `.override()` escape.
 
-The **tick-end seam** (the only source carrying the full `TickResult` with
-executed tool results + `shouldContinue`) is attached separately, from the
-reconciler mount, because it lives per-mount inside the lifecycle store.
-`useGate` attaches it (ref-counted — the controller subscribes once no matter
-how many gates a tree declares). For a session with **programmatic-only**
-gates and no `useGate` in the tree, mount `<GatesRuntime />` to wire the
-controller.
+**Evaluation is driven, not subscribed (ADR 67).** The session's continuation
+decision — `session.notifyLifecycle` — calls `controller.handleTickEnd(result)`
+once per tick with the settled `TickResult` (executed tool results +
+`shouldContinue`), AFTER the reconciler tick-end has settled the tree. A
+blocking gate calls `continueAfterTick` on the injected loop seam; the session
+drains it and folds the hold into its `TickEndForwardDecision`. There is **no**
+per-mount tick-end subscription and **no** `<GatesRuntime />` — the reconciler
+owns no gate wiring, and programmatic-only gates evaluate identically to
+tree-declared ones (both live in the same session-owned controller). `useGate`
+is therefore **registration-only**: register on mount, unregister on unmount,
+reflect the knob value.
 
 Gates is **not a harness**: it owns no independent state (a gate's value is a
 knob value), so it gets no `HookBridges` harness slot and is not snapshot-
@@ -187,8 +191,8 @@ through each session's tick automatically.
 - Types: `GateDescriptor`, `LatchGateDescriptor`, `VerifiedGateDescriptor`,
   `GateValue`.
 - `GatesController` + `GatesControllerDeps`, `GatesParentLayer`, `GateKnobs`,
-  `LoopControlSeam`, `TickEndSeam`, `GateOverrideAudit`, `GateInfo`,
-  `GateHandle`, `GatesHandle`.
+  `LoopControlSeam`, `GateOverrideAudit`, `GateInfo`, `GateHandle`,
+  `GatesHandle`.
 
 ### `/react`
 
@@ -198,8 +202,8 @@ through each session's tick automatically.
   `useKnob` → `session.knobs`. The raw `GatesController` is intentionally
   **not** returned — `Controller` is an internal impl surface, not a public v2
   noun (the vocabulary is Harness/Bridge/Handle/Store).
-- `<GatesProvider>`, `<GatesRuntime />`, `GatesContext` — controller
-  resolution/wiring (rarely needed directly).
+- `<GatesProvider>`, `GatesContext` — controller resolution (rarely needed
+  directly; the session transports its controller on the bridge bundle).
 
 ### `/testing`
 
@@ -227,25 +231,29 @@ Every claim above is exercised by a test:
 | Verified knob is read-only — the model's `set_knob` dispatch is refused (adversarial)                 | `controller.spec.ts`, `gate.spec.tsx`          |
 | `.override()` releases a verified gate AND emits an audit envelope; throws on latch; not a model path | `controller.spec.ts`                           |
 | Async verified predicates are awaited                                                                 | `gate.spec.tsx`                                |
-| `attach` is ref-counted — the tick-end source subscribes once                                         | `controller.spec.ts`                           |
 | Layer chain: `list`/`get` unify over a parent, self shadows parent by name                            | `controller.spec.ts`                           |
 | An inherited (parent) gate still evaluates against the child's tick (parent's own knob + loop)        | `controller.spec.ts`                           |
 | A self gate shadows a same-named parent gate during evaluation (parent skipped)                       | `controller.spec.ts`                           |
 | Unified registry: tree-declared + programmatic gates both in `session.gates.list()`                   | `session/__tests__/gates-integration.spec.tsx` |
 | Single construction site: `useGate`'s controller IS `session.gates` (reference equality)              | `session/__tests__/gates-integration.spec.tsx` |
-| Real tick drives tick-end through the shared controller — both gates evaluate                         | `session/__tests__/gates-integration.spec.tsx` |
+| `useGate` (registration-only) → controller evaluates: arm/verify/block/defer/clear/read-only          | `gate.spec.tsx`                                |
+| Real execution: `session.notifyLifecycle` evaluates both gates AND they HOLD the loop to `maxTicks`   | `session/__tests__/gates-integration.spec.tsx` |
 
 ## Status & roadmap
 
 Shipping. The core wiring, both front-ends, the read-only guarantee, the
 host override, and the unified registry are complete and tested.
 
+Gates evaluate session-side (ADR 67): `session.notifyLifecycle` drives
+`controller.handleTickEnd` with the settled `TickResult` and folds a gate's
+hold into the loop's continuation decision. No `<GatesRuntime />`, no per-mount
+tick-end subscription — tree-declared and programmatic gates evaluate
+identically. A gate is a **continue-forcer**: it holds the loop open exactly as
+steering does, under the loop's `maxTicks` hard cap.
+
 Known gaps / trailheads:
 
-- **`<GatesRuntime />` is a manual step** for sessions with programmatic-only
-  gates and no `useGate` in the tree. `TODO(gates-auto-runtime)`: a generic
-  reconciler-owned provider seam could mount it automatically for every
-  session (today reconciler-react has no gates dependency by design).
-- **Loop honoring of `continueAfterTick`** is the loop executor's contract,
-  not the gate's — a gate drives `loopControl.continueAfterTick`; whether the
-  loop continues is arbitrated by the loop's handler/middleware chain.
+- **App-tier gate layer** (`GatesParentLayer`) is a present-but-unused seam —
+  no app-scoped controller exists yet, so the session constructs its controller
+  with `parent: undefined`. A future app layer drops in as the session
+  controller's `parent` with no rewrite.

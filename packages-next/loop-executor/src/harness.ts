@@ -10,8 +10,11 @@
  *   3. for each toolCall in terminal.result.toolCalls:
  *        toolExecutor.dispatch(...) → ToolDispatchResult
  *   4. stateApplicator.applyExecutorResult + applyToolResults
- *   5. continuation decision (default: stopReason === "tool_use" + pending
- *      tool calls → continue; else stop; bounded by maxTicks)
+ *   5. reconciler.notifyLifecycle (settle the tree + `useOnTickEnd`) THEN
+ *      session.notifyTickEnd (the continuation decision) — ADR 67. The
+ *      loop builds a typed `TickResult`, settles the tree, then folds the
+ *      session's `TickEndForwardDecision` into its two-tier resolution
+ *      (stop-force > continue-force > abstain), bounded by maxTicks.
  *   6. loop
  *
  * Per-phase events on `surface: "loop"` give a single subscriber the
@@ -42,6 +45,7 @@ import type {
   OperationJournal,
   RunExecutionInput,
   SpecConfig,
+  TickResult,
   ToolCall,
   UsageStats,
 } from "@agentick/spec-next";
@@ -544,21 +548,65 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
 
         acc.lastStopReason = result.stopReason;
 
-        // 5. Continuation decision. Default policy (tool_use), extended
-        // by the session's tick-end forward decision (ADR 53): new
-        // input arrived mid-execution → keep ticking (steering); an
-        // explicit stop wins over everything.
+        // 5. Continuation decision (ADR 67). The loop no longer owns a
+        // scattered set of continuation authorities — it builds ONE
+        // typed `TickResult`, lets the tree settle, then asks the session
+        // for a single `TickEndForwardDecision` and folds it into its
+        // (unchanged) two-tier resolution under the `maxTicks` hard cap.
+        //
+        // `provisionalContinue` is the loop's INTRINSIC default disposition
+        // (tool_use with pending calls → keep ticking), computed BEFORE the
+        // session's predicates run. It rides the `TickResult` as
+        // `shouldContinue` so a gate/steering predicate can read "would the
+        // loop otherwise stop?" and hold it open.
+        const provisionalContinue = result.stopReason === "tool_use" && tickToolResults.length > 0;
+        const tickResult: TickResult = {
+          executionId,
+          sessionId: input.sessionId,
+          tickId,
+          tickIndex,
+          executorTerminal,
+          toolResults: tickToolResults,
+          shouldContinue: provisionalContinue,
+          stopReason: result.stopReason,
+        };
+
+        // ADR 67 §"flip the tick-end order" — SETTLE FIRST. The reconciler
+        // tick-end runs the tree's `useOnTickEnd` effects and settles the
+        // IR so the session's continuation predicates read SETTLED state
+        // (a tick-end effect may update a knob a gate checks). This
+        // deliberately precedes the session decision below.
+        //
+        // Lifecycle bridge (#206) — tick-end carries this tick's usage
+        // (a past fact; becomes "prior usedTokens" for the next render's
+        // utilization) + the settled `TickResult` (ADR 67 — the loop
+        // executor's documented lifecycle payload).
+        await input.reconciler.notifyLifecycle({
+          mountId: input.mountId,
+          event: {
+            kind: "tick-end",
+            tickId,
+            executionId,
+            result: tickResult,
+            ...(result.usage !== undefined ? { metadata: { usage: result.usage } } : {}),
+          },
+        });
+
+        // ADR 67 §"flip the tick-end order" — THEN DECIDE. The session
+        // folds its continuation predicates (gates + steering + tree stop)
+        // into ONE `TickEndForwardDecision`, reading the settled
+        // `TickResult`. The loop's combination below is UNCHANGED — it
+        // already implements the two-tier resolution (stop-force >
+        // continue-force > abstain), with `maxTicks` as the tier-1 hard cap.
         const forward = await input.notifyTickEnd?.({
           sessionId: input.sessionId,
           executionId,
           tickId,
           outcome: "succeeded",
+          result: tickResult,
         });
         const wantsContinue =
-          forward?.kind === "stop"
-            ? false
-            : (result.stopReason === "tool_use" && tickToolResults.length > 0) ||
-              forward?.kind === "continue";
+          forward?.kind === "stop" ? false : provisionalContinue || forward?.kind === "continue";
         const tickStopReason: string = !wantsContinue
           ? result.stopReason
           : acc.ticks >= input.maxTicks
@@ -573,19 +621,6 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           shouldContinue,
           stopReason: tickStopReason,
           usage: result.usage,
-        });
-        // Lifecycle bridge (#206) — tick-end carries this tick's usage
-        // (a past fact; becomes "prior usedTokens" for the next render's
-        // utilization) + the window.
-        await input.reconciler.notifyLifecycle({
-          mountId: input.mountId,
-          event: {
-            kind: "tick-end",
-            tickId,
-            executionId,
-            result,
-            ...(result.usage !== undefined ? { metadata: { usage: result.usage } } : {}),
-          },
         });
         input.onEvent?.({
           kind: "tick",

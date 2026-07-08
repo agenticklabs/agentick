@@ -217,9 +217,29 @@ The loop stays a dumb conduit — no per-fact knowledge. The **backward**
 half of the loop is the state applicator: after each tick the loop calls
 `applyExecutorResult` (append the assistant message + this generation's
 usage) and `applyToolResults` (append tool messages) so the _next_
-render sees them via `<Timeline/>`. `notifyLifecycle` is the session's
-continuation predicate (ADR 53): input appended mid-execution → return
-`{ kind: "continue" }` to keep ticking (steering).
+render sees them via `<Timeline/>`.
+
+**`notifyLifecycle` is the session's continuation decision (ADR 67).** The
+loop calls it once per tick — AFTER the reconciler tick-end has settled the
+tree — with the settled `TickResult`, and the session folds every
+continuation predicate it owns into ONE `TickEndForwardDecision`, in tier
+order (mirroring the loop's own resolution):
+
+1. **stop-force** — a trusted tree `stopAfterTick` (via `useLoopControl`) →
+   `{ kind: "stop" }`. Tier-1; beats everything. Provenance (ADR 51): gates
+   only ever _continue_-force, so a drained `stop` can only be trusted tree
+   code — the model cannot stop-force.
+2. **continue-force** — an active/blocking **gate** (evaluated here via
+   `session.gates.handleTickEnd(result)`), a tree `continueAfterTick`, or
+   **steering** (input appended mid-execution) → `{ kind: "continue" }`. A
+   gate holds the loop open exactly as steering does.
+3. **abstain** — `undefined` → the loop's own default (tool_use), under its
+   `maxTicks` hard cap.
+
+The settle-then-decide order is load-bearing: a tick-end effect may update a
+knob a gate checks, so the tree must settle before the predicates read it.
+Gate evaluation lives here, not in the reconciler mount — `useGate` is
+registration-only.
 
 ## `defineSession` — adopter-facing factory
 
@@ -340,6 +360,11 @@ their backing.
 - `src/__tests__/lifecycle-bridge.spec.tsx` — the real loop driving the
   whole `useOn*` hook family + `useContextInfo` yielding a live window
   and utilization (#206 / ADR 55).
+- `src/__tests__/gates-integration.spec.tsx` — the continuation decision
+  (ADR 67): a real execution drives `notifyLifecycle`, which evaluates the
+  shared gate controller against the settled `TickResult`; both a
+  tree-declared and a programmatic gate engage AND hold the loop open to
+  `maxTicks` (the load-bearing continue-force proof).
 - `src/__tests__/snapshot-restore.spec.tsx` — `InMemoryDataBridge`
   export/import round-trip (the data bridge the session wires into
   `bridges.data`); not the session `snapshot()` itself.

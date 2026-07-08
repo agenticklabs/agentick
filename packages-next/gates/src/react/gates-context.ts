@@ -19,30 +19,30 @@
  *      harness-level tests). Behaviorally identical to the old inline
  *      wiring.
  *
- * Whatever the source, the hook attaches THIS mount's tick-end source to
- * the controller (ref-counted) so the single shared wiring runs.
+ * Whatever the source, the hook only RESOLVES the controller and returns
+ * it (ADR 67). Tick-end evaluation is driven by `session.notifyLifecycle`
+ * — the hook no longer subscribes a per-mount tick-end source.
  */
 
-import React, {
-  createContext,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  type ReactNode,
-} from "react";
-import type { HookBridges, LifecycleTickEnd, TickResult } from "@agentick/spec-next";
-import { useBridges, useLifecycleStore, useLoopControl } from "@agentick/reconciler-react-next";
+import React, { createContext, useContext, useRef, type ReactNode } from "react";
+import type { HookBridges } from "@agentick/spec-next";
+import { useBridges } from "@agentick/reconciler-react-next";
 // Side-effect: register the `HookBridges.knobs` slot so `bridges.knobs`
 // is typed here (gates reads the session's KnobsHarness off the bundle).
 import "@agentick/knobs-next";
 
-import {
-  GatesController,
-  type GatesHandle,
-  type LoopControlSeam,
-  type TickEndSeam,
-} from "../controller.js";
+import { GatesController, type GatesHandle, type LoopControlSeam } from "../controller.js";
+
+/**
+ * A no-op loop seam for the mount-local fallback controller (a `useGate`
+ * render with no session). Standalone mounts have no loop to hold — no
+ * `session.notifyLifecycle` drives them — so the seam is inert. The real
+ * session injects a live loop bridge into its own controller.
+ */
+const NOOP_LOOP: LoopControlSeam = {
+  continueAfterTick: () => {},
+  stopAfterTick: () => {},
+};
 
 export const GatesContext = createContext<GatesController | null>(null);
 GatesContext.displayName = "AgentickGatesContext";
@@ -71,11 +71,9 @@ function transportedController(bridges: HookBridges): GatesController | undefine
  * PUBLIC accessor — resolve the in-scope gates surface as the curated
  * {@link GatesHandle} (`register` / `get` / `list` / `clear`), the SAME
  * shape `session.gates` exposes. Mirrors `useKnob` → `session.knobs`.
- * Attaches this mount's tick-end source (via {@link useGatesController}),
- * so calling it also wires the controller.
  *
  * The raw {@link GatesController} is intentionally NOT returned — it is an
- * internal impl surface (`unregister`, `attach`, `handleTickEnd`, …).
+ * internal impl surface (`unregister`, `handleTickEnd`, …).
  * `Controller` is not a public v2 noun; the vocabulary is
  * Harness/Bridge/Handle/Store.
  */
@@ -84,61 +82,32 @@ export function useGates(): GatesHandle {
 }
 
 /**
- * INTERNAL accessor — resolve the in-scope {@link GatesController} and
- * attach this mount's tick-end source to it. Not exported from the
- * package index (`/react`); the PUBLIC hook is {@link useGates}, which
- * returns the curated {@link GatesHandle}. Kept for the fuller controller
- * surface intra-package callers need — {@link useGate} (`register` /
- * `unregister` / `get`) and {@link GatesRuntime} (wiring only).
+ * INTERNAL accessor — resolve the in-scope {@link GatesController}
+ * (context → session-transported → mount-local fallback). Registration
+ * only (ADR 67): it does NOT subscribe a tick-end source. Evaluation is
+ * driven by `session.notifyLifecycle`. Not exported from the package
+ * index (`/react`); the PUBLIC hook is {@link useGates}, which returns
+ * the curated {@link GatesHandle}. Kept for the fuller controller surface
+ * {@link useGate} needs (`register` / `unregister` / `get`).
  */
 export function useGatesController(): GatesController {
   const ctxController = useContext(GatesContext);
   const bridges = useBridges();
-  const lifecycle = useLifecycleStore();
-
-  // Keep the loop bridge fresh — a per-execution loop bridge is tracked
-  // via the getter passed to the local controller.
-  const loop = useLoopControl();
-  const loopRef = useRef<LoopControlSeam>(loop);
-  loopRef.current = loop;
 
   const shared = ctxController ?? transportedController(bridges);
 
   // Mount-local fallback — constructed once, only when no shared
-  // controller exists. No hooks in this branch, so the rules of hooks
-  // hold regardless of which path a mount takes across its lifetime
-  // (a session either always transports a controller or never does).
+  // controller exists (a `useGate` render with no session). No hooks in
+  // this branch, so the rules of hooks hold regardless of which path a
+  // mount takes across its lifetime (a session either always transports a
+  // controller or never does). No live loop drives it — standalone gates
+  // register their knob but are not evaluated without a session.
   const localRef = useRef<GatesController | null>(null);
   if (!shared && localRef.current === null) {
     localRef.current = new GatesController({
       knobs: bridges.knobs,
-      loopControl: () => loopRef.current,
+      loopControl: NOOP_LOOP,
     });
   }
-  const controller = shared ?? localRef.current!;
-
-  const onTickEnd: TickEndSeam = useMemo(
-    () => (cb) =>
-      lifecycle.register("tick-end", (event: LifecycleTickEnd) => cb(event.result as TickResult)),
-    [lifecycle],
-  );
-
-  useEffect(() => controller.attach(onTickEnd), [controller, onTickEnd]);
-
-  return controller;
-}
-
-/**
- * Zero-render component that wires the in-scope controller to the
- * mount's tick-end source. Mount it when a session declares gates only
- * programmatically (`session.gates.register(...)`) with no `useGate` in
- * the tree, so those gates are still evaluated every tick.
- *
- * TODO(gates-auto-runtime): a future generic reconciler-owned provider
- * seam could mount this automatically for every session, removing the
- * manual step. Today reconciler-react has no gates dependency by design.
- */
-export function GatesRuntime(): null {
-  useGatesController();
-  return null;
+  return shared ?? localRef.current!;
 }

@@ -44,10 +44,43 @@ import type {
 import type { SessionStateStore } from "./session-state.js";
 import { omitUndefined } from "@agentick/utils-next";
 
-export function loopBridgeStub(): LoopBridge {
+/**
+ * The `HookBridges.loop` slot, made LIVE (ADR 67). `useLoopControl()`
+ * hands the tree this bridge; the tree's `continueAfterTick` /
+ * `stopAfterTick` calls — plus the gate controller's continuation holds,
+ * which drive the SAME seam — accumulate here across a tick. The session
+ * drains them once per tick-end (in `notifyLifecycle`) and folds them
+ * into its `TickEndForwardDecision`.
+ *
+ * Provenance falls out of the recorder for free (ADR 51): gates only ever
+ * call `continueAfterTick` (they hold the loop open, never stop-force), so
+ * a `stop` signal can ONLY originate from trusted tree code — exactly the
+ * "host/tree may stop-force, the model may not" rule.
+ */
+export interface RecordingLoopBridge extends LoopBridge {
+  /**
+   * Drain the continue/stop requests recorded since the last drain,
+   * resetting the recorder. First-writer-wins on the reason string.
+   */
+  drainLoopRequests(): { continue?: string; stop?: string };
+}
+
+export function recordingLoopBridge(): RecordingLoopBridge {
+  let cont: string | undefined;
+  let stop: string | undefined;
   return {
-    continueAfterTick: () => {},
-    stopAfterTick: () => {},
+    continueAfterTick: (reason?: string) => {
+      cont ??= reason ?? "continue";
+    },
+    stopAfterTick: (reason?: string) => {
+      stop ??= reason ?? "stop";
+    },
+    drainLoopRequests() {
+      const out = omitUndefined({ continue: cont, stop });
+      cont = undefined;
+      stop = undefined;
+      return out;
+    },
   };
 }
 
@@ -87,6 +120,13 @@ export interface SessionHookBridges extends HookBridges {
    * controller (unified registry).
    */
   readonly gates: GatesController;
+  /**
+   * The LIVE loop-control bridge (ADR 67). Narrowed from
+   * `HookBridges.loop` to the drainable {@link RecordingLoopBridge} so
+   * `session.notifyLifecycle` can fold tree + gate continuation signals
+   * into the tick-end decision.
+   */
+  readonly loop: RecordingLoopBridge;
   readonly data: InMemoryDataBridge;
   /**
    * Model registration bridge (ADR 56). The session builds one per
@@ -211,17 +251,20 @@ export function buildSessionBridges(
     resources,
     data: new InMemoryDataBridge(),
     models: new InMemoryModelBridge(),
-    loop: loopBridgeStub(),
+    loop: recordingLoopBridge(),
     session: sessionBridgeFor(store),
     ...omitUndefined({ tools: options.toolBridge }),
   } as SessionHookBridges;
 
-  // Gate wiring core (ADR 27). Injected with the session's KnobsHarness
-  // + a live getter over the loop bridge (so the same loop the tree sees
-  // via `useLoopControl` drives continuation) + a bus-backed audit sink
-  // for the trusted-host `.override()` escape. NOT a harness slot — the
-  // tick-end seam is attached from the reconciler mount (via `useGates` /
-  // `<GatesRuntime />`); the controller carries no independent state.
+  // Gate wiring core (ADR 27 + ADR 67). Injected with the session's
+  // KnobsHarness + a live getter over the LIVE loop bridge + a bus-backed
+  // audit sink for the trusted-host `.override()` escape. NOT a harness
+  // slot — gates own no independent state (a gate's value IS a knob
+  // value). Per ADR 67 the controller is DRIVEN from `session.notifyLifecycle`
+  // (which calls `handleTickEnd` with the settled `TickResult`), NOT from
+  // a reconciler-mount tick-end subscription. A held gate calls
+  // `continueAfterTick` on this same loop bridge; the session drains it and
+  // folds the hold into the tick-end `TickEndForwardDecision`.
   // `parent` (ADR 34 cascade) is absent today — no app-tier gate layer
   // exists yet; threaded explicitly so a future one drops in with no
   // rewrite (inherited gates then evaluate through this session's tick).

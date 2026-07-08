@@ -1,25 +1,21 @@
 /**
  * `@agentick/gates-next/react` — React front-end for the gate pattern.
  *
- * `useGate` is a thin binding over the reconciler-agnostic
- * {@link GatesController}. `useGates()` returns the curated
- * {@link GatesHandle} — the in-scope gates surface, the SAME shape
- * `session.gates` exposes. The remaining context surface (`GatesContext`,
- * `GatesProvider`, `GatesRuntime`) resolves + wires the controller;
- * adopters rarely touch it directly. The raw `GatesController` accessor
- * is intentionally internal (not exported here). Re-exports the
- * descriptor types + controller types so everything is reachable from
- * this subpath.
+ * `useGate` is a REGISTRATION-ONLY binding over the reconciler-agnostic
+ * {@link GatesController} (ADR 67): it registers the descriptor on mount,
+ * unregisters on unmount, and reflects the gate's knob value. It does NOT
+ * wire tick-end evaluation — that is driven by `session.notifyLifecycle`.
+ * `useGates()` returns the curated {@link GatesHandle} — the in-scope
+ * gates surface, the SAME shape `session.gates` exposes. The remaining
+ * context surface (`GatesContext`, `GatesProvider`) resolves the
+ * controller; adopters rarely touch it directly. The raw
+ * `GatesController` accessor is intentionally internal (not exported
+ * here). Re-exports the descriptor types + controller types so everything
+ * is reachable from this subpath.
  */
 
 export { useGate, type GateState } from "./use-gate.js";
-export {
-  GatesContext,
-  GatesProvider,
-  GatesRuntime,
-  useGates,
-  type GatesProviderProps,
-} from "./gates-context.js";
+export { GatesContext, GatesProvider, useGates, type GatesProviderProps } from "./gates-context.js";
 
 // Re-export descriptor + controller types so adopters can pull
 // everything from /react.
@@ -36,7 +32,6 @@ export type {
   GatesParentLayer,
   GateKnobs,
   LoopControlSeam,
-  TickEndSeam,
   GateOverrideAudit,
   GateInfo,
   GateHandle,

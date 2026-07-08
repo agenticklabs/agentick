@@ -11,9 +11,11 @@
  * The verification wiring — arming, `satisfied` evaluation at tick-end,
  * fail-closed on throw, auto-clear / re-engage, loop continuation, the
  * read-only-for-verified knob — lives ENTIRELY in the controller. This
- * hook does NOT re-implement any of it. The programmatic `session.gates`
- * API registers into the SAME controller, so tree-declared and
- * programmatic gates share one registry and one wiring.
+ * hook does NOT re-implement any of it, and (ADR 67) does NOT subscribe a
+ * tick-end source: evaluation is DRIVEN by `session.notifyLifecycle`, not
+ * a per-mount reconciler subscription. The hook is registration-only. The
+ * programmatic `session.gates` API registers into the SAME controller, so
+ * tree-declared and programmatic gates share one registry and one wiring.
  *
  * Latch gates (`activateWhen`):
  *   - Edge-triggered arming (consulted only while `inactive`); the model

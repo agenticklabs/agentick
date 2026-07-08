@@ -8,8 +8,12 @@
  *     `useGate` registers into IS `session.gates` (same instance).
  *   - Unified registry: a tree-declared gate AND a programmatic
  *     `session.gates.register(...)` gate both appear in `session.gates.list()`.
- *   - Real tick: a real execution drives tick-end through the reconciler
- *     lifecycle store into the shared controller — both gates evaluate.
+ *   - Real tick (ADR 67): a real execution drives the continuation
+ *     decision through `session.notifyLifecycle`, which evaluates the
+ *     shared controller against the settled `TickResult`. Both gates
+ *     engage AND — the load-bearing ADR 67 assertion — HOLD the loop open
+ *     (continue-force) so the execution runs to `maxTicks` instead of
+ *     stopping after the model's `end` on tick 1.
  */
 
 import React from "react";
@@ -125,14 +129,23 @@ describe("gates ↔ session — one controller, two front-ends", () => {
       .sort();
     expect(names).toEqual(["prog-latch", "tree-inv"]);
 
-    // Real tick drives tick-end through the shared controller — both
-    // gates evaluate: the verified one engages (unsatisfied), the latch
-    // one arms.
-    const handle = await session.send({ messages: [{ role: "user", content: "hi" }] });
-    await handle.result;
+    // Real execution drives the continuation decision through
+    // session.notifyLifecycle → controller.handleTickEnd against the
+    // settled TickResult. The model says "end" every tick (no tool_use →
+    // provisional stop), so both gates engage AND hold the loop open
+    // (continue-force). With maxTicks: 3 the execution runs the full three
+    // ticks and terminates on the hard cap — proving the gate hold is now
+    // load-bearing (pre-ADR-67 the loop stopped after tick 1).
+    const handle = await session.send({
+      messages: [{ role: "user", content: "hi" }],
+      maxTicks: 3,
+    });
+    const result = await handle.result;
 
     expect(session.gate("tree-inv")?.value).toBe("active");
     expect(session.gate("prog-latch")?.value).toBe("active");
+    expect(result.ticks).toBe(3);
+    expect(result.stopReason).toBe("max_ticks");
 
     await session.close();
     await tools.close();
