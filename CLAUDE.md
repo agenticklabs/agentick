@@ -195,24 +195,27 @@ export const MyStatefulTool = createTool({
 });
 ```
 
-### Context Injection Pattern
+### Dependency Injection into Tool Handlers (ADR 66)
 
-When tools need tree-scoped context (providers, React Context), use `use()`:
+Tool handlers run at **dispatch** time, separate from render. Two ways to reach what they need:
+
+**`ctx` — dispatch-resolved (the default).** Session/app-scoped harnesses are typed slots on the handler `ctx`, resolved fresh at dispatch from the live bridge: `ctx.elicit`, `ctx.tasks`, `ctx.resource`, `ctx.log`, `ctx.progress`, `ctx.sandbox`. Optional slots (sandbox, etc.) are contributed by their packages via module augmentation of `ToolHandlerCtxExtensions` — guard with `?`:
 
 ```typescript
 const ShellTool = createTool({
   name: "shell",
   description: "Execute a command in the sandbox",
   input: z.object({ command: z.string() }),
-  use: () => ({ sandbox: useSandbox() }), // render-time hook
-  handler: async ({ command }, deps) => {
-    const result = await deps!.sandbox.exec(command);
+  handler: async ({ command }, { ctx }) => {
+    const sandbox = ctx.sandbox?.get("primary"); // dispatch-resolved from the live bridge
+    if (!sandbox) return [{ type: "text", text: "no sandbox mounted" }];
+    const result = await sandbox.exec(command);
     return [{ type: "text", text: result.stdout }];
   },
 });
 ```
 
-`use()` runs at render time, captures values from the component tree, and passes them to the handler as `deps` (merged with `{ ctx }`). Direct `.run()` calls get `undefined` deps.
+**`use()` — render-captured (the escape hatch).** For genuinely *tree-positional* context — a value set by an ancestor provider, reachable only during render (a custom React Context). `use()` runs at render, captures from the component tree, and passes the result to the handler as `deps` (merged with `{ ctx }`). Reserve it for tree-positional context; session/app harnesses belong on `ctx`. Direct `.run()` calls get `undefined` deps.
 
 ## Package Architecture
 
