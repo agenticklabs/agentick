@@ -7,10 +7,12 @@
  * store.put + bus emit → handle.result.
  */
 
+import { fork } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { drainRejection, waitFor } from "@agentick/utils-next/testing";
+import type { TaskRecord } from "@agentick/spec-next";
 import { InMemoryTaskStore } from "../store.js";
 import { ChildProcessTaskExecutor } from "../child-executor.js";
 import { fakeTasks, type FakeTasksBundle } from "../testing/fake-tasks.js";
@@ -227,5 +229,41 @@ describe("ChildProcessTaskExecutor — registry + lifetime", () => {
     // close() cancels non-detached in-flight tasks → child torn down.
     await waitFor(() => executor.activeChildCount() === 0);
     expect(await drained).toMatchObject({ status: "cancelled" });
+  });
+});
+
+describe("runTaskWorker — orphan self-termination on parent disconnect", () => {
+  // A forked worker CANNOT re-attach to a new parent over fork IPC, so rather
+  // than run headless/orphaned when the parent (app) dies, it self-terminates
+  // on the IPC `disconnect`. Fork the fixture DIRECTLY (bypassing the executor)
+  // and drop the channel to simulate parent death mid-work.
+  it("a worker running a hang handler exits when the parent disconnects", async () => {
+    const child = fork(WORKER_MODULE, [], { ...FORK_OPTIONS, silent: true });
+    const now = 1_700_000_000_000;
+    const record: TaskRecord = {
+      taskId: "task:orphan",
+      status: "working",
+      scope: {},
+      executorKind: "child-process",
+      detached: true,
+      handlerRef: "hang", // ignores the signal, never resolves on its own
+      ttl: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const exited = new Promise<number | null>((resolve) => {
+      child.on("exit", (code) => resolve(code));
+    });
+    // Wait for the channel to be live, hand it the task, then sever the pipe.
+    await new Promise<void>((resolve) => child.on("spawn", () => resolve()));
+    child.send({ t: "start", record });
+    // Give the worker a beat to begin the (never-resolving) hang handler,
+    // then simulate parent death by dropping the IPC channel.
+    await new Promise<void>((resolve) => setTimeout(resolve, 100));
+    child.disconnect();
+
+    const code = await exited;
+    expect(code).toBe(1); // self-terminated via the disconnect handler
   });
 });

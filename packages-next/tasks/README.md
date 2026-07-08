@@ -763,13 +763,17 @@ runTasksHarnessConformance(async ({ harnessId }) => {
 
 ## Roadmap & known gaps
 
-- **ADR 68 pg (`@agentick/tasks-postgres-next`)** — a durable `TaskStore`
-  conforming to the same port. Adds durability + reattach across
-  app-process restart, and is what actually exercises the (already
-  wired) `interrupted`-on-hydration path. Also unlocks cross-restart
-  child reattach: persist the child pid on `record.executorState` and
-  adopt a still-live child by pid on hydration (today's child reattach is
-  same-process only).
+- **ADR 68 pg (`@agentick/tasks-postgres-next`)** — LANDED. A durable
+  `TaskStore` conforming to the same port; adds cross-app-restart record
+  durability and is what actually exercises the `interrupted`-on-hydration
+  path (proven against a real postgres). Cross-restart *child reattach* is
+  NOT unlocked by durability alone and is NOT a fork-IPC follow-on: a fresh
+  process cannot re-attach to a child spawned by the dead parent (fork IPC is
+  a non-reconnectable spawn-time pipe), so a persisted pid buys no channel.
+  A worker whose reports outlive its parent must report via a reconnectable
+  transport (shared store / cluster bus) — the **distributed-executor tier**
+  below. Across a restart the child-process executor's honest outcome is
+  `interrupted`; its worker self-terminates on IPC `disconnect`.
 - **Phase D (Effect-native internals, #155)** — convert the
   per-subscriber `Queue<TaskEvent>` fan-out to `Stream.fromQueue`,
   expose an `Effect<TaskHandle>` work overload that runs as a real

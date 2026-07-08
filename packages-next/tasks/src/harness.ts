@@ -860,9 +860,15 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
 // `reattach` re-adopts a still-live child WITHIN the app process (the
 // app-scoped instance's map outlives the session).
 //
-// TODO(ADR-68 pg): `@agentick/tasks-postgres-next` conforms to `TaskStore`
-// — durability across app-process restart + real `interrupted`-on-restart
-// exercise (hydration is a same-process no-op with the in-memory store).
-// A durable store also unlocks cross-restart child reattach: persist the
-// child pid on `record.executorState` and adopt a still-live child by pid
-// on hydration (today's `reattach` is same-process only).
+// ADR-68 pg: `@agentick/tasks-postgres-next` conforms to `TaskStore` —
+// durability across app-process restart + real `interrupted`-on-restart
+// (a same-process no-op with the in-memory store). LANDED + proven.
+//
+// NOTE (not a TODO on this executor): cross-*restart* CHILD reattach is NOT
+// achievable by "persist the pid + re-adopt by pid" — fork IPC is a
+// spawn-time pipe a fresh process can't re-attach to, so a pid gives no
+// channel to the child. A worker whose reports outlive its parent must
+// report via a reconnectable transport (shared store / cluster bus); that is
+// the DISTRIBUTED-executor tier (ADR-68 ambitious), not a fork-IPC follow-on.
+// Across a restart the child-process executor's honest outcome is
+// `interrupted`, and the worker self-terminates on IPC `disconnect`.

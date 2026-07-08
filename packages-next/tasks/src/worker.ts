@@ -91,6 +91,20 @@ export function runTaskWorker(registry: TaskHandlerRegistry = defaultTaskHandler
       });
     }
   });
+
+  // Parent gone → self-terminate; do NOT run headless. A forked worker
+  // CANNOT re-attach to a new parent over fork IPC (the channel is a
+  // spawn-time pipe inherited via NODE_CHANNEL_FD — not reconnectable by a
+  // fresh process). So if the IPC channel disconnects (the app process died
+  // / closed it) we abort in-flight work and exit rather than run orphaned
+  // and unobservable; the parent honestly reconciles the durable record to
+  // `interrupted` on restart. True cross-restart reattach requires a
+  // reconnectable transport (worker reports via the shared store / cluster
+  // bus) — the distributed-executor tier, NOT this fork-IPC driver.
+  process.on("disconnect", () => {
+    controller?.abort("parent_disconnected");
+    process.exit(1);
+  });
 }
 
 /**

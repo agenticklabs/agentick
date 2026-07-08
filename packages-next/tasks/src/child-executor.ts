@@ -18,9 +18,15 @@
  * **App-scoped instance.** The harness / app inject ONE instance shared
  * across sessions; its `children` map outlives any single session, so a
  * `detached` child survives `harness.close()` and can be
- * {@link reattach}ed WITHIN the app process. Cross-app-restart reattach
- * needs a durable store + a pid on `record.executorState` —
- * TODO(ADR-68 pg).
+ * {@link reattach}ed WITHIN the app process. Cross-app-*restart* reattach is
+ * NOT possible with this executor and is not a small follow-on: fork IPC is a
+ * spawn-time pipe (inherited via `NODE_CHANNEL_FD`), so a fresh process cannot
+ * re-attach to a child spawned by the dead parent — re-finding it by pid buys
+ * no channel to receive its transitions. A worker whose reports must outlive
+ * its parent has to report via a reconnectable transport (the shared store /
+ * cluster bus), which is the DISTRIBUTED-executor tier, not this one. Across a
+ * restart the honest outcome here is `interrupted` (the pg store proves it),
+ * and the worker self-terminates on IPC `disconnect` rather than orphaning.
  *
  * **The adopter owns the loader.** `forkOptions` is passed straight to
  * `fork` — the executor hardcodes NO `execArgv` / loader. A TS worker
@@ -189,8 +195,9 @@ export class ChildProcessTaskExecutor implements TaskExecutor {
     const handle = this.children.get(record.taskId);
     if (handle === undefined || handle.settled || handle.child.connected !== true) {
       // No live child in THIS process → harness marks it `interrupted`.
-      // Cross-app-restart reattach (by pid on record.executorState) needs
-      // a durable store. TODO(ADR-68 pg).
+      // This is same-process reattach ONLY (the app-scoped `children` map
+      // survives session close). Cross-restart reattach is unattainable over
+      // fork IPC (see the class doc); it belongs to the distributed tier.
       return undefined;
     }
     handle.report = report; // re-wire the sink; the message handler reads it live

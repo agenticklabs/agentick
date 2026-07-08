@@ -204,13 +204,20 @@ CREATE INDEX IF NOT EXISTS "agentick_tasks_status_idx" ON "agentick_tasks" ("sta
 
 ### Known gaps
 
-- **Cross-restart CHILD reattach-by-pid.** Today's `interrupted`-on-restart is
-  correct for the in-process executor (a lost fiber cannot reattach). A
-  `ChildProcessTaskExecutor` child that is *still alive* after the parent app
-  restarts could in principle be re-adopted, but that needs the executor to
-  persist its pid onto `record.executorState` and a pid-based re-adoption path
-  in `reattach` — durable storage is the enabler, but the reattach logic is
-  not built. Tracked as `TODO(ADR-68 child-reattach)` in the harness.
+- **Cross-restart CHILD reattach is out of scope for a fork-IPC executor —
+  it's the distributed tier.** `interrupted`-on-restart is the *correct*
+  outcome for both bundled executors: a lost in-process fiber can't reattach,
+  and a `ChildProcessTaskExecutor` child can't either — fork IPC is a
+  spawn-time pipe (`NODE_CHANNEL_FD`) that a freshly-restarted process cannot
+  re-attach to, so re-finding the child by pid gives no channel to receive its
+  transitions. Durable storage of the record is necessary but nowhere near
+  sufficient. A worker whose reports must survive parent death has to report
+  via a reconnectable transport (this durable store / the cluster bus) with the
+  parent *observing* that plane — which is the **distributed-executor tier**
+  (ADR 68 ambitious), not a follow-on to the child-process executor. This store
+  persists `executorState` faithfully for whatever that tier needs; the
+  fork-IPC executor self-terminates its worker on IPC `disconnect` rather than
+  orphaning it.
 - **`ttl` enforcement.** `ttl` is persisted on the record but nothing reaps a
   task whose `ttl` elapsed (shared ADR 68 gap, `TODO(ADR-68 ttl)` in the
   harness). A store-side reaper could ride on `prune`.
