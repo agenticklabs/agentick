@@ -962,14 +962,24 @@ describe("mapBedrockStreamChunk — toolUse input accumulation", () => {
     const { mapBedrockStreamChunk } = await import("../bedrock.js");
     const state = new Map();
     mapBedrockStreamChunk(
-      { contentBlockStart: { contentBlockIndex: 0, start: { toolUse: { toolUseId: "t1", name: "submit" } } } } as never,
+      {
+        contentBlockStart: {
+          contentBlockIndex: 0,
+          start: { toolUse: { toolUseId: "t1", name: "submit" } },
+        },
+      } as never,
       state,
     );
     mapBedrockStreamChunk(
-      { contentBlockDelta: { contentBlockIndex: 0, delta: { toolUse: { input: '{"a":1}' } } } } as never,
+      {
+        contentBlockDelta: { contentBlockIndex: 0, delta: { toolUse: { input: '{"a":1}' } } },
+      } as never,
       state,
     );
-    const end = mapBedrockStreamChunk({ contentBlockStop: { contentBlockIndex: 0 } } as never, state) as {
+    const end = mapBedrockStreamChunk(
+      { contentBlockStop: { contentBlockIndex: 0 } } as never,
+      state,
+    ) as {
       type: string;
       input?: unknown;
     };
