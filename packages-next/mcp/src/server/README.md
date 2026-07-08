@@ -83,12 +83,12 @@ a config before constructing the harness.
 The harness mounts every transport at `start()`; each can accept many
 concurrent connections.
 
-| Factory                                    | Wire     | Notes                                                                                                                                                                                                      |
-| ------------------------------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Factory                              | Wire     | Notes                                                                                                                                                                                                      |
+| ------------------------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `stdioTransport()` (#171c follow-up) | stdio    | Default for `spawnStandaloneMcpServer`. One process = one connection. Adopter owns SIGINT.                                                                                                                 |
-| `inMemoryServerTransport()`                | in-proc  | Adopter-driven test fixture. Returns `.connect()` that yields the client end.                                                                                                                              |
-| `httpTransport({ port })`                  | HTTP+SSE | **Landed** — Streamable HTTP listener (multi-connection). Wraps the SDK `StreamableHTTPServerTransport`; per-`Mcp-Session-Id` routing; `port: 0` binds ephemeral. Accepts a caller-supplied `http.Server`. |
-| Custom                                     | any      | Implement `ServerTransport`; the harness only cares about `listen(accept) → close()` + transport.                                                                                                          |
+| `inMemoryServerTransport()`          | in-proc  | Adopter-driven test fixture. Returns `.connect()` that yields the client end.                                                                                                                              |
+| `httpTransport({ port })`            | HTTP+SSE | **Landed** — Streamable HTTP listener (multi-connection). Wraps the SDK `StreamableHTTPServerTransport`; per-`Mcp-Session-Id` routing; `port: 0` binds ephemeral. Accepts a caller-supplied `http.Server`. |
+| Custom                               | any      | Implement `ServerTransport`; the harness only cares about `listen(accept) → close()` + transport.                                                                                                          |
 
 Transports carry their own `kind` discriminator (`"stdio"` / `"http"` / etc.)
 which the security pipeline reads for transport-aware defaults — stdio +
