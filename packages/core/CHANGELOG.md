@@ -1,5 +1,14 @@
 # @agentick/core
 
+## 0.15.3
+
+### Patch Changes
+
+- 43550df: `AdapterDelta`'s `tool_call_end` variant now types `input` as optional. Nullish means "parse the JSON accumulated from `tool_call_delta` chunks" — the contract the stream accumulator already implements. Adapters must not pass placeholder values (a non-nullish `{}` overrides the accumulated arguments).
+  - @agentick/kernel@0.15.3
+  - @agentick/shared@0.15.3
+  - @agentick/mcp@0.15.3
+
 ## 0.15.2
 
 ### Patch Changes
