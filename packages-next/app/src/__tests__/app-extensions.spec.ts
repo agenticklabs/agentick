@@ -228,3 +228,66 @@ describe("AppExtension — installer surfaces", () => {
     await app.closeApp();
   });
 });
+
+describe("AppExtension — ctx extension threading (ADR 66)", () => {
+  // The AppHarness is the single construction site that fills
+  // dispatch-resolved `ctx` extensions. It resolves the registered
+  // "sandbox" namespace GENERICALLY (opaque value from the bridges bag)
+  // and threads it as `ctxExtensions: { sandbox }` — with NO sandbox
+  // import. This proves the wiring with a plain stub bridge object.
+  async function dispatchCapturingCtx(exts: AppExtension[]): Promise<Record<string, unknown>> {
+    let captured: Record<string, unknown> = {};
+    const probe: AppExtension = {
+      name: "ctx-probe",
+      target: "app",
+      install(installer) {
+        installer.registerToolHandler("probe.handlers/ctx", async (_input, { ctx }) => {
+          captured = ctx as unknown as Record<string, unknown>;
+          return [{ type: "text", text: "ok" } as ContentBlock];
+        });
+      },
+    };
+    const app = await createApp(React.createElement(Agent), {
+      executor: await mkExecutor(),
+      extensions: [...exts, probe],
+    });
+    const session = await app.createSession();
+    const internals = session as unknown as { toolExecutor: ToolExecutorProtocol };
+    await internals.toolExecutor.register({
+      registration: {
+        declaration: {
+          id: "probe",
+          name: "probe",
+          description: "probe",
+          inputSchema: jsonSchema({ type: "object" }),
+          exposure: ["dispatch"],
+        },
+        handlerRef: "probe.handlers/ctx",
+        binding: { scope: "runtime" },
+      },
+    });
+    await session.dispatch("probe", {});
+    await app.closeApp();
+    return captured;
+  }
+
+  it("threads a registered 'sandbox' namespace onto ctx.sandbox — same reference", async () => {
+    const stubSandbox = { tag: "sandbox-bridge-stub" };
+    const sandboxExt: AppExtension = {
+      name: "stub-sandbox",
+      target: "app",
+      install(installer) {
+        installer.registerNamespace("sandbox", stubSandbox);
+      },
+    };
+    const ctx = await dispatchCapturingCtx([sandboxExt]);
+    // Dispatch-resolved from the live bridges bag — the exact object the
+    // extension registered, not a copy.
+    expect(ctx.sandbox).toBe(stubSandbox);
+  });
+
+  it("leaves ctx.sandbox undefined when no sandbox namespace is registered", async () => {
+    const ctx = await dispatchCapturingCtx([]);
+    expect(ctx.sandbox).toBeUndefined();
+  });
+});

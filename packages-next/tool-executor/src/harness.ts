@@ -99,6 +99,13 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
   private readonly elicitation: ElicitationHarnessProtocol;
   private readonly tasks: TasksHarnessProtocol | undefined;
   private readonly resources: Resources | undefined;
+  /**
+   * Opaque, harness-agnostic `ctx` extension bag spread onto every
+   * handler's `ctx` (ADR 66). Typed by `ToolHandlerCtxExtensions`
+   * augmentations; filled by the wiring layer. The executor never
+   * inspects it.
+   */
+  private readonly ctxExtensions: Readonly<Record<string, unknown>>;
 
   constructor(
     scopeId: string,
@@ -115,6 +122,7 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
     this.elicitation = options.elicitation;
     this.tasks = options.tasks;
     this.resources = options.resources;
+    this.ctxExtensions = options.ctxExtensions ?? {};
 
     // Eager registrations applied synchronously so callers can dispatch
     // immediately after `await harness.ready`.
@@ -564,6 +572,12 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
         tickId: input.context.tickId,
       });
       const ctx: ToolHandlerCtx = {
+        // ADR 66 — opaque, harness-agnostic extension slots (e.g.
+        // `ctx.sandbox`). Spread FIRST so the hardcoded universal fields
+        // below always win over any accidental key collision. Typed by
+        // `ToolHandlerCtxExtensions` augmentations; values point at live
+        // bridges (dispatch-resolved, not render-captured).
+        ...this.ctxExtensions,
         toolCallId: input.toolCallId,
         ...omitUndefined({
           sessionId: input.context.sessionId,

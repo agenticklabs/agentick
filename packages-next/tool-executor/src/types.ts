@@ -144,4 +144,24 @@ export interface ToolExecutorHarnessOptions {
    * {@link tasks} / {@link elicitation}.
    */
   readonly resources?: Resources;
+
+  /**
+   * Generic, harness-agnostic `ctx` extension bag (ADR 66). Every
+   * key/value here is spread onto the `ctx` passed to every tool
+   * handler, surfacing as a top-level `ctx.<key>`. The executor treats
+   * the record as OPAQUE — it never imports or inspects the values;
+   * their TYPES come from `declare module` augmentations of
+   * `ToolHandlerCtxExtensions` in the owning harness packages (e.g.
+   * `@agentick/sandbox-next` adds `ctx.sandbox`), and their VALUES are
+   * filled by the wiring layer (the AppHarness) from the live bridges.
+   *
+   * This is what lets an optional harness be dispatch-resolved on `ctx`
+   * without the executor depending on it. The reference is injected once
+   * at construction, but it points at live bridges — reads inside a
+   * handler (`ctx.sandbox.get(...)`) hit the current harness state, not a
+   * render-time capture.
+   *
+   * @see docs/proposals/v2/blueprint/66-tool-dependency-resolution.md
+   */
+  readonly ctxExtensions?: Readonly<Record<string, unknown>>;
 }

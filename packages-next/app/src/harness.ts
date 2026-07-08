@@ -1226,6 +1226,19 @@ export class AppHarness<P = unknown>
           ]
         : undefined;
 
+    // ADR 66 — dispatch-resolved `ctx` extensions. The AppHarness is the
+    // single construction site that fills the values: it resolves the
+    // registered "sandbox" namespace GENERICALLY (an opaque value pulled
+    // from the same bridges bag `bridges.sandbox` reads from) and threads
+    // it as `ctxExtensions: { sandbox }`. No sandbox import — the value is
+    // handled as an opaque `unknown`; its TYPE (`ctx.sandbox`) is
+    // contributed by the `@agentick/sandbox-next` augmentation on the far
+    // side, and the tool executor spreads the record onto every ctx
+    // without inspecting it. Omitted entirely when sandbox isn't mounted.
+    const sandboxNamespace = sessionExtensionBridges.get("sandbox");
+    const ctxExtensions: Readonly<Record<string, unknown>> | undefined =
+      sandboxNamespace !== undefined ? { sandbox: sandboxNamespace } : undefined;
+
     const tools: ToolExecutorProtocol = this.toolFactory
       ? this.toolFactory({
           scopeId: sessionId,
@@ -1240,6 +1253,7 @@ export class AppHarness<P = unknown>
           elicitation,
           tasks,
           resources,
+          ...omitUndefined({ ctxExtensions }),
         });
 
     // Cascade: per-call `createSession.*` > per-app `session.*` >

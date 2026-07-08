@@ -78,6 +78,12 @@ export interface TestHarnessOptions {
    * progress envelopes on the bus.
    */
   readonly tasks?: TasksHarnessProtocol;
+  /**
+   * Opaque `ctx` extension bag (ADR 66) — spread onto every handler's
+   * `ctx` as top-level fields. Used to exercise the generic
+   * dispatch-resolved extension seam (e.g. `ctx.sandbox`).
+   */
+  readonly ctxExtensions?: Readonly<Record<string, unknown>>;
 }
 
 export interface TestHarnessBundle {
@@ -141,6 +147,7 @@ export async function createTestHarness(
     ...omitUndefined({
       defaultTimeoutMs: options.defaultTimeoutMs,
       defaultConfirmationTimeoutMs: options.defaultConfirmationTimeoutMs,
+      ctxExtensions: options.ctxExtensions,
     }),
   };
 

@@ -125,7 +125,9 @@ import { Sandbox, Bash, ReadFile, WriteFile, EditFile } from "@agentick/sandbox-
 // 1. Install the extension (constructs the bridge on the app substrate).
 const app = createApp(Agent, { extensions: [withSandbox()] });
 
-// 2. Mount a sandbox; tools inside see it via useSandbox().
+// 2. Mount a sandbox. The built-in tool handlers resolve it at dispatch
+//    from `ctx.sandbox` (ADR 66); `<Sandbox>` also provides it to
+//    descendants for render-time `useSandbox()`.
 function Agent() {
   return (
     <Sandbox provider={myProvider} allow={{ read: ["/workspace/**"], exec: { allow: ["git *"] } }}>
@@ -137,6 +139,48 @@ function Agent() {
   );
 }
 ```
+
+## Handler access — `ctx.sandbox` vs `useSandbox()` (ADR 66)
+
+There are two ways to reach the sandbox, and they resolve at different
+times:
+
+- **`ctx.sandbox` — dispatch-time (tool handlers).** The tool executor
+  surfaces the app-scoped `SandboxBridge` on `ctx.sandbox` (a typed slot
+  contributed by this package's module augmentation of
+  `ToolHandlerCtxExtensions`). It is **dispatch-resolved from the live
+  bridge** — never captured at render — so reads always reflect current
+  harness state. The built-in tools use it:
+
+  ```ts
+  async handler({ command }, { ctx }) {
+    const sandbox = ctx.sandbox?.get("primary"); // the default <Sandbox> id
+    if (!sandbox) return [{ type: "text", text: "Error: no sandbox available in scope" }];
+    const { stdout } = await sandbox.exec({ command });
+    return [{ type: "text", text: stdout }];
+  }
+  ```
+
+  `ctx.sandbox` is `undefined` when `withSandbox()` isn't installed, so
+  handlers guard. It carries the SAME bridge as `useBridges().sandbox`.
+  The built-in `Bash`/`ReadFile`/`WriteFile`/`EditFile` tools target the
+  default `<Sandbox id="primary">` and fall back to the sole registered
+  sandbox when exactly one exists. Cross-section routing among multiple
+  sandboxes: query the bridge by id (`ctx.sandbox?.get(myId)`).
+
+- **`useSandbox()` — render-time (components).** The React hook reads the
+  tree-nearest `<Sandbox>` harness from Context. Use it inside components
+  and in custom tools that genuinely need **tree-positional** selection
+  (a specific harness by tree position) captured via a `use:` slot. This
+  is the escape hatch reserved for tree-positional context; everything
+  app-scoped belongs on `ctx.sandbox`.
+
+The tool executor and app harness thread `ctx.sandbox` **generically** —
+they never import this package. The type comes from the augmentation
+here; the value is an opaque record filled by the AppHarness from the
+registered `sandbox` namespace. That keeps the dependency graph clean:
+`@agentick/tool-executor-next` and `@agentick/app-next` have no sandbox
+dependency.
 
 ## editFile — the crown jewel
 
@@ -188,7 +232,7 @@ provider) invokes it, so it works uniformly across every provider.
 | `matchRequest` / `matchDomain`                               | The pure first-match-wins egress matcher (default-deny, `*.domain` wildcards).                                                                          |
 | `SessionACL`, `matchesACLPattern`                            | Per-session learned allow/deny state + the glob / `regex:` pattern matcher.                                                                             |
 | Spec wire types (re-exported)                                | `SandboxExec*`/`SandboxEdit*`/mount inputs, `SandboxPermissions`, `NetworkRule`, `ProxiedRequest` — one import source for providers.                    |
-| `/react` subpath                                             | `<Sandbox>`, `useSandbox()`, and the `Bash`/`ReadFile`/`WriteFile`/`EditFile` tools.                                                                    |
+| `/react` subpath                                             | `<Sandbox>`, `useSandbox()` (render-time), and the `Bash`/`ReadFile`/`WriteFile`/`EditFile` tools (handlers resolve `ctx.sandbox`, ADR 66).              |
 | `/testing` subpath                                           | `runSandboxProviderConformance` (#218) + `fakeSandboxProvider`.                                                                                         |
 | `/mcp` subpath (ADR 65)                                      | `sandboxRootsSource` / `bindSandboxRootsToClient` (outbound roots), `sandboxFileResolver` / `fsFileResolver` / `registerFileResolver` (readable files). |
 
@@ -212,6 +256,9 @@ provider) invokes it, so it works uniformly across every provider.
   `src/__tests__/net.spec.ts`.
 - **`<Sandbox>` + `useSandbox()` with the real reconciler** —
   `src/react/__tests__/component.spec.tsx`.
+- **Built-in tools resolve the harness from `ctx.sandbox` (ADR 66) —
+  primary/sole resolution, absent-guard, multi-sandbox ambiguity** —
+  `src/react/__tests__/tools-ctx-sandbox.spec.ts`.
 - **`/mcp` outbound roots — workspace root + live mounts (add → present,
   remove → gone) + `bindSandboxRootsToClient` fires on every change
   (fire-and-forget, unsubscribe stops it)** —

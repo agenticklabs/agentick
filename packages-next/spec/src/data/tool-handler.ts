@@ -39,6 +39,31 @@ export interface HandlerChannelSeed {
 // ============================================================================
 
 /**
+ * Empty seed for optional, dispatch-resolved `ctx` slots (ADR 66).
+ *
+ * Mirrors {@link import("../protocol/hook-bridges.js").HookBridges} and
+ * {@link import("./events.js").EventScopeExtensions}: spec declares the
+ * empty interface and hardcodes NO optional harness; each optional
+ * harness package augments it from its own `augment.ts` via
+ *
+ *   declare module "@agentick/spec-next" {
+ *     interface ToolHandlerCtxExtensions {
+ *       readonly sandbox?: SandboxBridge;
+ *     }
+ *   }
+ *
+ * so the slot surfaces as a top-level `ctx.<slot>` field, typed by the
+ * augmentation and filled at dispatch by the wiring layer (AppHarness)
+ * from the live bridge. The executor stays harness-agnostic — it
+ * spreads an opaque `Record<string, unknown>` (`ctxExtensions`) onto
+ * every ctx and never imports any harness.
+ *
+ * @see docs/proposals/v2/blueprint/66-tool-dependency-resolution.md
+ */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+export interface ToolHandlerCtxExtensions {}
+
+/**
  * Context object passed to every tool handler as the second argument's
  * `ctx` field. Surface the handler is allowed to interact with:
  *
@@ -60,10 +85,17 @@ export interface HandlerChannelSeed {
  * Substrate-primitive slots vs `use:` slots — the rule:
  * framework-provided harnesses that EVERY session has (elicitation,
  * tasks, and future sampling/roots when those bridges ship) live on
- * `ctx`. Extension-provided / provider-scoped things (sandbox
- * bridge, custom MCP refs) flow through the JSX `use:` capture.
+ * `ctx` as hardcoded fields below. OPTIONAL harnesses that not every
+ * deployment mounts (sandbox, custom MCP refs) contribute their slot
+ * via module augmentation of {@link ToolHandlerCtxExtensions} (ADR 66)
+ * and are dispatch-resolved from the live bridge — NOT captured at
+ * render through the JSX `use:` bag. `use:` is now reserved for
+ * genuinely tree-positional context (a value set by an ancestor
+ * provider at a specific tree position, reachable only during render).
+ *
+ * @see docs/proposals/v2/blueprint/66-tool-dependency-resolution.md
  */
-export interface ToolHandlerCtx {
+export interface ToolHandlerCtx extends ToolHandlerCtxExtensions {
   // ── Universal — every transport populates these ───────────────────
   readonly toolCallId: string;
   readonly sessionId?: string;

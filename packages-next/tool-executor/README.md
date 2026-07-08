@@ -176,7 +176,47 @@ factory + interface to the session-level `session.elicit`.
 
 `use` is the second arg's `use` field — render-time deps captured by the
 reconciler when the tool was declared via `<Tool use={() => ({…})}>`,
-merged over the registration's `useDeps`.
+merged over the registration's `useDeps`. `use` is reserved for
+genuinely **tree-positional** context; app-/session-scoped harnesses
+belong on `ctx` (see below).
+
+### `ctxExtensions` — the dispatch-resolved extension seam (ADR 66)
+
+Optional harnesses that not every deployment mounts (e.g. sandbox) reach
+tool handlers as **typed `ctx` slots**, resolved at dispatch from the
+live bridge rather than captured at render. The mechanism is one generic
+construction option:
+
+```ts
+new ToolExecutorHarness(id, journal, bus, inbox, {
+  handlerResolver,
+  elicitation,
+  // Opaque record spread onto every handler's ctx. The executor NEVER
+  // imports or inspects the values.
+  ctxExtensions: { sandbox: theSandboxBridge },
+});
+```
+
+Every key becomes a top-level `ctx.<key>`. The executor treats the
+record as an opaque `Readonly<Record<string, unknown>>`:
+
+- **The type** of `ctx.sandbox` comes from a `declare module
+  "@agentick/spec-next"` augmentation of `ToolHandlerCtxExtensions` in
+  the owning harness package (`@agentick/sandbox-next`). Spec seeds an
+  empty `ToolHandlerCtxExtensions {}`; each optional harness adds its own
+  slot. This executor hardcodes none.
+- **The value** is filled by the wiring layer (the AppHarness), which
+  resolves the registered namespace and threads it here. Because the
+  reference points at the live bridge, reads inside a handler
+  (`ctx.sandbox.get("primary")`) hit current harness state — no stale
+  render capture.
+- **Universal fields always win.** The record is spread FIRST, so a
+  colliding key can never shadow `toolCallId`, `transport`, etc.
+
+This is what lets an optional harness be dispatch-resolved on `ctx`
+**without this package depending on it** —
+`@agentick/tool-executor-next` imports no sandbox (or any other optional
+harness); the layering stays clean.
 
 ### `ctx.log` / `ctx.progress` — the runtime signal family (ADR 64)
 
@@ -261,12 +301,14 @@ of the level at which it was installed.
 
 `/testing` subpath (`@agentick/tool-executor-next/testing`):
 
-- `createTestHarness({ tools?, handlers?, elicitation?, tasks?, … })` —
-  wires an in-memory substrate (journal / bus / inbox), a real
-  `ElicitationHarness` and `TasksHarness` on the **same** substrate (so
-  bus subscriptions see envelopes from all three), and a
-  `ToolExecutorHarness`. Returns the bundle (`harness`, `journal`, `bus`,
-  `inbox`, `resolver`, `elicitation`, `tasks`), all `ready`.
+- `createTestHarness({ tools?, handlers?, elicitation?, tasks?,
+  ctxExtensions?, … })` — wires an in-memory substrate (journal / bus /
+  inbox), a real `ElicitationHarness` and `TasksHarness` on the **same**
+  substrate (so bus subscriptions see envelopes from all three), and a
+  `ToolExecutorHarness`. Pass `ctxExtensions` to exercise the ADR-66
+  extension seam (e.g. a stub `ctx.sandbox`). Returns the bundle
+  (`harness`, `journal`, `bus`, `inbox`, `resolver`, `elicitation`,
+  `tasks`), all `ready`.
 - `fakeRegistration({ declaration, handlerRef?, useDeps?, binding? })` —
   build a `ToolRegistration` with sensible defaults (`binding` defaults
   to `{ scope: "runtime" }`).
@@ -309,6 +351,9 @@ fixture behaviors into concrete handlers.
   the `ToolTaskModeConflictError` pre-flight matrix.
 - `src/__tests__/task-handle.spec.ts` — `ctx.tasks` wiring, await-vs-ref,
   abort propagation into the in-flight task.
+- `src/__tests__/ctx-extensions.spec.ts` — the ADR-66 `ctxExtensions`
+  seam: opaque values spread onto `ctx`, freshness (live-object reads,
+  not render capture), absence, and universal-field collision safety.
 - `src/__tests__/signals.spec.ts` + `signal-fire-and-forget.spec.ts` —
   `ctx.log` / `ctx.progress` emit shape + scope, and that a dying bus
   never blocks or fails the dispatch.

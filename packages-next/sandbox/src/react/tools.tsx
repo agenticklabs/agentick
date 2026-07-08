@@ -1,21 +1,51 @@
 /**
  * Pre-built tool components for sandbox operations.
  *
- * Each tool wraps a single harness command and uses `useSandbox()` to
- * capture the in-scope harness at render time. The handler is a thin
- * adapter that invokes the harness via `Effect.runPromise` and
- * formats the result as `ContentBlock[]` for the model.
+ * Each tool wraps a single harness command. The handler resolves the
+ * active `SandboxHarness` from `ctx.sandbox` — the app-scoped
+ * `SandboxBridge` dispatch-resolved by the tool executor (ADR 66) —
+ * rather than capturing it at render through the JSX `use:` bag. It is
+ * a thin adapter that invokes the harness and formats the result as
+ * `ContentBlock[]` for the model.
  *
- * Adopters who want different surface (typed args, response shaping,
- * etc.) compose their own tools using `useSandbox()` + the harness
- * directly.
+ * `ctx.sandbox` is the SAME bridge as `useBridges().sandbox`; the
+ * built-in tools target the default `<Sandbox id="primary">` (falling
+ * back to the sole sandbox when exactly one is registered). Adopters
+ * who need cross-section routing among multiple sandboxes compose their
+ * own tools and query the bridge by id (`ctx.sandbox?.get(id)`), or use
+ * `useSandbox()` + a render-time `use:` capture for genuinely
+ * tree-positional selection.
+ *
+ * @see docs/proposals/v2/blueprint/66-tool-dependency-resolution.md
  */
 
 import { z } from "zod";
 import { createTool } from "@agentick/reconciler-react-next";
 import type { ContentBlock } from "@agentick/spec-next";
 
-import { useSandbox } from "./hook.js";
+import "../augment.js";
+import type { SandboxBridge } from "../bridge.js";
+import type { SandboxHarness } from "../harness.js";
+
+/**
+ * Resolve the harness the built-in tools operate on from the app-scoped
+ * bridge. Targets the default `<Sandbox id="primary">`; when no
+ * "primary" is registered but exactly one sandbox exists, that sole
+ * sandbox is used. Returns `undefined` when no sandbox is mounted or the
+ * selection is ambiguous (multiple non-primary sandboxes) — the handler
+ * surfaces a clear error in that case.
+ */
+function activeSandbox(bridge: SandboxBridge | undefined): SandboxHarness | undefined {
+  if (!bridge) return undefined;
+  const primary = bridge.get("primary");
+  if (primary) return primary;
+  const regs = bridge.list();
+  if (regs.length === 1) {
+    const only = regs[0];
+    if (only) return bridge.get(only.id);
+  }
+  return undefined;
+}
 
 /**
  * `<Bash />` — execute a shell command in the in-scope sandbox.
@@ -29,12 +59,12 @@ export const Bash = createTool({
     cwd: z.string().optional().describe("Working directory inside the sandbox"),
     timeoutMs: z.number().int().positive().optional(),
   }),
-  use: () => ({ sandbox: useSandbox() }),
-  async handler({ command, cwd, timeoutMs }, { use }): Promise<readonly ContentBlock[]> {
-    if (!use.sandbox) {
+  async handler({ command, cwd, timeoutMs }, { ctx }): Promise<readonly ContentBlock[]> {
+    const sandbox = activeSandbox(ctx.sandbox);
+    if (!sandbox) {
       return [{ type: "text", text: "Error: no sandbox available in scope" }];
     }
-    const result = await use.sandbox.exec({
+    const result = await sandbox.exec({
       command,
       ...(cwd !== undefined ? { cwd } : {}),
       ...(timeoutMs !== undefined ? { timeoutMs } : {}),
@@ -60,12 +90,12 @@ export const ReadFile = createTool({
   inputSchema: z.object({
     path: z.string().describe("Absolute path inside the sandbox"),
   }),
-  use: () => ({ sandbox: useSandbox() }),
-  async handler({ path }, { use }): Promise<readonly ContentBlock[]> {
-    if (!use.sandbox) {
+  async handler({ path }, { ctx }): Promise<readonly ContentBlock[]> {
+    const sandbox = activeSandbox(ctx.sandbox);
+    if (!sandbox) {
       return [{ type: "text", text: "Error: no sandbox available in scope" }];
     }
-    const content = await use.sandbox.readFile({ path });
+    const content = await sandbox.readFile({ path });
     return [{ type: "text", text: content }];
   },
 });
@@ -80,12 +110,12 @@ export const WriteFile = createTool({
     path: z.string(),
     content: z.string(),
   }),
-  use: () => ({ sandbox: useSandbox() }),
-  async handler({ path, content }, { use }): Promise<readonly ContentBlock[]> {
-    if (!use.sandbox) {
+  async handler({ path, content }, { ctx }): Promise<readonly ContentBlock[]> {
+    const sandbox = activeSandbox(ctx.sandbox);
+    if (!sandbox) {
       return [{ type: "text", text: "Error: no sandbox available in scope" }];
     }
-    await use.sandbox.writeFile({ path, content });
+    await sandbox.writeFile({ path, content });
     return [{ type: "text", text: `Wrote ${content.length} bytes to ${path}` }];
   },
 });
@@ -157,12 +187,12 @@ MATCHING:
       )
       .min(1),
   }),
-  use: () => ({ sandbox: useSandbox() }),
-  async handler({ path, edits }, { use }): Promise<readonly ContentBlock[]> {
-    if (!use.sandbox) {
+  async handler({ path, edits }, { ctx }): Promise<readonly ContentBlock[]> {
+    const sandbox = activeSandbox(ctx.sandbox);
+    if (!sandbox) {
       return [{ type: "text", text: "Error: no sandbox available in scope" }];
     }
-    const result = await use.sandbox.editFile({ path, edits });
+    const result = await sandbox.editFile({ path, edits });
     const summary = result.changes
       .map((c) => `line ${c.line}: -${c.removed}/+${c.added}`)
       .join(", ");
