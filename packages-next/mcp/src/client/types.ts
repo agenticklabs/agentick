@@ -8,7 +8,7 @@
 
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { CreateMessageRequest, CreateMessageResult } from "@modelcontextprotocol/sdk/types.js";
-import type { ContentBlock, ResourceContents } from "@agentick/spec-next";
+import type { ContentBlock, McpRoot, ResourceContents } from "@agentick/spec-next";
 import type { McpAuth } from "./auth.js";
 import type { EraCodec } from "./era-codec.js";
 
@@ -174,10 +174,12 @@ export interface McpClientHarnessOptions {
    *
    * Omitted → the `roots` capability is NOT advertised.
    *
-   * TODO(#146-later / ADR-62): roots ultimately PROJECT FROM THE
-   * SANDBOX (workspace + mounts). Wave 2 keeps the client harness
-   * decoupled from `@agentick/sandbox` — the sandbox-backed adapter is
-   * a thin follow-on that supplies this `roots` provider fn.
+   * The source is PLUGGABLE (ADR 65): a static list, an adopter provider
+   * fn, or the sandbox adapter. The sandbox↔roots adapter
+   * (`sandboxRootsSource` / `bindSandboxRootsToClient`) lives OUTSIDE this
+   * package, in `@agentick/sandbox-next/mcp`, so the MCP client core stays
+   * decoupled from the sandbox (no dep, no cycle). The seam is exactly
+   * this provider fn — see {@link McpRootsSource}.
    */
   readonly roots?: McpRootsSource;
 }
@@ -204,16 +206,26 @@ export type McpSamplingHandler = (
 // Roots (client → server)
 // ============================================================================
 
-/** A single MCP root — a directory/file boundary the agent may operate on. */
-export interface McpRoot {
-  readonly uri: string;
-  readonly name?: string;
-}
+/**
+ * Re-export of the canonical {@link McpRoot} (home: `@agentick/spec-next`)
+ * so adopters constructing a roots source don't import spec directly. The
+ * single shape is shared with the inbound direction (`ctx.mcp.clientRoots`).
+ */
+export type { McpRoot };
 
 /**
- * Source of the roots list. Either a fixed array or a provider
- * function re-evaluated on each `roots/list` request (so a
- * sandbox-backed provider can reflect live mount changes).
+ * Source of the roots list offered to a remote server. Either a fixed
+ * array or a provider function re-evaluated on each `roots/list` request
+ * (so a live source — e.g. the sandbox adapter — reflects mount changes).
+ *
+ * This IS the pluggable seam (ADR 65): a static list keeps roots usable
+ * standalone with no sandbox in the graph; a provider fn lets the sandbox
+ * adapter (`@agentick/sandbox-next/mcp`) project workspace + mounts.
+ *
+ * TODO(#237-4b / ADR-65): roots-registry upgrade path — if a unified,
+ * inspectable, cross-source mount registry is ever needed, a RootsHarness
+ * slots UNDER this provider-fn seam (provider reads from it; inbound writes
+ * to it; add wire enumerate+subscribe). See ADR 65 for the trigger + rationale.
  */
 export type McpRootsSource =
   | readonly McpRoot[]

@@ -64,6 +64,57 @@ must not cross).
   `mounts` are the operator's explicit initial authorization and are
   honored regardless. Same ceiling-plus-dynamic shape as session
   `requiredScopes` + downscoping.
+- **`subscribeMounts(listener)`**: a mount-topology change stream (fires
+  after a successful `add-mount` / `remove-mount`), mirroring
+  `ResourcesHarness.subscribeListChanged`. The `/mcp` adapter binds to it
+  for live roots sync.
+
+## The `/mcp` subpath — sandbox ↔ MCP roots + readable files (ADR 65)
+
+An **opt-in** adapter (`@agentick/sandbox-next/mcp`, deps
+`@agentick/mcp-next` + `@agentick/resources-next`) that projects a sandbox
+onto two MCP surfaces. It is a **projection composed over existing
+primitives**, not a new harness (ADR 65): mount state stays owned by the
+sandbox, reads stay owned by resources, and the MCP client core stays
+decoupled from the sandbox (the dep points sandbox → mcp, one direction,
+no cycle — mirroring the `/react` convention).
+
+**Roots is pluggable — the sandbox is the flagship source, never a
+prerequisite.** Roots also work standalone from a static list or a plain
+provider fn with no sandbox in the graph (proved in
+`@agentick/mcp-next`).
+
+```ts
+import {
+  sandboxRootsSource,
+  bindSandboxRootsToClient,
+  sandboxFileResolver,
+  registerFileResolver,
+} from "@agentick/sandbox-next/mcp";
+
+// Outbound: offer the sandbox's workspace + live mounts as file:// roots
+// to a remote server, and keep them in sync on every mount change.
+const client = /* an McpClientHarness configured with: */ { roots: sandboxRootsSource(sandbox) };
+const stop = bindSandboxRootsToClient(sandbox, clientHarness); // → notifyRootsListChanged on change
+
+// Read: expose mounted files as readable resources (file://{+path}).
+registerFileResolver(resources, sandboxFileResolver(sandbox));
+```
+
+- `sandboxRootsSource(sandbox)` — an `McpRootsSource` provider fn:
+  `workspacePath` + `listMounts()` → `file://` roots, re-evaluated per
+  `roots/list` (reflects live mounts). Degrades to workspace-only when a
+  provider lacks `listMounts`.
+- `bindSandboxRootsToClient(sandbox, client)` — subscribes to mount
+  changes and fires the client's `notifyRootsListChanged()` (fire-and-
+  forget). Returns an `Unsubscribe`.
+- `sandboxFileResolver(sandbox)` / `fsFileResolver(rootDir)` — `file://`
+  `TemplateResolver`s. The sandbox path reads through the ACL-gated
+  `read-file` command (text, per the handle contract); the fs path is the
+  no-sandbox backend (lossless text + base64-blob binary, root-contained).
+- The **inbound** direction (a connecting client's roots on
+  `ctx.mcp.clientRoots`) needs no sandbox and lives in
+  `@agentick/mcp-next`'s server harness.
 
 ## Quick start
 
@@ -126,19 +177,20 @@ provider) invokes it, so it works uniformly across every provider.
 
 ## API
 
-| Export                                                       | What                                                                                                                                 |
-| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `SandboxProvider` / `SandboxHandle`                          | The construction contract + live-object interface providers implement/return (`src/contract.ts`).                                    |
-| `SandboxCreateOptions` / `SandboxSnapshot` / `SandboxIntent` | Provider create-options + the (deferred #223) snapshot seam.                                                                         |
-| `SandboxHarness`                                             | `BaseHarness<"sandbox">` — 8 commands (exec/read-file/write-file/edit-file/add-mount/remove-mount/list-mounts/destroy).              |
-| `withSandbox(options?)`                                      | `AppExtension` — constructs the bridge on the app substrate.                                                                         |
-| `inMemorySandboxBridge`                                      | In-memory bridge for tests.                                                                                                          |
-| `applyEdits(source, edits)` / `EditError`                    | The pure edit transform + its diagnostic error.                                                                                      |
-| `matchRequest` / `matchDomain`                               | The pure first-match-wins egress matcher (default-deny, `*.domain` wildcards).                                                       |
-| `SessionACL`, `matchesACLPattern`                            | Per-session learned allow/deny state + the glob / `regex:` pattern matcher.                                                          |
-| Spec wire types (re-exported)                                | `SandboxExec*`/`SandboxEdit*`/mount inputs, `SandboxPermissions`, `NetworkRule`, `ProxiedRequest` — one import source for providers. |
-| `/react` subpath                                             | `<Sandbox>`, `useSandbox()`, and the `Bash`/`ReadFile`/`WriteFile`/`EditFile` tools.                                                 |
-| `/testing` subpath                                           | `runSandboxProviderConformance` (#218) + `fakeSandboxProvider`.                                                                      |
+| Export                                                       | What                                                                                                                                                    |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SandboxProvider` / `SandboxHandle`                          | The construction contract + live-object interface providers implement/return (`src/contract.ts`).                                                       |
+| `SandboxCreateOptions` / `SandboxSnapshot` / `SandboxIntent` | Provider create-options + the (deferred #223) snapshot seam.                                                                                            |
+| `SandboxHarness`                                             | `BaseHarness<"sandbox">` — 8 commands (exec/read-file/write-file/edit-file/add-mount/remove-mount/list-mounts/destroy).                                 |
+| `withSandbox(options?)`                                      | `AppExtension` — constructs the bridge on the app substrate.                                                                                            |
+| `inMemorySandboxBridge`                                      | In-memory bridge for tests.                                                                                                                             |
+| `applyEdits(source, edits)` / `EditError`                    | The pure edit transform + its diagnostic error.                                                                                                         |
+| `matchRequest` / `matchDomain`                               | The pure first-match-wins egress matcher (default-deny, `*.domain` wildcards).                                                                          |
+| `SessionACL`, `matchesACLPattern`                            | Per-session learned allow/deny state + the glob / `regex:` pattern matcher.                                                                             |
+| Spec wire types (re-exported)                                | `SandboxExec*`/`SandboxEdit*`/mount inputs, `SandboxPermissions`, `NetworkRule`, `ProxiedRequest` — one import source for providers.                    |
+| `/react` subpath                                             | `<Sandbox>`, `useSandbox()`, and the `Bash`/`ReadFile`/`WriteFile`/`EditFile` tools.                                                                    |
+| `/testing` subpath                                           | `runSandboxProviderConformance` (#218) + `fakeSandboxProvider`.                                                                                         |
+| `/mcp` subpath (ADR 65)                                      | `sandboxRootsSource` / `bindSandboxRootsToClient` (outbound roots), `sandboxFileResolver` / `fsFileResolver` / `registerFileResolver` (readable files). |
 
 ## Verified by
 
@@ -160,6 +212,13 @@ provider) invokes it, so it works uniformly across every provider.
   `src/__tests__/net.spec.ts`.
 - **`<Sandbox>` + `useSandbox()` with the real reconciler** —
   `src/react/__tests__/component.spec.tsx`.
+- **`/mcp` outbound roots — workspace root + live mounts (add → present,
+  remove → gone) + `bindSandboxRootsToClient` fires on every change
+  (fire-and-forget, unsubscribe stops it)** —
+  `src/mcp/__tests__/roots.spec.ts`.
+- **`/mcp` file-resolver — text round-trip through the sandbox, binary
+  degrade, fs text + base64-blob binary, root-containment, routing through
+  a real `ResourcesHarness`** — `src/mcp/__tests__/file-resolver.spec.ts`.
 
 ## Roadmap & known gaps
 
@@ -182,3 +241,10 @@ provider) invokes it, so it works uniformly across every provider.
   deferred to avoid a fake until the handle grows a range-aware read.
 - **secure-exec provider** — deferred; validate the contract on local +
   docker first, then port secure-exec as the capability-tier test case.
+- **`/mcp` `sandboxFileResolver` is text-only** — the sandbox handle
+  exposes only `readFile(): string` (ADR 59: `bash` subsumes binary), so
+  a binary file read through the sandbox degrades to best-effort UTF-8
+  text (never a fabricated blob). A lossless binary read needs a
+  `readFileBytes` on the handle contract
+  (`TODO(#237-4b / ADR-65)` in `src/mcp/file-resolver.ts`); the
+  `fsFileResolver` path is the lossless-binary backend today.

@@ -31,8 +31,9 @@
  *     `samplingHandler` is configured; advertises `sampling`. Absent a
  *     handler, the SDK responds method-not-found (no fake model call).
  *   - `roots/list` — handled (#146) when a `roots` source is
- *     configured; advertises `roots: { listChanged }`. Roots ultimately
- *     project from the sandbox (ADR 62) — kept decoupled here.
+ *     configured; advertises `roots: { listChanged }`. The source is
+ *     pluggable (ADR 65): a static list, a provider fn, or the sandbox
+ *     adapter (`@agentick/sandbox-next/mcp`) — kept decoupled here.
  *   - `notifications/message` (logging) — surfaced via `onLogMessage`
  *     + the `mcp:<scopeId>:log` bus envelope.
  *
@@ -1320,12 +1321,18 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
 
   /**
    * Resolve the configured roots source to a concrete list. A provider
-   * function is re-evaluated on each `roots/list` so a future
-   * sandbox-backed provider reflects live mount changes.
+   * function is re-evaluated on each `roots/list` so a live source (the
+   * sandbox adapter) reflects mount changes.
    *
-   * TODO(#146-later / ADR-62): the sandbox-backed roots projection
-   * supplies this source (workspace + mounts). Kept decoupled from
-   * `@agentick/sandbox` here — Wave 2 accepts a list or provider fn.
+   * The source is the pluggable seam (ADR 65): a static list, an adopter
+   * provider fn, or the sandbox adapter (`@agentick/sandbox-next/mcp`,
+   * which deps this package — one direction, no cycle). This harness has
+   * no knowledge of any source; it just resolves a list.
+   *
+   * TODO(#237-4b / ADR-65): roots-registry upgrade path — if a unified,
+   * inspectable, cross-source mount registry is ever needed, a RootsHarness
+   * slots UNDER this provider-fn seam (provider reads from it; inbound writes
+   * to it; add wire enumerate+subscribe). See ADR 65 for the trigger + rationale.
    */
   private async resolveRoots(): Promise<readonly McpRoot[]> {
     const src = this.options.roots;

@@ -14,11 +14,11 @@ published independently.
 
 ## Subpath map
 
-| Import path                  | Purpose                                                                     |
-| ---------------------------- | --------------------------------------------------------------------------- |
-| `@agentick/mcp-next`         | **Client** harness + `withMCP` extension. Outbound: Agentick → MCP servers. |
-| `@agentick/mcp-next/server`  | **Server** harness. Inbound: MCP clients → Agentick.                        |
-| `@agentick/mcp-next/oauth`   | OAuth 2.1 utilities shared by both sides.                                   |
+| Import path                  | Purpose                                                                                         |
+| ---------------------------- | ----------------------------------------------------------------------------------------------- |
+| `@agentick/mcp-next`         | **Client** harness + `withMCP` extension. Outbound: Agentick → MCP servers.                     |
+| `@agentick/mcp-next/server`  | **Server** harness. Inbound: MCP clients → Agentick.                                            |
+| `@agentick/mcp-next/oauth`   | OAuth 2.1 utilities shared by both sides.                                                       |
 | `@agentick/mcp-next/testing` | `runMcpConformance` — the executable conformance suite (loopback + real-peer + version matrix). |
 
 Subpath isolation is deliberate — browser / edge bundles that only
@@ -27,32 +27,32 @@ code. See ADR 23 §6 (Package layout) and ADR 40 §1.
 
 ## Status
 
-| Phase                                                                            | Status               |
-| -------------------------------------------------------------------------------- | -------------------- |
-| **Client** (outbound, `@agentick/mcp-next`)                                      |                      |
-| #1 Skeleton — OAuth + protocol utilities + in-memory transport                   | ✅                   |
-| #2 `McpClientHarness` — Transport / Auth / Protocol / Lifecycle                  | ✅                   |
-| #3 `withMCP` extension + ToolBridge integration                                  | ✅                   |
-| #4 ElicitationBridge — server→client `elicitation/create` routing                | ✅                   |
-| #134a URL-mode elicit transport layer                                            | ✅                   |
-| #134b OAuth-via-elicit — URL-mode elicit on auth-needed                          | ✅                   |
-| #146 Client completeness — resources / prompts / completion / sampling / roots / logging | ✅ (Wave 2)  |
-| #154 `withMCP` auto-wires OAuth elicit via transport factory                     | ⏳                   |
-| **Server** (inbound, `@agentick/mcp-next/server`)                                |                      |
-| #171a `@agentick/tool-next/transforms` subpath (transform primitives)            | ✅                   |
-| #171b Server subpath + spec types + `McpServerHarness` skeleton                  | ✅                   |
-| #171c stdio + in-memory transport + tools projection + security pipeline         | ✅                   |
-| #310 **Tools `list_changed`** emission on `ToolCatalog` mutations                | ✅                   |
-| #171d.1 **Prompts projection** (`prompts/list` + `prompts/get` + `list_changed`) | ✅                   |
-| #171d.2.1 **Elicitation `ctx.elicit.*` sugar** (form-mode basics)                | ✅                   |
-| #171d.2.2 **Elicitation URL mode + `tryX` variants + `UrlElicitationRequired`**  | ✅                   |
-| #171d.2.3 Elicitation schema-flatness validation + advanced shapes               | ⏳                   |
-| #171d.3 Tasks projection (`tasks/list` + `tasks/get` + notifications)            | ⏳ (scoping pending) |
-| #171e Streamable HTTP transport (client + server, OAuth-threaded)                | ✅ (Wave 1)          |
-| #171f WebSocket transport                                                        | ⏳                   |
-| #171g Direct projection (`mcp://gateway/<name>` URL form)                        | ⏳                   |
-| #171h Embedded Authorization Server (optional)                                   | ⏳                   |
-| #171i Conformance suite + testing helpers                                        | ⏳                   |
+| Phase                                                                                    | Status               |
+| ---------------------------------------------------------------------------------------- | -------------------- |
+| **Client** (outbound, `@agentick/mcp-next`)                                              |                      |
+| #1 Skeleton — OAuth + protocol utilities + in-memory transport                           | ✅                   |
+| #2 `McpClientHarness` — Transport / Auth / Protocol / Lifecycle                          | ✅                   |
+| #3 `withMCP` extension + ToolBridge integration                                          | ✅                   |
+| #4 ElicitationBridge — server→client `elicitation/create` routing                        | ✅                   |
+| #134a URL-mode elicit transport layer                                                    | ✅                   |
+| #134b OAuth-via-elicit — URL-mode elicit on auth-needed                                  | ✅                   |
+| #146 Client completeness — resources / prompts / completion / sampling / roots / logging | ✅ (Wave 2)          |
+| #154 `withMCP` auto-wires OAuth elicit via transport factory                             | ⏳                   |
+| **Server** (inbound, `@agentick/mcp-next/server`)                                        |                      |
+| #171a `@agentick/tool-next/transforms` subpath (transform primitives)                    | ✅                   |
+| #171b Server subpath + spec types + `McpServerHarness` skeleton                          | ✅                   |
+| #171c stdio + in-memory transport + tools projection + security pipeline                 | ✅                   |
+| #310 **Tools `list_changed`** emission on `ToolCatalog` mutations                        | ✅                   |
+| #171d.1 **Prompts projection** (`prompts/list` + `prompts/get` + `list_changed`)         | ✅                   |
+| #171d.2.1 **Elicitation `ctx.elicit.*` sugar** (form-mode basics)                        | ✅                   |
+| #171d.2.2 **Elicitation URL mode + `tryX` variants + `UrlElicitationRequired`**          | ✅                   |
+| #171d.2.3 Elicitation schema-flatness validation + advanced shapes                       | ⏳                   |
+| #171d.3 Tasks projection (`tasks/list` + `tasks/get` + notifications)                    | ⏳ (scoping pending) |
+| #171e Streamable HTTP transport (client + server, OAuth-threaded)                        | ✅ (Wave 1)          |
+| #171f WebSocket transport                                                                | ⏳                   |
+| #171g Direct projection (`mcp://gateway/<name>` URL form)                                | ⏳                   |
+| #171h Embedded Authorization Server (optional)                                           | ⏳                   |
+| #171i Conformance suite + testing helpers                                                | ⏳                   |
 
 Phase numbering tracks ADR 40 §"Migration / rollout plan."
 
@@ -430,10 +430,38 @@ Then:
    the projected view (`prompts.transforms` lands later — see roadmap).
 
 The `McpRequestContext` flowing into a handler carries `user`,
-`clientInfo`, `clientCapabilities`, `signal` (for cancellation), the
-universal `log` / `progress` signal slots (ADR 64, below), and adopter
-`metadata`. See
+`clientInfo`, `clientCapabilities`, `clientRoots` (ADR 65, below),
+`signal` (for cancellation), the universal `log` / `progress` signal
+slots (ADR 64, below), and adopter `metadata`. See
 [`spec/protocol/mcp-server-harness.ts`](../spec/src/protocol/mcp-server-harness.ts).
+
+### Roots — both directions, composed not owned (ADR 65)
+
+MCP **roots** are `file://` boundaries a _client_ exposes to a _server_
+(advisory scoping — "operate within these dirs"; not enforced
+containment, not content transfer — that is resources, ADR 62). Agentick
+models roots as a **projection over existing primitives, NOT a
+`RootsHarness`** (ADR 65): mount state stays owned by the sandbox, reads
+by resources, and MCP is one projection of both.
+
+**Outbound (we are a client → a remote server).** The client harness
+takes a `roots` source (`McpRootsSource`): a static list, a provider fn,
+or the sandbox adapter. The source is **pluggable — roots work standalone
+with no sandbox**. The server pulls via `roots/list`; the client pushes
+`notifications/roots/list_changed` via `notifyRootsListChanged()`. The
+sandbox↔roots adapter (`sandboxRootsSource` / `bindSandboxRootsToClient`)
+lives in `@agentick/sandbox-next/mcp` — the client core stays decoupled.
+
+**Inbound (we are a server ← a connecting client).** When a client
+advertises the `roots` capability, the server harness pulls its
+`roots/list` after `initialize` and re-pulls on
+`notifications/roots/list_changed`, surfacing the result on
+`ctx.mcp.clientRoots`. This is **per-connection and isolated** —
+connection A's roots never appear on connection B's ctx (structural, like
+the `connectionScope` discipline for signals). It is fire-and-forget:
+`clientRoots` is `undefined` when the client didn't advertise `roots` (or
+before the first pull resolves), and a failed pull is never a control
+path.
 
 ### Runtime signals — `ctx.log` / `ctx.progress` are bus events, not sinks (ADR 64)
 
@@ -475,6 +503,7 @@ scope on every signal, so a tool's log/progress over connection A never
 reaches connection B — the load-bearing multi-tenant guarantee.
 
 Verified by:
+
 - `src/server/__tests__/projection-completions-logging.spec.ts` — log
   round-trip + level filter.
 - `src/server/__tests__/progress.spec.ts` — `ctx.progress` →
@@ -537,6 +566,7 @@ runMcpConformance();
   `McpConformanceFactories` (the `runTimelineStoreConformance` pattern),
   so `@agentick/resources-next` stays a dev dependency instead of leaking
   into mcp-next's runtime graph.
+
 - **Part B — REAL-PEER.**
   - **B1 (always on):** the raw SDK reference `Client` drives OUR server.
     It applies no agentick client-side normalization, so it exercises the
@@ -593,7 +623,9 @@ reference-server round-trip (until the package is a dev dep).
   configured list (+ provider re-evaluation), `setLoggingLevel` reaches
   the server and `notifications/message` surfaces via `onLogMessage`.
   Plus a `content-mapper` unit block: `structuredContent` / `isError` /
-  embedded-resource-block preservation.
+  embedded-resource-block preservation. **ADR 65 standalone roots** — a
+  static list AND a provider fn served on `roots/list` with NO sandbox in
+  the graph (the "roots works standalone" guarantee).
 
 ### Server
 
@@ -620,6 +652,13 @@ reference-server round-trip (until the package is a dev dep).
   clients on ONE server; a tool's `ctx.log` + `ctx.progress` over
   connection A reach NEITHER of connection B's notification handlers
   (mutation-checked against the `connectionScope` filter).
+- `src/server/__tests__/inbound-roots-isolation.spec.ts` — **ADR 65
+  inbound roots, per-connection isolation.** Two clients advertising
+  DIFFERENT roots; a tool over connection A sees A's roots on
+  `ctx.mcp.clientRoots` and NEVER B's (differential: positive presence AND
+  negative absence); a `roots/list_changed` on A re-pulls A only, B
+  untouched; a client that doesn't advertise `roots` leaves `clientRoots`
+  undefined. Mutation-checked against a shared holder.
 - `src/server/__tests__/below-level-log-bus-emit.spec.ts` — a
   below-level `debug` log the MCP projection drops (client set
   `warning`) is STILL observable by an independent bus subscriber; each
@@ -682,9 +721,10 @@ Defer until production load demands it; design space documented in
   the inbound `samplingHandler` and `roots` seams (`notifyRootsListChanged`).
   Follow-ons: (a) the read verbs are declared as **addressable** commands,
   NOT `exposure: "wire"` — remote-grantee exposure needs a ratified
-  verb-matrix row; (b) `roots` accepts a static list or provider fn —
-  the **sandbox-backed roots projection** (workspace + mounts, ADR 62)
-  is a thin follow-on that supplies that provider; (c) routing sampling
+  verb-matrix row; (b) `roots` accepts a static list or provider fn, and
+  the **sandbox-backed roots projection** (workspace + mounts, ADR 65) has
+  **landed** in `@agentick/sandbox-next/mcp` (`sandboxRootsSource` /
+  `bindSandboxRootsToClient`); (c) routing sampling
   to agentick's own executor by default is a Wave-3 ADR concern (the
   seam here takes an adopter-provided handler).
 - **`#154 withMCP auto-wires OAuth elicit`** via transport factory
@@ -711,7 +751,11 @@ Defer until production load demands it; design space documented in
   task scoping decision pending. Lands with #171d.3.
 - **Sampling (`ctx.sample.*`)** — server→client `sampling/createMessage`
   with v1's retry-loop sugar. Blocks on a `SamplingHarness` landing.
-- **Roots (`ctx.roots.*`)** — workspace bridge (#124).
+- **Inbound client roots (`ctx.mcp.clientRoots`)** — **landed (ADR 65).**
+  Per-connection, isolated, pulled on initialize + re-pulled on
+  `roots/list_changed`. Promotion to a unified cross-source mount registry
+  (a `RootsHarness`) is gated on a real consumer for the inspectable view
+  — see the `TODO(#237-4b / ADR-65)` seam markers + ADR 65 for the trigger.
 - **Resources (`resources/list` + `resources/read`)** — #123.
 - **Streamable HTTP transport (server)** — **landed** (Wave 1).
   `httpTransport({ port })` (from `@agentick/mcp-next/server`) is a

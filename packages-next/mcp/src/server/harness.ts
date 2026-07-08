@@ -61,6 +61,7 @@ import {
   installProgressProjection,
 } from "./projection/logging.js";
 import { installPromptsHandlers } from "./projection/prompts.js";
+import { installClientRootsIngest } from "./projection/roots.js";
 import { installResourcesHandlers, type ResourcesFilter } from "./projection/resources.js";
 import { createServerTaskRegistry, installTasksHandlers } from "./projection/tasks.js";
 import { installToolsHandlers } from "./projection/tools.js";
@@ -502,6 +503,16 @@ export class McpServerHarness
     this.connectionState.set(connectionId, { sdkServer, transport, cleanup });
     this._registerConnection(connectionRecord);
 
+    // Inbound client roots (ADR 65) — pull the connecting client's
+    // `file://` roots (if it advertised the capability) and surface them
+    // per-connection on `ctx.mcp.clientRoots`. Handlers register here,
+    // BEFORE `sdkServer.connect`, so the first pull (on `oninitialized`)
+    // and `roots/list_changed` re-pulls are wired before the transport
+    // starts. The holder is scoped to THIS connection — structural
+    // isolation, mirroring `connectionScope` for signals.
+    const clientRootsIngest = installClientRootsIngest(sdkServer);
+    cleanup.push(clientRootsIngest.unsubscribe);
+
     // 4. Install request-handler projections.
 
     // Per-connection structured logging (Wave 3a). The level holder is
@@ -539,6 +550,7 @@ export class McpServerHarness
         (sdkServer.getClientCapabilities?.() as Readonly<Record<string, unknown>> | undefined) ??
         null;
       const sdkClientInfo = sdkServer.getClientVersion?.() ?? null;
+      const clientRoots = clientRootsIngest.current();
 
       // ADR 43 — unified ToolHandlerCtx with `transport: "mcp"` +
       // MCP-specific extras nested under `mcp:`. Tool handlers receive
@@ -594,6 +606,11 @@ export class McpServerHarness
             ? { name: sdkClientInfo.name, version: sdkClientInfo.version }
             : null,
           clientCapabilities: sdkClientCaps,
+          // ADR 65 — inbound roots, read fresh per request so a
+          // `roots/list_changed` re-pull is reflected on the next call.
+          // Omitted when the client never advertised `roots` (or the
+          // first pull hasn't resolved) — advisory, never a control path.
+          ...(clientRoots !== undefined ? { clientRoots } : {}),
         },
         metadata: omitUndefined({
           ...(info.headers ? { headers: info.headers } : {}),

@@ -9,10 +9,10 @@ view); `read(uri)` routes to the matching resolver.
 
 The MCP server trio splits readable context by control:
 
-| Surface   | Controlled by | Primitive             |
-| --------- | ------------- | --------------------- |
-| tools     | the model     | `ToolsHarness`        |
-| prompts   | the user      | `PromptsHarness`      |
+| Surface   | Controlled by | Primitive              |
+| --------- | ------------- | ---------------------- |
+| tools     | the model     | `ToolsHarness`         |
+| prompts   | the user      | `PromptsHarness`       |
 | resources | the app       | **`ResourcesHarness`** |
 
 Resources are the **application-controlled** slice — readable content the
@@ -23,7 +23,7 @@ published independently.
 
 ## Purpose
 
-The framework's core is *compilers → IR → model input*. A resource is not
+The framework's core is _compilers → IR → model input_. A resource is not
 a store and not RAG — it is a **content-addressable read namespace**
 (`list` / `read` / `templates` / `subscribe` ≈ `readdir` / `cat` / `glob`
 / `watch`). Because agentick owns no resource content, this harness is
@@ -33,7 +33,7 @@ the server harness exactly as prompts are projected onto `prompts/*`.
 
 **Provider / consumer asymmetry.** This is the PROVIDER seam — agentick's
 own resources projected OUT (agentick-as-MCP-server). Reading an
-*external* server's resources is a `McpClientHarness` concern (Wave 2);
+_external_ server's resources is a `McpClientHarness` concern (Wave 2);
 compose it with a wrapping resolver
 (`register("proxy://…", () => client.readResource(uri))`), not by folding
 external content into this registry.
@@ -58,7 +58,7 @@ resources.registerTemplate("db://users/{id}", (uri) => [
   { uri, mimeType: "application/json", text: loadUser(parseId(uri)) },
 ]);
 
-const contents = await resources.read("db://users/42");   // runs the template resolver
+const contents = await resources.read("db://users/42"); // runs the template resolver
 const { resources: page, nextCursor } = await resources.list();
 
 // A provider signals its backing content changed → fans to subscribers.
@@ -103,14 +103,40 @@ declaration changed"):
 
 `registerTemplate` compiles an RFC 6570-lite pattern:
 
-| Expression | Matches                          |
-| ---------- | -------------------------------- |
+| Expression | Matches                           |
+| ---------- | --------------------------------- |
 | `{name}`   | exactly one path segment (no `/`) |
 | `{+name}`  | reserved expansion (incl. `/`)    |
 | `{/name}`  | path expansion (incl. `/`)        |
 
 Everything else is a regex-escaped literal, anchored end-to-end.
 `read(uri)` prefers a fixed binding, then the first matching template.
+
+### File resolvers (`file://{+path}`) — from `@agentick/sandbox-next/mcp`
+
+A ready-made `file://` `TemplateResolver` ships from the sandbox package's
+opt-in `/mcp` subpath (ADR 65), so a filesystem boundary declared as an
+MCP **root** is also **readable** as a resource:
+
+```ts
+import {
+  sandboxFileResolver,
+  fsFileResolver,
+  registerFileResolver,
+} from "@agentick/sandbox-next/mcp";
+
+// Read through a sandbox (ACL-gated; text, per the handle contract):
+registerFileResolver(resources, sandboxFileResolver(sandbox));
+// …or off the local filesystem, rooted + containment-checked (no sandbox):
+registerFileResolver(resources, fsFileResolver("/srv/data"));
+```
+
+`registerFileResolver(resources, resolver, meta?)` binds under the
+canonical `file://{+path}` template (reserved expansion so full paths
+match). The `fs` backend reads text as UTF-8 and non-text losslessly as a
+base64 blob; the sandbox backend is text-only (handle contract, ADR 59).
+The resolver lives WITH the sandbox because it deps the sandbox handle —
+resources stays content-agnostic (it owns the seam, not the backend).
 
 ## API
 
@@ -157,9 +183,13 @@ the MCP server projection + capability advertisement. Green.
 
 ## Roadmap & known gaps
 
-- **Wave 4b (`TODO(#237-4b)`):** roots-from-sandbox, a sandbox-backed
-  file resolver, the React `<Resource>` component / `ctx.resource`
-  front-ends, `withMCP` session surfacing of resources.
+- **Wave 4b (ADR 65) — roots/mounts seam + file-resolver: landed.**
+  `sandboxRootsSource` / `bindSandboxRootsToClient` (outbound roots),
+  inbound `ctx.mcp.clientRoots`, and `sandboxFileResolver` /
+  `fsFileResolver` / `registerFileResolver` (file → resource) ship from
+  `@agentick/sandbox-next/mcp`. **Still open (`TODO(#237-4b)`):** the
+  React `<Resource>` component / `ctx.resource` front-ends and `withMCP`
+  session surfacing of resources.
 - **Client-side external-resource consumption** landed in Wave 2
   (`McpClientHarness`); compose it via wrapping resolvers, not folded
   into this registry.

@@ -1097,6 +1097,9 @@ importers:
       '@agentick/elicitation-next':
         specifier: workspace:*
         version: link:../elicitation
+      '@agentick/mcp-next':
+        specifier: workspace:*
+        version: link:../mcp
       '@agentick/pubsub-next':
         specifier: workspace:*
         version: link:../pubsub
@@ -1106,6 +1109,9 @@ importers:
       '@agentick/reconciler-react-next':
         specifier: workspace:*
         version: link:../reconciler-react
+      '@agentick/resources-next':
+        specifier: workspace:*
+        version: link:../resources
       '@agentick/runtime-next':
         specifier: workspace:*
         version: link:../runtime

@@ -315,6 +315,22 @@ describe("wave2 client — roots", () => {
     const second = await server.listRoots();
     expect(second.roots).toEqual([{ uri: "file:///v2" }]);
   });
+
+  // ADR 65 — the "roots works standalone" guarantee: a static list AND a
+  // plain provider fn are served on `roots/list` with NO sandbox anywhere
+  // in the graph. The sandbox is the FLAGSHIP source, never a prerequisite.
+  it("serves roots standalone — static list and provider fn, no sandbox in the graph", async () => {
+    const staticList = await wire({ roots: [{ uri: "file:///data", name: "data" }] });
+    expect((await staticList.server.listRoots()).roots).toEqual([
+      { uri: "file:///data", name: "data" },
+    ]);
+
+    const providerFn: McpRootsSource = () => [{ uri: "file:///computed", name: "computed" }];
+    const dynamic = await wire({ roots: providerFn });
+    expect((await dynamic.server.listRoots()).roots).toEqual([
+      { uri: "file:///computed", name: "computed" },
+    ]);
+  });
 });
 
 // ============================================================================

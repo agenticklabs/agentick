@@ -193,6 +193,23 @@ export interface ToolHandlerCtx {
 // ============================================================================
 
 /**
+ * A single MCP root — a `file://` directory/file boundary advertised
+ * across the client↔server seam. Roots are advisory scoping ("operate
+ * within these directories"), NOT enforced containment and NOT content
+ * transfer (that is resources, ADR 62).
+ *
+ * Canonical home is spec-next so both directions type against ONE shape:
+ * the outbound client config (`McpRootsSource` in `@agentick/mcp-next`)
+ * and the inbound per-connection read ({@link McpRequestExtras.clientRoots}).
+ *
+ * @see docs/proposals/v2/blueprint/65-roots-as-projection.md
+ */
+export interface McpRoot {
+  readonly uri: string;
+  readonly name?: string;
+}
+
+/**
  * MCP-transport-specific ctx extras. Lives under `ToolHandlerCtx.mcp`
  * when `transport === "mcp"`. The fields here are the wire-level
  * identity material that's meaningless in the in-process case —
@@ -222,6 +239,24 @@ export interface McpRequestExtras {
   readonly clientInfo: { readonly name: string; readonly version: string } | null;
   /** Capability map the client advertised in `initialize`. */
   readonly clientCapabilities: Readonly<Record<string, unknown>> | null;
+  /**
+   * The connecting client's `file://` roots (ADR 65 — inbound direction).
+   * Populated per-connection when the client advertised the `roots`
+   * capability: the server pulls `roots/list` after initialize and
+   * re-pulls on `notifications/roots/list_changed`. Isolated per
+   * connection — connection A's roots never appear on connection B's ctx.
+   *
+   * `undefined` when the client did not advertise `roots`, or before the
+   * first pull resolves (fire-and-forget; never a control path). Roots
+   * are advisory scoping, so a handler treats absence as "no declared
+   * boundary," not an error.
+   *
+   * TODO(#237-4b / ADR-65): roots-registry upgrade path — if a unified,
+   * inspectable, cross-source mount registry is ever needed, a RootsHarness
+   * slots UNDER this provider-fn seam (provider reads from it; inbound writes
+   * to it; add wire enumerate+subscribe). See ADR 65 for the trigger + rationale.
+   */
+  readonly clientRoots?: readonly McpRoot[];
   /**
    * The client-supplied `_meta.progressToken` for THIS request, if any
    * (ADR 64). Pass it to `ctx.progress(...)` so the MCP progress

@@ -45,7 +45,8 @@
 import { omitUndefined } from "@agentick/utils-next";
 
 import { Effect } from "effect";
-import { BaseHarness, getContext } from "@agentick/runtime-next";
+import { BaseHarness, getContext, type Unsubscribe } from "@agentick/runtime-next";
+import { createNotifier, type Notifier } from "@agentick/pubsub-next";
 import type {
   ElicitationHarnessProtocol,
   EventBus,
@@ -149,6 +150,16 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
   private readonly permissionTimeoutMs: number;
   private readonly elicitation: ElicitationHarnessProtocol;
   private _status: SandboxStatus = "ready";
+
+  /**
+   * Mount-topology fan-out — fires after a successful `add-mount` /
+   * `remove-mount`. Mirrors `ResourcesHarness.subscribeListChanged`: a
+   * plain notifier is the idiomatic "a mutation happened" seam (the raw
+   * bus is a heavier `Stream` substrate for audit/observability). Consumed
+   * by the roots↔MCP adapter (`@agentick/sandbox-next/mcp`) to fire
+   * `notifyRootsListChanged()` so a connected server re-pulls (ADR 65).
+   */
+  private readonly mountsNotifier: Notifier = createNotifier();
 
   // ─── Declared commands (ADR 51) — assigned in the constructor ───
   private readonly execCmd: Cmd<SandboxExecInput, SandboxExecResult>;
@@ -305,6 +316,21 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
     return this.listMountCmd(undefined);
   }
 
+  /**
+   * Subscribe to mount-topology changes — the listener fires after a
+   * successful `add-mount` / `remove-mount`. Returns an `Unsubscribe`.
+   * Fire-and-forget fan-out (a throwing listener cannot corrupt siblings).
+   *
+   * This is the "mounts changed" seam the roots↔MCP adapter binds to
+   * (ADR 65). It is deliberately NOT the raw event bus: like
+   * `ResourcesHarness.subscribeListChanged`, a notifier is the right
+   * altitude for "a declaration changed" — the bus stays the audit/
+   * observability substrate.
+   */
+  subscribeMounts(listener: () => void): Unsubscribe {
+    return this.mountsNotifier.subscribe(listener);
+  }
+
   destroy(): Promise<void> {
     return this.destroyCmd(undefined);
   }
@@ -435,7 +461,7 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
       if (!allowed) {
         return yield* Effect.fail(sandboxPermissionDenied("mount", hostPath, "policy"));
       }
-      return yield* Effect.tryPromise<void, SandboxMountError>({
+      yield* Effect.tryPromise<void, SandboxMountError>({
         try: () => addMount.call(this.handle, input.mount),
         catch: (cause): SandboxMountError =>
           new SandboxMountError({
@@ -445,6 +471,9 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
             cause,
           }),
       });
+      // Notify AFTER the provider confirms — a denied/failed mount never
+      // fires (the Effect fails above and short-circuits).
+      this.mountsNotifier.notify();
     });
   }
 
@@ -456,7 +485,7 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
       if (removeMount === undefined) {
         return yield* Effect.fail(new SandboxUnsupportedError({ capability: "removeMount" }));
       }
-      return yield* Effect.tryPromise<void, SandboxMountError>({
+      yield* Effect.tryPromise<void, SandboxMountError>({
         try: () => removeMount.call(this.handle, input.sandboxPath),
         catch: (cause): SandboxMountError =>
           new SandboxMountError({
@@ -465,6 +494,7 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
             cause,
           }),
       });
+      this.mountsNotifier.notify();
     });
   }
 
