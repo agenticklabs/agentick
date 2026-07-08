@@ -529,6 +529,13 @@ importers:
       '@agentick/core':
         specifier: workspace:*
         version: link:../core
+    devDependencies:
+      react:
+        specifier: ^19.2.4
+        version: 19.2.4
+      zod:
+        specifier: ^4.3.6
+        version: 4.3.6
 
   packages/express:
     dependencies:
