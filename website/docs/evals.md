@@ -87,6 +87,36 @@ Axes compose: `{ model: [...], fixture: [...] }` runs every model against
 every fixture. An empty axis array yields zero cells (mathematical product);
 empty axes `{}` yields exactly one cell.
 
+**Input/expected pairs ride ONE axis value.** Never split a document and its
+expected output into separate axes — the cartesian product would score
+document A against document B's expectations. Make the axis value the pair:
+
+```ts
+interface BillFixture { name: string; fileBlock: unknown; expected: Expected }
+
+const sweep = await billEval.matrix({
+  fixture: [acmeFixture, metroFixture], // pairs — document + expectations together
+  model: ["google/gemini-2.5-flash", "bedrock/us.amazon.nova-2-lite-v1:0"],
+});
+```
+
+Overrides reach the app factory, not the test body — so when assertions need
+the pair, attach it to the per-invocation app and read it back from `t.app`
+(one app per cell, so this is concurrency-safe):
+
+```ts
+app: async (o) => {
+  const app = createMyAgent({ model: resolve(o?.model) });
+  (app as any).__fixture = o?.fixture ?? defaultFixture;
+  return app;
+},
+test: async (t) => {
+  const { fileBlock, expected } = (t.app as any).__fixture;
+  await t.send([fileBlock, { type: "text", text: "Extract it." }]);
+  // ... t.expect against `expected`
+},
+```
+
 For document-extraction pipelines the pattern is: one `defineEval` per
 document/expected pair (or a fixture axis), a `model` axis across providers,
 and `t.expect` assertions comparing the submitted extraction field-by-field

@@ -52,6 +52,9 @@ Key properties:
   `t.lastToolCall(name)`.
 - **Sequential by default** — `matrix` runs cells one at a time unless you
   raise `concurrency`, so real-model sweeps don't blow rate limits.
+- **Input/expected pairs ride one axis value** — never separate axes, or the
+  product mismatches them. Attach the pair to the per-invocation app in the
+  factory and read it from `t.app` in the test body (see /docs/evals).
 
 ## Running evals
 
