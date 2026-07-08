@@ -445,26 +445,17 @@ export {
 // Inbox messages
 // ============================================================================
 
-/**
- * Canonical inbox message types the tool executor harness accepts at
- * its `tool:{sessionId}` address.
- *
- * - `abort`  cancels an in-flight dispatch.
- *
- * Confirmation responses retired from this address — they now arrive
- * on the `elicitation:{scopeId}` harness's inbox as the generic
- * `request-response` envelope, where `BaseHarness.dispatchMessage`
- * auto-routes them through the elicitation registry. The tool
- * executor never sees them.
- *
- * Additional message types MAY be defined as the harness evolves —
- * unknown types route to the default `HandlerError` path.
- */
-export type ToolExecutorInboxMessage = {
-  readonly type: "abort";
-  readonly toolCallId: string;
-  readonly reason?: string;
-};
+// The tool executor defines NO custom inbox message type. `abort` is a
+// declared command (`tool:abort`, ADR 51) — an external actor cancels an
+// in-flight dispatch by `send`-ing the generic command-invocation shape
+// (`type: "tool:abort"`, `payload: AbortInput`) to the harness's
+// `tool:{scopeId}` address, where `BaseHarness.dispatchMessage`
+// auto-routes it through the command registry (validation + origin
+// stamping + the same `runOperation` path the public `abort()` method
+// uses). Confirmation responses retired from this address too — they
+// arrive on the `elicitation:{scopeId}` harness's inbox as the generic
+// `request-response` envelope. Unknown message types route to the
+// default `HandlerError` path.
 
 // ============================================================================
 // The protocol

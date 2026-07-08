@@ -14,10 +14,11 @@
 
 import { describe, expect, it } from "vitest";
 import { Effect, Stream, Fiber } from "effect";
-import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
+import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime-next";
 import {
   isToolExecutorFactory,
   jsonSchema,
+  ToolAbortedError,
   type DispatchInput,
   type ProtocolEvent,
   type ToolRegistration,
@@ -166,6 +167,51 @@ describe("defineToolExecutor — abort + envelopes", () => {
     await exec.abort({ toolCallId: callId, reason: "test-abort" });
     await expect(dispatchPromise).rejects.toBeDefined();
     expect(receivedSignal?.aborted).toBe(true);
+  });
+
+  it("inbox abort (a tool:abort message) cancels an in-flight dispatch with ToolAbortedError (#31 gap closed)", async () => {
+    // The #31 gap: a defineToolExecutor executor's handleMessage used to
+    // reject EVERY inbox message, so it could not be inbox-aborted. With
+    // `abort` declared as a command (`tool:abort`), BaseHarness auto-routes
+    // the inbox message — so a callback executor is now inbox-abortable.
+    const inbox = new LocalInbox();
+    const factory = defineToolExecutor({
+      dispatch: async (input, ctx) => {
+        await new Promise<void>((resolve, reject) => {
+          ctx.signal?.addEventListener("abort", () => reject(ctx.signal!.reason), { once: true });
+          setTimeout(resolve, 10_000);
+        });
+        return { toolCallId: input.toolCallId, name: input.name, succeeded: false, content: [] };
+      },
+    });
+    const scopeId = "inbox-abort-cb";
+    const exec = factory({
+      scopeId,
+      journal: new MemoryJournal(),
+      bus: new LocalEventBus(),
+      inbox,
+    });
+    // BaseHarness auto-registers its inbox address asynchronously; await
+    // `ready` before sending so the address resolves.
+    await (exec as unknown as { ready: Promise<void> }).ready;
+
+    const callId = "c_inbox_blocker";
+    const dispatchPromise = exec.dispatch({
+      toolCallId: callId,
+      name: "blocker",
+      input: {},
+      context: { via: "dispatch" },
+    });
+    // Give the dispatch a tick to register the in-flight controller.
+    await new Promise((r) => setImmediate(r));
+    await Effect.runPromise(
+      inbox.send(`tool:${scopeId}`, {
+        messageId: ulid(),
+        type: "tool:abort",
+        payload: { toolCallId: callId, reason: "inbox cancel" },
+      }),
+    );
+    await expect(dispatchPromise).rejects.toBeInstanceOf(ToolAbortedError);
   });
 
   it("dispatch emits envelopes on the supplied bus", async () => {

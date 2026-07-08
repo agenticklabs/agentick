@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { Effect } from "effect";
+import { ulid } from "@agentick/runtime-next";
 import type { DispatchInput, ToolRegistration } from "@agentick/spec-next";
 import {
   ToolAbortedError,
@@ -194,6 +196,46 @@ describe("ToolExecutorHarness — abort", () => {
   it("abort of an unknown id is a no-op", async () => {
     const { harness } = await createTestHarness({});
     await harness.abort({ toolCallId: "never" });
+  });
+
+  it("inbox abort (a tool:abort message) cancels an in-flight dispatch with ToolAbortedError", async () => {
+    // `abort` is a declared command, so an external actor cancels an
+    // in-flight dispatch by `send`-ing the generic command-invocation
+    // shape (type `tool:abort`, payload AbortInput) to the harness's
+    // address — BaseHarness.dispatchMessage auto-routes it. No custom
+    // inbox switch.
+    const { harness, inbox } = await createTestHarness({
+      tools: [echoReg("slow-inbox")],
+      handlers: [
+        {
+          handlerRef: "h.slow-inbox",
+          handler: async (_input, deps) => {
+            await new Promise((resolve, reject) => {
+              const timer = setTimeout(() => resolve(undefined), 200);
+              deps.ctx.signal.addEventListener("abort", () => {
+                clearTimeout(timer);
+                reject(deps.ctx.signal.reason);
+              });
+            });
+            return [{ type: "text", text: "should not return" }];
+          },
+        },
+      ],
+    });
+
+    const callId = "inbox-abort-target";
+    const inFlight = harness.dispatch(
+      dispatchOf("slow-inbox", "dispatch", {}, { toolCallId: callId }),
+    );
+    await new Promise((r) => setTimeout(r, 10));
+    await Effect.runPromise(
+      inbox.send(harness.address, {
+        messageId: ulid(),
+        type: "tool:abort",
+        payload: { toolCallId: callId, reason: "inbox cancel" },
+      }),
+    );
+    await expect(inFlight).rejects.toBeInstanceOf(ToolAbortedError);
   });
 
   it("caller-supplied signal also triggers ToolAbortedError", async () => {

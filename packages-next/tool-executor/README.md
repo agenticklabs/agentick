@@ -271,6 +271,28 @@ true` marks the tool session-allowed so subsequent calls skip the gate; a
 `reply.modifiedArguments` payload is re-validated before the handler
 runs. Timeout surfaces as `ToolConfirmationTimeoutError`.
 
+## Abort
+
+`abort({ toolCallId, reason? })` cancels an in-flight dispatch — the
+matching `AbortController` fires and the dispatch rejects with
+`ToolAbortedError`. It is a **declared command** (`tool:abort`, ADR 51),
+not a plain method, on BOTH the reference `ToolExecutorHarness` AND the
+`defineToolExecutor` `CallbackToolExecutor`. Three consequences:
+
+- **In-process** — `await tools.abort({ toolCallId })` works as before.
+- **Inbox-abortable** — an external actor (the session on user-escape, or
+  another cluster node) cancels a dispatch by `send`-ing the generic
+  command-invocation shape (`type: "tool:abort"`, `payload: AbortInput`)
+  to the harness's `tool:{scopeId}` address; `BaseHarness.dispatchMessage`
+  auto-routes it through the command registry — no hand-rolled inbox
+  switch. This closes the gap where a `defineToolExecutor` executor could
+  not be inbox-aborted (its `handleMessage` used to reject every message).
+- **Immediate** — the command handler fires `controller.abort`
+  synchronously; the command wrapper adds journaling AROUND that, never
+  latency, so cancellation is not deferred by the phase contract.
+
+Aborting an unknown `toolCallId` is a safe no-op.
+
 ## API
 
 Exhaustive detail is in the generated typedoc. Key exports from the
@@ -344,7 +366,9 @@ fixture behaviors into concrete handlers.
 - `src/__tests__/conformance.spec.ts` — drives the shared
   `runToolExecutorConformance` suite against `ToolExecutorHarness`.
 - `src/__tests__/harness.spec.ts` — registry + dispatch happy path,
-  abort, handler errors, exposure enforcement.
+  abort (direct `abort()`, caller-signal, timeout, unknown-id no-op, AND
+  inbox `tool:abort` command routing), handler errors, exposure
+  enforcement.
 - `src/__tests__/confirmation.spec.ts` — the confirmation gate
   (approve / deny / always / modifiedArguments / timeout).
 - `src/__tests__/dispatch-task-mode-matrix.spec.ts` — Pattern A vs B and
@@ -361,9 +385,11 @@ fixture behaviors into concrete handlers.
   multi-binding storage, precedence resolution, idempotency.
 - `src/__tests__/middleware-and-hooks.spec.ts` — `use(middleware)` +
   `onBeforeDispatch` verdicts.
-- `src/__tests__/define-tool-executor.spec.ts`,
-  `with-scope.spec.ts`, `validator.spec.ts`, `handler-resolver.spec.ts` —
-  the factory, scope helper, validators, and resolver.
+- `src/__tests__/define-tool-executor.spec.ts` — the callback factory,
+  including inbox `tool:abort` command routing cancelling an in-flight
+  dispatch with `ToolAbortedError` (the #31 gap: `CallbackToolExecutor` is
+  now inbox-abortable). Plus `with-scope.spec.ts`, `validator.spec.ts`,
+  `handler-resolver.spec.ts` — scope helper, validators, resolver.
 
 ## Status & roadmap
 
@@ -374,9 +400,12 @@ landed and passes conformance.
 
 Known gaps / deferred:
 
-- **`defineToolExecutor` inbox dispatch** — `handleMessage` on the
-  callback executor is not yet wired (FAÇADE.6 MVP); the reference
-  `ToolExecutorHarness` handles the inbox `abort` message.
+- **`defineToolExecutor` custom inbox message types** — `abort`
+  (`tool:abort`) auto-routes on both executors via the command registry
+  (see [Abort](#abort)), so a callback executor IS inbox-abortable. Any
+  OTHER inbox message type still routes to `HandlerError` on the callback
+  executor — declare it as a command (or add an `onMessage` handler) to
+  wire it.
 - **`taskSupport: "supported"` capability negotiation** — the "supported"
   branch of the task-mode matrix is resolved conservatively (Pattern A
   outside the model-required path). Phase C (#174) refines it.

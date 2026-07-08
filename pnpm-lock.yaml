@@ -768,9 +768,18 @@ importers:
         specifier: ^3.21.2
         version: 3.21.2
     devDependencies:
+      '@agentick/elicitation-next':
+        specifier: workspace:*
+        version: link:../elicitation
+      '@agentick/executor-next':
+        specifier: workspace:*
+        version: link:../executor
       '@agentick/spec-conformance-next':
         specifier: workspace:*
         version: link:../spec-conformance
+      '@agentick/tool-executor-next':
+        specifier: workspace:*
+        version: link:../tool-executor
 
   packages-next/mcp:
     dependencies:

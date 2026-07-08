@@ -71,7 +71,7 @@ import type {
   ToolListFilter,
   UnregisterToolInput,
 } from "@agentick/spec-next";
-import { HandlerError } from "@agentick/spec-next";
+import { HandlerError, ToolAbortedError } from "@agentick/spec-next";
 
 import { InMemoryToolRegistry, sameBindingKey } from "./registry.js";
 import { omitUndefined } from "@agentick/utils-next";
@@ -175,6 +175,18 @@ class CallbackToolExecutor extends BaseHarness<"tool"> implements ToolExecutorPr
   private readonly registry: InMemoryToolRegistry;
   private readonly inFlight = new Map<string, InFlightEntry>();
 
+  /**
+   * Cancel an in-flight dispatch — a declared command (`tool:abort`),
+   * identical to the reference `ToolExecutorHarness`. Declaring it here
+   * closes the #31 gap: a `defineToolExecutor` executor is now
+   * inbox-abortable (`BaseHarness.dispatchMessage` auto-routes a
+   * `tool:abort` message to this command), where its `handleMessage`
+   * previously rejected EVERY inbox message. Honors the adopter's custom
+   * `abort` callback when supplied; otherwise fires the in-flight
+   * controller synchronously.
+   */
+  readonly abort: (input: AbortInput) => Promise<void>;
+
   constructor(
     scopeId: string,
     journal: OperationJournal,
@@ -185,6 +197,14 @@ class CallbackToolExecutor extends BaseHarness<"tool"> implements ToolExecutorPr
     super("tool", scopeId, journal, bus, inbox);
     this.spec = spec;
     this.registry = new InMemoryToolRegistry();
+    this.abort = this.command<AbortInput, void, unknown>({
+      name: "tool:abort",
+      scope: () => ({ sessionId: this.scopeId }),
+      handler: (i) =>
+        this.spec.abort
+          ? Effect.tryPromise({ try: () => this.spec.abort!(i), catch: (cause) => cause })
+          : Effect.sync(() => this.abortInFlight(i)),
+    });
   }
 
   // ──────── ToolExecutorProtocol ────────
@@ -317,28 +337,35 @@ class CallbackToolExecutor extends BaseHarness<"tool"> implements ToolExecutorPr
     return runHarnessProtocol(this.runOperation(op, (i) => this.dispatchBody(i)));
   }
 
-  async abort(input: AbortInput): Promise<void> {
-    if (this.spec.abort) {
-      await this.spec.abort(input);
-      return;
-    }
+  /**
+   * Default abort body — fires the in-flight AbortController with a real
+   * `ToolAbortedError` instance (so the dispatch rejects with
+   * `instanceof ToolAbortedError` on both the direct and inbox paths).
+   * No-op for unknown ids. Used when the adopter supplies no custom
+   * `abort` callback.
+   */
+  private abortInFlight(input: AbortInput): void {
     const entry = this.inFlight.get(input.toolCallId);
     if (!entry) return;
-    entry.controller.abort({
-      _tag: "ToolAbortedError",
-      toolCallId: input.toolCallId,
-      ...omitUndefined({ reason: input.reason }),
-    });
+    entry.controller.abort(
+      new ToolAbortedError({ toolCallId: input.toolCallId, reason: input.reason }),
+    );
   }
 
-  // ──────── inbox dispatch (deferred) ────────
+  // ──────── inbox dispatch ────────
 
+  /**
+   * Inbox fallthrough. `abort` (`tool:abort`) is a declared command, so
+   * `BaseHarness.dispatchMessage` auto-routes it before reaching here —
+   * closing the gap where this method previously rejected EVERY inbox
+   * message. Anything else is genuinely unknown ⇒ `HandlerError`.
+   */
   protected handleMessage(
-    _msg: MessageEnvelope,
+    msg: MessageEnvelope,
   ): Effect.Effect<unknown, MessageHandlerError, never> {
     return Effect.fail(
       new HandlerError({
-        cause: new Error("defineToolExecutor inbox dispatch not yet wired (FAÇADE.6 MVP)"),
+        cause: new Error(`defineToolExecutor inbox: unknown message type "${msg.type}"`),
       }),
     );
   }

@@ -19,7 +19,6 @@ import type {
   ToolDeclaration,
   ToolDispatchTerminal,
   ToolExecutorError,
-  ToolExecutorInboxMessage,
   ToolExecutorProtocol,
   ToolLifecycleEvent,
   ToolListFilter,
@@ -198,13 +197,16 @@ describe("@agentick/spec-next — tool executor protocol", () => {
   });
 
   describe("Inbox messages", () => {
-    it("abort is the only recognized type (confirmation flow moved to ElicitationHarness in #126)", () => {
-      const abort: ToolExecutorInboxMessage = {
-        type: "abort",
-        toolCallId: "c1",
-        reason: "user pressed escape",
-      };
-      expect(abort.type).toBe("abort");
+    it("abort routes via the generic command-invocation shape (type tool:abort, payload AbortInput)", () => {
+      // The tool executor defines no custom inbox message type. `abort`
+      // is a declared command (`tool:abort`); an external actor sends the
+      // generic command shape and BaseHarness.dispatchMessage validates
+      // the payload against AbortInput before invoking. Pin that the
+      // payload IS an AbortInput.
+      const payload: AbortInput = { toolCallId: "c1", reason: "user pressed escape" };
+      const message = { type: "tool:abort", payload };
+      expect(message.type).toBe("tool:abort");
+      expect(message.payload.toolCallId).toBe("c1");
     });
   });
 

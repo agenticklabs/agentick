@@ -52,6 +52,9 @@
     "effect": "^3.21.2"
   },
   "devDependencies": {
-    "@agentick/spec-conformance-next": "workspace:*"
+    "@agentick/elicitation-next": "workspace:*",
+    "@agentick/executor-next": "workspace:*",
+    "@agentick/spec-conformance-next": "workspace:*",
+    "@agentick/tool-executor-next": "workspace:*"
   }
 }

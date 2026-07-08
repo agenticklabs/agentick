@@ -47,7 +47,6 @@ import type {
   TaskHandle,
   TasksHarnessProtocol,
   ToolDeclaration,
-  ToolExecutorInboxMessage,
   ToolExecutorProtocol,
   ToolListFilter,
   ToolRegistration,
@@ -107,6 +106,17 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
    */
   private readonly ctxExtensions: Readonly<Record<string, unknown>>;
 
+  /**
+   * Cancel an in-flight dispatch (ADR 51 / ADR 66). A declared command —
+   * so the same verb is reachable in-process (this method), over the
+   * inbox (a `tool:abort` message auto-routes here via
+   * `BaseHarness.dispatchMessage`), and — should a wire seam want it —
+   * grantable. The body ({@link abortBody}) fires the AbortController
+   * SYNCHRONOUSLY; the command wrapper adds journaling AROUND it, never
+   * latency, so cancellation stays immediate.
+   */
+  readonly abort: (input: AbortInput) => Promise<void>;
+
   constructor(
     scopeId: string,
     journal: OperationJournal,
@@ -123,6 +133,19 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
     this.tasks = options.tasks;
     this.resources = options.resources;
     this.ctxExtensions = options.ctxExtensions ?? {};
+
+    // `abort` as a declared command (ADR 51). Canonical verb `tool:abort`
+    // (the inbox message type); the derived Operation name is
+    // `tool:command:abort`, matching the sibling hand-rolled ops. Default
+    // `addressable` exposure makes it inbox-reachable — that's the whole
+    // point: an external actor (the session on user-escape) can cancel an
+    // in-flight dispatch by `send`-ing `tool:abort` to this harness's
+    // address, no hand-rolled inbox switch required.
+    this.abort = this.command<AbortInput, void, never>({
+      name: "tool:abort",
+      scope: () => ({ sessionId: this.scopeId }),
+      handler: (i) => Effect.sync(() => this.abortBody(i)),
+    });
 
     // Eager registrations applied synchronously so callers can dispatch
     // immediately after `await harness.ready`.
@@ -239,15 +262,24 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
     return runHarnessProtocol(this.runOperation(op, (i) => this.dispatchBody(i)));
   }
 
-  async abort(input: AbortInput): Promise<void> {
+  /**
+   * Synchronous abort body — the command handler ({@link abort}) wraps
+   * this in journaling. Fires the in-flight AbortController IMMEDIATELY
+   * so cancellation is not deferred by the command's phase contract. A
+   * real `ToolAbortedError` instance (not a plain tagged object) so both
+   * the direct and inbox paths reject the dispatch with
+   * `instanceof ToolAbortedError`. No-op for unknown ids.
+   *
+   * The dispatchBody promise sees the abort + rejects with
+   * `ToolAbortedError`; cleanup of `inFlight` is left to the dispatch
+   * path's `finally`.
+   */
+  private abortBody(input: AbortInput): void {
     const entry = this.inFlight.get(input.toolCallId);
     if (!entry) return; // no-op for unknown ids
     entry.controller.abort(
       new ToolAbortedError({ toolCallId: input.toolCallId, reason: input.reason }),
     );
-    // The dispatchBody promise will see the abort + reject with
-    // ToolAbortedError; we leave cleanup of inFlight to the dispatch
-    // path's `finally`.
   }
 
   // ──────────────────────── State store (handler ctx) ────────────────────────
@@ -298,57 +330,21 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
   // ──────────────────────── inbox dispatch ────────────────────────
 
   /**
-   * Inbox dispatcher. The tool executor handles `abort` only. The
-   * legacy `confirmation-response` message type retired with the
-   * ElicitationHarness refactor — confirmation responses now arrive
-   * on the elicitation harness's address, not here.
-   *
-   * Unknown message types route to `HandlerError`.
+   * Inbox fallthrough. `abort` is a declared command (`tool:abort`), so
+   * `BaseHarness.dispatchMessage` auto-routes it BEFORE reaching here —
+   * no hand-rolled switch. The legacy `confirmation-response` message
+   * type retired with the ElicitationHarness refactor (confirmation
+   * responses arrive on the elicitation harness's address). Every
+   * remaining message type is genuinely unknown ⇒ `HandlerError`.
    */
   protected handleMessage(
     msg: MessageEnvelope,
   ): Effect.Effect<unknown, MessageHandlerError, never> {
-    const payload = msg.payload as ToolExecutorInboxMessage | undefined;
-    if (!payload || typeof payload !== "object" || !("type" in payload)) {
-      return Effect.fail(
-        new HandlerError({ cause: new Error("tool inbox: payload missing or untagged") }),
-      );
-    }
-    switch (payload.type) {
-      case "abort":
-        return Effect.sync(() => {
-          this.abortInFlight(payload.toolCallId, payload.reason);
-        });
-      default: {
-        const unknownType = (payload as { type: string }).type;
-        return Effect.fail(
-          new HandlerError({
-            cause: new Error(`tool inbox: unknown message type "${unknownType}"`),
-          }),
-        );
-      }
-    }
-  }
-
-  /**
-   * In-process abort path used by both the protocol-level `abort()`
-   * method and the inbox `abort` message. Triggers the AbortController
-   * for an active dispatch — the dispatch's abort signal is also
-   * threaded into the in-flight `this.request(...)` (when a
-   * confirmation is pending), so the registry's signal-abort handler
-   * rejects the pending Deferred. The dispatchBody's
-   * `Effect.catchTag("RequestAbortedError", ...)` converts that
-   * rejection into a denial-shaped `DispatchResult`.
-   */
-  private abortInFlight(toolCallId: string, reason?: string): void {
-    const entry = this.inFlight.get(toolCallId);
-    if (entry) {
-      entry.controller.abort({
-        _tag: "ToolAbortedError",
-        toolCallId,
-        ...(reason !== undefined ? { reason } : {}),
-      });
-    }
+    return Effect.fail(
+      new HandlerError({
+        cause: new Error(`tool inbox: unknown message type "${msg.type}"`),
+      }),
+    );
   }
 
   // ──────────────────────── internals ────────────────────────
