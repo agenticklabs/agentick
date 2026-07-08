@@ -86,6 +86,7 @@ const PACKAGE_GROUPS: Array<{ label: string; packages: string[] }> = [
       "@agentick/timeline-next",
       "@agentick/timeline-fs-next",
       "@agentick/timeline-postgres-next",
+      "@agentick/tasks-postgres-next",
       "@agentick/skills-next",
       "@agentick/prompts-next",
       "@agentick/prompts-react-next",

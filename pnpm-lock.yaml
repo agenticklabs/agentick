@@ -1390,6 +1390,22 @@ importers:
         specifier: ^3.21.2
         version: 3.21.2
 
+  packages-next/tasks-postgres:
+    dependencies:
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../spec
+      pg:
+        specifier: ^8.13.1
+        version: 8.22.0
+    devDependencies:
+      '@agentick/tasks-next':
+        specifier: workspace:*
+        version: link:../tasks
+      '@types/pg':
+        specifier: ^8.11.10
+        version: 8.20.0
+
   packages-next/timeline:
     dependencies:
       '@agentick/pubsub-next':

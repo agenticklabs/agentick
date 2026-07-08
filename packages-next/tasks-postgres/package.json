@@ -1,0 +1,46 @@
+{
+  "name": "@agentick/tasks-postgres-next",
+  "version": "0.0.0",
+  "private": true,
+  "description": "postgresTaskStore — Postgres TaskStore adapter (ADR 68 pg tier). Durable task records across app-process restart, real interrupted-on-restart orphan accounting, terminal adoption across a fresh harness (the flexible cloud pole). BYO pg.Pool; jsonb payloads; full schema escape hatches.",
+  "keywords": [
+    "agent",
+    "agentick",
+    "ai",
+    "postgres",
+    "store",
+    "tasks"
+  ],
+  "license": "MIT",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages-next/tasks-postgres"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "main": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
+  },
+  "dependencies": {
+    "@agentick/spec-next": "workspace:*",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@agentick/tasks-next": "workspace:*",
+    "@types/pg": "^8.11.10"
+  }
+}
