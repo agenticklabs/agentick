@@ -69,6 +69,7 @@ import { buildSessionElicit } from "@agentick/elicitation-next";
 import { withScope } from "@agentick/tool-executor-next";
 import { effectiveModelInfo, mergeUsageStats, type ModelRegistry } from "@agentick/model-next";
 import type { KnobsHandle } from "@agentick/knobs-next";
+import type { GateHandle, GatesHandle } from "@agentick/gates-next";
 import type { StateHandle } from "@agentick/state-next";
 import type { TimelineHandle, TimelineHarnessOptions } from "@agentick/timeline-next";
 
@@ -505,6 +506,29 @@ export class SessionHarness<P = unknown>
    */
   get knobs(): KnobsHandle {
     return this.bridges.knobs;
+  }
+
+  /**
+   * The session's gates — the unified gate registry. Both tree-declared
+   * gates (`useGate`) and programmatically-registered gates
+   * (`session.gates.register(...)`) land in the SAME controller, so
+   * `list()` shows all of them. Per-gate access is `session.gate(name)`.
+   *
+   * Gates are NOT a harness — a gate's value IS a knob value. The
+   * controller rides the bridge bundle so this handle and every `useGate`
+   * are the same instance.
+   */
+  get gates(): GatesHandle {
+    return this.bridges.gates;
+  }
+
+  /**
+   * Per-gate handle by name — value/engaged reads, `clear()`/`defer()`,
+   * and the trusted-host `override()` escape for verified gates.
+   * Undefined when no gate by that name is registered.
+   */
+  gate(name: string): GateHandle | undefined {
+    return this.bridges.gates.get(name);
   }
 
   /**

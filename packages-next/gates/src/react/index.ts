@@ -1,14 +1,25 @@
 /**
- * `@agentick/gates-next/react` — React hook for the gate pattern.
+ * `@agentick/gates-next/react` — React front-end for the gate pattern.
  *
- * Composes `useKnob` + `useOnTickEnd` + `useLoopControl` from the
- * React reconciler ecosystem. Re-exports the descriptor types from
- * the package root so adopters can do everything from this subpath.
+ * `useGate` is a thin binding over the reconciler-agnostic
+ * {@link GatesController}. The context surface (`GatesContext`,
+ * `GatesProvider`, `useGatesController`, `GatesRuntime`) resolves + wires
+ * the controller; adopters rarely touch it directly. Re-exports the
+ * descriptor types + controller types so everything is reachable from
+ * this subpath.
  */
 
 export { useGate, type GateState } from "./use-gate.js";
+export {
+  GatesContext,
+  GatesProvider,
+  GatesRuntime,
+  useGatesController,
+  type GatesProviderProps,
+} from "./gates-context.js";
 
-// Re-export descriptor types so adopters can pull everything from /react.
+// Re-export descriptor + controller types so adopters can pull
+// everything from /react.
 export { gate, isVerifiedGate, GATE_OPTIONS, VERIFIED_GATE_OPTIONS } from "../descriptor.js";
 export type {
   GateDescriptor,
@@ -16,3 +27,14 @@ export type {
   VerifiedGateDescriptor,
   GateValue,
 } from "../descriptor.js";
+export { GatesController } from "../controller.js";
+export type {
+  GatesControllerDeps,
+  GateKnobs,
+  LoopControlSeam,
+  TickEndSeam,
+  GateOverrideAudit,
+  GateInfo,
+  GateHandle,
+  GatesHandle,
+} from "../controller.js";

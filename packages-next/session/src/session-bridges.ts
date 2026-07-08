@@ -17,13 +17,16 @@
  * cluster nodes) can address them at `inbox://{surface}:{sessionId}:{surface}`.
  */
 
+import { Effect } from "effect";
 import { InMemoryDataBridge, InMemoryModelBridge } from "@agentick/reconciler-next";
 import { ElicitationHarness } from "@agentick/elicitation-next";
 import { KnobsHarness } from "@agentick/knobs-next";
 import { StateHarness } from "@agentick/state-next";
 import { TasksHarness } from "@agentick/tasks-next";
 import { ResourcesHarness } from "@agentick/resources-next";
+import { GatesController, type GateOverrideAudit } from "@agentick/gates-next";
 import { TimelineHarness, type TimelineHarnessOptions } from "@agentick/timeline-next";
+import { ulid } from "@agentick/runtime-next";
 import type {
   ElicitationHarnessProtocol,
   EventBus,
@@ -31,6 +34,7 @@ import type {
   LoopBridge,
   MessageInbox,
   OperationJournal,
+  ProtocolEvent,
   Resources,
   SessionBridge,
   TasksHarnessProtocol,
@@ -73,6 +77,16 @@ export interface SessionHookBridges extends HookBridges {
   readonly state: StateHarness;
   readonly tasks: TasksHarnessProtocol;
   readonly resources: Resources;
+  /**
+   * The session's gate wiring core (ADR 27). Gates is NOT a harness —
+   * a gate's value is a knob value — so this is a runtime transport
+   * property on the bridge bundle, NOT a typed `HookBridges` harness
+   * slot and NOT snapshot-captured (the controller exposes no
+   * `exportSnapshot`). It rides the existing `BridgeContext` so
+   * `useGate` and the programmatic `session.gates` converge on ONE
+   * controller (unified registry).
+   */
+  readonly gates: GatesController;
   readonly data: InMemoryDataBridge;
   /**
    * Model registration bridge (ADR 56). The session builds one per
@@ -182,7 +196,7 @@ export function buildSessionBridges(
       substrate.inbox,
     );
 
-  const base: SessionHookBridges = {
+  const base = {
     timeline,
     knobs,
     state,
@@ -194,7 +208,21 @@ export function buildSessionBridges(
     loop: loopBridgeStub(),
     session: sessionBridgeFor(store),
     ...omitUndefined({ tools: options.toolBridge }),
-  };
+  } as SessionHookBridges;
+
+  // Gate wiring core (ADR 27). Injected with the session's KnobsHarness
+  // + a live getter over the loop bridge (so the same loop the tree sees
+  // via `useLoopControl` drives continuation) + a bus-backed audit sink
+  // for the trusted-host `.override()` escape. NOT a harness slot — the
+  // tick-end seam is attached from the reconciler mount (see gates-next
+  // `useGatesController`); the controller carries no independent state.
+  const gates = new GatesController({
+    knobs,
+    loopControl: () => base.loop,
+    audit: makeGateAudit(substrate.bus, store.id),
+  });
+  (base as { gates: GatesController }).gates = gates;
+
   if (options.extensionBridges && options.extensionBridges.size > 0) {
     return {
       ...base,
@@ -202,4 +230,27 @@ export function buildSessionBridges(
     } as SessionHookBridges;
   }
   return base;
+}
+
+/**
+ * Audit sink for verified-gate host overrides — appends a session-surface
+ * terminal event so `.override()` calls are traceable on `app.events()`.
+ * Fire-and-forget (`Effect.runFork`); an audit append never blocks or
+ * fails the override.
+ */
+function makeGateAudit(bus: EventBus, sessionId: string): (event: GateOverrideAudit) => void {
+  return (event) => {
+    const envelope: ProtocolEvent = {
+      id: ulid(),
+      surface: "session",
+      name: "session:gate:override",
+      phase: "terminal",
+      outcome: "succeeded",
+      timestamp: Date.now(),
+      scope: { sessionId },
+      payload: { name: event.name, value: event.value, reason: event.reason, at: event.at },
+      tags: ["gate", "override", "audit"],
+    };
+    Effect.runFork(bus.append(envelope));
+  };
 }

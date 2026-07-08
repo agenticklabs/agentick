@@ -29,6 +29,11 @@
       "types": "./src/react/index.ts",
       "import": "./src/react/index.ts",
       "default": "./src/react/index.ts"
+    },
+    "./testing": {
+      "types": "./src/testing/index.ts",
+      "import": "./src/testing/index.ts",
+      "default": "./src/testing/index.ts"
     }
   },
   "scripts": {
@@ -40,6 +45,7 @@
   },
   "dependencies": {
     "@agentick/knobs-next": "workspace:*",
+    "@agentick/pubsub-next": "workspace:*",
     "@agentick/reconciler-next": "workspace:*",
     "@agentick/reconciler-react-next": "workspace:*",
     "@agentick/spec-next": "workspace:*"

@@ -76,6 +76,7 @@ import type {
   TickEndForwardDecision,
 } from "@agentick/spec-next";
 import type { KnobsHandle } from "@agentick/knobs-next";
+import type { GateHandle, GatesHandle } from "@agentick/gates-next";
 import type { StateHandle } from "@agentick/state-next";
 import type { TimelineHandle } from "@agentick/timeline-next";
 import { buildSessionElicit, ElicitationHarness } from "@agentick/elicitation-next";
@@ -116,10 +117,12 @@ export interface DefineSessionInput<P = unknown> {
   ) => Promise<readonly ContentBlock[]>;
   readonly channel?: <T = unknown>(name: string) => ChannelHandle<T>;
   readonly knob?: <T = unknown>(name: string) => KnobHandle<T>;
+  readonly gate?: (name: string) => GateHandle | undefined;
 
   // ── Optional: top-level handles (ADR 27 augmentations) ───────────────
   readonly timeline?: TimelineHandle;
   readonly knobs?: KnobsHandle;
+  readonly gates?: GatesHandle;
   readonly state?: StateHandle;
   /**
    * Pre-constructed elicitation harness for the
@@ -169,6 +172,7 @@ class CallbackSessionHarness<P = unknown>
   private readonly spec: DefineSessionInput<P>;
   readonly timeline: TimelineHandle;
   readonly knobs: KnobsHandle;
+  readonly gates: GatesHandle;
   readonly state: StateHandle;
   readonly elicitation: ElicitationHarnessProtocol;
   readonly elicit: Elicit;
@@ -186,6 +190,7 @@ class CallbackSessionHarness<P = unknown>
     this.spec = spec;
     this.timeline = spec.timeline ?? noopTimelineHandle();
     this.knobs = spec.knobs ?? noopKnobsHandle();
+    this.gates = spec.gates ?? noopGatesHandle();
     this.state = spec.state ?? noopStateHandle();
     // Adopter-provided elicitation overrides; otherwise spin up a
     // fresh harness on the same substrate so the SessionHarnessProtocol
@@ -289,6 +294,10 @@ class CallbackSessionHarness<P = unknown>
     throw new Error(`defineSession: knob("${name}") not configured`);
   }
 
+  gate(name: string): GateHandle | undefined {
+    return this.spec.gate?.(name) ?? this.gates.get(name);
+  }
+
   // ──────── inbox dispatch (deferred) ────────
 
   protected handleMessage(
@@ -335,6 +344,19 @@ function noopKnobsHandle(): KnobsHandle {
     dispatch: async () => [],
     subscribe: () => unsubscribe,
     subscribeAll: () => unsubscribe,
+  };
+}
+
+function noopGatesHandle(): GatesHandle {
+  return {
+    register: () => {
+      throw new Error(
+        "defineSession: `gates` not configured — supply a GatesController via `gates` to register gates.",
+      );
+    },
+    get: () => undefined,
+    list: () => [],
+    clear: () => {},
   };
 }
 

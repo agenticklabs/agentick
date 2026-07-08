@@ -665,6 +665,9 @@ importers:
       '@agentick/knobs-next':
         specifier: workspace:*
         version: link:../knobs
+      '@agentick/pubsub-next':
+        specifier: workspace:*
+        version: link:../pubsub
       '@agentick/reconciler-next':
         specifier: workspace:*
         version: link:../reconciler
@@ -1085,6 +1088,9 @@ importers:
         specifier: ^19.0.0
         version: 19.2.4
     devDependencies:
+      '@agentick/reconciler-next':
+        specifier: workspace:*
+        version: link:../reconciler
       '@types/react':
         specifier: ^19.2.5
         version: 19.2.13
@@ -1184,6 +1190,9 @@ importers:
       '@agentick/elicitation-next':
         specifier: workspace:*
         version: link:../elicitation
+      '@agentick/gates-next':
+        specifier: workspace:*
+        version: link:../gates
       '@agentick/knobs-next':
         specifier: workspace:*
         version: link:../knobs

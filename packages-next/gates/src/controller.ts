@@ -1,0 +1,484 @@
+/**
+ * `GatesController` — the reconciler-agnostic gate-wiring core.
+ *
+ * ONE wiring logic, two front-ends. The verification wiring that used
+ * to live inside the React `useGate` hook — register the backing knob,
+ * arm the descriptor, evaluate the predicate at tick-end, auto-clear /
+ * re-engage, fail-closed on throw, drive loop continuation — lives here
+ * now. `useGate` (React) and the programmatic `session.gates` API are
+ * thin front-ends that register descriptors into the SAME controller;
+ * neither re-implements the wiring. This mirrors `useKnob` →
+ * `KnobsHarness`.
+ *
+ * Gates are NOT a harness. A gate owns no independent state — its value
+ * IS a knob value in the session's {@link KnobsHarnessProtocol}. The
+ * controller holds only the gate registry (descriptors + armed flags +
+ * a synchronous value mirror) and the single tick-end subscription. It
+ * takes its collaborators INJECTED (no React, no context reads):
+ *
+ *   - `knobs`       — register/set/get/subscribe the backing knob.
+ *   - `loopControl` — block/continue the loop (a value or a getter, so
+ *                     a per-execution loop bridge is tracked live).
+ *   - `audit`       — optional sink for the host `.override()` escape.
+ *
+ * The tick-end seam is attached separately via {@link attach} because
+ * the only source carrying the full {@link TickResult} (executed tool
+ * results + `shouldContinue`) is the per-mount lifecycle store, which
+ * exists inside the reconciler mount. `attach` is ref-counted: the
+ * controller subscribes exactly once regardless of how many front-ends
+ * attach it.
+ *
+ * @see ./descriptor.ts (pure descriptor types + `gate()`)
+ * @see ./react/use-gate.ts (React front-end)
+ * @see docs/proposals/v2/blueprint/27-modular-built-ins.md
+ */
+
+import type {
+  KnobPrimitive,
+  KnobRegistration,
+  KnobsHarnessProtocol,
+  TickResult,
+  Unsubscribe,
+} from "@agentick/spec-next";
+import { createNotifier, type Notifier } from "@agentick/pubsub-next";
+
+import {
+  GATE_OPTIONS,
+  VERIFIED_GATE_OPTIONS,
+  isVerifiedGate,
+  type GateDescriptor,
+  type GateValue,
+} from "./descriptor.js";
+
+// ============================================================================
+// Injected seams
+// ============================================================================
+
+/**
+ * The loop continuation seam — the block/continue surface a gate drives
+ * when the loop would otherwise stop. Structurally the spec's
+ * `LoopBridge`; named locally so the controller has no hard dependency
+ * on a bridge slot.
+ */
+export interface LoopControlSeam {
+  continueAfterTick(reason: string): void;
+  stopAfterTick(reason: string): void;
+}
+
+/**
+ * The subset of the knobs harness the controller consumes. Kept
+ * structural so the controller works against the real `KnobsHarness`,
+ * `fakeKnobsHarness`, or `stubKnobsHarness` interchangeably.
+ */
+export type GateKnobs = Pick<KnobsHarnessProtocol, "register" | "set" | "get" | "subscribe">;
+
+/**
+ * Tick-end subscription seam — hand the controller a full
+ * {@link TickResult} at the end of every tick. In React this wraps the
+ * per-mount lifecycle store's `register("tick-end", …)`; in a headless
+ * host it wraps whatever tick-end source the host drives.
+ */
+export type TickEndSeam = (cb: (result: TickResult) => void | Promise<void>) => Unsubscribe;
+
+/**
+ * Audit record emitted by the trusted-host {@link GateHandle.override}
+ * escape. Verified gates are code-cleared and read-only to the model;
+ * a host override is legitimate but must be explicit + auditable, never
+ * a silent setter.
+ */
+export interface GateOverrideAudit {
+  readonly kind: "gate:override";
+  readonly name: string;
+  readonly value: GateValue;
+  readonly reason?: string;
+  readonly at: number;
+}
+
+export interface GatesControllerDeps {
+  readonly knobs: GateKnobs;
+  /**
+   * The loop continuation seam. A value pins one bridge; a getter is
+   * re-read at each tick-end so a per-execution loop bridge is tracked
+   * live (mirrors how `useGate` read `useLoopControl()` fresh).
+   */
+  readonly loopControl: LoopControlSeam | (() => LoopControlSeam);
+  /**
+   * Optional audit sink for the host `.override()` escape. Wire it to
+   * the substrate bus (or any observer) so overrides are traceable. If
+   * omitted, overrides still apply — they just aren't recorded.
+   */
+  readonly audit?: (event: GateOverrideAudit) => void;
+}
+
+// ============================================================================
+// Public read shapes
+// ============================================================================
+
+/** Unified read row over a registered gate (tree-declared or programmatic). */
+export interface GateInfo {
+  readonly name: string;
+  readonly value: GateValue;
+  readonly verified: boolean;
+  readonly description: string;
+}
+
+/**
+ * Per-gate handle. Returned from {@link GatesController.register} /
+ * {@link GatesController.get}; surfaced to adopters as `session.gate(name)`.
+ */
+export interface GateHandle {
+  readonly name: string;
+  readonly descriptor: GateDescriptor;
+  /** True for verified (satisfied) gates; false for latch (activateWhen) gates. */
+  readonly verified: boolean;
+  /** Current gate value — the synchronous mirror of the backing knob. */
+  readonly value: GateValue;
+  /** `value !== "inactive"` — the gate is currently blocking exit. */
+  readonly engaged: boolean;
+  /**
+   * Release the gate — the host-side equivalent of the model clearing a
+   * latch via `set_knob`. Transient on verified gates: the predicate
+   * re-engages at the next tick end if still unsatisfied.
+   */
+  clear(): void;
+  /**
+   * Postpone a latch gate (`deferred`) — the model must still face it
+   * before completing. No-op on verified gates.
+   */
+  defer(): void;
+  /**
+   * **Verified gates, HOST-ONLY, audited.** Verified gates are cleared
+   * by their predicate and their backing knob is read-only to the MODEL
+   * (an unforgeable guarantee — `set_knob` cannot clear them). A HOST
+   * override is legitimate (the host is trusted) but is an EXPLICIT,
+   * auditable escape — it emits a {@link GateOverrideAudit} and does NOT
+   * exist as a generic setter that would silently reopen the read-only
+   * protection. Throws on latch gates (use {@link clear} there).
+   */
+  override(value: GateValue, reason?: string): void;
+  /** Subscribe to value changes for this gate. */
+  subscribe(listener: () => void): Unsubscribe;
+}
+
+// ============================================================================
+// Internal registry entry
+// ============================================================================
+
+interface GateEntry {
+  name: string;
+  descriptor: GateDescriptor;
+  verified: boolean;
+  /**
+   * Synchronous source of truth for the gate's value — updated
+   * immediately on `transition` (so same-tick logic sees the new value)
+   * and re-synced from the knob whenever the knob changes (so a model
+   * `set_knob` clear is observed). Mirrors `useGate`'s `stateRef`.
+   */
+  value: GateValue;
+  /**
+   * Verified-gate arming latch (sticky per registration). Verified gates
+   * without `activateWhen` are armed from the first tick.
+   */
+  armed: boolean;
+  /** Per-gate change notifier for handle subscribers. */
+  readonly notifier: Notifier;
+  /** Teardown for the knob subscription that keeps `value` in sync. */
+  knobUnsub: Unsubscribe;
+  /** Stable handle instance. */
+  readonly handle: GateHandle;
+}
+
+// ============================================================================
+// Controller
+// ============================================================================
+
+export class GatesController {
+  private readonly deps: GatesControllerDeps;
+  private readonly gates = new Map<string, GateEntry>();
+
+  // Single tick-end subscription, ref-counted across front-ends.
+  private tickEndUnsub: Unsubscribe | undefined;
+  private attachCount = 0;
+
+  constructor(deps: GatesControllerDeps) {
+    this.deps = deps;
+  }
+
+  /**
+   * Register (or replace) a gate by name. Registers the backing knob
+   * (three-state select for latch; read-only two-state for verified),
+   * wires a knob subscription that keeps the synchronous value mirror in
+   * sync, and returns a stable {@link GateHandle}. Idempotent by name —
+   * last-writer-wins on the descriptor (like ToolBridge / knobs).
+   */
+  register(name: string, descriptor: GateDescriptor): GateHandle {
+    const verified = isVerifiedGate(descriptor);
+
+    const existing = this.gates.get(name);
+    if (existing) {
+      // Replace the descriptor in place; keep the entry (and its handle
+      // identity + current value + subscribers) stable.
+      existing.descriptor = descriptor;
+      existing.verified = verified;
+      existing.armed = false;
+      void this.deps.knobs.register({ id: name, descriptor: this.knobRegistration(descriptor) });
+      return existing.handle;
+    }
+
+    const entry: GateEntry = {
+      name,
+      descriptor,
+      verified,
+      value: (this.deps.knobs.get(name) ?? "inactive") as GateValue,
+      armed: false,
+      notifier: createNotifier(),
+      knobUnsub: () => {},
+      handle: undefined as unknown as GateHandle,
+    };
+    (entry as { handle: GateHandle }).handle = this.makeHandle(entry);
+    this.gates.set(name, entry);
+
+    void this.deps.knobs.register({ id: name, descriptor: this.knobRegistration(descriptor) });
+
+    // Keep the synchronous mirror aligned with the knob so a model
+    // `set_knob` clear (latch) is observed by subsequent ticks + by
+    // handle subscribers, exactly as `useGate` re-read `state` per render.
+    entry.knobUnsub = this.deps.knobs.subscribe(name, () => {
+      const next = (this.deps.knobs.get(name) ?? "inactive") as GateValue;
+      if (next !== entry.value) {
+        entry.value = next;
+        entry.notifier.notify();
+      }
+    });
+
+    return entry.handle;
+  }
+
+  /** Remove a gate and tear down its knob subscription. */
+  unregister(name: string): void {
+    const entry = this.gates.get(name);
+    if (!entry) return;
+    entry.knobUnsub();
+    this.gates.delete(name);
+  }
+
+  /** The gate's handle, or undefined when unknown. */
+  get(name: string): GateHandle | undefined {
+    return this.gates.get(name)?.handle;
+  }
+
+  /** Unified snapshot over ALL registered gates (tree-declared + programmatic). */
+  list(): readonly GateInfo[] {
+    const out: GateInfo[] = [];
+    for (const entry of this.gates.values()) {
+      out.push({
+        name: entry.name,
+        value: entry.value,
+        verified: entry.verified,
+        description: entry.descriptor.description,
+      });
+    }
+    return out;
+  }
+
+  /** Release a gate by name (host-side clear). No-op when unknown. */
+  clear(name: string): void {
+    this.gates.get(name)?.handle.clear();
+  }
+
+  /**
+   * Attach a tick-end source. Ref-counted: the controller installs its
+   * single tick-end handler on the FIRST attach and tears it down when
+   * the LAST attacher detaches. Returns a detach function.
+   *
+   * The verification wiring lives behind this one subscription — every
+   * front-end that attaches drives the SAME {@link handleTickEnd}, so
+   * there is never duplicated verification logic.
+   */
+  attach(onTickEnd: TickEndSeam): Unsubscribe {
+    this.attachCount += 1;
+    if (this.attachCount === 1) {
+      this.tickEndUnsub = onTickEnd((result) => this.handleTickEnd(result));
+    }
+    let detached = false;
+    return () => {
+      if (detached) return;
+      detached = true;
+      this.attachCount -= 1;
+      if (this.attachCount === 0 && this.tickEndUnsub) {
+        this.tickEndUnsub();
+        this.tickEndUnsub = undefined;
+      }
+    };
+  }
+
+  /** True while a tick-end source is attached. Diagnostic. */
+  get wired(): boolean {
+    return this.tickEndUnsub !== undefined;
+  }
+
+  // ─────────── The single wiring logic (shared by both front-ends) ───────────
+
+  /**
+   * Evaluate every registered gate at tick-end. Serial — the lifecycle
+   * store awaits this handler, so async verified predicates are awaited
+   * in order (deterministic, matches v1 lifecycle semantics).
+   */
+  async handleTickEnd(result: TickResult): Promise<void> {
+    // Snapshot the entries so a gate registered/unregistered mid-eval
+    // doesn't perturb this tick's pass.
+    for (const entry of [...this.gates.values()]) {
+      await this.evaluate(entry, result);
+    }
+  }
+
+  private async evaluate(entry: GateEntry, result: TickResult): Promise<void> {
+    const { name, descriptor } = entry;
+
+    if (isVerifiedGate(descriptor)) {
+      // Optional arming scope: while unarmed the gate is dormant —
+      // `satisfied` is not evaluated and the gate never blocks. The
+      // first tick where `activateWhen` fires arms it (sticky); verification
+      // takes over immediately, same tick.
+      if (!entry.armed) {
+        if (descriptor.activateWhen === undefined || descriptor.activateWhen(result)) {
+          entry.armed = true;
+        } else {
+          return;
+        }
+      }
+
+      // Level-triggered: verify every tick; engage/clear from the
+      // predicate alone. Fail-closed — a throwing predicate counts as
+      // unsatisfied (the lifecycle store would otherwise swallow the
+      // error and leave the gate in its previous state).
+      let ok = false;
+      try {
+        ok = await descriptor.satisfied(result);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error(
+          `[@agentick/gates] verified gate "${name}" predicate threw; ` +
+            `treating as unsatisfied (fail-closed).`,
+          err,
+        );
+      }
+      if (ok) {
+        this.transition(entry, "inactive");
+        return;
+      }
+      this.transition(entry, "active");
+      if (!result.shouldContinue) {
+        this.loop().continueAfterTick(`gate:${name}`);
+      }
+      return;
+    }
+
+    // Edge-triggered latch: activate only when inactive — once engaged,
+    // the model is in control.
+    if (entry.value === "inactive" && descriptor.activateWhen(result)) {
+      this.transition(entry, "active");
+    }
+
+    // Block completion when engaged.
+    if (entry.value !== "inactive" && !result.shouldContinue) {
+      if (entry.value === "deferred") {
+        // Un-defer: the model must face the instructions before completing.
+        this.transition(entry, "active");
+      }
+      this.loop().continueAfterTick(`gate:${name}`);
+    }
+  }
+
+  // ─────────── Internals ───────────
+
+  private makeHandle(entry: GateEntry): GateHandle {
+    const controller = this;
+    return {
+      name: entry.name,
+      get descriptor() {
+        return entry.descriptor;
+      },
+      get verified() {
+        return entry.verified;
+      },
+      get value() {
+        return entry.value;
+      },
+      get engaged() {
+        return entry.value !== "inactive";
+      },
+      clear() {
+        controller.transition(entry, "inactive");
+      },
+      defer() {
+        if (!entry.verified) controller.transition(entry, "deferred");
+      },
+      override(value: GateValue, reason?: string) {
+        if (!entry.verified) {
+          throw new Error(
+            `override() is a verified-gate escape; gate "${entry.name}" is a latch gate — use clear().`,
+          );
+        }
+        controller.transition(entry, value);
+        controller.deps.audit?.({
+          kind: "gate:override",
+          name: entry.name,
+          value,
+          at: Date.now(),
+          ...(reason !== undefined ? { reason } : {}),
+        });
+      },
+      subscribe(listener: () => void) {
+        return entry.notifier.subscribe(listener);
+      },
+    };
+  }
+
+  /**
+   * Set a gate's value. Updates the synchronous mirror immediately (so
+   * same-tick logic + subscribers see it) and mirrors to the backing
+   * knob fire-and-forget (the durable, model-facing cell). The knob
+   * subscription started in `register` re-confirms the mirror when the
+   * async set lands — a no-op when already aligned.
+   */
+  private transition(entry: GateEntry, next: GateValue): void {
+    if (entry.value === next) return;
+    entry.value = next;
+    void this.deps.knobs.set({ id: entry.name, value: next });
+    entry.notifier.notify();
+  }
+
+  private loop(): LoopControlSeam {
+    const lc = this.deps.loopControl;
+    return typeof lc === "function" ? lc() : lc;
+  }
+
+  private knobRegistration(descriptor: GateDescriptor): KnobRegistration {
+    const verified = isVerifiedGate(descriptor);
+    return {
+      defaultValue: "inactive" as KnobPrimitive,
+      valueType: "string",
+      description: descriptor.description,
+      group: "gates",
+      options: (verified ? VERIFIED_GATE_OPTIONS : GATE_OPTIONS) as readonly KnobPrimitive[],
+      ...(verified ? { readOnly: true } : {}),
+    };
+  }
+}
+
+/**
+ * Curated session-facing surface over a {@link GatesController} —
+ * exposed as `session.gates` (mirrors `session.knobs` → `KnobsHandle`).
+ * Structural subset; the controller satisfies it directly.
+ */
+export interface GatesHandle {
+  /** Register (or replace) a gate by name; returns its handle. */
+  register(name: string, descriptor: GateDescriptor): GateHandle;
+  /** The gate's handle, or undefined when unknown. */
+  get(name: string): GateHandle | undefined;
+  /** Unified snapshot over ALL gates — tree-declared and programmatic. */
+  list(): readonly GateInfo[];
+  /** Release a gate by name (host-side clear). */
+  clear(name: string): void;
+}
