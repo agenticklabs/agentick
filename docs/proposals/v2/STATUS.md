@@ -1652,6 +1652,45 @@ explicit `typescript` + `vitest` devDeps. Both removed:
 Running record of decisions made during execution (separate from the
 blueprint's design decisions; this is execution-level).
 
+### 2026-07-08
+
+- **ADR 68 persistent tasks — Builds A + B landed** (`3c747508`,
+  `3c1beb6f`). The pivot: a task is a persisted `TaskRecord` FSM in a
+  `TaskStore`; *how it runs* is a pluggable `TaskExecutor`. Build A:
+  record-source-of-truth refactor of `TasksHarness` (CQRS — sync
+  projection kept in lockstep with async `store.put`; bus stays the
+  LIVE plane, store the DURABLE plane, wire payloads byte-identical),
+  `InMemoryTaskStore` + `runTaskStoreConformance`, `InProcessTaskExecutor`,
+  `detached` lifetime (survives session close), `interrupted` orphan
+  accounting on hydration (scope-filtered per session). Build B:
+  `ChildProcessTaskExecutor` over fork+IPC (by-ref: closures can't cross
+  the boundary → `handlerRef` + serializable `TaskRecord` descriptor;
+  graceful IPC-cancel → SIGKILL backstop; crash → `failed`; within-process
+  reattach), and the harness single-executor field generalized to a
+  **registry keyed by `.kind`** — per-submit `executorKind` selection,
+  hydration/cancel dispatch by `record.executorKind`.
+- **Executor authoring surface decided.** `TaskHandlerRegistry` +
+  `registerTaskHandler<I,O>` (transport-agnostic, generic) factored
+  STRICTLY apart from `runTaskWorker` (the IPC driver) — the registry is
+  the reusable piece a future distributed (e.g. queue-backed) executor
+  reuses with its own driver. NO `defineTaskStore`/`defineTaskExecutor`
+  factories: the ports are non-generic and validation lives in the
+  conformance suites, so a factory would be a pass-through returning its
+  arg. The `define`-energy belongs at the by-ref handler layer, not the
+  port layer.
+- **App-scoped `tasks: { store, executors }` seam on `createApp`** — NOT
+  a cascade. Detached tasks + child reattach require shared singletons
+  that outlive any one session, so the store + executors are app-owned
+  for the app's lifetime (a session-scoped store would lose detached
+  tasks on close). Contrast knobs/gates, which DO cascade (policy).
+- **Deferred (seam-ready):** `@agentick/tasks-postgres-next` durable
+  store + cross-app-restart reattach (child pid on `record.executorState`)
+  — `TODO(ADR-68 pg)` trailheads at child-executor.ts + harness.ts. A
+  distributed/queue executor (pg-boss-style) is the ambitious tier: it's
+  the child-process executor with the pipe swapped for a queue + the
+  cluster bus (report goes through the durable + cluster planes rather
+  than an in-process closure).
+
 ### 2026-06-29
 
 - **ADR 43 Slices 2 + 3 landed.** Slice 2: `buildSessionElicit(harness)`
