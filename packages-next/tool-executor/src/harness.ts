@@ -24,7 +24,7 @@ import { omitUndefined } from "@agentick/utils-next";
 import { buildSessionElicit } from "@agentick/elicitation-next";
 
 import { Cause, Effect, Exit, Option } from "effect";
-import { runHarnessProtocol, ulid } from "@agentick/runtime-next";
+import { getContext, runHarnessProtocol, ulid } from "@agentick/runtime-next";
 import { BaseHarness, type LifecycleHandler, type Unsubscribe } from "@agentick/runtime-next";
 import type {
   AbortInput,
@@ -40,6 +40,7 @@ import type {
   MessageInbox,
   Operation,
   OperationJournal,
+  OperationOrigin,
   RegisterToolInput,
   RemoveBoundToolsInput,
   Resources,
@@ -52,6 +53,7 @@ import type {
   ToolRegistration,
   UnregisterToolInput,
 } from "@agentick/spec-next";
+import { viaToOrigin } from "./provenance.js";
 import {
   HandlerError,
   isTaskHandle,
@@ -117,6 +119,21 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
    */
   readonly abort: (input: AbortInput) => Promise<void>;
 
+  /**
+   * The declared `dispatch` command (`tool:dispatch`, ADR 51/66) — the
+   * heavy path every tool call rides. Promoting `dispatch` from a plain
+   * `runOperation` method to a command is what makes it (a)
+   * provenance-stamped at its gate (the public {@link dispatch} maps the
+   * dispatch DOOR to the operation's `origin`), and (b) inbox/wire
+   * dispatch-by-name reachable (`BaseHarness.dispatchMessage` auto-routes
+   * a `tool:dispatch` message here). The dispatch FLOW ({@link dispatchBody})
+   * is byte-identical to before — only the declaration mechanism changed.
+   */
+  private readonly dispatchCommand: (
+    input: DispatchInput,
+    opts?: { readonly origin?: OperationOrigin },
+  ) => Promise<DispatchResult>;
+
   constructor(
     scopeId: string,
     journal: OperationJournal,
@@ -145,6 +162,33 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
       name: "tool:abort",
       scope: () => ({ sessionId: this.scopeId }),
       handler: (i) => Effect.sync(() => this.abortBody(i)),
+    });
+
+    // `dispatch` as a declared command (ADR 51/66). Canonical verb
+    // `tool:dispatch`; derived op name `tool:command:dispatch` — identical
+    // to the hand-rolled Operation this replaces. The scope thunk carries
+    // the caller's work-path coordinates (session/execution/tick off
+    // `input.context`) onto every dispatch envelope, matching the prior
+    // hand-built scope. Default `addressable` exposure makes the verb
+    // inbox-reachable: a `tool:dispatch` message (serializable
+    // `DispatchInput`, no `signal`) routes here via
+    // `BaseHarness.dispatchMessage`. The public `dispatch` method wraps
+    // this to stamp provenance from the dispatch door.
+    this.dispatchCommand = this.command<DispatchInput, DispatchResult, unknown>({
+      name: "tool:dispatch",
+      // Deterministic opId keyed by the model's stable `toolCallId` (or an
+      // explicit `input.opId`) — preserves dispatch's idempotency: a repeat
+      // dispatch of the same call replays the cached terminal instead of
+      // re-executing a side-effecting tool (ADR 51). Matches the opId the
+      // pre-command hand-built Operation used.
+      opId: (i) => i.opId ?? `tool:dispatch:${i.toolCallId}`,
+      scope: (i) =>
+        omitUndefined({
+          sessionId: i.context.sessionId,
+          executionId: i.context.executionId,
+          tickId: i.context.tickId,
+        }),
+      handler: (i) => this.dispatchBody(i),
     });
 
     // Eager registrations applied synchronously so callers can dispatch
@@ -247,19 +291,17 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
     return this.registry.compileForTick(filter);
   }
 
+  /**
+   * Dispatch a tool call through the declared `tool:dispatch` command.
+   * The public in-process gate stamps PROVENANCE (ADR 51 §5/§6): the
+   * dispatch DOOR (`input.context.via`) maps to the operation's `origin`
+   * — a model-driven tool call is stamped `"model"` (the untrusted
+   * capability subject), a host/session dispatch `"host"`. Inbox-delivered
+   * `tool:dispatch` messages are stamped by their delivering gate instead
+   * (see {@link viaToOrigin}).
+   */
   dispatch(input: DispatchInput): Promise<DispatchResult> {
-    const op: Operation<DispatchInput, DispatchResult> = {
-      opId: input.opId ?? `tool:dispatch:${input.toolCallId}`,
-      surface: "tool",
-      name: "tool:command:dispatch",
-      scope: {
-        sessionId: input.context.sessionId,
-        executionId: input.context.executionId,
-        tickId: input.context.tickId,
-      },
-      input,
-    };
-    return runHarnessProtocol(this.runOperation(op, (i) => this.dispatchBody(i)));
+    return this.dispatchCommand(input, { origin: viaToOrigin(input.context.via) });
   }
 
   /**
@@ -558,7 +600,15 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
 
       const channelEmits: HandlerChannelSeed[] = [];
       const publisher = this.channelPublisher;
-      const opIdForCausality = input.opId ?? `tool:dispatch:${input.toolCallId}`;
+      // Parent opId for channel emits (`ctx.emit`). Read from the ambient
+      // RuntimeContext `runOperation` established for THIS command so the
+      // causality edge points at the dispatch operation's real opId
+      // (command-manufactured ULID) rather than a hand-reconstructed
+      // string. `getContext` returns the command's opId here; the
+      // `input.opId` / `toolCallId` fallbacks cover direct `dispatchBody`
+      // calls made outside a command scope (test fixtures).
+      const ambient = yield* getContext;
+      const opIdForCausality = ambient.opId ?? input.opId ?? `tool:dispatch:${input.toolCallId}`;
       // Scope stamped on every signal (`ctx.log` / `ctx.progress`) this
       // dispatch emits — the work-path coordinates from the caller's
       // context. Subscribers filter on these (e.g. `{ executionId }`).

@@ -214,6 +214,77 @@ describe("defineToolExecutor — abort + envelopes", () => {
     await expect(dispatchPromise).rejects.toBeInstanceOf(ToolAbortedError);
   });
 
+  it("a model-driven dispatch stamps origin 'model'; host dispatch stamps 'host' (ADR 51 §5/§6)", async () => {
+    const bus = new LocalEventBus();
+    const factory = defineToolExecutor({
+      dispatch: async (input) => ({
+        toolCallId: input.toolCallId,
+        name: input.name,
+        succeeded: true,
+        content: [],
+      }),
+    });
+    const exec = factory({
+      scopeId: "prov-1",
+      journal: new MemoryJournal(),
+      bus,
+      inbox: new LocalInbox(),
+    });
+
+    const events: ProtocolEvent[] = [];
+    const fiber = Effect.runFork(
+      Stream.runForEach(bus.subscribe({ surface: "tool" }), (e) =>
+        Effect.sync(() => void events.push(e)),
+      ),
+    );
+    await new Promise((r) => setImmediate(r));
+
+    await exec.dispatch({ toolCallId: "m1", name: "t", input: {}, context: { via: "model" } });
+    await exec.dispatch({ toolCallId: "h1", name: "t", input: {}, context: { via: "dispatch" } });
+    await new Promise((r) => setTimeout(r, 20));
+    await Effect.runPromise(Fiber.interrupt(fiber));
+
+    const requested = events.filter(
+      (e) => e.name === "tool:command:dispatch" && e.phase === "requested",
+    );
+    expect(requested.map((e) => e.scope.origin)).toEqual(["model", "host"]);
+  });
+
+  it("a tool:dispatch inbox message invokes the tool by name and returns its result", async () => {
+    const inbox = new LocalInbox();
+    const factory = defineToolExecutor({
+      dispatch: async (input) => ({
+        toolCallId: input.toolCallId,
+        name: input.name,
+        succeeded: true,
+        content: [{ type: "text", text: `ran:${input.name}` }],
+      }),
+    });
+    const scopeId = "inbox-dispatch-cb";
+    const exec = factory({
+      scopeId,
+      journal: new MemoryJournal(),
+      bus: new LocalEventBus(),
+      inbox,
+    });
+    await (exec as unknown as { ready: Promise<void> }).ready;
+
+    const result = await Effect.runPromise(
+      inbox.ask<DispatchInput, { toolCallId: string; content: unknown }>(`tool:${scopeId}`, {
+        messageId: ulid(),
+        type: "tool:dispatch",
+        payload: {
+          toolCallId: "inbox-cb-1",
+          name: "calc",
+          input: {},
+          context: { via: "dispatch" },
+        },
+      }),
+    );
+    expect(result.toolCallId).toBe("inbox-cb-1");
+    expect(result.content).toEqual([{ type: "text", text: "ran:calc" }]);
+  });
+
   it("dispatch emits envelopes on the supplied bus", async () => {
     const bus = new LocalEventBus();
     const factory = defineToolExecutor({

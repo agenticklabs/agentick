@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { Effect } from "effect";
+import { Effect, Stream } from "effect";
 import { ulid } from "@agentick/runtime-next";
-import type { DispatchInput, ToolRegistration } from "@agentick/spec-next";
+import type {
+  DispatchInput,
+  DispatchResult,
+  ProtocolEvent,
+  ToolRegistration,
+} from "@agentick/spec-next";
 import {
   ToolAbortedError,
   ToolHandlerMissing,
@@ -44,6 +49,32 @@ function dispatchOf(
     ...overrides,
   };
 }
+
+describe("ToolExecutorHarness — dispatch idempotency (ADR 51)", () => {
+  it("re-dispatching the same toolCallId replays the cached terminal — the tool runs ONCE", async () => {
+    let runs = 0;
+    const { harness } = await createTestHarness({
+      tools: [echoReg()],
+      handlers: [
+        {
+          handlerRef: "h.echo",
+          handler: async () => {
+            runs += 1;
+            return [{ type: "text", text: `run-${runs}` }];
+          },
+        },
+      ],
+    });
+    // Same toolCallId → deterministic opId `tool:dispatch:dup-call` → the
+    // second dispatch hits `lookupTerminal` and replays instead of
+    // re-executing a (potentially side-effecting) tool.
+    const call = dispatchOf("echo", "dispatch", { a: 1 }, { toolCallId: "dup-call" });
+    const first = await harness.dispatch(call);
+    const second = await harness.dispatch(call);
+    expect(runs).toBe(1);
+    expect(second).toEqual(first);
+  });
+});
 
 describe("ToolExecutorHarness — dispatch happy path", () => {
   it("invokes the handler with validated input + use deps", async () => {
@@ -340,6 +371,98 @@ describe("ToolExecutorHarness — state store", () => {
     await harness.dispatch(dispatchOf("setter", "dispatch", { v: 42 }));
     expect(harness.getState("seen")).toEqual({ v: 42 });
     expect(harness.snapshotState()).toEqual({ seen: { v: 42 } });
+  });
+});
+
+// ============================================================================
+// dispatch as a declared command (ADR 51/66) — provenance + inbox-by-name
+// ============================================================================
+
+/** Collect bus events until `count` are seen; resolves with the buffer. */
+function collectEvents(
+  bus: import("@agentick/runtime-next").LocalEventBus,
+  count: number,
+): { events: ProtocolEvent[]; done: Promise<void> } {
+  const events: ProtocolEvent[] = [];
+  let resolve!: () => void;
+  const done = new Promise<void>((r) => (resolve = r));
+  Effect.runFork(
+    Stream.runForEach(bus.subscribe({}), (e) =>
+      Effect.sync(() => {
+        events.push(e);
+        if (events.length >= count) resolve();
+      }),
+    ),
+  );
+  return { events, done };
+}
+
+describe("ToolExecutorHarness — dispatch command provenance (ADR 51 §5/§6)", () => {
+  it("a model-driven dispatch stamps origin 'model' on the journaled envelope", async () => {
+    const { harness, bus } = await createTestHarness({
+      tools: [echoReg()],
+      handlers: [{ handlerRef: "h.echo", handler: async () => [{ type: "text", text: "ok" }] }],
+    });
+    const { events, done } = collectEvents(bus, 3); // requested → before → terminal
+
+    await harness.dispatch(dispatchOf("echo", "model", { a: 1 }));
+    await done;
+
+    const requested = events.find(
+      (e) => e.name === "tool:command:dispatch" && e.phase === "requested",
+    );
+    expect(requested?.scope.origin).toBe("model");
+  });
+
+  it("a host/session dispatch stamps origin 'host'", async () => {
+    const { harness, bus } = await createTestHarness({
+      tools: [echoReg()],
+      handlers: [{ handlerRef: "h.echo", handler: async () => [{ type: "text", text: "ok" }] }],
+    });
+    const { events, done } = collectEvents(bus, 3);
+
+    await harness.dispatch(dispatchOf("echo", "dispatch", { a: 1 }));
+    await done;
+
+    const requested = events.find(
+      (e) => e.name === "tool:command:dispatch" && e.phase === "requested",
+    );
+    expect(requested?.scope.origin).toBe("host");
+  });
+});
+
+describe("ToolExecutorHarness — inbox dispatch-by-name (declared command)", () => {
+  it("a tool:dispatch inbox message (serializable payload, no signal) invokes the tool + returns its result", async () => {
+    const { harness, inbox } = await createTestHarness({
+      tools: [echoReg()],
+      handlers: [
+        {
+          handlerRef: "h.echo",
+          handler: async (input) => [{ type: "text", text: JSON.stringify(input) }],
+        },
+      ],
+    });
+
+    // Wire-safe DispatchInput: name + input + context (no `signal`). Routes
+    // via BaseHarness.dispatchMessage → the declared `tool:dispatch` command.
+    const payload: DispatchInput = {
+      toolCallId: "inbox-dispatch-1",
+      name: "echo",
+      input: { hello: "world" },
+      context: { via: "dispatch", sessionId: "s1" },
+    };
+
+    const result = await Effect.runPromise(
+      inbox.ask<DispatchInput, DispatchResult>(harness.address, {
+        messageId: ulid(),
+        type: "tool:dispatch",
+        payload,
+      }),
+    );
+
+    expect(result.toolCallId).toBe("inbox-dispatch-1");
+    expect(result.succeeded).toBe(true);
+    expect(result.content).toEqual([{ type: "text", text: '{"hello":"world"}' }]);
   });
 });
 

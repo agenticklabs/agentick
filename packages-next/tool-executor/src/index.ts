@@ -34,6 +34,10 @@ export { InMemoryHandlerResolver } from "./handler-resolver.js";
 // Validators
 export { permissiveValidator, fromStandardSchema } from "./validator.js";
 
+// Dispatch provenance — maps the dispatch door (`via`) to the operation
+// origin stamped at the command gate (ADR 51 §5/§6).
+export { viaToOrigin } from "./provenance.js";
+
 // Types
 export type {
   HandlerEntry,

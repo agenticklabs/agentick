@@ -37,6 +37,32 @@ Same validation, same confirmation flow, same interceptors. `via` is
 observable to middleware so policies can branch on door without
 inspecting private fields.
 
+`dispatch` is a **declared command** (`tool:dispatch`, ADR 51/66) on BOTH
+executors — the same promotion `abort` got. Two consequences beyond the
+plain-method past:
+
+- **Provenance-stamped at the gate (ADR 51 §5/§6).** The public in-process
+  `dispatch` maps the DOOR to the operation's `origin`: `via: "model"` →
+  `origin: "model"` (a model-originated tool call — inside the process the
+  intentionally untrusted capability-policy subject), `via: "dispatch"` →
+  `origin: "host"` (a direct in-process call). The origin is stamped on
+  every dispatch envelope (`requested` / `before` / `terminal`) and trusted
+  downstream — it completes the journal as an authorization audit log (who,
+  via which gate, ran what). Inbox-delivered `tool:dispatch` messages are
+  stamped by their delivering gate (`origin: "inbox"`) instead, because
+  origin names the GATE, not the `via` the payload claims.
+- **Inbox/wire dispatch-by-name.** A `tool:dispatch` message (serializable
+  `DispatchInput` payload — `name` + `input` + `context`, no `signal`) to
+  the harness's `tool:{scopeId}` address routes through the command registry
+  via `BaseHarness.dispatchMessage`; `ask` returns the `DispatchResult`. No
+  hand-rolled inbox switch.
+
+The dispatch FLOW is byte-identical to the pre-command method — validation,
+before-dispatch lifecycle, ctx build (incl. `ctxExtensions`), abort-signal
+composition, task-mode Pattern A/B, confirmation, and timeout are unchanged.
+Only the declaration mechanism moved from a hand-built `Operation` +
+`runOperation` to `this.command({ name: "tool:dispatch", … })`.
+
 ### Exposure routing
 
 `ToolDeclaration.exposure` (a `ToolExposure[]` from
@@ -368,7 +394,11 @@ fixture behaviors into concrete handlers.
 - `src/__tests__/harness.spec.ts` — registry + dispatch happy path,
   abort (direct `abort()`, caller-signal, timeout, unknown-id no-op, AND
   inbox `tool:abort` command routing), handler errors, exposure
-  enforcement.
+  enforcement, AND — for `dispatch` as a declared command — provenance
+  (`via: "model"` stamps `origin: "model"`, `via: "dispatch"` stamps
+  `origin: "host"`, asserted on the journaled `requested` envelope) plus
+  inbox dispatch-by-name (a `tool:dispatch` message invokes the tool and
+  returns its `DispatchResult`).
 - `src/__tests__/confirmation.spec.ts` — the confirmation gate
   (approve / deny / always / modifiedArguments / timeout).
 - `src/__tests__/dispatch-task-mode-matrix.spec.ts` — Pattern A vs B and
@@ -388,8 +418,10 @@ fixture behaviors into concrete handlers.
 - `src/__tests__/define-tool-executor.spec.ts` — the callback factory,
   including inbox `tool:abort` command routing cancelling an in-flight
   dispatch with `ToolAbortedError` (the #31 gap: `CallbackToolExecutor` is
-  now inbox-abortable). Plus `with-scope.spec.ts`, `validator.spec.ts`,
-  `handler-resolver.spec.ts` — scope helper, validators, resolver.
+  now inbox-abortable), plus `dispatch`-as-command parity on the callback
+  executor (model/host provenance stamping + inbox dispatch-by-name). Plus
+  `with-scope.spec.ts`, `validator.spec.ts`, `handler-resolver.spec.ts` —
+  scope helper, validators, resolver.
 
 ## Status & roadmap
 

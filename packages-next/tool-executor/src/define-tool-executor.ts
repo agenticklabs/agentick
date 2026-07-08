@@ -61,6 +61,7 @@ import type {
   MessageInbox,
   Operation,
   OperationJournal,
+  OperationOrigin,
   RegisterToolInput,
   RemoveBoundToolsInput,
   ReplaceReconcilerToolsInput,
@@ -74,6 +75,7 @@ import type {
 import { HandlerError, ToolAbortedError } from "@agentick/spec-next";
 
 import { InMemoryToolRegistry, sameBindingKey } from "./registry.js";
+import { viaToOrigin } from "./provenance.js";
 import { omitUndefined } from "@agentick/utils-next";
 
 // ============================================================================
@@ -187,6 +189,18 @@ class CallbackToolExecutor extends BaseHarness<"tool"> implements ToolExecutorPr
    */
   readonly abort: (input: AbortInput) => Promise<void>;
 
+  /**
+   * The declared `dispatch` command (`tool:dispatch`, ADR 51/66) — the
+   * same promotion the reference `ToolExecutorHarness` makes. Provenance-
+   * stamped at the public {@link dispatch} gate and inbox/wire
+   * dispatch-by-name reachable. The dispatch FLOW ({@link dispatchBody})
+   * is byte-identical to before; only the declaration mechanism changed.
+   */
+  private readonly dispatchCommand: (
+    input: DispatchInput,
+    opts?: { readonly origin?: OperationOrigin },
+  ) => Promise<DispatchResult>;
+
   constructor(
     scopeId: string,
     journal: OperationJournal,
@@ -204,6 +218,20 @@ class CallbackToolExecutor extends BaseHarness<"tool"> implements ToolExecutorPr
         this.spec.abort
           ? Effect.tryPromise({ try: () => this.spec.abort!(i), catch: (cause) => cause })
           : Effect.sync(() => this.abortInFlight(i)),
+    });
+    this.dispatchCommand = this.command<DispatchInput, DispatchResult, unknown>({
+      name: "tool:dispatch",
+      // Deterministic opId keyed by `toolCallId` — preserves dispatch
+      // idempotency (repeat dispatch replays the cached terminal, no
+      // re-execution). Mirrors ToolExecutorHarness (ADR 51).
+      opId: (i) => i.opId ?? `tool:dispatch:${i.toolCallId}`,
+      scope: (i) =>
+        omitUndefined({
+          sessionId: i.context.sessionId,
+          executionId: i.context.executionId,
+          tickId: i.context.tickId,
+        }),
+      handler: (i) => this.dispatchBody(i),
     });
   }
 
@@ -320,21 +348,15 @@ class CallbackToolExecutor extends BaseHarness<"tool"> implements ToolExecutorPr
     return this.registry.compileForTick(filter);
   }
 
+  /**
+   * Dispatch through the declared `tool:dispatch` command. The public
+   * in-process gate stamps PROVENANCE (ADR 51 §5/§6) off the dispatch
+   * door: `via: "model"` → `origin: "model"`, `via: "dispatch"` →
+   * `origin: "host"`. Inbox-delivered `tool:dispatch` messages are
+   * stamped by their delivering gate instead (see {@link viaToOrigin}).
+   */
   dispatch(input: DispatchInput): Promise<DispatchResult> {
-    const op: Operation<DispatchInput, DispatchResult> = {
-      opId: input.opId ?? `tool:dispatch:${input.toolCallId}`,
-      surface: "tool",
-      name: "tool:command:dispatch",
-      scope: {
-        ...omitUndefined({
-          sessionId: input.context.sessionId,
-          executionId: input.context.executionId,
-          tickId: input.context.tickId,
-        }),
-      },
-      input,
-    };
-    return runHarnessProtocol(this.runOperation(op, (i) => this.dispatchBody(i)));
+    return this.dispatchCommand(input, { origin: viaToOrigin(input.context.via) });
   }
 
   /**

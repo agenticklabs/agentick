@@ -944,11 +944,24 @@ export abstract class BaseHarness<
     readonly description?: string;
     /**
      * Work-path scope dims for the Operation (surface-specific — e.g.
-     * timeline supplies `() => ({ sessionId: this.scopeId })`). The
-     * gate's `origin` is merged in; `principal` is stamped by
+     * timeline supplies `() => ({ sessionId: this.scopeId })`). Receives
+     * the command input so input-derived dims (e.g. tool dispatch's
+     * `executionId` / `tickId` off `input.context`) are expressible;
+     * static-scope declarations simply ignore the arg. The gate's
+     * `origin` is merged in; `principal` is stamped by
      * {@link makeEvent} regardless.
      */
-    readonly scope?: () => EventScope;
+    readonly scope?: (input: I) => EventScope;
+    /**
+     * Deterministic opId derivation (ADR 51 idempotency). By default the
+     * command manufactures a fresh `${name}:${ulid()}` opId per invocation.
+     * A command whose re-invocation must be idempotent (e.g. tool dispatch,
+     * keyed by the model's stable `toolCallId`) supplies a pure function of
+     * the input so a repeat invocation hits the same opId and
+     * `runOperation`'s `lookupTerminal` replays the cached terminal instead
+     * of re-executing. Static/non-idempotent commands omit it.
+     */
+    readonly opId?: (input: I) => string;
     readonly handler: (input: I) => Effect.Effect<R, E, never>;
   }): (input: I, opts?: { readonly origin?: OperationOrigin }) => Promise<R> {
     const name = def.name;
@@ -972,11 +985,11 @@ export abstract class BaseHarness<
     ): Effect.Effect<R, E | SubstrateError, never> =>
       this.runOperation<I, R, E>(
         {
-          opId: `${name}:${ulid()}`,
+          opId: def.opId?.(input) ?? `${name}:${ulid()}`,
           surface: this.surface,
           name: opName,
           ...omitUndefined({ parentOpId: opts.parentOpId, correlationId: opts.correlationId }),
-          scope: omitUndefined({ ...(def.scope?.() ?? {}), origin: opts.origin }),
+          scope: omitUndefined({ ...(def.scope?.(input) ?? {}), origin: opts.origin }),
           input,
         },
         def.handler,
