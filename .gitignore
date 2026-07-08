@@ -66,3 +66,5 @@ packages/*/docs/
 .mcp.json
 
 .codex/
+
+.claude/worktrees/*
