@@ -9,7 +9,7 @@ same wire vocabulary, opposite direction.
 > consuming only the MCP client never pull in Node transport code.
 
 ```ts
-import { spawnStandaloneMcpServer, stdioServerTransport } from "@agentick/mcp-next/server";
+import { spawnStandaloneMcpServer, stdioTransport } from "@agentick/mcp-next/server";
 import { createTool } from "@agentick/tool-next";
 import { z } from "zod";
 
@@ -24,7 +24,7 @@ const Calculator = createTool({
 
 const { close } = await spawnStandaloneMcpServer({
   name: "calc-server",
-  transports: [stdioServerTransport()],
+  transports: [stdioTransport()],
   tools: [Calculator],
 });
 
@@ -85,7 +85,7 @@ concurrent connections.
 
 | Factory                                    | Wire     | Notes                                                                                                                                                                                                      |
 | ------------------------------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `stdioServerTransport()` (#171c follow-up) | stdio    | Default for `spawnStandaloneMcpServer`. One process = one connection. Adopter owns SIGINT.                                                                                                                 |
+| `stdioTransport()` (#171c follow-up) | stdio    | Default for `spawnStandaloneMcpServer`. One process = one connection. Adopter owns SIGINT.                                                                                                                 |
 | `inMemoryServerTransport()`                | in-proc  | Adopter-driven test fixture. Returns `.connect()` that yields the client end.                                                                                                                              |
 | `httpTransport({ port })`                  | HTTP+SSE | **Landed** — Streamable HTTP listener (multi-connection). Wraps the SDK `StreamableHTTPServerTransport`; per-`Mcp-Session-Id` routing; `port: 0` binds ephemeral. Accepts a caller-supplied `http.Server`. |
 | Custom                                     | any      | Implement `ServerTransport`; the harness only cares about `listen(accept) → close()` + transport.                                                                                                          |
@@ -410,7 +410,7 @@ own SIGINT / process exit.
 ```ts
 const handle = await spawnStandaloneMcpServer({
   name: "my-server",
-  transports: [stdioServerTransport()],
+  transports: [stdioTransport()],
   tools: [
     /* CreatedTool[] */
   ],

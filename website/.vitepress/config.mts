@@ -240,6 +240,7 @@ export default defineConfig({
 
     nav: [
       { text: "Docs", link: "/docs/getting-started" },
+      { text: "v2 (preview)", link: "/docs/v2/" },
       { text: "API", link: "/api/" },
       {
         text: "GitHub",
@@ -305,6 +306,20 @@ export default defineConfig({
             { text: "Connectors", link: "/docs/connectors" },
             { text: "Observability", link: "/docs/observability" },
             { text: "DevTools", link: "/docs/devtools" },
+          ],
+        },
+      ],
+      "/docs/v2/": [
+        {
+          text: "v2 Preview (work in progress)",
+          items: [{ text: "Overview", link: "/docs/v2/" }],
+        },
+        {
+          text: "MCP & Resources",
+          items: [
+            { text: "Resources", link: "/docs/v2/resources" },
+            { text: "MCP: Connecting to Servers", link: "/docs/v2/mcp" },
+            { text: "Exposing an MCP Server", link: "/docs/v2/mcp-server" },
           ],
         },
       ],

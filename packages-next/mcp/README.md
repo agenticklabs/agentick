@@ -117,18 +117,25 @@ See ADR 40 §3 for the full per-connection projection model.
 ## Client quickstart
 
 ```ts
-import { withMCP } from "@agentick/mcp-next";
+import { withMCP, streamableHttpTransport, StdioClientTransport } from "@agentick/mcp-next";
 import { createApp } from "@agentick/app-next";
 
 const app = createApp({
   extensions: [
     withMCP({
       servers: [
-        { name: "linear", url: "https://mcp.linear.app" },
+        // Each server is identified by a `serverId` (an alias YOU assign —
+        // tool names are prefixed `<serverId>__<tool>`) and a `transport`.
         {
-          name: "filesystem",
-          command: "npx",
-          args: ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"],
+          serverId: "docs-server",
+          transport: streamableHttpTransport({ url: "https://example.com/mcp" }),
+        },
+        {
+          serverId: "filesystem",
+          transport: new StdioClientTransport({
+            command: "npx",
+            args: ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"],
+          }),
         },
       ],
     }),
@@ -142,11 +149,11 @@ const app = createApp({
 ## Server quickstart
 
 ```ts
-import { McpServerHarness, stdioServerTransport, bearerTokenAuth } from "@agentick/mcp-next/server";
+import { McpServerHarness, stdioTransport, bearerTokenAuth } from "@agentick/mcp-next/server";
 
 const server = new McpServerHarness(scopeId, journal, bus, inbox, {
   name: "my-server",
-  transports: [stdioServerTransport()],
+  transports: [stdioTransport()],
 
   // Tools — accepts `CreatedTool[]` shorthand OR the projection-config
   // object. The array form is the 90% case; the config form adds
@@ -399,7 +406,7 @@ import { spawnStandaloneMcpServer } from "@agentick/mcp-next/server";
 
 const handle = await spawnStandaloneMcpServer({
   name: "my-server",
-  transports: [stdioServerTransport()],
+  transports: [stdioTransport()],
   tools: {
     /* ... */
   },
