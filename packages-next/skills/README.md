@@ -206,6 +206,41 @@ const skill = await session.skills.require("must_exist");
 - Remote-registry backend (`agentskills.io` compatibility)
 - Embedding-based search (currently substring-only)
 - Skill versioning / history
+- **Bundled skill assets via a `skill://` resource namespace.** A skill is
+  currently `{ name, description, content }` — instructions only. Folder-shaped
+  skills (a `SKILL.md` plus reference files, examples, data) want _progressive
+  disclosure_: the instructions surface on activation, and the supporting files
+  are pulled on demand. Those files are **resources**, not a new subsystem —
+  register them into the session `ResourcesHarness` under a
+  `skill://<name>/<path>` namespace with a directory-backed resolver, exactly
+  the aliased-resolver pattern already shipped for the sandbox (`file://`) and
+  remote MCP servers (`mcp://<alias>/`). Progressive disclosure then _is_ lazy
+  resource reads (register lazy resolvers, don't eagerly read the bytes), and
+  skill assets get catalog surfacing + MCP projection for free. The skill's
+  **instructions stay push** (conditionally-activated context, not a pull) —
+  only the asset layer is resources. See ADR 62 (resources seam) and ADR 65
+  (compose onto the existing seam, don't add a subsystem).
+- **Multi-source precedence.** Multiple source folders already work today (pass
+  several `fromDirectory` loaders). What's undecided is the collision policy when
+  two sources define the same skill name — today the harness raises
+  `SkillAlreadyExists`. Intended direction: **layered precedence** (user >
+  project > bundled, like a settings cascade) so a local skill shadows a shipped
+  one. This decision and the `skill://` asset-URI shape are coupled: layering
+  keeps `skill://<name>/…` single-winner; source-namespacing would force
+  `skill://<source>/<name>/…`.
+
+**Design stance (recorded from review):**
+
+- **Markdown/file is the primary authoring form, deliberately.** Portability is
+  the skill format's whole point (droppable `SKILL.md` folders, runtime-loadable
+  from any directory, `agentskills.io` interop, non-engineer authored). JSX/TSX
+  `<Skill>` authoring (reactive, compiled, in-tree — the read-side analogue of
+  `<Resource>`) was considered and **deferred**: it is compiled app code, not a
+  portable artifact, so it must never become the default and fork the ecosystem.
+  If added later it is a power-path front-end into the SAME `SkillsHarness`
+  registry, justified ONLY by "app-authored skills share one searchable catalog +
+  activation model with file-skills" — a reactive instruction block that doesn't
+  need the catalog is just a `<Section>`.
 
 **Known gaps:**
 
