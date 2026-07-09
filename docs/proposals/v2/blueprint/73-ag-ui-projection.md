@@ -55,15 +55,42 @@ The first draft oversold this as "a thin codec over everything." Corrected: it s
   1. **Shared state.** AG-UI wants **event-sourced diffs** of a typed store; we do **snapshot +
      `onStateChange`** (full snapshots). Projecting needs snapshot-diffing (a real diff codec) or
      restructuring knobs/state/gates to be event-sourced (bigger). A decision, not a codec.
-  2. **Steering.** AG-UI "steering" implies **fine-grained real-time control** (pause / edit /
-     retry a step); ADR 53 steering is **append input mid-execution** (coarser). Same word,
-     different granularity — a faithful mapping may need more control surface than we expose.
+  2. **Steering — CORRECTION (this is NOT a divergence).** AG-UI has NO dedicated steering
+     events. Its control is **interrupt-then-resume**: `RunFinished{outcome:{type:"interrupt",
+     interrupts}}` → the client resumes by starting a NEW run with a `resume` array (+ `parentRunId`
+     branching). That IS our `input_required` (ADR 68) + escalation (ADR 69) + resume-with-input —
+     and ours is RICHER (the interrupt bubbles up the ownership tree with interception/lineage,
+     T2a; AG-UI's is flat), plus we have append-steering (ADR 53) + abort-as-command. So there is
+     **nothing to adopt here — our control model is a superset.** The interrupt/resume maps cleanly.
 - **Between — wiring, moderate:** sub-agent stream nesting (AG-UI compositional needs ← `spawn` +
   T2a lineage): nest the spawned session's stream in the parent's. Doable, not a pure codec.
 
-**Recommendation:** ship Tier 1 (the codec) first; treat each Tier-2 divergence as its own decision
-(adapt-AG-UI-to-us lossy / adapt-us-to-AG-UI bigger / document-the-lossy-edge). Do NOT claim a full
-AG-UI mapping until the state + steering divergences are resolved.
+**Recommendation:** ship Tier 1 (the codec) first; the ONE remaining Tier-2 divergence (state) is
+best resolved by ADOPTING AG-UI's model natively — see below.
+
+## Adopt FROM AG-UI (run along our native seams) — the inverse of projecting
+
+The valuable move isn't only "project to AG-UI"; it's adopting the few things AG-UI models *better*
+than us into our native seams, which ALSO makes the projection fall out. Discovery (against the
+AG-UI event spec):
+
+- **`StateDelta` — RFC 6902 JSON Patch. ADOPT (load-bearing).** AG-UI syncs state as an initial
+  snapshot + **JSON-Patch deltas**; we emit *full snapshots* (`onStateChange`). Adopt the
+  snapshot-delta pattern **natively**: the reactive knobs/state/gates seam emits **JSON-Patch ops
+  on the bus** on change (with an initial snapshot). This makes native state-sync efficient (diff,
+  not whole store) AND makes the AG-UI `StateDelta` projection fall out — dissolving the ONLY real
+  Tier-2 divergence by adopting, not adapting.
+- **`StepStarted` / `StepFinished` — named subtask lifecycle. ADOPT (small).** We have tick
+  lifecycle but no *named steps* within a run. A lightweight `step` concept on the loop-executor
+  (named phase around sub-work) makes agent progress legible in any UI, and projects 1:1.
+- **`ActivitySnapshot` / `ActivityDelta` — structured in-progress activity. CONSIDER.** Richer +
+  delta-based vs our flat `status`/`progress`; layer structured-activity on the status channel.
+- **Steering / interrupts — DON'T adopt.** Our escalation + append-steering + abort-command are a
+  superset (see the corrected divergence #2). If anything, we exceed AG-UI here.
+
+Native homes: `StateDelta` → the **bus** (reactive state emits JSON-Patch); `Step` → the
+**loop-executor**; `Activity` → the **status/progress** channel. Each is a native-seam improvement
+first, an AG-UI projection second.
 
 ## Why it's a projection, not a new model
 We already own the bus, the execution lifecycle, the reactive state, and the inbox. AG-UI is a wire
