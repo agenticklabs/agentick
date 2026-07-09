@@ -880,8 +880,10 @@ completed` status timeline (bus envelopes) with the paused-state
   below. Across a restart the child-process executor's honest outcome is
   `interrupted`; its worker self-terminates on IPC `disconnect`.
 - **`taskSupport: "supported"`** — the caller-choice mode declared in
-  the spec annotation but not yet branched on by the executor. Lands
-  alongside Phase C, where the model has the tooling to opt in.
+  the spec annotation but not yet branched on by the executor (the
+  `"supported"` branch needs capability negotiation — see the TODO in
+  `@agentick/tool-executor-next`'s `harness.ts`). Lands with the
+  caller-side opt-in tooling.
 
 @see [`docs/proposals/v2/blueprint/23-mcp-as-harness.md`](../../docs/proposals/v2/blueprint/23-mcp-as-harness.md) §Tasks
 @see [`docs/proposals/v2/blueprint/26-harness-api-shape.md`](../../docs/proposals/v2/blueprint/26-harness-api-shape.md)
