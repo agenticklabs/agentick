@@ -43,6 +43,28 @@ substrate is here; the gaps are the streaming surface (#308) + the codec.
 Every arrow is an existing seam. The client→server arrows all land on the **addressable session
 inbox** — the same substrate the escalation relay (ADR 69) and `ui://` tool-calls (ADR 72) use.
 
+## Honest scoping — thin codec vs. model divergence (NOT uniformly thin)
+
+The first draft oversold this as "a thin codec over everything." Corrected: it splits.
+
+- **Tier 1 — genuinely filter + translate (the ~70%, high-value):** message/text deltas, tool
+  call/result, lifecycle, thinking (with a redaction guard), user input, interrupts, custom. These
+  are a codec over existing bus/`ClientEvent`/inbox seams — `#308`'s `client.events()` rail is
+  already in place. This delivers what most AG-UI frontends actually render.
+- **Tier 2 — where AG-UI's model DIVERGES from ours (NOT a translate):**
+  1. **Shared state.** AG-UI wants **event-sourced diffs** of a typed store; we do **snapshot +
+     `onStateChange`** (full snapshots). Projecting needs snapshot-diffing (a real diff codec) or
+     restructuring knobs/state/gates to be event-sourced (bigger). A decision, not a codec.
+  2. **Steering.** AG-UI "steering" implies **fine-grained real-time control** (pause / edit /
+     retry a step); ADR 53 steering is **append input mid-execution** (coarser). Same word,
+     different granularity — a faithful mapping may need more control surface than we expose.
+- **Between — wiring, moderate:** sub-agent stream nesting (AG-UI compositional needs ← `spawn` +
+  T2a lineage): nest the spawned session's stream in the parent's. Doable, not a pure codec.
+
+**Recommendation:** ship Tier 1 (the codec) first; treat each Tier-2 divergence as its own decision
+(adapt-AG-UI-to-us lossy / adapt-us-to-AG-UI bigger / document-the-lossy-edge). Do NOT claim a full
+AG-UI mapping until the state + steering divergences are resolved.
+
 ## Why it's a projection, not a new model
 We already own the bus, the execution lifecycle, the reactive state, and the inbox. AG-UI is a wire
 *codec* over them — exactly as the MCP server harness projects tools/tasks/elicitation to the MCP
