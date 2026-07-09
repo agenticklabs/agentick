@@ -1652,6 +1652,29 @@ explicit `typescript` + `vitest` devDeps. Both removed:
 Running record of decisions made during execution (separate from the
 blueprint's design decisions; this is execution-level).
 
+### 2026-07-09
+
+- **ADR 70 — tool result currency landed** (`5719389f` ADR, `f72508bb` build). A
+  tool handler returns `string | ContentBlock[] | { content: string |
+  ContentBlock[]; structuredContent?; isError?; metadata? }` (+ Promise/Effect/
+  TaskHandle), normalized to one internal result at dispatch. `structuredContent`
+  is `outputSchema`-validated (typed `ToolValidationError` on failure) and flows
+  to `DispatchResult` + the MCP `CallToolResult` wire — closing the dead
+  `outputSchema`→`structuredContent` seam. The headline is composition:
+  `outputSchema` is what lets a model chain tools (typed output→input) or write
+  code that calls them. `isError` (soft/domain error, model-visible) **replaces**
+  `DispatchResult.succeeded` (removed) — soft-error path coherent end-to-end
+  (`DispatchResult.isError` → loop `dispatchSucceeded` → `LoopToolResult.succeeded`
+  → session `tool_result.isError`); throw stays the HARD path. NO plain-object→
+  JsonBlock guessing (rejected — kills inference; wrong-shape return is a TS error,
+  guarded by `@ts-expect-error`). `toContentBlocks` string→text normalizer created
+  in `spec-next`. `LoopToolResult`/`ExecutionTerminal.succeeded` retained
+  (different types, loop-internal — out of scope). Full suite 8060 green.
+- **`@agentick/tasks-store-postgres-next` rename** (`6e0a5c90`) + configurable
+  `created_at` column across both pg stores (`a2b4445f`) — the pg store gains a
+  slot discriminator (tasks has two swappable slots: store + executor, unlike
+  timeline's one), forward-compatible with a future `tasks-executor-*`.
+
 ### 2026-07-08
 
 - **ADR 69 — substrate request escalation (chain-of-responsibility over the
