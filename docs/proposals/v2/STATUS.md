@@ -1654,6 +1654,18 @@ blueprint's design decisions; this is execution-level).
 
 ### 2026-07-09
 
+- **Design ADRs drafted (NOT built — banked for later):** **ADR 71** (`a2df8b02`)
+  — app workspace conventions + `agentick.config.ts` (workspace-default layout,
+  five explicit-barrel convention folders, a `mergeLayered`-resolved config with
+  profiles/`extends`, `create-agentick-app --framework`). **ADR 72** (`33333635`)
+  — the `ui://` IR **widget** seam → **A2UI** (MCP-Apps = A2UI-over-MCP), with
+  interaction via the ADR 69 inbox relay. **ADR 73** (`0ea18bb8`) — the **AG-UI**
+  projection: the session bus/`ClientEvent` stream + inbox → AG-UI events (a thin
+  codec over existing substrate; "closer to done"; gated on #308 `client.events()`).
+  A2UI = widgets, AG-UI = event stream, MCP = tools — three axes, they compose.
+  Companion workshop artifacts exist for 71 + 72. All three are DESIGN drafts;
+  none started. (NOTE: the "## What's next" section above is STALE — it predates
+  the whole tasks/escalation/tool-result arc; this Decision Log is the live record.)
 - **ADR 70 — tool result currency landed** (`5719389f` ADR, `f72508bb` build). A
   tool handler returns `string | ContentBlock[] | { content: string |
   ContentBlock[]; structuredContent?; isError?; metadata? }` (+ Promise/Effect/
