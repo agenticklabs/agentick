@@ -37,10 +37,15 @@ import type { ContentBlock } from "../data/content-blocks.js";
  *
  *   working          — task running.
  *   input_required   — task paused awaiting an out-of-band input
- *                      (elicit, sampling, roots). Phase A declares
- *                      the state but doesn't auto-transition; tools
- *                      that pause on elicits stay `working` until
- *                      Phase B's auto-pause integration ships.
+ *                      (elicit, sampling, roots, a webhook — anything
+ *                      external). A work fn opts into this by wrapping
+ *                      the pause in {@link TaskWorkContext.awaitingInput}:
+ *                      the task flips `working → input_required` for the
+ *                      duration of the awaited promise, then back to
+ *                      `working` when it settles. Observers (the model
+ *                      via `session_tasks_*`, a UI, an MCP client) read
+ *                      it as "blocked on input, provide it" — distinct
+ *                      from actively `working`.
  *   completed        — terminal; result available.
  *   failed           — terminal; `statusMessage` carries the error
  *                      summary, `failure` carries structured detail.
@@ -177,6 +182,17 @@ export interface TaskWorkContext {
    * numeric current/total.
    */
   setStatusMessage(message: string): void;
+  /**
+   * Run `promise` in the `input_required` state: the task transitions
+   * `working → input_required` (optionally with a `message` statusMessage) for the
+   * duration of the pause, then back to `working` when it settles. Wrap ANY
+   * external-input await — an elicitation, MCP sampling, a roots request, a webhook —
+   * so observers (the model via `session_tasks_*`, a UI, an MCP client) can tell
+   * "blocked on input, provide it" from "actively working". Restores `working` even
+   * if `promise` rejects or the task is cancelled (via `finally`), so a throw can't
+   * strand the task in `input_required`. Returns the resolved value (or rethrows).
+   */
+  awaitingInput<T>(promise: Promise<T>, opts?: { readonly message?: string }): Promise<T>;
 }
 
 export interface TaskCreationInput {

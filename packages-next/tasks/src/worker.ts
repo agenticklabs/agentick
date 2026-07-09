@@ -147,6 +147,23 @@ async function runOnce(
     setStatusMessage: (message) => {
       void send({ t: "transition", transition: { statusMessage: message } });
     },
+    // Same `working → input_required → working` flip as the in-process
+    // executor, sent over IPC → parent → `report` → store + bus. The
+    // parent's `applyTransition` ignores post-terminal reports, so a
+    // cancel while paused wins and the `finally`'s `working` report is a
+    // no-op there.
+    awaitingInput: (promise, opts) => {
+      void send({
+        t: "transition",
+        transition: {
+          status: "input_required",
+          ...(opts?.message !== undefined ? { statusMessage: opts.message } : {}),
+        },
+      });
+      return Promise.resolve(promise).finally(() => {
+        void send({ t: "transition", transition: { status: "working" } });
+      });
+    },
   };
 
   let terminal: TaskTransition;

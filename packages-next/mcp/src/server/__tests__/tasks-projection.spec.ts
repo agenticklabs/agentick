@@ -26,6 +26,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { describe, expect, it } from "vitest";
 import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime-next";
+import { waitFor } from "@agentick/utils-next/testing";
 import type { ContentBlock } from "@agentick/spec-next";
 import { createTool } from "@agentick/tool-next";
 import { z } from "zod";
@@ -234,6 +235,72 @@ describe("MCP server tasks projection — Pattern B over the wire", () => {
           expect(t.taskId).toMatch(/^task:/);
           expect(["working", "completed"]).toContain(t.status);
         }
+      } finally {
+        await client.close();
+      }
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it("projects a PRODUCED input_required status onto the wire (awaitingInput)", async () => {
+    // The codec maps `input_required` 1:1 (a defined-but-previously-dead
+    // wire state). This proves a task PRODUCES it: a Pattern B tool whose
+    // work fn pauses via `ctx.awaitingInput` surfaces `input_required` on
+    // `tasks/get`. A test-owned gate makes the pause deterministic — the
+    // wire snapshot is asserted WHILE the gate is unresolved (no race).
+    let releaseGate!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseGate = resolve;
+    });
+    const AwaitsInput = createTool({
+      name: "awaits_input",
+      description: "Pauses awaiting external input, then completes.",
+      inputSchema: z.object({}),
+      annotations: { taskSupport: "required" },
+      handler: async (_args, { ctx }) => {
+        return ctx.tasks!.submit(async (task) => {
+          await task.awaitingInput(gate, { message: "need input" });
+          return [{ type: "text", text: "input provided" } as ContentBlock];
+        });
+      },
+    });
+
+    const { harness, transport } = await makeServerWith([AwaitsInput]);
+    try {
+      const client = await makeClient(await transport.connect());
+      try {
+        const callRaw = await client.request(
+          { method: "tools/call", params: { name: "awaits_input", arguments: {} } },
+          CallToolResultSchema.passthrough(),
+        );
+        const taskId = (callRaw as unknown as { task: { taskId: string } }).task.taskId;
+
+        // The gate is unresolved → the task is parked in input_required.
+        // The WIRE snapshot must report it (produced, not just mapped).
+        await waitFor(async () => {
+          const snap = await client.request(
+            { method: "tasks/get", params: { taskId } },
+            GetTaskResultSchema,
+          );
+          return snap.status === "input_required";
+        });
+        const paused = await client.request(
+          { method: "tasks/get", params: { taskId } },
+          GetTaskResultSchema,
+        );
+        expect(paused.status).toBe("input_required");
+        expect(paused.statusMessage).toBe("need input");
+
+        // Provide the input → the task flips back to working and completes.
+        releaseGate();
+        const payload = await client.request(
+          { method: "tasks/result", params: { taskId } },
+          GetTaskPayloadResultSchema,
+        );
+        expect(payload.isError).toBe(false);
+        const content = payload.content as ReadonlyArray<{ type: string; text: string }>;
+        expect(content[0]!.text).toBe("input provided");
       } finally {
         await client.close();
       }

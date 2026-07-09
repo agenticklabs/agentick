@@ -70,6 +70,18 @@ export class InProcessTaskExecutor implements TaskExecutor {
       signal,
       onProgress: (update) => report({ progress: update }),
       setStatusMessage: (message) => report({ statusMessage: message }),
+      // Wrap an external-input pause: flip `working → input_required` for
+      // the await, then restore `working` when it settles. The harness's
+      // `applyTransition` ignores post-terminal reports, so a cancel while
+      // paused drives the record terminal and the `finally`'s `working`
+      // report is a safe no-op (it can't strand the task).
+      awaitingInput: (promise, opts) => {
+        report({
+          status: "input_required",
+          ...(opts?.message !== undefined ? { statusMessage: opts.message } : {}),
+        });
+        return Promise.resolve(promise).finally(() => report({ status: "working" }));
+      },
     };
 
     // Invoke work SYNCHRONOUSLY so its body runs (registering signal

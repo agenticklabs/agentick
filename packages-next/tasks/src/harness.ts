@@ -847,8 +847,17 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
 // channels carry the same payloads. Inbound MCP `tasks/cancel` lands on
 // the inbox via `TASKS_CANCEL_MESSAGE_TYPE`.
 //
-// TODO(#120-followup): auto-transition to `input_required` when a task's
-// work fn pauses on an elicit/sampling/roots request.
+// #120-followup (LANDED): `input_required` is a live, produced state. A
+// work fn opts in by wrapping any external-input pause in
+// `TaskWorkContext.awaitingInput(promise, { message? })` — GENERIC over
+// elicit / sampling / roots / any external await (tasks take NO
+// elicitation dependency). It flips `working → input_required → working`
+// through the SAME `report` seam as `onProgress` / `setStatusMessage`, so
+// `applyTransition`'s non-terminal `t.status` branch persists + emits it
+// with no special-casing; wired symmetrically in the in-process executor
+// and the child-process worker (over IPC). A cancel while paused drives
+// the record terminal and the `finally`'s `working` report is a
+// post-terminal no-op (can't strand the task).
 //
 // ADR-68 Build B (LANDED): `ChildProcessTaskExecutor` implements the same
 // `TaskExecutor` seam over IPC (serializable descriptor: `handlerRef` +

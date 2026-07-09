@@ -12,9 +12,10 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { drainRejection, waitFor } from "@agentick/utils-next/testing";
-import type { TaskRecord } from "@agentick/spec-next";
+import type { TaskRecord, TaskStatus } from "@agentick/spec-next";
 import { InMemoryTaskStore } from "../store.js";
 import { ChildProcessTaskExecutor } from "../child-executor.js";
+import type { WorkerToParentMessage } from "../child-protocol.js";
 import { fakeTasks, type FakeTasksBundle } from "../testing/fake-tasks.js";
 
 const WORKER_MODULE = fileURLToPath(new URL("./fixtures/task-worker.ts", import.meta.url));
@@ -229,6 +230,68 @@ describe("ChildProcessTaskExecutor — registry + lifetime", () => {
     // close() cancels non-detached in-flight tasks → child torn down.
     await waitFor(() => executor.activeChildCount() === 0);
     expect(await drained).toMatchObject({ status: "cancelled" });
+  });
+});
+
+describe("runTaskWorker — input_required over IPC (message-triggered release)", () => {
+  // A by-ref child that pauses on `ctx.awaitingInput` must flip
+  // `input_required → working → completed` over IPC — symmetric with the
+  // in-process executor. Fork the fixture DIRECTLY and read the raw
+  // WorkerToParentMessage transitions (observing the wire itself). The
+  // pause is released by a custom `{ t: "release-input" }` message — a
+  // deterministic, deferred-triggered release, NOT a timer race.
+  it("flips input_required (with statusMessage) → working → completed", async () => {
+    const child = fork(WORKER_MODULE, [], { ...FORK_OPTIONS, silent: true });
+    const now = 1_700_000_000_000;
+    const record: TaskRecord = {
+      taskId: "task:awaits-input",
+      status: "working",
+      scope: {},
+      executorKind: "child-process",
+      detached: false,
+      handlerRef: "awaits-input",
+      ttl: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const transitions: WorkerToParentMessage["transition"][] = [];
+    let onInputRequired!: () => void;
+    const sawInputRequired = new Promise<void>((resolve) => {
+      onInputRequired = resolve;
+    });
+    let onCompleted!: () => void;
+    const sawCompleted = new Promise<void>((resolve) => {
+      onCompleted = resolve;
+    });
+    child.on("message", (message: WorkerToParentMessage) => {
+      if (message == null || message.t !== "transition") return;
+      transitions.push(message.transition);
+      if (message.transition.status === "input_required") onInputRequired();
+      if (message.transition.status === "completed") onCompleted();
+    });
+    const exited = new Promise<number | null>((resolve) => {
+      child.on("exit", (code) => resolve(code));
+    });
+
+    await new Promise<void>((resolve) => child.on("spawn", () => resolve()));
+    child.send({ t: "start", record });
+
+    // The child paused in input_required — deterministic (the release
+    // message hasn't been sent). Only THEN release it.
+    await sawInputRequired;
+    child.send({ t: "release-input" });
+    await sawCompleted;
+    expect(await exited).toBe(0);
+
+    // The worker emits ONLY its own transitions (the parent harness writes
+    // the initial `working`), so: input_required → working → completed.
+    const statuses = transitions
+      .map((t) => t.status)
+      .filter((s): s is TaskStatus => s !== undefined);
+    expect(statuses).toEqual(["input_required", "working", "completed"]);
+    const inputReq = transitions.find((t) => t.status === "input_required");
+    expect(inputReq?.statusMessage).toBe("need input");
   });
 });
 

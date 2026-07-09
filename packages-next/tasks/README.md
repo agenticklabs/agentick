@@ -325,6 +325,41 @@ fire.
 - `onProgress(update: ProgressUpdate): void` — emit progress.
 - `setStatusMessage(message: string): void` — update the human-readable
   status without emitting a progress event.
+- `awaitingInput<T>(promise, opts?): Promise<T>` — run `promise` in the
+  `input_required` state. See below.
+
+#### `awaitingInput` — pause on external input (`input_required`)
+
+Wrap ANY external-input await so observers can tell **"blocked on input,
+provide it"** from **"actively working"**. The task flips
+`working → input_required` for the duration of the pause (optionally with a
+`message` statusMessage), then back to `working` when the promise settles:
+
+```ts
+ctx.tasks.submit(async (task) => {
+  // `askOperator()` returns a Promise that settles when the human answers
+  // (an elicit, a webhook, a UI approval — anything external). While it's
+  // pending the task shows `input_required` on the bus, the model's
+  // `session_tasks_*` view, and the MCP wire.
+  const answer = await task.awaitingInput(askOperator("Approve deploy to prod?"), {
+    message: "awaiting approval",
+  });
+  if (!answer.approved) return [{ type: "text", text: "cancelled by operator" }];
+  return deploy();
+});
+```
+
+It is **generic — not elicitation-coupled**: wrap an elicit, MCP sampling,
+a roots request, a webhook, any external await. Tasks take no dependency on
+elicitation. The flip runs through the same `report` seam as `onProgress` /
+`setStatusMessage`, so it lands on the durable `TaskStore` record, the
+`task-status` bus channel, AND the MCP wire (which maps `input_required`
+1:1). A `finally` restores `working` even if the promise **rejects** — so a
+throw can't strand the task paused. And if the task is **cancelled while
+paused**, the caller's `cancelled` transition wins (it's terminal); the
+`finally`'s `working` report is a post-terminal no-op, so cancel is honored
+— the task does not revert. `input_required` means "provide input," a state
+distinct from `working`.
 
 ### `TaskHandle<T>`
 
@@ -399,10 +434,11 @@ unknown ids — same shape across local and cluster paths.
 
 `"working" | "input_required" | "completed" | "failed" | "cancelled" |
 "interrupted"`. The first five map 1:1 to MCP's task FSM.
-`input_required` is declared for forward-compat with MCP but Phase A
-doesn't auto-transition into it; tools that pause on `ctx.elicitation`
-stay `working` until Phase B's auto-pause integration ships.
-`interrupted` (ADR 68) is the orphan-accounting terminal — a `working`
+`input_required` is a **live, produced** state: a work fn opts in by
+wrapping an external-input pause in
+[`ctx.awaitingInput`](#awaitinginput--pause-on-external-input-input_required),
+which flips `working → input_required → working` and surfaces on the bus +
+the MCP wire. `interrupted` (ADR 68) is the orphan-accounting terminal — a `working`
 record whose live executor is gone (harness re-hydrated a store record
 with no reattachable execution). It has **no MCP-wire representation**
 (the MCP enum stops at `cancelled`); the server codec lossy-maps it to
@@ -728,15 +764,23 @@ runTasksHarnessConformance(async ({ harnessId }) => {
   persisted, shared-store cross-session isolation, and
   `interrupted`-on-hydration (orphaned `working` → `interrupted`;
   terminal prior-run records surfaced read-only).
-- `src/__tests__/child-executor.spec.ts` — 10 tests that ACTUALLY fork a
+- `src/__tests__/input-required.spec.ts` — the `awaitingInput` seam on the
+  in-process executor: the full `working → input_required → working →
+  completed` status timeline (bus envelopes) with the paused-state
+  statusMessage, the durable `TaskStore` record reflecting `input_required`
+  while paused, and cancel-while-paused landing terminal `cancelled` (the
+  `finally`'s `working` report proven a post-terminal no-op).
+- `src/__tests__/child-executor.spec.ts` — 13 tests that ACTUALLY fork a
   `tsx`-loaded child and round-trip over IPC (no fakes for the process
   boundary): echo result round-trip, ordered progress over IPC, thrower →
   `failed`, graceful cancel (child exits), `SIGKILL` backstop for a child
   that ignores cancel, `TaskHandlerRefRequiredError` on a by-ref submit
   without `handlerRef` (before forking), `UnknownTaskExecutorError` on an
   unregistered kind, registry merge (in-process + child both resolvable),
-  detached-survives-`close()` + reattach-within-process + cancel, and
-  non-detached killed on `close()`.
+  detached-survives-`close()` + reattach-within-process + cancel,
+  non-detached killed on `close()`, and `awaitingInput` flipping
+  `input_required → working → completed` over IPC (message-triggered
+  release — deterministic, real fork).
 - `src/__tests__/executor-conformance.spec.ts` — `runTaskExecutorConformance`
   green for BOTH bundled strategies: `InProcessTaskExecutor` (closures) and
   `ChildProcessTaskExecutor` (by-ref over a real fork). The proof the seam
@@ -759,7 +803,9 @@ runTasksHarnessConformance(async ({ harnessId }) => {
 - `packages-next/mcp/src/__tests__/task-bridge.spec.ts` +
   `mcp/src/server/__tests__/tasks-projection.spec.ts` (sibling
   package) — the MCP wire round-trip is unchanged under the refactor
-  (byte-identical `task-status` / `task-progress` payloads).
+  (byte-identical `task-status` / `task-progress` payloads), plus a
+  PRODUCED `input_required` projecting onto the wire (`tasks/get`
+  reports the paused state a task entered via `ctx.awaitingInput`).
 
 ## Roadmap & known gaps
 
@@ -778,10 +824,6 @@ runTasksHarnessConformance(async ({ harnessId }) => {
   per-subscriber `Queue<TaskEvent>` fan-out to `Stream.fromQueue`,
   expose an `Effect<TaskHandle>` work overload that runs as a real
   interruptible fiber.
-- **`input_required` transitions** — declared in `TaskStatus` for
-  forward-compat with MCP's FSM, but Phase A doesn't auto-transition
-  into it. When a task's work fn pauses on an elicit / sampling /
-  roots request, Phase B's auto-pause integration will set the status.
 - **`taskSupport: "supported"`** — the caller-choice mode declared in
   the spec annotation but not yet branched on by the executor. Lands
   alongside Phase C, where the model has the tooling to opt in.

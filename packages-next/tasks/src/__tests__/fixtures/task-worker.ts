@@ -48,6 +48,30 @@ registerTaskHandler<unknown, readonly ContentBlock[]>("slow", async (ctx) => {
   return [{ type: "text", text: "should-not-reach" }];
 });
 
+// `awaits-input` — pauses on an EXTERNAL input via `ctx.awaitingInput`,
+// released by a custom `{ t: "release-input" }` parent IPC message (a
+// deferred-triggered release — deterministic, NOT a timer race). Proves
+// the worker flips `input_required → working → completed` over IPC. The
+// handler owns its own release protocol on top of the worker's IPC (the
+// worker's own `process.on("message")` ignores non-start/cancel messages).
+registerTaskHandler<unknown, readonly ContentBlock[]>("awaits-input", async (ctx) => {
+  const released = new Promise<void>((resolve) => {
+    const onMessage = (message: unknown): void => {
+      if (
+        message != null &&
+        typeof message === "object" &&
+        (message as { t?: string }).t === "release-input"
+      ) {
+        process.off("message", onMessage);
+        resolve();
+      }
+    };
+    process.on("message", onMessage);
+  });
+  await ctx.awaitingInput(released, { message: "need input" });
+  return [{ type: "text", text: "input-provided" }];
+});
+
 // `hang` — ignores the signal and never resolves. Forces the SIGKILL
 // backstop (the cooperative cancel can't stop it).
 registerTaskHandler<unknown, readonly ContentBlock[]>("hang", async () => {
