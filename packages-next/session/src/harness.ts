@@ -11,7 +11,14 @@
 
 import { Effect, Fiber, Stream } from "effect";
 
-import { BaseHarness, runHarnessProtocol, ulid } from "@agentick/runtime-next";
+import {
+  BaseHarness,
+  runHarnessProtocol,
+  ulid,
+  SESSION_ESCALATION_MESSAGE_TYPE,
+  ESCALATION_TIMEOUT_MS,
+  type EscalationEnvelopePayload,
+} from "@agentick/runtime-next";
 import type {
   JournalingPolicy,
   LoopExecutorProtocol,
@@ -24,6 +31,8 @@ import type {
   ApplyToolResultsInput,
   ChannelHandle,
   ContentBlock,
+  ElicitationRequest,
+  FormElicitationRequest,
   EventBus,
   EventBusFactory,
   ExecutionTarget,
@@ -867,10 +876,75 @@ export class SessionHarness<P = unknown>
   //      (name + JSON input) is fully serializable and is the easy
   //      first declaration. Design rides the slice-5/verb-matrix pass.
   protected handleMessage(
-    _msg: MessageEnvelope,
+    msg: MessageEnvelope,
   ): Effect.Effect<unknown, MessageHandlerError, never> {
+    // ADR 69 — substrate request escalation. A nested unit of work (a
+    // task, a spawned sub-agent) `ask`s its escalation-parent for
+    // something only the client can provide; the session is a hop on that
+    // chain.
+    if (msg.type === SESSION_ESCALATION_MESSAGE_TYPE) {
+      return this.handleEscalation(msg as MessageEnvelope<EscalationEnvelopePayload>);
+    }
     return Effect.fail(
       new HandlerError({ cause: new Error("session inbox dispatch not yet wired (Phase 4e+)") }),
+    );
+  }
+
+  /**
+   * Escalation hop (ADR 69). The `ask` return value IS the response — the
+   * nested-`ask` stack is both the relay AND the reply route:
+   *
+   *   - **spawned session** (`parentSessionId` set) → **forward** one hop
+   *     up to `session:{parentSessionId}`; the parent's eventual response
+   *     threads back down through this `ask`'s return. Built now; the
+   *     recursive hop + ancestor interception are exercised at T2.
+   *   - **root session** (no `parentSessionId`) → resolve **terminally**.
+   *     Today the one implemented class is `"elicit"`: run the real client
+   *     elicitation on this session's harness and return the outcome,
+   *     which routes back to the origin task automatically.
+   *
+   * A long timeout (not the 30s `ask` default) governs the human-scale
+   * wait; the origin's `signal` (cancel / ttl) interrupts the chain.
+   */
+  private handleEscalation(
+    msg: MessageEnvelope<EscalationEnvelopePayload>,
+  ): Effect.Effect<unknown, MessageHandlerError, never> {
+    const payload = msg.payload;
+    if (payload === undefined) {
+      return Effect.fail(new HandlerError({ cause: "escalation envelope missing payload" }));
+    }
+
+    // Forward branch — a spawned session bubbles to its spawner.
+    // TODO(ADR-69 T2): test the recursive hop, ancestor interception
+    // (a hop resolving instead of forwarding), and populate `lineage`
+    // (provenance / principal stamping per ADR 51).
+    if (this.parentSessionId !== undefined) {
+      return this.inbox
+        .ask(
+          `session:${this.parentSessionId}`,
+          { type: SESSION_ESCALATION_MESSAGE_TYPE, payload },
+          { timeoutMs: ESCALATION_TIMEOUT_MS },
+        )
+        .pipe(Effect.catchAll((cause) => Effect.fail(new HandlerError({ cause }))));
+    }
+
+    // Terminal branch (root) — resolve against the real client.
+    if (payload.class === "elicit") {
+      const request = payload.request as ElicitationRequest;
+      return Effect.tryPromise<unknown, MessageHandlerError>({
+        // Branch so overload resolution picks the form / url signature.
+        try: () =>
+          request.mode === "url"
+            ? this.elicitation.elicit(request)
+            : this.elicitation.elicit(request as FormElicitationRequest),
+        catch: (cause): MessageHandlerError => new HandlerError({ cause }),
+      });
+    }
+
+    // TODO(ADR-69 T2+): non-elicit payload classes (sampling, permission,
+    // credential, error) resolve terminally here via their own resolvers.
+    return Effect.fail(
+      new HandlerError({ cause: `unknown escalation class: ${String(payload.class)}` }),
     );
   }
 

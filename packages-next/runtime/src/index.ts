@@ -49,6 +49,12 @@ export { matchesQuery, compileQuery, type CompiledMatcher } from "./substrate/qu
 export { resolveSyncSubstrateSlot } from "./substrate/resolve-slot.js";
 export { ulid } from "./substrate/ulid.js";
 export {
+  SESSION_ESCALATION_MESSAGE_TYPE,
+  ESCALATION_TIMEOUT_MS,
+  type SessionEscalationMessageType,
+  type EscalationEnvelopePayload,
+} from "./substrate/escalation-protocol.js";
+export {
   RequestResponseRegistry,
   type RegisterOptions,
   type RegisteredRequest,

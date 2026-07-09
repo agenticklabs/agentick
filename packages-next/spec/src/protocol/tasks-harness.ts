@@ -26,6 +26,7 @@
 import type { Effect } from "effect";
 
 import type { ContentBlock } from "../data/content-blocks.js";
+import type { Elicit } from "./elicit-api.js";
 
 // ============================================================================
 // FSM
@@ -193,6 +194,25 @@ export interface TaskWorkContext {
    * strand the task in `input_required`. Returns the resolved value (or rethrows).
    */
   awaitingInput<T>(promise: Promise<T>, opts?: { readonly message?: string }): Promise<T>;
+  /**
+   * Request input from the connected client while this task runs (ADR 69).
+   * The same {@link Elicit} sugar surface a tool handler sees on
+   * `ctx.elicit` (text / confirm / select / form / …) — but instead of
+   * hitting a live per-tick elicitation, each call:
+   *
+   *   1. flips the task `working → input_required` (via {@link awaitingInput}),
+   *   2. **escalates** the request up the ownership chain to the owning
+   *      session and ultimately the client (nested `inbox.ask`), and
+   *   3. resolves with the client's response, restoring `working`.
+   *
+   * **THROWS on a detached task.** A `detached: true` task has no
+   * guaranteed live ancestor chain to reach the client, so `elicit` (and
+   * `awaitingInput`) raise a typed `DetachedTaskCannotElicitError` rather
+   * than hang against a dead inbox — `interactive ⊥ detached` (ADR 69).
+   *
+   * @see docs/proposals/v2/blueprint/69-request-escalation.md
+   */
+  readonly elicit: Elicit;
 }
 
 export interface TaskCreationInput {

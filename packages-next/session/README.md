@@ -343,8 +343,14 @@ their backing.
   live tool handlers). An addressable `session:send` needs a designed
   serializable signal form — `TODO(adr-51-session-verbs)`. `session/send`
   and `session/respondToElicitation` are already routed via the gateway.
-- **Inbox dispatch not wired.** `handleMessage` rejects with
-  `HandlerError` (Phase 4e+).
+- **Inbox dispatch mostly not wired.** `handleMessage` handles the
+  `session:escalation` message type — the terminal / forward hop of ADR 69
+  request escalation (a task or sub-agent asking the client for input;
+  root session resolves it against its elicitation harness, a spawned
+  session forwards to its `parentSessionId`). Every other message type
+  still rejects with `HandlerError` (Phase 4e+). The recursive forward hop
+  is built but T2-tested — see
+  [ADR 69](../../docs/proposals/v2/blueprint/69-request-escalation.md).
 - **Snapshot carries the persisted log only.** The (potentially
   compacted) projection is not yet round-tripped via `SessionSnapshot` —
   the composed per-harness `SnapshotHarness` is a later step.
@@ -382,6 +388,12 @@ their backing.
   `src/testing/kill-resume-acceptance.tsx` — the end-to-end
   kill-and-resume acceptance (`runKillResumeAcceptance`) across the
   memory / fs / postgres store poles (ADR 49).
+- `src/__tests__/escalation.spec.ts` — ADR 69 T1 request escalation: a
+  task's `ctx.elicit` escalates (nested `inbox.ask`) to its root owning
+  session, which resolves terminally against the real client elicitation;
+  the answer round-trips and the task FSM flips
+  `working → input_required → working → completed`. Also the
+  `interactive ⊥ detached` guard end-to-end.
 
 ## See also
 

@@ -25,6 +25,35 @@
  *     sugar wraps.
  */
 
+import type { ElicitationRequest, ElicitationResult } from "./elicitation-harness.js";
+
+// ============================================================================
+// The single elicit call the sugar wraps — transport-agnostic
+// ============================================================================
+
+/**
+ * The one form/url elicit round-trip the {@link Elicit} sugar composes
+ * over — transport-agnostic. Every {@link Elicit} method funnels through
+ * a single `ElicitFn`; where that call *goes* is the transport's concern:
+ *
+ *   - **Direct** (`buildSessionElicit`): straight to a live
+ *     `ElicitationHarness.elicit` on an in-process tick.
+ *   - **Escalated** (ADR 69, tasks): wrapped in `awaitingInput` +
+ *     `inbox.ask` up the ownership chain to the client.
+ *
+ * Because the sugar takes the raw `ElicitFn`, the tasks package can build
+ * an escalation-backed `Elicit` WITHOUT depending on `@agentick/elicitation-next`
+ * — the factory (`buildElicitSugar`) is injected. The `unknown` value on
+ * the result is intentional: the sugar re-narrows per call via the schema
+ * it constructs, so the underlying fn is value-agnostic.
+ *
+ * @see docs/proposals/v2/blueprint/69-request-escalation.md
+ */
+export type ElicitFn = (
+  request: ElicitationRequest,
+  opts?: { readonly timeoutMs?: number; readonly signal?: AbortSignal },
+) => Promise<ElicitationResult<unknown>>;
+
 // ============================================================================
 // Outcome union — used by `try*` variants (impl-side, not spec — listed here
 // so the contract type lives next to the sugar interface)

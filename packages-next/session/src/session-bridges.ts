@@ -19,7 +19,7 @@
 
 import { Effect } from "effect";
 import { InMemoryDataBridge, InMemoryModelBridge } from "@agentick/reconciler-next";
-import { ElicitationHarness } from "@agentick/elicitation-next";
+import { ElicitationHarness, buildElicitSugar } from "@agentick/elicitation-next";
 import { KnobsHarness } from "@agentick/knobs-next";
 import { StateHarness } from "@agentick/state-next";
 import { TasksHarness } from "@agentick/tasks-next";
@@ -232,6 +232,15 @@ export function buildSessionBridges(
     options.tasks ??
     new TasksHarness(`${store.id}:tasks`, substrate.journal, substrate.bus, substrate.inbox, {
       parentScope: { sessionId: store.id },
+      // ADR 69 — task `ctx.elicit` escalation. Inject the elicit-sugar
+      // factory so a task's `ctx.elicit.*` escalates to this session
+      // (`session:{sessionId}`) via `inbox.ask` and resolves with the
+      // client's response. Keeps `@agentick/tasks-next` free of an
+      // elicitation dependency (the escalation relay is payload-agnostic).
+      // TODO(ADR-69 T2): the shared/app-scoped `options.tasks` path is
+      // app-owned — the AppHarness must inject `buildElicit` there too,
+      // and escalate per originating session rather than the harness scope.
+      buildElicit: buildElicitSugar,
     });
   const resources =
     options.resources ??

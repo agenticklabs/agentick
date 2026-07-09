@@ -40,8 +40,10 @@
 import { Effect } from "effect";
 import { reasonOf } from "@agentick/utils-next";
 import type { TaskRecord, TaskTransition, TaskWorkContext } from "@agentick/spec-next";
+import { DetachedTaskCannotElicitError } from "@agentick/spec-next";
 
 import { defaultTaskHandlerRegistry, type TaskHandlerRegistry } from "./handler-registry.js";
+import { assertInteractive, throwingTaskElicit } from "./task-elicit.js";
 import type { ParentToWorkerMessage, WorkerToParentMessage } from "./child-protocol.js";
 
 /**
@@ -151,8 +153,10 @@ async function runOnce(
     // executor, sent over IPC → parent → `report` → store + bus. The
     // parent's `applyTransition` ignores post-terminal reports, so a
     // cancel while paused wins and the `finally`'s `working` report is a
-    // no-op there.
+    // no-op there. A detached task cannot pause on client input
+    // (`interactive ⊥ detached`, ADR 69).
     awaitingInput: (promise, opts) => {
+      assertInteractive(record);
       void send({
         t: "transition",
         transition: {
@@ -164,6 +168,21 @@ async function runOnce(
         void send({ t: "transition", transition: { status: "working" } });
       });
     },
+    // TODO(ADR-69 T2): cross-process elicit escalation. A forked child
+    // has a SEPARATE inbox, so `ctx.elicit` can't nest-`ask` the parent
+    // session directly — it needs an IPC bridge from the child's
+    // escalation origin to the parent's inbox (the parent then continues
+    // the chain). Until that bridge exists, `ctx.elicit` fails loud (or
+    // throws the detached error) rather than hang. The surface + the
+    // `interactive ⊥ detached` guard exist here for symmetry with the
+    // in-process executor per ADR 69 T1.
+    elicit: throwingTaskElicit(() =>
+      record.detached === true
+        ? new DetachedTaskCannotElicitError({ taskId: record.taskId })
+        : new Error(
+            `task ${record.taskId}: cross-process (child-process executor) elicit escalation is not yet wired — ADR 69 T2`,
+          ),
+    ),
   };
 
   let terminal: TaskTransition;

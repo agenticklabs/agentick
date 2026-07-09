@@ -36,6 +36,7 @@ import type { Effect } from "effect";
 import type { ContentBlock } from "../data/content-blocks.js";
 import type { EventScope } from "../data/events.js";
 import type { ProgressUpdate, TaskFailure, TaskStatus, TaskWorkContext } from "./tasks-harness.js";
+import type { Elicit, ElicitFn } from "./elicit-api.js";
 
 // ============================================================================
 // TaskRecord — the durable source of truth
@@ -172,6 +173,36 @@ export interface TaskTransition {
 export type TaskReport = (transition: TaskTransition) => void;
 
 /**
+ * Builds the {@link Elicit} sugar surface over a raw {@link ElicitFn}
+ * (ADR 69). Injected into the executor's ctx-build so the tasks package
+ * can hang `ctx.elicit` on a task WITHOUT depending on
+ * `@agentick/elicitation-next` — the sugar (schema construction, throw-
+ * on-decline, `try*` variants) lives in the elicitation package and is
+ * passed in. `buildElicitSugar` from `@agentick/elicitation-next` has
+ * exactly this shape.
+ *
+ * @see docs/proposals/v2/blueprint/69-request-escalation.md
+ */
+export type TaskElicitFactory = (elicit: ElicitFn) => Elicit;
+
+/**
+ * Optional per-task escalation wiring (ADR 69) handed to
+ * {@link TaskExecutor.start} alongside `report`. Both are undefined for a
+ * bare tasks harness with no escalation configured (the ctx's `elicit`
+ * then throws a clear "not configured" error on use); a session-wired
+ * harness supplies both so `ctx.elicit` escalates to the client.
+ *
+ *   - `escalate` — the raw {@link ElicitFn} that performs the up-chain
+ *     `inbox.ask` (built by the harness from its inbox + owning session).
+ *   - `buildElicit` — the {@link TaskElicitFactory} that wraps the
+ *     `awaitingInput`-composed escalate into the full `Elicit` sugar.
+ */
+export interface TaskExecutorHooks {
+  readonly escalate?: ElicitFn;
+  readonly buildElicit?: TaskElicitFactory;
+}
+
+/**
  * Opaque per-task execution handle an executor returns from {@link
  * TaskExecutor.start} and receives back at {@link TaskExecutor.cancel}.
  * The harness treats it as opaque — each executor defines its own
@@ -208,8 +239,18 @@ export interface TaskExecutor {
    * the work body has registered its `signal` listeners before returning
    * — a synchronous `cancel()` right after `submit` relies on it. Drive
    * `report` for every transition; observe `signal` for cancellation.
+   *
+   * `hooks` (optional, ADR 69) carries the escalation wiring the executor
+   * composes into `ctx.elicit`. Omitted for executors / call sites with
+   * no escalation configured — the ctx's `elicit` then throws on use.
    */
-  start(record: TaskRecord, work: TaskWork, report: TaskReport, signal: AbortSignal): TaskExecution;
+  start(
+    record: TaskRecord,
+    work: TaskWork,
+    report: TaskReport,
+    signal: AbortSignal,
+    hooks?: TaskExecutorHooks,
+  ): TaskExecution;
   /**
    * Re-attach to an already-running execution described by `record`
    * (durable-store restart, child still alive). Returns `undefined` when

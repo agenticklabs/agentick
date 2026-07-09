@@ -20,6 +20,7 @@
 
 import type {
   Elicit,
+  ElicitFn,
   ElicitOutcome,
   ElicitTimeoutOption,
   ElicitationHarnessProtocol,
@@ -240,10 +241,36 @@ export interface BuildSessionElicitOptions {
  * it via `ctx.elicit.text(...)` etc., identical to the MCP-server
  * `ctx.elicit` surface — the same {@link Elicit} interface, the same
  * outcomes, the same throwing semantics on decline/cancel.
+ *
+ * Thin wrapper over {@link buildElicitSugar} whose {@link ElicitFn}
+ * routes straight to the live harness (direct-to-client on a tick).
  */
 export function buildSessionElicit(options: BuildSessionElicitOptions): Elicit {
   const { harness } = options;
+  return buildElicitSugar((request, opts) =>
+    // Branch so overload resolution picks the form / url signature — the
+    // union arg alone won't resolve an overloaded call.
+    request.mode === "url" ? harness.elicit(request, opts) : harness.elicit(request, opts),
+  );
+}
 
+/**
+ * Build the {@link Elicit} sugar surface over a raw {@link ElicitFn}
+ * (ADR 69). This is the transport-agnostic core: every sugar method
+ * (`text`, `confirm`, `select`, `url`, the `try*` variants, …)
+ * constructs a flat-schema request and funnels through the single
+ * `elicit` call. WHERE that call goes is the caller's concern:
+ *
+ *   - {@link buildSessionElicit} routes it to a live in-process harness
+ *     (direct-to-client during a tick).
+ *   - The tasks package (ADR 69) hands in an escalation-backed `ElicitFn`
+ *     that wraps `awaitingInput` + `inbox.ask` up the ownership chain —
+ *     so it reuses this exact sugar WITHOUT a dep on this package (the
+ *     factory is injected as a `TaskElicitFactory`).
+ *
+ * @see docs/proposals/v2/blueprint/69-request-escalation.md
+ */
+export function buildElicitSugar(elicit: ElicitFn): Elicit {
   async function form<T>(
     message: string,
     schema: StandardSchemaV1<unknown, T>,
@@ -251,7 +278,7 @@ export function buildSessionElicit(options: BuildSessionElicitOptions): Elicit {
   ): Promise<ElicitationResult<T>> {
     const ms = timeoutOptToMs(timeoutMs);
     const opts = ms !== undefined ? { timeoutMs: ms } : undefined;
-    return harness.elicit({ mode: "form", message, schema }, opts);
+    return (await elicit({ mode: "form", message, schema }, opts)) as ElicitationResult<T>;
   }
 
   async function sendUrl(
@@ -260,10 +287,10 @@ export function buildSessionElicit(options: BuildSessionElicitOptions): Elicit {
   ): Promise<ElicitationResult<undefined>> {
     const ms = timeoutOptToMs(spec.timeoutMs);
     const opts = ms !== undefined ? { timeoutMs: ms } : undefined;
-    return harness.elicit(
+    return (await elicit(
       { mode: "url", message: spec.message, url: spec.url, elicitationId },
       opts,
-    );
+    )) as ElicitationResult<undefined>;
   }
 
   return {

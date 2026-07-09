@@ -49,11 +49,19 @@
  */
 
 import { Effect, Stream } from "effect";
-import { BaseHarness, ulid } from "@agentick/runtime-next";
+import {
+  BaseHarness,
+  ulid,
+  SESSION_ESCALATION_MESSAGE_TYPE,
+  ESCALATION_TIMEOUT_MS,
+  type EscalationEnvelopePayload,
+} from "@agentick/runtime-next";
 import { createLocalPubSub, type LocalPubSub } from "@agentick/pubsub-next";
 import { omitUndefined } from "@agentick/utils-next";
 import type {
   ContentBlock,
+  ElicitFn,
+  ElicitationResult,
   EventBus,
   EventScope,
   MessageEnvelope,
@@ -62,9 +70,11 @@ import type {
   OperationJournal,
   ProgressUpdate,
   TaskCreationInput,
+  TaskElicitFactory,
   TaskEvent,
   TaskExecution,
   TaskExecutor,
+  TaskExecutorHooks,
   TaskFailure,
   TaskHandle,
   TaskInfo,
@@ -183,6 +193,18 @@ export interface TasksHarnessOptions {
    * detached-survives-close) and passes `[childExecutor]` here.
    */
   readonly executors?: readonly TaskExecutor[];
+  /**
+   * Elicit-sugar factory for task `ctx.elicit` (ADR 69). Injected so this
+   * package stays free of `@agentick/elicitation-next` — pass its
+   * `buildElicitSugar`. When supplied, a task's `ctx.elicit.*` escalates
+   * the request to the owning session (`scope.sessionId`) via
+   * `inbox.ask` and resolves with the client's response; when omitted,
+   * `ctx.elicit` throws a "not configured" error on use (a bare harness
+   * has no client to reach). `buildSessionBridges` wires this.
+   *
+   * @see docs/proposals/v2/blueprint/69-request-escalation.md
+   */
+  readonly buildElicit?: TaskElicitFactory;
 }
 
 // ============================================================================
@@ -203,6 +225,12 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
    * `record.executorKind`.
    */
   private readonly executors: Map<string, TaskExecutor>;
+  /**
+   * Injected {@link TaskElicitFactory} (ADR 69) — the elicit-sugar
+   * builder for task `ctx.elicit`. Undefined on a bare harness (no
+   * escalation); `ctx.elicit` then throws on use.
+   */
+  private readonly buildElicit: TaskElicitFactory | undefined;
 
   /**
    * Resolves once hydration (orphan accounting, ADR 68) has run — chained
@@ -235,6 +263,7 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
     for (const executor of options.executors ?? []) {
       this.executors.set(executor.kind, executor);
     }
+    this.buildElicit = options.buildElicit;
     // Hydration reads the store AFTER inbox registration. `ready` is a
     // readonly BaseHarness field (can't reassign), so this is a sibling
     // barrier. TODO(#134-followup): fold into `ready` if BaseHarness gains
@@ -343,6 +372,7 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
       work as TaskWork,
       this.makeReport(live),
       live.controller.signal,
+      this.makeHooks(live),
     );
     // Sync-completing work (e.g. `Effect.succeed`) may have already driven
     // the record terminal during `start` — don't stash a dead handle.
@@ -354,6 +384,56 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
   /** The ONE uniform transition path from an executor back to the harness. */
   private makeReport(live: LiveTask): TaskReport {
     return (transition) => this.applyTransition(live, transition);
+  }
+
+  /**
+   * Per-task escalation wiring handed to the executor's ctx-build (ADR
+   * 69). `escalate` is the raw up-chain `inbox.ask` bound to THIS task's
+   * signal (so an origin cancel / ttl interrupts the ask fiber via
+   * `Effect.runPromise({ signal })`); `buildElicit` is the injected sugar
+   * factory. The executor composes them into `ctx.elicit`; when
+   * `buildElicit` is absent, `ctx.elicit` is a throwing stub and
+   * `escalate` is never invoked.
+   */
+  private makeHooks(live: LiveTask): TaskExecutorHooks {
+    return {
+      escalate: this.makeEscalate(live.controller.signal),
+      ...(this.buildElicit !== undefined ? { buildElicit: this.buildElicit } : {}),
+    };
+  }
+
+  /**
+   * Build the escalation {@link ElicitFn} for a task: `ask` the owning
+   * session (`session:{scope.sessionId}`) with a payload-agnostic
+   * escalation envelope (ADR 69), tagged `class: "elicit"`. The handler's
+   * return value threads the client's {@link ElicitationResult} back —
+   * the `ask` return stack IS the reply route (no envelope-forwarding
+   * machinery). A long timeout (not the 30s `ask` default) governs a
+   * human-in-the-loop wait; the task's `signal` (cancel / ttl / close)
+   * interrupts the ask fiber early.
+   *
+   * TODO(ADR-69 T2): a shared/app-scoped harness stamps the originating
+   * session per-submit rather than reading the single harness scope;
+   * escalate should route from the record's owning session, not
+   * `this.scope`.
+   */
+  private makeEscalate(signal: AbortSignal): ElicitFn {
+    const inbox = this.inbox;
+    const sessionId = this.scope.sessionId;
+    return (request) => {
+      if (sessionId === undefined) {
+        throw new Error(
+          "cannot escalate task elicit: this TasksHarness has no owning session (scope.sessionId). Escalation requires a session-scoped harness (ADR 69).",
+        );
+      }
+      const payload: EscalationEnvelopePayload = { class: "elicit", request };
+      const ask = inbox.ask<EscalationEnvelopePayload, ElicitationResult>(
+        `session:${sessionId}`,
+        { type: SESSION_ESCALATION_MESSAGE_TYPE, payload },
+        { timeoutMs: ESCALATION_TIMEOUT_MS },
+      );
+      return Effect.runPromise(ask, { signal });
+    };
   }
 
   /**

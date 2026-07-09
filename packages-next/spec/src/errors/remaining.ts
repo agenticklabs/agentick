@@ -82,6 +82,35 @@ export class TaskHandlerRefRequiredError extends AgentickError {
 registerAgentickError("TaskHandlerRefRequiredError", TaskHandlerRefRequiredError);
 
 // ============================================================================
+// DetachedTaskCannotElicitError — interactive ⊥ detached (ADR 69)
+// ============================================================================
+
+/**
+ * Thrown when a `detached: true` task attempts to request input from the
+ * client — via `TaskWorkContext.elicit` or the underlying
+ * `TaskWorkContext.awaitingInput` (ADR 69). Escalation to the client
+ * requires a live ancestor chain (the owning session's inbox), and a
+ * detached task is by definition *not* guaranteed one: it may outlive the
+ * session that spawned it. Rather than hang against a dead inbox, the
+ * attempt fails loud and immediately — `interactive ⊥ detached`. Detached
+ * means non-interactive, fire-and-forget, durable-result work.
+ *
+ * @see docs/proposals/v2/blueprint/69-request-escalation.md §`interactive ⊥ detached`
+ */
+export class DetachedTaskCannotElicitError extends AgentickError {
+  readonly _tag = "DetachedTaskCannotElicitError" as const;
+  readonly taskId: string;
+  constructor(args: { readonly taskId: string; readonly cause?: unknown }) {
+    super(
+      `detached task ${args.taskId} cannot elicit: a detached task has no live ancestor chain to reach the client (interactive ⊥ detached, ADR 69)`,
+      { cause: args.cause },
+    );
+    this.taskId = args.taskId;
+  }
+}
+registerAgentickError("DetachedTaskCannotElicitError", DetachedTaskCannotElicitError);
+
+// ============================================================================
 // ChannelPublishError — channel publisher failures
 // ============================================================================
 

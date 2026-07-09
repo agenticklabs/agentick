@@ -211,6 +211,7 @@ export {
   SandboxPermissionDeniedError,
   SandboxResourceLimitError,
   SandboxUnsupportedError,
+  DetachedTaskCannotElicitError,
   TaskHandlerRefRequiredError,
   UnknownTaskError,
   UnknownTaskExecutorError,

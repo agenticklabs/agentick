@@ -327,6 +327,8 @@ fire.
   status without emitting a progress event.
 - `awaitingInput<T>(promise, opts?): Promise<T>` — run `promise` in the
   `input_required` state. See below.
+- `elicit: Elicit` — request input from the connected client, from inside
+  a task, via request escalation (ADR 69). See below.
 
 #### `awaitingInput` — pause on external input (`input_required`)
 
@@ -360,6 +362,52 @@ paused**, the caller's `cancelled` transition wins (it's terminal); the
 `finally`'s `working` report is a post-terminal no-op, so cancel is honored
 — the task does not revert. `input_required` means "provide input," a state
 distinct from `working`.
+
+#### `ctx.elicit` — ask the client, from inside a task (ADR 69)
+
+`awaitingInput` is generic but leaves you holding the promise. When the
+"external input" you want is a structured answer **from the connected
+client**, use `ctx.elicit` — the same [`Elicit`](../elicitation) sugar a
+tool handler sees (`text`, `confirm`, `select`, `number`, `form`, the
+`try*` variants), but sourced through **request escalation** instead of a
+live per-tick elicitation:
+
+```ts
+ctx.tasks.submit(async (task) => {
+  // Flips working → input_required, escalates the request up the
+  // ownership chain to the connected client, resolves with the answer,
+  // and restores working — all in one call.
+  const approved = await task.elicit.confirm("Approve deploy to prod?");
+  if (!approved) return [{ type: "text", text: "cancelled by operator" }];
+  return deploy();
+});
+```
+
+Each call composes `awaitingInput(escalate(request))`: the task flips to
+`input_required`, the request **escalates as nested `inbox.ask`** to the
+task's owning session (and, up the spawn lineage, ultimately the client),
+and the answer threads back down the `ask` return stack. The escalation
+relay is **payload-agnostic substrate** — this package takes no dependency
+on `@agentick/elicitation-next`; the elicit sugar is injected by the
+session that owns the harness.
+
+`interactive ⊥ detached` — a **`detached: true`** task has no guaranteed
+live ancestor chain to reach the client, so `ctx.elicit` (and the
+underlying `awaitingInput`) **throw** `DetachedTaskCannotElicitError`
+rather than hang. Detached means non-interactive, fire-and-forget,
+durable-result work.
+
+> **Tier.** T1 (this release) wires the root-session case: a task in a
+> connected session escalates to that session, which resolves terminally
+> against the real client elicitation. Deeper bubbling — a **sub-agent**
+> session forwarding to its spawner, ancestor **interception**, and the
+> **cross-process** (child-executor) elicit bridge — is **ADR 69 T2**
+> (seam built, `TODO(ADR-69 T2)` trailheads in place). See
+> [ADR 69](../../docs/proposals/v2/blueprint/69-request-escalation.md).
+
+Verified by `src/__tests__/escalation.spec.ts` (origin guards) and
+`@agentick/session-next`'s `src/__tests__/escalation.spec.ts` (the
+root-session round-trip + FSM flip).
 
 ### `TaskHandle<T>`
 

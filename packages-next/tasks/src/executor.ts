@@ -35,12 +35,15 @@ import { causeValue, reasonOf } from "@agentick/utils-next";
 import type {
   TaskExecution,
   TaskExecutor,
+  TaskExecutorHooks,
   TaskFailure,
   TaskRecord,
   TaskReport,
   TaskWork,
   TaskWorkContext,
 } from "@agentick/spec-next";
+
+import { assertInteractive, buildTaskElicit } from "./task-elicit.js";
 
 /** In-process execution handle — carries the Effect `Fiber` when one exists. */
 interface InProcessExecution extends TaskExecution {
@@ -58,30 +61,38 @@ export class InProcessTaskExecutor implements TaskExecutor {
   readonly kind = "in-process";
 
   start(
-    _record: TaskRecord,
+    record: TaskRecord,
     work: TaskWork,
     report: TaskReport,
     signal: AbortSignal,
+    hooks?: TaskExecutorHooks,
   ): TaskExecution {
+    // Wrap an external-input pause: flip `working → input_required` for
+    // the await, then restore `working` when it settles. The harness's
+    // `applyTransition` ignores post-terminal reports, so a cancel while
+    // paused drives the record terminal and the `finally`'s `working`
+    // report is a safe no-op (it can't strand the task). A detached task
+    // cannot pause on client input (`interactive ⊥ detached`, ADR 69) —
+    // guard loud rather than hang against a dead ancestor inbox.
+    const awaitingInput: TaskWorkContext["awaitingInput"] = (promise, opts) => {
+      assertInteractive(record);
+      report({
+        status: "input_required",
+        ...(opts?.message !== undefined ? { statusMessage: opts.message } : {}),
+      });
+      return Promise.resolve(promise).finally(() => report({ status: "working" }));
+    };
+
     // Build the work ctx here — onProgress / setStatusMessage funnel into
     // the ONE report path. The signal is harness-owned (aborts on cancel
-    // / close); the work fn observes it.
+    // / close); the work fn observes it. `elicit` composes escalation
+    // (ADR 69) over `awaitingInput` + the harness `hooks`.
     const ctx: TaskWorkContext = {
       signal,
       onProgress: (update) => report({ progress: update }),
       setStatusMessage: (message) => report({ statusMessage: message }),
-      // Wrap an external-input pause: flip `working → input_required` for
-      // the await, then restore `working` when it settles. The harness's
-      // `applyTransition` ignores post-terminal reports, so a cancel while
-      // paused drives the record terminal and the `finally`'s `working`
-      // report is a safe no-op (it can't strand the task).
-      awaitingInput: (promise, opts) => {
-        report({
-          status: "input_required",
-          ...(opts?.message !== undefined ? { statusMessage: opts.message } : {}),
-        });
-        return Promise.resolve(promise).finally(() => report({ status: "working" }));
-      },
+      awaitingInput,
+      elicit: buildTaskElicit({ record, awaitingInput, hooks }),
     };
 
     // Invoke work SYNCHRONOUSLY so its body runs (registering signal
