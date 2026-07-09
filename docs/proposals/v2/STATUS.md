@@ -1688,10 +1688,23 @@ blueprint's design decisions; this is execution-level).
   `EscalationHop`, `EscalationOutcome`, `EscalationInterceptor`) moved to
   spec-next (cycle-free: the spec `SessionHarnessProtocol.interceptEscalation`
   references them); wire constants stay in runtime-next. Full suite 8035 green.
-- **Deferred:** T2b (cross-process child IPC elicit bridge — the forked
-  worker's `ctx.elicit` stub throws loud today), lineage UI-surfacing into the
-  client elicit request, and T3 (durable/cluster + direct-delivery
-  optimization). `TODO(ADR-69 T2b)`-trailed.
+- **ADR 69 T2b landed** (`6c3f18be`) — the cross-process child elicit bridge:
+  a forked task's `ctx.elicit` (a generic `Elicit` Proxy) marshals a
+  serializable INTENT `{method, args}` over IPC; the parent
+  (`ChildProcessTaskExecutor.bridgeElicit`) reconstructs the live-schema
+  request via `hooks.buildElicit(hooks.escalate)[method](...args)` and feeds
+  the SAME escalate chain — so interception + lineage apply to a forked task
+  for free (proven: a parent interceptor short-circuits a forked child's
+  elicit, client elicit never called). The live `StandardSchemaV1` NEVER
+  crosses IPC (only `{method, args}` does; `assertElicitArgsCloneable` fails
+  loud on a raw `form(liveSchema)`). Typed elicit errors round-trip via
+  `serializeAgentickError` (child rethrows the exact class, e.g.
+  `ElicitationDeclined`). `input_required` flip crosses via `awaitingInput`
+  over IPC. `@agentick/elicitation-next` is a TEST-ONLY devDep — tasks src
+  stays elicitation-free (the sugar is injected). Full suite green.
+  **Escalation arc (T1 + T2a + T2b) complete for in-process AND cross-process.**
+- **Deferred:** lineage UI-surfacing into the client elicit request, and T3
+  (durable/cluster escalation + the direct-delivery optimization).
 - **ADR 68 input_required (#120-followup) landed** (`4fdb548f`) —
   `ctx.awaitingInput` status wrapper (`working → input_required → working`),
   the origin seam ADR 69 builds on. Plus worker self-terminates on parent IPC
