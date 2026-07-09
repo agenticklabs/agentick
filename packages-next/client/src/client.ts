@@ -34,7 +34,8 @@ import type {
   WireResult,
 } from "@agentick/spec-next";
 import { EMPTY_CLIENT_CAPABILITIES, ErrorCode } from "@agentick/spec-next";
-import { createNotifier } from "@agentick/pubsub-next";
+import { createLocalPubSub, createNotifier, type LocalPubSub } from "@agentick/pubsub-next";
+import { Deferred, Effect, Stream } from "effect";
 import { buildClientCapabilities } from "./capabilities.js";
 import { ClientHandlerRegistry } from "./handler-registry.js";
 import { makeAppHandle, makeGatewayHandle, makeSessionHandle } from "./handles.js";
@@ -75,6 +76,20 @@ class AgentickClient implements ClientProtocol {
   private readonly extensions: readonly ClientExtension[];
   private readonly handlerRegistry = new ClientHandlerRegistry();
   private readonly clientBus: LocalEventBus;
+  /**
+   * Dedicated client-event emitter. Deliberately DECOUPLED from
+   * `clientBus` (the `ProtocolEvent` observability bus) and from the
+   * substrate's `EventSurface` union — `ClientEvent` is its own
+   * augmentable surface family (`ClientEventSurfaces`). `events()`
+   * subscribes THIS pubsub; nothing on the wire flows through it.
+   *
+   * Elements are `SequencedClientEvent` (not bare `ClientEvent`) so a
+   * monotonic, client-scoped `Cursor` can be threaded to every stream
+   * without mutating the `ClientEvent` shape.
+   */
+  private readonly clientEvents: LocalPubSub<SequencedClientEvent>;
+  /** Monotonic, client-scoped cursor counter. Advanced per publish. */
+  private clientEventSeq = 0;
   private readonly composedRequest: ReturnType<typeof composeRequest>;
   private readonly stateListeners = createNotifier<ClientState>();
   private readonly capabilityListeners = createNotifier<ClientCapabilities>();
@@ -100,6 +115,12 @@ class AgentickClient implements ClientProtocol {
     this.extensions = options.extensions ?? [];
 
     this.clientBus = new LocalEventBus();
+    // closeDrainTimeoutMs: 0 — client-event delivery is best-effort
+    // observability. At client teardown we don't block on flushing
+    // buffered events to subscribers (and a lagging/late subscriber must
+    // never stall `client.close()`); iterators end via their own
+    // `interruptWhen` on `ClientEventStream.close()`.
+    this.clientEvents = createLocalPubSub<SequencedClientEvent>({ closeDrainTimeoutMs: 0 });
     this.composedRequest = composeRequest(this.extensions, (req) =>
       this.transport.request(req.method, req.params, req.signal),
     );
@@ -291,6 +312,9 @@ class AgentickClient implements ClientProtocol {
         /* swallow — close must not throw */
       }
     }
+    // Drain + shut down the client-event emitter so any live
+    // `events()` iterators end and no subscription leaks.
+    await this.clientEvents.close();
     await this.transport.close();
   }
 
@@ -342,16 +366,40 @@ class AgentickClient implements ClientProtocol {
     return makeSessionHandle(this, sessionId).send(input);
   }
 
+  /**
+   * Subscribe to events ABOUT this client. Returns a live
+   * `AsyncIterable<ClientEvent>` fed by the dedicated `clientEvents`
+   * emitter — NOT the `ProtocolEvent` observability bus and NOT the
+   * wire. Each call yields an independent stream with its own
+   * subscription; multiple concurrent iterators do not interfere.
+   *
+   * **Filter.** `filter.surface` (single or array) and `filter.phase`
+   * (single or array) narrow the stream; both are AND-ed. Omit either
+   * to match all.
+   *
+   * **Cursor semantics — LIVE-ONLY.** The stream starts at
+   * subscribe-time; there is NO replay buffer, so `fromCursor` is
+   * accepted for forward-compatibility but IGNORED — a caller can
+   * never rewind past the moment it subscribed. The returned stream's
+   * `cursor` advances monotonically (client-scoped sequence) to the
+   * position of the most recently yielded event, so a caller can
+   * observe progress and correlate events across streams from the same
+   * client. When a bounded replay ring lands (#308-followup),
+   * `fromCursor` becomes best-effort resume.
+   *
+   * **Close.** `close()` interrupts the underlying stream, ending every
+   * active `for await` cleanly and releasing the pubsub subscription
+   * (no leak). Idempotent.
+   *
+   * @verifiedBy src/__tests__/events.spec.ts
+   */
   events(
-    _filter?: ClientEventFilter,
+    filter?: ClientEventFilter,
     _fromCursor?: Cursor,
-  ): AsyncIterable<ClientEvent> & { close(): Promise<void> } {
-    // Phase 33.B ships the type surface + client-bus + extension registration.
-    // The bus-Stream → AsyncIterable<ClientEvent> adapter lands in a follow-up
-    // once the client `EventSurface` registration extends `@agentick/spec-next`'s
-    // bus event-surface union. Today's bus is typed against `ProtocolEvent`;
-    // client events are a separate surface family.
-    return new ClientEventStream();
+  ): AsyncIterable<ClientEvent> & { close(): Promise<void>; readonly cursor: Cursor } {
+    // fromCursor is intentionally unused: live-only, no replay buffer.
+    // See the doc-comment above and TODO(#308-followup) at the ring.
+    return new ClientEventStream(this.clientEvents, filter);
   }
 
   // ── helpers ───────────────────────────────────────────────────────────
@@ -369,10 +417,61 @@ class AgentickClient implements ClientProtocol {
     };
   }
 
-  private publishConnectionEvent(_from: ClientState, _to: ClientState): void {
-    // Deferred — see events() comment. State listeners (added via
-    // onStateChange) work today; bus-emitted events arrive in follow-up.
+  /**
+   * Publish a `connection`-surface `ClientEvent` for a transport state
+   * transition onto the dedicated client-event emitter. The `connection`
+   * surface's only phase in the spec vocabulary is `"transition"`; the
+   * started/opened/closed/failed distinctions live in the `ClientState`
+   * values carried by `from`/`to`, not in a phase field. We therefore
+   * emit `phase: "transition"` and let subscribers switch on
+   * `to` (`"open"`, `"closed"`, `{ kind: "failed" }`, …).
+   *
+   * TODO(#308-followup): the other `ClientEvent` surfaces —
+   * `request` / `subscription` / `auth` / `wire` / `extension` — need
+   * their own emit sites (the request pipeline, the subscribe RPC
+   * family, the auth surface, the `wireMirror()` extension). Those
+   * sources are not wired here; only `connection` has a live source
+   * today.
+   */
+  private publishConnectionEvent(from: ClientState, to: ClientState): void {
+    this.publishClientEvent({
+      surface: "connection",
+      phase: "transition",
+      clientId: this.id,
+      timestamp: Date.now(),
+      from,
+      to,
+    });
   }
+
+  /** Stamp a monotonic client-scoped cursor and publish to the emitter. */
+  private publishClientEvent(event: ClientEvent): void {
+    const cursor: Cursor = { value: ++this.clientEventSeq };
+    this.clientEvents.publish({ cursor, event });
+  }
+}
+
+/** A `ClientEvent` paired with its monotonic client-scoped cursor. */
+interface SequencedClientEvent {
+  readonly cursor: Cursor;
+  readonly event: ClientEvent;
+}
+
+/**
+ * Build the subscribe-side predicate for a `ClientEventFilter`. Matches
+ * on `surface` and `phase` (both single or array; AND-ed). Undefined
+ * facets match everything.
+ */
+function matchesFilter(event: ClientEvent, filter?: ClientEventFilter): boolean {
+  if (!filter) return true;
+  if (filter.surface !== undefined && !includesValue(filter.surface, event.surface)) return false;
+  if (filter.phase !== undefined && !includesValue(filter.phase, event.phase)) return false;
+  return true;
+}
+
+/** True when `needle` equals `spec` or is contained in the `spec` array. */
+function includesValue<T>(spec: T | readonly T[], needle: T): boolean {
+  return Array.isArray(spec) ? spec.includes(needle) : spec === needle;
 }
 
 /** True when the ClientState value is the failed-object variant. */
@@ -399,18 +498,54 @@ function isMethodNotFound(err: unknown): boolean {
 }
 
 /**
- * Reserved AsyncIterable for `client.events()`. The bus-Stream →
- * AsyncIterable adapter lands when client event surfaces are
- * registered on `@agentick/spec-next`'s `EventSurface` union.
+ * Live `AsyncIterable<ClientEvent>` over the client's dedicated
+ * `LocalPubSub<SequencedClientEvent>` emitter.
+ *
+ * Each `[Symbol.asyncIterator]()` opens an independent pubsub
+ * subscription (filtered by `ClientEventFilter`), so concurrent
+ * iterators do not interfere. Every stream from one `events()` call
+ * shares a single interrupt `Deferred`: `close()` completes it, which
+ * `Stream.interruptWhen` observes — interrupting the underlying Effect
+ * stream(s), ending each consumer's `for await`, and releasing the
+ * pubsub subscription scope (unsubscribe, no leak).
+ *
+ * The `cursor` getter reflects the monotonic, client-scoped position of
+ * the most recently yielded event. Live-only: there is no replay
+ * buffer, so a subscription only ever sees events published after it
+ * attached. `fromCursor` resume is a #308-followup (needs a bounded
+ * replay ring on the emitter).
  */
 class ClientEventStream implements AsyncIterable<ClientEvent> {
+  private readonly interrupt = Effect.runSync(Deferred.make<void>());
+  private _cursor: Cursor = { value: 0 };
+  private closed = false;
+
+  constructor(
+    private readonly source: LocalPubSub<SequencedClientEvent>,
+    private readonly filter?: ClientEventFilter,
+  ) {}
+
+  /** Monotonic, client-scoped position of the most recently yielded event. */
+  get cursor(): Cursor {
+    return this._cursor;
+  }
+
   [Symbol.asyncIterator](): AsyncIterator<ClientEvent> {
-    return {
-      next: async () => ({ done: true, value: undefined as unknown as ClientEvent }),
-    };
+    const stream = this.source
+      .subscribe((seq) => matchesFilter(seq.event, this.filter))
+      .pipe(
+        Stream.interruptWhen(Deferred.await(this.interrupt)),
+        Stream.map((seq) => {
+          this._cursor = seq.cursor;
+          return seq.event;
+        }),
+      );
+    return Stream.toAsyncIterable(stream)[Symbol.asyncIterator]();
   }
 
   async close(): Promise<void> {
-    /* no-op */
+    if (this.closed) return;
+    this.closed = true;
+    await Effect.runPromise(Deferred.succeed(this.interrupt, undefined));
   }
 }

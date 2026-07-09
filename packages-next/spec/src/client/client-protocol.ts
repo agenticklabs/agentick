@@ -141,11 +141,16 @@ export interface ClientProtocol {
    * Wire events from the server flow through per-resource subscriptions
    * by default. The `wireMirror()` extension republishes them onto the
    * client-bus under `surface: "wire"`.
+   *
+   * The returned stream carries a monotonic, client-scoped `cursor`
+   * that advances to the position of the most recently yielded event.
+   * See the concrete `client.events()` implementation for the precise
+   * `fromCursor` semantics (live-only vs. replay).
    */
   events(
     filter?: ClientEventFilter,
     fromCursor?: Cursor,
-  ): AsyncIterable<ClientEvent> & { close(): Promise<void> };
+  ): AsyncIterable<ClientEvent> & { close(): Promise<void>; readonly cursor: Cursor };
 
   // ── auth ───────────────────────────────────────────────────────────────
   readonly auth: ClientAuthSurface;
