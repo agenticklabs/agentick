@@ -326,7 +326,10 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
     const record: TaskRecord = {
       taskId,
       status: "working",
-      scope: this.scope,
+      // Originating-session scope: per-submit override (a shared/app-scoped
+      // harness stamps each task's owning session) else the harness scope.
+      // The record is the source of truth (ADR 68) — escalation routes from it.
+      scope: opts.scope ?? this.scope,
       executorKind: executor.kind,
       detached: opts.detached ?? false,
       // TODO(ADR-68 ttl): `ttl` is persisted + surfaced on `TaskInfo` but NOT
@@ -398,7 +401,7 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
    */
   private makeHooks(live: LiveTask): TaskExecutorHooks {
     return {
-      escalate: this.makeEscalate(live.controller.signal, live.record.taskId),
+      escalate: this.makeEscalate(live.controller.signal, live.record),
       ...(this.buildElicit !== undefined ? { buildElicit: this.buildElicit } : {}),
     };
   }
@@ -413,21 +416,22 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
    * human-in-the-loop wait; the task's `signal` (cancel / ttl / close)
    * interrupts the ask fiber early.
    *
-   * TODO(app-scoped-tasks): a shared/app-scoped harness (one TasksHarness
-   * serving many sessions) must stamp the originating session per-submit
-   * rather than reading the single harness scope — escalate should route
-   * from the record's owning session, not `this.scope`. Orthogonal to the
-   * cross-process bridge (ADR 69 T2b, landed): this is about multi-session
-   * fan-in on one harness, whichever executor runs the task.
+   * Multi-session fan-in (app-scoped harness): the origin session is read
+   * from the RECORD (`record.scope.sessionId`), not `this.scope`. So ONE
+   * harness serving many sessions escalates each task's `ctx.elicit` to
+   * that task's own owning session — the record is the source of truth
+   * (ADR 68). A per-session harness stamps `record.scope = this.scope`, so
+   * the two coincide there.
    */
-  private makeEscalate(signal: AbortSignal, taskId: string): ElicitFn {
+  private makeEscalate(signal: AbortSignal, record: TaskRecord): ElicitFn {
     const inbox = this.inbox;
-    const sessionId = this.scope.sessionId;
+    const { taskId } = record;
+    const sessionId = record.scope.sessionId;
     const principal = this.principal;
     return (request) => {
       if (sessionId === undefined) {
         throw new Error(
-          "cannot escalate task elicit: this TasksHarness has no owning session (scope.sessionId). Escalation requires a session-scoped harness (ADR 69).",
+          "cannot escalate task elicit: the task's record has no owning session (scope.sessionId). Escalation requires a session-scoped task (ADR 69).",
         );
       }
       // Origin lineage stamp (ADR 69 §Provenance): the escalation starts

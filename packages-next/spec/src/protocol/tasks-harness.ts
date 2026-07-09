@@ -26,6 +26,7 @@
 import type { Effect } from "effect";
 
 import type { ContentBlock } from "../data/content-blocks.js";
+import type { EventScope } from "../data/events.js";
 import type { Elicit } from "./elicit-api.js";
 
 // ============================================================================
@@ -271,6 +272,16 @@ export interface TaskCreationInput {
    * `record.executorKind` at hydration / reattach.
    */
   readonly executorKind?: string;
+  /**
+   * Originating-session scope stamped on the {@link TaskRecord} — the
+   * task's owner, and the address escalation ({@link Elicit}) routes from.
+   * Omitted → the harness's own `parentScope` (a per-session harness's
+   * `{ sessionId }`). Pass it when ONE app-scoped `TasksHarness` serves
+   * MANY sessions: the record is the source of truth (ADR 68), so a task's
+   * `ctx.elicit` escalates to `record.scope.sessionId`, not the harness's
+   * scope — each session's tasks reach their own client.
+   */
+  readonly scope?: EventScope;
 }
 
 // ============================================================================

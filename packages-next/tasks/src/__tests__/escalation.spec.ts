@@ -22,12 +22,36 @@
  * (child-executor) elicit bridge over IPC.
  */
 
+import { Effect } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { buildElicitSugar } from "@agentick/elicitation-next";
 import { DetachedTaskCannotElicitError } from "@agentick/spec-next";
+import type { ElicitationResult, Unsubscribe } from "@agentick/spec-next";
+import type { EscalationEnvelopePayload } from "@agentick/runtime-next";
 import { drainRejection } from "@agentick/utils-next/testing";
 
 import { fakeTasks, type FakeTasksBundle } from "../testing/fake-tasks.js";
+
+/** Register a terminal escalation handler at `session:{sessionId}` that records
+ *  the requests it receives and answers with a canned result. */
+async function registerTerminal(
+  bundle: FakeTasksBundle,
+  sessionId: string,
+  answer: ElicitationResult,
+): Promise<{ readonly requests: EscalationEnvelopePayload[]; readonly unregister: Unsubscribe }> {
+  const requests: EscalationEnvelopePayload[] = [];
+  const unregister = await Effect.runPromise(
+    bundle.inbox.register<EscalationEnvelopePayload, ElicitationResult>(
+      `session:${sessionId}`,
+      (envelope) => {
+        requests.push(envelope.payload as EscalationEnvelopePayload);
+        return Effect.succeed(answer);
+      },
+    ),
+  );
+  return { requests, unregister };
+}
 
 describe("TasksHarness — escalation origin guards (ADR 69)", () => {
   let bundle: FakeTasksBundle | undefined;
@@ -89,5 +113,49 @@ describe("TasksHarness — escalation origin guards (ADR 69)", () => {
     await handle.result;
     expect(probedForm).toBe(false);
     expect(probedUrl).toBe(false);
+  });
+});
+
+describe("TasksHarness — escalation routes per ORIGINATING session (app-scoped fan-in)", () => {
+  let bundle: FakeTasksBundle | undefined;
+  afterEach(async () => {
+    if (bundle) await bundle.close();
+    bundle = undefined;
+  });
+
+  it("ONE harness serving many sessions escalates each task's ctx.elicit to that task's own owning session (record.scope, not harness scope)", async () => {
+    // A shared harness — NO harness sessionId (this.scope = {}). Each task
+    // carries its originating session via the per-submit `scope`.
+    bundle = await fakeTasks({ buildElicit: buildElicitSugar });
+    const a = await registerTerminal(bundle, "sess-A", { outcome: "accepted", value: true });
+    const b = await registerTerminal(bundle, "sess-B", { outcome: "accepted", value: false });
+
+    const hA = bundle.harness.submit(
+      async (ctx) => [{ type: "text", text: (await ctx.elicit.confirm("A?")) ? "A-yes" : "A-no" }],
+      { scope: { sessionId: "sess-A" } },
+    );
+    const hB = bundle.harness.submit(
+      async (ctx) => [{ type: "text", text: (await ctx.elicit.confirm("B?")) ? "B-yes" : "B-no" }],
+      { scope: { sessionId: "sess-B" } },
+    );
+
+    expect(await hA.result).toEqual([{ type: "text", text: "A-yes" }]);
+    expect(await hB.result).toEqual([{ type: "text", text: "B-no" }]);
+
+    // Each escalation reached ONLY its originating session's terminal, and the
+    // lineage origin is stamped from the record's scope — not the harness's.
+    expect(a.requests).toHaveLength(1);
+    expect(b.requests).toHaveLength(1);
+    expect(a.requests[0]!.lineage?.[0]).toMatchObject({
+      scopeId: "session:sess-A",
+      taskId: hA.taskId,
+    });
+    expect(b.requests[0]!.lineage?.[0]).toMatchObject({
+      scopeId: "session:sess-B",
+      taskId: hB.taskId,
+    });
+
+    a.unregister();
+    b.unregister();
   });
 });
