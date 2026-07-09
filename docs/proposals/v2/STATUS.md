@@ -1672,9 +1672,26 @@ blueprint's design decisions; this is execution-level).
   Payload-agnostic escalation protocol lives in `runtime-next` (substrate
   floor). First consumer = elicitation; sampling/permission/credential/error
   are free future riders. Verified: round-trip + FSM flip + detached guard,
-  full suite 8028 green. T2 (recursive hop + ancestor interception + `lineage`
-  provenance + cross-process child bridge) + T3 (durable/cluster) deferred,
-  `TODO(ADR-69 T2)`-trailed.
+  full suite 8028 green.
+- **ADR 69 T2a landed** (`1f4ac378`) — the multi-agent bubbling core: the
+  recursive `parentSessionId` hop (2-session chain proven — child task elicit
+  forwards up, root parent resolves against the real client), the
+  `interceptEscalation(handler)` seam (an ancestor answers / denies / forwards
+  a descendant's request; `{forward:false,response}` short-circuits before the
+  terminal, throw = deny, `{forward:true}` falls through; NO interceptor =
+  byte-identical to T1 parity), `lineage` provenance appended per hop
+  (origin task+session → each forwarding hop, principal best-effort per ADR
+  51), and the folded dual-currency gap: `awaitingInput` gains an
+  `Effect<T,E,never>` overload run as a real interruptible child fiber
+  (cancel/ttl `Fiber.interrupt`s it — finalizer-fires proven — vs the
+  Promise flag-only path). Contract types (`EscalationEnvelopePayload`,
+  `EscalationHop`, `EscalationOutcome`, `EscalationInterceptor`) moved to
+  spec-next (cycle-free: the spec `SessionHarnessProtocol.interceptEscalation`
+  references them); wire constants stay in runtime-next. Full suite 8035 green.
+- **Deferred:** T2b (cross-process child IPC elicit bridge — the forked
+  worker's `ctx.elicit` stub throws loud today), lineage UI-surfacing into the
+  client elicit request, and T3 (durable/cluster + direct-delivery
+  optimization). `TODO(ADR-69 T2b)`-trailed.
 - **ADR 68 input_required (#120-followup) landed** (`4fdb548f`) —
   `ctx.awaitingInput` status wrapper (`working → input_required → working`),
   the origin seam ADR 69 builds on. Plus worker self-terminates on parent IPC
