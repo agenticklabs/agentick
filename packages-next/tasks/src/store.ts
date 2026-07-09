@@ -5,7 +5,7 @@
  *
  * This is the store the `TasksHarness` uses when the app/gateway doesn't
  * inject a durable one, and the reference the `runTaskStoreConformance`
- * suite validates every adapter against. A `@agentick/tasks-postgres-next`
+ * suite validates every adapter against. A `@agentick/tasks-store-postgres-next`
  * conforms to the SAME {@link TaskStore} port later (not built here) — the
  * harness never sees the difference beyond durability across restart.
  *

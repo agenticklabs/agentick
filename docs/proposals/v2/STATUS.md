@@ -1739,7 +1739,7 @@ blueprint's design decisions; this is execution-level).
   that outlive any one session, so the store + executors are app-owned
   for the app's lifetime (a session-scoped store would lose detached
   tasks on close). Contrast knobs/gates, which DO cascade (policy).
-- **ADR 68 pg tier landed** (`4e3b43d3`). `@agentick/tasks-postgres-next` —
+- **ADR 68 pg tier landed** (`4e3b43d3`). `@agentick/tasks-store-postgres-next` —
   a durable Postgres `TaskStore`, the flexible cloud-pole sibling of
   `timeline-postgres` (BYO executor, table/columns/sql/codec/migrate escape
   hatches, factory implements the port directly per ADR 49). Schema: task_id

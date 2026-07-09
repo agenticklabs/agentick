@@ -1394,7 +1394,7 @@ importers:
         specifier: workspace:*
         version: link:../elicitation
 
-  packages-next/tasks-postgres:
+  packages-next/tasks-store-postgres:
     dependencies:
       '@agentick/spec-next':
         specifier: workspace:*

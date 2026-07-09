@@ -31,7 +31,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { Pool } from "pg";
 import { fakeTasks } from "@agentick/tasks-next/testing";
 
-import { postgresTaskStore } from "../store.js";
+import { postgresTaskStore } from "../store.ts";
 
 const url = process.env.TASKS_PG_URL;
 const pool = url ? new Pool({ connectionString: url }) : undefined;

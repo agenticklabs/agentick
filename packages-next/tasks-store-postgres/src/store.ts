@@ -54,7 +54,7 @@ import {
   quoteIdent,
   SCHEMA_VERSION,
   type TaskColumns,
-} from "./schema.js";
+} from "./schema.ts";
 
 /** One executed SQL statement: text + positional bind values. */
 export interface SqlQuery {
@@ -191,6 +191,7 @@ class PostgresTaskStore implements TaskStore {
       updatedAt: quoteIdent(this.cols.updatedAt),
       payload: quoteIdent(this.cols.payload),
       schemaVer: quoteIdent(this.cols.schemaVer),
+      createdAt: quoteIdent(this.cols.createdAt),
     };
   }
 

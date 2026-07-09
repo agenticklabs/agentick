@@ -24,6 +24,8 @@ export interface TaskColumns {
   readonly payload: string;
   /** Schema-on-read version tag. Default `"schema_ver"`. */
   readonly schemaVer: string;
+  /** Created at timestamp (`timestamptz`). Default `"created_at"`. */
+  readonly createdAt: string;
 }
 
 export const DEFAULT_TABLE = "agentick_tasks";
@@ -35,6 +37,7 @@ export const DEFAULT_COLUMNS: TaskColumns = {
   updatedAt: "updated_at",
   payload: "payload",
   schemaVer: "schema_ver",
+  createdAt: "created_at",
 };
 
 /** The schema version stamped on every row written by this adapter. */
@@ -73,6 +76,7 @@ export function postgresTaskSchemaSql(
     updatedAt: quoteIdent(columns.updatedAt),
     payload: quoteIdent(columns.payload),
     schemaVer: quoteIdent(columns.schemaVer),
+    createdAt: quoteIdent(columns.createdAt),
   };
   const scopeIdx = quoteIdent(`${table}_scope_gin`);
   const statusIdx = quoteIdent(`${table}_status_idx`);
@@ -84,7 +88,7 @@ export function postgresTaskSchemaSql(
     `  ${c.updatedAt} bigint NOT NULL,`,
     `  ${c.payload} jsonb NOT NULL,`,
     `  ${c.schemaVer} int NOT NULL DEFAULT ${SCHEMA_VERSION},`,
-    `  "created_at" timestamptz NOT NULL DEFAULT now()`,
+    `  ${c.createdAt} timestamptz NOT NULL DEFAULT now()`,
     `);`,
     `CREATE INDEX IF NOT EXISTS ${scopeIdx} ON ${t} USING gin (${c.scope});`,
     `CREATE INDEX IF NOT EXISTS ${statusIdx} ON ${t} (${c.status});`,

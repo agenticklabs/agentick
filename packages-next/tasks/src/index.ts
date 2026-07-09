@@ -25,7 +25,7 @@ export { TasksHarness, type TasksHarnessOptions } from "./harness.js";
 export { withTasks, type WithTasksOptions } from "./extension.js";
 // ADR 68 — record-as-source-of-truth durability. The CRUD store port +
 // bundled in-memory default + its conformance suite, and the default
-// in-process executor. A `@agentick/tasks-postgres-next` store and a
+// in-process executor. A `@agentick/tasks-store-postgres-next` store and a
 // child-process executor conform to the SAME spec-next ports later.
 export { InMemoryTaskStore } from "./store.js";
 export { runTaskStoreConformance, type TaskStoreConformanceOptions } from "./store-conformance.js";

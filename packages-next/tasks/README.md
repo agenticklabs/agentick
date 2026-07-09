@@ -34,7 +34,7 @@ seam is what unlocks the later tiers without a rewrite:
 
 | Piece          | Bundled default (here)           | Conforms to the same port later                  |
 | -------------- | -------------------------------- | ------------------------------------------------ |
-| `TaskStore`    | `InMemoryTaskStore` (node-local) | `@agentick/tasks-postgres-next` (across-restart) |
+| `TaskStore`    | `InMemoryTaskStore` (node-local) | `@agentick/tasks-store-postgres-next` (across-restart) |
 | `TaskExecutor` | `InProcessTaskExecutor` (fiber)  | child-process (isolation) / sandbox / worker     |
 
 - The store/executor **port types** live in `@agentick/spec-next`
@@ -63,7 +63,7 @@ not published independently.
 | B     | MCP wire codec — `tools/call` task opt-in, `notifications/tasks/status` translation, inbound `tasks/cancel`                                                                                                                                                                                                                                                                                                                | ✅     |
 | 68-A  | Record-as-source-of-truth — `TaskStore` port + `InMemoryTaskStore`, `TaskExecutor` seam + `InProcessTaskExecutor`, `detached` lifetime, `interrupted` on hydration                                                                                                                                                                                                                                                         | ✅     |
 | 68-B  | Child-process executor over IPC (isolation / detached) + executor registry keyed by `.kind`, per-submit selection — conforms to the `TaskExecutor` seam                                                                                                                                                                                                                                                                    | ✅     |
-| 68-pg | `@agentick/tasks-postgres-next` durable store — durable records + `interrupted`-on-restart + terminal adoption across app-process restart (cross-restart child reattach-by-pid still deferred)                                                                                                                                                                                                                             | ✅     |
+| 68-pg | `@agentick/tasks-store-postgres-next` durable store — durable records + `interrupted`-on-restart + terminal adoption across app-process restart (cross-restart child reattach-by-pid still deferred)                                                                                                                                                                                                                             | ✅     |
 | 68-ir | `ctx.awaitingInput` — `working → input_required → working` status wrapper (the origin seam for elicitation escalation); worker self-terminates on parent IPC `disconnect` (#120-followup)                                                                                                                                                                                                                                  | ✅     |
 | 69-T1 | Request escalation — task `ctx.elicit` escalates to the connected client via nested `inbox.ask`; `interactive ⊥ detached` guard. Root-session case                                                                                                                                                                                                                                                                          | ✅     |
 | 69-T2a | Multi-agent bubbling — recursive spawn-lineage hop (`session → parentSessionId`), ancestor **interception** (`session.interceptEscalation` — answer / deny / forward), `lineage` provenance (origin task+session → each hop), and the `awaitingInput(Effect)` overload (real fiber interruptibility)                                                                                                                          | ✅     |
@@ -521,7 +521,7 @@ app/gateway-scoped:
   the shared app-scoped store, so the session can stop and the task
   continues — as long as the app process is alive (with the in-memory
   store). Survival across app-process **restart** needs a durable store
-  (`@agentick/tasks-postgres-next`, a shipped sibling on the same port).
+  (`@agentick/tasks-store-postgres-next`, a shipped sibling on the same port).
 - **Orphan accounting (`interrupted`)**: on construction the harness
   reads its scope-filtered store records; any still-`working` record
   with no reattachable executor is marked `interrupted` (a lost
@@ -660,7 +660,7 @@ class QueueTaskExecutor implements TaskExecutor {
 ```
 
 The bundled `ChildProcessTaskExecutor` (below) is a worked instance of exactly
-this seam; a `@agentick/tasks-postgres-next` store is a worked instance of the
+this seam; a `@agentick/tasks-store-postgres-next` store is a worked instance of the
 store port.
 
 ## Executor registry + selecting an executor (ADR 68 Build B)
@@ -849,7 +849,7 @@ runTasksHarnessConformance(async ({ harnessId }) => {
   `InMemoryTaskStore` is node-local + lost on process exit. `detached`
   tasks survive their spawning session's close (same process), but
   survival across an app-process restart needs a durable store
-  (`@agentick/tasks-postgres-next`, same `TaskStore` port — a shipped
+  (`@agentick/tasks-store-postgres-next`, same `TaskStore` port — a shipped
   sibling package, not part of this one). The `interrupted`-on-hydration
   logic is wired here; the pg store is what exercises it across restart.
 - **The distributed executor** — the ambitious tier (a task running on
@@ -943,7 +943,7 @@ completed` status timeline (bus envelopes) with the paused-state
 
 ## Roadmap & known gaps
 
-- **ADR 68 pg (`@agentick/tasks-postgres-next`)** — LANDED. A durable
+- **ADR 68 pg (`@agentick/tasks-store-postgres-next`)** — LANDED. A durable
   `TaskStore` conforming to the same port; adds cross-app-restart record
   durability and is what actually exercises the `interrupted`-on-hydration
   path (proven against a real postgres). Cross-restart _child reattach_ is

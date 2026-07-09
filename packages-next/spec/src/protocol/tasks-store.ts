@@ -18,7 +18,7 @@
  * (distributed) tiers are added executor strategies + a durable store, not
  * rewrites. The bundled default store ({@link
  * import("@agentick/tasks-next").InMemoryTaskStore}) and executor
- * (in-process) ship now; `@agentick/tasks-postgres-next` and the
+ * (in-process) ship now; `@agentick/tasks-store-postgres-next` and the
  * child-process executor conform to the SAME ports later.
  *
  * Port homes: the store/executor **types** live in spec-next (the
@@ -119,7 +119,7 @@ export interface TaskStoreQuery {
  * `@agentick/tasks-next`), exactly like the timeline stores.
  *
  * Bundled default: `InMemoryTaskStore` (`@agentick/tasks-next`). A
- * `@agentick/tasks-postgres-next` conforms to this SAME protocol later.
+ * `@agentick/tasks-store-postgres-next` conforms to this SAME protocol later.
  */
 export interface TaskStore {
   /** Upsert — called on every transition. Later `put`s of the same `taskId` replace. */

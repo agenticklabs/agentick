@@ -1,5 +1,5 @@
 /**
- * `@agentick/tasks-postgres-next` — Postgres {@link TaskStore} adapter
+ * `@agentick/tasks-store-postgres-next` — Postgres {@link TaskStore} adapter
  * (ADR 68 pg tier, the flexible cloud pole).
  *
  * The durable backing that unlocks cross-app-restart task resume: task
@@ -12,7 +12,7 @@
  * ```ts
  * import { Pool } from "pg";
  * import { withTasks } from "agentick";
- * import { postgresTaskStore } from "@agentick/tasks-postgres-next";
+ * import { postgresTaskStore } from "@agentick/tasks-store-postgres-next";
  *
  * const pool = new Pool({ connectionString: process.env.DATABASE_URL });
  * withTasks({ store: postgresTaskStore({ executor: pool }) });
@@ -33,7 +33,7 @@ export {
   type TaskCodec,
   type TaskPutProjection,
   type TaskSqlOverrides,
-} from "./store.js";
+} from "./store.ts";
 
 export {
   DEFAULT_COLUMNS,
@@ -41,4 +41,4 @@ export {
   postgresTaskSchemaSql,
   SCHEMA_VERSION,
   type TaskColumns,
-} from "./schema.js";
+} from "./schema.ts";

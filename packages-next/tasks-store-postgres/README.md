@@ -1,4 +1,4 @@
-# @agentick/tasks-postgres-next
+# @agentick/tasks-store-postgres-next
 
 **Postgres** `TaskStore` adapter — the durable, flexible **cloud pole** of
 the persistent-task substrate from
@@ -44,7 +44,7 @@ hatch on the factory.
 ```ts
 import { Pool } from "pg";
 import { withTasks } from "agentick";
-import { postgresTaskStore } from "@agentick/tasks-postgres-next";
+import { postgresTaskStore } from "@agentick/tasks-store-postgres-next";
 
 // BYO pool — the adapter never creates or closes it.
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -58,7 +58,7 @@ withTasks({ store: postgresTaskStore({ executor: pool }) });
 Apply the schema with your own migration tooling (the recommended path):
 
 ```ts
-import { postgresTaskSchemaSql } from "@agentick/tasks-postgres-next";
+import { postgresTaskSchemaSql } from "@agentick/tasks-store-postgres-next";
 
 await pool.query(postgresTaskSchemaSql());
 // → CREATE TABLE IF NOT EXISTS "agentick_tasks" ( ... );

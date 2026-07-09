@@ -52,7 +52,7 @@
     "../packages-next/timeline",
     "../packages-next/timeline-fs",
     "../packages-next/timeline-postgres",
-    "../packages-next/tasks-postgres",
+    "../packages-next/tasks-store-postgres",
     "../packages-next/skills",
     "../packages-next/prompts",
     "../packages-next/prompts-react",

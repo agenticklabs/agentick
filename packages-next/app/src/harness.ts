@@ -246,7 +246,7 @@ export interface AppHarnessOptions<P = unknown> {
    * lifetime.
    *
    *   - `store` — defaults to a node-local `InMemoryTaskStore`. Swap a
-   *     durable store (`@agentick/tasks-postgres-next`, same port) for
+   *     durable store (`@agentick/tasks-store-postgres-next`, same port) for
    *     survival across app restart.
    *   - `executors` — extra `TaskExecutor` strategies merged over the
    *     bundled in-process default. Pass ONE app-scoped

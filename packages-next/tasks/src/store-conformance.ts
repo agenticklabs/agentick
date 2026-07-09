@@ -2,7 +2,7 @@
  * Conformance suite for {@link TaskStore} implementations (ADR 68).
  *
  * Every adapter — the bundled {@link InMemoryTaskStore}, a future
- * `@agentick/tasks-postgres-next`, any adopter-written store — MUST pass
+ * `@agentick/tasks-store-postgres-next`, any adopter-written store — MUST pass
  * this suite. The behaviors pinned here are the substrate contract the
  * {@link TasksHarness} depends on: put→get round-trip, upsert-in-place,
  * scope + status filtered `list`, delete, and (when supported) prune of

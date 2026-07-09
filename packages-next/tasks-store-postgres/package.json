@@ -1,5 +1,5 @@
 {
-  "name": "@agentick/tasks-postgres-next",
+  "name": "@agentick/tasks-store-postgres-next",
   "version": "0.0.0",
   "private": true,
   "description": "postgresTaskStore — Postgres TaskStore adapter (ADR 68 pg tier). Durable task records across app-process restart, real interrupted-on-restart orphan accounting, terminal adoption across a fresh harness (the flexible cloud pole). BYO pg.Pool; jsonb payloads; full schema escape hatches.",
@@ -16,7 +16,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/agenticklabs/agentick.git",
-    "directory": "packages-next/tasks-postgres"
+    "directory": "packages-next/tasks-store-postgres"
   },
   "type": "module",
   "sideEffects": false,

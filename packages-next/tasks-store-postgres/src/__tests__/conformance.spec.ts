@@ -20,7 +20,7 @@ import { afterAll } from "vitest";
 import { Pool } from "pg";
 import { runTaskStoreConformance } from "@agentick/tasks-next";
 
-import { postgresTaskStore } from "../store.js";
+import { postgresTaskStore } from "../store.ts";
 
 const url = process.env.TASKS_PG_URL;
 // Lazily constructed only when a real backend is configured.

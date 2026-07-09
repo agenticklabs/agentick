@@ -24,7 +24,7 @@
  * The bundled default executor is {@link InProcessTaskExecutor} — the
  * current Promise/Effect fiber model, refactored onto the report seam,
  * BEHAVIOR-IDENTICAL for the caller. The child-process executor (isolation
- * / detached) and a `@agentick/tasks-postgres-next` durable store conform
+ * / detached) and a `@agentick/tasks-store-postgres-next` durable store conform
  * to the SAME seams later — not built here.
  *
  * Per-task fan-out is unchanged: a single `LocalPubSub<TaskEvent>` per
@@ -966,7 +966,7 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
 // `reattach` re-adopts a still-live child WITHIN the app process (the
 // app-scoped instance's map outlives the session).
 //
-// ADR-68 pg: `@agentick/tasks-postgres-next` conforms to `TaskStore` —
+// ADR-68 pg: `@agentick/tasks-store-postgres-next` conforms to `TaskStore` —
 // durability across app-process restart + real `interrupted`-on-restart
 // (a same-process no-op with the in-memory store). LANDED + proven.
 //
