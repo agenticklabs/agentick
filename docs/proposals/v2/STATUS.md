@@ -1654,6 +1654,32 @@ blueprint's design decisions; this is execution-level).
 
 ### 2026-07-08
 
+- **ADR 69 — substrate request escalation (chain-of-responsibility over the
+  ownership inbox); T1 landed** (`5f1794bf` ADR, `01ea384b` T1). A nested unit
+  (task or sub-agent) blocked on input escalates up the ownership chain to the
+  connected client; the answer routes back. The mechanism IS **nested
+  `inbox.ask`** — the ask return-value stack is both the relay AND the reply
+  route (no envelope-forwarding / reply-address threading; the first ADR draft
+  had that and it was deleted). Escalation edge is the **spawn lineage
+  (`parentSessionId`), NOT the structural harness `parent`** (which is the App).
+  Interception = a hop's handler returns instead of forwarding; default is
+  forward; bubble is the superset, cluster-direct a future optimization.
+  Invariant: **`interactive ⊥ detached`** — a detached task can't elicit (no
+  live chain) → typed `DetachedTaskCannotElicitError`. T1: `ctx.elicit =
+  awaitingInput(escalate)`; `escalate = inbox.ask("session:"+sessionId, 24h,
+  signal-interruptible)`; `SessionHarness.handleMessage` forwards if
+  `parentSessionId` else resolves terminally via `elicitation.elicit`.
+  Payload-agnostic escalation protocol lives in `runtime-next` (substrate
+  floor). First consumer = elicitation; sampling/permission/credential/error
+  are free future riders. Verified: round-trip + FSM flip + detached guard,
+  full suite 8028 green. T2 (recursive hop + ancestor interception + `lineage`
+  provenance + cross-process child bridge) + T3 (durable/cluster) deferred,
+  `TODO(ADR-69 T2)`-trailed.
+- **ADR 68 input_required (#120-followup) landed** (`4fdb548f`) —
+  `ctx.awaitingInput` status wrapper (`working → input_required → working`),
+  the origin seam ADR 69 builds on. Plus worker self-terminates on parent IPC
+  `disconnect` (`65cf49d8`); cross-restart child reattach reframed as the
+  distributed tier (unsound over fork IPC), not a follow-on.
 - **ADR 68 persistent tasks — Builds A + B landed** (`3c747508`,
   `3c1beb6f`). The pivot: a task is a persisted `TaskRecord` FSM in a
   `TaskStore`; *how it runs* is a pluggable `TaskExecutor`. Build A:
