@@ -73,6 +73,19 @@ export function defaultIsRetryable(err: unknown): boolean {
  *
  * Returns the key as a string to attach to `params._meta.idempotencyKey`.
  */
+// TODO(idempotency-decl): this hardcoded, non-exhaustive method allowlist is a
+// CORRECTNESS FAILURE POINT with wire extensions. An extension can register its
+// own MUTATING method (`session/foo`) that isn't listed here → this returns
+// `undefined` → a retried request DOUBLE-EXECUTES. The client cannot know a
+// method's semantics; only the method's DEFINITION (server + extension) does.
+//
+// The fix (two parts):
+//   1. Client — delete this allowlist; ALWAYS send a fresh key (safe, exhaustive,
+//      extension-proof; per-call-unique keys make a key on a read harmless).
+//   2. Server — declare `mutating` on the `method()` definition / extension method
+//      registration; the gateway's dedup layer keys ONLY mutating methods (reads
+//      ignore it → no cache bloat). Semantics live at the source, not a client guess.
+// Dumb-safe client + smart server. Kills the non-exhaustive `if`.
 export function defaultIdempotencyKey(method: string): string | undefined {
   if (
     method === "session/send" ||
