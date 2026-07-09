@@ -80,17 +80,24 @@ AG-UI event spec):
   on the bus** on change (with an initial snapshot). This makes native state-sync efficient (diff,
   not whole store) AND makes the AG-UI `StateDelta` projection fall out — dissolving the ONLY real
   Tier-2 divergence by adopting, not adapting.
-- **`StepStarted` / `StepFinished` — named subtask lifecycle. ADOPT (small).** We have tick
-  lifecycle but no *named steps* within a run. A lightweight `step` concept on the loop-executor
-  (named phase around sub-work) makes agent progress legible in any UI, and projects 1:1.
-- **`ActivitySnapshot` / `ActivityDelta` — structured in-progress activity. CONSIDER.** Richer +
-  delta-based vs our flat `status`/`progress`; layer structured-activity on the status channel.
+- **`StepStarted` / `StepFinished` — ALREADY HAVE (project, don't adopt).** These map directly to
+  our `tick_start` / `tick_end` — a start/end lifecycle pair around a unit of work. Project 1:1
+  (each tick → a step). The ONLY thing we lack is a semantic `stepName` (a tick is one model call,
+  numbered; an AG-UI step can be a *named* subtask spanning multiple ticks). An optional
+  `step("searching")` author API would add coarser human-meaningful steps — a small sugar for
+  legibility, NOT a divergence or a required adoption.
+- **`ActivitySnapshot` / `ActivityDelta` — SKIP (covered).** "Structured in-progress activity" is
+  already surfaced three ways: text deltas (output), tool-call events (structured actions),
+  `reasoning` (thinking), and task `progress`/`status`. A dedicated Activity channel is a
+  UI-convenience layered on top — optional/niche, not a gap. Don't adopt without a concrete need.
 - **Steering / interrupts — DON'T adopt.** Our escalation + append-steering + abort-command are a
   superset (see the corrected divergence #2). If anything, we exceed AG-UI here.
 
-Native homes: `StateDelta` → the **bus** (reactive state emits JSON-Patch); `Step` → the
-**loop-executor**; `Activity` → the **status/progress** channel. Each is a native-seam improvement
-first, an AG-UI projection second.
+**Net: the adoption discovery collapses to ONE real thing — `StateDelta`.** Everything else already
+exists (ticks→steps, escalation→interrupts, tool calls, text deltas, reasoning, lifecycle) or is
+covered/optional (activity). Native home: `StateDelta` → the **bus**, emitted by the reactive
+knobs/state/gates seam as RFC-6902 JSON-Patch ops (initial snapshot + deltas). A native state-sync
+improvement first; the AG-UI projection is a free consequence.
 
 ## Why it's a projection, not a new model
 We already own the bus, the execution lifecycle, the reactive state, and the inbox. AG-UI is a wire
