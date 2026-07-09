@@ -141,6 +141,8 @@ interface LiveTask {
   readonly resultDeferred: Deferred<unknown>;
   /** Executor handle (for cancel). `undefined` once terminal / for orphans. */
   execution: TaskExecution | undefined;
+  /** ttl reaper timer (ADR 68) — set when the record has a `ttl`; cleared on terminal (`settle`). */
+  ttlTimer?: ReturnType<typeof setTimeout>;
 }
 
 interface Deferred<T> {
@@ -332,12 +334,9 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
       scope: opts.scope ?? this.scope,
       executorKind: executor.kind,
       detached: opts.detached ?? false,
-      // TODO(ADR-68 ttl): `ttl` is persisted + surfaced on `TaskInfo` but NOT
-      // yet enforced — nothing reaps a task whose `ttl` elapsed, so a hung
-      // detached child (ignores cancel) outlives its ttl until app exit or an
-      // explicit cancel. A reaper (harness timer or store-side `prune`) that
-      // marks elapsed non-terminal tasks `failed { kind: "timeout" }` is the
-      // missing piece; `get` should also treat an elapsed record as expired.
+      // `ttl` (ms from creation) is enforced by the reaper below (`expireTask`
+      // via an unref'd timer): a still-non-terminal task whose ttl elapses is
+      // failed with `kind: "timeout"`. `null` = no expiry.
       ttl: opts.ttl ?? null,
       createdAt: now,
       updatedAt: now,
@@ -382,7 +381,35 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
     // the record terminal during `start` — don't stash a dead handle.
     live.execution = this.isTerminal(live.record.status) ? undefined : execution;
 
+    // ttl reaper (ADR 68): a still-`working` task whose `ttl` elapses is
+    // failed with `kind: "timeout"`. `unref`'d so it never holds the event
+    // loop open; cleared on any terminal (`settle`).
+    if (record.ttl !== null && !this.isTerminal(live.record.status)) {
+      live.ttlTimer = setTimeout(() => this.expireTask(live), record.ttl);
+      live.ttlTimer.unref?.();
+    }
+
     return this.makeHandle<T>(live);
+  }
+
+  /**
+   * ttl reaper (ADR 68): the task's `ttl` elapsed while still non-terminal —
+   * mark it `failed { kind: "timeout" }` and tear down the executor. A
+   * post-terminal call is a no-op (`applyTransition` ignores it); `settle`
+   * has already cleared the timer, so this only runs for a live, elapsed task.
+   */
+  private expireTask(live: LiveTask): void {
+    if (this.isTerminal(live.record.status)) return;
+    this.applyTransition(live, {
+      status: "failed",
+      failure: { kind: "timeout", reason: "ttl elapsed" },
+    });
+    live.controller.abort("ttl_timeout");
+    if (live.execution !== undefined) {
+      const execution = live.execution;
+      live.execution = undefined;
+      void this.executors.get(live.record.executorKind)?.cancel(execution, "ttl_timeout");
+    }
   }
 
   /** The ONE uniform transition path from an executor back to the harness. */
@@ -511,6 +538,11 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
 
   /** Resolve / reject the result deferred from the (now terminal) record. */
   private settle(live: LiveTask): void {
+    // Terminal — cancel any pending ttl reaper (ADR 68).
+    if (live.ttlTimer !== undefined) {
+      clearTimeout(live.ttlTimer);
+      live.ttlTimer = undefined;
+    }
     const { record, resultDeferred } = live;
     if (record.status === "completed") {
       resultDeferred.resolve(record.result);

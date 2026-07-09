@@ -584,3 +584,34 @@ describe("TasksHarness — identity + address", () => {
     }
   });
 });
+
+describe("TasksHarness — ttl reaper (ADR 68)", () => {
+  it("a still-working task whose ttl elapses is failed with kind:timeout; result rejects", async () => {
+    const bundle = await fakeTasks({ sessionId: "s-ttl" });
+    try {
+      const handle = bundle.harness.submit(
+        () => new Promise<never>(() => {}), // never completes on its own
+        { ttl: 30 },
+      );
+      const rejection = (await drainRejection(handle.result)) as TaskRejection;
+      expect(rejection).toMatchObject({ _tag: "TaskRejection", status: "failed" });
+      expect(rejection.failure).toMatchObject({ kind: "timeout" });
+      expect(bundle.harness.status(handle.taskId)).toBe("failed");
+    } finally {
+      await bundle.close();
+    }
+  });
+
+  it("a task that completes before its ttl is unaffected (reaper cleared on settle)", async () => {
+    const bundle = await fakeTasks({ sessionId: "s-ttl-ok" });
+    try {
+      const handle = bundle.harness.submit(async () => [{ type: "text", text: "done" }], {
+        ttl: 10_000,
+      });
+      expect(await handle.result).toEqual([{ type: "text", text: "done" }]);
+      expect(bundle.harness.status(handle.taskId)).toBe("completed");
+    } finally {
+      await bundle.close();
+    }
+  });
+});
