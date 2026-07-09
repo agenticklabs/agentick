@@ -66,7 +66,7 @@ not published independently.
 | 68-pg | `@agentick/tasks-postgres-next` durable store — durable records + `interrupted`-on-restart + terminal adoption across app-process restart (cross-restart child reattach-by-pid still deferred) | ✅     |
 | 68-ir | `ctx.awaitingInput` — `working → input_required → working` status wrapper (the origin seam for elicitation escalation); worker self-terminates on parent IPC `disconnect` (#120-followup) | ✅     |
 | 69-T1 | Request escalation — task `ctx.elicit` escalates to the connected client via nested `inbox.ask`; `interactive ⊥ detached` guard. Root-session case; recursive spawn-lineage hop + interception + cross-process child bridge = T2 (ADR 69) | ✅     |
-| D     | Effect-native internals refactor — `Stream<TaskEvent>` for events, `Effect<TaskHandle>` work overload with real fiber interruptibility (#155)                      | ⏳     |
+| D     | Effect-native internals — `Effect<T,E,never>` work overload + real `Fiber.interrupt` on cancel (#155); events fan out over Effect `Stream` (`LocalPubSub` + `Stream.takeUntil`). **Landed.** The protocol *surface* stays Promise/`AsyncIterable` by design (Promise-at-the-edge, Effect-internal — as everywhere in v2); exposing `Effect`/`Stream` at the boundary is a whole-framework decision, not a tasks-local gap. | ✅     |
 
 ## Quick start
 
