@@ -173,6 +173,7 @@ class PostgresTimelineStore implements TimelineStore {
       seq: quoteIdent(this.cols.seq),
       payload: quoteIdent(this.cols.payload),
       schemaVer: quoteIdent(this.cols.schemaVer),
+      createdAt: quoteIdent(this.cols.createdAt),
     };
   }
 

@@ -15,6 +15,8 @@ export interface TimelineColumns {
   readonly payload: string;
   /** Schema-on-read version tag. Default `"schema_ver"`. */
   readonly schemaVer: string;
+  /** Created at timestamp (`timestamptz`). Default `"created_at"`. */
+  readonly createdAt: string;
 }
 
 export const DEFAULT_TABLE = "agentick_timeline";
@@ -24,6 +26,7 @@ export const DEFAULT_COLUMNS: TimelineColumns = {
   seq: "seq",
   payload: "payload",
   schemaVer: "schema_ver",
+  createdAt: "created_at",
 };
 
 /** The schema version stamped on every row written by this adapter. */
@@ -57,6 +60,7 @@ export function postgresTimelineSchemaSql(
     seq: quoteIdent(columns.seq),
     payload: quoteIdent(columns.payload),
     schemaVer: quoteIdent(columns.schemaVer),
+    createdAt: quoteIdent(columns.createdAt),
   };
   return [
     `CREATE TABLE IF NOT EXISTS ${t} (`,
@@ -64,7 +68,7 @@ export function postgresTimelineSchemaSql(
     `  ${c.seq} bigint GENERATED ALWAYS AS IDENTITY,`,
     `  ${c.payload} jsonb NOT NULL,`,
     `  ${c.schemaVer} int NOT NULL DEFAULT ${SCHEMA_VERSION},`,
-    `  "created_at" timestamptz NOT NULL DEFAULT now(),`,
+    `  ${c.createdAt} timestamptz NOT NULL DEFAULT now(),`,
     `  PRIMARY KEY (${c.sessionId}, ${c.seq})`,
     `);`,
   ].join("\n");
