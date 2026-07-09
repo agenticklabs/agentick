@@ -1654,6 +1654,23 @@ blueprint's design decisions; this is execution-level).
 
 ### 2026-07-09
 
+- **Tasks/escalation close-out batch (4 built + verified):** (1) escalation routes
+  per ORIGINATING session — `makeEscalate`/lineage read `record.scope`, `submit`
+  stamps a per-submit `scope` (`de8aeaa5`); (2) `taskSupport: "supported"` verified
+  ALREADY built (pre-flight conflict validation + caller-choice ref/inline + the
+  `dispatch-task-mode-matrix` suite; only #174 auto-capability-negotiation remains);
+  (3) `ttl` reaper — unref'd per-task timer → `expireTask` marks `failed{kind:
+  "timeout"}` + tears down the executor, cleared on terminal (`08155ac2`); (4)
+  `client.events()` live stream — `AsyncIterable<ClientEvent>` over a dedicated
+  `LocalPubSub` emitter, filter/close/multi-iterator, live-only cursor honestly
+  documented, `#308` (`b4497f9d`).
+- **ADR 73** (`0ea18bb8`) — AG-UI projection (session bus/`ClientEvent` stream +
+  inbox → AG-UI events; thin codec over existing substrate; gated on #308, now
+  partly unblocked). **ADR 74** (`980f35dd`) — DRAFT media capabilities +
+  capability-aware normalization (#17): structured `media` capability on
+  `TargetCapabilities` + a shared normalization pass (source-form transcode in-core;
+  format transcode pluggable; unsupported → `onUnsupportedMedia` policy). Design-first
+  (no prior spec); 7 open questions to workshop before build.
 - **Design ADRs drafted (NOT built — banked for later):** **ADR 71** (`a2df8b02`)
   — app workspace conventions + `agentick.config.ts` (workspace-default layout,
   five explicit-barrel convention folders, a `mergeLayered`-resolved config with
