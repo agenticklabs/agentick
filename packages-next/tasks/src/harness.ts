@@ -55,6 +55,7 @@ import {
   SESSION_ESCALATION_MESSAGE_TYPE,
   ESCALATION_TIMEOUT_MS,
   type EscalationEnvelopePayload,
+  type EscalationHop,
 } from "@agentick/runtime-next";
 import { createLocalPubSub, type LocalPubSub } from "@agentick/pubsub-next";
 import { omitUndefined } from "@agentick/utils-next";
@@ -397,7 +398,7 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
    */
   private makeHooks(live: LiveTask): TaskExecutorHooks {
     return {
-      escalate: this.makeEscalate(live.controller.signal),
+      escalate: this.makeEscalate(live.controller.signal, live.record.taskId),
       ...(this.buildElicit !== undefined ? { buildElicit: this.buildElicit } : {}),
     };
   }
@@ -412,21 +413,35 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
    * human-in-the-loop wait; the task's `signal` (cancel / ttl / close)
    * interrupts the ask fiber early.
    *
-   * TODO(ADR-69 T2): a shared/app-scoped harness stamps the originating
+   * TODO(ADR-69 T2b): a shared/app-scoped harness stamps the originating
    * session per-submit rather than reading the single harness scope;
    * escalate should route from the record's owning session, not
    * `this.scope`.
    */
-  private makeEscalate(signal: AbortSignal): ElicitFn {
+  private makeEscalate(signal: AbortSignal, taskId: string): ElicitFn {
     const inbox = this.inbox;
     const sessionId = this.scope.sessionId;
+    const principal = this.principal;
     return (request) => {
       if (sessionId === undefined) {
         throw new Error(
           "cannot escalate task elicit: this TasksHarness has no owning session (scope.sessionId). Escalation requires a session-scoped harness (ADR 69).",
         );
       }
-      const payload: EscalationEnvelopePayload = { class: "elicit", request };
+      // Origin lineage stamp (ADR 69 §Provenance): the escalation starts
+      // at THIS task in its owning session. Each forwarding session hop
+      // appends its own entry (session/harness.ts). `principal` is
+      // best-effort (ADR 51) — stamped when the harness has one in scope.
+      const origin: EscalationHop = {
+        scopeId: `session:${sessionId}`,
+        taskId,
+        ...(principal !== undefined ? { principal } : {}),
+      };
+      const payload: EscalationEnvelopePayload = {
+        class: "elicit",
+        request,
+        lineage: [origin],
+      };
       const ask = inbox.ask<EscalationEnvelopePayload, ElicitationResult>(
         `session:${sessionId}`,
         { type: SESSION_ESCALATION_MESSAGE_TYPE, payload },

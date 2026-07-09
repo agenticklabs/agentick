@@ -192,8 +192,25 @@ export interface TaskWorkContext {
    * "blocked on input, provide it" from "actively working". Restores `working` even
    * if `promise` rejects or the task is cancelled (via `finally`), so a throw can't
    * strand the task in `input_required`. Returns the resolved value (or rethrows).
+   *
+   * **Effect overload (real interruptibility).** Mirrors `submit`'s
+   * Promise/Effect duality. When handed an `Effect<T, E, never>`, the
+   * pause runs as a **real interruptible child fiber** bound to the
+   * task's `signal`: a `cancel()` / ttl while paused natively
+   * `Fiber.interrupt`s it, so `Effect.sleep`, `Effect.async` finalizers,
+   * `Effect.onInterrupt`, and generator yields inside the pause actually
+   * unwind — unlike the Promise overload, where the signal only flips a
+   * flag the promise may ignore. Use the Effect overload whenever a pause
+   * must hard-cancel (a long poll, a held resource, a nested request);
+   * use the Promise overload for plain awaits happy to observe the
+   * signal. Both overloads flip `working → input_required → working`
+   * identically and both honor the `interactive ⊥ detached` guard.
    */
   awaitingInput<T>(promise: Promise<T>, opts?: { readonly message?: string }): Promise<T>;
+  awaitingInput<T, E = unknown>(
+    effect: Effect.Effect<T, E, never>,
+    opts?: { readonly message?: string },
+  ): Promise<T>;
   /**
    * Request input from the connected client while this task runs (ADR 69).
    * The same {@link Elicit} sugar surface a tool handler sees on

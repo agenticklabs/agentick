@@ -155,7 +155,10 @@ async function runOnce(
     // cancel while paused wins and the `finally`'s `working` report is a
     // no-op there. A detached task cannot pause on client input
     // (`interactive ⊥ detached`, ADR 69).
-    awaitingInput: (promise, opts) => {
+    awaitingInput: ((
+      input: Promise<unknown> | Effect.Effect<unknown, unknown, never>,
+      opts?: { readonly message?: string },
+    ) => {
       assertInteractive(record);
       void send({
         t: "transition",
@@ -164,23 +167,31 @@ async function runOnce(
           ...(opts?.message !== undefined ? { statusMessage: opts.message } : {}),
         },
       });
-      return Promise.resolve(promise).finally(() => {
-        void send({ t: "transition", transition: { status: "working" } });
-      });
-    },
-    // TODO(ADR-69 T2): cross-process elicit escalation. A forked child
+      const restore = () => void send({ t: "transition", transition: { status: "working" } });
+      // Effect overload — a real interruptible child fiber bound to the
+      // worker's controller signal (aborted on cancel over IPC), mirroring
+      // the in-process executor (ADR 69 T2a).
+      if (Effect.isEffect(input)) {
+        return Effect.runPromise(input as Effect.Effect<unknown, unknown, never>, {
+          signal: controller.signal,
+        }).finally(restore);
+      }
+      return Promise.resolve(input).finally(restore);
+    }) as TaskWorkContext["awaitingInput"],
+    // TODO(ADR-69 T2b): cross-process elicit escalation. A forked child
     // has a SEPARATE inbox, so `ctx.elicit` can't nest-`ask` the parent
     // session directly — it needs an IPC bridge from the child's
     // escalation origin to the parent's inbox (the parent then continues
-    // the chain). Until that bridge exists, `ctx.elicit` fails loud (or
-    // throws the detached error) rather than hang. The surface + the
-    // `interactive ⊥ detached` guard exist here for symmetry with the
+    // the chain — including the T2a interception + lineage it already
+    // supports in-process). Until that bridge exists, `ctx.elicit` fails
+    // loud (or throws the detached error) rather than hang. The surface +
+    // the `interactive ⊥ detached` guard exist here for symmetry with the
     // in-process executor per ADR 69 T1.
     elicit: throwingTaskElicit(() =>
       record.detached === true
         ? new DetachedTaskCannotElicitError({ taskId: record.taskId })
         : new Error(
-            `task ${record.taskId}: cross-process (child-process executor) elicit escalation is not yet wired — ADR 69 T2`,
+            `task ${record.taskId}: cross-process (child-process executor) elicit escalation is not yet wired — ADR 69 T2b`,
           ),
     ),
   };

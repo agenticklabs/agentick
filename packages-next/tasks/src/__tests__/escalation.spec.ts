@@ -16,8 +16,10 @@
  *     that throws a clear "not configured" error on use, never a silent
  *     hang against a client that isn't there.
  *
- * TODO(ADR-69 T2): the recursive `parentSessionId` forward hop, ancestor
- * interception, and the cross-process (child-executor) elicit bridge.
+ * The recursive `parentSessionId` forward hop, ancestor interception, and
+ * `lineage` provenance are proven in `@agentick/session-next`'s
+ * `escalation.spec.ts` (T2a). TODO(ADR-69 T2b): the cross-process
+ * (child-executor) elicit bridge over IPC.
  */
 
 import { afterEach, describe, expect, it } from "vitest";

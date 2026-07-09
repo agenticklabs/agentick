@@ -237,7 +237,7 @@ export function buildSessionBridges(
       // (`session:{sessionId}`) via `inbox.ask` and resolves with the
       // client's response. Keeps `@agentick/tasks-next` free of an
       // elicitation dependency (the escalation relay is payload-agnostic).
-      // TODO(ADR-69 T2): the shared/app-scoped `options.tasks` path is
+      // TODO(ADR-69 T2b): the shared/app-scoped `options.tasks` path is
       // app-owned — the AppHarness must inject `buildElicit` there too,
       // and escalate per originating session rather than the harness scope.
       buildElicit: buildElicitSugar,

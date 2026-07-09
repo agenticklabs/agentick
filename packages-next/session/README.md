@@ -69,12 +69,38 @@ via `ctx.elicit` (whether dispatched in-process or via MCP server).
 Adopter code using `await session.elicit.text(...)` is the canonical
 shape; reach for the raw protocol only when the sugar is too narrow.
 
-This session is also the **escalation terminal** for input requests that
-originate deeper in the ownership tree: a long-running task's `ctx.elicit`
-(and, once ADR 69 T2 lands, a spawned sub-agent's) escalates up the
-spawn lineage as a nested `inbox.ask` and is resolved here against the
-real client — or forwarded to this session's own spawner if it has one.
-Adopters don't wire this; it's handled in `handleMessage`. See ADR 69.
+This session is also the **escalation terminal / hop** for input requests
+that originate deeper in the ownership tree: a long-running task's
+`ctx.elicit` (or a spawned sub-agent's) escalates up the spawn lineage
+(`parentSessionId`) as a nested `inbox.ask`. A **root** session resolves it
+here against the real client; a **spawned** session forwards it one hop up
+to its own spawner (appending a `lineage` provenance entry). Adopters don't
+wire this; it's handled in `handleMessage`. See ADR 69.
+
+**`session.interceptEscalation(handler)` (ADR 69 T2a)** lets an ancestor
+session **mediate its descendants' input requests** instead of blindly
+forwarding — the value of a chain over a dumb pipe. The handler is consulted
+first on every hop the session receives:
+
+```ts
+// A parent agent answering / denying / forwarding a sub-agent's elicit.
+const unsub = session.interceptEscalation(async (payload) => {
+  if (payload.class === "elicit" && isKnownAnswer(payload)) {
+    // Answer it here — the client is never bothered (dedupe / cache / policy).
+    return { forward: false, response: { outcome: "accepted", value: cached } };
+  }
+  if (isRateLimited(payload)) throw new Error("denied"); // hard deny → origin rejects
+  return { forward: true }; // fall through to forward / terminal
+});
+```
+
+`{ forward: false, response }` short-circuits (this hop answered); a **throw**
+is a hard deny (propagates as the origin's `ctx.elicit` rejection);
+`{ forward: true }` falls through. Payload-agnostic — the handler branches on
+`payload.class`; no policy DSL. With none registered, behavior is identical to
+plain forward/resolve (T1 parity). The escalation envelope carries a `lineage`
+path (origin task + session → each forwarding hop, principal-stamped best-
+effort per ADR 51) the interceptor can inspect.
 
 ```ts
 // 90% case — sugar
@@ -354,9 +380,12 @@ their backing.
   `session:escalation` message type — the terminal / forward hop of ADR 69
   request escalation (a task or sub-agent asking the client for input;
   root session resolves it against its elicitation harness, a spawned
-  session forwards to its `parentSessionId`). Every other message type
-  still rejects with `HandlerError` (Phase 4e+). The recursive forward hop
-  is built but T2-tested — see
+  session forwards to its `parentSessionId`). It consults a registered
+  `interceptEscalation` handler first (T2a — answer / deny / forward) and
+  appends a `lineage` provenance entry per forward hop. Every other message
+  type still rejects with `HandlerError` (Phase 4e+). The recursive forward
+  hop + interception + lineage are tested (T2a); the cross-process child
+  elicit bridge is `TODO(ADR-69 T2b)` — see
   [ADR 69](../../docs/proposals/v2/blueprint/69-request-escalation.md).
 - **Snapshot carries the persisted log only.** The (potentially
   compacted) projection is not yet round-tripped via `SessionSnapshot` —
@@ -395,12 +424,20 @@ their backing.
   `src/testing/kill-resume-acceptance.tsx` — the end-to-end
   kill-and-resume acceptance (`runKillResumeAcceptance`) across the
   memory / fs / postgres store poles (ADR 49).
-- `src/__tests__/escalation.spec.ts` — ADR 69 T1 request escalation: a
-  task's `ctx.elicit` escalates (nested `inbox.ask`) to its root owning
-  session, which resolves terminally against the real client elicitation;
-  the answer round-trips and the task FSM flips
-  `working → input_required → working → completed`. Also the
-  `interactive ⊥ detached` guard end-to-end.
+- `src/__tests__/escalation.spec.ts` — ADR 69 T1 + T2a request escalation.
+  T1: a task's `ctx.elicit` escalates (nested `inbox.ask`) to its root
+  owning session, which resolves terminally against the real client
+  elicitation; the answer round-trips and the task FSM flips
+  `working → input_required → working → completed`; plus the
+  `interactive ⊥ detached` guard end-to-end. **T2a** (5 tests): a real
+  2-session chain proving the recursive `parentSessionId` forward hop
+  (child task elicit → child forwards → root parent terminal resolve →
+  answer threads back + FSM flip); ancestor **interception** — short-circuit
+  (parent answers, the real client elicit is never called), **deny**
+  (interceptor throws → child `ctx.elicit` rejects), and **forward**
+  (`{ forward: true }` reaches the terminal); and **lineage** (the envelope
+  reaching the parent carries `[origin(task+session), child-session hop]`
+  in order).
 
 ## See also
 

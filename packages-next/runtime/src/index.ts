@@ -53,6 +53,9 @@ export {
   ESCALATION_TIMEOUT_MS,
   type SessionEscalationMessageType,
   type EscalationEnvelopePayload,
+  type EscalationHop,
+  type EscalationOutcome,
+  type EscalationInterceptor,
 } from "./substrate/escalation-protocol.js";
 export {
   RequestResponseRegistry,

@@ -41,8 +41,9 @@ import type { StreamEvent } from "../data/streaming.js";
 import type { SessionStatus as BridgeSessionStatus } from "./hook-bridges.js";
 import type { LoopToolResult } from "./loop-executor.js";
 import type { EventBus } from "./bus.js";
-import type { MessageInbox } from "./inbox.js";
+import type { MessageInbox, Unsubscribe } from "./inbox.js";
 import type { OperationJournal } from "./journal.js";
+import type { EscalationInterceptor } from "./escalation.js";
 
 // ============================================================================
 // SessionSubstrateParent — forward-reference shell for factories
@@ -584,6 +585,37 @@ export interface SessionHarnessProtocol<P = unknown> {
    * `surface: "session"` with name `session:channel:<name>`.
    */
   channel<T = unknown>(name: string): ChannelHandle<T>;
+
+  /**
+   * Register the session's escalation interceptor (ADR 69 T2a). This is
+   * the value of a chain over a dumb pipe: an ancestor session can
+   * **answer / deny / transform** a descendant's escalated request
+   * instead of blindly forwarding it toward the client.
+   *
+   * The handler is consulted **first** on every escalation hop the
+   * session receives — before the forward-or-terminal logic:
+   *
+   *   - returns `{ forward: false, response }` → **this hop answered**;
+   *     the session short-circuits and threads `response` back to the
+   *     origin (for `class: "elicit"`, `response` is an
+   *     `ElicitationResult`). The parent / terminal never sees it.
+   *   - **throws** → a hard **deny**; the throw propagates as the
+   *     escalation `ask`'s rejection, so the origin's `ctx.elicit`
+   *     rejects.
+   *   - returns `{ forward: true }` → **fall through** to the existing
+   *     forward (bubble one hop up) or terminal (root client) logic.
+   *
+   * ONE interceptor per session — the handler branches on
+   * `payload.class` itself. Payload-agnostic: no policy DSL, no
+   * class-typed sugar (ADR 69: "a handler is code; that's enough").
+   * With NO interceptor registered, behavior is identical to a session
+   * that simply forwards/resolves (T1 parity).
+   *
+   * Returns an {@link Unsubscribe} that clears the interceptor.
+   *
+   * @see docs/proposals/v2/blueprint/69-request-escalation.md
+   */
+  interceptEscalation(handler: EscalationInterceptor): Unsubscribe;
 
   /**
    * Return a programmatic handle for a named knob. Wraps the

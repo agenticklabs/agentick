@@ -18,6 +18,9 @@ import {
   SESSION_ESCALATION_MESSAGE_TYPE,
   ESCALATION_TIMEOUT_MS,
   type EscalationEnvelopePayload,
+  type EscalationHop,
+  type EscalationInterceptor,
+  type EscalationOutcome,
 } from "@agentick/runtime-next";
 import type {
   JournalingPolicy,
@@ -65,6 +68,7 @@ import type {
   TickResult,
   TimelineEntry,
   ToolExecutorProtocol,
+  Unsubscribe,
 } from "@agentick/spec-next";
 import {
   DEFAULT_JOURNALING_POLICY,
@@ -272,6 +276,11 @@ export class SessionHarness<P = unknown>
   private readonly target: ExecutionTarget;
   private readonly spawnContext: SpawnContext<P> | undefined;
   private readonly parentSessionId: string | undefined;
+  /**
+   * Single-slot escalation interceptor (ADR 69 T2a). `undefined` =
+   * forward/resolve as T1 did (parity); set via `interceptEscalation`.
+   */
+  private escalationInterceptor: EscalationInterceptor | undefined;
   private readonly defaultMaxTicks: number;
   private readonly defaultStreaming: boolean | undefined;
 
@@ -843,6 +852,22 @@ export class SessionHarness<P = unknown>
     return runHarnessProtocol(eff);
   }
 
+  /**
+   * Register this session's escalation interceptor (ADR 69 T2a). ONE
+   * per session — a later registration replaces the current one. The
+   * returned unsubscribe clears it only if it is still the current
+   * handler (a stale unsubscribe from a replaced handler is a no-op).
+   * With none registered, escalation behaves exactly as T1 (parity).
+   */
+  interceptEscalation(handler: EscalationInterceptor): Unsubscribe {
+    this.escalationInterceptor = handler;
+    return () => {
+      if (this.escalationInterceptor === handler) {
+        this.escalationInterceptor = undefined;
+      }
+    };
+  }
+
   knob<T = unknown>(name: string): KnobHandle<T> {
     const bridge = this.bridges.knobs;
     return {
@@ -894,10 +919,16 @@ export class SessionHarness<P = unknown>
    * Escalation hop (ADR 69). The `ask` return value IS the response — the
    * nested-`ask` stack is both the relay AND the reply route:
    *
+   *   - a registered **interceptor** (ADR 69 T2a) is consulted FIRST — it
+   *     may **answer** (`{ forward: false, response }` → short-circuit,
+   *     this hop resolves), **deny** (throw → the ask rejects), or **fall
+   *     through** (`{ forward: true }`). With none registered, behavior is
+   *     byte-identical to T1 (parity).
    *   - **spawned session** (`parentSessionId` set) → **forward** one hop
-   *     up to `session:{parentSessionId}`; the parent's eventual response
-   *     threads back down through this `ask`'s return. Built now; the
-   *     recursive hop + ancestor interception are exercised at T2.
+   *     up to `session:{parentSessionId}`, appending this session's
+   *     {@link EscalationHop} to `payload.lineage` first (provenance, ADR
+   *     69 §Provenance); the parent's eventual response threads back down
+   *     through this `ask`'s return.
    *   - **root session** (no `parentSessionId`) → resolve **terminally**.
    *     Today the one implemented class is `"elicit"`: run the real client
    *     elicitation on this session's harness and return the outcome,
@@ -914,15 +945,54 @@ export class SessionHarness<P = unknown>
       return Effect.fail(new HandlerError({ cause: "escalation envelope missing payload" }));
     }
 
-    // Forward branch — a spawned session bubbles to its spawner.
-    // TODO(ADR-69 T2): test the recursive hop, ancestor interception
-    // (a hop resolving instead of forwarding), and populate `lineage`
-    // (provenance / principal stamping per ADR 51).
+    const interceptor = this.escalationInterceptor;
+    if (interceptor === undefined) {
+      return this.forwardOrResolveEscalation(payload);
+    }
+
+    // Consult the interceptor FIRST (ADR 69 T2a). A throw is a hard DENY
+    // — it propagates as this ask's rejection, so the origin's ctx.elicit
+    // rejects. `{ forward: false }` means THIS hop answered → short-circuit
+    // (the parent / terminal never sees it). `{ forward: true }` falls
+    // through to the existing forward-or-terminal logic.
+    return Effect.tryPromise<EscalationOutcome, MessageHandlerError>({
+      try: () => interceptor(payload),
+      catch: (cause): MessageHandlerError => new HandlerError({ cause }),
+    }).pipe(
+      Effect.flatMap((outcome) =>
+        outcome.forward === false
+          ? Effect.succeed(outcome.response)
+          : this.forwardOrResolveEscalation(payload),
+      ),
+    );
+  }
+
+  /**
+   * The forward-or-terminal half of an escalation hop (ADR 69). Split
+   * out from {@link handleEscalation} so the interceptor consult composes
+   * cleanly in front of it. Forwards to the spawner (appending a lineage
+   * hop) when this is a spawned session; resolves terminally against the
+   * real client otherwise.
+   */
+  private forwardOrResolveEscalation(
+    payload: EscalationEnvelopePayload,
+  ): Effect.Effect<unknown, MessageHandlerError, never> {
+    // Forward branch — a spawned session bubbles to its spawner. Append
+    // this session's hop to the lineage path (origin → each hop) before
+    // forwarding; `principal` is best-effort (ADR 51).
     if (this.parentSessionId !== undefined) {
+      const hop: EscalationHop = {
+        scopeId: `session:${this.scopeId}`,
+        ...(this.principal !== undefined ? { principal: this.principal } : {}),
+      };
+      const forwarded: EscalationEnvelopePayload = {
+        ...payload,
+        lineage: [...(payload.lineage ?? []), hop],
+      };
       return this.inbox
         .ask(
           `session:${this.parentSessionId}`,
-          { type: SESSION_ESCALATION_MESSAGE_TYPE, payload },
+          { type: SESSION_ESCALATION_MESSAGE_TYPE, payload: forwarded },
           { timeoutMs: ESCALATION_TIMEOUT_MS },
         )
         .pipe(Effect.catchAll((cause) => Effect.fail(new HandlerError({ cause }))));
@@ -941,7 +1011,7 @@ export class SessionHarness<P = unknown>
       });
     }
 
-    // TODO(ADR-69 T2+): non-elicit payload classes (sampling, permission,
+    // TODO(ADR-69 T2b+): non-elicit payload classes (sampling, permission,
     // credential, error) resolve terminally here via their own resolvers.
     return Effect.fail(
       new HandlerError({ cause: `unknown escalation class: ${String(payload.class)}` }),

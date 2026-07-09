@@ -74,14 +74,31 @@ export class InProcessTaskExecutor implements TaskExecutor {
     // report is a safe no-op (it can't strand the task). A detached task
     // cannot pause on client input (`interactive ⊥ detached`, ADR 69) —
     // guard loud rather than hang against a dead ancestor inbox.
-    const awaitingInput: TaskWorkContext["awaitingInput"] = (promise, opts) => {
+    const awaitingInput = ((
+      input: Promise<unknown> | Effect.Effect<unknown, unknown, never>,
+      opts?: { readonly message?: string },
+    ) => {
       assertInteractive(record);
       report({
         status: "input_required",
         ...(opts?.message !== undefined ? { statusMessage: opts.message } : {}),
       });
-      return Promise.resolve(promise).finally(() => report({ status: "working" }));
-    };
+      const restore = () => report({ status: "working" });
+      // Effect overload — run the pause as a REAL interruptible child
+      // fiber bound to the task's `signal`. `Effect.runPromise({ signal })`
+      // forks a fiber and `Fiber.interrupt`s it when the signal aborts
+      // (cancel / ttl / close), so the Effect's finalizers / `onInterrupt`
+      // / `Effect.sleep` actually unwind — the hard-cancel guarantee the
+      // Promise overload can't give (a Promise only observes the flag).
+      if (Effect.isEffect(input)) {
+        return Effect.runPromise(input as Effect.Effect<unknown, unknown, never>, {
+          signal,
+        }).finally(restore);
+      }
+      // Promise overload — the current path: the harness-owned signal only
+      // flips a flag the work must observe; the promise keeps running.
+      return Promise.resolve(input).finally(restore);
+    }) as TaskWorkContext["awaitingInput"];
 
     // Build the work ctx here — onProgress / setStatusMessage funnel into
     // the ONE report path. The signal is harness-owned (aborts on cancel

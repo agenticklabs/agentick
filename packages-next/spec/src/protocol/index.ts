@@ -20,6 +20,7 @@ export * from "./event-log.js";
 export * from "./journal.js";
 export * from "./bus.js";
 export * from "./inbox.js";
+export * from "./escalation.js";
 export * from "./command.js";
 export * from "./channels.js";
 export * from "./reconciler.js";

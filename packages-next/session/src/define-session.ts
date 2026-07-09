@@ -57,6 +57,7 @@ import type {
   ApplyToolResultsInput,
   ChannelHandle,
   ContentBlock,
+  EscalationInterceptor,
   EventBus,
   KnobHandle,
   MessageEnvelope,
@@ -74,6 +75,7 @@ import type {
   SessionSnapshot,
   SpawnInput,
   TickEndForwardDecision,
+  Unsubscribe,
 } from "@agentick/spec-next";
 import type { KnobsHandle } from "@agentick/knobs-next";
 import type { GateHandle, GatesHandle } from "@agentick/gates-next";
@@ -178,6 +180,7 @@ class CallbackSessionHarness<P = unknown>
   readonly elicit: Elicit;
   readonly tasks: TasksHarnessProtocol;
   readonly resources: Resources;
+  private escalationInterceptor: EscalationInterceptor | undefined;
 
   constructor(
     scopeId: string,
@@ -292,6 +295,20 @@ class CallbackSessionHarness<P = unknown>
   knob<T = unknown>(name: string): KnobHandle<T> {
     if (this.spec.knob) return this.spec.knob<T>(name);
     throw new Error(`defineSession: knob("${name}") not configured`);
+  }
+
+  /**
+   * Single-slot escalation interceptor (ADR 69 T2a). Stored for
+   * protocol conformance; consulted once this façade wires escalation
+   * dispatch (`handleMessage` is currently unwired — FAÇADE MVP).
+   */
+  interceptEscalation(handler: EscalationInterceptor): Unsubscribe {
+    this.escalationInterceptor = handler;
+    return () => {
+      if (this.escalationInterceptor === handler) {
+        this.escalationInterceptor = undefined;
+      }
+    };
   }
 
   gate(name: string): GateHandle | undefined {

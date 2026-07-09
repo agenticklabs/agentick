@@ -128,3 +128,78 @@ describe("TasksHarness — input_required (awaitingInput)", () => {
     expect(bundle.harness.get(handle.taskId)?.failure?.reason).toBe("user-abort");
   });
 });
+
+describe("TasksHarness — awaitingInput(Effect) real interruptibility (ADR 69 T2a)", () => {
+  let bundle: FakeTasksBundle | undefined;
+  afterEach(async () => {
+    if (bundle) await bundle.close();
+    bundle = undefined;
+  });
+
+  it("an Effect pause flips working → input_required → working → completed and resolves with the Effect's value", async () => {
+    bundle = await fakeTasks();
+    const gate = makeDeferred<string>();
+
+    const envsP = takeStatusEnvelopes(bundle.bus, 4);
+
+    const handle = bundle.harness.submit(async (ctx) => {
+      // Effect overload — a pause expressed as an Effect (not a Promise).
+      const provided = await ctx.awaitingInput(
+        Effect.promise(() => gate.promise),
+        {
+          message: "awaiting effect",
+        },
+      );
+      return [{ type: "text", text: provided }];
+    });
+
+    expect(bundle.harness.status(handle.taskId)).toBe("input_required");
+    expect(bundle.harness.get(handle.taskId)?.statusMessage).toBe("awaiting effect");
+
+    gate.resolve("effect-value");
+    const result = await handle.result;
+    expect(result).toEqual([{ type: "text", text: "effect-value" }]);
+    expect(bundle.harness.status(handle.taskId)).toBe("completed");
+
+    const infos = (await envsP).map((e) => e.payload as TaskInfo);
+    expect(infos.map((i) => i.status)).toEqual([
+      "working",
+      "input_required",
+      "working",
+      "completed",
+    ]);
+  });
+
+  it("a cancel WHILE paused on an Effect INTERRUPTS the Effect fiber (onInterrupt finalizer fires) and lands terminal cancelled", async () => {
+    bundle = await fakeTasks();
+    let interrupted = false;
+
+    // A never-completing pause with a real interrupt finalizer. On the
+    // Promise path this would hang forever ignoring the signal; on the
+    // Effect path the task's `signal` (aborted by cancel) natively
+    // `Fiber.interrupt`s it, so `onInterrupt` runs.
+    const paused = Effect.never.pipe(
+      Effect.onInterrupt(() =>
+        Effect.sync(() => {
+          interrupted = true;
+        }),
+      ),
+    );
+
+    const handle = bundle.harness.submit(async (ctx) => {
+      const v = await ctx.awaitingInput(paused, { message: "awaiting effect" });
+      return [{ type: "text", text: String(v) }];
+    });
+    expect(bundle.harness.status(handle.taskId)).toBe("input_required");
+
+    const rejected = drainRejection(handle.result);
+    await bundle.harness.cancel(handle.taskId, "user-abort");
+    expect(bundle.harness.status(handle.taskId)).toBe("cancelled");
+    expect(await rejected).toMatchObject({ _tag: "TaskRejection", status: "cancelled" });
+
+    // The proof of REAL interruptibility (vs AbortSignal-flag-only): the
+    // Effect's finalizer ran because its fiber was interrupted.
+    await waitFor(() => interrupted);
+    expect(interrupted).toBe(true);
+  });
+});

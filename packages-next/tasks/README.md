@@ -65,7 +65,8 @@ not published independently.
 | 68-B  | Child-process executor over IPC (isolation / detached) + executor registry keyed by `.kind`, per-submit selection — conforms to the `TaskExecutor` seam                                                                                                                                                                                                                                                                    | ✅     |
 | 68-pg | `@agentick/tasks-postgres-next` durable store — durable records + `interrupted`-on-restart + terminal adoption across app-process restart (cross-restart child reattach-by-pid still deferred)                                                                                                                                                                                                                             | ✅     |
 | 68-ir | `ctx.awaitingInput` — `working → input_required → working` status wrapper (the origin seam for elicitation escalation); worker self-terminates on parent IPC `disconnect` (#120-followup)                                                                                                                                                                                                                                  | ✅     |
-| 69-T1 | Request escalation — task `ctx.elicit` escalates to the connected client via nested `inbox.ask`; `interactive ⊥ detached` guard. Root-session case; recursive spawn-lineage hop + interception + cross-process child bridge = T2 (ADR 69)                                                                                                                                                                                  | ✅     |
+| 69-T1 | Request escalation — task `ctx.elicit` escalates to the connected client via nested `inbox.ask`; `interactive ⊥ detached` guard. Root-session case                                                                                                                                                                                                                                                                          | ✅     |
+| 69-T2a | Multi-agent bubbling — recursive spawn-lineage hop (`session → parentSessionId`), ancestor **interception** (`session.interceptEscalation` — answer / deny / forward), `lineage` provenance (origin task+session → each hop), and the `awaitingInput(Effect)` overload (real fiber interruptibility). Cross-process child bridge = T2b                                                                                        | ✅     |
 | D     | Effect-native internals — `Effect<T,E,never>` work overload + real `Fiber.interrupt` on cancel (#155); events fan out over Effect `Stream` (`LocalPubSub` + `Stream.takeUntil`). **Landed.** The protocol _surface_ stays Promise/`AsyncIterable` by design (Promise-at-the-edge, Effect-internal — as everywhere in v2); exposing `Effect`/`Stream` at the boundary is a whole-framework decision, not a tasks-local gap. | ✅     |
 
 ## Quick start
@@ -329,7 +330,9 @@ fire.
 - `setStatusMessage(message: string): void` — update the human-readable
   status without emitting a progress event.
 - `awaitingInput<T>(promise, opts?): Promise<T>` — run `promise` in the
-  `input_required` state. See below.
+  `input_required` state. **Also accepts an `Effect<T, E, never>`** — the
+  Effect overload runs the pause as a real interruptible child fiber (a
+  cancel / ttl `Fiber.interrupt`s it). See below.
 - `elicit: Elicit` — request input from the connected client, from inside
   a task, via request escalation (ADR 69). See below.
 
@@ -366,6 +369,31 @@ paused**, the caller's `cancelled` transition wins (it's terminal); the
 — the task does not revert. `input_required` means "provide input," a state
 distinct from `working`.
 
+**Promise vs Effect (real interruptibility).** `awaitingInput` mirrors
+`submit`'s Promise/Effect duality. Hand it a **Promise** and cancellation is
+AbortSignal-flag-only — the promise keeps running until it observes the
+signal. Hand it an **`Effect<T, E, never>`** and the pause runs as a real
+interruptible child fiber bound to the task's `signal`: a `cancel()` / ttl
+while paused natively `Fiber.interrupt`s it, so `Effect.sleep`, `Effect.async`
+finalizers, `Effect.onInterrupt`, and generator yields inside the pause
+actually unwind. Use the Effect overload whenever a pause must hard-cancel
+(a long poll, a held resource, a nested request):
+
+```ts
+ctx.tasks.submit(async (task) => {
+  // Effect pause — a cancel while blocked interrupts the fiber and runs
+  // the release finalizer (a Promise pause would leak it).
+  const lease = await task.awaitingInput(
+    acquireLease.pipe(Effect.onInterrupt(() => releaseLease)),
+    { message: "acquiring lease" },
+  );
+  return run(lease);
+});
+```
+
+Both overloads flip `working → input_required → working` identically and both
+honor the `interactive ⊥ detached` guard.
+
 #### `ctx.elicit` — ask the client, from inside a task (ADR 69)
 
 `awaitingInput` is generic but leaves you holding the promise. When the
@@ -400,17 +428,22 @@ underlying `awaitingInput`) **throw** `DetachedTaskCannotElicitError`
 rather than hang. Detached means non-interactive, fire-and-forget,
 durable-result work.
 
-> **Tier.** T1 (this release) wires the root-session case: a task in a
-> connected session escalates to that session, which resolves terminally
-> against the real client elicitation. Deeper bubbling — a **sub-agent**
-> session forwarding to its spawner, ancestor **interception**, and the
-> **cross-process** (child-executor) elicit bridge — is **ADR 69 T2**
-> (seam built, `TODO(ADR-69 T2)` trailheads in place). See
+> **Tier.** T1 + **T2a** (this release). T1 wires the root-session case: a
+> task in a connected session escalates to that session, which resolves
+> terminally against the real client elicitation. **T2a** adds deeper
+> bubbling — a **sub-agent** session forwarding to its spawner up the
+> `parentSessionId` lineage, ancestor **interception**
+> (`session.interceptEscalation` — a hop answering / denying / forwarding
+> instead of blindly relaying), and `lineage` provenance (origin task +
+> session → each forwarding hop). The remaining **cross-process**
+> (child-executor) elicit bridge is **ADR 69 T2b** (worker `ctx.elicit`
+> stub + `TODO(ADR-69 T2b)` trailheads in place). See
 > [ADR 69](../../docs/proposals/v2/blueprint/69-request-escalation.md).
 
 Verified by `src/__tests__/escalation.spec.ts` (origin guards) and
 `@agentick/session-next`'s `src/__tests__/escalation.spec.ts` (the
-root-session round-trip + FSM flip).
+root-session round-trip + FSM flip, the T2a 2-session bubbling chain,
+interception short-circuit / deny / forward, and lineage assertion).
 
 ### `TaskHandle<T>`
 
@@ -822,7 +855,12 @@ runTasksHarnessConformance(async ({ harnessId }) => {
 completed` status timeline (bus envelopes) with the paused-state
   statusMessage, the durable `TaskStore` record reflecting `input_required`
   while paused, and cancel-while-paused landing terminal `cancelled` (the
-  `finally`'s `working` report proven a post-terminal no-op).
+  `finally`'s `working` report proven a post-terminal no-op). Plus the ADR
+  69 T2a **`awaitingInput(Effect)`** overload: an Effect pause flips the
+  same status timeline and resolves with the Effect's value, and a cancel
+  while paused **interrupts the Effect fiber** (an `Effect.onInterrupt`
+  finalizer is proven to fire) and lands terminal `cancelled` — the
+  real-interruptibility proof vs the AbortSignal-flag-only Promise path.
 - `src/__tests__/child-executor.spec.ts` — 13 tests that ACTUALLY fork a
   `tsx`-loaded child and round-trip over IPC (no fakes for the process
   boundary): echo result round-trip, ordered progress over IPC, thrower →
