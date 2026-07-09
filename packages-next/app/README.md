@@ -175,7 +175,7 @@ import { z } from "zod";
 
 const calculator = createTool({
   name: "calculator",
-  input: z.object({ a: z.number(), b: z.number() }),
+  inputSchema: z.object({ a: z.number(), b: z.number() }),
   handler: async ({ a, b }) => [{ type: "text", text: `${a + b}` }],
 });
 

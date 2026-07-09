@@ -110,7 +110,7 @@ import { z } from "zod";
 const Deploy = createTool({
   name: "deploy",
   description: "Deploy the current branch.",
-  input: z.object({ target: z.string() }),
+  inputSchema: z.object({ target: z.string() }),
   annotations: { taskSupport: "required" }, // Pattern B — see below
   handler: async ({ target }, { ctx }) => {
     return ctx.tasks!.submit(

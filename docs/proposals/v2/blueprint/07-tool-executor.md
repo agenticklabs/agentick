@@ -371,7 +371,7 @@ harness captures `use:` deps at render time:
 const ShellTool = createTool({
   name: "shell",
   description: "Execute a command",
-  input: z.object({ command: z.string() }),
+  inputSchema: z.object({ command: z.string() }),
   use: () => ({ sandbox: useSandbox() }), // captured at render time
   handler: async ({ command }, deps) => {
     const out = await deps!.sandbox.exec(command);

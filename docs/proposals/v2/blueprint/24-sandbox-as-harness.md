@@ -390,7 +390,7 @@ The tool components (`<Bash>`, `<ReadFile>`, `<WriteFile>`, `<EditFile>`) use `u
 export const Bash = createTool({
   name: "bash",
   description: "Execute a bash command in the sandbox",
-  input: z.object({ command: z.string() }),
+  inputSchema: z.object({ command: z.string() }),
   use: () => ({ sandbox: useSandbox() }),
   async handler({ command }, { ctx, use }) {
     if (!use.sandbox) {
