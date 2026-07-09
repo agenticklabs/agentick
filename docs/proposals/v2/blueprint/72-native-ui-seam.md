@@ -1,4 +1,4 @@
-# ADR 72 — Native UI seam: `ui://` IR resources → MCP-Apps / AG-UI projections → inbox-relay interaction
+# ADR 72 — Native UI-widget seam: `ui://` IR resources → A2UI (+ MCP-Apps) → inbox-relay interaction
 
 **Status:** DRAFT 2026-07-09 (Fable, for Ryan — design workshop). **Revisits** ADR 40's "defer
 first-class MCP-Apps" stance. **Builds on:** ADR 62 (resources — `ui://` rides the general seam;
@@ -9,13 +9,15 @@ escalation + the addressable session inbox), ADR 71 (the `--framework` reconcile
 
 ## TL;DR
 
-Agentick renders UI through **one native seam**: a **`ui://` resource whose content is agentick
-IR** — authored in JSX (the same reconciler that builds model context, Flow E), rendered
+Agentick renders UI **widgets** through one native seam: a **`ui://` resource whose content is
+agentick IR** — authored in JSX (the same reconciler that builds model context, Flow E), rendered
 **client-side** by the `--framework` binding, kept live by the resource `subscribe`/`notifyUpdated`
-fan. **MCP-Apps and AG-UI are down-projections of that one seam** (client + server sides), exactly
-as tools/tasks/elicitation project to the MCP wire. **Interactive UI → tool calls route through the
-addressable session inbox via the ADR 69 relay** — no new bridge; the escalation substrate
-generalized. Nothing new at the substrate: resources + reconciler IR + the ADR 69 relay, composed.
+fan. That seam projects to **A2UI** (the transport-agnostic UI-widget protocol whose component-tree
+model ≈ our IR), and **MCP-Apps is A2UI-over-MCP** (`ui://` + `notifyUpdated`). **Interactive UI →
+tool calls route through the addressable session inbox via the ADR 69 relay** — no new bridge; the
+escalation substrate generalized. **AG-UI is a *sibling* axis, not a projection of this seam** — an
+event-based Agent↔User stream that projects from the session bus/client-sync + inbox (its own ADR;
+see §Scope). Nothing new at the substrate: resources + reconciler IR + the ADR 69 relay, composed.
 
 ## The native seam — `ui://` carries IR, not opaque HTML
 
@@ -34,19 +36,50 @@ Why IR, not HTML: IR keeps the framework binding + reactivity + type-safety, and
 **insulates us from the MCP-Apps spec churn ADR 40 flagged.** We own the native IR; HTML is one
 *down-projection* we emit when a wire demands it. The spec can move; our seam doesn't.
 
-## Projections — one seam, N wire forms (client + server)
+## Scope — the `ui://` **widget** seam projects to A2UI (+ MCP-Apps). AG-UI is a DIFFERENT axis.
 
-| Consumer | Projection | Where |
-| --- | --- | --- |
-| **Agentick client** (native) | `read ui://` → IR → render with the framework binding | client-next + the binding |
-| **MCP-Apps** | IR **→ HTML**, exposed as an `MCPApp`/`ui://` app resource | `@agentick/mcp-apps-next` (the package ADR 62 reserved) on the MCP **server** harness |
-| **AG-UI** | IR / UI-state **→ AG-UI events** | `@agentick/ag-ui-next` on the **gateway** |
+Three protocols, correctly placed (per the A2UI + AG-UI specs):
 
-Each projection is an *encoding* of the native IR-over-`ui://` seam — the same pattern that makes a
-tool/task/elicitation a native harness with an MCP-wire codec on top. This is what lets us **honor
-MCP-Apps and AG-UI without either owning the model**: an adopter targeting an MCP client gets the
-HTML projection; one targeting an AG-UI client gets the event projection; the agentick client gets
-the native IR. One authoring surface.
+- **A2UI** — a transport-agnostic generative-**UI-widget** protocol: "a flat, component-based
+  declarative structure" (a component map with ID-referenced children + a catalog / JSON Schema).
+  **That is the reconciler `RenderedTree`.** This ADR's `ui://` seam projects to it.
+- **MCP-Apps** — UI widgets carried over MCP = **A2UI-over-MCP**, i.e. `ui://` + `notifyUpdated` on
+  the MCP resource-subscribe channel.
+- **AG-UI** — a DIFFERENT axis: an **event-based** Agent↔User protocol (message deltas,
+  `tool_use`/`tool_result`, event-sourced state diffs, lifecycle, thinking, + a return channel for
+  user input / interrupts / steering). It is NOT a widget protocol; it projects from agentick's
+  **session event stream** (bus/channels + client-sync) + the **interaction inbox**, not from
+  `ui://`. **AG-UI is its own ADR** (see below). A2UI widgets can *ride* an AG-UI stream — they
+  compose.
+
+### This ADR: the `ui://` widget seam → A2UI, over N transports
+Because A2UI is transport-agnostic and A2UI ≈ our IR, the projection is **thin** and forks only by
+transport:
+
+| Transport binding | What it is |
+| --- | --- |
+| **agentick's own** (`in-process` / `ws` / `http`) | native agentick client — A2UI over our transport |
+| **MCP** (resource-subscribe) | **"MCP-Apps"** — A2UI bound to MCP (`ui://` + `notifyUpdated`) |
+
+**A2UI message ↔ agentick primitive:**
+
+| A2UI | agentick |
+| --- | --- |
+| `createSurface` / `updateComponents` | `read ui://` + `subscribe`/`notifyUpdated` (ADR 62) |
+| `updateDataModel` (JSON-Pointer patches) | a reactive UI data model (knobs/state-shaped) |
+| `action` (user event → server) | the ADR 69 inbox relay (§ below) |
+| `callFunction` / `functionResponse` | client-next's `handler-registry` (exists) |
+
+**Keep agentick IR canonical; A2UI is the primary widget projection.** We own the IR (spec-stable),
+emit A2UI (thin), let it ride any transport — "MCP-Apps" is A2UI-over-MCP; the native client is
+A2UI-over-our-transport. One authoring surface, one widget-projection format, transport the only axis.
+
+### Sibling (not this ADR): AG-UI ← the session event stream
+AG-UI standardizes agentick's *interaction surface*, which mostly **already exists**: the bus /
+channel events + client-next sync (streaming deltas, tool calls, state diffs, lifecycle, thinking)
+→ AG-UI events; user input / interrupts (abort-command) / steering / state mutations → the session
+inbox. It is arguably *closer to done* than the widget seam. Tracked as a separate ADR because it's
+a different axis (event stream, not widgets) — the two compose but don't share a seam.
 
 ## Interaction — the ADR 69 relay, generalized
 
@@ -98,12 +131,14 @@ MCP-Apps-specific one) is now the right investment. Owning the native IR seam + 
    agent-authoring, or a UI-specific renderer over the shared IR?
 3. **Tool-call origin-addressing** — the exact inbox address scheme for native-dispatch vs
    mcp-app-relay origins, and how the `ui://` resource carries origin.
-4. **AG-UI fidelity** — how much of AG-UI's event vocabulary the gateway projection covers; is it
-   lossy?
-5. **Package split** — `@agentick/mcp-apps-next` (server HTML projection + inbound app render) and
-   `@agentick/ag-ui-next` (gateway event projection) as separate optional packages; the native
-   render lives in client-next + the binding.
-6. **Security model** for untrusted inbound MCP-App HTML (sandbox policy, capability gating via the
-   relay).
+4. **Package split** — `@agentick/a2ui-next` (the IR→A2UI widget projection + native render) and
+   `@agentick/mcp-apps-next` (the A2UI-over-MCP binding, server-side). Native render lives in
+   client-next + the binding.
+5. **Security model** for untrusted inbound MCP-App HTML/widgets (sandbox policy, capability gating
+   via the relay).
+6. **The sibling AG-UI ADR** — scope out the event-stream projection (bus/client-sync + inbox →
+   AG-UI events; `@agentick/ag-ui-next` on the gateway) and map its event vocabulary onto our
+   existing bus/execution events + steering/abort — it's a different axis and likely closer to
+   done.
 
 @see the workshop artifact (native-ui-seam) for the rendered diagram + resolved-decision log.
