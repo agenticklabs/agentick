@@ -1389,6 +1389,10 @@ importers:
       effect:
         specifier: ^3.21.2
         version: 3.21.2
+    devDependencies:
+      '@agentick/elicitation-next':
+        specifier: workspace:*
+        version: link:../elicitation
 
   packages-next/tasks-postgres:
     dependencies:

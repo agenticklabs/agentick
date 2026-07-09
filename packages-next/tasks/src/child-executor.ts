@@ -38,15 +38,18 @@
 
 import { fork, type ChildProcess, type ForkOptions } from "node:child_process";
 
-import { omitUndefined } from "@agentick/utils-next";
+import { omitUndefined, reasonOf } from "@agentick/utils-next";
 import type {
+  Elicit,
   TaskExecution,
   TaskExecutor,
+  TaskExecutorHooks,
   TaskRecord,
   TaskReport,
   TaskStatus,
   TaskWork,
 } from "@agentick/spec-next";
+import { isAgentickError, serializeAgentickError } from "@agentick/spec-next";
 
 import type { ParentToWorkerMessage, WorkerToParentMessage } from "./child-protocol.js";
 
@@ -129,6 +132,7 @@ export class ChildProcessTaskExecutor implements TaskExecutor {
     _work: TaskWork,
     report: TaskReport,
     signal: AbortSignal,
+    hooks?: TaskExecutorHooks,
   ): TaskExecution {
     // `serialization: "advanced"` (V8 structured clone) as the DEFAULT, not
     // fork's `"json"` default: task `input` + result are commonly
@@ -145,7 +149,14 @@ export class ChildProcessTaskExecutor implements TaskExecutor {
     this.children.set(record.taskId, handle);
 
     child.on("message", (message: WorkerToParentMessage) => {
-      if (message == null || message.t !== "transition") return;
+      if (message == null || typeof message !== "object") return;
+      // Cross-process elicit bridge (ADR 69 T2b): the child marshals a
+      // serializable INTENT; reconstruct + escalate on the parent.
+      if (message.t === "elicit-request") {
+        void this.bridgeElicit(handle, message, hooks);
+        return;
+      }
+      if (message.t !== "transition") return;
       if (handle.settled) return;
       const transition = message.transition;
       if (transition.status !== undefined && isTerminalStatus(transition.status)) {
@@ -203,6 +214,67 @@ export class ChildProcessTaskExecutor implements TaskExecutor {
     handle.report = report; // re-wire the sink; the message handler reads it live
     const execution: ChildProcessExecution = { kind: this.kind, taskId: record.taskId };
     return execution;
+  }
+
+  /**
+   * Parent-side elicit bridge (ADR 69 T2b). A forked child's `ctx.elicit`
+   * can't reach the parent session's inbox directly, so it marshals a
+   * serializable INTENT `{method, args}` here. This reconstructs the real
+   * live-schema request via the injected sugar — `hooks.buildElicit(
+   * hooks.escalate)[method](...args)` — and escalates it IN-RUNTIME
+   * through the EXISTING T1/T2a chain (validation + ancestor interception
+   * + lineage all apply exactly as for an in-process task; the live schema
+   * is fine here because it never crossed IPC). The result (or the typed
+   * error the sugar throws on decline/cancel) is marshaled back by
+   * `requestId`.
+   *
+   * When no escalation is wired (`hooks` absent — a bare executor / no
+   * owning session) it replies with a clear `elicit-error`, matching the
+   * in-process "not configured" behavior rather than hanging the child.
+   */
+  private async bridgeElicit(
+    handle: ChildHandle,
+    request: Extract<WorkerToParentMessage, { t: "elicit-request" }>,
+    hooks: TaskExecutorHooks | undefined,
+  ): Promise<void> {
+    const { requestId, method, args } = request;
+    const escalate = hooks?.escalate;
+    const buildElicit = hooks?.buildElicit;
+    if (escalate === undefined || buildElicit === undefined) {
+      this.send(handle.child, {
+        t: "elicit-error",
+        requestId,
+        error: {
+          message:
+            "no escalation configured for this executor — a child-process task's ctx.elicit " +
+            "requires a session-wired harness (ADR 69)",
+        },
+      });
+      return;
+    }
+    try {
+      const elicit = buildElicit(escalate) as unknown as Record<
+        string,
+        ((...a: readonly unknown[]) => unknown) | undefined
+      >;
+      const fn = elicit[method];
+      if (typeof fn !== "function") {
+        throw new Error(`ctx.elicit.${method} is not a method on the reconstructed Elicit sugar`);
+      }
+      const result = await fn.apply(elicit as unknown as Elicit, args as unknown[]);
+      this.send(handle.child, { t: "elicit-response", requestId, result });
+    } catch (err) {
+      // A tagged AgentickError (e.g. ElicitationDeclined) round-trips via
+      // the codec so the child rethrows the exact class + fields; anything
+      // else crosses as a plain message.
+      this.send(handle.child, {
+        t: "elicit-error",
+        requestId,
+        error: isAgentickError(err)
+          ? { serialized: serializeAgentickError(err) }
+          : { message: reasonOf(err) },
+      });
+    }
   }
 
   cancel(execution: TaskExecution, reason?: string): Promise<void> {

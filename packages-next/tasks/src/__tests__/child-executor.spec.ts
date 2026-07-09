@@ -255,7 +255,7 @@ describe("runTaskWorker — input_required over IPC (message-triggered release)"
       updatedAt: now,
     };
 
-    const transitions: WorkerToParentMessage["transition"][] = [];
+    const transitions: Extract<WorkerToParentMessage, { t: "transition" }>["transition"][] = [];
     let onInputRequired!: () => void;
     const sawInputRequired = new Promise<void>((resolve) => {
       onInputRequired = resolve;

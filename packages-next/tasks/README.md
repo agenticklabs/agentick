@@ -66,7 +66,8 @@ not published independently.
 | 68-pg | `@agentick/tasks-postgres-next` durable store — durable records + `interrupted`-on-restart + terminal adoption across app-process restart (cross-restart child reattach-by-pid still deferred)                                                                                                                                                                                                                             | ✅     |
 | 68-ir | `ctx.awaitingInput` — `working → input_required → working` status wrapper (the origin seam for elicitation escalation); worker self-terminates on parent IPC `disconnect` (#120-followup)                                                                                                                                                                                                                                  | ✅     |
 | 69-T1 | Request escalation — task `ctx.elicit` escalates to the connected client via nested `inbox.ask`; `interactive ⊥ detached` guard. Root-session case                                                                                                                                                                                                                                                                          | ✅     |
-| 69-T2a | Multi-agent bubbling — recursive spawn-lineage hop (`session → parentSessionId`), ancestor **interception** (`session.interceptEscalation` — answer / deny / forward), `lineage` provenance (origin task+session → each hop), and the `awaitingInput(Effect)` overload (real fiber interruptibility). Cross-process child bridge = T2b                                                                                        | ✅     |
+| 69-T2a | Multi-agent bubbling — recursive spawn-lineage hop (`session → parentSessionId`), ancestor **interception** (`session.interceptEscalation` — answer / deny / forward), `lineage` provenance (origin task+session → each hop), and the `awaitingInput(Effect)` overload (real fiber interruptibility)                                                                                                                          | ✅     |
+| 69-T2b | Cross-process child elicit bridge — a **forked** task's `ctx.elicit` marshals a serializable intent `{method, args}` over IPC; the parent (`ChildProcessTaskExecutor`) reconstructs the live-schema request via the injected sugar and feeds the SAME `escalate` chain, so interception + lineage apply for free. The live `StandardSchemaV1` never crosses (sugar methods cross; raw `form(liveSchema)` fails loud)         | ✅     |
 | D     | Effect-native internals — `Effect<T,E,never>` work overload + real `Fiber.interrupt` on cancel (#155); events fan out over Effect `Stream` (`LocalPubSub` + `Stream.takeUntil`). **Landed.** The protocol _surface_ stays Promise/`AsyncIterable` by design (Promise-at-the-edge, Effect-internal — as everywhere in v2); exposing `Effect`/`Stream` at the boundary is a whole-framework decision, not a tasks-local gap. | ✅     |
 
 ## Quick start
@@ -399,7 +400,7 @@ honor the `interactive ⊥ detached` guard.
 `awaitingInput` is generic but leaves you holding the promise. When the
 "external input" you want is a structured answer **from the connected
 client**, use `ctx.elicit` — the same [`Elicit`](../elicitation) sugar a
-tool handler sees (`text`, `confirm`, `select`, `number`, `form`, the
+tool handler sees (`text`, `confirm`, `select`, `number`, `boolean`, the
 `try*` variants), but sourced through **request escalation** instead of a
 live per-tick elicitation:
 
@@ -428,22 +429,45 @@ underlying `awaitingInput`) **throw** `DetachedTaskCannotElicitError`
 rather than hang. Detached means non-interactive, fire-and-forget,
 durable-result work.
 
-> **Tier.** T1 + **T2a** (this release). T1 wires the root-session case: a
-> task in a connected session escalates to that session, which resolves
-> terminally against the real client elicitation. **T2a** adds deeper
-> bubbling — a **sub-agent** session forwarding to its spawner up the
-> `parentSessionId` lineage, ancestor **interception**
+**A forked (child-process) task's `ctx.elicit` works too** (T2b). The
+child has a SEPARATE inbox, so it can't nest-`ask` the parent session
+directly — instead each sugar call marshals a serializable **intent**
+`{method, args}` to the parent over IPC; the parent
+(`ChildProcessTaskExecutor`) reconstructs the live-schema request via the
+same injected sugar and escalates it in-runtime through the **same
+`escalate` chain** an in-process task uses. So ancestor **interception +
+lineage apply to a forked task for free** — the bridge is pure IPC
+marshaling, not a second escalation path. The `working → input_required →
+working` flip crosses IPC via `awaitingInput`.
+
+The **live `StandardSchemaV1` never crosses the process boundary** — its
+`validate()` is a function, not structured-cloneable. The sugar methods
+(`text` / `confirm` / `select` / `number` / `boolean` / …) carry only
+serializable args and cross fine; a raw `form(liveSchema)` call **fails
+loud** with a clear boundary error (never a silent drop or hang). Use a
+sugar method, or run the task in-process, when you need a bespoke schema.
+
+> **Tier.** T1 + **T2a** + **T2b** (this release). T1 wires the
+> root-session case: a task in a connected session escalates to that
+> session, which resolves terminally against the real client elicitation.
+> **T2a** adds deeper bubbling — a **sub-agent** session forwarding to its
+> spawner up the `parentSessionId` lineage, ancestor **interception**
 > (`session.interceptEscalation` — a hop answering / denying / forwarding
 > instead of blindly relaying), and `lineage` provenance (origin task +
-> session → each forwarding hop). The remaining **cross-process**
-> (child-executor) elicit bridge is **ADR 69 T2b** (worker `ctx.elicit`
-> stub + `TODO(ADR-69 T2b)` trailheads in place). See
+> session → each forwarding hop). **T2b** completes the "any nested unit,
+> in-process OR forked, can reach the client" story: the cross-process
+> child bridge over IPC. See
 > [ADR 69](../../docs/proposals/v2/blueprint/69-request-escalation.md).
 
-Verified by `src/__tests__/escalation.spec.ts` (origin guards) and
-`@agentick/session-next`'s `src/__tests__/escalation.spec.ts` (the
-root-session round-trip + FSM flip, the T2a 2-session bubbling chain,
-interception short-circuit / deny / forward, and lineage assertion).
+Verified by `src/__tests__/escalation.spec.ts` (origin guards),
+`src/__tests__/child-elicit.spec.ts` (the **real-fork** child bridge:
+intent-only marshaling on the wire, the answer + FSM flip round-trip, the
+typed-decline round-trip via the error codec, and the live-schema boundary
+failing loud), and `@agentick/session-next`'s
+`src/__tests__/escalation.spec.ts` (the root-session round-trip + FSM
+flip, the T2a 2-session bubbling chain, interception short-circuit / deny
+/ forward + lineage, and the **T2b forked-child interception-composes**
+proof through a real 2-session chain).
 
 ### `TaskHandle<T>`
 
@@ -882,6 +906,19 @@ completed` status timeline (bus envelopes) with the paused-state
   `ctx.elicit` throws a clear "not configured" error, and its capability
   probes report `false` rather than throw. The root-session round-trip +
   FSM flip live in `@agentick/session-next`'s `escalation.spec.ts`.
+- `src/__tests__/child-elicit.spec.ts` — 5 tests that ACTUALLY fork a
+  `tsx`-loaded child, proving the ADR 69 T2b elicit bridge over real IPC:
+  at the raw wire, the child marshals ONLY `{method, args}` (never the
+  live schema) + resolves on `elicit-response` + flips `input_required →
+  working → completed`, and reconstructs a typed error from a serialized
+  `elicit-error` (`ElicitationDeclined` round-trips via the error codec);
+  integrated through a real `TasksHarness` + the real `buildElicitSugar` +
+  a test escalation terminal, the parent reconstructs the LIVE request +
+  the answer/FSM-flip round-trip, a decline round-trips as
+  `ElicitationDeclined`, and a raw `form(liveSchema)` fails LOUD at the
+  boundary (never escalates, never hangs). The forked-child
+  interception-composes proof lives in `@agentick/session-next`'s
+  `escalation.spec.ts`.
 - `src/__tests__/cluster-inbox.spec.ts` — 6 tests covering
   cluster-portable cancel / get / result via inbox addressing.
 - `src/__tests__/conformance.spec.ts` — drives

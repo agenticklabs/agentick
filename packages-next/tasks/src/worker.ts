@@ -38,13 +38,17 @@
  */
 
 import { Effect } from "effect";
-import { reasonOf } from "@agentick/utils-next";
-import type { TaskRecord, TaskTransition, TaskWorkContext } from "@agentick/spec-next";
-import { DetachedTaskCannotElicitError } from "@agentick/spec-next";
+import { reasonOf, ulid } from "@agentick/utils-next";
+import type { Elicit, TaskRecord, TaskTransition, TaskWorkContext } from "@agentick/spec-next";
+import { deserializeAgentickError } from "@agentick/spec-next";
 
 import { defaultTaskHandlerRegistry, type TaskHandlerRegistry } from "./handler-registry.js";
-import { assertInteractive, throwingTaskElicit } from "./task-elicit.js";
-import type { ParentToWorkerMessage, WorkerToParentMessage } from "./child-protocol.js";
+import { assertInteractive } from "./task-elicit.js";
+import type {
+  ParentToWorkerMessage,
+  WireElicitError,
+  WorkerToParentMessage,
+} from "./child-protocol.js";
 
 /**
  * Send a {@link WorkerToParentMessage} and resolve once the IPC channel
@@ -64,6 +68,105 @@ function send(message: WorkerToParentMessage): Promise<void> {
   });
 }
 
+/** A child-issued elicit awaiting the parent's IPC reply, keyed by requestId. */
+interface PendingElicit {
+  resolve(value: unknown): void;
+  reject(reason: unknown): void;
+}
+
+/**
+ * Reconstruct the error a child-side `ctx.elicit` should reject with from
+ * its {@link WireElicitError}. A tagged error round-trips through the
+ * codec (exact class + domain fields — `ElicitationDeclined.reason` etc.);
+ * an untagged throw becomes a bare `Error` carrying the message.
+ */
+function reviveElicitError(wire: WireElicitError): unknown {
+  return "serialized" in wire ? deserializeAgentickError(wire.serialized) : new Error(wire.message);
+}
+
+/**
+ * Build the child's `ctx.elicit` (ADR 69 T2b) — a generic marshaling
+ * {@link Elicit} Proxy. The child has a SEPARATE inbox, so it CANNOT
+ * nest-`ask` the parent session directly. Instead each sugar method call
+ * `(…args)` marshals a serializable INTENT `{method, args}` to the parent
+ * over IPC; the parent reconstructs the live-schema request via the
+ * injected sugar and escalates through the existing T1/T2a chain. The
+ * `input_required` flip flows over IPC via `awaitingInput` (origin-side
+ * flip; the `interactive ⊥ detached` guard applies through it).
+ *
+ * The live schema NEVER crosses: an arg that isn't structured-cloneable
+ * (a `StandardSchemaV1` carries a live `validate()` function — e.g. a raw
+ * `form(schema)` call) fails LOUD before any IPC, rather than hanging.
+ */
+function buildIpcElicit(deps: {
+  readonly record: TaskRecord;
+  readonly awaitingInput: TaskWorkContext["awaitingInput"];
+  readonly pending: Map<string, PendingElicit>;
+}): Elicit {
+  const { record, awaitingInput, pending } = deps;
+
+  const ipcElicit = (method: string, args: readonly unknown[]): Promise<unknown> => {
+    if (typeof process.send !== "function" || process.connected !== true) {
+      // A worker run standalone (or after the parent dropped the channel)
+      // has no one to escalate to — fail loud rather than hang forever.
+      return Promise.reject(
+        new Error(
+          `task ${record.taskId}: cannot escalate ctx.elicit.${method} — no live IPC channel to the parent`,
+        ),
+      );
+    }
+    const requestId = ulid();
+    return new Promise<unknown>((resolve, reject) => {
+      pending.set(requestId, { resolve, reject });
+      void send({ t: "elicit-request", requestId, method, args });
+    });
+  };
+
+  return new Proxy({} as Elicit, {
+    get(_target, prop): unknown {
+      // Capability probes: a fully-wired forked task CAN do form/url
+      // (the sugar constructs the request; the parent's client answers) —
+      // parity with the in-process `buildElicitSugar` (both report true).
+      if (prop === "canDoForm" || prop === "canDoUrl") return () => true;
+      if (typeof prop !== "string") return undefined;
+      const method = prop;
+      return (...args: unknown[]): Promise<unknown> => {
+        assertElicitArgsCloneable(record, method, args);
+        // The first sugar arg is always the human-readable message.
+        const message = typeof args[0] === "string" ? args[0] : undefined;
+        return awaitingInput(
+          ipcElicit(method, args),
+          message !== undefined ? { message } : undefined,
+        ) as Promise<unknown>;
+      };
+    },
+  });
+}
+
+/**
+ * The live-schema boundary guard (ADR 69 T2b). A `StandardSchemaV1`'s
+ * `validate()` is a function → not structured-cloneable → it cannot cross
+ * fork IPC. `structuredClone` (the same algorithm as the executor's
+ * `serialization: "advanced"`) is the honest pre-send probe; on failure we
+ * throw a clear boundary error rather than let the IPC send drop the frame
+ * and hang the caller.
+ */
+function assertElicitArgsCloneable(
+  record: TaskRecord,
+  method: string,
+  args: readonly unknown[],
+): void {
+  try {
+    structuredClone(args);
+  } catch {
+    throw new Error(
+      `task ${record.taskId}: a live-schema elicit ('${method}') can't cross the child-process boundary — ` +
+        `its arguments aren't structured-cloneable (a StandardSchemaV1 carries a live validate() function). ` +
+        `Use a sugar method (text/confirm/select/number/boolean) or run the task in-process.`,
+    );
+  }
+}
+
 /**
  * Bootstrap a by-ref task worker: register `process.on("message")`, and
  * on the first `start`, reconstruct a {@link TaskWorkContext}, resolve
@@ -78,6 +181,10 @@ export function runTaskWorker(registry: TaskHandlerRegistry = defaultTaskHandler
   // signal-honoring handlers clean up. Assigned when `start` arrives.
   let controller: AbortController | undefined;
   let started = false;
+  // In-flight child→parent elicits (ADR 69 T2b), correlated by requestId.
+  // The parent's `elicit-response` / `elicit-error` settle the pending
+  // Promise `buildIpcElicit` registered here.
+  const pendingElicits = new Map<string, PendingElicit>();
 
   process.on("message", (message: ParentToWorkerMessage) => {
     if (message == null || typeof message !== "object") return;
@@ -85,12 +192,33 @@ export function runTaskWorker(registry: TaskHandlerRegistry = defaultTaskHandler
       controller?.abort(message.reason ?? "cancelled");
       return;
     }
+    if (message.t === "elicit-response") {
+      const entry = pendingElicits.get(message.requestId);
+      if (entry !== undefined) {
+        pendingElicits.delete(message.requestId);
+        entry.resolve(message.result);
+      }
+      return;
+    }
+    if (message.t === "elicit-error") {
+      const entry = pendingElicits.get(message.requestId);
+      if (entry !== undefined) {
+        pendingElicits.delete(message.requestId);
+        entry.reject(reviveElicitError(message.error));
+      }
+      return;
+    }
     if (message.t === "start") {
       if (started) return; // one fork = one task
       started = true;
-      void runOnce(registry, message.record, (c) => {
-        controller = c;
-      });
+      void runOnce(
+        registry,
+        message.record,
+        (c) => {
+          controller = c;
+        },
+        pendingElicits,
+      );
     }
   });
 
@@ -118,6 +246,7 @@ async function runOnce(
   registry: TaskHandlerRegistry,
   record: TaskRecord,
   bindController: (controller: AbortController) => void,
+  pendingElicits: Map<string, PendingElicit>,
 ): Promise<void> {
   const ref = record.handlerRef;
   const work = ref !== undefined ? registry.get(ref) : undefined;
@@ -139,6 +268,37 @@ async function runOnce(
   const controller = new AbortController();
   bindController(controller);
 
+  // Same `working → input_required → working` flip as the in-process
+  // executor, sent over IPC → parent → `report` → store + bus. The
+  // parent's `applyTransition` ignores post-terminal reports, so a cancel
+  // while paused wins and the `finally`'s `working` report is a no-op
+  // there. A detached task cannot pause on client input
+  // (`interactive ⊥ detached`, ADR 69). Hoisted out of the ctx literal so
+  // `ctx.elicit` (ADR 69 T2b) composes its IPC bridge over it.
+  const awaitingInput = ((
+    input: Promise<unknown> | Effect.Effect<unknown, unknown, never>,
+    opts?: { readonly message?: string },
+  ) => {
+    assertInteractive(record);
+    void send({
+      t: "transition",
+      transition: {
+        status: "input_required",
+        ...(opts?.message !== undefined ? { statusMessage: opts.message } : {}),
+      },
+    });
+    const restore = () => void send({ t: "transition", transition: { status: "working" } });
+    // Effect overload — a real interruptible child fiber bound to the
+    // worker's controller signal (aborted on cancel over IPC), mirroring
+    // the in-process executor (ADR 69 T2a).
+    if (Effect.isEffect(input)) {
+      return Effect.runPromise(input as Effect.Effect<unknown, unknown, never>, {
+        signal: controller.signal,
+      }).finally(restore);
+    }
+    return Promise.resolve(input).finally(restore);
+  }) as TaskWorkContext["awaitingInput"];
+
   const ctx: TaskWorkContext = {
     signal: controller.signal,
     // Progress / status-message updates funnel into the SAME transition
@@ -149,51 +309,16 @@ async function runOnce(
     setStatusMessage: (message) => {
       void send({ t: "transition", transition: { statusMessage: message } });
     },
-    // Same `working → input_required → working` flip as the in-process
-    // executor, sent over IPC → parent → `report` → store + bus. The
-    // parent's `applyTransition` ignores post-terminal reports, so a
-    // cancel while paused wins and the `finally`'s `working` report is a
-    // no-op there. A detached task cannot pause on client input
-    // (`interactive ⊥ detached`, ADR 69).
-    awaitingInput: ((
-      input: Promise<unknown> | Effect.Effect<unknown, unknown, never>,
-      opts?: { readonly message?: string },
-    ) => {
-      assertInteractive(record);
-      void send({
-        t: "transition",
-        transition: {
-          status: "input_required",
-          ...(opts?.message !== undefined ? { statusMessage: opts.message } : {}),
-        },
-      });
-      const restore = () => void send({ t: "transition", transition: { status: "working" } });
-      // Effect overload — a real interruptible child fiber bound to the
-      // worker's controller signal (aborted on cancel over IPC), mirroring
-      // the in-process executor (ADR 69 T2a).
-      if (Effect.isEffect(input)) {
-        return Effect.runPromise(input as Effect.Effect<unknown, unknown, never>, {
-          signal: controller.signal,
-        }).finally(restore);
-      }
-      return Promise.resolve(input).finally(restore);
-    }) as TaskWorkContext["awaitingInput"],
-    // TODO(ADR-69 T2b): cross-process elicit escalation. A forked child
-    // has a SEPARATE inbox, so `ctx.elicit` can't nest-`ask` the parent
-    // session directly — it needs an IPC bridge from the child's
-    // escalation origin to the parent's inbox (the parent then continues
-    // the chain — including the T2a interception + lineage it already
-    // supports in-process). Until that bridge exists, `ctx.elicit` fails
-    // loud (or throws the detached error) rather than hang. The surface +
-    // the `interactive ⊥ detached` guard exist here for symmetry with the
-    // in-process executor per ADR 69 T1.
-    elicit: throwingTaskElicit(() =>
-      record.detached === true
-        ? new DetachedTaskCannotElicitError({ taskId: record.taskId })
-        : new Error(
-            `task ${record.taskId}: cross-process (child-process executor) elicit escalation is not yet wired — ADR 69 T2b`,
-          ),
-    ),
+    awaitingInput,
+    // Cross-process elicit escalation (ADR 69 T2b). A forked child has a
+    // SEPARATE inbox, so `ctx.elicit` can't nest-`ask` the parent session
+    // directly — this Proxy marshals each sugar call over IPC; the parent
+    // (ChildProcessTaskExecutor) reconstructs the live-schema request and
+    // escalates through the SAME T1/T2a chain (interception + lineage
+    // apply for free). The `input_required` flip flows over IPC via
+    // `awaitingInput`, which also enforces the `interactive ⊥ detached`
+    // guard — a detached task's `ctx.elicit` throws before any IPC.
+    elicit: buildIpcElicit({ record, awaitingInput, pending: pendingElicits }),
   };
 
   let terminal: TaskTransition;

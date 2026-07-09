@@ -413,10 +413,12 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
    * human-in-the-loop wait; the task's `signal` (cancel / ttl / close)
    * interrupts the ask fiber early.
    *
-   * TODO(ADR-69 T2b): a shared/app-scoped harness stamps the originating
-   * session per-submit rather than reading the single harness scope;
-   * escalate should route from the record's owning session, not
-   * `this.scope`.
+   * TODO(app-scoped-tasks): a shared/app-scoped harness (one TasksHarness
+   * serving many sessions) must stamp the originating session per-submit
+   * rather than reading the single harness scope — escalate should route
+   * from the record's owning session, not `this.scope`. Orthogonal to the
+   * cross-process bridge (ADR 69 T2b, landed): this is about multi-session
+   * fan-in on one harness, whichever executor runs the task.
    */
   private makeEscalate(signal: AbortSignal, taskId: string): ElicitFn {
     const inbox = this.inbox;

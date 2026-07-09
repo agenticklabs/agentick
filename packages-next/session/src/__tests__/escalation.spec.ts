@@ -27,14 +27,20 @@
  * task's escalation over IPC → parent inbox → the session escalation entry).
  */
 
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { Chunk, Effect, Stream } from "effect";
 
 import { FakeLanguageModelExecutor } from "@agentick/executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
-import { ElicitationHarness } from "@agentick/elicitation-next";
+import { ElicitationHarness, buildElicitSugar } from "@agentick/elicitation-next";
 import { ELICITATION_CHANNEL_FQN } from "@agentick/elicitation-next";
-import { TASK_STATUS_CHANNEL_FQN } from "@agentick/tasks-next";
+import {
+  ChildProcessTaskExecutor,
+  TASK_STATUS_CHANNEL_FQN,
+  TasksHarness,
+} from "@agentick/tasks-next";
+import type { TasksHarnessProtocol } from "@agentick/spec-next";
 import { InMemoryHandlerResolver, ToolExecutorHarness } from "@agentick/tool-executor-next";
 import { LoopExecutorHarness } from "@agentick/loop-executor-next";
 import { ReconcilerHarness } from "@agentick/reconciler-react-next";
@@ -223,7 +229,15 @@ describe("SessionHarness — task elicit escalation (ADR 69 T1)", () => {
 async function mkSessionOn(
   shared: { journal: MemoryJournal; bus: LocalEventBus; inbox: LocalInbox },
   prefix: string,
-  opts: { parentSessionId?: string } = {},
+  opts: {
+    parentSessionId?: string;
+    /**
+     * Optional pre-built tasks harness keyed off the resolved sessionId —
+     * used by the T2b forked-child test to inject a `ChildProcessTaskExecutor`
+     * (the default `buildSessionBridges` wiring is in-process only).
+     */
+    tasks?: (sessionId: string) => TasksHarnessProtocol;
+  } = {},
 ) {
   const { journal, bus, inbox } = shared;
   const reconciler = new ReconcilerHarness(`${prefix}-r`, journal, bus, inbox);
@@ -237,15 +251,19 @@ async function mkSessionOn(
   const executor = replyExec();
   await Promise.all([reconciler.ready, loop.ready, tools.ready, elicitation.ready, executor.ready]);
 
+  const sessionId = `${prefix}-${Math.random().toString(36).slice(2)}`;
+  const tasks = opts.tasks?.(sessionId);
+  if (tasks !== undefined) await (tasks as { ready: Promise<void> }).ready;
+
   const session = new SessionHarness(journal, bus, inbox, {
-    sessionId: `${prefix}-${Math.random().toString(36).slice(2)}`,
+    sessionId,
     agent: null,
     reconciler,
     loop,
     executor,
     toolExecutor: tools,
     target,
-    ...omitUndefined({ parentSessionId: opts.parentSessionId }),
+    ...omitUndefined({ parentSessionId: opts.parentSessionId, tasks }),
   });
   await session.ready;
   await session.mountReady;
@@ -425,5 +443,102 @@ describe("SessionHarness — escalation bubbling + interception + lineage (ADR 6
     // Forward hop — the child session appended itself before forwarding.
     expect(captured![1]).toMatchObject({ scopeId: `session:${chain.child.id}` });
     expect(captured![1]!.taskId).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T2b — cross-process child elicit bridge composes the SAME chain
+// ---------------------------------------------------------------------------
+
+/**
+ * A FORKED child task's `ctx.elicit` escalates over IPC (ADR 69 T2b): the
+ * child marshals a serializable intent, the parent-side
+ * `ChildProcessTaskExecutor` reconstructs the live-schema request via the
+ * injected sugar and feeds it into the SAME `hooks.escalate` an in-process
+ * task uses — so ancestor interception + lineage apply to a forked task for
+ * free. This proves it end-to-end with a REAL fork + a real 2-session
+ * chain: a parent interceptor short-circuits the child's elicit and the
+ * parent's terminal client elicit is NEVER reached.
+ *
+ * The tasks-owned wire mechanics (intent-only marshaling, typed-error
+ * round-trip, the live-schema boundary) are proven with real forks in
+ * `@agentick/tasks-next`'s `child-elicit.spec.ts`.
+ */
+const CHILD_WORKER_MODULE = fileURLToPath(
+  new URL("../../../tasks/src/__tests__/fixtures/task-worker.ts", import.meta.url),
+);
+const CHILD_FORK_OPTIONS = { execArgv: ["--import", "tsx"] };
+
+describe("SessionHarness — forked-child elicit bridge composes the chain (ADR 69 T2b)", () => {
+  let close: (() => Promise<void>) | undefined;
+  afterEach(async () => {
+    if (close) await close();
+    close = undefined;
+  });
+
+  it("a forked child task's ctx.elicit escalates over IPC; a parent interceptor short-circuits → the parent's real client elicit is NEVER called", async () => {
+    const shared = {
+      journal: new MemoryJournal(),
+      bus: new LocalEventBus(),
+      inbox: new LocalInbox(),
+    };
+    const { session: parent } = await mkSessionOn(shared, "parent");
+    // The child session's TasksHarness runs a real child-process executor
+    // (the default session bridges are in-process only) + the real sugar.
+    const { session: child } = await mkSessionOn(shared, "child", {
+      parentSessionId: parent.id,
+      tasks: (sessionId) =>
+        new TasksHarness(`${sessionId}:tasks`, shared.journal, shared.bus, shared.inbox, {
+          parentScope: { sessionId },
+          buildElicit: buildElicitSugar,
+          executors: [
+            new ChildProcessTaskExecutor({
+              workerModule: CHILD_WORKER_MODULE,
+              forkOptions: CHILD_FORK_OPTIONS,
+              killGracePeriodMs: 1_000,
+            }),
+          ],
+        }),
+    });
+    close = async () => {
+      await child.close();
+      await parent.close();
+    };
+
+    // Spy the parent's terminal client elicit — it must not be reached.
+    let realElicitCalls = 0;
+    const elicitTarget = parent.elicitation;
+    const orig = elicitTarget.elicit.bind(elicitTarget);
+    (elicitTarget as { elicit: typeof elicitTarget.elicit }).elicit = ((
+      req: Parameters<typeof orig>[0],
+    ) => {
+      realElicitCalls += 1;
+      return orig(req);
+    }) as typeof elicitTarget.elicit;
+
+    parent.interceptEscalation(async (payload) => {
+      if (payload.class === "elicit") {
+        return {
+          forward: false,
+          response: { outcome: "accepted", value: true } as ElicitationResult,
+        };
+      }
+      return { forward: true };
+    });
+
+    const handle = (
+      child.tasks as {
+        submit: (opts: { executorKind: string; handlerRef: string }) => {
+          result: Promise<readonly { type: string; text: string }[]>;
+        };
+      }
+    ).submit({ executorKind: "child-process", handlerRef: "asks-approval" });
+
+    const result = await handle.result;
+    expect(result).toEqual([{ type: "text", text: "approved" }]);
+    // The ancestor interceptor answered the FORKED child's elicit; the
+    // parent's real client elicit was never consulted — interception +
+    // lineage compose for a cross-process task exactly as in-process.
+    expect(realElicitCalls).toBe(0);
   });
 });

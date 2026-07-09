@@ -81,4 +81,42 @@ registerTaskHandler<unknown, readonly ContentBlock[]>("hang", async () => {
   return [];
 });
 
+// ─── ADR 69 T2b — cross-process ctx.elicit (marshaled over IPC) ───
+
+// `asks-approval` — a forked task that asks the client to confirm, then
+// returns based on the answer. Proves the elicit INTENT crosses IPC, the
+// parent reconstructs + escalates, and the boolean answer round-trips (plus
+// the working → input_required → working FSM flip over IPC).
+registerTaskHandler<unknown, readonly ContentBlock[]>("asks-approval", async (ctx) => {
+  const approved = await ctx.elicit.confirm("Approve?");
+  return [{ type: "text", text: approved ? "approved" : "rejected" }];
+});
+
+// `asks-text` — like `asks-approval` but a free-text answer; used for the
+// typed-decline round-trip (the terminal declines → ElicitationDeclined
+// rethrows child-side → the task fails with that reason).
+registerTaskHandler<unknown, readonly ContentBlock[]>("asks-text", async (ctx) => {
+  const answer = await ctx.elicit.text("Your name?");
+  return [{ type: "text", text: answer }];
+});
+
+// `elicit-live-schema` — deliberately hits the raw `form(liveSchema)` path
+// (not on the public `Elicit` surface). A `StandardSchemaV1` carries a live
+// `validate()` function → not structured-cloneable → the child MUST fail
+// loud at the boundary (never hang, never silently drop the frame).
+registerTaskHandler<unknown, readonly ContentBlock[]>("elicit-live-schema", async (ctx) => {
+  const liveSchema = {
+    "~standard": {
+      version: 1,
+      vendor: "test",
+      validate: (v: unknown) => ({ value: v }),
+    },
+  };
+  const rawForm = ctx.elicit as unknown as {
+    form: (schema: unknown) => Promise<unknown>;
+  };
+  await rawForm.form(liveSchema);
+  return [{ type: "text", text: "should-not-reach" }];
+});
+
 runTaskWorker();

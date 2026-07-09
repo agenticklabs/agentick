@@ -86,10 +86,11 @@ export function buildTaskElicit(deps: {
 
 /**
  * An {@link Elicit} whose every method throws `makeError()`. Used where a
- * task cannot elicit — no escalation configured (in-process), or the
- * cross-process bridge is not yet built (worker, ADR 69 T2b). `canDoForm`
- * / `canDoUrl` report `false` (honest capability probe) rather than
- * throw; everything else fails loud.
+ * task cannot elicit — a bare in-process harness with no escalation
+ * configured (`buildTaskElicit` with absent `hooks`). The cross-process
+ * worker no longer uses this: its `ctx.elicit` is a live IPC bridge (ADR
+ * 69 T2b). `canDoForm` / `canDoUrl` report `false` (honest capability
+ * probe) rather than throw; everything else fails loud.
  */
 export function throwingTaskElicit(makeError: () => Error): Elicit {
   return new Proxy({} as Elicit, {

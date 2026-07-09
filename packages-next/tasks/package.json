@@ -53,6 +53,7 @@
     "effect": "^3.21.2"
   },
   "devDependencies": {
+    "@agentick/elicitation-next": "workspace:*",
     "@agentick/utils-next": "workspace:*"
   }
 }
