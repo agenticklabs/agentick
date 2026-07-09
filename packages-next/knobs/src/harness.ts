@@ -65,6 +65,13 @@ import type {
 } from "@agentick/spec-next";
 import { HandlerError } from "@agentick/spec-next";
 import { createKeyedNotifier, type KeyedNotifier } from "@agentick/pubsub-next";
+import { ulid, type JsonPatchOp } from "@agentick/utils-next";
+import {
+  KNOBS_STATE_CHANNEL_FQN,
+  knobPointer,
+  type KnobsStateFrame,
+  type KnobsStateSnapshotFrame,
+} from "./channel.js";
 
 // ============================================================================
 // Harness
@@ -93,6 +100,13 @@ export class KnobsHarness extends BaseHarness<"knobs"> implements KnobsHarnessPr
    * mutations (and a fresh reference after one).
    */
   private listCache: readonly KnobDescriptor[] | null = null;
+
+  /**
+   * Monotonic frame counter for the `knobs-state` channel (ADR 73). Every
+   * emitted snapshot/delta frame carries the incremented value so a
+   * subscriber can detect a dropped frame and re-seed from a snapshot.
+   */
+  private stateVersion = 0;
 
   get id(): string {
     return this.scopeId;
@@ -201,6 +215,49 @@ export class KnobsHarness extends BaseHarness<"knobs"> implements KnobsHarnessPr
     for (const [k, v] of Object.entries(values)) this.values.set(k, v);
     this.listCache = null;
     for (const id of changed) this.fireListeners(id);
+    // Wholesale replacement — a fresh full-store frame, not N per-key deltas.
+    this.publishStateFrame({
+      kind: "snapshot",
+      version: ++this.stateVersion,
+      values: { ...values },
+    });
+  }
+
+  // ─────────── State channel (ADR 73) ───────────
+
+  /**
+   * Current full state as a snapshot frame — the seed a late subscriber
+   * applies before consuming live deltas. The channel is append-only and
+   * bus-only (unjournaled); a subscriber that joins mid-session, or detects
+   * a `version` gap, re-seeds from this. Reads the current version (does not
+   * advance it — this is an observation, not a new frame).
+   */
+  stateSnapshotFrame(): KnobsStateSnapshotFrame {
+    return { kind: "snapshot", version: this.stateVersion, values: this.exportSnapshot() };
+  }
+
+  private emitStateDelta(ops: readonly JsonPatchOp[]): void {
+    this.publishStateFrame({ kind: "delta", version: ++this.stateVersion, ops });
+  }
+
+  /**
+   * Fan a state frame onto the substrate channel. Fire-and-forget, bus-only
+   * (`phase: "delta"` is unjournaled per the default policy) — mirrors the
+   * TasksHarness channel fan. Knob state is low-frequency, so we publish
+   * unconditionally rather than probe for subscribers.
+   */
+  private publishStateFrame(frame: KnobsStateFrame): void {
+    void Effect.runPromise(
+      this.bus.append({
+        id: ulid(),
+        surface: "session",
+        name: KNOBS_STATE_CHANNEL_FQN,
+        phase: "delta",
+        timestamp: Date.now(),
+        scope: { sessionId: this.scopeId },
+        payload: frame,
+      } as Parameters<typeof this.bus.append>[0]),
+    ).catch(() => undefined);
   }
 
   // ─────────── Inbox routing ───────────
@@ -219,18 +276,30 @@ export class KnobsHarness extends BaseHarness<"knobs"> implements KnobsHarnessPr
   // ─────────── Internals ───────────
 
   private applySet(input: KnobsSetInput): void {
+    const existed = this.values.has(input.id);
     this.values.set(input.id, input.value);
     this.listCache = null;
     this.fireListeners(input.id);
+    // Per-id change → a single JSON-Patch op (no document diff needed —
+    // the change granularity already IS per-key). `add` for a new id,
+    // `replace` for an existing one.
+    this.emitStateDelta([
+      { op: existed ? "replace" : "add", path: knobPointer(input.id), value: input.value },
+    ]);
   }
 
   private applyRegister(input: KnobsRegisterInput): void {
     this.descriptors.set(input.id, input.descriptor);
-    if (!this.values.has(input.id) && input.descriptor.defaultValue !== undefined) {
-      this.values.set(input.id, input.descriptor.defaultValue);
-    }
+    const defaultValue = input.descriptor.defaultValue;
+    const applied = !this.values.has(input.id) && defaultValue !== undefined;
+    if (applied) this.values.set(input.id, defaultValue);
     this.listCache = null;
     this.fireListeners(input.id);
+    // A registration emits a delta only when it seeds a value; a
+    // descriptor-only registration changes no cell, so no state frame.
+    if (applied) {
+      this.emitStateDelta([{ op: "add", path: knobPointer(input.id), value: defaultValue }]);
+    }
   }
 
   /**

@@ -739,6 +739,9 @@ importers:
       '@agentick/tool-next':
         specifier: workspace:*
         version: link:../tool
+      '@agentick/utils-next':
+        specifier: workspace:*
+        version: link:../utils
       effect:
         specifier: ^3.21.2
         version: 3.21.2

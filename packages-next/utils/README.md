@@ -111,6 +111,9 @@ Pattern B).
 | `reasonOf(cause)`         | function  | unknown value → single-line reason string                 |
 | `reasonOfCause<E>(cause)` | function  | Effect.Cause → single-line reason string                  |
 | `unwrapExit<A, E>(exit)`  | function  | Exit → value or throw (preserves typed failure identity)  |
+| `applyJsonPatch<T>`       | function  | apply RFC 6902 ops (add/replace/remove/test), copy-on-write |
+| `JsonPatchOp`             | type      | one RFC 6902 operation                                     |
+| `JsonPatchError`          | class     | thrown when a patch cannot be applied                     |
 
 **`/loaders` subpath:** see [src/loaders/README.md](./src/loaders/README.md) for the loader primitive surface.
 
@@ -178,6 +181,10 @@ site.
 - `reasonOf` / `reasonOfCause` / `unwrapExit` — table-driven coverage of
   string / Error / `{_tag}` / JSON / die / interrupted / composite cause
   shapes, and the typed-failure-identity preservation — `src/__tests__/cause.spec.ts`
+- `applyJsonPatch` — RFC 6902 add/replace/remove/test on objects + arrays,
+  `~0`/`~1` pointer escaping, whole-document target, op sequencing, `test`
+  mismatch throws, and copy-on-write immutability + structural sharing of
+  untouched subtrees — `src/__tests__/json-patch.spec.ts` (18 tests)
 
 The in-process observer primitives (`Notifier` / `KeyedNotifier` /
 `LocalPubSub`) moved to

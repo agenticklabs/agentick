@@ -472,6 +472,12 @@ export class GatesController {
   private transition(entry: GateEntry, next: GateValue): void {
     if (entry.value === next) return;
     entry.value = next;
+    // TODO(state-deltas): a gate's boolean value ALREADY flows to clients as
+    // a knob JSON-Patch delta via this write-through (KnobsHarness emits on
+    // the knobs-state channel, ADR 73). What isn't projected is gate-specific
+    // info (open/closed reason, hit counts, predicate metadata). When that's
+    // wanted client-side, add a `gates-state` snapshot+delta channel here at
+    // the notifier, mirroring packages-next/knobs/src/channel.ts.
     void this.deps.knobs.set({ id: entry.name, value: next });
     entry.notifier.notify();
   }

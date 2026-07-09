@@ -16,5 +16,14 @@ import "./augment.js";
 
 export { KnobsHarness } from "./harness.js";
 export type { KnobsHandle } from "./handle.js";
+export {
+  KNOBS_STATE_CHANNEL,
+  KNOBS_STATE_CHANNEL_FQN,
+  knobPointer,
+  type KnobsStateChannelName,
+  type KnobsStateFrame,
+  type KnobsStateSnapshotFrame,
+  type KnobsStateDeltaFrame,
+} from "./channel.js";
 export { withKnobs, type WithKnobsOptions } from "./extension.js";
 export { runKnobsHarnessConformance } from "./conformance.js";

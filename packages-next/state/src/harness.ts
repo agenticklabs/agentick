@@ -135,4 +135,12 @@ export class StateHarness extends BaseHarness<"state"> implements StateHarnessPr
   private fireListeners(key: string): void {
     this.notifier.notify(key);
   }
+
+  // TODO(state-deltas): project a `state` snapshot+delta channel like
+  // KnobsHarness does (packages-next/knobs/src/channel.ts, ADR 73). The
+  // per-key notification here IS the delta source: `applySet` → an
+  // `add`/`replace` op, `applyDelete` → a `remove` op, `importSnapshot` →
+  // a full snapshot frame; consumers apply with `applyJsonPatch`. Same
+  // shape as knobs — a shared "SnapshotCapable reactive harness emits
+  // snapshot+deltas from its change notification" mixin would DRY the two.
 }

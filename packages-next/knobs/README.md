@@ -156,6 +156,10 @@ sets every settable knob in that group atomically after a shared type-check.
     `dispatch(input)` (the `set_knob` pipeline → `ContentBlock[]`).
   - Snapshot: `exportSnapshot()` / `importSnapshot(values)` round-trip the
     value cells (descriptors are re-declared on remount, not snapshotted).
+  - State channel: `stateSnapshotFrame()` returns the current store as a
+    `snapshot` frame (late-join re-seed). Every `set` / defaulted `register`
+    fans a `delta` frame, and `importSnapshot` a fresh `snapshot` frame, onto
+    `KNOBS_STATE_CHANNEL_FQN` — see [State-sync channel](#state-sync-channel-adr-73).
   - **Layer-aware resolution (ADR 34 cascade).** The optional `parentLayer`
     is a read-only fallback `KnobsHarnessProtocol`: reads (`get` / `has` /
     `list`) fall through to it when self has no entry, **self shadows parent
@@ -216,6 +220,41 @@ block.
 model calls `set_knob({ group: "output", value: true })` to flip them all at
 once. Group writes skip read-only members and type-check the group first.
 
+## State-sync channel (ADR 73)
+
+Knob state reaches observers two ways. The coarse way is the harness
+snapshot (`exportSnapshot()` → the reconciler's `SnapshotCapable` projection):
+the **whole store, re-sent**. The fine way is the **`knobs-state` channel** — an
+initial `snapshot` frame followed by RFC 6902 **JSON-Patch `delta` frames**, one
+op per knob that changed. A subscriber seeds from the snapshot and applies each
+delta with `applyJsonPatch` (`@agentick/utils-next`), re-rendering only the
+branch that moved.
+
+This is the native form of AG-UI's `StateSnapshot` / `StateDelta` pair: we adopt
+the snapshot+delta model on our own bus, and the AG-UI projection becomes a thin
+codec over this channel instead of a bespoke document diff. Crucially, **delta
+generation needs no diffing** — the harness already notifies per-id, so a changed
+knob _is_ a single `add`/`replace` op. Only the far side applies the patch.
+
+```ts
+import { KNOBS_STATE_CHANNEL_FQN, type KnobsStateFrame } from "@agentick/knobs-next";
+import { applyJsonPatch } from "@agentick/utils-next";
+
+// Subscribe to `session:channel:knobs-state`, seed once, then follow deltas:
+let store = harness.stateSnapshotFrame().values; //  late-join re-seed
+for await (const frame of framesFromBus /* KnobsStateFrame */) {
+  store = frame.kind === "snapshot" ? frame.values : applyJsonPatch(store, frame.ops);
+}
+```
+
+Frames carry a monotonic `version`; a gap signals a dropped delta → re-seed via
+`stateSnapshotFrame()`. Emission is fire-and-forget and **bus-only** (unjournaled).
+The **client-side apply** (a generic per-channel state model) is intentionally
+NOT built here — it is cross-cutting with `task-status` and belongs in one
+generic channel-consumer, not a knobs-bespoke one. Gates already project their
+boolean value through this channel (they write-through to knobs); `state` follows
+the same shape (see the `TODO(state-deltas)` trailheads).
+
 ## Status & roadmap
 
 Extracted per ADR 26 Step 2, modularized per ADR 27. Green.
@@ -242,6 +281,12 @@ Extracted per ADR 26 Step 2, modularized per ADR 27. Green.
   shadows parent by id, `set` / `register` write self only, `list` union with
   self-shadowing, and **`exportSnapshot` captures the self layer only** (never
   inherited parent state).
+- `src/__tests__/state-channel.spec.ts` (7 tests) — the `knobs-state` channel:
+  `add` vs `replace` deltas, monotonic gap-free `version`, defaulted-`register`
+  emits / descriptor-only does not, `importSnapshot` → a `snapshot` frame,
+  `stateSnapshotFrame()` reads without advancing the version, RFC 6901 id
+  escaping round-trips, and the **money test** — a snapshot seed plus applied
+  deltas reconstruct `exportSnapshot()`.
 - `src/__tests__/integration-with-reconciler.spec.tsx` (10 tests) — `useKnob`
   descriptor registration, momentary reset at execution end, `<Knobs />`
   default rendering + render prop, and reactivity (external `set` re-renders
