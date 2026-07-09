@@ -55,18 +55,18 @@ not published independently.
 
 🚧 In active development as part of v2 (`feat/v2`).
 
-| Phase | What                                                                                                                                                               | Status |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------ |
-| A     | Substrate primitive — harness, registry, progress, cancel, conformance                                                                                             | ✅     |
-| A.1   | ToolExecutor integration — `ctx.tasks` on every handler, TaskHandle-return detection, Pattern A vs B branching on `taskSupport` annotation (#156)                  | ✅     |
-| A.2   | Model-facing `session_tasks_*` tools — auto-registered `session_tasks_list / get / cancel / await` so the model can manage Pattern B tasks (#157)                  | ✅     |
-| B     | MCP wire codec — `tools/call` task opt-in, `notifications/tasks/status` translation, inbound `tasks/cancel`                                                        | ✅     |
-| 68-A  | Record-as-source-of-truth — `TaskStore` port + `InMemoryTaskStore`, `TaskExecutor` seam + `InProcessTaskExecutor`, `detached` lifetime, `interrupted` on hydration | ✅     |
-| 68-B  | Child-process executor over IPC (isolation / detached) + executor registry keyed by `.kind`, per-submit selection — conforms to the `TaskExecutor` seam            | ✅     |
-| 68-pg | `@agentick/tasks-postgres-next` durable store — durable records + `interrupted`-on-restart + terminal adoption across app-process restart (cross-restart child reattach-by-pid still deferred) | ✅     |
-| 68-ir | `ctx.awaitingInput` — `working → input_required → working` status wrapper (the origin seam for elicitation escalation); worker self-terminates on parent IPC `disconnect` (#120-followup) | ✅     |
-| 69-T1 | Request escalation — task `ctx.elicit` escalates to the connected client via nested `inbox.ask`; `interactive ⊥ detached` guard. Root-session case; recursive spawn-lineage hop + interception + cross-process child bridge = T2 (ADR 69) | ✅     |
-| D     | Effect-native internals — `Effect<T,E,never>` work overload + real `Fiber.interrupt` on cancel (#155); events fan out over Effect `Stream` (`LocalPubSub` + `Stream.takeUntil`). **Landed.** The protocol *surface* stays Promise/`AsyncIterable` by design (Promise-at-the-edge, Effect-internal — as everywhere in v2); exposing `Effect`/`Stream` at the boundary is a whole-framework decision, not a tasks-local gap. | ✅     |
+| Phase | What                                                                                                                                                                                                                                                                                                                                                                                                                       | Status |
+| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| A     | Substrate primitive — harness, registry, progress, cancel, conformance                                                                                                                                                                                                                                                                                                                                                     | ✅     |
+| A.1   | ToolExecutor integration — `ctx.tasks` on every handler, TaskHandle-return detection, Pattern A vs B branching on `taskSupport` annotation (#156)                                                                                                                                                                                                                                                                          | ✅     |
+| A.2   | Model-facing `session_tasks_*` tools — auto-registered `session_tasks_list / get / cancel / await` so the model can manage Pattern B tasks (#157)                                                                                                                                                                                                                                                                          | ✅     |
+| B     | MCP wire codec — `tools/call` task opt-in, `notifications/tasks/status` translation, inbound `tasks/cancel`                                                                                                                                                                                                                                                                                                                | ✅     |
+| 68-A  | Record-as-source-of-truth — `TaskStore` port + `InMemoryTaskStore`, `TaskExecutor` seam + `InProcessTaskExecutor`, `detached` lifetime, `interrupted` on hydration                                                                                                                                                                                                                                                         | ✅     |
+| 68-B  | Child-process executor over IPC (isolation / detached) + executor registry keyed by `.kind`, per-submit selection — conforms to the `TaskExecutor` seam                                                                                                                                                                                                                                                                    | ✅     |
+| 68-pg | `@agentick/tasks-postgres-next` durable store — durable records + `interrupted`-on-restart + terminal adoption across app-process restart (cross-restart child reattach-by-pid still deferred)                                                                                                                                                                                                                             | ✅     |
+| 68-ir | `ctx.awaitingInput` — `working → input_required → working` status wrapper (the origin seam for elicitation escalation); worker self-terminates on parent IPC `disconnect` (#120-followup)                                                                                                                                                                                                                                  | ✅     |
+| 69-T1 | Request escalation — task `ctx.elicit` escalates to the connected client via nested `inbox.ask`; `interactive ⊥ detached` guard. Root-session case; recursive spawn-lineage hop + interception + cross-process child bridge = T2 (ADR 69)                                                                                                                                                                                  | ✅     |
+| D     | Effect-native internals — `Effect<T,E,never>` work overload + real `Fiber.interrupt` on cancel (#155); events fan out over Effect `Stream` (`LocalPubSub` + `Stream.takeUntil`). **Landed.** The protocol _surface_ stays Promise/`AsyncIterable` by design (Promise-at-the-edge, Effect-internal — as everywhere in v2); exposing `Effect`/`Stream` at the boundary is a whole-framework decision, not a tasks-local gap. | ✅     |
 
 ## Quick start
 
@@ -311,6 +311,7 @@ submit<T = readonly ContentBlock[]>(
     detached?: boolean; // ADR 68 — survive spawning session close
     input?: unknown; // audit / replay; payload a by-ref executor resolves work with
     handlerRef?: string; // by-ref work for an out-of-process executor
+    executorKind?: string; // ADR 68 Build B — which registered executor runs this (default "in-process")
   },
 ): TaskHandle<T>
 ```
@@ -463,7 +464,7 @@ app/gateway-scoped:
   the shared app-scoped store, so the session can stop and the task
   continues — as long as the app process is alive (with the in-memory
   store). Survival across app-process **restart** needs a durable store
-  (`@agentick/tasks-postgres-next`, same port, not built here).
+  (`@agentick/tasks-postgres-next`, a shipped sibling on the same port).
 - **Orphan accounting (`interrupted`)**: on construction the harness
   reads its scope-filtered store records; any still-`working` record
   with no reattachable executor is marked `interrupted` (a lost
@@ -514,7 +515,7 @@ new TasksHarness(id, journal, bus, inbox, { store, executors: [childExecutor] })
 ```
 
 `TaskStore` — `put` / `get` / `list(query?)` / `delete` / `prune?` +
-`backend`. `TaskExecutor` — `start(record, work, report, signal)` →
+`backend`. `TaskExecutor` — `start(record, work, report, signal, hooks?)` →
 `TaskExecution`, `reattach?`, `cancel(exec, reason?)`. Any custom store
 proves compliance via `runTaskStoreConformance({ label, factory })`.
 
@@ -791,11 +792,13 @@ runTasksHarnessConformance(async ({ harnessId }) => {
   `InMemoryTaskStore` is node-local + lost on process exit. `detached`
   tasks survive their spawning session's close (same process), but
   survival across an app-process restart needs a durable store
-  (`@agentick/tasks-postgres-next`, same `TaskStore` port — not built
-  here). The `interrupted`-on-hydration logic is wired and ready for it.
-- **The child-process / distributed executors** — ADR 68 Build B and
-  the ambitious tier. They implement the same `TaskExecutor` seam; not
-  built here.
+  (`@agentick/tasks-postgres-next`, same `TaskStore` port — a shipped
+  sibling package, not part of this one). The `interrupted`-on-hydration
+  logic is wired here; the pg store is what exercises it across restart.
+- **The distributed executor** — the ambitious tier (a task running on
+  another node): a distributed-worker `TaskExecutor` + a shared store.
+  Implements the same `TaskExecutor` seam; not built here. The
+  child-process executor (ADR 68 Build B) IS built here — see above.
 - **ToolExecutor return-shape detection** — the executor's logic for
   detecting a `TaskHandle` return and branching on `taskSupport`
   lives in `@agentick/tool-executor-next` (#156).
@@ -816,7 +819,7 @@ runTasksHarnessConformance(async ({ harnessId }) => {
   terminal prior-run records surfaced read-only).
 - `src/__tests__/input-required.spec.ts` — the `awaitingInput` seam on the
   in-process executor: the full `working → input_required → working →
-  completed` status timeline (bus envelopes) with the paused-state
+completed` status timeline (bus envelopes) with the paused-state
   statusMessage, the durable `TaskStore` record reflecting `input_required`
   while paused, and cancel-while-paused landing terminal `cancelled` (the
   `finally`'s `working` report proven a post-terminal no-op).
@@ -835,6 +838,12 @@ runTasksHarnessConformance(async ({ harnessId }) => {
   green for BOTH bundled strategies: `InProcessTaskExecutor` (closures) and
   `ChildProcessTaskExecutor` (by-ref over a real fork). The proof the seam
   is honestly uniform.
+- `src/__tests__/escalation.spec.ts` — 3 tests: the ADR 69 escalation
+  origin guards — a detached task's `awaitingInput` throws
+  `DetachedTaskCannotElicitError` (fails, doesn't hang), an unconfigured
+  `ctx.elicit` throws a clear "not configured" error, and its capability
+  probes report `false` rather than throw. The root-session round-trip +
+  FSM flip live in `@agentick/session-next`'s `escalation.spec.ts`.
 - `src/__tests__/cluster-inbox.spec.ts` — 6 tests covering
   cluster-portable cancel / get / result via inbox addressing.
 - `src/__tests__/conformance.spec.ts` — drives
@@ -862,7 +871,7 @@ runTasksHarnessConformance(async ({ harnessId }) => {
 - **ADR 68 pg (`@agentick/tasks-postgres-next`)** — LANDED. A durable
   `TaskStore` conforming to the same port; adds cross-app-restart record
   durability and is what actually exercises the `interrupted`-on-hydration
-  path (proven against a real postgres). Cross-restart *child reattach* is
+  path (proven against a real postgres). Cross-restart _child reattach_ is
   NOT unlocked by durability alone and is NOT a fork-IPC follow-on: a fresh
   process cannot re-attach to a child spawned by the dead parent (fork IPC is
   a non-reconnectable spawn-time pipe), so a persisted pid buys no channel.
@@ -870,10 +879,6 @@ runTasksHarnessConformance(async ({ harnessId }) => {
   transport (shared store / cluster bus) — the **distributed-executor tier**
   below. Across a restart the child-process executor's honest outcome is
   `interrupted`; its worker self-terminates on IPC `disconnect`.
-- **Phase D (Effect-native internals, #155)** — convert the
-  per-subscriber `Queue<TaskEvent>` fan-out to `Stream.fromQueue`,
-  expose an `Effect<TaskHandle>` work overload that runs as a real
-  interruptible fiber.
 - **`taskSupport: "supported"`** — the caller-choice mode declared in
   the spec annotation but not yet branched on by the executor. Lands
   alongside Phase C, where the model has the tooling to opt in.
