@@ -59,7 +59,7 @@ describe("ToolExecutorHarness — ctxExtensions seam (ADR 66)", () => {
       context: { via: "dispatch" },
     });
 
-    expect(result.succeeded).toBe(true);
+    expect(result.isError ?? false).toBe(false);
     // The exact same reference the wiring layer injected — opaque spread,
     // not a copy.
     expect((seen as unknown as { sandbox: unknown }).sandbox).toBe(injected);

@@ -70,16 +70,35 @@ describe("@agentick/spec-next — tool executor protocol", () => {
   });
 
   describe("DispatchResult", () => {
-    it("returns ContentBlock[] (executedBy + metrics optional)", () => {
+    it("returns ContentBlock[] (executedBy + metrics optional; isError absent = success)", () => {
       const result: DispatchResult = {
         toolCallId: "c1",
         name: "calc.add",
-        succeeded: true,
         content: [{ type: "text", text: "3" }],
         executedBy: "agentick",
         durationMs: 2,
       };
-      expect(result.succeeded).toBe(true);
+      // ADR 70 — success is the default (isError absent/false); HARD
+      // failures reject rather than resolving a result.
+      expect(result.isError ?? false).toBe(false);
+    });
+
+    it("carries a SOFT error (isError) + structuredContent (ADR 70)", () => {
+      const result: DispatchResult = {
+        toolCallId: "c2",
+        name: "weather.get",
+        isError: false,
+        content: [{ type: "text", text: "72F, clear" }],
+        structuredContent: { tempF: 72, condition: "clear" },
+      };
+      expect(result.structuredContent).toEqual({ tempF: 72, condition: "clear" });
+      const soft: DispatchResult = {
+        toolCallId: "c3",
+        name: "weather.get",
+        isError: true,
+        content: [{ type: "text", text: "location not found" }],
+      };
+      expect(soft.isError).toBe(true);
     });
   });
 

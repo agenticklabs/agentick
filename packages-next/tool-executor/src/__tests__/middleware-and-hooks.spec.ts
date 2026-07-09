@@ -65,7 +65,7 @@ describe("ToolExecutorHarness — .use(middleware)", () => {
     expect(observed).toHaveLength(2);
     expect(observed[0]).toMatchObject({ phase: "before" });
     expect(observed[1]!.phase).toBe("after");
-    expect((observed[1]!.payload as DispatchResult).succeeded).toBe(true);
+    expect((observed[1]!.payload as DispatchResult).isError ?? false).toBe(false);
   });
 
   it("composes outer→inner — first registered is outermost", async () => {
@@ -142,7 +142,7 @@ describe("ToolExecutorHarness — .onBeforeDispatch(handler)", () => {
     });
     harness.onBeforeDispatch(() => Effect.succeed(undefined));
     const result = await harness.dispatch(dispatchOf("echo", "c-h-1"));
-    expect(result.succeeded).toBe(true);
+    expect(result.isError ?? false).toBe(false);
     expect(ran).toBe(1);
   });
 
@@ -193,6 +193,6 @@ describe("ToolExecutorHarness — .onBeforeDispatch(handler)", () => {
     unsub();
     // After unsub, dispatch should succeed.
     const result = await harness.dispatch(dispatchOf("echo", "c-h-4"));
-    expect(result.succeeded).toBe(true);
+    expect(result.isError ?? false).toBe(false);
   });
 });

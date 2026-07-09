@@ -99,7 +99,7 @@ describe("ctx.log / ctx.progress fire-and-forget under emit failure (ADR 64)", (
 
     // The failed signal emit was swallowed — the handler's return value
     // survived intact and the dispatch reports success.
-    expect(result.succeeded).toBe(true);
+    expect(result.isError ?? false).toBe(false);
     expect(result.content).toEqual([{ type: "text", text: "handler-return-intact" }]);
 
     // Both signal appends were actually attempted (probe passed, append

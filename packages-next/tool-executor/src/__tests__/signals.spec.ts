@@ -81,7 +81,7 @@ describe("ctx.log / ctx.progress — in-process dispatch (ADR 64)", () => {
 
     const events = await withBusCapture(bus, async () => {
       const r = await harness.dispatch(dispatchOf());
-      expect(r.succeeded).toBe(true);
+      expect(r.isError ?? false).toBe(false);
     });
 
     const logs = events.filter((e) => e.name === logEventName("tool"));

@@ -56,19 +56,35 @@ export interface ToolSpec<TInput = unknown> {
   readonly inputSchema?: StandardSchemaV1<unknown, TInput>;
   /**
    * Optional output schema. Declares the shape of the handler's
-   * structured result. When set, the framework MAY validate the
-   * handler's `structuredContent` against this schema before returning
-   * to the caller, and emits the schema as `outputSchema` on the
-   * model's tool definition (provider-dependent; aligned with MCP
-   * 2025-11-25 `Tool.outputSchema`).
+   * `structuredContent` (the typed machine result carried on the ADR 70
+   * result envelope). When set, the tool executor validates the handler's
+   * `structuredContent` against this schema before the dispatch resolves
+   * (a failure is a typed dispatch error, mirroring `inputSchema`), and
+   * emits the schema as `outputSchema` on the model's tool definition
+   * (provider-dependent; aligned with MCP 2025-11-25 `Tool.outputSchema`).
    *
-   * Omit for tools returning unstructured content (text/image/etc).
+   * A typed output shape is what unlocks tool COMPOSITION — chaining one
+   * tool's typed output into another's typed input, or code that
+   * orchestrates several tools — not just validation.
+   *
+   * Omit for tools returning unstructured content (text/image/etc); the
+   * result currency stays `string | ContentBlock[]` and validation is
+   * skipped.
    */
   readonly outputSchema?: StandardSchemaV1;
   /**
    * The async function invoked at dispatch time. Receives the
    * validated input + a `ctx` bundle (toolCallId, sessionId,
    * executionId, abort signal, channel emit).
+   *
+   * Returns the ADR 70 result currency — a `string` (sugar for one
+   * text block), a `ContentBlock[]`, or a `{ content, structuredContent?,
+   * isError?, metadata? }` envelope (plus the `Promise` / `Effect` /
+   * `TaskHandle` wrappers). `structuredContent` is validated against
+   * {@link outputSchema} when declared; `isError: true` is a SOFT/domain
+   * error (the dispatch resolves) while a throw is a HARD failure (the
+   * dispatch rejects). The three shapes stay type-discriminable, so a
+   * wrong-shape return is a compile error.
    */
   readonly handler: (input: TInput, args: { readonly ctx: ToolHandlerCtx }) => ToolHandlerResult;
   /**

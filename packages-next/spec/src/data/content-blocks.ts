@@ -557,3 +557,21 @@ export function foldContentBlockWith<R>(
   const handler = handlers[block.type] as ((b: ContentBlock) => R) | undefined;
   return handler ? handler(block) : fallback(block);
 }
+
+// ============================================================================
+// Content currency — the string ⇄ ContentBlock[] normalizer
+// ============================================================================
+
+/**
+ * Normalize the message-input content currency `string | ContentBlock[]`
+ * to `ContentBlock[]`. A bare string becomes exactly one {@link TextBlock};
+ * an array passes through unchanged (identity — same reference).
+ *
+ * This is the CANONICAL string→text-block normalizer. The tool-result
+ * currency ({@link import("./tool-result.js").normalizeToolResult}) and any
+ * surface that accepts `string | ContentBlock[]` reuse it — do NOT hand-roll
+ * a second. Pure, allocation-free on the array path.
+ */
+export function toContentBlocks(input: string | readonly ContentBlock[]): readonly ContentBlock[] {
+  return typeof input === "string" ? [{ type: "text", text: input }] : input;
+}

@@ -11,7 +11,7 @@
  * Approve  → `accepted` with `value.approved: true` → handler runs
  *            (`modifiedArguments` re-validated when set).
  * Deny     → `accepted` with `value.approved: false` OR `declined` /
- *            `cancelled` outcome → DispatchResult{ succeeded: false }.
+ *            `cancelled` outcome → DispatchResult{ isError: true } (ADR 70).
  * Abort    → controller signal fires → elicit() resolves to
  *            `{ outcome: "failed", failure.kind: "aborted" }` →
  *            denial-shaped result with reason from the failure.
@@ -117,12 +117,12 @@ describe("ToolExecutorHarness — confirmation flow (via ElicitationHarness)", (
     });
 
     const result = await dispatchP;
-    expect(result.succeeded).toBe(true);
+    expect(result.isError ?? false).toBe(false);
     expect(handlerRan).toBe(1);
     expect((result.content[0] as { text: string }).text).toBe("deleted");
   });
 
-  it("deny via accepted+approved:false: succeeded=false; handler never runs", async () => {
+  it("deny via accepted+approved:false: isError=true; handler never runs", async () => {
     let handlerRan = 0;
     const { harness, bus, elicitation } = await createTestHarness({
       tools: [confirmTool()],
@@ -147,13 +147,13 @@ describe("ToolExecutorHarness — confirmation flow (via ElicitationHarness)", (
     });
 
     const result = await dispatchP;
-    expect(result.succeeded).toBe(false);
+    expect(result.isError).toBe(true);
     expect(handlerRan).toBe(0);
     expect((result.content[0] as { text: string }).text).toContain("denied");
     expect((result.content[0] as { text: string }).text).toContain("user said no");
   });
 
-  it("deny via declined outcome: succeeded=false; reason flows through", async () => {
+  it("deny via declined outcome: isError=true; reason flows through", async () => {
     let handlerRan = 0;
     const { harness, bus, elicitation } = await createTestHarness({
       tools: [confirmTool()],
@@ -178,7 +178,7 @@ describe("ToolExecutorHarness — confirmation flow (via ElicitationHarness)", (
     });
 
     const result = await dispatchP;
-    expect(result.succeeded).toBe(false);
+    expect(result.isError).toBe(true);
     expect(handlerRan).toBe(0);
     expect((result.content[0] as { text: string }).text).toContain("user clicked Deny");
   });
@@ -239,7 +239,7 @@ describe("ToolExecutorHarness — confirmation flow (via ElicitationHarness)", (
 
     // No elicit response delivered for the second call — gate skipped.
     const second = await harness.dispatch(dispatchOf("delete-file", "tc-5"));
-    expect(second.succeeded).toBe(true);
+    expect(second.isError ?? false).toBe(false);
     expect(handlerRan).toBe(2);
   });
 
@@ -260,7 +260,7 @@ describe("ToolExecutorHarness — confirmation flow (via ElicitationHarness)", (
     }, 10);
 
     const result = await dispatchP;
-    expect(result.succeeded).toBe(false);
+    expect(result.isError).toBe(true);
     // Failure reason comes from the abort signal's reason — a tagged
     // ToolAbortedError stringified via the elicitation harness's
     // reason coercion.

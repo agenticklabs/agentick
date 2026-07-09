@@ -448,10 +448,14 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
               },
             });
             const durationMs = dispatched.durationMs ?? Date.now() - startedAt;
+            // ADR 70 — `DispatchResult.succeeded` retired for `isError`
+            // (soft/domain error). A resolved dispatch is a success unless
+            // it flags a soft error; HARD failures reject (caught below).
+            const dispatchSucceeded = dispatched.isError !== true;
             tickToolResults.push({
               toolCallId: tc.id,
               toolName: tc.name,
-              succeeded: dispatched.succeeded,
+              succeeded: dispatchSucceeded,
               content: dispatched.content,
               durationMs,
             });
@@ -460,7 +464,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
               tick: tickIndex,
               callId: tc.id,
               name: tc.name,
-              outcome: dispatched.succeeded ? "succeeded" : "failed",
+              outcome: dispatchSucceeded ? "succeeded" : "failed",
               durationMs,
             });
             void input.reconciler.notifyLifecycle({
@@ -470,7 +474,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
                 tickId,
                 callId: tc.id,
                 name: tc.name,
-                outcome: dispatched.succeeded ? "succeeded" : "failed",
+                outcome: dispatchSucceeded ? "succeeded" : "failed",
                 durationMs,
                 executionId,
               },
@@ -481,7 +485,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
               callId: tc.id,
               name: tc.name,
               content: dispatched.content,
-              succeeded: dispatched.succeeded,
+              succeeded: dispatchSucceeded,
               durationMs,
             });
           } catch (err) {

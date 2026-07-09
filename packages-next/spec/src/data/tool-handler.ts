@@ -16,6 +16,7 @@ import type { Effect } from "effect";
 
 import type { Elicit } from "../protocol/elicit-api.js";
 import type { ContentBlock } from "./content-blocks.js";
+import type { ToolResultInput } from "./tool-result.js";
 import type { LogLevel, ProgressToken } from "./signals.js";
 
 // ============================================================================
@@ -346,11 +347,18 @@ export interface McpAuthenticatedUser {
 // ============================================================================
 
 /**
- * Tool handler bodies may return any of four shapes:
+ * Tool handler bodies may return one of the following shapes. The
+ * synchronous/promised/Effect forms carry the ADR 70 **result currency**
+ * ({@link ToolResultInput}); the `TaskHandle` forms resolve with
+ * `ContentBlock[]` (a task resolves with content, not an envelope):
  *
- *   1. **Sync** — `readonly ContentBlock[]`
- *   2. **Promise** — `Promise<readonly ContentBlock[]>`
- *   3. **Effect** — `Effect<readonly ContentBlock[], unknown, never>`
+ *   1. **Sync** — {@link ToolResultInput}: a bare `string` (sugar for one
+ *      text block), a `readonly ContentBlock[]` (today's shape), or a
+ *      `ToolResultEnvelope` (`{ content, structuredContent?, isError?,
+ *      metadata? }`). The three are DISCRIMINABLE (string / array /
+ *      object-with-`content`), so a wrong-shape return is a type error.
+ *   2. **Promise** — `Promise<ToolResultInput>`.
+ *   3. **Effect** — `Effect<ToolResultInput, unknown, never>`.
  *   4. **TaskHandle** — `TaskHandle<readonly ContentBlock[]>` (the
  *      handler `submit`-ed long-running work via `ctx.tasks.submit`
  *      and returned the handle). The executor branches on the
@@ -366,6 +374,11 @@ export interface McpAuthenticatedUser {
  *      - `"supported"` → caller-choice; landed in a follow-up
  *        slice.
  *
+ * The currency normalizes to ONE internal result at dispatch (see
+ * {@link import("./tool-result.js").normalizeToolResult}); when the tool
+ * declares `outputSchema`, the executor validates the envelope's
+ * `structuredContent` against it (mirroring `inputSchema`).
+ *
  * Effect-typed handlers are preferred for retry / timeout /
  * structured concurrency / finalizers. Promise/sync forms remain
  * supported.
@@ -374,11 +387,13 @@ export interface McpAuthenticatedUser {
  * boundary — the validator narrows). The second is the per-dispatch
  * dependency bundle: `ctx` (harness-provided) and `use` (render-time
  * deps captured by the reconciler).
+ *
+ * @see docs/proposals/v2/blueprint/70-tool-result-currency.md
  */
 export type ToolHandlerResult =
-  | readonly ContentBlock[]
-  | Promise<readonly ContentBlock[]>
-  | Effect.Effect<readonly ContentBlock[], unknown, never>
+  | ToolResultInput
+  | Promise<ToolResultInput>
+  | Effect.Effect<ToolResultInput, unknown, never>
   | import("../protocol/tasks-harness.js").TaskHandle<readonly ContentBlock[]>
   | Promise<import("../protocol/tasks-harness.js").TaskHandle<readonly ContentBlock[]>>
   | Effect.Effect<

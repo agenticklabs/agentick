@@ -47,6 +47,27 @@ For low-level wiring, register the pieces yourself: `declaration` → `ToolExecu
 
 The returned `validator` is what the tool executor runs against dispatched input **before** the handler is invoked; invalid input surfaces a typed `ToolValidationError` (from `@agentick/spec-next`) instead of reaching the handler. `createTool` itself performs no validation — it packages the validator (a `StandardSchemaV1` adapter when `inputSchema` is set, or a permissive pass-through when it is omitted). Any Standard-Schema library works: Zod 4, Valibot, ArkType, Effect Schema, or a raw JSON Schema wrapped via `jsonSchema({ ... })` from spec.
 
+### Result currency (ADR 70)
+
+A handler returns one of three **discriminable** shapes (plus the usual `Promise` / `Effect` / `TaskHandle` wrappers), normalized to one internal result at dispatch:
+
+```ts
+handler: async () => "42";                               // string sugar → [{ type: "text", text: "42" }]
+handler: async () => [{ type: "text", text: "42" }];     // ContentBlock[] — the classic shape
+handler: async () => ({                                  // the opt-in envelope
+  content: "72°F, clear",                                //   display (string sugar accepted here too)
+  structuredContent: { tempF: 72, condition: "clear" },  //   typed machine result (outputSchema-validated)
+  isError: false,                                        //   SOFT/domain error flag (default false)
+  metadata: { source: "cache" },
+});
+```
+
+The three shapes stay type-discriminable (`string` / array / object-with-`content`), so a **wrong-shape return is a compile error** — there is no plain-object→JSON-block guessing (`return { temp: 72 }` does not silently become content; it fails to type-check). Structured data goes through `structuredContent`, not a bare object.
+
+**`structuredContent` + `outputSchema` = composition.** When a tool declares `outputSchema`, the executor validates the envelope's `structuredContent` against it (same Standard-Schema acceptance as `inputSchema`; a failure is a typed dispatch error). A typed output shape is what lets the model treat tools as composable building blocks — chain one tool's typed output into another's typed input, or emit code that orchestrates several tools ("tools as an API") — instead of re-parsing prose each hop. It flows to `DispatchResult.structuredContent` and, on the MCP wire, to `CallToolResult.structuredContent`.
+
+**`isError` (soft) vs throw (hard).** `isError: true` is a *domain* error the model reasons about and can retry ("file not found", "rate-limited") — the dispatch still **resolves**. A thrown/rejected handler is a *hard* failure — the dispatch **rejects** with a typed `ToolExecutorError` and never produces a result. `isError` maps to MCP `CallToolResult.isError`.
+
 ## Tool handler ctx is transport-portable
 
 Per ADR 43, every `ToolHandler` receives a `ToolHandlerCtx` with a `transport: "in-process" | "mcp"` discriminator. **The same handler runs unchanged whether dispatched by an in-process Agentick session OR by an MCP server projecting your `ToolDeclaration` onto the wire.**

@@ -46,6 +46,7 @@ export * from "./execution-result.js";
 export * from "./execution-target.js";
 export * from "./reconciler-snapshot.js";
 export * from "./tool-handler.js";
+export * from "./tool-result.js";
 export * from "./validator.js";
 export * from "./sandbox.js";
 export * from "./mcp.js";

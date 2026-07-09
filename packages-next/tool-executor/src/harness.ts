@@ -38,6 +38,7 @@ import type {
   MessageEnvelope,
   MessageHandlerError,
   MessageInbox,
+  NormalizedToolResult,
   Operation,
   OperationJournal,
   OperationOrigin,
@@ -51,8 +52,10 @@ import type {
   ToolExecutorProtocol,
   ToolListFilter,
   ToolRegistration,
+  ToolResultInput,
   UnregisterToolInput,
 } from "@agentick/spec-next";
+import { normalizeToolResult } from "@agentick/spec-next";
 import { viaToOrigin } from "./provenance.js";
 import {
   HandlerError,
@@ -74,6 +77,7 @@ import {
   type ToolConfirmationReply,
 } from "./confirmation-schema.js";
 import { InMemoryToolRegistry, sameBindingKey } from "./registry.js";
+import { fromStandardSchema } from "./validator.js";
 import type {
   HandlerResolver,
   HandlerChannelSeed,
@@ -553,7 +557,9 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
           const denialResult: DispatchResult = {
             toolCallId: input.toolCallId,
             name: input.name,
-            succeeded: false,
+            // Denial is a SOFT error (ADR 70): the dispatch completed, the
+            // model sees the denial text and can adapt. HARD failures reject.
+            isError: true,
             content: [
               {
                 type: "text",
@@ -713,9 +719,11 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
 
       const started = Date.now();
 
-      // Compose body that branches on handler shape.
+      // Compose body that branches on handler shape. Resolves to the
+      // ADR 70 `NormalizedToolResult` (content + optional structuredContent
+      // / isError / metadata); the TaskHandle branches produce content-only.
       const invokeHandler = Effect.suspend(
-        (): Effect.Effect<readonly ContentBlock[], unknown, never> => {
+        (): Effect.Effect<NormalizedToolResult, unknown, never> => {
           if (controller.signal.aborted) {
             return Effect.fail(
               controller.signal.reason ?? new ToolAbortedError({ toolCallId: input.toolCallId }),
@@ -784,9 +792,12 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
 
           const dispatchOnResolved = (
             resolved: unknown,
-          ): Effect.Effect<readonly ContentBlock[], unknown, never> => {
+          ): Effect.Effect<NormalizedToolResult, unknown, never> => {
             if (!isTaskHandle(resolved)) {
-              return Effect.succeed(resolved as readonly ContentBlock[]);
+              // Non-TaskHandle: the ADR 70 result currency (string / array
+              // / envelope) → one internal result. Bare-array parity is
+              // exact (no structuredContent/isError set).
+              return Effect.succeed(normalizeToolResult(resolved as ToolResultInput));
             }
 
             const usePatternB =
@@ -809,7 +820,7 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
                   { once: true },
                 );
               }
-              return Effect.succeed(serializeTaskRef(resolved));
+              return Effect.succeed({ content: serializeTaskRef(resolved) });
             }
 
             // Pattern A — await the handle's result. Abort the task
@@ -826,7 +837,8 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
               try: () => resolved.result as Promise<readonly ContentBlock[]>,
               catch: (cause: unknown) => cause,
             });
-            return Effect.raceFirst(taskAwaitEff, abortEff);
+            // A task resolves with content (not an envelope) — wrap.
+            return Effect.map(Effect.raceFirst(taskAwaitEff, abortEff), (content) => ({ content }));
           };
 
           if (isTaskHandle(handlerResult)) {
@@ -859,12 +871,11 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
             return Effect.flatMap(Effect.raceFirst(handlerEff, abortEff), dispatchOnResolved);
           }
 
-          // Sync, non-TaskHandle return — pass through. TS can't
-          // narrow across the disjoint branches above, so cast
-          // explicitly: at this point handlerResult is a sync
-          // `readonly ContentBlock[]` (Effect/Promise/TaskHandle
-          // cases already returned).
-          return Effect.succeed(handlerResult as readonly ContentBlock[]);
+          // Sync, non-TaskHandle return — normalize. TS can't narrow
+          // across the disjoint branches above, so cast explicitly: at
+          // this point handlerResult is a sync `ToolResultInput`
+          // (Effect/Promise/TaskHandle cases already returned).
+          return Effect.succeed(normalizeToolResult(handlerResult as ToolResultInput));
         },
       );
 
@@ -877,11 +888,44 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
       void channelEmits;
 
       if (Exit.isSuccess(exit)) {
+        const normalized = exit.value;
+
+        // ADR 70 — validate `structuredContent` against `outputSchema`
+        // when both are present, mirroring the inputSchema path above
+        // (Standard-Schema via `fromStandardSchema`). A failure is a
+        // typed HARD dispatch error (reject), same shape as input
+        // validation. No outputSchema OR no structuredContent → skip
+        // (back-compat: existing tools unaffected).
+        const outputSchema = reg.declaration.outputSchema;
+        if (outputSchema !== undefined && normalized.structuredContent !== undefined) {
+          const outValidator = fromStandardSchema(outputSchema);
+          const outResult = yield* Effect.tryPromise({
+            try: async () => outValidator.validate(normalized.structuredContent),
+            catch: (cause): { readonly _tag: "ToolValidationError"; readonly cause: unknown } => ({
+              _tag: "ToolValidationError",
+              cause,
+            }),
+          });
+          if (isValidationFailure(outResult)) {
+            return yield* Effect.fail(
+              new ToolValidationError({
+                toolName: input.name,
+                issues: outResult.issues,
+                cause: "structuredContent failed outputSchema validation",
+              }),
+            );
+          }
+        }
+
         const dispatchResult: DispatchResult = {
           toolCallId: input.toolCallId,
           name: input.name,
-          succeeded: true,
-          content: exit.value,
+          content: normalized.content,
+          ...(normalized.isError !== undefined ? { isError: normalized.isError } : {}),
+          ...(normalized.structuredContent !== undefined
+            ? { structuredContent: normalized.structuredContent }
+            : {}),
+          ...(normalized.metadata !== undefined ? { metadata: normalized.metadata } : {}),
           executedBy: "agentick",
           durationMs: Date.now() - started,
         };

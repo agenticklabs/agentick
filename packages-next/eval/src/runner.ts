@@ -258,10 +258,11 @@ function processDispatchEvent(
   pending.delete(opId);
 
   // terminal payload for tool:command:dispatch is { result: DispatchResult }.
-  // DispatchResult carries {toolCallId, name, succeeded, content, ...}.
+  // DispatchResult carries {toolCallId, name, isError?, content, ...} (ADR 70).
+  // Success/failure is taken from the operation `event.outcome`, not a field.
   const termPayload = event.payload as { readonly result?: unknown } | undefined;
   const dispatchResult = termPayload?.result as
-    | { readonly name?: unknown; readonly content?: unknown; readonly succeeded?: unknown }
+    | { readonly name?: unknown; readonly content?: unknown; readonly isError?: unknown }
     | undefined;
 
   const name =

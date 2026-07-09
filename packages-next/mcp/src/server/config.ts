@@ -25,11 +25,13 @@ import {
   isResourcesInstance,
   isTaskHandle,
   McpServerConfigInvalid,
+  normalizeToolResult,
   type McpRequestContext,
   type PromptDeclaration,
   type Prompts,
   type Resources,
   type ToolDeclaration,
+  type ToolResultInput,
 } from "@agentick/spec-next";
 import {
   isCreatedTool,
@@ -701,25 +703,42 @@ function resolveFromCreatedTools(
       // `transport: "mcp"` discriminator). Pass directly; no stub /
       // adapter needed.
       const result = await h(input, { ctx, use: {} });
-      if (Array.isArray(result)) {
-        return { kind: "inline", content: result };
-      }
       // Pattern B (#171d.3) — the handler returned a TaskHandle (via
       // `ctx.tasks!.submit(...)`). The projection layer registers the
       // handle in the per-connection server-task registry, returns
       // CreateTaskResult on the wire, and emits
-      // `notifications/tasks/status` as the task progresses.
+      // `notifications/tasks/status` as the task progresses. Checked
+      // BEFORE the currency normalization: a TaskHandle is an object
+      // and would otherwise be mistaken for a result envelope.
       if (isTaskHandle(result)) {
         return { kind: "task", handle: result };
       }
-      // ToolHandlerResult can also be Promise<ContentBlock[]> /
-      // Effect<...>. The MCP server projection doesn't speak Effect
-      // yet — Effect handlers + Promise<ContentBlock[]> handlers land
-      // with downstream integration.
+      // ADR 70 — the result currency: `string` (text sugar),
+      // `ContentBlock[]`, or a `{ content, structuredContent?, isError? }`
+      // envelope. Normalize to one inline result and thread
+      // structuredContent + isError onto the wire `CallToolResult`.
+      if (
+        typeof result === "string" ||
+        Array.isArray(result) ||
+        (typeof result === "object" && result !== null && "content" in result)
+      ) {
+        const normalized = normalizeToolResult(result as ToolResultInput);
+        return {
+          kind: "inline",
+          content: normalized.content,
+          ...(normalized.structuredContent !== undefined
+            ? { structuredContent: normalized.structuredContent }
+            : {}),
+          ...(normalized.isError !== undefined ? { isError: normalized.isError } : {}),
+        };
+      }
+      // ToolHandlerResult can also be Effect<...>. The MCP server
+      // projection doesn't speak Effect yet — Effect handlers land with
+      // downstream integration. (Promise is already awaited above.)
       throw new Error(
-        "MCP-server tool handlers must return either ContentBlock[] (inline) " +
-          "or a TaskHandle (Pattern B via ctx.tasks!.submit). Effect handlers " +
-          "are deferred.",
+        "MCP-server tool handlers must return a string, ContentBlock[], or " +
+          "{ content, structuredContent?, isError? } envelope (inline), or a " +
+          "TaskHandle (Pattern B via ctx.tasks!.submit). Effect handlers are deferred.",
       );
     };
   };

@@ -55,7 +55,6 @@ describe("defineToolExecutor — factory shape", () => {
       dispatch: async (input) => ({
         toolCallId: input.toolCallId,
         name: input.name,
-        succeeded: true,
         content: [{ type: "text", text: "ok" }],
       }),
     });
@@ -67,7 +66,6 @@ describe("defineToolExecutor — factory shape", () => {
       dispatch: async (input) => ({
         toolCallId: input.toolCallId,
         name: input.name,
-        succeeded: true,
         content: [{ type: "text", text: `ran:${input.name}` }],
       }),
     });
@@ -78,7 +76,7 @@ describe("defineToolExecutor — factory shape", () => {
       inbox: new LocalInbox(),
     });
     const result = await exec.dispatch(dispatchOf("calc", { a: 1 }));
-    expect(result.succeeded).toBe(true);
+    expect(result.isError ?? false).toBe(false);
     expect(result.content[0]).toMatchObject({ type: "text", text: "ran:calc" });
   });
 });
@@ -89,7 +87,6 @@ describe("defineToolExecutor — registry behavior", () => {
       dispatch: async (input) => ({
         toolCallId: input.toolCallId,
         name: input.name,
-        succeeded: true,
         content: [],
       }),
     });
@@ -114,7 +111,6 @@ describe("defineToolExecutor — registry behavior", () => {
       dispatch: async (input) => ({
         toolCallId: input.toolCallId,
         name: input.name,
-        succeeded: true,
         content: [],
       }),
       list: async () => remote,
@@ -144,7 +140,7 @@ describe("defineToolExecutor — abort + envelopes", () => {
         return {
           toolCallId: input.toolCallId,
           name: input.name,
-          succeeded: false,
+          isError: true,
           content: [],
         };
       },
@@ -181,7 +177,7 @@ describe("defineToolExecutor — abort + envelopes", () => {
           ctx.signal?.addEventListener("abort", () => reject(ctx.signal!.reason), { once: true });
           setTimeout(resolve, 10_000);
         });
-        return { toolCallId: input.toolCallId, name: input.name, succeeded: false, content: [] };
+        return { toolCallId: input.toolCallId, name: input.name, isError: true, content: [] };
       },
     });
     const scopeId = "inbox-abort-cb";
@@ -220,7 +216,6 @@ describe("defineToolExecutor — abort + envelopes", () => {
       dispatch: async (input) => ({
         toolCallId: input.toolCallId,
         name: input.name,
-        succeeded: true,
         content: [],
       }),
     });
@@ -256,7 +251,6 @@ describe("defineToolExecutor — abort + envelopes", () => {
       dispatch: async (input) => ({
         toolCallId: input.toolCallId,
         name: input.name,
-        succeeded: true,
         content: [{ type: "text", text: `ran:${input.name}` }],
       }),
     });
@@ -291,7 +285,6 @@ describe("defineToolExecutor — abort + envelopes", () => {
       dispatch: async (input) => ({
         toolCallId: input.toolCallId,
         name: input.name,
-        succeeded: true,
         content: [{ type: "text", text: "ok" }],
       }),
     });

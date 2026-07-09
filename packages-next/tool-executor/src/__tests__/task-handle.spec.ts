@@ -98,7 +98,7 @@ describe("ToolExecutor ctx — substrate primitives (#156)", () => {
       ],
     });
     const result = await harness.dispatch(dispatchOf("compute", "tc-2"));
-    expect(result.succeeded).toBe(true);
+    expect(result.isError ?? false).toBe(false);
     expect((result.content[0] as { text: string }).text).toBe("computed-via-task");
   });
 });
@@ -123,7 +123,7 @@ describe("ToolExecutor — TaskHandle return + taskSupport branching (#156)", ()
       ],
     });
     const result = await harness.dispatch(dispatchOf("wait", "tc-3"));
-    expect(result.succeeded).toBe(true);
+    expect(result.isError ?? false).toBe(false);
     expect((result.content[0] as { text: string }).text).toBe("done");
   });
 
@@ -159,7 +159,7 @@ describe("ToolExecutor — TaskHandle return + taskSupport branching (#156)", ()
     // #164: host-side `via: "dispatch"` defaults to Pattern A; pass
     // `task: "ref"` to keep Pattern B semantics for this assertion.
     const result = await harness.dispatch(dispatchOf("deploy", "tc-4", { task: "ref" }));
-    expect(result.succeeded).toBe(true);
+    expect(result.isError ?? false).toBe(false);
     expect(result.content).toHaveLength(1);
     const block = result.content[0];
     if (!isTaskRefBlock(block!)) throw new Error(`expected task_ref, got ${block?.type}`);
@@ -247,8 +247,8 @@ describe("ToolExecutor — Pattern A dispatch abort cancels the task (#156)", ()
     });
     // Race a small delay against the dispatch so we have a chance
     // to abort while it's still in-flight. The dispatch resolves
-    // with a failed result on abort (the executor maps the abort
-    // to a `succeeded: false` shape rather than rethrowing).
+    // with a failed result on abort (the executor may map the abort
+    // to an `isError: true` shape rather than rethrowing; ADR 70).
     await new Promise((r) => setTimeout(r, 10));
     ctrl.abort("test_abort");
     let result: Awaited<typeof dispatchP> | undefined;
@@ -268,7 +268,7 @@ describe("ToolExecutor — Pattern A dispatch abort cancels the task (#156)", ()
     expect(savedHandle!.info().status).toBe("cancelled");
     // Either path is fine — assert that the dispatch didn't succeed.
     if (!caughtAbort && result !== undefined) {
-      expect(result.succeeded).toBe(false);
+      expect(result.isError).toBe(true);
     }
   });
 });

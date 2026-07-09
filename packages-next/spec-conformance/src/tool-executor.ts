@@ -234,7 +234,7 @@ export function runToolExecutorConformance(factory: ToolExecutorConformanceFacto
       const exec = await factory.createExecutor([echoTool()]);
       const result = await exec.dispatch(dispatchOf("echo", "dispatch", { hello: "world" }));
       expect(result.name).toBe("echo");
-      expect(result.succeeded).toBe(true);
+      expect(result.isError ?? false).toBe(false);
       expect(result.content[0]).toMatchObject({ type: "text" });
     });
 
@@ -273,8 +273,8 @@ export function runToolExecutorConformance(factory: ToolExecutorConformanceFacto
       const exec = await factory.createExecutor([echoTool()]);
       const m = await exec.dispatch(dispatchOf("echo", "model", {}));
       const d = await exec.dispatch(dispatchOf("echo", "dispatch", {}));
-      expect(m.succeeded).toBe(true);
-      expect(d.succeeded).toBe(true);
+      expect(m.isError ?? false).toBe(false);
+      expect(d.isError ?? false).toBe(false);
     });
   });
 
@@ -299,7 +299,7 @@ export function runToolExecutorConformance(factory: ToolExecutorConformanceFacto
       // `deny-validation` behavior produces failures by design.
       const exec = await factory.createExecutor([echoTool()]);
       const result = await exec.dispatch(dispatchOf("echo", "dispatch", { q: "ok" }));
-      expect(result.succeeded).toBe(true);
+      expect(result.isError ?? false).toBe(false);
     });
   });
 

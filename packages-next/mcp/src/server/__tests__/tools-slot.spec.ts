@@ -66,6 +66,42 @@ describe("resolveToolsOption — form A: CreatedTool[] shorthand", () => {
     }
   });
 
+  it("ADR 70 — string return normalizes to one inline text block", async () => {
+    const t = createTool({
+      name: "greet",
+      description: "greet",
+      handler: async () => "hi there",
+    });
+    const resolved = resolveToolsOption([t]);
+    const result = await resolved.resolveHandler(t.handlerRef)!({}, fakeCtx());
+    expect(result.kind).toBe("inline");
+    if (result.kind === "inline") {
+      expect(result.content).toEqual([{ type: "text", text: "hi there" }]);
+      expect(result.structuredContent).toBeUndefined();
+      expect(result.isError).toBeUndefined();
+    }
+  });
+
+  it("ADR 70 — envelope return threads structuredContent + isError onto the inline result (→ CallToolResult)", async () => {
+    const t = createTool({
+      name: "weather",
+      description: "weather",
+      handler: async () => ({
+        content: "72F, clear",
+        structuredContent: { tempF: 72 },
+        isError: true,
+      }),
+    });
+    const resolved = resolveToolsOption([t]);
+    const result = await resolved.resolveHandler(t.handlerRef)!({}, fakeCtx());
+    expect(result.kind).toBe("inline");
+    if (result.kind === "inline") {
+      expect(result.content).toEqual([{ type: "text", text: "72F, clear" }]);
+      expect(result.structuredContent).toEqual({ tempF: 72 });
+      expect(result.isError).toBe(true);
+    }
+  });
+
   it("returns null for unknown handlerRef", () => {
     const t = createTool({
       name: "x",

@@ -70,7 +70,23 @@ import type { ResolvedSecurity } from "../security/stages.js";
  * in.
  */
 export type ToolHandlerInvokeResult =
-  | { readonly kind: "inline"; readonly content: readonly ContentBlock[] }
+  | {
+      readonly kind: "inline";
+      readonly content: readonly ContentBlock[];
+      /**
+       * ADR 70 — the `outputSchema`-validated typed machine result. Maps
+       * to `CallToolResult.structuredContent` on the wire. Absent when
+       * the handler returned no envelope `structuredContent`.
+       */
+      readonly structuredContent?: unknown;
+      /**
+       * ADR 70 — SOFT/domain error flag from the handler's result
+       * envelope. Maps to `CallToolResult.isError`. Absent → `false`
+       * (successful call); a thrown handler still routes through the
+       * `catch` below to `isError: true`.
+       */
+      readonly isError?: boolean;
+    }
   | { readonly kind: "task"; readonly handle: TaskHandle<readonly ContentBlock[]> };
 
 /**
@@ -247,7 +263,16 @@ export function installToolsHandlers(
           // typings cover both via separate aliases).
           return toCreateTaskResult(result.handle.info()) as unknown as CallToolResult;
         }
-        return { content: result.content as CallToolResult["content"], isError: false };
+        // ADR 70 — thread the handler's structuredContent + soft isError
+        // onto the wire result. `structuredContent` only when present;
+        // `isError` defaults to false for a resolved (non-throwing) call.
+        return {
+          content: result.content as CallToolResult["content"],
+          isError: result.isError ?? false,
+          ...(result.structuredContent !== undefined
+            ? { structuredContent: result.structuredContent as CallToolResult["structuredContent"] }
+            : {}),
+        };
       } catch (cause) {
         // Tool-execution error — surface as `isError: true` per the v1
         // convention. JSON-RPC protocol errors are for transport /

@@ -101,7 +101,7 @@ describe("ToolExecutorHarness — dispatch happy path", () => {
       ),
     );
 
-    expect(result.succeeded).toBe(true);
+    expect(result.isError ?? false).toBe(false);
     expect(result.content).toEqual([{ type: "text", text: '{"a":1}' }]);
     expect(result.executedBy).toBe("agentick");
     expect(typeof result.durationMs).toBe("number");
@@ -461,7 +461,7 @@ describe("ToolExecutorHarness — inbox dispatch-by-name (declared command)", ()
     );
 
     expect(result.toolCallId).toBe("inbox-dispatch-1");
-    expect(result.succeeded).toBe(true);
+    expect(result.isError ?? false).toBe(false);
     expect(result.content).toEqual([{ type: "text", text: '{"hello":"world"}' }]);
   });
 });

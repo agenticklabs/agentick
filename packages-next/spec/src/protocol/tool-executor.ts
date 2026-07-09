@@ -141,16 +141,44 @@ export interface DispatchInput extends ToolCallScopedInput {
  * shape — the loop executor wraps into a `ToolResultBlock` for the
  * model; the session host door returns `content` directly.
  *
- * Failed dispatches reject with `ToolExecutorError` (NOT a result with
- * `succeeded: false`). The `succeeded` field is informational for
- * middleware (e.g., metrics that bucket by outcome): the canonical
- * "did this fail" signal is whether the Promise rejected.
+ * ## Two failure channels (ADR 70)
+ *
+ * HARD failure — the dispatch did not complete — is Promise **rejection**
+ * with a `ToolExecutorError`. That stays the canonical "did this fail"
+ * signal; a rejected dispatch never produces a `DispatchResult`.
+ *
+ * SOFT / domain error — the handler ran and produced a usable but
+ * error-flavored result ("file not found", "rate-limited") — is
+ * `isError: true` on the resolved result. The model reasons about /
+ * retries a soft error; a hard failure is an infrastructure fault. This
+ * replaces the redundant `succeeded` boolean (MCP collapses "couldn't
+ * run" and "ran-with-error" into one `isError` from the model's view, and
+ * so do we — the couldn't-run vs ran-with-error nuance lives in the error
+ * content, not a second boolean).
+ *
+ * `structuredContent` is the `outputSchema`-validated typed machine result
+ * (distinct from `content`, which is the model/human-readable display).
+ * It flows to the MCP wire as `CallToolResult.structuredContent`.
  */
 export interface DispatchResult {
   readonly toolCallId: string;
   readonly name: string;
-  readonly succeeded: boolean;
+  /**
+   * SOFT / domain-error flag. `true` when the handler completed but the
+   * result is a domain error the model should reason about; absent /
+   * `false` on success. NOT set for HARD failures — those reject. Default
+   * (absent) means success. Mirrors MCP `CallToolResult.isError`.
+   */
+  readonly isError?: boolean;
   readonly content: readonly ContentBlock[];
+  /**
+   * The tool's typed machine result — validated against the tool's
+   * `outputSchema` (when declared) before the dispatch resolves. Distinct
+   * from `content` (display): may be identical or a separate typed object.
+   * Absent when the handler returned no envelope `structuredContent`.
+   * Maps to MCP `CallToolResult.structuredContent`.
+   */
+  readonly structuredContent?: unknown;
   /**
    * Who actually ran the handler. Open string — see `ToolExecutor` in
    * `@agentick/spec-next/data/content-blocks`.

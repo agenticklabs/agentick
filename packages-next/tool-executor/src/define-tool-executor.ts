@@ -14,8 +14,8 @@
  *     return {
  *       toolCallId: input.toolCallId,
  *       name: input.name,
- *       succeeded: true,
  *       content: [{ type: "text", text: result.text }],
+ *       // isError?: true for a SOFT/domain error (ADR 70); throw for a HARD failure.
  *     };
  *   },
  * });
