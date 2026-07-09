@@ -40,28 +40,38 @@ is the one implemented consumer; the others ride the same rails for free.
 
 ## Decision
 
-### The mechanism — a forwarding discipline on the existing inbox
+### The mechanism — nested `inbox.ask`, nothing more
 
-The inbox already supports **addressed request/response** (`BaseHarness` auto-intercepts
-`request-response` with a `correlationId`). Escalation adds one discipline:
+The inbox already supports `ask()` — RPC-shaped send-and-await-typed-response, where the
+recipient's handler **return value IS the response**, correlated + `messageId`-idempotent +
+Effect-fiber-interruptible (`runtime/src/substrate/local-inbox.ts`). Escalation is **nested
+`ask`** — the `ask` return-value stack *is* the relay AND the return path; there is no separate
+envelope-forwarding machinery and no origin-reply-address to thread:
 
-1. A blocked node emits an **escalation envelope** — an opaque, serializable payload + a
-   `correlationId` + the **origin reply-address** — to its **escalation-parent**'s inbox.
-2. The receiving harness runs its **escalation handler** for the payload's class. It returns one of:
-   - **resolve(response)** — it handled it (answered / denied / transformed-then-answered). The
-     response routes back to the origin reply-address. This is **interception**; it needs no new
-     machinery beyond "the handler chose to reply."
-   - **forward** (the default) — re-address the *same* envelope to *this* harness's
-     escalation-parent, **preserving the origin reply-address across the hop**.
-3. The **root** harness (no escalation-parent) resolves **terminally**: for elicitation, perform
-   the real client `elicitation/create` over the wire; absent a willing client, a root **policy**
-   resolves it (deny / timeout).
-4. The **response** is a normal addressed reply to the origin's reply-address — O(1) back, not a
-   reverse walk. The origin's `awaitingInput` (ADR 68) resolves.
+1. A blocked node **`ask`s its escalation-parent**, passing an opaque escalation payload.
+2. The receiving harness's **escalation handler** returns one of:
+   - a **resolution** — it handled it (answered / denied / transformed-then-answered). This is
+     **interception**; it needs no machinery beyond "the handler returned a value."
+   - **`yield* inbox.ask(myEscalationParent, payload)`** (the default) — forward one hop; the
+     parent's eventual response propagates back down through this `ask`'s return.
+3. The **root** harness (no escalation-parent) resolves **terminally**: for elicitation, the real
+   client `elicitation/create` over the wire; absent a willing client, a root **policy** (deny /
+   timeout).
+4. The response threads back down the nested-`ask` return stack to the origin, whose
+   `awaitingInput` (ADR 68) resolves. Correlation, idempotency, and **interruptibility** (an origin
+   cancel/ttl interrupts the whole chain via `Fiber.join`) are the primitive's, not ours.
 
-Interception is **default-off**: a harness with no registered handler for a payload class simply
-forwards. So with no ancestor intercepting, the chain **behaves like direct-to-client**, only
-preserving the *seam*. (See §Bubble vs direct.)
+Interception is **default-off**: a harness with no handler for a payload class just forwards. With
+no ancestor intercepting, the chain **behaves like direct-to-client**, preserving only the *seam*.
+(See §Bubble vs direct.)
+
+**Timeout.** `ask` defaults to 30s — wrong for a human-in-the-loop elicit. Escalation asks use a
+long/unbounded timeout governed by the origin's `ttl`/cancel, not a 30s spurious failure.
+
+**Runtime boundary.** Nested `ask` works **within one runtime** (`LocalInbox` is an in-process
+fiber registry). A **forked child** task has a *separate* inbox — so T1 (in-process) is trivial
+nested-`ask`, and the **cross-process child** case (T2) needs an IPC bridge from the child's
+escalation origin to the parent's inbox. A `ClusterInbox` extends the same `ask` across nodes (T3).
 
 ### The escalation edge is the spawn lineage, NOT the structural parent — load-bearing
 
@@ -161,6 +171,9 @@ resolves. Chain of responsibility gives this for free — a node refusing is jus
   escalation-parent is the robust mechanism; the downward handle stays a control ref (cancel/await).
 - **Letting a detached task elicit.** No live chain → a silent hang. Made a typed error; `detached`
   means non-interactive.
+- **A bespoke escalation envelope + manual origin-reply-address threading across hops.** The first
+  draft of this ADR did this; it's redundant. Nested `inbox.ask` already composes the recursion
+  AND the return path — the `ask` return-value stack is the reply route. Deleted.
 
 ## Open questions
 
