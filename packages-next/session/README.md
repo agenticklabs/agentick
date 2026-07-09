@@ -69,6 +69,13 @@ via `ctx.elicit` (whether dispatched in-process or via MCP server).
 Adopter code using `await session.elicit.text(...)` is the canonical
 shape; reach for the raw protocol only when the sugar is too narrow.
 
+This session is also the **escalation terminal** for input requests that
+originate deeper in the ownership tree: a long-running task's `ctx.elicit`
+(and, once ADR 69 T2 lands, a spawned sub-agent's) escalates up the
+spawn lineage as a nested `inbox.ask` and is resolved here against the
+real client — or forwarded to this session's own spawner if it has one.
+Adopters don't wire this; it's handled in `handleMessage`. See ADR 69.
+
 ```ts
 // 90% case — sugar
 const name = await session.elicit.text("Your name?");
