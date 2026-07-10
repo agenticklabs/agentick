@@ -6,7 +6,7 @@
 
 **All framework-internal operations carry one Effect fiber, threaded start-to-finish, through a single process.** Harness-to-harness calls *compose* Effects (`yield*`) instead of each running its own `runPromise` root. `runPromise` happens only at true edges: the public/wire API, and each node's inbound message handler. The fiber breaks **only** at process/node boundaries (cluster), where it is stitched by W3C trace context — never incidentally.
 
-**Edges are native JavaScript** — `Promise`, plain objects, `AsyncIterable` — so non-Effect users need zero Effect knowledge. **And they are dual-typed**: Effect users get the composable Effect too, via a spike-validated form (below). The single-object "both an Effect and a Promise" is **impossible** (proven — it hard-crashes `runPromise`); the viable dual is a lazy thenable wrapper that carries the Effect as `.effect`, or explicit twins.
+**Edges are native JavaScript** — `Promise`, plain objects, `AsyncIterable` — so non-Effect users need zero Effect knowledge. **And they are dual-typed** via **two layered surfaces**, not one dual object: the Effect surface is primary (the spine's internal protocols already return Effects), and the native-JS surface is *derived* from it (`runPromise` at the edge). Effect users reach the Effect twin under a **`.fx` namespace** (`session.send(...)` → `Promise`; `session.fx.send(...)` → `Effect`). The single-object "both an Effect and a Promise" is **impossible** (spike-proven — eager-Promise vs lazy-Effect is an inherent fork; the thenable form hard-crashes `runPromise`).
 
 Telemetry, native `parentOpId` propagation, structured interruption, and ADR 76's middleware-context all **fall out** of the intact spine — they are not separate features. Telemetry was only ever a *symptom* of the broken tree.
 
@@ -45,18 +45,25 @@ The callee reference is either a **local impl** or a **remote proxy**, both expo
 
 So the tree spans exactly one process and breaks exactly at node boundaries. Cluster is the *less-likely* path (the local fast path is the common, well-optimized one) but is designed-in, not bolted-on.
 
-### 3. Dual-typed edges (native-JS primary, Effect twin) — spike-validated
+### 3. Dual-typed edges — two layered surfaces under a `.fx` namespace
 
-Public/wire methods return **native JS** (`Promise` for one-shot, `AsyncIterable` for streams, plain objects for data). Effect users get the composable Effect too. **The form matters — the spike settled it:**
+The dream of "one object that is both an `await`-able Promise and a `yield*`-able Effect" is not merely hard — it is **semantically incoherent**, and the spike proved it. Native `await` wants an **eager** Promise (work started, awaiting a result); Effect composition wants a **lazy** description (nothing has run). One object cannot be both, which is exactly why Effect itself is Effect-primary and makes you leave Effect-land explicitly with `runPromise`. The spike's three attempts:
 
-| Form | Result |
+| Single-object form | Result |
 | --- | --- |
-| One object that *is* an Effect **and** thenable | ❌ **Hard-crashes** `runPromise` — Promise-resolution *adopts* thenables and Effect's runtime re-enters `runPromise` infinitely (stack overflow, reproduced). |
-| Promise-primary, eager `runPromise` + `.effect` accessor | ❌ **Double-executes** for Effect users (eager run + their `yield*` run) — a side-effect bug. |
-| **Lazy wrapper: NOT an Effect; thenable that runs on `await`; carries the lazy Effect as `.effect`** | ✅ Single execution per consumer, `isEffect === false`, no crash. (v1 `ProcedurePromise` lineage.) |
-| Explicit twins (`op()` → Promise, `opEffect()` → Effect) | ✅ Bulletproof, less ergonomic. |
+| Is an Effect **and** thenable | ❌ **Hard-crashes** `runPromise` — Promise-resolution *adopts* thenables → Effect's runtime re-enters `runPromise` infinitely (stack overflow, reproduced). |
+| Promise-primary, eager `runPromise` + `.effect` | ❌ **Double-executes** for Effect users (eager run + their `yield*`) — a side-effect bug. |
+| Lazy thenable wrapper (`isEffect: false`) + `.effect` | ⚠️ Runs once per consumer and doesn't crash, **but** an Effect user who `await`s by habit runs the op as a **separate root** — silently leaving the fiber tree (no tracer, no interruption, no context). A silent correctness footgun — unacceptable in a framework. |
 
-**Decision:** the edge returns the **lazy-wrapper dual** by default — `await result` runs it (native path); `yield* result.effect` composes it (Effect path). **Contract:** Effect users compose via `.effect` and do **not** `await` (awaiting eagerly runs a separate root). The wrapper is **never** an Effect (must satisfy `isEffect === false`) — that invariant is what prevents the crash. Explicit twins remain the escape hatch where the wrapper's contract is too subtle.
+**Decision — don't use one object. Ship two layered surfaces:**
+
+- **Effect surface is primary.** Post-spine, internal protocol methods already return Effects; Effect users compose them directly — idiomatic, zero magic.
+- **Native-JS surface is derived, not duplicated.** A Proxy/codegen projection wraps each Effect-returning method as `(input) => runtime.runPromise(coreEffect(input))`. Clean `Promise`s; no Effect knowledge required.
+- **Presentation: a `.fx` namespace.** `session.send(...)` → `Promise`; `session.fx.send(...)` → the Effect twin. One discoverable rule — *everything under `.fx` is the Effect-typed mirror of the API* — and `.fx` is a Proxy over the same core, so it's free to maintain. (Suffix `sendEffect()` is the alternative; `.fx` groups the surface and scales cleaner.)
+
+Each surface has exactly **one** meaning, so there is no silent-await footgun and no thenable crash: call the plain method, get a Promise; reach through `.fx`, get an Effect. This only touches the handful of *public* entry points — the entire internal spine is Effect regardless.
+
+**Streaming note:** the thenable trick never applied to streams anyway; the streaming edge is a native `AsyncIterable` with an `Effect.Stream` twin under the same `.fx`.
 
 ### 4. Interruption + error channels (the semantics that *change*)
 
@@ -90,20 +97,19 @@ The confidence is *earned by method*, not assumed:
 
 - **ALS runtime propagation** — masks the broken tree; fails the "better than Effect" bar.
 - **~80-edit runtime threading** — throwaway once the tree is mended.
-- **Thenable-Effect single-object dual** — spike-proven `runPromise` crash.
-- **Promise-eager + `.effect`** — double-executes side-effecting operations.
+- **Any single-object dual.** Thenable-Effect → spike-proven `runPromise` crash; Promise-eager+`.effect` → double-executes; lazy-wrapper → silent-await footgun (Effect user `await`s → op leaves the fiber tree). Eager-Promise vs lazy-Effect is inherent; two layered surfaces (`.fx`) is the coherent answer.
 - **Big-bang all-harnesses conversion** — drops migration confidence from high to moderate; the whole point is incremental dual-path.
 
 ## Confidence
 
 - **Design correctness:** HIGH.
 - **Edge = native-JS, contract unchanged → nothing external breaks:** HIGH.
-- **Dual-typed edge (lazy-wrapper form):** HIGH — spike-validated single-execution, no crash.
+- **Dual-typed edge (two layered surfaces, `.fx` namespace):** HIGH — each surface has one meaning; no crash, no double-run, no silent-await footgun. The native facade is a mechanical `runPromise` projection of the Effect core.
 - **Migration doesn't break things:** HIGH *with* the safeguards above; MODERATE if rushed/big-banged. The loop `Effect.gen` rewrite is the concentrated risk; interruption semantics change for the better and need explicit tests.
 
 ## Open questions
 
-1. **Dual form per surface.** Lazy-wrapper everywhere, or explicit twins for the subtle cases (streaming `AsyncIterable` + Effect `Stream`)? Lean: lazy-wrapper for one-shot; a `Stream`/`AsyncIterable` twin for streams (the thenable trick doesn't apply to iterables).
+1. **`.fx` mechanics.** Is `.fx` a hand-written twin object, a `Proxy` over the core protocol, or codegen from the protocol type? Lean: a `Proxy` derived once from the Effect-returning protocol, so a new method appears on both surfaces automatically. Pin during S1.
 2. **Spine extent.** Does S1 stop at tool-executor, or also pull in reconciler/timeline immediately? Lean: stop at the execution spine; add others per-need.
 3. **Interruption contract.** Exact semantics when a composed sub-operation is interrupted mid-flight (partial state applied?) — pin during S1 with tests.
 4. **`runHarnessProtocol` fate.** Becomes the edge-only runner (with the tracer-provide), or is inlined at each edge? Lean: keep it as the single edge runner, now Layer-aware.
