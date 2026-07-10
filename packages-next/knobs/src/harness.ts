@@ -64,7 +64,14 @@ import type {
   OperationJournal,
 } from "@agentick/spec-next";
 import { HandlerError } from "@agentick/spec-next";
-import { createKeyedNotifier, type KeyedNotifier } from "@agentick/pubsub-next";
+import {
+  changeKind,
+  createChangeNotifier,
+  createKeyedNotifier,
+  type ChangeEvent,
+  type ChangeNotifier,
+  type KeyedNotifier,
+} from "@agentick/pubsub-next";
 import { ulid, type JsonPatchOp } from "@agentick/utils-next";
 import {
   KNOBS_STATE_CHANNEL_FQN,
@@ -81,6 +88,16 @@ export class KnobsHarness extends BaseHarness<"knobs"> implements KnobsHarnessPr
   private readonly values = new Map<string, KnobPrimitive>();
   private readonly descriptors = new Map<string, KnobRegistration>();
   private readonly notifier: KeyedNotifier = createKeyedNotifier();
+
+  /**
+   * The notify seam (ADR 75): typed push carrying the delta. Distinct from
+   * `notifier` (bare render pings) — mutation sites emit a semantic
+   * `ChangeEvent` here; projections (the StateDelta channel wired in the
+   * constructor, and future timeline / AG-UI projections) subscribe via
+   * {@link onChange}. The mutation logic stays ignorant of any specific
+   * projection.
+   */
+  private readonly changes: ChangeNotifier<KnobPrimitive> = createChangeNotifier<KnobPrimitive>();
 
   /**
    * Optional read-only fallback LAYER (ADR 34 cascade). Reads fall
@@ -154,6 +171,11 @@ export class KnobsHarness extends BaseHarness<"knobs"> implements KnobsHarnessPr
       scope,
       handler: (i: KnobsDispatchInput) => Effect.sync(() => this.executeDispatch(i)),
     });
+    // Wire the StateDelta (ADR 73) projection onto the change stream:
+    // mutation sites emit a semantic ChangeEvent; this projection derives the
+    // JSON-Patch op. Decoupled so additional projections attach to the same
+    // stream without touching the mutation logic.
+    this.changes.onChange((change) => this.projectStateDelta(change));
   }
 
   // ─────────── Sync surface ───────────
@@ -199,6 +221,22 @@ export class KnobsHarness extends BaseHarness<"knobs"> implements KnobsHarnessPr
     return this.notifier.subscribeAll(listener);
   }
 
+  /**
+   * Subscribe to the typed change stream (ADR 75 notify seam). Each set /
+   * register / dispatch that mutates a cell emits a `ChangeEvent`
+   * (`{ key, value?, prev? }`) carrying the delta. Read-only and
+   * fire-and-forget — an observer cannot affect the mutation. This is the
+   * seam projections (StateDelta, timeline events, AG-UI) attach to;
+   * `subscribe` above is the bare render-ping twin.
+   *
+   * TODO(notify-seam): promote to `KnobsHarnessProtocol` when a
+   * protocol-typed (cross-package) projection needs it — class-only until a
+   * consumer exists.
+   */
+  onChange(listener: (change: ChangeEvent<KnobPrimitive>) => void): Unsubscribe {
+    return this.changes.onChange(listener);
+  }
+
   // ─────────── Snapshot / restore ───────────
 
   exportSnapshot(): Readonly<Record<string, KnobPrimitive>> {
@@ -241,6 +279,22 @@ export class KnobsHarness extends BaseHarness<"knobs"> implements KnobsHarnessPr
   }
 
   /**
+   * The single StateDelta subscriber on the change stream (wired in the
+   * constructor). Derives the JSON-Patch op from the change's value/prev
+   * presence via `changeKind`: add → `add`, update → `replace`, remove →
+   * `remove` (knobs don't remove today, but the mapping is total).
+   */
+  private projectStateDelta(change: ChangeEvent<KnobPrimitive>): void {
+    const path = knobPointer(change.key);
+    const kind = changeKind(change);
+    const op: JsonPatchOp =
+      kind === "remove"
+        ? { op: "remove", path }
+        : { op: kind === "add" ? "add" : "replace", path, value: change.value as KnobPrimitive };
+    this.emitStateDelta([op]);
+  }
+
+  /**
    * Fan a state frame onto the substrate channel. Fire-and-forget, bus-only
    * (`phase: "delta"` is unjournaled per the default policy) — mirrors the
    * TasksHarness channel fan. Knob state is low-frequency, so we publish
@@ -276,16 +330,19 @@ export class KnobsHarness extends BaseHarness<"knobs"> implements KnobsHarnessPr
   // ─────────── Internals ───────────
 
   private applySet(input: KnobsSetInput): void {
-    const existed = this.values.has(input.id);
+    const prev = this.values.get(input.id);
     this.values.set(input.id, input.value);
     this.listCache = null;
     this.fireListeners(input.id);
-    // Per-id change → a single JSON-Patch op (no document diff needed —
-    // the change granularity already IS per-key). `add` for a new id,
-    // `replace` for an existing one.
-    this.emitStateDelta([
-      { op: existed ? "replace" : "add", path: knobPointer(input.id), value: input.value },
-    ]);
+    // Emit the semantic change; the constructor-wired StateDelta projection
+    // derives the JSON-Patch op. Prev present ⇒ update (existing id); absent
+    // ⇒ add (new id) — KnobPrimitive never holds `undefined`, so prev
+    // presence is an exact existed-check.
+    this.changes.emitChange(
+      prev !== undefined
+        ? { key: input.id, value: input.value, prev }
+        : { key: input.id, value: input.value },
+    );
   }
 
   private applyRegister(input: KnobsRegisterInput): void {
@@ -295,10 +352,10 @@ export class KnobsHarness extends BaseHarness<"knobs"> implements KnobsHarnessPr
     if (applied) this.values.set(input.id, defaultValue);
     this.listCache = null;
     this.fireListeners(input.id);
-    // A registration emits a delta only when it seeds a value; a
-    // descriptor-only registration changes no cell, so no state frame.
-    if (applied) {
-      this.emitStateDelta([{ op: "add", path: knobPointer(input.id), value: defaultValue }]);
+    // A registration is a change only when it seeds a value (an `add`); a
+    // descriptor-only registration mutates no cell → no change event.
+    if (applied && defaultValue !== undefined) {
+      this.changes.emitChange({ key: input.id, value: defaultValue });
     }
   }
 

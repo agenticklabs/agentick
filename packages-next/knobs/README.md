@@ -152,6 +152,8 @@ sets every settable knob in that group atomically after a shared type-check.
   Construct with `(scopeId, journal, bus, inbox, parentLayer?)`.
   - Sync reads: `get(id)` · `has(id)` · `list()` · `subscribe(id, fn)` ·
     `subscribeAll(fn)`.
+  - Notify seam (ADR 75): `onChange(fn)` — typed push carrying the delta
+    (`ChangeEvent<KnobPrimitive>`), the source the state-sync channel projects from.
   - Async commands: `set({ id, value })` · `register({ id, descriptor })` ·
     `dispatch(input)` (the `set_knob` pipeline → `ContentBlock[]`).
   - Snapshot: `exportSnapshot()` / `importSnapshot(values)` round-trip the
@@ -236,6 +238,15 @@ codec over this channel instead of a bespoke document diff. Crucially, **delta
 generation needs no diffing** — the harness already notifies per-id, so a changed
 knob _is_ a single `add`/`replace` op. Only the far side applies the patch.
 
+**The channel is a projection over the `onChange` notify seam (ADR 75), not a
+bespoke mechanism.** Each mutation emits a typed `ChangeEvent`
+(`{ key, value?, prev? }`) on a `ChangeNotifier` (`@agentick/pubsub-next`); the
+JSON-Patch channel is one subscriber that derives the op via `changeKind`. The
+mutation logic is ignorant of the projection, so additional projections (timeline
+`event` entries, AG-UI) attach to the same stream without touching it. The seam is
+exposed as `harness.onChange(listener)` — the push twin of the bare `subscribe`
+render-ping.
+
 ```ts
 import { KNOBS_STATE_CHANNEL_FQN, type KnobsStateFrame } from "@agentick/knobs-next";
 import { applyJsonPatch } from "@agentick/utils-next";
@@ -287,6 +298,10 @@ Extracted per ADR 26 Step 2, modularized per ADR 27. Green.
   `stateSnapshotFrame()` reads without advancing the version, RFC 6901 id
   escaping round-trips, and the **money test** — a snapshot seed plus applied
   deltas reconstruct `exportSnapshot()`.
+- `src/__tests__/change-stream.spec.ts` (5 tests) — the `onChange` notify seam:
+  add (no prev) / update (with prev) on `set`, `add` on defaulted `register` /
+  none for descriptor-only, dispatch rides `applySet`, unsubscribe, and multiple
+  projections on one stream (the channel is a third, internal subscriber).
 - `src/__tests__/integration-with-reconciler.spec.tsx` (10 tests) — `useKnob`
   descriptor registration, momentary reset at execution end, `<Knobs />`
   default rendering + render prop, and reactivity (external `set` re-renders
