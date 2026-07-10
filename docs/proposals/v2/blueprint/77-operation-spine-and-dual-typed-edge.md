@@ -65,6 +65,10 @@ Each surface has exactly **one** meaning, so there is no silent-await footgun an
 
 **Streaming note:** the thenable trick never applied to streams anyway; the streaming edge is a native `AsyncIterable` with an `Effect.Stream` twin under the same `.fx`.
 
+**Implementation direction — `.fx` is the real impl; the plain method is a `runPromise` facade.** `command()` already has this exact shape internally: it builds the operation Effect (`run = (i) => this.runOperation(op, handler)`) and returns `(i) => runHarnessProtocol(run(i))`. The refactor *exposes what's already there* — `run` becomes `harness.fx.<name>` (the canonical Effect, the real logic), and the existing wrapper stays as `harness.<name>` (the derived `runPromise` facade). `.fx` is a `Proxy` over the command registry's Effect side; the plain surface is a `PromiseView<Protocol>` over the same declarations. One declaration → both surfaces, no drift.
+
+**The load-bearing rule:** *internal* harness-to-harness callers MUST use `.fx` (`yield* other.fx.op(i)`) to stay in one fiber tree. The plain `harness.op(i)` Promise method is an **edge facade only** — calling it internally does a `runPromise` mid-tree and re-opens the ~40-roots wound this ADR mends. So: `.fx` = the program (composition — internal + Effect users); `harness.op()` = run the program here, at the edge. The consumption style *is* the fiber-tree boundary.
+
 ### 4. Interruption + error channels (the semantics that *change*)
 
 - **Interruption becomes structured.** With one tree, aborting a request interrupts all nested operations natively (Effect fibers). This is *better* than today's ad-hoc `loop.abort`, but it is a **behavior change** — code that assumed a nested op couldn't be interrupted must be audited. Explicitly tested.
