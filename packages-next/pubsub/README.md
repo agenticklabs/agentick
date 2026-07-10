@@ -2,13 +2,16 @@
 
 Local observer / pub-sub primitives for Agentick v2.
 
-Consolidates ~16 hand-rolled `Set<() => void>` / `Map<K, Set<listener>>` fan-out implementations across harnesses, bridges, transports, and reconciler test doubles into one canonical set. Three layered factories cover every fan-out shape the v2 framework needs:
+Consolidates ~16 hand-rolled `Set<() => void>` / `Map<K, Set<listener>>` fan-out implementations across harnesses, bridges, transports, and reconciler test doubles into one canonical set. The factories cover every fan-out shape the v2 framework needs:
 
 | Primitive                            | Shape                                           | Replaces                                                                                                          |
 | ------------------------------------ | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | `createNotifier<T = void>()`         | Single-channel observer                         | Bare `Set<() => void>` (timeline, sandbox, subscriptions, session-state, transport state, client state)           |
 | `createKeyedNotifier<K, T = void>()` | Keyed observer + optional wildcard channel      | `Map<K, Set<listener>> + Set<wildcard>` (knobs, state, skills, reconciler test fakes, lifecycle store, MCP tasks) |
+| `createChangeNotifier<V, K>()`       | The **notify** seam — typed push carrying the delta | Per-mutation value-capture at projection sites (StateDelta, AG-UI steps, timeline events)                    |
 | `createLocalPubSub<T>()`             | Effect.Stream-based fan-out with drain-on-close | Hand-rolled `Set<Queue<T>>` async-iterable fan-out (tasks fan-out is the current consumer)                        |
+
+**Pull vs push.** `createNotifier` / `createKeyedNotifier` are *pull* — "something changed, re-read" (the `useSyncExternalStore` render pattern). `createChangeNotifier` is *push* — it hands the consumer the delta (`{ key, value?, prev? }`) so it can project without re-reading and diffing. It is the read-only *notify* seam of the operation model (ADR 76): observers are fire-and-forget and cannot affect the emitting operation.
 
 The package depends only on `effect`. No coupling to harness, spec, or reconciler — pubsub-next sits at the same layer as `@agentick/utils-next` in the dep graph.
 
@@ -50,6 +53,25 @@ await t.notifyAsync("foo", event); // serial; errors propagate
 ```
 
 Buckets auto-collect on the last unsubscribe — long-lived harnesses don't leak `Map` slots.
+
+### `createChangeNotifier` — the notify seam (typed push)
+
+```ts
+import { createChangeNotifier, changeKind } from "@agentick/pubsub-next";
+
+const changes = createChangeNotifier<number>(); // V = value type
+
+// Consumers project the delta — no re-read, no diff:
+changes.onChange((c) => stateDelta.push({ op: changeKind(c), path: `/${c.key}`, value: c.value }));
+
+// The producer (harness) supplies the full delta at the mutation site,
+// where it already knows `prev`:
+const prev = values.get("budget");
+values.set("budget", 50);
+changes.emitChange({ key: "budget", value: 50, prev });
+```
+
+`emitChange` fans out synchronously and error-isolated; a throwing observer cannot break the producer or sibling observers (the outcome is committed before notify). The notifier is a stateless pipe — it holds no values and computes no `prev`. `changeKind(c)` derives the mechanical `add`/`update`/`remove` from value/prev presence for CRUD consumers (JSON-Patch codecs, wire projections).
 
 ### `createLocalPubSub` — Stream-based
 
@@ -97,6 +119,17 @@ await bus.close();
 | `wildcardCount`            | Wildcard subscriber count.                             |
 | `size`                     | Total listeners (all keys + wildcards).                |
 | `clear()`                  | Drop every subscriber.                                 |
+
+### `createChangeNotifier<V, K = string>(): ChangeNotifier<V, K>`
+
+| Method                 | Description                                                                        |
+| ---------------------- | --------------------------------------------------------------------------------- |
+| `onChange(listener)`   | Subscribe to every change (`ChangeEvent<V, K>`). Read-only, fire-and-forget.       |
+| `emitChange(change)`   | Emit a delta. Producer supplies `key` + `value?` + `prev?`; sync, error-isolated.  |
+| `size`                 | Diagnostic listener count.                                                          |
+| `clear()`              | Drop every listener.                                                                |
+
+Also exported: `ChangeEvent<V, K>` (the delta type) and `changeKind(change): "add" | "update" | "remove"` (pure CRUD derivation). Presence convention: a side is *absent* when its property is `undefined` — producers omit the side that doesn't apply.
 
 ### `createLocalPubSub<T>(): LocalPubSub<T>`
 
@@ -167,7 +200,8 @@ real testing need: asserting call patterns from collaborators.
 ## Status
 
 - Layer 1 / Layer 2 / Layer 3 — landed
-- Spy doubles for all three primitives — landed under `/testing`
+- `createChangeNotifier` (the notify seam, ADR 75) — landed; consumers (StateDelta refit, timeline `event` projection) pending
+- Spy doubles for the pull/stream primitives — landed under `/testing`
 - 16 sweep sites migrated across knobs, state, skills, timeline, sandbox, subscriptions, session-state, client, transport-next, mcp, reconciler (in-memory data bridge, lifecycle store, three test bridges)
 
 ## Roadmap & known gaps
@@ -180,5 +214,6 @@ real testing need: asserting call patterns from collaborators.
 
 - `createNotifier` — subscribe/notify/unsubscribe semantics, listener-error isolation, mid-iteration unsubscribe, typed-payload variant — `src/__tests__/notifier.spec.ts`
 - `createKeyedNotifier` — keyed dispatch, wildcards, `notifyAll`, `notifyAsync` error propagation, auto-collection of empty buckets, diagnostic `count`/`wildcardCount`/`size` — `src/__tests__/keyed-notifier.spec.ts`
+- `createChangeNotifier` — full-delta fan-out, statelessness (no producer-injected `prev`), unsubscribe isolation, fire-and-forget error isolation, mid-fan-out subscribe snapshotting, `size`/`clear`; `changeKind` add/update/remove derivation — `src/__tests__/change-notifier.spec.ts`
 - `createLocalPubSub` — multi-subscriber fan-out, subscribe-time filter, `close()` drain semantics (slow subscriber receives every event), idempotent close — `src/__tests__/local-pubsub.spec.ts`
 - `spyNotifier` / `spyKeyedNotifier` / `spyLocalPubSub` — call recording, listener delivery preserved, `reset()` semantics, typed-payload + void variants — `src/__tests__/testing-spies.spec.ts`
