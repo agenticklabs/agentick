@@ -18,9 +18,13 @@ Two foundational things; everything else is a consequence.
    change-event carrying the delta**. We add `onChange` to `KeyedNotifier`. This is
    the **notify** seam — the read-only twin of the *intercept* (middleware, ADR 76)
    and *commit* (factory-slot) seams the framework already has.
-2. **The `event` timeline archetype.** The timeline gains a first-class
-   `kind:"event"` entry, and `"event"` is removed from `MessageRole` — fixing an
-   axis bug (an event has no *voice*; it belongs on the `kind` axis, not `role`).
+2. **The `event` timeline archetype.** The **persisted** timeline
+   (`TimelineEntry`) gains a first-class `kind:"event"` entry — sibling to the
+   message and the ADR 53 turn boundary — that *renders to* a message at compile.
+   `"event"` is retired from **both** role unions (`MessageRole` +
+   `SessionMessageRole`), fixing an axis bug (an event has no *voice*; it belongs on
+   `kind`, not `role`) via a real migration, `visibility` serving the
+   out-of-model-context case.
 
 The consequences, both shipped as overridable defaults: a change-event **may**
 project into the timeline as a `kind:"event"` outcome (opt-in per kind), and it
@@ -36,11 +40,13 @@ Two gaps surfaced while wiring StateDelta (ADR 73) and the AG-UI step projection
    "something changed," not *what*. StateDelta had to hand-capture the value at the
    mutation site because the notifier couldn't carry it. Every projection (wire
    delta, step, timeline entry) wants the delta and the substrate can't hand it over.
-2. **The `event` axis is confused.** `MessageRole` is `"user" | "assistant" |
-   "system" | "tool" | "event" | (string&{})`. `"event"` is not a *voice* — nobody
-   *speaks* an event, it *happens*. It belongs on `kind` (`"message" | "section"`
-   today). The stray role is vestigial (nothing produces it — verified), so this is
-   a clean fix, not a migration.
+2. **The `event` axis is confused.** Both role unions — `MessageRole`
+   (rendered-tree) and `SessionMessageRole` (persisted) — carry `"event"`. An event
+   is not a *voice*: nobody *speaks* an event, it *happens*. It belongs on the `kind`
+   axis, not `role`. `"event"` is a *crude existing mechanism* ("state events that
+   flow through the timeline without participating in model context," paired with
+   `visibility`), with reconciler-react test usages and README-flagged deferred debt
+   — so retiring it is a **migration** (Decision 2), not a clean deletion.
 
 A third, softer gap follows: once a harness *can* emit a typed change, there is no
 principled seam for promoting a system fact (a task completing, a host setting a
@@ -57,7 +63,8 @@ Steel-manning before adding anything ([[feedback_steelman_the_null_hypothesis]])
   into the model's context; only a timeline entry can. Necessary, not sufficient.
 - *"Keep `role:"event"` — it works."* It type-checks but it's a category error: a
   role is a speaker, an event has none, and it forces every adapter to answer "what
-  voice is an event?" Fixing the axis is cheaper than perpetuating the confusion.
+  voice is an event?" It's already README-flagged as deferred debt. Fixing the axis
+  (a `kind`, with `visibility` for the out-of-context case) beats perpetuating it.
 - *"Auto-dump all harness changes into the timeline."* The ES-bloat ADR 49 forbids:
   a knob at `5` after 100 sets needs *one live render of `5`*, not 100 outcome
   entries. Current-state churn renders live from the store; only discrete *outcomes*
@@ -117,37 +124,73 @@ projection.
 
 ### 2. The `event` timeline archetype
 
-Split the two axes cleanly:
+> **Correction (2026-07-10).** An earlier draft of this decision claimed
+> `role:"event"` was vestigial and sketched the archetype against the
+> rendered-tree union. Both were wrong (found on survey before implementing).
+> The corrected model is below.
+
+The spec has **two** entry models; the fix touches the persisted one:
+
+- **Rendered-tree** — `ContextEntry = MessageEntry | SectionEntry`
+  (`data/entries.ts`): the compiler's model-input projection. `kind ∈ {message,
+  section}`, uses `MessageRole`.
+- **Persisted timeline** — `TimelineEntry = MessageTimelineEntry | TurnBoundaryEntry`
+  (`protocol/session-harness.ts`): the recovery-bearing log (ADR 49). `kind ∈
+  {message, boundary}`, uses `SessionMessageRole`. This union **already has a
+  non-message kind** — the ADR 53 turn boundary — so the archetype has precedent.
+
+`role:"event"` is **not** vestigial. `SessionMessageRole` documents it as "app-level
+state events that flow through the timeline without participating in model context,"
+paired with `MessageTimelineEntry.visibility` (`model | observer | log`). It has
+reconciler-react test usages and is already flagged as deferred debt in the timeline
+README. It is a *crude existing mechanism*, and this ADR **replaces** it — a
+migration, not a deletion.
+
+**The event is a persisted-timeline kind that RENDERS to a message.** Add a third
+`TimelineEntry` kind, sibling to `MessageTimelineEntry` / `TurnBoundaryEntry`,
+following their nested-domain-object convention (`message:` / `boundary:` →
+`event:`):
 
 ```ts
-type MessageRole = "user" | "assistant" | "system" | "tool" | (string & {}); // "event" REMOVED
+// "event" REMOVED from BOTH role unions:
+type SessionMessageRole = "user" | "assistant" | "system" | "tool" | (string & {});
+type MessageRole        = "user" | "assistant" | "system" | "tool" | (string & {});
 
-interface MessageEntry { kind: "message"; role: MessageRole; content; … }   // has a voice
-interface EventEntry {                                                       // has NO voice
+interface EventTimelineEntry {
   kind: "event";
-  eventKind: string;                   // open, namespaced: "knobs:changed", "tasks:completed"
-  content: readonly ContentBlock[];    // semantic rendering (from the projection)
-  payload?: unknown;                   // the structured outcome — not a frozen string (ADR 49)
-  source?: EventSource;                // "model" | "host" | "remote" | (string&{})
-  timestamp: number;                   // an event intrinsically happened at T
-  renderedWith?: FormatterRef;         // per-entry format override (existing seam)
-  id?: string;
-  metadata?: MessageMetadata;
+  event: {
+    id: string;
+    eventKind: string;                  // open, namespaced: "knobs:changed", "tasks:completed"
+    content: readonly ContentBlock[];   // semantic rendering (from the projection)
+    payload?: unknown;                  // the structured outcome — not a frozen string (ADR 49)
+    source?: EventSource;               // "model" | "host" | "remote" | (string&{})
+    renderedWith?: FormatterRef;        // per-entry format override (the Decision 4 seam)
+  };
+  ts: number;                           // when it happened (ISO ms — timeline convention, not `timestamp`)
+  visibility?: "model" | "observer" | "log";  // SAME control as MessageTimelineEntry
+  tags?: readonly string[];
+  metadata?: SessionMessageMetadata;
 }
-interface SectionEntry { kind: "section"; … }
 ```
 
-`eventKind` is an **open** namespaced string (`"<harness>:<verb>"`) — the same
-extension posture as roles. The entry stores the **structured outcome** (`payload`),
-not a rendered string, so the ES fold stays a deterministic re-render and an old
-event can be re-projected differently later.
+Crucially, the event does **NOT** get a parallel entry in the rendered-tree
+(`entries.ts`). At compile it **renders to a `MessageEntry`** (role `user` + the
+`<event>` envelope, Decision 4) — normalization stays a projection concern, and
+`renderedWith` on the *stored* event keeps re-projection deterministic (ADR 49:
+store the outcome, re-render by fold). `eventKind` is an **open** namespaced string
+(`"<harness>:<verb>"`), the same extension posture as roles.
 
-An `EventEntry` is a distinct archetype, not a roleless `MessageEntry` nor a
-timestamped `SectionEntry`: a **section** is *ambient current-state* (id-stable,
-re-rendered — the live todo list); an **event** is a *historical outcome* (a
-discrete thing that happened at T, folded into history). Different on the
-`voice? / historical? / ambient?` axes; the `kind` discriminator already exists to
-carry exactly this.
+An event is a distinct archetype from a **message** (no voice — it *happened*,
+nobody *spoke* it) and from a **section** (a section is *ambient current-state*,
+re-rendered live; an event is a *historical outcome* at `ts`). The `kind`
+discriminator carries exactly this; `role` is the wrong axis for it.
+
+**Migration (retiring `role:"event"`):** remove `"event"` from both `MessageRole`
+and `SessionMessageRole`; add `EventTimelineEntry` to the `TimelineEntry` union
+(+ its fold/render handling, mirroring the ADR 53 turn-boundary wiring); move the
+reconciler-react test usages and the timeline README's deferred-conflation note onto
+the new kind. The "flows through without entering model context" case is served by
+`kind:"event"` + `visibility`, not a magic role.
 
 ### 3. Projection — opt-in per kind, and the no-double-count test
 
@@ -242,7 +285,8 @@ answer / awaited result, ADR 68/69) is a separate, already-built mechanism and i
   double-books the semantic with `eventKind`. Primitive carries data; harness names
   the transition.
 - **Keep `role:"event"`.** Category error; forces adapters to answer an
-  unanswerable "what voice?" Fixed by the `kind` axis.
+  unanswerable "what voice?" Retired via `kind:"event"` + `visibility` — a
+  migration off both role unions, not a clean deletion.
 - **Auto-project every harness change.** ES-bloat (ADR 49); churn renders, not logs.
 - **`developer` role as the default carrier.** Non-portable (OpenAI-only) and
   semantically "instructions," not "a fact." `user` + envelope is the portable
@@ -275,7 +319,11 @@ answer / awaited result, ADR 68/69) is a separate, already-built mechanism and i
   first change-event routings.
 - `packages-next/spec/src/data/entries.ts` — `MessageEntry` / `SectionEntry` +
   `renderedWith: FormatterRef`.
-- `packages-next/spec/src/data/content-blocks.ts` — `MessageRole` (the `"event"`
-  value this ADR removes).
+- `packages-next/spec/src/data/content-blocks.ts` — `MessageRole`, and
+  `packages-next/spec/src/protocol/session-harness.ts` — `SessionMessageRole` +
+  `TimelineEntry` / `MessageTimelineEntry` / `TurnBoundaryEntry` (both role unions
+  drop `"event"`; the new `EventTimelineEntry` kind lands here, and `visibility`
+  serves the out-of-context case). Migration touches reconciler-react's
+  `content-blocks.spec.tsx` `role:"event"` usages + the timeline README note.
 - `packages-next/pubsub/src/change-notifier.ts` — the `ChangeNotifier` notify seam
   (`onChange` / `emitChange` / `changeKind`), sibling to `keyed-notifier.ts`. **BUILT.**
