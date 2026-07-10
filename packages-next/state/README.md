@@ -91,6 +91,10 @@ an unmount → remount of the component and a hibernate → resume of the sessio
   Construct with `(scopeId, journal, bus, inbox)`.
   - Sync reads: `get(key)` · `has(key)` · `list()` · `subscribe(key, fn)` ·
     `subscribeAll(fn)`.
+  - Notify seam (ADR 75): `onChange(fn)` — typed push carrying the delta
+    (`ChangeEvent<unknown>`): `set` → add/update, `delete` → remove. The push
+    twin of the bare `subscribe` render-ping; the source a future `state`
+    snapshot+delta channel projects from.
   - Async commands: `set({ key, value })` · `delete({ key })`.
   - Snapshot: `exportSnapshot()` / `importSnapshot(values)`.
 - **`withState(options?)`** — `SessionExtension` factory.
@@ -149,6 +153,11 @@ Extracted per ADR 26 Step 3a, modularized per ADR 27. Green.
   `list`), async commands (`set` / `delete`) through the Operation envelope,
   per-key + wildcard subscription fan, and snapshot round-trip firing
   subscribers on changed keys.
+- `src/__tests__/change-stream.spec.ts` (4 tests) — the `onChange` notify seam:
+  add (no prev) / update (with prev) on `set`, `remove` (value omitted) on
+  `delete` / no-op delete emits nothing, the `existed`-not-`prev!==undefined`
+  discriminator (`set(undefined)` then `set(value)` = add→update), and
+  unsubscribe / multiple projections on one stream.
 - `src/__tests__/integration-with-reconciler.spec.tsx` (4 tests) —
   `useSessionState` initial registration, non-overwrite on re-mount,
   persistence across unmount → remount when the bridge is reused, and

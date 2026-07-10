@@ -218,6 +218,14 @@ interface GateEntry {
 // Controller
 // ============================================================================
 
+// NOTE(notify-seam, ADR 75): GatesController deliberately owns NO
+// `ChangeNotifier`. A gate value IS a knob value — every engage/clear/latch
+// goes through `deps.knobs.set` → `KnobsHarness.emitChange`, so gate
+// transitions already surface on the knobs notify seam (`knobs.onChange`). A
+// gates-owned change stream would DOUBLE-EMIT the same fact. A projection that
+// wants gate transitions subscribes `knobs.onChange` and filters for the
+// gate-backing keys (the `GateEntry.notifier` here is the per-gate render-PING
+// for handle subscribers — the pull twin, not a second delta source).
 export class GatesController {
   private readonly deps: GatesControllerDeps;
   private readonly gates = new Map<string, GateEntry>();
