@@ -164,6 +164,18 @@ The relationship: **wire-compatible peer protocol** with overlapping but disjoin
 
 JSON-RPC inspectors (Postman, Bruno, Insomnia) work out of the box. OpenRPC schema generation is a separate effort (`@agentick/wire-openrpc-next`) — deferred; see Open Questions §6.
 
+### Rejected alternative — `@effect/rpc` as the wire
+
+Tempting, because the substrate is Effect end-to-end (`BaseHarness.runOperation` returns `Effect`, middleware is Effect, typed error channels flow through), and `@effect/rpc` offers schema-first method definitions, generated typed clients, `RpcMiddleware`, and streaming responses. If the agentick client and gateway were the *only* peers that ever spoke this wire, it would be a strong buy.
+
+They are not, and that decides it:
+
+1. **It abandons MCP envelope-parity — the entire point of choosing JSON-RPC 2.0.** `@effect/rpc` uses its own request/response framing and serialization protocol, *not* JSON-RPC 2.0. Adopting it forfeits "wire-compatible peer of MCP — same envelope, one endpoint hosts both" (this section's thesis). The parity is the load-bearing design win; `@effect/rpc` trades it away.
+2. **A wire protocol and `@effect/rpc` optimize opposite things.** `@effect/rpc` optimizes *Effect-client-to-Effect-server* ergonomics. A wire's job is *interoperability and independence from any one runtime* — it must be speakable by MCP hosts, AG-UI frontends, plain browser JS, JSON-RPC inspectors, other languages. `@effect/rpc`'s private format leaks Effect into every consumer; JSON-RPC 2.0 stays library-agnostic and inspectable out of the box.
+3. **Its benefits are separable from the library.** Typed client → derive from the gateway's method-contract registry (the proxy is already 1:1 with harness protocols). Wire middleware → the client extension pipeline (this ADR) / substrate middleware (ADR 76). Schema validation → Standard Schema. Streaming → the two MCP-aligned patterns above. We *steal `@effect/rpc`'s patterns* (schema-first defs, typed error channels, streaming) on top of JSON-RPC 2.0, without its envelope.
+
+`@effect/rpc` would be **one more wire, not THE wire — and a worse one**, because it costs the MCP parity. Door left cracked: `@effect/rpc` has pluggable `RpcSerialization`, so a JSON-RPC-2.0 serializer is *conceivable* for the native client↔gateway path — but it fights its request/response model against JSON-RPC method/params/id + our streaming-envelope semantics, for a payoff (typed client) obtainable more cheaply from our own registry. Not worth it.
+
 ### WebSocket subprotocol
 
 WebSocket transports advertise `agentick-rpc-v1` as a subprotocol per RFC 6455. Lets servers version-negotiate at the WS handshake. Wire-format-breaking changes bump the version suffix; client and server must agree before the first frame. (MCP-compatible servers also advertise `mcp` as a parallel subprotocol when they want to accept MCP clients.)
