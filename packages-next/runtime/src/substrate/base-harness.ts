@@ -174,6 +174,22 @@ export function mergeVerdict<R>(a: HandlerVerdict<R>, b: HandlerVerdict<R>): Han
 // MiddlewareChain — outer→inner composition
 // ============================================================================
 
+/**
+ * Compose an explicit middleware list around a body. First element is
+ * outermost. Shared by {@link MiddlewareChain.compose} and — DRAFT(ADR 76)
+ * — by `BaseHarness.runOperation` when it composes an inherited stack
+ * collected across construction-ancestors.
+ */
+export function composeMiddleware<I, R, E>(
+  list: readonly Middleware<I, R, E>[],
+  body: (input: I) => Effect.Effect<R, E, never>,
+): (input: I) => Effect.Effect<R, E, never> {
+  return list.reduceRight<(input: I) => Effect.Effect<R, E, never>>(
+    (next, mw) => (input) => mw(input, next),
+    body,
+  );
+}
+
 export class MiddlewareChain {
   private middlewares: Middleware<unknown, unknown, unknown>[] = [];
 
@@ -186,16 +202,21 @@ export class MiddlewareChain {
   }
 
   /**
+   * Snapshot the registered middleware in registration order (first =
+   * outermost). DRAFT(ADR 76): used to collect an inherited stack across
+   * construction-ancestors without mutating any chain.
+   */
+  snapshot(): Middleware<unknown, unknown, unknown>[] {
+    return this.middlewares.slice();
+  }
+
+  /**
    * Compose middlewares around a body. The first registered is outermost.
    */
   compose<I, R, E>(
     body: (input: I) => Effect.Effect<R, E, never>,
   ): (input: I) => Effect.Effect<R, E, never> {
-    const list = this.middlewares.slice() as Middleware<I, R, E>[];
-    return list.reduceRight<(input: I) => Effect.Effect<R, E, never>>(
-      (next, mw) => (input) => mw(input, next),
-      body,
-    );
+    return composeMiddleware(this.middlewares.slice() as Middleware<I, R, E>[], body);
   }
 }
 
@@ -393,6 +414,33 @@ export abstract class BaseHarness<
   }
 
   /**
+   * DRAFT(ADR 76) — structural middleware inheritance.
+   *
+   * Collect this harness's middleware plus every *construction*-ancestor's,
+   * ordered **root-outermost**: the returned list is
+   * `[...root.mw, …, ...parent.mw, ...this.mw]`. Recursion up the `parent`
+   * pointer (ADR 31) terminates at the first non-`BaseHarness` parent
+   * (top-of-tree). Collected **fresh per operation** so a late `use()` /
+   * unsubscribe on an ancestor is honored.
+   *
+   * Behavior-preserving: a root harness returns exactly its own chain; a
+   * child whose ancestors registered nothing returns exactly its own chain.
+   * The inherited stack only does something once an ancestor is `.use()`d.
+   *
+   * TODO(perf): walks the ancestor chain each op. Depth is ≈3–4
+   * (gateway→app→session→sub); memoize + invalidate-on-`use` only if a hot
+   * path profiles badly. See ADR 76 open question Q1.
+   */
+  protected ownAndInheritedMiddleware(): Middleware<unknown, unknown, unknown>[] {
+    // `parent` is typed `Parent | undefined`; narrow structurally. Protected
+    // access across instances of the same class is permitted within the class.
+    const inherited =
+      this.parent instanceof BaseHarness ? this.parent.ownAndInheritedMiddleware() : [];
+    // Ancestors are broader scope → outermost → first in the list.
+    return [...inherited, ...this.middleware.snapshot()];
+  }
+
+  /**
    * Substrate used by this harness. Set from positional defaults
    * (the parent's substrate, passed in as ctor args) unless an
    * override is supplied in `options.{bus,inbox,journal}`.
@@ -569,7 +617,14 @@ export abstract class BaseHarness<
             //    `Effect.withSpan` — which we found copies failures
             //    when it captures them, breaking error-reference
             //    identity in adopters' typed error channels.
-            const composed = this.middleware.compose<I, R, E>(body);
+            // DRAFT(ADR 76): compose the inherited stack (construction-
+            // ancestors' middleware, root-outermost) around this harness's
+            // own, around the body. Reduces to `this.middleware.compose(body)`
+            // when no ancestor registered middleware.
+            const composed = composeMiddleware<I, R, E>(
+              this.ownAndInheritedMiddleware() as Middleware<I, R, E>[],
+              body,
+            );
             return yield* composed(resolvedOp.input).pipe(
               Effect.tap((value) =>
                 this.publishTerminal(resolvedOp, scope, "succeeded", { result: value }),

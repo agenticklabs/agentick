@@ -1,98 +1,119 @@
-# ADR 75 — System events: the change-event primitive, the `event` timeline archetype, and opt-in projection
+# ADR 75 — The change-event primitive and the `event` timeline archetype
 
-**Status:** DRAFT 2026-07-09 (Fable, for Ryan). **Builds on:** ADR 49
+**Status:** DRAFT 2026-07-10 (Fable, for Ryan). **Builds on:** ADR 49
 (stores-not-snapshots — three planes, outcomes-not-commands, the timeline as the
-recovery-bearing ES log), ADR 63 (default-projection registry — the surfacing
-seam), ADR 68/69 (persistent tasks + escalation — `input_required` resume vs a
-*new* run), ADR 73 (StateDelta — the first bus/wire routing of a reactive
-change), the `KeyedNotifier` (`@agentick/pubsub-next`), the per-entry
+recovery-bearing ES log), ADR 73 (StateDelta — the first routing of a reactive
+change), ADR 76 (operation middleware — the *intercept* seam this ADR's *notify*
+seam is the twin of), the `KeyedNotifier` (`@agentick/pubsub-next`), the per-entry
 `renderedWith: FormatterRef` seam (`entries.ts`). **Governing principle:**
-[[feedback_capability_not_opinion]] — agentick builds agent harnesses; it ships
-*capability* + a good *overridable default*, never a hardcoded policy.
+[[feedback_capability_not_opinion]] — ship *capability* + an *overridable default*,
+never a hardcoded policy.
 
 ## TL;DR
 
-Three things, one spine. **(1)** Reactive harnesses today expose only *pull*
-reactivity — `subscribe(key, () => void)` → re-read. They lack *push* — a **typed
-change-event** that carries the delta. We add it as one small substrate primitive
-on `KeyedNotifier`. **(2)** A change-event can be routed to four sinks; two exist
-or are specced (StateDelta wire, AG-UI steps), two are new here: a **timeline
-`event` entry** and a **loop-wake**. **(3)** The timeline gains a first-class
-`kind:"event"` archetype (sibling to `message`) — fixing the current axis bug
-where `"event"` is a stray *role*. A harness op can *optionally* project into the
-timeline as an outcome the model reads; normalization to a provider is a formatter
-concern with a portable default (a `user` message in an `<event>` XML envelope).
-Nothing is imposed: every routing, format, and policy is an overridable default.
+Two foundational things; everything else is a consequence.
+
+1. **The change-event primitive.** Reactive harnesses expose only *pull* reactivity
+   today — `subscribe(key, () => void)` → re-read. They lack *push*: a **typed
+   change-event carrying the delta**. We add `onChange` to `KeyedNotifier`. This is
+   the **notify** seam — the read-only twin of the *intercept* (middleware, ADR 76)
+   and *commit* (factory-slot) seams the framework already has.
+2. **The `event` timeline archetype.** The timeline gains a first-class
+   `kind:"event"` entry, and `"event"` is removed from `MessageRole` — fixing an
+   axis bug (an event has no *voice*; it belongs on the `kind` axis, not `role`).
+
+The consequences, both shipped as overridable defaults: a change-event **may**
+project into the timeline as a `kind:"event"` outcome (opt-in per kind), and it
+renders to a provider through the **formatter** (default: a `user` message in an
+`<event>` envelope). Nothing else. There is **no framework wake policy** — a *run*
+is started by the adopter calling `send()`, including from an `onChange` handler.
 
 ## Problem
 
-Three gaps surfaced together while wiring StateDelta (ADR 73) and the AG-UI step
-projection:
+Two gaps surfaced while wiring StateDelta (ADR 73) and the AG-UI step projection:
 
 1. **No push reactivity.** `KnobsHarness.subscribe(id, () => void)` fires *bare* —
-   "something changed," not *what*. Building StateDelta forced value-capture at the
-   mutation site because the notifier couldn't carry the new value. Every
-   projection (wire delta, step, timeline entry, webhook) wants the delta, and the
-   substrate can't hand it over.
+   "something changed," not *what*. StateDelta had to hand-capture the value at the
+   mutation site because the notifier couldn't carry it. Every projection (wire
+   delta, step, timeline entry) wants the delta and the substrate can't hand it over.
 2. **The `event` axis is confused.** `MessageRole` is `"user" | "assistant" |
    "system" | "tool" | "event" | (string&{})`. `"event"` is not a *voice* — nobody
-   *speaks* an event, it *happens*. It belongs on the `kind` axis (`"message" |
-   "section"` today), not the `role` axis. The stray role value is vestigial
-   (nothing produces it — verified), so this is a clean fix, not a migration.
-3. **No seam for harness ops to reach the timeline.** A background task completing,
-   an elicitation being answered, or a *host* setting a knob out-of-band are facts
-   the model should learn on its next turn. Today they hit the bus (telemetry) and
-   the journal (audit) but never the timeline (the model's world). There is no
-   principled way to promote a system fact to a domain outcome — nor to decide
-   which facts, in what shape, or whether any should *wake* the agent.
+   *speaks* an event, it *happens*. It belongs on `kind` (`"message" | "section"`
+   today). The stray role is vestigial (nothing produces it — verified), so this is
+   a clean fix, not a migration.
+
+A third, softer gap follows: once a harness *can* emit a typed change, there is no
+principled seam for promoting a system fact (a task completing, a host setting a
+knob out-of-band) into a **domain outcome** the model reads on its next turn.
 
 ## Null hypothesis (why existing facts don't already suffice)
 
 Steel-manning before adding anything ([[feedback_steelman_the_null_hypothesis]]):
 
-- *"The bus already carries every change — just subscribe."* True for **observation**
+- *"The bus already carries every change — subscribe to it."* True for **observation**
   (a UI, a codec). But the bus is Transport-plane: bounded-retention, not
   recovery-bearing (ADR 49). A fact the **model** must fold over on its next render
-  has to live on the **Domain** plane (timeline). Bus-subscription cannot put a fact
-  into the model's context; only a timeline entry can. The bus is necessary, not
-  sufficient.
+  must live on the **Domain** plane (timeline). Bus-subscription cannot put a fact
+  into the model's context; only a timeline entry can. Necessary, not sufficient.
 - *"Keep `role:"event"` — it works."* It type-checks but it's a category error: a
-  role is a speaker, an event has none. It also forces every provider adapter to
-  answer "what voice is an event?" with no good answer (see Decision 4). Fixing the
-  axis is cheaper than perpetuating the confusion.
-- *"Auto-dump all harness changes into the timeline."* This is the ES-bloat ADR 49
-  explicitly forbids: a knob at `5` after 100 sets needs *one render of `5`*, not
-  100 outcome entries. Current-state churn is rendered live from the store; only
-  discrete *outcomes* belong in the recovery log. So the answer is not "dump" — it's
-  a **curated, opt-in projection**.
-- *"Todos/steps/wake each need their own subsystem."* No — they are all **routings
-  of one change-event**. The primitive is the change-event; the routings are
-  policies over it. Compose, don't multiply ([[feedback_compose_primitives_not_subsystems]]).
+  role is a speaker, an event has none, and it forces every adapter to answer "what
+  voice is an event?" Fixing the axis is cheaper than perpetuating the confusion.
+- *"Auto-dump all harness changes into the timeline."* The ES-bloat ADR 49 forbids:
+  a knob at `5` after 100 sets needs *one live render of `5`*, not 100 outcome
+  entries. Current-state churn renders live from the store; only discrete *outcomes*
+  belong in the recovery log. The answer is a **curated, opt-in projection**.
 
 ## Decision
 
-### 1. The change-event primitive — push reactivity on `KeyedNotifier`
+### 1. The change-event primitive — the `ChangeNotifier` notify seam
 
-`KeyedNotifier` gains a typed, payload-carrying variant alongside the existing bare
-one (which stays — it is correct for `useSyncExternalStore` render subscriptions):
+A **sibling primitive** in `@agentick/pubsub-next`, `ChangeNotifier<V>`, carries
+typed *push* reactivity alongside the existing *pull* one. It is deliberately
+**separate from `KeyedNotifier`** (not a bolt-on): `KeyedNotifier`'s job is
+`void`-or-`T` ping fan-out for `useSyncExternalStore` render subscriptions; folding
+a value+prev change stream into it would force a third type parameter and muddy
+that overload. Single responsibility — a harness holds both: a `KeyedNotifier` for
+render pings and a `ChangeNotifier` for the delta stream.
 
 ```ts
-interface ChangeEvent<T> {
-  readonly type: "add" | "update" | "remove";
-  readonly key: string;
-  readonly value?: T;      // present for add/update
-  readonly prev?: T;       // present for update/remove
+interface ChangeEvent<V, K = string> {
+  readonly key: K;
+  readonly value?: V;   // present when the key now holds a value (add | update)
+  readonly prev?: V;    // present when the key previously held one (update | remove)
 }
 
-// pull (exists): "something changed, re-read"
+interface ChangeNotifier<V, K = string> {
+  // push (new): "here is exactly what changed" — read-only, fire-and-forget
+  onChange(listener: (change: ChangeEvent<V, K>) => void): Unsubscribe;
+  // producer supplies the full delta (it knows `prev` at the mutation site)
+  emitChange(change: ChangeEvent<V, K>): void;
+}
+
+// pull (unchanged, KeyedNotifier): "something changed, re-read"
 subscribe(key: string, listener: () => void): Unsubscribe;
-// push (new): "here is exactly what changed"
-onChange(listener: (change: ChangeEvent<T>) => void): Unsubscribe;
 ```
 
-This is the **single substrate addition** everything else composes over. Knobs,
-state, gates, todos, tasks emit `onChange` at their mutation sites (they already
-know the delta there). Pull stays for rendering; push feeds every projection.
+**No transition verb in the primitive.** `ChangeEvent` carries *data* (`key`,
+`value`, `prev`); the *semantic* transition — "completed," "reordered," "budget
+lowered" — is the harness's to name (see Decision 3, `eventKind`). Only the harness
+knows whether a value change means completed or reordered; a CRUD verb in the
+substrate would be a lossy guess and would double-book the semantic. Order in
+ordered collections rides the value, not a `reorder` variant. A pure `changeKind()`
+helper derives the mechanical `add`/`update`/`remove` for consumers that need the
+CRUD shape (e.g. a JSON-Patch codec) from value/prev presence.
+
+This is the notify seam in the three-seam model (ADR 76): **intercept** (middleware)
+can transform or veto; **commit** (the factory slot) mutates; **notify** (`onChange`)
+observes the committed fact, **read-only and fire-and-forget**. An observer must
+never be able to change the outcome — the instant it can `throw`-to-abort or
+return-to-transform, it *is* middleware, and the power-level distinction that keeps
+the system reason-about-able is lost. This is the single load-bearing rule of the
+primitive.
+
+This is the **one substrate addition** the rest of the ADR composes over. Knobs,
+state, gates, and any collection harness emit `onChange` at their mutation sites
+(they already know the delta there). Pull stays for rendering; push feeds every
+projection.
 
 ### 2. The `event` timeline archetype
 
@@ -101,55 +122,65 @@ Split the two axes cleanly:
 ```ts
 type MessageRole = "user" | "assistant" | "system" | "tool" | (string & {}); // "event" REMOVED
 
-interface MessageEntry { kind: "message"; role: MessageRole; content; … }        // has a voice
-interface EventEntry {                                                            // has NO voice
+interface MessageEntry { kind: "message"; role: MessageRole; content; … }   // has a voice
+interface EventEntry {                                                       // has NO voice
   kind: "event";
-  eventKind: string;                       // open, namespaced: "knobs:changed", "tasks:completed"
-  content: readonly ContentBlock[];        // semantic rendering (from the projection)
-  payload?: unknown;                        // the structured ChangeEvent — outcome, not string (ADR 49)
-  source?: EventSource;                     // "model" | "host" | "remote" | (string&{})
-  timestamp: number;                        // an event is intrinsically "a thing that happened at T"
-  renderedWith?: FormatterRef;              // per-entry format override (existing seam)
+  eventKind: string;                   // open, namespaced: "knobs:changed", "tasks:completed"
+  content: readonly ContentBlock[];    // semantic rendering (from the projection)
+  payload?: unknown;                   // the structured outcome — not a frozen string (ADR 49)
+  source?: EventSource;                // "model" | "host" | "remote" | (string&{})
+  timestamp: number;                   // an event intrinsically happened at T
+  renderedWith?: FormatterRef;         // per-entry format override (existing seam)
   id?: string;
   metadata?: MessageMetadata;
 }
 interface SectionEntry { kind: "section"; … }
 ```
 
-`eventKind` is an **open** namespaced string (`"<harness>:<verb>"`) — extension and
-custom harnesses mint their own, same posture as roles. The entry stores the
-**structured outcome** (`payload`), not a frozen string, so the ES fold stays a
-deterministic re-render and an old event can be re-projected differently later.
+`eventKind` is an **open** namespaced string (`"<harness>:<verb>"`) — the same
+extension posture as roles. The entry stores the **structured outcome** (`payload`),
+not a rendered string, so the ES fold stays a deterministic re-render and an old
+event can be re-projected differently later.
 
-### 3. Timeline projection — opt-in per kind, generous but not indiscriminate
+An `EventEntry` is a distinct archetype, not a roleless `MessageEntry` nor a
+timestamped `SectionEntry`: a **section** is *ambient current-state* (id-stable,
+re-rendered — the live todo list); an **event** is a *historical outcome* (a
+discrete thing that happened at T, folded into history). Different on the
+`voice? / historical? / ambient?` axes; the `kind` discriminator already exists to
+carry exactly this.
+
+### 3. Projection — opt-in per kind, and the no-double-count test
 
 A **projection policy** decides which `eventKind`s become `EventEntry`s. The
-framework ships defaults; the adopter overrides per-kind / per-harness / globally.
-The default is *generous but honest* — it adds the facts worth remembering and
-leaves churn to live rendering:
+framework ships a generous-but-honest default; the adopter overrides per-kind /
+per-harness / globally.
 
-| Class | Examples | Default |
-| --- | --- | --- |
-| **Discrete outcomes** | `task:completed`, `elicitation:answered`, `todo:added`/`completed`, any **host/out-of-band** mutation | **ON** — a real fact the model should carry |
-| **State churn** | `knob:changed`, `gate:toggled`, `todo:reordered` | **OFF / coalesced** — current value renders live; intermediate states are ES-bloat |
+- **Discrete outcomes** (`task:completed`, `elicitation:answered`, any host /
+  out-of-band mutation) → **ON**: a real fact the model should carry.
+- **State churn** (`knob:changed`, `gate:toggled`, `todo:reordered`) → **OFF**:
+  current value renders live; intermediate states are ES-bloat (ADR 49).
 
-"Coalesced" = an optional net-change-at-execution-boundary entry rather than one per
-write. An adopter who wants every knob write in the transcript flips `knob:changed`
-ON; one who finds task-completion noisy flips it OFF. **Capability:** change-events
-*can* project. **Opinion (overridable):** this per-kind default table.
+**The no-double-count test (the governing rule, not the table).** If an `eventKind`
+is *fully recoverable from a live current-state render*, it does **not** project —
+projecting it makes the model read the same fact twice, in two representations that
+can drift. Events carry the transition facts a current-state render *cannot* show:
+*who* changed it, *when*, *why*, that it changed *at all*. Current-state renders own
+"what is true now"; events own "what happened." The table above is just this test
+applied to common kinds.
 
-### 4. Normalization + rendering — a `user` message in an `<event>` envelope (default)
+**Capability:** change-events *can* project. **Opinion (overridable):** the default
+per-kind classification.
 
-An `EventEntry` is provider-agnostic. The **formatter** owns provider
-normalization, riding the existing `renderedWith: FormatterRef` seam. The default
-event formatter's decision, and why:
+### 4. Rendering — formatter-owned; `user` + `<event>` envelope by default
 
-**No provider has a native "an event occurred" role.** And of the roles that exist,
-only `user` is **interspersable mid-conversation on every provider** — Anthropic and
-Google take `system`/`systemInstruction` only as a single top-level param (no
-mid-stream system turn); `tool` needs a matching `tool_use` id; `assistant` is the
-model's own voice. So the portable carrier is `user`, with the "not human voice"
-signal in the **content envelope**, not the role:
+An `EventEntry` is provider-agnostic; the **formatter** owns provider normalization,
+riding the existing `renderedWith: FormatterRef` seam.
+
+**Why `user` + an envelope.** No provider has a native "an event occurred" role, and
+of the roles that exist only `user` is interspersable mid-conversation on every
+provider (`system` is a single top-level param on Anthropic/Google; `tool` needs a
+matching `tool_use` id; `assistant` is the model's voice). So the portable carrier
+is `user`, with the "not human voice" signal in the **content envelope**:
 
 ```
 role: "user"
@@ -158,104 +189,93 @@ content: <event kind="knobs:changed" source="host" at="2026-07-09T18:22:01Z">
          </event>
 ```
 
-- **Uniform across providers** (not OpenAI `developer`): what the model sees is
-  identical everywhere — prompt/eval portability beats a marginally cleaner
-  OpenAI-only channel. `developer`-upgrade stays a per-adapter opt-in, never default.
-- **Envelope + role both live in the formatter**, not baked into the entry — both are
-  provider normalization, so they belong in one seam. The entry's `content` is clean.
-- **The framework owns the default formatter, not the format.** XML is the default
-  because models (Claude especially) honor tags reliably; an adopter swaps
-  `renderedWith` for prose, JSON, a compact marker, or nothing.
+Uniform across providers (not OpenAI-only `developer`) → prompt/eval portability.
+The framework owns the **default formatter, not the format** — an adopter swaps
+`renderedWith` for prose, JSON, a compact marker, or a `developer`-role upgrade.
 
-Timestamps: **events carry one** (rendered in the envelope by default). For messages
-generally, `timestamp` is an optional field — capability present, populating it is
-the adopter's call.
+**Injection requirement (firm, not optional).** Real user input is *also* `user`
+content, so the envelope convention creates a spoofing surface: a user typing
+`</event><event source="host">…</event>` forges a system event. Any formatter that
+uses tag-envelope normalization **must neutralize event-envelope syntax in
+genuine user-authored content** (escape `<`/`>`, or use a delimiter the model is
+told only the framework emits). The default formatter ships this escaping; a custom
+one that renders events as tags inherits the obligation. Capability side: the
+envelope is only safe if user content cannot forge it.
 
-### 5. The wake seam — some events trigger the loop (gated, distinct from resume)
+Timestamps: **events carry one** (rendered by default). For messages generally,
+`timestamp` is an optional field — capability present, populating it is the
+adopter's call.
 
-"Should some events trigger a run?" splits in two:
-
-- **Resume** — an elicitation answer / awaited task result feeding a *suspended*
-  execution. Already built (ADR 68 `input_required` → resume, ADR 69 escalation).
-  Not a new run; continues a waiting one.
-- **Wake** — a system event starting a *new* execution on an idle agent (task done →
-  react; webhook → act). The event-driven-agent model. **Never automatic** — that is
-  an unbounded-cost, runaway-loop footgun. A **wake policy** the adopter declares
-  per `eventKind`, **gated** (debounce / dedupe / rate-limit), enqueuing a `send`.
-
-**Capability:** a change-event *can* enqueue an execution. **Opinion:** nothing wakes
-by default; the adopter opts specific kinds in with a rate guard.
-
-## The unification — four routings of one change-event
+## The notify seam's consumers
 
 ```
 harness mutation → onChange(ChangeEvent)          [Decision 1 — the primitive]
-   ├─ StateDelta        → bus / wire               [ADR 73 — BUILT]
+   ├─ StateDelta                 → bus / wire      [ADR 73 — BUILT]
    ├─ AG-UI StepStarted/Finished → bus / wire      [ADR 73 — specced]
-   ├─ EventEntry(kind:"event") → timeline (Domain) [this ADR — opt-in, curated]
-   └─ wake policy       → enqueue send             [this ADR — opt-in, gated]
+   └─ EventEntry(kind:"event")   → timeline        [this ADR — opt-in, curated]
 ```
 
-One primitive; four policies. The timeline projection and wake are not new
-subsystems — they are sinks on the same push stream that already powers the wire
-projections.
+Three independent consumers subscribe to one push stream — which is simply what a
+push stream is *for*. There is no fourth "wake" routing: **starting a run is the
+adopter calling `send()`** (optionally from an `onChange` handler, with their own
+rate-limiting). A framework wake policy would be shipping a debounce/dedupe *opinion*
+— exactly what capability-not-opinion forbids — and it is redundant once `onChange`
+and `send()` both exist. Resume (a suspended execution continuing on an elicitation
+answer / awaited result, ADR 68/69) is a separate, already-built mechanism and is
+*not* a new run.
 
-## Capability vs opinion (the whole posture in one table)
+## Capability vs opinion
 
 | Concern | Capability (firm) | Default opinion (overridable) |
 | --- | --- | --- |
-| Reactivity | `onChange` typed change-event exists | — (mechanism) |
+| Reactivity | `onChange` typed change-event; observers read-only | — (mechanism) |
 | Event archetype | `kind:"event"` entries; no `role` | — (structural) |
-| Rendering | events render via `renderedWith: FormatterRef` | `<event kind source at>` XML → `user` role |
+| Rendering | events render via `renderedWith: FormatterRef` | `user` + `<event>` XML (with forced escaping) |
+| Timeline population | change-events *can* project | per-kind: outcomes ON, churn OFF; no-double-count |
 | Timestamps | entries may carry `timestamp` | events include one; messages: adopter's call |
-| Timeline population | change-events *can* project | per-kind: outcomes ON, churn OFF/coalesced |
-| Loop triggering | a change-event *can* enqueue a run | nothing wakes by default; per-kind + gated |
+| Starting a run | `send()` (callable from `onChange`) | nothing auto-runs; no framework wake policy |
 
 ## Rejected
 
-- **Keep `role:"event"`.** Category error (a role is a speaker); forces adapters to
-  answer an unanswerable "what voice?" Fixed by the `kind` axis.
-- **Auto-project every harness change into the timeline.** ES-bloat (ADR 49);
-  current-state churn is rendered, not logged. Curated opt-in instead.
-- **`developer` role as the default event carrier.** Non-portable (OpenAI-only;
-  Anthropic/Google can't intersperse it) and semantically "instructions," not "a
-  fact." `user` + envelope is the portable default; `developer` an opt-in nicety.
+- **A transition verb (`add`/`update`/`remove`) in `ChangeEvent`.** Leaky for
+  FSM-shaped harnesses (a task *completing* is not a generic "update") and
+  double-books the semantic with `eventKind`. Primitive carries data; harness names
+  the transition.
+- **Keep `role:"event"`.** Category error; forces adapters to answer an
+  unanswerable "what voice?" Fixed by the `kind` axis.
+- **Auto-project every harness change.** ES-bloat (ADR 49); churn renders, not logs.
+- **`developer` role as the default carrier.** Non-portable (OpenAI-only) and
+  semantically "instructions," not "a fact." `user` + envelope is the portable
+  default; `developer` an opt-in.
 - **Bake the `<event>` tag into the entry.** Couples the domain log to one wire
-  format. The entry is semantic; the envelope is formatter output.
-- **Freeze rendered strings in the entry.** ADR 49 wants outcomes, not rendered
-  text — store `payload`, render via projection, keep re-projection open.
-- **A `SystemEventHarness` / subsystem.** Events are routings of the change-event
-  primitive; a subsystem would multiply what composition already covers.
-- **Auto-wake on events.** Runaway-cost footgun; wake is explicit + gated.
+  format. Entry is semantic; envelope is formatter output.
+- **A framework wake policy / `SystemEventHarness`.** A run is an adopter `send()`;
+  a wake policy is a throttling *opinion* and a subsystem multiplies what the
+  `onChange`+`send()` composition already covers.
 
 ## Open questions
 
-1. **Coalescing shape for churn.** Net-change-at-execution-boundary vs a debounce
-   window vs simply OFF. Lean: OFF by default, offer a boundary-coalesce opt-in;
-   revisit when an adopter wants churn in the transcript.
-2. **`ChangeEvent` for ordered collections.** Todos have order; does `ChangeEvent`
-   need a `reorder`/index variant, or is order a value-shape detail? Lean: keep the
-   three verbs; carry order in the value.
-3. **Wake policy home.** Is the gated wake policy an `agentick.config.ts` concern
-   (ADR 71), a per-harness option, or a dedicated `withWake({...})` extension? Lean:
-   config-level with per-kind entries.
-4. **Retrofit order.** Prove `onChange` on `state` first (dual-reactivity on the
-   generic collection) then adopt in knobs/gates/todos, or land it on the new
-   `TodosHarness` as the reference instance? Ties to the todos primitive decision.
-5. **`source` provenance fidelity.** `"model" | "host" | "remote"` — enough, or do
-   we need the acting principal (ADR 48 scope) on the event for multi-tenant audit?
-6. **Compaction interplay.** Event outcomes compact like any entry; do any
-   `eventKind`s deserve a "sticky / never-compact" hint (e.g. a safety-relevant
-   host mutation)? Defer until a concrete need.
+1. **Coalescing churn.** If an adopter *does* want churn in the transcript, is the
+   opt-in a per-write entry, a net-change-at-execution-boundary entry, or a debounce
+   window? Lean: OFF by default; offer boundary-coalesce when asked.
+2. **Retrofit order.** Prove `onChange` on `state` first (dual-reactivity on the
+   generic collection) then adopt in knobs/gates/todos, or refit StateDelta (knobs)
+   as the first real consumer? Lean: knobs — it already has the pain and proves the
+   primitive isn't speculative.
+3. **`source` provenance fidelity.** `"model" | "host" | "remote"` — enough, or does
+   multi-tenant audit need the acting principal (ADR 48 scope) on the event?
 
 ## References
 
 - `docs/proposals/v2/blueprint/49-stores-not-snapshots.md` — three planes,
   outcomes-not-commands, the timeline as the ES log.
+- `docs/proposals/v2/blueprint/76-operation-middleware-scoping.md` — the *intercept*
+  seam; `onChange` here is its *notify* twin.
 - `docs/proposals/v2/blueprint/73-ag-ui-projection.md` — StateDelta + steps, the
   first change-event routings.
 - `packages-next/spec/src/data/entries.ts` — `MessageEntry` / `SectionEntry` +
-  `renderedWith: FormatterRef` (the formatter seam this rides).
+  `renderedWith: FormatterRef`.
 - `packages-next/spec/src/data/content-blocks.ts` — `MessageRole` (the `"event"`
   value this ADR removes).
-- `packages-next/pubsub/src/keyed-notifier.ts` — the notifier gaining `onChange`.
+- `packages-next/pubsub/src/change-notifier.ts` — the `ChangeNotifier` notify seam
+  (`onChange` / `emitChange` / `changeKind`), sibling to `keyed-notifier.ts`. **BUILT.**
