@@ -18,7 +18,7 @@
  * @see docs/proposals/v2/blueprint/09-app-harness.md
  */
 
-import { Effect } from "effect";
+import { Effect, ManagedRuntime } from "effect";
 
 import {
   BaseHarness,
@@ -516,10 +516,14 @@ export class AppHarness<P = unknown>
   private readonly taskExecutors: readonly TaskExecutor[];
 
   /**
-   * Stored `TelemetryLayer` (4f.7 placeholder slot). Accepted for
-   * forward compat; not yet applied to command execution.
+   * App-scoped telemetry runtime (ADR 78). Built ONCE from the adopter's
+   * `telemetry` Layer at construction (`ManagedRuntime.make`) — NOT a per-call
+   * `Effect.provide`, which would rebuild the Layer (and its exporter) on every
+   * command. App-edge operations run on it so the substrate's `Effect.withSpan`
+   * annotations flow to the configured tracer; disposed in `closeApp` (flushing
+   * pending spans). `undefined` when no telemetry Layer is supplied.
    */
-  private readonly telemetryLayer: import("@agentick/spec-next").TelemetryLayer | undefined;
+  private readonly telemetryRuntime: ManagedRuntime.ManagedRuntime<never, never> | undefined;
 
   /**
    * Tool bridge surfaced to each session's HookBridges. Wraps the
@@ -661,7 +665,8 @@ export class AppHarness<P = unknown>
           : options.executor!;
     // Resolve target: caller override > executor.target.
     this.target = options.target ?? this.executor.target;
-    this.telemetryLayer = options.telemetry;
+    this.telemetryRuntime =
+      options.telemetry !== undefined ? ManagedRuntime.make(options.telemetry) : undefined;
 
     // Cascade: longhand (`options.session.*`) wins over shorthand
     // (`options.defaultMaxTicks` / `options.initialProps` /
@@ -1005,7 +1010,7 @@ export class AppHarness<P = unknown>
     };
   }
 
-  closeApp(): Promise<void> {
+  async closeApp(): Promise<void> {
     const op: Operation<void, void> = {
       opId: `app:close-app:${ulid()}`,
       surface: "app",
@@ -1013,7 +1018,7 @@ export class AppHarness<P = unknown>
       scope: {},
       input: undefined,
     };
-    return this.runWithTelemetry(
+    await this.runWithTelemetry(
       this.runOperation(op, () =>
         Effect.tryPromise({
           try: () => this.closeAppBody(),
@@ -1021,6 +1026,9 @@ export class AppHarness<P = unknown>
         }),
       ),
     );
+    // Dispose the telemetry runtime AFTER the close operation ran on it, so its
+    // own spans are captured and the exporter flushes pending spans (ADR 78).
+    if (this.telemetryRuntime !== undefined) await this.telemetryRuntime.dispose();
   }
 
   /**
@@ -1068,9 +1076,12 @@ export class AppHarness<P = unknown>
    * exporter.
    */
   private runWithTelemetry<R>(eff: Effect.Effect<R, unknown, never>): Promise<R> {
-    if (this.telemetryLayer === undefined) return runHarnessProtocol(eff);
-    const provided = Effect.provide(eff, this.telemetryLayer) as Effect.Effect<R, unknown, never>;
-    return runHarnessProtocol(provided);
+    // Run on the app's ManagedRuntime (built once from the telemetry Layer) so
+    // `Effect.withSpan` annotations reach the configured tracer. Falls through
+    // to the default runtime when no telemetry Layer was supplied — identical
+    // to the prior behavior. Error normalization is preserved (both paths go
+    // through `runHarnessProtocol`'s Exit unwrap).
+    return runHarnessProtocol(eff, this.telemetryRuntime);
   }
 
   // ──────── lifecycle hooks (block 5 — α design) ────────

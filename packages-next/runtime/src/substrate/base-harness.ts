@@ -22,7 +22,7 @@
  * @see docs/proposals/v2/blueprint/01-harness-principle.md
  */
 
-import { Cause, Effect, Exit, Option } from "effect";
+import { Cause, Effect, Exit, ManagedRuntime, Option } from "effect";
 import { unwrapExit, omitUndefined, isThenable } from "@agentick/utils-next";
 import type {
   CommandOutcome,
@@ -1539,7 +1539,19 @@ export type { InboxError };
  * Defects (interrupts, unhandled throws) reject with a normal `Error`
  * carrying `Cause.pretty(cause)`.
  */
-export async function runHarnessProtocol<R>(eff: Effect.Effect<R, unknown, never>): Promise<R> {
-  const exit = await Effect.runPromiseExit(eff);
+/**
+ * Run an operation-bearing Effect to a Promise, normalizing the Exit.
+ *
+ * Optionally runs on a caller-provided `ManagedRuntime` (ADR 78) instead of
+ * the default runtime — this is how the app-/node-scoped telemetry runtime
+ * gets its tracer onto the substrate's `Effect.withSpan` annotations. When
+ * `runtime` is omitted the behavior is identical to before (default runtime),
+ * so every existing call site is unaffected.
+ */
+export async function runHarnessProtocol<R>(
+  eff: Effect.Effect<R, unknown, never>,
+  runtime?: ManagedRuntime.ManagedRuntime<never, never>,
+): Promise<R> {
+  const exit = await (runtime ? runtime.runPromiseExit(eff) : Effect.runPromiseExit(eff));
   return unwrapExit(exit) as R;
 }
