@@ -1,6 +1,6 @@
 # ADR 78 — Telemetry via runtime-as-substrate (B), not a spine-mend (A)
 
-**Status:** DRAFT 2026-07-10 (Fable, for Ryan). **Supersedes the open question in** ADR 77 (the operation-spine A-vs-B fork). **Builds on:** ADR 31 (substrate threading), ADR 49 (planes), ADR 77 (why the fiber tree breaks at harness boundaries). **Governing principle:** [[feedback_capability_not_opinion]], and: *cross-harness context propagates explicitly — the same way local and clustered.*
+**Status:** DRAFT 2026-07-10 — **A-vs-B resolution SUPERSEDED by ADR 79** (the cluster-orthogonality dig showed composing the spine does *not* hurt clustering, so A-on-the-spine wins; ADR 79 pins the distribution granularity that makes it safe). **Retained from this ADR:** brick #1 (the app-edge `ManagedRuntime`, built + committed) and the whitelabel `telemetryNamespace` (committed) — both valid under ADR 79. **Superseded:** brick #2 (per-harness runtime threading) — unnecessary once the spine composes to one root. **Supersedes the open question in** ADR 77 (the operation-spine A-vs-B fork). **Builds on:** ADR 31 (substrate threading), ADR 49 (planes), ADR 77 (why the fiber tree breaks at harness boundaries). **Governing principle:** [[feedback_capability_not_opinion]], and: *cross-harness context propagates explicitly — the same way local and clustered.*
 
 ## Decision
 
