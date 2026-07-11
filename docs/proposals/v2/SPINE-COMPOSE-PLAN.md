@@ -39,13 +39,18 @@ consumer composes it).
 
 ## Stage 1 — `.fx` surface (additive, behavior-neutral)
 
-- [ ] `BaseHarness.command()` exposes the operation Effect (`run`) as `harness.fx.<name>`;
-      the existing Promise wrapper stays as `harness.<name>` (`runPromise(fx)`).
-- [ ] `.fx` = a `Proxy` over the command registry's Effect side.
-- [ ] `PromiseView<Protocol>` mapped type (Effect canonical → Promise derived).
-- [ ] Typing: `E`-channel preserved on `.fx`; `.fx` and the plain surface both infer.
+- [x] **`BaseHarness.fxProxy()`** — a `Proxy` exposing each declared command's composable
+      Effect under its ergonomic action name (`fx.<action>` → `commandEffect(<surface>:<action>)`),
+      auto-derived from the naming convention. Returns the Effect (not a Promise); the plain
+      `harness.<action>()` stays the edge facade. *(The runtime already existed as
+      `commandEffect` — timeline's `drain` composes over it; `.fx` is the sugar.)* Proven in
+      `base-harness.spec` (fx.add composes; plain method is a Promise; fx twins nest in one gen).
+- [ ] **Per-harness typed `get fx()`** over `fxProxy()` (concrete harnesses declare their `.fx`
+      shape; avoids getter-override friction). Start with knobs as the reference.
+- [ ] **`PromiseView<Protocol>`** mapped type — the plain surface derived from the Effect-canonical
+      protocol (drops `E`), so Effect stays the source of truth. *(The delicate typing piece.)*
 
-**Gate:** workspace green; zero behavior change (nothing composes yet).
+**Gate:** workspace green; zero behavior change (nothing composes yet). *(Runtime + proof: met.)*
 
 ## Stage 2 — Effect-returning spine protocols (additive)
 
