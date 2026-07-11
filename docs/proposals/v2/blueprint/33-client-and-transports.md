@@ -176,6 +176,18 @@ They are not, and that decides it:
 
 `@effect/rpc` would be **one more wire, not THE wire — and a worse one**, because it costs the MCP parity. Door left cracked: `@effect/rpc` has pluggable `RpcSerialization`, so a JSON-RPC-2.0 serializer is *conceivable* for the native client↔gateway path — but it fights its request/response model against JSON-RPC method/params/id + our streaming-envelope semantics, for a payoff (typed client) obtainable more cheaply from our own registry. Not worth it.
 
+### Rejected alternative — tRPC as the wire
+
+Same disqualifier as `@effect/rpc`, different value prop. tRPC's headline — **end-to-end type inference with no codegen** (the client imports the server's types and gets fully-typed calls) — is genuinely best-in-class DX. But:
+
+1. **tRPC's wire is not JSON-RPC 2.0.** It's tRPC's own HTTP-batching / WS protocol → forfeits MCP envelope-parity (one endpoint hosting both).
+2. **TypeScript-only, both ends** → forecloses MCP hosts, other-language clients, any non-tRPC consumer. The wire's job is to be speakable by non-us parties; tRPC optimizes TS-to-TS, the opposite.
+3. **The tRPC client requires the tRPC server** — coupled; there is no "tRPC on the client only."
+
+**We take the DX, not the library.** The gateway is already a proxy whose methods are 1:1 with typed harness protocols, so we **derive a typed proxy client from those shared protocol interfaces** (`client.session.send(input)` typed by TypeScript inference across the import boundary) — tRPC's magic, on the JSON-RPC 2.0 wire, keeping MCP parity + multi-language. tRPC gives that typing for free; we build it (a typed proxy + type-derivation from the protocol registry) — bounded work, and the piece that makes the JSON-RPC 2.0 client feel as good as tRPC.
+
+**Principle (both rejections):** steal the typed-client *pattern*; keep the interoperable wire. The wire's consumers include MCP hosts, browser JS, and other languages — none of which speak `@effect/rpc` or tRPC.
+
 ### WebSocket subprotocol
 
 WebSocket transports advertise `agentick-rpc-v1` as a subprotocol per RFC 6455. Lets servers version-negotiate at the WS handshake. Wire-format-breaking changes bump the version suffix; client and server must agree before the first frame. (MCP-compatible servers also advertise `mcp` as a parallel subprotocol when they want to accept MCP clients.)
