@@ -1104,6 +1104,33 @@ export abstract class BaseHarness<
   }
 
   /**
+   * DRAFT(ADR 77/79 Stage 1) — the `.fx` surface: a `Proxy` that exposes each
+   * declared command's **composable Effect twin** under its ergonomic action
+   * name. `fxProxy()[action](input)` → `commandEffect("<surface>:<action>", …)`
+   * — auto-derived from the command-naming convention (`<surface>:<action>`),
+   * so there is no hand-maintained map. It returns the operation **Effect**
+   * (NOT run to a Promise), so an in-process caller composes it with `yield*`
+   * and stays in one fiber tree; the plain `harness.<action>()` Promise method
+   * is the edge facade. A concrete harness exposes a typed `get fx()` over this.
+   */
+  protected fxProxy(): Record<
+    string,
+    (
+      input: unknown,
+      opts?: { readonly origin?: OperationOrigin },
+    ) => Effect.Effect<unknown, unknown, never>
+  > {
+    const surface = this.surface;
+    return new Proxy(Object.create(null) as Record<string, never>, {
+      get: (_t, action): unknown => {
+        if (typeof action !== "string") return undefined;
+        return (input: unknown, opts?: { readonly origin?: OperationOrigin }) =>
+          this.commandEffect(`${surface}:${action}`, input, opts);
+      },
+    });
+  }
+
+  /**
    * Enumerate declared commands (wire-safe summaries). Also served to
    * remote callers via the `"<surface>:commands"` meta-verb — the
    * declare-and-discover surface `commands/list` composes over.

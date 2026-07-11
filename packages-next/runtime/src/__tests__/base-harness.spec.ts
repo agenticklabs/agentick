@@ -99,6 +99,31 @@ async function harness() {
   return { h, journal, bus, inbox };
 }
 
+/** A harness that declares a command via `this.command()` (so it registers in
+ *  the command registry) and exposes the `.fx` Effect surface over it. */
+class FxTestHarness extends BaseHarness<"tool"> {
+  readonly add: (input: AddInput) => Promise<number>;
+
+  constructor(scopeId: string, journal: MemoryJournal, bus: LocalEventBus, inbox: LocalInbox) {
+    super("tool", scopeId, journal, bus, inbox);
+    this.add = this.command({
+      name: "tool:add",
+      handler: (i: AddInput) => Effect.succeed(i.a + i.b),
+    });
+  }
+
+  /** Typed-per-harness `.fx` getter over the base runtime Proxy. */
+  get fx() {
+    return this.fxProxy();
+  }
+
+  protected handleMessage(
+    msg: MessageEnvelope,
+  ): Effect.Effect<unknown, MessageHandlerError, never> {
+    return Effect.fail(new HandlerError({ cause: new Error(`unknown: ${msg.type}`) }));
+  }
+}
+
 async function collectJournal(j: MemoryJournal): Promise<ProtocolEvent[]> {
   const chunk = await Effect.runPromise(Stream.runCollect(j.readByQuery({}, "beginning")));
   return Array.from(Chunk.toReadonlyArray(chunk));
@@ -339,5 +364,41 @@ describe("BaseHarness — onMessage extension point", () => {
       }),
     );
     expect(customRan).toBe(false);
+  });
+});
+
+describe("BaseHarness — .fx surface (ADR 77/79 Stage 1)", () => {
+  it("fx.<action> returns the composable Effect twin; the plain method returns a Promise", async () => {
+    const h = new FxTestHarness("fx-1", new MemoryJournal(), new LocalEventBus(), new LocalInbox());
+    await h.ready;
+
+    // .fx.add hands back an Effect (not run) — composable, isEffect true.
+    const eff = h.fx.add({ a: 2, b: 3 });
+    expect(Effect.isEffect(eff)).toBe(true);
+    expect(eff).not.toBeInstanceOf(Promise);
+    const composed = await Effect.runPromise(
+      Effect.gen(function* () {
+        return yield* eff;
+      }),
+    );
+    expect(composed).toBe(5);
+
+    // The plain method is the edge facade — a Promise with the same result,
+    // from the SAME declared command.
+    const p = h.add({ a: 4, b: 5 });
+    expect(p).toBeInstanceOf(Promise);
+    expect(await p).toBe(9);
+  });
+
+  it("fx twins compose into ONE fiber tree (nested yield*)", async () => {
+    const h = new FxTestHarness("fx-2", new MemoryJournal(), new LocalEventBus(), new LocalInbox());
+    await h.ready;
+    const total = await Effect.runPromise(
+      Effect.gen(function* () {
+        const a = (yield* h.fx.add({ a: 1, b: 1 })) as number;
+        return (yield* h.fx.add({ a, b: 3 })) as number;
+      }),
+    );
+    expect(total).toBe(5); // 1+1 → 2, 2+3 → 5, composed in a single generator
   });
 });
