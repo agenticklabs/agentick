@@ -14,23 +14,18 @@ consumer composes it).
 
 ## Gate 0 — Characterization completeness (BLOCKS every rewrite below)
 
-The loop rewrite is the crux; its net must be comprehensive first. These are pure
-*observation* of current behavior — low-risk, touch nothing load-bearing.
-`packages-next/loop-executor/src/__tests__/characterization.spec.ts` — **26 tests**.
+**✅ CLOSED.** The loop rewrite's net is comprehensive.
+`packages-next/loop-executor/src/__tests__/characterization.spec.ts` — **28 tests**.
 
 - [x] **Executor-failure paths** — `failed`→`executor_failed`, `canceled`→`aborted`,
-      `vetoed`→`vetoed` (incl. fail-on-Nth-tick). *(Via the improved fake's scripted
-      `outcome`.)*
-- [x] **Streaming vs non-streaming** — gating; streaming forwards deltas;
-      non-streaming synthesizes. *(Deep streaming-`.result`-reject path: light — remaining.)*
+      `vetoed`→`vetoed` (incl. fail-on-Nth-tick). *(Via the improved fake's scripted `outcome`.)*
+- [x] **Streaming vs non-streaming** — gating; streaming forwards deltas; non-streaming
+      synthesizes; **streaming `.result`-reject → `executor_failed`**.
 - [x] **Tool-dispatch outcomes** — soft error (`isError`), hard throw (caught, `error`
-      captured), `applyToolResults` skipped when 0. *(Provider-side-tools-not-dispatched:
-      remaining.)*
+      captured), `applyToolResults` skipped when 0, **provider-side tool_result not dispatched**.
 - [x] **Usage accumulation** — summed across ticks; terminal = sum.
 - [x] **Event sequence** — run-level bookends + tool-dispatch order.
-- [x] **`applyToolResults` skipped when 0 results.**
-- [x] **maxTicks cap** — `max_ticks` stop (main path; line-654 normalization is the
-      same observable outcome).
+- [x] **maxTicks cap** — `max_ticks` stop.
 
 **Mitigations baked in (design, not just boxes):**
 - [x] **Differential seam** — `runChar(makeLoop?)`; the SAME scenarios run against the
@@ -38,11 +33,7 @@ The loop rewrite is the crux; its net must be comprehensive first. These are pur
 - [x] **Invariant assertions** — `assertLoopInvariants` (bounds, defined outcome,
       monotone usage, no-dangling) → catches whole *classes* of drift.
 
-**Remaining (minor, before declaring Gate 0 fully closed):** provider-side-tools-not-
-dispatched; the streaming-`.result`-reject failure path.
-
-**Gate:** the suite pins every branch the `Effect.gen` rewrite touches. The two minor
-remainders above, then the loop is safe to compose.
+**Gate:** ✅ met. The loop is now safe to compose (Stage 3).
 
 ---
 

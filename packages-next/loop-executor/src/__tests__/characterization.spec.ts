@@ -521,6 +521,37 @@ describe("LoopExecutorHarness [characterization] — tool-dispatch outcomes", ()
     expect(trace.order).toContain("apply:executor-result");
     expect(trace.order).not.toContain("apply:tool-results");
   });
+
+  it("provider-side tool_result in output (not in toolCalls) is NOT dispatched", async () => {
+    const dispatched: string[] = [];
+    const providerResult: LanguageModelExecutionResult = {
+      specVersion: SPEC_VERSION,
+      output: [
+        {
+          type: "tool_result",
+          toolCallId: "srv-1",
+          content: [{ type: "text", text: "server ran" }],
+        } as unknown as ContentBlock,
+      ],
+      stopReason: "end",
+      usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+      // NO `toolCalls` → the loop has nothing to dispatch.
+    };
+    const trace = await runChar({
+      ticks: [providerResult],
+      maxTicks: 5,
+      dispatch: async (call) => {
+        dispatched.push(call.toolCallId);
+        return dispatchOk(call);
+      },
+    });
+    expect(dispatched).toEqual([]); // dispatch never called
+    expect(trace.terminal.result!.toolResults).toEqual([]); // no loop-dispatched results
+    // The provider's tool_result rode through in the accumulated output.
+    expect(
+      trace.terminal.result!.output.some((b) => (b as { type: string }).type === "tool_result"),
+    ).toBe(true);
+  });
 });
 
 // ============================================================================
@@ -591,6 +622,12 @@ describe("LoopExecutorHarness [characterization] — streaming vs non-streaming"
     const trace = await runChar({ ticks: [ended()], maxTicks: 5, stream: false });
     expect(trace.terminal.outcome).toBe("succeeded");
     expect(trace.events.some((e) => e.kind === "model")).toBe(true);
+  });
+
+  it("streaming path: a rejecting stream.result → failed terminal, 'executor_failed'", async () => {
+    const trace = await runChar({ scripted: [failRun("failed")], maxTicks: 5, stream: true });
+    expect(trace.terminal.result!.ticks).toBe(1);
+    expect(trace.terminal.result!.stopReason).toBe("executor_failed");
   });
 });
 

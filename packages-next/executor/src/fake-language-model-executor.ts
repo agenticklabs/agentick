@@ -229,10 +229,16 @@ export class FakeLanguageModelExecutor
     let aborted = false;
     let abortReason: unknown = null;
 
+    // A scripted `outcome: "failed"` rejects `.result` — driving the loop's
+    // streaming failure path (`await stream.result` → failed terminal). Mirrors
+    // the `run()` failure scripting. Awaited by the loop, so no dangling reject.
+    const streamResult: Promise<unknown> =
+      next?.outcome === "failed"
+        ? Promise.reject(new ProviderRejected({ cause: "scripted stream failure" }))
+        : Promise.resolve(scriptedResult);
+
     return {
-      result: aborted
-        ? Promise.reject(abortReason ?? new Error("aborted"))
-        : Promise.resolve(scriptedResult),
+      result: aborted ? Promise.reject(abortReason ?? new Error("aborted")) : streamResult,
       abort(reason) {
         aborted = true;
         abortReason = reason ?? "aborted";
