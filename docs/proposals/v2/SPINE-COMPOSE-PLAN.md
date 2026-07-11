@@ -16,24 +16,33 @@ consumer composes it).
 
 The loop rewrite is the crux; its net must be comprehensive first. These are pure
 *observation* of current behavior — low-risk, touch nothing load-bearing.
-`packages-next/loop-executor/src/__tests__/characterization.spec.ts` (13 tests
-landed) extends with:
+`packages-next/loop-executor/src/__tests__/characterization.spec.ts` — **26 tests**.
 
-- [ ] **Executor-failure paths** — `failed`→`executor_failed`, `canceled`→`aborted`,
-      `vetoed`→`vetoed`; streaming `stream.result` reject → failed terminal.
-- [ ] **Streaming vs non-streaming** — `wantsStreaming` gating; streaming forwards
-      deltas + **no** synthesis; non-streaming synthesizes content/tool-call/message-end.
-- [ ] **Tool-dispatch outcomes** — soft error (`isError:true`→`succeeded:false`);
-      hard throw → caught, `error` set, `isError` event; provider-side tools
-      (tool_result in output, not in `toolCalls`) **not** dispatched.
-- [ ] **Usage accumulation** — summed across ticks; terminal usage = sum.
-- [ ] **Event sequence** — execution-start/tick-start/tick-end/tick/execution-end +
-      tool-dispatch-{start,end,result} order.
-- [ ] **`applyToolResults` skipped when 0 results** (negative case).
-- [ ] **maxTicks post-loop normalization** (the line-654 path).
+- [x] **Executor-failure paths** — `failed`→`executor_failed`, `canceled`→`aborted`,
+      `vetoed`→`vetoed` (incl. fail-on-Nth-tick). *(Via the improved fake's scripted
+      `outcome`.)*
+- [x] **Streaming vs non-streaming** — gating; streaming forwards deltas;
+      non-streaming synthesizes. *(Deep streaming-`.result`-reject path: light — remaining.)*
+- [x] **Tool-dispatch outcomes** — soft error (`isError`), hard throw (caught, `error`
+      captured), `applyToolResults` skipped when 0. *(Provider-side-tools-not-dispatched:
+      remaining.)*
+- [x] **Usage accumulation** — summed across ticks; terminal = sum.
+- [x] **Event sequence** — run-level bookends + tool-dispatch order.
+- [x] **`applyToolResults` skipped when 0 results.**
+- [x] **maxTicks cap** — `max_ticks` stop (main path; line-654 normalization is the
+      same observable outcome).
 
-**Gate:** the suite pins every branch the `Effect.gen` rewrite touches. Until then,
-no compose work on the loop.
+**Mitigations baked in (design, not just boxes):**
+- [x] **Differential seam** — `runChar(makeLoop?)`; the SAME scenarios run against the
+      future `Effect.gen` loop → validate the rewrite by *diffing traces*, not hoping.
+- [x] **Invariant assertions** — `assertLoopInvariants` (bounds, defined outcome,
+      monotone usage, no-dangling) → catches whole *classes* of drift.
+
+**Remaining (minor, before declaring Gate 0 fully closed):** provider-side-tools-not-
+dispatched; the streaming-`.result`-reject failure path.
+
+**Gate:** the suite pins every branch the `Effect.gen` rewrite touches. The two minor
+remainders above, then the loop is safe to compose.
 
 ---
 
