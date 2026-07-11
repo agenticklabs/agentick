@@ -57,6 +57,7 @@ import {
   NormalizationFailed,
   ProjectionFailed,
   ProviderAborted,
+  ProviderRejected,
   SPEC_VERSION,
 } from "@agentick/spec-next";
 
@@ -80,6 +81,14 @@ export interface MockScriptedRun {
    * scripted result.
    */
   readonly deltas?: ReadonlyArray<AdapterDelta>;
+  /**
+   * Override the run's terminal outcome. Default (omitted) → `"succeeded"`
+   * with `result`. `"failed"` / `"vetoed"` / `"canceled"` return the
+   * corresponding non-success terminal — so tests can drive loop failure-path
+   * behavior without a bespoke executor stub. (Abort-driven cancellation still
+   * goes through `abort()` / the lifecycle; this is the *scripted* variant.)
+   */
+  readonly outcome?: "failed" | "vetoed" | "canceled";
 }
 
 export interface FakeLanguageModelExecutorOptions {
@@ -365,6 +374,15 @@ export class FakeLanguageModelExecutor
           reason: "aborted",
         };
         return terminal;
+      }
+      // Scripted non-success outcome (failure-path driving).
+      switch (next?.outcome) {
+        case "failed":
+          return { outcome: "failed", error: new ProviderRejected({ cause: "scripted failure" }) };
+        case "vetoed":
+          return { outcome: "vetoed", reason: "scripted veto" };
+        case "canceled":
+          return { outcome: "canceled", reason: "scripted cancel" };
       }
       const targetOutput = next?.result ?? DEFAULT_REPLY;
       void projected;
