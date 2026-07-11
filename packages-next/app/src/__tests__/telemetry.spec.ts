@@ -90,6 +90,22 @@ describe("App telemetry (ADR 78) — spans reach the supplied tracer", () => {
     expect(closeSpan!.attributes.get("agentick.op_id")).toMatch(/^app:close-app:/);
   });
 
+  it("telemetryNamespace whitelabels the attribute prefix (agentick → acme)", async () => {
+    const { layer, spans } = collectingTracer();
+    const app = await createApp(React.createElement(Agent), {
+      executor: await mkExecutor(),
+      telemetry: layer,
+      telemetryNamespace: "acme",
+    });
+    await app.closeApp();
+
+    const closeSpan = spans.find((s) => s.name === "app:command:close-app");
+    expect(closeSpan!.attributes.get("acme.surface")).toBe("app");
+    expect(closeSpan!.attributes.get("acme.op_id")).toMatch(/^app:close-app:/);
+    // The framework name does not leak when whitelabelled.
+    expect(closeSpan!.attributes.has("agentick.surface")).toBe(false);
+  });
+
   it("no telemetry Layer → no crash, no runtime (behavior-preserving)", async () => {
     const app = await createApp(React.createElement(Agent), { executor: await mkExecutor() });
     await expect(app.closeApp()).resolves.toBeUndefined();

@@ -381,15 +381,23 @@ export interface AppHarnessOptions<P = unknown> {
   readonly metadata?: Readonly<Record<string, unknown>>;
 
   /**
-   * Telemetry `Layer` (Effect). Placeholder slot — defined for forward
-   * compat with OTel/observability backends. The MVP impl accepts and
-   * stores it but does NOT yet apply the Layer to running commands
-   * (requires a runtime refactor in `runHarnessProtocol`). Adopters
-   * relying on it today should set up their OTel SDK out-of-band.
+   * Telemetry `Layer` (Effect) — the adopter's OTel/observability backend
+   * (e.g. `@effect/opentelemetry`'s `NodeSdk`). Built into an app-scoped
+   * `ManagedRuntime` once at construction; app-edge operations run on it so
+   * `Effect.withSpan` annotations reach the configured tracer (ADR 78). BYO —
+   * the framework bundles no OTel dependency.
    *
-   * @see docs/proposals/v2/blueprint/09-app-harness.md §Telemetry
+   * @see docs/proposals/v2/blueprint/78-telemetry-via-runtime-substrate.md
    */
   readonly telemetry?: TelemetryLayer;
+
+  /**
+   * Span-attribute namespace — the prefix on every `<ns>.op_id` / `<ns>.surface`
+   * telemetry attribute. Defaults to `"agentick"`. Set it to whitelabel your
+   * deployment's traces (e.g. `"acme"`). Capability + overridable default.
+   * (Flat for now; group into `telemetry: {…}` only if it grows to 3+ knobs.)
+   */
+  readonly telemetryNamespace?: string;
 
   /**
    * Pluggable extensions. Each extension is a `{ name, install }`
@@ -617,7 +625,12 @@ export class AppHarness<P = unknown>
       new LocalInbox(),
       {
         metadata: options.metadata,
-        ...omitUndefined({ journal: options.journal, bus: options.bus, inbox: options.inbox }),
+        ...omitUndefined({
+          journal: options.journal,
+          bus: options.bus,
+          inbox: options.inbox,
+          telemetryNamespace: options.telemetryNamespace,
+        }),
         policy: mergeLayered<JournalingPolicy>(DEFAULT_JOURNALING_POLICY, {
           override: { "app:command:close-app": "bus-only" },
         }),

@@ -324,6 +324,12 @@ export interface BaseHarnessOptions<P = unknown, I = unknown> {
   readonly bus?: EventBus | EventBusFactory<HarnessShell>;
   readonly inbox?: MessageInbox | MessageInboxFactory<HarnessShell>;
   readonly journal?: OperationJournal | OperationJournalFactory<HarnessShell>;
+  /**
+   * Span-attribute namespace (ADR 78) — the prefix on every telemetry
+   * attribute key. Defaults to `"agentick"`; whitelabel deployments override
+   * it. Threaded from the app so a deployment sets it once.
+   */
+  readonly telemetryNamespace?: string;
 }
 
 export abstract class BaseHarness<
@@ -383,6 +389,15 @@ export abstract class BaseHarness<
    * the subclass's `handleMessage` is consulted.
    */
   protected readonly requests = new RequestResponseRegistry<unknown>();
+
+  /**
+   * Span-attribute namespace (ADR 78). The prefix on every `spanAttributes`
+   * key (`<ns>.op_id`, `<ns>.surface`, …). Defaults to `"agentick"`;
+   * whitelabel deployments override it once (`agentick.config` / app option),
+   * so their traces read `acme.op_id` rather than leaking the framework name.
+   * Capability + overridable default — never a hardcode.
+   */
+  protected readonly telemetryNamespace: string;
   private readonly policy: JournalingPolicy;
   private inboxUnsubscribe?: Unsubscribe;
 
@@ -463,6 +478,7 @@ export abstract class BaseHarness<
     this.input = options.input;
     this.metadata = Object.freeze({ ...(options.metadata ?? {}) });
     this.principal = options.principal;
+    this.telemetryNamespace = options.telemetryNamespace ?? "agentick";
 
     // Substrate slot resolution (ADR 31). Build a shell exposing the
     // positional substrate defaults as the parent-side upstream, then
@@ -655,14 +671,15 @@ export abstract class BaseHarness<
     op: Operation<unknown, unknown, unknown>,
   ): Readonly<Record<string, unknown>> {
     const scope = op.scope ?? {};
+    const ns = this.telemetryNamespace;
     return {
-      "agentick.op_id": op.opId,
-      "agentick.surface": op.surface,
-      "agentick.parent_op_id": op.parentOpId,
-      "agentick.correlation_id": op.correlationId,
-      "agentick.session_id": scope.sessionId,
-      "agentick.execution_id": scope.executionId,
-      "agentick.tick_id": scope.tickId,
+      [`${ns}.op_id`]: op.opId,
+      [`${ns}.surface`]: op.surface,
+      [`${ns}.parent_op_id`]: op.parentOpId,
+      [`${ns}.correlation_id`]: op.correlationId,
+      [`${ns}.session_id`]: scope.sessionId,
+      [`${ns}.execution_id`]: scope.executionId,
+      [`${ns}.tick_id`]: scope.tickId,
     };
   }
 
