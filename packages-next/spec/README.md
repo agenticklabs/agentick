@@ -265,6 +265,67 @@ nominal sugar.
   `serializeAgentickError` / `deserializeAgentickError` with full
   cross-wire class-identity preservation.
 
+## The `.fx` dual-typed edge (ADR 77)
+
+Every spine harness (`executor`, `loop`, `tool-executor`, `reconciler`,
+`knobs`, `session`) exposes **two first-class surfaces for the same
+operation** — a Promise edge-facade and an Effect-native `.fx` twin. This is
+the dual-typed edge, and the types that express it live here in spec.
+
+```ts
+// Promise edge-facade — the ergonomic default. await it.
+const terminal: ExecutorTerminal = await executor.run(input);
+
+// `.fx` Effect-native twin — the peer for adopters composing Effects.
+// Returns an UN-RUN Effect; yield* it inside your own Effect.gen so
+// telemetry, interruption, and FiberRef context propagate into your fiber.
+const terminal = yield * executor.fx.run(input);
+```
+
+**Effect is canonical; the Promise facade is DERIVED.** `harness.<op>()` is
+exactly `runHarnessProtocol(harness.fx.<op>(...))` — the twin with a single
+`runPromise` at the entity edge. Neither surface is second-class: pick the
+facade for ergonomics, `.fx` to compose in Effect.
+
+**`PromiseView<T>`** (`protocol/promise-view.ts`) — the homomorphic mapped
+type that expresses the derivation at the _type_ level. It rewrites each
+Effect-returning method of an `XFx` interface to its awaited Promise form,
+dropping the `E`/`Ctx` channels:
+
+```ts
+export interface KnobsHarnessProtocol extends SnapshotCapable<KnobsSnapshot>, PromiseView<KnobsFx> {
+  readonly fx: KnobsFx; // the Effect twins are the single source of truth
+}
+// `set`, `register`, `dispatch` are DERIVED as Promise methods — declared once
+// (as Effects on KnobsFx), never duplicated. The erasure is one-way (a Promise
+// can't carry E), so there is no inverse: Effect is authored, Promise derived.
+```
+
+Keep `PromiseView` **homomorphic** (`[K in keyof T]`) — a non-homomorphic
+rewrite (key-remapping, union wrapper) silently drops JSDoc, invisibly to
+`tsc`. This is regression-guarded in `promise-view.spec.ts`.
+
+**`AsyncStream<Item, Result>`** (`protocol/async-stream.ts`) — the _streaming_
+facade, the dual of `Promise<A>` for operations that yield items before a
+terminal result:
+
+```ts
+export type AsyncStream<Item, Result> = AsyncIterable<Item> & {
+  readonly result: Promise<Result>;
+  abort(reason?: unknown): void;
+};
+// ExecutorStream<T> = AsyncStream<AdapterDelta, T> — iterate deltas as they
+// arrive; await `.result` for the final assembled output; `abort()` to cancel.
+```
+
+Its Effect-native twin is the **sink-fold** `(input, sink) => Effect<Result>`
+(the ONE case not derivable via `PromiseView` — different arity). The facade's
+Queue/fork/iterator machinery lives once in `runHarnessStream`
+(`@agentick/runtime-next`), the streaming sibling of `runHarnessProtocol`.
+
+> **Full write-up:** [ADR 77 — Operation spine + dual-typed edge](../../docs/proposals/v2/blueprint/77-operation-spine-and-dual-typed-edge.md)
+> · [SPINE-COMPOSE-PLAN](../../docs/proposals/v2/SPINE-COMPOSE-PLAN.md).
+
 ## Status
 
 🚧 In active development as part of v2 (`feat/v2`).

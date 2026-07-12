@@ -323,6 +323,55 @@ eagerly on the supplied substrate when omitted; there is no
 `bridges.*` wiring — that plumbing is exclusive to the reference
 `SessionHarness`.
 
+## Telemetry — nested traces (ADR 77 / 78)
+
+Because the session runs the execution as ONE Effect fiber (the ADR 77 spine —
+`send → loop → executor → tool`), running it on a tracer runtime yields a
+**nested** span tree for free, with `parentOpId` auto-linked via FiberRef. No
+manual span threading.
+
+You bring the tracer (the framework bundles no OpenTelemetry dependency —
+capability, not opinion). Supply a telemetry `Layer` to `createApp`; the app
+builds a `ManagedRuntime` from it ONCE and forwards it (plus the whitelabel
+`telemetryNamespace`) to each session, which runs the composed loop on it:
+
+```ts
+import { NodeSdk } from "@effect/opentelemetry";
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
+
+const telemetry = NodeSdk.layer(() => ({
+  resource: { serviceName: "my-agent" },
+  spanProcessor: new BatchSpanProcessor(new OTLPTraceExporter()),
+}));
+
+const app = await createApp(<Agent />, {
+  model: openai("gpt-4o"),
+  telemetry, // → session.send now emits a nested trace to your exporter
+  telemetryNamespace: "acme", // whitelabels the attribute keys (acme.op_id, …)
+});
+
+await (await session.send({ messages })).result;
+```
+
+A single `session.send` produces:
+
+```
+loop:command:run-execution                 (the execution span — root)
+├─ reconciler:command:render-tree
+├─ tool:command:replace-reconciler-tools
+├─ executor:command:project / run / …
+└─ tool:command:dispatch                    (one per parallel tool call)
+```
+
+Every child's `<ns>.parent_op_id` equals the execution's `<ns>.op_id`. Without
+a telemetry Layer, spans emit against Effect's no-op tracer (discarded) — the
+run is otherwise identical. Verified in `__tests__/telemetry.spec.ts`.
+
+> **Known gap:** the namespace whitelabels SESSION-owned spans; the shared spine
+> harnesses carry their own (default `"agentick"`). A whole-spine whitelabel
+> needs the namespace read from fiber context — `TODO(stage-4:
+fiber-context-namespace)`. Nesting is unaffected.
+
 ## API
 
 Full surface in the [typedoc]. The package root exports the thin set an

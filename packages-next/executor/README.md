@@ -39,12 +39,49 @@ await exec.ready;
 const terminal = await exec.run({ compiled, target, tools: [] });
 ```
 
+## The `.fx` edge + streaming (ADR 77)
+
+The executor exposes the dual-typed edge: a Promise facade AND an
+Effect-native `.fx` twin for each operation. The loop composes the twins so
+the whole execution is ONE fiber (telemetry nests, interruption propagates):
+
+```ts
+// Promise facade — await it:
+const terminal = await exec.run(input);
+
+// `.fx` twin — compose in your Effect.gen:
+const terminal = yield * exec.fx.run(input);
+const projected = yield * exec.fx.project(input); // + normalize, executeStream
+```
+
+`executeStream` returns an **`ExecutorStream<TRaw>`** — an
+`AsyncStream<AdapterDelta, TRaw>` (the streaming dual of `Promise`): iterate
+deltas as the provider emits them, `await .result` for the final raw output,
+`abort()` to cancel:
+
+```ts
+const stream = exec.executeStream(input);
+for await (const delta of stream) {
+  /* content-delta tokens, tool-call deltas, message-end, … */
+}
+const raw = await stream.result; // final accumulated output
+```
+
+Its `.fx` twin is the **sink-fold** `executeStream(input, sink): Effect<TRaw>`
+— the loop composes it with no queue (`yield* exec.fx.executeStream(input, (d)
+=> Effect.sync(() => emit(d)))`); the Queue/backpressure machinery lives in the
+facade's `runHarnessStream` bridge. Cancellation is real Effect fiber
+interruption of the provider call (via `withExternalAbort` + the `tryPromise`
+fiber signal), driven by `input.signal` — which the loop wires to
+`loop.abort()` / execution timeout.
+
 ## API
 
 - `LanguageModelExecutor<TRaw, TChunk>` — the harness. Protocol surface
   per `@agentick/spec-next`: `project` / `execute` / `executeStream` /
-  `normalize` / `run` / `abort`, plus the self-described `target`
-  delegated from the adapter.
+  `normalize` / `run` / `abort` (Promise facades) + `fx.{run, project,
+normalize, executeStream}` (Effect twins), plus the self-described
+  `target` delegated from the adapter.
 - `FakeLanguageModelExecutor` — scripted double (no wire) for tests,
   examples, and the substrate proof.
 - `ExecutorLifecycle` — in-flight entry tracking shared by both.

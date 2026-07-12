@@ -290,6 +290,92 @@ The handler body has `ctx` in lexical scope via the deps parameter.
 Async work inside the body captures it via JS closure — no
 `readContext()` needed inside the handler.
 
+## The edge bridges — `runHarnessProtocol` / `runHarnessStream`
+
+The `.fx` dual-typed edge (ADR 77) is Effect-canonical; the Promise/AsyncStream
+facades are DERIVED at the entity edge by these two bridges.
+
+**`runHarnessProtocol(effect, runtime?)`** — Effect → Promise. Runs `effect`
+to a settled `Exit` and normalizes it (typed failures re-thrown, defects
+surfaced). The single `runPromise` boundary a harness facade crosses:
+
+```ts
+// A harness facade IS its `.fx` twin bridged once:
+run(input: RunInput): Promise<ExecutorTerminal> {
+  return runHarnessProtocol(this.runFx(input)); // fx.run minus the runPromise
+}
+```
+
+Pass the optional `runtime` (an app-scoped `ManagedRuntime` built from a
+telemetry `Layer`) to run the whole composed fiber on a real tracer — that is
+how a `session.send` produces a **nested** span tree (see `@agentick/session-next`).
+
+**`runHarnessStream(build, options?)`** — the streaming sibling, Effect →
+`AsyncStream`. All the Queue / `forkDaemon` / iterator / result-Promise
+machinery lives here ONCE; each streaming edge supplies only its sink-fold
+`build` + policy hooks (`queueCapacity`, `isCancellation`, `onStart`,
+`onAbort`, `runtime`). The executor's `executeStream` facade is
+`runHarnessStream((sink) => this.executeStreamFx(input, sink), { … })`.
+
+## Operation middleware — three tiers (ADR 76)
+
+`runOperation` composes middleware around every operation body,
+**outermost → innermost**:
+
+```
+tier 4 — call-scoped (FiberRef, broadest)
+  → tier 3 — inherited construction-ancestors (root → parent)
+    → tier 2 — this harness's own chain
+      → before-verdict handlers (veto > replace > defer > proceed)
+        → operation body
+```
+
+Within any one chain, first-registered is outermost. A `Middleware` wraps the
+body: call `next(input)` to proceed, or return a value to short-circuit.
+
+```ts
+import type { Middleware } from "@agentick/runtime-next";
+
+const timing: Middleware = (input, next) =>
+  Effect.gen(function* () {
+    const start = Date.now();
+    const result = yield* next(input);
+    // …record Date.now() - start…
+    return result;
+  });
+```
+
+**Tier 2 — per-instance** (`harness.use(mw)`): wraps that harness's own ops.
+Returns an `Unsubscribe`.
+
+**Tier 3 — structural inheritance:** a harness's effective stack is its
+**construction-ancestors'** chains, root-outermost, wrapping its own. The app
+is each session's construction parent, so `app.use(mw)` structurally wraps
+every session op — deployment-global tracing / journaling / audit. The
+before-verdict handlers inherit the same way (`app.on*()` reaches a descendant
+op). Walked fresh per op (late registration honored); behavior-preserving when
+no ancestor registered anything. The SHARED spine harnesses (loop / executor /
+tool) are construction-_siblings_, not children — a session-scoped concern
+around the model call is tier 4, not tier 3.
+
+**Tier 4 — call-scoped** (`withCallMiddleware(mw, effect)`): the Effect-native,
+dynamic-scope power. Scopes `mw` around every nested `runOperation` the effect
+transitively reaches — **in ANY harness, across construction-siblings** — then
+evaporates. Enabled by the ADR 77 spine: the call is one fiber, so a FiberRef
+propagates the middleware list across boundaries. This is the _only_ correct
+scope for per-request / per-session middleware around a _shared_ harness:
+
+```ts
+import { withCallMiddleware } from "@agentick/runtime-next";
+
+// budgetCap wraps every op this send transitively reaches — the model call
+// (executor) and each tool dispatch, though they're shared singletons — then
+// is gone when the send settles. Nested calls accumulate (outer stays outermost).
+yield * withCallMiddleware([budgetCap], loop.fx.runExecution(sendInput));
+```
+
+> **Full write-up:** [ADR 76 — Operation middleware scoping](../../docs/proposals/v2/blueprint/76-operation-middleware-scoping.md).
+
 ---
 
 ## See also
