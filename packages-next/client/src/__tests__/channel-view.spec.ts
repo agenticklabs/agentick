@@ -1,10 +1,10 @@
 /**
  * `channelView` — the generic client-side reduced-channel primitive.
  *
- * Pins the composition contract: PULL a baseline (whose cursor the stream
- * resumes from), then PUSH-fold deltas onto it, exposing the reduced state
- * via the useSyncExternalStore contract. No version bookkeeping — the
- * transport cursor ties snapshot→stream.
+ * Pins the fold contract: the subscription opens with a snapshot frame, then
+ * streams deltas on the same ordered stream; `reduce` seeds on the snapshot and
+ * folds the deltas; state is exposed via the useSyncExternalStore contract. No
+ * baseline pull, no cursor — the snapshot is simply the first frame.
  */
 
 import { describe, expect, it } from "vitest";
@@ -19,7 +19,7 @@ import type {
 import { channelEventName } from "@agentick/spec-next";
 import { waitFor } from "@agentick/utils-next/testing";
 
-import { channelView, type ChannelBaseline } from "../channel-view.js";
+import { channelView } from "../channel-view.js";
 
 const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 5));
 
@@ -84,20 +84,14 @@ function pushStream(channel: string): PushStream {
 interface Captured {
   scope?: SubscriptionScope;
   query?: EventQuery;
-  fromCursor?: Cursor;
 }
 
 function fakeClient(stream: SubscriptionStream, captured: Captured) {
   return {
     transport: {
-      subscribe(
-        scope: SubscriptionScope,
-        query?: EventQuery,
-        fromCursor?: Cursor,
-      ): SubscriptionStream {
+      subscribe(scope: SubscriptionScope, query?: EventQuery): SubscriptionStream {
         captured.scope = scope;
         captured.query = query;
-        captured.fromCursor = fromCursor;
         return stream;
       },
     },
@@ -105,121 +99,87 @@ function fakeClient(stream: SubscriptionStream, captured: Captured) {
 }
 
 type Doc = Record<string, number>;
-const scope: SubscriptionScope = { kind: "session", id: "s1" };
-const mergeReduce = (s: Doc, f: Doc): Doc => ({ ...s, ...f });
+// A realistic reducer that distinguishes the snapshot (seed) from deltas (fold).
+type Frame = { kind: "snapshot"; values: Doc } | { kind: "delta"; set: Doc };
+const reduce = (s: Doc, f: Frame): Doc =>
+  f.kind === "snapshot" ? { ...f.values } : { ...s, ...f.set };
 
-describe("channelView — pull baseline, push-fold deltas", () => {
-  it("seeds from the baseline, subscribes from its cursor, then folds deltas", async () => {
+const scope: SubscriptionScope = { kind: "session", id: "s1" };
+
+describe("channelView — fold over a channel subscription", () => {
+  it("seeds from the opening snapshot frame, then folds deltas", async () => {
     const stream = pushStream("test");
     const captured: Captured = {};
-    const view = channelView<Doc, Doc>(fakeClient(stream, captured), scope, "test", {
+    const view = channelView<Doc, Frame>(fakeClient(stream, captured), scope, "test", {
       initial: {},
-      baseline: async () => ({ state: { a: 1 }, cursor: { value: 7 } as Cursor }),
-      reduce: mergeReduce,
+      reduce,
     });
 
-    expect(view.get()).toEqual({}); // initial, before baseline resolves
-    await waitFor(() => Object.keys(view.get()).length > 0);
-    expect(view.get()).toEqual({ a: 1 }); // baseline seeded
-
-    // Composition contract: subscribed to THIS channel, resuming from the
-    // baseline's cursor (versionless snapshot→stream tie).
+    // Subscribed to THIS channel; no separate baseline pull.
     expect(captured.scope).toEqual(scope);
     expect(captured.query).toEqual({ surface: "session", name: { exact: "session:channel:test" } });
-    expect(captured.fromCursor).toEqual({ value: 7 });
+    expect(view.get()).toEqual({}); // initial, before the first frame
 
-    let notified = 0;
-    view.subscribe(() => notified++);
-    stream.emit({ b: 2 });
-    await waitFor(() => notified > 0);
-    expect(view.get()).toEqual({ a: 1, b: 2 }); // delta folded onto the baseline
-  });
+    stream.emit({ kind: "snapshot", values: { a: 1 } }); // frame one = snapshot
+    await waitFor(() => Object.keys(view.get()).length > 0);
+    expect(view.get()).toEqual({ a: 1 });
 
-  it("PULLS before it PUSHES — no subscription opens until the baseline resolves", async () => {
-    const stream = pushStream("test");
-    const captured: Captured = {};
-    let resolveBaseline!: (b: ChannelBaseline<Doc>) => void;
-    const view = channelView<Doc, Doc>(fakeClient(stream, captured), scope, "test", {
-      initial: { n: 0 },
-      baseline: () => new Promise<ChannelBaseline<Doc>>((r) => (resolveBaseline = r)),
-      reduce: mergeReduce,
-    });
-
-    await tick();
-    expect(view.get()).toEqual({ n: 0 }); // still initial
-    expect(captured.scope).toBeUndefined(); // NOT subscribed yet — pull is first
-
-    resolveBaseline({ state: { n: 5 } });
-    await waitFor(() => view.get().n === 5);
-    expect(captured.scope).toEqual(scope); // subscribed only after the baseline
+    stream.emit({ kind: "delta", set: { b: 2 } }); // subsequent = delta
+    await waitFor(() => "b" in view.get());
+    expect(view.get()).toEqual({ a: 1, b: 2 });
   });
 
   it("subscribe() listeners fire on change and stop after Unsubscribe", async () => {
     const stream = pushStream("test");
-    const view = channelView<Doc, Doc>(fakeClient(stream, {}), scope, "test", {
+    const view = channelView<Doc, Frame>(fakeClient(stream, {}), scope, "test", {
       initial: {},
-      baseline: async () => ({ state: {} }),
-      reduce: mergeReduce,
+      reduce,
     });
-    await tick();
 
     let count = 0;
     const unsub = view.subscribe(() => count++);
-    stream.emit({ a: 1 });
+    stream.emit({ kind: "snapshot", values: { a: 1 } });
     await waitFor(() => count === 1);
 
     unsub();
-    stream.emit({ b: 2 });
-    await tick();
+    stream.emit({ kind: "delta", set: { b: 2 } });
+    await waitFor(() => "b" in view.get());
     expect(count).toBe(1); // no further notifications after Unsubscribe
     expect(view.get()).toEqual({ a: 1, b: 2 }); // state still folds; only the listener detached
   });
 
   it("close() stops folding and closes the underlying stream", async () => {
     const stream = pushStream("test");
-    const view = channelView<Doc, Doc>(fakeClient(stream, {}), scope, "test", {
+    const view = channelView<Doc, Frame>(fakeClient(stream, {}), scope, "test", {
       initial: {},
-      baseline: async () => ({ state: { a: 1 } }),
-      reduce: mergeReduce,
+      reduce,
     });
+
+    stream.emit({ kind: "snapshot", values: { a: 1 } });
     await waitFor(() => view.get().a === 1);
 
     view.close();
     expect(view.closed).toBe(true);
     expect(stream.isClosed).toBe(true);
 
-    stream.emit({ b: 2 });
+    stream.emit({ kind: "delta", set: { b: 2 } });
     await tick();
     expect(view.get()).toEqual({ a: 1 }); // no fold after close
   });
 
   it("isolates listener faults — a throwing listener can't starve the others", async () => {
     const stream = pushStream("test");
-    const view = channelView<Doc, Doc>(fakeClient(stream, {}), scope, "test", {
+    const view = channelView<Doc, Frame>(fakeClient(stream, {}), scope, "test", {
       initial: {},
-      baseline: async () => ({ state: {} }),
-      reduce: mergeReduce,
+      reduce,
     });
-    await tick();
 
     let good = 0;
     view.subscribe(() => {
       throw new Error("bad listener");
     });
     view.subscribe(() => good++);
-    stream.emit({ a: 1 });
+    stream.emit({ kind: "snapshot", values: { a: 1 } });
     await waitFor(() => good === 1); // the second listener still ran
-  });
-
-  it("omitting the baseline cursor subscribes from the head (undefined fromCursor)", async () => {
-    const stream = pushStream("test");
-    const captured: Captured = {};
-    const view = channelView<Doc, Doc>(fakeClient(stream, captured), scope, "test", {
-      initial: {},
-      baseline: async () => ({ state: { a: 1 } }), // no cursor
-      reduce: mergeReduce,
-    });
-    await waitFor(() => view.get().a === 1);
-    expect(captured.fromCursor).toBeUndefined();
   });
 });

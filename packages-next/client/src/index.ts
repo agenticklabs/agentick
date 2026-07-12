@@ -21,12 +21,7 @@ export {
   type ReceivedLog,
   type ReceivedProgress,
 } from "./signals.js";
-export {
-  channelView,
-  type ChannelView,
-  type ChannelBaseline,
-  type ChannelViewConfig,
-} from "./channel-view.js";
+export { channelView, type ChannelView, type ChannelViewConfig } from "./channel-view.js";
 
 // Re-export protocol types adopters need to write extensions, for the
 // "one import" ergonomic. Spec is the canonical source.
