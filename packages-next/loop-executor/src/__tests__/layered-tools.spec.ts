@@ -110,6 +110,10 @@ function mkReconciler(tools: readonly ToolDeclaration[]): ReconcilerProtocol {
 
 function noopApplicator(): StateApplicator {
   return {
+    fx: {
+      applyExecutorResult: () => Effect.void,
+      applyToolResults: () => Effect.void,
+    },
     applyExecutorResult: async () => undefined,
     applyToolResults: async () => undefined,
     appendEntry: async () => undefined,

@@ -151,6 +151,18 @@ function stubToolExecutor(): ToolExecutorProtocol {
 function makeRecordingApplicator() {
   const calls: { method: string; payload: unknown }[] = [];
   const applicator: StateApplicator = {
+    // Record on the fx path too — the loop composes `fx.apply*` after the
+    // Stage-3 rewrite, so the conformance count must hold on both edges.
+    fx: {
+      applyExecutorResult: (payload) =>
+        Effect.sync(() => {
+          calls.push({ method: "applyExecutorResult", payload });
+        }),
+      applyToolResults: (payload) =>
+        Effect.sync(() => {
+          calls.push({ method: "applyToolResults", payload });
+        }),
+    },
     applyExecutorResult: async (payload) => {
       calls.push({ method: "applyExecutorResult", payload });
     },

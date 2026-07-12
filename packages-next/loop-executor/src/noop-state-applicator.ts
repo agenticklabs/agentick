@@ -14,9 +14,16 @@
  * scenarios with timeline feedback arrive with the session harness.
  */
 
-import type { StateApplicator } from "@agentick/spec-next";
+import { Effect } from "effect";
+
+import type { StateApplicator, StateApplicatorFx } from "@agentick/spec-next";
 
 export class NoopStateApplicator implements StateApplicator {
+  /** No-op fx twins — compose in the loop's fiber, write nothing. */
+  readonly fx: StateApplicatorFx = {
+    applyExecutorResult: () => Effect.void,
+    applyToolResults: () => Effect.void,
+  };
   async applyExecutorResult(): Promise<void> {
     // intentional no-op
   }

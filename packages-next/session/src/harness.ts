@@ -607,22 +607,38 @@ export class SessionHarness<P = unknown>
 
   // ── StateApplicator ──────────────────────────────────────────────
 
+  /**
+   * The composable `applyExecutorResult` Effect — the state-applicator
+   * `fx` twin the loop composes in-fiber (ADR 77). Returns the un-run
+   * `Effect.tryPromise` so the timeline write's exit-normalization stays
+   * in the loop's fiber rather than launching its own `runPromise` root.
+   * {@link applyExecutorResult} is the facade.
+   */
+  private applyExecutorResultFx(
+    input: ApplyExecutorResultInput,
+  ): Effect.Effect<ApplyResult, StateApplyError, never> {
+    return Effect.tryPromise({
+      try: () => this.applyExecutorResultBody(input),
+      catch: (cause): StateApplyError => new TimelineWriteFailed({ cause }),
+    });
+  }
+
   applyExecutorResult(input: ApplyExecutorResultInput): Promise<ApplyResult> {
-    return runHarnessProtocol(
-      Effect.tryPromise({
-        try: () => this.applyExecutorResultBody(input),
-        catch: (cause): StateApplyError => new TimelineWriteFailed({ cause }),
-      }),
-    );
+    return runHarnessProtocol(this.applyExecutorResultFx(input));
+  }
+
+  /** The composable `applyToolResults` Effect — see {@link applyExecutorResultFx}. */
+  private applyToolResultsFx(
+    input: ApplyToolResultsInput,
+  ): Effect.Effect<ApplyResult, StateApplyError, never> {
+    return Effect.tryPromise({
+      try: () => this.applyToolResultsBody(input),
+      catch: (cause): StateApplyError => new TimelineWriteFailed({ cause }),
+    });
   }
 
   applyToolResults(input: ApplyToolResultsInput): Promise<ApplyResult> {
-    return runHarnessProtocol(
-      Effect.tryPromise({
-        try: () => this.applyToolResultsBody(input),
-        catch: (cause): StateApplyError => new TimelineWriteFailed({ cause }),
-      }),
-    );
+    return runHarnessProtocol(this.applyToolResultsFx(input));
   }
 
   appendEntry(input: AppendEntryInput): Promise<ApplyResult> {
@@ -1150,6 +1166,13 @@ export class SessionHarness<P = unknown>
           target: targetForCall,
           toolExecutor: this.toolExecutor,
           stateApplicator: {
+            // The `.fx` twins compose in the loop's fiber (Stage 3); the
+            // Promise facades below stay the derived edge. `Effect.asVoid`
+            // drops the session's `ApplyResult` to the loop-facing `void`.
+            fx: {
+              applyExecutorResult: (i) => this.applyExecutorResultFx(i).pipe(Effect.asVoid),
+              applyToolResults: (i) => this.applyToolResultsFx(i).pipe(Effect.asVoid),
+            },
             applyExecutorResult: (i) => this.applyExecutorResult(i).then(() => undefined),
             applyToolResults: (i) => this.applyToolResults(i).then(() => undefined),
             appendEntry: (i) => this.appendEntry(i).then(() => undefined),

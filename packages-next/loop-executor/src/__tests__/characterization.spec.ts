@@ -83,6 +83,18 @@ function mkRecordingReconciler(order: string[]): ReconcilerProtocol {
 /** State applicator that records apply-call order. */
 function mkRecordingApplicator(order: string[]): StateApplicator {
   return {
+    // Record on BOTH edges — the Stage-3 loop composes `fx.apply*`; the
+    // characterization diff must stay byte-identical across the rewrite.
+    fx: {
+      applyExecutorResult: () =>
+        Effect.sync(() => {
+          order.push("apply:executor-result");
+        }),
+      applyToolResults: () =>
+        Effect.sync(() => {
+          order.push("apply:tool-results");
+        }),
+    },
     applyExecutorResult: async () => {
       order.push("apply:executor-result");
     },

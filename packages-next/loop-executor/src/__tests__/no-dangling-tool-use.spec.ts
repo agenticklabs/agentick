@@ -92,6 +92,18 @@ function mkRecordingApplicator(): {
   const toolResultCalls: Array<readonly LoopToolResult[]> = [];
   const order: string[] = [];
   const applicator: StateApplicator = {
+    // Record on BOTH edges (Stage-3 loop composes `fx.apply*`).
+    fx: {
+      applyExecutorResult: () =>
+        Effect.sync(() => {
+          order.push("executor-result");
+        }),
+      applyToolResults: (input) =>
+        Effect.sync(() => {
+          order.push("tool-results");
+          toolResultCalls.push(input.results);
+        }),
+    },
     applyExecutorResult: async () => {
       order.push("executor-result");
     },

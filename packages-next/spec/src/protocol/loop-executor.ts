@@ -33,6 +33,7 @@ import type {
   UsageStats,
 } from "../data/execution-result.js";
 import type { LoopExecutorError } from "../errors/harnesses.js";
+import type { StateApplyErrorChannel } from "../errors/lifecycle.js";
 import type { FormatterRef } from "../data/formatter.js";
 import type { ExecutorProtocol } from "./executor.js";
 import type { RegisteredModel } from "./hook-bridges.js";
@@ -53,33 +54,54 @@ import type { ToolExecutorProtocol } from "./tool-executor.js";
  * loop accepts any object matching these methods — `@agentick/loop-executor-next`
  * ships `NoopStateApplicator` for tests and the example app.
  */
-export interface StateApplicator {
-  /**
-   * Apply an executor's normalized result to session state — typically
-   * appending an assistant message to the timeline with the model's
-   * output blocks (and updating usage / stop reason).
-   */
+/**
+ * The Effect-canonical composable surface of the state applicator (ADR 77,
+ * the dual-typed edge). The loop reaches `stateApplicator.fx.apply*(...)`
+ * to compose the tick's state writes into one fiber tree (Stage 3); the
+ * plain Promise methods on {@link StateApplicator} are the derived edge
+ * facades ({@link PromiseView} of this).
+ *
+ * The reference implementer is the session harness, whose `apply*` are
+ * `runHarnessProtocol`-backed (a `runPromise` root that would sever the
+ * fiber if the loop awaited the facade). These twins are the un-run
+ * inners so the write's exit-normalization stays in the loop's fiber.
+ * `appendEntry` has no twin — the loop never calls it (interceptor/
+ * middleware surface only).
+ */
+export interface StateApplicatorFx {
   applyExecutorResult(input: {
     readonly sessionId: string;
     readonly executionId: string;
     readonly tickId: string;
     readonly result: LanguageModelExecutionResult;
-  }): Promise<void>;
+  }): Effect.Effect<void, StateApplyErrorChannel | SubstrateError, never>;
 
-  /**
-   * Apply tool dispatch results to session state — typically appending
-   * tool message(s) to the timeline so the next tick's render sees them.
-   */
   applyToolResults(input: {
     readonly sessionId: string;
     readonly executionId: string;
     readonly tickId: string;
     readonly results: readonly LoopToolResult[];
-  }): Promise<void>;
+  }): Effect.Effect<void, StateApplyErrorChannel | SubstrateError, never>;
+}
+
+export interface StateApplicator extends PromiseView<StateApplicatorFx> {
+  /**
+   * The Effect-canonical composable surface (ADR 77) — `fx.apply*` for
+   * in-fiber composition by the loop's `Effect.gen` body.
+   */
+  readonly fx: StateApplicatorFx;
+
+  // `applyExecutorResult` / `applyToolResults` are derived from
+  // `PromiseView<StateApplicatorFx>` — the Promise facades of the
+  // Effect-canonical twins ({@link StateApplicatorFx.applyExecutorResult}
+  // appends the assistant message with the model's output blocks;
+  // `applyToolResults` appends tool message(s) so the next tick's render
+  // sees them). The implementer exposes the Effect surface as `.fx`.
 
   /**
    * Append an arbitrary timeline entry. Used by interceptors / middleware
-   * that want to record opaque state changes.
+   * that want to record opaque state changes. No fx twin — off the loop's
+   * hot path.
    */
   appendEntry(input: {
     readonly sessionId: string;

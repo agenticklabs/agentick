@@ -166,8 +166,24 @@ the run — telemetry nesting is low-value there); only the two *awaited* lifecy
       twin for loop uniformity, but its facade stays bare `async` (no `runHarnessProtocol` on the
       hot per-tick path). `list` needs no twin (loop never calls it). Both impls (harness +
       `defineToolExecutor`) done; +4 proofs incl. binding-mismatch → catchable failure.
-- [ ] **reconciler `notifyLifecycle`** twin (both impls: CallbackReconciler + React ReconcilerHarness).
-- [ ] **`StateApplicator` fx** (`applyExecutorResult` + `applyToolResults`).
+- [x] **reconciler `notifyLifecycle`** — **NULL HYPOTHESIS HELD: no twin needed.** Verified both impls
+      (CallbackReconciler → spec callback; React ReconcilerHarness → `state.lifecycle.dispatch`) are
+      bare `async` passthroughs — NOT `runOperation`/`runHarnessProtocol`-backed, no span, no
+      `runPromise` root inside. So the loop composes them fiber-clean via `Effect.promise` (the 2
+      awaited bridges) / detached `void` (the ~4 fire-and-forget) with NO severing and NO lost span.
+      A dedicated twin would be surface-uniformity theater. The session's own `notifyLifecycle`
+      (= the tick-end `notifyTickEnd` decision) is likewise bare async → stays a callback via
+      `Effect.promise`. **The real twin criterion is sharpened: twin iff `runHarnessProtocol`-backed
+      (launches a `runPromise` root).**
+- [x] **`StateApplicator` fx** (`applyExecutorResult` + `applyToolResults`) — GENUINE: the session's
+      impls ARE `runHarnessProtocol`-backed (would sever + drop the write's exit-normalization).
+      `StateApplicatorFx` added to spec; the two apply facades derive via `PromiseView`; `appendEntry`
+      needs no twin (loop never calls it). Session extracts `applyExecutorResultFx`/`applyToolResultsFx`
+      + wires the loop-facing adapter's `fx` (`Effect.asVoid` drops `ApplyResult` → the loop's `void`).
+      `NoopStateApplicator` + recording doubles gain `fx` recording on BOTH edges so the
+      characterization diff holds byte-identical when the loop switches facade→fx in step 5. +3 proofs.
+      **Twin surface now COMPLETE — every `runHarnessProtocol`-backed spine call the loop makes has a
+      composable twin.**
 - [ ] **Loop `Effect.gen` rewrite (THE CRUX)** — `runExecutionAsync` → generator,
       `yield* executor.fx.run(...)` etc., **zero internal `tryPromise` islands**.
       **Characterization suite stays green UNCHANGED.** Interruption + error-channel re-tested.
