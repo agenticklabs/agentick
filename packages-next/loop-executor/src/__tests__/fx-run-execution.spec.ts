@@ -39,6 +39,7 @@ const okResult: LanguageModelExecutionResult = {
 
 const stubReconciler = (): ReconcilerProtocol =>
   ({
+    fx: { renderTree: () => Effect.succeed({ tree: EMPTY_TREE, diagnostics: [], iterations: 1 }) },
     mount: async () => ({ mountId: "fx-mount", restoredFromSnapshot: false }),
     rerender: async () => undefined,
     renderTree: async () => ({ tree: EMPTY_TREE, diagnostics: [], iterations: 1 }),
@@ -61,6 +62,11 @@ const stubReconciler = (): ReconcilerProtocol =>
 
 const stubToolExecutor = (): ToolExecutorProtocol =>
   ({
+    fx: {
+      replaceReconcilerTools: () => Effect.void,
+      compileForTick: () => Effect.succeed([]),
+      dispatch: () => Effect.succeed({ toolCallId: "t", name: "n", content: [], isError: false }),
+    },
     replaceReconcilerTools: async () => undefined,
     compileForTick: async () => [],
     dispatch: async () => ({ toolCallId: "t", name: "n", content: [], isError: false }),

@@ -6,6 +6,7 @@
  * shared ToolExecutorHarness).
  */
 
+import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { FakeLanguageModelExecutor } from "@agentick/executor-next";
@@ -18,6 +19,9 @@ import { fakeBridges } from "@agentick/reconciler-next";
 import type {
   ContentBlock,
   ExecutionTarget,
+  ExecutorFx,
+  LanguageModelExecutionResult,
+  LanguageModelInput,
   SessionHarnessProtocol,
   SpawnContext,
   SpawnContextChildInput,
@@ -398,27 +402,37 @@ describe("steering — send() during a running execution (ADR 53)", () => {
     const gate = new Promise<void>((r) => {
       releaseTick1 = r;
     });
-    // The loop takes the streaming path when the executor exposes
-    // executeStream — gate BOTH entry points and count generations.
+    // ADR 77 — the loop composes the `.fx` twins, so gate + count THERE
+    // (patching the public facades is bypassed once internal calls go
+    // through `fx`). Gate BOTH entry points (run / executeStream) and count
+    // generations; the first generation is held until `releaseTick1()` so
+    // the steering send lands mid-execution.
     let runCalls = 0;
-    const origRun = exec.run.bind(exec);
-    (exec as { run: typeof exec.run }).run = async (i) => {
-      runCalls += 1;
-      if (runCalls === 1) await gate;
-      return origRun(i);
+    const baseFx = exec.fx;
+    const patchedFx: ExecutorFx<LanguageModelInput, unknown, LanguageModelExecutionResult> = {
+      ...baseFx,
+      run: (i) => {
+        runCalls += 1;
+        const inner = baseFx.run(i);
+        return runCalls === 1
+          ? Effect.zipRight(
+              Effect.promise(() => gate),
+              inner,
+            )
+          : inner;
+      },
+      executeStream: (i, sink) => {
+        runCalls += 1;
+        const inner = baseFx.executeStream(i, sink);
+        return runCalls === 1
+          ? Effect.zipRight(
+              Effect.promise(() => gate),
+              inner,
+            )
+          : inner;
+      },
     };
-    const origStream = exec.executeStream.bind(exec);
-    (exec as { executeStream: typeof exec.executeStream }).executeStream = (i) => {
-      runCalls += 1;
-      const inner = origStream(i);
-      if (runCalls === 1) {
-        const gatedResult = gate.then(() => inner.result);
-        return new Proxy(inner, {
-          get: (t, k) => (k === "result" ? gatedResult : Reflect.get(t, k)),
-        });
-      }
-      return inner;
-    };
+    Object.defineProperty(exec, "fx", { configurable: true, get: () => patchedFx });
 
     const handle1 = await session.send({
       messages: [{ role: "user", content: "original ask" }],

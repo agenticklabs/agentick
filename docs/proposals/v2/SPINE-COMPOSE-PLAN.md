@@ -184,9 +184,27 @@ the run — telemetry nesting is low-value there); only the two *awaited* lifecy
       characterization diff holds byte-identical when the loop switches facade→fx in step 5. +3 proofs.
       **Twin surface now COMPLETE — every `runHarnessProtocol`-backed spine call the loop makes has a
       composable twin.**
-- [ ] **Loop `Effect.gen` rewrite (THE CRUX)** — `runExecutionAsync` → generator,
-      `yield* executor.fx.run(...)` etc., **zero internal `tryPromise` islands**.
-      **Characterization suite stays green UNCHANGED.** Interruption + error-channel re-tested.
+- [x] **Loop `Effect.gen` rewrite (THE CRUX)** — DONE. `runExecutionAsync` (Promise-chained) →
+      one `Effect.gen` fiber; `runExecutionBody` composes every downstream call via its `.fx` twin
+      (`yield* reconciler.fx.renderTree`, `executor.fx.{project,run,executeStream,normalize}`,
+      `toolExecutor.fx.{replaceReconcilerTools,compileForTick,dispatch}`, `stateApplicator.fx
+      .apply*`). **Zero internal `tryPromise` islands.** The imperative control flow (while/break/
+      accumulate) is UNCHANGED — `Effect.gen` preserves it; only `await facade()` → `yield* fx()`.
+      The two locally-handled failures (streaming `.result` reject, hard tool throw) are caught
+      in-body via `Effect.either`; everything else folds to `ExecutionError` via a boundary
+      `Effect.catchAll`; `finally` → `Effect.ensuring`. Bridge notifications (`notifyLifecycle`/
+      `notifyTickEnd`, no span, bare async) awaited in-fiber via `awaitBridge` (a bare
+      `Effect.tryPromise` — NOT a severing root) or fire-and-forget. **Characterization 28
+      byte-identical green** on the first diff; loop-executor 50 green; workspace 145/145; full
+      packages-next suite green.
+      - **KEY FINDING (surfaced by session integration, exactly as intended):** overriding/patching
+        an executor's PUBLIC facade (`run`/`executeStream`/`project`) does NOT intercept the `.fx`
+        twin — both derive from the same private impl, but a facade override doesn't touch it. So the
+        moment internal composition moved facade→fx, two test doubles that intercepted the facade
+        (the kill-resume `SpyLanguageModelExecutor`, the steering monkey-patch) went silently inert.
+        Fixed by intercepting at the fx edge. This is the correct architecture (adopters decorate at
+        the adapter/runner layer, not by overriding executor facades — ADR 52 killed the subclass
+        tier) — but it's a real contract the fx surface now enforces.
 - [ ] **Session** — `send` composes `yield* loop.fx.runExecution`; `runPromise` once
       at the entity edge on the tracer runtime; `notifyTickEnd` gains its Effect variant here.
 

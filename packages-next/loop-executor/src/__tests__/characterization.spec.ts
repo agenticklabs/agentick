@@ -118,6 +118,18 @@ function mkFakeToolExecutor(
   dispatch: (call: { name: string; toolCallId: string }) => Promise<DispatchResult>,
 ): ToolExecutorProtocol {
   return {
+    // fx twins the Stage-3 loop composes. `dispatch` rides `Effect.tryPromise`
+    // so a hard throw lands on the E channel (→ the loop's `Effect.either`
+    // tool-error path), matching the facade's rejection.
+    fx: {
+      replaceReconcilerTools: () => Effect.void,
+      compileForTick: () => Effect.succeed([]),
+      dispatch: (i: { name: string; toolCallId: string }) =>
+        Effect.tryPromise({
+          try: () => dispatch({ name: i.name, toolCallId: i.toolCallId }),
+          catch: (e) => e,
+        }),
+    },
     replaceReconcilerTools: async () => undefined,
     compileForTick: async () => [],
     dispatch: async (i: { name: string; toolCallId: string }) =>

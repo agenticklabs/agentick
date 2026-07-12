@@ -17,6 +17,20 @@
  *      (stop-force > continue-force > abstain), bounded by maxTicks.
  *   6. loop
  *
+ * ## ADR 77 — the fiber spine
+ *
+ * `runExecutionBody` is ONE `Effect.gen` fiber. Every downstream harness
+ * call composes in-fiber via its `.fx` twin (`yield* reconciler.fx
+ * .renderTree(...)`, `executor.fx.run(...)`, `toolExecutor.fx.dispatch
+ * (...)`, `stateApplicator.fx.apply*(...)`) — no `runPromise` root between
+ * boundaries, so telemetry/interruption propagate through the whole tree.
+ * The only Promise boundaries are the bridge NOTIFICATIONS that carry no
+ * span (`reconciler.notifyLifecycle`, `session.notifyTickEnd`) — awaited
+ * in-fiber via {@link awaitBridge} (a bare `Effect.tryPromise`, NOT a
+ * severing `runHarnessProtocol` root) or dispatched fire-and-forget. The
+ * genuine external-I/O boundaries (`adapter.execute`, the user tool
+ * handler) live INSIDE the executor / tool-executor, not here.
+ *
  * Per-phase events on `surface: "loop"` give a single subscriber the
  * full execution flow without having to compose four other harnesses'
  * events.
@@ -24,7 +38,7 @@
  * @see docs/proposals/v2/blueprint/05-loop-executor.md
  */
 
-import { Effect } from "effect";
+import { Effect, Either } from "effect";
 
 import { BaseHarness, runHarnessProtocol, ulid } from "@agentick/runtime-next";
 import type {
@@ -170,26 +184,27 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
 
   // ──────── internals ────────
 
+  /**
+   * The tick loop as ONE `Effect.gen` fiber (ADR 77). Every downstream
+   * harness call composes in-fiber via its `.fx` twin — no `runPromise`
+   * root between boundaries. Bridge notifications (`notifyLifecycle` /
+   * `notifyTickEnd`) carry no span and are awaited via {@link awaitBridge}
+   * (a bare `Effect.tryPromise`, in-fiber, NOT a severing root) or
+   * dispatched fire-and-forget. The imperative control flow (while / break /
+   * accumulate) is unchanged from the Promise original — the characterization
+   * suite pins it byte-identical. Any uncaught twin failure folds to
+   * `ExecutionError` at the boundary (the two locally-handled failures —
+   * a streaming `.result` reject and a hard tool-dispatch throw — are caught
+   * in-body via `Effect.either`, exactly as the Promise version try/caught
+   * them). `inFlight`/`aborted` cleanup rides `Effect.ensuring`.
+   */
   private runExecutionBody(
     input: RunExecutionInput,
   ): Effect.Effect<ExecutionTerminal, LoopExecutorError, never> {
-    return Effect.tryPromise({
-      try: () => this.runExecutionAsync(input),
-      catch: (cause): LoopExecutorError => new ExecutionError({ cause }),
-    });
-  }
-
-  /**
-   * Promise-shaped body for the tick loop. Composes the four downstream
-   * harnesses (reconciler, executor, tool-executor, state applicator)
-   * via their public Promise surfaces. The loop's own typed lifecycle
-   * goes through `runOperation` at the public entry point.
-   */
-  private async runExecutionAsync(input: RunExecutionInput): Promise<ExecutionTerminal> {
     const executionId = input.executionId;
-    this.inFlight.set(executionId, { executionId });
+    return Effect.gen(this, function* () {
+      this.inFlight.set(executionId, { executionId });
 
-    try {
       const acc: TickAccumulator = {
         ticks: 0,
         output: [],
@@ -242,17 +257,20 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
 
         // Lifecycle bridge (#206) — dispatch tick-start to the reconciler
         // hook store AWAITED, BEFORE render. Without this bridge the
-        // entire useOn* family is inert (no producer).
-        await input.reconciler.notifyLifecycle({
-          mountId: input.mountId,
-          event: { kind: "tick-start", tickId, executionId },
-        });
+        // entire useOn* family is inert (no producer). A throw here fails
+        // the run (→ ExecutionError) — pinned by characterization.
+        yield* awaitBridge(() =>
+          input.reconciler.notifyLifecycle({
+            mountId: input.mountId,
+            event: { kind: "tick-start", tickId, executionId },
+          }),
+        );
 
         // 1. Render. The RenderContext envelope rides render-context
         // (ADR 54 / 55) so useContextInfo / useRenderContext read it
         // SYNCHRONOUSLY during this render — adaptive-compaction components
-        // react before the IR freezes.
-        const renderResult = await input.reconciler.renderTree({
+        // react before the IR freezes. Composed in-fiber via `.fx`.
+        const renderResult = yield* input.reconciler.fx.renderTree({
           mountId: input.mountId,
           sessionId: input.sessionId,
           executionId,
@@ -307,13 +325,14 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         // precedence-resolved model-visible set — the unification of
         // every layered seam (gateway/app/session/execution/extension/
         // reconciler). The projection reads that set, not the IR slot.
+        // Both compose in-fiber via `.fx`.
         const reconcilerTools = renderResult.tree.declarations?.tools ?? [];
         const reconcilerBinding = { scope: "reconciler", mountId: input.mountId } as const;
-        await input.toolExecutor.replaceReconcilerTools({
+        yield* input.toolExecutor.fx.replaceReconcilerTools({
           mountId: input.mountId,
           registrations: reconcilerTools.map((d) => toRegistration(d, reconcilerBinding)),
         });
-        const modelTools = await input.toolExecutor.compileForTick({ exposure: "model" });
+        const modelTools = yield* input.toolExecutor.fx.compileForTick({ exposure: "model" });
 
         // 3. Execute. Streaming path (executeStream) when the caller
         //    requested streaming AND the executor supports it AND the
@@ -325,55 +344,50 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
 
         let executorTerminal: ExecutorTerminal<LanguageModelExecutionResult>;
 
-        if (wantsStreaming && tickExecutor.executeStream) {
-          // Streaming path. The adapter emits AdapterDeltas (including
-          // the symmetric summary events: message, content, tool-call,
-          // reasoning, message-end). We forward each delta through
-          // onEvent — NO loop-side synthesis on this path (adapter
-          // already owns symmetric event emission).
-          const projected = await tickExecutor.project({
+        if (wantsStreaming) {
+          // Streaming path — project → executeStream(sink) → normalize,
+          // all in ONE fiber (the sink-fold twin; no queue). The sink
+          // forwards each AdapterDelta (including the symmetric summary
+          // events) as a `model` event — NO loop-side synthesis on this
+          // path (adapter already owns symmetric event emission).
+          const projected = yield* tickExecutor.fx.project({
             compiled: tickCompiled,
             target: tickTarget,
             scope: { sessionId: input.sessionId, executionId, tickId },
             tools: modelTools,
           });
-          const stream = tickExecutor.executeStream({
-            targetInput: projected,
-            target: tickTarget,
-            scope: { sessionId: input.sessionId, executionId, tickId },
-            ...omitUndefined({ signal: input.signal }),
-          });
-          try {
-            for await (const delta of stream) {
-              input.onEvent?.({ kind: "model", tick: tickIndex, delta });
-            }
-          } catch {
-            // #182 Option A: the iterator throws the typed error on
-            // provider failure. The SAME error arrives on `.result`
-            // below — that path owns terminal construction; swallowing
-            // here avoids double-handling.
-          }
-          let raw: unknown;
-          try {
-            raw = await stream.result;
-          } catch (cause) {
-            // executor.execute rejection — treat as failed terminal.
+          // #182 Option A: a provider failure lands on the twin's E
+          // channel; `Effect.either` catches it exactly where the Promise
+          // version caught the `.result` rejection → a failed terminal.
+          const streamed = yield* Effect.either(
+            tickExecutor.fx.executeStream(
+              {
+                targetInput: projected,
+                target: tickTarget,
+                scope: { sessionId: input.sessionId, executionId, tickId },
+                ...omitUndefined({ signal: input.signal }),
+              },
+              (delta) =>
+                Effect.sync(() => input.onEvent?.({ kind: "model", tick: tickIndex, delta })),
+            ),
+          );
+          if (Either.isLeft(streamed)) {
             executorTerminal = {
               outcome: "failed",
-              error: new ProviderRejected({ cause }),
+              error: new ProviderRejected({ cause: streamed.left }),
             };
             stopReason = "executor_failed";
             break;
           }
-          const normalized = await tickExecutor.normalize({
-            targetOutput: raw,
+          const normalized = yield* tickExecutor.fx.normalize({
+            targetOutput: streamed.right,
             target: tickTarget,
             scope: { sessionId: input.sessionId, executionId, tickId },
           });
           executorTerminal = { outcome: "succeeded", result: normalized };
         } else {
           // Non-streaming path: classic project → execute → normalize via run.
-          executorTerminal = await tickExecutor.run({
+          executorTerminal = yield* tickExecutor.fx.run({
             compiled: tickCompiled,
             target: tickTarget,
             scope: { sessionId: input.sessionId, executionId, tickId },
@@ -436,7 +450,10 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         // 3. Tool dispatch — every entry in result.toolCalls is a
         // request for Agentick to invoke. Provider-side tools come
         // back as tool_result blocks in result.output and don't
-        // appear in toolCalls.
+        // appear in toolCalls. Each dispatch composes in-fiber via
+        // `.fx`; a HARD throw lands on the twin's E channel and
+        // `Effect.either` catches it into a failed tool result (exactly
+        // where the Promise version try/caught) — the run survives.
         const toolCalls: readonly ToolCall[] = result.toolCalls ?? [];
         const tickToolResults: LoopToolResult[] = [];
         for (const tc of toolCalls) {
@@ -462,8 +479,8 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
               executionId,
             },
           });
-          try {
-            const dispatched = await input.toolExecutor.dispatch({
+          const dispatched = yield* Effect.either(
+            input.toolExecutor.fx.dispatch({
               toolCallId: tc.id,
               name: tc.name,
               input: tc.input,
@@ -473,17 +490,20 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
                 executionId,
                 tickId,
               },
-            });
-            const durationMs = dispatched.durationMs ?? Date.now() - startedAt;
+            }),
+          );
+          if (Either.isRight(dispatched)) {
+            const ok = dispatched.right;
+            const durationMs = ok.durationMs ?? Date.now() - startedAt;
             // ADR 70 — `DispatchResult.succeeded` retired for `isError`
             // (soft/domain error). A resolved dispatch is a success unless
             // it flags a soft error; HARD failures reject (caught below).
-            const dispatchSucceeded = dispatched.isError !== true;
+            const dispatchSucceeded = ok.isError !== true;
             tickToolResults.push({
               toolCallId: tc.id,
               toolName: tc.name,
               succeeded: dispatchSucceeded,
-              content: dispatched.content,
+              content: ok.content,
               durationMs,
             });
             input.onEvent?.({
@@ -511,11 +531,12 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
               tick: tickIndex,
               callId: tc.id,
               name: tc.name,
-              content: dispatched.content,
+              content: ok.content,
               succeeded: dispatchSucceeded,
               durationMs,
             });
-          } catch (err) {
+          } else {
+            const err = dispatched.left;
             const durationMs = Date.now() - startedAt;
             tickToolResults.push({
               toolCallId: tc.id,
@@ -559,17 +580,18 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         }
         acc.toolResults.push(...tickToolResults);
 
-        // 4. State application — the session harness's apply commands.
-        // NoopStateApplicator records nothing; real session harness
-        // will write timeline entries here so the next render sees them.
-        await input.stateApplicator.applyExecutorResult({
+        // 4. State application — the session harness's apply commands,
+        // composed in-fiber via `.fx`. NoopStateApplicator records nothing;
+        // the real session harness writes timeline entries here so the next
+        // render sees them.
+        yield* input.stateApplicator.fx.applyExecutorResult({
           sessionId: input.sessionId,
           executionId,
           tickId,
           result,
         });
         if (tickToolResults.length > 0) {
-          await input.stateApplicator.applyToolResults({
+          yield* input.stateApplicator.fx.applyToolResults({
             sessionId: input.sessionId,
             executionId,
             tickId,
@@ -606,22 +628,25 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         // tick-end runs the tree's `useOnTickEnd` effects and settles the
         // IR so the session's continuation predicates read SETTLED state
         // (a tick-end effect may update a knob a gate checks). This
-        // deliberately precedes the session decision below.
+        // deliberately precedes the session decision below. AWAITED
+        // in-fiber via the bridge.
         //
         // Lifecycle bridge (#206) — tick-end carries this tick's usage
         // (a past fact; becomes "prior usedTokens" for the next render's
         // utilization) + the settled `TickResult` (ADR 67 — the loop
         // executor's documented lifecycle payload).
-        await input.reconciler.notifyLifecycle({
-          mountId: input.mountId,
-          event: {
-            kind: "tick-end",
-            tickId,
-            executionId,
-            result: tickResult,
-            ...(result.usage !== undefined ? { metadata: { usage: result.usage } } : {}),
-          },
-        });
+        yield* awaitBridge(() =>
+          input.reconciler.notifyLifecycle({
+            mountId: input.mountId,
+            event: {
+              kind: "tick-end",
+              tickId,
+              executionId,
+              result: tickResult,
+              ...(result.usage !== undefined ? { metadata: { usage: result.usage } } : {}),
+            },
+          }),
+        );
 
         // ADR 67 §"flip the tick-end order" — THEN DECIDE. The session
         // folds its continuation predicates (gates + steering + tree stop)
@@ -629,13 +654,19 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         // `TickResult`. The loop's combination below is UNCHANGED — it
         // already implements the two-tier resolution (stop-force >
         // continue-force > abstain), with `maxTicks` as the tier-1 hard cap.
-        const forward = await input.notifyTickEnd?.({
-          sessionId: input.sessionId,
-          executionId,
-          tickId,
-          outcome: "succeeded",
-          result: tickResult,
-        });
+        // `notifyTickEnd` is a session-provided callback (no span) — awaited
+        // in-fiber via the bridge.
+        const forward = input.notifyTickEnd
+          ? yield* awaitBridge(() =>
+              input.notifyTickEnd!({
+                sessionId: input.sessionId,
+                executionId,
+                tickId,
+                outcome: "succeeded",
+                result: tickResult,
+              }),
+            )
+          : undefined;
         const wantsContinue =
           forward?.kind === "stop" ? false : provisionalContinue || forward?.kind === "continue";
         const tickStopReason: string = !wantsContinue
@@ -717,16 +748,45 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
       void executionStartedAt;
 
       return terminal;
-    } finally {
-      this.inFlight.delete(executionId);
-      this.aborted.delete(executionId);
-    }
+    }).pipe(
+      // Any uncaught twin failure (renderTree / project / normalize / run /
+      // replaceReconcilerTools / apply* / a bridge reject) folds to
+      // `ExecutionError` — the boundary the Promise original hit when an
+      // un-try/caught `await` threw. The two locally-handled failures
+      // (streaming `.result`, hard tool throw) are already absorbed in-body.
+      Effect.catchAll(
+        (cause): Effect.Effect<never, LoopExecutorError> =>
+          Effect.fail(cause instanceof ExecutionError ? cause : new ExecutionError({ cause })),
+      ),
+      // inFlight/aborted cleanup on every exit (success, failure, interrupt)
+      // — the Promise original's `finally`.
+      Effect.ensuring(
+        Effect.sync(() => {
+          this.inFlight.delete(executionId);
+          this.aborted.delete(executionId);
+        }),
+      ),
+    );
   }
 }
 
 // ============================================================================
 // helpers
 // ============================================================================
+
+/**
+ * Await a bridge NOTIFICATION (`reconciler.notifyLifecycle` /
+ * `session.notifyTickEnd`) in-fiber. These carry no span and are bare
+ * `async` (no `runHarnessProtocol` root), so `Effect.tryPromise` composes
+ * them WITHOUT severing the fiber — the right tool for an external,
+ * non-twin promise boundary. A rejection lands on the `E` channel, folding
+ * to `ExecutionError` at the loop boundary (the Promise original's "an
+ * un-caught awaited throw fails the run"). NOT `Effect.promise` — that
+ * turns a reject into a defect that would bypass the boundary's catch.
+ */
+function awaitBridge<A>(thunk: () => Promise<A> | A): Effect.Effect<A, unknown, never> {
+  return Effect.tryPromise({ try: async () => thunk(), catch: (e: unknown) => e });
+}
 
 function accumulateUsage(acc: MutableUsage, add?: UsageStats): void {
   if (!add) return;

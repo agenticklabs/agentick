@@ -38,6 +38,7 @@
  */
 
 import React from "react";
+import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { FakeLanguageModelExecutor } from "@agentick/executor-next";
@@ -50,6 +51,7 @@ import { Timeline } from "@agentick/timeline-next/react";
 import type { TimelineStore } from "@agentick/timeline-next";
 import type {
   ExecutionTarget,
+  ExecutorFx,
   ExecutorTerminal,
   LanguageModelExecutionResult,
   LanguageModelInput,
@@ -151,6 +153,37 @@ class SpyLanguageModelExecutor extends FakeLanguageModelExecutor {
       ...(input.scope !== undefined ? { scope: input.scope } : {}),
     });
     return super.run(input);
+  }
+
+  /**
+   * ADR 77 — the loop composes the `.fx` twins, NOT the public facades, so
+   * the capture must intercept there too (a facade override alone is
+   * bypassed once internal calls go through `fx`). Mirrors the facade
+   * overrides: `fx.project` captures the projected input; `fx.run`
+   * (non-streaming path) projects-to-capture before running.
+   */
+  override get fx(): ExecutorFx<LanguageModelInput, unknown, LanguageModelExecutionResult> {
+    const base = super.fx;
+    const capture = (projected: LanguageModelInput): void => {
+      this._captured.push(projected);
+    };
+    return {
+      ...base,
+      project: (input) =>
+        base.project(input).pipe(Effect.tap((p) => Effect.sync(() => capture(p)))),
+      run: (input) =>
+        base
+          .project({
+            compiled: input.compiled,
+            target: input.target,
+            tools: input.tools,
+            ...(input.scope !== undefined ? { scope: input.scope } : {}),
+          })
+          .pipe(
+            Effect.tap((p) => Effect.sync(() => capture(p))),
+            Effect.zipRight(base.run(input)),
+          ),
+    };
   }
 }
 
