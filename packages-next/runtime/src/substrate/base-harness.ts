@@ -22,9 +22,10 @@
  * @see docs/proposals/v2/blueprint/01-harness-principle.md
  */
 
-import { Cause, Effect, Exit, ManagedRuntime, Option } from "effect";
+import { Cause, Effect, Exit, Fiber, ManagedRuntime, Option, Queue } from "effect";
 import { unwrapExit, omitUndefined, isThenable } from "@agentick/utils-next";
 import type {
+  AsyncStream,
   CommandOutcome,
   EventBus,
   CommandDescriptor,
@@ -1598,4 +1599,113 @@ export async function runHarnessProtocol<R>(
 ): Promise<R> {
   const exit = await (runtime ? runtime.runPromiseExit(eff) : Effect.runPromiseExit(eff));
   return unwrapExit(exit) as R;
+}
+
+/**
+ * Bridge a streaming operation's Effect-canonical form to the JS
+ * {@link AsyncStream} facade — the streaming sibling of
+ * {@link runHarnessProtocol}, and the singular concept behind EVERY
+ * streaming edge (ADR 77).
+ *
+ * The canonical form is a **sink-fold**: `build(sink)` returns the Effect
+ * that drives the work once, invoking `sink(item)` per emitted item and
+ * succeeding with the final `Result`. In-process Effect callers compose
+ * that Effect directly (one fiber, no bridge). This helper adds the
+ * JS-shaped projection on top: it runs the Effect on a daemon fiber, tees
+ * items into a bounded queue (real backpressure — a lagging iterator
+ * consumer pauses the upstream via `Queue.offer`), and exposes both an
+ * `AsyncIterable<Item>` and a `result` Promise reading the same fiber's
+ * outcome. All the Queue/fork/Promise machinery lives HERE, once — a new
+ * streaming edge supplies only its `build` and a couple of policy hooks.
+ *
+ * `result` and iteration observe ONE run. The iterator throws a real
+ * provider failure (matching async-iterable ecosystem semantics) but
+ * completes cleanly on cancellation — `options.isCancellation`
+ * distinguishes the two (interrupts always complete cleanly). `abort`
+ * interrupts the fiber; `onAbort` runs first for edge-specific bookkeeping.
+ * `onStart` hands the running fiber to the edge (e.g. to register it for
+ * an out-of-band `abort(id)` path). `runtime` threads a telemetry
+ * `ManagedRuntime` the same way `runHarnessProtocol` does.
+ */
+export function runHarnessStream<Item, Result>(
+  build: (sink: (item: Item) => Effect.Effect<void>) => Effect.Effect<Result, unknown, never>,
+  options?: {
+    readonly queueCapacity?: number;
+    readonly isCancellation?: (cause: unknown) => boolean;
+    readonly onStart?: (fiber: Fiber.RuntimeFiber<Result, unknown>) => void;
+    readonly onAbort?: (reason: string) => void;
+    readonly runtime?: ManagedRuntime.ManagedRuntime<never, never>;
+  },
+): AsyncStream<Item, Result> {
+  const capacity = options?.queueCapacity ?? 16;
+  const isCancellation = options?.isCancellation ?? ((): boolean => false);
+  const run = <A>(eff: Effect.Effect<A, never, never>): Promise<A> =>
+    options?.runtime ? options.runtime.runPromise(eff) : Effect.runPromise(eff);
+
+  type QItem = Option.Option<Item>;
+  type QF = { queue: Queue.Queue<QItem>; fiber: Fiber.RuntimeFiber<Result, unknown> };
+
+  // Setup runs once; the daemon fiber outlives it so the iterator and
+  // `result` can both observe the same outcome. `None` terminates the
+  // queue whatever the fiber's exit (success / failure / interrupt).
+  const program = Effect.gen(function* () {
+    const queue = yield* Queue.bounded<QItem>(capacity);
+    const sink = (item: Item): Effect.Effect<void> =>
+      Queue.offer(queue, Option.some(item)).pipe(Effect.asVoid);
+    const runEffect = build(sink).pipe(Effect.ensuring(Queue.offer(queue, Option.none<Item>())));
+    const fiber = yield* Effect.forkDaemon(runEffect);
+    return { queue, fiber } satisfies QF;
+  });
+
+  let resolveQF!: (v: QF) => void;
+  let rejectQF!: (e: unknown) => void;
+  const ready = new Promise<QF>((res, rej) => {
+    resolveQF = res;
+    rejectQF = rej;
+  });
+  void run(program).then((qf) => {
+    resolveQF(qf);
+    options?.onStart?.(qf.fiber);
+  }, rejectQF);
+
+  const result: Promise<Result> = ready.then(({ fiber }) =>
+    run(Fiber.await(fiber)).then((exit) => unwrapExit(exit) as Result),
+  );
+  // The caller may never await `.result`; don't let Node flag it.
+  result.catch(() => {});
+
+  return {
+    result,
+    abort: (reason) => {
+      options?.onAbort?.(reason ?? "aborted");
+      void ready.then(({ fiber }) => run(Fiber.interrupt(fiber)));
+    },
+    [Symbol.asyncIterator](): AsyncIterator<Item> {
+      return {
+        next: async (): Promise<IteratorResult<Item>> => {
+          const { queue, fiber } = await ready;
+          const item = await run(Queue.take(queue)).catch(() => Option.none<Item>());
+          if (Option.isNone(item)) {
+            const exit = await run(Fiber.await(fiber));
+            if (Exit.isFailure(exit) && !Cause.isInterruptedOnly(exit.cause)) {
+              const cause = Cause.squash(exit.cause);
+              if (!isCancellation(cause)) throw cause;
+            }
+            return { value: undefined as unknown as Item, done: true };
+          }
+          return { value: item.value, done: false };
+        },
+        return: async (): Promise<IteratorResult<Item>> => {
+          try {
+            const { fiber, queue } = await ready;
+            await run(Fiber.interrupt(fiber));
+            await run(Queue.shutdown(queue));
+          } catch {
+            // ignore — caller is closing iteration
+          }
+          return { value: undefined as unknown as Item, done: true };
+        },
+      };
+    },
+  };
 }

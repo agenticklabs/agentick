@@ -28,11 +28,11 @@
  * @see docs/proposals/v2/blueprint/52-executors-and-model-adapters.md
  */
 
-import { omitUndefined, unwrapExit } from "@agentick/utils-next";
+import { omitUndefined } from "@agentick/utils-next";
 
-import { Cause, Chunk, Effect, Exit, Fiber, Option, Queue, Stream } from "effect";
+import { Chunk, Effect, Fiber, Stream } from "effect";
 
-import { BaseHarness, runHarnessProtocol, ulid } from "@agentick/runtime-next";
+import { BaseHarness, runHarnessProtocol, runHarnessStream, ulid } from "@agentick/runtime-next";
 import type {
   AbortExecutorInput,
   AdapterDelta,
@@ -369,162 +369,46 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
 
   executeStream(input: ExecuteInput<LanguageModelInput>): ExecutorStream<TRaw> {
     if (!this.supportsRunStreaming) {
+      // Unsupported adapter: a stream that fails immediately — the iterator
+      // throws and `.result` rejects with the typed error, via the bridge.
       const err: ExecuteErrorChannel = new StreamFailed({
         cause: new Error(
           `adapter '${this.adapter.provider}' does not support executeStream — use execute() instead`,
         ),
       });
-      const resultPromise: Promise<TRaw> = Promise.reject(err);
-      // Silence Node's unhandled-rejection — the caller may not await .result.
-      resultPromise.catch(() => {});
-      return {
-        result: resultPromise,
-        abort: () => {},
-        [Symbol.asyncIterator]() {
-          return {
-            next: () => Promise.reject(err),
-            return: () =>
-              Promise.resolve({ value: undefined as unknown as AdapterDelta, done: true }),
-          };
-        },
-      };
+      return runHarnessStream<AdapterDelta, TRaw>(() => Effect.fail(err), {
+        queueCapacity: STREAM_QUEUE_CAPACITY,
+      });
     }
 
+    // Facade = the streaming-edge bridge over the canonical `.fx.executeStream`
+    // twin. All the Queue/fork/Promise machinery lives in `runHarnessStream`;
+    // here we supply only the `build` (the twin) and the executor's policy
+    // hooks. `executionId` is pinned into the input so the twin's Operation
+    // and our inFlight bookkeeping agree.
     const executionId = input.scope?.executionId ?? `exec:${ulid()}`;
-    const streamOp: Operation<ExecuteInput<LanguageModelInput>, unknown> = {
-      opId: `executor:execute:${executionId}:${ulid()}`,
-      surface: "executor",
-      name: "executor:command:execute",
-      scope: input.scope ?? { executionId },
-      input,
+    const scopedInput: ExecuteInput<LanguageModelInput> = {
+      ...input,
+      scope: { ...(input.scope ?? {}), executionId },
     };
-
-    // Bounded delta queue — provides real backpressure: when the
-    // iterator consumer lags, `Queue.offer` (inside executeBody's
-    // sink-tap) blocks the upstream Stream, which pauses
-    // `Stream.fromAsyncIterable`'s pull from the provider SDK.
-    // None = stream completion sentinel.
-    const harness = this;
-    type QItem = Option.Option<AdapterDelta>;
-
-    const program = Effect.gen(function* () {
-      const queue = yield* Queue.bounded<QItem>(STREAM_QUEUE_CAPACITY);
-
-      // Run executeBody to completion inside this fiber. The sink
-      // injects deltas into the queue with backpressure; when the
-      // stream completes we enqueue None as the iterator's terminator.
-      const sink = (delta: AdapterDelta): Effect.Effect<void> =>
-        Queue.offer(queue, Option.some(delta)).pipe(Effect.asVoid);
-
-      const runEffect = harness
-        .runOperation(streamOp, (i) =>
-          harness.executeBody(i, executionId, streamOp as Operation<unknown, unknown>, sink),
-        )
-        .pipe(
-          // Whatever happens (success, error, interrupt), the consumer
-          // gets a terminating None so its iterator drains cleanly.
-          Effect.ensuring(Queue.offer(queue, Option.none<AdapterDelta>())),
-        ) as Effect.Effect<TRaw, unknown>;
-
-      // forkDaemon — the streaming fiber must outlive this setup
-      // Effect's scope; iterator.return() / abort() interrupt it
-      // explicitly via the returned handle.
-      const fiber = yield* Effect.forkDaemon(runEffect);
-      return { queue, fiber };
-    });
-
-    // Forking via runPromise so the iterator and `.result` Promise can
-    // both observe the same fiber outcome.
-    let resolveQueueFiber!: (v: {
-      queue: Queue.Queue<QItem>;
-      fiber: Fiber.RuntimeFiber<TRaw, unknown>;
-    }) => void;
-    let rejectQueueFiber!: (e: unknown) => void;
-    const ready = new Promise<{
-      queue: Queue.Queue<QItem>;
-      fiber: Fiber.RuntimeFiber<TRaw, unknown>;
-    }>((res, rej) => {
-      resolveQueueFiber = res;
-      rejectQueueFiber = rej;
-    });
-
-    void Effect.runPromise(program).then(
-      (qf) =>
-        resolveQueueFiber(
-          qf as { queue: Queue.Queue<QItem>; fiber: Fiber.RuntimeFiber<TRaw, unknown> },
-        ),
-      rejectQueueFiber,
-    );
-
-    const resultPromise: Promise<TRaw> = ready.then(({ fiber }) =>
-      // Unwrap via the SAME helper `runHarnessProtocol` uses (which
-      // execute()/run() go through), so `.result` rejects with the typed
-      // `ExecuteErrorChannel` — not a raw Effect `Cause`. Keeps the
-      // streaming path's failure surface identical to the non-streaming
-      // paths and honors "Effect internal, Promise external" at the
-      // ExecutorProtocol boundary (#181).
-      Effect.runPromise(Fiber.await(fiber)).then((exit) => unwrapExit(exit) as TRaw),
-    );
-    // Silence Node's unhandled-rejection — the caller may not await .result.
-    resultPromise.catch(() => {});
-
-    // Track the fiber so `abort()` can interrupt it (separate from
-    // executeBody's controller — interrupt the fiber, then let
-    // withExternalAbort surface ProviderAborted).
-    void ready.then(({ fiber }) => {
-      const entry = this.inFlight.get(executionId);
-      if (entry) entry.fiber = fiber as Fiber.RuntimeFiber<unknown, unknown>;
-    });
-
-    return {
-      result: resultPromise,
-      abort: (reason) => {
+    return runHarnessStream<AdapterDelta, TRaw>((sink) => this.executeStreamFx(scopedInput, sink), {
+      queueCapacity: STREAM_QUEUE_CAPACITY,
+      // Cancellation completes the iterator cleanly; a real provider failure
+      // throws (#182). `.result` carries the aborted terminal either way.
+      isCancellation: (cause) => cause instanceof ProviderAborted,
+      onStart: (fiber) => {
+        const entry = this.inFlight.get(executionId);
+        if (entry) entry.fiber = fiber as Fiber.RuntimeFiber<unknown, unknown>;
+      },
+      onAbort: (reason) => {
         this.aborted.add(executionId);
-        const r = reason ?? "aborted";
-        void ready.then(({ fiber }) => {
-          const entry = this.inFlight.get(executionId);
-          if (entry) {
-            entry.abortReason = r;
-            entry.abort?.abort(r);
-          }
-          void Effect.runPromise(Fiber.interrupt(fiber));
-        });
+        const entry = this.inFlight.get(executionId);
+        if (entry) {
+          entry.abortReason = reason;
+          entry.abort?.abort(reason);
+        }
       },
-      [Symbol.asyncIterator]() {
-        return {
-          next: async (): Promise<IteratorResult<AdapterDelta>> => {
-            const { queue, fiber } = await ready;
-            const item = await Effect.runPromise(Queue.take(queue)).catch(() =>
-              Option.none<AdapterDelta>(),
-            );
-            if (Option.isNone(item)) {
-              // End of stream (#182, Option A): a provider FAILURE throws
-              // the typed error from the iterator — matching generateStream
-              // and ecosystem async-iterable semantics. Abort/interrupt
-              // clean-terminates (cancellation is an outcome, not an
-              // error; `.result` carries the aborted terminal).
-              const exit = await Effect.runPromise(Fiber.await(fiber));
-              if (Exit.isFailure(exit) && !Cause.isInterruptedOnly(exit.cause)) {
-                const cause = Cause.squash(exit.cause);
-                if (!(cause instanceof ProviderAborted)) throw cause;
-              }
-              return { value: undefined as unknown as AdapterDelta, done: true };
-            }
-            return { value: item.value, done: false };
-          },
-          return: async (): Promise<IteratorResult<AdapterDelta>> => {
-            try {
-              const { fiber, queue } = await ready;
-              await Effect.runPromise(Fiber.interrupt(fiber));
-              await Effect.runPromise(Queue.shutdown(queue));
-            } catch {
-              // ignore — caller is closing iteration
-            }
-            return { value: undefined as unknown as AdapterDelta, done: true };
-          },
-        };
-      },
-    };
+    });
   }
 
   normalize(input: NormalizeInput<unknown>): Promise<LanguageModelExecutionResult> {
@@ -557,8 +441,44 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
    * `Stream<AdapterDelta>` vs `Effect<ExecutorStream>`) when Stage 3
    * composes the loop's streaming path. `run` is the beachhead.
    */
-  get fx(): ExecutorFx<LanguageModelExecutionResult> {
-    return { run: (input) => this.runFx(input) };
+  get fx(): ExecutorFx<LanguageModelInput, TRaw, LanguageModelExecutionResult> {
+    return {
+      run: (input) => this.runFx(input),
+      executeStream: (input, sink) => this.executeStreamFx(input, sink),
+    };
+  }
+
+  /**
+   * The streaming-edge canonical twin (sink-fold). Drives the provider
+   * once through the SAME `runOperation(streamOp, executeBody(sink))` the
+   * JS facade {@link executeStream} builds — but un-run and without the
+   * Queue/fork/Promise bridge, so it composes in the caller's fiber. The
+   * facade adds only the {@link AsyncStream} projection on top of this.
+   */
+  private executeStreamFx(
+    input: ExecuteInput<LanguageModelInput>,
+    sink: (delta: AdapterDelta) => Effect.Effect<void>,
+  ): Effect.Effect<TRaw, ExecuteErrorChannel | SubstrateError, never> {
+    if (!this.supportsRunStreaming) {
+      return Effect.fail(
+        new StreamFailed({
+          cause: new Error(
+            `adapter '${this.adapter.provider}' does not support executeStream — use execute() instead`,
+          ),
+        }),
+      );
+    }
+    const executionId = input.scope?.executionId ?? `exec:${ulid()}`;
+    const streamOp: Operation<ExecuteInput<LanguageModelInput>, TRaw, ExecuteErrorChannel> = {
+      opId: `executor:execute:${executionId}:${ulid()}`,
+      surface: "executor",
+      name: "executor:command:execute",
+      scope: input.scope ?? { executionId },
+      input,
+    };
+    return this.runOperation(streamOp, (i) =>
+      this.executeBody(i, executionId, streamOp as Operation<unknown, unknown>, sink),
+    );
   }
 
   /**

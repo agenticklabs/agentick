@@ -30,6 +30,7 @@ export {
   OperationOutcomeError,
   mergeVerdict,
   runHarnessProtocol,
+  runHarnessStream,
   type BaseHarnessOptions,
   type HarnessShell,
   type Middleware,

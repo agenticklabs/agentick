@@ -32,8 +32,10 @@ import type {
   LanguageModelExecutionResult,
 } from "../data/execution-result.js";
 import type { SubstrateError } from "../data/errors.js";
+import type { ExecuteErrorChannel } from "../errors/harnesses.js";
 import type { AdapterDelta } from "../data/streaming.js";
 import type { PromiseView } from "./promise-view.js";
+import type { AsyncStream } from "./async-stream.js";
 
 // ============================================================================
 // Error taxonomies for the per-phase commands
@@ -66,29 +68,13 @@ export type NormalizeError = import("../errors/harnesses.js").NormalizationFaile
 // ============================================================================
 
 /**
- * Dual-shape handle returned by {@link ExecutorProtocol.executeStream}.
- *
- *   - As `AsyncIterable<AdapterDelta>`: consumers iterate provider
- *     emissions in real time (content-delta tokens, content/message
- *     summaries, tool-call deltas + summary, reasoning, usage, errors).
- *   - As `{ result: Promise<TOutput> }`: consumers await the final
- *     accumulated raw response (same shape `execute` returns).
- *
- * Both shapes derive from the same underlying provider call — iterating
- * the deltas does not change the final result; awaiting `.result` does
- * not consume deltas for other iterators (where the underlying impl
- * supports multi-subscribe — the reference impls expect single-iterator
- * consumption).
- *
- * `abort` cancels the in-flight provider request. Subsequent iterations
- * MAY yield a final `error` delta before the iterator completes.
+ * The executor's streaming handle — an instance of the singular streaming
+ * edge {@link AsyncStream} (dual of `Promise<A>`). Items are provider
+ * `AdapterDelta`s (content-delta tokens, content/message summaries,
+ * tool-call deltas + summary, reasoning, usage, errors); the summary is
+ * the final accumulated raw response (same shape `execute` returns).
  */
-export interface ExecutorStream<TOutput = unknown> extends AsyncIterable<AdapterDelta> {
-  /** Final accumulated raw response — the same shape `execute` would return. */
-  readonly result: Promise<TOutput>;
-  /** Abort the in-flight stream. Best-effort — provider may have already produced output. */
-  abort(reason?: string): void;
-}
+export type ExecutorStream<TOutput = unknown> = AsyncStream<AdapterDelta, TOutput>;
 
 // ============================================================================
 // Command inputs
@@ -416,7 +402,11 @@ export interface LanguageModelParameters {
  * deliberate Stage-3 decision, made where the loop's delta consumption is
  * known. See TODO(stage-2) on the harness.
  */
-export interface ExecutorFx<TResult extends ExecutionResult = ExecutionResult> {
+export interface ExecutorFx<
+  TInput = unknown,
+  TOutput = unknown,
+  TResult extends ExecutionResult = ExecutionResult,
+> {
   /**
    * Convenience: project → execute → normalize, with delta events
    * emitted throughout. Returns an `ExecutorTerminal` envelope (typed
@@ -430,13 +420,31 @@ export interface ExecutorFx<TResult extends ExecutionResult = ExecutionResult> {
   run(
     input: RunInput,
   ): Effect.Effect<ExecutorTerminal<TResult>, ExecutorError | SubstrateError, never>;
+
+  /**
+   * The streaming-edge canonical form (sink-fold): drives the provider
+   * once, invoking `sink` per emitted `AdapterDelta`, and succeeds with
+   * the final accumulated raw output. Composes in the loop's fiber —
+   * `yield* executor.fx.executeStream(input, (d) => Effect.sync(...))` —
+   * with no queue/fork; that machinery lives only in the JS facade's
+   * bridge ({@link AsyncStream} / `runHarnessStream`).
+   *
+   * NOT `PromiseView`-derivable: the facade
+   * ({@link ExecutorProtocol.executeStream}) has a different arity
+   * (`(input): ExecutorStream`, no sink) — the two surfaces share the
+   * bridge implementation, not a mapped type. Hand-declared on both.
+   */
+  executeStream(
+    input: ExecuteInput<TInput>,
+    sink: (delta: AdapterDelta) => Effect.Effect<void>,
+  ): Effect.Effect<TOutput, ExecuteErrorChannel | SubstrateError, never>;
 }
 
 export interface ExecutorProtocol<
   TInput = unknown,
   TOutput = unknown,
   TResult extends ExecutionResult = ExecutionResult,
-> extends PromiseView<ExecutorFx<TResult>> {
+> extends PromiseView<Pick<ExecutorFx<TInput, TOutput, TResult>, "run">> {
   /**
    * Resolves when the executor's substrate is initialized and the
    * executor is ready to accept calls. Mirrors the `.ready` shape on
