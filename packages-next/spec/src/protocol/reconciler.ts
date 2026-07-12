@@ -56,13 +56,17 @@
  * @see docs/proposals/v2/blueprint/21-reconciler-implementation.md
  */
 
+import type { Effect } from "effect";
 import type { FormatterRef, RenderedTree } from "../data/index.js";
+import type { SubstrateError } from "../data/errors.js";
+import type { ReconcileErrorChannel } from "../errors/harnesses.js";
 import type {
   ReconcileDiagnostic,
   ReconcilerSnapshot,
   RenderToStringPayload,
 } from "../data/reconciler-snapshot.js";
 import type { HookBridges } from "./hook-bridges.js";
+import type { PromiseView } from "./promise-view.js";
 import type { RenderContext } from "./render-context.js";
 
 // ============================================================================
@@ -464,7 +468,32 @@ export type ReconcilerInboxMessage =
  * methods reject with values matching `ReconcileError` (wrapped in a
  * tagged-union shape).
  */
-export interface ReconcilerProtocol {
+/**
+ * The reconciler's **canonical** composable surface: the Effect twin of
+ * `renderTree` (ADR 77, the dual-typed edge). The loop reaches
+ * `reconciler.fx.renderTree(...)` to compose the render into one fiber
+ * tree (Stage 3); the plain Promise method on {@link ReconcilerProtocol}
+ * is the derived edge facade ({@link PromiseView} of this),
+ * `runHarnessProtocol` at the boundary.
+ *
+ * `renderTree` is not a registry command (it builds its Operation inline),
+ * so `.fx` hand-exposes the `runOperation(op, body)` Effect the harness
+ * already builds. The `E` channel is the reconciler's own taxonomy
+ * (`NotMounted`, `RenderFailed`, …) plus `SubstrateError`; the reference
+ * callback reconciler (whose render is an adopter `Effect.promise`) only
+ * inhabits the substrate slice.
+ */
+export interface ReconcilerFx {
+  /**
+   * Reconcile-then-collect. The canonical command — produces a
+   * `RenderedTree` ready for the executor harness to consume.
+   */
+  renderTree(
+    input: RenderTreeInput,
+  ): Effect.Effect<RenderTreeResult, ReconcileErrorChannel | SubstrateError, never>;
+}
+
+export interface ReconcilerProtocol extends PromiseView<ReconcilerFx> {
   /**
    * Mount an application. Idempotent on `mountId` — calling twice with
    * the same `mountId` returns the existing mount (no re-execution).
@@ -477,11 +506,9 @@ export interface ReconcilerProtocol {
    */
   rerender(input: RerenderInput): Promise<void>;
 
-  /**
-   * Reconcile-then-collect. The canonical command — produces a
-   * `RenderedTree` ready for the executor harness to consume.
-   */
-  renderTree(input: RenderTreeInput): Promise<RenderTreeResult>;
+  // `renderTree` is derived from `PromiseView<ReconcilerFx>` — the Promise
+  // facade of the Effect-canonical {@link ReconcilerFx.renderTree} twin.
+  // The concrete harness exposes the Effect surface as `reconciler.fx`.
 
   /**
    * Free-root render to a text payload. Used outside the tick loop

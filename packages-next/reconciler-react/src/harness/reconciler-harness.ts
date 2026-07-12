@@ -35,6 +35,8 @@ import type {
   Operation,
   MessageInbox,
   ReconcileDiagnostic,
+  ReconcileErrorChannel,
+  ReconcilerFx,
   ReconcilerInboxMessage,
   ReconcilerProtocol,
   ReconcilerSnapshot,
@@ -46,12 +48,14 @@ import type {
   RerenderInput,
   RestoreInput,
   SnapshotInput,
+  SubstrateError,
   UnmountInput,
 } from "@agentick/spec-next";
 import {
   AlreadyMounted,
   HandlerError,
   NotMounted,
+  ReconcileError,
   RenderFailed,
   SPEC_VERSION,
 } from "@agentick/spec-next";
@@ -233,40 +237,68 @@ export class ReconcilerHarness extends BaseHarness<"reconciler"> implements Reco
     );
   }
 
+  /**
+   * The Effect-canonical `.fx` surface (ADR 77, the dual-typed edge). The
+   * loop reaches `reconciler.fx.renderTree(...)` to compose the render
+   * into one fiber tree (Stage 3); the plain `renderTree(...)` Promise
+   * below is the derived facade. Both drive the SAME Operation.
+   */
+  get fx(): ReconcilerFx {
+    return { renderTree: (input) => this.renderTreeFx(input) };
+  }
+
+  /**
+   * The composable `renderTree` Effect the harness builds — the
+   * `.fx.renderTree` twin. Returns the `runOperation(op, body)` Effect
+   * un-run, so an in-process caller stays in one fiber. {@link renderTree}
+   * is the facade. Failures inhabit the reconciler's error taxonomy:
+   * `NotMounted` (guard) and `RenderFailed` ({@link renderTreeBody} throws
+   * it on render error); any other throw is wrapped in `RenderFailed`.
+   */
+  private renderTreeFx(
+    input: RenderTreeInput,
+  ): Effect.Effect<RenderTreeResult, ReconcileErrorChannel | SubstrateError, never> {
+    return Effect.suspend(() => {
+      const state = this.tryMountState(input.mountId);
+      if (!state) {
+        return Effect.fail(new NotMounted({ mountId: input.mountId }));
+      }
+      // HAND-BUILT — NOT by §1.2 doctrine (payload is JSON-shaped) but
+      // by registry shape: per-input scope (mountId →
+      // state.bridges.session.id + input.executionId) vs the nullary
+      // command-scope fn; caller-supplied `input.opId` idempotency vs
+      // registry-minted `${verb}:${ulid()}`; and the existing
+      // "reconciler:render:" opId prefix can't coexist with the
+      // derived "reconciler:command:render-tree" op name (the registry
+      // derives both from one verb string). See the ADR-51 note above
+      // handleMessage.
+      const op: Operation<RenderTreeInput, RenderTreeResult, ReconcileErrorChannel> = {
+        opId: input.opId ?? `reconciler:render:${input.mountId}:${ulid()}`,
+        surface: "reconciler",
+        name: "reconciler:command:render-tree",
+        scope: {
+          sessionId: state.bridges.session.id,
+          executionId: input.executionId,
+        },
+        input,
+      };
+      return this.runOperation(op, (i) =>
+        Effect.tryPromise({
+          try: () => this.renderTreeBody(i, state),
+          // renderTreeBody throws typed `RenderFailed` on render error;
+          // pass typed reconciler errors through, wrap anything else so the
+          // `E` channel stays the reconciler taxonomy.
+          catch: (e: unknown): ReconcileErrorChannel =>
+            e instanceof ReconcileError
+              ? (e as ReconcileErrorChannel)
+              : new RenderFailed({ cause: e }),
+        }),
+      );
+    });
+  }
+
   renderTree(input: RenderTreeInput): Promise<RenderTreeResult> {
-    return runHarnessProtocol(
-      Effect.suspend(() => {
-        const state = this.tryMountState(input.mountId);
-        if (!state) {
-          return Effect.fail(new NotMounted({ mountId: input.mountId }));
-        }
-        // HAND-BUILT — NOT by §1.2 doctrine (payload is JSON-shaped) but
-        // by registry shape: per-input scope (mountId →
-        // state.bridges.session.id + input.executionId) vs the nullary
-        // command-scope fn; caller-supplied `input.opId` idempotency vs
-        // registry-minted `${verb}:${ulid()}`; and the existing
-        // "reconciler:render:" opId prefix can't coexist with the
-        // derived "reconciler:command:render-tree" op name (the registry
-        // derives both from one verb string). See the ADR-51 note above
-        // handleMessage.
-        const op: Operation<RenderTreeInput, RenderTreeResult> = {
-          opId: input.opId ?? `reconciler:render:${input.mountId}:${ulid()}`,
-          surface: "reconciler",
-          name: "reconciler:command:render-tree",
-          scope: {
-            sessionId: state.bridges.session.id,
-            executionId: input.executionId,
-          },
-          input,
-        };
-        return this.runOperation(op, (i) =>
-          Effect.tryPromise({
-            try: () => this.renderTreeBody(i, state),
-            catch: (e: unknown) => e,
-          }),
-        );
-      }),
-    );
+    return runHarnessProtocol(this.renderTreeFx(input));
   }
 
   renderToString(input: RenderToStringInput): Promise<RenderToStringResult> {
