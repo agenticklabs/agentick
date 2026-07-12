@@ -20,9 +20,12 @@
  * @see docs/proposals/v2/blueprint/05-loop-executor.md
  */
 
+import type { Effect } from "effect";
 import type { CommandOutcome } from "../data/outcomes.js";
 import type { ContentBlock } from "../data/content-blocks.js";
+import type { SubstrateError } from "../data/errors.js";
 import type { ExecutionTarget } from "../data/execution-target.js";
+import type { PromiseView } from "./promise-view.js";
 import type {
   ExecutorTerminal,
   LanguageModelExecutionResult,
@@ -356,21 +359,44 @@ export {
 // ============================================================================
 
 /**
- * Methods every loop executor MUST provide. Promise-typed at the public
- * surface (matching the other harness protocols). Implementations
- * wrap their bodies with `runHarnessProtocol(Effect.suspend(...))`.
+ * The loop executor's **canonical** composable surface: the Effect twins
+ * of its operations (ADR 77, the dual-typed edge). The session harness
+ * reaches `loop.fx.runExecution(...)` to compose an execution into one
+ * fiber tree (Stage 3); the plain Promise method on
+ * {@link LoopExecutorProtocol} is the derived edge facade
+ * ({@link PromiseView} of this), `runHarnessProtocol` at the boundary.
  *
- * @throws {LoopExecutorError}
+ * Like the executor, `runExecution` is not a registry command — the input
+ * carries live object refs (ADR 51 §1.2, in-process only) — so `.fx` is
+ * hand-exposed (the `runOperation(op, body)` Effect the harness already
+ * builds), not `fxProxy`-derived.
  */
-export interface LoopExecutorProtocol {
+export interface LoopExecutorFx {
   /**
    * Run one agent execution from start to terminal. The terminal
    * envelope carries the outcome (succeeded / failed / canceled /
    * vetoed); the `result` field carries the assembled
-   * `ExecutionRunResult` on success.
+   * `ExecutionRunResult` on success. Substrate/loop failures inhabit
+   * the `E` channel; non-success outcomes ride the success channel as
+   * the terminal.
    */
-  runExecution(input: RunExecutionInput): Promise<ExecutionTerminal>;
+  runExecution(
+    input: RunExecutionInput,
+  ): Effect.Effect<ExecutionTerminal, LoopExecutorError | SubstrateError, never>;
+}
 
+/**
+ * Methods every loop executor MUST provide. Promise-typed at the public
+ * surface (matching the other harness protocols). Implementations
+ * wrap their bodies with `runHarnessProtocol(Effect.suspend(...))`.
+ *
+ * `runExecution` is derived from `PromiseView<LoopExecutorFx>` — the
+ * Promise facade of the Effect-canonical twin; the concrete harness
+ * exposes the Effect surface as `loop.fx`.
+ *
+ * @throws {LoopExecutorError}
+ */
+export interface LoopExecutorProtocol extends PromiseView<LoopExecutorFx> {
   /**
    * Abort the named execution. The in-flight `runExecution` for this
    * id MUST terminate with `outcome: "canceled"`. No-op for unknown

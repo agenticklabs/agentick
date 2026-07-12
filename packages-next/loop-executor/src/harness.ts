@@ -35,6 +35,7 @@ import type {
   LanguageModelExecutionResult,
   LanguageModelStopReason,
   LoopExecutorError,
+  LoopExecutorFx,
   LoopExecutorProtocol,
   LoopToolResult,
   MessageEnvelope,
@@ -45,6 +46,7 @@ import type {
   OperationJournal,
   RunExecutionInput,
   SpecConfig,
+  SubstrateError,
   TickResult,
   ToolCall,
   UsageStats,
@@ -102,13 +104,34 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
 
   // ──────── LoopExecutorProtocol ────────
 
-  runExecution(input: RunExecutionInput): Promise<ExecutionTerminal> {
-    // ADR 51 classification: NOT a declarable command — the input
-    // carries live object refs (reconciler, executor, toolExecutor,
-    // stateApplicator callbacks, onEvent) and is in-process-only by
-    // doctrine (§1.2). The addressable execution surface is the
-    // session's (see session harness TODO(adr-51-session-verbs)).
-    const op: Operation<RunExecutionInput, ExecutionTerminal> = {
+  /**
+   * The Effect-canonical `.fx` surface (ADR 77, the dual-typed edge). The
+   * session harness reaches `loop.fx.runExecution(...)` to compose an
+   * execution into one fiber tree (Stage 3); the plain
+   * `loop.runExecution(...)` Promise below is the derived facade
+   * (`runHarnessProtocol` at the boundary). Both drive the SAME Operation
+   * — `fx.runExecution` is `runExecution` minus the terminal `runPromise`.
+   */
+  get fx(): LoopExecutorFx {
+    return { runExecution: (input) => this.runExecutionFx(input) };
+  }
+
+  /**
+   * The composable `runExecution` Effect the harness builds — the
+   * `.fx.runExecution` twin. Constructs the Operation and returns
+   * `runOperation(op, body)` un-run, so an in-process caller stays in one
+   * fiber. {@link runExecution} is the facade.
+   *
+   * ADR 51 classification: NOT a declarable command — the input carries
+   * live object refs (reconciler, executor, toolExecutor, stateApplicator
+   * callbacks, onEvent) and is in-process-only by doctrine (§1.2). The
+   * addressable execution surface is the session's (see session harness
+   * TODO(adr-51-session-verbs)).
+   */
+  private runExecutionFx(
+    input: RunExecutionInput,
+  ): Effect.Effect<ExecutionTerminal, LoopExecutorError | SubstrateError, never> {
+    const op: Operation<RunExecutionInput, ExecutionTerminal, LoopExecutorError> = {
       opId: `loop:execution:${input.executionId}`,
       surface: "loop",
       name: "loop:command:run-execution",
@@ -118,7 +141,11 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
       },
       input,
     };
-    return runHarnessProtocol(this.runOperation(op, (i) => this.runExecutionBody(i)));
+    return this.runOperation(op, (i) => this.runExecutionBody(i));
+  }
+
+  runExecution(input: RunExecutionInput): Promise<ExecutionTerminal> {
+    return runHarnessProtocol(this.runExecutionFx(input));
   }
 
   abort(input: { executionId: string; reason?: string }): Promise<void> {
