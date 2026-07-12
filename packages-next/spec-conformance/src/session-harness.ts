@@ -112,7 +112,10 @@ function mkTree(): RenderedTree {
 
 function stubReconciler(): ReconcilerProtocol {
   return {
-    fx: { renderTree: () => Effect.succeed({ tree: mkTree(), diagnostics: [], iterations: 1 }) },
+    fx: {
+      use: () => () => {},
+      renderTree: () => Effect.succeed({ tree: mkTree(), diagnostics: [], iterations: 1 }),
+    },
     mount: async () => ({ mountId: "stub-mount", restoredFromSnapshot: false }),
     rerender: async () => undefined,
     renderTree: async () => ({
@@ -177,7 +180,7 @@ function stubLoop(text: string): LoopExecutorProtocol {
     };
   };
   return {
-    fx: { runExecution: (input) => Effect.promise(() => run(input)) },
+    fx: { use: () => () => {}, runExecution: (input) => Effect.promise(() => run(input)) },
     runExecution: run,
     abort: async () => undefined,
   };
@@ -193,6 +196,7 @@ function stubExecutor(): ExecutorProtocol<unknown, unknown, LanguageModelExecuti
     Effect.succeed({ outcome: "succeeded", result });
   return {
     fx: {
+      use: () => () => {},
       run: runFx,
       project: () => Effect.succeed({ messages: [] }),
       normalize: () => Effect.succeed(result),
@@ -219,6 +223,7 @@ function stubToolExecutor(): ToolExecutorProtocol {
     });
   return {
     fx: {
+      use: () => () => {},
       dispatch: (input) => dispatchFx(input),
       replaceReconcilerTools: () => Effect.void,
       compileForTick: () => Effect.succeed([]),

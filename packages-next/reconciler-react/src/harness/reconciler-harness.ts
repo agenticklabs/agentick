@@ -244,7 +244,10 @@ export class ReconcilerHarness extends BaseHarness<"reconciler"> implements Reco
    * below is the derived facade. Both drive the SAME Operation.
    */
   get fx(): ReconcilerFx {
-    return { renderTree: (input) => this.renderTreeFx(input) };
+    return {
+      use: (mw) => this.registerEffectMiddleware(mw),
+      renderTree: (input) => this.renderTreeFx(input),
+    };
   }
 
   /**

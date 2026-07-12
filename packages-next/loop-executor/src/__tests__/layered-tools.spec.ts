@@ -86,7 +86,10 @@ function mkReconciler(tools: readonly ToolDeclaration[]): ReconcilerProtocol {
     ...(tools.length > 0 ? { declarations: { tools } } : {}),
   });
   return {
-    fx: { renderTree: () => Effect.succeed({ tree: mkTree(), diagnostics: [], iterations: 1 }) },
+    fx: {
+      use: () => () => {},
+      renderTree: () => Effect.succeed({ tree: mkTree(), diagnostics: [], iterations: 1 }),
+    },
     mount: async () => ({ mountId: "stub-mount", restoredFromSnapshot: false }),
     rerender: async () => undefined,
     renderTree: async () => ({ tree: mkTree(), diagnostics: [], iterations: 1 }),
@@ -152,6 +155,7 @@ function mkRecordingExecutor(): {
     target: { kind: "language-model", provider: "fake", modelId: "fake-v1" },
     ready: Promise.resolve(),
     fx: {
+      use: () => () => {},
       run: runFx,
       project: (input) =>
         Effect.sync(() => {
@@ -406,7 +410,7 @@ describe("LoopExecutorHarness — layered tools (#138)", () => {
       return { tree, diagnostics: [], iterations: 1 };
     };
     const reconciler: ReconcilerProtocol = {
-      fx: { renderTree: () => Effect.succeed(renderResult()) },
+      fx: { use: () => () => {}, renderTree: () => Effect.succeed(renderResult()) },
       mount: async () => ({ mountId: "m_5", restoredFromSnapshot: false }),
       rerender: async () => undefined,
       renderTree: async () => renderResult(),

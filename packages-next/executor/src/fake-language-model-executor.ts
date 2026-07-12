@@ -306,6 +306,7 @@ export class FakeLanguageModelExecutor
    */
   get fx(): ExecutorFx<LanguageModelInput, unknown, LanguageModelExecutionResult> {
     return {
+      use: (mw) => this.registerEffectMiddleware(mw),
       run: (input) => this.runFx(input),
       project: (input) => this.projectFx(input),
       normalize: (input) => this.normalizeFx(input),

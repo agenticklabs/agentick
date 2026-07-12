@@ -141,7 +141,10 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
    * — `fx.runExecution` is `runExecution` minus the terminal `runPromise`.
    */
   get fx(): LoopExecutorFx {
-    return { runExecution: (input) => this.runExecutionFx(input) };
+    return {
+      use: (mw) => this.registerEffectMiddleware(mw),
+      runExecution: (input) => this.runExecutionFx(input),
+    };
   }
 
   /**

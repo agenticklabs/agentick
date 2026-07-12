@@ -21,6 +21,7 @@
  * @see docs/proposals/v2/blueprint/06-executor-harness.md
  */
 
+import type { HarnessFx } from "./middleware.js";
 import type { Effect } from "effect";
 import type { ProviderOptions, ProviderToolOptions, RenderedTree } from "../data/rendered-tree.js";
 import type { MediaSource } from "../data/content-blocks.js";
@@ -409,7 +410,7 @@ export interface ExecutorFx<
   TInput = unknown,
   TOutput = unknown,
   TResult extends ExecutionResult = ExecutionResult,
-> {
+> extends HarnessFx {
   /**
    * Convenience: project → execute → normalize, with delta events
    * emitted throughout. Returns an `ExecutorTerminal` envelope (typed

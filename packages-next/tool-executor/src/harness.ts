@@ -345,6 +345,7 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
    */
   get fx(): ToolExecutorFx {
     return {
+      use: (mw) => this.registerEffectMiddleware(mw),
       dispatch: (input) => this.dispatchFx(input),
       replaceReconcilerTools: (input) => this.replaceReconcilerToolsFx(input),
       compileForTick: (filter) => this.compileForTickFx(filter),

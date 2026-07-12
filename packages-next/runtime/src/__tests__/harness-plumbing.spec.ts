@@ -104,7 +104,7 @@ class ToyKnobsHarness extends BaseHarness<"tool"> {
       next: (input: unknown) => Effect.Effect<unknown, unknown, never>,
     ) => Effect.Effect<unknown, unknown, never>,
   ): () => void {
-    return this.use(mw);
+    return this.fx.use(mw);
   }
 
   // ─── Expose before-handler registration ───

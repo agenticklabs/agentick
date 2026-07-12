@@ -56,6 +56,7 @@
  * @see docs/proposals/v2/blueprint/21-reconciler-implementation.md
  */
 
+import type { HarnessFx } from "./middleware.js";
 import type { Effect } from "effect";
 import type { FormatterRef, RenderedTree } from "../data/index.js";
 import type { SubstrateError } from "../data/errors.js";
@@ -483,7 +484,7 @@ export type ReconcilerInboxMessage =
  * callback reconciler (whose render is an adopter `Effect.promise`) only
  * inhabits the substrate slice.
  */
-export interface ReconcilerFx {
+export interface ReconcilerFx extends HarnessFx {
   /**
    * Reconcile-then-collect. The canonical command — produces a
    * `RenderedTree` ready for the executor harness to consume.
@@ -493,7 +494,7 @@ export interface ReconcilerFx {
   ): Effect.Effect<RenderTreeResult, ReconcileErrorChannel | SubstrateError, never>;
 }
 
-export interface ReconcilerProtocol extends PromiseView<ReconcilerFx> {
+export interface ReconcilerProtocol extends PromiseView<Omit<ReconcilerFx, "use">> {
   /**
    * The Effect-canonical composable surface (ADR 77) — `fx.renderTree` for
    * in-fiber composition by the loop. On the protocol so a protocol-typed
@@ -514,7 +515,7 @@ export interface ReconcilerProtocol extends PromiseView<ReconcilerFx> {
    */
   rerender(input: RerenderInput): Promise<void>;
 
-  // `renderTree` is derived from `PromiseView<ReconcilerFx>` — the Promise
+  // `renderTree` is derived from `PromiseView<Omit<ReconcilerFx, "use">>` — the Promise
   // facade of the Effect-canonical {@link ReconcilerFx.renderTree} twin.
   // The concrete harness exposes the Effect surface as `reconciler.fx`.
 

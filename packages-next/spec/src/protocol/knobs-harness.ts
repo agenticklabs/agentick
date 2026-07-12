@@ -21,6 +21,7 @@
  * @see docs/proposals/v2/blueprint/26-harness-api-shape.md
  */
 
+import type { HarnessFx } from "./middleware.js";
 import type { Effect } from "effect";
 import type { ContentBlock } from "../data/content-blocks.js";
 import type { SubstrateError } from "../data/errors.js";
@@ -101,7 +102,7 @@ export {
  * `dispatch` reports them as `ContentBlock[]` (the `set_knob` contract),
  * so they ride the success channel.
  */
-export interface KnobsFx {
+export interface KnobsFx extends HarnessFx {
   /**
    * Set a knob's value. Goes through `runOperation` — emits
    * `knobs:command:set:requested → :terminal` envelopes; addressable
@@ -134,7 +135,7 @@ export interface KnobsFx {
 // ============================================================================
 
 export interface KnobsHarnessProtocol
-  extends SnapshotCapable<KnobsHarnessSnapshot>, PromiseView<KnobsFx> {
+  extends SnapshotCapable<KnobsHarnessSnapshot>, PromiseView<Omit<KnobsFx, "use">> {
   /**
    * Harness identifier. Composes into the inbox address as
    * `knobs:{id}` — admin actors send mutations addressed here.
@@ -169,7 +170,7 @@ export interface KnobsHarnessProtocol
 
   // ─────────── Async surface (Operations) ───────────
   //
-  // `set` / `register` / `dispatch` are derived from `PromiseView<KnobsFx>`
+  // `set` / `register` / `dispatch` are derived from `PromiseView<Omit<KnobsFx, "use">>`
   // — the Promise facade of the Effect-canonical {@link KnobsFx} twin. The
   // concrete harness exposes the canonical Effect surface as `knobs.fx`.
 

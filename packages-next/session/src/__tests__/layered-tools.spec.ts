@@ -67,6 +67,7 @@ function mkRecordingExecutor(): {
     target,
     ready: Promise.resolve(),
     fx: {
+      use: () => () => {},
       run: runFx,
       project: () => Effect.succeed({ messages: [] }),
       normalize: () => Effect.succeed(result),

@@ -56,7 +56,10 @@ function mkSubstrate() {
 function mkEmptyReconciler(): ReconcilerProtocol {
   const tree: RenderedTree = { specVersion: SPEC_VERSION, context: { entries: [] } };
   return {
-    fx: { renderTree: () => Effect.succeed({ tree, diagnostics: [], iterations: 1 }) },
+    fx: {
+      use: () => () => {},
+      renderTree: () => Effect.succeed({ tree, diagnostics: [], iterations: 1 }),
+    },
     mount: async () => ({ mountId: "nd-mount", restoredFromSnapshot: false }),
     rerender: async () => undefined,
     renderTree: async () => ({ tree, diagnostics: [], iterations: 1 }),

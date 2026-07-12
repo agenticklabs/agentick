@@ -345,44 +345,55 @@ const timing: Middleware = (input, next) =>
   });
 ```
 
-### Two forms: Effect or pure-JS async — you do NOT need Effect
+### Two surfaces: `use` (pure-JS) and `fx.use` (Effect) — you do NOT need Effect
 
-Middleware comes in two forms; `harness.use(...)` and `withCallMiddleware(...)`
-accept both:
+Middleware comes in two forms, registered through the **two surfaces every
+harness already exposes** — the same facade/twin split as every operation
+(`harness.use : harness.fx.use  ::  harness.run : harness.fx.run`):
 
-- **`Middleware`** (Effect-native, above) — `next(input)` returns an Effect;
-  composes IN the fiber. Telemetry span-nesting and structured interruption
-  propagate through it.
-- **`AsyncMiddleware`** (pure JS) — `next(input)` returns a `Promise`; `await`
-  it. No Effect knowledge required:
+- **`harness.use(mw)`** takes an **`AsyncMiddleware`** (pure JS) — `next(input)`
+  returns a `Promise`; `await` it. No Effect knowledge required. The operation's
+  `RuntimeContext` is handed to you as an explicit **third argument** (`ctx`),
+  since an async middleware runs outside the fiber and can't read `getContext`.
+- **`harness.fx.use(mw)`** takes an Effect-native **`Middleware`** — `next(input)`
+  returns an Effect; composes IN the fiber. Telemetry span-nesting and structured
+  interruption propagate through it.
 
 ```ts
-import { liftMiddleware } from "@agentick/runtime-next";
+// Pure-JS — the ergonomic form. `use` types the inline arrow cleanly.
+harness.use(async (input, next, ctx) => {
+  const start = Date.now();
+  const result = await next(input);
+  metrics.record(ctx.sessionId, ctx.opId, Date.now() - start);
+  return result;
+});
 
-// Pure-JS middleware. `liftMiddleware` gives inline params clean typing.
-harness.use(
-  liftMiddleware(async (input, next) => {
-    const start = Date.now();
-    const result = await next(input);
-    record(Date.now() - start);
+// Effect-native — for middleware that must stay in-fiber.
+harness.fx.use((input, next) =>
+  Effect.gen(function* () {
+    const t0 = yield* Clock.currentTimeMillis;
+    const result = yield* next(input);
+    yield* recordSpan(Clock.currentTimeMillis - t0);
     return result;
   }),
 );
-
-// A bare `async function` also works — it's auto-detected + lifted at runtime
-// (its params infer as `unknown`; wrap in liftMiddleware for inline typing):
-harness.use(async (input, next) => next(input));
 ```
+
+Splitting the forms across the two surfaces is what lets EACH be a single type,
+so an inline arrow infers its params cleanly — one overloaded `use` could not
+(the async and Effect `next` contracts are incompatible, and the union kills
+inline inference for both).
 
 > **Honest caveat — an async middleware severs the fiber.** `await next(input)`
 > runs the inner ops to a `Promise` (a fresh root fiber), so the ADR 77 spine's
 > in-fiber propagation stops AT it: OTel span-parent nesting and structured
-> interruption do NOT cross an async middleware. The framework re-threads the
-> `RuntimeContext` so `parentOpId` (the causal tree) survives and traces stay
-> reconstructable from attributes — but that's the limit. Use the Effect form
-> for middleware that must stay in-fiber (per-op spans that nest through it,
-> a tier-4 timeout/cancel that reaches inner work). **Async = ergonomic;
-> Effect = in-fiber.**
+> interruption do NOT cross an async middleware. The lift re-threads the captured
+> `ctx` so `parentOpId` (the causal tree) survives and traces stay reconstructable
+> from attributes — but that's the limit. This is *why* `ctx` is passed
+> explicitly (you can't read a fiber you left) and why `fx.use` exists: use the
+> Effect form for middleware that must stay in-fiber (per-op spans that nest
+> through it, a tier-4 timeout/cancel that reaches inner work). **Async =
+> ergonomic; Effect = in-fiber.**
 
 **Tier 2 — per-instance** (`harness.use(mw)`): wraps that harness's own ops.
 Returns an `Unsubscribe`.

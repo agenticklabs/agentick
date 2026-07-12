@@ -20,6 +20,7 @@
  * @see docs/proposals/v2/blueprint/05-loop-executor.md
  */
 
+import type { HarnessFx } from "./middleware.js";
 import type { Effect } from "effect";
 import type { CommandOutcome } from "../data/outcomes.js";
 import type { ContentBlock } from "../data/content-blocks.js";
@@ -413,7 +414,7 @@ export {
  * hand-exposed (the `runOperation(op, body)` Effect the harness already
  * builds), not `fxProxy`-derived.
  */
-export interface LoopExecutorFx {
+export interface LoopExecutorFx extends HarnessFx {
   /**
    * Run one agent execution from start to terminal. The terminal
    * envelope carries the outcome (succeeded / failed / canceled /
@@ -438,7 +439,7 @@ export interface LoopExecutorFx {
  *
  * @throws {LoopExecutorError}
  */
-export interface LoopExecutorProtocol extends PromiseView<LoopExecutorFx> {
+export interface LoopExecutorProtocol extends PromiseView<Omit<LoopExecutorFx, "use">> {
   /**
    * The Effect-canonical composable surface (ADR 77) — `fx.runExecution`
    * for in-fiber composition by the session harness. On the protocol so a

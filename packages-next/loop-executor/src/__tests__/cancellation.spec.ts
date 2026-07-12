@@ -50,7 +50,10 @@ const EMPTY_TREE = { specVersion: SPEC_VERSION, context: { entries: [] } };
 
 function stubReconciler(): ReconcilerProtocol {
   return {
-    fx: { renderTree: () => Effect.succeed({ tree: EMPTY_TREE, diagnostics: [], iterations: 1 }) },
+    fx: {
+      use: () => () => {},
+      renderTree: () => Effect.succeed({ tree: EMPTY_TREE, diagnostics: [], iterations: 1 }),
+    },
     mount: async () => ({ mountId: "c-mount", restoredFromSnapshot: false }),
     rerender: async () => undefined,
     renderTree: async () => ({ tree: EMPTY_TREE, diagnostics: [], iterations: 1 }),
@@ -81,6 +84,7 @@ function stubToolExecutor(
 ): ToolExecutorProtocol {
   return {
     fx: {
+      use: () => () => {},
       replaceReconcilerTools: () => Effect.void,
       compileForTick: () => Effect.succeed([]),
       dispatch: (i: { toolCallId: string; name: string; signal?: AbortSignal }) =>
@@ -101,6 +105,7 @@ function hangingExecutor(onStart: () => void): LanguageModelExecutor {
     target: { kind: "language-model", provider: "fake", modelId: "hang-v1" },
     ready: Promise.resolve(),
     fx: {
+      use: () => () => {},
       run: (input: RunInput) =>
         Effect.async<ExecutorTerminal<LanguageModelExecutionResult>>((resume) => {
           const signal = input.signal;
@@ -186,6 +191,7 @@ describe("LoopExecutorHarness — structured cancellation (Stage 5)", () => {
       target: { kind: "language-model", provider: "fake", modelId: "tu-v1" },
       ready: Promise.resolve(),
       fx: {
+        use: () => () => {},
         run: () =>
           Effect.succeed<ExecutorTerminal<LanguageModelExecutionResult>>({
             outcome: "succeeded",
@@ -247,6 +253,7 @@ function multiToolExec(toolCalls: readonly { id: string; name: string }[]): Lang
     target: { kind: "language-model", provider: "fake", modelId: "mt-v1" },
     ready: Promise.resolve(),
     fx: {
+      use: () => () => {},
       run: () =>
         Effect.sync(() => {
           call += 1;

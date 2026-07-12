@@ -155,7 +155,10 @@ class CallbackReconciler extends BaseHarness<"reconciler"> implements Reconciler
    * `fx.renderTree` is `renderTree` minus the terminal `runPromise`.
    */
   get fx(): ReconcilerFx {
-    return { renderTree: (input) => this.renderTreeFx(input) };
+    return {
+      use: (mw) => this.registerEffectMiddleware(mw),
+      renderTree: (input) => this.renderTreeFx(input),
+    };
   }
 
   /**

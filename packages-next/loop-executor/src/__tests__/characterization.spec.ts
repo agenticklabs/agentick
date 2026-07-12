@@ -56,7 +56,10 @@ const EMPTY_TREE: RenderedTree = { specVersion: SPEC_VERSION, context: { entries
 /** Reconciler that renders nothing and records every notifyLifecycle kind. */
 function mkRecordingReconciler(order: string[]): ReconcilerProtocol {
   return {
-    fx: { renderTree: () => Effect.succeed({ tree: EMPTY_TREE, diagnostics: [], iterations: 1 }) },
+    fx: {
+      use: () => () => {},
+      renderTree: () => Effect.succeed({ tree: EMPTY_TREE, diagnostics: [], iterations: 1 }),
+    },
     mount: async () => ({ mountId: "ch-mount", restoredFromSnapshot: false }),
     rerender: async () => undefined,
     renderTree: async () => ({ tree: EMPTY_TREE, diagnostics: [], iterations: 1 }),
@@ -122,6 +125,7 @@ function mkFakeToolExecutor(
     // so a hard throw lands on the E channel (→ the loop's `Effect.either`
     // tool-error path), matching the facade's rejection.
     fx: {
+      use: () => () => {},
       replaceReconcilerTools: () => Effect.void,
       compileForTick: () => Effect.succeed([]),
       dispatch: (i: { name: string; toolCallId: string }) =>

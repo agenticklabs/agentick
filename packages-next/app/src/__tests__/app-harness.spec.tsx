@@ -310,11 +310,11 @@ describe("AppHarness — closeApp", () => {
 });
 
 describe("AppHarness — middleware on app commands (command refactor)", () => {
-  it("app.use(middleware) wraps createSession after the command refactor", async () => {
+  it("app.fx.use(middleware) wraps createSession after the command refactor", async () => {
     const { Effect } = await import("effect");
     const calls: string[] = [];
     const app = await mkApp();
-    app.use((input, next) =>
+    app.fx.use((input, next) =>
       Effect.gen(function* () {
         calls.push("in");
         const r = yield* next(input);
@@ -327,11 +327,11 @@ describe("AppHarness — middleware on app commands (command refactor)", () => {
     await app.closeApp();
   });
 
-  it("app.use(middleware) wraps runOnce too", async () => {
+  it("app.fx.use(middleware) wraps runOnce too", async () => {
     const { Effect } = await import("effect");
     const calls: string[] = [];
     const app = await mkApp();
-    app.use((input, next) =>
+    app.fx.use((input, next) =>
       Effect.gen(function* () {
         calls.push("in");
         const r = yield* next(input);

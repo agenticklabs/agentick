@@ -36,10 +36,12 @@ import type {
   EventScope,
   EventSurface,
   HandlerVerdict,
+  HarnessFx,
   InboxError,
   JournalError,
   JournalingPolicy,
   LogLevel,
+  Middleware,
   ProgressEventPayload,
   MessageEnvelope,
   MessageInbox,
@@ -100,51 +102,47 @@ export type LifecycleHandler<I = unknown, R = unknown, E = never> = (
   input: I,
 ) => Effect.Effect<HandlerVerdict<R> | void, E, never>;
 
-/**
- * Middleware. Wraps the command body — invoke `next(input)` to proceed
- * or return a value to short-circuit. Composes outer→inner: the first
- * middleware registered is the outermost.
- */
-export type Middleware<I = unknown, R = unknown, E = unknown> = (
-  input: I,
-  next: (input: I) => Effect.Effect<R, E, never>,
-) => Effect.Effect<R, E, never>;
+// `Middleware` (Effect-native, `fx.use`) + `HarnessFx` are defined in
+// `@agentick/spec-next` (so the `XFx` protocols can type `fx.use`) and
+// re-exported here. `AsyncMiddleware` (pure-JS, `use`) is defined below —
+// it carries `RuntimeContext`, a runtime concern.
+export type { Middleware, HarnessFx } from "@agentick/spec-next";
 
 /**
- * Async (pure-JS) middleware — the ergonomic form. `next(input)` returns a
- * `Promise`; `await` it to proceed, or return a value to short-circuit. No
- * Effect knowledge required. `harness.use(...)` / `withCallMiddleware(...)`
- * accept it directly (an `async function` is auto-detected + lifted); or wrap
- * it explicitly with {@link liftMiddleware}.
+ * Pure-JS middleware — the ergonomic `harness.use` form. `next(input)` returns
+ * a Promise; `await` it to proceed, or return a value to short-circuit. No
+ * Effect knowledge required.
+ *
+ * The third argument, **`ctx`**, is the operation's {@link RuntimeContext}
+ * (sessionId / executionId / tickId / opId / parentOpId / user …), passed
+ * EXPLICITLY: an async middleware runs OUTSIDE the fiber (see the caveat
+ * below), so it cannot read `getContext` itself — `use`'s lift hands it the
+ * snapshot captured at the op boundary. An Effect middleware (`fx.use`) reads
+ * the same context natively via `yield* getContext`.
  *
  * ```ts
- * harness.use(async (input, next) => {
- *   const start = Date.now();
+ * harness.use(async (input, next, ctx) => {
+ *   const started = Date.now();
  *   const result = await next(input);
- *   record(Date.now() - start);
+ *   metrics.record(ctx.sessionId, ctx.opId, Date.now() - started);
  *   return result;
  * });
  * ```
  *
  * **Honest caveat — the fiber severs here.** `await next(input)` runs the inner
- * operations to a `Promise`, which is a fresh root fiber. So the ADR 77 spine's
- * in-fiber propagation stops AT an async middleware: OTel span-parent nesting
- * and structured interruption do NOT cross it. The framework re-threads the
- * `RuntimeContext` (so `parentOpId` — the causal tree — survives, and traces
- * stay reconstructable from attributes), but that is the limit. For middleware
- * that must stay in-fiber (per-op spans that nest through it, timeout/cancel
- * that reaches inner work — e.g. a tier-4 call-scoped wrapper), use the
- * Effect-native {@link Middleware} form. Async = ergonomic; Effect = in-fiber.
+ * operations to a Promise (a fresh root fiber), so the ADR 77 spine's in-fiber
+ * propagation stops AT an async middleware: OTel span-parent nesting and
+ * structured interruption do NOT cross it. The lift re-threads `ctx` onto the
+ * continuation so `parentOpId` (the causal tree) survives and traces stay
+ * reconstructable from attributes — but that is the limit. For middleware that
+ * must stay in-fiber, use `harness.fx.use` (the Effect-native {@link Middleware}).
+ * Async = ergonomic; Effect = in-fiber.
  */
 export type AsyncMiddleware<I = unknown, R = unknown> = (
   input: I,
   next: (input: I) => Promise<R>,
+  ctx: RuntimeContext,
 ) => Promise<R>;
-
-/** Either middleware form — accepted by `use()` / `withCallMiddleware`. */
-export type AnyMiddleware<I = unknown, R = unknown, E = unknown> =
-  | Middleware<I, R, E>
-  | AsyncMiddleware<I, R>;
 
 // ============================================================================
 // HandlerRegistry — keyed handler lists
@@ -250,27 +248,13 @@ export function liftMiddleware<I = unknown, R = unknown, E = unknown>(
       const ctx = yield* getContext;
       const nextPromise = (i: I): Promise<R> =>
         Effect.runPromise(withContext(ctx, next(i)) as Effect.Effect<R, never, never>);
+      // Hand the async middleware the captured `ctx` explicitly — it runs
+      // outside the fiber and can't read `getContext` itself.
       return yield* Effect.tryPromise({
-        try: () => mw(input, nextPromise),
+        try: () => mw(input, nextPromise, ctx),
         catch: (e) => e as E,
       });
     });
-}
-
-/**
- * Detect an async-function middleware so `use()` / `withCallMiddleware` can lift
- * it. An Effect {@link Middleware} is never written `async` (it returns an
- * Effect, not a Promise), so this is unambiguous for the intended usage. A
- * promise-returning middleware NOT declared `async` is the one edge case — wrap
- * it explicitly with {@link liftMiddleware}.
- */
-function isAsyncMiddleware<I, R, E>(mw: AnyMiddleware<I, R, E>): mw is AsyncMiddleware<I, R> {
-  return (mw as { constructor?: { name?: string } }).constructor?.name === "AsyncFunction";
-}
-
-/** Normalize either middleware form to the Effect-native {@link Middleware}. */
-function toEffectMiddleware<I, R, E>(mw: AnyMiddleware<I, R, E>): Middleware<I, R, E> {
-  return isAsyncMiddleware(mw) ? liftMiddleware<I, R, E>(mw) : mw;
 }
 
 // ============================================================================
@@ -308,18 +292,19 @@ const getCallMiddleware: Effect.Effect<readonly Middleware<unknown, unknown, unk
  * Nested `withCallMiddleware` calls ACCUMULATE (append, so an outer
  * provider stays outermost). Empty list is a pass-through.
  *
- * The Effect-native tier-4 surface: `withCallMiddleware([cap], someEffect)`
- * — e.g., a per-`send` budget cap or a per-request trace attribute that
- * must wrap every op the request touches, then vanish.
+ * The Effect-native tier-4 surface (in-fiber): `withCallMiddleware([cap],
+ * someEffect)` — e.g., a per-`send` budget cap or a per-request trace attribute
+ * that must wrap every op the request touches, then vanish. Takes the
+ * Effect-native {@link Middleware}; for a pure-JS async tier-4 middleware wrap
+ * it with {@link liftMiddleware}.
  */
 export function withCallMiddleware<A, E, R>(
-  middleware: readonly AnyMiddleware<unknown, unknown, unknown>[],
+  middleware: readonly Middleware<unknown, unknown, unknown>[],
   effect: Effect.Effect<A, E, R>,
 ): Effect.Effect<A, E, R> {
   if (middleware.length === 0) return effect;
-  const lifted = middleware.map(toEffectMiddleware);
   return Effect.flatMap(getCallMiddleware, (current) =>
-    Effect.locally(CallMiddlewareRef, [...current, ...lifted])(effect),
+    Effect.locally(CallMiddlewareRef, [...current, ...middleware])(effect),
   );
 }
 
@@ -546,31 +531,52 @@ export abstract class BaseHarness<
   readonly ready: Promise<void>;
 
   /**
-   * Register an around-style middleware that wraps every operation
-   * the harness routes through `runOperation`. Composition is
-   * outer→inner — the first registered is the outermost wrap.
-   * Returns an `Unsubscribe` to remove it.
+   * Register a PURE-JS async middleware (tier 2) around this harness's ops —
+   * the ergonomic default surface (dual of `harness.fx.use`, which takes the
+   * Effect-native {@link Middleware}). `next(input)` returns a Promise; `await`
+   * it. No Effect knowledge required. Single-typed, so an inline arrow infers:
    *
-   * Note: this is the universal surface. Harnesses whose *public*
-   * commands don't currently go through `runOperation`
-   * (`SessionHarness.send`, `AppHarness.createSession`, etc.) will
-   * accept registrations but those operations won't be wrapped until
-   * they're refactored to use `runOperation`.
+   * ```ts
+   * harness.use(async (input, next) => {
+   *   const start = Date.now();
+   *   const result = await next(input);
+   *   record(Date.now() - start);
+   *   return result;
+   * });
+   * ```
+   *
+   * Lifted to an Effect middleware internally ({@link liftMiddleware}); the
+   * chain only ever holds Effect middleware. An async middleware SEVERS the
+   * fiber — use `harness.fx.use` for middleware that must stay in-fiber (see
+   * the caveat on {@link AsyncMiddleware}).
+   *
+   * Note: this is the universal surface. Harnesses whose *public* commands
+   * don't currently go through `runOperation` (`SessionHarness.send`,
+   * `AppHarness.createSession`) accept registrations but those operations
+   * aren't wrapped until refactored onto `runOperation`.
    */
+  use<I = unknown, R = unknown>(mw: AsyncMiddleware<I, R>): Unsubscribe {
+    return this.middleware.use(liftMiddleware(mw) as Middleware<unknown, unknown, unknown>);
+  }
+
   /**
-   * Register middleware around this harness's ops (tier 2). Accepts either an
-   * Effect-native {@link Middleware} (in-fiber) OR a pure-JS
-   * {@link AsyncMiddleware} (auto-detected + lifted — it severs the fiber; see
-   * the caveat on `AsyncMiddleware`). Overloaded so an inline Effect arrow
-   * infers its params; for a typed inline ASYNC middleware wrap it in
-   * {@link liftMiddleware} (`use(liftMiddleware(async (input, next) => …))`) —
-   * a bare inline `async` arrow lifts at runtime but its params infer as
-   * `unknown`. The chain only ever holds Effect middleware.
+   * The harness's `.fx` surface — the Effect-native operations twin PLUS
+   * `fx.use` (register an Effect-native {@link Middleware}, in-fiber). Concrete
+   * op-harnesses OVERRIDE this to add their operation twins (`fx.run`, …); this
+   * base provides the middleware register for harnesses without op twins (app,
+   * gateway) and is the type all `XFx` extend via {@link HarnessFx}.
    */
-  use<I = unknown, R = unknown, E = unknown>(mw: Middleware<I, R, E>): Unsubscribe;
-  use<I = unknown, R = unknown>(mw: AsyncMiddleware<I, R>): Unsubscribe;
-  use(mw: AnyMiddleware<unknown, unknown, unknown>): Unsubscribe {
-    return this.middleware.use(toEffectMiddleware(mw) as Middleware<unknown, unknown, unknown>);
+  get fx(): HarnessFx {
+    return { use: (mw) => this.registerEffectMiddleware(mw) };
+  }
+
+  /**
+   * Register an Effect-native {@link Middleware} on this harness's chain — the
+   * impl behind `fx.use`. Exposed `protected` so each concrete `get fx()`
+   * override can include `use: (mw) => this.registerEffectMiddleware(mw)`.
+   */
+  protected registerEffectMiddleware<I, R, E>(mw: Middleware<I, R, E>): Unsubscribe {
+    return this.middleware.use(mw as Middleware<unknown, unknown, unknown>);
   }
 
   /**
@@ -1290,21 +1296,33 @@ export abstract class BaseHarness<
    * and stays in one fiber tree; the plain `harness.<action>()` Promise method
    * is the edge facade. A concrete harness exposes a typed `get fx()` over this.
    */
-  protected fxProxy(): Record<
-    string,
-    (
-      input: unknown,
-      opts?: { readonly origin?: OperationOrigin },
-    ) => Effect.Effect<unknown, unknown, never>
-  > {
+  protected fxProxy(): HarnessFx &
+    Record<
+      string,
+      (
+        input: unknown,
+        opts?: { readonly origin?: OperationOrigin },
+      ) => Effect.Effect<unknown, unknown, never>
+    > {
     const surface = this.surface;
     return new Proxy(Object.create(null) as Record<string, never>, {
       get: (_t, action): unknown => {
         if (typeof action !== "string") return undefined;
+        // `fx.use` — the Effect-native middleware register (HarnessFx),
+        // universal across all `.fx` surfaces including the fxProxy-based ones.
+        if (action === "use")
+          return (mw: Middleware<unknown, unknown, unknown>) => this.registerEffectMiddleware(mw);
         return (input: unknown, opts?: { readonly origin?: OperationOrigin }) =>
           this.commandEffect(`${surface}:${action}`, input, opts);
       },
-    });
+    }) as unknown as HarnessFx &
+      Record<
+        string,
+        (
+          input: unknown,
+          opts?: { readonly origin?: OperationOrigin },
+        ) => Effect.Effect<unknown, unknown, never>
+      >;
   }
 
   /**

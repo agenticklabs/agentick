@@ -23,7 +23,6 @@ import {
   getContext,
   liftMiddleware,
   withCallMiddleware,
-  type AsyncMiddleware,
   type Middleware,
 } from "@agentick/runtime-next";
 import type { MessageEnvelope, MessageHandlerError, Operation } from "@agentick/spec-next";
@@ -80,7 +79,7 @@ class MwHarness extends BaseHarness<"tool"> {
   }
 
   useMw(mw: Middleware<unknown, unknown, unknown>): () => void {
-    return this.use(mw);
+    return this.fx.use(mw);
   }
 
   protected handleMessage(
@@ -167,44 +166,76 @@ describe("Tier-4 call-scoped middleware (ADR 76 / ADR 77 spine payoff)", () => {
   });
 });
 
-describe("Async (pure-JS) middleware — no Effect required", () => {
-  it("a pure-JS async middleware wraps an op — no Effect knowledge (via liftMiddleware)", async () => {
+describe("harness.use — pure-JS async middleware (the Promise-facade surface)", () => {
+  it("an INLINE async middleware wraps an op — no Effect, params infer, no wrapper", async () => {
     const a = await mkHarness("async-use");
     const events: string[] = [];
-    // Pure JS. `liftMiddleware` gives inline params clean typing; `await
-    // next(input)` proceeds.
-    a.use(
-      liftMiddleware(async (input, next) => {
-        events.push("before");
-        const result = await next(input);
-        events.push("after");
-        return result;
-      }),
-    );
+    // `use` is single-typed (AsyncMiddleware) → the inline arrow's params infer;
+    // no liftMiddleware wrapper. `await next(input)` proceeds. `use` lifts it
+    // to Effect internally.
+    a.use(async (input, next) => {
+      events.push("before");
+      const result = await next(input);
+      events.push("after");
+      return result;
+    });
 
     const r = await Effect.runPromise(a.opFx("op"));
     expect(r).toBe(1);
     expect(events).toEqual(["before", "after"]);
   });
 
-  it("a bare `async function` passed to use() is AUTO-DETECTED + lifted at runtime", async () => {
-    const a = await mkHarness("async-auto");
-    let ran = false;
-    // No liftMiddleware wrapper — a typed AsyncMiddleware const passed straight
-    // to use(); the runtime detects the async function and lifts it.
-    const mw: AsyncMiddleware<unknown, unknown> = async (input, next) => {
-      ran = true;
-      return next(input);
-    };
-    a.use(mw);
+  it("an async middleware can SHORT-CIRCUIT (returns without calling next)", async () => {
+    const a = await mkHarness("async-short");
+    a.use(async () => 99); // never calls next → op body never runs
     const r = await Effect.runPromise(a.opFx("op"));
-    expect(r).toBe(1);
-    expect(ran).toBe(true);
+    expect(r).toBe(99); // the short-circuit value, not the body's 1
   });
 
-  it("an async middleware works via withCallMiddleware (typed inline via liftMiddleware)", async () => {
+  it("mixes with fx.use Effect middleware — both in one chain, outer→inner", async () => {
+    const a = await mkHarness("async-mixed");
+    const order: string[] = [];
+    // Effect middleware via fx.use (registered first → outermost).
+    a.fx.use((input, next) =>
+      Effect.gen(function* () {
+        order.push("effect");
+        return yield* next(input);
+      }),
+    );
+    // Async middleware via use (registered second → inner).
+    a.use(async (input, next) => {
+      order.push("async");
+      return await next(input);
+    });
+
+    await Effect.runPromise(a.opFx("op"));
+    expect(order).toEqual(["effect", "async"]);
+  });
+
+  it("a throw in an async middleware fails the op", async () => {
+    const a = await mkHarness("async-throw");
+    a.use(async () => {
+      throw new Error("mw boom");
+    });
+    const exit = await Effect.runPromiseExit(a.opFx("op"));
+    expect(exit._tag).toBe("Failure");
+  });
+
+  it("the causal tree survives the async boundary (parentOpId re-threaded)", async () => {
+    const a = await mkHarness("async-ctx");
+    // An async middleware severs the fiber (await next runs a fresh root), but
+    // `use`'s lift re-threads RuntimeContext — so a NESTED op still sees its
+    // real parentOpId even though the fiber (span-nesting) does not survive.
+    a.use(async (input, next) => await next(input));
+
+    await Effect.runPromise(a.nestedFx());
+    expect(a.capturedParent).toBe("tool:outer:1");
+  });
+
+  it("a pure-JS async middleware works via withCallMiddleware (tier 4) through liftMiddleware", async () => {
     const a = await mkHarness("async-call");
     let wrapped = false;
+    // withCallMiddleware takes Effect middleware; wrap async with liftMiddleware.
     const r = await Effect.runPromise(
       withCallMiddleware(
         [
@@ -218,57 +249,5 @@ describe("Async (pure-JS) middleware — no Effect required", () => {
     );
     expect(r).toBe(1);
     expect(wrapped).toBe(true);
-  });
-
-  it("an async middleware can SHORT-CIRCUIT (returns without calling next)", async () => {
-    const a = await mkHarness("async-short");
-    a.use(liftMiddleware(async () => 99)); // never calls next → op body never runs
-    const r = await Effect.runPromise(a.opFx("op"));
-    expect(r).toBe(99); // the short-circuit value, not the body's 1
-  });
-
-  it("mixes with Effect middleware — both compose, outer→inner", async () => {
-    const a = await mkHarness("async-mixed");
-    const order: string[] = [];
-    // Effect middleware (registered first → outermost).
-    a.use((input, next) =>
-      Effect.gen(function* () {
-        order.push("effect");
-        return yield* next(input);
-      }),
-    );
-    // Async middleware (registered second → inner).
-    a.use(
-      liftMiddleware(async (input, next) => {
-        order.push("async");
-        return await next(input);
-      }),
-    );
-
-    await Effect.runPromise(a.opFx("op"));
-    expect(order).toEqual(["effect", "async"]);
-  });
-
-  it("a throw in an async middleware fails the op", async () => {
-    const a = await mkHarness("async-throw");
-    a.use(
-      liftMiddleware(async () => {
-        throw new Error("mw boom");
-      }),
-    );
-    const exit = await Effect.runPromiseExit(a.opFx("op"));
-    expect(exit._tag).toBe("Failure");
-  });
-
-  it("the causal tree survives the async boundary (parentOpId re-threaded)", async () => {
-    const a = await mkHarness("async-ctx");
-    // An async middleware severs the fiber (await next runs a fresh root), but
-    // the framework re-threads RuntimeContext — so a NESTED op still sees its
-    // real parentOpId.
-    a.use(liftMiddleware(async (input, next) => await next(input)));
-
-    await Effect.runPromise(a.nestedFx());
-    // inner op ran under outer op → parentOpId preserved across the async lift.
-    expect(a.capturedParent).toBe("tool:outer:1");
   });
 });

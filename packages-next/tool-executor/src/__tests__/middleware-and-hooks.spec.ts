@@ -39,7 +39,7 @@ function dispatchOf(name: string, toolCallId: string, input: unknown = {}): Disp
   };
 }
 
-describe("ToolExecutorHarness — .use(middleware)", () => {
+describe("ToolExecutorHarness — .fx.use(middleware)", () => {
   it("wraps the dispatch body — sees both input and result", async () => {
     const observed: Array<{ phase: string; payload: unknown }> = [];
     const { harness } = await createTestHarness({
@@ -52,7 +52,7 @@ describe("ToolExecutorHarness — .use(middleware)", () => {
       ],
     });
 
-    harness.use((input, next) =>
+    harness.fx.use((input, next) =>
       Effect.gen(function* () {
         observed.push({ phase: "before", payload: input });
         const result = yield* next(input);
@@ -80,7 +80,7 @@ describe("ToolExecutorHarness — .use(middleware)", () => {
       ],
     });
 
-    harness.use((input, next) =>
+    harness.fx.use((input, next) =>
       Effect.gen(function* () {
         order.push("A-in");
         const r = yield* next(input);
@@ -88,7 +88,7 @@ describe("ToolExecutorHarness — .use(middleware)", () => {
         return r;
       }),
     );
-    harness.use((input, next) =>
+    harness.fx.use((input, next) =>
       Effect.gen(function* () {
         order.push("B-in");
         const r = yield* next(input);
@@ -112,7 +112,7 @@ describe("ToolExecutorHarness — .use(middleware)", () => {
         },
       ],
     });
-    const unsub = harness.use((input, next) =>
+    const unsub = harness.fx.use((input, next) =>
       Effect.gen(function* () {
         count++;
         return yield* next(input);

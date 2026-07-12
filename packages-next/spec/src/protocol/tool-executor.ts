@@ -39,6 +39,7 @@
  * @see docs/proposals/v2/blueprint/07-tool-executor.md
  */
 
+import type { HarnessFx } from "./middleware.js";
 import type { Effect } from "effect";
 import type { ContentBlock } from "../data/content-blocks.js";
 import type { ToolBinding, ToolDeclaration, ToolExposure } from "../data/declarations.js";
@@ -520,7 +521,7 @@ export {
  * only for BARE command passthroughs — knobs; a facade with logic on top
  * hand-authors.)
  */
-export interface ToolExecutorFx {
+export interface ToolExecutorFx extends HarnessFx {
   /**
    * The canonical command — validate input, run interceptors + the
    * confirmation flow if required, invoke the handler, and emit the
@@ -558,7 +559,7 @@ export interface ToolExecutorFx {
   compileForTick(filter?: ToolListFilter): Effect.Effect<readonly ToolDeclaration[], never, never>;
 }
 
-export interface ToolExecutorProtocol extends PromiseView<ToolExecutorFx> {
+export interface ToolExecutorProtocol extends PromiseView<Omit<ToolExecutorFx, "use">> {
   /**
    * The Effect-canonical composable surface (ADR 77) — `fx.dispatch` for
    * in-fiber composition by the loop. On the protocol so a protocol-typed
@@ -579,7 +580,7 @@ export interface ToolExecutorProtocol extends PromiseView<ToolExecutorFx> {
    */
   unregister(input: UnregisterToolInput): Promise<void>;
 
-  // `dispatch` is derived from `PromiseView<ToolExecutorFx>` — the Promise
+  // `dispatch` is derived from `PromiseView<Omit<ToolExecutorFx, "use">>` — the Promise
   // facade of the Effect-canonical {@link ToolExecutorFx.dispatch} twin.
   // The concrete harness exposes the Effect surface as `toolExecutor.fx`.
 
@@ -614,7 +615,7 @@ export interface ToolExecutorProtocol extends PromiseView<ToolExecutorFx> {
   removeBoundTools(input: RemoveBoundToolsInput): Promise<void>;
 
   // `replaceReconcilerTools` and `compileForTick` are derived from
-  // `PromiseView<ToolExecutorFx>` — the Promise facades of the
+  // `PromiseView<Omit<ToolExecutorFx, "use">>` — the Promise facades of the
   // Effect-canonical twins ({@link ToolExecutorFx.replaceReconcilerTools} /
   // {@link ToolExecutorFx.compileForTick}). The concrete harness exposes
   // the Effect surface as `toolExecutor.fx`.

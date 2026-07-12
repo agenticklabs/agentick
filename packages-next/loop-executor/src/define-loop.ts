@@ -141,7 +141,10 @@ class CallbackLoopExecutor extends BaseHarness<"loop"> implements LoopExecutorPr
   }
 
   get fx(): LoopExecutorFx {
-    return { runExecution: (input) => this.runExecutionFx(input) };
+    return {
+      use: (mw) => this.registerEffectMiddleware(mw),
+      runExecution: (input) => this.runExecutionFx(input),
+    };
   }
 
   private runExecutionFx(

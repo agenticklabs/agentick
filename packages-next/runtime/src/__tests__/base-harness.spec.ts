@@ -142,7 +142,7 @@ describe("BaseHarness — phase contract", () => {
   it("same opId returns cached terminal (idempotent replay)", async () => {
     const { h } = await harness();
     let calls = 0;
-    h.use((i, next) =>
+    h.fx.use((i, next) =>
       Effect.gen(function* () {
         calls++;
         return yield* next(i);
@@ -203,7 +203,7 @@ describe("BaseHarness — middleware", () => {
   it("composes outer-wraps-inner", async () => {
     const { h } = await harness();
     const trace: string[] = [];
-    h.use((i, next) =>
+    h.fx.use((i, next) =>
       Effect.gen(function* () {
         trace.push("outer:before");
         const r = yield* next(i);
@@ -211,7 +211,7 @@ describe("BaseHarness — middleware", () => {
         return r;
       }),
     );
-    h.use((i, next) =>
+    h.fx.use((i, next) =>
       Effect.gen(function* () {
         trace.push("inner:before");
         const r = yield* next(i);

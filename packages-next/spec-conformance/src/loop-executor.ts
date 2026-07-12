@@ -67,7 +67,10 @@ function mkTarget(): ExecutionTarget {
 /** Reconciler stub — returns a canned tree on every `renderTree`. */
 function stubReconciler(tree: RenderedTree): ReconcilerProtocol {
   return {
-    fx: { renderTree: () => Effect.succeed({ tree, diagnostics: [], iterations: 1 }) },
+    fx: {
+      use: () => () => {},
+      renderTree: () => Effect.succeed({ tree, diagnostics: [], iterations: 1 }),
+    },
     mount: async () => ({ mountId: "stub-mount", restoredFromSnapshot: false }),
     rerender: async () => undefined,
     renderTree: async () => ({ tree, diagnostics: [], iterations: 1 }),
@@ -105,6 +108,7 @@ function stubExecutor(
     });
   return {
     fx: {
+      use: () => () => {},
       run: runFx,
       project: () => Effect.succeed({ messages: [] }),
       normalize: (input) => Effect.succeed(input.targetOutput as LanguageModelExecutionResult),
@@ -132,6 +136,7 @@ function stubToolExecutor(): ToolExecutorProtocol {
     });
   return {
     fx: {
+      use: () => () => {},
       dispatch: (input) => dispatchFx(input),
       replaceReconcilerTools: () => Effect.void,
       compileForTick: () => Effect.succeed([]),
