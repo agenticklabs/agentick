@@ -17,6 +17,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { Effect } from "effect";
 
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type {
@@ -55,6 +56,7 @@ function mkSubstrate() {
 function mkEmptyReconciler(): ReconcilerProtocol {
   const tree: RenderedTree = { specVersion: SPEC_VERSION, context: { entries: [] } };
   return {
+    fx: { renderTree: () => Effect.succeed({ tree, diagnostics: [], iterations: 1 }) },
     mount: async () => ({ mountId: "nd-mount", restoredFromSnapshot: false }),
     rerender: async () => undefined,
     renderTree: async () => ({ tree, diagnostics: [], iterations: 1 }),

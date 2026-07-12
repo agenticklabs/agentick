@@ -446,6 +446,15 @@ export interface ExecutorProtocol<
   TResult extends ExecutionResult = ExecutionResult,
 > extends PromiseView<Pick<ExecutorFx<TInput, TOutput, TResult>, "run">> {
   /**
+   * The Effect-canonical composable surface (ADR 77, the dual-typed edge)
+   * — the twins the spine composes in-fiber (`yield* executor.fx.run(...)`).
+   * On the protocol so a protocol-typed ref (e.g. the loop's
+   * `RunExecutionInput.executor`) can compose without severing the fiber
+   * at the Promise facade.
+   */
+  readonly fx: ExecutorFx<TInput, TOutput, TResult>;
+
+  /**
    * Resolves when the executor's substrate is initialized and the
    * executor is ready to accept calls. Mirrors the `.ready` shape on
    * every other v2 harness (`gateway.ready`, `app.ready`, etc.). Callers

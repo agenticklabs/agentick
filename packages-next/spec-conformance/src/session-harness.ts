@@ -34,12 +34,15 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { Effect } from "effect";
 
 import type {
   ContentBlock,
   EventBus,
   ExecutionTarget,
+  ExecutionTerminal,
   ExecutorProtocol,
+  ExecutorTerminal,
   LanguageModelExecutionResult,
   LoopExecutorProtocol,
   MessageInbox,
@@ -109,6 +112,7 @@ function mkTree(): RenderedTree {
 
 function stubReconciler(): ReconcilerProtocol {
   return {
+    fx: { renderTree: () => Effect.succeed({ tree: mkTree(), diagnostics: [], iterations: 1 }) },
     mount: async () => ({ mountId: "stub-mount", restoredFromSnapshot: false }),
     rerender: async () => undefined,
     renderTree: async () => ({
@@ -139,38 +143,42 @@ function stubReconciler(): ReconcilerProtocol {
  * Calls the supplied `stateApplicator` to mimic the real loop's writes.
  */
 function stubLoop(text: string): LoopExecutorProtocol {
-  return {
-    runExecution: async (input) => {
-      const tickId = "tick-1";
-      const output: readonly ContentBlock[] = [{ type: "text", text }];
-      const usage = { inputTokens: 1, outputTokens: 1, totalTokens: 2 };
-      // Apply via state applicator — exercises the session's
-      // applyExecutorResult path. The loop's StateApplicator takes the
-      // full LanguageModelExecutionResult shape; the session narrows it
-      // internally.
-      await input.stateApplicator.applyExecutorResult({
-        sessionId: input.sessionId,
+  const run = async (
+    input: Parameters<LoopExecutorProtocol["runExecution"]>[0],
+  ): Promise<ExecutionTerminal> => {
+    const tickId = "tick-1";
+    const output: readonly ContentBlock[] = [{ type: "text", text }];
+    const usage = { inputTokens: 1, outputTokens: 1, totalTokens: 2 };
+    // Apply via state applicator — exercises the session's
+    // applyExecutorResult path. The loop's StateApplicator takes the
+    // full LanguageModelExecutionResult shape; the session narrows it
+    // internally.
+    await input.stateApplicator.applyExecutorResult({
+      sessionId: input.sessionId,
+      executionId: input.executionId,
+      tickId,
+      result: {
+        specVersion: "2026-05-08",
+        output,
+        stopReason: "end",
+        usage,
+      },
+    });
+    return {
+      outcome: "succeeded",
+      result: {
         executionId: input.executionId,
-        tickId,
-        result: {
-          specVersion: "2026-05-08",
-          output,
-          stopReason: "end",
-          usage,
-        },
-      });
-      return {
-        outcome: "succeeded",
-        result: {
-          executionId: input.executionId,
-          output,
-          toolResults: [],
-          stopReason: "end",
-          usage,
-          ticks: 1,
-        },
-      };
-    },
+        output,
+        toolResults: [],
+        stopReason: "end",
+        usage,
+        ticks: 1,
+      },
+    };
+  };
+  return {
+    fx: { runExecution: (input) => Effect.promise(() => run(input)) },
+    runExecution: run,
     abort: async () => undefined,
   };
 }
@@ -181,29 +189,35 @@ function stubExecutor(): ExecutorProtocol<unknown, unknown, LanguageModelExecuti
     output: [{ type: "text", text: "stub" }],
     stopReason: "end",
   };
+  const runFx = (): Effect.Effect<ExecutorTerminal<LanguageModelExecutionResult>> =>
+    Effect.succeed({ outcome: "succeeded", result });
   return {
+    fx: { run: runFx, executeStream: () => Effect.succeed({} as unknown) },
     ready: Promise.resolve(),
     project: async () => ({ messages: [] }),
     execute: async () => ({}),
     normalize: async () => result,
-    run: async () => ({ outcome: "succeeded", result }),
+    run: () => Effect.runPromise(runFx()),
     abort: async () => undefined,
   };
 }
 
 function stubToolExecutor(): ToolExecutorProtocol {
-  return {
-    register: async () => undefined,
-    unregister: async () => undefined,
-    list: async () => [],
-    dispatch: async (input) => ({
+  const dispatchFx = (input: { toolCallId: string; name: string }) =>
+    Effect.succeed({
       toolCallId: input.toolCallId,
       name: input.name,
       succeeded: true,
-      content: [{ type: "text", text: "stub" }],
+      content: [{ type: "text" as const, text: "stub" }],
       executedBy: "agentick",
       durationMs: 0,
-    }),
+    });
+  return {
+    fx: { dispatch: (input) => dispatchFx(input) },
+    register: async () => undefined,
+    unregister: async () => undefined,
+    list: async () => [],
+    dispatch: (input) => Effect.runPromise(dispatchFx(input)),
     abort: async () => undefined,
     replaceReconcilerTools: async () => undefined,
     removeBoundTools: async () => undefined,

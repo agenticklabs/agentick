@@ -20,6 +20,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { Effect } from "effect";
 
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type {
@@ -55,6 +56,7 @@ const EMPTY_TREE: RenderedTree = { specVersion: SPEC_VERSION, context: { entries
 /** Reconciler that renders nothing and records every notifyLifecycle kind. */
 function mkRecordingReconciler(order: string[]): ReconcilerProtocol {
   return {
+    fx: { renderTree: () => Effect.succeed({ tree: EMPTY_TREE, diagnostics: [], iterations: 1 }) },
     mount: async () => ({ mountId: "ch-mount", restoredFromSnapshot: false }),
     rerender: async () => undefined,
     renderTree: async () => ({ tree: EMPTY_TREE, diagnostics: [], iterations: 1 }),

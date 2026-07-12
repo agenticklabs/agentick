@@ -398,6 +398,13 @@ export interface LoopExecutorFx {
  */
 export interface LoopExecutorProtocol extends PromiseView<LoopExecutorFx> {
   /**
+   * The Effect-canonical composable surface (ADR 77) — `fx.runExecution`
+   * for in-fiber composition by the session harness. On the protocol so a
+   * protocol-typed ref composes without severing the fiber.
+   */
+  readonly fx: LoopExecutorFx;
+
+  /**
    * Abort the named execution. The in-flight `runExecution` for this
    * id MUST terminate with `outcome: "canceled"`. No-op for unknown
    * ids.

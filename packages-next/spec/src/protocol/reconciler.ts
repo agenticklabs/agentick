@@ -495,6 +495,14 @@ export interface ReconcilerFx {
 
 export interface ReconcilerProtocol extends PromiseView<ReconcilerFx> {
   /**
+   * The Effect-canonical composable surface (ADR 77) — `fx.renderTree` for
+   * in-fiber composition by the loop. On the protocol so a protocol-typed
+   * ref (the loop's `RunExecutionInput.reconciler`) composes without
+   * severing the fiber at the Promise facade.
+   */
+  readonly fx: ReconcilerFx;
+
+  /**
    * Mount an application. Idempotent on `mountId` — calling twice with
    * the same `mountId` returns the existing mount (no re-execution).
    */

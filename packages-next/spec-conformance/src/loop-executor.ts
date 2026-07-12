@@ -10,11 +10,13 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { Effect } from "effect";
 
 import type {
   ExecutionRunResult,
   ExecutionTarget,
   ExecutorProtocol,
+  ExecutorTerminal,
   LanguageModelExecutionResult,
   LoopExecutorProtocol,
   ReconcilerProtocol,
@@ -65,6 +67,7 @@ function mkTarget(): ExecutionTarget {
 /** Reconciler stub — returns a canned tree on every `renderTree`. */
 function stubReconciler(tree: RenderedTree): ReconcilerProtocol {
   return {
+    fx: { renderTree: () => Effect.succeed({ tree, diagnostics: [], iterations: 1 }) },
     mount: async () => ({ mountId: "stub-mount", restoredFromSnapshot: false }),
     rerender: async () => undefined,
     renderTree: async () => ({ tree, diagnostics: [], iterations: 1 }),
@@ -94,34 +97,43 @@ function stubExecutor(
   scripts: readonly LanguageModelExecutionResult[],
 ): ExecutorProtocol<unknown, unknown, LanguageModelExecutionResult> {
   let i = 0;
+  const runFx = (): Effect.Effect<ExecutorTerminal<LanguageModelExecutionResult>> =>
+    Effect.sync(() => {
+      const result = scripts[Math.min(i, scripts.length - 1)] ?? scripts[scripts.length - 1]!;
+      i++;
+      return { outcome: "succeeded", result };
+    });
   return {
+    fx: {
+      run: runFx,
+      executeStream: () => Effect.succeed(scripts[Math.min(i, scripts.length - 1)] as unknown),
+    },
     ready: Promise.resolve(),
     project: async () => ({ messages: [] }),
     execute: async () => scripts[Math.min(i, scripts.length - 1)],
     normalize: async (input) => input.targetOutput as LanguageModelExecutionResult,
-    run: async () => {
-      const result = scripts[Math.min(i, scripts.length - 1)] ?? scripts[scripts.length - 1]!;
-      i++;
-      return { outcome: "succeeded", result };
-    },
+    run: () => Effect.runPromise(runFx()),
     abort: async () => undefined,
   };
 }
 
 /** Tool executor stub — every dispatch echoes the input. */
 function stubToolExecutor(): ToolExecutorProtocol {
-  return {
-    register: async () => undefined,
-    unregister: async () => undefined,
-    list: async () => [],
-    dispatch: async (input) => ({
+  const dispatchFx = (input: { toolCallId: string; name: string; input: unknown }) =>
+    Effect.succeed({
       toolCallId: input.toolCallId,
       name: input.name,
       succeeded: true,
-      content: [{ type: "text", text: `echoed: ${JSON.stringify(input.input)}` }],
+      content: [{ type: "text" as const, text: `echoed: ${JSON.stringify(input.input)}` }],
       executedBy: "agentick",
       durationMs: 1,
-    }),
+    });
+  return {
+    fx: { dispatch: (input) => dispatchFx(input) },
+    register: async () => undefined,
+    unregister: async () => undefined,
+    list: async () => [],
+    dispatch: (input) => Effect.runPromise(dispatchFx(input)),
     abort: async () => undefined,
     replaceReconcilerTools: async () => undefined,
     removeBoundTools: async () => undefined,

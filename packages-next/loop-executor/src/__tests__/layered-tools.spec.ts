@@ -17,6 +17,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { Effect } from "effect";
 
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type {
@@ -79,17 +80,16 @@ async function mkToolExecutor(
 }
 
 function mkReconciler(tools: readonly ToolDeclaration[]): ReconcilerProtocol {
+  const mkTree = (): RenderedTree => ({
+    specVersion: SPEC_VERSION,
+    context: { entries: [] },
+    ...(tools.length > 0 ? { declarations: { tools } } : {}),
+  });
   return {
+    fx: { renderTree: () => Effect.succeed({ tree: mkTree(), diagnostics: [], iterations: 1 }) },
     mount: async () => ({ mountId: "stub-mount", restoredFromSnapshot: false }),
     rerender: async () => undefined,
-    renderTree: async () => {
-      const tree: RenderedTree = {
-        specVersion: SPEC_VERSION,
-        context: { entries: [] },
-        ...(tools.length > 0 ? { declarations: { tools } } : {}),
-      };
-      return { tree, diagnostics: [], iterations: 1 };
-    },
+    renderTree: async () => ({ tree: mkTree(), diagnostics: [], iterations: 1 }),
     renderToString: async () => ({
       payload: { text: "", mimeType: "text/plain" },
       diagnostics: [],
@@ -138,10 +138,16 @@ function mkRecordingExecutor(): {
     stopReason: "end",
     usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
   };
+  const runFx = (input: RunInput): Effect.Effect<ExecutorTerminal<LanguageModelExecutionResult>> =>
+    Effect.sync(() => {
+      captured.runs.push(input.tools);
+      return { outcome: "succeeded", result };
+    });
   const executor: LanguageModelExecutor = {
     family: "language-model",
     target: { kind: "language-model", provider: "fake", modelId: "fake-v1" },
     ready: Promise.resolve(),
+    fx: { run: runFx, executeStream: () => Effect.succeed(result) },
     async project(input: ProjectInput): Promise<LanguageModelInput> {
       captured.projects.push(input.tools);
       return { messages: [] };
@@ -152,9 +158,8 @@ function mkRecordingExecutor(): {
     async normalize(_: NormalizeInput<unknown>): Promise<LanguageModelExecutionResult> {
       return result;
     },
-    async run(input: RunInput): Promise<ExecutorTerminal<LanguageModelExecutionResult>> {
-      captured.runs.push(input.tools);
-      return { outcome: "succeeded", result };
+    run(input: RunInput): Promise<ExecutorTerminal<LanguageModelExecutionResult>> {
+      return Effect.runPromise(runFx(input));
     },
     executeStream(_: ExecuteInput<LanguageModelInput>): ExecutorStream<unknown> {
       const iter: AsyncIterableIterator<never> & ExecutorStream<unknown> = {
@@ -366,30 +371,32 @@ describe("LoopExecutorHarness — layered tools (#138)", () => {
     // First tick: reconciler emits a tool, loop syncs it into the
     // registry. The registry's reconciler slice has one entry.
     let stage = 0;
+    const renderResult = () => {
+      const tools: readonly ToolDeclaration[] =
+        stage === 0
+          ? [
+              {
+                id: "t.x",
+                name: "x",
+                description: "x",
+                inputSchema: jsonSchema({ type: "object" }),
+                exposure: ["model"] as const,
+                handlerRef: "h.x",
+              },
+            ]
+          : [];
+      const tree: RenderedTree = {
+        specVersion: SPEC_VERSION,
+        context: { entries: [] },
+        ...(tools.length > 0 ? { declarations: { tools } } : {}),
+      };
+      return { tree, diagnostics: [], iterations: 1 };
+    };
     const reconciler: ReconcilerProtocol = {
+      fx: { renderTree: () => Effect.succeed(renderResult()) },
       mount: async () => ({ mountId: "m_5", restoredFromSnapshot: false }),
       rerender: async () => undefined,
-      renderTree: async () => {
-        const tools: readonly ToolDeclaration[] =
-          stage === 0
-            ? [
-                {
-                  id: "t.x",
-                  name: "x",
-                  description: "x",
-                  inputSchema: jsonSchema({ type: "object" }),
-                  exposure: ["model"],
-                  handlerRef: "h.x",
-                },
-              ]
-            : [];
-        const tree: RenderedTree = {
-          specVersion: SPEC_VERSION,
-          context: { entries: [] },
-          ...(tools.length > 0 ? { declarations: { tools } } : {}),
-        };
-        return { tree, diagnostics: [], iterations: 1 };
-      },
+      renderTree: async () => renderResult(),
       renderToString: async () => ({
         payload: { text: "", mimeType: "text/plain" },
         diagnostics: [],

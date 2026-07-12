@@ -13,6 +13,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { Effect } from "effect";
 
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type {
@@ -56,10 +57,16 @@ function mkRecordingExecutor(): {
     stopReason: "end",
     usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
   };
+  const runFx = (input: RunInput): Effect.Effect<ExecutorTerminal<LanguageModelExecutionResult>> =>
+    Effect.sync(() => {
+      captured.runs.push(input.tools);
+      return { outcome: "succeeded", result };
+    });
   const executor: LanguageModelExecutor = {
     family: "language-model",
     target,
     ready: Promise.resolve(),
+    fx: { run: runFx, executeStream: () => Effect.succeed(result) },
     async project() {
       return { messages: [] };
     },
@@ -69,9 +76,8 @@ function mkRecordingExecutor(): {
     async normalize() {
       return result;
     },
-    async run(input: RunInput): Promise<ExecutorTerminal<LanguageModelExecutionResult>> {
-      captured.runs.push(input.tools);
-      return { outcome: "succeeded", result };
+    run(input: RunInput): Promise<ExecutorTerminal<LanguageModelExecutionResult>> {
+      return Effect.runPromise(runFx(input));
     },
     async abort() {},
   };

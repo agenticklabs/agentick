@@ -535,6 +535,14 @@ export interface ToolExecutorFx {
 
 export interface ToolExecutorProtocol extends PromiseView<ToolExecutorFx> {
   /**
+   * The Effect-canonical composable surface (ADR 77) — `fx.dispatch` for
+   * in-fiber composition by the loop. On the protocol so a protocol-typed
+   * ref (the loop's `RunExecutionInput.toolExecutor`) composes without
+   * severing the fiber at the Promise facade.
+   */
+  readonly fx: ToolExecutorFx;
+
+  /**
    * Add a tool to the registry. Idempotent on `registration.declaration.name`
    * when the declaration + handlerRef are identical; throws
    * `ToolAlreadyRegistered` when re-registering with a different shape.

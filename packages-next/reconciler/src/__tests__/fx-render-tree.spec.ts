@@ -10,7 +10,6 @@ import { describe, expect, it } from "vitest";
 
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type {
-  ReconcilerFx,
   ReconcilerProtocol,
   RenderTreeInput,
   RenderTreeResult,
@@ -27,12 +26,7 @@ const result = (): RenderTreeResult => ({
   iterations: 1,
 });
 
-// `.fx` is concrete-only today (not yet on ReconcilerProtocol — that hoist
-// is the Stage 2→3 bridge); the factory returns the protocol interface, so
-// reach the concrete twin via this shape.
-type WithFx = ReconcilerProtocol & { readonly fx: ReconcilerFx };
-
-function makeReconciler(): WithFx {
+function makeReconciler(): ReconcilerProtocol {
   const factory = defineReconciler({
     mount: async () => ({ mountId: "m", restoredFromSnapshot: false }),
     unmount: async () => {},
@@ -43,7 +37,7 @@ function makeReconciler(): WithFx {
     journal: new MemoryJournal(),
     bus: new LocalEventBus(),
     inbox: new LocalInbox(),
-  }) as WithFx;
+  });
 }
 
 const input = (): RenderTreeInput => ({ mountId: "m", sessionId: "s" });

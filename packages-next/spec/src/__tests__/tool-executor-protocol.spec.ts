@@ -233,6 +233,7 @@ describe("@agentick/spec-next — tool executor protocol", () => {
     it("declares the full method set (register/unregister/dispatch/abort/list + binding scopes)", () => {
       type Methods = keyof ToolExecutorProtocol;
       expectTypeOf<Methods>().toEqualTypeOf<
+        | "fx"
         | "register"
         | "unregister"
         | "dispatch"

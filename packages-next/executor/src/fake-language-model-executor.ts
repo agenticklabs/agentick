@@ -33,9 +33,11 @@ import type {
   AdapterDelta,
   EventBus,
   ExecuteError,
+  ExecuteErrorChannel,
   ExecuteInput,
   ExecutionTarget,
   ExecutorError,
+  ExecutorFx,
   ExecutorStream,
   ExecutorTerminal,
   LanguageModelExecutionResult,
@@ -51,6 +53,7 @@ import type {
   ProjectInput,
   ProjectionError,
   RunInput,
+  SubstrateError,
 } from "@agentick/spec-next";
 import {
   HandlerError,
@@ -288,7 +291,25 @@ export class FakeLanguageModelExecutor
     );
   }
 
-  run(input: RunInput): Promise<ExecutorTerminal<LanguageModelExecutionResult>> {
+  /**
+   * The Effect-canonical `.fx` surface (ADR 77) — mirrors the real
+   * `LanguageModelExecutor`. `fx.run` exposes the run Effect un-run;
+   * `fx.executeStream` is the sink-fold twin over the scripted deltas.
+   */
+  get fx(): ExecutorFx<LanguageModelInput, unknown, LanguageModelExecutionResult> {
+    return {
+      run: (input) => this.runFx(input),
+      executeStream: (input, sink) => this.executeStreamFx(input, sink),
+    };
+  }
+
+  private runFx(
+    input: RunInput,
+  ): Effect.Effect<
+    ExecutorTerminal<LanguageModelExecutionResult>,
+    ExecutorError | SubstrateError,
+    never
+  > {
     const executionId = input.scope?.executionId ?? `exec:${ulid()}`;
     // opId is per-tick, not per-execution — the same executor.run may be
     // called many times within one execution (multi-tick loops). Using
@@ -299,14 +320,53 @@ export class FakeLanguageModelExecutor
       tickId !== undefined
         ? `executor:run:${executionId}:${tickId}`
         : `executor:run:${executionId}:${ulid()}`;
-    const op: Operation<RunInput, ExecutorTerminal<LanguageModelExecutionResult>> = {
+    const op: Operation<RunInput, ExecutorTerminal<LanguageModelExecutionResult>, ExecutorError> = {
       opId,
       surface: "executor",
       name: "executor:command:run",
       scope: { ...(input.scope ?? {}), executionId },
       input,
     };
-    return runHarnessProtocol(this.runOperation(op, (i) => this.runBody(i, executionId, op)));
+    return this.runOperation(op, (i) => this.runBody(i, executionId, op));
+  }
+
+  /**
+   * Sink-fold streaming twin — drives the scripted deltas once, invoking
+   * `sink` per delta, and succeeds with the scripted raw (or fails on a
+   * scripted `outcome: "failed"`, mirroring the facade's `.result` reject).
+   */
+  private executeStreamFx(
+    input: ExecuteInput<LanguageModelInput>,
+    sink: (delta: AdapterDelta) => Effect.Effect<void>,
+  ): Effect.Effect<unknown, ExecuteErrorChannel | SubstrateError, never> {
+    const next = this.nextScripted();
+    const scriptedResult = next?.result ?? DEFAULT_REPLY;
+    const scriptedDeltas: ReadonlyArray<AdapterDelta> =
+      next?.deltas ?? defaultDeltasFor(scriptedResult);
+    const executionId = input.scope?.executionId ?? `exec:${ulid()}`;
+    const streamOp: Operation<ExecuteInput<LanguageModelInput>, unknown> = {
+      opId: `executor:executeStream:${executionId}:${ulid()}`,
+      surface: "executor",
+      name: "executor:command:execute",
+      scope: input.scope ?? { executionId },
+      input,
+    };
+    const failed = next?.outcome === "failed";
+    return Effect.gen(this, function* () {
+      for (const delta of scriptedDeltas) {
+        yield* sink(delta);
+        // Bus parity with the facade — observability subscribers see deltas.
+        yield* this.emitDeltaLazy(streamOp, () => delta).pipe(Effect.catchAll(() => Effect.void));
+      }
+      if (failed) {
+        return yield* Effect.fail(new ProviderRejected({ cause: "scripted stream failure" }));
+      }
+      return scriptedResult as unknown;
+    });
+  }
+
+  run(input: RunInput): Promise<ExecutorTerminal<LanguageModelExecutionResult>> {
+    return runHarnessProtocol(this.runFx(input));
   }
 
   abort(input: AbortExecutorInput): Promise<void> {

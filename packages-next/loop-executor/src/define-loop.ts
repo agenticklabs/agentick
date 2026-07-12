@@ -60,6 +60,7 @@ import type {
   LoopExecutorError,
   LoopExecutorFactory,
   LoopExecutorFactoryDeps,
+  LoopExecutorFx,
   LoopExecutorProtocol,
   MessageEnvelope,
   MessageHandlerError,
@@ -67,6 +68,7 @@ import type {
   Operation,
   OperationJournal,
   RunExecutionInput,
+  SubstrateError,
 } from "@agentick/spec-next";
 import { ExecutionError, HandlerError } from "@agentick/spec-next";
 
@@ -138,8 +140,14 @@ class CallbackLoopExecutor extends BaseHarness<"loop"> implements LoopExecutorPr
     this.spec = spec;
   }
 
-  runExecution(input: RunExecutionInput): Promise<ExecutionTerminal> {
-    const op: Operation<RunExecutionInput, ExecutionTerminal> = {
+  get fx(): LoopExecutorFx {
+    return { runExecution: (input) => this.runExecutionFx(input) };
+  }
+
+  private runExecutionFx(
+    input: RunExecutionInput,
+  ): Effect.Effect<ExecutionTerminal, LoopExecutorError | SubstrateError, never> {
+    const op: Operation<RunExecutionInput, ExecutionTerminal, LoopExecutorError> = {
       opId: `loop:run-execution:${input.executionId}`,
       surface: "loop",
       name: "loop:command:run-execution",
@@ -149,7 +157,11 @@ class CallbackLoopExecutor extends BaseHarness<"loop"> implements LoopExecutorPr
       },
       input,
     };
-    return runHarnessProtocol(this.runOperation(op, (i) => this.runExecutionBody(i)));
+    return this.runOperation(op, (i) => this.runExecutionBody(i));
+  }
+
+  runExecution(input: RunExecutionInput): Promise<ExecutionTerminal> {
+    return runHarnessProtocol(this.runExecutionFx(input));
   }
 
   async abort(input: { readonly executionId: string; readonly reason?: string }): Promise<void> {
