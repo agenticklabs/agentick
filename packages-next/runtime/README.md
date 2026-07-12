@@ -345,6 +345,45 @@ const timing: Middleware = (input, next) =>
   });
 ```
 
+### Two forms: Effect or pure-JS async — you do NOT need Effect
+
+Middleware comes in two forms; `harness.use(...)` and `withCallMiddleware(...)`
+accept both:
+
+- **`Middleware`** (Effect-native, above) — `next(input)` returns an Effect;
+  composes IN the fiber. Telemetry span-nesting and structured interruption
+  propagate through it.
+- **`AsyncMiddleware`** (pure JS) — `next(input)` returns a `Promise`; `await`
+  it. No Effect knowledge required:
+
+```ts
+import { liftMiddleware } from "@agentick/runtime-next";
+
+// Pure-JS middleware. `liftMiddleware` gives inline params clean typing.
+harness.use(
+  liftMiddleware(async (input, next) => {
+    const start = Date.now();
+    const result = await next(input);
+    record(Date.now() - start);
+    return result;
+  }),
+);
+
+// A bare `async function` also works — it's auto-detected + lifted at runtime
+// (its params infer as `unknown`; wrap in liftMiddleware for inline typing):
+harness.use(async (input, next) => next(input));
+```
+
+> **Honest caveat — an async middleware severs the fiber.** `await next(input)`
+> runs the inner ops to a `Promise` (a fresh root fiber), so the ADR 77 spine's
+> in-fiber propagation stops AT it: OTel span-parent nesting and structured
+> interruption do NOT cross an async middleware. The framework re-threads the
+> `RuntimeContext` so `parentOpId` (the causal tree) survives and traces stay
+> reconstructable from attributes — but that's the limit. Use the Effect form
+> for middleware that must stay in-fiber (per-op spans that nest through it,
+> a tier-4 timeout/cancel that reaches inner work). **Async = ergonomic;
+> Effect = in-fiber.**
+
 **Tier 2 — per-instance** (`harness.use(mw)`): wraps that harness's own ops.
 Returns an `Unsubscribe`.
 

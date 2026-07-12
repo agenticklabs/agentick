@@ -57,11 +57,9 @@ class TestHarness extends BaseHarness<"tool"> {
     );
   }
 
-  use<I = AddInput, R = number, E = never>(
-    mw: (input: I, next: (i: I) => Effect.Effect<R, E, never>) => Effect.Effect<R, E, never>,
-  ): () => void {
-    return this.middleware.use(mw as never);
-  }
+  // `use` is inherited from BaseHarness (now overloaded for Effect + async
+  // middleware); no override needed. The middleware test below calls it with an
+  // Effect middleware, which infers via the `Middleware` overload.
 
   ping(): Promise<void> {
     return Effect.runPromise(

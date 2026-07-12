@@ -110,6 +110,42 @@ export type Middleware<I = unknown, R = unknown, E = unknown> = (
   next: (input: I) => Effect.Effect<R, E, never>,
 ) => Effect.Effect<R, E, never>;
 
+/**
+ * Async (pure-JS) middleware — the ergonomic form. `next(input)` returns a
+ * `Promise`; `await` it to proceed, or return a value to short-circuit. No
+ * Effect knowledge required. `harness.use(...)` / `withCallMiddleware(...)`
+ * accept it directly (an `async function` is auto-detected + lifted); or wrap
+ * it explicitly with {@link liftMiddleware}.
+ *
+ * ```ts
+ * harness.use(async (input, next) => {
+ *   const start = Date.now();
+ *   const result = await next(input);
+ *   record(Date.now() - start);
+ *   return result;
+ * });
+ * ```
+ *
+ * **Honest caveat — the fiber severs here.** `await next(input)` runs the inner
+ * operations to a `Promise`, which is a fresh root fiber. So the ADR 77 spine's
+ * in-fiber propagation stops AT an async middleware: OTel span-parent nesting
+ * and structured interruption do NOT cross it. The framework re-threads the
+ * `RuntimeContext` (so `parentOpId` — the causal tree — survives, and traces
+ * stay reconstructable from attributes), but that is the limit. For middleware
+ * that must stay in-fiber (per-op spans that nest through it, timeout/cancel
+ * that reaches inner work — e.g. a tier-4 call-scoped wrapper), use the
+ * Effect-native {@link Middleware} form. Async = ergonomic; Effect = in-fiber.
+ */
+export type AsyncMiddleware<I = unknown, R = unknown> = (
+  input: I,
+  next: (input: I) => Promise<R>,
+) => Promise<R>;
+
+/** Either middleware form — accepted by `use()` / `withCallMiddleware`. */
+export type AnyMiddleware<I = unknown, R = unknown, E = unknown> =
+  | Middleware<I, R, E>
+  | AsyncMiddleware<I, R>;
+
 // ============================================================================
 // HandlerRegistry — keyed handler lists
 // ============================================================================
@@ -191,6 +227,52 @@ export function composeMiddleware<I, R, E>(
   );
 }
 
+/**
+ * Lift an {@link AsyncMiddleware} (pure JS) into the Effect-native
+ * {@link Middleware} the chain composes. The lifted middleware runs the inner
+ * `next` as a `Promise` (`Effect.runPromise`) so the adopter can `await` it —
+ * a fresh root fiber, so the spine's in-fiber propagation SEVERS here (see the
+ * caveat on {@link AsyncMiddleware}). The ambient `RuntimeContext` is captured
+ * and re-applied across that boundary, so `parentOpId` (the causal tree)
+ * survives even though the fiber does not. A rejection (from `next`, or thrown
+ * by the async middleware) surfaces on the `E` channel unchanged.
+ *
+ * `use()` / `withCallMiddleware` call this automatically for `async` functions;
+ * use it explicitly for a promise-returning middleware NOT declared `async`.
+ */
+export function liftMiddleware<I = unknown, R = unknown, E = unknown>(
+  mw: AsyncMiddleware<I, R>,
+): Middleware<I, R, E> {
+  return (input, next) =>
+    Effect.gen(function* () {
+      // Snapshot the ambient context so the causal tree survives the Promise
+      // boundary (the fresh root fiber below would otherwise see EMPTY_CONTEXT).
+      const ctx = yield* getContext;
+      const nextPromise = (i: I): Promise<R> =>
+        Effect.runPromise(withContext(ctx, next(i)) as Effect.Effect<R, never, never>);
+      return yield* Effect.tryPromise({
+        try: () => mw(input, nextPromise),
+        catch: (e) => e as E,
+      });
+    });
+}
+
+/**
+ * Detect an async-function middleware so `use()` / `withCallMiddleware` can lift
+ * it. An Effect {@link Middleware} is never written `async` (it returns an
+ * Effect, not a Promise), so this is unambiguous for the intended usage. A
+ * promise-returning middleware NOT declared `async` is the one edge case — wrap
+ * it explicitly with {@link liftMiddleware}.
+ */
+function isAsyncMiddleware<I, R, E>(mw: AnyMiddleware<I, R, E>): mw is AsyncMiddleware<I, R> {
+  return (mw as { constructor?: { name?: string } }).constructor?.name === "AsyncFunction";
+}
+
+/** Normalize either middleware form to the Effect-native {@link Middleware}. */
+function toEffectMiddleware<I, R, E>(mw: AnyMiddleware<I, R, E>): Middleware<I, R, E> {
+  return isAsyncMiddleware(mw) ? liftMiddleware<I, R, E>(mw) : mw;
+}
+
 // ============================================================================
 // Tier 4 — call-scoped (dynamic) middleware (ADR 76)
 // ============================================================================
@@ -231,12 +313,13 @@ const getCallMiddleware: Effect.Effect<readonly Middleware<unknown, unknown, unk
  * must wrap every op the request touches, then vanish.
  */
 export function withCallMiddleware<A, E, R>(
-  middleware: readonly Middleware<unknown, unknown, unknown>[],
+  middleware: readonly AnyMiddleware<unknown, unknown, unknown>[],
   effect: Effect.Effect<A, E, R>,
 ): Effect.Effect<A, E, R> {
   if (middleware.length === 0) return effect;
+  const lifted = middleware.map(toEffectMiddleware);
   return Effect.flatMap(getCallMiddleware, (current) =>
-    Effect.locally(CallMiddlewareRef, [...current, ...middleware])(effect),
+    Effect.locally(CallMiddlewareRef, [...current, ...lifted])(effect),
   );
 }
 
@@ -474,8 +557,20 @@ export abstract class BaseHarness<
    * accept registrations but those operations won't be wrapped until
    * they're refactored to use `runOperation`.
    */
-  use<I = unknown, R = unknown, E = unknown>(mw: Middleware<I, R, E>): Unsubscribe {
-    return this.middleware.use(mw as Middleware<unknown, unknown, unknown>);
+  /**
+   * Register middleware around this harness's ops (tier 2). Accepts either an
+   * Effect-native {@link Middleware} (in-fiber) OR a pure-JS
+   * {@link AsyncMiddleware} (auto-detected + lifted — it severs the fiber; see
+   * the caveat on `AsyncMiddleware`). Overloaded so an inline Effect arrow
+   * infers its params; for a typed inline ASYNC middleware wrap it in
+   * {@link liftMiddleware} (`use(liftMiddleware(async (input, next) => …))`) —
+   * a bare inline `async` arrow lifts at runtime but its params infer as
+   * `unknown`. The chain only ever holds Effect middleware.
+   */
+  use<I = unknown, R = unknown, E = unknown>(mw: Middleware<I, R, E>): Unsubscribe;
+  use<I = unknown, R = unknown>(mw: AsyncMiddleware<I, R>): Unsubscribe;
+  use(mw: AnyMiddleware<unknown, unknown, unknown>): Unsubscribe {
+    return this.middleware.use(toEffectMiddleware(mw) as Middleware<unknown, unknown, unknown>);
   }
 
   /**

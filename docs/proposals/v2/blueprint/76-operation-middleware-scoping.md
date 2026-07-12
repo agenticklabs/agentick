@@ -264,6 +264,15 @@ In `packages-next/runtime/src/substrate/base-harness.ts` (DRAFT markers removed)
 - `CallMiddlewareRef` FiberRef + `withCallMiddleware(mw, effect)` (exported) — tier 4.
 - `runOperation` composes `[...callScoped, ...ownAndInherited]` around the body, and
   runs `runInheritedBefore` for the verdict phase.
+- **Dual-shape middleware (no Effect required).** `use()` / `withCallMiddleware` accept
+  either an Effect-native `Middleware` OR a pure-JS `AsyncMiddleware`
+  (`(input, next) => Promise<R>`); `liftMiddleware(asyncMw)` (exported) is the bridge, and
+  an `async function` is auto-detected + lifted. HONEST CAVEAT: an async middleware
+  `await`s `next`, which runs the inner ops to a Promise (fresh root fiber) — so it SEVERS
+  the fiber: span-nesting + structured interruption stop at it. The framework re-threads
+  `RuntimeContext` so `parentOpId` (the causal tree) survives. Effect = in-fiber; async =
+  ergonomic-with-a-cost. Matches the framework's "adopters write JS, Effect is the engine"
+  stance (tool-handler `liftHandler` precedent).
 
 **Parent threading (tier 3 goes live).** `BaseHarness.parent` was never set in
 construction, so tier 3 was inert. The AppHarness now passes `parent: this` when it
