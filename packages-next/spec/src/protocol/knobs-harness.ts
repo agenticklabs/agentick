@@ -21,8 +21,11 @@
  * @see docs/proposals/v2/blueprint/26-harness-api-shape.md
  */
 
+import type { Effect } from "effect";
 import type { ContentBlock } from "../data/content-blocks.js";
+import type { SubstrateError } from "../data/errors.js";
 import type { Unsubscribe } from "./inbox.js";
+import type { PromiseView } from "./promise-view.js";
 import type {
   KnobDescriptor,
   KnobPrimitive,
@@ -80,10 +83,58 @@ export {
 } from "../errors/harnesses.js";
 
 // ============================================================================
+// Async surface — the Effect-canonical twin (`.fx`)
+// ============================================================================
+
+/**
+ * The knobs harness's **canonical** async surface: the composable Effect
+ * twins of its declared write commands (ADR 77, the dual-typed edge).
+ * Each method returns the operation Effect un-run, so an in-process
+ * caller composes it with `yield*` and stays in one fiber tree —
+ * exposed as `knobs.fx`. The plain Promise methods on
+ * {@link KnobsHarnessProtocol} are the derived edge facade
+ * ({@link PromiseView} of this), `runPromise` applied at the boundary.
+ *
+ * The `E` channel is `SubstrateError` — knobs' handlers are pure
+ * (`Effect.sync`), so the only failure mode is the substrate's own
+ * (vetoed / journaled / lifecycle). Validation failures are NOT `E`:
+ * `dispatch` reports them as `ContentBlock[]` (the `set_knob` contract),
+ * so they ride the success channel.
+ */
+export interface KnobsFx {
+  /**
+   * Set a knob's value. Goes through `runOperation` — emits
+   * `knobs:command:set:requested → :terminal` envelopes; addressable
+   * via inbox. Replays the cached terminal when called twice with the
+   * same `opId`.
+   */
+  set(input: KnobsSetInput): Effect.Effect<void, SubstrateError, never>;
+
+  /**
+   * Push a descriptor for `id`. The harness preserves any existing
+   * value; if no value exists, initializes to `descriptor.defaultValue`.
+   * Operation envelope as for {@link set}.
+   */
+  register(input: KnobsRegisterInput): Effect.Effect<void, SubstrateError, never>;
+
+  /**
+   * Validated mutation — the model-equivalent of `set_knob`. Runs the
+   * full validation pipeline (exactly-one, exists, type, options,
+   * bounds, length/pattern, custom validate) before mutating. Returns
+   * the same `ContentBlock[]` the `set_knob` tool would return —
+   * either a success message or an error.
+   */
+  dispatch(
+    input: KnobsDispatchInput,
+  ): Effect.Effect<readonly ContentBlock[], SubstrateError, never>;
+}
+
+// ============================================================================
 // Protocol
 // ============================================================================
 
-export interface KnobsHarnessProtocol extends SnapshotCapable<KnobsHarnessSnapshot> {
+export interface KnobsHarnessProtocol
+  extends SnapshotCapable<KnobsHarnessSnapshot>, PromiseView<KnobsFx> {
   /**
    * Harness identifier. Composes into the inbox address as
    * `knobs:{id}` — admin actors send mutations addressed here.
@@ -117,30 +168,10 @@ export interface KnobsHarnessProtocol extends SnapshotCapable<KnobsHarnessSnapsh
   subscribeAll(listener: () => void): Unsubscribe;
 
   // ─────────── Async surface (Operations) ───────────
-
-  /**
-   * Set a knob's value. Goes through `runOperation` — emits
-   * `knobs:command:set:requested → :terminal` envelopes; addressable
-   * via inbox. Replays the cached terminal when called twice with the
-   * same `opId`.
-   */
-  set(input: KnobsSetInput): Promise<void>;
-
-  /**
-   * Push a descriptor for `id`. The harness preserves any existing
-   * value; if no value exists, initializes to `descriptor.defaultValue`.
-   * Operation envelope as for {@link set}.
-   */
-  register(input: KnobsRegisterInput): Promise<void>;
-
-  /**
-   * Validated mutation — the model-equivalent of `set_knob`. Runs the
-   * full validation pipeline (exactly-one, exists, type, options,
-   * bounds, length/pattern, custom validate) before mutating. Returns
-   * the same `ContentBlock[]` the `set_knob` tool would return —
-   * either a success message or an error.
-   */
-  dispatch(input: KnobsDispatchInput): Promise<readonly ContentBlock[]>;
+  //
+  // `set` / `register` / `dispatch` are derived from `PromiseView<KnobsFx>`
+  // — the Promise facade of the Effect-canonical {@link KnobsFx} twin. The
+  // concrete harness exposes the canonical Effect surface as `knobs.fx`.
 
   // ─────────── Lifecycle ───────────
 

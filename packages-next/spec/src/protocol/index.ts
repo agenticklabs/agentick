@@ -22,6 +22,7 @@ export * from "./bus.js";
 export * from "./inbox.js";
 export * from "./escalation.js";
 export * from "./command.js";
+export * from "./promise-view.js";
 export * from "./channels.js";
 export * from "./reconciler.js";
 export * from "./hook-bridges.js";

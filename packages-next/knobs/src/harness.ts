@@ -55,6 +55,7 @@ import type {
   KnobRegistration,
   KnobValueType,
   KnobsDispatchInput,
+  KnobsFx,
   KnobsHarnessProtocol,
   KnobsRegisterInput,
   KnobsSetInput,
@@ -176,6 +177,20 @@ export class KnobsHarness extends BaseHarness<"knobs"> implements KnobsHarnessPr
     // JSON-Patch op. Decoupled so additional projections attach to the same
     // stream without touching the mutation logic.
     this.changes.onChange((change) => this.projectStateDelta(change));
+  }
+
+  /**
+   * The Effect-canonical async surface (ADR 77, the dual-typed edge) —
+   * the composable Effect twins of `set` / `register` / `dispatch`. An
+   * in-process caller reaches these to compose a knobs write into a
+   * larger Effect (`yield* knobs.fx.set(...)`) and stay in one fiber
+   * tree; the plain `knobs.set(...)` Promise methods are the derived
+   * edge facade (`runPromise` at the boundary). Both dispatch the SAME
+   * declared command — `fx` is the sugar over `commandEffect`, typed via
+   * {@link KnobsFx}.
+   */
+  get fx(): KnobsFx {
+    return this.fxProxy() as unknown as KnobsFx;
   }
 
   // ─────────── Sync surface ───────────
