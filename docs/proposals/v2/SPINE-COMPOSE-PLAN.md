@@ -86,9 +86,21 @@ edge-facade derivation. Stage 2 replicates the twin onto the spine protocols.
       `LoopExecutorFx` twin; protocol's `runExecution` derives from `PromiseView`; harness splits
       `runExecutionFx` (Effect) + facade. Internal tick body stays Promise-shaped — the `Effect.gen`
       rewrite is Stage 3, gated by the 28-test characterization diff (still green, unchanged).
-- [ ] **Remaining spine harnesses** — tool-executor, reconciler, `StateApplicator`, session. Each
-      hand-exposes its primary Effect. (Tool-executor's `dispatch` IS a registry command → could be
-      `fxProxy`-derived like knobs, unlike executor/loop — first harness where the two mechanisms meet.)
+- [x] **Tool-executor `.fx.dispatch`** (`4f269ea1`) — where the two `.fx` mechanisms meet.
+      `dispatch` IS a registry command, so it COULD be `fxProxy`-derived — but the facade maps the
+      door → origin (`viaToOrigin`), which `fxProxy`'s default `"host"` would drop. So the twin
+      hand-authors over `commandEffect`. **Sharpened rule: `fxProxy` is sugar only for BARE command
+      passthroughs (knobs); a facade with logic on top hand-authors.** Both impls (harness +
+      `defineToolExecutor`) done; proof asserts door→origin is preserved through the twin.
+- [ ] **Remaining spine harnesses** — reconciler, `StateApplicator`, session. Each hand-exposes its
+      primary Effect. Then Stage 3 rewires the loop body to `yield*` the twins.
+
+**The `.fx` mechanism decision tree (settled):**
+- Op is a BARE command passthrough (facade == `commandEffect`, no extra logic) → `fxProxy` sugar (knobs).
+- Op is a command but the facade adds logic (door→origin, etc.) → hand-author over `commandEffect` (tool-executor).
+- Op is NOT a command (builds its Operation inline) → hand-author over `runOperation` (executor, loop).
+- Op's facade is a non-Promise shape (streaming) → hand-author + a bespoke edge bridge (`runHarnessStream`).
+- ALL sit behind the uniform typed `get fx(): XFx` seam.
 
 **Deferred design fork (recorded, not urgent):** streaming canonical form is the **sink-fold**
 (`(input, sink) => Effect<Result>`), chosen because it fits `runOperation`'s discrete
