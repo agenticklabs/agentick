@@ -118,3 +118,80 @@ describe("ToolExecutorHarness — .fx.dispatch dual-typed edge", () => {
     expect(b.content).toEqual([{ type: "text", text: "ok" }]);
   });
 });
+
+// ============================================================================
+// replaceReconcilerTools + compileForTick twins (Stage 3) — the loop calls
+// both every tick (sync the reconciler slice, then read the resolved
+// model-visible set). Composing them in one fiber is the per-tick shape.
+// ============================================================================
+
+const reconcilerReg = (mountId: string, name: string): ToolRegistration => ({
+  declaration: {
+    id: `h.${name}`,
+    name,
+    description: `${name} tool`,
+    inputSchema: jsonSchema({ type: "object", properties: {} }),
+    exposure: ["model"],
+    handlerRef: `h.${name}`,
+  },
+  handlerRef: `h.${name}`,
+  binding: { scope: "reconciler", mountId },
+});
+
+describe("ToolExecutorHarness — .fx.replaceReconcilerTools / .fx.compileForTick twins", () => {
+  it("fx.compileForTick is a composable Effect; compileForTick() is the facade; same result", async () => {
+    const { harness } = await makeHarness();
+    const eff = harness.fx.compileForTick({ exposure: "model" });
+
+    expect(Effect.isEffect(eff)).toBe(true);
+    expect(eff).not.toBeInstanceOf(Promise);
+
+    const fromFx = await Effect.runPromise(eff);
+    const fromFacade = await harness.compileForTick({ exposure: "model" });
+    expect(fromFx.map((d) => d.name)).toEqual(fromFacade.map((d) => d.name));
+  });
+
+  it("fx.replaceReconcilerTools returns a composable Effect (not a Promise)", async () => {
+    const { harness } = await makeHarness();
+    const eff = harness.fx.replaceReconcilerTools({
+      mountId: "m1",
+      registrations: [reconcilerReg("m1", "calc")],
+    });
+    expect(Effect.isEffect(eff)).toBe(true);
+    expect(eff).not.toBeInstanceOf(Promise);
+  });
+
+  it("replaceReconcilerTools → compileForTick compose in one gen; the swap is visible to the read", async () => {
+    const { harness } = await makeHarness();
+
+    const names = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* harness.fx.replaceReconcilerTools({
+          mountId: "m1",
+          registrations: [reconcilerReg("m1", "calc"), reconcilerReg("m1", "search")],
+        });
+        const tools = yield* harness.fx.compileForTick({ exposure: "model" });
+        return tools.map((d) => d.name).sort();
+      }),
+    );
+
+    // The reconciler slice the twin installed is visible to the in-fiber
+    // read — plus the base echo tool (exposure includes "model").
+    expect(names).toContain("calc");
+    expect(names).toContain("search");
+  });
+
+  it("a binding mismatch surfaces as a catchable ToolValidationError on the E channel", async () => {
+    const { harness } = await makeHarness();
+
+    // Registration bound to a DIFFERENT mountId than the swap targets —
+    // the registry rejects it; the twin maps the throw to a tagged failure.
+    const exit = await Effect.runPromiseExit(
+      harness.fx.replaceReconcilerTools({
+        mountId: "m1",
+        registrations: [reconcilerReg("m2", "calc")],
+      }),
+    );
+    expect(exit._tag).toBe("Failure");
+  });
+});

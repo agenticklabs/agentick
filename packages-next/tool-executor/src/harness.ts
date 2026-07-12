@@ -254,25 +254,60 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
     );
   }
 
-  replaceReconcilerTools(input: ReplaceReconcilerToolsInput): Promise<void> {
-    const op: Operation<ReplaceReconcilerToolsInput, void> = {
+  /**
+   * The composable `replaceReconcilerTools` Effect — the
+   * `.fx.replaceReconcilerTools` twin. Returns `runOperation(op, body)`
+   * un-run so the loop composes the reconciler-slice swap in one fiber
+   * (its span nests under the tick). {@link replaceReconcilerTools} is
+   * the facade.
+   *
+   * `Effect.try` (not `.sync`) — binding validation throws on mismatch;
+   * we surface those as a tagged `ToolValidationError` on the `E` channel
+   * (catchable, not a fiber-crashing defect). The registry throws a plain
+   * `Error`; we wrap it so the twin's channel is typed for composition
+   * (`ToolExecutorErrorChannel`). Valid bindings — every real call —
+   * never trigger this.
+   */
+  private replaceReconcilerToolsFx(
+    input: ReplaceReconcilerToolsInput,
+  ): Effect.Effect<void, ToolExecutorErrorChannel | SubstrateError, never> {
+    const op: Operation<ReplaceReconcilerToolsInput, void, ToolExecutorErrorChannel> = {
       opId: input.opId ?? `tool:replace-reconciler:${input.mountId}:${ulid()}`,
       surface: "tool",
       name: "tool:command:replace-reconciler-tools",
       scope: {},
       input,
     };
-    // `Effect.try` (not `.sync`) — binding validation throws on
-    // mismatch; we want those to surface as tagged failures the
-    // caller can catch, not defects that crash the fiber.
-    return runHarnessProtocol(
-      this.runOperation(op, (i) =>
-        Effect.try({
-          try: () => this.registry.replaceReconcilerSlice(i.mountId, i.registrations),
-          catch: (cause) => cause,
-        }),
-      ),
+    return this.runOperation(op, (i) =>
+      Effect.try({
+        try: () => this.registry.replaceReconcilerSlice(i.mountId, i.registrations),
+        catch: (cause): ToolExecutorErrorChannel =>
+          new ToolValidationError({
+            toolName: `reconciler-slice:${i.mountId}`,
+            issues: [{ message: cause instanceof Error ? cause.message : String(cause) }],
+            cause,
+          }),
+      }),
     );
+  }
+
+  replaceReconcilerTools(input: ReplaceReconcilerToolsInput): Promise<void> {
+    return runHarnessProtocol(this.replaceReconcilerToolsFx(input));
+  }
+
+  /**
+   * The composable `compileForTick` Effect — the `.fx.compileForTick`
+   * twin. A PURE registry read wrapped in `Effect.sync` (no
+   * `runOperation`, no journal/bus envelope) so the loop composes it
+   * in-fiber (`yield* toolExecutor.fx.compileForTick(...)`) without a
+   * `runPromise` root. The facade {@link compileForTick} stays a bare
+   * `async` read — no `runHarnessProtocol` spin-up on this hot per-tick
+   * path.
+   */
+  private compileForTickFx(
+    filter?: ToolListFilter,
+  ): Effect.Effect<readonly ToolDeclaration[], never, never> {
+    return Effect.sync(() => this.registry.compileForTick(filter));
   }
 
   /**
@@ -281,6 +316,10 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
    * BEFORE precedence resolution so a high-precedence registration
    * that fails the filter doesn't shadow a lower-precedence one that
    * passes — matching only competes among rows the filter admits.
+   *
+   * Bare `async` (NOT `runHarnessProtocol(this.compileForTickFx(...))`) —
+   * the type is `PromiseView`-compatible with the twin, but the hot path
+   * skips the Effect-runtime spin-up. See {@link compileForTickFx}.
    */
   async compileForTick(filter?: ToolListFilter): Promise<readonly ToolDeclaration[]> {
     return this.registry.compileForTick(filter);
@@ -305,7 +344,11 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
    * provenance.
    */
   get fx(): ToolExecutorFx {
-    return { dispatch: (input) => this.dispatchFx(input) };
+    return {
+      dispatch: (input) => this.dispatchFx(input),
+      replaceReconcilerTools: (input) => this.replaceReconcilerToolsFx(input),
+      compileForTick: (filter) => this.compileForTickFx(filter),
+    };
   }
 
   /**

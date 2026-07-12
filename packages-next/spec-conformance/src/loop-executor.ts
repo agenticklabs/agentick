@@ -131,7 +131,11 @@ function stubToolExecutor(): ToolExecutorProtocol {
       durationMs: 1,
     });
   return {
-    fx: { dispatch: (input) => dispatchFx(input) },
+    fx: {
+      dispatch: (input) => dispatchFx(input),
+      replaceReconcilerTools: () => Effect.void,
+      compileForTick: () => Effect.succeed([]),
+    },
     register: async () => undefined,
     unregister: async () => undefined,
     list: async () => [],

@@ -74,7 +74,7 @@ import type {
   ToolListFilter,
   UnregisterToolInput,
 } from "@agentick/spec-next";
-import { HandlerError, ToolAbortedError } from "@agentick/spec-next";
+import { HandlerError, ToolAbortedError, ToolValidationError } from "@agentick/spec-next";
 
 import { InMemoryToolRegistry, sameBindingKey } from "./registry.js";
 import { viaToOrigin } from "./provenance.js";
@@ -312,28 +312,59 @@ class CallbackToolExecutor extends BaseHarness<"tool"> implements ToolExecutorPr
     );
   }
 
-  replaceReconcilerTools(input: ReplaceReconcilerToolsInput): Promise<void> {
-    const op: Operation<ReplaceReconcilerToolsInput, void> = {
+  /**
+   * The composable `replaceReconcilerTools` Effect — the
+   * `.fx.replaceReconcilerTools` twin (see the harness impl for the
+   * design). Returns `runOperation(op, body)` un-run so the loop composes
+   * the reconciler-slice swap in-fiber. A binding mismatch (or a rejecting
+   * spec override) surfaces as a tagged `ToolValidationError` on the `E`
+   * channel. {@link replaceReconcilerTools} is the facade.
+   */
+  private replaceReconcilerToolsFx(
+    input: ReplaceReconcilerToolsInput,
+  ): Effect.Effect<void, ToolExecutorErrorChannel | SubstrateError, never> {
+    const op: Operation<ReplaceReconcilerToolsInput, void, ToolExecutorErrorChannel> = {
       opId: input.opId ?? `tool:replace-reconciler:${input.mountId}:${ulid()}`,
       surface: "tool",
       name: "tool:command:replace-reconciler-tools",
       scope: {},
       input,
     };
-    return runHarnessProtocol(
-      this.runOperation(op, (i) =>
-        Effect.tryPromise({
-          try: async () => {
-            if (this.spec.replaceReconcilerTools) {
-              await this.spec.replaceReconcilerTools(i);
-            } else {
-              this.registry.replaceReconcilerSlice(i.mountId, i.registrations);
-            }
-          },
-          catch: (cause) => cause,
-        }),
-      ),
+    return this.runOperation(op, (i) =>
+      Effect.tryPromise({
+        try: async () => {
+          if (this.spec.replaceReconcilerTools) {
+            await this.spec.replaceReconcilerTools(i);
+          } else {
+            this.registry.replaceReconcilerSlice(i.mountId, i.registrations);
+          }
+        },
+        catch: (cause): ToolExecutorErrorChannel =>
+          new ToolValidationError({
+            toolName: `reconciler-slice:${i.mountId}`,
+            issues: [{ message: cause instanceof Error ? cause.message : String(cause) }],
+            cause,
+          }),
+      }),
     );
+  }
+
+  replaceReconcilerTools(input: ReplaceReconcilerToolsInput): Promise<void> {
+    return runHarnessProtocol(this.replaceReconcilerToolsFx(input));
+  }
+
+  /**
+   * The composable `compileForTick` Effect — the `.fx.compileForTick`
+   * twin. A pure read: `Effect.sync` over the registry, or `Effect.promise`
+   * over an async spec override. No `runOperation`; the loop composes it
+   * in-fiber. {@link compileForTick} is the bare-`async` facade.
+   */
+  private compileForTickFx(
+    filter?: ToolListFilter,
+  ): Effect.Effect<readonly ToolDeclaration[], never, never> {
+    return this.spec.compileForTick
+      ? Effect.promise(() => this.spec.compileForTick!(filter))
+      : Effect.sync(() => this.registry.compileForTick(filter));
   }
 
   async compileForTick(filter?: ToolListFilter): Promise<readonly ToolDeclaration[]> {
@@ -356,7 +387,11 @@ class CallbackToolExecutor extends BaseHarness<"tool"> implements ToolExecutorPr
    * preserve the door → origin mapping the facade applies.
    */
   get fx(): ToolExecutorFx {
-    return { dispatch: (input) => this.dispatchFx(input) };
+    return {
+      dispatch: (input) => this.dispatchFx(input),
+      replaceReconcilerTools: (input) => this.replaceReconcilerToolsFx(input),
+      compileForTick: (filter) => this.compileForTickFx(filter),
+    };
   }
 
   /**

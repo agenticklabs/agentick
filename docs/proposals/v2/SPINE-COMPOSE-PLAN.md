@@ -156,8 +156,16 @@ the run — telemetry nesting is low-value there); only the two *awaited* lifecy
 
 **Corrected order (twin-completion is the low-risk additive tranche; the loop rewrite is the crux):**
 
-- [ ] **executor `project` + `normalize`** twins (known `TODO(stage-2)`; unblocks the stream path).
-- [ ] **tool-executor `compileForTick` + `replaceReconcilerTools`** twins.
+- [x] **executor `project` + `normalize`** twins (`f63a7ff9`; unblocks the stream path).
+- [x] **tool-executor `compileForTick` + `replaceReconcilerTools`** twins. Refined finding:
+      `replaceReconcilerTools` is `runOperation`-backed (journaled span) → genuine twin, facade
+      `PromiseView`-derived; the registry's plain-`Error` binding-mismatch throw now maps to a
+      typed `ToolValidationError` on the `E` channel (catchable, per the pre-existing intent).
+      `compileForTick`/`list` are PURE reads that bypass `runOperation` — no span, so calling them
+      via `Effect.promise` would NOT sever the fiber; `compileForTick` still gets an `Effect.sync`
+      twin for loop uniformity, but its facade stays bare `async` (no `runHarnessProtocol` on the
+      hot per-tick path). `list` needs no twin (loop never calls it). Both impls (harness +
+      `defineToolExecutor`) done; +4 proofs incl. binding-mismatch → catchable failure.
 - [ ] **reconciler `notifyLifecycle`** twin (both impls: CallbackReconciler + React ReconcilerHarness).
 - [ ] **`StateApplicator` fx** (`applyExecutorResult` + `applyToolResults`).
 - [ ] **Loop `Effect.gen` rewrite (THE CRUX)** — `runExecutionAsync` → generator,

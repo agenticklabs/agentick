@@ -531,6 +531,31 @@ export interface ToolExecutorFx {
   dispatch(
     input: DispatchInput,
   ): Effect.Effect<DispatchResult, ToolExecutorErrorChannel | SubstrateError, never>;
+
+  /**
+   * Atomically replace the reconciler-bound slice of the registry for
+   * `input.mountId` (remove every `binding.scope === "reconciler" &&
+   * binding.mountId === mountId` row, then add the supplied
+   * registrations). The loop calls this after each `renderTree()` so the
+   * reconciler slice mirrors the just-rendered tree — composed in the
+   * loop's fiber via this twin so the mutation's span nests under the
+   * tick. A binding mismatch surfaces as a `ToolValidationError` on the
+   * `E` channel (catchable — not a fiber-crashing defect).
+   */
+  replaceReconcilerTools(
+    input: ReplaceReconcilerToolsInput,
+  ): Effect.Effect<void, ToolExecutorErrorChannel | SubstrateError, never>;
+
+  /**
+   * Per-tick compile — the **precedence-resolved** model-visible tool set
+   * (see {@link ToolExecutorProtocol.compileForTick} for the resolution
+   * rules). A PURE registry read: no `runOperation`, no journal/bus
+   * envelope, `E = never`. The twin exists so the loop composes it
+   * uniformly (`yield* toolExecutor.fx.compileForTick(...)`) in-fiber; the
+   * facade stays a bare `async` read (no `runHarnessProtocol` spin-up on
+   * this hot path).
+   */
+  compileForTick(filter?: ToolListFilter): Effect.Effect<readonly ToolDeclaration[], never, never>;
 }
 
 export interface ToolExecutorProtocol extends PromiseView<ToolExecutorFx> {
@@ -588,38 +613,19 @@ export interface ToolExecutorProtocol extends PromiseView<ToolExecutorFx> {
    */
   removeBoundTools(input: RemoveBoundToolsInput): Promise<void>;
 
-  /**
-   * Atomically replace the reconciler-bound slice of the registry for
-   * the given `mountId`. Every existing registration with
-   * `binding.scope === "reconciler" && binding.mountId === input.mountId`
-   * is removed first; then the supplied registrations are added. Other
-   * binding slices (gateway/app/session/execution/extension/runtime)
-   * are untouched.
-   *
-   * The loop executor calls this immediately after each successful
-   * `renderTree()` so the reconciler slice mirrors the just-rendered
-   * tree. Reconciler-agnostic — any harness that produces a valid
-   * `RenderedTree` flows through this slot.
-   */
-  replaceReconcilerTools(input: ReplaceReconcilerToolsInput): Promise<void>;
-
-  /**
-   * Per-tick compile — returns the **precedence-resolved** set of tool
-   * declarations visible at this tick.
-   *
-   * Resolution rules:
-   * 1. Filter every registration by the supplied {@link ToolListFilter}
-   *    (the common case: `{ exposure: "model" }` for the model's tool
-   *    list).
-   * 2. Dedup by `declaration.name`. On collision, the most-specific
-   *    binding wins. Precedence (low → high):
-   *    `runtime < gateway < \{app, extension@app\} < \{session,
-   *    extension@session\} < execution < reconciler`.
-   *
-   * This is the canonical source for projection — the loop passes the
-   * result as `ProjectInput.tools`.
-   */
-  compileForTick(filter?: ToolListFilter): Promise<readonly ToolDeclaration[]>;
+  // `replaceReconcilerTools` and `compileForTick` are derived from
+  // `PromiseView<ToolExecutorFx>` — the Promise facades of the
+  // Effect-canonical twins ({@link ToolExecutorFx.replaceReconcilerTools} /
+  // {@link ToolExecutorFx.compileForTick}). The concrete harness exposes
+  // the Effect surface as `toolExecutor.fx`.
+  //
+  // `compileForTick` resolution rules (unchanged; documented on the twin):
+  // filter every registration by the supplied {@link ToolListFilter}
+  // (`{ exposure: "model" }` for the model's list), then dedup by
+  // `declaration.name` — on collision the most-specific binding wins
+  // (`runtime < gateway < {app, extension@app} < {session,
+  // extension@session} < execution < reconciler`). Canonical source for
+  // projection — the loop passes the result as `ProjectInput.tools`.
 }
 
 /**
