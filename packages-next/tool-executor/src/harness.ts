@@ -41,14 +41,16 @@ import type {
   NormalizedToolResult,
   Operation,
   OperationJournal,
-  OperationOrigin,
   RegisterToolInput,
   RemoveBoundToolsInput,
   Resources,
   ReplaceReconcilerToolsInput,
+  SubstrateError,
   TaskHandle,
   TasksHarnessProtocol,
   ToolDeclaration,
+  ToolExecutorErrorChannel,
+  ToolExecutorFx,
   ToolExecutorProtocol,
   ToolListFilter,
   ToolRegistration,
@@ -123,21 +125,6 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
    */
   readonly abort: (input: AbortInput) => Promise<void>;
 
-  /**
-   * The declared `dispatch` command (`tool:dispatch`, ADR 51/66) — the
-   * heavy path every tool call rides. Promoting `dispatch` from a plain
-   * `runOperation` method to a command is what makes it (a)
-   * provenance-stamped at its gate (the public {@link dispatch} maps the
-   * dispatch DOOR to the operation's `origin`), and (b) inbox/wire
-   * dispatch-by-name reachable (`BaseHarness.dispatchMessage` auto-routes
-   * a `tool:dispatch` message here). The dispatch FLOW ({@link dispatchBody})
-   * is byte-identical to before — only the declaration mechanism changed.
-   */
-  private readonly dispatchCommand: (
-    input: DispatchInput,
-    opts?: { readonly origin?: OperationOrigin },
-  ) => Promise<DispatchResult>;
-
   constructor(
     scopeId: string,
     journal: OperationJournal,
@@ -178,7 +165,11 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
     // `DispatchInput`, no `signal`) routes here via
     // `BaseHarness.dispatchMessage`. The public `dispatch` method wraps
     // this to stamp provenance from the dispatch door.
-    this.dispatchCommand = this.command<DispatchInput, DispatchResult, unknown>({
+    // Registers the `tool:dispatch` command (reached via `commandEffect`
+    // in `dispatchFx`, and inbox/wire dispatch-by-name). The return —
+    // the Promise facade — is unused; the public `dispatch` derives from
+    // the `.fx` twin instead (facade = runHarnessProtocol(twin)).
+    this.command<DispatchInput, DispatchResult, unknown>({
       name: "tool:dispatch",
       // Deterministic opId keyed by the model's stable `toolCallId` (or an
       // explicit `input.opId`) — preserves dispatch's idempotency: a repeat
@@ -304,8 +295,40 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
    * `tool:dispatch` messages are stamped by their delivering gate instead
    * (see {@link viaToOrigin}).
    */
+  /**
+   * The Effect-canonical `.fx` surface (ADR 77, the dual-typed edge). The
+   * loop reaches `toolExecutor.fx.dispatch(...)` to compose a tool call
+   * into one fiber tree (Stage 3); the plain `dispatch(...)` Promise below
+   * is the derived facade. `dispatch` IS a registry command, but the
+   * facade maps the door → origin, which a bare `fxProxy` would drop — so
+   * the twin hand-authors over `commandEffect`, preserving the door
+   * provenance.
+   */
+  get fx(): ToolExecutorFx {
+    return { dispatch: (input) => this.dispatchFx(input) };
+  }
+
+  /**
+   * The composable `dispatch` Effect — the `.fx.dispatch` twin. Resolves
+   * the declared `tool:dispatch` command via `commandEffect`, stamping the
+   * origin from the dispatch door (`viaToOrigin(context.via)`), un-run.
+   * {@link dispatch} is the facade. The command body's declared `unknown`
+   * error is narrowed here to the protocol contract (`ToolExecutorError`):
+   * dispatch rejects only with that; handler throws become a
+   * `DispatchResult`.
+   */
+  private dispatchFx(
+    input: DispatchInput,
+  ): Effect.Effect<DispatchResult, ToolExecutorErrorChannel | SubstrateError, never> {
+    return this.commandEffect<DispatchInput, DispatchResult, ToolExecutorErrorChannel>(
+      "tool:dispatch",
+      input,
+      { origin: viaToOrigin(input.context.via) },
+    );
+  }
+
   dispatch(input: DispatchInput): Promise<DispatchResult> {
-    return this.dispatchCommand(input, { origin: viaToOrigin(input.context.via) });
+    return runHarnessProtocol(this.dispatchFx(input));
   }
 
   /**

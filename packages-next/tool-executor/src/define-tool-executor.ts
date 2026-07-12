@@ -61,13 +61,15 @@ import type {
   MessageInbox,
   Operation,
   OperationJournal,
-  OperationOrigin,
   RegisterToolInput,
   RemoveBoundToolsInput,
   ReplaceReconcilerToolsInput,
+  SubstrateError,
   ToolDeclaration,
+  ToolExecutorErrorChannel,
   ToolExecutorFactory,
   ToolExecutorFactoryDeps,
+  ToolExecutorFx,
   ToolExecutorProtocol,
   ToolListFilter,
   UnregisterToolInput,
@@ -189,18 +191,6 @@ class CallbackToolExecutor extends BaseHarness<"tool"> implements ToolExecutorPr
    */
   readonly abort: (input: AbortInput) => Promise<void>;
 
-  /**
-   * The declared `dispatch` command (`tool:dispatch`, ADR 51/66) — the
-   * same promotion the reference `ToolExecutorHarness` makes. Provenance-
-   * stamped at the public {@link dispatch} gate and inbox/wire
-   * dispatch-by-name reachable. The dispatch FLOW ({@link dispatchBody})
-   * is byte-identical to before; only the declaration mechanism changed.
-   */
-  private readonly dispatchCommand: (
-    input: DispatchInput,
-    opts?: { readonly origin?: OperationOrigin },
-  ) => Promise<DispatchResult>;
-
   constructor(
     scopeId: string,
     journal: OperationJournal,
@@ -219,7 +209,10 @@ class CallbackToolExecutor extends BaseHarness<"tool"> implements ToolExecutorPr
           ? Effect.tryPromise({ try: () => this.spec.abort!(i), catch: (cause) => cause })
           : Effect.sync(() => this.abortInFlight(i)),
     });
-    this.dispatchCommand = this.command<DispatchInput, DispatchResult, unknown>({
+    // Registers the `tool:dispatch` command (reached via `commandEffect`
+    // in `dispatchFx`, and inbox/wire dispatch-by-name). Return unused —
+    // the public `dispatch` derives from the `.fx` twin.
+    this.command<DispatchInput, DispatchResult, unknown>({
       name: "tool:dispatch",
       // Deterministic opId keyed by `toolCallId` — preserves dispatch
       // idempotency (repeat dispatch replays the cached terminal, no
@@ -355,8 +348,36 @@ class CallbackToolExecutor extends BaseHarness<"tool"> implements ToolExecutorPr
    * `origin: "host"`. Inbox-delivered `tool:dispatch` messages are
    * stamped by their delivering gate instead (see {@link viaToOrigin}).
    */
+  /**
+   * The Effect-canonical `.fx` surface (ADR 77, the dual-typed edge). The
+   * loop reaches `toolExecutor.fx.dispatch(...)` to compose a tool call
+   * into one fiber tree (Stage 3); `dispatch(...)` below is the derived
+   * facade. The twin hand-authors over `commandEffect` (not `fxProxy`) to
+   * preserve the door → origin mapping the facade applies.
+   */
+  get fx(): ToolExecutorFx {
+    return { dispatch: (input) => this.dispatchFx(input) };
+  }
+
+  /**
+   * The composable `dispatch` Effect — the `.fx.dispatch` twin. Resolves
+   * the declared `tool:dispatch` command via `commandEffect`, stamping the
+   * origin from the dispatch door, un-run. {@link dispatch} is the facade.
+   * The body's declared `unknown` error is narrowed to the protocol
+   * contract (`ToolExecutorError`); handler throws become a `DispatchResult`.
+   */
+  private dispatchFx(
+    input: DispatchInput,
+  ): Effect.Effect<DispatchResult, ToolExecutorErrorChannel | SubstrateError, never> {
+    return this.commandEffect<DispatchInput, DispatchResult, ToolExecutorErrorChannel>(
+      "tool:dispatch",
+      input,
+      { origin: viaToOrigin(input.context.via) },
+    );
+  }
+
   dispatch(input: DispatchInput): Promise<DispatchResult> {
-    return this.dispatchCommand(input, { origin: viaToOrigin(input.context.via) });
+    return runHarnessProtocol(this.dispatchFx(input));
   }
 
   /**

@@ -39,9 +39,13 @@
  * @see docs/proposals/v2/blueprint/07-tool-executor.md
  */
 
+import type { Effect } from "effect";
 import type { ContentBlock } from "../data/content-blocks.js";
 import type { ToolBinding, ToolDeclaration, ToolExposure } from "../data/declarations.js";
 import type { StandardSchemaIssue } from "../data/standard-schema.js";
+import type { SubstrateError } from "../data/errors.js";
+import type { ToolExecutorErrorChannel } from "../errors/harnesses.js";
+import type { PromiseView } from "./promise-view.js";
 
 // ============================================================================
 // Common input fragments
@@ -500,7 +504,36 @@ export {
  * direct in-process registration outside the protocol — but
  * conformance only exercises the protocol surface.
  */
-export interface ToolExecutorProtocol {
+/**
+ * The tool executor's **canonical** composable surface: the Effect twin
+ * of `dispatch` (ADR 77, the dual-typed edge). The loop reaches
+ * `toolExecutor.fx.dispatch(...)` to compose a tool call into one fiber
+ * tree (Stage 3); the plain Promise method on {@link ToolExecutorProtocol}
+ * is the derived edge facade ({@link PromiseView} of this),
+ * `runHarnessProtocol` at the boundary.
+ *
+ * Unlike the executor/loop, `dispatch` IS a registry command — so this
+ * could be `fxProxy`-derived. But the public facade adds door→origin
+ * mapping (`viaToOrigin(context.via)`), which `fxProxy`'s default `"host"`
+ * origin would drop; so the twin hand-authors over `commandEffect`,
+ * preserving the door provenance. (Sharpens the rule: `fxProxy` is sugar
+ * only for BARE command passthroughs — knobs; a facade with logic on top
+ * hand-authors.)
+ */
+export interface ToolExecutorFx {
+  /**
+   * The canonical command — validate input, run interceptors + the
+   * confirmation flow if required, invoke the handler, and emit the
+   * full lifecycle event sequence on the bus. Rejects (via the `E`
+   * channel) only with `ToolExecutorError`; handler throws become a
+   * `DispatchResult` with `isError`.
+   */
+  dispatch(
+    input: DispatchInput,
+  ): Effect.Effect<DispatchResult, ToolExecutorErrorChannel | SubstrateError, never>;
+}
+
+export interface ToolExecutorProtocol extends PromiseView<ToolExecutorFx> {
   /**
    * Add a tool to the registry. Idempotent on `registration.declaration.name`
    * when the declaration + handlerRef are identical; throws
@@ -513,12 +546,9 @@ export interface ToolExecutorProtocol {
    */
   unregister(input: UnregisterToolInput): Promise<void>;
 
-  /**
-   * The canonical command — validate input, run interceptors + the
-   * confirmation flow if required, invoke the handler, and emit the
-   * full lifecycle event sequence on the bus.
-   */
-  dispatch(input: DispatchInput): Promise<DispatchResult>;
+  // `dispatch` is derived from `PromiseView<ToolExecutorFx>` — the Promise
+  // facade of the Effect-canonical {@link ToolExecutorFx.dispatch} twin.
+  // The concrete harness exposes the Effect surface as `toolExecutor.fx`.
 
   /**
    * Cancel an in-flight dispatch. Best-effort — the handler may have
