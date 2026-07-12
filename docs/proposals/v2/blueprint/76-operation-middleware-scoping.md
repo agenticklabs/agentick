@@ -123,7 +123,29 @@ registered on a *true construction ancestor* only. A harness constructed with
 *structural* scope — "everything under this node in the tree" — and it is why the
 call-scoped tier below exists for the cases structural scope can't express.
 
-### Tier 4 — Call-scoped / dynamic (DESIGNED, DEFERRED)
+### Tier 4 — Call-scoped / dynamic (BUILT — the ADR 77 spine payoff)
+
+> **UPDATE (built).** Tier 4 was originally deferred (below) on the null hypothesis
+> that tiers 2/3 cover the common cases. Building the ADR 77 spine surfaced that the
+> hypothesis is FALSE for the most common case — see "Construction-topology finding."
+> Tier 4 is now built: `withCallMiddleware([mw], effect)` (exported from
+> `@agentick/runtime-next`) scopes `mw` around every nested `runOperation` the effect
+> reaches, via a `CallMiddlewareRef` FiberRef read at the compose site (outermost of
+> all). Proven cross-sibling in `runtime/__tests__/call-middleware.spec.ts`.
+
+**Construction-topology finding (why tier 4 is primary, not deferred).** The ADR
+originally assumed a nested construction tree (`gateway → app → session → sub`) where
+structural inheritance (tier 3) reaches most concerns. The real topology is FLAT: the
+app constructs the loop / executor / tool / reconciler ONCE as **shared singletons**
+and hands the same instances to every session — so they are construction-*siblings* of
+the session, not its children. Consequences: (a) `app.use()` (tier 3) reaches
+everything — deployment-global; but (b) a **session/request-scoped** concern around the
+model call CANNOT be expressed structurally — the executor is shared across all
+sessions, so a session structurally wrapping it would leak into other sessions. That
+concern is exactly tier 4's *dynamic call scope*, and the ADR 77 spine (the call
+`session.send → loop → executor → tool` is now ONE fiber) is what makes the FiberRef
+propagate across those siblings. **The spine did not merely unblock tier 4; it made
+tier 4 the primary mechanism for the single most common middleware need.**
 
 Structural scope walks the *construction* tree. Some concerns are scoped to a
 *dynamic call tree* instead: "run *this* `send` with a budget cap" or "trace *this
@@ -147,12 +169,15 @@ Effect.provideService(session.send(input), OperationMiddleware, [budgetCap])
 //   in every harness, then is gone when the send completes.
 ```
 
-Cost is ~5 lines at the same spot `runOperation` already reads the FiberRef — the
-list read + a `composeMiddleware([...ambient, ...inherited, ...own], body)`. We
-**defer** it: per-harness + structural already cover tracing / journaling / auth /
-validation (deployment-scoped concerns). Call-scoped earns its keep only when a
-concern varies *per request* rather than *per deployment*. Build it with its first
-real consumer, not speculatively.
+Cost was ~5 lines at the same spot `runOperation` already reads the FiberRef — the
+list read + a `composeMiddleware([...call, ...inherited, ...own], body)`. **Built as
+described.** The `CallMiddlewareRef` FiberRef holds the ambient list; `runOperation`
+reads it (`yield* getCallMiddleware`) and composes it outermost; `withCallMiddleware`
+scopes it via `Effect.locally` (nested calls accumulate). No `Layer` wiring at call
+sites. The original "defer to first consumer" reasoning was overtaken by the
+construction-topology finding above: call-scoped is not a *per-deployment-vs-per-request*
+nicety — it is the ONLY correct scope for session/request middleware around a
+*shared* harness, which is the common case, not the rare one.
 
 > **Aside — why not `@effect/rpc`'s `RpcMiddleware` for any of this?** It exists,
 > and it's the closest named prior art, but it's bound to `@effect/rpc`'s handler

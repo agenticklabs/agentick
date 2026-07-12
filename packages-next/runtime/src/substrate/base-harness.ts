@@ -22,7 +22,7 @@
  * @see docs/proposals/v2/blueprint/01-harness-principle.md
  */
 
-import { Cause, Effect, Exit, Fiber, ManagedRuntime, Option, Queue } from "effect";
+import { Cause, Effect, Exit, Fiber, FiberRef, ManagedRuntime, Option, Queue } from "effect";
 import { unwrapExit, omitUndefined, isThenable } from "@agentick/utils-next";
 import type {
   AsyncStream,
@@ -188,6 +188,55 @@ export function composeMiddleware<I, R, E>(
   return list.reduceRight<(input: I) => Effect.Effect<R, E, never>>(
     (next, mw) => (input) => mw(input, next),
     body,
+  );
+}
+
+// ============================================================================
+// Tier 4 — call-scoped (dynamic) middleware (ADR 76)
+// ============================================================================
+
+/**
+ * FiberRef carrying the CALL-SCOPED (tier-4) operation middleware — the
+ * broadest scope, composed outermost of all. Distinct from the
+ * construction-tree scopes (tier 2 `harness.use()` / tier 3 structural
+ * inheritance): tier 4 is scoped to a *dynamic call tree*, not the
+ * construction tree.
+ *
+ * **Enabled by the ADR 77 spine.** Before the spine, the operation tree was
+ * ~40 independent `runPromise` roots, so a FiberRef could not propagate a
+ * middleware list across harness boundaries — tier 4 was impossible. Now the
+ * call `session.send → loop → executor → tool` is ONE fiber, so this
+ * FiberRef reaches every nested `runOperation` in every harness the call
+ * touches — *even across construction-siblings* (the app builds the loop /
+ * executor / tool as shared singletons; they are not construction-children
+ * of the session, so a session-scoped concern around the model call CANNOT
+ * be expressed structurally — only here, dynamically).
+ */
+const CallMiddlewareRef = FiberRef.unsafeMake<readonly Middleware<unknown, unknown, unknown>[]>([]);
+
+/** Read the ambient call-scoped middleware list. Substrate-internal. */
+const getCallMiddleware: Effect.Effect<readonly Middleware<unknown, unknown, unknown>[]> =
+  FiberRef.get(CallMiddlewareRef);
+
+/**
+ * Scope `middleware` around `effect` for the current dynamic call tree
+ * (ADR 76 tier 4). Every nested `runOperation` the effect transitively
+ * reaches — in ANY harness, across construction-siblings — composes it
+ * **outermost** (broadest scope); when `effect` settles it evaporates.
+ * Nested `withCallMiddleware` calls ACCUMULATE (append, so an outer
+ * provider stays outermost). Empty list is a pass-through.
+ *
+ * The Effect-native tier-4 surface: `withCallMiddleware([cap], someEffect)`
+ * — e.g., a per-`send` budget cap or a per-request trace attribute that
+ * must wrap every op the request touches, then vanish.
+ */
+export function withCallMiddleware<A, E, R>(
+  middleware: readonly Middleware<unknown, unknown, unknown>[],
+  effect: Effect.Effect<A, E, R>,
+): Effect.Effect<A, E, R> {
+  if (middleware.length === 0) return effect;
+  return Effect.flatMap(getCallMiddleware, (current) =>
+    Effect.locally(CallMiddlewareRef, [...current, ...middleware])(effect),
   );
 }
 
@@ -634,12 +683,18 @@ export abstract class BaseHarness<
             //    `Effect.withSpan` — which we found copies failures
             //    when it captures them, breaking error-reference
             //    identity in adopters' typed error channels.
-            // DRAFT(ADR 76): compose the inherited stack (construction-
-            // ancestors' middleware, root-outermost) around this harness's
-            // own, around the body. Reduces to `this.middleware.compose(body)`
-            // when no ancestor registered middleware.
+            // ADR 76 composition order (outermost → innermost):
+            //   call-scoped (tier 4, FiberRef — broadest)
+            //     → inherited ancestors (tier 3, root → parent)
+            //       → this harness (tier 2)
+            //         → body
+            // Tier 4 is read from the FiberRef the ADR 77 spine made
+            // continuous across harness boundaries; tiers 2/3 walk the
+            // construction tree. Both reduce to a pass-through when nothing
+            // is registered (behavior-preserving).
+            const callMiddleware = yield* getCallMiddleware;
             const composed = composeMiddleware<I, R, E>(
-              this.ownAndInheritedMiddleware() as Middleware<I, R, E>[],
+              [...callMiddleware, ...this.ownAndInheritedMiddleware()] as Middleware<I, R, E>[],
               body,
             );
             return yield* composed(resolvedOp.input).pipe(
