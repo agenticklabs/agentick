@@ -45,6 +45,18 @@ import type { Effect } from "effect";
  * Promise<R>` (the `E` and `Ctx` channels are dropped — `runPromise`
  * rejects on `E` and requires `Ctx = never`). Every other member — sync
  * accessors, plain fields — passes through untouched.
+ *
+ * ## INVARIANT — keep this homomorphic (`[K in keyof T]`)
+ *
+ * The `Fx` twin is the single source of truth for BOTH type and doc: a
+ * homomorphic mapped type preserves each source member's JSDoc, so the
+ * doc authored once on `XFx.method` surfaces on the derived Promise
+ * method too (verified — see `promise-view.spec`). Rewriting this into a
+ * NON-homomorphic form — key-remapping (`[K in keyof T as ...]`), a union
+ * wrapper, an intersection — silently drops that JSDoc. Doc loss does not
+ * fail `tsc`: types still resolve, every suite stays green, only the
+ * hover goes blank. The `promise-view.spec` regression test is the ONLY
+ * guard. Do not "simplify" this shape.
  */
 export type PromiseView<T> = {
   [K in keyof T]: T[K] extends (...args: infer A) => Effect.Effect<infer R, infer _E, infer _Ctx>
