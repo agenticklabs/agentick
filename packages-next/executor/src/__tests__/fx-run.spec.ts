@@ -1,0 +1,141 @@
+/**
+ * `LanguageModelExecutor.fx.run` — the dual-typed edge on a SPINE harness
+ * (ADR 77 Stage 2). Unlike knobs, the executor's `run` is not a registry
+ * command — it builds its Operation inline — so `.fx` is hand-exposed
+ * (`get fx()` returns the very `runOperation(op, body)` Effect that `run`
+ * already builds, un-run) rather than `fxProxy`-derived.
+ *
+ * Proves:
+ *   - `executor.fx.run(input)` is a composable Effect (un-run; nests in a
+ *     parent `Effect.gen` — the shape Stage 3's loop needs).
+ *   - `executor.run(input)` is the derived Promise facade.
+ *   - Both drive the SAME Operation → identical terminal.
+ */
+
+import { Effect } from "effect";
+import { describe, expect, it } from "vitest";
+
+import type {
+  AdapterDelta,
+  ExecutionTarget,
+  LanguageModelExecutionResult,
+  LanguageModelInput,
+  RenderedTree,
+  RunInput,
+} from "@agentick/spec-next";
+import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
+
+import { LanguageModelExecutor } from "../language-model-executor.js";
+import type { LanguageModelAdapter, StreamAccumulatorView } from "@agentick/model-next";
+
+interface StubRaw {
+  readonly text: string;
+}
+
+function stubAdapter(): LanguageModelAdapter<StubRaw, never> {
+  return {
+    provider: "stub",
+    target: { kind: "language-model", provider: "stub", modelId: "stub-v1" },
+    streamByDefault: false,
+    buildParams(_input: LanguageModelInput, _target: ExecutionTarget): unknown {
+      return {};
+    },
+    call(): Promise<StubRaw> {
+      return Promise.resolve({ text: "ok" });
+    },
+    // Required by the adapter contract; unused — `run` takes the
+    // non-streaming (`call`) path since `streamByDefault` is false.
+    async *openStream(): AsyncIterable<never> {},
+    mapChunk(): readonly AdapterDelta[] {
+      return [];
+    },
+    reconstructRaw(_accum: StreamAccumulatorView): StubRaw {
+      return { text: "ok" };
+    },
+    normalize(raw: StubRaw): LanguageModelExecutionResult {
+      return {
+        specVersion: "2026-05-08",
+        output: [{ type: "text", text: raw.text }],
+        stopReason: "end",
+        usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+      };
+    },
+  };
+}
+
+async function makeExecutor(scope = "exec-fx"): Promise<LanguageModelExecutor<StubRaw, never>> {
+  const exec = new LanguageModelExecutor<StubRaw, never>(
+    scope,
+    new MemoryJournal(),
+    new LocalEventBus(),
+    new LocalInbox(),
+    { adapter: stubAdapter() },
+  );
+  await exec.ready;
+  return exec;
+}
+
+const emptyTree = (): RenderedTree => ({
+  specVersion: "2026-05-08",
+  context: { entries: [] },
+});
+
+const mkInput = (executionId: string): RunInput => ({
+  compiled: emptyTree(),
+  target: { kind: "language-model", provider: "stub", modelId: "stub-v1" },
+  tools: [],
+  scope: { executionId },
+});
+
+describe("LanguageModelExecutor — .fx.run dual-typed edge", () => {
+  it("fx.run returns a composable Effect (not a Promise)", async () => {
+    const exec = await makeExecutor();
+    const eff = exec.fx.run(mkInput("e1"));
+
+    expect(Effect.isEffect(eff)).toBe(true);
+    expect(eff).not.toBeInstanceOf(Promise);
+
+    const terminal = await Effect.runPromise(eff);
+    expect(terminal.outcome).toBe("succeeded");
+  });
+
+  it("the plain run() is the Promise facade", async () => {
+    const exec = await makeExecutor();
+    const p = exec.run(mkInput("e2"));
+
+    expect(p).toBeInstanceOf(Promise);
+    expect(Effect.isEffect(p)).toBe(false);
+
+    const terminal = await p;
+    expect(terminal.outcome).toBe("succeeded");
+  });
+
+  it("fx.run nests in one Effect.gen (single fiber tree)", async () => {
+    const exec = await makeExecutor();
+
+    // Two ticks composed with yield* — one fiber, no runPromise between.
+    const [t1, t2] = await Effect.runPromise(
+      Effect.gen(function* () {
+        const a = yield* exec.fx.run(mkInput("e3"));
+        const b = yield* exec.fx.run(mkInput("e4"));
+        return [a, b] as const;
+      }),
+    );
+
+    expect(t1.outcome).toBe("succeeded");
+    expect(t2.outcome).toBe("succeeded");
+  });
+
+  it("both surfaces drive the same Operation → identical terminal shape", async () => {
+    const viaFx = await makeExecutor("via-fx");
+    const viaPromise = await makeExecutor("via-promise");
+
+    const fromFx = await Effect.runPromise(viaFx.fx.run(mkInput("same")));
+    const fromPromise = await viaPromise.run(mkInput("same"));
+
+    expect(fromFx.outcome).toBe(fromPromise.outcome);
+    if (fromFx.outcome === "succeeded" && fromPromise.outcome === "succeeded") {
+      expect(fromFx.result.output).toEqual(fromPromise.result.output);
+    }
+  });
+});

@@ -41,6 +41,7 @@ import type {
   ExecuteInput,
   ExecutionTarget,
   ExecutorError,
+  ExecutorFx,
   ExecutorStream,
   ExecutorTerminal,
   LanguageModelExecutionResult,
@@ -56,6 +57,7 @@ import type {
   ProjectInput,
   ProjectionError,
   RunInput,
+  SubstrateError,
 } from "@agentick/spec-next";
 import {
   HandlerError,
@@ -543,21 +545,52 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
     );
   }
 
-  run(input: RunInput): Promise<ExecutorTerminal<LanguageModelExecutionResult>> {
+  /**
+   * The Effect-canonical `.fx` surface (ADR 77, the dual-typed edge). The
+   * loop executor reaches `executor.fx.run(...)` to compose a tick into
+   * one fiber tree; the plain `executor.run(...)` Promise below is the
+   * derived facade (`runHarnessProtocol` at the boundary). Both drive the
+   * SAME Operation — `fx.run` is `run` minus the terminal `runPromise`.
+   *
+   * TODO(stage-2): migrate `project` / `execute` / `normalize` / `abort`
+   * into `ExecutorFx` too, and design the `executeStream` twin (Effect
+   * `Stream<AdapterDelta>` vs `Effect<ExecutorStream>`) when Stage 3
+   * composes the loop's streaming path. `run` is the beachhead.
+   */
+  get fx(): ExecutorFx<LanguageModelExecutionResult> {
+    return { run: (input) => this.runFx(input) };
+  }
+
+  /**
+   * The composable `run` Effect the harness builds — the `.fx.run` twin.
+   * Constructs the Operation and returns `runOperation(op, body)` un-run,
+   * so an in-process caller stays in one fiber. {@link run} is the facade.
+   */
+  private runFx(
+    input: RunInput,
+  ): Effect.Effect<
+    ExecutorTerminal<LanguageModelExecutionResult>,
+    ExecutorError | SubstrateError,
+    never
+  > {
     const executionId = input.scope?.executionId ?? `exec:${ulid()}`;
     const tickId = input.scope?.tickId;
     const opId =
       tickId !== undefined
         ? `executor:run:${executionId}:${tickId}`
         : `executor:run:${executionId}:${ulid()}`;
-    const op: Operation<RunInput, ExecutorTerminal<LanguageModelExecutionResult>> = {
+    const op: Operation<RunInput, ExecutorTerminal<LanguageModelExecutionResult>, ExecutorError> = {
       opId,
       surface: "executor",
       name: "executor:command:run",
       scope: { ...(input.scope ?? {}), executionId },
       input,
     };
-    return runHarnessProtocol(this.runOperation(op, (i) => this.runBody(i, executionId, op)));
+    return this.runOperation(op, (i) => this.runBody(i, executionId, op));
+  }
+
+  run(input: RunInput): Promise<ExecutorTerminal<LanguageModelExecutionResult>> {
+    return runHarnessProtocol(this.runFx(input));
   }
 
   abort(input: AbortExecutorInput): Promise<void> {

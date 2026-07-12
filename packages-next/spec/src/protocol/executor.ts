@@ -21,15 +21,19 @@
  * @see docs/proposals/v2/blueprint/06-executor-harness.md
  */
 
+import type { Effect } from "effect";
 import type { ProviderOptions, ProviderToolOptions, RenderedTree } from "../data/rendered-tree.js";
 import type { MediaSource } from "../data/content-blocks.js";
 import type { ExecutionTarget, LanguageModelTarget } from "../data/execution-target.js";
 import type {
   ExecutionResult,
+  ExecutorError,
   ExecutorTerminal,
   LanguageModelExecutionResult,
 } from "../data/execution-result.js";
+import type { SubstrateError } from "../data/errors.js";
 import type { AdapterDelta } from "../data/streaming.js";
+import type { PromiseView } from "./promise-view.js";
 
 // ============================================================================
 // Error taxonomies for the per-phase commands
@@ -392,11 +396,47 @@ export interface LanguageModelParameters {
  * Type parameters are generic over family-specific input/output/result
  * shapes — `LanguageModelExecutor` narrows them.
  */
+/**
+ * The executor's **canonical** composable surface: the Effect twins of
+ * its operations (ADR 77, the dual-typed edge). An in-process caller —
+ * the loop executor composing a tick — reaches these via `executor.fx`
+ * to stay in one fiber tree (`yield* executor.fx.run(...)`); the plain
+ * Promise methods on {@link ExecutorProtocol} are the derived edge facade
+ * ({@link PromiseView} of this), `runHarnessProtocol` at the boundary.
+ *
+ * Unlike a command-declaring harness (knobs), the executor's `run` is not
+ * a registry command — it builds its Operation inline. So `.fx` is NOT
+ * `fxProxy`-derived; the concrete harness hand-exposes the very Effect its
+ * `run` already builds (`runOperation(op, body)`), un-run.
+ *
+ * SCOPE: `run` only for now — the composition unit the loop's non-stream
+ * path consumes. `project` / `execute` / `normalize` / `abort` and the
+ * streaming `executeStream` twin migrate here as Stage 3 composes them;
+ * the streaming twin (Effect `Stream` vs `Effect<ExecutorStream>`) is a
+ * deliberate Stage-3 decision, made where the loop's delta consumption is
+ * known. See TODO(stage-2) on the harness.
+ */
+export interface ExecutorFx<TResult extends ExecutionResult = ExecutionResult> {
+  /**
+   * Convenience: project → execute → normalize, with delta events
+   * emitted throughout. Returns an `ExecutorTerminal` envelope (typed
+   * outcome). The loop executor uses this on the non-streaming path.
+   *
+   * Successful terminals (`outcome: "succeeded"`) succeed the Effect.
+   * Non-success terminals (`canceled`, `vetoed`, `replaced`) also
+   * succeed — they're the operation's legitimate outcomes. Only
+   * substrate/executor failures inhabit the `E` channel.
+   */
+  run(
+    input: RunInput,
+  ): Effect.Effect<ExecutorTerminal<TResult>, ExecutorError | SubstrateError, never>;
+}
+
 export interface ExecutorProtocol<
   TInput = unknown,
   TOutput = unknown,
   TResult extends ExecutionResult = ExecutionResult,
-> {
+> extends PromiseView<ExecutorFx<TResult>> {
   /**
    * Resolves when the executor's substrate is initialized and the
    * executor is ready to accept calls. Mirrors the `.ready` shape on
@@ -452,19 +492,9 @@ export interface ExecutorProtocol<
    */
   normalize(input: NormalizeInput<TOutput>): Promise<TResult>;
 
-  /**
-   * Convenience: project → execute → normalize, with delta events
-   * emitted throughout. Returns an `ExecutorTerminal` envelope (typed
-   * outcome). The loop executor (Phase 4d) uses this.
-   *
-   * Successful terminals (`outcome: "succeeded"`) resolve the Promise.
-   * Non-success terminals (`canceled`, `vetoed`, `replaced`) also
-   * resolve — they're the operation's legitimate outcomes. Only
-   * substrate-level failures (`ExecutorError`) reject.
-   *
-   * @throws {ExecutorError}
-   */
-  run(input: RunInput): Promise<ExecutorTerminal<TResult>>;
+  // `run` is derived from `PromiseView<ExecutorFx>` — the Promise facade of
+  // the Effect-canonical {@link ExecutorFx.run} twin. The concrete harness
+  // exposes the canonical Effect surface as `executor.fx`.
 
   /**
    * Abort the in-flight execution identified by `executionId`. No-op
