@@ -282,15 +282,17 @@ In `packages-next/runtime/src/substrate/base-harness.ts` (DRAFT markers removed)
   `async`-auto-detect path. `withCallMiddleware` (tier 4) is Effect-native (`Middleware[]`),
   since it lives in the fiber by construction.
 
-  HONEST CAVEAT: an async middleware `await`s `next`, which runs the inner ops on a forked
-  root fiber — so it SEVERS the fiber for **span-nesting** (a span opened in the wrapped ops
-  won't nest under the middleware's op). Two things ARE re-threaded: the captured `ctx` (so
-  `parentOpId`, the causal tree, survives) and **interruption** — `liftMiddleware` forks the
-  continuation (via `runFork`, holding its fiber handle) and interrupts it on the
-  `Effect.tryPromise` abort signal, so cancelling a `send` tears down the inner model/tool
-  call instead of leaking a detached root. What `use` still doesn't give you is span-nesting
-  or the middleware's own body in-fiber. Effect (`fx.use`) = fully in-fiber; async (`use`) =
-  ergonomic, context + abort re-threaded. The definitive
+  HONEST CAVEAT: only the middleware's OWN body is off-fiber. `liftMiddleware` forks each
+  continuation on the AMBIENT runtime (`Effect.runtime()` — Context + FiberRefs + tracer),
+  NOT the default runtime. So everything `next` wraps keeps full in-fiber semantics across
+  the `await`: OTel span-nesting, `RuntimeContext`/`parentOpId`, tier-4 `withCallMiddleware`
+  (a nested op reached through the middleware still sees call-scoped middleware), and
+  interruption (aborting a `send` tears down the inner call — the fiber handle is held via
+  `runFork` and interrupted on the `Effect.tryPromise` abort signal). The ONE residual: the
+  async middleware's own JS body (statements around `await next`, microtask-driven) can't be
+  fiber-interrupted mid-statement and can't read `getContext` (hence explicit `ctx`). For a
+  middleware whose own logic must be in-fiber, use `fx.use`. Each property is test-pinned
+  (`base-harness.spec` → "async middleware fiber propagation"). The definitive
   analysis (why a "lazy in-fiber `next`" can make the *continuation* in-fiber but never the
   middleware's own body — a JS async fn's suspension points aren't externally steppable,
   only a generator's are, and Effect IS that generator protocol) is recorded in the STATUS

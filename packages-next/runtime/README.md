@@ -384,36 +384,41 @@ so an inline arrow infers its params cleanly — one overloaded `use` could not
 (the async and Effect `next` contracts are incompatible, and the union kills
 inline inference for both).
 
-> **Honest caveat — an async middleware severs the fiber (span-nesting, not
-> interruption).** `await next(input)` runs the inner ops on a forked root fiber,
-> so the ADR 77 spine's in-fiber propagation stops AT it for **OTel span-parent
-> nesting** — a span opened inside the wrapped ops will not nest under the
-> middleware's op. Two things ARE re-threaded across the boundary: the captured
-> `ctx` (so `parentOpId`, the causal tree, survives and traces stay
-> reconstructable from attributes) and **interruption** (the lift forks the
-> continuation and interrupts it when the outer op is aborted, so cancelling a
-> `send` tears down the inner model/tool call instead of leaking a detached
-> root). What you DON'T get from `use` is span-nesting and having the
-> middleware's own body run in-fiber. That's *why* `ctx` is passed explicitly
-> (you can't read a fiber you left) and why `fx.use` exists: use the Effect form
-> when you need per-op spans that nest through the middleware. **Async =
-> ergonomic (context + abort re-threaded); Effect = fully in-fiber.**
+> **Honest caveat — only the middleware's OWN body is off-fiber; the wrapped
+> ops are fully in-fiber.** `liftMiddleware` forks each `use` continuation on the
+> **ambient runtime** (`Effect.runtime()` — the fiber's Context, FiberRefs, and
+> tracer), not the default one. So everything the middleware *wraps* keeps full
+> in-fiber semantics across the `await` boundary: **OTel span-nesting** (a span
+> opened in the wrapped ops nests under the op span), **`RuntimeContext` /
+> `parentOpId`**, **tier-4 `withCallMiddleware`** (a nested op reached through the
+> middleware still sees call-scoped middleware), and **interruption** (aborting a
+> `send` tears down the in-flight inner model/tool call — no detached-root leak).
+> The ONE thing that stays off-fiber is the middleware's *own* JS body — the
+> statements around `await next` run on the microtask queue, not a fiber, so they
+> can't be fiber-interrupted mid-statement and can't read `getContext` (that's
+> *why* `ctx` is passed explicitly). For a middleware whose *own logic* must be
+> in-fiber, use `fx.use`. **`use` = ergonomic, wrapped work fully in-fiber;
+> `fx.use` = the middleware body itself is in-fiber too.** Each of these is
+> pinned by a test (`base-harness.spec` → "async middleware fiber propagation").
 
 ### Which surface — a use-case catalog
 
-Reach for `use` (async) by default; drop to `fx.use` (Effect) only when the
-middleware must stay _inside_ the fiber. Rule of thumb: **observe → `use`;
-control the fiber → `fx.use`.**
+Reach for `use` (async) by default — the work it wraps is fully in-fiber
+(spans nest, interruption reaches inner ops, context + tier-4 survive). Drop to
+`fx.use` (Effect) only when the middleware's **own body** must be in-fiber. Rule
+of thumb: **wrapping ops → `use` is enough; the middleware itself does
+fiber-level work → `fx.use`.**
 
-| Use case                                        | Surface           | Why                                                             |
-| ----------------------------------------------- | ----------------- | -------------------------------------------------------------- |
-| Timing / metrics / structured logging           | `use`             | Reads `ctx` (sessionId, opId, traceparent); severing is fine   |
-| Auth / quota guard (short-circuit before `next`) | `use`             | Return a value without calling `next` — no fiber needed        |
-| Retry with backoff around a flaky op             | `use`             | A `for` loop `await`ing `next` reads naturally in async JS     |
-| Result rewriting / redaction after `next`        | `use`             | Pure transform of the awaited result                           |
-| A per-op OTel span that **nests** under the op   | `fx.use`          | Span parent-linkage needs in-fiber propagation                 |
-| A timeout / cancel that tears down **inner** work | `fx.use` / tier 4 | Structured interruption must cross into the wrapped ops         |
-| Providing a scoped resource to inner ops         | `fx.use`          | FiberRef/Layer scoping only survives in-fiber                  |
+| Use case                                          | Surface  | Why                                                              |
+| ------------------------------------------------- | -------- | --------------------------------------------------------------- |
+| Timing / metrics / structured logging             | `use`    | Reads `ctx` (sessionId, opId, traceparent)                      |
+| Auth / quota guard (short-circuit before `next`)  | `use`    | Return a value without calling `next` — op never runs           |
+| Retry with backoff around a flaky op              | `use`    | A `for` loop `await`ing `next` reads naturally in async JS      |
+| Result rewriting / redaction after `next`         | `use`    | Pure transform of the awaited result                            |
+| A per-op OTel span that **nests** under the op    | `use`    | The wrapped ops fork on the ambient runtime → nesting survives  |
+| A timeout / cancel that tears down **inner** work | `use`    | Interruption is re-threaded to the forked continuation          |
+| The middleware's OWN body must be interruptible   | `fx.use` | Only an Effect body runs in-fiber; a JS async body cannot       |
+| Providing a scoped resource via Layer/FiberRef    | `fx.use` | Establishing (not just inheriting) fiber scope needs the Effect |
 
 ```ts
 // use — short-circuit guard (never calls next): the op never runs.

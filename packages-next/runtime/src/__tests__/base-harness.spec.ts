@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { Cause, Chunk, Effect, Exit, Fiber, Option, Stream } from "effect";
+import {
+  Cause,
+  Chunk,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  ManagedRuntime,
+  Option,
+  Stream,
+  Tracer,
+} from "effect";
 import { waitFor } from "@agentick/utils-next/testing";
 import { HandlerError } from "@agentick/spec-next";
 import type {
@@ -9,7 +20,12 @@ import type {
   Operation,
   ProtocolEvent,
 } from "@agentick/spec-next";
-import { BaseHarness, OperationOutcomeError } from "../substrate/base-harness.js";
+import {
+  BaseHarness,
+  OperationOutcomeError,
+  withCallMiddleware,
+  type Middleware,
+} from "../substrate/base-harness.js";
 import { LocalEventBus } from "../substrate/local-event-bus.js";
 import { LocalInbox } from "../substrate/local-inbox.js";
 import { MemoryJournal } from "../substrate/memory-journal.js";
@@ -69,6 +85,25 @@ class TestHarness extends BaseHarness<"tool"> {
       input: { a: 0, b: 0 },
     };
     return Effect.runFork(this.runOperation(op, body));
+  }
+
+  /**
+   * Return the composed operation Effect (unrun) so a test can run it on a
+   * caller-supplied runtime — e.g. one carrying a collecting tracer, to assert
+   * span nesting across the middleware chain.
+   */
+  runOpEffect(
+    opId: string,
+    body: (i: AddInput) => Effect.Effect<number, unknown>,
+  ): Effect.Effect<number, unknown> {
+    const op: Operation<AddInput, number> = {
+      opId,
+      surface: "tool",
+      name: "tool:test:span-op",
+      scope: { sessionId: "s_1", executionId: "e_1", tickId: "t_1" },
+      input: { a: 0, b: 0 },
+    };
+    return this.runOperation(op, body);
   }
 
   onBefore(fn: (input: AddInput) => HandlerVerdict<number> | void): () => void {
@@ -301,6 +336,146 @@ describe("BaseHarness — middleware", () => {
     const out = await h.add("op-short", { a: 1, b: 1 });
     expect(out).toBe(999);
     expect(bodyRan).toBe(false);
+  });
+});
+
+/** A tracer that records each span it opens + its parent (Option<Span>). */
+function collectingTracer() {
+  const spans: { name: string; parent: Option.Option<unknown> }[] = [];
+  const tracer = Tracer.make({
+    span: (name, parent, context, links, startTime, kind) => {
+      spans.push({ name, parent: parent as Option.Option<unknown> });
+      const attributes = new Map<string, unknown>();
+      return {
+        _tag: "Span",
+        spanId: `s${spans.length}`,
+        traceId: "t",
+        name,
+        parent,
+        context,
+        status: { _tag: "Started", startTime },
+        attributes,
+        links,
+        kind,
+        sampled: true,
+        end() {},
+        attribute(key: string, value: unknown) {
+          attributes.set(key, value);
+        },
+        event() {},
+        addLinks() {},
+      } as unknown as Tracer.Span;
+    },
+    context: (f) => f(),
+  });
+  const layer = Layer.mergeAll(Layer.setTracer(tracer), Layer.setTracerEnabled(true));
+  return { layer: layer as Layer.Layer<never, never, never>, spans };
+}
+
+describe("BaseHarness — async middleware fiber propagation", () => {
+  // `liftMiddleware` forks each `use` continuation on the AMBIENT runtime
+  // (`Effect.runtime()` — context + FiberRefs + tracer), not the default one.
+  // These tests pin every property that inheritance is supposed to preserve
+  // across the async boundary; a naive `Effect.runFork` would break each.
+
+  it("a span opened in the body nests under the op span THROUGH an async `use` middleware", async () => {
+    const { h } = await harness();
+    const { layer, spans } = collectingTracer();
+    const runtime = ManagedRuntime.make(layer);
+    // A naive Effect.runFork would run the body on the DEFAULT runtime (no
+    // tracer) — "child-span" wouldn't even be collected. Forking on the
+    // captured runtime keeps the tracer AND the parent-span context.
+    h.use(async (input, next) => next(input));
+    const body = (_i: AddInput): Effect.Effect<number> =>
+      Effect.succeed(0).pipe(Effect.withSpan("child-span"));
+    await runtime.runPromise(h.runOpEffect("op-span", body));
+    await runtime.dispose();
+
+    const child = spans.find((s) => s.name === "child-span");
+    const opSpan = spans.find((s) => s.name === "tool:test:span-op");
+    expect(child).toBeDefined();
+    expect(opSpan).toBeDefined();
+    // child's parent must be SOME span named after the op — nesting survived.
+    expect(Option.isSome(child!.parent)).toBe(true);
+    const parent = Option.getOrNull(child!.parent) as { name?: string } | null;
+    expect(parent?.name).toBe("tool:test:span-op");
+  });
+
+  it("the continuation body still reads the op's RuntimeContext after the fork", async () => {
+    const { h } = await harness();
+    h.use(async (input, next) => next(input));
+    let bodyCtx: RuntimeContext | undefined;
+    const body = (_i: AddInput): Effect.Effect<number> =>
+      Effect.gen(function* () {
+        bodyCtx = yield* getContext; // in-fiber read ON the forked continuation
+        return 0;
+      });
+    await Effect.runPromise(h.runOpEffect("op-ctx-cont", body));
+    expect(bodyCtx?.opId).toBe("op-ctx-cont");
+    expect(bodyCtx?.sessionId).toBe("s_1");
+  });
+
+  it("a tier-4 withCallMiddleware still wraps a NESTED op reached through an async `use` middleware", async () => {
+    const { h } = await harness();
+    h.use(async (input, next) => next(input)); // forces the body to fork
+    let wraps = 0;
+    const callMw: Middleware<unknown, unknown, unknown> = (i, next) =>
+      Effect.gen(function* () {
+        wraps++;
+        return yield* next(i);
+      });
+    // Outer op's body (forked by the async mw) invokes a NESTED op. The
+    // tier-4 FiberRef must survive the fork for the nested op to see callMw.
+    const outerBody = (_i: AddInput): Effect.Effect<number, unknown> =>
+      h.runOpEffect("nested-op", () => Effect.succeed(7));
+    await Effect.runPromise(withCallMiddleware([callMw], h.runOpEffect("outer-op", outerBody)));
+    // 2 = callMw wrapped BOTH the outer op and the nested op — the CallMiddlewareRef
+    // (a FiberRef) crossed the async boundary. A default-runtime fork → 1.
+    expect(wraps).toBe(2);
+  });
+
+  it("a rejection from the wrapped body surfaces on the outer error channel", async () => {
+    const { h } = await harness();
+    h.use(async (input, next) => next(input));
+    const boom = new Error("body boom");
+    const body = (_i: AddInput): Effect.Effect<number, unknown> => Effect.fail(boom);
+    await expect(Effect.runPromise(h.runOpEffect("op-body-fail", body))).rejects.toThrow(
+      "body boom",
+    );
+  });
+
+  it("a throw from the async middleware's own body surfaces on the outer error channel", async () => {
+    const { h } = await harness();
+    h.use(async () => {
+      throw new Error("mw boom");
+    });
+    await expect(
+      Effect.runPromise(h.runOpEffect("op-mw-fail", () => Effect.succeed(0))),
+    ).rejects.toThrow("mw boom");
+  });
+
+  it("an async `use` middleware may call next() more than once (retry pattern)", async () => {
+    const { h } = await harness();
+    let bodyCalls = 0;
+    const body = (_i: AddInput): Effect.Effect<number> =>
+      Effect.sync(() => {
+        bodyCalls++;
+        if (bodyCalls < 2) throw new Error("transient");
+        return 42;
+      });
+    h.use(async (input, next) => {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          return await next(input);
+        } catch {
+          /* retry */
+        }
+      }
+      throw new Error("exhausted");
+    });
+    const out = await Effect.runPromise(h.runOpEffect("op-retry", body));
+    expect(out).toBe(42);
+    expect(bodyCalls).toBe(2); // failed once, succeeded on the second next()
   });
 });
 
