@@ -86,14 +86,29 @@ edge-facade derivation. Stage 2 replicates the twin onto the spine protocols.
       `LoopExecutorFx` twin; protocol's `runExecution` derives from `PromiseView`; harness splits
       `runExecutionFx` (Effect) + facade. Internal tick body stays Promise-shaped — the `Effect.gen`
       rewrite is Stage 3, gated by the 28-test characterization diff (still green, unchanged).
+- [x] **Reconciler `.fx.renderTree`** (`25467540`) — both impls (CallbackReconciler + the React
+      ReconcilerHarness). E channel = the reconciler taxonomy; tightened the react catch to map
+      throws → `RenderFailed` (behavior-preserving; 216 tests green).
+- [x] **`readonly fx` HOISTED onto the four spine protocols** (`c27f4235`) — THE Stage 2→3 bridge.
+      The loop holds protocol-typed refs (`RunExecutionInput.executor/.reconciler/.toolExecutor`),
+      so `yield* input.executor.fx.run(...)` requires `fx` on the PROTOCOL, not just the concrete
+      class. Every impl + double now provides it — notably `FakeLanguageModelExecutor` gained
+      `fx.run` + a sink-fold `fx.executeStream`; structural test doubles gained `fx` sharing the
+      facade's logic (recording executors record on the fx path too). **"internal calls go through
+      .fx" now typechecks.** Workspace 145/145; 1146 tests green.
 - [x] **Tool-executor `.fx.dispatch`** (`4f269ea1`) — where the two `.fx` mechanisms meet.
       `dispatch` IS a registry command, so it COULD be `fxProxy`-derived — but the facade maps the
       door → origin (`viaToOrigin`), which `fxProxy`'s default `"host"` would drop. So the twin
       hand-authors over `commandEffect`. **Sharpened rule: `fxProxy` is sugar only for BARE command
       passthroughs (knobs); a facade with logic on top hand-authors.** Both impls (harness +
       `defineToolExecutor`) done; proof asserts door→origin is preserved through the twin.
-- [ ] **Remaining spine harnesses** — reconciler, `StateApplicator`, session. Each hand-exposes its
-      primary Effect. Then Stage 3 rewires the loop body to `yield*` the twins.
+- [ ] **`StateApplicator` + session twins** — the loop also calls `stateApplicator.apply*` and the
+      session's `send`. `StateApplicator` is a structural `Pick` of session apply-methods; its fx
+      twins + the session's own come last. Then Stage 3 rewires the loop body to `yield*` the twins.
+
+**Core spine is composable.** executor / loop / tool-executor / reconciler all expose `fx` on their
+protocols — the loop can now compose `input.<dep>.fx.<op>()` in-fiber. `StateApplicator`/session are
+the last twins before the Stage 3 `Effect.gen` loop rewrite.
 
 **The `.fx` mechanism decision tree (settled):**
 - Op is a BARE command passthrough (facade == `commandEffect`, no extra logic) → `fxProxy` sugar (knobs).
