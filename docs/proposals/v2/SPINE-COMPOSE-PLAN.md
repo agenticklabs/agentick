@@ -63,11 +63,37 @@ edge-facade derivation. Stage 2 replicates the twin onto the spine protocols.
 
 ## Stage 2 — Effect-returning spine protocols (additive)
 
-- [ ] `spec-next`: Effect twins for `LoopExecutorProtocol`, executor,
-      tool-executor, reconciler, `StateApplicator`, session.
-- [ ] Each spine harness implements its `.fx` twin (the `run` Effect it already builds).
+- [x] **Executor `.fx.run`** (`33836abb`) — first spine harness. Unlike knobs, spine ops aren't
+      registry commands (they build their Operation inline), so `.fx` is NOT `fxProxy`-derived; the
+      harness hand-exposes the `runOperation(op, body)` Effect its `run` already builds. Uniform
+      contract stays the typed seam (`get fx()` + `PromiseView`); only the impl behind it differs.
+- [x] **Streaming edge de-risked + made singular** (`d2525696`) — the DUAL of the Promise edge:
+      - `AsyncStream<Item, Result>` (spec) — the streaming facade type, dual of `Promise<A>`.
+      - `runHarnessStream` (runtime) — the bridge, sibling of `runHarnessProtocol`. All the
+        Queue/fork/Promise machinery lives here ONCE; each streaming edge supplies only its
+        sink-fold `build` + policy hooks. Executor's `executeStream` facade rewritten over it
+        (~120 lines → the reused bridge); the 8 backpressure/cancellation tests stay green.
+      - `ExecutorFx.executeStream(input, sink): Effect<TOutput, E>` — the canonical sink-fold twin.
+        The ONE exception to `PromiseView`: its facade differs in arity (`(input): AsyncStream`),
+        so hand-declared on both surfaces — they share the bridge, not a mapped type.
+      - **Finding:** the Effect-native streaming side is *simpler* than the facade — the loop
+        composes `yield* executor.fx.executeStream(input, sink)` in one fiber, no queue. Machinery
+        exists only to bridge one Effect stream into JS's two-consumer shape.
+- [ ] **Remaining executor twins** — `project` / `execute` / `normalize` / `abort` into `ExecutorFx`
+      (loud `TODO(stage-2)` on the harness). Migrate the protocol's inline Promise methods to
+      `PromiseView<Pick<ExecutorFx, …>>` wholesale once the full surface has twins.
+- [ ] **Other spine harnesses** — `LoopExecutorProtocol`, tool-executor, reconciler,
+      `StateApplicator`, session. Each hand-exposes its `run`/`runExecution` Effect. Loop's
+      `runExecution` twin is next.
 
-**Gate:** green; still no composition.
+**Deferred design fork (recorded, not urgent):** streaming canonical form is the **sink-fold**
+(`(input, sink) => Effect<Result>`), chosen because it fits `runOperation`'s discrete
+request→terminal model with zero new substrate machinery. A `Stream<Item, E>`-returning canonical
+(more composable — throttle/merge) would need broadcast-sharing to also yield the result + a
+streaming-scoped operation primitive. Revisit only if a consumer needs Stream combinators the loop
+doesn't.
+
+**Gate:** ✅ met for executor — workspace 145/145; executor 50/50 (incl. 8 streaming); runtime 189/189.
 
 ## Stage 3 — Compose the spine, leaf-up (each behind dual-path + green gate)
 
