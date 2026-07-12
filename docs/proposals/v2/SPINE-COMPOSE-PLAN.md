@@ -205,19 +205,48 @@ the run — telemetry nesting is low-value there); only the two *awaited* lifecy
         Fixed by intercepting at the fx edge. This is the correct architecture (adopters decorate at
         the adapter/runner layer, not by overriding executor facades — ADR 52 killed the subclass
         tier) — but it's a real contract the fx surface now enforces.
-- [ ] **Session** — `send` composes `yield* loop.fx.runExecution`; `runPromise` once
-      at the entity edge on the tracer runtime; `notifyTickEnd` gains its Effect variant here.
+- [x] **Session** — DONE. `send` runs the COMPOSED loop (`loop.fx.runExecution`, one fiber) on the
+      telemetry runtime. The facade `loop.runExecution` IS `runHarnessProtocol(loop.fx
+      .runExecution(...))` on the DEFAULT runtime; the session now calls `runHarnessProtocol(loop.fx
+      .runExecution(...), this.telemetryRuntime)` — a one-line swap that routes the whole execution's
+      span tree to the adopter's tracer. `undefined` runtime → default → behavior-preserving.
+      `notifyTickEnd` stays a session callback (awaited in-fiber via `awaitBridge` in the loop — no
+      separate Effect variant needed; the loop rewrite already handles it). NOTE: the loop runs
+      BACKGROUNDED (send returns the handle before it finishes), so it is its own root fiber on the
+      tracer runtime, NOT a `yield*` child of send — but because the loop is one fiber, its execution
+      span is the trace root and everything nests under it.
 
 **Gate per box:** workspace green + full suite + characterization unchanged.
 
 ## Stage 4 — Telemetry falls out
 
-- [ ] Extend the tracer `ManagedRuntime` from app-edge to **session edge**
-      (one injection per entity, not per harness — supersedes ADR 78 brick #2).
-- [ ] Delete manual `parentOpId` threading on the spine (FiberRef propagates).
-- [ ] Whitelabel namespace read from fiber context (reaches every spine span).
-- [ ] **Verify end-to-end:** a `session.send` under a collecting tracer produces a
-      **nested** trace tree (session > tick > model-call + tool spans).
+**THE PAYOFF LANDED.** The Stage-3 crux did the hard part; Stage 4 was a ~1-line
+routing change + forwarding the runtime. Findings (verified by the telemetry map):
+most of the plumbing already existed — `runHarnessProtocol(eff, runtime?)` already
+takes the runtime, spans already emit via `Effect.withSpan` in `runOperation`, and
+`parentOpId` already auto-threads via the `RuntimeContextRef` FiberRef.
+
+- [x] **Extend the tracer runtime from app-edge to session edge.** `SessionHarnessOptions` gains
+      `telemetryRuntime?` + `telemetryNamespace?`; the AppHarness forwards its app-scoped
+      `ManagedRuntime` (+ namespace) at session construction. `send` runs the composed loop via
+      `runHarnessProtocol(loop.fx.runExecution(...), this.telemetryRuntime)` — the whole execution's
+      `Effect.withSpan` tree reaches the adopter's tracer.
+- [x] **Manual `parentOpId` threading — ALREADY GONE on the spine.** `runOperation` auto-sets
+      `parentOpId` from the ambient FiberRef (`getContext.opId`) for same-fiber nested ops. The
+      Stage-3 crux (loop = one fiber) means every downstream op inherits the execution's opId
+      automatically. The only residual manual threading is the cross-fiber INBOX seam, which FiberRef
+      fundamentally cannot cross — correct to keep. Nothing to delete.
+- [ ] **Whitelabel namespace across the spine — FOLLOW-UP (not the payoff).** Deferred: the namespace
+      is currently PER-HARNESS (`this.telemetryNamespace` in `spanAttributes`), set at each harness's
+      construction — and the spine harness constructors (loop/executor/tool/reconciler) don't even
+      accept it, so a whole-spine whitelabel needs the namespace read from FIBER CONTEXT (ADR 78 brick
+      #2) rather than per-harness fields. Orthogonal to nesting; its own small change. `TODO(stage-4:
+      fiber-context-namespace)`.
+- [x] **Verify end-to-end — DONE.** `session/__tests__/telemetry.spec.ts`: a `session.send` under a
+      collecting tracer produces a **nested** trace tree — `loop:command:run-execution` (root) >
+      `{executor:command:project/normalize/run, reconciler:command:render-tree, tool:command:*}`,
+      every child's `parent_op_id` == the execution's `op_id` AND Effect's own span-parent agrees.
+      Path-agnostic (streaming or non-streaming). + a no-telemetry-runtime behavior-preserving case.
 
 ## Stage 5 — Enhancements unlocked (opt-in, post-compose)
 

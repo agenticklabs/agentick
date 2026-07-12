@@ -1356,6 +1356,17 @@ export class AppHarness<P = unknown>
       tasks,
       resources,
       target: this.target,
+      // ADR 77 Stage 4 — forward the app-scoped telemetry runtime + the
+      // whitelabel namespace so the session runs its composed execution on
+      // the tracer runtime (nested spans).
+      // TODO(stage-4: fiber-context-namespace) — this whitelabels only
+      // SESSION-owned spans. The spine harnesses (loop/executor/tool/
+      // reconciler) carry their own `telemetryNamespace` (default
+      // "agentick") and their constructors don't accept an override, so a
+      // WHOLE-SPINE whitelabel needs the namespace read from fiber context
+      // (ADR 78 brick #2), not per-harness fields. Nesting is unaffected.
+      telemetryNamespace: this.telemetryNamespace,
+      ...(this.telemetryRuntime !== undefined ? { telemetryRuntime: this.telemetryRuntime } : {}),
       defaultMaxTicks: input.maxTicks ?? this.sessionDefaults.defaultMaxTicks ?? 8,
       ...(input.requiredScopes !== undefined ? { requiredScopes: input.requiredScopes } : {}),
       ...(this.models !== undefined ? { models: this.models } : {}),
