@@ -270,6 +270,15 @@ export interface SessionHarnessOptions<P = unknown> {
    * prefix as app-edge spans. Defaults to `"agentick"` (BaseHarness).
    */
   readonly telemetryNamespace?: string;
+  /**
+   * Construction parent (ADR 76 tier 3 — structural middleware
+   * inheritance). Typically the AppHarness. When set, middleware
+   * registered via `app.use(...)` composes OUTERMOST of the session's own
+   * chain around every session operation — deployment-global concerns
+   * (audit / trace / journal) wrapping session commands. Undefined →
+   * top-of-tree, inherits nothing (behavior-preserving).
+   */
+  readonly parent?: unknown;
 }
 
 // ============================================================================
@@ -383,6 +392,9 @@ export class SessionHarness<P = unknown>
         bus: options.bus,
         inbox: options.inbox,
         telemetryNamespace: options.telemetryNamespace,
+        // ADR 76 tier 3 — the app is the session's construction parent, so
+        // `app.use(...)` structurally wraps every session operation.
+        parent: options.parent,
       }),
       policy: mergeLayered<JournalingPolicy>(DEFAULT_JOURNALING_POLICY, {
         override: { "session:command:close": "bus-only" },
@@ -396,6 +408,11 @@ export class SessionHarness<P = unknown>
     const resolvedInbox = this.inbox;
 
     this.store = new SessionStateStore(options.sessionId);
+    // TODO(adr-76: bridge-parent-threading) — pass `parent: this` to the
+    // per-session bridge harnesses (knobs/state/gates/timeline) so
+    // `session.use()` structurally wraps their ops (tier 3). Safe because the
+    // bridges are per-session (no cross-session leak). Not wired yet — the
+    // bridge constructors don't take a parent; app→session (above) is live.
     this.bridges = buildSessionBridges(
       this.store,
       { journal: resolvedJournal, bus: resolvedBus, inbox: resolvedInbox },

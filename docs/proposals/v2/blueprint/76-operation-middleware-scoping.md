@@ -232,9 +232,13 @@ walk the same construction-ancestor path. See open question Q2.
    honors late registration, simplest) or memoize per harness and invalidate on
    ancestor `use`/unsubscribe? Start with the walk; memoize only if profiling a hot
    path demands it. Add a `TODO(perf)` trailhead at the walk.
-2. **Handler inheritance.** Make `HandlerRegistry.run` walk the same ancestor path
-   so tier-3 semantics are uniform across both intercept seams (see §Consistency).
-   Immediate follow-up; separate diff.
+2. **Handler inheritance — RESOLVED (built).** `BaseHarness.runInheritedBefore` walks
+   the same construction-ancestor path as `ownAndInheritedMiddleware`, running each
+   ancestor's `before` handlers root-outermost and merging verdicts
+   (`veto > replace > defer > proceed`, first-veto short-circuits). `runOperation`
+   calls it in place of `this.handlers.run("before", …)`. The two intercept seams now
+   share ONE scoping model. Behavior-preserving when no ancestor registered handlers.
+   Proven in `runtime/__tests__/structural-middleware.spec.ts`.
 3. **Public commands not yet on `runOperation`.** `SessionHarness.send`,
    `AppHarness.createSession` accept `.use()` registrations today but aren't wrapped
    until refactored onto `runOperation` (noted in the `use()` docstring). Inherited
@@ -246,18 +250,28 @@ walk the same construction-ancestor path. See open question Q2.
    handler phase too? Deferred; the surgical change preserves today's relative
    order (handlers before middleware).
 
-## Draft implementation
+## Implementation (BUILT)
 
-Spec'd against `packages-next/runtime/src/substrate/base-harness.ts` in DRAFT state
-(marked `DRAFT(ADR 76)` at each touch point) to workshop the shape:
+In `packages-next/runtime/src/substrate/base-harness.ts` (DRAFT markers removed):
 
 - `MiddlewareChain.snapshot()` — expose the registered list in order.
 - `composeMiddleware(list, body)` — free function; `MiddlewareChain.compose`
-  delegates to it (DRY).
+  delegates to it (DRY). Exported from `@agentick/runtime-next`.
 - `BaseHarness.ownAndInheritedMiddleware()` — protected, recursive: returns
   `[...parent?.ownAndInheritedMiddleware(), ...this.middleware.snapshot()]`,
-  yielding root-outermost order naturally.
-- `runOperation` step 4 composes `this.ownAndInheritedMiddleware()` instead of
-  `this.middleware` alone.
+  root-outermost (tier 3).
+- `BaseHarness.runInheritedBefore()` — the handler-inheritance twin (Q2).
+- `CallMiddlewareRef` FiberRef + `withCallMiddleware(mw, effect)` (exported) — tier 4.
+- `runOperation` composes `[...callScoped, ...ownAndInherited]` around the body, and
+  runs `runInheritedBefore` for the verdict phase.
+
+**Parent threading (tier 3 goes live).** `BaseHarness.parent` was never set in
+construction, so tier 3 was inert. The AppHarness now passes `parent: this` when it
+constructs each `SessionHarness` (via `SessionHarnessOptions.parent`), so `app.use()`
+/ `app.on*()` structurally wrap every session op — the deployment-global case. The
+SHARED spine harnesses (loop/executor/tool) remain parent-less: a session-scoped
+concern around the model call is tier 4 (they are construction-siblings). Threading
+`session → its per-session bridges` (knobs/state/gates/timeline) is the natural next
+structural link — `TODO(adr-76: bridge-parent-threading)`.
 
 Strictly additive; behavior-preserving until an ancestor is `.use()`d.

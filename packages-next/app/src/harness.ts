@@ -1367,6 +1367,9 @@ export class AppHarness<P = unknown>
       // (ADR 78 brick #2), not per-harness fields. Nesting is unaffected.
       telemetryNamespace: this.telemetryNamespace,
       ...(this.telemetryRuntime !== undefined ? { telemetryRuntime: this.telemetryRuntime } : {}),
+      // ADR 76 tier 3 — the app is the session's construction parent, so
+      // `app.use(...)` middleware wraps every session op (deployment-global).
+      parent: this,
       defaultMaxTicks: input.maxTicks ?? this.sessionDefaults.defaultMaxTicks ?? 8,
       ...(input.requiredScopes !== undefined ? { requiredScopes: input.requiredScopes } : {}),
       ...(this.models !== undefined ? { models: this.models } : {}),

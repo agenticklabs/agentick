@@ -177,8 +177,8 @@ export function mergeVerdict<R>(a: HandlerVerdict<R>, b: HandlerVerdict<R>): Han
 
 /**
  * Compose an explicit middleware list around a body. First element is
- * outermost. Shared by {@link MiddlewareChain.compose} and — DRAFT(ADR 76)
- * — by `BaseHarness.runOperation` when it composes an inherited stack
+ * outermost. Shared by {@link MiddlewareChain.compose} and (ADR 76)
+ * by `BaseHarness.runOperation` when it composes an inherited stack
  * collected across construction-ancestors.
  */
 export function composeMiddleware<I, R, E>(
@@ -253,7 +253,7 @@ export class MiddlewareChain {
 
   /**
    * Snapshot the registered middleware in registration order (first =
-   * outermost). DRAFT(ADR 76): used to collect an inherited stack across
+   * outermost). ADR 76: used to collect an inherited stack across
    * construction-ancestors without mutating any chain.
    */
   snapshot(): Middleware<unknown, unknown, unknown>[] {
@@ -479,7 +479,7 @@ export abstract class BaseHarness<
   }
 
   /**
-   * DRAFT(ADR 76) — structural middleware inheritance.
+   * ADR 76 — structural middleware inheritance (tier 3).
    *
    * Collect this harness's middleware plus every *construction*-ancestor's,
    * ordered **root-outermost**: the returned list is
@@ -503,6 +503,30 @@ export abstract class BaseHarness<
       this.parent instanceof BaseHarness ? this.parent.ownAndInheritedMiddleware() : [];
     // Ancestors are broader scope → outermost → first in the list.
     return [...inherited, ...this.middleware.snapshot()];
+  }
+
+  /**
+   * ADR 76 Q2 — run the `before` verdict handlers of every
+   * construction-ancestor (root-outermost) followed by this harness's own,
+   * merging the verdicts (`veto > replace > defer > proceed`) and
+   * short-circuiting on the first `veto`. Mirrors {@link ownAndInheritedMiddleware}
+   * so the two intercept seams — freeform `Middleware` and the verdict
+   * `HandlerRegistry` — share ONE scoping model (an adopter would be surprised
+   * if `app.use()` reached a descendant but an app-level `before` handler did
+   * not). Walked fresh per op. Behavior-preserving: a root harness, or one whose
+   * ancestors registered no `before` handlers, runs exactly its own chain.
+   */
+  protected runInheritedBefore<I, R>(input: I): Effect.Effect<HandlerVerdict<R>, unknown, never> {
+    const self = this;
+    return Effect.gen(function* () {
+      let merged: HandlerVerdict<R> = { kind: "proceed" };
+      if (self.parent instanceof BaseHarness) {
+        merged = yield* self.parent.runInheritedBefore<I, R>(input);
+        if (merged.kind === "veto") return merged;
+      }
+      const own = yield* self.handlers.run<I, R>("before", input);
+      return mergeVerdict(merged, own);
+    });
   }
 
   /**
@@ -642,11 +666,13 @@ export abstract class BaseHarness<
               this.makeEvent(resolvedOp, "requested", scope, { payload: resolvedOp.input }),
             );
 
-            // 3. Append `before` and run handlers.
+            // 3. Append `before` and run handlers — this harness's PLUS
+            // every construction-ancestor's, root-outermost (ADR 76 Q2:
+            // handler inheritance mirrors tier-3 middleware inheritance, so
+            // `app.on*()` reaches a descendant op the same way `app.use()`
+            // does; the scoping model is uniform across both intercept seams).
             yield* this.publish(this.makeEvent(resolvedOp, "before", scope));
-            const verdictExit = yield* Effect.exit(
-              this.handlers.run<I, R>("before", resolvedOp.input),
-            );
+            const verdictExit = yield* Effect.exit(this.runInheritedBefore<I, R>(resolvedOp.input));
             if (Exit.isFailure(verdictExit)) {
               const cause = Cause.failureOption(verdictExit.cause);
               const lifecycleErr = new LifecycleHandlerError({
