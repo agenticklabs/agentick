@@ -45,12 +45,21 @@ consumer composes it).
       `harness.<action>()` stays the edge facade. *(The runtime already existed as
       `commandEffect` — timeline's `drain` composes over it; `.fx` is the sugar.)* Proven in
       `base-harness.spec` (fx.add composes; plain method is a Promise; fx twins nest in one gen).
-- [ ] **Per-harness typed `get fx()`** over `fxProxy()` (concrete harnesses declare their `.fx`
-      shape; avoids getter-override friction). Start with knobs as the reference.
-- [ ] **`PromiseView<Protocol>`** mapped type — the plain surface derived from the Effect-canonical
-      protocol (drops `E`), so Effect stays the source of truth. *(The delicate typing piece.)*
+- [x] **Per-harness typed `get fx()`** over `fxProxy()` — **knobs is the reference harness**.
+      `KnobsFx` (spec) declares the Effect twins; `get fx(): KnobsFx { return this.fxProxy() as
+      unknown as KnobsFx; }`. The typed getter (over an index-signature base) sidesteps the
+      getter-override/contravariance friction. Proven in `knobs/fx-surface.spec`.
+- [x] **`PromiseView<T>`** mapped type (spec) — homomorphic; rewrites each Effect-returning method
+      to its awaited Promise form, drops `E`/`Ctx`. **Effect is canonical, Promise derived** — the
+      erasure runs one way only (can't recover `E`), so there is no `EffectView` inverse. Knobs'
+      protocol async surface is now `PromiseView<KnobsFx>` — single source of truth. Type-level dual
+      of utils' `liftToEffect` (runtime boundary bridge).
 
-**Gate:** workspace green; zero behavior change (nothing composes yet). *(Runtime + proof: met.)*
+**Gate:** ✅ met — workspace `tsc` 145/145; knobs 63/63; zero behavior change (nothing composes yet).
+
+**Stage 1 ✅ CLOSED** (`33c08e80`). The `.fx` pattern is proven end-to-end on the reference
+harness: runtime (`fxProxy`/`commandEffect`), typing (`KnobsFx` + `PromiseView`), and the
+edge-facade derivation. Stage 2 replicates the twin onto the spine protocols.
 
 ## Stage 2 — Effect-returning spine protocols (additive)
 
