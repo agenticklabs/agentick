@@ -57,9 +57,9 @@ class TestHarness extends BaseHarness<"tool"> {
     );
   }
 
-  // `use` is inherited from BaseHarness (now overloaded for Effect + async
-  // middleware); no override needed. The middleware test below calls it with an
-  // Effect middleware, which infers via the `Middleware` overload.
+  // Middleware registers through the two inherited surfaces: `use` takes the
+  // pure-JS `AsyncMiddleware` (severs the fiber, gets `ctx` explicitly),
+  // `fx.use` takes the Effect-native `Middleware` (in-fiber). No override needed.
 
   ping(): Promise<void> {
     return Effect.runPromise(
@@ -221,6 +221,39 @@ describe("BaseHarness — middleware", () => {
     );
     await h.add("op-mw", { a: 1, b: 2 });
     expect(trace).toEqual(["outer:before", "inner:before", "inner:after", "outer:after"]);
+  });
+
+  it("hands an async (`use`) middleware the operation's RuntimeContext as the 3rd arg", async () => {
+    const { h } = await harness();
+    let seen: RuntimeContext | undefined;
+    h.use(async (input, next, ctx) => {
+      // The async middleware runs OUTSIDE the fiber — it can't read getContext
+      // itself, so the lift captures it at the op boundary and passes it here.
+      seen = ctx;
+      return next(input);
+    });
+    const out = await h.add("op-ctx", { a: 2, b: 3 });
+    expect(out).toBe(5); // body still ran through the async middleware
+    // `add` stamps scope { sessionId: "s_1", executionId: "e_1", tickId: "t_1" }
+    // and opId "op-ctx" onto the operation — the ctx snapshot must carry them.
+    expect(seen?.sessionId).toBe("s_1");
+    expect(seen?.executionId).toBe("e_1");
+    expect(seen?.opId).toBe("op-ctx");
+  });
+
+  it("an async (`use`) middleware can short-circuit without calling next()", async () => {
+    const { h } = await harness();
+    let bodyRan = false;
+    h.use(async () => 999); // never calls next → body skipped
+    h.fx.use((i, next) =>
+      Effect.gen(function* () {
+        bodyRan = true; // this inner mw + the body are both short-circuited
+        return yield* next(i);
+      }),
+    );
+    const out = await h.add("op-short", { a: 1, b: 1 });
+    expect(out).toBe(999);
+    expect(bodyRan).toBe(false);
   });
 });
 

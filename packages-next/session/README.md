@@ -372,6 +372,29 @@ run is otherwise identical. Verified in `__tests__/telemetry.spec.ts`.
 > needs the namespace read from fiber context — `TODO(stage-4:
 fiber-context-namespace)`. Nesting is unaffected.
 
+## Middleware — per-session (tier 2) and per-send (tier 4)
+
+`session.use(mw)` wraps **this session's own** operations (ADR 76, tier 2) —
+narrower than `app.use` (which wraps every session; tier 3). Use it for
+session-scoped concerns bound to one conversation: per-session rate limiting,
+a redaction pass, request logging keyed to `ctx.sessionId`.
+
+```typescript
+// Async form (severs the fiber; reads ctx). Effect form is `session.fx.use`.
+session.use(async (input, next, ctx) => {
+  log.debug("session op", { session: ctx.sessionId, op: ctx.opId });
+  return next(input);
+});
+```
+
+Because the loop / executor / tool harnesses are shared singletons (construction
+_siblings_, not children of the session), middleware that must wrap **the model
+call or a tool dispatch for one send only** is tier 4 — `withCallMiddleware`,
+scoped to the fiber of that `send` and gone when it settles. That's the ADR 77
+spine paying off: one send is one fiber, so a call-scoped FiberRef reaches across
+the shared harnesses. See [runtime README — Operation middleware](../runtime/README.md#operation-middleware--three-tiers-adr-76)
+for the full tier model and the `use` vs `fx.use` split.
+
 ## API
 
 Full surface in the [typedoc]. The package root exports the thin set an

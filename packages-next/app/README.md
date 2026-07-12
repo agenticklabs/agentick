@@ -206,6 +206,36 @@ const app = await createApp(<Agent />, {
 });
 ```
 
+### Middleware — deployment-global (tier 3)
+
+The app is each session's **construction parent**, so `app.use(mw)`
+structurally wraps _every_ operation of _every_ session it creates — the
+deployment-global seam for audit, tracing, journaling, and metrics (ADR 76,
+tier 3). It's the same middleware primitive every harness exposes; registering
+it on the app just gives it the broadest structural scope.
+
+```typescript
+// Pure-JS async form — reads the op's RuntimeContext (ctx) and severs the
+// fiber at `await` (fine for observation). Returns an Unsubscribe.
+const off = app.use(async (input, next, ctx) => {
+  const started = Date.now();
+  try {
+    return await next(input);
+  } finally {
+    audit.record({ session: ctx.sessionId, op: ctx.opId, ms: Date.now() - started });
+  }
+});
+
+// Effect-native form for middleware that must stay in-fiber (span-nesting,
+// structured cancel that reaches inner ops):
+app.fx.use((input, next) => Effect.gen(function* () { /* … */ return yield* next(input); }));
+```
+
+Note the SHARED spine harnesses (loop / executor / tool) are construction
+_siblings_ of the session, not children — a **per-session** concern _around the
+model call_ is tier 4 (`withCallMiddleware`), not `app.use`. Full tier model and
+the `use` vs `fx.use` split: [runtime README — Operation middleware](../runtime/README.md#operation-middleware--three-tiers-adr-76).
+
 ## Status
 
 Phase 5 (cluster fusion) — landed. `createApp({cluster})` is the

@@ -395,6 +395,44 @@ inline inference for both).
 > through it, a tier-4 timeout/cancel that reaches inner work). **Async =
 > ergonomic; Effect = in-fiber.**
 
+### Which surface — a use-case catalog
+
+Reach for `use` (async) by default; drop to `fx.use` (Effect) only when the
+middleware must stay _inside_ the fiber. Rule of thumb: **observe → `use`;
+control the fiber → `fx.use`.**
+
+| Use case                                        | Surface           | Why                                                             |
+| ----------------------------------------------- | ----------------- | -------------------------------------------------------------- |
+| Timing / metrics / structured logging           | `use`             | Reads `ctx` (sessionId, opId, traceparent); severing is fine   |
+| Auth / quota guard (short-circuit before `next`) | `use`             | Return a value without calling `next` — no fiber needed        |
+| Retry with backoff around a flaky op             | `use`             | A `for` loop `await`ing `next` reads naturally in async JS     |
+| Result rewriting / redaction after `next`        | `use`             | Pure transform of the awaited result                           |
+| A per-op OTel span that **nests** under the op   | `fx.use`          | Span parent-linkage needs in-fiber propagation                 |
+| A timeout / cancel that tears down **inner** work | `fx.use` / tier 4 | Structured interruption must cross into the wrapped ops         |
+| Providing a scoped resource to inner ops         | `fx.use`          | FiberRef/Layer scoping only survives in-fiber                  |
+
+```ts
+// use — short-circuit guard (never calls next): the op never runs.
+harness.use(async (input, next, ctx) => {
+  if (!isAuthorized(ctx.user)) return denied(); // no next() → body skipped
+  return next(input);
+});
+
+// use — retry: async control flow is exactly what async middleware is good at.
+harness.use(async (input, next) => {
+  let lastErr;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await next(input);
+    } catch (err) {
+      lastErr = err;
+      await sleep(2 ** attempt * 50);
+    }
+  }
+  throw lastErr;
+});
+```
+
 **Tier 2 — per-instance** (`harness.use(mw)`): wraps that harness's own ops.
 Returns an `Unsubscribe`.
 

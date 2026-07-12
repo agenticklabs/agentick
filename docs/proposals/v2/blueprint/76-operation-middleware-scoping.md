@@ -264,15 +264,33 @@ In `packages-next/runtime/src/substrate/base-harness.ts` (DRAFT markers removed)
 - `CallMiddlewareRef` FiberRef + `withCallMiddleware(mw, effect)` (exported) — tier 4.
 - `runOperation` composes `[...callScoped, ...ownAndInherited]` around the body, and
   runs `runInheritedBefore` for the verdict phase.
-- **Dual-shape middleware (no Effect required).** `use()` / `withCallMiddleware` accept
-  either an Effect-native `Middleware` OR a pure-JS `AsyncMiddleware`
-  (`(input, next) => Promise<R>`); `liftMiddleware(asyncMw)` (exported) is the bridge, and
-  an `async function` is auto-detected + lifted. HONEST CAVEAT: an async middleware
-  `await`s `next`, which runs the inner ops to a Promise (fresh root fiber) — so it SEVERS
-  the fiber: span-nesting + structured interruption stop at it. The framework re-threads
-  `RuntimeContext` so `parentOpId` (the causal tree) survives. Effect = in-fiber; async =
-  ergonomic-with-a-cost. Matches the framework's "adopters write JS, Effect is the engine"
-  stance (tool-handler `liftHandler` precedent).
+- **Two surfaces, no Effect required (`use` / `fx.use`).** Middleware registers through
+  the harness's TWO surfaces — the same facade/twin split as every operation
+  (`harness.use : harness.fx.use  ::  harness.run : harness.fx.run`):
+  - `harness.use(mw)` takes a pure-JS `AsyncMiddleware`
+    (`(input, next, ctx: RuntimeContext) => Promise<R>`) — `next` returns a Promise, `await`
+    it. The op's `ctx` is handed in as an explicit **third argument** (captured at the op
+    boundary via `getContext`), because an async middleware runs OUTSIDE the fiber and can't
+    read fiber-local context itself. `liftMiddleware(asyncMw)` (exported) is the bridge that
+    `use` applies internally.
+  - `harness.fx.use(mw)` takes the Effect-native `Middleware`
+    (`(input, next) => Effect<R,E>`) — composes IN the fiber.
+
+  Splitting the forms across the two surfaces is what lets EACH be a single type, so an
+  inline arrow infers its params cleanly — one overloaded `use` (union `Middleware |
+  AsyncMiddleware`) killed inline inference for both forms and was removed along with the
+  `async`-auto-detect path. `withCallMiddleware` (tier 4) is Effect-native (`Middleware[]`),
+  since it lives in the fiber by construction.
+
+  HONEST CAVEAT: an async middleware `await`s `next`, which runs the inner ops to a Promise
+  (fresh root fiber) — so it SEVERS the fiber: span-nesting + structured interruption stop
+  at it. The lift re-threads the captured `ctx` so `parentOpId` (the causal tree) survives.
+  Effect (`fx.use`) = in-fiber; async (`use`) = ergonomic-with-a-cost. The definitive
+  analysis (why a "lazy in-fiber `next`" can make the *continuation* in-fiber but never the
+  middleware's own body — a JS async fn's suspension points aren't externally steppable,
+  only a generator's are, and Effect IS that generator protocol) is recorded in the STATUS
+  log. Matches the framework's "adopters write JS, Effect is the engine" stance (tool-handler
+  `liftHandler` precedent).
 
 **Parent threading (tier 3 goes live).** `BaseHarness.parent` was never set in
 construction, so tier 3 was inert. The AppHarness now passes `parent: this` when it
