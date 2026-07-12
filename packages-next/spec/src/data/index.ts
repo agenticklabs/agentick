@@ -15,7 +15,6 @@
  *   - execution-target.ts ExecutionTarget, LanguageModelTarget, TargetCapabilities
  *
  * Still pending (later phases):
- *   - channels.ts          FrameworkChannels and concrete channel payloads
  *   - timeline.ts          TimelineEntry
  *   - knobs.ts             KnobDeclaration, KnobState
  *   - subscriptions.ts     SubscriptionIntent
@@ -35,6 +34,7 @@ export * from "./standard-schema.js";
 
 export * from "./content-blocks.js";
 export * from "./signals.js";
+export * from "./channels.js";
 export * from "./streaming.js";
 export * from "./semantic.js";
 export * from "./formatter.js";
