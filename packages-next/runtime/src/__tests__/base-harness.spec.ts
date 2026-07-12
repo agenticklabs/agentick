@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { Cause, Chunk, Effect, Exit, Option, Stream } from "effect";
+import { Cause, Chunk, Effect, Exit, Fiber, Option, Stream } from "effect";
+import { waitFor } from "@agentick/utils-next/testing";
 import { HandlerError } from "@agentick/spec-next";
 import type {
   HandlerVerdict,
@@ -49,6 +50,25 @@ class TestHarness extends BaseHarness<"tool"> {
     const failure = Cause.failureOption(exit.cause);
     if (Option.isSome(failure)) throw failure.value;
     throw new Error(Cause.pretty(exit.cause));
+  }
+
+  /**
+   * Run an op with a caller-supplied body, FORKED, returning the fiber so a
+   * test can interrupt the live operation (exercises interruption crossing the
+   * middleware chain).
+   */
+  runForked(
+    opId: string,
+    body: (i: AddInput) => Effect.Effect<number>,
+  ): Fiber.RuntimeFiber<number, unknown> {
+    const op: Operation<AddInput, number> = {
+      opId,
+      surface: "tool",
+      name: "tool:test:forked",
+      scope: { sessionId: "s_1", executionId: "e_1", tickId: "t_1" },
+      input: { a: 0, b: 0 },
+    };
+    return Effect.runFork(this.runOperation(op, body));
   }
 
   onBefore(fn: (input: AddInput) => HandlerVerdict<number> | void): () => void {
@@ -239,6 +259,33 @@ describe("BaseHarness — middleware", () => {
     expect(seen?.sessionId).toBe("s_1");
     expect(seen?.executionId).toBe("e_1");
     expect(seen?.opId).toBe("op-ctx");
+  });
+
+  it("interrupting an op tears down the inner call an async (`use`) middleware wraps", async () => {
+    const { h } = await harness();
+    let bodyStarted = false;
+    let bodyInterrupted = false;
+    // An async middleware forwards to `next`. Its continuation is forked (a
+    // detached root) — without interrupt re-threading, an aborted op would
+    // leave the body below running forever. We prove the interrupt reaches it.
+    h.use(async (input, next) => next(input));
+    const body = (_i: AddInput): Effect.Effect<number> =>
+      Effect.gen(function* () {
+        bodyStarted = true;
+        yield* Effect.never; // hang until interrupted
+        return 0;
+      }).pipe(
+        Effect.onInterrupt(() =>
+          Effect.sync(() => {
+            bodyInterrupted = true;
+          }),
+        ),
+      );
+    const fiber = h.runForked("op-abort", body);
+    await waitFor(() => bodyStarted); // body reached its hang point through the mw
+    await Effect.runPromise(Fiber.interrupt(fiber)); // abort the outer op
+    await waitFor(() => bodyInterrupted); // the forked continuation was torn down
+    expect(bodyInterrupted).toBe(true);
   });
 
   it("an async (`use`) middleware can short-circuit without calling next()", async () => {

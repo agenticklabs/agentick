@@ -129,14 +129,18 @@ export type { Middleware, HarnessFx } from "@agentick/spec-next";
  * });
  * ```
  *
- * **Honest caveat — the fiber severs here.** `await next(input)` runs the inner
- * operations to a Promise (a fresh root fiber), so the ADR 77 spine's in-fiber
- * propagation stops AT an async middleware: OTel span-parent nesting and
- * structured interruption do NOT cross it. The lift re-threads `ctx` onto the
- * continuation so `parentOpId` (the causal tree) survives and traces stay
- * reconstructable from attributes — but that is the limit. For middleware that
- * must stay in-fiber, use `harness.fx.use` (the Effect-native {@link Middleware}).
- * Async = ergonomic; Effect = in-fiber.
+ * **Honest caveat — span-nesting severs here (interruption does NOT).**
+ * `await next(input)` runs the inner operations on a forked root fiber, so the
+ * ADR 77 spine's in-fiber propagation stops AT an async middleware for **OTel
+ * span-parent nesting**: a span opened in the wrapped ops won't nest under the
+ * middleware's op. Two things ARE re-threaded: `ctx` (so `parentOpId`, the
+ * causal tree, survives and traces stay reconstructable from attributes) and
+ * **interruption** — the lift forks the continuation and interrupts it when the
+ * outer op is aborted, so cancelling a `send` tears down the inner call rather
+ * than leaking a detached root. What you don't get is span-nesting or the
+ * middleware's own body running in-fiber. For those, use `harness.fx.use` (the
+ * Effect-native {@link Middleware}). Async = ergonomic (context + abort
+ * re-threaded); Effect = fully in-fiber.
  */
 export type AsyncMiddleware<I = unknown, R = unknown> = (
   input: I,
@@ -228,12 +232,20 @@ export function composeMiddleware<I, R, E>(
 /**
  * Lift an {@link AsyncMiddleware} (pure JS) into the Effect-native
  * {@link Middleware} the chain composes. The lifted middleware runs the inner
- * `next` as a `Promise` (`Effect.runPromise`) so the adopter can `await` it —
- * a fresh root fiber, so the spine's in-fiber propagation SEVERS here (see the
- * caveat on {@link AsyncMiddleware}). The ambient `RuntimeContext` is captured
- * and re-applied across that boundary, so `parentOpId` (the causal tree)
- * survives even though the fiber does not. A rejection (from `next`, or thrown
- * by the async middleware) surfaces on the `E` channel unchanged.
+ * `next` on a **forked** fiber so the adopter can `await` its result — still a
+ * ROOT fiber, so the spine's in-fiber propagation SEVERS here (span-nesting
+ * does NOT cross an async middleware — see the caveat on {@link AsyncMiddleware}).
+ * The ambient `RuntimeContext` is captured and re-applied across that boundary,
+ * so `parentOpId` (the causal tree) survives even though the fiber does not.
+ *
+ * **Interruption IS re-threaded.** `Effect.tryPromise` exposes an `AbortSignal`
+ * that fires when the OUTER op fiber is interrupted; we hold each continuation's
+ * fiber handle (via `runFork`, not `runPromise`) and interrupt it on that signal.
+ * So aborting a `send` tears down the in-flight inner model/tool call an async
+ * middleware wraps — instead of leaving it running as a detached root. This
+ * closes the leak; it does NOT restore span-nesting (the child is still a root
+ * span). A rejection (from `next`, or thrown by the async middleware) surfaces
+ * on the `E` channel unchanged.
  *
  * `use()` / `withCallMiddleware` call this automatically for `async` functions;
  * use it explicitly for a promise-returning middleware NOT declared `async`.
@@ -243,15 +255,31 @@ export function liftMiddleware<I = unknown, R = unknown, E = unknown>(
 ): Middleware<I, R, E> {
   return (input, next) =>
     Effect.gen(function* () {
-      // Snapshot the ambient context so the causal tree survives the Promise
-      // boundary (the fresh root fiber below would otherwise see EMPTY_CONTEXT).
+      // Snapshot the ambient context so the causal tree survives the fiber
+      // boundary (the forked root below would otherwise see EMPTY_CONTEXT).
       const ctx = yield* getContext;
-      const nextPromise = (i: I): Promise<R> =>
-        Effect.runPromise(withContext(ctx, next(i)) as Effect.Effect<R, never, never>);
-      // Hand the async middleware the captured `ctx` explicitly — it runs
-      // outside the fiber and can't read `getContext` itself.
       return yield* Effect.tryPromise({
-        try: () => mw(input, nextPromise, ctx),
+        // `signal` fires when the outer op fiber is interrupted. Fork each
+        // continuation so we can interrupt it on abort — a plain `runPromise`
+        // would leave the inner call running detached after an aborted send.
+        try: (signal) => {
+          const nextPromise = (i: I): Promise<R> => {
+            const fiber = Effect.runFork(
+              withContext(ctx, next(i)) as Effect.Effect<R, never, never>,
+            );
+            const onAbort = (): void => {
+              Effect.runFork(Fiber.interrupt(fiber));
+            };
+            if (signal.aborted) onAbort();
+            else signal.addEventListener("abort", onAbort, { once: true });
+            return Effect.runPromise(Fiber.await(fiber))
+              .then((exit) => unwrapExit(exit) as R)
+              .finally(() => signal.removeEventListener("abort", onAbort));
+          };
+          // Hand the async middleware the captured `ctx` explicitly — it runs
+          // outside the fiber and can't read `getContext` itself.
+          return mw(input, nextPromise, ctx);
+        },
         catch: (e) => e as E,
       });
     });

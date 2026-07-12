@@ -384,16 +384,20 @@ so an inline arrow infers its params cleanly — one overloaded `use` could not
 (the async and Effect `next` contracts are incompatible, and the union kills
 inline inference for both).
 
-> **Honest caveat — an async middleware severs the fiber.** `await next(input)`
-> runs the inner ops to a `Promise` (a fresh root fiber), so the ADR 77 spine's
-> in-fiber propagation stops AT it: OTel span-parent nesting and structured
-> interruption do NOT cross an async middleware. The lift re-threads the captured
-> `ctx` so `parentOpId` (the causal tree) survives and traces stay reconstructable
-> from attributes — but that's the limit. This is *why* `ctx` is passed
-> explicitly (you can't read a fiber you left) and why `fx.use` exists: use the
-> Effect form for middleware that must stay in-fiber (per-op spans that nest
-> through it, a tier-4 timeout/cancel that reaches inner work). **Async =
-> ergonomic; Effect = in-fiber.**
+> **Honest caveat — an async middleware severs the fiber (span-nesting, not
+> interruption).** `await next(input)` runs the inner ops on a forked root fiber,
+> so the ADR 77 spine's in-fiber propagation stops AT it for **OTel span-parent
+> nesting** — a span opened inside the wrapped ops will not nest under the
+> middleware's op. Two things ARE re-threaded across the boundary: the captured
+> `ctx` (so `parentOpId`, the causal tree, survives and traces stay
+> reconstructable from attributes) and **interruption** (the lift forks the
+> continuation and interrupts it when the outer op is aborted, so cancelling a
+> `send` tears down the inner model/tool call instead of leaking a detached
+> root). What you DON'T get from `use` is span-nesting and having the
+> middleware's own body run in-fiber. That's *why* `ctx` is passed explicitly
+> (you can't read a fiber you left) and why `fx.use` exists: use the Effect form
+> when you need per-op spans that nest through the middleware. **Async =
+> ergonomic (context + abort re-threaded); Effect = fully in-fiber.**
 
 ### Which surface — a use-case catalog
 
