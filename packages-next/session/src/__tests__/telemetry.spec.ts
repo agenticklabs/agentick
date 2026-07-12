@@ -114,7 +114,7 @@ async function mkSession(telemetryRuntime: ManagedRuntime.ManagedRuntime<never, 
   });
   await session.ready;
   await session.mountReady;
-  return { session, tools };
+  return { session, tools, loop };
 }
 
 describe("Session telemetry (ADR 77 Stage 4) — the composed execution nests", () => {
@@ -155,6 +155,49 @@ describe("Session telemetry (ADR 77 Stage 4) — the composed execution nests", 
     for (const child of downstream) {
       expect(child.attributes.get(`${ns}.parent_op_id`)).toBe(execOpId);
       expect(child.parent).toBeDefined();
+    }
+
+    await session.close();
+    await tools.close();
+    await runtime.dispose();
+  });
+
+  it("an async `use` middleware ON THE LOOP does NOT break the downstream span tree", async () => {
+    // The conclusive spine-level proof for ADR 76 gap #2. A `use` middleware on
+    // the loop forks `runExecution`'s body onto the ambient runtime — so the
+    // ENTIRE downstream spine (executor + reconciler, opened INSIDE the forked
+    // continuation) runs across the async boundary. If those spans still nest
+    // under the execution span, the fiber threaded through the middleware. With
+    // the old default-runtime fork, they would detach (or vanish — no tracer).
+    const { layer, spans } = collectingTracer();
+    const runtime = ManagedRuntime.make(layer);
+    const { session, tools, loop } = await mkSession(runtime);
+
+    let wrapped = 0;
+    loop.use(async (input, next) => {
+      wrapped++;
+      return next(input);
+    });
+
+    const handle = await session.send({ messages: [{ role: "user", content: "hi" }] });
+    await handle.result;
+
+    expect(wrapped).toBe(1); // the async middleware actually ran on the spine
+
+    const ns = "agentick";
+    const execSpan = spans.find((s) => s.name === "loop:command:run-execution");
+    expect(execSpan).toBeDefined();
+    const execOpId = execSpan!.attributes.get(`${ns}.op_id`);
+
+    // Downstream spans are opened by the loop BODY — i.e. inside the async
+    // middleware's forked continuation. They must STILL nest under the execution.
+    const downstream = spans.filter(
+      (s) => s.name.startsWith("executor:command:") || s.name === "reconciler:command:render-tree",
+    );
+    expect(downstream.length).toBeGreaterThan(0);
+    for (const child of downstream) {
+      expect(child.attributes.get(`${ns}.parent_op_id`)).toBe(execOpId); // causal tree
+      expect(child.parent).toBeDefined(); // Effect's real span parent — nesting held
     }
 
     await session.close();
