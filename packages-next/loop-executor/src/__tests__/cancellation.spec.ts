@@ -234,3 +234,133 @@ describe("LoopExecutorHarness — structured cancellation (Stage 5)", () => {
     expect(tr[0]!.error).toBeInstanceOf(Error);
   });
 });
+
+// ============================================================================
+// Parallel tool dispatch (Stage 5)
+// ============================================================================
+
+/** A 2-tick executor: tick 1 returns `tool_use` with the given calls; tick 2 ends. */
+function multiToolExec(toolCalls: readonly { id: string; name: string }[]): LanguageModelExecutor {
+  let call = 0;
+  return {
+    family: "language-model",
+    target: { kind: "language-model", provider: "fake", modelId: "mt-v1" },
+    ready: Promise.resolve(),
+    fx: {
+      run: () =>
+        Effect.sync(() => {
+          call += 1;
+          if (call === 1) {
+            return {
+              outcome: "succeeded",
+              result: {
+                specVersion: SPEC_VERSION,
+                output: [{ type: "text", text: "calling" }],
+                stopReason: "tool_use",
+                usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+                toolCalls: toolCalls.map((t) => ({ id: t.id, name: t.name, input: {} })),
+              },
+            } satisfies ExecutorTerminal<LanguageModelExecutionResult>;
+          }
+          return {
+            outcome: "succeeded",
+            result: okResult,
+          } satisfies ExecutorTerminal<LanguageModelExecutionResult>;
+        }),
+      project: () => Effect.succeed({ messages: [] }),
+      normalize: () => Effect.succeed(okResult),
+      executeStream: () => Effect.succeed({} as unknown),
+    },
+  } as unknown as LanguageModelExecutor;
+}
+
+describe("LoopExecutorHarness — parallel tool dispatch (Stage 5)", () => {
+  it("dispatches a tick's tool calls CONCURRENTLY (default unbounded); results stay in call-order", async () => {
+    const sub = mkSubstrate();
+    const loop = new LoopExecutorHarness("loop_p1", sub.journal, sub.bus, sub.inbox);
+    await loop.ready;
+
+    // RENDEZVOUS proof of concurrency: tool "A" (FIRST in call order) awaits a
+    // gate that tool "B" (second) opens. Sequential dispatch (A then B) would
+    // DEADLOCK — A waits for B, which never starts. Parallel completes.
+    let openA!: () => void;
+    const aGate = new Promise<void>((r) => {
+      openA = r;
+    });
+    const completed: string[] = [];
+    const toolExecutor = stubToolExecutor(async (i) => {
+      if (i.name === "A") await aGate;
+      else openA();
+      completed.push(i.name);
+      return { toolCallId: i.toolCallId, name: i.name, content: [], durationMs: 1 };
+    });
+
+    const executor = multiToolExec([
+      { id: "a", name: "A" },
+      { id: "b", name: "B" },
+    ]);
+    const terminal = await loop.runExecution(baseInput("exec_p1", executor, toolExecutor));
+
+    // Completed at all ⇒ parallel (a sequential loop would hang forever).
+    expect(terminal.outcome).toBe("succeeded");
+    // Results are in CALL order regardless of completion order (Effect.all).
+    expect(terminal.result!.toolResults.map((r) => r.toolName)).toEqual(["A", "B"]);
+    // But B genuinely COMPLETED before A — the concurrency actually happened.
+    expect(completed).toEqual(["B", "A"]);
+  });
+
+  it("toolConcurrency: 1 opts out to sequential — independent tools, call-order", async () => {
+    const sub = mkSubstrate();
+    const loop = new LoopExecutorHarness("loop_p2", sub.journal, sub.bus, sub.inbox);
+    await loop.ready;
+
+    const order: string[] = [];
+    const toolExecutor = stubToolExecutor(async (i) => {
+      order.push(i.name);
+      return { toolCallId: i.toolCallId, name: i.name, content: [], durationMs: 1 };
+    });
+    const executor = multiToolExec([
+      { id: "a", name: "A" },
+      { id: "b", name: "B" },
+    ]);
+
+    const terminal = await loop.runExecution({
+      ...baseInput("exec_p2", executor, toolExecutor),
+      toolConcurrency: 1,
+    });
+
+    expect(terminal.outcome).toBe("succeeded");
+    expect(order).toEqual(["A", "B"]);
+    expect(terminal.result!.toolResults.map((r) => r.toolName)).toEqual(["A", "B"]);
+  });
+});
+
+// ============================================================================
+// Execution timeout (Stage 5)
+// ============================================================================
+
+describe("LoopExecutorHarness — execution timeout (Stage 5)", () => {
+  it("timeoutMs → structured abort → canceled terminal, stopReason 'timeout'", async () => {
+    const sub = mkSubstrate();
+    const loop = new LoopExecutorHarness("loop_t1", sub.journal, sub.bus, sub.inbox);
+    await loop.ready;
+
+    // A hanging model call — only the timeout can end it.
+    const executor = hangingExecutor(() => {});
+    const toolExecutor = stubToolExecutor(async (i) => ({
+      toolCallId: i.toolCallId,
+      name: i.name,
+      content: [],
+      durationMs: 1,
+    }));
+
+    const terminal = await loop.runExecution({
+      ...baseInput("exec_t1", executor, toolExecutor),
+      timeoutMs: 40,
+    });
+
+    expect(terminal.outcome).toBe("canceled");
+    expect(terminal.reason).toBe("execution timeout");
+    expect(terminal.result!.stopReason).toBe("timeout");
+  });
+});

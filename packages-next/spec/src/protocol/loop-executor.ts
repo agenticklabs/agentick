@@ -185,6 +185,25 @@ export interface RunExecutionInput {
   ) => Promise<import("./session-harness.js").TickEndForwardDecision>;
   readonly maxTicks: number;
 
+  /**
+   * Concurrency for dispatching a tick's tool calls (ADR 77 Stage 5).
+   * `"unbounded"` (default) runs every `result.toolCalls` entry
+   * concurrently — results stay in call-order (`Effect.all` preserves
+   * order regardless of concurrency); a positive integer caps in-flight
+   * dispatches; `1` is sequential. Abort / timeout tears down all
+   * in-flight tool fibers.
+   */
+  readonly toolConcurrency?: number | "unbounded";
+
+  /**
+   * Optional execution timeout in milliseconds (ADR 77 Stage 5). NO
+   * default — the framework ships the mechanism, not a policy. On expiry
+   * the execution structurally aborts (tearing down the in-flight model
+   * call / tool handlers via the same signal machinery) and resolves a
+   * `canceled` terminal with `stopReason: "timeout"`.
+   */
+  readonly timeoutMs?: number;
+
   /** Optional caller abort. The harness also exposes an inbox `halt` message. */
   readonly signal?: AbortSignal;
 
@@ -307,7 +326,8 @@ export interface ExecutionRunResult {
     | "max_ticks"
     | "aborted"
     | "vetoed"
-    | "executor_failed";
+    | "executor_failed"
+    | "timeout";
   /** Canonical content stream — concatenated `output` from each tick's executor result. */
   readonly output: readonly ContentBlock[];
   /** Tool dispatch results accumulated across ticks. */

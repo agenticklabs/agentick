@@ -1,5 +1,13 @@
 # Spine-compose plan (ADR 77 + ADR 79 — "A")
 
+> **STATUS — LANDED (Stages 0–6).** The session spine is one Effect fiber; telemetry
+> nests; abort does structured teardown of in-flight work; tool calls dispatch in
+> parallel; execution timeout is opt-in; `.fx` + the edge-facade are documented as
+> first-class public surfaces. Deferred (own designs, not spine-compose): the
+> whole-spine whitelabel namespace (`TODO(stage-4: fiber-context-namespace)`) and
+> ADR 76 middleware tier-4. Every box below landed workspace `tsc` 145/145 + full
+> suite green + the 28-test characterization diff byte-identical.
+
 Staged, gated build to compose the session operation spine into one fiber tree
 (structured concurrency + free nested telemetry), with `runPromise` only at the
 entity edge. **The edge contract stays frozen** (`session.send()` remains
@@ -266,15 +274,40 @@ Not required to land the spine; enabled by it. Each is its own decision:
       `loop-executor/__tests__/cancellation.spec.ts` — a HANGING executor/tool aborted mid-flight
       settles a canceled terminal promptly (would time out if the signal didn't reach it). char 28 +
       loop 50 + executor/session/app green (575); workspace 145/145.
-- [ ] `Effect.timeout` on runs / sub-ops.
-- [ ] Middleware tier-4 (ADR 76 FiberRef call-scoped) across the composed spine.
-- [ ] Bounded-concurrent tool dispatch (`Effect.all` w/ concurrency + interruption).
-- [ ] `.fx` documented as the adopter-facing Effect surface (Effect-native composability).
+- [x] **Bounded-concurrent tool dispatch** — DONE. A tick's tool calls dispatch CONCURRENTLY via
+      `Effect.all` (`input.toolConcurrency` / `SendInput.toolConcurrency`, **default `"unbounded"`**;
+      a number caps in-flight, `1` = sequential opt-out). `Effect.all` keeps results in CALL-ORDER
+      regardless of concurrency (deterministic persistence + next-tick model view); only the per-tool
+      lifecycle EVENTS interleave. Interruption falls out — each dispatch carries `execSignal` and
+      `Effect.all` propagates interrupt to its children, so abort/timeout tears down all in-flight
+      tool fibers. Proof: `cancellation.spec.ts` — a RENDEZVOUS test (tool A awaits a gate tool B
+      opens; sequential would deadlock, parallel completes) + call-order assertion + a
+      `toolConcurrency: 1` sequential opt-out.
+- [x] **`Effect.timeout` (execution timeout)** — DONE, opt-in. `input.timeoutMs` / `SendInput
+      .timeoutMs`, **NO default** (mechanism not policy). A per-execution timer fires the SAME
+      structured-abort path (controller + aborted map) so in-flight work tears down; the terminal
+      lands `canceled` with `stopReason: "timeout"` (new stop reason, threaded through
+      `ExecutionRunResult` + `SendResult`). Timer cleared on every exit via `Effect.ensuring`. Proof
+      in `cancellation.spec.ts`.
+- [x] **`.fx` documented as a first-class public surface** — DONE (Stage 6 docs). BOTH the Promise
+      edge-facade AND the `.fx` Effect-native twin are documented as first-class public API — the
+      facade the ergonomic default, `.fx` the peer for adopters composing Effects (NOT a second-class
+      escape hatch). See the loop-executor README "The fiber spine" section.
+- [ ] Middleware tier-4 (ADR 76 FiberRef call-scoped) — DEFERRED. Out of the spine-compose scope; it
+      is its own ADR 76 design (call-scoped `Context.Reference`+`provide`), not a "finish-off" item.
 
 ## Stage 6 — Cleanup
 
-- [ ] Remove dead Promise paths once the Effect path is proven.
-- [ ] READMEs / ARCHITECTURE docs updated; `.fx` + edge-facade documented.
+- [x] **Dead Promise paths — CHECKED, none to remove (finding).** The facades (`loop.runExecution`,
+      `executor.run`, …) are the FROZEN public entity edge (`LoopExecutorProtocol` etc.) — the session
+      uses `.fx` internally now, but the facade remains the public contract + is exercised by
+      conformance/tests. Grep confirmed `loop.runExecution` has zero non-test production callers, yet
+      it's not "dead" — it's the public API. The dual surface is the intended end state, not a
+      migration artifact. Nothing removed.
+- [x] **READMEs / ARCHITECTURE — `.fx` + edge-facade documented.** loop-executor README gains a "The
+      fiber spine — `.fx` and the edge-facade (ADR 77)" section (dual public surface + the three
+      fall-out capabilities: nested telemetry, structured cancellation, parallel tools, timeout) +
+      Status + Verified-by rows + the ADR 77 / SPINE-COMPOSE-PLAN cross-refs.
 
 ---
 

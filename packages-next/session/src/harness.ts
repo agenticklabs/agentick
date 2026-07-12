@@ -1247,7 +1247,13 @@ export class SessionHarness<P = unknown>
             maxTicks: input.maxTicks ?? this.defaultMaxTicks,
             stream: streamForCall,
             onEvent,
-            ...omitUndefined({ signal: input.signal }),
+            // Stage 5 — per-send tool concurrency (default "unbounded" in
+            // the loop) + optional execution timeout, both opt-in.
+            ...omitUndefined({
+              signal: input.signal,
+              toolConcurrency: input.toolConcurrency,
+              timeoutMs: input.timeoutMs,
+            }),
           }),
           this.telemetryRuntime,
         ),

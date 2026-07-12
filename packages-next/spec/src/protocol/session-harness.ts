@@ -232,6 +232,20 @@ export interface SendInput<P = unknown> {
    * @see ToolBinding in `@agentick/spec-next` for the precedence ladder.
    */
   readonly tools?: ReadonlyArray<import("../data/declarations.js").ToolDeclaration>;
+  /**
+   * Concurrency for dispatching this send's per-tick tool calls (ADR 77
+   * Stage 5). `"unbounded"` (default) runs a tick's tool calls
+   * concurrently; a positive integer caps them; `1` is sequential.
+   * Results always stay in call-order.
+   */
+  readonly toolConcurrency?: number | "unbounded";
+  /**
+   * Optional execution timeout (ms) for this send (ADR 77 Stage 5). No
+   * default. On expiry the execution structurally aborts (in-flight
+   * model/tool work torn down) and the handle resolves with a canceled
+   * outcome (`stopReason: "timeout"`).
+   */
+  readonly timeoutMs?: number;
 }
 
 /**
@@ -263,7 +277,8 @@ export interface SendResult {
     | "max_ticks"
     | "aborted"
     | "vetoed"
-    | "executor_failed";
+    | "executor_failed"
+    | "timeout";
   readonly ticks: number;
   readonly executionId: string;
 }

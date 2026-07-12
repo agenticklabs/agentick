@@ -198,10 +198,73 @@ streaming path the adapter owns symmetric event emission (`message` /
 deltas from the normalized result so subscribers see the same events
 either way.
 
+### The fiber spine — `.fx` and the edge-facade (ADR 77)
+
+The loop's `runExecutionBody` is **one `Effect.gen` fiber**. Every
+downstream harness call composes in-fiber via its `.fx` twin — `yield*
+reconciler.fx.renderTree(...)`, `executor.fx.{run,project,executeStream,
+normalize}(...)`, `toolExecutor.fx.{replaceReconcilerTools,compileForTick,
+dispatch}(...)`, `stateApplicator.fx.apply*(...)` — with no `runPromise`
+root between boundaries.
+
+**Two first-class public surfaces, one operation.** Every spine harness
+exposes both:
+
+- **The Promise edge-facade** (`loop.runExecution(...)`, `executor.run(...)`,
+  …) — the ergonomic default. `await` it; it resolves the result. This is
+  the entity boundary the gateway/client/wire speak.
+- **The `.fx` Effect-native twin** (`loop.fx.runExecution(...)`,
+  `executor.fx.run(...)`, …) — the composable surface for adopters who
+  work in Effect. `harness.fx.<op>(...)` returns an **un-run** `Effect`;
+  `yield*` it inside your own `Effect.gen` to compose it into your fiber
+  tree (telemetry, interruption, and `FiberRef` context all propagate).
+  The facade is exactly `runHarnessProtocol(harness.fx.<op>(...))` — the
+  twin minus the terminal `runPromise`.
+
+Neither is second-class: the facade is the default; `.fx` is the peer for
+Effect-native composition. The framework itself composes the spine through
+`.fx`.
+
+Because the spine is one fiber, three capabilities fall out:
+
+- **Nested telemetry.** Run the composed execution on a tracer
+  `ManagedRuntime` (the session does this automatically when the app has a
+  `telemetry` Layer) and the whole trace nests — `loop:command:run-execution`
+  > `executor:command:*` + `tool:command:dispatch` + `reconciler:command:
+render-tree` — with `parentOpId` auto-linked via `FiberRef`. No manual
+  > span threading.
+- **Structured cancellation.** `loop.abort()` (→ `session.send(...).abort()`)
+  tears down the IN-FLIGHT model call / tool handler immediately: a
+  per-execution `AbortController`, merged with the caller's `signal`, is
+  threaded to `executor.fx.run`/`executeStream` + `toolExecutor.fx.dispatch`.
+  The executor turns it into real Effect fiber interruption of the provider
+  call. Partial output up to the abort is preserved on the canceled terminal.
+- **Parallel tool dispatch.** A tick's tool calls dispatch **concurrently**
+  by default (`input.toolConcurrency` / `SendInput.toolConcurrency`,
+  `"unbounded"`; set a number to cap, `1` for sequential). `Effect.all`
+  keeps results in call-order regardless of concurrency; abort/timeout
+  interrupts every in-flight tool fiber.
+- **Execution timeout.** Opt-in `input.timeoutMs` / `SendInput.timeoutMs`
+  (no default — the framework ships the mechanism, not a policy). On expiry
+  the execution structurally aborts and the terminal lands `canceled` with
+  `stopReason: "timeout"`.
+
 ## Status
 
 - ✅ Canonical tick loop (`LoopExecutorHarness`): render → execute →
   dispatch → apply → continuation, bounded by `maxTicks`.
+- ✅ **Fiber spine (ADR 77)** — `runExecutionBody` is one `Effect.gen`
+  composing every downstream call via its `.fx` twin. Dual public surface:
+  the Promise edge-facade + the `.fx` Effect-native twin.
+- ✅ **Nested telemetry** — spans nest under the execution when run on a
+  tracer runtime (session-wired); `parentOpId` auto-threads via `FiberRef`.
+- ✅ **Structured cancellation** — `abort()` tears down in-flight model/tool
+  work immediately (merged `AbortSignal` → executor + dispatch), preserving
+  partial output.
+- ✅ **Parallel tool dispatch** — concurrent by default, call-order results,
+  `toolConcurrency`-configurable.
+- ✅ **Execution timeout** — opt-in `timeoutMs`, structured abort,
+  `stopReason: "timeout"`.
 - ✅ Streaming + non-streaming execution paths with symmetric events.
 - ✅ Per-phase `LoopEmittedEvent` stream via `onEvent`.
 - ✅ Lifecycle bridge to the reconciler hook store (ADR 54/55) —
@@ -245,6 +308,15 @@ either way.
   substrate sharing, abort routing.
 - `src/__tests__/layered-tools.spec.ts` — tool-declaration sync into the
   tool executor + per-tick model-visible compile.
+- `src/__tests__/characterization.spec.ts` — 28-test net pinning the tick
+  loop's control flow / continuation behavior byte-identical across the
+  `Effect.gen` rewrite (ADR 77 Gate 0).
+- `src/__tests__/fx-run-execution.spec.ts` — the `.fx.runExecution` twin is
+  a composable Effect; the facade is its `runHarnessProtocol` derivation.
+- `src/__tests__/cancellation.spec.ts` — structured cancellation (abort
+  tears down a hanging model call / tool handler), parallel dispatch
+  (rendezvous proof of concurrency + call-order results), execution timeout
+  (`stopReason: "timeout"`).
 - Cross-harness integration (real reconciler + executor + tool-executor,
   lifecycle bridge, per-tick model resolution) lives in
   `@agentick/session-next/__tests__/` (`lifecycle-bridge.spec.tsx`,
@@ -254,6 +326,8 @@ either way.
 ## See also
 
 - [ADR 05 — Loop executor](../../docs/proposals/v2/blueprint/05-loop-executor.md)
+- [ADR 77 — Operation spine + dual-typed edge](../../docs/proposals/v2/blueprint/77-operation-spine-and-dual-typed-edge.md)
+  · [SPINE-COMPOSE-PLAN](../../docs/proposals/v2/SPINE-COMPOSE-PLAN.md) — the staged tracker
 - [ADR 53 — Timeline offsets / steering](../../docs/proposals/v2/blueprint/53-timeline-offsets-not-tiers.md)
 - [ADR 55 — Render-context seam](../../docs/proposals/v2/blueprint/55-render-context-seam.md)
 - [ADR 56 — Tree-declared model per tick](../../docs/proposals/v2/blueprint/56-tree-declared-model-per-tick.md)

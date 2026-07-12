@@ -87,6 +87,12 @@ interface InFlightEntry {
    * into real Effect fiber interruption of the provider call.
    */
   readonly controller: AbortController;
+  /**
+   * Execution-timeout timer (Stage 5). Fires the controller + sets the
+   * aborted map after `input.timeoutMs`; cleared on every exit via
+   * `Effect.ensuring`. Absent when no timeout was requested.
+   */
+  readonly timer?: ReturnType<typeof setTimeout>;
   abortReason?: string;
 }
 
@@ -228,7 +234,24 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
       // down immediately. The tick-top checks below still catch the
       // pre-run / between-tick cases off the `aborted` map + `input.signal`.
       const controller = new AbortController();
-      this.inFlight.set(executionId, { executionId, controller });
+      // Optional execution timeout (Stage 5) — fires the SAME structured
+      // abort path (controller + aborted map) so in-flight model/tool work
+      // tears down and the terminal lands `canceled` with `stopReason:
+      // "timeout"`. No default — the field is opt-in. Cleared on every exit.
+      let timedOut = false;
+      const timeoutTimer =
+        input.timeoutMs !== undefined
+          ? setTimeout(() => {
+              timedOut = true;
+              this.aborted.set(executionId, "execution timeout");
+              controller.abort("execution timeout");
+            }, input.timeoutMs)
+          : undefined;
+      this.inFlight.set(executionId, {
+        executionId,
+        controller,
+        ...(timeoutTimer !== undefined ? { timer: timeoutTimer } : {}),
+      });
       if (this.aborted.has(executionId)) controller.abort(this.aborted.get(executionId));
       const execSignal = mergeAbortSignals(input.signal, controller.signal);
 
@@ -244,7 +267,8 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         | "max_ticks"
         | "aborted"
         | "vetoed"
-        | "executor_failed" = "end";
+        | "executor_failed"
+        | "timeout" = "end";
 
       // Emit execution-start to consumer (typed handle iterator) AND
       // bridge it to the reconciler hook store (ADR 55) so
@@ -474,109 +498,108 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           });
         }
 
-        // 3. Tool dispatch — every entry in result.toolCalls is a
-        // request for Agentick to invoke. Provider-side tools come
-        // back as tool_result blocks in result.output and don't
-        // appear in toolCalls. Each dispatch composes in-fiber via
-        // `.fx`; a HARD throw lands on the twin's E channel and
-        // `Effect.either` catches it into a failed tool result (exactly
-        // where the Promise version try/caught) — the run survives.
+        // 3. Tool dispatch — every entry in result.toolCalls is a request
+        // for Agentick to invoke (provider-side tools come back as
+        // tool_result blocks in result.output and don't appear here). Each
+        // dispatch composes in-fiber via `.fx`; a HARD throw lands on the
+        // twin's E channel and `Effect.either` catches it into a failed
+        // tool result (the run survives).
+        //
+        // Stage 5 — a tick's tool calls dispatch CONCURRENTLY
+        // (`input.toolConcurrency`, default "unbounded"). `Effect.all`
+        // preserves call-order in the results array regardless of
+        // concurrency (so persistence + the model's next-tick view are
+        // deterministic); only the per-tool lifecycle EVENTS interleave.
+        // Abort / timeout tears down every in-flight tool fiber — each
+        // carries `execSignal`, and `Effect.all` propagates interruption.
         const toolCalls: readonly ToolCall[] = result.toolCalls ?? [];
-        const tickToolResults: LoopToolResult[] = [];
-        for (const tc of toolCalls) {
-          const startedAt = Date.now();
-          input.onEvent?.({
-            kind: "tool-dispatch-start",
-            tick: tickIndex,
-            callId: tc.id,
-            name: tc.name,
-            via: "model",
-          });
-          // Bridge to the reconciler hook store (ADR 55) — lights up
-          // useOnToolStart. Fire-and-forget (a hook throw must not fail
-          // the run).
-          void input.reconciler.notifyLifecycle({
-            mountId: input.mountId,
-            event: {
-              kind: "tool-start",
-              tickId,
-              callId: tc.id,
-              name: tc.name,
-              via: "model",
-              executionId,
-            },
-          });
-          const dispatched = yield* Effect.either(
-            input.toolExecutor.fx.dispatch({
-              toolCallId: tc.id,
-              name: tc.name,
-              input: tc.input,
-              context: {
-                via: "model",
-                sessionId: input.sessionId,
-                executionId,
-                tickId,
-              },
-              // Structured cancellation (Stage 5) — an in-flight tool
-              // handler tears down when `abort()` fires (the tool executor
-              // honors `DispatchInput.signal`).
-              signal: execSignal,
-            }),
-          );
-          if (Either.isRight(dispatched)) {
-            const ok = dispatched.right;
-            const durationMs = ok.durationMs ?? Date.now() - startedAt;
-            // ADR 70 — `DispatchResult.succeeded` retired for `isError`
-            // (soft/domain error). A resolved dispatch is a success unless
-            // it flags a soft error; HARD failures reject (caught below).
-            const dispatchSucceeded = ok.isError !== true;
-            tickToolResults.push({
-              toolCallId: tc.id,
-              toolName: tc.name,
-              succeeded: dispatchSucceeded,
-              content: ok.content,
-              durationMs,
-            });
+        const dispatchOne = (tc: ToolCall): Effect.Effect<LoopToolResult, never, never> =>
+          Effect.gen(function* () {
+            const startedAt = Date.now();
             input.onEvent?.({
-              kind: "tool-dispatch-end",
+              kind: "tool-dispatch-start",
               tick: tickIndex,
               callId: tc.id,
               name: tc.name,
-              outcome: dispatchSucceeded ? "succeeded" : "failed",
-              durationMs,
+              via: "model",
             });
+            // Bridge to the reconciler hook store (ADR 55) — lights up
+            // useOnToolStart. Fire-and-forget (a hook throw must not fail
+            // the run).
             void input.reconciler.notifyLifecycle({
               mountId: input.mountId,
               event: {
-                kind: "tool-end",
+                kind: "tool-start",
                 tickId,
+                callId: tc.id,
+                name: tc.name,
+                via: "model",
+                executionId,
+              },
+            });
+            const dispatched = yield* Effect.either(
+              input.toolExecutor.fx.dispatch({
+                toolCallId: tc.id,
+                name: tc.name,
+                input: tc.input,
+                context: {
+                  via: "model",
+                  sessionId: input.sessionId,
+                  executionId,
+                  tickId,
+                },
+                // Structured cancellation (Stage 5) — an in-flight tool
+                // handler tears down when abort()/timeout fires (the tool
+                // executor honors `DispatchInput.signal`).
+                signal: execSignal,
+              }),
+            );
+            if (Either.isRight(dispatched)) {
+              const ok = dispatched.right;
+              const durationMs = ok.durationMs ?? Date.now() - startedAt;
+              // ADR 70 — `DispatchResult.succeeded` retired for `isError`
+              // (soft/domain error). A resolved dispatch is a success unless
+              // it flags a soft error; HARD failures reject (caught below).
+              const dispatchSucceeded = ok.isError !== true;
+              input.onEvent?.({
+                kind: "tool-dispatch-end",
+                tick: tickIndex,
                 callId: tc.id,
                 name: tc.name,
                 outcome: dispatchSucceeded ? "succeeded" : "failed",
                 durationMs,
-                executionId,
-              },
-            });
-            input.onEvent?.({
-              kind: "tool-dispatch",
-              tick: tickIndex,
-              callId: tc.id,
-              name: tc.name,
-              content: ok.content,
-              succeeded: dispatchSucceeded,
-              durationMs,
-            });
-          } else {
+              });
+              void input.reconciler.notifyLifecycle({
+                mountId: input.mountId,
+                event: {
+                  kind: "tool-end",
+                  tickId,
+                  callId: tc.id,
+                  name: tc.name,
+                  outcome: dispatchSucceeded ? "succeeded" : "failed",
+                  durationMs,
+                  executionId,
+                },
+              });
+              input.onEvent?.({
+                kind: "tool-dispatch",
+                tick: tickIndex,
+                callId: tc.id,
+                name: tc.name,
+                content: ok.content,
+                succeeded: dispatchSucceeded,
+                durationMs,
+              });
+              return {
+                toolCallId: tc.id,
+                toolName: tc.name,
+                succeeded: dispatchSucceeded,
+                content: ok.content,
+                durationMs,
+              };
+            }
             const err = dispatched.left;
             const durationMs = Date.now() - startedAt;
-            tickToolResults.push({
-              toolCallId: tc.id,
-              toolName: tc.name,
-              succeeded: false,
-              content: [],
-              durationMs,
-              error: err,
-            });
             input.onEvent?.({
               kind: "tool-dispatch-end",
               tick: tickIndex,
@@ -607,8 +630,23 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
               durationMs,
               isError: true,
             });
-          }
-        }
+            return {
+              toolCallId: tc.id,
+              toolName: tc.name,
+              succeeded: false,
+              content: [],
+              durationMs,
+              error: err,
+            };
+          });
+
+        const dispatchedResults =
+          toolCalls.length > 0
+            ? yield* Effect.all(toolCalls.map(dispatchOne), {
+                concurrency: input.toolConcurrency ?? "unbounded",
+              })
+            : [];
+        const tickToolResults: LoopToolResult[] = [...dispatchedResults];
         acc.toolResults.push(...tickToolResults);
 
         // 4. State application — the session harness's apply commands,
@@ -744,6 +782,13 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         stopReason = "max_ticks";
       }
 
+      // Stage 5 — a timeout fired the structured abort; label the stop
+      // precisely. `wasAborted` (below) reads the map the timer set, so the
+      // terminal is `canceled` with reason "execution timeout".
+      if (timedOut) {
+        stopReason = "timeout";
+      }
+
       const runResult: ExecutionRunResult = {
         executionId,
         ticks: acc.ticks,
@@ -790,9 +835,12 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           Effect.fail(cause instanceof ExecutionError ? cause : new ExecutionError({ cause })),
       ),
       // inFlight/aborted cleanup on every exit (success, failure, interrupt)
-      // — the Promise original's `finally`.
+      // — the Promise original's `finally`. Also clears the timeout timer
+      // (Stage 5) so it can't fire after the execution settled.
       Effect.ensuring(
         Effect.sync(() => {
+          const entry = this.inFlight.get(executionId);
+          if (entry?.timer !== undefined) clearTimeout(entry.timer);
           this.inFlight.delete(executionId);
           this.aborted.delete(executionId);
         }),
