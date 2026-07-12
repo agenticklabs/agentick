@@ -82,9 +82,13 @@ edge-facade derivation. Stage 2 replicates the twin onto the spine protocols.
 - [ ] **Remaining executor twins** — `project` / `execute` / `normalize` / `abort` into `ExecutorFx`
       (loud `TODO(stage-2)` on the harness). Migrate the protocol's inline Promise methods to
       `PromiseView<Pick<ExecutorFx, …>>` wholesale once the full surface has twins.
-- [ ] **Other spine harnesses** — `LoopExecutorProtocol`, tool-executor, reconciler,
-      `StateApplicator`, session. Each hand-exposes its `run`/`runExecution` Effect. Loop's
-      `runExecution` twin is next.
+- [x] **Loop `.fx.runExecution`** (`5f3449fe`) — the crux harness, same clean extraction.
+      `LoopExecutorFx` twin; protocol's `runExecution` derives from `PromiseView`; harness splits
+      `runExecutionFx` (Effect) + facade. Internal tick body stays Promise-shaped — the `Effect.gen`
+      rewrite is Stage 3, gated by the 28-test characterization diff (still green, unchanged).
+- [ ] **Remaining spine harnesses** — tool-executor, reconciler, `StateApplicator`, session. Each
+      hand-exposes its primary Effect. (Tool-executor's `dispatch` IS a registry command → could be
+      `fxProxy`-derived like knobs, unlike executor/loop — first harness where the two mechanisms meet.)
 
 **Deferred design fork (recorded, not urgent):** streaming canonical form is the **sink-fold**
 (`(input, sink) => Effect<Result>`), chosen because it fits `runOperation`'s discrete
