@@ -252,7 +252,20 @@ takes the runtime, spans already emit via `Effect.withSpan` in `runOperation`, a
 
 Not required to land the spine; enabled by it. Each is its own decision:
 
-- [ ] Structured cancellation (abort → clean teardown of in-flight model/tool work).
+- [x] **Structured cancellation** — DONE. `loop.abort()` now tears down IN-FLIGHT model/tool work
+      immediately, not at the next tick boundary. A per-execution `AbortController` (fired by
+      `abort()`) is merged with the caller's `input.signal` into one `execSignal` threaded to
+      `executor.fx.run`/`executeStream` + `toolExecutor.fx.dispatch`. The executor turns the signal
+      into REAL Effect fiber interruption of the provider call (`withExternalAbort` + `tryPromise`
+      fiber signal); the tool executor honors `DispatchInput.signal` on the handler. **Design choice:
+      signal-forwarding, NOT raw fiber-interrupt of the whole loop** — it PRESERVES the accumulator
+      (partial output/usage up to the abort → a canceled terminal that still carries what was
+      generated) and keeps the 28-test char behavior byte-identical; interrupting the loop fiber
+      would discard partial results and diverge from the net. Propagates to the public edge:
+      `session.send(...).abort()` → `loop.abort()` → structured teardown. Proof:
+      `loop-executor/__tests__/cancellation.spec.ts` — a HANGING executor/tool aborted mid-flight
+      settles a canceled terminal promptly (would time out if the signal didn't reach it). char 28 +
+      loop 50 + executor/session/app green (575); workspace 145/145.
 - [ ] `Effect.timeout` on runs / sub-ops.
 - [ ] Middleware tier-4 (ADR 76 FiberRef call-scoped) across the composed spine.
 - [ ] Bounded-concurrent tool dispatch (`Effect.all` w/ concurrency + interruption).

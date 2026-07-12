@@ -71,7 +71,6 @@ import {
   ProviderRejected,
   toRegistration,
 } from "@agentick/spec-next";
-import { omitUndefined } from "@agentick/utils-next";
 
 // ============================================================================
 // Internal types
@@ -79,6 +78,15 @@ import { omitUndefined } from "@agentick/utils-next";
 
 interface InFlightEntry {
   readonly executionId: string;
+  /**
+   * Per-execution abort controller (ADR 77 Stage 5 — structured
+   * cancellation). `abort()` fires it; its signal is merged with the
+   * caller's `input.signal` and threaded to the executor + tool dispatch,
+   * so an in-flight model call / tool handler is torn down IMMEDIATELY
+   * rather than at the next tick boundary. The executor turns the signal
+   * into real Effect fiber interruption of the provider call.
+   */
+  readonly controller: AbortController;
   abortReason?: string;
 }
 
@@ -165,9 +173,19 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
   abort(input: { executionId: string; reason?: string }): Promise<void> {
     return runHarnessProtocol(
       Effect.sync(() => {
-        this.aborted.set(input.executionId, input.reason ?? "aborted");
+        const reason = input.reason ?? "aborted";
+        this.aborted.set(input.executionId, reason);
         const entry = this.inFlight.get(input.executionId);
-        if (entry) entry.abortReason = input.reason ?? "aborted";
+        if (entry) {
+          entry.abortReason = reason;
+          // Structured cancellation (Stage 5): fire the per-execution
+          // controller so an IN-FLIGHT model call / tool handler tears
+          // down now, not at the next tick-boundary check. Pre-run aborts
+          // (no entry yet) still land via the `aborted` map's tick-top
+          // check. Idempotent — a second abort on an already-aborted
+          // controller is a no-op.
+          entry.controller.abort(reason);
+        }
       }),
     );
   }
@@ -203,7 +221,16 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
   ): Effect.Effect<ExecutionTerminal, LoopExecutorError, never> {
     const executionId = input.executionId;
     return Effect.gen(this, function* () {
-      this.inFlight.set(executionId, { executionId });
+      // Structured cancellation (Stage 5) — a per-execution controller
+      // `abort()` fires. Merge it with the caller's `input.signal` into
+      // ONE `execSignal` threaded to every in-flight edge (executor model
+      // call + tool dispatch), so a mid-flight `abort()` tears the work
+      // down immediately. The tick-top checks below still catch the
+      // pre-run / between-tick cases off the `aborted` map + `input.signal`.
+      const controller = new AbortController();
+      this.inFlight.set(executionId, { executionId, controller });
+      if (this.aborted.has(executionId)) controller.abort(this.aborted.get(executionId));
+      const execSignal = mergeAbortSignals(input.signal, controller.signal);
 
       const acc: TickAccumulator = {
         ticks: 0,
@@ -365,7 +392,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
                 targetInput: projected,
                 target: tickTarget,
                 scope: { sessionId: input.sessionId, executionId, tickId },
-                ...omitUndefined({ signal: input.signal }),
+                signal: execSignal,
               },
               (delta) =>
                 Effect.sync(() => input.onEvent?.({ kind: "model", tick: tickIndex, delta })),
@@ -392,7 +419,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
             target: tickTarget,
             scope: { sessionId: input.sessionId, executionId, tickId },
             tools: modelTools,
-            ...omitUndefined({ signal: input.signal }),
+            signal: execSignal,
           });
         }
 
@@ -490,6 +517,10 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
                 executionId,
                 tickId,
               },
+              // Structured cancellation (Stage 5) — an in-flight tool
+              // handler tears down when `abort()` fires (the tool executor
+              // honors `DispatchInput.signal`).
+              signal: execSignal,
             }),
           );
           if (Either.isRight(dispatched)) {
@@ -786,6 +817,27 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
  */
 function awaitBridge<A>(thunk: () => Promise<A> | A): Effect.Effect<A, unknown, never> {
   return Effect.tryPromise({ try: async () => thunk(), catch: (e: unknown) => e });
+}
+
+/**
+ * Merge the caller's optional `input.signal` with the per-execution
+ * abort controller's signal into ONE composite (Stage 5 — structured
+ * cancellation). The composite aborts when EITHER source fires; the
+ * loop threads it to every in-flight edge so a `loop.abort()` OR an
+ * external `input.signal` abort tears down the in-flight model call /
+ * tool handler. Same pattern as the executor's `mergeSignals` (kept
+ * local to avoid a runtime dep on the executor package for one helper).
+ */
+function mergeAbortSignals(external: AbortSignal | undefined, internal: AbortSignal): AbortSignal {
+  if (external === undefined) return internal;
+  if (external.aborted) return external;
+  if (internal.aborted) return internal;
+  const ctrl = new AbortController();
+  const onExternal = (): void => ctrl.abort(external.reason);
+  const onInternal = (): void => ctrl.abort(internal.reason);
+  external.addEventListener("abort", onExternal, { once: true });
+  internal.addEventListener("abort", onInternal, { once: true });
+  return ctrl.signal;
 }
 
 function accumulateUsage(acc: MutableUsage, add?: UsageStats): void {
