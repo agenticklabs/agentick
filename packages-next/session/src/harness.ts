@@ -33,7 +33,9 @@ import type {
   ApplyResult,
   ApplyToolResultsInput,
   ChannelHandle,
+  ChannelSnapshotProvider,
   ContentBlock,
+  EventEnvelope,
   ElicitationRequest,
   FormElicitationRequest,
   EventBus,
@@ -71,9 +73,11 @@ import type {
   Unsubscribe,
 } from "@agentick/spec-next";
 import {
+  channelEventName,
   DEFAULT_JOURNALING_POLICY,
   ExecutionFailed,
   HandlerError,
+  isChannelSnapshotProvider,
   SessionClosedError,
   SPEC_VERSION,
   TimelineWriteFailed,
@@ -303,6 +307,12 @@ export class SessionHarness<P = unknown>
   private readonly target: ExecutionTarget;
   private readonly spawnContext: SpawnContext<P> | undefined;
   private readonly parentSessionId: string | undefined;
+  /**
+   * Lazily-built index of the channel-owning harnesses among this
+   * session's bridges (knobs, tasks, state, gates, timeline). Keyed by
+   * `provider.snapshotChannel`. Built once on first `channelSnapshot`.
+   */
+  private _snapshotProviders: Map<string, ChannelSnapshotProvider> | null = null;
   /**
    * Telemetry runtime (ADR 77 Stage 4). The composed execution runs on
    * it so spans export + nest; `undefined` → default runtime (no-op
@@ -900,6 +910,48 @@ export class SessionHarness<P = unknown>
         void sessionAddress;
       },
     };
+  }
+
+  /**
+   * Current snapshot of a channel as a ready-to-publish envelope, or
+   * `undefined` when no bridge owns `channel`. Scans the session's
+   * bridges for the {@link ChannelSnapshotProvider} keyed by `channel`
+   * and renders its current state into a `delta`-phase channel envelope —
+   * the opening frame the `sub/subscribe` handler prepends so a fresh
+   * subscriber opens WITH the current state (the K8s `sendInitialEvents`
+   * model). Async so a future provider can render its frame off-thread;
+   * today `channelSnapshotPayload()` is sync.
+   */
+  async channelSnapshot(channel: string): Promise<EventEnvelope | undefined> {
+    const provider = this.snapshotProviders().get(channel);
+    if (provider === undefined) return undefined;
+    const payload = provider.channelSnapshotPayload();
+    return {
+      id: ulid(),
+      surface: "session",
+      name: channelEventName(channel),
+      phase: "delta",
+      timestamp: Date.now(),
+      scope: { sessionId: this.store.id },
+      payload,
+    };
+  }
+
+  /**
+   * Build (once) the `channel → ChannelSnapshotProvider` index by scanning
+   * every bridge value for one passing {@link isChannelSnapshotProvider}.
+   * No hardcoded slot list — any harness that conforms is discovered
+   * generically (mirrors the SnapshotCapable feature-detection pattern).
+   */
+  private snapshotProviders(): Map<string, ChannelSnapshotProvider> {
+    if (this._snapshotProviders === null) {
+      const map = new Map<string, ChannelSnapshotProvider>();
+      for (const value of Object.values(this.bridges)) {
+        if (isChannelSnapshotProvider(value)) map.set(value.snapshotChannel, value);
+      }
+      this._snapshotProviders = map;
+    }
+    return this._snapshotProviders;
   }
 
   /**

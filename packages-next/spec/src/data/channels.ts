@@ -44,3 +44,33 @@ export function channelEventName(channel: string): string {
 export function channelEventQuery(channel: string): EventQuery {
   return { surface: CHANNEL_SURFACE, name: { exact: channelEventName(channel) } };
 }
+
+/**
+ * A harness that OWNS a channel and can render its current state as the
+ * channel's opening frame. The session collects providers from its bridges
+ * and, on `sub/subscribe`, prepends `channelSnapshotPayload()` as the first
+ * frame a fresh subscriber receives — before any live delta (the K8s
+ * `sendInitialEvents` / watch-list model). One provider per channel.
+ *
+ * @see docs/proposals/v2/blueprint/73-ag-ui-projection.md
+ */
+export interface ChannelSnapshotProvider {
+  /** The channel this provider snapshots, e.g. "knobs-state". */
+  readonly snapshotChannel: string;
+  /** Current snapshot frame payload (rides `envelope.payload`). */
+  channelSnapshotPayload(): unknown;
+}
+
+/**
+ * Structural type guard for {@link ChannelSnapshotProvider}. Used by the
+ * session to scan its bridges for channel-owning harnesses without a
+ * hardcoded slot list.
+ */
+export function isChannelSnapshotProvider(x: unknown): x is ChannelSnapshotProvider {
+  return (
+    x !== null &&
+    typeof x === "object" &&
+    typeof (x as ChannelSnapshotProvider).snapshotChannel === "string" &&
+    typeof (x as ChannelSnapshotProvider).channelSnapshotPayload === "function"
+  );
+}

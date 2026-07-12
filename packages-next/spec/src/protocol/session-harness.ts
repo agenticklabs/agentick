@@ -34,6 +34,7 @@
  */
 
 import type { CommandOutcome, TerminalEvent } from "../data/outcomes.js";
+import type { EventEnvelope } from "../data/events.js";
 import type { ContentBlock } from "../data/content-blocks.js";
 import type { LanguageModelStopReason, UsageStats } from "../data/execution-result.js";
 import type { TickResult } from "./loop-executor.js";
@@ -600,6 +601,18 @@ export interface SessionHarnessProtocol<P = unknown> {
    * `surface: "session"` with name `session:channel:<name>`.
    */
   channel<T = unknown>(name: string): ChannelHandle<T>;
+
+  /**
+   * Current snapshot of a channel as a ready-to-publish envelope, or
+   * `undefined` if no provider owns `channel`.
+   *
+   * The session scans its bridges for the {@link ChannelSnapshotProvider}
+   * that owns `channel` and renders its current state into a `delta`-phase
+   * `ChannelEvent`. The `sub/subscribe` wire handler prepends this frame so
+   * a fresh subscriber opens WITH the current state, then live deltas follow
+   * on the same stream (the K8s `sendInitialEvents` / watch-list model).
+   */
+  channelSnapshot(channel: string): Promise<EventEnvelope | undefined>;
 
   /**
    * Register the session's escalation interceptor (ADR 69 T2a). This is

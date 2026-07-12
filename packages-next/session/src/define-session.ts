@@ -59,6 +59,7 @@ import type {
   ContentBlock,
   EscalationInterceptor,
   EventBus,
+  EventEnvelope,
   KnobHandle,
   MessageEnvelope,
   MessageHandlerError,
@@ -118,6 +119,13 @@ export interface DefineSessionInput<P = unknown> {
     options?: import("@agentick/spec-next").DispatchOptions,
   ) => Promise<readonly ContentBlock[]>;
   readonly channel?: <T = unknown>(name: string) => ChannelHandle<T>;
+  /**
+   * Render a channel's current snapshot as its opening frame (slice 2 —
+   * `SessionHarnessProtocol.channelSnapshot`). Omit to opt out: the façade
+   * then reports "no provider owns this channel" (`undefined`) for every
+   * channel, so a subscription simply opens with no seed frame.
+   */
+  readonly channelSnapshot?: (channel: string) => Promise<EventEnvelope | undefined>;
   readonly knob?: <T = unknown>(name: string) => KnobHandle<T>;
   readonly gate?: (name: string) => GateHandle | undefined;
 
@@ -290,6 +298,11 @@ class CallbackSessionHarness<P = unknown>
   channel<T = unknown>(name: string): ChannelHandle<T> {
     if (this.spec.channel) return this.spec.channel<T>(name);
     throw new Error(`defineSession: channel("${name}") not configured`);
+  }
+
+  channelSnapshot(channel: string): Promise<EventEnvelope | undefined> {
+    if (this.spec.channelSnapshot) return this.spec.channelSnapshot(channel);
+    return Promise.resolve(undefined);
   }
 
   knob<T = unknown>(name: string): KnobHandle<T> {

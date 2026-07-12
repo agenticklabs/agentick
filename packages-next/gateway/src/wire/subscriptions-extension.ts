@@ -63,13 +63,60 @@ function openScopeEvents(
   return null;
 }
 
+/** Fully-qualified prefix every channel event's `name` carries. */
+const CHANNEL_NAME_PREFIX = "session:channel:";
+
+/**
+ * When a subscription targets exactly ONE session channel, resolve the
+ * owning session and render the channel's current snapshot as the opening
+ * frame. Returns `undefined` unless: the scope is a session, the query is a
+ * single-channel `{ exact }` name under `session:channel:`, a session
+ * resolves, AND a provider owns that channel. Session resolution mirrors
+ * the `session` branch of {@link openScopeEvents}.
+ */
+async function resolveChannelSnapshot(
+  gateway: GatewayHarnessProtocol,
+  params: SubscribeParams,
+): Promise<EventEnvelope | undefined> {
+  const scope = params.scope;
+  if (scope.kind !== "session") return undefined;
+  const name = params.query?.name;
+  if (name === undefined || !("exact" in name)) return undefined;
+  if (!name.exact.startsWith(CHANNEL_NAME_PREFIX)) return undefined;
+  const channel = name.exact.slice(CHANNEL_NAME_PREFIX.length);
+  for (const app of gateway.apps() as readonly AppHarnessProtocol[]) {
+    const sess = app.getSession(scope.id);
+    if (sess) return sess.channelSnapshot(channel);
+  }
+  return undefined;
+}
+
+/**
+ * Prepend the channel snapshot as the FIRST frame, then relay live deltas
+ * on the same stream (K8s `sendInitialEvents` / watch-list).
+ */
+async function* withSnapshot(
+  snap: EventEnvelope,
+  live: AsyncIterable<EventEnvelope>,
+): AsyncGenerator<EventEnvelope> {
+  yield snap;
+  yield* live;
+}
+
 export const subscriptionsWireExtension: WireExtension = defineWireExtension({
   name: "@agentick/gateway-next#subscriptions",
   namespace: "sub",
   version: "1.0.0",
   methods: {
     "sub/subscribe": async (params, ctx) => {
-      const iterable = openScopeEvents(ctx.gateway, params);
+      // Subscribe to the live bus FIRST (openScopeEvents pins the cursor at
+      // head; the ring buffer retains events), THEN read the channel
+      // snapshot. Opening the live stream before the snapshot closes the
+      // gap where a delta could land between snapshot and subscribe; the
+      // tiny overlap (a delta counted in both the snapshot version and the
+      // live tail) is absorbed by the client's idempotent, version-gated
+      // reducer.
+      let iterable = openScopeEvents(ctx.gateway, params);
       if (!iterable) {
         // No conforming AgentickError class covers "scope target not
         // found" today. AppNotFoundError is the closest fit (session
@@ -77,6 +124,15 @@ export const subscriptionsWireExtension: WireExtension = defineWireExtension({
         throw new AppNotFoundError({
           appId: params.scope.kind === "app" ? params.scope.id : String(params.scope),
         });
+      }
+
+      // Open-with-snapshot: when this is a single-session-channel
+      // subscription and a provider owns the channel, the FIRST frame the
+      // subscriber receives is the channel's current snapshot; live deltas
+      // follow on the same stream.
+      const snapEnvelope = await resolveChannelSnapshot(ctx.gateway, params);
+      if (snapEnvelope) {
+        iterable = withSnapshot(snapEnvelope, iterable);
       }
 
       let cancelled = false;

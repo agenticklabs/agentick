@@ -74,7 +74,9 @@ import {
   type KeyedNotifier,
 } from "@agentick/pubsub-next";
 import { ulid, type JsonPatchOp } from "@agentick/utils-next";
+import type { ChannelSnapshotProvider } from "@agentick/spec-next";
 import {
+  KNOBS_STATE_CHANNEL,
   KNOBS_STATE_CHANNEL_FQN,
   knobPointer,
   type KnobsStateFrame,
@@ -85,7 +87,10 @@ import {
 // Harness
 // ============================================================================
 
-export class KnobsHarness extends BaseHarness<"knobs"> implements KnobsHarnessProtocol {
+export class KnobsHarness
+  extends BaseHarness<"knobs">
+  implements KnobsHarnessProtocol, ChannelSnapshotProvider
+{
   private readonly values = new Map<string, KnobPrimitive>();
   private readonly descriptors = new Map<string, KnobRegistration>();
   private readonly notifier: KeyedNotifier = createKeyedNotifier();
@@ -277,6 +282,23 @@ export class KnobsHarness extends BaseHarness<"knobs"> implements KnobsHarnessPr
   }
 
   // ─────────── State channel (ADR 73) ───────────
+
+  /**
+   * The channel this harness owns — {@link ChannelSnapshotProvider}. The
+   * session's `channelSnapshot("knobs-state")` renders {@link
+   * channelSnapshotPayload} into the opening frame a fresh subscriber
+   * receives before any live delta.
+   */
+  readonly snapshotChannel = KNOBS_STATE_CHANNEL;
+
+  /**
+   * {@link ChannelSnapshotProvider} — the current knob store as the
+   * channel's opening frame. Delegates to {@link stateSnapshotFrame} (reads
+   * the current version; does not advance it — this is an observation).
+   */
+  channelSnapshotPayload(): unknown {
+    return this.stateSnapshotFrame();
+  }
 
   /**
    * Current full state as a snapshot frame — the seed a late subscriber
