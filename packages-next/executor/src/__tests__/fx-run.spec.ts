@@ -20,6 +20,8 @@ import type {
   ExecutionTarget,
   LanguageModelExecutionResult,
   LanguageModelInput,
+  NormalizeInput,
+  ProjectInput,
   RenderedTree,
   RunInput,
 } from "@agentick/spec-next";
@@ -137,5 +139,64 @@ describe("LanguageModelExecutor — .fx.run dual-typed edge", () => {
     if (fromFx.outcome === "succeeded" && fromPromise.outcome === "succeeded") {
       expect(fromFx.result.output).toEqual(fromPromise.result.output);
     }
+  });
+});
+
+// ============================================================================
+// project / normalize twins (Stage 3) — the streaming path splits
+// project → executeStream → normalize so it can forward deltas; the two
+// bookend phases compose in the loop's fiber via these twins.
+// ============================================================================
+
+const mkProjectInput = (): ProjectInput => ({
+  compiled: emptyTree(),
+  target: { kind: "language-model", provider: "stub", modelId: "stub-v1" },
+  tools: [],
+});
+
+const mkNormalizeInput = (raw: StubRaw): NormalizeInput<StubRaw> => ({
+  targetOutput: raw,
+  target: { kind: "language-model", provider: "stub", modelId: "stub-v1" },
+  scope: {},
+});
+
+describe("LanguageModelExecutor — .fx.project / .fx.normalize twins", () => {
+  it("fx.project is a composable Effect; project() is the Promise facade; same output", async () => {
+    const exec = await makeExecutor("proj");
+    const eff = exec.fx.project(mkProjectInput());
+
+    expect(Effect.isEffect(eff)).toBe(true);
+    expect(eff).not.toBeInstanceOf(Promise);
+
+    const fromFx = await Effect.runPromise(eff);
+    const fromFacade = await exec.project(mkProjectInput());
+    expect(fromFx).toEqual(fromFacade);
+  });
+
+  it("fx.normalize is a composable Effect; normalize() is the Promise facade; same result", async () => {
+    const exec = await makeExecutor("norm");
+    const eff = exec.fx.normalize(mkNormalizeInput({ text: "hi" }));
+
+    expect(Effect.isEffect(eff)).toBe(true);
+    expect(eff).not.toBeInstanceOf(Promise);
+
+    const fromFx = await Effect.runPromise(eff);
+    const fromFacade = await exec.normalize(mkNormalizeInput({ text: "hi" }));
+    expect(fromFx.output).toEqual(fromFacade.output);
+    expect(fromFx.output).toEqual([{ type: "text", text: "hi" }]);
+  });
+
+  it("project + normalize nest in one Effect.gen (the streaming-path bookends, single fiber)", async () => {
+    const exec = await makeExecutor("proj-norm");
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        // project → (executeStream elided) → normalize, all in-fiber.
+        yield* exec.fx.project(mkProjectInput());
+        return yield* exec.fx.normalize(mkNormalizeInput({ text: "composed" }));
+      }),
+    );
+
+    expect(result.output).toEqual([{ type: "text", text: "composed" }]);
   });
 });

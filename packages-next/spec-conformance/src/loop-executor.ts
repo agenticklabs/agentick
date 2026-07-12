@@ -106,6 +106,8 @@ function stubExecutor(
   return {
     fx: {
       run: runFx,
+      project: () => Effect.succeed({ messages: [] }),
+      normalize: (input) => Effect.succeed(input.targetOutput as LanguageModelExecutionResult),
       executeStream: () => Effect.succeed(scripts[Math.min(i, scripts.length - 1)] as unknown),
     },
     ready: Promise.resolve(),

@@ -66,7 +66,12 @@ function mkRecordingExecutor(): {
     family: "language-model",
     target,
     ready: Promise.resolve(),
-    fx: { run: runFx, executeStream: () => Effect.succeed(result) },
+    fx: {
+      run: runFx,
+      project: () => Effect.succeed({ messages: [] }),
+      normalize: () => Effect.succeed(result),
+      executeStream: () => Effect.succeed(result),
+    },
     async project() {
       return { messages: [] };
     },

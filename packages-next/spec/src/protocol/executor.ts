@@ -46,8 +46,11 @@ import type { AsyncStream } from "./async-stream.js";
  * own slice. `run`'s E channel is the union — see `ExecutorError` in
  * `data/execution-result.ts`.
  */
-/** Single-tag projection failure — migrated to a class (ADR 41). */
-export type { ProjectionFailed as ProjectionError } from "../errors/harnesses.js";
+/** Single-tag projection failure — migrated to a class (ADR 41). Local
+ * alias form (mirrors {@link NormalizeError}) so the name is usable
+ * in-file — a bare `export type { … as … }` re-export creates no local
+ * binding. */
+export type ProjectionError = import("../errors/harnesses.js").ProjectionFailed;
 
 /** Migrated to class hierarchy (ADR 41). Re-exports from `../errors/harnesses.js`. */
 export {
@@ -422,6 +425,27 @@ export interface ExecutorFx<
   ): Effect.Effect<ExecutorTerminal<TResult>, ExecutorError | SubstrateError, never>;
 
   /**
+   * IR → target input projection (the first execution phase). Pure —
+   * deterministic for the same inputs. Composes in the loop's fiber on
+   * the STREAMING path, where `run` is not used (the loop splits
+   * project → executeStream → normalize so it can forward deltas).
+   *
+   * @throws {ProjectionError} on the `E` channel.
+   */
+  project(input: ProjectInput): Effect.Effect<TInput, ProjectionError | SubstrateError, never>;
+
+  /**
+   * Target output → canonical `ExecutionResult` (the final execution
+   * phase). Deterministic. The streaming path's terminal step after the
+   * sink-fold `executeStream` returns the accumulated raw output.
+   *
+   * @throws {NormalizeError} on the `E` channel.
+   */
+  normalize(
+    input: NormalizeInput<TOutput>,
+  ): Effect.Effect<TResult, NormalizeError | SubstrateError, never>;
+
+  /**
    * The streaming-edge canonical form (sink-fold): drives the provider
    * once, invoking `sink` per emitted `AdapterDelta`, and succeeds with
    * the final accumulated raw output. Composes in the loop's fiber —
@@ -444,7 +468,7 @@ export interface ExecutorProtocol<
   TInput = unknown,
   TOutput = unknown,
   TResult extends ExecutionResult = ExecutionResult,
-> extends PromiseView<Pick<ExecutorFx<TInput, TOutput, TResult>, "run">> {
+> extends PromiseView<Pick<ExecutorFx<TInput, TOutput, TResult>, "run" | "project" | "normalize">> {
   /**
    * The Effect-canonical composable surface (ADR 77, the dual-typed edge)
    * — the twins the spine composes in-fiber (`yield* executor.fx.run(...)`).
@@ -464,13 +488,8 @@ export interface ExecutorProtocol<
    */
   readonly ready: Promise<void>;
 
-  /**
-   * IR → target input projection. Pure (deterministic for the same
-   * inputs). The first phase of an execution.
-   *
-   * @throws {ProjectionError}
-   */
-  project(input: ProjectInput): Promise<TInput>;
+  // `project` is derived from `PromiseView<ExecutorFx>` — the Promise
+  // facade of the Effect-canonical {@link ExecutorFx.project} twin.
 
   /**
    * Target/provider request execution. Returns the final accumulated
@@ -502,12 +521,8 @@ export interface ExecutorProtocol<
    */
   executeStream?(input: ExecuteInput<TInput>): ExecutorStream<TOutput>;
 
-  /**
-   * Target output → canonical `ExecutionResult`. Deterministic.
-   *
-   * @throws {NormalizeError}
-   */
-  normalize(input: NormalizeInput<TOutput>): Promise<TResult>;
+  // `normalize` is derived from `PromiseView<ExecutorFx>` — the Promise
+  // facade of the Effect-canonical {@link ExecutorFx.normalize} twin.
 
   // `run` is derived from `PromiseView<ExecutorFx>` — the Promise facade of
   // the Effect-canonical {@link ExecutorFx.run} twin. The concrete harness

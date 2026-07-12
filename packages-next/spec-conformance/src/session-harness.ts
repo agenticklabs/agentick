@@ -192,7 +192,12 @@ function stubExecutor(): ExecutorProtocol<unknown, unknown, LanguageModelExecuti
   const runFx = (): Effect.Effect<ExecutorTerminal<LanguageModelExecutionResult>> =>
     Effect.succeed({ outcome: "succeeded", result });
   return {
-    fx: { run: runFx, executeStream: () => Effect.succeed({} as unknown) },
+    fx: {
+      run: runFx,
+      project: () => Effect.succeed({ messages: [] }),
+      normalize: () => Effect.succeed(result),
+      executeStream: () => Effect.succeed({} as unknown),
+    },
     ready: Promise.resolve(),
     project: async () => ({ messages: [] }),
     execute: async () => ({}),

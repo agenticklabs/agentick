@@ -172,23 +172,27 @@ export class FakeLanguageModelExecutor
 
   // ──────── ExecutorProtocol ────────
 
-  project(input: ProjectInput): Promise<LanguageModelInput> {
-    const op: Operation<ProjectInput, LanguageModelInput> = {
+  private projectFx(
+    input: ProjectInput,
+  ): Effect.Effect<LanguageModelInput, ProjectionError | SubstrateError, never> {
+    const op: Operation<ProjectInput, LanguageModelInput, ProjectionError> = {
       opId: `executor:project:${ulid()}`,
       surface: "executor",
       name: "executor:command:project",
       scope: input.scope ?? {},
       input,
     };
-    return runHarnessProtocol(
-      this.runOperation(op, (i) =>
-        Effect.try({
-          try: () => projectImpl(i),
-          catch: (cause): ProjectionError =>
-            new ProjectionFailed({ reason: "projection threw", cause }),
-        }),
-      ),
+    return this.runOperation(op, (i) =>
+      Effect.try({
+        try: () => projectImpl(i),
+        catch: (cause): ProjectionError =>
+          new ProjectionFailed({ reason: "projection threw", cause }),
+      }),
     );
+  }
+
+  project(input: ProjectInput): Promise<LanguageModelInput> {
+    return runHarnessProtocol(this.projectFx(input));
   }
 
   execute(input: ExecuteInput<LanguageModelInput>): Promise<unknown> {
@@ -270,8 +274,10 @@ export class FakeLanguageModelExecutor
     };
   }
 
-  normalize(input: NormalizeInput<unknown>): Promise<LanguageModelExecutionResult> {
-    const op: Operation<NormalizeInput<unknown>, LanguageModelExecutionResult> = {
+  private normalizeFx(
+    input: NormalizeInput<unknown>,
+  ): Effect.Effect<LanguageModelExecutionResult, NormalizeError | SubstrateError, never> {
+    const op: Operation<NormalizeInput<unknown>, LanguageModelExecutionResult, NormalizeError> = {
       opId: `executor:normalize:${ulid()}`,
       surface: "executor",
       name: "executor:command:normalize",
@@ -281,14 +287,16 @@ export class FakeLanguageModelExecutor
     // normalize is independent of the run-sequence cursor — it just
     // identity-transforms whatever was passed in (matching what a real
     // adapter would do parsing a provider response).
-    return runHarnessProtocol(
-      this.runOperation(op, (i) =>
-        Effect.try({
-          try: () => normalizeImpl(i, this.scriptedSequence[0]),
-          catch: (cause): NormalizeError => new NormalizationFailed({ cause }),
-        }),
-      ),
+    return this.runOperation(op, (i) =>
+      Effect.try({
+        try: () => normalizeImpl(i, this.scriptedSequence[0]),
+        catch: (cause): NormalizeError => new NormalizationFailed({ cause }),
+      }),
     );
+  }
+
+  normalize(input: NormalizeInput<unknown>): Promise<LanguageModelExecutionResult> {
+    return runHarnessProtocol(this.normalizeFx(input));
   }
 
   /**
@@ -299,6 +307,8 @@ export class FakeLanguageModelExecutor
   get fx(): ExecutorFx<LanguageModelInput, unknown, LanguageModelExecutionResult> {
     return {
       run: (input) => this.runFx(input),
+      project: (input) => this.projectFx(input),
+      normalize: (input) => this.normalizeFx(input),
       executeStream: (input, sink) => this.executeStreamFx(input, sink),
     };
   }

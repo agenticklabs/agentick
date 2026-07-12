@@ -332,23 +332,33 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
   // ExecutorProtocol — framework-final, do not override in subclasses
   // ──────────────────────────────────────────────────────────────────
 
-  project(input: ProjectInput): Promise<LanguageModelInput> {
-    const op: Operation<ProjectInput, LanguageModelInput> = {
+  /**
+   * The composable `project` Effect the harness builds — the
+   * `.fx.project` twin. Returns `runOperation(op, body)` un-run so the
+   * loop's streaming path composes it in one fiber. {@link project} is
+   * the facade.
+   */
+  private projectFx(
+    input: ProjectInput,
+  ): Effect.Effect<LanguageModelInput, ProjectionError | SubstrateError, never> {
+    const op: Operation<ProjectInput, LanguageModelInput, ProjectionError> = {
       opId: `executor:project:${ulid()}`,
       surface: "executor",
       name: "executor:command:project",
       scope: input.scope ?? {},
       input,
     };
-    return runHarnessProtocol(
-      this.runOperation(op, (i) =>
-        Effect.try({
-          try: () => this.projectImpl(i),
-          catch: (cause): ProjectionError =>
-            new ProjectionFailed({ reason: "projection threw", cause }),
-        }),
-      ),
+    return this.runOperation(op, (i) =>
+      Effect.try({
+        try: () => this.projectImpl(i),
+        catch: (cause): ProjectionError =>
+          new ProjectionFailed({ reason: "projection threw", cause }),
+      }),
     );
+  }
+
+  project(input: ProjectInput): Promise<LanguageModelInput> {
+    return runHarnessProtocol(this.projectFx(input));
   }
 
   execute(input: ExecuteInput<LanguageModelInput>): Promise<unknown> {
@@ -411,22 +421,32 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
     });
   }
 
-  normalize(input: NormalizeInput<unknown>): Promise<LanguageModelExecutionResult> {
-    const op: Operation<NormalizeInput<unknown>, LanguageModelExecutionResult> = {
+  /**
+   * The composable `normalize` Effect the harness builds — the
+   * `.fx.normalize` twin. Returns `runOperation(op, body)` un-run so the
+   * loop's streaming path composes it in one fiber. {@link normalize} is
+   * the facade.
+   */
+  private normalizeFx(
+    input: NormalizeInput<unknown>,
+  ): Effect.Effect<LanguageModelExecutionResult, NormalizeError | SubstrateError, never> {
+    const op: Operation<NormalizeInput<unknown>, LanguageModelExecutionResult, NormalizeError> = {
       opId: `executor:normalize:${ulid()}`,
       surface: "executor",
       name: "executor:command:normalize",
       scope: input.scope ?? {},
       input,
     };
-    return runHarnessProtocol(
-      this.runOperation(op, (i) =>
-        Effect.try({
-          try: () => this.normalizeRaw(i.targetOutput as TRaw),
-          catch: (cause): NormalizeError => new NormalizationFailed({ cause }),
-        }),
-      ),
+    return this.runOperation(op, (i) =>
+      Effect.try({
+        try: () => this.normalizeRaw(i.targetOutput as TRaw),
+        catch: (cause): NormalizeError => new NormalizationFailed({ cause }),
+      }),
     );
+  }
+
+  normalize(input: NormalizeInput<unknown>): Promise<LanguageModelExecutionResult> {
+    return runHarnessProtocol(this.normalizeFx(input));
   }
 
   /**
@@ -436,14 +456,18 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
    * derived facade (`runHarnessProtocol` at the boundary). Both drive the
    * SAME Operation — `fx.run` is `run` minus the terminal `runPromise`.
    *
-   * TODO(stage-2): migrate `project` / `execute` / `normalize` / `abort`
-   * into `ExecutorFx` too, and design the `executeStream` twin (Effect
-   * `Stream<AdapterDelta>` vs `Effect<ExecutorStream>`) when Stage 3
-   * composes the loop's streaming path. `run` is the beachhead.
+   * Stage 3: `project` / `normalize` are twinned (the loop's streaming
+   * path composes project → executeStream → normalize in one fiber).
+   * `execute` / `abort` are NOT twinned — the loop never calls them
+   * directly (`run` subsumes `execute` on the non-streaming path; `abort`
+   * is a control-plane sync op), so they remain facade-only until a
+   * consumer needs the Effect twin.
    */
   get fx(): ExecutorFx<LanguageModelInput, TRaw, LanguageModelExecutionResult> {
     return {
       run: (input) => this.runFx(input),
+      project: (input) => this.projectFx(input),
+      normalize: (input) => this.normalizeFx(input),
       executeStream: (input, sink) => this.executeStreamFx(input, sink),
     };
   }

@@ -128,15 +128,43 @@ doesn't.
 
 ## Stage 3 — Compose the spine, leaf-up (each behind dual-path + green gate)
 
-- [ ] **Executor** composes; the model HTTP call stays `Effect.tryPromise(adapter.execute)`
-      (external I/O — a legit Promise boundary).
-- [ ] **Tool-executor** composes; the user tool handler stays `Effect.tryPromise(handler)`.
-- [ ] **Reconciler** composes; the react-reconciler render stays `Effect.tryPromise`.
+**DISCOVERY (2026-07-12, verified against the code before starting):** the Stage-2
+close-out ("remaining twins: StateApplicator + session") **undercounted**. Tracing every
+downstream call in `runExecutionAsync` against the `.fx` surface that actually exists,
+**4 of ~11 internal harness calls are twinned** (`renderTree`, `run`, `executeStream`,
+`dispatch`). A clean `Effect.gen` loop — one that composes with **zero internal
+`tryPromise` islands** (wrapping an internal harness call in `tryPromise` re-launches its
+own `runPromise` root via the facade, re-severing the fiber at exactly the boundary Stage 3
+mends: span detaches, interrupt doesn't reach it) — needs these **7 more twins first**:
+
+| Twin needed | Harness | Loop call site | Why (path) |
+|---|---|---|---|
+| `project` | executor | streaming path | project → executeStream → normalize is split on the stream path |
+| `normalize` | executor | streaming path | ″ |
+| `compileForTick` | tool-executor | every tick | precedence-resolved model tool set |
+| `replaceReconcilerTools` | tool-executor | every tick | sync IR tool decls into the registry |
+| `notifyLifecycle` | reconciler | 2 awaited (tick-start/tick-end bridges) + ~4 fire-and-forget | ADR 67 settle-before-decide ordering rides the two awaited ones |
+| `applyExecutorResult` | StateApplicator | per tick | writes the timeline the next render reads |
+| `applyToolResults` | StateApplicator | per tick | ″ |
+
+`tryPromise` survives ONLY at the two genuine external-I/O boundaries — `adapter.execute`
+(inside the executor) and the user tool handler (inside tool-executor). `notifyTickEnd` is a
+**session-provided callback** (not a harness method); it stays a Promise callback wrapped in
+`tryPromise` as an interim until the session twin lands (its Effect variant is session-twin
+territory). Fire-and-forget `void notifyLifecycle` stays detached (hook throws must not fail
+the run — telemetry nesting is low-value there); only the two *awaited* lifecycle bridges twin.
+
+**Corrected order (twin-completion is the low-risk additive tranche; the loop rewrite is the crux):**
+
+- [ ] **executor `project` + `normalize`** twins (known `TODO(stage-2)`; unblocks the stream path).
+- [ ] **tool-executor `compileForTick` + `replaceReconcilerTools`** twins.
+- [ ] **reconciler `notifyLifecycle`** twin (both impls: CallbackReconciler + React ReconcilerHarness).
+- [ ] **`StateApplicator` fx** (`applyExecutorResult` + `applyToolResults`).
 - [ ] **Loop `Effect.gen` rewrite (THE CRUX)** — `runExecutionAsync` → generator,
-      `yield* executor.fx.run(...)` etc. **Characterization suite stays green UNCHANGED.**
-      Interruption + error-channel behavior explicitly re-tested.
+      `yield* executor.fx.run(...)` etc., **zero internal `tryPromise` islands**.
+      **Characterization suite stays green UNCHANGED.** Interruption + error-channel re-tested.
 - [ ] **Session** — `send` composes `yield* loop.fx.runExecution`; `runPromise` once
-      at the entity edge on the tracer runtime.
+      at the entity edge on the tracer runtime; `notifyTickEnd` gains its Effect variant here.
 
 **Gate per box:** workspace green + full suite + characterization unchanged.
 

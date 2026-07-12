@@ -147,7 +147,16 @@ function mkRecordingExecutor(): {
     family: "language-model",
     target: { kind: "language-model", provider: "fake", modelId: "fake-v1" },
     ready: Promise.resolve(),
-    fx: { run: runFx, executeStream: () => Effect.succeed(result) },
+    fx: {
+      run: runFx,
+      project: (input) =>
+        Effect.sync(() => {
+          captured.projects.push(input.tools);
+          return { messages: [] };
+        }),
+      normalize: () => Effect.succeed(result),
+      executeStream: () => Effect.succeed(result),
+    },
     async project(input: ProjectInput): Promise<LanguageModelInput> {
       captured.projects.push(input.tools);
       return { messages: [] };
