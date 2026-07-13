@@ -107,6 +107,7 @@ interface CreateGatewayOptions {
   cluster?: ClusterFactory; // Phase 5
   tools?: readonly ToolDeclaration[]; // gateway-scope tools (see below)
   wireExtensions?: readonly WireExtension[]; // ADR 46 — see below
+  authorizer?: Authorizer; // authz policy — see "Authentication & authorization"
   metadata?: Readonly<Record<string, unknown>>;
 }
 ```
@@ -175,6 +176,15 @@ const crmExt = defineWireExtension({
   namespace: "crm",
   methods: {
     "crm/listContacts": async (_, ctx) => ({ contacts: await loadContacts() }),
+    "crm/deleteContact": async ({ id }) => {
+      await removeContact(id);
+      return null;
+    },
+  },
+  // Per-method authorization (see "Authentication & authorization").
+  // A method with no entry is gated by its verb scope (`crm:listContacts`).
+  auth: {
+    "crm/deleteContact": { required: true, scope: "crm:admin" }, // crm:deleteContact AND crm:admin
   },
   notifications: ["crm/contact-changed"],
 });
@@ -217,6 +227,133 @@ const { extensions } = await client.request("_extensions/list", {});
 See [ADR 46 — Wire extensions](../../docs/proposals/v2/blueprint/46-wire-extensions.md)
 and [`@agentick/spec-next/wire`](../spec/src/wire/README.md) for the
 extension authoring guide.
+
+## Authentication & authorization
+
+Two edges, each crossed exactly once (ADR 51). **Authentication** turns a
+credential into an identity at ingress; **authorization** decides — at a single
+choke point, before any handler runs — whether that identity may call the method.
+Harnesses are authz-unaware: there are no in-handler permission checks.
+
+```text
+  client ──token──▶  AuthSource.authenticate  ──▶  IngressIdentity { principal, scopes }
+                     (ingress · fail-closed)
+
+  request ─────────▶  dispatch choke point  (@agentick/transport-next)
+                       1. session requiredScopes ceiling   (#199 — un-waivable)
+                       2. verb-derived scope                (session/send → session:send)
+                       3. + declared role                   (WireExtension.auth — additive)
+                       ▼ allowed
+                     handler runs
+```
+
+### 1. Authentication — the `AuthSource`
+
+An `AuthSource` maps a presented credential (bearer token) to an
+`IngressIdentity` (`{ principal, scopes, user? }`), stamped on the connection at
+ingress. `staticTokenAuthSource` (from `@agentick/transport-next`) is the bundled
+table form; OAuth/JWT sources produce the same shape from token claims.
+
+```ts
+import { staticTokenAuthSource } from "@agentick/transport-next";
+
+const authSource = staticTokenAuthSource({
+  tokens: {
+    "tok-alice": { principal: "alice", scopes: ["session:send", "knobs:set"] },
+    "tok-root": { principal: "root", scopes: ["*"] },
+  },
+  // allowAnonymous: false (default) — a configured source REJECTS a missing token.
+});
+```
+
+Two poles, by design:
+
+- **No `AuthSource`** → local/trusted pole: no principal is stamped; only the
+  anonymous-local path the authorizer permits passes.
+- **`AuthSource` configured** → **fail-closed**: a missing or invalid credential is
+  rejected at ingress, before dispatch ever runs.
+
+The source runs at the transport server via `authenticateIngress` (the ADR 50
+`GatewayInstaller.interceptIngress` seam generalizes where it's wired). Identity
+is stamped once; everything downstream reads the stamp — it is never re-derived.
+
+### 2. Authorization — the `Authorizer` (your policy)
+
+`createGateway({ authorizer })` sets the policy. The triad (ADR 51 §4.2): the
+framework owns the enforcement point (the dispatch choke point), the `Authorizer`
+is the port, the **policy is yours**. Bundled authorizers cover the poles:
+
+```ts
+import { createGateway, staticAuthorizer } from "@agentick/gateway-next";
+
+const gateway = await createGateway({
+  authorizer: staticAuthorizer({
+    grants: {
+      alice: ["session:*", "knobs:set"], // principal → allowed scope patterns
+      root: ["*"],
+    },
+    // anonymous: [] (default) — unauthenticated callers are denied everything.
+  }),
+});
+```
+
+- **`staticAuthorizer({ grants })`** — a server-side table: principal → scope
+  patterns. Cover-aware (`session:*` satisfies `session:send`).
+- **`claimsAuthorizer()`** — allow iff the credential's OWN scope claims cover the
+  requested scope (OAuth-shaped; grants ride the token, no server table).
+- **`permissiveAuthorizer()`** — allow everything. Explicit opt-in for no-auth
+  local deployments.
+- **Default when unset: `unconfiguredAuthorizer` — deny-by-default.** An
+  authenticated principal against no policy is DENIED (auth-without-policy is a
+  misconfiguration); only the anonymous-local pole passes. You never ship ungated
+  by accident.
+
+The same-principal rule (ADR 48): a method targeting a session whose owning
+principal differs from the caller's is denied unless a grant explicitly elevates.
+
+### 3. Authorizing a specific action — `WireExtension.auth`
+
+Every method is gated by default: its authz scope **defaults to the verb name**
+(`crm/deleteContact` → `crm:deleteContact`), so grants are written once and cover
+both the porcelain and dynamic-command lanes (ADR 51 §3.3 anti-bypass). Declare
+`auth` on the extension to change a method's requirement:
+
+```ts
+const crmExt = defineWireExtension({
+  name: "@my-org/crm",
+  namespace: "crm",
+  methods: {
+    /* … */
+  },
+  auth: {
+    "crm/health": { required: false }, // OPEN — policy skipped (rare)
+    "crm/deleteContact": { required: true, scope: "crm:admin" }, // verb scope AND role
+    // unlisted methods → gated by their verb scope
+  },
+});
+```
+
+- **`required: false`** → **open**: the authorizer policy is skipped. The target
+  session's structural `requiredScopes` ceiling still applies — open does not waive
+  the resource ceiling. Reserve for methods with no gated dynamic-lane counterpart.
+- **`scope: "role"`** → **additive**: required ON TOP of the verb scope, never in
+  place of it. A role can only _tighten_, so a method is never reachable under a
+  label different from its verb (§3.3 anti-bypass). `crm/deleteContact` requires
+  BOTH `crm:deleteContact` AND `crm:admin`.
+- **absent** → verb scope, gated (the default; the common case).
+
+### The structural ceiling (`requiredScopes`)
+
+A session may carry `requiredScopes` (resource-declared identity, ADR 48/#199).
+The choke point checks it **first** and **no authorizer can waive it** — not an
+absent one, not a `permissiveAuthorizer`, not a `required: false` method. It's the
+floor beneath policy: hold the ceiling scopes, or you never reach the session at
+all.
+
+> **Verified by** `@agentick/transport-next` — `wire-declarative-auth.spec.ts`
+> (verb-scope default, `required:false` open, additive role, §3.3 anti-bypass,
+> ceiling-un-waivable) and the framework `wire-framework-extensions` /
+> `wire-lane-e2e` suites. See [ADR 51 — invocation & authorization](../../docs/proposals/v2/blueprint/51-invocation-and-authorization.md).
 
 ## Server-initiated notifications (#311)
 
