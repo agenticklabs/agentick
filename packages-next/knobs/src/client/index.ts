@@ -8,4 +8,10 @@
  * client without pulling the server harness into a browser bundle.
  */
 
-export { knobsStateView, type KnobsState } from "./knobs-state-view.js";
+export {
+  knobsStateView,
+  type KnobsState,
+  type KnobsClient,
+  type KnobsCommandClient,
+} from "./knobs-state-view.js";
+export { knobsHandle, type KnobsHandleView } from "./knobs-handle.js";

@@ -24,9 +24,22 @@ import { KNOBS_STATE_CHANNEL, type KnobsStateFrame } from "../channel.js";
 /** The reduced knob store: knob id → current primitive value. */
 export type KnobsState = Readonly<Record<string, KnobPrimitive>>;
 
-/** Minimal client surface the view needs. */
-interface KnobsClient {
+/**
+ * Read surface for the knobs client façade: `knobsStateView` folds the
+ * `knobs-state` channel and only needs `transport.subscribe`.
+ */
+export interface KnobsClient {
   readonly transport: Pick<ClientTransport, "subscribe">;
+}
+
+/**
+ * Command surface for the full knobs resource handle: `knobsHandle` folds
+ * the channel (read) AND issues the `knobs/set` command, so it needs both
+ * `subscribe` and `request`. A superset of {@link KnobsClient} — a command
+ * client is a valid read client.
+ */
+export interface KnobsCommandClient {
+  readonly transport: Pick<ClientTransport, "subscribe" | "request">;
 }
 
 /**

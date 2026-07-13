@@ -26,4 +26,5 @@ export {
   type KnobsStateDeltaFrame,
 } from "./channel.js";
 export { withKnobs, type WithKnobsOptions } from "./extension.js";
+export { knobsWireExtension } from "./wire.js";
 export { runKnobsHarnessConformance } from "./conformance.js";

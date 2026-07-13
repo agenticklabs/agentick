@@ -28,6 +28,16 @@ export interface WithKnobsOptions {
   readonly initial?: Readonly<Record<string, string | number | boolean>>;
 }
 
+// TODO(slice-4): register `knobsWireExtension` (from ./wire.js) in
+// production by returning an `ExtensionBundle`
+// `{ name, session, wire: [knobsWireExtension] }` from `withKnobs()` — the
+// gateway's `splitExtensions` folds `bundle.wire` into `wireFromBundles` and
+// registers it. Blocked on ADR 26 Step 8: `withKnobs()` isn't yet consumed by
+// `createGateway({ extensions })` (the SessionHarness constructs KnobsHarness
+// directly in session-bridges.ts), so widening this return type registers
+// nothing today and would only be a framework-composition guess. Slice 4's
+// tests register `knobsWireExtension` explicitly; production wiring lands with
+// Step 8. See packages-next/gateway/src/harness.ts (splitExtensions).
 export function withKnobs(options: WithKnobsOptions = {}): SessionExtension {
   return {
     name: "@agentick/knobs-next",
