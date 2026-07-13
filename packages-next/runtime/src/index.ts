@@ -26,6 +26,7 @@ export {
 export {
   BaseHarness,
   HandlerRegistry,
+  Hooks,
   MiddlewareChain,
   OperationOutcomeError,
   composeMiddleware,
