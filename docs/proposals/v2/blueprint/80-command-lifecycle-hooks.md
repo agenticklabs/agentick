@@ -84,19 +84,35 @@ createApp(<Agent />, {
 });
 ```
 
-`CommandHooks` is an **empty-seed interface** (the `HookBridges` pattern, ADR 27). Each harness package augments it with its **exposed** verbs, typed to their I/O:
+`CommandHooks` is **derived, never hand-written.** The augmentation target is an empty-seed `CommandRegistry` (id → its I/O); each package contributes **one line per verb**, and both typed hooks fall out via a mapped type:
 
 ```ts
+export type BeforeHook<In,  Ctx = RuntimeContext> = (input:  In,  ctx: Ctx) => In  | void | Promise<In  | void>;
+export type AfterHook<Out,  Ctx = RuntimeContext> = (output: Out, ctx: Ctx) => Out | void | Promise<Out | void>;
+//                    ^^ the transform invariant: return type === input type (rule: in-type is out-type)
+
+export interface CommandRegistry {}   // empty seed — augmented per package
+
+type Cap<S extends string>    = S extends `${infer H}${infer T}` ? `${Uppercase<H>}${T}` : S;
+type Pascal<S extends string> = S extends `${infer A}:${infer B}` ? `${Cap<A>}${Pascal<B>}` : Cap<S>;
+
+export type CommandHooks =
+  & { [K in keyof CommandRegistry as `onBefore${Pascal<K & string>}`]?:
+        BeforeHook<CommandRegistry[K] extends { input:  infer I } ? I : never> }   // before ← op INPUT
+  & { [K in keyof CommandRegistry as `onAfter${Pascal<K & string>}`]?:
+        AfterHook<CommandRegistry[K]  extends { output: infer O } ? O : never> };  // after  ← op OUTPUT
+
+// one line per command; both hooks generated + typed:
 declare module "@agentick/spec-next" {
-  interface CommandHooks {
-    onBeforeModelGenerate?:  BeforeHook<LanguageModelInput, RuntimeContext>;
-    onAfterModelGenerate?:   AfterHook<LanguageModelExecutionResult, RuntimeContext>;
-    onBeforeTimelineAppend?: BeforeHook<TimelineAppendInput, RuntimeContext>;
-    onAfterTimelineAppend?:  AfterHook<TimelineEntry, RuntimeContext>;
-    // …contributed per-package
+  interface CommandRegistry {
+    "model:generate":  { input: LanguageModelInput;  output: LanguageModelExecutionResult };
+    "timeline:append": { input: TimelineAppendInput; output: TimelineEntry };
   }
 }
+// ⇒ CommandHooks gains onBeforeModelGenerate?: BeforeHook<LanguageModelInput>, onAfterModelGenerate?, …
 ```
+
+The elegance is the **symmetry**: the type-level `Pascal<K>` (which names the hook members) is the exact twin of the runtime `deriveHookNames(op.name)` (which resolves which hook fires). One command-id→hook-name transformation, once in the type system, once at runtime — they must agree, which is a test.
 
 **Exposure gate.** Only commands declared `exposure: "public"` contribute keys (mirroring tool `audience` / wire `exposure`). So `onBeforeKnobSet` exists but an internal `knob:_reconcile` never surfaces — the gate is what keeps "every command is hookable" from becoming "every invariant is user-breakable."
 
@@ -138,6 +154,17 @@ Tempting under "everything is a harness," but wrong, for reasons tied to what a 
 
 `Hooks` is the command-middleware registry every `BaseHarness` already owns, exposed as the cascaded declarative object (§5) + the `.hooks` accessor. A **facet, not a subject** — which keeps the mechanism intrinsic to `command()` instead of lifted back into a parallel subsystem.
 
+### 9. Wire-extensions — the same seam, one straggler to route
+
+Wire methods (`<ext>/<method>`, e.g. `knobs/set`) are dispatched **directly** today — `dispatchRequest` calls `resolution.handler(req.params, ctx)` (`transport/src/server/dispatch.ts:61`), not through `runOperation`. So they inherit hooks at two levels:
+
+- **Command-level: free.** A wire handler that delegates to a harness command (the pattern — `knobs/set` → `knob:set`) fires that command's hooks regardless of origin. Wire or local, same `onBeforeKnobSet`.
+- **Wire-level: route the dispatch.** To hook the *wire method itself* (raw JSON-RPC `params` + identity, pre-translation), wrap the handler call in `this.runOperation("<ext>:<method>", h)` at that one choke point — the identical "straggler → `runOperation`" move as the session verbs (slice 0). Wire methods then get `onBefore/After<Ext><Method>` + `<ext>-<method>-start/end`, cascading from the **gateway** (the top tier) — the home for deployment-wide wire policy (audit, rate-limit, param-validate every remote call).
+
+**Auth is the archetypal `onBefore` veto — and it stays explicit.** `authorizeDispatch` (`dispatch.ts:249`) already runs before the handler and throws to deny (`WireRpcError.forbidden`) with `required:false`→open + an un-waivable ceiling — structurally an `onBefore` veto hook. This *validates* the model (the before-veto shape was always there for auth). But it must **not** be demoted to a userland-registered hook that a config could omit ([[wire_constraints_at_the_wire]], [[credentials_never_cross_wire]]). Composition: **auth remains the framework's explicit, un-waivable first pre-gate; the userland hook cascade runs inside `runOperation`, after auth passes** — a wire `onBeforeKnobsSet` reshapes/observes an *already-authorized* request and cannot bypass the gate.
+
+**Delimiter + layer note.** Wire ids use `/` (`knobs/set`), commands use `:` (`knob:set`); `deriveHookNames`/`Pascal` normalize both. Note `knobs/set` (wire) and `knob:set` (command) yield *different* hook names — correctly, because they are **different interception points** (raw params + identity vs typed input). A wire method is "a command reached over the wire": both route through `runOperation`, both get the surface, both cascade from the gateway; the `CommandRegistry` typing extends to wire methods verbatim (`input`/`output` = params/result).
+
 ## Worked examples
 
 **`model:generate` — provider-aware media reconciliation** (the thread this ADR was born from). The seam is reconciler-agnostic (React, ADR-44 functional, or custom), executor-owned (fires for `executor.run()` standalone), fires with the per-tick resolved target, and is async:
@@ -158,7 +185,8 @@ The hardest-looking requirement in the originating thread lands in the plainest 
 
 - **Slice 0 (prerequisite).** Route session `send`/`render`/`dispatch` through `runOperation` (the ADR-51 session-verb migration, TODO `session/src/harness.ts:1002`). Without it the session stays a lifecycle vacuum; this unblocks `onBefore/AfterSessionSend` and clean `timeline:append` ingest hooks.
 - **Slice 1 (the mechanism).** The cascaded `hooks` RuntimeContext + `command()` self-wiring; the augmented `CommandHooks` empty-seed interface + per-command exposure gate; the `.hooks` imperative accessor (`append`/`prepend`/`remove`/`off` + `.fx`); derived `<who>-<what>-<phase>` event names; the §7 fiber invariant. Ship with **three exposed commands** — `model:generate`, `timeline:append`, `tool:execute` (with the `tool:dispatch → tool:execute` rename). Mergeable on its own.
-- **Slice 2 (accretion).** Every other harness augments `CommandHooks` when ready (documented per-package checklist) — no big-bang. Wire or delete the dead spec: `ToolLifecycleEvent` (adopt its 9 kinds as the tool op's phase vocabulary, or remove) and `useOnError` (wire a producer or remove).
+- **Slice 2 (accretion).** Every other harness augments `CommandRegistry` when ready (documented per-package checklist) — no big-bang. Wire or delete the dead spec: `ToolLifecycleEvent` (adopt its 9 kinds as the tool op's phase vocabulary, or remove) and `useOnError` (wire a producer or remove).
+- **Slice 3 (wire-extensions, §9).** Route `dispatchRequest`'s resolved-method call (`transport/src/server/dispatch.ts:61`) through `runOperation("<ext>:<method>", h)` so wire methods gain their own hook layer; auth (`authorizeDispatch`) stays the explicit un-waivable pre-gate, hooks compose after it. Extends `deriveHookNames`/`Pascal` to normalize the `/` delimiter. Same shape as slice 0 — "route the straggler."
 
 The React `useOn*` family is retained as **sugar over the same registry**: `useOnBeforeModelGenerate` registers into the command's middleware chain during render; a non-React reconciler registers into the same registry without React. The store's observer-only handlers become one consumer of the events, not a separate mechanism.
 
