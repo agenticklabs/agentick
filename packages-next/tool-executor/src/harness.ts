@@ -94,12 +94,12 @@ import type {
 // content). One line per verb; both hooks fall out via the mapped type.
 declare module "@agentick/runtime-next" {
   interface CommandRegistry {
-    // TODO(adr-80): `output` is declared `ContentBlock[]` but the command body
-    // returns the richer `DispatchResult` — so `onAfterToolDispatch` is
-    // observe-safe but TRANSFORM-unsafe (returning ContentBlock[] would break
-    // `session.dispatch().content`). Reconcile to `DispatchResult` (+ update the
-    // observe-only after-hook test) to make after-transforms sound.
-    "tool:dispatch": { input: DispatchInput; output: ContentBlock[] };
+    // `output` is the richer `DispatchResult` the command body actually returns
+    // (`this.command<DispatchInput, DispatchResult>` below) — NOT the bare
+    // `ContentBlock[]`. This makes `onAfterToolDispatch` transform-SOUND: an
+    // after-hook sees and may return a `DispatchResult`, so it can't silently
+    // strip `isError`/metadata off `session.dispatch()`.
+    "tool:dispatch": { input: DispatchInput; output: DispatchResult };
   }
 }
 

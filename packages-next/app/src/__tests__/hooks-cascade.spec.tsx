@@ -140,7 +140,7 @@ describe("ADR 82 — hook cascade wired end-to-end (tool:dispatch)", () => {
     await app.closeApp();
   });
 
-  it("onAfterToolDispatch fires around the dispatch (app layer, observe)", async () => {
+  it("onAfterToolDispatch TRANSFORMS the DispatchResult and the change reaches session.dispatch()", async () => {
     const seen: { value?: unknown } = {};
     let afterRan = 0;
     const app = await createApp(React.createElement(Agent), {
@@ -148,11 +148,16 @@ describe("ADR 82 — hook cascade wired end-to-end (tool:dispatch)", () => {
       tools: [echoTool()],
       toolHandlers: new Map([[ECHO_REF, makeEchoHandler(seen)]]),
       hooks: {
-        // Observe (return void → passthrough). The `tool:dispatch` command's
-        // runtime output is the richer dispatch-result object, so we assert the
-        // hook FIRED rather than reshaping a shape the registry under-declares.
-        onAfterToolDispatch: () => {
+        // Transform, soundly: the registry now declares `tool:dispatch` output
+        // as the richer `DispatchResult`, so the hook receives one and returns
+        // one — rewriting `content` without stripping `isError`/metadata. Proves
+        // after-transforms flow through to `session.dispatch()`, not just observe.
+        onAfterToolDispatch: (output) => {
           afterRan++;
+          return {
+            ...output,
+            content: [{ type: "text", text: "reshaped-by-after" }],
+          };
         },
       },
     });
@@ -160,10 +165,10 @@ describe("ADR 82 — hook cascade wired end-to-end (tool:dispatch)", () => {
     const session = await app.createSession();
     const result = await session.dispatch("echo", { value: "untouched" });
 
-    // The handler ran unchanged; the after-hook fired exactly once around it.
+    // The handler ran unchanged; the after-transform rewrote the surfaced content.
     expect(seen.value).toBe("untouched");
     expect(afterRan).toBe(1);
-    expect((result[0] as { text: string }).text).toBe("untouched");
+    expect((result[0] as { text: string }).text).toBe("reshaped-by-after");
 
     await app.closeApp();
   });
