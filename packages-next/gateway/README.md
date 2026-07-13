@@ -186,7 +186,7 @@ const crmExt = defineWireExtension({
   auth: {
     "crm/deleteContact": { required: true, scope: "crm:admin" }, // crm:deleteContact AND crm:admin
   },
-  notifications: ["crm/contact-changed"],
+  notifications: ["crm/contactChanged"], // camelCase, matching the methods above
 });
 
 const gateway = await createGateway({
