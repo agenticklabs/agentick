@@ -11,6 +11,38 @@ extension package.
 
 ---
 
+## Naming convention
+
+**snake_case for what you route on; camelCase for what you carry.**
+
+| Token                     | Casing                                 | Examples                                                                    |
+| ------------------------- | -------------------------------------- | --------------------------------------------------------------------------- |
+| **Method names**          | `snake_case`, lowercase, `/`-segmented | `app/create_session`, `gateway/list_apps`, `session/respond_to_elicitation` |
+| **Notification names**    | `snake_case`, lowercase, `/`-segmented | `notifications/subscription/event`, `notifications/auth/expired`            |
+| **Param / result fields** | `camelCase`                            | `{ sessionId, appId, progressToken }`                                       |
+
+Single-word verbs stay bare (`session/send`, `session/dispatch`, `knobs/set`,
+`commands/list`) — snake_case only bites multi-word tokens. Namespaces (the
+first segment) are lowercase, snake_case if multi-word (`mcp_clients/…`).
+
+**Why the split** (it's one rule, not two): a method name is an **opaque routing
+string** — never a program identifier — so `snake_case` there is language-neutral
+and costs nothing in any client. A param field **becomes an identifier** in the
+consuming code, and Agentick's reference stack has **no serialization boundary**:
+the wire JSON object IS the TypeScript object (`client.request("app/create_session",
+{ sessionId })` — the same `{ sessionId }` is the type, the handler arg, and the
+wire payload). `snake_case` params would therefore pour `session_id` through the
+whole `camelCase` TS codebase, with no serde layer to contain it. Non-JS clients
+convert either casing via their own serde, so they don't tip the decision. See
+the [ADR 51 discussion](../../../docs/proposals/v2/blueprint/51-invocation-and-authorization.md).
+
+**External-protocol parity overrides this.** When a name mirrors an external
+protocol verbatim, use its own spelling — e.g. `notifications/tools/list_changed`
+is MCP's own wire name. (Conveniently, MCP uses this same split — `snake_case`
+method/notification names, `camelCase` params — so alignment is free.)
+
+---
+
 ## Status
 
 Phase 33.A foundation shipped (#251-era — JSON-RPC envelope types,
@@ -37,11 +69,11 @@ validator).
 **Phase C of #280 (Framework methods as wire extensions) — landed
 (#295).**
 
-- `gatewayWireExtension` (`gateway/listApps`, `gateway/getApp`),
-  `appWireExtension` (`app/createSession`, `app/getSession`,
-  `app/listSessions`), `sessionWireExtension`
+- `gatewayWireExtension` (`gateway/list_apps`, `gateway/get_app`),
+  `appWireExtension` (`app/create_session`, `app/get_session`,
+  `app/list_sessions`), `sessionWireExtension`
   (`session/send`, `session/dispatch`, `session/abort`,
-  `session/close`, `session/respondToElicitation`), and
+  `session/close`, `session/respond_to_elicitation`), and
   `subscriptionsWireExtension` (`sub/subscribe`,
   `sub/unsubscribe`) ship in `@agentick/gateway-next` and register
   as defaults on every `GatewayHarness`.
@@ -97,7 +129,7 @@ conformance helper (#299) land in subsequent phases per ADR 46.
 
 Live directly in `params.ts` (`WireMethods` interface) and
 `notifications.ts` (`WireNotifications` interface). Framework-core
-methods like `session/send`, `gateway/listApps`, `subscribe`. Dispatch
+methods like `session/send`, `gateway/list_apps`, `subscribe`. Dispatch
 is hardcoded into the gateway today.
 
 ### Wire extensions (ADR 46)
@@ -105,7 +137,7 @@ is hardcoded into the gateway today.
 Adopters and framework packages add new JSON-RPC namespaces
 without patching the framework. Each extension declares:
 
-- A **namespace** prefix (`mcpClients`, `credentials`, `crm`).
+- A **namespace** prefix (`mcp_clients`, `credentials`, `crm`).
 - **Methods** under that prefix — handler bodies, auth declarations,
   cluster-routing hints.
 - **Notifications** the extension publishes.
@@ -127,10 +159,10 @@ design rationale.
 // Step 1 — declare-merge type-level entries:
 declare module "@agentick/spec-next" {
   interface WireMethods {
-    "myExt/doThing": { params: DoThingParams; result: DoThingResult };
+    "myext/do_thing": { params: DoThingParams; result: DoThingResult };
   }
   interface WireNotifications {
-    "myExt/thing-changed": ThingChangedParams;
+    "myext/thing_changed": ThingChangedParams;
   }
 }
 
@@ -139,10 +171,10 @@ import { defineWireExtension, type WireExtension } from "@agentick/spec-next";
 
 export const myWireExtension: WireExtension = defineWireExtension({
   name: "@my-org/my-extension",
-  namespace: "myExt",
+  namespace: "myext",
   version: "1.0.0",
   methods: {
-    "myExt/doThing": async (params, ctx) => {
+    "myext/do_thing": async (params, ctx) => {
       // ctx exposes:
       //   ctx.gateway   — GatewayHarnessProtocol (always present)
       //   ctx.app       — AppHarnessProtocol (when method is app-scoped)
@@ -153,16 +185,16 @@ export const myWireExtension: WireExtension = defineWireExtension({
       // Handler is async — return Promise<DoThingResult>.
       // Throws AgentickError subclasses for typed wire-error responses.
       const result = await doSomething(params);
-      ctx.publish("myExt/thing-changed", { id: result.id });
+      ctx.publish("myext/thing_changed", { id: result.id });
       return result;
     },
   },
-  notifications: ["myExt/thing-changed"],
+  notifications: ["myext/thing_changed"],
   auth: {
-    "myExt/doThing": { required: true, scope: "session-user" },
+    "myext/do_thing": { required: true, scope: "session-user" },
   },
   clusterRoute: {
-    "myExt/doThing": "session-local", // default for session-scoped; explicit here for clarity
+    "myext/do_thing": "session-local", // default for session-scoped; explicit here for clarity
   },
 });
 

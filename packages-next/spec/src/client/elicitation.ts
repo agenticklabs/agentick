@@ -5,7 +5,7 @@
  * `session:channel:elicitation`. The client receives them as
  * `ClientElicitation` values via `SessionHandle.elicitations()` and
  * replies by calling `SessionHandle.respondToElicitation(...)` (which
- * routes through the new `session/respondToElicitation` wire method
+ * routes through the new `session/respond_to_elicitation` wire method
  * to the server's `bridges.elicitation.respond()`).
  *
  * This is the canonical client path for every "ask the user X" step

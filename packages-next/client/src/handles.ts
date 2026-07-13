@@ -42,10 +42,10 @@ interface InternalClient {
 export function makeGatewayHandle(client: InternalClient): GatewayHandle {
   return {
     async listApps(): Promise<GatewayListAppsResult> {
-      return client.request("gateway/listApps", {});
+      return client.request("gateway/list_apps", {});
     },
     async getApp(id) {
-      return client.request("gateway/getApp", { appId: id });
+      return client.request("gateway/get_app", { appId: id });
     },
     events(query, fromCursor) {
       return client.transport.subscribe({ kind: "gateway" }, query, fromCursor);
@@ -60,21 +60,21 @@ export function makeAppHandle(client: InternalClient, appId: string): AppHandle 
   return {
     id: appId,
     async createSession<P = unknown>(input?: CreateSessionInput<P>) {
-      return client.request("app/createSession", {
+      return client.request("app/create_session", {
         appId,
         sessionId: input?.sessionId,
         metadata: input?.metadata,
       });
     },
     async getSession(sessionId): Promise<SessionEntry> {
-      return client.request("app/getSession", { appId, sessionId }) as Promise<SessionEntry>;
+      return client.request("app/get_session", { appId, sessionId }) as Promise<SessionEntry>;
     },
     async listSessions(filter?: SessionFilter) {
-      const result = await client.request("app/listSessions", { appId, filter });
+      const result = await client.request("app/list_sessions", { appId, filter });
       return result.sessions as readonly SessionEntry[];
     },
     async runOnce<P = unknown>(input: SendInput<P>) {
-      return client.request("app/runOnce", {
+      return client.request("app/run_once", {
         appId,
         messages: input.messages as readonly SendMessageInput[] | undefined,
         props: input.props,
@@ -136,7 +136,7 @@ export function makeSessionHandle(client: InternalClient, sessionId: string): Se
       return makeElicitationStream(client, sessionId, opts?.fromCursor);
     },
     async respondToElicitation(input): Promise<void> {
-      await client.request("session/respondToElicitation", {
+      await client.request("session/respond_to_elicitation", {
         sessionId,
         correlationId: input.correlationId,
         outcome: input.outcome,
@@ -242,7 +242,7 @@ function wrapHandle(
     reason?: string;
   }): Promise<void> =>
     client
-      .request("session/respondToElicitation", {
+      .request("session/respond_to_elicitation", {
         sessionId,
         correlationId: elic.correlationId,
         outcome: body.outcome,

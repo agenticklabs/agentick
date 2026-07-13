@@ -24,13 +24,13 @@ describe("client-next + in-process transport smoke", () => {
       switch (req.method) {
         case "ping":
           return { jsonrpc: "2.0", id: req.id, result: {} };
-        case "gateway/listApps":
+        case "gateway/list_apps":
           return {
             jsonrpc: "2.0",
             id: req.id,
             result: { apps: [{ id: "app-1" }, { id: "app-2" }] },
           };
-        case "app/listSessions":
+        case "app/list_sessions":
           return {
             jsonrpc: "2.0",
             id: req.id,
@@ -106,7 +106,7 @@ describe("client-next + in-process transport smoke", () => {
     const { handler } = makeStubHandler();
     const client = await createClient({ transport: inProcessTransport({ handler }) });
     await client.connect();
-    await expect(client.request("gateway/getApp", { appId: "no-such" })).rejects.toMatchObject({
+    await expect(client.request("gateway/get_app", { appId: "no-such" })).rejects.toMatchObject({
       kind: "rpc",
       error: { code: ErrorCode.MethodNotFound },
     });

@@ -35,17 +35,19 @@ describe("GatewayHarness — framework wire extensions", () => {
     expect(names).toContain("@agentick/gateway-next#subscriptions");
 
     // Every framework method resolves.
-    expect(registry.resolve("gateway/listApps")?.extension).toBe(gatewayWireExtension);
-    expect(registry.resolve("gateway/getApp")?.extension).toBe(gatewayWireExtension);
-    expect(registry.resolve("app/createSession")?.extension).toBe(appWireExtension);
-    expect(registry.resolve("app/getSession")?.extension).toBe(appWireExtension);
-    expect(registry.resolve("app/listSessions")?.extension).toBe(appWireExtension);
+    expect(registry.resolve("gateway/list_apps")?.extension).toBe(gatewayWireExtension);
+    expect(registry.resolve("gateway/get_app")?.extension).toBe(gatewayWireExtension);
+    expect(registry.resolve("app/create_session")?.extension).toBe(appWireExtension);
+    expect(registry.resolve("app/get_session")?.extension).toBe(appWireExtension);
+    expect(registry.resolve("app/list_sessions")?.extension).toBe(appWireExtension);
     // session extension covers non-streaming AND streaming methods post-#303.
     expect(registry.resolve("session/send")?.extension).toBe(sessionWireExtension);
     expect(registry.resolve("session/dispatch")?.extension).toBe(sessionWireExtension);
     expect(registry.resolve("session/abort")?.extension).toBe(sessionWireExtension);
     expect(registry.resolve("session/close")?.extension).toBe(sessionWireExtension);
-    expect(registry.resolve("session/respondToElicitation")?.extension).toBe(sessionWireExtension);
+    expect(registry.resolve("session/respond_to_elicitation")?.extension).toBe(
+      sessionWireExtension,
+    );
     // sub/* namespace (renamed from bare subscribe/unsubscribe per #300).
     expect(registry.resolve("sub/subscribe")?.extension).toBe(subscriptionsWireExtension);
     expect(registry.resolve("sub/unsubscribe")?.extension).toBe(subscriptionsWireExtension);
@@ -73,7 +75,7 @@ describe("GatewayHarness — framework wire extensions", () => {
       name: "@adopter/rogue-gateway",
       namespace: "gateway",
       methods: {
-        "gateway/listApps": async () => ({ apps: [] }),
+        "gateway/list_apps": async () => ({ apps: [] }),
       },
     });
     expect(() => new GatewayHarness({ wireExtensions: [collision] })).toThrow(
@@ -89,7 +91,7 @@ describe("GatewayHarness — framework wire extensions", () => {
       name: "@adopter/rogue-app",
       namespace: "app",
       methods: {
-        "app/listSessions": async () => ({ sessions: [] }),
+        "app/list_sessions": async () => ({ sessions: [] }),
       },
     });
     expect(() => new GatewayHarness({ wireExtensions: [collision] })).toThrow(
@@ -139,7 +141,7 @@ describe("GatewayHarness — framework wire extensions", () => {
     expect(registry.resolve("crm/listContacts")?.extension).toBe(adopterExt);
 
     // Framework extensions still register.
-    expect(registry.resolve("gateway/listApps")).toBeDefined();
+    expect(registry.resolve("gateway/list_apps")).toBeDefined();
 
     // Enumerate lists framework FIRST, adopter AFTER.
     const names = registry.enumerate().map((e) => e.name);

@@ -39,7 +39,7 @@ async function post(
   const res = await fetch(url, {
     method: "POST",
     headers,
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "gateway/listApps", params: {} }),
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "gateway/list_apps", params: {} }),
   });
   // Drain the body so the socket is released.
   await res.text().catch(() => undefined);

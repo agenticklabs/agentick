@@ -4,7 +4,7 @@
  *
  * Method-explicit-allowlist by default — most agentick methods are
  * stateful (sessions, executions) and MUST NOT be cached. Adopters opt
- * specific read-shaped methods (`gateway/listApps`, `app/getSession`)
+ * specific read-shaped methods (`gateway/list_apps`, `app/get_session`)
  * into the cache with per-method TTL.
  *
  * Same family as React Query / TanStack Query / SWR / Apollo Client

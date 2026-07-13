@@ -142,7 +142,7 @@ export interface SessionSendParams extends WireRequestParams {
 /**
  * `session/send` returns the session-scope {@link SendResult} —
  * session-level fields (`stopReason`, `ticks`, `response`) that the
- * client-side handle exposes on `.result`. `app/runOnce` uses the
+ * client-side handle exposes on `.result`. `app/run_once` uses the
  * broader {@link ExecutionResult} shape instead — the two RPCs
  * return different projections deliberately.
  */
@@ -201,7 +201,7 @@ export interface SessionCloseParams extends WireRequestParams {
 export type SessionCloseResult = null;
 
 // ============================================================================
-// session/respondToElicitation — client → server elicitation reply
+// session/respond_to_elicitation — client → server elicitation reply
 // ============================================================================
 
 /**
@@ -414,13 +414,13 @@ export interface ExtensionsListResult {
 export interface WireMethods {
   initialize: { params: InitializeParams; result: InitializeResult };
 
-  "gateway/listApps": { params: GatewayListAppsParams; result: GatewayListAppsResult };
-  "gateway/getApp": { params: GatewayGetAppParams; result: GatewayGetAppResult };
+  "gateway/list_apps": { params: GatewayListAppsParams; result: GatewayListAppsResult };
+  "gateway/get_app": { params: GatewayGetAppParams; result: GatewayGetAppResult };
 
-  "app/createSession": { params: AppCreateSessionParams; result: AppCreateSessionResult };
-  "app/getSession": { params: AppGetSessionParams; result: AppGetSessionResult };
-  "app/listSessions": { params: AppListSessionsParams; result: AppListSessionsResult };
-  "app/runOnce": { params: AppRunOnceParams; result: AppRunOnceResult };
+  "app/create_session": { params: AppCreateSessionParams; result: AppCreateSessionResult };
+  "app/get_session": { params: AppGetSessionParams; result: AppGetSessionResult };
+  "app/list_sessions": { params: AppListSessionsParams; result: AppListSessionsResult };
+  "app/run_once": { params: AppRunOnceParams; result: AppRunOnceResult };
   "app/close": { params: AppCloseParams; result: AppCloseResult };
 
   "session/send": { params: SessionSendParams; result: SessionSendResult };
@@ -430,7 +430,7 @@ export interface WireMethods {
   "session/snapshot": { params: SessionSnapshotParams; result: SessionSnapshotResult };
   "session/rebind": { params: SessionRebindParams; result: SessionRebindResult };
   "session/close": { params: SessionCloseParams; result: SessionCloseResult };
-  "session/respondToElicitation": {
+  "session/respond_to_elicitation": {
     params: SessionRespondToElicitationParams;
     result: SessionRespondToElicitationResult;
   };

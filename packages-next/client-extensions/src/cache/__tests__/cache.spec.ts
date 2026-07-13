@@ -16,14 +16,14 @@ describe("cache middleware", () => {
     let calls = 0;
     const handler = async (req: JsonRpcRequest): Promise<JsonRpcResponse> => {
       calls++;
-      if (req.method === "gateway/listApps") {
+      if (req.method === "gateway/list_apps") {
         return { jsonrpc: "2.0", id: req.id, result: { apps: [{ id: "a" }] } };
       }
       return { jsonrpc: "2.0", id: req.id, result: {} };
     };
     const client = await createClient({
       transport: inProcessTransport({ handler: withHandshake(handler) }),
-      extensions: [cache({ methods: { "gateway/listApps": { ttlMs: 60_000 } } })],
+      extensions: [cache({ methods: { "gateway/list_apps": { ttlMs: 60_000 } } })],
     });
     await client.connect();
     calls = 0;
@@ -50,7 +50,7 @@ describe("cache middleware", () => {
     };
     const client = await createClient({
       transport: inProcessTransport({ handler: withHandshake(handler) }),
-      extensions: [cache({ methods: { "gateway/listApps": { ttlMs: 1000 } } })],
+      extensions: [cache({ methods: { "gateway/list_apps": { ttlMs: 1000 } } })],
     });
     await client.connect();
     calls = 0;
@@ -79,7 +79,7 @@ describe("cache middleware", () => {
     };
     const client = await createClient({
       transport: inProcessTransport({ handler: withHandshake(handler) }),
-      extensions: [cache({ methods: { "gateway/getApp": { ttlMs: 60_000 } } })],
+      extensions: [cache({ methods: { "gateway/get_app": { ttlMs: 60_000 } } })],
     });
     await client.connect();
     calls = 0;
@@ -100,15 +100,15 @@ describe("cache middleware", () => {
     };
     const client = await createClient({
       transport: inProcessTransport({ handler: withHandshake(handler) }),
-      extensions: [cache({ methods: { "gateway/listApps": { ttlMs: 60_000 } } })],
+      extensions: [cache({ methods: { "gateway/list_apps": { ttlMs: 60_000 } } })],
     });
     await client.connect();
     calls = 0;
 
     // Two requests with same logical params but different `_meta`
     // entries — should be a cache hit on the second.
-    await client.request("gateway/listApps", { _meta: { traceparent: "00-a-b-01" } } as never);
-    await client.request("gateway/listApps", { _meta: { traceparent: "00-c-d-01" } } as never);
+    await client.request("gateway/list_apps", { _meta: { traceparent: "00-a-b-01" } } as never);
+    await client.request("gateway/list_apps", { _meta: { traceparent: "00-c-d-01" } } as never);
     expect(calls).toBe(1);
     await client.close();
   });
@@ -143,7 +143,7 @@ describe("cache middleware", () => {
       extensions: [
         cache({
           methods: {
-            "gateway/getApp": {
+            "gateway/get_app": {
               ttlMs: 60_000,
               key: (params) => (params as { appId: string }).appId,
             },
@@ -171,7 +171,7 @@ describe("cache middleware", () => {
       transport: inProcessTransport({ handler: withHandshake(handler) }),
       extensions: [
         cache({
-          methods: { "gateway/listApps": { ttlMs: 60_000 } },
+          methods: { "gateway/list_apps": { ttlMs: 60_000 } },
           store,
         }),
       ],

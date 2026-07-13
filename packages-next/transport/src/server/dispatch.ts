@@ -258,7 +258,7 @@ async function authorizeDispatch(
   // NOTE: session resolution keys on the `sessionId` param by
   // convention — the same convention buildWireExtensionContext uses.
   // TODO(trail-session-resolution-seam): methods that reach a session
-  // via other params (a future app/runOnce) must route through the
+  // via other params (a future app/run_once) must route through the
   // same resolution or the ceiling won't see them.
   const targetSession = sessionId ? findSessionOrUndef(host, sessionId) : undefined;
   // #199 — the target session's scope CEILING is structural (resource-

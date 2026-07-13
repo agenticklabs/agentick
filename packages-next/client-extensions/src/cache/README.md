@@ -25,7 +25,7 @@ Most agentick methods mutate state or return per-call-distinct results:
 
 - `session/send` — runs an execution; result is unique per call
 - `session/dispatch` — invokes a tool; side effects matter
-- `app/createSession` — creates state
+- `app/create_session` — creates state
 - `session/snapshot` — returns current state (changes constantly)
 
 Caching these silently would corrupt adopter applications. The cache
@@ -36,9 +36,9 @@ import { cache } from "@agentick/client-extensions-next/cache";
 
 cache({
   methods: {
-    "gateway/listApps": { ttlMs: 60_000 }, // 1 minute
-    "gateway/getApp": { ttlMs: 30_000 },
-    "app/listSessions": { ttlMs: 5_000 }, // 5 seconds (sessions churn)
+    "gateway/list_apps": { ttlMs: 60_000 }, // 1 minute
+    "gateway/get_app": { ttlMs: 30_000 },
+    "app/list_sessions": { ttlMs: 5_000 }, // 5 seconds (sessions churn)
   },
 });
 ```
@@ -54,7 +54,7 @@ const client = await createClient({
   extensions: [
     cache({
       methods: {
-        "gateway/listApps": { ttlMs: 60_000 },
+        "gateway/list_apps": { ttlMs: 60_000 },
       },
     }),
   ],
@@ -114,14 +114,14 @@ const store = new LruCacheStore(1000);
 const client = await createClient({
   ...
   extensions: [
-    cache({ methods: { "gateway/listApps": { ttlMs: 60_000 } }, store }),
+    cache({ methods: { "gateway/list_apps": { ttlMs: 60_000 } }, store }),
     {
       name: "invalidate-on-app-created",
       install(installer) {
         // ADR 33 client-bus: subscribe to 'gateway:app-created' from server
-        // and invalidate gateway/listApps cache entries.
+        // and invalidate gateway/list_apps cache entries.
         installer.bus.subscribe(/* surface: "wire", filter for app-created */);
-        // ... call store.delete("gateway/listApps:...") on event ...
+        // ... call store.delete("gateway/list_apps:...") on event ...
       },
     },
   ],

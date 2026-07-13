@@ -224,7 +224,7 @@ Reserved namespaces guarantee non-collision: agentick will not define methods in
 
 ```jsonc
 // → request
-{ "jsonrpc": "2.0", "id": 1, "method": "gateway/listApps", "params": {} }
+{ "jsonrpc": "2.0", "id": 1, "method": "gateway/list_apps", "params": {} }
 
 // ← response
 { "jsonrpc": "2.0", "id": 1,
@@ -251,8 +251,8 @@ Reserved namespaces guarantee non-collision: agentick will not define methods in
 ```jsonc
 // → request batch
 [
-  { "jsonrpc": "2.0", "id": 3, "method": "gateway/listApps", "params": {} },
-  { "jsonrpc": "2.0", "id": 4, "method": "app/listSessions",
+  { "jsonrpc": "2.0", "id": 3, "method": "gateway/list_apps", "params": {} },
+  { "jsonrpc": "2.0", "id": 4, "method": "app/list_sessions",
     "params": { "appId": "app-7" } }
 ]
 

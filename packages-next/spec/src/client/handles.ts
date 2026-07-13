@@ -98,7 +98,7 @@ export interface SessionHandle extends ResourceHandle {
 
   /**
    * Reply to a pending elicitation. Routes through the
-   * `session/respondToElicitation` wire method to the server's
+   * `session/respond_to_elicitation` wire method to the server's
    * `bridges.elicitation.respond({correlationId, outcome, value?,
    * reason?})`. Idempotent — unknown / already-resolved correlationIds
    * are silent no-ops (first-write-wins).

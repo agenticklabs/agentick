@@ -32,13 +32,13 @@ describe("defineWireExtension — happy path", () => {
       name: "test:minimal",
       namespace: "gateway",
       methods: {
-        "gateway/listApps": async () => ({ apps: [] }),
+        "gateway/list_apps": async () => ({ apps: [] }),
       },
     });
 
     expect(ext.name).toBe("test:minimal");
     expect(ext.namespace).toBe("gateway");
-    expect(Object.keys(ext.methods)).toEqual(["gateway/listApps"]);
+    expect(Object.keys(ext.methods)).toEqual(["gateway/list_apps"]);
   });
 
   it("accepts version + auth + clusterRoute", () => {
@@ -47,19 +47,19 @@ describe("defineWireExtension — happy path", () => {
       namespace: "gateway",
       version: "1.2.3",
       methods: {
-        "gateway/listApps": async () => ({ apps: [] }),
+        "gateway/list_apps": async () => ({ apps: [] }),
       },
       auth: {
-        "gateway/listApps": { required: false },
+        "gateway/list_apps": { required: false },
       },
       clusterRoute: {
-        "gateway/listApps": "any",
+        "gateway/list_apps": "any",
       },
     });
 
     expect(ext.version).toBe("1.2.3");
-    expect(ext.auth?.["gateway/listApps"]?.required).toBe(false);
-    expect(ext.clusterRoute?.["gateway/listApps"]).toBe("any");
+    expect(ext.auth?.["gateway/list_apps"]?.required).toBe(false);
+    expect(ext.clusterRoute?.["gateway/list_apps"]).toBe("any");
   });
 });
 
@@ -69,7 +69,7 @@ describe("defineWireExtension — rejection: namespace", () => {
       defineWireExtension({
         name: "test:empty-ns",
         namespace: "",
-        methods: { "gateway/listApps": async () => ({ apps: [] }) },
+        methods: { "gateway/list_apps": async () => ({ apps: [] }) },
       } as WireExtension),
     ).toThrow(WireExtensionDefinitionError);
   });
@@ -79,7 +79,7 @@ describe("defineWireExtension — rejection: namespace", () => {
       defineWireExtension({
         name: "test:slash-ns",
         namespace: "gateway/sub",
-        methods: { "gateway/listApps": async () => ({ apps: [] }) },
+        methods: { "gateway/list_apps": async () => ({ apps: [] }) },
       } as WireExtension),
     ).toThrow(/MUST NOT contain "\/"/);
   });
@@ -119,7 +119,7 @@ describe("defineWireExtension — rejection: auth references unknown method", ()
         name: "test:stray-auth",
         namespace: "gateway",
         methods: {
-          "gateway/listApps": async () => ({ apps: [] }),
+          "gateway/list_apps": async () => ({ apps: [] }),
         },
         auth: {
           subscribe: { required: true },
@@ -136,7 +136,7 @@ describe("defineWireExtension — rejection: clusterRoute references unknown met
         name: "test:stray-route",
         namespace: "gateway",
         methods: {
-          "gateway/listApps": async () => ({ apps: [] }),
+          "gateway/list_apps": async () => ({ apps: [] }),
         },
         clusterRoute: {
           subscribe: "leader",
@@ -152,7 +152,7 @@ describe("defineWireExtension — error shape", () => {
       defineWireExtension({
         name: "test:err-shape",
         namespace: "",
-        methods: { "gateway/listApps": async () => ({ apps: [] }) },
+        methods: { "gateway/list_apps": async () => ({ apps: [] }) },
       } as WireExtension);
       expect.fail("should have thrown");
     } catch (err) {

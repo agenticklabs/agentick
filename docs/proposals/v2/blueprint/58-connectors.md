@@ -22,7 +22,7 @@ no new subsystem, no new supertype, no bespoke inbound verb:
   live; `SessionHarnessProtocol.send()` is callable in-process — no wire hop);
 - **confirmations** → subscribe the elicitation channel via `subscribeBus`, format the
   request for the platform, route the reply through `session.elicitation.respond`
-  (`session/respondToElicitation` is already wired,
+  (`session/respond_to_elicitation` is already wired,
   `gateway/src/wire/session-extension.ts:117`);
 - **the four v1 client-side behaviors** (delivery cadence, content policy, rate-limit,
   retry) become small composed helpers, not a framework tier.

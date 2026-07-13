@@ -19,7 +19,7 @@ export const gatewayWireExtension: WireExtension = defineWireExtension({
   namespace: "gateway",
   version: "1.0.0",
   methods: {
-    "gateway/listApps": async (_params, ctx) => {
+    "gateway/list_apps": async (_params, ctx) => {
       // Metadata isn't part of AppHarnessProtocol yet; project the
       // stable subset the client depends on (id). Extensible via
       // #254 when the full app-info shape settles.
@@ -27,7 +27,7 @@ export const gatewayWireExtension: WireExtension = defineWireExtension({
         apps: ctx.gateway.apps().map((a) => ({ id: a.id })),
       };
     },
-    "gateway/getApp": async ({ appId }, ctx) => {
+    "gateway/get_app": async ({ appId }, ctx) => {
       const app = ctx.gateway.app(appId);
       if (!app) throw new AppNotFoundError({ appId });
       return { id: app.id };

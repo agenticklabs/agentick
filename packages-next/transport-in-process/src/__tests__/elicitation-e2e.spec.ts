@@ -9,7 +9,7 @@
  *   2. Client subscription via `session.elicitations()` parses the
  *      envelope into a `ClientElicitationHandle` and yields it.
  *   3. Client calls `elic.accept({...})`. The handle's typed
- *      convenience routes through `session/respondToElicitation` —
+ *      convenience routes through `session/respond_to_elicitation` —
  *      the new wire method — which `dispatchRequest` routes to
  *      `sess.elicitation.respond({...})` on the gateway side.
  *   4. The server-side `elicit()` Promise resolves with the typed
@@ -179,7 +179,7 @@ describe("elicitation end-to-end — client ↔ gateway ↔ session", () => {
     expect(elic.mode).toBe("form");
     expect(elic.schema).toBeDefined();
 
-    // Client accepts — routes through session/respondToElicitation,
+    // Client accepts — routes through session/respond_to_elicitation,
     // which the gateway routes to sess.elicitation.respond(...).
     await elic.accept({ approved: true });
 

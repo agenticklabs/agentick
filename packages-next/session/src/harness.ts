@@ -499,7 +499,7 @@ export class SessionHarness<P = unknown>
    * The session's elicitation harness — exposed on
    * `SessionHarnessProtocol.elicitation` (slot added by the elicitation
    * package's module augmentation). Gateway routes
-   * `session/respondToElicitation` here.
+   * `session/respond_to_elicitation` here.
    */
   get elicitation(): import("@agentick/spec-next").ElicitationHarnessProtocol {
     return this.bridges.elicitation;

@@ -9,7 +9,7 @@
  * default when a `GatewayHarness` is constructed — see
  * `../harness.ts`.
  *
- * `app/runOnce` is NOT yet in this extension — no runtime handler
+ * `app/run_once` is NOT yet in this extension — no runtime handler
  * exists in the transport dispatcher today either. It lands when
  * app-level one-shot send is implemented (out of scope for #295).
  *
@@ -28,7 +28,7 @@ export const appWireExtension: WireExtension = defineWireExtension({
   namespace: "app",
   version: "1.0.0",
   methods: {
-    "app/createSession": async ({ appId, sessionId, metadata }, ctx) => {
+    "app/create_session": async ({ appId, sessionId, metadata }, ctx) => {
       const app = ctx.gateway.app(appId);
       if (!app) throw new AppNotFoundError({ appId });
       const session = await app.createSession({
@@ -37,14 +37,14 @@ export const appWireExtension: WireExtension = defineWireExtension({
       });
       return { sessionId: session.id };
     },
-    "app/getSession": async ({ appId, sessionId }, ctx) => {
+    "app/get_session": async ({ appId, sessionId }, ctx) => {
       const app = ctx.gateway.app(appId);
       if (!app) throw new AppNotFoundError({ appId });
       const entry = app.listSessions().find((e) => e.id === sessionId);
       if (!entry) throw new SessionNotFoundError({ sessionId });
       return entry;
     },
-    "app/listSessions": async ({ appId, filter }, ctx) => {
+    "app/list_sessions": async ({ appId, filter }, ctx) => {
       const app = ctx.gateway.app(appId);
       if (!app) throw new AppNotFoundError({ appId });
       return { sessions: app.listSessions(filter) };

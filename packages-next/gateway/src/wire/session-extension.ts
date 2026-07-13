@@ -162,7 +162,7 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
       await sess.close();
       return null;
     },
-    "session/respondToElicitation": async (params, ctx) => {
+    "session/respond_to_elicitation": async (params, ctx) => {
       const sess = ctx.session ?? findSession(ctx, params.sessionId);
       // The elicitation slot on SessionHarnessProtocol is augmented in
       // by `@agentick/elicitation-next`. Gateway package intentionally

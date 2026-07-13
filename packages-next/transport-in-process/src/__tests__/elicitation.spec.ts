@@ -5,7 +5,7 @@
  * elicitation":
  *
  *   1. `session.respondToElicitation(...)` routes through the new
- *      `session/respondToElicitation` wire method.
+ *      `session/respond_to_elicitation` wire method.
  *   2. `session.elicitations()` returns an AsyncIterable of parsed
  *      `ClientElicitationHandle` values — verified by feeding a stub
  *      handler that fakes a subscription event.
@@ -31,11 +31,11 @@ import { describe, expect, it } from "vitest";
 import { inProcessTransport } from "../index.js";
 
 describe("client elicitation surface — wire method", () => {
-  it("session.respondToElicitation issues session/respondToElicitation with the correct params", async () => {
+  it("session.respondToElicitation issues session/respond_to_elicitation with the correct params", async () => {
     const seen: Array<{ method: string; params: unknown }> = [];
     const handler = async (req: JsonRpcRequest): Promise<JsonRpcResponse> => {
       seen.push({ method: req.method, params: req.params });
-      if (req.method === "session/respondToElicitation") {
+      if (req.method === "session/respond_to_elicitation") {
         return { jsonrpc: "2.0", id: req.id, result: null };
       }
       return {
@@ -54,7 +54,7 @@ describe("client elicitation surface — wire method", () => {
       value: { approved: true },
     });
 
-    const params = seen.find((s) => s.method === "session/respondToElicitation")
+    const params = seen.find((s) => s.method === "session/respond_to_elicitation")
       ?.params as SessionRespondToElicitationParams;
     expect(params).toBeDefined();
     expect(params.sessionId).toBe("sess-1");
@@ -68,7 +68,7 @@ describe("client elicitation surface — wire method", () => {
   it("declined and cancelled outcomes pass reason through verbatim", async () => {
     const seen: Array<SessionRespondToElicitationParams> = [];
     const handler = async (req: JsonRpcRequest): Promise<JsonRpcResponse> => {
-      if (req.method === "session/respondToElicitation") {
+      if (req.method === "session/respond_to_elicitation") {
         seen.push(req.params as SessionRespondToElicitationParams);
         return { jsonrpc: "2.0", id: req.id, result: null };
       }
@@ -112,7 +112,7 @@ describe("client elicitation surface — type checks", () => {
     // stub handler doesn't push subscription events without the
     // GatewayHarness adapter).
     const handler = async (req: JsonRpcRequest): Promise<JsonRpcResponse> => {
-      if (req.method === "session/respondToElicitation") {
+      if (req.method === "session/respond_to_elicitation") {
         return { jsonrpc: "2.0", id: req.id, result: null };
       }
       return {

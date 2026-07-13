@@ -103,7 +103,7 @@ const factory: IngressAuthnFactory = {
         const conn = await connectUnix(path);
         const before = spy.seen.length;
         const outcome = await Promise.race([
-          conn.request("gateway/listApps", {}).then(() => "ok" as const),
+          conn.request("gateway/list_apps", {}).then(() => "ok" as const),
           conn.closed.then(() => "refused" as const),
         ]);
         conn.close();
@@ -113,8 +113,8 @@ const factory: IngressAuthnFactory = {
       async twoCrossingsOneSession() {
         const conn = await connectUnix(path);
         const i = spy.seen.length;
-        await conn.request("gateway/listApps", {});
-        await conn.request("gateway/listApps", {});
+        await conn.request("gateway/list_apps", {});
+        await conn.request("gateway/list_apps", {});
         conn.close();
         return { first: spy.seen[i], second: spy.seen[i + 1] };
       },

@@ -7,7 +7,7 @@
  *                                              calling `elicit(...)`.
  *   2. `SessionHarnessProtocol.elicitation` → server-side access for
  *                                              the gateway routing
- *                                              `session/respondToElicitation`
+ *                                              `session/respond_to_elicitation`
  *                                              wire RPCs to
  *                                              `respond(...)`.
  *
@@ -43,7 +43,7 @@ declare module "@agentick/spec-next" {
     /**
      * The session's elicitation harness — raw protocol surface. Same
      * instance the per-session tool executor + `bridges.elicitation`
-     * use; clients reach it via `session/respondToElicitation` to
+     * use; clients reach it via `session/respond_to_elicitation` to
      * unblock pending elicitations. Prefer {@link elicit} for the
      * adopter-friendly sugar surface.
      */

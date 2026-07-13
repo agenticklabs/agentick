@@ -131,7 +131,7 @@ describe("telemetry middleware", () => {
     });
     await client.connect();
     spans.length = 0;
-    await expect(client.request("gateway/getApp", { appId: "x" })).rejects.toBeDefined();
+    await expect(client.request("gateway/get_app", { appId: "x" })).rejects.toBeDefined();
     await client.close();
 
     const span = spans[0]!;
@@ -153,11 +153,11 @@ describe("telemetry middleware", () => {
     });
     await client.connect();
     await client.request("ping", {});
-    await client.request("gateway/listApps", {});
+    await client.request("gateway/list_apps", {});
     await client.close();
 
     expect(spans.find((s) => s.name === "agentick/ping")).toBeUndefined();
-    expect(spans.find((s) => s.name === "agentick/gateway/listApps")).toBeDefined();
+    expect(spans.find((s) => s.name === "agentick/gateway/list_apps")).toBeDefined();
   });
 
   it("custom serviceName flows into span name + rpc.service", async () => {

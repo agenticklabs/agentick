@@ -56,7 +56,7 @@ const LOOP_EXECUTION_EVENT_NAME = "loop:command:run-execution";
  * `@agentick/connector-next` intentionally does NOT depend on
  * `@agentick/elicitation-next` at runtime (it constructs no harness;
  * the AppHarness owns construction, #159). Identical discipline to the
- * gateway's `session/respondToElicitation` wire method
+ * gateway's `session/respond_to_elicitation` wire method
  * (`gateway/src/wire/session-extension.ts`).
  */
 type SessionWithElicitation = SessionHarnessProtocol & {

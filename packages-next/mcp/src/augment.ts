@@ -68,17 +68,17 @@ declare module "@agentick/spec-next" {
 // bypass the model loop AND the capability-policy gate).
 declare module "@agentick/spec-next" {
   interface WireMethods {
-    "mcp/list-tools": { params: { sessionId: string; serverId: string }; result: unknown };
-    "mcp/list-tasks": { params: { sessionId: string; serverId: string }; result: unknown };
-    "mcp/get-task": {
+    "mcp/list_tools": { params: { sessionId: string; serverId: string }; result: unknown };
+    "mcp/list_tasks": { params: { sessionId: string; serverId: string }; result: unknown };
+    "mcp/get_task": {
       params: { sessionId: string; serverId: string; taskId: string };
       result: unknown;
     };
-    "mcp/get-task-result": {
+    "mcp/get_task_result": {
       params: { sessionId: string; serverId: string; taskId: string };
       result: unknown;
     };
-    "mcp/cancel-task": {
+    "mcp/cancel_task": {
       params: { sessionId: string; serverId: string; taskId: string };
       result: unknown;
     };

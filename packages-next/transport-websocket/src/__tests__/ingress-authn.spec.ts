@@ -87,7 +87,7 @@ const factory: IngressAuthnFactory = {
       async crossing(token) {
         const conn = await connectWs(url, token);
         const before = spy.seen.length;
-        await conn.request("gateway/listApps", {});
+        await conn.request("gateway/list_apps", {});
         conn.close();
         return { principal: spy.seen[before] };
       },
@@ -96,8 +96,8 @@ const factory: IngressAuthnFactory = {
         // connection identity; the second token is irrelevant.
         const conn = await connectWs(url, tokenA);
         const i = spy.seen.length;
-        await conn.request("gateway/listApps", {});
-        await conn.request("gateway/listApps", {});
+        await conn.request("gateway/list_apps", {});
+        await conn.request("gateway/list_apps", {});
         conn.close();
         return { first: spy.seen[i], second: spy.seen[i + 1] };
       },

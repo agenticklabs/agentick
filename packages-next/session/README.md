@@ -447,7 +447,7 @@ their backing.
   non-serializable per-call overrides (`executor`, `target`, `signal`,
   live tool handlers). An addressable `session:send` needs a designed
   serializable signal form — `TODO(adr-51-session-verbs)`. `session/send`
-  and `session/respondToElicitation` are already routed via the gateway.
+  and `session/respond_to_elicitation` are already routed via the gateway.
 - **Inbox dispatch mostly not wired.** `handleMessage` handles the
   `session:escalation` message type — the terminal / forward hop of ADR 69
   request escalation (a task or sub-agent asking the client for input;

@@ -419,8 +419,8 @@ describe("@agentick/spec-next — wire structural tests", () => {
     it("WireMethods exposes the expected method namespace surface", () => {
       // Compile-time: every namespace's first method exists.
       type _initialize = WireMethods["initialize"];
-      type _gateway = WireMethods["gateway/listApps"];
-      type _app = WireMethods["app/createSession"];
+      type _gateway = WireMethods["gateway/list_apps"];
+      type _app = WireMethods["app/create_session"];
       type _session = WireMethods["session/send"];
       type _subscribe = WireMethods["sub/subscribe"];
       type _auth = WireMethods["auth/refresh"];

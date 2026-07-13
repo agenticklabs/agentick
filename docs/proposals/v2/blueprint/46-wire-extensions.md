@@ -652,11 +652,11 @@ generic typed primitives from `@agentick/client-next`).
 ## The framework's own wire methods ARE wire extensions
 
 **Eat-your-own-dogfood commitment.** The methods currently hardcoded
-in `WireMethods` — `gateway/listApps`, `gateway/getApp`,
-`app/createSession`, `app/getSession`, `app/listSessions`,
-`app/runOnce`, `app/close`, `session/send`, `session/dispatch`,
+in `WireMethods` — `gateway/list_apps`, `gateway/get_app`,
+`app/create_session`, `app/get_session`, `app/list_sessions`,
+`app/run_once`, `app/close`, `session/send`, `session/dispatch`,
 `session/abort`, `session/queue`, `session/snapshot`, `session/rebind`,
-`session/close`, `session/respondToElicitation`, `subscribe`,
+`session/close`, `session/respond_to_elicitation`, `subscribe`,
 `unsubscribe`, `auth/refresh`, `auth/completeChallenge`,
 `auth/signOut`, `ping` — get reorganized into framework-supplied
 `WireExtension` values during Phase B/C:
@@ -918,11 +918,11 @@ Delivered:
 Non-streaming framework methods now flow through the same wire
 extension registry adopters use:
 
-- `gatewayWireExtension` — `gateway/listApps`, `gateway/getApp`.
-- `appWireExtension` — `app/createSession`, `app/getSession`,
-  `app/listSessions`.
+- `gatewayWireExtension` — `gateway/list_apps`, `gateway/get_app`.
+- `appWireExtension` — `app/create_session`, `app/get_session`,
+  `app/list_sessions`.
 - `sessionWireExtension` — `session/dispatch`, `session/abort`,
-  `session/close`, `session/respondToElicitation`.
+  `session/close`, `session/respond_to_elicitation`.
 
 Registered as framework defaults on `GatewayHarness` construction,
 BEFORE adopter-supplied extensions. Adopter attempts to claim
