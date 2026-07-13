@@ -25,7 +25,7 @@ import { buildSessionElicit } from "@agentick/elicitation-next";
 
 import { Cause, Effect, Exit, Option } from "effect";
 import { getContext, runHarnessProtocol, ulid } from "@agentick/runtime-next";
-import { BaseHarness, type LifecycleHandler, type Unsubscribe } from "@agentick/runtime-next";
+import { BaseHarness, type GuardDecider, type Unsubscribe } from "@agentick/runtime-next";
 import type {
   AbortInput,
   ChannelPublisher,
@@ -435,8 +435,9 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
   //   tools.use<DispatchInput, DispatchResult>((input, next) => ...);
 
   /**
-   * Register a handler that runs BEFORE every dispatch's body. The
-   * handler can return a `HandlerVerdict` to influence execution:
+   * Register a GUARD on dispatch — a decider that runs BEFORE every
+   * dispatch's body and admits or rejects it (ADR 83). Returns a
+   * `HandlerVerdict` to influence execution:
    *
    *   - `{ kind: "proceed" }` (or void) — continue normally
    *   - `{ kind: "veto", reason? }` — abort dispatch, terminal:vetoed
@@ -445,14 +446,17 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
    *   - `{ kind: "defer", retryAfter? }` — terminal:deferred (caller
    *     responsibility to retry)
    *
-   * Returns `Unsubscribe`. Multiple handlers compose per the
-   * `mergeVerdict` rules: veto > replace > defer > proceed.
+   * Returns `Unsubscribe`. Multiple guards compose by COMPOSE-ORDER (the
+   * outermost decides first) — ADR 83 replaced the old order-independent
+   * priority-merge (`veto > replace > defer`) with the composed guard seam.
    *
-   * Re-exposes `BaseHarness.handlers.register("before", ...)` with a
-   * tool-typed signature.
+   * The tool-typed name for the universal `BaseHarness.guardEffect(...)`
+   * seam. The handler stays Effect-native (in-fiber verdict). Distinct
+   * from the `gate` package (loop continuation) — this is op admission:
+   * guard : operation :: gate : loop.
    */
-  onBeforeDispatch(handler: LifecycleHandler<DispatchInput, DispatchResult, unknown>): Unsubscribe {
-    return this.handlers.register("before", handler as LifecycleHandler<unknown, unknown, unknown>);
+  guardDispatch(handler: GuardDecider<DispatchInput, DispatchResult, unknown>): Unsubscribe {
+    return this.guardEffect<DispatchInput, DispatchResult>(handler);
   }
 
   // ──────────────────────── inbox dispatch ────────────────────────

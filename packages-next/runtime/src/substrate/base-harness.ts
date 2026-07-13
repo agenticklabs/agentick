@@ -74,7 +74,6 @@ import {
   progressEventName,
   HandlerError,
   InvalidPayload,
-  LifecycleHandlerError,
   MessageHandlerError,
   registerAgentickError,
 } from "@agentick/spec-next";
@@ -82,6 +81,27 @@ import { resolveSyncSubstrateSlot } from "./resolve-slot.js";
 import { ulid } from "./ulid.js";
 import { getContext, type RuntimeContext, withContext } from "./runtime-context.js";
 import { RequestResponseRegistry, type RequestError } from "./request-response-registry.js";
+import {
+  type InterceptorKind,
+  type OperationReplace,
+  type OperationSignal,
+  interceptorKind,
+  isOperationSignal,
+  orderInterceptors,
+  signalFromVerdict,
+  tagInterceptor,
+} from "./op-signals.js";
+
+export {
+  OperationVeto,
+  OperationDefer,
+  OperationReplace,
+  isOperationSignal,
+  interceptorKind,
+  orderInterceptors,
+  type InterceptorKind,
+  type OperationSignal,
+} from "./op-signals.js";
 
 export type { Unsubscribe } from "@agentick/spec-next";
 
@@ -103,13 +123,15 @@ interface RegisteredCommand {
 }
 
 /**
- * Lifecycle handler. Runs at a phase boundary (typically `before`); may
- * return a {@link HandlerVerdict} to influence command execution.
- *
- * Returning `void` is equivalent to `{ kind: "proceed" }`.
+ * Effect-native guard decider (ADR 83). The Effect twin of the
+ * {@link BaseHarness.guard} sugar's decider: receives the command's input plus
+ * the op's {@link RuntimeContext}, returns a {@link HandlerVerdict} (or `void`
+ * ≡ `proceed`) on the Effect success channel. Desugared to a `guard`-kind
+ * interceptor by {@link BaseHarness.guardEffect}.
  */
-export type LifecycleHandler<I = unknown, R = unknown, E = never> = (
+export type GuardDecider<I = unknown, R = unknown, E = never> = (
   input: I,
+  ctx: RuntimeContext,
 ) => Effect.Effect<HandlerVerdict<R> | void, E, never>;
 
 // `Middleware` (Effect-native, `fx.use`) + `HarnessFx` are defined in
@@ -216,69 +238,14 @@ export type CommandHooks = {
 };
 
 // ============================================================================
-// HandlerRegistry — keyed handler lists
-// ============================================================================
-
-export class HandlerRegistry {
-  private handlers = new Map<string, LifecycleHandler<unknown, unknown, unknown>[]>();
-
-  register<I, R, E = never>(key: string, handler: LifecycleHandler<I, R, E>): Unsubscribe {
-    const list = this.handlers.get(key) ?? [];
-    list.push(handler as LifecycleHandler<unknown, unknown, unknown>);
-    this.handlers.set(key, list);
-    return () => {
-      const current = this.handlers.get(key);
-      if (!current) return;
-      const idx = current.indexOf(handler as LifecycleHandler<unknown, unknown, unknown>);
-      if (idx >= 0) current.splice(idx, 1);
-    };
-  }
-
-  /**
-   * Run all handlers for `key` in registration order. Returns the merged
-   * verdict per: veto > replace > defer > proceed.
-   *
-   * Handler failures propagate through the `E` channel.
-   */
-  run<I, R>(key: string, input: I): Effect.Effect<HandlerVerdict<R>, unknown, never> {
-    const list = this.handlers.get(key) ?? [];
-    return Effect.gen(function* () {
-      let merged: HandlerVerdict<R> = { kind: "proceed" };
-      for (const h of list) {
-        const raw = yield* h(input) as Effect.Effect<HandlerVerdict<R> | void, unknown, never>;
-        const v = (raw ?? { kind: "proceed" }) as HandlerVerdict<R>;
-        merged = mergeVerdict(merged, v);
-        if (merged.kind === "veto") return merged;
-      }
-      return merged;
-    });
-  }
-}
-
-/**
- * Verdict merge rule: veto > replace > defer > proceed.
- * First-veto wins; first-replace wins; deferreds use earliest retry.
- */
-export function mergeVerdict<R>(a: HandlerVerdict<R>, b: HandlerVerdict<R>): HandlerVerdict<R> {
-  if (a.kind === "veto") return a;
-  if (b.kind === "veto") return b;
-  if (a.kind === "replace") return a;
-  if (b.kind === "replace") return b;
-  if (a.kind === "defer" && b.kind === "defer") {
-    const ra = a.retryAfter;
-    const rb = b.retryAfter;
-    if (ra === undefined) return b;
-    if (rb === undefined) return a;
-    return { kind: "defer", retryAfter: Math.min(ra, rb) };
-  }
-  if (a.kind === "defer") return a;
-  if (b.kind === "defer") return b;
-  return { kind: "proceed" };
-}
-
-// ============================================================================
 // MiddlewareChain — outer→inner composition
 // ============================================================================
+//
+// NOTE (ADR 83): `HandlerRegistry` + `mergeVerdict` are GONE.
+// The verdict guard collapsed into the universal interceptor seam — a guard is a
+// `guard`-kind `Middleware` that raises an OperationSignal (see op-signals.ts).
+// The verdict-merge PRIORITY (veto > replace > defer, order-independent) is
+// replaced by compose-order: the outermost guard decides first. See STATUS note.
 
 /**
  * Compose an explicit middleware list around a body. First element is
@@ -733,7 +700,6 @@ export abstract class BaseHarness<
    * Cluster-aware inboxes route to whichever node owns the address.
    */
   public readonly address: string;
-  protected readonly handlers = new HandlerRegistry();
   protected readonly middleware = new MiddlewareChain();
 
   /**
@@ -887,27 +853,76 @@ export abstract class BaseHarness<
   }
 
   /**
-   * ADR 76 Q2 — run the `before` verdict handlers of every
-   * construction-ancestor (root-outermost) followed by this harness's own,
-   * merging the verdicts (`veto > replace > defer > proceed`) and
-   * short-circuiting on the first `veto`. Mirrors {@link ownAndInheritedMiddleware}
-   * so the two intercept seams — freeform `Middleware` and the verdict
-   * `HandlerRegistry` — share ONE scoping model (an adopter would be surprised
-   * if `app.use()` reached a descendant but an app-level `before` handler did
-   * not). Walked fresh per op. Behavior-preserving: a root harness, or one whose
-   * ancestors registered no `before` handlers, runs exactly its own chain.
+   * Register a GUARD interceptor (ADR 83) — the named seam that
+   * re-expresses the old before-verdict handler. A guard decides
+   * (`proceed` / `veto` / `replace` / `defer`) BEFORE the body runs; it is a
+   * `guard`-kind {@link Middleware} that either calls `next` (proceed) or raises
+   * an {@link OperationSignal} that `runOperation` maps to the matching terminal
+   * (`vetoed` / `replaced` / `deferred`).
+   *
+   * The ergonomic surface: a decider returning a {@link HandlerVerdict} (or
+   * `void` ≡ proceed), sync or Promise. Guards compose OUTERMOST of all
+   * interceptors (deny-before-transform), and are inherited across
+   * construction-ancestors the same way `.use()` middleware is (they live on
+   * the same chain). Returns {@link Unsubscribe}.
+   *
+   * ```ts
+   * harness.guard((input, ctx) =>
+   *   input.locked ? { kind: "veto", reason: "locked" } : undefined,
+   * );
+   * ```
    */
-  protected runInheritedBefore<I, R>(input: I): Effect.Effect<HandlerVerdict<R>, unknown, never> {
-    const self = this;
-    return Effect.gen(function* () {
-      let merged: HandlerVerdict<R> = { kind: "proceed" };
-      if (self.parent instanceof BaseHarness) {
-        merged = yield* self.parent.runInheritedBefore<I, R>(input);
-        if (merged.kind === "veto") return merged;
-      }
-      const own = yield* self.handlers.run<I, R>("before", input);
-      return mergeVerdict(merged, own);
-    });
+  guard<I = unknown, R = unknown>(
+    decide: (
+      input: I,
+      ctx: RuntimeContext,
+    ) => HandlerVerdict<R> | void | Promise<HandlerVerdict<R> | void>,
+  ): Unsubscribe {
+    return this.guardEffect<I, R>((input, ctx) =>
+      Effect.suspend(() => {
+        const raw = decide(input, ctx);
+        return isThenable(raw)
+          ? Effect.promise(() => raw as Promise<HandlerVerdict<R> | void>)
+          : Effect.succeed(raw as HandlerVerdict<R> | void);
+      }),
+    );
+  }
+
+  /**
+   * Effect-native {@link guard} — the composition path for a decider that is
+   * already an Effect (e.g. the tool-executor's `guardDispatch`, which runs
+   * its verdict logic in-fiber). Builds ONE `guard`-kind interceptor that reads
+   * the op's ambient {@link RuntimeContext}, runs the decider, and either
+   * proceeds or raises the desugared control-signal. This is the SOLE place a
+   * verdict becomes a signal.
+   */
+  protected guardEffect<I, R>(decide: GuardDecider<I, R, unknown>): Unsubscribe {
+    const mw: Middleware<I, R, unknown> = (input, next) =>
+      Effect.gen(function* () {
+        const ctx = yield* getContext;
+        const verdict = (yield* decide(input, ctx)) ?? ({ kind: "proceed" } as const);
+        if (verdict.kind === "proceed") return yield* next(input);
+        // Raise the control-signal on the failure channel — `runOperation`'s
+        // settle step catches it and emits the terminal. Because guards compose
+        // outermost, no transform (retry) middleware can swallow it.
+        return yield* Effect.fail(signalFromVerdict(verdict));
+      });
+    return this.middleware.use(
+      tagInterceptor("guard", mw) as Middleware<unknown, unknown, unknown>,
+    );
+  }
+
+  /**
+   * INTROSPECTION (ADR 83) — enumerate the effective interceptor
+   * kinds for `opName`, in composed (outermost-first) order after the
+   * guard-outermost sort. Proves the collapsed seam stays enumerable: guards,
+   * transforms, and observers are one list, not two disjoint mechanisms. Omits
+   * the tier-4 (FiberRef) call-scoped middleware, which is only resolvable
+   * in-fiber.
+   */
+  listInterceptors(opName: string): InterceptorKind[] {
+    const assembled = [...this.ownAndInheritedMiddleware(), ...this.hooks.forOp(opName)];
+    return orderInterceptors(assembled).map(interceptorKind);
   }
 
   /**
@@ -1048,85 +1063,50 @@ export abstract class BaseHarness<
               this.makeEvent(resolvedOp, "requested", scope, { payload: resolvedOp.input }),
             );
 
-            // 3. Append `before` and run handlers — this harness's PLUS
-            // every construction-ancestor's, root-outermost (ADR 76 Q2:
-            // handler inheritance mirrors tier-3 middleware inheritance, so
-            // `app.on*()` reaches a descendant op the same way `app.use()`
-            // does; the scoping model is uniform across both intercept seams).
+            // 3. Append the `before` marker (observe-only). The verdict GUARD
+            //    is no longer a distinct phase — it collapsed into the ONE
+            //    composed-interceptor seam below (a `guard`-kind interceptor
+            //    raising an OperationSignal). This event is kept verbatim so
+            //    subscribers still see the phase boundary.
             yield* this.publish(this.makeEvent(resolvedOp, "before", scope));
-            const verdictExit = yield* Effect.exit(this.runInheritedBefore<I, R>(resolvedOp.input));
-            if (Exit.isFailure(verdictExit)) {
-              const cause = Cause.failureOption(verdictExit.cause);
-              const lifecycleErr = new LifecycleHandlerError({
-                phase: "before",
-                cause: Option.isSome(cause) ? cause.value : verdictExit.cause,
-              });
-              yield* this.publishTerminal(resolvedOp, scope, "failed", {
-                error: this.normalizeError(lifecycleErr),
-              });
-              return yield* Effect.fail<SubstrateError>(lifecycleErr);
-            }
-            const verdict = verdictExit.value as HandlerVerdict<R>;
-            switch (verdict.kind) {
-              case "veto":
-                return yield* this.terminate<R>(resolvedOp, scope, "vetoed", {
-                  reason: verdict.reason,
-                });
-              case "replace":
-                return yield* this.terminate<R>(resolvedOp, scope, "replaced", {
-                  result: verdict.result,
-                  reason: verdict.reason,
-                });
-              case "defer":
-                return yield* this.terminate<R>(resolvedOp, scope, "deferred", {
-                  retryAfter: verdict.retryAfter,
-                });
-              case "proceed":
-                break;
-            }
 
-            // 4. Compose middleware around body, execute. We capture
-            //    the body's exit so the span integration (below) can
-            //    annotate attributes without going through
-            //    `Effect.withSpan` — which we found copies failures
-            //    when it captures them, breaking error-reference
-            //    identity in adopters' typed error channels.
-            // ADR 76 composition order (outermost → innermost):
-            //   call-scoped (tier 4, FiberRef — broadest)
-            //     → inherited ancestors (tier 3, root → parent)
-            //       → this harness (tier 2)
-            //         → body
-            // Tier 4 is read from the FiberRef the ADR 77 spine made
-            // continuous across harness boundaries; tiers 2/3 walk the
-            // construction tree. Both reduce to a pass-through when nothing
-            // is registered (behavior-preserving).
+            // 4. Assemble the ONE interceptor list around the body and compose
+            //    it. Assembly order (outermost → innermost):
+            //      call-scoped (tier 4, FiberRef — broadest)
+            //        → inherited ancestors (tier 3, root → parent)
+            //          → this harness (tier 2, incl. guards from `.guard()`)
+            //            → command hooks (ADR 82)
+            //    Then a STABLE guard-outermost sort floats every `guard`-kind
+            //    interceptor ahead of the transforms (deny-before-transform),
+            //    preserving tier order within each kind. Everything reduces to
+            //    a pass-through when nothing is registered.
             const callMiddleware = yield* getCallMiddleware;
+            const assembled = [
+              ...callMiddleware,
+              ...this.ownAndInheritedMiddleware(),
+              ...this.hooks.forOp(resolvedOp.name),
+            ];
             const composed = composeMiddleware<I, R, E>(
-              [
-                ...callMiddleware,
-                ...this.ownAndInheritedMiddleware(),
-                // ADR 82: command lifecycle hooks compose innermost — all
-                // middleware tiers wrap all hooks. The cascade is already
-                // folded into `this.hooks` at construction (no parent-walk);
-                // `forOp` reads the local, resolved value. Per-scope
-                // middleware↔hook interleave is a deferred refinement.
-                ...this.hooks.forOp(resolvedOp.name),
-              ] as Middleware<I, R, E>[],
+              orderInterceptors(assembled) as Middleware<I, R, E>[],
               body,
             );
+            // Settle: a raised OperationSignal (from a guard) maps to its
+            // terminal (vetoed/replaced/deferred); a real failure re-raises
+            // ORIGINAL (identity-preserving) after terminal:failed; success
+            // emits terminal:succeeded. `catchAll` sees only the typed-failure
+            // channel — defects/interrupts pass through untouched, exactly as
+            // the prior `tapError` did.
             return yield* composed(resolvedOp.input).pipe(
               Effect.tap((value) =>
                 this.publishTerminal(resolvedOp, scope, "succeeded", { result: value }),
               ),
-              Effect.tapError((err) =>
-                this.publishTerminal(resolvedOp, scope, "failed", {
-                  error: this.normalizeError(err),
-                }),
+              Effect.catchAll((err) =>
+                isOperationSignal(err)
+                  ? this.terminateFromSignal<R>(resolvedOp, scope, err)
+                  : this.publishTerminal(resolvedOp, scope, "failed", {
+                      error: this.normalizeError(err),
+                    }).pipe(Effect.zipRight(Effect.fail(err))),
               ),
-              // Span annotation: attributes carry through whether the
-              // operation succeeded or failed. The span's recordException
-              // path runs on the captured Exit only — the failure value
-              // returned to the caller is untouched.
               this.annotateOperationSpan(resolvedOp),
             );
           }),
@@ -1887,6 +1867,31 @@ export abstract class BaseHarness<
       yield* this.publishTerminal(op, scope, outcome, payload);
       return yield* this.replayTerminal<R>(this.payloadToTerminal(outcome, payload));
     });
+  }
+
+  /**
+   * Map a guard-raised {@link OperationSignal} to its terminal
+   * (ADR 83). `veto` → terminal `vetoed` + `OperationOutcomeError`;
+   * `replace` → terminal `replaced` + success(`result`); `defer` → terminal
+   * `deferred` + `OperationOutcomeError`. The interceptor-seam twin of the old
+   * before-phase verdict switch.
+   */
+  private terminateFromSignal<R>(
+    op: Operation<unknown, R, unknown>,
+    scope: EventScope,
+    signal: OperationSignal,
+  ): Effect.Effect<R, OperationOutcomeError | JournalError, never> {
+    switch (signal._signal) {
+      case "veto":
+        return this.terminate<R>(op, scope, "vetoed", { reason: signal.reason });
+      case "replace":
+        return this.terminate<R>(op, scope, "replaced", {
+          result: (signal as OperationReplace<R>).result,
+          reason: signal.reason,
+        });
+      case "defer":
+        return this.terminate<R>(op, scope, "deferred", { retryAfter: signal.retryAfter });
+    }
   }
 
   /**

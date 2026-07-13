@@ -111,13 +111,11 @@ class ToyKnobsHarness extends BaseHarness<"tool"> {
   installBeforeHandler(
     fn: (input: { id: string; value: unknown }) => { veto: true; reason?: string } | undefined,
   ): () => void {
-    return this.handlers.register<{ id: string; value: unknown }, void>("before", (input) =>
-      Effect.sync(() => {
-        const out = fn(input);
-        if (out?.veto) return { kind: "veto", reason: out.reason };
-        return { kind: "proceed" };
-      }),
-    );
+    // ADR 83: before-verdict handler → `gate()` sugar.
+    return this.guard<{ id: string; value: unknown }, void>((input) => {
+      const out = fn(input);
+      return out?.veto ? { kind: "veto", reason: out.reason } : { kind: "proceed" };
+    });
   }
 
   // ─── Inbox routing ───

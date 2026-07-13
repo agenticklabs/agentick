@@ -107,9 +107,9 @@ class TestHarness extends BaseHarness<"tool"> {
   }
 
   onBefore(fn: (input: AddInput) => HandlerVerdict<number> | void): () => void {
-    return this.handlers.register<AddInput, number>("before", (input) =>
-      Effect.sync(() => fn(input)),
-    );
+    // ADR 83: the before-verdict handler is now the `gate()`
+    // sugar — a `gate`-kind interceptor that desugars the verdict to a signal.
+    return this.guard<AddInput, number>((input) => fn(input));
   }
 
   // Middleware registers through the two inherited surfaces: `use` takes the

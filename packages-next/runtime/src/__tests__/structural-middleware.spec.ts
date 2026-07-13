@@ -52,9 +52,8 @@ class TierHarness extends BaseHarness<"tool"> {
   }
 
   onBefore(fn: (input: { n: number }) => HandlerVerdict<number> | void): () => void {
-    return this.handlers.register<{ n: number }, number>("before", (input) =>
-      Effect.sync(() => fn(input)),
-    );
+    // ADR 83: before-verdict handler → `gate()` sugar.
+    return this.guard<{ n: number }, number>((input) => fn(input));
   }
 
   protected handleMessage(

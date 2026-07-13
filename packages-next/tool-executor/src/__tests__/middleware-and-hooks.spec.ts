@@ -1,9 +1,9 @@
 /**
  * Tool executor middleware + lifecycle hook exposure (4a.6).
  *
- * `.use(middleware)` and `.onBeforeDispatch(handler)` are thin typed
- * wrappers over `BaseHarness.middleware.use` and
- * `BaseHarness.handlers.register("before", ...)`. The base already
+ * `.use(middleware)` and `.guardDispatch(handler)` are thin typed
+ * wrappers over `BaseHarness.middleware.use` and (ADR 83)
+ * `BaseHarness.guardEffect(...)` — one composed interceptor seam. The base
  * composes both into every operation; these tests verify the typed
  * surfaces work as advertised.
  */
@@ -125,7 +125,7 @@ describe("ToolExecutorHarness — .fx.use(middleware)", () => {
   });
 });
 
-describe("ToolExecutorHarness — .onBeforeDispatch(handler)", () => {
+describe("ToolExecutorHarness — .guardDispatch(handler)", () => {
   it("proceed verdict (or void) lets dispatch run normally", async () => {
     let ran = 0;
     const { harness } = await createTestHarness({
@@ -140,7 +140,7 @@ describe("ToolExecutorHarness — .onBeforeDispatch(handler)", () => {
         },
       ],
     });
-    harness.onBeforeDispatch(() => Effect.succeed(undefined));
+    harness.guardDispatch(() => Effect.succeed(undefined));
     const result = await harness.dispatch(dispatchOf("echo", "c-h-1"));
     expect(result.isError ?? false).toBe(false);
     expect(ran).toBe(1);
@@ -160,9 +160,7 @@ describe("ToolExecutorHarness — .onBeforeDispatch(handler)", () => {
         },
       ],
     });
-    harness.onBeforeDispatch(() =>
-      Effect.succeed({ kind: "veto", reason: "policy block" } as const),
-    );
+    harness.guardDispatch(() => Effect.succeed({ kind: "veto", reason: "policy block" } as const));
     // Veto path: BaseHarness's terminate emits terminal:vetoed and
     // replayTerminal causes the caller to receive an
     // OperationOutcomeError (Promise reject).
@@ -184,7 +182,7 @@ describe("ToolExecutorHarness — .onBeforeDispatch(handler)", () => {
         },
       ],
     });
-    const unsub = harness.onBeforeDispatch(() => {
+    const unsub = harness.guardDispatch(() => {
       vetoes++;
       return Effect.succeed({ kind: "veto", reason: "no" } as const);
     });
