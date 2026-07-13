@@ -57,11 +57,22 @@ import type { WireNotificationMethod, WireNotificationParams } from "./notificat
  * the seam where per-method policy lives.
  */
 export interface WireMethodAuth {
-  /** `true` if any authenticated session can call; `false` for open methods (rare). */
+  /**
+   * Whether the authorizer POLICY gates this method. `true` (or an absent
+   * `auth` entry) → gated by the verb-derived scope (`a/b` → `a:b`, ADR 51
+   * §3.3). `false` → OPEN: the policy is skipped (rare — for methods with no
+   * gated dynamic-lane counterpart). Open does NOT waive the target session's
+   * structural `requiredScopes` ceiling — that is un-waivable (#199).
+   */
   readonly required: boolean;
   /**
-   * Optional scope label — used for role-gated dispatch. Opaque to
-   * the framework; semantics defined by the gateway's `AuthSource`.
+   * Optional role label, checked **additively** — required ON TOP of the
+   * verb-derived scope, never in place of it (ADR 51 §3.3 anti-bypass: a
+   * porcelain method's authz label is its verb name and cannot be relabeled to
+   * reach a verb the plumbing lane would deny; an additive role can only
+   * tighten). So `{ scope: "admin" }` on `x/verb` requires BOTH `x:verb` AND
+   * `admin`. Opaque to the framework; the gateway's `Authorizer` defines the
+   * role's meaning.
    */
   readonly scope?: string;
 }

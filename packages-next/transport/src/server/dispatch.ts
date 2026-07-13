@@ -33,11 +33,14 @@ import {
   type SessionHarnessProtocol,
   type SubscriptionHandle,
   type WireExtension,
+  type WireMethod,
+  type WireMethodAuth,
   type IngressIdentity,
   type WireExtensionContext,
   type WireExtensionTransport,
   type WireNotificationMethod,
 } from "@agentick/spec-next";
+import { omitUndefined } from "@agentick/utils-next";
 
 /**
  * A `DispatchHost` is anything that satisfies `GatewayHarnessProtocol`.
@@ -110,7 +113,13 @@ export async function dispatchRequest(
         // same-principal rule. Bootstrap methods (initialize / ping /
         // _extensions/list) returned above and are deliberately
         // pre-auth.
-        await authorizeDispatch(host, req.method, req.params, identity);
+        await authorizeDispatch(
+          host,
+          req.method,
+          req.params,
+          identity,
+          resolution.extension.auth?.[req.method as WireMethod],
+        );
         const ctx = buildWireExtensionContext(
           host,
           resolution.extension,
@@ -222,12 +231,27 @@ function methodScope(method: string): string {
  * same-principal rule has real input — before this fix the gate only
  * ever saw `{ sessionId }` and the rule was structurally dead (review
  * finding: cross-principal access under surface-glob grants).
+ *
+ * The optional `methodAuth` is the resolved extension's declared
+ * {@link WireMethodAuth} for this method (ADR 46 `WireExtension.auth`),
+ * finally wired in:
+ *   - `required: false` → OPEN: the authorizer POLICY is skipped (the
+ *     structural ceiling below still applies — it is un-waivable). For
+ *     the rare method with no gated dynamic-lane counterpart.
+ *   - `scope` (a declared role, e.g. `"admin"`) → checked ADDITIVELY, ON
+ *     TOP of the verb-derived scope — NEVER as a replacement. ADR 51 §3.3
+ *     (anti-bypass): a porcelain method's authz label is its verb name and
+ *     cannot be relabeled to reach a verb the plumbing lane would deny; an
+ *     additive role can only tighten, never widen. So a role-gated method
+ *     requires BOTH `verb:scope` AND the role.
+ *   - absent → verb-derived scope, gated (the default; unchanged).
  */
 async function authorizeDispatch(
   host: DispatchHost,
   method: string,
   rawParams: unknown,
   identity: IngressIdentity | undefined,
+  methodAuth?: WireMethodAuth,
 ): Promise<void> {
   const params = (rawParams ?? {}) as Record<string, unknown>;
   const sessionId = typeof params.sessionId === "string" ? params.sessionId : undefined;
@@ -242,6 +266,8 @@ async function authorizeDispatch(
   // the no-authorizer short-circuit: no authorizer — including an
   // absent one — can waive it (review finding: it sat behind the
   // guard). Cover-aware: a star/glob claim satisfies its members.
+  // Applies EVEN to `required: false` methods — the ceiling is a
+  // resource constraint, orthogonal to a method's policy openness.
   const requiredScopes = targetSession?.requiredScopes;
   if (requiredScopes !== undefined && requiredScopes.length > 0) {
     const held = identity?.scopes ?? [];
@@ -249,24 +275,35 @@ async function authorizeDispatch(
       throw WireRpcError.forbidden(methodScope(method));
     }
   }
+
+  // Declared-open methods skip the authorizer POLICY (the ceiling above
+  // still applied). Absent declaration → gated (the default).
+  if (methodAuth?.required === false) return;
+
   const authorizer = host.authorizer;
   if (!authorizer) return; // hosts without a policy (bare test hosts) are trusted-domain
-  const decision = await authorizer.authorize({
-    ...(identity?.principal !== undefined ? { principal: identity.principal } : {}),
-    ...(identity?.scopes !== undefined ? { tokenScopes: identity.scopes } : {}),
-    scope: methodScope(method),
-    ...(sessionId !== undefined
-      ? {
-          target: {
-            sessionId,
-            ...(targetSession?.principal !== undefined
-              ? { principal: targetSession.principal }
-              : {}),
-          },
-        }
-      : {}),
+
+  const target =
+    sessionId !== undefined
+      ? { sessionId, ...omitUndefined({ principal: targetSession?.principal }) }
+      : undefined;
+  const authInput = (scope: string) => ({
+    scope,
+    ...omitUndefined({ principal: identity?.principal, tokenScopes: identity?.scopes, target }),
   });
-  if (!decision.allowed) throw WireRpcError.forbidden(methodScope(method));
+
+  // The verb-derived scope is ALWAYS required — the §3.3 anti-bypass label.
+  const verbScope = methodScope(method);
+  if (!(await authorizer.authorize(authInput(verbScope))).allowed) {
+    throw WireRpcError.forbidden(verbScope);
+  }
+  // A declared role is ADDITIVE — required ON TOP of the verb scope, never
+  // in place of it. Both must pass; the verb gate is never widened.
+  if (methodAuth?.scope !== undefined) {
+    if (!(await authorizer.authorize(authInput(methodAuth.scope))).allowed) {
+      throw WireRpcError.forbidden(methodAuth.scope);
+    }
+  }
 }
 
 /**
@@ -320,9 +357,7 @@ function buildWireExtensionContext(
     // Authn happened ONCE at ingress (ADR 51 §4.1); dispatch only
     // carries the stamped identity. The dynamic command lane's
     // Authorizer gate consumes it.
-    ...(identity?.principal !== undefined ? { principal: identity.principal } : {}),
-    ...(app ? { app } : {}),
-    ...(session ? { session } : {}),
+    ...omitUndefined({ principal: identity?.principal, app, session }),
     // TODO(phase-F): resolve HookBridges from the session's session-extension
     // registry when the mcpControlWireExtension needs `ctx.bridges().mcp`.
     // For Phase B/C, no framework-shipped extension uses bridges — the empty
