@@ -1189,6 +1189,12 @@ export class AppHarness<P = unknown>
     // session bridges (so React-side `bridges.elicitation` and
     // server-side `bridges.elicitation.respond(...)` from clients
     // reach the same registry the tool executor is awaiting).
+    // TODO(adr-81): these per-session sub-harnesses are built here (app) with
+    // no `parent`, so the ADR-76 middleware / ADR-80 hook cascade doesn't reach
+    // them. Deferred while dormant (no `hooks:{}` option wired yet). Fix =
+    // relocate construction into the SessionHarness via app-provided factory
+    // injection (`(parent) => new XHarness(…, { parent })`) — "children born
+    // from parents", parent stamped structurally. See blueprint/81.
     const elicitation = new ElicitationHarness(
       `${sessionId}:elicitation`,
       this.journal,
