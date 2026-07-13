@@ -17,9 +17,12 @@
  *
  * NOTE: these are WRITE surfaces (client → server mutations). They are
  * registered in the bundled tier (not the framework-privileged tier), so an
- * adopter may still gate or override them. A deployment that must NOT expose a
- * mutation to clients should attach an `auth` policy (per-method `WireMethodAuth`)
- * on the extension — none is declared today (`TODO(auth): gate knobs/set`).
+ * adopter may still override them. They are NOT ungated: the wire dispatch
+ * choke point (`@agentick/transport-next` `authorizeDispatch`) authorizes every
+ * resolved method by its verb-derived scope (`knobs:set`) + the target session's
+ * structural `requiredScopes` ceiling, with a deny-by-default authorizer for
+ * authenticated principals. A deployment restricts these by granting/withholding
+ * the corresponding scope in its `Authorizer` policy.
  */
 
 import type { WireExtension } from "@agentick/spec-next";

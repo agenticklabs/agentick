@@ -37,8 +37,14 @@ export interface WithKnobsOptions {
 // double-construct. The wire-extension is a stateless router (resolves the live
 // session's knobs bridge at dispatch), so it registers once at gateway
 // construction independent of the per-session bridge construction.
-// TODO(auth): `knobs/set` is a client-reachable mutation with no `auth` policy —
-// attach a per-method `WireMethodAuth` before exposing it in an untrusted deployment.
+// AUTHZ: `knobs/set` is NOT ungated — the wire dispatch choke point
+// (`@agentick/transport-next` `server/dispatch.ts` `authorizeDispatch`) gates
+// EVERY resolved method with its verb-derived scope (`knobs:set`) + the target
+// session's structural `requiredScopes` ceiling, before the handler runs;
+// `unconfiguredAuthorizer` is deny-by-default for authenticated principals. A
+// declared `WireMethodAuth` on `knobsWireExtension` is currently INERT (the
+// choke point uses the verb-derived scope, not `extension.auth`) — declaring one
+// only matters once that declarative layer is wired into `authorizeDispatch`.
 export function withKnobs(options: WithKnobsOptions = {}): SessionExtension {
   return {
     name: "@agentick/knobs-next",
