@@ -158,6 +158,64 @@ export type AsyncMiddleware<I = unknown, R = unknown> = (
 ) => Promise<R>;
 
 // ============================================================================
+// Command lifecycle hooks (ADR 80) — the typed CommandRegistry → CommandHooks
+// derivation. Co-located with AsyncMiddleware because a hook DESUGARS to an
+// AsyncMiddleware entry (§7 fiber invariant) and carries the RuntimeContext —
+// so, like AsyncMiddleware, it can't live in spec without a wrong-direction dep.
+// ============================================================================
+
+/**
+ * A before-hook (ADR 80 §4): receives the command's input plus the op's
+ * {@link RuntimeContext}. Return the reshaped input to **transform**, `void`
+ * to **observe/passthrough**, or `throw` to **veto** (the op aborts with the
+ * thrown error on the `E` channel — no verdict DSL).
+ */
+export type BeforeHook<In, Ctx = RuntimeContext> = (
+  input: In,
+  ctx: Ctx,
+) => In | void | Promise<In | void>;
+
+/** An after-hook — symmetric to {@link BeforeHook} over the command's output. */
+export type AfterHook<Out, Ctx = RuntimeContext> = (
+  output: Out,
+  ctx: Ctx,
+) => Out | void | Promise<Out | void>;
+
+/**
+ * Empty-seed registry (ADR 80 §5) — the single source of truth mapping a
+ * command id (`"<who>:<what>"`) to its `{ input; output }`. Each harness
+ * package augments it with one line per exposed verb via module augmentation
+ * of `@agentick/runtime-next`; {@link CommandHooks} falls out mechanically.
+ */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+export interface CommandRegistry {}
+
+/** Uppercase the first char of `S`, leaving the tail untouched. */
+type Cap<S extends string> = S extends `${infer H}${infer T}` ? `${Uppercase<H>}${T}` : S;
+/** PascalCase a command id, splitting on the `:` (command) and `/` (wire) delimiters. */
+type Pascal<S extends string> = S extends `${infer A}:${infer B}`
+  ? `${Cap<A>}${Pascal<B>}`
+  : S extends `${infer A}/${infer B}`
+    ? `${Cap<A>}${Pascal<B>}`
+    : Cap<S>;
+
+/**
+ * The derived, never-hand-written hook surface (ADR 80 §5): each
+ * {@link CommandRegistry} entry mints `onBefore<Pascal>?` (over its input) and
+ * `onAfter<Pascal>?` (over its output). The type-level `Pascal` is the exact
+ * twin of the runtime {@link deriveHookNames} — they MUST agree (a test).
+ */
+export type CommandHooks = {
+  [K in keyof CommandRegistry as `onBefore${Pascal<K & string>}`]?: BeforeHook<
+    CommandRegistry[K] extends { input: infer I } ? I : never
+  >;
+} & {
+  [K in keyof CommandRegistry as `onAfter${Pascal<K & string>}`]?: AfterHook<
+    CommandRegistry[K] extends { output: infer O } ? O : never
+  >;
+};
+
+// ============================================================================
 // HandlerRegistry — keyed handler lists
 // ============================================================================
 
@@ -304,6 +362,42 @@ export function liftMiddleware<I = unknown, R = unknown, E = unknown>(
       });
     });
 }
+
+/**
+ * Resolve a command's op name (`"<surface>:command:<verb>"`) to its
+ * `[onBefore…, onAfter…]` hook names (ADR 80 §5). Strips the `:command:`
+ * infix to the canonical `"<who>:<what>"`, then PascalCases (splitting on `:`
+ * AND `/`). The runtime twin of the type-level `Pascal` — they MUST agree, so
+ * `deriveHookNames("tool:command:dispatch")` === `["onBeforeToolDispatch",
+ * "onAfterToolDispatch"]`, the names `CommandHooks` mints for `"tool:dispatch"`.
+ */
+export function deriveHookNames(opName: string): [string, string] {
+  const pascal = opName
+    .replace(":command:", ":")
+    .split(/[:/]/)
+    .map((seg) => (seg === "" ? seg : seg.charAt(0).toUpperCase() + seg.slice(1)))
+    .join("");
+  return [`onBefore${pascal}`, `onAfter${pascal}`];
+}
+
+/**
+ * Adapt a {@link BeforeHook} into an {@link AsyncMiddleware}: await the hook,
+ * thread its reshaped input (or the original on `void`) into `next`; a `throw`
+ * propagates as a veto. Lifted through the SAME `liftMiddleware` path `.use`
+ * uses — the ADR 80 §7 fiber invariant.
+ */
+const asBefore =
+  <I, R>(hook: BeforeHook<I>): AsyncMiddleware<I, R> =>
+  async (input, next, ctx) =>
+    next(((await hook(input, ctx)) ?? input) as I);
+
+/** Adapt an {@link AfterHook} into an {@link AsyncMiddleware} (symmetric to {@link asBefore}). */
+const asAfter =
+  <I, R>(hook: AfterHook<R>): AsyncMiddleware<I, R> =>
+  async (input, next, ctx) => {
+    const out = await next(input);
+    return ((await hook(out, ctx)) ?? out) as R;
+  };
 
 // ============================================================================
 // Tier 4 — call-scoped (dynamic) middleware (ADR 76)
@@ -496,6 +590,14 @@ export interface BaseHarnessOptions<P = unknown, I = unknown> {
    * it. Threaded from the app so a deployment sets it once.
    */
   readonly telemetryNamespace?: string;
+  /**
+   * Command lifecycle hooks (ADR 80) — a declarative, cascading map of
+   * `onBefore<Command>` / `onAfter<Command>` participants. Each present hook
+   * desugars to an {@link AsyncMiddleware} entry on the matching command's
+   * chain (§7), inheriting the `liftMiddleware` fiber fix verbatim and
+   * cascading to descendants exactly like `harness.use()`.
+   */
+  readonly hooks?: CommandHooks;
 }
 
 export abstract class BaseHarness<
@@ -564,6 +666,13 @@ export abstract class BaseHarness<
    * Capability + overridable default — never a hardcode.
    */
   protected readonly telemetryNamespace: string;
+  /**
+   * Declarative command lifecycle hooks (ADR 80). Consulted per-op by
+   * {@link ownAndInheritedHooks}, which lifts each present hook into the
+   * command's middleware chain. `undefined` when none were supplied.
+   * @see BaseHarnessOptions.hooks
+   */
+  protected readonly hooks: CommandHooks | undefined;
   private readonly policy: JournalingPolicy;
   private inboxUnsubscribe?: Unsubscribe;
 
@@ -655,6 +764,28 @@ export abstract class BaseHarness<
   }
 
   /**
+   * ADR 80 — command lifecycle hooks as middleware entries. Mirrors
+   * {@link ownAndInheritedMiddleware} EXACTLY: walk the construction-ancestor
+   * chain root-outermost and, at each level, lift the present
+   * `onBefore/After<Command>` hooks for `opName` through the SAME
+   * `liftMiddleware` path `.use` uses (the §7 fiber invariant — never a
+   * bespoke hook-runner). Returns `[]` when no ancestor registered a matching
+   * hook, so the composed chain stays byte-identical to today's.
+   */
+  protected ownAndInheritedHooks(opName: string): Middleware<unknown, unknown, unknown>[] {
+    const inherited =
+      this.parent instanceof BaseHarness ? this.parent.ownAndInheritedHooks(opName) : [];
+    const [beforeName, afterName] = deriveHookNames(opName);
+    const map = this.hooks as Record<string, unknown> | undefined;
+    const before = map?.[beforeName] as BeforeHook<unknown> | undefined;
+    const after = map?.[afterName] as AfterHook<unknown> | undefined;
+    const own: Middleware<unknown, unknown, unknown>[] = [];
+    if (before) own.push(liftMiddleware(asBefore(before)));
+    if (after) own.push(liftMiddleware(asAfter(after)));
+    return [...inherited, ...own];
+  }
+
+  /**
    * ADR 76 Q2 — run the `before` verdict handlers of every
    * construction-ancestor (root-outermost) followed by this harness's own,
    * merging the verdicts (`veto > replace > defer > proceed`) and
@@ -702,6 +833,7 @@ export abstract class BaseHarness<
     this.metadata = Object.freeze({ ...(options.metadata ?? {}) });
     this.principal = options.principal;
     this.telemetryNamespace = options.telemetryNamespace ?? "agentick";
+    this.hooks = options.hooks;
 
     // Substrate slot resolution (ADR 31). Build a shell exposing the
     // positional substrate defaults as the parent-side upstream, then
@@ -869,7 +1001,14 @@ export abstract class BaseHarness<
             // is registered (behavior-preserving).
             const callMiddleware = yield* getCallMiddleware;
             const composed = composeMiddleware<I, R, E>(
-              [...callMiddleware, ...this.ownAndInheritedMiddleware()] as Middleware<I, R, E>[],
+              [
+                ...callMiddleware,
+                ...this.ownAndInheritedMiddleware(),
+                // ADR 80: command lifecycle hooks compose innermost — all
+                // middleware tiers wrap all hooks. Per-scope middleware↔hook
+                // interleave is a deferred refinement.
+                ...this.ownAndInheritedHooks(resolvedOp.name),
+              ] as Middleware<I, R, E>[],
               body,
             );
             return yield* composed(resolvedOp.input).pipe(

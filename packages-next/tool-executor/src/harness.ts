@@ -88,6 +88,16 @@ import type {
   ValidatorResult,
 } from "./types.js";
 
+// ADR 80 — contribute this harness's exposed `tool:dispatch` verb to the
+// command registry, so `CommandHooks` gains typed `onBeforeToolDispatch` /
+// `onAfterToolDispatch` participants (before ← input, after ← the dispatch
+// content). One line per verb; both hooks fall out via the mapped type.
+declare module "@agentick/runtime-next" {
+  interface CommandRegistry {
+    "tool:dispatch": { input: DispatchInput; output: ContentBlock[] };
+  }
+}
+
 interface InFlightEntry {
   readonly controller: AbortController;
   readonly toolName: string;
