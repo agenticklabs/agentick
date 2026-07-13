@@ -28,16 +28,17 @@ export interface WithKnobsOptions {
   readonly initial?: Readonly<Record<string, string | number | boolean>>;
 }
 
-// TODO(slice-4): register `knobsWireExtension` (from ./wire.js) in
-// production by returning an `ExtensionBundle`
-// `{ name, session, wire: [knobsWireExtension] }` from `withKnobs()` — the
-// gateway's `splitExtensions` folds `bundle.wire` into `wireFromBundles` and
-// registers it. Blocked on ADR 26 Step 8: `withKnobs()` isn't yet consumed by
-// `createGateway({ extensions })` (the SessionHarness constructs KnobsHarness
-// directly in session-bridges.ts), so widening this return type registers
-// nothing today and would only be a framework-composition guess. Slice 4's
-// tests register `knobsWireExtension` explicitly; production wiring lands with
-// Step 8. See packages-next/gateway/src/harness.ts (splitExtensions).
+// NOTE: `knobsWireExtension` (./wire.js) IS registered in production — via
+// `builtinWireExtensions` in `@agentick/app-next`, which the gateway registers
+// in its bundled tier (`gateway/src/harness.ts`). It rides that path, NOT this
+// `withKnobs()` session extension: `withKnobs`'s installer constructs its OWN
+// `KnobsHarness` (below), while `buildSessionBridges` ALSO constructs one
+// unconditionally — so folding the wire through a `withKnobs()` bundle would
+// double-construct. The wire-extension is a stateless router (resolves the live
+// session's knobs bridge at dispatch), so it registers once at gateway
+// construction independent of the per-session bridge construction.
+// TODO(auth): `knobs/set` is a client-reachable mutation with no `auth` policy —
+// attach a per-method `WireMethodAuth` before exposing it in an untrusted deployment.
 export function withKnobs(options: WithKnobsOptions = {}): SessionExtension {
   return {
     name: "@agentick/knobs-next",

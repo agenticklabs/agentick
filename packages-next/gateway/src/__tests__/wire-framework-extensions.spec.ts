@@ -53,6 +53,21 @@ describe("GatewayHarness — framework wire extensions", () => {
     await gw.closeGateway();
   });
 
+  it("registers built-in harness wire-extensions (knobs/set) by default", async () => {
+    // `knobs/set` rides `builtinWireExtensions` (owned by `@agentick/app-next`,
+    // which depends on the built-in harness packages), registered in the gateway's
+    // bundled tier. Asserted by namespace/name so this test needs no knobs dep.
+    const gw = new GatewayHarness();
+    await gw.ready;
+
+    const resolved = gw.wireExtensions().resolve("knobs/set");
+    expect(resolved).toBeDefined();
+    expect(resolved?.extension.namespace).toBe("knobs");
+    expect(resolved?.extension.name).toBe("@agentick/knobs-next#wire");
+
+    await gw.closeGateway();
+  });
+
   it("rejects adopter attempts to claim the `gateway` namespace", () => {
     const collision = defineWireExtension({
       name: "@adopter/rogue-gateway",

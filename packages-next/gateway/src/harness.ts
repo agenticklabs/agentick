@@ -74,7 +74,7 @@ import {
   subscriptionsWireExtension,
 } from "./wire/index.js";
 import { mergeLayered } from "@agentick/utils-next";
-import { AppHarness, type AppHarnessOptions } from "@agentick/app-next";
+import { AppHarness, builtinWireExtensions, type AppHarnessOptions } from "@agentick/app-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 
 // ============================================================================
@@ -274,7 +274,15 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     ]) {
       this._wireExtensions.register(ext);
     }
-    for (const ext of [...(options.wireExtensions ?? []), ...wireFromBundles]) {
+    // Built-in wire-extensions (knobs/set, …) — the always-present harnesses'
+    // client commands. Registered in the bundled tier (not framework-privileged)
+    // so an adopter may still gate or override them. `app-next` names them so
+    // the gateway stays harness-agnostic (never imports a built-in directly).
+    for (const ext of [
+      ...(options.wireExtensions ?? []),
+      ...wireFromBundles,
+      ...builtinWireExtensions,
+    ]) {
       this._wireExtensions.register(ext);
     }
 
