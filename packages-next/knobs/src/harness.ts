@@ -46,7 +46,7 @@
  */
 
 import { Effect } from "effect";
-import { BaseHarness, type Unsubscribe } from "@agentick/runtime-next";
+import { BaseHarness, type Hooks, type Unsubscribe } from "@agentick/runtime-next";
 import type {
   ContentBlock,
   EventBus,
@@ -86,6 +86,19 @@ import {
 // ============================================================================
 // Harness
 // ============================================================================
+
+/**
+ * Construction options for {@link KnobsHarness}. Minimal today — knobs takes its
+ * substrate + layer-chain parent positionally; this carries the ADR 82 resolved
+ * hook layer forwarded by the SessionHarness (via `buildSessionBridges`).
+ */
+export interface KnobsHarnessOptions {
+  /**
+   * Resolved command lifecycle hooks (ADR 82) — the cascade-folded {@link Hooks}
+   * value, forwarded to {@link BaseHarness}. Defaults to `Hooks.empty`.
+   */
+  readonly hooks?: Hooks;
+}
 
 export class KnobsHarness
   extends BaseHarness<"knobs">
@@ -156,8 +169,9 @@ export class KnobsHarness
     bus: EventBus,
     inbox: MessageInbox,
     parentLayer?: KnobsHarnessProtocol,
+    options: KnobsHarnessOptions = {},
   ) {
-    super("knobs", scopeId, journal, bus, inbox);
+    super("knobs", scopeId, journal, bus, inbox, { hooks: options.hooks });
     this.parentLayer = parentLayer;
     const scope = () => ({ sessionId: this.scopeId });
     this.set = this.command({

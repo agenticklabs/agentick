@@ -94,6 +94,11 @@ import type {
 // content). One line per verb; both hooks fall out via the mapped type.
 declare module "@agentick/runtime-next" {
   interface CommandRegistry {
+    // TODO(adr-80): `output` is declared `ContentBlock[]` but the command body
+    // returns the richer `DispatchResult` — so `onAfterToolDispatch` is
+    // observe-safe but TRANSFORM-unsafe (returning ContentBlock[] would break
+    // `session.dispatch().content`). Reconcile to `DispatchResult` (+ update the
+    // observe-only after-hook test) to make after-transforms sound.
     "tool:dispatch": { input: DispatchInput; output: ContentBlock[] };
   }
 }
@@ -142,7 +147,7 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
     inbox: MessageInbox,
     options: ToolExecutorHarnessOptions,
   ) {
-    super("tool", scopeId, journal, bus, inbox);
+    super("tool", scopeId, journal, bus, inbox, { hooks: options.hooks });
     this.handlerResolver = options.handlerResolver;
     this.defaultTimeoutMs = options.defaultTimeoutMs;
     this.defaultConfirmationTimeoutMs = options.defaultConfirmationTimeoutMs;

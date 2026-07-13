@@ -23,8 +23,10 @@ import { Effect, ManagedRuntime } from "effect";
 import {
   BaseHarness,
   busAsyncIterator,
+  type CommandHooks,
   forkBusSubscription,
   type HarnessShell,
+  Hooks,
   LocalEventBus,
   LocalInbox,
   MemoryJournal,
@@ -107,6 +109,29 @@ import type {
   MessageInboxFactory,
   OperationJournalFactory,
 } from "@agentick/spec-next";
+
+// ADR 82 — declarative per-session hook layer. `CommandHooks` is derived from
+// the runtime-augmented `CommandRegistry`, so it lives in `@agentick/runtime-next`
+// and cannot be referenced from `@agentick/spec-next` (foundation layer — no
+// upward dep). The app is the scope that OWNS `createSession` and folds the hook
+// cascade, so it augments spec's protocol shell here (the same `declare module`
+// pattern harness packages use for `HookBridges` / `CommandRegistry`). The value
+// is folded onto the app's resolved layer via `this.hooks.extend(Hooks.from(...))`
+// in `createSessionBody`.
+declare module "@agentick/spec-next" {
+  // `P` matches the augmented interface's arity (declaration merging requires
+  // identical type parameters); it is unused in this augmentation body.
+  // eslint-disable-next-line no-unused-vars
+  interface CreateSessionInput<P> {
+    /**
+     * Per-session command lifecycle hooks (ADR 82). Declarative
+     * {@link CommandHooks}; folded over the app's resolved layer at
+     * `createSession` and threaded into every per-session sub-harness. App
+     * hooks compose OUTER (both fire), never override.
+     */
+    readonly hooks?: CommandHooks;
+  }
+}
 
 // ============================================================================
 // Construction options
@@ -400,6 +425,20 @@ export interface AppHarnessOptions<P = unknown> {
   readonly telemetryNamespace?: string;
 
   /**
+   * App-level command lifecycle hooks (ADR 82) — declarative
+   * {@link CommandHooks}. Folded ONCE at construction into the app's resolved
+   * {@link Hooks} layer (`Hooks.from(options.hooks)`) and threaded down the
+   * scope chain: the app-shared spine (loop / executor) and every per-session
+   * sub-harness fold it (`this.hooks.extend(Hooks.from(input.hooks))`). Hooks
+   * COMPOSE across scopes (app-outer, session-inner both fire) — they never
+   * override. A before-hook reshapes/vetos the command input; an after-hook the
+   * output. `createApp({ hooks: { onBeforeToolDispatch: (i) => reshaped } })`.
+   *
+   * @see docs/proposals/v2/blueprint/82-hooks-cascade-as-construction-fold.md
+   */
+  readonly hooks?: CommandHooks;
+
+  /**
    * Pluggable extensions. Each extension is a `{ name, install }`
    * record produced by an extension package's `withX()` factory.
    * AppHarness invokes `install(installer)` for each extension at
@@ -631,6 +670,10 @@ export class AppHarness<P = unknown>
           inbox: options.inbox,
           telemetryNamespace: options.telemetryNamespace,
         }),
+        // ADR 82 — fold the app's declarative hooks into its resolved layer
+        // ONCE, at the construction boundary. `this.hooks` is now the app's
+        // cascade base; `createSessionBody` extends it per session.
+        hooks: Hooks.from(options.hooks ?? {}),
         policy: mergeLayered<JournalingPolicy>(DEFAULT_JOURNALING_POLICY, {
           override: { "app:command:close-app": "bus-only" },
         }),
@@ -667,6 +710,9 @@ export class AppHarness<P = unknown>
       options.model !== undefined
         ? new TheLanguageModelExecutor(`${appId}:executor`, journal, bus, inbox, {
             adapter: options.model,
+            // ADR 82 — app-shared spine folds the APP's resolved layer (session
+            // hooks never reach shared harnesses).
+            hooks: this.hooks,
           })
         : isExecutorFactory(options.executor)
           ? options.executor({
@@ -711,7 +757,9 @@ export class AppHarness<P = unknown>
     // as-is; undefined → bundled default with shared substrate.
     this.loop = isLoopExecutorFactory(options.loop)
       ? options.loop({ scopeId: appId, journal, bus, inbox })
-      : (options.loop ?? new LoopExecutorHarness(appId, journal, bus, inbox));
+      : (options.loop ??
+        // ADR 82 — app-shared spine folds the APP's resolved layer.
+        new LoopExecutorHarness(appId, journal, bus, inbox, { hooks: this.hooks }));
 
     // Persistent-tasks substrate (ADR 68) — app-scoped store + executor
     // registry, constructed ONCE (NOT a cascade — detached tasks +
@@ -1182,6 +1230,14 @@ export class AppHarness<P = unknown>
       return existing.session as SessionHarnessProtocol<P>;
     }
 
+    // ADR 82 — the construction-fold. Compute the session's resolved hook layer
+    // ONCE, before any harness exists: `this.hooks` (app's resolved layer)
+    // `.extend` the session's own declarative layer. This VALUE is threaded into
+    // the SessionHarness AND every per-session sub-harness below — no parent
+    // pointer, no ordering knot (the fold IS the walk, memoized here). `extend`
+    // COMPOSES per command (app-outer, session-inner both fire).
+    const sessionHooks = this.hooks.extend(Hooks.from(input.hooks ?? {}));
+
     // Per-session elicitation harness. Owns the request/response
     // correlation engine for tool confirmation, MCP elicitation, and
     // any other "ask user X" step. The same instance is threaded into
@@ -1189,18 +1245,21 @@ export class AppHarness<P = unknown>
     // session bridges (so React-side `bridges.elicitation` and
     // server-side `bridges.elicitation.respond(...)` from clients
     // reach the same registry the tool executor is awaiting).
-    // TODO(adr-81): these per-session sub-harnesses are built here (app) with
-    // no `parent`, so the ADR-76 middleware / ADR-80 hook cascade doesn't reach
-    // them. Deferred while dormant (no `hooks:{}` option wired yet). Fix =
-    // relocate construction into the SessionHarness via app-provided factory
-    // injection (`(parent) => new XHarness(…, { parent })`) — "children born
-    // from parents", parent stamped structurally. See blueprint/81.
+    // ADR 82 — the hook cascade reaches these per-session sub-harnesses via the
+    // resolved `sessionHooks` VALUE (folded above), threaded into each `hooks`
+    // option. No parent pointer needed for hooks.
+    // TODO(adr-81): the ADR-76 MIDDLEWARE cascade (`app.use()` / `session.use()`)
+    // still doesn't reach them — that walk needs the construction-parent pointer
+    // these harnesses drop (built here at app scope, not born from the session).
+    // Fix = relocate construction into the SessionHarness via app-provided
+    // factory injection (`(parent) => new XHarness(…, { parent })`). See
+    // blueprint/81 (now narrowed to middleware-only by ADR 82).
     const elicitation = new ElicitationHarness(
       `${sessionId}:elicitation`,
       this.journal,
       this.bus,
       this.inbox,
-      { parentScope: { sessionId } },
+      { parentScope: { sessionId }, hooks: sessionHooks },
     );
 
     // Per-session tasks harness — substrate-level long-running tool
@@ -1216,6 +1275,8 @@ export class AppHarness<P = unknown>
       // `{ sessionId }` above.
       store: this.taskStore,
       executors: this.taskExecutors,
+      // ADR 82 — session's resolved hook layer.
+      hooks: sessionHooks,
     });
 
     // Per-session resources harness (ADR 62) — the application-controlled
@@ -1230,6 +1291,8 @@ export class AppHarness<P = unknown>
       this.journal,
       this.bus,
       this.inbox,
+      // ADR 82 — session's resolved hook layer.
+      { hooks: sessionHooks },
     );
 
     // ── Session extension lifecycle (#150) ────────────────────────
@@ -1343,6 +1406,9 @@ export class AppHarness<P = unknown>
           tasks,
           resources,
           ...omitUndefined({ ctxExtensions }),
+          // ADR 82 — session's resolved hook layer. `tool:dispatch` routes
+          // through `runOperation`, so `onBefore/AfterToolDispatch` fire here.
+          hooks: sessionHooks,
         });
 
     // Cascade: per-call `createSession.*` > per-app `session.*` >
@@ -1376,6 +1442,10 @@ export class AppHarness<P = unknown>
       // ADR 76 tier 3 — the app is the session's construction parent, so
       // `app.use(...)` middleware wraps every session op (deployment-global).
       parent: this,
+      // ADR 82 — session's resolved hook layer (app + session, composed). The
+      // SessionHarness reads it per-op AND forwards it to its per-session
+      // bridges (knobs / state / …) so their commands fold the same cascade.
+      hooks: sessionHooks,
       defaultMaxTicks: input.maxTicks ?? this.sessionDefaults.defaultMaxTicks ?? 8,
       ...(input.requiredScopes !== undefined ? { requiredScopes: input.requiredScopes } : {}),
       ...(this.models !== undefined ? { models: this.models } : {}),

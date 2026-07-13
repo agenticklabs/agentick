@@ -51,6 +51,7 @@
 import { Effect, Stream } from "effect";
 import {
   BaseHarness,
+  type Hooks,
   ulid,
   SESSION_ESCALATION_MESSAGE_TYPE,
   ESCALATION_TIMEOUT_MS,
@@ -208,6 +209,11 @@ export interface TasksHarnessOptions {
    * @see docs/proposals/v2/blueprint/69-request-escalation.md
    */
   readonly buildElicit?: TaskElicitFactory;
+  /**
+   * Resolved command lifecycle hooks (ADR 82) — the cascade-folded {@link Hooks}
+   * value, forwarded to {@link BaseHarness}. Defaults to `Hooks.empty`.
+   */
+  readonly hooks?: Hooks;
 }
 
 // ============================================================================
@@ -254,7 +260,7 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
     inbox: MessageInbox,
     options: TasksHarnessOptions = {},
   ) {
-    super("tasks", scopeId, journal, bus, inbox);
+    super("tasks", scopeId, journal, bus, inbox, { hooks: options.hooks });
     this.parentScope = options.parentScope;
     this.scope = options.parentScope ?? {};
     this.store = options.store ?? new InMemoryTaskStore();

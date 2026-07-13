@@ -13,6 +13,7 @@ import { Effect, Fiber, ManagedRuntime, Stream } from "effect";
 
 import {
   BaseHarness,
+  type Hooks,
   runHarnessProtocol,
   ulid,
   SESSION_ESCALATION_MESSAGE_TYPE,
@@ -283,6 +284,14 @@ export interface SessionHarnessOptions<P = unknown> {
    * top-of-tree, inherits nothing (behavior-preserving).
    */
   readonly parent?: unknown;
+  /**
+   * Resolved command lifecycle hooks (ADR 82) — the session's cascade-folded
+   * {@link Hooks} value (app + session, composed), supplied by the app's
+   * `createSessionBody`. Forwarded to {@link BaseHarness} for the session's own
+   * commands AND onto the per-session bridges (knobs / state / …) so they fold
+   * the same layer. Defaults to `Hooks.empty`.
+   */
+  readonly hooks?: Hooks;
 }
 
 // ============================================================================
@@ -405,6 +414,8 @@ export class SessionHarness<P = unknown>
         // ADR 76 tier 3 — the app is the session's construction parent, so
         // `app.use(...)` structurally wraps every session operation.
         parent: options.parent,
+        // ADR 82 — the session's resolved (app + session) hook layer.
+        hooks: options.hooks,
       }),
       policy: mergeLayered<JournalingPolicy>(DEFAULT_JOURNALING_POLICY, {
         override: { "session:command:close": "bus-only" },
@@ -435,6 +446,11 @@ export class SessionHarness<P = unknown>
           resources: options.resources,
           timeline: options.timeline,
         }),
+        // ADR 82 — forward the session's resolved hook layer to the per-session
+        // bridges (knobs / state) built inside `buildSessionBridges`, so e.g.
+        // `knobs:set` folds the same app+session cascade. `this.hooks` was set
+        // by `super(...)` above.
+        hooks: this.hooks,
       },
     );
     if (options.initialKnobs) {

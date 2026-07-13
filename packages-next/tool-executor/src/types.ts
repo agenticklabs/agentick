@@ -24,6 +24,7 @@ import type {
   ToolRegistration,
   Validator,
 } from "@agentick/spec-next";
+import type { Hooks } from "@agentick/runtime-next";
 
 // Re-export the moved types so existing import paths keep working.
 export type {
@@ -164,4 +165,12 @@ export interface ToolExecutorHarnessOptions {
    * @see docs/proposals/v2/blueprint/66-tool-dependency-resolution.md
    */
   readonly ctxExtensions?: Readonly<Record<string, unknown>>;
+
+  /**
+   * Resolved command lifecycle hooks (ADR 82) — the cascade-folded {@link Hooks}
+   * value, forwarded to {@link BaseHarness}. `tool:dispatch` routes through
+   * `runOperation`, so `onBefore/AfterToolDispatch` fire against this layer.
+   * Defaults to `Hooks.empty`.
+   */
+  readonly hooks?: Hooks;
 }

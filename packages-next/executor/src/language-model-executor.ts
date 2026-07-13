@@ -32,7 +32,13 @@ import { omitUndefined } from "@agentick/utils-next";
 
 import { Chunk, Effect, Fiber, Stream } from "effect";
 
-import { BaseHarness, runHarnessProtocol, runHarnessStream, ulid } from "@agentick/runtime-next";
+import {
+  BaseHarness,
+  type Hooks,
+  runHarnessProtocol,
+  runHarnessStream,
+  ulid,
+} from "@agentick/runtime-next";
 import type {
   AbortExecutorInput,
   AdapterDelta,
@@ -107,6 +113,13 @@ type InFlightEntry = ExecutorInFlightEntry;
 export interface LanguageModelExecutorOptions<TRaw = unknown, TChunk = unknown> {
   /** The provider-normalization part (ADR 52). */
   readonly adapter: LanguageModelAdapter<TRaw, TChunk>;
+  /**
+   * Resolved command lifecycle hooks (ADR 82) — the cascade-folded {@link Hooks}
+   * value, forwarded to {@link BaseHarness}. App-shared spine, so this folds the
+   * APP's layer (session hooks never reach shared harnesses). Defaults to
+   * `Hooks.empty`.
+   */
+  readonly hooks?: Hooks;
 }
 
 export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
@@ -149,7 +162,7 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
     inbox: MessageInbox,
     options: LanguageModelExecutorOptions<TRaw, TChunk>,
   ) {
-    super("executor", scopeId, journal, bus, inbox);
+    super("executor", scopeId, journal, bus, inbox, { hooks: options.hooks });
     this.adapter = options.adapter;
   }
 

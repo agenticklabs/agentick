@@ -33,7 +33,7 @@
  */
 
 import { Effect, Either } from "effect";
-import { BaseHarness } from "@agentick/runtime-next";
+import { BaseHarness, type Hooks } from "@agentick/runtime-next";
 import { reasonOf, omitUndefined } from "@agentick/utils-next";
 import type { RequestError } from "@agentick/runtime-next";
 import type {
@@ -84,6 +84,12 @@ export interface ElicitationHarnessOptions {
    * `buildSessionBridges`) thread the owning session's id through.
    */
   readonly parentScope?: import("@agentick/spec-next").EventScope;
+  /**
+   * Resolved command lifecycle hooks (ADR 82) — the cascade-folded {@link Hooks}
+   * value, forwarded to {@link BaseHarness} so this harness's commands read the
+   * composed layer per-op. Defaults to `Hooks.empty`.
+   */
+  readonly hooks?: Hooks;
 }
 
 // ============================================================================
@@ -108,7 +114,7 @@ export class ElicitationHarness
     inbox: MessageInbox,
     options: ElicitationHarnessOptions = {},
   ) {
-    super("elicitation", scopeId, journal, bus, inbox);
+    super("elicitation", scopeId, journal, bus, inbox, { hooks: options.hooks });
     this.defaultTimeoutMs = options.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.parentScope = options.parentScope;
   }

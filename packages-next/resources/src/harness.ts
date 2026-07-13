@@ -33,7 +33,7 @@
  */
 
 import { Effect } from "effect";
-import { BaseHarness, type Unsubscribe } from "@agentick/runtime-next";
+import { BaseHarness, type Hooks, type Unsubscribe } from "@agentick/runtime-next";
 import type {
   EventBus,
   MessageEnvelope,
@@ -88,6 +88,11 @@ export interface ResourcesHarnessOptions {
   readonly pageSize?: number;
   /** Backend discriminator surfaced via `.backend`. Default `"memory"`. */
   readonly backend?: string;
+  /**
+   * Resolved command lifecycle hooks (ADR 82) — the cascade-folded {@link Hooks}
+   * value, forwarded to {@link BaseHarness}. Defaults to `Hooks.empty`.
+   */
+  readonly hooks?: Hooks;
 }
 
 interface FixedBinding {
@@ -146,7 +151,7 @@ export class ResourcesHarness
     inbox: MessageInbox,
     options: ResourcesHarnessOptions = {},
   ) {
-    super(SURFACE, scopeId, journal, bus, inbox);
+    super(SURFACE, scopeId, journal, bus, inbox, { hooks: options.hooks });
     this.pageSize = options.pageSize ?? DEFAULT_PAGE_SIZE;
     this.backend = options.backend ?? "memory";
 

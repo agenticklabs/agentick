@@ -40,7 +40,7 @@
 
 import { Effect, Either } from "effect";
 
-import { BaseHarness, runHarnessProtocol, ulid } from "@agentick/runtime-next";
+import { BaseHarness, type Hooks, runHarnessProtocol, ulid } from "@agentick/runtime-next";
 import type {
   ContentBlock,
   ExecutionRunResult,
@@ -122,12 +122,31 @@ function zeroUsage(): MutableUsage {
 // LoopExecutorHarness
 // ============================================================================
 
+/**
+ * Construction options for {@link LoopExecutorHarness}. Minimal today — the
+ * loop takes its substrate positionally; this carries the ADR 82 resolved hook
+ * layer (the app-shared spine folds the APP's layer here).
+ */
+export interface LoopExecutorHarnessOptions {
+  /**
+   * Resolved command lifecycle hooks (ADR 82) — the cascade-folded {@link Hooks}
+   * value, forwarded to {@link BaseHarness}. Defaults to `Hooks.empty`.
+   */
+  readonly hooks?: Hooks;
+}
+
 export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExecutorProtocol {
   private readonly inFlight = new Map<string, InFlightEntry>();
   private readonly aborted = new Map<string, string | undefined>();
 
-  constructor(scopeId: string, journal: OperationJournal, bus: EventBus, inbox: MessageInbox) {
-    super("loop", scopeId, journal, bus, inbox);
+  constructor(
+    scopeId: string,
+    journal: OperationJournal,
+    bus: EventBus,
+    inbox: MessageInbox,
+    options: LoopExecutorHarnessOptions = {},
+  ) {
+    super("loop", scopeId, journal, bus, inbox, { hooks: options.hooks });
   }
 
   // ──────── LoopExecutorProtocol ────────
