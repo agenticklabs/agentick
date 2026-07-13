@@ -11,12 +11,12 @@
  *
  * ```ts
  * import { Pool } from "pg";
- * import { withTasks } from "agentick";
+ * import { createApp } from "agentick";
  * import { postgresTaskStore } from "@agentick/tasks-store-postgres-next";
  *
  * const pool = new Pool({ connectionString: process.env.DATABASE_URL });
- * withTasks({ store: postgresTaskStore({ executor: pool }) });
- * // or: createApp(App, { tasks: { store: postgresTaskStore({ executor: pool }) } })
+ * // App-scoped store — a shared singleton, so it rides on `createApp`.
+ * createApp(App, { tasks: { store: postgresTaskStore({ executor: pool }) } });
  * ```
  *
  * Per ADR 49's "NO `define*` helper" amendment, the adapter implements

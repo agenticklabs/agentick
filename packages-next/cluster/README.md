@@ -3,11 +3,13 @@
 Cluster **protocol** for Agentick v2. Ships the typed seams, factory
 shapes, and `defineCluster*` adapter-authoring helpers — but NO
 transport implementations. Adapter packages
-(`@agentick/cluster-ipc-next`, `@agentick/cluster-redis-next`, etc.)
-provide the actual wire.
+(`@agentick/cluster-net-next`, `@agentick/cluster-ws-next`,
+`@agentick/cluster-redis-next`) provide the actual wire.
 
-**Status:** Phase 3.2 — wrappers + cross-node ask + diagnostics +
-safety pass. `ClusterEventBus` / `ClusterInbox` wrap the parent's
+**Status:** Phase 6 — protocol + wrappers + cross-node ask +
+diagnostics + gateway/app substrate-seam integration, with real wire
+adapters shipped (`cluster-net`, `cluster-ws`, `cluster-redis`).
+`ClusterEventBus` / `ClusterInbox` wrap the parent's
 local substrate and route across the cluster transport. Remote
 `ask` works end-to-end via a cluster-internal `@cluster/ask` /
 `@cluster/ask-response` wire framing with correlationId-keyed
@@ -27,9 +29,10 @@ on every topology transition. Transport failures (`broadcast`, `send`)
 emit `cluster:transport:*:failed` diagnostics. Inbound routes to
 unregistered addresses emit `cluster:routing:address-not-found`.
 Bus inbound shape-validates before re-appending; malformed events
-emit `cluster:event:malformed`. Phase 4 (`@agentick/cluster-ipc-next`,
-first real adapter) and Phase 5 (createGateway / createApp
-substrate-seam integration) are next.
+emit `cluster:event:malformed`. The substrate seam is wired into both
+`createGateway` (canonical) and `createApp` (fallback) — pass a
+`ClusterFactory` as the `cluster` slot — and the first real wire
+adapters (`cluster-net`, `cluster-ws`, `cluster-redis`) are shipped.
 
 **Design:** [ADR 35 — cluster protocol](../../docs/proposals/v2/blueprint/35-cluster-protocol.md) ·
 [ADR 11 — cluster vision](../../docs/proposals/v2/blueprint/11-cluster.md)
@@ -49,42 +52,46 @@ implement — plus the `defineCluster` factory that composes them.
 Adapter implementations ship separately so adopters install only
 what they need (Redis pub/sub vs NATS JetStream vs IPC vs custom).
 
-## Quick start (Phase 2+)
+## Quick start
+
+Pass a `defineXCluster` factory (from any wire adapter package) as the
+`cluster` slot on `createGateway` (canonical) or `createApp` (fallback).
+The factory wraps the local substrate before children inherit it:
 
 ```typescript
 import { createGateway } from "@agentick/gateway-next";
-import { defineCluster } from "@agentick/cluster-next";
-import { ipcTransport, ipcMembership } from "@agentick/cluster-ipc-next";
+import { defineUnixCluster } from "@agentick/cluster-net-next";
 
 const gateway = await createGateway({
-  cluster: defineCluster({
+  cluster: defineUnixCluster({
+    // Auto-elect: first to bind the socket becomes broker; rest connect.
+    socketPath: "/tmp/agentick.sock",
     nodeId: () => process.env.NODE_ID ?? `auto-${process.pid}`,
-    transport: ipcTransport({
-      // Auto-elect: first to bind becomes broker; rest connect.
-      socketPath: "/tmp/agentick.sock",
-    }),
-    membership: ipcMembership(),
   }),
   // ... rest of gateway options
 });
 ```
 
-Without `cluster` configured, the gateway behaves identically to
+Wire adapters ship separately — `@agentick/cluster-net-next` (TCP +
+Unix socket), `@agentick/cluster-ws-next` (WebSocket), and
+`@agentick/cluster-redis-next` (cross-machine via Redis). Each exports a
+matching `defineXCluster` factory that plugs into the same `cluster`
+slot. Without `cluster` configured, the gateway behaves identically to
 today — pure local substrate, zero overhead.
 
 ## Status
 
-| Phase | Scope                                                                                                              | Status      |
-| ----- | ------------------------------------------------------------------------------------------------------------------ | ----------- |
-| 1     | Protocol scaffold — types, factory shapes, helper signatures                                                       | **shipped** |
-| 2     | `defineCluster*` impls + JSON codec + `LocalClusterTransport` fixture + conformance suite                          | **shipped** |
-| 3     | `ClusterEventBus` / `ClusterInbox` wrapper impls + diagnostic event emission                                       | **shipped** |
-| 3.1   | Cross-node `ask` + membership reactivity + transport diagnostics + loud routing                                    | **shipped** |
-| 3.2   | Effect.async cancel + wire validation + namespace enforcement + InboxError round-trip + spec-evolution-safe guards | **shipped** |
-| 4     | `@agentick/cluster-ipc-next` — cross-runtime broker (first real adapter)                                           | pending     |
-| 5     | Gateway/App substrate-seam integration + Otto cluster demo                                                         | **done**    |
-| 6     | `@agentick/cluster-redis-next` — cross-machine via Redis                                                           | **done**    |
-| 7+    | NATS, MessagePack/protobuf codecs, durability (rung d)                                                             | pending     |
+| Phase | Scope                                                                                                                   | Status      |
+| ----- | ----------------------------------------------------------------------------------------------------------------------- | ----------- |
+| 1     | Protocol scaffold — types, factory shapes, helper signatures                                                            | **shipped** |
+| 2     | `defineCluster*` impls + JSON codec + `LocalClusterTransport` fixture + conformance suite                               | **shipped** |
+| 3     | `ClusterEventBus` / `ClusterInbox` wrapper impls + diagnostic event emission                                            | **shipped** |
+| 3.1   | Cross-node `ask` + membership reactivity + transport diagnostics + loud routing                                         | **shipped** |
+| 3.2   | Effect.async cancel + wire validation + namespace enforcement + InboxError round-trip + spec-evolution-safe guards      | **shipped** |
+| 4     | First real wire adapters — `cluster-broker-next` base + `cluster-net-next` (TCP / Unix) + `cluster-ws-next` (WebSocket) | **done**    |
+| 5     | Gateway/App substrate-seam integration + Otto cluster demo                                                              | **done**    |
+| 6     | `@agentick/cluster-redis-next` — cross-machine via Redis                                                                | **done**    |
+| 7+    | NATS, MessagePack/protobuf codecs, durability (rung d)                                                                  | pending     |
 
 ## API surface (Phase 1)
 
@@ -247,34 +254,29 @@ adopter monitoring) sees them through the standard subscription path.
   it always builds when fan-out crosses the wire. Adopters with hot
   publishers can keep `fanoutMode: "node-local-default"` to retain
   the short-circuit.
-- **Codec is constructed but not yet routed through** — the local
-  fixture transport stays in-process and doesn't serialize. Adapter
-  packages (cluster-ipc-next, cluster-redis-next) consume the codec
-  for their wire serialization in Phase 4+.
-- **Cluster substrate seam not yet wired into `createGateway` /
-  `createApp`.** ADR 35 §1 describes the integration; Phase 5
-  implements it. Until then, adopters must construct the cluster
-  manually against a parent shell.
-- **No real adapter packages.** `@agentick/cluster-ipc-next` is the
-  first; Phase 4.
+- **The local fixture transport stays in-process and doesn't
+  serialize** — so the codec is a no-op against it. The real wire
+  adapters (`cluster-net-next`, `cluster-ws-next`,
+  `cluster-redis-next`) route their frames through the configured
+  codec for on-wire serialization.
 - **Rung (d) durability is documented but not implementable** until
   the framework's continuation primitives ship (v2.x). The
   `DurableJournal` seam exists so adapters can build incrementally.
 
-### IPC broker leader re-election (Phase 4 concern)
+### Broker leader re-election (wire-adapter concern)
 
-The `@agentick/cluster-ipc-next` adapter (Phase 4) elects ONE process
-as the broker; other processes connect as clients. If the broker dies,
-clients lose their wire — the cluster's transport effectively
-partitions until a new broker exists.
+The broker-pattern wire adapters (`cluster-net-next`,
+`cluster-ws-next`) elect ONE process as the broker; other processes
+connect as clients. If the broker dies, clients lose their wire — the
+cluster's transport effectively partitions until a new broker exists.
 
-Two recovery paths the adapter supports, ranked by what Phase 4 ships:
+Two recovery paths the adapters support, ranked by what ships:
 
 1. **External supervisor restarts the broker** (PM2, Kubernetes,
    systemd, Docker restart policy). Clients detect disconnect, retry
    with exponential backoff, reconnect once the broker is back up.
    The adapter does nothing special — the orchestrator handles
-   restart. **This is the Phase 4 default.**
+   restart. **This is the default.**
 2. **Internal re-election** — file-lock on the socket path (Unix) or
    bind-on-port race (TCP); first-to-acquire becomes the new broker;
    others connect to the new winner. More complex; lands if real

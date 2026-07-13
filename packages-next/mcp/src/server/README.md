@@ -64,7 +64,7 @@ interface McpServerOptions {
   readonly prompts?: McpServerPromptsOptions; // see "The prompts slot"
   readonly elicit?: boolean | { enabled: boolean }; // see "Elicitation"
   readonly completions?: McpServerCompletionsOptions; // see "Argument completion"
-  readonly resources?: unknown; // lands with #123
+  readonly resources?: McpServerResourcesOptions; // Resources source projected over resources/* (ADR 62)
 
   readonly capabilities?: McpServerCapabilitiesOptions; // opt-OUTs only
   readonly auth?: McpServerAuthOptions; // five-stage pipeline
@@ -125,7 +125,7 @@ tools: [Calculator, Search, Translate];          // each: CreatedTool
 tools: {
   tools: [Calculator, Search],
   filter: (tool, ctx) => ctx.mcp.user?.roles?.includes("admin") || !tool.name.startsWith("admin_"),
-  transforms: [toolPrefix({ prefix: "v2_" })],
+  transforms: [prefix("v2_")],
 }
 
 // Form C (low-level escape hatch) — explicit registry + handler resolver
@@ -142,9 +142,14 @@ tools: {
 invisible to BOTH `tools/list` AND `tools/call` (the projection re-applies on
 every request, so a tool can't be hidden from `list` then called via `call`).
 `transforms` rewrite declarations (name / metadata / schema) per-connection —
-adopters compose with the helpers from `@agentick/tool-next/transforms`
-(`toolPrefix`, `toolRename`, `restrictInput`, `wrapHandler`, `toolAlias`,
-`composeTransforms`).
+adopters compose with the helpers from `@agentick/tool-next/transforms`:
+name-targeting (`prefix`, `suffix`, `rename`, `renameBy`), visibility
+(`filter`, `allow`, `deny`, `onlyExposingTo`), metadata / schema
+(`setMetadata`, `replaceMetadata`, `replaceInputSchema`, `replaceOutputSchema`,
+`mapSchemas`), and `composeTransforms` to chain them. `prefix` / `suffix` take
+a positional string (`prefix("v2_")`); `rename` takes a `{ old: new }` map.
+Handler wrapping is deliberately NOT a transform (transforms operate on
+`ToolDeclaration` only).
 
 Transforms run AFTER the security pipeline's `authenticator` stage, so they
 can branch on `ctx.mcp.user.roles` / `ctx.mcp.clientInfo` / `ctx.metadata`.
@@ -289,31 +294,43 @@ substrate lands (Wave 4).
 
 ---
 
-## Structured logging (`ctx.log`)
+## Structured logging (`ctx.log` / `ctx.progress`)
 
-Every MCP request context carries a `ctx.log(level, data, logger?)` sink
-that emits `notifications/message` to the connected client. The `logging`
-capability is advertised **by default**; opt out with
-`capabilities: { logging: false }` (which also makes `ctx.log` undefined).
+Per ADR 64, `ctx.log(level, data, logger?)` and `ctx.progress(...)` are
+**always-present bus slots** on every `ToolHandlerCtx` — not MCP-specific
+sinks. Each call emits ONE discrete bus event (`<surface>:signal:log` /
+`:progress`) scoped to the connection; the slots are present regardless of
+whether the handler runs over MCP or in-process, so handlers never guard
+for their existence. `capabilities: { logging: false }` does NOT remove
+`ctx.log` — it only suppresses the MCP wire projection.
 
 ```ts
 const tool = createTool({
   name: "reindex",
   handler: async (input, { ctx }) => {
-    ctx.log?.("info", { phase: "start", input });
+    ctx.log("info", { phase: "start", input });
     // ... work ...
-    ctx.log?.("debug", { rows: 1234 }, "indexer"); // optional logger channel
+    ctx.log("debug", { rows: 1234 }, "indexer"); // optional logger channel
     return [{ type: "text", text: "done" }];
   },
 });
 ```
 
+On the MCP server side, `installLogProjection` is a **bus subscriber**:
+per connection it subscribes to `log` events and forwards them to
+`notifications/message`, filtered by the client's `logging/setLevel`
+(installed only when the client advertised the `logging` capability).
+`installProgressProjection` does the same for `notifications/progress`
+(not capability-gated — installed unconditionally per connection).
+
 Clients set their minimum severity with `logging/setLevel`; the server
 stores it per-connection and filters emissions below it (syslog ordering:
 `debug < info < notice < warning < error < critical < alert < emergency`).
 Before any `setLevel`, the connection defaults to `debug` (emit
-everything). The sink is fire-and-forget — below-threshold levels and
-send failures (connection closed mid-flight) drop silently.
+everything). Projections are fire-and-forget — below-threshold levels and
+send failures (connection closed mid-flight) drop silently. Because the
+bus is the seam, a below-level log the MCP projection drops is still
+observable by any other bus subscriber.
 
 ---
 
@@ -389,9 +406,13 @@ actually wired** — never from adopter declaration. `tools` advertises when
 `tools` is set AND the resolved registry is non-empty. `prompts` advertises
 when the prompts source has declarations. `elicitation` advertises when
 `elicit` is enabled. `tasks` advertises when at least one tool declares
-`taskSupport: "required" | "supported"`. `completions` advertises when the
-`completions` slot carries a handler. `logging` advertises by default (every
-request context gets a `ctx.log` sink).
+`taskSupport: "required" | "supported"`. `resources` advertises (with
+`subscribe` + `listChanged`) when a Resources source is wired (ADR 62).
+`completions` advertises when the `completions` slot carries a handler.
+`logging` advertises by default (every request context gets a `ctx.log`
+sink). (`elicitation` and `sampling` are CLIENT capabilities in MCP — the
+server never advertises them on the wire; it issues `elicitation/create`
+when the connected client advertised the capability and `elicit` is enabled.)
 
 Adopters can OPT OUT of advertising a capability that IS wired
 (`capabilities: { tools: false }`) — useful for staged rollouts — but cannot
@@ -447,25 +468,26 @@ with #171g.
 
 ## What this subpath exports
 
-| Symbol                                                                                                                     | Purpose                                                                                         |
-| -------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `McpServerHarness`                                                                                                         | Construct + lifecycle the harness directly                                                      |
-| `spawnStandaloneMcpServer` / `SpawnStandaloneOptions` / `StandaloneServerHandle`                                           | Mode-A shell                                                                                    |
-| `validateOptions` / `McpServerOptions`                                                                                     | Eager options validation; flat adopter API                                                      |
-| `McpServerToolsOptions` / `McpServerToolsConfig` / `resolveToolsOption`                                                    | Tools slot trichotomy + resolved internal shape (ADR 42)                                        |
-| `McpServerPromptsOptions` / `McpServerPromptsConfig` / `resolvePromptsOption`                                              | Prompts slot trichotomy (#171d.1b)                                                              |
-| `McpServerElicitOptions` / `resolveElicitOption`                                                                           | Elicit opt-out resolution (#171d.2)                                                             |
-| `McpServerCompletionsOptions` / `McpServerCompletionsConfig` / `resolveCompletionsOption`                                  | Argument-completion slot + resolved internal shape (Wave 3a)                                    |
-| `completeFromList` / `completeFromEnum` / `completePrefixMatch` / `completeDependent` / `completeFromAsync`                | Completion sugar builders (re-exported from the protocol layer)                                 |
-| `installToolsHandlers` / `installPromptsHandlers` / `installCompletionsHandlers` / `installLoggingHandler` / `buildMcpLog` | Low-level projection installers — adopters with custom Server instances can call these directly |
-| `buildMcpElicit` / `inspectElicitationCapabilities`                                                                        | MCP-flavored `Elicit` sugar factory (ADR 43)                                                    |
-| `bearerTokenAuth` / `allowListGuard` / `roleBasedAuthz` / `slidingWindowLimiter`                                           | Built-in security stages                                                                        |
-| `inMemoryServerTransport`                                                                                                  | In-process transport for tests                                                                  |
-| `ElicitationCancelled` / `ElicitationDeclined` / `ElicitationNotSupported` / `UrlElicitationRequired`                      | Elicit error classes (re-exports)                                                               |
+| Symbol                                                                                                                                                                                         | Purpose                                                                                                                                  |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `McpServerHarness`                                                                                                                                                                             | Construct + lifecycle the harness directly                                                                                               |
+| `spawnStandaloneMcpServer` / `SpawnStandaloneOptions` / `StandaloneServerHandle`                                                                                                               | Mode-A shell                                                                                                                             |
+| `validateOptions` / `McpServerOptions`                                                                                                                                                         | Eager options validation; flat adopter API                                                                                               |
+| `McpServerToolsOptions`                                                                                                                                                                        | Tools slot type (array shorthand \| config object, ADR 42). `McpServerToolsConfig` / `resolveToolsOption` are internal — NOT re-exported |
+| `McpServerPromptsOptions` / `McpServerPromptsConfig` / `resolvePromptsOption`                                                                                                                  | Prompts slot trichotomy (#171d.1b)                                                                                                       |
+| `McpServerElicitOptions` / `resolveElicitOption`                                                                                                                                               | Elicit opt-out resolution (#171d.2)                                                                                                      |
+| `McpServerCompletionsOptions` / `McpServerCompletionsConfig` / `resolveCompletionsOption`                                                                                                      | Argument-completion slot + resolved internal shape (Wave 3a)                                                                             |
+| `completeFromList` / `completeFromEnum` / `completePrefixMatch` / `completeDependent` / `completeFromAsync`                                                                                    | Completion sugar builders (re-exported from the protocol layer)                                                                          |
+| `installToolsHandlers` / `installPromptsHandlers` / `installResourcesHandlers` / `installCompletionsHandlers` / `installLoggingHandler` / `installLogProjection` / `installProgressProjection` | Low-level projection installers — adopters with custom Server instances can call these directly                                          |
+| `createConnectionLogState` / `LOG_LEVEL_SEVERITY` / `ConnectionLogState`                                                                                                                       | Per-connection log-level state + syslog severity ordering (ADR 64)                                                                       |
+| `buildMcpElicit` / `inspectElicitationCapabilities`                                                                                                                                            | MCP-flavored `Elicit` sugar factory (ADR 43)                                                                                             |
+| `bearerTokenAuth` / `allowListGuard` / `roleBasedAuthz` / `slidingWindowLimiter`                                                                                                               | Built-in security stages                                                                                                                 |
+| `inMemoryServerTransport`                                                                                                                                                                      | In-process transport for tests                                                                                                           |
+| `ElicitationCancelled` / `ElicitationDeclined` / `ElicitationNotSupported` / `UrlElicitationRequired`                                                                                          | Elicit error classes (re-exports)                                                                                                        |
 
 Spec types are re-exported for adopters' convenience: `McpRequestContext`,
 `McpServerConnectionInfo`, `McpAuthenticatedUser`, `McpServerError`,
-`McpServerHarnessProtocol`, `McpLogLevel`, `McpLogSink`.
+`McpServerHarnessProtocol`, `McpServerRegistry`, `McpLogLevel`.
 
 ---
 

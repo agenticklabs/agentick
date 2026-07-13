@@ -117,26 +117,28 @@ BYO engine you constructed yourself. **Exactly one is required**, and
 they are mutually exclusive; passing a bare adapter to `executor`
 throws (it belongs on `model`).
 
-| Field        | Type                                         | Notes                                                                                                                                    |
-| ------------ | -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `model`      | `LanguageModelAdapter`                       | The model to call — `openai("gpt-4o")`, `aisdk(model)`, `google(...)`, etc. Standard path. Exactly one of `model` / `executor` required. |
-| `executor`   | `LanguageModelExecutor` or `ExecutorFactory` | BYO execution engine. A bare adapter goes on `model`, not here.                                                                          |
-| `target`     | `ExecutionTarget`                            | Optional. Defaults to `executor.target`.                                                                                                 |
-| `reconciler` | `ReconcilerProtocol` or `ReconcilerFactory`  | Required (omittable via `/react` subpath default).                                                                                       |
-| `loop`       | `LoopExecutorProtocol` or factory            | Optional. Defaults to the bundled `LoopExecutorHarness`.                                                                                 |
-| `cluster`    | `ClusterFactory`                             | Optional. See "Cluster integration" above.                                                                                               |
-| `tools`      | `ToolDeclaration[]`                          | App-scope tool registry. Threads to every session.                                                                                       |
-| `extensions` | `Extension[]`                                | App + session extensions. Composed at construction.                                                                                      |
-| `bus`        | `EventBus` or factory                        | Optional substrate override.                                                                                                             |
-| `inbox`      | `MessageInbox` or factory                    | Optional substrate override.                                                                                                             |
-| `journal`    | `OperationJournal` or factory                | Optional substrate override.                                                                                                             |
-| `metadata`   | `Record<string, unknown>`                    | Adopter-defined bag carried on the harness instance.                                                                                     |
-| `appId`      | `string`                                     | Defaults to `app:${ulid()}`.                                                                                                             |
+| Field                | Type                                         | Notes                                                                                                                                                                                                                                                         |
+| -------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `model`              | `LanguageModelAdapter`                       | The model to call — `openai("gpt-4o")`, `aisdk(model)`, `google(...)`, etc. Standard path. Exactly one of `model` / `executor` required.                                                                                                                      |
+| `executor`           | `LanguageModelExecutor` or `ExecutorFactory` | BYO execution engine. A bare adapter goes on `model`, not here.                                                                                                                                                                                               |
+| `target`             | `ExecutionTarget`                            | Optional. Defaults to `executor.target`.                                                                                                                                                                                                                      |
+| `reconciler`         | `ReconcilerProtocol` or `ReconcilerFactory`  | Required (omittable via `/react` subpath default).                                                                                                                                                                                                            |
+| `loop`               | `LoopExecutorProtocol` or factory            | Optional. Defaults to the bundled `LoopExecutorHarness`.                                                                                                                                                                                                      |
+| `cluster`            | `ClusterFactory`                             | Optional. See "Cluster integration" above.                                                                                                                                                                                                                    |
+| `tools`              | `ToolDeclaration[]`                          | App-scope tool registry. Threads to every session.                                                                                                                                                                                                            |
+| `extensions`         | `Extension[]`                                | App + session extensions. Composed at construction.                                                                                                                                                                                                           |
+| `bus`                | `EventBus` or factory                        | Optional substrate override.                                                                                                                                                                                                                                  |
+| `inbox`              | `MessageInbox` or factory                    | Optional substrate override.                                                                                                                                                                                                                                  |
+| `journal`            | `OperationJournal` or factory                | Optional substrate override.                                                                                                                                                                                                                                  |
+| `metadata`           | `Record<string, unknown>`                    | Adopter-defined bag carried on the harness instance.                                                                                                                                                                                                          |
+| `telemetry`          | `TelemetryLayer`                             | Optional Effect `Layer` (e.g. `@effect/opentelemetry`'s `NodeSdk`). Built into an app-scoped `ManagedRuntime` at construction; app-edge operations run on it so `Effect.withSpan` annotations reach the tracer (ADR 78). BYO — no OTel dependency is bundled. |
+| `telemetryNamespace` | `string`                                     | Span-attribute prefix on every `<ns>.op_id` / `<ns>.surface` attribute. Defaults to `"agentick"`; set it to whitelabel your deployment's traces.                                                                                                              |
+| `appId`              | `string`                                     | Defaults to `app:${ulid()}`.                                                                                                                                                                                                                                  |
 
 Returns `Promise<AppHarness>` after substrate readiness signals. Not
 exhaustive — see [typedoc](https://agentick.dev) / `AppHarnessOptions`
 in `src/harness.ts` for every slot (`models`, `session`, `toolExecutor`,
-`defaultMaxTicks`, `streaming`, `telemetry`, …).
+`defaultMaxTicks`, `streaming`, …).
 
 ### `app.createSession(opts?)`
 
@@ -228,7 +230,11 @@ const off = app.use(async (input, next, ctx) => {
 
 // Effect-native form for middleware that must stay in-fiber (span-nesting,
 // structured cancel that reaches inner ops):
-app.fx.use((input, next) => Effect.gen(function* () { /* … */ return yield* next(input); }));
+app.fx.use((input, next) =>
+  Effect.gen(function* () {
+    /* … */ return yield* next(input);
+  }),
+);
 ```
 
 Note the SHARED spine harnesses (loop / executor / tool) are construction
@@ -261,5 +267,3 @@ counterpart (see [ADR 38](../../docs/proposals/v2/blueprint/38-cluster-lifecycle
   double-deliver. See [ADR 38 §"What this ADR does NOT pin"](../../docs/proposals/v2/blueprint/38-cluster-lifecycle-and-ownership.md#what-this-adr-does-not-pin).
 - No mid-flight cluster swap. To replace a cluster, close the app
   and construct a new one.
-- `telemetry: TelemetryLayer` field is accepted but not yet applied
-  to running commands. OTel set-up still happens out-of-band.

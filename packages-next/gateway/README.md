@@ -126,6 +126,7 @@ class GatewayHarness extends BaseHarness<"gateway"> implements GatewayHarnessPro
   createApp<P>(input: CreateGatewayAppInput<P>): Promise<AppHarnessProtocol<P>>;
   events(filter?: EventQuery, options?: SubscribeOptions): AsyncIterable<ProtocolEvent>;
   wireExtensions(): WireExtensionRegistry; // ADR 46 — see below
+  emitCapabilitiesChanged(): void; // ADR 47 — see "Server-initiated notifications"
   closeGateway(): Promise<void>;
   close(): Promise<void>; // alias for closeGateway
 }
@@ -355,88 +356,60 @@ all.
 > ceiling-un-waivable) and the framework `wire-framework-extensions` /
 > `wire-lane-e2e` suites. See [ADR 51 — invocation & authorization](../../docs/proposals/v2/blueprint/51-invocation-and-authorization.md).
 
-## Server-initiated notifications (#311)
+## Server-initiated notifications — the control-plane bus (ADR 47)
 
-The gateway can push notifications out to every connected client
-independent of any active RPC — used by
-`notifications/capabilities/changed` today; the seam #308 dynamic
-extensions and #302 auth-expired flows will build on.
+The gateway signals control-plane changes to connected clients over
+the **substrate bus**, not a bespoke connection registry. There is one
+primitive:
 
-Two primitives:
+### `gateway.emitCapabilitiesChanged(): void`
 
-### `gateway.acceptConnection(connection): () => void`
-
-Transport servers call this at wire-accept time, supplying a
-`ClientConnection` — metadata + a synchronous `deliver` callback.
-Returns an unsubscribe the transport invokes on close. The
-framework-supplied WebSocket, Unix-socket, and in-process transport
-servers wire this automatically; adopters building custom transports
-call it themselves.
+Appends a single `gateway:capabilities:changed` event
+(`GATEWAY_CAPABILITIES_CHANGED`) to the gateway bus on the gateway
+surface, scoped to `{ gatewayId }`. This is the bus-native replacement
+for the ripped-out `notify` / `acceptConnection` fan-out — delivery,
+replay, reconnect-resume, and per-instance (per-tenant / per-principal
+child bus) isolation are the bus's job, not a runtime connection filter.
 
 ```ts
-const releaseConnection = gateway.acceptConnection({
-  metadata: { transport: "my-transport", connectionId: "conn-42" },
-  deliver: (n) => myWire.writeJson(n),
-});
-// on close:
-releaseConnection();
+// After mutating the wire-extension set (e.g. #308 dynamic
+// extensions), signal every gateway-scope subscriber to refetch.
+gateway.emitCapabilitiesChanged();
 ```
 
-### `gateway.notify(notification, options?)`
+**How it reaches a client.** A gateway-scope subscriber (opened via
+`sub/subscribe` on `{ surface: "gateway" }`) receives it. The event
+flows:
 
-Push a notification to connected clients. With no options, fans out
-to every client. Pass `options.to` to filter by metadata — future
-auth-scoped pushes, tenant-scoped install/uninstall notifications,
-and transport-targeted announcements all use this shape.
-
-```ts
-// broadcast to every connected client
-gateway.notify({
-  method: "notifications/capabilities/changed",
-  params: {},
-});
-
-// WebSocket-only broadcast (metadata.transport is populated by
-// every framework transport server)
-gateway.notify(
-  { method: "myext/announce", params: { field: "x" } },
-  { to: (m) => m.transport === "websocket" },
-);
+```text
+gateway.emitCapabilitiesChanged()
+  → bus.append(gateway:capabilities:changed, surface "gateway")
+  → subscriptionsWireExtension drain (a gateway-scope subscription)
+  → notifications/subscription/event over the transport
+  → subscriber receives the frame
 ```
 
-**Metadata today = `{ transport, connectionId }`.** Framework
-transport servers (WS, Unix-socket, in-process) populate those two
-fields. The `[k]: unknown` slot is reserved for future extensions:
-`principal` (auth extension, #302) and application-scoped
-discriminators like tenant / project id (populated by an adopter-
-supplied transport variant or an auth-adjacent extension at accept
-time). Nothing in the framework fills those slots today — if
-`to: (m) => m.principal === X` matters to you, either (a) wait for
-#302, or (b) provide a custom transport server that mutates
-`metadata` at `acceptConnection` time.
+Isolation is structural, not a filter argument: a session- or
+app-scoped subscriber never matches the event (different surface / no
+`sessionId` in scope), and a per-tenant child bus wrapping the gateway
+bus never sees another tenant's emit. Emitting with zero subscribers
+is safe.
 
-A connection whose `deliver` throws is caught so one broken client
-cannot poison the fan-out. Errors route through the
-`onDeliveryError` diagnostic hook on `GatewayHarnessOptions`.
+**Client does not auto-react yet.** The runtime capability re-sync —
+the client keeping its own `capabilities` fresh when the extension set
+mutates — is deferred to #308. The wire-extension registry is sealed
+at gateway construction today, so `gateway:capabilities:changed` cannot
+fire in normal operation until dynamic extensions land; the emit seam
+and its end-to-end delivery are proven now. See the e2e coverage below.
 
-### Delivery errors — visible by default
-
-`onDeliveryError` defaults to `console.error`. Failed deliveries
-are logged with the connection id + transport kind + failing
-notification method so adopters see wire problems without wiring
-observability first. Pass `() => {}` to silence, or supply a
-structured logger:
-
-```ts
-await createGateway({
-  onDeliveryError: (err, connId, meta, notif) => {
-    myLogger.warn("wire delivery failed", { err, connId, meta, method: notif.method });
-  },
-});
-```
-
-The invariant — one broken connection does not poison the
-broadcast — is preserved regardless of what the hook does.
+> **Verified by** `src/__tests__/emit-capabilities-changed.spec.ts`
+> (event shape, scope-query + child-bus isolation, per-call ordering,
+> zero-subscriber safety, and rip-out completeness — `notify` /
+> `acceptConnection` / `onDeliveryError` are absent) and
+> `@agentick/transport-in-process-next`'s
+> `src/__tests__/capabilities-changed-e2e.spec.ts` (full emit → bus →
+> `sub/subscribe` → subscriber delivery, fan-out to every gateway-scope
+> subscriber). See [ADR 47](../../docs/proposals/v2/blueprint/47-reactive-signals-ride-the-bus.md).
 
 ## Patterns
 
@@ -481,9 +454,10 @@ websocketServer({ httpServer, gateway });
 httpServer.listen(8080);
 ```
 
-The JSON-RPC dispatcher in `@agentick/transport-websocket-next/server`
-calls into `GatewayHarnessProtocol` methods directly — no adapter
-layer between wire and harness.
+Every transport routes wire frames through the one shared dispatcher —
+`dispatchRequest` in `@agentick/transport-next` — which calls into
+`GatewayHarnessProtocol` methods directly. `websocketServer` is a thin
+socket adapter over it; there is no bespoke per-transport wire logic.
 
 ## Verified by
 
@@ -557,7 +531,7 @@ See `docs/proposals/v2/STATUS.md`.
 | Phase 4 (done)        | This package — gateway scaffold                                                                                                       |
 | Phase 5 (done)        | `AppHarnessProtocol.id` / `SessionHarnessProtocol.id`                                                                                 |
 | Phase 33.C–E          | Transports mount on `GatewayHarness` (no changes to this package)                                                                     |
-| Phase 33.D extraction | Shared `@agentick/gateway-rpc-adapter-next` extracted from `transport-websocket-next/server/dispatch.ts` — reusable across transports |
+| Phase 33.D (done)     | Shared dispatcher `dispatchRequest` landed in `@agentick/transport-next` — every transport routes wire frames through it |
 | ADR 34                | `@agentick/auth-next` adds a `GatewayExtension` for auth                                                                              |
 | Phase 33.I            | `@agentick/mcp-surface-next` adds a `GatewayExtension` that mounts MCP method namespaces                                              |
 | ADR 29 Phase D        | `@agentick/cluster-next` substrate impl — gateway gets a cluster journal/bus                                                          |

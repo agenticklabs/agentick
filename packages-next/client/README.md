@@ -130,6 +130,45 @@ A `useLog` React hook is deferred until a `client-react` surface exists
 (see `TODO(#19-react)` in `src/signals.ts`); `onLog` is the framework-
 agnostic primitive it will wrap.
 
+### Channel consumer — `channelView` (ADR 33)
+
+`channelView` is the generic primitive for reading a `session:channel:<x>`
+on the client: a pure **fold** over one channel subscription (the K8s
+watch-list / `sendInitialEvents` model).
+
+```ts
+import { channelView, type ChannelView } from "@agentick/client-next";
+
+const view: ChannelView<Store> = channelView(client, scope, channel, {
+  initial: {}, // value get() returns until the first frame folds in
+  reduce: (state, frame) => (frame.kind === "snapshot" ? seed(frame) : fold(state, frame)),
+});
+
+const off = view.subscribe(() => render(view.get())); // useSyncExternalStore contract
+view.get(); // current folded state
+view.close(); // tears down the subscription
+```
+
+The subscription **opens with a snapshot frame**, then streams deltas on the
+**same** ordered stream — so there is **no baseline pull and no cursor**. The
+snapshot is simply frame one, which makes snapshot↔stream ordering correct by
+construction (no race to reconcile). `channelView` folds every frame onto held
+state via `reduce` and exposes it through the `useSyncExternalStore` contract
+(`get()` + `subscribe()`), so a future `client-react` `useChannel(view)` hook
+is a one-liner. `close()` tears down; a malformed frame is skipped rather than
+tearing down the stream.
+
+The primitive stays **dumb** — it does not know what a snapshot is.
+`reduce(state, frame)` handles whatever the producer sends: a snapshot-kind
+frame seeds, a delta-kind frame folds. That is the producer's + reducer's
+concern, which is why the same `channelView` covers both snapshot+delta
+channels (`knobs-state`) and full-object-per-item channels (`task-status`).
+
+It is knobs/tasks-**agnostic**: typed façades (`knobsStateView`,
+`taskStatusView`, `collectionView`) live in their own **harness** packages
+(e.g. `@agentick/knobs-next/client`) and supply `reduce` — they do not live
+here. Config: `ChannelViewConfig<T, F>` = `{ initial: T; reduce: (state, frame) => T }`.
+
 ### Capabilities + server info
 
 `client.connect()` runs a two-step handshake — `initialize` (protocol version + framework flags + server info) then `_extensions/list` (wire-extension enumeration for feature-gating). Both populate `client.capabilities` and `client.serverInfo`.
@@ -276,16 +315,17 @@ Phase 33.B of the v2 implementation plan — see `docs/proposals/v2/STATUS.md` a
 Every claim in this README has a corresponding test, or appears below
 under "Roadmap & known gaps" with an explicit marker.
 
-| Concern                                                                                                    | Test file                                                     |
-| ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| `createClient`, `connect`, `close`, request dispatch                                                       | `../transport-in-process/src/__tests__/smoke.spec.ts`         |
-| Extension `request` middleware composition (outer→inner)                                                   | `../transport-in-process/src/__tests__/smoke.spec.ts`         |
-| Extension `install()` namespace registration                                                               | `../transport-in-process/src/__tests__/smoke.spec.ts`         |
-| `onClose` handler LIFO order                                                                               | `../transport-in-process/src/__tests__/smoke.spec.ts`         |
-| `ClientHandlerRegistry` per-event merge kinds (`observer` / `first-non-null-wins` / `any-reconnect-wins`)  | `src/__tests__/handler-registry.spec.ts`                      |
-| `effectMiddleware` Effect↔Promise adapter, error propagation, interleave with Promise middleware           | `src/__tests__/effect-middleware.spec.ts`                     |
-| `client.send(sessionId, input)` shortcut shape equivalence with `client.session(id).send(input)`           | `../transport-in-process/src/__tests__/send-shortcut.spec.ts` |
-| `onLog` / `onProgress` cross-surface query + envelope→payload mapping + unsubscribe closes stream (ADR 64) | `src/__tests__/signals.spec.ts`                               |
+| Concern                                                                                                                           | Test file                                                     |
+| --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `createClient`, `connect`, `close`, request dispatch                                                                              | `../transport-in-process/src/__tests__/smoke.spec.ts`         |
+| Extension `request` middleware composition (outer→inner)                                                                          | `../transport-in-process/src/__tests__/smoke.spec.ts`         |
+| Extension `install()` namespace registration                                                                                      | `../transport-in-process/src/__tests__/smoke.spec.ts`         |
+| `onClose` handler LIFO order                                                                                                      | `../transport-in-process/src/__tests__/smoke.spec.ts`         |
+| `ClientHandlerRegistry` per-event merge kinds (`observer` / `first-non-null-wins` / `any-reconnect-wins`)                         | `src/__tests__/handler-registry.spec.ts`                      |
+| `effectMiddleware` Effect↔Promise adapter, error propagation, interleave with Promise middleware                                  | `src/__tests__/effect-middleware.spec.ts`                     |
+| `client.send(sessionId, input)` shortcut shape equivalence with `client.session(id).send(input)`                                  | `../transport-in-process/src/__tests__/send-shortcut.spec.ts` |
+| `onLog` / `onProgress` cross-surface query + envelope→payload mapping + unsubscribe closes stream (ADR 64)                        | `src/__tests__/signals.spec.ts`                               |
+| `channelView` snapshot-seed + delta-fold, `useSyncExternalStore` contract, `close()` teardown, malformed-frame isolation (ADR 33) | `src/__tests__/channel-view.spec.ts`                          |
 
 ## Roadmap & known gaps
 

@@ -27,32 +27,32 @@ code. See ADR 23 §6 (Package layout) and ADR 40 §1.
 
 ## Status
 
-| Phase                                                                                    | Status               |
-| ---------------------------------------------------------------------------------------- | -------------------- |
-| **Client** (outbound, `@agentick/mcp-next`)                                              |                      |
-| #1 Skeleton — OAuth + protocol utilities + in-memory transport                           | ✅                   |
-| #2 `McpClientHarness` — Transport / Auth / Protocol / Lifecycle                          | ✅                   |
-| #3 `withMCP` extension + ToolBridge integration                                          | ✅                   |
-| #4 ElicitationBridge — server→client `elicitation/create` routing                        | ✅                   |
-| #134a URL-mode elicit transport layer                                                    | ✅                   |
-| #134b OAuth-via-elicit — URL-mode elicit on auth-needed                                  | ✅                   |
-| #146 Client completeness — resources / prompts / completion / sampling / roots / logging | ✅ (Wave 2)          |
-| #154 `withMCP` auto-wires OAuth elicit via transport factory                             | ⏳                   |
-| **Server** (inbound, `@agentick/mcp-next/server`)                                        |                      |
-| #171a `@agentick/tool-next/transforms` subpath (transform primitives)                    | ✅                   |
-| #171b Server subpath + spec types + `McpServerHarness` skeleton                          | ✅                   |
-| #171c stdio + in-memory transport + tools projection + security pipeline                 | ✅                   |
-| #310 **Tools `list_changed`** emission on `ToolCatalog` mutations                        | ✅                   |
-| #171d.1 **Prompts projection** (`prompts/list` + `prompts/get` + `list_changed`)         | ✅                   |
-| #171d.2.1 **Elicitation `ctx.elicit.*` sugar** (form-mode basics)                        | ✅                   |
-| #171d.2.2 **Elicitation URL mode + `tryX` variants + `UrlElicitationRequired`**          | ✅                   |
-| #171d.2.3 Elicitation schema-flatness validation + advanced shapes                       | ⏳                   |
-| #171d.3 Tasks projection (`tasks/list` + `tasks/get` + notifications)                    | ⏳ (scoping pending) |
-| #171e Streamable HTTP transport (client + server, OAuth-threaded)                        | ✅ (Wave 1)          |
-| #171f WebSocket transport                                                                | ⏳                   |
-| #171g Direct projection (`mcp://gateway/<name>` URL form)                                | ⏳                   |
-| #171h Embedded Authorization Server (optional)                                           | ⏳                   |
-| #171i Conformance suite + testing helpers                                                | ⏳                   |
+| Phase                                                                                    | Status      |
+| ---------------------------------------------------------------------------------------- | ----------- |
+| **Client** (outbound, `@agentick/mcp-next`)                                              |             |
+| #1 Skeleton — OAuth + protocol utilities + in-memory transport                           | ✅          |
+| #2 `McpClientHarness` — Transport / Auth / Protocol / Lifecycle                          | ✅          |
+| #3 `withMCP` extension + ToolBridge integration                                          | ✅          |
+| #4 ElicitationBridge — server→client `elicitation/create` routing                        | ✅          |
+| #134a URL-mode elicit transport layer                                                    | ✅          |
+| #134b OAuth-via-elicit — URL-mode elicit on auth-needed                                  | ✅          |
+| #146 Client completeness — resources / prompts / completion / sampling / roots / logging | ✅ (Wave 2) |
+| #154 `withMCP` auto-wires OAuth elicit via transport factory                             | ⏳          |
+| **Server** (inbound, `@agentick/mcp-next/server`)                                        |             |
+| #171a `@agentick/tool-next/transforms` subpath (transform primitives)                    | ✅          |
+| #171b Server subpath + spec types + `McpServerHarness` skeleton                          | ✅          |
+| #171c stdio + in-memory transport + tools projection + security pipeline                 | ✅          |
+| #310 **Tools `list_changed`** emission on `ToolCatalog` mutations                        | ✅          |
+| #171d.1 **Prompts projection** (`prompts/list` + `prompts/get` + `list_changed`)         | ✅          |
+| #171d.2.1 **Elicitation `ctx.elicit.*` sugar** (form-mode basics)                        | ✅          |
+| #171d.2.2 **Elicitation URL mode + `tryX` variants + `UrlElicitationRequired`**          | ✅          |
+| #171d.2.3 Elicitation schema-flatness validation (`assertFlatSchema`, #271)              | ✅          |
+| #171d.3 Tasks projection (`tasks/list` + `tasks/get` + notifications)                    | ✅          |
+| #171e Streamable HTTP transport (client + server, OAuth-threaded)                        | ✅ (Wave 1) |
+| #171f WebSocket transport                                                                | ⏳          |
+| #171g Direct projection (`mcp://gateway/<name>` URL form)                                | ⏳          |
+| #171h Embedded Authorization Server (optional)                                           | ⏳          |
+| #171i Conformance suite + testing helpers                                                | ⏳          |
 
 Phase numbering tracks ADR 40 §"Migration / rollout plan."
 
@@ -208,8 +208,8 @@ tools: [Calculator, Search, Translate];                 // each: CreatedTool
 // Form C (inline) — config object: CreatedTool[] + projection rules
 tools: {
   tools: [Calculator, Search],
-  filter: (tool, ctx) => ctx.user?.roles?.includes("admin") || !tool.name.startsWith("admin_"),
-  transforms: [toolPrefix({ prefix: "v2_" })],
+  filter: (tool, ctx) => ctx.mcp.user?.roles?.includes("admin") || !tool.name.startsWith("admin_"),
+  transforms: [prefix("v2_")],
 }
 
 // Form C (low-level escape hatch) — explicit registry + handler resolver
@@ -274,7 +274,7 @@ prompts: somePromptsInstance,
 prompts: {
   declarations: [/* ... */],   // OR
   use: somePromptsInstance,    // ← "use this prompts source"
-  filter: (decl, ctx) => ctx.user !== null || decl.metadata?.visibility === "public",
+  filter: (decl, ctx) => ctx.mcp.user !== null || decl.metadata?.visibility === "public",
 }
 ```
 
@@ -412,8 +412,8 @@ const handle = await spawnStandaloneMcpServer({
   },
 });
 
-await handle.ready;
-// process now serves traffic over stdio
+// `spawnStandaloneMcpServer` already awaited `start()` — the process is
+// now serving traffic over stdio. `handle` is `{ harness, close }`.
 ```
 
 ## Per-connection projection model
@@ -422,9 +422,9 @@ Every request that reaches a tool or prompt handler has been:
 
 1. **Connection-guarded** (once, at accept) — origin / CIDR / glob
    allow-lists for HTTP/WS; stdio + in-memory short-circuit.
-2. **Authenticated** — `Authenticator` populates `ctx.user`; HTTP/WS
+2. **Authenticated** — `Authenticator` populates `ctx.mcp.user`; HTTP/WS
    default-reject without explicit config, stdio defaults to allow-all.
-3. **Authorized** — `Authorizer` gates the operation against `ctx.user`
+3. **Authorized** — `Authorizer` gates the operation against `ctx.mcp.user`
    - the `OperationInfo` (type + name).
 4. **Rate-limited** — per-principal budget (default: sliding window).
 5. **Sanitized** — `InputSanitizer` runs on `tool_call` inputs only.
@@ -571,14 +571,14 @@ Verified by:
 The server's `initialize` response advertises only what's actually
 wired. **No "we support X but it returns empty" lies on the wire.**
 
-| Capability    | Advertised when                                             |
-| ------------- | ----------------------------------------------------------- |
-| `tools`       | `options.tools` set AND `options.tools.registry.length > 0` |
-| `prompts`     | `options.prompts` set (with `listChanged: true`)            |
-| `resources`   | (wired with #123 — pending)                                 |
-| `elicitation` | (wired with #171d.2 — pending)                              |
-| `tasks`       | (wired with #171d.3 — pending)                              |
-| `sampling`    | (wired with `SamplingHarness` — pending)                    |
+| Capability    | Advertised when                                                                                                                               |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tools`       | `tools` slot set AND the resolved registry is non-empty                                                                                       |
+| `prompts`     | `prompts` slot set (with `listChanged: true`)                                                                                                 |
+| `resources`   | a Resources source is wired (ADR 62) — advertises `subscribe` + `listChanged`                                                                 |
+| `elicitation` | client capability, never advertised server-side; the server issues `elicitation/create` when the client advertised it AND `elicit` is enabled |
+| `tasks`       | at least one tool declares `taskSupport: "required" \| "supported"`                                                                           |
+| `sampling`    | (wired with `SamplingHarness` — pending)                                                                                                      |
 
 Adopter `options.capabilities` can opt **OUT** of an otherwise-wired
 capability (`{ tools: false }` hides a populated tools registry) but
@@ -811,11 +811,15 @@ Defer until production load demands it; design space documented in
 
 ### Server
 
-- **Elicitation (`ctx.elicit.*`)** — adopter sugar on the request
-  context for sending `elicitation/create` to connected clients.
-  Lands with #171d.2.
-- **Tasks projection (`tasks/list` + `tasks/get`)** — per-connection
-  task scoping decision pending. Lands with #171d.3.
+- **Elicitation (`ctx.elicit.*`)** — **landed (#171d.2).** Adopter sugar
+  on the request context for sending `elicitation/create` to connected
+  clients (form + URL mode + `tryX` + `requireUrls` deferred-auth).
+  Schema-flatness validation shipped via `assertFlatSchema` (#271).
+- **Tasks projection (`tasks/list` + `tasks/get`)** — **landed (#171d.3).**
+  Pattern B over the wire — a handler returning a `TaskHandle` routes
+  through `tasks/get` / `tasks/result` / `tasks/cancel` / `tasks/list`
+  with `notifications/tasks/status`; `tasks` advertised when any tool
+  declares `taskSupport`.
 - **Sampling (`ctx.sample.*`)** — server→client `sampling/createMessage`
   with v1's retry-loop sugar. Blocks on a `SamplingHarness` landing.
 - **Inbound client roots (`ctx.mcp.clientRoots`)** — **landed (ADR 65).**
@@ -823,7 +827,11 @@ Defer until production load demands it; design space documented in
   `roots/list_changed`. Promotion to a unified cross-source mount registry
   (a `RootsHarness`) is gated on a real consumer for the inspectable view
   — see the `TODO(#237-4b / ADR-65)` seam markers + ADR 65 for the trigger.
-- **Resources (`resources/list` + `resources/read`)** — #123.
+- **Resources (`resources/list` + `resources/read`)** — **landed (ADR 62).**
+  The server projects an adopter-supplied Resources source over
+  `resources/list` / `resources/templates/list` / `resources/read`
+  (text + blob), with `subscribe` / `updated` / `list_changed`;
+  `resources` advertised when a source is wired.
 - **Streamable HTTP transport (server)** — **landed** (Wave 1).
   `httpTransport({ port })` (from `@agentick/mcp-next/server`) is a
   multi-connection Streamable-HTTP listener wrapping the SDK

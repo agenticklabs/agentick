@@ -180,6 +180,12 @@ sets every settable knob in that group atomically after a shared type-check.
 - **`runKnobsHarnessConformance({ make })`** — protocol conformance suite;
   any `KnobsHarnessProtocol` impl (a redis-backed variant, a stub) can be
   driven through it to prove compliance.
+- **`knobsWireExtension`** — the wire extension that exposes the `knobs/set`
+  command over the gateway (the write half the `/client` handle calls).
+- **`KNOBS_STATE_CHANNEL`** (`"knobs-state"`) / **`KNOBS_STATE_CHANNEL_FQN`**
+  (`"session:channel:knobs-state"`) — the channel name and its fully-qualified
+  subscription topic. Plus `knobPointer(id)` (the RFC 6901 pointer for a knob),
+  `KnobsStateFrame` (`snapshot` | `delta`), and the frame subtypes.
 - **Type `KnobsHandle`** — the curated `session.knobs` surface (hides `id` /
   `ready` / `close` / snapshot import-export / `register`).
 
@@ -199,6 +205,47 @@ sets every settable knob in that group atomically after a shared type-check.
 
 - **`stubKnobsHarness(initial?)`** — a real `KnobsHarness` on its own
   in-memory substrate (journal / bus / inbox); `initial` seeds values.
+
+### `@agentick/knobs-next/client`
+
+The far side of the `knobs-state` channel: the client-side projection of knob
+state an app frontend subscribes to. It depends on the generic `channelView`
+from `@agentick/client-next` — **not** on the knobs harness runtime — so a
+browser bundle never pulls the server harness in. Mirrors the `/react` subpath
+convention.
+
+- **`knobsStateView(client, sessionId)`** → `ChannelView<KnobsState>` — a live,
+  read-only reactive view of a session's knob state. It is the knobs façade
+  (rung 1) over `channelView`: it hides the channel name, the frame kinds, and
+  the JSON-Patch fold. The subscription opens with the current `snapshot` frame
+  (which seeds the whole store), then folds `knobs-state` `delta` frames (RFC
+  6902 JSON-Patch, one op per changed knob) with `applyJsonPatch`. State is
+  exposed through the `useSyncExternalStore` contract (`get()` + `subscribe()`);
+  `close()` tears down. This is the READ half of the knobs resource (CQRS query)
+  — writes are a separate command whose effect returns here as a delta.
+- **`knobsHandle(client, sessionId)`** → `KnobsHandleView` — the read + write
+  resource handle. It composes `knobsStateView` for the read half
+  (`get` / `subscribe` / `closed` / `close`) and adds
+  **`set(key, value): Promise<void>`**, the WRITE command over `knobs/set`. The
+  write is deliberately fire-and-observe: `set` issues the RPC and resolves once
+  the gateway accepts it — it does **not** hand-patch the local view. The
+  write's effect returns as a `knobs-state` delta on the same channel and
+  re-folds the view (CQRS: one write path, one read path, state flows through
+  the channel only).
+- Types: **`KnobsState`** (`Readonly<Record<string, KnobPrimitive>>` — the
+  reduced knob store, knob id → current value), **`KnobsClient`** (the read
+  surface — needs only `transport.subscribe`), **`KnobsCommandClient`** (the
+  command surface — needs `subscribe` + `request`; a superset of `KnobsClient`),
+  and **`KnobsHandleView`** (`ChannelView<KnobsState>` plus `set`).
+
+```ts
+import { knobsHandle } from "@agentick/knobs-next/client";
+
+const knobs = knobsHandle(client, sessionId);
+const off = knobs.subscribe(() => render(knobs.get())); // live read
+await knobs.set("verbosity", 3); // write — lands back on the view as a delta
+knobs.close();
+```
 
 Per-knob handle (`session.knob(name)` → `KnobHandle<T>`) and the top-level
 `session.knobs` accessor are owned by `@agentick/session-next` (which
@@ -260,11 +307,14 @@ for await (const frame of framesFromBus /* KnobsStateFrame */) {
 
 Frames carry a monotonic `version`; a gap signals a dropped delta → re-seed via
 `stateSnapshotFrame()`. Emission is fire-and-forget and **bus-only** (unjournaled).
-The **client-side apply** (a generic per-channel state model) is intentionally
-NOT built here — it is cross-cutting with `task-status` and belongs in one
-generic channel-consumer, not a knobs-bespoke one. Gates already project their
-boolean value through this channel (they write-through to knobs); `state` follows
-the same shape (see the `TODO(state-deltas)` trailheads).
+The **client-side apply** lands as the [`/client` subpath](#agentickknobs-nextclient):
+`knobsStateView` / `knobsHandle` fold this channel on the far side. It is built on
+the generic per-channel `channelView` primitive in `@agentick/client-next` (shared
+with `task-status`, not knobs-bespoke) — the harness package only supplies the
+typed façade and the `reduce` that seeds from the `snapshot` frame and applies each
+`delta` with `applyJsonPatch`. Gates already project their boolean value through
+this channel (they write-through to knobs); `state` follows the same shape (see the
+`TODO(state-deltas)` trailheads).
 
 ## Status & roadmap
 

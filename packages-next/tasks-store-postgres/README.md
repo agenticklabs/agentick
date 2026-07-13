@@ -43,16 +43,16 @@ hatch on the factory.
 
 ```ts
 import { Pool } from "pg";
-import { withTasks } from "agentick";
+import { createApp } from "agentick";
 import { postgresTaskStore } from "@agentick/tasks-store-postgres-next";
 
 // BYO pool — the adapter never creates or closes it.
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
 // Inject one app-scoped durable store; detached tasks survive session close
-// and the whole app process, resumable on the next boot.
-withTasks({ store: postgresTaskStore({ executor: pool }) });
-// or: createApp(MyAgent, { model, tasks: { store: postgresTaskStore({ executor: pool }) } });
+// and the whole app process, resumable on the next boot. The store is
+// app-scoped (a shared singleton), so it rides on `createApp`, not `withTasks`.
+createApp(MyAgent, { model, tasks: { store: postgresTaskStore({ executor: pool }) } });
 ```
 
 Apply the schema with your own migration tooling (the recommended path):
@@ -74,14 +74,14 @@ postgresTaskStore({ executor: pool, migrate: "create-if-absent" });
 
 ### `postgresTaskStore(options): TaskStore`
 
-| Option     | Type                          | Default            | Description                                                                        |
-| ---------- | ----------------------------- | ------------------ | ---------------------------------------------------------------------------------- |
-| `executor` | `pg.Pool \| QueryExecutor`    | **required**       | BYO connection. A `pg.Pool` or a minimal `{ query(text, values?) }`. Never owned.  |
-| `table`    | `string`                      | `"agentick_tasks"` | Table name.                                                                        |
+| Option     | Type                          | Default            | Description                                                                                |
+| ---------- | ----------------------------- | ------------------ | ------------------------------------------------------------------------------------------ |
+| `executor` | `pg.Pool \| QueryExecutor`    | **required**       | BYO connection. A `pg.Pool` or a minimal `{ query(text, values?) }`. Never owned.          |
+| `table`    | `string`                      | `"agentick_tasks"` | Table name.                                                                                |
 | `columns`  | `Partial<TaskColumns>`        | snake_case         | Map logical `taskId`/`scope`/`status`/`updatedAt`/`payload`/`schemaVer` onto real columns. |
-| `sql`      | `TaskSqlOverrides`            | generated          | Per-operation FULL SQL override (see below).                                       |
-| `codec`    | `TaskCodec`                   | identity           | `jsonb` payload encode/decode + schema-on-read (`encrypt`, `compress`, migrate).   |
-| `migrate`  | `"off" \| "create-if-absent"` | `"off"`            | `"off"` never runs DDL; `"create-if-absent"` runs `CREATE TABLE IF NOT EXISTS` once. |
+| `sql`      | `TaskSqlOverrides`            | generated          | Per-operation FULL SQL override (see below).                                               |
+| `codec`    | `TaskCodec`                   | identity           | `jsonb` payload encode/decode + schema-on-read (`encrypt`, `compress`, migrate).           |
+| `migrate`  | `"off" \| "create-if-absent"` | `"off"`            | `"off"` never runs DDL; `"create-if-absent"` runs `CREATE TABLE IF NOT EXISTS` once.       |
 
 `backend` is `"postgres"`. Implements the full [`TaskStore`](../spec/src/protocol/tasks-store.ts)
 port (`put` upsert, `get`, `list`, `delete`, `prune`). Per ADR 49's "NO
@@ -159,14 +159,14 @@ CREATE INDEX IF NOT EXISTS "agentick_tasks_status_idx" ON "agentick_tasks" ("sta
   keys. This keeps the record self-consistent even if a projection column and
   the payload ever disagree.
 - **Upsert per transition.** `put` is `INSERT ... ON CONFLICT (task_id) DO
-  UPDATE` — the harness `put`s a new record on every FSM transition; later
+UPDATE` — the harness `put`s a new record on every FSM transition; later
   `put`s of the same id replace in place.
 - **Scope containment via GIN.** `list({ scope })` issues `scope @> $1::jsonb`
   (every provided dimension must match), indexed by the GIN index. `status`
   narrows via `status = ANY($n::text[])` (a single status is normalized to a
   one-element array).
 - **Terminal-only `prune`.** `prune(before)` deletes `updated_at < before AND
-  status = ANY('{completed,failed,cancelled,interrupted}')` — an in-flight
+status = ANY('{completed,failed,cancelled,interrupted}')` — an in-flight
   `working` / `input_required` task is never pruned, matching
   `InMemoryTaskStore.prune`.
 - **`bigint` is write-only here.** `updated_at` is a `bigint` column; pg
@@ -205,7 +205,7 @@ CREATE INDEX IF NOT EXISTS "agentick_tasks_status_idx" ON "agentick_tasks" ("sta
 ### Known gaps
 
 - **Cross-restart CHILD reattach is out of scope for a fork-IPC executor —
-  it's the distributed tier.** `interrupted`-on-restart is the *correct*
+  it's the distributed tier.** `interrupted`-on-restart is the _correct_
   outcome for both bundled executors: a lost in-process fiber can't reattach,
   and a `ChildProcessTaskExecutor` child can't either — fork IPC is a
   spawn-time pipe (`NODE_CHANNEL_FD`) that a freshly-restarted process cannot
@@ -213,7 +213,7 @@ CREATE INDEX IF NOT EXISTS "agentick_tasks_status_idx" ON "agentick_tasks" ("sta
   transitions. Durable storage of the record is necessary but nowhere near
   sufficient. A worker whose reports must survive parent death has to report
   via a reconnectable transport (this durable store / the cluster bus) with the
-  parent *observing* that plane — which is the **distributed-executor tier**
+  parent _observing_ that plane — which is the **distributed-executor tier**
   (ADR 68 ambitious), not a follow-on to the child-process executor. This store
   persists `executorState` faithfully for whatever that tier needs; the
   fork-IPC executor self-terminates its worker on IPC `disconnect` rather than

@@ -21,12 +21,12 @@ code.
 
 ```ts
 import { createClient } from "@agentick/client-next";
-import { inProcessTransport } from "@agentick/transport-in-process-next";
+import { inProcessTransport, withHandshake } from "@agentick/transport-in-process-next";
 import type { JsonRpcRequest, JsonRpcResponse } from "@agentick/spec-next";
 
 // Your gateway-side request handler. In practice this is a thin adapter
 // that translates JSON-RPC frames into GatewayHarness method calls —
-// the same logic that lives in @agentick/transport-websocket-next/server.
+// the canonical adapter is `dispatchRequest` from @agentick/transport-next.
 const handler = async (req: JsonRpcRequest): Promise<JsonRpcResponse> => {
   switch (req.method) {
     case "ping":
@@ -36,13 +36,28 @@ const handler = async (req: JsonRpcRequest): Promise<JsonRpcResponse> => {
   return { jsonrpc: "2.0", id: req.id, error: { code: -32601, message: "method not found" } };
 };
 
+// Since #296, `client.connect()` auto-issues `initialize` and
+// `_extensions/list`. A handler that answers neither still connects —
+// `connect()` tolerates `MethodNotFound` on both — but the client then
+// sees no `serverInfo` / capabilities. `withHandshake` wraps a stub
+// handler with real canned responses for both so the handshake actually
+// negotiates.
 const client = await createClient({
-  transport: inProcessTransport({ handler }),
+  transport: inProcessTransport({ handler: withHandshake(handler) }),
 });
 
 await client.connect();
 await client.request("ping", {});
 ```
+
+`withHandshake(inner, overrides?)` answers `initialize` and
+`_extensions/list` from `buildHandshakeInitializeResult()` /
+`buildHandshakeExtensionsListResult()` (override either via the second
+argument), then falls through to `inner` for everything else.
+`withHandshake` is for **stub** handlers; a real gateway wired through
+`dispatchRequest(gateway, req, sink)` from `@agentick/transport-next`
+answers `initialize` / `ping` / `_extensions/list` itself as bootstrap
+builtins.
 
 ## API surface
 
@@ -53,71 +68,69 @@ interface InProcessTransportOptions {
   handler: InProcessGatewayHandler;
   wireParity?: boolean;
   id?: string;
-  serverNotifier?: InProcessServerNotifier;
 }
 
 type InProcessGatewayHandler = (
   request: JsonRpcRequest,
   sendNotification: (n: { method: string; params?: unknown }) => void,
 ) => Promise<JsonRpcResponse>;
-
-type InProcessServerNotifier =
-  | ((deliver: (n: { method: string; params?: unknown }) => void) => () => void)
-  | { acceptConnection(connection: ClientConnection): () => void };
 ```
 
 - `handler` — server-side function called for every RPC. Receives a
-  per-request `sendNotification` for progress + subscription frames.
+  per-request `sendNotification` it can call to push out-of-band frames
+  (progress, subscription events, and control-plane notifications) to
+  the client on the same connection.
 - `wireParity` — when `true`, frame payloads roundtrip through
   `JSON.parse(JSON.stringify(...))`. Catches wire-shape regressions at
   test time without paying the cost in production. Off by default.
-- `serverNotifier` — optional wiring for **server-initiated
-  notifications** (out-of-band frames pushed to the client, e.g.
-  `notifications/capabilities/changed`). Two accepted shapes:
-  - **A gateway** — pass a `GatewayHarness` directly. The transport
-    calls `gateway.acceptConnection` on connect with default in-
-    process metadata. The one-line ergonomic shortcut.
-  - **A function** — full control over metadata + registration. Used
-    when wiring a non-gateway push source (test fixture, mock server).
+- `id` — optional transport id; defaults to a `in-process-N` counter.
 
-### Server-initiated notifications (#311)
+There is no separate server-push slot. Server→client notifications
+travel through the `sendNotification` callback the handler already
+receives — the same channel `dispatchRequest`'s `DispatchSink` uses to
+fan subscription events back to the subscriber.
 
-For the common case — a real gateway pushing capability-change,
-tenant-scoped, or extension-declared notifications — the wiring is
-one line:
+### Server-initiated notifications — the control-plane bus (ADR 47)
+
+Control-plane signals (`gateway:capabilities:changed`) ride the
+substrate bus, not a bespoke push slot. Wire a real gateway through
+`dispatchRequest` so `sub/subscribe` establishes a live bus
+subscription, then emit on the gateway:
 
 ```ts
+import { dispatchRequest, type DispatchSink } from "@agentick/transport-next";
+
 const gateway = await createGateway();
+
+const handler: InProcessGatewayHandler = (req, sendNotification) => {
+  // sendNotification MUST be the sink's notifier so subscription-event
+  // frames reach the subscriber over this connection.
+  const sink: DispatchSink = {
+    sendNotification,
+    registerSubscription: () => {},
+    unregisterSubscription: () => {},
+    registerInFlight: () => {},
+    unregisterInFlight: () => {},
+  };
+  return dispatchRequest(gateway, req, sink);
+};
+
 const client = await createClient({
-  transport: inProcessTransport({ handler, serverNotifier: gateway }),
+  transport: inProcessTransport({ handler: withHandshake(handler) }),
 });
 await client.connect();
 
-// From anywhere on the server side:
-gateway.notify({ method: "notifications/capabilities/changed", params: {} });
-// Client's onCapabilitiesChange subscriber fires; capabilities re-sync.
+// From anywhere on the server side, after the client has opened a
+// gateway-scope subscription:
+gateway.emitCapabilitiesChanged();
 ```
 
-For test fixtures that need to push without a real gateway, use the
-function form:
-
-```ts
-let pushToClient: (n: { method: string; params?: unknown }) => void = () => {};
-inProcessTransport({
-  handler,
-  serverNotifier: (deliver) => {
-    pushToClient = deliver;
-    return () => {
-      pushToClient = () => {};
-    };
-  },
-});
-// later in the test:
-pushToClient({ method: "notifications/whatever", params: {} });
-```
-
-Omit `serverNotifier` entirely if no server→client push channel is
-needed — the transport still works for RPC-only communication.
+The `gateway:capabilities:changed` event drains through the gateway's
+`sub/subscribe` fan-out and arrives as a `notifications/subscription/event`
+frame. **The client does NOT auto-react to it today** — runtime
+capability re-sync is deferred to #308; a subscriber consumes the frame
+manually. This is exactly what
+`src/__tests__/capabilities-changed-e2e.spec.ts` drives.
 
 ## Patterns
 
@@ -169,20 +182,20 @@ confidence.
 
 ## Verified by
 
-| Concern                                                                                       | Test file                                |
-| --------------------------------------------------------------------------------------------- | ---------------------------------------- |
-| End-to-end `createClient` + `inProcessTransport` + handler stub                               | `src/__tests__/smoke.spec.ts`            |
-| `ping` roundtrip                                                                              | `src/__tests__/smoke.spec.ts`            |
-| `gateway.listApps`, `app.listSessions` returning `SessionEntry[]`                             | `src/__tests__/smoke.spec.ts`            |
-| `session.abort` parameter plumbing                                                            | `src/__tests__/smoke.spec.ts`            |
-| RPC error propagation as `TransportError { kind: "rpc" }`                                     | `src/__tests__/smoke.spec.ts`            |
-| `wireParity: true` JSON roundtrip mode                                                        | `src/__tests__/smoke.spec.ts`            |
-| Pre-connect request rejection                                                                 | `src/__tests__/smoke.spec.ts`            |
-| Extension `request` middleware observation order                                              | `src/__tests__/smoke.spec.ts`            |
-| Extension `install()` namespace registration                                                  | `src/__tests__/smoke.spec.ts`            |
-| `onClose` handler LIFO order                                                                  | `src/__tests__/smoke.spec.ts`            |
-| Wire conformance (envelope roundtrips, validator integration, batches, empty batch rejection) | `src/__tests__/wire-conformance.spec.ts` |
-| Full `session/send` client → gateway → executor roundtrip                                     | `src/__tests__/session-send-e2e.spec.ts` |
+| Concern                                                                                       | Test file                                   |
+| --------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| End-to-end `createClient` + `inProcessTransport` + handler stub                               | `src/__tests__/smoke.spec.ts`               |
+| `ping` roundtrip                                                                              | `src/__tests__/smoke.spec.ts`               |
+| `gateway.listApps`, `app.listSessions` returning `SessionEntry[]`                             | `src/__tests__/smoke.spec.ts`               |
+| `session.abort` parameter plumbing                                                            | `src/__tests__/smoke.spec.ts`               |
+| RPC error propagation as `TransportError { kind: "rpc" }`                                     | `src/__tests__/smoke.spec.ts`               |
+| `wireParity: true` JSON roundtrip mode                                                        | `src/__tests__/smoke.spec.ts`               |
+| Pre-connect request rejection                                                                 | `src/__tests__/smoke.spec.ts`               |
+| Extension `request` middleware observation order                                              | `src/__tests__/smoke.spec.ts`               |
+| Extension `install()` namespace registration                                                  | `src/__tests__/smoke.spec.ts`               |
+| `onClose` handler LIFO order                                                                  | `src/__tests__/smoke.spec.ts`               |
+| Wire conformance (envelope roundtrips, validator integration, batches, empty batch rejection) | `src/__tests__/wire-conformance.spec.ts`    |
+| Full `session/send` client → gateway → executor roundtrip                                     | `src/__tests__/session-send-e2e.spec.ts`    |
 | `ctx.progress` during an in-flight send reaches `client.transport.progress(token)` (ADR 64)   | `src/__tests__/progress-signal-e2e.spec.ts` |
 
 ## Status
@@ -192,13 +205,13 @@ Phase 33.B of the v2 implementation plan — see
 
 ## Roadmap & known gaps
 
-- **No `GatewayExtension` server-side wrapper.** Adopters currently
-  hand-write a handler closure. The real adapter that translates
-  JSON-RPC ↔ `GatewayHarnessProtocol` calls lives in
-  `@agentick/transport-websocket-next/server/dispatch.ts` and is
-  transport-agnostic — extracting it into a shared
-  `@agentick/gateway-rpc-adapter-next` (or similar) is a Phase 33.D
-  cleanup.
+- **Adopters hand-write a handler closure or delegate to
+  `dispatchRequest`.** The canonical adapter that translates
+  JSON-RPC ↔ `GatewayHarnessProtocol` calls is `dispatchRequest` in
+  `@agentick/transport-next` (`src/server/dispatch.ts`). It's
+  transport-agnostic — every transport (in-process, WebSocket, Unix
+  socket) routes frames through it — so an in-process handler can be as
+  thin as `(req, send) => dispatchRequest(gateway, req, sink)`.
 - **No cancellation propagation.** When the client aborts, the
   in-process handler doesn't receive a cancellation signal. The WS
   transport's `notifications/cancelled` machinery doesn't have an

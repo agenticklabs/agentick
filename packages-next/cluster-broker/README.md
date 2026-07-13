@@ -119,7 +119,7 @@ interface Connector {
 ```typescript
 const broker = new BaseBroker({
   listener: myWireListener,
-  codec: jsonCodec(),
+  codec: createJsonCodec(),
   onDiagnostic: (name, payload) => bus.append({ surface: "cluster", name, ... }),
 });
 await broker.start();
@@ -133,7 +133,7 @@ await broker.close();
 const client = new BaseClusterClient({
   nodeId: "node-A",
   connector: myWireConnector,
-  codec: jsonCodec(),
+  codec: createJsonCodec(),
   heartbeatMs: 30_000,
   missedPongLimit: 3,
   reconnect: { initialMs: 500, maxMs: 30_000 },
