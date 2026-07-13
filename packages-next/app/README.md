@@ -126,6 +126,7 @@ throws (it belongs on `model`).
 | `loop`               | `LoopExecutorProtocol` or factory            | Optional. Defaults to the bundled `LoopExecutorHarness`.                                                                                                                                                                                                      |
 | `cluster`            | `ClusterFactory`                             | Optional. See "Cluster integration" above.                                                                                                                                                                                                                    |
 | `tools`              | `ToolDeclaration[]`                          | App-scope tool registry. Threads to every session.                                                                                                                                                                                                            |
+| `hooks`              | `CommandHooks`                               | App-scope command-lifecycle hooks (`onBefore*` / `onAfter*`, ADR 80). Folded once at construction; every session composes its own onto these (ADR 82). See the "Hooks" pattern below.                                                                          |
 | `extensions`         | `Extension[]`                                | App + session extensions. Composed at construction.                                                                                                                                                                                                           |
 | `bus`                | `EventBus` or factory                        | Optional substrate override.                                                                                                                                                                                                                                  |
 | `inbox`              | `MessageInbox` or factory                    | Optional substrate override.                                                                                                                                                                                                                                  |
@@ -242,6 +243,32 @@ _siblings_ of the session, not children — a **per-session** concern _around th
 model call_ is tier 4 (`withCallMiddleware`), not `app.use`. Full tier model and
 the `use` vs `fx.use` split: [runtime README — Operation middleware](../runtime/README.md#operation-middleware--three-tiers-adr-76).
 
+### Hooks — lifecycle participation (`onBefore*` / `onAfter*`)
+
+Where middleware wraps _every_ op opaquely, **hooks** participate in a _named_
+verb by command id — `onBeforeToolDispatch`, `onAfterToolDispatch`, … — typed
+over that verb's real input/output. A `before` hook transforms the command input
+(or vetoes by throwing); an `after` hook transforms the output. They ride the
+same `liftMiddleware` fiber path as `use`, so ambient context and interruption
+survive the `await`.
+
+```typescript
+const app = await createApp(<Agent />, {
+  model: openai("gpt-4o"),
+  hooks: {
+    // Transform the dispatch result soundly (sees + returns a DispatchResult).
+    onAfterToolDispatch: (result, ctx) => redactSecrets(result),
+  },
+});
+```
+
+**The cascade composes, it does not override.** App hooks fold at construction;
+`createSession({ hooks })` composes the session's own onto the app's (both fire,
+**app-outer**). Hooks are declarative at construction today; a runtime-imperative
+overlay onto a live session is designed (ADR 82 §4) but not yet built. Full
+mechanism (naming as a total function of the command id, the typed
+`CommandRegistry`, compose-not-override, the construction-fold): [runtime README — Command lifecycle hooks](../runtime/README.md#command-lifecycle-hooks-adr-80--82).
+
 ## Status
 
 Phase 5 (cluster fusion) — landed. `createApp({cluster})` is the
@@ -258,6 +285,9 @@ counterpart (see [ADR 38](../../docs/proposals/v2/blueprint/38-cluster-lifecycle
   routing + per-session install.
 - `src/__tests__/layered-tools.spec.tsx` — app-scope tool propagation
   to sessions.
+- `src/__tests__/hooks-cascade.spec.tsx` — `createApp({ hooks })` fires
+  on dispatch, `createSession({ hooks })` composes app-outer, `onAfter*`
+  transforms flow through, no-hooks is behavior-preserving.
 
 ## Known gaps
 

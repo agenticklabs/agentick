@@ -345,6 +345,25 @@ The registry also exports the precedence ladder as data —
 session < execution < reconciler`; an `extension` binding takes the rank
 of the level at which it was installed.
 
+### Command lifecycle hooks (ADR 80)
+
+`dispatch` is a `command("tool:dispatch", …)`, so it participates in the
+framework-wide command-lifecycle hook surface. This package contributes the one
+`CommandRegistry` augmentation for the verb (`harness.ts`), which mints two
+typed hooks on `CommandHooks`:
+
+| Hook                   | Fires        | Receives / returns                                              |
+| ---------------------- | ------------ | -------------------------------------------------------------- |
+| `onBeforeToolDispatch` | pre-dispatch | `DispatchInput` — transform the call, or `throw` to veto it    |
+| `onAfterToolDispatch`  | post-dispatch | `DispatchResult` — transform the **full** result (not bare `content`), so an after-hook can't strip `isError` / `structuredContent` / metadata |
+
+Register them at any scope that folds down to the dispatch (`createApp({ hooks })`
+or `createSession({ hooks })`; composed app-outer). **Distinct from the
+`onBeforeDispatch` _verdict_ handler** (the validate → authorize → confirm gate
+below), which decides whether a dispatch proceeds; the lifecycle hooks transform
+its input/output. Mechanism, naming, and the construction-fold cascade:
+[runtime README — Command lifecycle hooks](../runtime/README.md#command-lifecycle-hooks-adr-80--82).
+
 ## Testing
 
 `/testing` subpath (`@agentick/tool-executor-next/testing`):
@@ -415,6 +434,10 @@ fixture behaviors into concrete handlers.
   multi-binding storage, precedence resolution, idempotency.
 - `src/__tests__/middleware-and-hooks.spec.ts` — `use(middleware)` +
   `onBeforeDispatch` verdicts.
+- `src/__tests__/command-hooks-augmentation.spec.ts` — the `tool:dispatch`
+  `CommandRegistry` augmentation mints `onBeforeToolDispatch` (← `DispatchInput`)
+  / `onAfterToolDispatch` (← `DispatchResult`), and the type-level names agree
+  with runtime `deriveHookNames` (lockstep).
 - `src/__tests__/define-tool-executor.spec.ts` — the callback factory,
   including inbox `tool:abort` command routing cancelling an in-flight
   dispatch with `ToolAbortedError` (the #31 gap: `CallbackToolExecutor` is

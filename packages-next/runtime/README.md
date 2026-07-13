@@ -475,6 +475,98 @@ yield * withCallMiddleware([budgetCap], loop.fx.runExecution(sendInput));
 
 ---
 
+## Command lifecycle hooks (ADR 80 / 82)
+
+Every harness verb — `tool:dispatch`, `knobs:set`, `session:send`, … — is a
+`command("<who>:<what>", body)` routed through `runOperation`. That one seam
+already emits phase envelopes and composes middleware; **lifecycle hooks ride it
+too.** No privileged "core" layer: every verb on every harness gets the same
+before/after participation, uniformly.
+
+### Two surfaces, one seam
+
+The command already carries an **observe** side; hooks add a **participate** side.
+
+- **Events (observe · out-of-band).** `runOperation` emits structured phase
+  envelopes `{ surface, name: "<who>:<what>", phase }` on the bus —
+  `EventPhase` is `"requested" | "before" | "delta" | "terminal"`. Subscribe on
+  the bus (the app exposes `app.events(...)`); fire-and-forget, cannot alter the
+  op. (ADR 80's flat
+  `<who>-<what>-<phase>` kebab is the _wire_ projection of these envelopes for
+  wire-extensions — a projection over this in-process shape, not a second bus.)
+- **Hooks (participate · in-band).** `onBefore<Who><What>` /
+  `onAfter<Who><What>` — awaited, ordered, transform-capable. The rest of this
+  section is about these.
+
+A **hook** is `(value, ctx) => value | void`: **return a value → transform**,
+**return `void` → observe**, **`throw` → veto**. `before` receives the command
+input and returns that same type; `after` receives the command output and returns
+that same type. `ctx` is the op's `RuntimeContext` (scope, resolved `target`,
+principal, hooks). Hooks **are middleware entries** — lifted through the SAME
+`liftMiddleware` path as `use` (above), so ambient `RuntimeContext`, OTel
+span-nesting, and interruption survive the `await`. There is no bespoke
+hook-runner; the fiber invariant is inherited from middleware verbatim.
+
+### Typed by a derived mapped type
+
+Hook names are a **total function of the command id**:
+`hook = on + Before|After + PascalCase("<who>:<what>")`. A verb opts into typed
+hooks with one line — an augmentation of the empty-seed `CommandRegistry`:
+
+```ts
+// in the harness that owns the verb (e.g. @agentick/tool-executor-next):
+declare module "@agentick/runtime-next" {
+  interface CommandRegistry {
+    "tool:dispatch": { input: DispatchInput; output: DispatchResult };
+  }
+}
+```
+
+`CommandHooks` (a mapped type over the registry) then mints
+`onBeforeToolDispatch?: (input: DispatchInput, ctx) => …` and
+`onAfterToolDispatch?: (output: DispatchResult, ctx) => …`. Only augmented verbs
+are type-safe keys — the surface is **exposure-gated**. The type-level `Pascal<K>`
+and the runtime `deriveHookNames(id)` are lockstep-tested so a name can never
+drift between them.
+
+### The cascade is a construction-fold, not a parent-walk (ADR 82)
+
+Unlike the middleware tiers above (which walk construction-ancestors per op),
+hooks **fold once at construction** into an immutable `Hooks` value threaded into
+every harness a scope builds:
+
+```ts
+// each scope folds its own hooks onto its parent's RESOLVED value:
+this.hooks = parentResolved.extend(Hooks.from(options.hooks ?? {}));
+// createApp({ hooks }) → app.hooks;  createSession({ hooks }) composes onto app's.
+```
+
+`Hooks.extend` **composes** per command (ancestor + descendant both fire,
+outer-first) — deliberately NOT tools' last-wins override. Each op reads the
+local, already-resolved `this.hooks.forOp(name)` — no parent pointer, no
+construction-ordering knot (a value needs no live parent). The fold _is_ the
+walk, memoized at each node.
+
+The trade vs a walk: the fold **snapshots** the parent's hooks at the child's
+birth, so hooks today are **declarative at construction** (`createApp({ hooks })`
+/ `createSession({ hooks })`). `app.hooks` mutated after a session exists would
+not reach that session (its fold already ran). A runtime-imperative overlay onto
+a _live_ harness — `Hooks` gaining `append` / `remove`, surfaced as a public
+`session.hooks` accessor — is **designed (ADR 82 §4) but not yet built**; the
+`Hooks` primitive is `empty` / `from` / `extend` / `forOp` only. The 10% that
+overlay would buy is runtime-retroactive deployment policy — and a call-scoped
+transform that must reach a _shared_ harness (the model executor) belongs in
+**tier-4** middleware anyway (`withCallMiddleware`, above), not the harness fold.
+
+The mechanism (transform / veto / compose-outer-first / fiber preservation /
+`from`↔`forOp` agreement) is pinned generically by
+`src/__tests__/command-hooks.spec.ts`.
+
+> **Full write-ups:** [ADR 80 — command lifecycle hooks](../../docs/proposals/v2/blueprint/80-command-lifecycle-hooks.md),
+> [ADR 82 — the cascade is a construction-fold](../../docs/proposals/v2/blueprint/82-hooks-cascade-as-construction-fold.md).
+
+---
+
 ## See also
 
 - `docs/proposals/v2/blueprint/45-runtime-context-model.md` — full
