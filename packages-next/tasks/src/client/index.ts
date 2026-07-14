@@ -9,3 +9,6 @@
  */
 
 export { taskStatusView, type TaskStatusClient, type TaskStatusMap } from "./task-status-view.js";
+
+// Side-effect: contribute `session.tasks` to the client SessionHandle (ADR 87).
+import "./register.js";

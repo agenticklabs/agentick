@@ -30,6 +30,7 @@ import type {
   SessionEntry,
   SessionFilter,
   SessionHandle,
+  SessionHandleExtensions,
   StreamEvent,
   SubscriptionScope,
   SubscriptionStream,
@@ -38,6 +39,7 @@ import type { Cursor } from "@agentick/spec-next";
 import { omitUndefined } from "@agentick/utils-next";
 import { onLog as onLogFn, onProgress as onProgressFn } from "./signals.js";
 import { channelView as channelViewFn } from "./channel-view.js";
+import { applySessionHandleExtensions } from "./session-handle-extensions.js";
 
 interface InternalClient {
   readonly id: string;
@@ -132,7 +134,12 @@ export function makeAppHandle(client: InternalClient, appId: string): AppHandle 
 }
 
 export function makeSessionHandle(client: InternalClient, sessionId: string): SessionHandle {
-  return {
+  // Typed against the BASE (minus the augmented sub-handles) so the literal is
+  // fully checked; the registered sub-handles are attached as getters below and
+  // asserted at return. In client-core `SessionHandleExtensions` is empty, so this
+  // is just `SessionHandle`; in a harness package's compilation it drops that
+  // package's slot (added by the getter), keeping the slot NON-optional (ADR 87).
+  const handle: Omit<SessionHandle, keyof SessionHandleExtensions> = {
     ...scopedSubscriptions(client, { kind: "session", id: sessionId }),
     id: sessionId,
     send<P = unknown>(input: SendInput<P>): ClientSessionExecutionHandle {
@@ -180,6 +187,10 @@ export function makeSessionHandle(client: InternalClient, sessionId: string): Se
       });
     },
   };
+  // ADR 87 — spread registered per-harness sub-handles (session.tasks, .knobs, …)
+  // as lazy getters. Client-core stays agnostic; harness /client packages register.
+  applySessionHandleExtensions(handle, client as unknown as ClientProtocol, sessionId);
+  return handle as SessionHandle;
 }
 
 // ============================================================================

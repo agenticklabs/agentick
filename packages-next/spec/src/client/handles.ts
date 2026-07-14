@@ -94,12 +94,32 @@ export interface AppHandle extends ResourceHandle, HandleSubscriptions {
 // ============================================================================
 
 /**
+ * Empty-seed interface for per-harness client sub-handles (ADR 87) — the
+ * client-side twin of the server's `HookBridges`. Each harness `/client` package
+ * augments this to contribute a typed sub-handle (`session.tasks`, `session.knobs`,
+ * …), so the client `SessionHandle` self-assembles from installed harness client
+ * packages the same way the server session assembles bridges. Client-core declares
+ * NO slots here — they arrive only via `declare module` from the harness packages
+ * (which also `registerSessionHandleExtension` the runtime factory).
+ *
+ * @example
+ * // in @agentick/tasks-next/client:
+ * declare module "@agentick/spec-next" {
+ *   interface SessionHandleExtensions { readonly tasks: ChannelView<TaskStatusMap>; }
+ * }
+ */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+export interface SessionHandleExtensions {}
+
+/**
  * Client-side session handle. `send()` returns a `ClientSessionExecutionHandle`
  * — same shape as the server-side `SessionExecutionHandle` (AsyncIterable +
  * `.result` + `abort()`), guaranteeing in-process and remote calls have
- * identical types.
+ * identical types. Carries the generic subscription surface ({@link
+ * HandleSubscriptions}) plus per-harness sub-handles ({@link SessionHandleExtensions}).
  */
-export interface SessionHandle extends ResourceHandle, HandleSubscriptions {
+export interface SessionHandle
+  extends ResourceHandle, HandleSubscriptions, SessionHandleExtensions {
   send<P = unknown>(input: SendInput<P>): ClientSessionExecutionHandle;
   dispatch(tool: string, input: unknown): Promise<readonly ContentBlock[]>;
   abort(reason?: string): Promise<void>;

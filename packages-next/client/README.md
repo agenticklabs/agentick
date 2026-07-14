@@ -274,6 +274,52 @@ here. Config: `ChannelViewConfig<T, F>` = `{ initial: T; reduce: (state, frame) 
 function). Reach for the façade for a known resource; drop to `channelView` for
 a bespoke channel.
 
+### Session sub-handles — install-to-appear (ADR 87)
+
+A harness's typed façade doesn't have to be summoned by hand. The client
+`SessionHandle` is the **client twin of the server's `HookBridges`**: harness
+`/client` packages augment it with a named slot and register a factory, so
+`client.session(id).tasks` / `.knobs` **self-assemble** the moment you import
+the subpath — no client-core wiring, no manual `taskStatusView(client, id)`.
+
+```ts
+import { createClient } from "@agentick/client-next";
+import "@agentick/tasks-next/client"; // types `.tasks` + registers its factory
+import "@agentick/knobs-next/client"; // types `.knobs` + registers its factory
+
+const client = await createClient({ transport });
+const session = client.session(id);
+
+// Non-optional slots — install-to-appear, not `?.`:
+session.tasks.get(); // ChannelView<Record<taskId, TaskInfo>>
+session.tasks.subscribe(render);
+session.knobs.get(); // ChannelView<KnobsState>
+await session.knobs.set("temperature", 0.7); // knobs adds the write half
+```
+
+The seam is `spec/client`'s empty `SessionHandleExtensions` interface (the
+twin of the empty `HookBridges` seed) + `registerSessionHandleExtension(name,
+(client, sessionId) => sub)` in client-core. `makeSessionHandle` spreads every
+registered factory as a **lazy, cached getter** that never shadows a real
+handle member — so the slot costs nothing until first touched, and installing a
+harness package is the _only_ thing that makes its slot exist. Same law as the
+server bridges (ADR 27): built-in vs optional is a packaging concern, not an
+architectural one — the registration path is identical.
+
+To publish your own sub-handle, mirror `tasks-next/client/register.ts`:
+
+```ts
+import { registerSessionHandleExtension } from "@agentick/client-next";
+import { myView, type MyView } from "./my-view.js";
+
+declare module "@agentick/spec-next" {
+  interface SessionHandleExtensions {
+    readonly mine: MyView;
+  }
+}
+registerSessionHandleExtension("mine", (client, sessionId) => myView(client, sessionId));
+```
+
 ### Capabilities + server info
 
 `client.connect()` runs a two-step handshake — `initialize` (protocol version + framework flags + server info) then `_extensions/list` (wire-extension enumeration for feature-gating). Both populate `client.capabilities` and `client.serverInfo`.
