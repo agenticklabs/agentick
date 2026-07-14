@@ -56,15 +56,24 @@ Both are hookable ops (§4): `gateway:start` and `gateway:close`.
 
 ## 2. `ServerTransport` — the missing symmetry
 
+**Status: the abstraction + gateway ownership + conformance LANDED
+(`@agentick/spec-next` `server/transport.ts`, `@agentick/gateway-next`,
+`@agentick/spec-conformance-next` `runServerTransportConformance`). The
+concrete transport wrappers (`webSocket` / `http` / `unixSocket` /
+`inProcess`) are the follow-on task — they wrap the existing
+`websocketServer` / `httpServer` / `unixSocketServer` factories behind this
+interface.**
+
 The client side has `BaseClientTransport`; the server side has only the loose
 `dispatchRequest` + per-transport adapters the adopter wires by hand. Add the
-symmetric abstraction:
+symmetric abstraction (lives in spec — `GatewayHarnessProtocol` directly, NOT
+the `transport-next` `DispatchHost` alias, so spec stays dep-free):
 
 ```ts
 interface ServerTransport {
   readonly id: string;
-  listen(host: DispatchHost): Promise<void>;   // bind + accept; route inbound via dispatchRequest(host, …)
-  close(): Promise<void>;                        // stop accepting, drain
+  listen(host: GatewayHarnessProtocol): Promise<void>; // bind + accept; route inbound via dispatchRequest(host, …)
+  close(): Promise<void>;                                // stop accepting, drain
 }
 ```
 
@@ -92,9 +101,18 @@ An exotic transport that needs late binding closes over a thunk at construction.
 ```ts
 createGateway({ transports: [webSocketServerTransport({ port: 8080 }), inProcessServerTransport()] })
 
-gateway.listen()  →  await parallel(transports.map(t => t.listen(this)))
-gateway.close()   →  await parallel(transports.map(t => t.close()))
+gateway.listen()  →  await Promise.all(transports.map(t => t.listen(this)))
+gateway.close()   →  await Promise.all(transports.map(t => t.close()))
 ```
+
+**Close ordering (LANDED).** `gateway.close()` closes transports **first** in
+its LIFO teardown (`transports → apps → extensions → substrate`). Transports
+are the ingress edge; stopping them before apps tear down prevents an inbound
+frame from routing `dispatchRequest(this, …)` into a half-closed app. Symmetric
+with `listen()`, which binds transports **last** (after gateway-ready seals the
+wire registry). Transport close failures are best-effort — one failure never
+blocks the rest of teardown. `listen()`'s started-latch short-circuits before
+the op fires, so a second `listen()` does NOT re-listen transports.
 
 Concrete server transports route each inbound frame through the existing
 `dispatchRequest(this, req, sink, identity)` — the wire seam (ADR 83 wire
@@ -179,7 +197,9 @@ identity enrichment — lower priority, same rules.
 2. `wire:` prefix on wire ops (ADR 83 wire section) — kills the collision.
 3. Gateway lifecycle — `listen()` / `close({ drain })`; `gateway:start` /
    `gateway:close` ops; thread gateway→app live inheritance in `createApp`.
-4. `ServerTransport` abstraction + `withTransports` ownership + concrete transports.
+4. `ServerTransport` abstraction + flat `transports` gateway ownership +
+   conformance — **LANDED**. Concrete transport wrappers (`webSocket` / `http` /
+   `unixSocket` / `inProcess`) are the follow-on task.
 5. Gateway op surface — `authorizer:authorize`, `gateway:accept`,
    `gateway:create-app` through `runOperation`.
 

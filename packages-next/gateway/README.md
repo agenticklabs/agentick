@@ -111,6 +111,7 @@ interface CreateGatewayOptions {
   cluster?: ClusterFactory; // Phase 5
   tools?: readonly ToolDeclaration[]; // gateway-scope tools (see below)
   wireExtensions?: readonly WireExtension[]; // ADR 46 — see below
+  transports?: readonly ServerTransport[]; // ADR 84 — see "Lifecycle & transports"
   authorizer?: Authorizer; // authz policy — see "Authentication & authorization"
   metadata?: Readonly<Record<string, unknown>>;
 }
@@ -127,14 +128,59 @@ class GatewayHarness extends BaseHarness<"gateway"> implements GatewayHarnessPro
   readonly id: string;
   app(id: string): AppHarnessProtocol | undefined;
   apps(): readonly AppHarnessProtocol[];
+  // Two-door signature, mirroring the top-level createApp(rootElement, options):
+  createApp<P>(rootElement: unknown, input: Omit<CreateGatewayAppInput<P>, "rootElement">): Promise<AppHarnessProtocol<P>>;
   createApp<P>(input: CreateGatewayAppInput<P>): Promise<AppHarnessProtocol<P>>;
   events(filter?: EventQuery, options?: SubscribeOptions): AsyncIterable<ProtocolEvent>;
   wireExtensions(): WireExtensionRegistry; // ADR 46 — see below
   emitCapabilitiesChanged(): void; // ADR 47 — see "Server-initiated notifications"
-  closeGateway(): Promise<void>;
-  close(): Promise<void>; // alias for closeGateway
+  listen(): Promise<void>; // ADR 84 — bind transports, flip ready
+  closeGateway(opts?: { drain?: boolean }): Promise<void>;
+  close(opts?: { drain?: boolean }): Promise<void>; // alias for closeGateway
 }
 ```
+
+## Lifecycle & transports (ADR 84)
+
+The gateway is a server, so it takes the canonical server lifecycle pair —
+`listen()` to start, `close({ drain })` to stop (graceful-vs-forced is a
+parameter, not a second `destroy()` verb).
+
+The gateway **owns** its server transports. Pass them flat via the
+`transports` option (the `withX` convention — no `config: {}` nest); each
+`ServerTransport` has its wire config (port/path/tls) bound at its own
+construction, so the gateway only needs to hand it the dispatch host:
+
+```ts
+const gateway = await createGateway({
+  transports: [
+    webSocketServerTransport({ port: 8080 }), // config bound at construction
+    inProcessServerTransport(),
+  ],
+});
+
+await gateway.listen(); // → await Promise.all(transports.map(t => t.listen(this)))
+// ... serve ...
+await gateway.close(); // → closes transports FIRST, then apps, then substrate
+```
+
+- **`listen()`** runs the hookable `gateway:start` op, awaits gateway-ready
+  (so the wire registry has sealed before any frame arrives), then fans out
+  `transport.listen(this)` — injecting the gateway itself as each transport's
+  dispatch host. It is **idempotent**: a started-latch short-circuits before
+  the op fires, so a second `listen()` does NOT re-listen the transports. Zero
+  transports → a clean no-op that just flips ready.
+- **`close()`** runs the hookable `gateway:close` op and closes transports
+  **first** in the LIFO teardown (`transports → apps → extensions →
+  substrate`). Transports are the ingress edge: stopping them before apps tear
+  down prevents an inbound frame from routing into a half-closed app. Transport
+  close failures are best-effort — one failing transport never blocks the rest
+  of teardown.
+
+The concrete transport wrappers (`webSocket` / `http` / `unixSocket` /
+`inProcess`) ship from the `@agentick/transport-*-next` packages; this package
+owns only the fan-out. `spyServerTransport()` (`@agentick/gateway-next/testing`)
+is a call-recording double for asserting the fan-out in tests.
 
 
 
@@ -559,6 +605,11 @@ socket adapter over it; there is no bespoke per-transport wire logic.
 | Wire extension registry — register / resolve / seal    | `src/__tests__/wire-registry.spec.ts`                        |
 | Wire extension dispatch end-to-end                     | `../transport/src/__tests__/wire-extension-dispatch.spec.ts` |
 | Framework wire extensions + namespace-conflict reject  | `src/__tests__/wire-framework-extensions.spec.ts`            |
+| `listen()` fans out to `transport.listen(this)` (host === gateway) | `src/__tests__/server-transports.spec.ts`         |
+| `close()` closes every owned transport (transports-first LIFO) | `src/__tests__/server-transports.spec.ts`             |
+| `listen()` idempotency does not re-fire `transport.listen` | `src/__tests__/server-transports.spec.ts`                |
+| Zero-transport `listen()` no-op fan-out                | `src/__tests__/server-transports.spec.ts`                    |
+| `ServerTransport` conformance (spy double)             | `src/__tests__/server-transports.spec.ts`                    |
 
 
 
@@ -576,10 +627,13 @@ See `docs/proposals/v2/STATUS.md`.
 
 ## Roadmap & known gaps
 
-- **No transports / plugins / auth in this package.** ADR 31 +
-ADR 32 land transports as separate `@agentick/transport-*-next`
-packages and plugins as extensions (shape-1 per ADR 32). This
-package only ships the runtime-root harness.
+- **The gateway OWNS the transport fan-out, not the concrete
+transports.** ADR 84 §2 landed `transports?: ServerTransport[]` +
+the `listen()`/`close()` fan-out here (see "Lifecycle &
+transports"). The concrete wrappers (`webSocket` / `http` /
+`unixSocket` / `inProcess`) still ship as separate
+`@agentick/transport-*-next` packages (ADR 31 + ADR 32) — the
+follow-on task. Plugins/auth remain extensions (shape-1 per ADR 32).
 - **No cluster substrate.** ADR 29 Phase D substrate (Redis Streams /
 Kafka) lands in `@agentick/cluster-next`; this package's
 `GatewayHarness` accepts any `EventBus` impl so cluster mode is

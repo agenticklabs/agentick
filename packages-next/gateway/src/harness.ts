@@ -49,6 +49,7 @@ import type {
   Operation,
   OperationJournal,
   ProtocolEvent,
+  ServerTransport,
   SubscribeOptions,
   ToolDeclaration,
   ToolRegistration,
@@ -171,6 +172,21 @@ export interface GatewayHarnessOptions extends BaseHarnessOptions {
    * this is the higher-level extension surface. Both may be supplied.
    */
   readonly extensions?: ReadonlyArray<AnyExtension>;
+
+  /**
+   * Server transports the gateway owns (ADR 84 §2). Each is a
+   * {@link ServerTransport} whose wire config (port/path/tls) is bound at
+   * its own construction; `gateway.listen()` fans out to
+   * `transport.listen(this)` (injecting the gateway as the dispatch host)
+   * and `gateway.close()` closes each. Flat adopter surface (the `withX`
+   * convention — no `config: {}` nest).
+   *
+   * The concrete transport wrappers (webSocket / http / unixSocket /
+   * inProcess) ship from the `@agentick/transport-*-next` packages; this
+   * slot accepts any of them (or a test double). Omitted → the fan-out is
+   * a no-op and `listen()` just flips ready.
+   */
+  readonly transports?: readonly ServerTransport[];
 }
 
 // ============================================================================
@@ -187,6 +203,13 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
   private gatewayClosed = false;
   /** Idempotency latch for {@link listen} — a second `listen()` is a no-op. */
   private gatewayStarted = false;
+  /**
+   * Server transports this gateway owns (ADR 84 §2). Bound in {@link listen}
+   * via `transport.listen(this)`, torn down in {@link closeGatewayBody} via
+   * `transport.close()`. Empty when {@link GatewayHarnessOptions.transports}
+   * was omitted — the fan-out is then a clean no-op.
+   */
+  private readonly serverTransports: readonly ServerTransport[];
 
   /**
    * Gateway-extension bridges (ADR 50) — the `gateway.bridges.<name>`
@@ -274,6 +297,11 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     this.gatewayTools = (options.tools ?? []).map((decl) =>
       toRegistration(decl, { scope: "gateway" }),
     );
+
+    // Own the adopter-supplied server transports (ADR 84 §2). Wire config is
+    // already bound inside each transport's factory; the gateway only needs to
+    // hand them itself as the dispatch host at `listen()` time.
+    this.serverTransports = options.transports ?? [];
 
     // Distribute the ADR 50 extension surface into its scopes.
     const { gatewayExts, wireFromBundles, cascade } = splitExtensions(options.extensions ?? []);
@@ -624,9 +652,11 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
    * `onBeforeGatewayStart` guard can gate/feature-flag transports and an
    * `onAfterGatewayStart` observer can log bound addresses.
    *
-   * Idempotent: a second call is a safe no-op (the transports are already
-   * bound). Fans out to every owned `ServerTransport` — but that abstraction
-   * lands in a later arc (ADR 84 §2), so today the body just ensures ready.
+   * Idempotent: a second call is a safe no-op (the started-latch short-circuits
+   * before the op fires, so owned transports are NOT re-listened). Fans out to
+   * every owned {@link ServerTransport} via `transport.listen(this)`, injecting
+   * the gateway as the dispatch host (ADR 84 §2). Zero transports → the fan-out
+   * is a no-op that just flips ready.
    *
    * @see docs/proposals/v2/blueprint/84-gateway-lifecycle-and-transports.md
    */
@@ -708,24 +738,46 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
   // ============================================================================
 
   /**
-   * Start-op body (ADR 84 §1). Today a near-no-op: it just ensures the
-   * gateway is ready. The point of landing it now is the hookable
-   * `gateway:start` op + `listen()` method shape.
+   * Start-op body (ADR 84 §1 + §2). Ensures the gateway is ready, then fans
+   * out to every owned {@link ServerTransport}, binding each with the gateway
+   * as its dispatch host. Ready is awaited FIRST so the wire registry has
+   * sealed before any transport begins accepting frames it would route back
+   * through this host. Zero transports → the fan-out is a clean no-op.
    */
   private async listenBody(): Promise<void> {
-    // TODO(adr-84): fan out to serverTransports.map(t => t.listen(this)).
-    // The ServerTransport abstraction (ADR 84 §2) lands in a later arc; until
-    // then `listen()` on zero transports is a no-op that just flips ready.
     await this.gatewayReady;
+    await Promise.all(this.serverTransports.map((t) => t.listen(this)));
   }
 
   private async closeGatewayBody(drain: boolean): Promise<void> {
-    // TODO(adr-84): thread `drain` into the ServerTransport fan-out —
-    // `drain === false` is the forced variant (stop accepting immediately,
-    // skip the graceful in-flight drain). Until ServerTransport (ADR 84 §2)
-    // exists there is nothing to drain; the flag is accepted and the SHAPE is
-    // wired so `close({ drain: false })` type-checks and reaches here today.
+    // The `ServerTransport` fan-out now exists (below), but the ADR 84 §2
+    // interface is `close(): Promise<void>` — deliberately NO `drain` arg.
+    // Graceful-vs-forced at the transport level (`drain === false` ⇒ stop
+    // accepting immediately, skip the in-flight drain) is a concrete-wrapper
+    // concern, so the flag is accepted at the gateway edge but not yet
+    // threaded down.
+    // TODO(adr-84): when the concrete transport wrappers land, either widen
+    // `ServerTransport.close(opts?: { drain })` or add a `drain()` verb, and
+    // pass `drain` through here.
     void drain;
+    // Close server transports FIRST (ADR 84 §2) — before any app teardown.
+    // Transports are the ingress edge: an inbound frame routes through
+    // `dispatchRequest(this, …)` into an app/session. Tearing an app down while
+    // its transport still accepts frames races a half-closed app against live
+    // dispatch. Stopping ingress first quiesces the deployment top-down (the
+    // mirror of `listen`, which binds transports LAST, after ready) — so the
+    // LIFO close order is: transports → apps → extensions → substrate.
+    await Promise.all(
+      this.serverTransports.map(async (t) => {
+        try {
+          await t.close();
+        } catch {
+          // Best effort — one transport's close failure must not block the
+          // rest of teardown (apps, extensions, substrate still must close).
+        }
+      }),
+    );
+
     // Close every registered App. Each App's close cascades into its
     // sessions; we await sequentially to preserve teardown ordering.
     const apps = Array.from(this._apps.values());

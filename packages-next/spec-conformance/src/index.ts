@@ -85,3 +85,12 @@ export {
   type TransportConformanceFactory,
   type TestHandler,
 } from "./transport.js";
+
+// ServerTransport conformance (ADR 84 §2) — the symmetric server-side
+// counterpart. Every `ServerTransport` impl runs this to prove listen/close
+// bind + teardown + idempotency. The gateway relies on this contract when it
+// fans out `transport.listen(this)` / `transport.close()`.
+export {
+  runServerTransportConformance,
+  type ServerTransportConformanceFactory,
+} from "./server-transport.js";
