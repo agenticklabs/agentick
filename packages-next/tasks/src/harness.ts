@@ -293,6 +293,51 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
 
   // ─────────── submit ───────────
 
+  // NOTE(adr-83, hookability blocker — DELIBERATELY NOT wrapped in `runOperation`).
+  // `submit` is the natural before/after hook point ("gate/transform a
+  // submission" / "observe the accepted handle"), mirroring the just-landed
+  // `sessionOp` (session) and `elicitOp` (elicitation) wrappers. It CANNOT be
+  // wrapped behavior-preservingly, for a structural reason:
+  //
+  //   • `submit` returns `TaskHandle<T>` **synchronously** — callers (and the
+  //     existing test suite) read `handle.taskId` / `handle.initialStatus`
+  //     immediately, and the executor must `start` synchronously so signal
+  //     listeners register before `submit` returns. The public overloads MUST
+  //     keep returning `TaskHandle<T>` (not a Promise).
+  //   • `runOperation`'s interceptor seam is intrinsically **async**: command
+  //     hooks lift through `asBefore`/`asAfter` (both `async`) via
+  //     `liftMiddleware` → `Effect.tryPromise`. So the moment ANY hook (or an
+  //     inherited async interceptor) is registered for the op, the composed
+  //     effect suspends on the microtask queue.
+  //   • Extracting a synchronous result from that effect requires
+  //     `Effect.runSyncExit`, which **dies** (`AsyncFiberException`) on any
+  //     async boundary — verified empirically. So a `runSyncExit`-based submit
+  //     would work ONLY with zero hooks registered (hollow) and would REGRESS
+  //     (throw) under any inherited async interceptor — strictly worse than
+  //     today, where `submit` never throws for interception reasons.
+  //
+  // Every existing `runOperation`-wrapped verb in the repo (session `send` /
+  // `append` / `apply*`, elicitation `elicit`, tool `dispatch`, gateway/app
+  // ops) is ASYNC (Promise/Effect surface). A synchronous command has no
+  // precedent because the seam does not support one.
+  //
+  // UNBLOCKERS (either lands this cleanly; both are out of this task's scope —
+  // one changes the public type, the other touches shared runtime-next hook
+  // semantics used by every harness, so both want explicit sign-off):
+  //   1. Make `submit` async (`Promise<TaskHandle<T>>`). The ONLY way to host
+  //      async before-hooks. Violates today's "public types unchanged"
+  //      constraint + breaks synchronous `handle.taskId` reads.
+  //   2. A synchronous-hook fast-path in `@agentick/runtime-next` (`Hooks.forOp`
+  //      / the `asBefore`/`asAfter` lift): keep a synchronous hook synchronous
+  //      (`Effect.sync`), only going async when the hook returns a Promise. Lets
+  //      `runSyncExit` host sync hooks; async submit hooks would still throw
+  //      loudly (documented). Does NOT fix the async-inherited-interceptor
+  //      regression, so it is necessary-but-insufficient on its own.
+  //
+  // The `settle`/`applyTransition` "after the task COMPLETES" hook (the more
+  // useful reactive seam) is blocked by the SAME async-seam issue plus the sync
+  // executor-callback path — see the NOTE at `applyTransition`.
+
   // Closure path (unchanged — inference-first so existing call sites are
   // untouched; PARITY).
   submit<T = readonly ContentBlock[]>(
@@ -508,6 +553,25 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
    * this is what preserves "caller cancel wins the race" against a work
    * fn that resolves/rejects after cancel.
    */
+  // NOTE(adr-83, `onAfterTasksSettle` deferred — the terminal transition is
+  // NOT wrapped in `runOperation`). The useful "react when the task actually
+  // completes" hook lives here (the terminal `settle`), decoupled from the
+  // `submit`-accept seam. It is deferred for TWO compounding reasons:
+  //   • `applyTransition` / `settle` are SYNCHRONOUS `void` methods invoked
+  //     from the executor's report callback (`makeReport`) and the ttl reaper /
+  //     cancel paths. `runOperation` is async (Effect); wrapping the terminal
+  //     transition would force this callback path async, risking the FSM
+  //     ordering + "cancel wins the race" post-terminal-no-op invariant that
+  //     the harness tests pin (ttl-reaper, cancel, post-terminal-no-op,
+  //     orphan hydration). The task brief explicitly says: do NOT force
+  //     sync→async on the callback path.
+  //   • Even ignoring the callback path, the interceptor seam is async (see the
+  //     NOTE at `submit`), so the same runSyncExit-dies-on-any-hook problem
+  //     applies.
+  // Unblock: make the FSM transition path async (a follow-up that reworks
+  // `makeReport` + the ttl/cancel callers to compose an Effect), OR add a
+  // dedicated task-lifecycle event seam that fires the terminal hook off the
+  // durable record without touching the transition ordering.
   private applyTransition(live: LiveTask, t: TaskTransition): void {
     const record = live.record;
     if (this.isTerminal(record.status)) return;

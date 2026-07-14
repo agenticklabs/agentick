@@ -841,6 +841,62 @@ runTasksHarnessConformance(async ({ harnessId }) => {
 });
 ```
 
+## Command hooks — the submit(sync) / settle(async) split (ADR 83)
+
+The session and elicitation harnesses route their verbs through `runOperation`
+(via `sessionOp` / `elicitOp`), so each mints a derived `onBefore…` / `onAfter…`
+command-lifecycle hook. The two natural task hook points are:
+
+| Seam                  | Would-be hooks                                    | "before" = …                          | "after" = …                        |
+| --------------------- | ------------------------------------------------- | ------------------------------------- | ---------------------------------- |
+| `submit` (accept)     | `onBeforeTasksSubmit` / `onAfterTasksSubmit`      | gate / transform / veto a submission  | the accepted `TaskHandle`          |
+| `settle` (complete)   | `onBeforeTasksSettle` / `onAfterTasksSettle`      | inspect the terminal record           | react "after the task COMPLETES"   |
+
+The name derivation is locked by a test
+(`src/__tests__/command-hooks.spec.ts`): `deriveHookNames("tasks:command:submit")`
+=== `["onBeforeTasksSubmit", "onAfterTasksSubmit"]` (the `:command:` infix is
+stripped, then each segment PascalCases).
+
+**Status: NOT yet wired — deferred, by design.** Unlike `send` / `elicit`,
+neither task seam is currently routed through `runOperation`, so no task hook
+fires today. This is a structural constraint, not an oversight:
+
+- **`submit` is synchronous.** It returns `TaskHandle<T>` (not a Promise) and
+  starts the executor synchronously so signal listeners register before it
+  returns — the public overloads and the existing suite depend on reading
+  `handle.taskId` immediately. The `runOperation` interceptor seam is
+  intrinsically **async**: command hooks lift through `asBefore`/`asAfter`
+  (both `async`) via `Effect.tryPromise`. Extracting a synchronous result from
+  that effect needs `Effect.runSyncExit`, which **dies** on any async boundary.
+  A `runSyncExit`-based `submit` would therefore work only with zero hooks
+  registered (hollow) and would _regress_ (throw) under any inherited async
+  interceptor — strictly worse than today. So `submit` stays a plain method.
+- **`settle` is a synchronous `void` on the executor callback path.** The
+  "after the task completes" hook lives at the terminal transition
+  (`applyTransition` → `settle`), which is invoked from the executor's report
+  callback, the ttl reaper, and cancel. Making that async to host a hook would
+  risk the FSM ordering + "cancel wins the race" post-terminal-no-op invariant
+  the suite pins. Not forced.
+
+**Unblockers** (both out of scope here — one changes a public type, the other
+touches shared `@agentick/runtime-next` hook semantics used by every harness,
+so both want explicit sign-off):
+
+1. Make `submit` async (`Promise<TaskHandle<T>>`) — the only way to host async
+   before-hooks; breaks the synchronous `handle.taskId` contract.
+2. A synchronous-hook fast-path in `runtime-next` (`Hooks.forOp` / the
+   `asBefore`/`asAfter` lift): keep a synchronous hook synchronous, only going
+   async when the hook returns a Promise. Lets `runSyncExit` host sync hooks;
+   async submit hooks still throw loudly. Necessary-but-insufficient — it does
+   not fix the async-inherited-interceptor regression.
+3. For `settle`: rework the FSM transition path to compose an Effect (async
+   `makeReport` + ttl/cancel callers), OR add a dedicated task-lifecycle event
+   seam that fires the terminal hook off the durable record without reordering
+   the transition.
+
+See the in-code `NOTE(adr-83, …)` blocks at `submit` and `applyTransition` in
+`src/harness.ts` for the full reasoning + trailheads.
+
 ## What does NOT belong here
 
 - **MCP wire encoding** — lives in `@agentick/mcp-next`, layers on top.
@@ -919,6 +975,10 @@ completed` status timeline (bus envelopes) with the paused-state
   boundary (never escalates, never hangs). The forked-child
   interception-composes proof lives in `@agentick/session-next`'s
   `escalation.spec.ts`.
+- `src/__tests__/command-hooks.spec.ts` — 2 tests locking the ADR 83
+  hook-name derivation for the tasks verbs (`tasks:command:submit` →
+  `onBeforeTasksSubmit` / `onAfterTasksSubmit`; `:settle` symmetric). A naming
+  contract lock for the deferred wiring — NOT a claim the verbs fire.
 - `src/__tests__/cluster-inbox.spec.ts` — 6 tests covering
   cluster-portable cancel / get / result via inbox addressing.
 - `src/__tests__/conformance.spec.ts` — drives
@@ -954,6 +1014,12 @@ completed` status timeline (bus envelopes) with the paused-state
   transport (shared store / cluster bus) — the **distributed-executor tier**
   below. Across a restart the child-process executor's honest outcome is
   `interrupted`; its worker self-terminates on IPC `disconnect`.
+- **Hookable task verbs (ADR 83)** — DEFERRED. `submit` (sync return) and
+  `settle` (sync `void` on the executor callback path) cannot be routed through
+  the async `runOperation` interceptor seam behavior-preservingly. See the
+  "Command hooks" section above + the `NOTE(adr-83, …)` blocks in `harness.ts`
+  for the blocker and the unblockers (async `submit`, or a sync-hook fast-path
+  in `runtime-next`, or an async FSM transition path for the terminal hook).
 - **`taskSupport: "supported"`** — the caller-choice mode declared in
   the spec annotation but not yet branched on by the executor (the
   `"supported"` branch needs capability negotiation — see the TODO in
