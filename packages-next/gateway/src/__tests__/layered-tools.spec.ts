@@ -61,6 +61,7 @@ const tool = (name: string, description = name): ToolDeclaration => ({
 describe("GatewayHarness — layered tools (#141)", () => {
   it("propagates gateway-level tools to every session of every app it hosts", async () => {
     const gateway = await createGateway({ tools: [tool("health_check")] });
+    await gateway.listen();
     const app = await gateway.createApp({
       rootElement: NULL_ROOT,
       options: mkAppOptions(),
@@ -69,11 +70,12 @@ describe("GatewayHarness — layered tools (#141)", () => {
     const internals = session as unknown as { toolExecutor: ToolExecutorProtocol };
     const compiled = await internals.toolExecutor.compileForTick({ exposure: "model" });
     expect(compiled.map((t) => t.name)).toContain("health_check");
-    await gateway.closeGateway();
+    await gateway.close();
   });
 
   it("gateway tools reach multiple apps under the same gateway", async () => {
     const gateway = await createGateway({ tools: [tool("ping")] });
+    await gateway.listen();
     const a = await gateway.createApp({
       appId: "a",
       rootElement: NULL_ROOT,
@@ -94,13 +96,14 @@ describe("GatewayHarness — layered tools (#141)", () => {
     expect(
       (await intB.toolExecutor.compileForTick({ exposure: "model" })).map((t) => t.name),
     ).toContain("ping");
-    await gateway.closeGateway();
+    await gateway.close();
   });
 
   it("app-level tool overrides gateway-level tool on name collision", async () => {
     const gateway = await createGateway({
       tools: [tool("calc", "gateway calc")],
     });
+    await gateway.listen();
     const app = await gateway.createApp({
       rootElement: NULL_ROOT,
       options: { ...mkAppOptions(), tools: [tool("calc", "app calc")] },
@@ -110,13 +113,14 @@ describe("GatewayHarness — layered tools (#141)", () => {
     const compiled = await internals.toolExecutor.compileForTick({ exposure: "model" });
     const calc = compiled.find((t) => t.name === "calc");
     expect(calc?.description).toBe("app calc");
-    await gateway.closeGateway();
+    await gateway.close();
   });
 
   it("session-level tool overrides gateway-level tool on name collision", async () => {
     const gateway = await createGateway({
       tools: [tool("calc", "gateway calc")],
     });
+    await gateway.listen();
     const app = await gateway.createApp({ rootElement: NULL_ROOT, options: mkAppOptions() });
     const session = await app.createSession({
       tools: [tool("calc", "session calc")],
@@ -125,15 +129,16 @@ describe("GatewayHarness — layered tools (#141)", () => {
     const compiled = await internals.toolExecutor.compileForTick({ exposure: "model" });
     const calc = compiled.find((t) => t.name === "calc");
     expect(calc?.description).toBe("session calc");
-    await gateway.closeGateway();
+    await gateway.close();
   });
 
   it("omitting gateway.tools yields apps with no gateway-bound tools", async () => {
     const gateway = await createGateway();
+    await gateway.listen();
     const app = await gateway.createApp({ rootElement: NULL_ROOT, options: mkAppOptions() });
     const session = await app.createSession();
     const internals = session as unknown as { toolExecutor: ToolExecutorProtocol };
     expect(await internals.toolExecutor.compileForTick({ exposure: "model" })).toEqual([]);
-    await gateway.closeGateway();
+    await gateway.close();
   });
 });

@@ -120,11 +120,12 @@ describe("authorizeDispatch — the fine contextual auth layer (ADR 84 §5)", ()
     expect(observed.length).toBeGreaterThan(0);
     expect(observed.every((r) => r.allowed)).toBe(true);
 
-    await gw.closeGateway();
+    await gw.close();
   });
 
   it("the structural requiredScopes ceiling denies regardless of ANY authorize hook — the hook never fires (un-waivable)", async () => {
     const gw = await createGateway({ authorizer: claimsAuthorizer(), wireExtensions: [probeExt] });
+    await gw.listen();
     const app = await gw.createApp({
       rootElement: {} as unknown,
       options: makeAppOptions() as never,
@@ -160,6 +161,6 @@ describe("authorizeDispatch — the fine contextual auth layer (ADR 84 §5)", ()
     // its hook, never fired. No hook could have widened the ceiling.
     expect(hookFired).toBe(0);
 
-    await gw.closeGateway();
+    await gw.close();
   });
 });

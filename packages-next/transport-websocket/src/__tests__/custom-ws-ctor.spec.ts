@@ -34,7 +34,7 @@ describe("WebSocket transport — custom WebSocket constructor", () => {
     await new Promise<void>((resolve, reject) =>
       httpServer.close((err) => (err ? reject(err) : resolve())),
     );
-    await gateway.closeGateway();
+    await gateway.close();
   });
 
   it("works with the `ws` library WebSocket as the constructor override", async () => {

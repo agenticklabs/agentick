@@ -52,7 +52,7 @@ const gateway2 = await createGateway({
 });
 
 // Closing the gateway closes the cluster.
-await gateway.closeGateway();
+await gateway.close();
 ```
 
 ### Side-channel cluster (advanced)

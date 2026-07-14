@@ -36,7 +36,7 @@ describe("WebSocket transport — reconnect", () => {
     await new Promise<void>((resolve, reject) => {
       httpServer.close((err) => (err ? reject(err) : resolve()));
     });
-    await gateway.closeGateway();
+    await gateway.close();
   });
 
   it("client transitions through reconnecting → open on server bounce", async () => {

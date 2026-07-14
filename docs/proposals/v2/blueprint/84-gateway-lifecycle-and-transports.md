@@ -6,7 +6,7 @@
 
 ## TL;DR
 
-The gateway is a **Tier-0 stub** today: it can `closeGateway()`, but it has no
+The gateway is a **Tier-0 stub** today: it can `close()`, but it has no
 `start`, owns no transports, and does not propagate its hooks to the apps it
 creates. This ADR makes the gateway a real deployment root:
 
@@ -47,12 +47,22 @@ gateway.close(opts?: { drain?: boolean }): Promise<void>  // terminal; drain-by-
   reads identically to each `transport.listen()`, keeping the fan-out nominally
   consistent. (`start()` is the acceptable generic if a deployment has no
   transports; `listen()` on zero transports is a no-op that just flips ready.)
-- `close()` already exists (aliased from `closeGateway()`, symmetric with
-  `app.close()`). It gains `{ drain }`. **No `destroy()`** — shipping both
-  invites "which do I call?" and double-teardown bugs, and violates the
-  one-way-to-do-things line. `close({ drain: false })` is the forced variant.
+- `close()` is the **sole terminal verb** (symmetric with `app.close()`); the
+  old `closeGateway()` name is removed — one way to do things. It gains
+  `{ drain }`. **No `destroy()`** — shipping both invites "which do I call?" and
+  double-teardown bugs, and violates the one-way-to-do-things line.
+  `close({ drain: false })` is the forced variant.
 
 Both are hookable ops (§4): `gateway:start` and `gateway:close`.
+
+**`listen()` is REQUIRED before app hosting.** `createApp` is gated on the
+started latch and throws `GatewayNotStartedError` until `listen()` has run, so
+the `gateway:start` seam is guaranteed to fire before any app mounts. The gate
+is a pre-check ahead of the `gateway:create-app` op, so `onBeforeGatewayCreateApp`
+never fires on the not-started path. `close()` is NOT gated on started — an
+unstarted gateway can still be closed. The canonical flow is therefore
+`createGateway(...)` → `await gateway.listen()` → `createApp(...)` →
+`await gateway.close()`.
 
 ## 2. `ServerTransport` — the missing symmetry
 

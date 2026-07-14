@@ -67,7 +67,7 @@ describe("gateway.emitCapabilitiesChanged — event shape", () => {
     expect(ev.scope.gatewayId).toBe(gw.id);
     expect(ev.payload).toEqual({});
 
-    await gw.closeGateway();
+    await gw.close();
   });
 
   it("emits one event per call, preserving order", async () => {
@@ -87,13 +87,13 @@ describe("gateway.emitCapabilitiesChanged — event shape", () => {
       GATEWAY_CAPABILITIES_CHANGED,
     ]);
 
-    await gw.closeGateway();
+    await gw.close();
   });
 
   it("is safe to emit with zero subscribers", async () => {
     const gw = await createGateway();
     expect(() => gw.emitCapabilitiesChanged!()).not.toThrow();
-    await gw.closeGateway();
+    await gw.close();
   });
 });
 
@@ -121,7 +121,7 @@ describe("gateway.emitCapabilitiesChanged — isolation (multi-tenant safety)", 
     );
     expect(gatewayScoped).toHaveLength(1);
 
-    await gw.closeGateway();
+    await gw.close();
   });
 
   // NOTE: child-bus *physical* isolation (a per-tenant child bus
@@ -145,6 +145,6 @@ describe("gateway — notify rip-out completeness (ADR 47)", () => {
     // The bus-native replacement is present.
     expect(typeof gw.emitCapabilitiesChanged).toBe("function");
 
-    await gw.closeGateway();
+    await gw.close();
   });
 });

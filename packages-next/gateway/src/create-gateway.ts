@@ -10,7 +10,7 @@
  * gateway's `bus`/`inbox`/`journal` instances, which after wrap
  * ARE the cluster-wrapped versions).
  *
- * The gateway owns the cluster lifecycle: `gateway.closeGateway()`
+ * The gateway owns the cluster lifecycle: `gateway.close()`
  * tears down the cluster AFTER all apps close.
  *
  * This is the recommended pattern for multi-app deployments. Apps
@@ -37,7 +37,7 @@ export interface CreateGatewayOptions extends GatewayHarnessOptions {
    * cluster's wrapped substrate, and every App spawned via
    * `gateway.createApp(...)` inherits it.
    *
-   * `gateway.closeGateway()` closes the cluster after all apps
+   * `gateway.close()` closes the cluster after all apps
    * have closed.
    */
   readonly cluster?: ClusterFactory;

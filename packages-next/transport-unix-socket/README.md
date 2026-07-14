@@ -133,7 +133,7 @@ const server = unixSocketServer({ path: "/tmp/myagent.sock", gateway });
 
 process.on("SIGTERM", async () => {
   await server.close();
-  await gateway.closeGateway();
+  await gateway.close();
   process.exit(0);
 });
 ```

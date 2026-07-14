@@ -122,6 +122,7 @@ export {
   GatewayError,
   type GatewayErrorChannel,
   GatewayLifecycleError,
+  GatewayNotStartedError,
 } from "../errors/lifecycle.js";
 
 /**
@@ -195,25 +196,24 @@ export interface GatewayHarnessProtocol {
    * gate/feature-flag transports and `onAfterGatewayStart` can observe bound
    * addresses.
    *
+   * REQUIRED before app hosting (ADR 84 §1): `createApp` is gated on it and
+   * throws `GatewayNotStartedError` until `listen()` has run, so the
+   * `gateway:start` seam is guaranteed to fire before any app mounts.
+   *
    * @see docs/proposals/v2/blueprint/84-gateway-lifecycle-and-transports.md
    */
   listen(): Promise<void>;
 
   /**
-   * Close every App, run substrate teardown, and emit
-   * `gateway:lifecycle:closed`. Subsequent calls reject with
-   * `GatewayClosedError`.
+   * Terminal teardown, symmetric with {@link listen} (ADR 84 §1). The sole
+   * terminal verb: closes every App, runs substrate teardown, and emits
+   * `gateway:lifecycle:closed`. Takes the graceful-vs-forced `{ drain }`
+   * argument: `close({ drain: false })` forces teardown. Drain-by-default.
+   * There is NO `destroy()` twin — graceful-vs-forced is a parameter, not a
+   * second verb. Subsequent app-hosting calls reject with `GatewayClosedError`.
    *
    * Close-op envelopes are bus-only per the Operation framework's
    * `JournalingPolicy.override` (matches `app.closeApp` semantics).
-   */
-  closeGateway(opts?: { readonly drain?: boolean }): Promise<void>;
-
-  /**
-   * Terminal teardown, symmetric with {@link listen} (ADR 84 §1). Alias for
-   * {@link closeGateway}, taking the graceful-vs-forced `{ drain }` argument:
-   * `close({ drain: false })` forces teardown. Drain-by-default. There is NO
-   * `destroy()` twin — graceful-vs-forced is a parameter, not a second verb.
    */
   close(opts?: { readonly drain?: boolean }): Promise<void>;
 

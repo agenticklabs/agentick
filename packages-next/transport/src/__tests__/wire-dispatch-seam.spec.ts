@@ -85,7 +85,7 @@ describe("dispatchRequest — wire dispatch through the gateway operation seam",
     // Hook fired exactly once — no double-fire.
     expect(fired).toEqual(["run"]);
 
-    await gw.closeGateway();
+    await gw.close();
   });
 
   it("self-scopes by op: a hook on a different wire method does not fire", async () => {
@@ -105,7 +105,7 @@ describe("dispatchRequest — wire dispatch through the gateway operation seam",
     expect(resp).toMatchObject({ result: { echoed: "hi" } });
     expect(fired).toEqual([]); // op-scoping: WireProbeOther hook never fired on WireProbeRun
 
-    await gw.closeGateway();
+    await gw.close();
   });
 
   it("authorization stays the un-waivable pre-gate: unauthorized rejects BEFORE the seam", async () => {
@@ -134,6 +134,6 @@ describe("dispatchRequest — wire dispatch through the gateway operation seam",
     // The hook NEVER fired — auth ran (and denied) before the seam.
     expect(fired).toEqual([]);
 
-    await gw.closeGateway();
+    await gw.close();
   });
 });

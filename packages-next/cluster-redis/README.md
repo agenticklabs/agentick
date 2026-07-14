@@ -81,7 +81,7 @@ const gateway = await createGateway({
 
 // ... use the gateway ...
 
-await gateway.closeGateway();
+await gateway.close();
 // Adopter still calls pubClient.quit() / subClient.quit() —
 // the cluster doesn't own them.
 ```

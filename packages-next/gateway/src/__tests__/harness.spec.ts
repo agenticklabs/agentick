@@ -6,7 +6,7 @@
  *   - createApp with default (gateway-substrate) inheritance
  *   - createApp with per-app substrate factory override
  *   - apps()/app(id) read-side
- *   - closeGateway cascades into app closes
+ *   - close cascades into app closes
  *   - events() observes app-level events via fan-in
  *   - Duplicate appId rejection
  *   - GatewayClosedError after close
@@ -16,7 +16,11 @@ import { describe, expect, it } from "vitest";
 import { Effect, Stream } from "effect";
 import { LocalEventBus, MemoryJournal, LocalInbox } from "@agentick/runtime-next";
 import type { ProtocolEvent } from "@agentick/spec-next";
-import { AppAlreadyExistsError, GatewayClosedError } from "@agentick/spec-next";
+import {
+  AppAlreadyExistsError,
+  GatewayClosedError,
+  GatewayNotStartedError,
+} from "@agentick/spec-next";
 
 import { createGateway } from "../index.js";
 
@@ -58,7 +62,7 @@ describe("GatewayHarness — construction + lifecycle", () => {
     const gateway = await createGateway();
     expect(gateway.id).toMatch(/^gateway:/);
     expect(gateway.apps()).toEqual([]);
-    await gateway.closeGateway();
+    await gateway.close();
   });
 
   it("accepts a custom gatewayId", async () => {
@@ -73,13 +77,13 @@ describe("GatewayHarness — construction + lifecycle", () => {
     const inbox = new LocalInbox();
     const gateway = await createGateway({ journal, bus, inbox });
     expect(gateway.id).toMatch(/^gateway:/);
-    await gateway.closeGateway();
+    await gateway.close();
   });
 
-  it("close() is an alias for closeGateway()", async () => {
+  it("close() is idempotent — a second call is a safe no-op", async () => {
     const gateway = await createGateway();
     await gateway.close();
-    // No assertion needed; throwing the second close should be a no-op.
+    // No assertion needed; the second close should be a no-op.
     await gateway.close();
   });
 
@@ -109,7 +113,7 @@ describe("GatewayHarness — listen() + gateway:start op (ADR 84 §1)", () => {
     await gateway.listen();
     expect(before).toBe(1);
     expect(after).toBe(1);
-    await gateway.closeGateway();
+    await gateway.close();
   });
 
   it("listen() is idempotent — a second call is a no-op (op does not re-fire)", async () => {
@@ -124,12 +128,12 @@ describe("GatewayHarness — listen() + gateway:start op (ADR 84 §1)", () => {
     await gateway.listen();
     await gateway.listen();
     expect(fired).toBe(1);
-    await gateway.closeGateway();
+    await gateway.close();
   });
 });
 
 describe("GatewayHarness — gateway:close op (ADR 84 §1)", () => {
-  it("closeGateway() runs the hookable gateway:close op — onBefore/onAfterGatewayClose fire", async () => {
+  it("close() runs the hookable gateway:close op — onBefore/onAfterGatewayClose fire", async () => {
     const gateway = await createGateway();
     let before = 0;
     let after = 0;
@@ -143,7 +147,7 @@ describe("GatewayHarness — gateway:close op (ADR 84 §1)", () => {
         return output;
       },
     });
-    await gateway.closeGateway();
+    await gateway.close();
     expect(before).toBe(1);
     expect(after).toBe(1);
   });
@@ -152,6 +156,7 @@ describe("GatewayHarness — gateway:close op (ADR 84 §1)", () => {
 describe("GatewayHarness — gateway:create-app op (ADR 84 §4)", () => {
   it("onBeforeGatewayCreateApp transforms the mount input; onAfterGatewayCreateApp sees the app", async () => {
     const gateway = await createGateway();
+    await gateway.listen();
     let afterSawId: string | undefined;
     // Multi-tenant gating: the before-hook rewrites the mount input (here,
     // stamping a tenant-scoped appId) and the after-hook observes the mounted
@@ -171,11 +176,12 @@ describe("GatewayHarness — gateway:create-app op (ADR 84 §4)", () => {
     expect(app.id).toBe("tenant-scoped-app");
     expect(afterSawId).toBe("tenant-scoped-app");
     expect(gateway.app("tenant-scoped-app")).toBe(app);
-    await gateway.closeGateway();
+    await gateway.close();
   });
 
   it("onBeforeGatewayCreateApp can VETO a mount by throwing — no app is registered", async () => {
     const gateway = await createGateway();
+    await gateway.listen();
     gateway.hook({
       onBeforeGatewayCreateApp: () => {
         throw new Error("tenant not provisioned");
@@ -186,13 +192,48 @@ describe("GatewayHarness — gateway:create-app op (ADR 84 §4)", () => {
     ).rejects.toThrow(/tenant not provisioned/);
     // The veto short-circuited the mount body: nothing was registered.
     expect(gateway.apps()).toEqual([]);
-    await gateway.closeGateway();
+    await gateway.close();
+  });
+});
+
+describe("GatewayHarness — createApp lifecycle gate (ADR 84 §1)", () => {
+  it("throws GatewayNotStartedError before listen(); succeeds after listen()", async () => {
+    const gateway = await createGateway();
+    // Enforcement: the gateway must be started before it hosts apps, so the
+    // `gateway:start` seam is guaranteed to fire.
+    await expect(
+      gateway.createApp({ rootElement: {} as unknown, options: makeAppOptions() as never }),
+    ).rejects.toBeInstanceOf(GatewayNotStartedError);
+    await gateway.listen();
+    const app = await gateway.createApp({
+      rootElement: {} as unknown,
+      options: makeAppOptions() as never,
+    });
+    expect(gateway.app(app.id)).toBe(app);
+    await gateway.close();
+  });
+
+  it("the not-started pre-gate fires BEFORE the create-app op — onBeforeGatewayCreateApp does not run", async () => {
+    const gateway = await createGateway();
+    let beforeRan = 0;
+    gateway.hook({
+      onBeforeGatewayCreateApp: (input) => {
+        beforeRan++;
+        return input;
+      },
+    });
+    await expect(
+      gateway.createApp({ rootElement: {} as unknown, options: makeAppOptions() as never }),
+    ).rejects.toBeInstanceOf(GatewayNotStartedError);
+    expect(beforeRan).toBe(0);
+    await gateway.close();
   });
 });
 
 describe("GatewayHarness — createApp", () => {
   it("creates an app inheriting gateway substrate by default", async () => {
     const gateway = await createGateway();
+    await gateway.listen();
     const app = await gateway.createApp({
       rootElement: {} as unknown,
       options: makeAppOptions() as never,
@@ -200,11 +241,12 @@ describe("GatewayHarness — createApp", () => {
     expect(app.id).toMatch(/^app:/);
     expect(gateway.apps()).toHaveLength(1);
     expect(gateway.app(app.id)).toBe(app);
-    await gateway.closeGateway();
+    await gateway.close();
   });
 
   it("accepts a caller-supplied appId", async () => {
     const gateway = await createGateway();
+    await gateway.listen();
     const app = await gateway.createApp({
       appId: "my-app",
       rootElement: {} as unknown,
@@ -212,11 +254,12 @@ describe("GatewayHarness — createApp", () => {
     });
     expect(app.id).toBe("my-app");
     expect(gateway.app(app.id)).toBe(app);
-    await gateway.closeGateway();
+    await gateway.close();
   });
 
   it("rejects duplicate appId", async () => {
     const gateway = await createGateway();
+    await gateway.listen();
     await gateway.createApp({
       appId: "dup",
       rootElement: {} as unknown,
@@ -229,11 +272,12 @@ describe("GatewayHarness — createApp", () => {
         options: makeAppOptions() as never,
       }),
     ).rejects.toBeInstanceOf(AppAlreadyExistsError);
-    await gateway.closeGateway();
+    await gateway.close();
   });
 
   it("emits gateway:app:created on the bus when an app is created", async () => {
     const gateway = await createGateway();
+    await gateway.listen();
     const events: ProtocolEvent[] = [];
     const sub = Effect.runFork(
       Stream.runForEach(
@@ -274,13 +318,14 @@ describe("GatewayHarness — createApp", () => {
     expect((events[0]!.scope as Record<string, unknown>).appId).toBe("observed-app");
     expect((events[0]!.payload as Record<string, unknown>).metadata).toEqual({ tenant: "alpha" });
 
-    await gateway.closeGateway();
+    await gateway.close();
   });
 });
 
 describe("GatewayHarness — close cascade", () => {
-  it("closes every app on closeGateway", async () => {
+  it("closes every app on close", async () => {
     const gateway = await createGateway();
+    await gateway.listen();
     await gateway.createApp({
       appId: "a",
       rootElement: {} as unknown,
@@ -292,13 +337,13 @@ describe("GatewayHarness — close cascade", () => {
       options: makeAppOptions() as never,
     });
     expect(gateway.apps()).toHaveLength(2);
-    await gateway.closeGateway();
+    await gateway.close();
     expect(gateway.apps()).toHaveLength(0);
   });
 
   it("rejects createApp after close", async () => {
     const gateway = await createGateway();
-    await gateway.closeGateway();
+    await gateway.close();
     await expect(
       gateway.createApp({
         rootElement: {} as unknown,
@@ -311,6 +356,7 @@ describe("GatewayHarness — close cascade", () => {
 describe("GatewayHarness — per-app substrate factory override", () => {
   it("uses caller-supplied substrate factory for per-app isolation", async () => {
     const gateway = await createGateway();
+    await gateway.listen();
     const localBus = new LocalEventBus();
     const app = await gateway.createApp({
       appId: "tenant-a",
@@ -320,6 +366,6 @@ describe("GatewayHarness — per-app substrate factory override", () => {
     });
     expect(gateway.app("tenant-a")).toBe(app);
     void localBus;
-    await gateway.closeGateway();
+    await gateway.close();
   });
 });

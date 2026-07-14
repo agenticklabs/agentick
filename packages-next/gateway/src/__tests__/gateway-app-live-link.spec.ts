@@ -86,6 +86,7 @@ describe("ADR 84 §3 — gateway → app live interceptor link (CAPSTONE)", () =
   it("gateway.hook registered AFTER the session exists reaches the per-session tool-executor", async () => {
     const seen: { value?: unknown } = {};
     const gateway = await createGateway();
+    await gateway.listen();
 
     // App + session constructed with NOTHING registered on the gateway yet —
     // a frozen construction-fold would have snapshotted an empty layer here.
@@ -108,12 +109,13 @@ describe("ADR 84 §3 — gateway → app live interceptor link (CAPSTONE)", () =
     expect(seen.value).toBe("reshaped-by-gateway");
     expect((result[0] as { text: string }).text).toBe("reshaped-by-gateway");
 
-    await gateway.closeGateway();
+    await gateway.close();
   });
 
   it("gateway.hook unsubscribe cascades — after removal the dispatch sees raw input", async () => {
     const seen: { value?: unknown } = {};
     const gateway = await createGateway();
+    await gateway.listen();
     const app = await gateway.createApp({ rootElement: NULL_ROOT, options: mkAppOptions(seen) });
     const session = await app.createSession();
 
@@ -129,6 +131,6 @@ describe("ADR 84 §3 — gateway → app live interceptor link (CAPSTONE)", () =
     expect(seen.value).toBe("verbatim");
     expect((result[0] as { text: string }).text).toBe("verbatim");
 
-    await gateway.closeGateway();
+    await gateway.close();
   });
 });

@@ -33,7 +33,7 @@ describe("WebSocket transport — subprotocol enforcement", () => {
     await new Promise<void>((resolve, reject) =>
       httpServer.close((err) => (err ? reject(err) : resolve())),
     );
-    await gateway.closeGateway();
+    await gateway.close();
   });
 
   it("rejects upgrade when no subprotocol is offered", async () => {
@@ -96,7 +96,7 @@ describe("WebSocket transport — origin validation", () => {
     await new Promise<void>((resolve, reject) =>
       httpServer.close((err) => (err ? reject(err) : resolve())),
     );
-    await gateway.closeGateway();
+    await gateway.close();
   });
 
   it("rejects connections from a disallowed origin with 403", async () => {

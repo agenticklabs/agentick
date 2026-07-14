@@ -23,8 +23,10 @@ Gateway responsibilities:
 takes a per-app substrate factory override.
 - **Substrate inheritance** — apps see the gateway's journal / bus /
 inbox unless they explicitly override.
-- **Lifecycle cascade** — `closeGateway()` shuts down every hosted
-app cleanly.
+- **Lifecycle cascade** — `close()` shuts down every hosted app
+cleanly. `listen()` is REQUIRED before hosting apps: `createApp`
+throws `GatewayNotStartedError` until `listen()` has run, guaranteeing
+the `gateway:start` seam fires before any app mounts (ADR 84 §1).
 - **Cross-app observation** — `gateway.events(filter?)` returns an
 `AsyncIterable<ProtocolEvent>` fanned in from every hosted app.
 - **Read-side protocol surface** — `gateway.app(id)`, `gateway.apps()`
@@ -40,6 +42,7 @@ spec).
 import { createGateway } from "@agentick/gateway-next";
 
 const gateway = await createGateway();
+await gateway.listen(); // REQUIRED before createApp — fires the gateway:start seam
 
 const app = await gateway.createApp(<MyAgent />, {
   appId: "my-app",
@@ -49,7 +52,7 @@ const app = await gateway.createApp(<MyAgent />, {
 const session = await app.createSession({});
 const result = await session.send({ messages: [...] }).result;
 
-await gateway.closeGateway();
+await gateway.close();
 ```
 
 
@@ -68,6 +71,7 @@ import { defineUnixCluster } from "@agentick/cluster-net-next";
 const gateway = await createGateway({
   cluster: defineUnixCluster({ socketPath: "/tmp/cluster.sock" }),
 });
+await gateway.listen();
 
 const app1 = await gateway.createApp({
   rootElement: <Agent1 />,
@@ -78,9 +82,9 @@ const app2 = await gateway.createApp({
   options: { executor: ... },
 });
 
-// `closeGateway()` closes all apps first, then the cluster
+// `close()` closes all apps first, then the cluster
 // (transport / membership / locally-elected broker), then the substrate.
-await gateway.closeGateway();
+await gateway.close();
 ```
 
 This is the **recommended multi-app deployment pattern.** Apps that
@@ -134,9 +138,8 @@ class GatewayHarness extends BaseHarness<"gateway"> implements GatewayHarnessPro
   events(filter?: EventQuery, options?: SubscribeOptions): AsyncIterable<ProtocolEvent>;
   wireExtensions(): WireExtensionRegistry; // ADR 46 — see below
   emitCapabilitiesChanged(): void; // ADR 47 — see "Server-initiated notifications"
-  listen(): Promise<void>; // ADR 84 — bind transports, flip ready
-  closeGateway(opts?: { drain?: boolean }): Promise<void>;
-  close(opts?: { drain?: boolean }): Promise<void>; // alias for closeGateway
+  listen(): Promise<void>; // ADR 84 — bind transports, flip ready; REQUIRED before createApp
+  close(opts?: { drain?: boolean }): Promise<void>; // sole terminal verb; drain-by-default
 }
 ```
 
@@ -662,7 +665,8 @@ socket adapter over it; there is no bespoke per-transport wire logic.
 | `createApp` with default gateway-substrate inheritance | `src/__tests__/harness.spec.ts`                              |
 | `createApp` with per-app substrate factory override    | `src/__tests__/harness.spec.ts`                              |
 | `apps()` / `app(id)` read-side                         | `src/__tests__/harness.spec.ts`                              |
-| `closeGateway()` cascades into app closes              | `src/__tests__/harness.spec.ts`                              |
+| `close()` cascades into app closes                     | `src/__tests__/harness.spec.ts`                              |
+| `createApp` before `listen()` throws `GatewayNotStartedError` | `src/__tests__/harness.spec.ts`                        |
 | `events()` observes app-level events via fan-in        | `src/__tests__/harness.spec.ts`                              |
 | Duplicate `appId` rejection                            | `src/__tests__/harness.spec.ts`                              |
 | `GatewayClosedError` after close                       | `src/__tests__/harness.spec.ts`                              |

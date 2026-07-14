@@ -45,6 +45,7 @@ describe("Streamable HTTP transport — end-to-end with real GatewayHarness", ()
 
   beforeEach(async () => {
     gateway = await createGateway();
+    await gateway.listen();
     serverHttp = createServer();
     server = httpServer({ httpServer: serverHttp, gateway });
     await new Promise<void>((resolve) => serverHttp.listen(0, "127.0.0.1", () => resolve()));
@@ -56,7 +57,7 @@ describe("Streamable HTTP transport — end-to-end with real GatewayHarness", ()
     await new Promise<void>((resolve, reject) =>
       serverHttp.close((err) => (err ? reject(err) : resolve())),
     );
-    await gateway.closeGateway();
+    await gateway.close();
   });
 
   it("ping roundtrips over POST", async () => {

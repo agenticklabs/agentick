@@ -72,6 +72,23 @@ export class GatewayClosedError extends GatewayError {
 }
 registerAgentickError("GatewayClosedError", GatewayClosedError);
 
+/**
+ * `createApp` (or any app-hosting call) was reached before the gateway was
+ * started. ADR 84 §1 makes `listen()` REQUIRED: the gateway must be started
+ * before it hosts apps, so the `gateway:start` seam is guaranteed to fire.
+ * Thrown as a pre-gate in `createApp`, BEFORE the `gateway:create-app` op, so
+ * `onBeforeGatewayCreateApp` never fires on the not-started path.
+ */
+export class GatewayNotStartedError extends GatewayError {
+  readonly _tag = "GatewayNotStartedError" as const;
+  constructor(args?: { readonly cause?: unknown }) {
+    super("Gateway not started — call `await gateway.listen()` before createApp().", {
+      cause: args?.cause,
+    });
+  }
+}
+registerAgentickError("GatewayNotStartedError", GatewayNotStartedError);
+
 export class AppAlreadyExistsError extends GatewayError {
   readonly _tag = "AppAlreadyExistsError" as const;
   readonly appId: string;
@@ -124,6 +141,7 @@ registerAgentickError("GatewayBridgeSlotOccupied", GatewayBridgeSlotOccupied);
 
 export type GatewayErrorChannel =
   | GatewayClosedError
+  | GatewayNotStartedError
   | AppAlreadyExistsError
   | AppNotFoundError
   | GatewayLifecycleError

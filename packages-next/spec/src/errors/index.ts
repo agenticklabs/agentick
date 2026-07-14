@@ -73,6 +73,7 @@ export {
   GatewayError,
   type GatewayErrorChannel,
   GatewayLifecycleError,
+  GatewayNotStartedError,
   KnobError,
   SessionBusyError,
   SessionClosedError,

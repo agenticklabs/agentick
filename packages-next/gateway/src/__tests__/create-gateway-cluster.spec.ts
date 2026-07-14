@@ -5,7 +5,7 @@
  *      construction. The gateway's substrate IS the cluster-wrapped
  *      one — proven by the cluster registering the gateway-as-node
  *      in the local registry.
- *   2. `gateway.closeGateway()` fires the cluster's parent.onClose
+ *   2. `gateway.close()` fires the cluster's parent.onClose
  *      chain — proven by registry removal.
  *   3. Substrate factories alongside `cluster` are rejected with a
  *      clear error.
@@ -30,7 +30,7 @@ describe("createGateway({ cluster }) — Phase 5c gateway-level wiring", () => {
     });
 
     expect(registry.nodes()).toContain("gw-A");
-    await gateway.closeGateway();
+    await gateway.close();
     expect(registry.nodes()).not.toContain("gw-A");
   });
 
@@ -51,6 +51,6 @@ describe("createGateway({ cluster }) — Phase 5c gateway-level wiring", () => {
     });
 
     expect(registry.nodes()).toContain("gw-C");
-    await gateway.closeGateway();
+    await gateway.close();
   });
 });

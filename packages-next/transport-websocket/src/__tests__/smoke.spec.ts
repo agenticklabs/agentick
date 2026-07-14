@@ -49,6 +49,7 @@ describe("WebSocket transport — end-to-end with real GatewayHarness", () => {
 
   beforeEach(async () => {
     gateway = await createGateway();
+    await gateway.listen();
     httpServer = createServer();
     server = websocketServer({ httpServer, gateway });
     await new Promise<void>((resolve) => {
@@ -62,7 +63,7 @@ describe("WebSocket transport — end-to-end with real GatewayHarness", () => {
     await new Promise<void>((resolve, reject) => {
       httpServer.close((err) => (err ? reject(err) : resolve()));
     });
-    await gateway.closeGateway();
+    await gateway.close();
   });
 
   it("client connects with agentick-rpc-v1 subprotocol", async () => {

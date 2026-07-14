@@ -136,7 +136,7 @@ Identical discipline to the existing pair: `install` runs once during
 `GatewayHarness` construction, after the framework's own wire extensions
 register and before the registry seals at `ready`. Async installs are
 awaited; `ready` does not resolve until every extension has installed.
-Extensions close in reverse install order during `closeGateway()` via
+Extensions close in reverse install order during `close()` via
 `onClose` registrations.
 
 ### `GatewayInstaller`

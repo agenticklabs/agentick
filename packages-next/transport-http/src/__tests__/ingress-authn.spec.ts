@@ -87,7 +87,7 @@ const factory: IngressAuthnFactory = {
     } finally {
       await server.close();
       await new Promise<void>((res, rej) => node.close((e) => (e ? rej(e) : res())));
-      await gateway.closeGateway();
+      await gateway.close();
     }
   },
 };

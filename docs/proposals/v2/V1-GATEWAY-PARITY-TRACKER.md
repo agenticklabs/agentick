@@ -55,7 +55,7 @@ feature reshaped into v2 extension or different harness location ·
 options?)` returns `AsyncIterable<ProtocolEvent>` aggregating
       every app the gateway hosts. **Inherits from Phase C bus
       surface.**
-- [ ] **GG4. Lifecycle.** `closeGateway()` / `close()` alias.
+- [ ] **GG4. Lifecycle.** `close()` — the sole terminal verb (ADR 84 §1).
       Cascades into apps' close. Operation-wrapped with `bus-only`
       override per Option G semantics (ADR 31 §close-op
       journaling-policy).

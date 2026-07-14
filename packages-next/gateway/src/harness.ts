@@ -67,6 +67,7 @@ import {
   GatewayBridgeSlotOccupied,
   GatewayClosedError,
   GatewayLifecycleError,
+  GatewayNotStartedError,
   toRegistration,
 } from "@agentick/spec-next";
 import { createWireExtensionRegistry } from "./wire-registry.js";
@@ -83,7 +84,7 @@ import { AppHarness, builtinWireExtensions, type AppHarnessOptions } from "@agen
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 
 // ADR 80/83/84 — light up the gateway lifecycle verbs. Both `gateway:start`
-// (see `listen`) and `gateway:close` (see `closeGateway`) route through
+// (see `listen`) and `gateway:close` (see `close`) route through
 // `runOperation`, so typing them mints `onBeforeGatewayStart` /
 // `onAfterGatewayStart` and `onBeforeGatewayClose` / `onAfterGatewayClose` on
 // the derived `CommandHooks` surface. Both ops are nullary —
@@ -222,7 +223,7 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
   private gatewayStarted = false;
   /**
    * Server transports this gateway owns (ADR 84 §2). Bound in {@link listen}
-   * via `transport.listen(this)`, torn down in {@link closeGatewayBody} via
+   * via `transport.listen(this)`, torn down in {@link closeBody} via
    * `transport.close()`. Empty when {@link GatewayHarnessOptions.transports}
    * was omitted — the fan-out is then a clean no-op.
    */
@@ -237,7 +238,7 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
   private readonly gatewayExtensionCloseHandlers: Array<() => void | Promise<void>> = [];
   /**
    * Live `subscribeBus` fiber-interrupt thunks from gateway extensions.
-   * Interrupted during {@link closeGatewayBody} so an extension that
+   * Interrupted during {@link closeBody} so an extension that
    * subscribed but never unsubscribed doesn't leak a fiber past teardown.
    * Manual unsubscribe splices its own entry out.
    */
@@ -587,8 +588,19 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
             rootElement: rootOrInput as CreateGatewayAppInput<P>["rootElement"],
           } as CreateGatewayAppInput<P>);
 
+    // Lifecycle pre-gates (ADR 84 §1) — checked BEFORE the `gateway:create-app`
+    // op fires, so `onBeforeGatewayCreateApp` never runs on a closed or
+    // not-started gateway. Closed wins over not-started (a closed gateway is
+    // terminal regardless of whether it was ever started).
+    if (this.gatewayClosed) {
+      throw new GatewayClosedError();
+    }
+    if (!this.gatewayStarted) {
+      throw new GatewayNotStartedError();
+    }
+
     // ADR 84 §4 — wrap the mount in the hookable `gateway:create-app` op via
-    // `runOperation` (the same pattern `listen` / `closeGateway` mirror). The
+    // `runOperation` (the same pattern `listen` / `close` mirror). The
     // before-hook (`onBeforeGatewayCreateApp`) can veto (throw) or transform
     // the normalized input (multi-tenant gating); the body receives the
     // possibly-transformed input; the after-hook (`onAfterGatewayCreateApp`)
@@ -618,16 +630,13 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
   /**
    * Mount body for the {@link createApp} op (ADR 84 §4). Receives the
    * normalized — and possibly `onBeforeGatewayCreateApp`-transformed — input.
-   * The `appId` default, closed-gateway guard, duplicate-id check, substrate
-   * inheritance, tool/extension cascade, and app registration all live here so
-   * the before-hook operates on the raw input and the after-hook observes the
-   * finished app.
+   * The `appId` default, duplicate-id check, substrate inheritance,
+   * tool/extension cascade, and app registration all live here so the
+   * before-hook operates on the raw input and the after-hook observes the
+   * finished app. The closed/not-started lifecycle guards are pre-gates in
+   * {@link createApp} (before the op fires).
    */
   private async createAppBody<P>(input: CreateGatewayAppInput<P>): Promise<AppHarnessProtocol<P>> {
-    if (this.gatewayClosed) {
-      const err: GatewayError = new GatewayClosedError();
-      throw err;
-    }
     const appId = input.appId ?? `app:${ulid()}`;
     if (this._apps.has(appId)) {
       throw new AppAlreadyExistsError({ appId });
@@ -741,7 +750,14 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     );
   }
 
-  closeGateway(opts: { drain?: boolean } = {}): Promise<void> {
+  /**
+   * Terminal teardown (ADR 84 §1) — symmetric with {@link listen}. The SOLE
+   * terminal verb, gaining the graceful-vs-forced `{ drain }` argument:
+   * `close({ drain: false })` is the forced variant. Drain-by-default. There is
+   * deliberately NO `destroy()` twin — graceful-vs-forced is a parameter, not a
+   * second verb (ADR 84 §1). Idempotent: a second call is a safe no-op.
+   */
+  close(opts: { drain?: boolean } = {}): Promise<void> {
     if (this.gatewayClosed) {
       return Promise.resolve();
     }
@@ -760,7 +776,7 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     return runHarnessProtocol(
       this.runOperation(op, () =>
         Effect.tryPromise({
-          try: () => this.closeGatewayBody(drain),
+          try: () => this.closeBody(drain),
           catch: (cause): never => {
             // Rethrow as plain — Effect's failure channel for the
             // close body is unconstrained; we surface the underlying
@@ -770,17 +786,6 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
         }),
       ),
     );
-  }
-
-  /**
-   * Terminal teardown (ADR 84 §1) — symmetric with {@link listen}. Alias for
-   * {@link closeGateway}, gaining the graceful-vs-forced `{ drain }` argument:
-   * `close({ drain: false })` is the forced variant. Drain-by-default. There is
-   * deliberately NO `destroy()` twin — graceful-vs-forced is a parameter, not a
-   * second verb (ADR 84 §1).
-   */
-  close(opts?: { drain?: boolean }): Promise<void> {
-    return this.closeGateway(opts);
   }
 
   /**
@@ -840,7 +845,7 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     await Promise.all(this.serverTransports.map((t) => t.listen(this)));
   }
 
-  private async closeGatewayBody(drain: boolean): Promise<void> {
+  private async closeBody(drain: boolean): Promise<void> {
     // The `ServerTransport` fan-out now exists (below), but the ADR 84 §2
     // interface is `close(): Promise<void>` — deliberately NO `drain` arg.
     // Graceful-vs-forced at the transport level (`drain === false` ⇒ stop
@@ -922,13 +927,13 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
 
   /**
    * Close handlers registered by `createGateway` (e.g., for cluster
-   * teardown). Fired LIFO during {@link closeGatewayBody}, AFTER apps
+   * teardown). Fired LIFO during {@link closeBody}, AFTER apps
    * close and BEFORE substrate teardown via `super.close()`.
    */
   private readonly internalCloseHandlers: Array<() => void | Promise<void>> = [];
 
   /**
-   * Register a close handler that fires during {@link closeGateway},
+   * Register a close handler that fires during {@link close},
    * AFTER all spawned apps close and BEFORE the substrate teardown.
    *
    * Internal slot used by `createGateway` to wire substrate-level

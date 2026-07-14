@@ -43,6 +43,7 @@ async function makeStack(replyText: string) {
   await executor.ready;
 
   const gateway = await createGateway();
+  await gateway.listen();
   const app = await gateway.createApp({
     appId: "test-app",
     rootElement: null,

@@ -47,6 +47,7 @@ describe("Unix socket transport — end-to-end with real GatewayHarness", () => 
 
   beforeEach(async () => {
     gateway = await createGateway();
+    await gateway.listen();
     socketDir = mkdtempSync(join(tmpdir(), "agentick-unix-"));
     socketPath = join(socketDir, "agentick.sock");
     server = unixSocketServer({ path: socketPath, gateway });
@@ -61,7 +62,7 @@ describe("Unix socket transport — end-to-end with real GatewayHarness", () => 
     } catch {
       /* swallow */
     }
-    await gateway.closeGateway();
+    await gateway.close();
   });
 
   it("ping roundtrips over the socket", async () => {

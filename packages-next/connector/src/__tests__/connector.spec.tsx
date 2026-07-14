@@ -48,7 +48,7 @@ function makeExec(output: readonly ContentBlock[]) {
   );
 }
 
-const gateways: Array<{ closeGateway: () => Promise<void> }> = [];
+const gateways: Array<{ close: () => Promise<void> }> = [];
 
 async function buildStack(
   platform: FakeConnectorPlatform,
@@ -59,6 +59,7 @@ async function buildStack(
     extensions: [defineConnector({ name: "test", platform, config })],
   });
   gateways.push(gateway);
+  await gateway.listen();
   const app = await gateway.createApp({
     rootElement: React.createElement(Agent),
     options: { executor: makeExec(output), reconciler: reactReconciler() } as never,
@@ -67,7 +68,7 @@ async function buildStack(
 }
 
 afterEach(async () => {
-  while (gateways.length) await gateways.pop()!.closeGateway();
+  while (gateways.length) await gateways.pop()!.close();
 });
 
 // Declare an augmented telegram slot so `metadata.source` typechecks.

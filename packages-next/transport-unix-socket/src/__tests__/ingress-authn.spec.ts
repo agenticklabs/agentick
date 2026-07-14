@@ -124,7 +124,7 @@ const factory: IngressAuthnFactory = {
       return await body(server_iface);
     } finally {
       await server.close();
-      await gateway.closeGateway();
+      await gateway.close();
     }
   },
 };

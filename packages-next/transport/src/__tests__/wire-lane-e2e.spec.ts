@@ -83,6 +83,7 @@ describe("wire lane e2e — real gateway + session, ingress identity, Authorizer
         anonymous: [],
       }),
     })) as GatewayHarness;
+    await gateway.listen();
     const app = await gateway.createApp({
       appId: "a1",
       ...(makeAppOptions() as object),
@@ -99,7 +100,7 @@ describe("wire lane e2e — real gateway + session, ingress identity, Authorizer
   });
 
   afterAll(async () => {
-    await gateway.closeGateway();
+    await gateway.close();
   });
 
   it("granted principal reaches the REAL TimelineHarness: timeline/compact round-trips", async () => {

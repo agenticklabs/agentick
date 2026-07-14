@@ -33,9 +33,10 @@ await app.closeApp(); // closes the cluster too
 const gateway = await createGateway({
   cluster: defineUnixCluster({ socketPath: "/tmp/cluster.sock" }),
 });
+await gateway.listen(); // REQUIRED before createApp (ADR 84 §1)
 const app1 = await gateway.createApp({ rootElement: ..., options: ... });
 const app2 = await gateway.createApp({ rootElement: ..., options: ... });
-await gateway.closeGateway(); // closes apps, then cluster
+await gateway.close(); // closes apps, then cluster
 ```
 
 **Lifecycle ownership: the framework owns the cluster.**
@@ -43,7 +44,7 @@ await gateway.closeGateway(); // closes apps, then cluster
 `createApp({cluster})` and `createGateway({cluster})` invoke the
 factory at construction against a synthesized `ClusterParent`. The
 factory registers cleanup via `parent.onClose(...)`. When
-`app.closeApp()` / `gateway.closeGateway()` fires, the framework
+`app.closeApp()` / `gateway.close()` fires, the framework
 runs the cluster's onClose chain. Adopter writes ZERO lifecycle
 code.
 

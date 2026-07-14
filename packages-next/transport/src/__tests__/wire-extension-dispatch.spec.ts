@@ -105,7 +105,6 @@ function fakeGateway(
     app: (appId: string) => augmentedApps.get(appId),
     apps: () => Array.from(augmentedApps.values()),
     listen: async () => {},
-    closeGateway: async () => {},
     close: async () => {},
     // No authorizer on this fake → the dispatch gate's policy layer never
     // reaches `authorize`; the member exists only to satisfy the protocol.
@@ -257,7 +256,6 @@ describe("dispatchRequest — wire extension registry integration", () => {
       app: () => undefined,
       apps: () => [],
       listen: async () => {},
-      closeGateway: async () => {},
       close: async () => {},
       authorize: () => Promise.resolve({ allowed: true }),
       events: () => ({ [Symbol.asyncIterator]: async function* () {} }),

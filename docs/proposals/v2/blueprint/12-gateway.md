@@ -105,7 +105,8 @@ class GatewayHarness extends BaseHarness<"gateway", undefined, GatewayInput> {
   // Lifecycle
   createApp(element: ReactElement, options?: AppOptions): Promise<AppHarness>;
   app(id: string): AppHarness | undefined;
-  closeGateway(): Promise<void>;
+  listen(): Promise<void>; // REQUIRED before createApp (ADR 84 §1)
+  close(opts?: { drain?: boolean }): Promise<void>;
 
   // Observation
   events(filter?: EventQuery, options?: SubscribeOptions): AsyncIterable<ProtocolEvent>;
@@ -258,8 +259,8 @@ export interface GatewayHarnessProtocol {
   apps(): readonly AppHarnessProtocol[];
 
   // Lifecycle
-  closeGateway(): Promise<void>;
-  close(): Promise<void>; // alias
+  listen(): Promise<void>; // REQUIRED before createApp (ADR 84 §1)
+  close(opts?: { drain?: boolean }): Promise<void>; // sole terminal verb
 
   // Observation
   events(filter?: EventQuery, options?: SubscribeOptions): AsyncIterable<ProtocolEvent>;

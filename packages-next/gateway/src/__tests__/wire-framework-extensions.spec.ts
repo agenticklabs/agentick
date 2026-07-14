@@ -52,7 +52,7 @@ describe("GatewayHarness — framework wire extensions", () => {
     expect(registry.resolve("sub/subscribe")?.extension).toBe(subscriptionsWireExtension);
     expect(registry.resolve("sub/unsubscribe")?.extension).toBe(subscriptionsWireExtension);
 
-    await gw.closeGateway();
+    await gw.close();
   });
 
   it("registers built-in harness wire-extensions (knobs/set) by default", async () => {
@@ -67,7 +67,7 @@ describe("GatewayHarness — framework wire extensions", () => {
     expect(resolved?.extension.namespace).toBe("knobs");
     expect(resolved?.extension.name).toBe("@agentick/knobs-next#wire");
 
-    await gw.closeGateway();
+    await gw.close();
   });
 
   it("rejects adopter attempts to claim the `gateway` namespace", () => {
@@ -149,7 +149,7 @@ describe("GatewayHarness — framework wire extensions", () => {
       names.indexOf("@adopter/crm"),
     );
 
-    await gw.closeGateway();
+    await gw.close();
   });
 });
 

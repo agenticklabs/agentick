@@ -82,6 +82,7 @@ async function makeStack(replyText = "ok") {
   await executor.ready;
 
   const gateway = await createGateway();
+  await gateway.listen();
   const app = await gateway.createApp({
     appId: "elic-app",
     rootElement: null,

@@ -20,7 +20,7 @@
  *     app/session→cascade to every `createApp`.
  *   - cascade ORDERING: gateway-level parts compose BEFORE per-call parts.
  *   - `onClose` handlers fire in LIFO (reverse install) order on
- *     `closeGateway`, after apps close.
+ *     `close`, after apps close.
  *   - `subscribeBus` delivers gateway bus events to the extension.
  *   - the no-gateway-extensions path seals synchronously (zero behavior
  *     change vs. pre-ADR-50).
@@ -112,7 +112,7 @@ describe("GatewayExtension — install + bridges (ADR 50)", () => {
     const gateway = await createGateway({ extensions: [ext] });
     expect(gateway.bridges.testCap).toBeDefined();
     expect(gateway.bridges.testCap.ping()).toBe("pong");
-    await gateway.closeGateway();
+    await gateway.close();
   });
 
   it("exposes a live installer host — gatewayId + apps() reflect reality", async () => {
@@ -132,9 +132,10 @@ describe("GatewayExtension — install + bridges (ADR 50)", () => {
     // No apps at install time; the accessor is live, so it observes ones
     // created afterward.
     expect(host!.apps()).toHaveLength(0);
+    await gateway.listen();
     await gateway.createApp({ rootElement: NULL_ROOT, options: mkAppOptions() });
     expect(host!.apps()).toHaveLength(1);
-    await gateway.closeGateway();
+    await gateway.close();
   });
 
   it("awaits async install() before gatewayReady resolves", async () => {
@@ -153,7 +154,7 @@ describe("GatewayExtension — install + bridges (ADR 50)", () => {
     // createGateway awaited gatewayReady, which awaited install().
     expect(installed).toBe(true);
     expect(gateway.bridges.testCap.ping()).toBe("async");
-    await gateway.closeGateway();
+    await gateway.close();
   });
 });
 
@@ -197,7 +198,7 @@ describe("GatewayBridges — hard singleton", () => {
     const gateway = await createGateway({ extensions: [a, b] });
     expect(gateway.bridges.testCap.ping()).toBe("a");
     expect(gateway.bridges.other.value).toBe(42);
-    await gateway.closeGateway();
+    await gateway.close();
   });
 });
 
@@ -259,7 +260,7 @@ describe("GatewayInstaller — registerWireExtension", () => {
     const resolved = gateway.wireExtensions().resolve("gwext/ping");
     expect(resolved).toBeDefined();
     expect(await resolved!.handler({}, {})).toEqual({ pong: true });
-    await gateway.closeGateway();
+    await gateway.close();
   });
 
   it("throws when registerWireExtension is called after the registry seals (post-ready)", async () => {
@@ -275,7 +276,7 @@ describe("GatewayInstaller — registerWireExtension", () => {
     const gateway = await createGateway({ extensions: [ext] });
     // Registry sealed once gatewayReady resolved — the ADR 46 rule.
     expect(() => captured!.registerWireExtension(pingWire())).toThrow(/sealed/i);
-    await gateway.closeGateway();
+    await gateway.close();
   });
 });
 
@@ -310,6 +311,7 @@ describe("ExtensionBundle — field distribution + cascade", () => {
     // App/session parts cascade — nothing installed until an app/session exists.
     expect(events).toEqual([]);
 
+    await gateway.listen();
     const app = await gateway.createApp({ rootElement: NULL_ROOT, options: mkAppOptions() });
     expect(events).toContain("app-install");
     expect(events).not.toContain("session-install");
@@ -317,7 +319,7 @@ describe("ExtensionBundle — field distribution + cascade", () => {
     await app.createSession();
     expect(events).toContain("session-install");
 
-    await gateway.closeGateway();
+    await gateway.close();
   });
 
   it("composes gateway-level cascade BEFORE per-call extensions", async () => {
@@ -337,6 +339,7 @@ describe("ExtensionBundle — field distribution + cascade", () => {
     const gateway = await createGateway({
       extensions: [{ name: "b", app: gwCascadeApp }],
     });
+    await gateway.listen();
     await gateway.createApp({
       rootElement: NULL_ROOT,
       options: { ...mkAppOptions(), extensions: [perCallApp] },
@@ -344,7 +347,7 @@ describe("ExtensionBundle — field distribution + cascade", () => {
 
     // Outer scope composes first — gateway cascade installs before per-call.
     expect(order).toEqual(["gateway-cascade", "per-call"]);
-    await gateway.closeGateway();
+    await gateway.close();
   });
 
   it("cascades a BARE app extension (not wrapped in a bundle) to every app", async () => {
@@ -357,10 +360,11 @@ describe("ExtensionBundle — field distribution + cascade", () => {
       install: () => void (installed = true),
     };
     const gateway = await createGateway({ extensions: [bare] });
+    await gateway.listen();
     expect(installed).toBe(false); // nothing to install onto yet
     await gateway.createApp({ rootElement: NULL_ROOT, options: mkAppOptions() });
     expect(installed).toBe(true);
-    await gateway.closeGateway();
+    await gateway.close();
   });
 
   it("cascades a BARE session extension to every session", async () => {
@@ -371,11 +375,12 @@ describe("ExtensionBundle — field distribution + cascade", () => {
       install: () => void (installed = true),
     };
     const gateway = await createGateway({ extensions: [bare] });
+    await gateway.listen();
     const app = await gateway.createApp({ rootElement: NULL_ROOT, options: mkAppOptions() });
     expect(installed).toBe(false); // no session yet
     await app.createSession();
     expect(installed).toBe(true);
-    await gateway.closeGateway();
+    await gateway.close();
   });
 
   it("cascades the same gateway-level app part to EVERY app", async () => {
@@ -386,10 +391,11 @@ describe("ExtensionBundle — field distribution + cascade", () => {
       install: () => void installs++,
     };
     const gateway = await createGateway({ extensions: [{ name: "b", app: shared }] });
+    await gateway.listen();
     await gateway.createApp({ rootElement: NULL_ROOT, options: mkAppOptions() });
     await gateway.createApp({ rootElement: NULL_ROOT, options: mkAppOptions() });
     expect(installs).toBe(2);
-    await gateway.closeGateway();
+    await gateway.close();
   });
 });
 
@@ -408,7 +414,7 @@ describe("GatewayExtension — lifecycle", () => {
     };
 
     const gateway = await createGateway({ extensions: [first, second] });
-    await gateway.closeGateway();
+    await gateway.close();
     // Reverse install order — last installed tears down first.
     expect(teardown).toEqual(["second", "first"]);
   });
@@ -421,6 +427,7 @@ describe("GatewayExtension — lifecycle", () => {
       install: (i) => i.onClose(() => void order.push("gateway-ext-close")),
     };
     const gateway = await createGateway({ extensions: [ext] });
+    await gateway.listen();
     const app = await gateway.createApp({ rootElement: NULL_ROOT, options: mkAppOptions() });
     const origClose = app.closeApp.bind(app);
     vi.spyOn(app, "closeApp").mockImplementation(async () => {
@@ -428,7 +435,7 @@ describe("GatewayExtension — lifecycle", () => {
       await origClose();
     });
 
-    await gateway.closeGateway();
+    await gateway.close();
     expect(order).toEqual(["app-close", "gateway-ext-close"]);
   });
 });
@@ -452,7 +459,7 @@ describe("GatewayInstaller — subscribeBus", () => {
       description: "extension observes the gateway bus event",
       timeoutMs: 2_000,
     });
-    await gateway.closeGateway();
+    await gateway.close();
   });
 
   it("keeps delivering after a listener throws (per-event error isolation)", async () => {
@@ -483,7 +490,7 @@ describe("GatewayInstaller — subscribeBus", () => {
       description: "second event still delivered after the throw",
       timeoutMs: 2_000,
     });
-    await gateway.closeGateway();
+    await gateway.close();
   });
 });
 
@@ -505,6 +512,6 @@ describe("GatewayHarness — no gateway extensions (pre-ADR-50 path)", () => {
     );
     // Framework built-ins registered regardless of the extension path.
     expect(gateway.wireExtensions().enumerate().length).toBeGreaterThan(0);
-    await gateway.closeGateway();
+    await gateway.close();
   });
 });

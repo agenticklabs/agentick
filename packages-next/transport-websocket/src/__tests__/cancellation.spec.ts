@@ -158,7 +158,7 @@ describe("WebSocket transport — notifications/cancelled", () => {
       await new Promise<void>((resolve, reject) =>
         httpServer.close((err) => (err ? reject(err) : resolve())),
       );
-      await gateway.closeGateway();
+      await gateway.close();
     });
 
     it("accepts notifications/cancelled for unknown ids without erroring", async () => {
