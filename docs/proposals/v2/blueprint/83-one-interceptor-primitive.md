@@ -265,5 +265,25 @@ adopter surface grows, the substrate shrinks.
 5. Delete `Hooks`/`hookLayer`/`forOp`; fold hooks into `resolvedInterceptors`; compose site drops `hookLayer.forOp`.
 6. Merge the session-config hooks into the `inheritedInterceptors` threading (drop the `hooks:` option).
 
+## Per-harness hookability (as of 2026-07-14)
+
+The seam lives in `BaseHarness.runOperation`, so **any op routed through
+`command()`/`runOperation` is hookable** — but not every op is routed that way,
+and typed hook *names* exist only for verbs augmented into `CommandRegistry`.
+
+| Harness / verb | Hookable | Typed name | Notes |
+| --- | --- | --- | --- |
+| `tool:dispatch` (+ `tool:abort`) | ✅ | ✅ | `onBefore/AfterToolDispatch`; `guardDispatch` |
+| `session:send` / `append` / `apply-executor-result` / `apply-tool-results` | ✅ | ✅ | public door; NON-ADDRESSABLE (SendInput non-serializable); `apply-*` skip the loop's in-fiber `*Fx` path |
+| `elicitation:elicit` | ✅ | ✅ | one op for the round-trip: before=request, after=response (form+URL unified) |
+| `knobs:*`, `timeline:*`, `resources:*` | ✅ (mechanism) | — | route through `command()`; add a 1-line `CommandRegistry` entry for typed names |
+| `tasks:submit` / `tasks:settle` | ⛔ | — (naming locked) | **the async-seam boundary**: the seam is async (`asBefore`/`asAfter` await); `submit` returns `TaskHandle` synchronously, so wrapping needs `runSyncExit` which dies on the async boundary. Unblockers: async `submit` (breaking) or a sync-hook fast-path (necessary-but-insufficient). |
+
+**The async-only property is deliberate.** Every hookable op crosses the async
+seam; a *synchronous* operation (a sync handle return, a sync FSM transition)
+cannot be hooked without making it async. The things worth intercepting (model
+calls, dispatch, elicits, sends) are inherently async; tasks is the one harness
+whose valuable hooks sit on sync surfaces.
+
 @see ADR 76 (tiers this re-collects), ADR 80 (hooks + fiber invariant), ADR 82
 (the fold this generalizes), ADR 81 (superseded).
