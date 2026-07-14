@@ -217,6 +217,13 @@ export interface TasksHarnessOptions {
    * interceptors wrap this harness's ops. Defaults to `[]`.
    */
   readonly inheritedInterceptors?: readonly Middleware<unknown, unknown, unknown>[];
+  /**
+   * LIVE interceptor parent (ADR 83 §4) — the AppHarness (this per-session
+   * harness is constructed by the app). Keeps inheritance live so a LATER
+   * `app.use()` / `app.guard()` / `app.hook()` reaches this harness's ops, not
+   * just the construction snapshot. Forwarded to {@link BaseHarness}.
+   */
+  readonly interceptorParent?: BaseHarness;
 }
 
 // ============================================================================
@@ -265,6 +272,7 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
   ) {
     super("tasks", scopeId, journal, bus, inbox, {
       inheritedInterceptors: options.inheritedInterceptors,
+      interceptorParent: options.interceptorParent,
     });
     this.parentScope = options.parentScope;
     this.scope = options.parentScope ?? {};

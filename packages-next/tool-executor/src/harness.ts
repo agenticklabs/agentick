@@ -159,6 +159,7 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
   ) {
     super("tool", scopeId, journal, bus, inbox, {
       inheritedInterceptors: options.inheritedInterceptors,
+      interceptorParent: options.interceptorParent,
     });
     this.handlerResolver = options.handlerResolver;
     this.defaultTimeoutMs = options.defaultTimeoutMs;

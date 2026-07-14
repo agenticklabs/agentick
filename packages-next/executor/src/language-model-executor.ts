@@ -156,6 +156,12 @@ export interface LanguageModelExecutorOptions<TRaw = unknown, TChunk = unknown> 
    * Defaults to `[]`.
    */
   readonly inheritedInterceptors?: readonly Middleware<unknown, unknown, unknown>[];
+  /**
+   * LIVE interceptor parent (ADR 83 §4). The app passes `interceptorParent: this`
+   * alongside the snapshot so a LATER `app.use()` / `app.guard()` / `app.hook()`
+   * reaches this app-shared spine harness too. Forwarded to {@link BaseHarness}.
+   */
+  readonly interceptorParent?: BaseHarness;
 }
 
 export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
@@ -200,6 +206,7 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
   ) {
     super("executor", scopeId, journal, bus, inbox, {
       inheritedInterceptors: options.inheritedInterceptors,
+      interceptorParent: options.interceptorParent,
     });
     this.adapter = options.adapter;
   }

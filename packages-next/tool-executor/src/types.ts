@@ -24,7 +24,7 @@ import type {
   ToolRegistration,
   Validator,
 } from "@agentick/spec-next";
-import type { Middleware } from "@agentick/runtime-next";
+import type { BaseHarness, Middleware } from "@agentick/runtime-next";
 
 // Re-export the moved types so existing import paths keep working.
 export type {
@@ -175,4 +175,12 @@ export interface ToolExecutorHarnessOptions {
    * ToolDispatch` hooks all wrap `tool:dispatch`. Defaults to `[]`.
    */
   readonly inheritedInterceptors?: readonly Middleware<unknown, unknown, unknown>[];
+  /**
+   * LIVE interceptor parent (ADR 83 §4) — the AppHarness (the per-session tool
+   * executor is constructed by the app). Passing `interceptorParent: app` keeps
+   * the relation live so a LATER `app.use()` / `app.guard()` / `app.hook()` (and
+   * gateway hooks, once the gateway links) reaches `tool:dispatch`, not just the
+   * construction snapshot. Forwarded to {@link BaseHarness}.
+   */
+  readonly interceptorParent?: BaseHarness;
 }

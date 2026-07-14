@@ -312,6 +312,15 @@ export interface SessionHarnessOptions<P = unknown> {
    * Undefined → top-of-tree, inherits nothing.
    */
   readonly inheritedInterceptors?: readonly Middleware<unknown, unknown, unknown>[];
+  /**
+   * LIVE interceptor parent (ADR 83 §4) — the AppHarness. The session is
+   * constructed by the app and seeded from `app.resolvedInterceptors()`; passing
+   * `interceptorParent: app` keeps that live so a LATER `app.use()` /
+   * `app.guard()` / `app.hook()` (and gateway hooks, once the gateway links)
+   * reaches every session op — the gateway→app→session requirement. Forwarded to
+   * {@link BaseHarness}.
+   */
+  readonly interceptorParent?: BaseHarness;
 }
 
 // ============================================================================
@@ -435,8 +444,10 @@ export class SessionHarness<P = unknown>
         // snapshot (incl. the app+session command hooks as op-scoped
         // middleware), folded in at construction so `app.use(...)` /
         // `app.guard(...)` and the declarative hooks structurally wrap every
-        // session operation. No parent pointer.
+        // session operation. LIVE via `interceptorParent` (ADR 83 §4) — a later
+        // app/gateway registration reaches this session too.
         inheritedInterceptors: options.inheritedInterceptors,
+        interceptorParent: options.interceptorParent,
       }),
       policy: mergeLayered<JournalingPolicy>(DEFAULT_JOURNALING_POLICY, {
         override: { "session:command:close": "bus-only" },
@@ -472,7 +483,11 @@ export class SessionHarness<P = unknown>
         // op-scoped middleware, plus the session's own), so `session.use()` /
         // `app.use()` AND the `knobs:set` hooks fold the same cascade onto the
         // per-session bridges (knobs / state) built inside `buildSessionBridges`.
+        // ADR 83 §4 — `interceptorParent: this` keeps the relation LIVE: a later
+        // `session.use()` / `session.guard()` / `session.hook()` reaches the
+        // per-session bridges too, not just the construction snapshot.
         inheritedInterceptors: this.resolvedInterceptors(),
+        interceptorParent: this,
       },
     );
     if (options.initialKnobs) {

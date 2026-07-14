@@ -102,6 +102,13 @@ export interface KnobsHarnessOptions {
    * app/session `hooks` config all wrap `knobs:set`. Defaults to `[]`.
    */
   readonly inheritedInterceptors?: readonly Middleware<unknown, unknown, unknown>[];
+  /**
+   * LIVE interceptor parent (ADR 83 §4) — the SessionHarness, so a LATER
+   * `session.use()` / `session.guard()` / `session.hook()` (or an app one that
+   * folded into the session) reaches this per-session bridge too. Forwarded to
+   * {@link BaseHarness}.
+   */
+  readonly interceptorParent?: BaseHarness;
 }
 
 export class KnobsHarness
@@ -177,6 +184,7 @@ export class KnobsHarness
   ) {
     super("knobs", scopeId, journal, bus, inbox, {
       inheritedInterceptors: options.inheritedInterceptors,
+      interceptorParent: options.interceptorParent,
     });
     this.parentLayer = parentLayer;
     const scope = () => ({ sessionId: this.scopeId });

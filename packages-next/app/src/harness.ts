@@ -740,7 +740,11 @@ export class AppHarness<P = unknown>
             // snapshot (incl. the app's declarative hooks registered just above;
             // no `app.use()` has run yet at construction, so this equals the old
             // app-hook-only layer). Session hooks never reach shared harnesses.
+            // ADR 83 §4 — `interceptorParent: this` keeps the relation LIVE, so a
+            // LATER `app.use()` / `app.guard()` / `app.hook()` reaches the
+            // executor too (not just the construction snapshot).
             inheritedInterceptors: this.resolvedInterceptors(),
+            interceptorParent: this,
           })
         : isExecutorFactory(options.executor)
           ? options.executor({
@@ -787,9 +791,12 @@ export class AppHarness<P = unknown>
       ? options.loop({ scopeId: appId, journal, bus, inbox })
       : (options.loop ??
         // ADR 76/83 — app-shared spine folds the APP's resolved interceptor
-        // snapshot (incl. the app's declarative hooks registered above).
+        // snapshot (incl. the app's declarative hooks registered above). ADR 83
+        // §4 — `interceptorParent: this` keeps the relation LIVE (a later
+        // `app.use()`/`app.guard()`/`app.hook()` reaches the loop too).
         new LoopExecutorHarness(appId, journal, bus, inbox, {
           inheritedInterceptors: this.resolvedInterceptors(),
+          interceptorParent: this,
         }));
 
     // Persistent-tasks substrate (ADR 68) — app-scoped store + executor
@@ -1268,13 +1275,29 @@ export class AppHarness<P = unknown>
     // adapted to op-scoped middleware. Guards, `.use` transforms, AND the
     // app+session command hooks now ride this SINGLE value (was two: a separate
     // `sessionHooks` layer + `inheritedInterceptors`). Threaded into the
-    // SessionHarness AND every per-session sub-harness below — no parent pointer,
-    // the fold IS the walk, memoized here. App-outer, session-inner: the app
-    // interceptors precede the session-hook middleware in registration order.
+    // SessionHarness AND every per-session sub-harness below. App-outer,
+    // session-inner: the app interceptors precede the session-hook middleware in
+    // registration order.
+    //
+    // ADR 83 §4 — this is the ONE-TIME construction snapshot (pull-seed). The
+    // relation is kept LIVE by `interceptorParent: this` on each child below: the
+    // session AND every per-session sub-harness (elicitation / tasks / resources
+    // / tool-executor) register as live children of THIS app, so a LATER
+    // `app.use()` / `app.guard()` / `app.hook()` — including a gateway hook that
+    // folded into the app — reaches them all (the gateway→app→session
+    // requirement). Parenting to the app (not the session) is correct: the app
+    // constructs these before the session exists and seeds them from
+    // `app.resolvedInterceptors()`. The session→bridges(knobs) edge is parented
+    // to the session (in SessionHarness). Each per-session child is closed on
+    // session teardown, which detaches it from this app's children set.
     const inheritedInterceptors = [
       ...this.resolvedInterceptors(),
       ...hooksToMiddlewares(input.hooks ?? {}),
     ];
+    // TODO(adr-84): the ONLY remaining live-inheritance gap is the gateway→app
+    // edge — the gateway does not link to apps at all yet (no `interceptorParent`
+    // on `createApp`). Once it does, a gateway hook folds through the app and
+    // cascades down these already-live app→session→sub edges unchanged.
 
     // Per-session elicitation harness. Owns the request/response
     // correlation engine for tool confirmation, MCP elicitation, and
@@ -1293,7 +1316,7 @@ export class AppHarness<P = unknown>
       this.journal,
       this.bus,
       this.inbox,
-      { parentScope: { sessionId }, inheritedInterceptors },
+      { parentScope: { sessionId }, inheritedInterceptors, interceptorParent: this },
     );
 
     // Per-session tasks harness — substrate-level long-running tool
@@ -1310,8 +1333,9 @@ export class AppHarness<P = unknown>
       store: this.taskStore,
       executors: this.taskExecutors,
       // ADR 76/83 — the app's resolved interceptor snapshot incl. the app+session
-      // command hooks as op-scoped middleware.
+      // command hooks as op-scoped middleware. Live via `interceptorParent`.
       inheritedInterceptors,
+      interceptorParent: this,
     });
 
     // Per-session resources harness (ADR 62) — the application-controlled
@@ -1327,8 +1351,8 @@ export class AppHarness<P = unknown>
       this.bus,
       this.inbox,
       // ADR 76/83 — the app's resolved interceptor snapshot incl. the app+session
-      // command hooks as op-scoped middleware.
-      { inheritedInterceptors },
+      // command hooks as op-scoped middleware. Live via `interceptorParent`.
+      { inheritedInterceptors, interceptorParent: this },
     );
 
     // ── Session extension lifecycle (#150) ────────────────────────
@@ -1445,8 +1469,10 @@ export class AppHarness<P = unknown>
           // ADR 76/83 — the ONE resolved interceptor snapshot: `app.use()` /
           // `app.guard()` AND the app+session `onBefore/After/AroundToolDispatch`
           // hooks (as op-scoped middleware) all wrap `tool:dispatch`, which
-          // routes through `runOperation`.
+          // routes through `runOperation`. LIVE via `interceptorParent` (ADR 83
+          // §4) — a LATER app/gateway hook reaches `tool:dispatch` too.
           inheritedInterceptors,
+          interceptorParent: this,
         });
 
     // Cascade: per-call `createSession.*` > per-app `session.*` >
@@ -1480,9 +1506,11 @@ export class AppHarness<P = unknown>
       // ADR 76/83 — the ONE resolved interceptor snapshot: `app.use(...)` /
       // `app.guard(...)` AND the app+session command hooks (as op-scoped
       // middleware) wrap every session op, folded in at construction. The
-      // SessionHarness re-folds this onto its own per-session bridges. No parent
-      // pointer, one value (was `inheritedInterceptors` + `hooks`).
+      // SessionHarness re-folds this onto its own per-session bridges. LIVE via
+      // `interceptorParent` (ADR 83 §4) — a LATER app/gateway hook reaches this
+      // session (and, through its bridges edge, the knobs harness) too.
       inheritedInterceptors,
+      interceptorParent: this,
       defaultMaxTicks: input.maxTicks ?? this.sessionDefaults.defaultMaxTicks ?? 8,
       ...(input.requiredScopes !== undefined ? { requiredScopes: input.requiredScopes } : {}),
       ...(this.models !== undefined ? { models: this.models } : {}),

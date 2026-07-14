@@ -26,7 +26,7 @@ import { TasksHarness } from "@agentick/tasks-next";
 import { ResourcesHarness } from "@agentick/resources-next";
 import { GatesController, type GateOverrideAudit } from "@agentick/gates-next";
 import { TimelineHarness, type TimelineHarnessOptions } from "@agentick/timeline-next";
-import { type Middleware, ulid } from "@agentick/runtime-next";
+import { type BaseHarness, type Middleware, ulid } from "@agentick/runtime-next";
 import type {
   ElicitationHarnessProtocol,
   EventBus,
@@ -190,6 +190,13 @@ export interface BuildSessionBridgesOptions {
    * per bridge.
    */
   readonly inheritedInterceptors?: readonly Middleware<unknown, unknown, unknown>[];
+  /**
+   * LIVE interceptor parent (ADR 83 §4) — the SessionHarness. Forwarded to the
+   * per-session bridge harnesses (today: knobs) so a LATER `session.use()` /
+   * `session.guard()` / `session.hook()` reaches them, not just the
+   * construction-time snapshot ({@link inheritedInterceptors}).
+   */
+  readonly interceptorParent?: BaseHarness;
 }
 
 export function buildSessionBridges(
@@ -225,7 +232,10 @@ export function buildSessionBridges(
     // ADR 76 tier 3 + ADR 83 amendment — the session's resolved interceptor
     // snapshot (incl. the app+session command hooks as op-scoped middleware), so
     // `knobs:set` inherits `session.use()` / `app.use()` AND the hook cascade.
-    { inheritedInterceptors: options.inheritedInterceptors },
+    {
+      inheritedInterceptors: options.inheritedInterceptors,
+      interceptorParent: options.interceptorParent,
+    },
   );
   const state = new StateHarness(
     `${store.id}:state`,

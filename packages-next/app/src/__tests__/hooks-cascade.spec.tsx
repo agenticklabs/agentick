@@ -24,6 +24,7 @@ import { describe, expect, it } from "vitest";
 
 import { createApp } from "../react.js";
 import { FakeLanguageModelExecutor } from "@agentick/executor-next";
+import { KnobsHarness } from "@agentick/knobs-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type { ContentBlock, ToolDeclaration, ToolHandler } from "@agentick/spec-next";
 import { jsonSchema } from "@agentick/spec-next";
@@ -187,6 +188,64 @@ describe("ADR 82 — hook cascade wired end-to-end (tool:dispatch)", () => {
 
     expect(seen.value).toBe("verbatim");
     expect((result[0] as { text: string }).text).toBe("verbatim");
+
+    await app.closeApp();
+  });
+});
+
+/**
+ * ADR 83 §4 — LIVE interceptor inheritance end-to-end through the REAL tree.
+ *
+ * The construction-fold tests above register hooks at `createApp` time. These
+ * prove the LATE case: a hook registered on the app AFTER a session already
+ * exists cascades down the live app→session→sub edges to reach that session's
+ * per-session harnesses — the gateway→app→session requirement, exercised at the
+ * app level (a gateway hook folds into the app identically once the gateway
+ * links). Proven against TWO distinct session-subtree harnesses, not the
+ * app-shared executor/loop spine:
+ *   - the per-session tool-executor (`tool:dispatch`, a direct app child)
+ *   - the session's knobs bridge (`knobs:set`, the deepest app→session→knobs
+ *     2-hop edge)
+ */
+describe("ADR 83 §4 — late app registration reaches already-constructed per-session subs", () => {
+  it("app.hook + app.use registered AFTER createSession reach the tool-executor AND the knobs bridge", async () => {
+    const seen: { value?: unknown } = {};
+    const app = await createApp(React.createElement(Agent), {
+      executor: await mkExecutor(),
+      tools: [echoTool()],
+      toolHandlers: new Map([[ECHO_REF, makeEchoHandler(seen)]]),
+    });
+
+    // Session (and its per-session subs) constructed with NOTHING registered on
+    // the app yet — the frozen fold would have snapshotted an empty layer here.
+    const session = await app.createSession();
+
+    // LATE registrations on the app, AFTER the session + its subs exist.
+    const seenOpIds: string[] = [];
+    app.use(async (input, next, ctx) => {
+      if (ctx.opId !== undefined) seenOpIds.push(ctx.opId);
+      return next(input);
+    });
+    app.hook({
+      onBeforeToolDispatch: (input) => ({
+        ...input,
+        input: { ...(input.input as Record<string, unknown>), value: "reshaped-late" },
+      }),
+    });
+
+    // (1) per-session TOOL-EXECUTOR dispatch — the late app.hook reshaped the
+    // input, so it reached `tool:dispatch` on a harness built before it.
+    const result = await session.dispatch("echo", { value: "original" });
+    expect(seen.value).toBe("reshaped-late");
+    expect((result[0] as { text: string }).text).toBe("reshaped-late");
+
+    // (2) SESSION → KNOBS bridge (the deepest, 2-hop edge). The late app.use
+    // wrapped the `knobs:set` op on the session's own knobs harness — proving
+    // the cascade reaches a grandchild, not just the app's direct children.
+    const knobs = (session as unknown as { bridges: { knobs: KnobsHarness } }).bridges.knobs;
+    await knobs.set({ id: "flag", value: "on" });
+    expect(knobs.get("flag")).toBe("on");
+    expect(seenOpIds.some((id) => id.startsWith("knobs:set"))).toBe(true);
 
     await app.closeApp();
   });

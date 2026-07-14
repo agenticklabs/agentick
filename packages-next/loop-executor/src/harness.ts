@@ -147,6 +147,12 @@ export interface LoopExecutorHarnessOptions {
    * construction and forwarded to {@link BaseHarness}. Defaults to `[]`.
    */
   readonly inheritedInterceptors?: readonly Middleware<unknown, unknown, unknown>[];
+  /**
+   * LIVE interceptor parent (ADR 83 §4). The app passes `interceptorParent: this`
+   * alongside the snapshot so a LATER `app.use()` / `app.guard()` / `app.hook()`
+   * reaches this app-shared spine harness too. Forwarded to {@link BaseHarness}.
+   */
+  readonly interceptorParent?: BaseHarness;
 }
 
 export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExecutorProtocol {
@@ -162,6 +168,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
   ) {
     super("loop", scopeId, journal, bus, inbox, {
       inheritedInterceptors: options.inheritedInterceptors,
+      interceptorParent: options.interceptorParent,
     });
   }
 

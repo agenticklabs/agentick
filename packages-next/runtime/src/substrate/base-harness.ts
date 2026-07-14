@@ -9,7 +9,9 @@
  *   ③ Interceptors — ONE composed seam around every command (ADR 83):
  *                    `.guard()` (admission), `.use(mw)` (middleware), and
  *                    hooks (keyed transform) — three kinds of one `Middleware`,
- *                    inherited via the construction-fold (`inheritedInterceptors`)
+ *                    inherited via LIVE inheritance down the construction tree
+ *                    (ADR 83 §4): a registration on a harness pushes to every
+ *                    live descendant, and a new descendant pulls the current set
  *   ④ Events       — `emit` (light path) + `emitDelta` (in-flight)
  *
  * Substrate-internal API is Effect-typed end-to-end. Concrete harnesses
@@ -492,10 +494,19 @@ export class MiddlewareChain {
 
   use<I, R, E = unknown>(mw: Middleware<I, R, E>): Unsubscribe {
     this.middlewares.push(mw as Middleware<unknown, unknown, unknown>);
-    return () => {
-      const idx = this.middlewares.indexOf(mw as Middleware<unknown, unknown, unknown>);
-      if (idx >= 0) this.middlewares.splice(idx, 1);
-    };
+    return () => this.remove(mw as Middleware<unknown, unknown, unknown>);
+  }
+
+  /**
+   * Remove a middleware by identity (first occurrence). The removal seam
+   * ADR 83 §4 live inheritance uses to cascade an unsubscribe into a
+   * descendant's inherited layer — where the pushing parent didn't hold that
+   * descendant's `use()` closure (a descendant constructed AFTER the
+   * registration pulled the interceptor via the fold). No-op when absent.
+   */
+  remove(mw: Middleware<unknown, unknown, unknown>): void {
+    const idx = this.middlewares.indexOf(mw);
+    if (idx >= 0) this.middlewares.splice(idx, 1);
   }
 
   /**
@@ -625,6 +636,20 @@ export interface BaseHarnessOptions<I = unknown> {
    * harness's own middleware (broader scope first). Defaults to `[]`.
    */
   readonly inheritedInterceptors?: readonly Middleware<unknown, unknown, unknown>[];
+  /**
+   * The construction parent for LIVE interceptor inheritance (ADR 83 §4).
+   * When set, this harness registers itself as a live child of the parent at
+   * construction — so an interceptor registered on the parent AFTER this
+   * harness exists (`.use` / `.guard` / `.hook`) propagates DOWN to it (and its
+   * own descendants), and the parent's unsubscribe cascades the removal back.
+   * The one-time construction snapshot ({@link inheritedInterceptors}) seeds the
+   * initial set; this keeps the relation live thereafter. The parent passes
+   * `interceptorParent: this` alongside `inheritedInterceptors:
+   * this.resolvedInterceptors()` — both synchronous in the child ctor, so no
+   * registration can slip between the pull-seed and the attach. Omit for a
+   * top-of-tree harness (no parent to inherit from).
+   */
+  readonly interceptorParent?: BaseHarness<EventSurface, unknown>;
 }
 
 export abstract class BaseHarness<Surface extends EventSurface = EventSurface, Input = unknown> {
@@ -683,16 +708,38 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
    */
   protected readonly telemetryNamespace: string;
   /**
-   * The parent scope's RESOLVED interceptor snapshot (ADR 76 tier 3), folded
-   * in at construction. Guards, `.use` transforms, AND command hooks (ADR 83
-   * amendment — hooks are now op-scoped `transform` middleware on `.use`) all
-   * inherit through this ONE seam. The cascade
-   * lives in the FOLD (the parent computed `resolvedInterceptors()` and passed
-   * the value), not a per-op parent-walk. Composed OUTERMOST of this harness's
-   * own `this.middleware` per op; `[]` when top-of-tree.
+   * The parent scope's inherited interceptor layer (ADR 76 tier 3 + ADR 83 §4)
+   * as a LIVE holder — no longer a frozen array. Seeded at construction from the
+   * parent's `resolvedInterceptors()` snapshot ({@link BaseHarnessOptions.inheritedInterceptors}),
+   * then kept live: a later registration on the parent pushes into this chain
+   * (via {@link acceptInheritedInterceptor}) and the parent's unsubscribe removes
+   * it by identity (via {@link removeInheritedInterceptor}). Guards, `.use`
+   * transforms, AND command hooks (ADR 83 amendment — hooks are op-scoped
+   * `transform` middleware) all inherit through this ONE seam. Composed OUTERMOST
+   * of this harness's own `this.middleware` per op; empty when top-of-tree. Read
+   * per op as `this.inherited.snapshot()` — no parent-walk.
    * @see BaseHarnessOptions.inheritedInterceptors
    */
-  protected readonly inheritedInterceptors: readonly Middleware<unknown, unknown, unknown>[];
+  private readonly inherited = new MiddlewareChain();
+
+  /**
+   * Live interceptor descendants (ADR 83 §4). A child registers here at
+   * construction (via {@link attachInterceptorChild}) when it passes
+   * `interceptorParent: this`; a registration on THIS harness then pushes down
+   * to each, and their teardown ({@link close}) removes them so no push ever
+   * hits a torn-down harness. Distinct from the substrate/close cascade — this
+   * tracks the interceptor-inheritance edge only.
+   */
+  private readonly interceptorChildren = new Set<BaseHarness>();
+
+  /**
+   * Detach this harness from its interceptor parent's {@link interceptorChildren}
+   * set — captured at construction when `interceptorParent` was supplied, fired
+   * at {@link close}. A closure rather than a stored parent pointer (ADR 81
+   * deleted the parent pointer; this restores only a forwarding edge, not a
+   * back-reference that survives teardown).
+   */
+  private detachFromInterceptorParent?: Unsubscribe;
   private readonly policy: JournalingPolicy;
   private inboxUnsubscribe?: Unsubscribe;
 
@@ -733,7 +780,63 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
    * aren't wrapped until refactored onto `runOperation`.
    */
   use<I = unknown, R = unknown>(mw: AsyncMiddleware<I, R>): Unsubscribe {
-    return this.middleware.use(liftMiddleware(mw) as Middleware<unknown, unknown, unknown>);
+    return this.registerOwn(liftMiddleware(mw) as Middleware<unknown, unknown, unknown>);
+  }
+
+  /**
+   * The SINGLE own-registration funnel (ADR 83 §4) behind `.use` / `.fx.use` /
+   * `.guard` / `.hook`. Registers `mw` on this harness's OWN chain, then PUSHES
+   * it to every live interceptor child (which appends to its inherited layer and
+   * recurses to grandchildren). The returned {@link Unsubscribe} removes the own
+   * registration AND cascades the removal into all CURRENT descendants by
+   * interceptor identity at call time — so it also unhooks descendants
+   * constructed AFTER this registration (which pulled `mw` via the fold). No-op
+   * when nothing subscribes.
+   */
+  private registerOwn(mw: Middleware<unknown, unknown, unknown>): Unsubscribe {
+    const ownUnsub = this.middleware.use(mw);
+    for (const child of this.interceptorChildren) child.acceptInheritedInterceptor(mw);
+    let live = true;
+    return () => {
+      if (!live) return;
+      live = false;
+      ownUnsub();
+      for (const child of this.interceptorChildren) child.removeInheritedInterceptor(mw);
+    };
+  }
+
+  /**
+   * Register a live interceptor child (ADR 83 §4). Called by the child's ctor
+   * (`interceptorParent.attachInterceptorChild(this)`) AFTER it has pull-seeded
+   * its inherited layer. Returns the detach thunk the child fires at
+   * {@link close}. Idempotent per child (Set semantics).
+   */
+  private attachInterceptorChild(child: BaseHarness): Unsubscribe {
+    this.interceptorChildren.add(child);
+    return () => {
+      this.interceptorChildren.delete(child);
+    };
+  }
+
+  /**
+   * Receive an interceptor pushed from the parent (ADR 83 §4): append to this
+   * harness's inherited layer and recurse to its own live children
+   * (grandchildren). Same reference throughout, so the interceptor-kind tag
+   * ({@link tagInterceptor}) rides along.
+   */
+  private acceptInheritedInterceptor(mw: Middleware<unknown, unknown, unknown>): void {
+    this.inherited.use(mw);
+    for (const child of this.interceptorChildren) child.acceptInheritedInterceptor(mw);
+  }
+
+  /**
+   * Remove a parent-pushed interceptor by identity (ADR 83 §4): drop it from this
+   * harness's inherited layer and recurse to grandchildren. The cascade half of
+   * {@link registerOwn}'s unsubscribe.
+   */
+  private removeInheritedInterceptor(mw: Middleware<unknown, unknown, unknown>): void {
+    this.inherited.remove(mw);
+    for (const child of this.interceptorChildren) child.removeInheritedInterceptor(mw);
   }
 
   /**
@@ -753,30 +856,28 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
    * override can include `use: (mw) => this.registerEffectMiddleware(mw)`.
    */
   protected registerEffectMiddleware<I, R, E>(mw: Middleware<I, R, E>): Unsubscribe {
-    return this.middleware.use(mw as Middleware<unknown, unknown, unknown>);
+    return this.registerOwn(mw as Middleware<unknown, unknown, unknown>);
   }
 
   /**
-   * ADR 76 — structural middleware inheritance (tier 3) as a CONSTRUCTION-FOLD.
+   * ADR 76/83 — structural interceptor inheritance (tier 3), now a LIVE relation.
    *
-   * The value a parent hands its children: this harness's inherited layer
-   * (folded in at construction) followed by its OWN registered middleware,
-   * ordered **root-outermost** — `[...inheritedInterceptors, ...ownMiddleware]`.
-   * A child snapshots this at ITS construction (`inheritedInterceptors:
-   * parent.resolvedInterceptors()`), so the cascade is a static fold down the
-   * scope chain, not a per-op walk up a parent pointer. The fold IS the walk,
-   * memoized at each node (ADR 82, generalized by ADR 83).
+   * The value a parent hands its children AT CONSTRUCTION: this harness's
+   * inherited layer followed by its OWN registered middleware, ordered
+   * **root-outermost** — `[...inherited, ...ownMiddleware]`. A child pull-seeds
+   * this at ITS construction (`inheritedInterceptors: parent.resolvedInterceptors()`)
+   * — so it inherits everything registered before it existed — AND (via
+   * `interceptorParent: parent`) registers as a live child so registrations made
+   * on the parent AFTER it exists push down too (ADR 83 §4). The per-op read is
+   * still local (`this.inherited.snapshot()` + own) — no parent-walk.
    *
    * Guards (`.guard()`), transforms (`.use()`), AND command hooks (`.hook()` —
    * op-scoped `transform` middleware, ADR 83 amendment) all live on
-   * `this.middleware`, so all inherit through this one seam. Snapshots the OWN
-   * chain live, so a child sees registrations made on the parent BEFORE the
-   * child was constructed; registrations made AFTER are outside the child's
-   * static fold.
+   * `this.middleware`, so all inherit through this one seam.
    */
   protected resolvedInterceptors(): readonly Middleware<unknown, unknown, unknown>[] {
     // Inherited layer is broader scope → outermost → first in the list.
-    return [...this.inheritedInterceptors, ...this.middleware.snapshot()];
+    return [...this.inherited.snapshot(), ...this.middleware.snapshot()];
   }
 
   /**
@@ -834,9 +935,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
         // outermost, no transform (retry) middleware can swallow it.
         return yield* Effect.fail(signalFromVerdict(verdict));
       });
-    return this.middleware.use(
-      tagInterceptor("guard", mw) as Middleware<unknown, unknown, unknown>,
-    );
+    return this.registerOwn(tagInterceptor("guard", mw) as Middleware<unknown, unknown, unknown>);
   }
 
   /**
@@ -851,7 +950,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
   private registerCommandHook(key: string, fn: unknown): Unsubscribe {
     const mw = commandHookMiddleware(key, fn);
     if (mw === undefined) return () => {};
-    return this.middleware.use(mw);
+    return this.registerOwn(mw);
   }
 
   /**
@@ -916,7 +1015,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
     // no separate hook-layer term. Each hook enumerates as `transform`
     // regardless of `_opName` (the op-scoping is a runtime `ctx.op` compare,
     // opaque to static kind introspection).
-    const assembled = [...this.inheritedInterceptors, ...this.middleware.snapshot()];
+    const assembled = [...this.inherited.snapshot(), ...this.middleware.snapshot()];
     return orderInterceptors(assembled).map(interceptorKind);
   }
 
@@ -943,7 +1042,16 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
     this.metadata = Object.freeze({ ...(options.metadata ?? {}) });
     this.principal = options.principal;
     this.telemetryNamespace = options.telemetryNamespace ?? "agentick";
-    this.inheritedInterceptors = options.inheritedInterceptors ?? [];
+    // ADR 83 §4 — LIVE interceptor inheritance. Pull-seed the inherited layer
+    // from the parent's construction-time snapshot, THEN register as a live
+    // child of the parent. Both are synchronous here, so no interceptor can be
+    // registered on the parent between the snapshot and the attach (which would
+    // otherwise be missed or double-counted). Thereafter parent registrations
+    // push down live and its unsubscribe cascades the removal (`registerOwn`).
+    for (const mw of options.inheritedInterceptors ?? []) this.inherited.use(mw);
+    if (options.interceptorParent !== undefined) {
+      this.detachFromInterceptorParent = options.interceptorParent.attachInterceptorChild(this);
+    }
 
     // Substrate slot resolution (ADR 31). Build a shell exposing the
     // positional substrate defaults as the parent-side upstream, then
@@ -1071,9 +1179,11 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
             // 4. Assemble the ONE interceptor list around the body and compose
             //    it. Assembly order (outermost → innermost):
             //      call-scoped (tier 4, FiberRef — broadest)
-            //        → inherited layer (tier 3, folded at construction — no
-            //          walk; the parent's `resolvedInterceptors()` snapshot,
-            //          incl. inherited command hooks as op-scoped middleware)
+            //        → inherited layer (tier 3, LIVE — seeded at construction
+            //          from the parent's `resolvedInterceptors()` snapshot and
+            //          kept live by push-on-register (ADR 83 §4); read locally
+            //          here, no walk; incl. inherited command hooks as
+            //          op-scoped middleware)
             //          → this harness's own middleware (tier 2, read locally
             //            per op, incl. guards from `.guard()` AND own command
             //            hooks from `.hook()` — ADR 83 amendment: hooks are just
@@ -1087,7 +1197,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
             const callMiddleware = yield* getCallMiddleware;
             const assembled = [
               ...callMiddleware,
-              ...this.inheritedInterceptors,
+              ...this.inherited.snapshot(),
               ...this.middleware.snapshot(),
             ];
             const composed = composeMiddleware<I, R, E>(
@@ -1810,6 +1920,13 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
    * See `AppHarness` constructor for the canonical pattern.
    */
   async close(): Promise<void> {
+    // ADR 83 §4 — detach from the interceptor parent so a torn-down child stops
+    // receiving pushed registrations and is not retained by the parent's
+    // children set. Fired before the substrate unwind (order-independent).
+    if (this.detachFromInterceptorParent) {
+      this.detachFromInterceptorParent();
+      this.detachFromInterceptorParent = undefined;
+    }
     if (this.inboxUnsubscribe) {
       this.inboxUnsubscribe();
       this.inboxUnsubscribe = undefined;
