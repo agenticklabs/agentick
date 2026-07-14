@@ -11,11 +11,13 @@
  * @see docs/proposals/v2/blueprint/33-client-and-transports.md
  */
 
+import type { Unsubscribe } from "../protocol/inbox.js";
 import type { Cursor } from "../protocol/event-log.js";
 import type { SendInput } from "../protocol/session-harness.js";
 import type { WireMethod, WireParams, WireResult } from "../wire/params.js";
 import type { ClientEvent, ClientEventFilter } from "./events.js";
 import type { ClientNamespaces } from "./extension.js";
+import type { WireHooks, WireRegistrars } from "./hooks.js";
 import type {
   AppHandle,
   ClientSessionExecutionHandle,
@@ -118,6 +120,33 @@ export interface ClientProtocol {
     params: WireParams<M>,
     signal?: AbortSignal,
   ): Promise<WireResult<M>>;
+
+  // ── wire hooks (ADR 83) ────────────────────────────────────────────────
+
+  /**
+   * Register client wire hooks DECLARATIVELY — the runtime twin of the
+   * server's `harness.hook()`, taking a {@link WireHooks} config. Each
+   * `onBeforeWire<Method>` runs before a matching request leaves (may
+   * transform `params` by returning a new value, or `throw` to abort the
+   * request); each `onAfterWire<Method>` runs on the way back (may
+   * transform the `result` the caller sees). Method-scoped: a hook fires
+   * only for its wire method.
+   *
+   * The `wire:` prefix distinguishes these from the server-side op hooks
+   * — `onBeforeWireSessionSend` (this wire hop) is NOT
+   * `onBeforeSessionSend` (the server's `session:send` op).
+   *
+   * Returns an {@link Unsubscribe} removing every hook in the config.
+   */
+  hook(config: WireHooks): Unsubscribe;
+
+  /**
+   * Per-method imperative registrars — a typed Proxy over single-hook
+   * registration (`client.hooks.onBeforeWireSessionSend(fn)`), each
+   * returning its {@link Unsubscribe}. The imperative twin of
+   * {@link hook}; mirrors the server's `harness.hooks`.
+   */
+  readonly hooks: WireRegistrars;
 
   // ── resource handles ───────────────────────────────────────────────────
   gateway(): GatewayHandle;

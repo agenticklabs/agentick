@@ -13,5 +13,6 @@ export * from "./transport.js";
 export * from "./handles.js";
 export * from "./elicitation.js";
 export * from "./extension.js";
+export * from "./hooks.js";
 export * from "./capabilities.js";
 export * from "./client-protocol.js";

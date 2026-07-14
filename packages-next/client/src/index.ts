@@ -12,6 +12,7 @@
 export { createClient, type CreateClientOptions } from "./client.js";
 export { composeRequest, composeSubscribe } from "./pipeline.js";
 export { ClientHandlerRegistry } from "./handler-registry.js";
+export { ClientHookRegistry, commandForMethod } from "./hook-registry.js";
 export { effectMiddleware, type EffectRequestMiddleware } from "./effect-middleware.js";
 export { makeAppHandle, makeGatewayHandle, makeSessionHandle } from "./handles.js";
 export {
@@ -32,12 +33,15 @@ export type {
   ClientEventFilter,
   ClientEventSurface,
   ClientExtension,
+  ClientHookContext,
   ClientInstaller,
   ClientLifecycleEvents,
   ClientNamespaces,
   ClientProtocol,
   ClientState,
   ClientTransport,
+  WireHooks,
+  WireRegistrars,
   EventFrame,
   LifecycleEventSpec,
   LifecycleHandlerFor,

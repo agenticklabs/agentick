@@ -27,10 +27,14 @@ import type {
   EventBus,
   GatewayHandle,
   InitializeResult,
+  ClientHookContext,
   SendInput,
   ServerInfo,
+  Unsubscribe,
+  WireHooks,
   WireMethod,
   WireParams,
+  WireRegistrars,
   WireResult,
 } from "@agentick/spec-next";
 import { EMPTY_CLIENT_CAPABILITIES, ErrorCode } from "@agentick/spec-next";
@@ -38,6 +42,7 @@ import { createLocalPubSub, createNotifier, type LocalPubSub } from "@agentick/p
 import { Deferred, Effect, Stream } from "effect";
 import { buildClientCapabilities } from "./capabilities.js";
 import { ClientHandlerRegistry } from "./handler-registry.js";
+import { ClientHookRegistry, commandForMethod } from "./hook-registry.js";
 import { makeAppHandle, makeGatewayHandle, makeSessionHandle } from "./handles.js";
 import { composeRequest } from "./pipeline.js";
 
@@ -75,6 +80,14 @@ class AgentickClient implements ClientProtocol {
 
   private readonly extensions: readonly ClientExtension[];
   private readonly handlerRegistry = new ClientHandlerRegistry();
+  /**
+   * Dynamically-registered client wire hooks (ADR 83). Read LIVE per
+   * request — a hook added AFTER construction takes effect on the next
+   * request without rebuilding the pipeline. Empty by default; the
+   * request path fast-paths straight to `composedRequest` when so.
+   */
+  private readonly hookRegistry = new ClientHookRegistry();
+  private _hookRegistrars?: WireRegistrars;
   private readonly clientBus: LocalEventBus;
   /**
    * Dedicated client-event emitter. Deliberately DECOUPLED from
@@ -340,7 +353,83 @@ class AgentickClient implements ClientProtocol {
     params: WireParams<M>,
     signal?: AbortSignal,
   ): Promise<WireResult<M>> {
-    return this.composedRequest({ method, params, signal } as never) as Promise<WireResult<M>>;
+    // Fast-path: no wire hooks registered → straight to the composed
+    // extension pipeline, zero per-request hook overhead.
+    if (this.hookRegistry.isEmpty()) {
+      return this.composedRequest({ method, params, signal } as never) as Promise<WireResult<M>>;
+    }
+    return this.dispatchWithHooks(method, params, signal);
+  }
+
+  /**
+   * The hooked request path (ADR 83). Wraps the extension pipeline
+   * OUTERMOST: `onBeforeWire<Method>` hooks transform `params` (or throw
+   * to abort) before extension middleware sees them; `onAfterWire<Method>`
+   * hooks transform the `result` after the pipeline resolves. Both are
+   * method-scoped via the shared command derivation.
+   */
+  private async dispatchWithHooks<M extends WireMethod>(
+    method: M,
+    params: WireParams<M>,
+    signal?: AbortSignal,
+  ): Promise<WireResult<M>> {
+    const command = commandForMethod(method);
+    const ctx: ClientHookContext = { method, signal };
+
+    let nextParams: WireParams<M> = params;
+    for (const hook of this.hookRegistry.beforeHooks(command)) {
+      // A throw aborts the request (no verdict DSL); a returned value
+      // transforms the params, `undefined` passes them through.
+      const reshaped = await hook(nextParams, ctx);
+      if (reshaped !== undefined) nextParams = reshaped as WireParams<M>;
+    }
+
+    let result = (await this.composedRequest({
+      method,
+      params: nextParams,
+      signal,
+    } as never)) as WireResult<M>;
+
+    for (const hook of this.hookRegistry.afterHooks(command)) {
+      const reshaped = await hook(result, ctx);
+      if (reshaped !== undefined) result = reshaped as WireResult<M>;
+    }
+    return result;
+  }
+
+  /**
+   * Register client wire hooks declaratively (ADR 83) — the runtime twin
+   * of the server's `harness.hook()`. Returns an {@link Unsubscribe}
+   * removing every hook in the config.
+   */
+  hook(config: WireHooks): Unsubscribe {
+    const unsubs: Unsubscribe[] = [];
+    for (const [key, fn] of Object.entries(config as Record<string, unknown>)) {
+      if (fn === undefined) continue;
+      unsubs.push(this.hookRegistry.register(key, fn));
+    }
+    if (unsubs.length === 0) return () => {};
+    let live = true;
+    return () => {
+      if (!live) return;
+      live = false;
+      for (const off of unsubs) off();
+    };
+  }
+
+  /**
+   * Per-method imperative registrars (ADR 83) — a typed Proxy over
+   * single-hook registration, mirroring the server's `harness.hooks`.
+   * `client.hooks.onBeforeWireSessionSend(fn)` registers a hook and
+   * returns its {@link Unsubscribe}.
+   */
+  get hooks(): WireRegistrars {
+    return (this._hookRegistrars ??= new Proxy({} as WireRegistrars, {
+      get: (_target, name) =>
+        typeof name === "string"
+          ? (fn: unknown) => this.hookRegistry.register(name, fn)
+          : undefined,
+    }));
   }
 
   gateway(): GatewayHandle {
