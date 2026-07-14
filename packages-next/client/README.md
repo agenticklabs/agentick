@@ -269,6 +269,56 @@ Opt-in adapter for adopters who prefer the Effect-native signature
 middleware shape is Promise-based because most adopters write trivial
 wrappers.
 
+### Wire hooks — `client.hook` / `client.hooks`
+
+Intercept outbound wire requests by method, symmetric with the server's
+`harness.hook` / `harness.hooks` (ADR 83). A **before-hook** transforms the
+request `params` (or throws to abort the request before it leaves); an
+**after-hook** transforms the `result` the caller sees. Hooks are read **live**
+per request — register or remove them any time — and when none are registered
+the request path is zero-overhead.
+
+The names are typed off `WireMethods` with a `wire:` prefix, so
+`session/send` → `onBeforeWireSessionSend`. That prefix is deliberate: it's the
+**same op at two wire layers** — the client request leaving here and the gateway
+wire dispatch arriving there both key on `onBeforeWireSessionSend`, distinct from
+the server-side `session:send` op's `onBeforeSessionSend`.
+
+Two surfaces, both returning an `Unsubscribe`:
+
+```ts
+import { createClient } from "@agentick/client-next";
+
+const client = await createClient({ transport });
+
+// 1. Batch config — register several at once:
+const off = client.hook({
+  // before: `throw` to abort, return reshaped params to transform, or
+  // return nothing to pass them through unchanged. `params` is typed as
+  // WireParams<"session/send">.
+  onBeforeWireSessionSend: (params, ctx) => {
+    if (overBudget()) throw new Error("client budget exceeded"); // request never leaves
+    return params; // (or a reshaped copy)
+  },
+  // after: observe or transform the result the caller receives
+  onAfterWireSessionSend: (result, ctx) => {
+    metrics.record(ctx.method);
+    return result; // (or a reshaped copy)
+  },
+});
+off(); // remove them all
+
+// 2. Per-method proxy — one registrar, live:
+const stop = client.hooks.onBeforeWireAppRunOnce((params, ctx) => {
+  audit(ctx.method); // ctx.method === "app/run_once"
+  return params;
+});
+```
+
+The hook context is `{ method, signal }` (`method` is the wire method being
+called; `signal` the request's `AbortSignal`). `client.hook(config)` and every
+`client.hooks.on…` registrar return an `Unsubscribe`.
+
 ## Patterns
 
 ### Talk to a remote gateway over WebSocket
@@ -326,6 +376,7 @@ under "Roadmap & known gaps" with an explicit marker.
 | `client.send(sessionId, input)` shortcut shape equivalence with `client.session(id).send(input)`                                  | `../transport-in-process/src/__tests__/send-shortcut.spec.ts` |
 | `onLog` / `onProgress` cross-surface query + envelope→payload mapping + unsubscribe closes stream (ADR 64)                        | `src/__tests__/signals.spec.ts`                               |
 | `channelView` snapshot-seed + delta-fold, `useSyncExternalStore` contract, `close()` teardown, malformed-frame isolation (ADR 33) | `src/__tests__/channel-view.spec.ts`                          |
+| Wire hooks — `onBeforeWire<Method>` param transform + abort, `onAfterWire<Method>` result transform, method-scoping, `client.hook`/`client.hooks` register + unsubscribe, empty-registry fast-path (ADR 83) | `src/__tests__/wire-hooks.spec.ts`                            |
 
 ## Roadmap & known gaps
 
