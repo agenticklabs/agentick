@@ -54,6 +54,39 @@ httpServer.listen(8080);
 Browser clients send `Sec-WebSocket-Protocol: agentick-rpc-v1`; the
 server rejects connections that don't.
 
+### Server, gateway-owned (ADR 84 `ServerTransport`)
+
+`webSocketServerTransport(config)` inverts the raw factory: the wire
+config (`port`, TLS, origins) binds at construction, and the gateway
+injects itself as the dispatch host at `listen()`. Hand it to
+`createGateway({ transports })` and the gateway owns the whole
+lifecycle — `gateway.listen()` creates and binds the Node `http.Server`;
+`gateway.close()` tears both the WS handler and the server down.
+
+```ts
+import { createGateway } from "@agentick/gateway-next";
+import { webSocketServerTransport } from "@agentick/transport-websocket-next/server";
+
+const gateway = await createGateway({
+  transports: [
+    webSocketServerTransport({
+      port: 8080,
+      host: "0.0.0.0",
+      allowedOrigins: ["https://my-app.example.com"],
+    }),
+  ],
+});
+
+await gateway.listen(); // creates node:http server, attaches WS, binds :8080
+// ...
+await gateway.close(); // tears down the WS handler AND the server it created
+```
+
+An adopter that already owns a Node server (shared with an HTTP
+transport, an `https.Server`) passes `{ httpServer }` instead of
+`{ port }` — the wrapper attaches to it and, since it did not create it,
+does not close it.
+
 ## API surface
 
 ### `websocket(options): ClientTransport`
@@ -98,6 +131,23 @@ interface WebSocketServerOptions {
    *  strings leak into proxy logs / history). */
   allowQueryToken?: boolean;
 }
+```
+
+### `webSocketServerTransport(config): ServerTransport`
+
+```ts
+// Common path — the wrapper owns the Node http.Server:
+type WebSocketServerTransportPortConfig = Omit<
+  WebSocketServerOptions,
+  "gateway" | "httpServer"
+> & {
+  port: number;
+  host?: string; // bind address; default all interfaces
+};
+// Or attach to an adopter-owned server:
+type WebSocketServerTransportConfig =
+  | WebSocketServerTransportPortConfig
+  | Omit<WebSocketServerOptions, "gateway">; // { httpServer, ... }
 ```
 
 Server auth extracts the bearer from `Authorization: Bearer ...` (and,
@@ -274,3 +324,4 @@ discipline: a `✓` claim has a test or it doesn't ship with the `✓`.
 | `notifications/cancelled` client emit + server handle                  | `src/__tests__/cancellation.spec.ts`     |
 | Custom WebSocket constructor (`ws` library)                            | `src/__tests__/custom-ws-ctor.spec.ts`   |
 | Ingress authn (ADR 61) — per-connection bearer auth, fail-closed 401, prototype-key guard, once-per-socket, local pole when no `authSource` | `src/__tests__/ingress-authn.spec.ts` (`runIngressAuthnConformance`) |
+| `webSocketServerTransport` — `ServerTransport` conformance + real gateway-owned bind (`gateway.listen()` binds the port + WS round-trips a ping; `gateway.close()` frees it) | `src/__tests__/server-transport.spec.ts` (`runServerTransportConformance`) |

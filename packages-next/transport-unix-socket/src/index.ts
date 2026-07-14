@@ -13,7 +13,9 @@ export {
 } from "./client/index.js";
 export {
   unixSocketServer,
+  unixSocketServerTransport,
   type UnixSocketServerOptions,
   type UnixSocketServerHandle,
+  type UnixSocketServerTransportConfig,
   type DispatchHost,
 } from "./server/index.js";

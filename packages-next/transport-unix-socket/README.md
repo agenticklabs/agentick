@@ -30,6 +30,27 @@ const server = unixSocketServer({
 });
 ```
 
+### Server, gateway-owned (ADR 84 `ServerTransport`)
+
+`unixSocketServerTransport(config)` binds the socket `path` at
+construction and takes the dispatch host at `listen()`. It is the
+simplest wrapper — the underlying `net.Server` binds itself — so
+`gateway.listen()` just defers the host and awaits the `listening`
+event; `gateway.close()` closes the socket (Node unlinks the path).
+
+```ts
+import { createGateway } from "@agentick/gateway-next";
+import { unixSocketServerTransport } from "@agentick/transport-unix-socket-next/server";
+
+const gateway = await createGateway({
+  transports: [unixSocketServerTransport({ path: "/run/agentick.sock" })],
+});
+
+await gateway.listen(); // binds the net.Server on the socket path
+// ...
+await gateway.close(); // closes the socket; Node unlinks the path
+```
+
 ### Client (TUI / CLI)
 
 ```ts
@@ -75,6 +96,16 @@ interface UnixSocketServerOptions {
 `server` is the underlying `net.Server`. Caller owns the socket file's
 lifecycle. To rebind cleanly after a daemon restart, `fs.unlink(path)`
 before `unixSocketServer({ path })` when an existing file is found.
+
+### `unixSocketServerTransport(config): ServerTransport`
+
+```ts
+type UnixSocketServerTransportConfig = Omit<UnixSocketServerOptions, "gateway">; // { path, authSource? }
+```
+
+The gateway injects the dispatch host at `listen()`. The wrapper awaits
+the `net.Server` `listening` event so a resolved `gateway.listen()`
+means a client can connect immediately.
 
 ## Wire format
 
@@ -132,6 +163,7 @@ Phase 33.E of the v2 implementation plan — see
 | End-to-end ping, listApps, RPC error → TransportError, multiplexed RPCs, close transition                                                              | `src/__tests__/smoke.spec.ts`                                                                                        |
 | State machine, RPC correlation, multiplexed concurrent RPCs, `notifications/cancelled` emit, subscription routing + close + eviction, progress streams | `src/__tests__/transport-conformance.spec.ts` (via `runTransportConformance` from `@agentick/spec-conformance-next`) |
 | Ingress authn (ADR 61) — host-local `none` credential → local pole; configured `authSource` rejecting `none` fails closed; `allowAnonymous` admits with no principal | `src/__tests__/ingress-authn.spec.ts` (`runIngressAuthnConformance`) |
+| `unixSocketServerTransport` — `ServerTransport` conformance + real gateway-owned bind (`gateway.listen()` binds the socket, ping round-trips; `gateway.close()` unlinks the path) | `src/__tests__/server-transport.spec.ts` (`runServerTransportConformance`) |
 
 ## Roadmap & known gaps
 

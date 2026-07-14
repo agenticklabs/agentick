@@ -56,13 +56,22 @@ Both are hookable ops (§4): `gateway:start` and `gateway:close`.
 
 ## 2. `ServerTransport` — the missing symmetry
 
-**Status: the abstraction + gateway ownership + conformance LANDED
+**Status: LANDED — the abstraction + gateway ownership + conformance
 (`@agentick/spec-next` `server/transport.ts`, `@agentick/gateway-next`,
-`@agentick/spec-conformance-next` `runServerTransportConformance`). The
-concrete transport wrappers (`webSocket` / `http` / `unixSocket` /
-`inProcess`) are the follow-on task — they wrap the existing
-`websocketServer` / `httpServer` / `unixSocketServer` factories behind this
-interface.**
+`@agentick/spec-conformance-next` `runServerTransportConformance`) AND the
+four concrete transport wrappers:**
+
+- **`webSocketServerTransport({ port, host?, … })`** — `@agentick/transport-websocket-next/server`. Owns the Node `http.Server`: `listen(host)` creates it, attaches `websocketServer`, binds the port; `close()` tears down both. `{ httpServer }` config attaches to an adopter-owned server (not closed).
+- **`httpServerTransport({ port, host?, … })`** — `@agentick/transport-http-next/server`. Same http-server ownership as WS (`httpServer` mounts on a caller-supplied Node server, so the wrapper creates + binds it). `{ httpServer }` config for adopter-owned servers.
+- **`unixSocketServerTransport({ path, … })`** — `@agentick/transport-unix-socket-next/server`. Simplest — `unixSocketServer` binds its own `net.Server`; the wrapper defers the host and awaits `listening`. `close()` closes the socket (Node unlinks the path).
+- **`inProcessServerTransport()`** — `@agentick/transport-in-process-next`. Direct-call transport: no wire to bind, so `listen`/`close` are honest no-ops. Present so an in-process deployment lists its transport alongside the network ones and fan-out stays uniform. Stable id `"in-process"`.
+
+Each wraps the existing `websocketServer` / `httpServer` /
+`unixSocketServer` factory (or, for in-process, the direct-call handler)
+behind this interface, inverting the shape: **wire config binds at
+construction; the host is injected at `listen(host)`.** Each ships
+`runServerTransportConformance` plus a real gateway-owned bind test in
+its package `__tests__/server-transport.spec.ts`.
 
 The client side has `BaseClientTransport`; the server side has only the loose
 `dispatchRequest` + per-transport adapters the adopter wires by hand. Add the
@@ -198,8 +207,10 @@ identity enrichment — lower priority, same rules.
 3. Gateway lifecycle — `listen()` / `close({ drain })`; `gateway:start` /
    `gateway:close` ops; thread gateway→app live inheritance in `createApp`.
 4. `ServerTransport` abstraction + flat `transports` gateway ownership +
-   conformance — **LANDED**. Concrete transport wrappers (`webSocket` / `http` /
-   `unixSocket` / `inProcess`) are the follow-on task.
+   conformance — **LANDED**. Concrete transport wrappers
+   (`webSocketServerTransport` / `httpServerTransport` /
+   `unixSocketServerTransport` / `inProcessServerTransport`) — **LANDED**
+   (§2), each with conformance + a real gateway-owned bind test.
 5. Gateway op surface — `authorizer:authorize`, `gateway:accept`,
    `gateway:create-app` through `runOperation`.
 

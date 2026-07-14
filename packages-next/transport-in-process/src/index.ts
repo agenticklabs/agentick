@@ -24,3 +24,4 @@ export {
   buildHandshakeExtensionsListResult,
   type WithHandshakeOverrides,
 } from "./handshake.js";
+export { inProcessServerTransport } from "./server-transport.js";

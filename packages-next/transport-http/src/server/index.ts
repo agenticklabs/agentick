@@ -12,3 +12,8 @@ export {
   type HttpServerHandle,
   type DispatchHost,
 } from "./server.js";
+export {
+  httpServerTransport,
+  type HttpServerTransportConfig,
+  type HttpServerTransportPortConfig,
+} from "./transport.js";

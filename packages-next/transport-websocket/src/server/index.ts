@@ -15,4 +15,9 @@ export {
   type WebSocketServerOptions,
   type WebSocketServerHandle,
 } from "./server.js";
+export {
+  webSocketServerTransport,
+  type WebSocketServerTransportConfig,
+  type WebSocketServerTransportPortConfig,
+} from "./transport.js";
 export type { DispatchHost } from "@agentick/transport-next";

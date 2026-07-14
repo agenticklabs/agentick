@@ -90,6 +90,29 @@ travel through the `sendNotification` callback the handler already
 receives — the same channel `dispatchRequest`'s `DispatchSink` uses to
 fan subscription events back to the subscriber.
 
+### `inProcessServerTransport(): ServerTransport`
+
+The server-side symmetry of the ADR 84 transport family. In-process is a
+DIRECT-CALL transport: the client reaches the gateway through the
+`handler` closure above, not through a bound socket. There is nothing to
+open, so `listen()` and `close()` are honest no-ops. It exists so an
+in-process deployment can list its transport alongside the network
+transports and `gateway.listen()` fan-out stays uniform:
+
+```ts
+import { createGateway } from "@agentick/gateway-next";
+import { inProcessServerTransport } from "@agentick/transport-in-process-next";
+import { webSocketServerTransport } from "@agentick/transport-websocket-next/server";
+
+// A gateway reachable both in-process AND over the network:
+const gateway = await createGateway({
+  transports: [inProcessServerTransport(), webSocketServerTransport({ port: 8080 })],
+});
+await gateway.listen(); // binds :8080; in-process transport is a no-op
+```
+
+Its `id` is the stable string `"in-process"`.
+
 ### Server-initiated notifications — the control-plane bus (ADR 47)
 
 Control-plane signals (`gateway:capabilities:changed`) ride the
@@ -197,6 +220,7 @@ confidence.
 | Wire conformance (envelope roundtrips, validator integration, batches, empty batch rejection) | `src/__tests__/wire-conformance.spec.ts`    |
 | Full `session/send` client → gateway → executor roundtrip                                     | `src/__tests__/session-send-e2e.spec.ts`    |
 | `ctx.progress` during an in-flight send reaches `client.transport.progress(token)` (ADR 64)   | `src/__tests__/progress-signal-e2e.spec.ts` |
+| `inProcessServerTransport` — `ServerTransport` conformance + no-op `listen`/`close` inside a gateway; stable `"in-process"` id | `src/__tests__/server-transport.spec.ts` (`runServerTransportConformance`) |
 
 ## Status
 

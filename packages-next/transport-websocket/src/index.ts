@@ -12,8 +12,11 @@ export { websocket, type WebSocketTransportOptions, type ReconnectPolicy } from 
 
 export {
   websocketServer,
+  webSocketServerTransport,
   type WebSocketServerOptions,
   type WebSocketServerHandle,
+  type WebSocketServerTransportConfig,
+  type WebSocketServerTransportPortConfig,
   type DispatchHost,
 } from "./server/index.js";
 

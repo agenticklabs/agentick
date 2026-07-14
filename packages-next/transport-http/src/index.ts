@@ -9,7 +9,10 @@ export { http, type HttpTransportOptions } from "./client/index.js";
 export type { ReconnectPolicy } from "./client/transport.js";
 export {
   httpServer,
+  httpServerTransport,
   type HttpServerOptions,
   type HttpServerHandle,
+  type HttpServerTransportConfig,
+  type HttpServerTransportPortConfig,
   type DispatchHost,
 } from "./server/index.js";

@@ -68,6 +68,31 @@ const server = httpServer({
 node.listen(8080);
 ```
 
+### Server, gateway-owned (ADR 84 `ServerTransport`)
+
+`httpServerTransport(config)` binds the wire config at construction and
+takes the dispatch host at `listen()`. Because `httpServer` mounts on a
+caller-supplied Node server, the wrapper owns the port: given `{ port }`
+it creates the Node `http.Server` on `gateway.listen()`, mounts the
+handler, and binds; `gateway.close()` tears both down.
+
+```ts
+import { createGateway } from "@agentick/gateway-next";
+import { httpServerTransport } from "@agentick/transport-http-next/server";
+
+const gateway = await createGateway({
+  transports: [httpServerTransport({ port: 3000, host: "0.0.0.0" })],
+});
+
+await gateway.listen(); // creates + binds the node:http server on :3000
+// ...
+await gateway.close(); // closes the request handler AND the server it created
+```
+
+Pass `{ httpServer }` instead of `{ port }` to mount on a server the
+adopter already owns (shared with a WS transport, an `https.Server`);
+the wrapper does not close what it did not create.
+
 ## API surface
 
 ### `http(options): ClientTransport`
@@ -102,6 +127,23 @@ interface HttpServerOptions {
    */
   authSource?: AuthSource;
 }
+```
+
+### `httpServerTransport(config): ServerTransport`
+
+```ts
+// Common path — the wrapper owns the Node http.Server:
+type HttpServerTransportPortConfig = Omit<
+  HttpServerOptions,
+  "gateway" | "httpServer"
+> & {
+  port: number;
+  host?: string; // bind address; default all interfaces
+};
+// Or mount on an adopter-owned server:
+type HttpServerTransportConfig =
+  | HttpServerTransportPortConfig
+  | Omit<HttpServerOptions, "gateway">; // { httpServer, ... }
 ```
 
 > **Server-side auth (prod edge).** `authSource` authenticates the
@@ -159,6 +201,7 @@ under "Roadmap & known gaps" with an explicit marker.
 | State machine, RPC correlation, multiplexed concurrent RPCs, `notifications/cancelled` emit, subscription routing + close + eviction, progress streams | `src/__tests__/transport-conformance.spec.ts` (`runTransportConformance` from `@agentick/spec-conformance-next`) |
 | SSE codec — `encodeSseFrame` + `parseSseFrames`                                                                                                        | covered via the conformance suite's streaming-response path                                                      |
 | Per-request ingress authn — valid/invalid/missing bearer, prototype-key guard, no cross-request identity bleed (two POSTs, one session)                | `src/__tests__/ingress-authn.spec.ts` (`runIngressAuthnConformance`)                                             |
+| `httpServerTransport` — `ServerTransport` conformance + real gateway-owned bind (`gateway.listen()` creates + binds the node server, ping round-trips; `gateway.close()` frees the port) | `src/__tests__/server-transport.spec.ts` (`runServerTransportConformance`)                                       |
 
 ## Roadmap & known gaps
 
