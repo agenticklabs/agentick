@@ -629,3 +629,28 @@ describe("TasksHarness — ttl reaper (ADR 68)", () => {
     }
   });
 });
+
+describe("TasksHarness — channel snapshot (ADR 87 / ChannelSnapshotProvider)", () => {
+  it("snapshotChannel is task-status; channelSnapshotPayload reflects the current task set", async () => {
+    const bundle = await fakeTasks({ sessionId: "s-snap" });
+    try {
+      expect(bundle.harness.snapshotChannel).toBe("task-status");
+
+      // No tasks yet → an empty snapshot (seed for a subscriber that joins early).
+      expect(bundle.harness.channelSnapshotPayload()).toEqual({ kind: "snapshot", tasks: [] });
+
+      const a = bundle.harness.submit(async () => "a");
+      const b = bundle.harness.submit(() => new Promise<never>(() => {})); // stays working
+      void b.result.catch(() => undefined); // cancelled on close() — swallow the rejection
+      await a.result;
+
+      const snap = bundle.harness.channelSnapshotPayload();
+      expect(snap.kind).toBe("snapshot");
+      const byId = Object.fromEntries(snap.tasks.map((t) => [t.taskId, t.status]));
+      expect(byId[a.taskId]).toBe("completed");
+      expect(byId[b.taskId]).toBe("working");
+    } finally {
+      await bundle.close();
+    }
+  });
+});

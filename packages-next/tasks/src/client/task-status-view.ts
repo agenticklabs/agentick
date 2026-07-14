@@ -11,10 +11,12 @@
  * the server bundle. The `/client` subpath convention (like `/react`): a harness
  * package may add a client surface over the generic client.
  *
- * NOTE: the task-status channel does not register an open-with-snapshot today, so
- * a subscriber sees tasks as they transition — not a backfill of the pre-existing
- * list. When the channel gains a snapshot, seed from it in a `kind: "snapshot"`
- * branch here (mirroring `knobsStateView`); the fold below is forward-compatible.
+ * The subscription OPENS with a `kind: "snapshot"` frame (the harness's
+ * {@link ChannelSnapshotProvider}) carrying the full current task set — so a
+ * late/reconnecting subscriber renders the existing list, not just tasks that
+ * transition after it joined (the K8s watch-list model, ADR 87). Live deltas
+ * that follow are bare {@link TaskInfo} (one task's current state); the fold
+ * discriminates structurally on `kind`.
  *
  * @see docs/proposals/v2/blueprint/33-client-and-transports.md
  * @see docs/proposals/v2/blueprint/85-ui-packages.md (the `useTasks` family)
@@ -23,7 +25,7 @@
 
 import { channelView, type ChannelView } from "@agentick/client-next";
 import type { ClientTransport, SubscriptionScope, TaskInfo } from "@agentick/spec-next";
-import { TASK_STATUS_CHANNEL } from "../channel.js";
+import { TASK_STATUS_CHANNEL, type TaskStatusFrame } from "../channel.js";
 
 /** Minimal client surface the view needs — a read (`subscribe`) client. */
 export interface TaskStatusClient {
@@ -43,9 +45,16 @@ export function taskStatusView(
   sessionId: string,
 ): ChannelView<TaskStatusMap> {
   const scope: SubscriptionScope = { kind: "session", id: sessionId };
-  return channelView<TaskStatusMap, TaskInfo>(client, scope, TASK_STATUS_CHANNEL, {
+  return channelView<TaskStatusMap, TaskStatusFrame>(client, scope, TASK_STATUS_CHANNEL, {
     initial: {},
-    // Each frame is one task's current TaskInfo; fold by taskId (latest wins).
-    reduce: (state, info) => ({ ...state, [info.taskId]: info }),
+    reduce: (state, frame) => {
+      // Opening frame: the full current task set — seed the whole store. Only
+      // the snapshot arm carries `kind`; a live delta is a bare TaskInfo.
+      if ("kind" in frame) {
+        return Object.fromEntries(frame.tasks.map((t) => [t.taskId, t]));
+      }
+      // Live delta: one task's current TaskInfo; fold by taskId (latest wins).
+      return { ...state, [frame.taskId]: frame };
+    },
   });
 }

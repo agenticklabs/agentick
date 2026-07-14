@@ -61,6 +61,7 @@ import {
 import { createLocalPubSub, type LocalPubSub } from "@agentick/pubsub-next";
 import { omitUndefined } from "@agentick/utils-next";
 import type {
+  ChannelSnapshotProvider,
   ContentBlock,
   ElicitFn,
   ElicitationResult,
@@ -97,7 +98,11 @@ import {
   UnknownTaskExecutorError,
 } from "@agentick/spec-next";
 
-import { TASK_PROGRESS_CHANNEL, TASK_STATUS_CHANNEL } from "./channel.js";
+import {
+  TASK_PROGRESS_CHANNEL,
+  TASK_STATUS_CHANNEL,
+  type TaskStatusSnapshotFrame,
+} from "./channel.js";
 import { InMemoryTaskStore } from "./store.js";
 import { InProcessTaskExecutor } from "./executor.js";
 import {
@@ -230,7 +235,10 @@ export interface TasksHarnessOptions {
 // Harness
 // ============================================================================
 
-export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessProtocol {
+export class TasksHarness
+  extends BaseHarness<"tasks">
+  implements TasksHarnessProtocol, ChannelSnapshotProvider
+{
   /** In-process projection of the store, scoped to this harness's tasks. */
   private readonly live = new Map<string, LiveTask>();
   private readonly parentScope: EventScope | undefined;
@@ -899,6 +907,27 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
    */
   private persist(record: TaskRecord): void {
     void this.store.put(record).catch(() => undefined);
+  }
+
+  // ─────────── Status channel snapshot (ADR 87 / K8s watch-list) ───────────
+
+  /**
+   * The channel this harness snapshots — {@link ChannelSnapshotProvider}. The
+   * session scans its bridges for this and, on `sub/subscribe`, prepends
+   * {@link channelSnapshotPayload} as the opening frame a fresh `task-status`
+   * subscriber receives before any live delta.
+   */
+  readonly snapshotChannel = TASK_STATUS_CHANNEL;
+
+  /**
+   * {@link ChannelSnapshotProvider} — the current task set as the channel's
+   * opening frame, so a late/reconnecting subscriber renders the existing list
+   * rather than only tasks that transition after it joined. Discriminated
+   * (`kind: "snapshot"`) from the bare-`TaskInfo` live deltas. An observation:
+   * reads the live projection, publishes nothing.
+   */
+  channelSnapshotPayload(): TaskStatusSnapshotFrame {
+    return { kind: "snapshot", tasks: this.list() };
   }
 
   private publishStatus(live: LiveTask): void {

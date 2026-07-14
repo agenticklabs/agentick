@@ -82,9 +82,11 @@ the server-side `session.tasks` (`TasksHarness`, with `.submit(...)`) is the
 authority. Same noun, two vantages — CQRS by design (see the DX note in ADR 87).
 
 Each frame is one task's current `TaskInfo` (published on every FSM transition);
-the view folds them by `taskId`, latest wins. The channel has no open-with-snapshot
-today, so a subscriber sees tasks as they transition, not a backfill of the
-pre-existing list — seed from a snapshot frame here once the channel projects one.
+the view folds them by `taskId`, latest wins. The subscription OPENS with a
+`kind: "snapshot"` frame — the full current task set (the harness's
+`ChannelSnapshotProvider`) — so a late/reconnecting subscriber renders the
+existing list, not just tasks that transition after it joined (the K8s
+watch-list model, [ADR 87](../../docs/proposals/v2/blueprint/87-client-sub-handles.md)).
 This is the `useTasks` family source in [ADR 85](../../docs/proposals/v2/blueprint/85-ui-packages.md).
 
 ## Status

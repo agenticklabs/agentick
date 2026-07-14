@@ -20,8 +20,31 @@
  * from the MCP wire — Phase B's codec maps these envelopes onto the
  * wire 1:1.
  */
+
+import type { TaskInfo } from "@agentick/spec-next";
+
 export const TASK_STATUS_CHANNEL = "task-status" as const;
 export const TASK_PROGRESS_CHANNEL = "task-progress" as const;
+
+/**
+ * Opening frame of the `task-status` channel (ADR 87 / the K8s watch-list
+ * model). A fresh subscriber receives this FIRST — the full set of current
+ * tasks — before any live delta, so a late/reconnecting client renders the
+ * existing task list instead of only tasks that transition after it joined.
+ * Discriminated by `kind` so a consumer distinguishes it from a live delta
+ * frame, whose payload is a bare {@link TaskInfo} (unchanged, MCP-mirrored).
+ */
+export interface TaskStatusSnapshotFrame {
+  readonly kind: "snapshot";
+  readonly tasks: readonly TaskInfo[];
+}
+
+/**
+ * A `task-status` frame as seen on the bus: either the opening
+ * {@link TaskStatusSnapshotFrame} (seed) or a live delta (one task's current
+ * {@link TaskInfo}). The client `taskStatusView` folds both.
+ */
+export type TaskStatusFrame = TaskStatusSnapshotFrame | TaskInfo;
 
 export type TaskStatusChannelName = typeof TASK_STATUS_CHANNEL;
 export type TaskProgressChannelName = typeof TASK_PROGRESS_CHANNEL;

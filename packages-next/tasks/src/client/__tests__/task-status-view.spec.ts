@@ -19,16 +19,16 @@ import { channelEventName } from "@agentick/spec-next";
 import { waitFor } from "@agentick/utils-next/testing";
 
 import { taskStatusView } from "../task-status-view.js";
-import { TASK_STATUS_CHANNEL } from "../../channel.js";
+import { TASK_STATUS_CHANNEL, type TaskStatusFrame } from "../../channel.js";
 
 /** A push-driven subscription stream a test emits task-status frames onto. */
-function pushStream(): SubscriptionStream & { emit(info: TaskInfo): void } {
+function pushStream(): SubscriptionStream & { emit(frame: TaskStatusFrame): void } {
   const buffer: EventFrame[] = [];
   const waiters: Array<(r: IteratorResult<EventFrame>) => void> = [];
   let n = 0;
   return {
     subscriptionId: "sub-test",
-    emit(info: TaskInfo): void {
+    emit(frame: TaskStatusFrame): void {
       const f: EventFrame = {
         cursor: { value: ++n } as Cursor,
         envelope: {
@@ -38,7 +38,7 @@ function pushStream(): SubscriptionStream & { emit(info: TaskInfo): void } {
           phase: "delta",
           timestamp: 0,
           scope: { sessionId: "s1" },
-          payload: info,
+          payload: frame,
         } as ProtocolEvent,
       };
       const w = waiters.shift();
@@ -92,6 +92,25 @@ describe("taskStatusView", () => {
       t1: taskInfo("t1", "completed", { lastUpdatedAt: 5 }),
       t2: taskInfo("t2", "input_required"),
     });
+  });
+
+  it("seeds the whole store from the opening snapshot frame, then folds deltas on top", async () => {
+    const stream = pushStream();
+    const view = taskStatusView(fakeClient(stream), "s1");
+
+    // Opening frame: the full current task set (K8s watch-list / ADR 87).
+    stream.emit({
+      kind: "snapshot",
+      tasks: [taskInfo("t1", "working"), taskInfo("t2", "completed")],
+    });
+    await waitFor(() => Object.keys(view.get()).length === 2);
+    expect(view.get().t1?.status).toBe("working");
+    expect(view.get().t2?.status).toBe("completed");
+
+    // A live delta after the snapshot folds onto the seeded store.
+    stream.emit(taskInfo("t3", "input_required"));
+    await waitFor(() => "t3" in view.get());
+    expect(Object.keys(view.get())).toEqual(["t1", "t2", "t3"]);
   });
 
   it("subscribes to the task-status channel (façade builds the session scope + query)", () => {
