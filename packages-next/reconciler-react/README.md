@@ -72,7 +72,7 @@ Layer B — Collection
 
 Layer C — Harness
   BaseHarness subclass wraps renderTree as a typed command with the
-  full phase contract, lifecycle handlers, middleware, inbox, events.
+  full phase contract, interceptors (guard/transform/observe), inbox, events.
 ```
 
 The host tree never crosses the harness boundary; only `RenderedTree`,
