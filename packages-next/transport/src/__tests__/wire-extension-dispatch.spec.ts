@@ -107,6 +107,9 @@ function fakeGateway(
     listen: async () => {},
     closeGateway: async () => {},
     close: async () => {},
+    // No authorizer on this fake → the dispatch gate's policy layer never
+    // reaches `authorize`; the member exists only to satisfy the protocol.
+    authorize: () => Promise.resolve({ allowed: true }),
     events: () => ({ [Symbol.asyncIterator]: async function* () {} }),
     runWireDispatch: (_m, _p, run) => run(),
     wireExtensions: () => registry,
@@ -256,6 +259,7 @@ describe("dispatchRequest — wire extension registry integration", () => {
       listen: async () => {},
       closeGateway: async () => {},
       close: async () => {},
+      authorize: () => Promise.resolve({ allowed: true }),
       events: () => ({ [Symbol.asyncIterator]: async function* () {} }),
       runWireDispatch: (_m, _p, run) => run(),
     };

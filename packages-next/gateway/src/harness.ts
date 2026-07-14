@@ -31,6 +31,8 @@ import {
 import type {
   AnyExtension,
   AppHarnessProtocol,
+  AuthorizeInput,
+  AuthorizeResult,
   CreateAppInput,
   EventBus,
   EventQuery,
@@ -64,6 +66,7 @@ import {
   GATEWAY_CAPABILITIES_CHANGED,
   GatewayBridgeSlotOccupied,
   GatewayClosedError,
+  GatewayLifecycleError,
   toRegistration,
 } from "@agentick/spec-next";
 import { createWireExtensionRegistry } from "./wire-registry.js";
@@ -87,10 +90,24 @@ import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next
 // `Operation<undefined, void>` — so both sides are typed from these
 // declarations. (`gateway:close` is the ADR 84 rename of `gateway:close-gateway`
 // — `onGatewayClose`, dropping the redundant `Gateway` suffix.)
+//
+// ADR 84 §4/§5 — two more gateway ops route through `runOperation`:
+//   - `gateway:create-app` (see `createApp`) mints `onBeforeGatewayCreateApp`
+//     / `onAfterGatewayCreateApp`. Before-hook input is the normalized
+//     `CreateGatewayAppInput` (veto by throwing, or transform for multi-tenant
+//     app-mount gating); after-hook output is the mounted `AppHarnessProtocol`.
+//   - `authorizer:authorize` (see `authorize`) mints
+//     `onBeforeAuthorizerAuthorize` / `onAfterAuthorizerAuthorize` — the FINE
+//     contextual auth layer (ADR 84 §5). Before-hook can augment the
+//     `AuthorizeInput` (add contextual scopes) or throw to deny; after-hook
+//     observes the `AuthorizeResult`. The structural ceiling (`requiredScopes`)
+//     stays un-waivable and OUTSIDE this seam — checked before the op fires.
 declare module "@agentick/runtime-next" {
   interface CommandRegistry {
     "gateway:start": { input: undefined; output: void };
     "gateway:close": { input: undefined; output: void };
+    "gateway:create-app": { input: CreateGatewayAppInput; output: AppHarnessProtocol };
+    "authorizer:authorize": { input: AuthorizeInput; output: AuthorizeResult };
   }
 }
 
@@ -559,7 +576,9 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
   ): Promise<AppHarnessProtocol<P>> {
     // Two-door signature, mirroring `createApp(rootElement, options)`: the
     // positional form is discriminated by the presence of the second arg
-    // (arity), so no structural sniffing of the first is needed.
+    // (arity), so no structural sniffing of the first is needed. Normalize
+    // FIRST so the op — and its `onBeforeGatewayCreateApp` hook — always sees
+    // one canonical `CreateGatewayAppInput` shape regardless of the door used.
     const input: CreateGatewayAppInput<P> =
       maybeInput === undefined
         ? (rootOrInput as CreateGatewayAppInput<P>)
@@ -567,6 +586,44 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
             ...maybeInput,
             rootElement: rootOrInput as CreateGatewayAppInput<P>["rootElement"],
           } as CreateGatewayAppInput<P>);
+
+    // ADR 84 §4 — wrap the mount in the hookable `gateway:create-app` op via
+    // `runOperation` (the same pattern `listen` / `closeGateway` mirror). The
+    // before-hook (`onBeforeGatewayCreateApp`) can veto (throw) or transform
+    // the normalized input (multi-tenant gating); the body receives the
+    // possibly-transformed input; the after-hook (`onAfterGatewayCreateApp`)
+    // observes the mounted `AppHarnessProtocol`.
+    const op: Operation<CreateGatewayAppInput<P>, AppHarnessProtocol<P>, GatewayError> = {
+      opId: `gateway:create-app:${ulid()}`,
+      surface: SURFACE,
+      name: "gateway:command:create-app",
+      scope: { gatewayId: this.scopeId },
+      input,
+    };
+    return runHarnessProtocol(
+      this.runOperation(op, (i) =>
+        Effect.tryPromise({
+          try: () => this.createAppBody(i),
+          // Map the rejection into the op's typed FAIL channel (NOT a defect):
+          // `runHarnessProtocol` rethrows a Fail value AS-IS, so
+          // `GatewayClosedError` / `AppAlreadyExistsError` keep their identity
+          // (instanceof) at the caller. A bare `throw` here would become a
+          // defect and get stringified — see `mapGatewayError`.
+          catch: mapGatewayError,
+        }),
+      ),
+    );
+  }
+
+  /**
+   * Mount body for the {@link createApp} op (ADR 84 §4). Receives the
+   * normalized — and possibly `onBeforeGatewayCreateApp`-transformed — input.
+   * The `appId` default, closed-gateway guard, duplicate-id check, substrate
+   * inheritance, tool/extension cascade, and app registration all live here so
+   * the before-hook operates on the raw input and the after-hook observes the
+   * finished app.
+   */
+  private async createAppBody<P>(input: CreateGatewayAppInput<P>): Promise<AppHarnessProtocol<P>> {
     if (this.gatewayClosed) {
       const err: GatewayError = new GatewayClosedError();
       throw err;
@@ -726,6 +783,40 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     return this.closeGateway(opts);
   }
 
+  /**
+   * The FINE contextual authorization layer (ADR 84 §5). Wraps
+   * {@link authorizer}.authorize in the hookable `authorizer:authorize` op via
+   * `runOperation`, so `onBeforeAuthorizerAuthorize` can augment the
+   * {@link AuthorizeInput} from request context (grant a contextual scope) or
+   * throw to deny, and `onAfterAuthorizerAuthorize` can observe/audit the
+   * {@link AuthorizeResult}. The wire dispatch gate (`authorizeDispatch`)
+   * routes its policy calls through THIS method rather than the raw authorizer.
+   *
+   * CRITICAL: the STRUCTURAL ceiling (`SessionHarnessProtocol.requiredScopes`)
+   * stays un-waivable and OUTSIDE this seam — `authorizeDispatch` checks it
+   * BEFORE this op fires, so no hook here can widen it. This op is only the
+   * policy layer that sits ON TOP of that floor.
+   */
+  authorize(input: AuthorizeInput): Promise<AuthorizeResult> {
+    const op: Operation<AuthorizeInput, AuthorizeResult, never> = {
+      opId: `authorizer:authorize:${ulid()}`,
+      surface: SURFACE,
+      name: "authorizer:command:authorize",
+      scope: { gatewayId: this.scopeId },
+      input,
+    };
+    return runHarnessProtocol(
+      this.runOperation(op, (i) =>
+        Effect.tryPromise({
+          try: () => this.authorizer.authorize(i),
+          catch: (cause): never => {
+            throw cause;
+          },
+        }),
+      ),
+    );
+  }
+
   events(filter: EventQuery = {}, options: SubscribeOptions = {}): AsyncIterable<ProtocolEvent> {
     const bus = this.bus;
     return {
@@ -862,6 +953,31 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     void msg;
     return Effect.succeed(undefined);
   }
+}
+
+// ============================================================================
+// Error mapping
+// ============================================================================
+
+/**
+ * Map a `createApp` rejection into the op's typed `GatewayError` FAIL channel
+ * (the twin of `@agentick/app-next`'s `mapAppError`). A typed `AgentickError`
+ * (carrying a string `_tag`) — `GatewayClosedError`, `AppAlreadyExistsError`,
+ * etc. — passes through AS-IS so `runHarnessProtocol` rethrows it with its
+ * identity intact (pattern-match / `instanceof` at the caller). Anything else
+ * (a raw throw from an `onBeforeGatewayCreateApp` hook, say) is wrapped as a
+ * `GatewayLifecycleError` so the channel stays typed.
+ */
+function mapGatewayError(cause: unknown): GatewayError {
+  if (
+    cause &&
+    typeof cause === "object" &&
+    "_tag" in cause &&
+    typeof (cause as { _tag?: unknown })._tag === "string"
+  ) {
+    return cause as GatewayError;
+  }
+  return new GatewayLifecycleError({ cause });
 }
 
 // ============================================================================

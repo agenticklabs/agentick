@@ -299,15 +299,23 @@ async function authorizeDispatch(
     ...omitUndefined({ principal: identity?.principal, tokenScopes: identity?.scopes, target }),
   });
 
+  // ADR 84 §5 — the POLICY calls route through `host.authorize(...)`, the
+  // gateway's hookable `authorizer:authorize` op, NOT the raw
+  // `host.authorizer.authorize(...)`. This lets `onBeforeAuthorizerAuthorize`
+  // grant a contextual scope (or deny) around each ask. The structural ceiling
+  // above stays the un-waivable pre-gate — it ran BEFORE this seam, so no
+  // authorize hook can widen it. (`host.authorizer` still gates whether policy
+  // runs at all, above: a host with no authorizer is trusted-domain.)
+  //
   // The verb-derived scope is ALWAYS required — the §3.3 anti-bypass label.
   const verbScope = methodScope(method);
-  if (!(await authorizer.authorize(authInput(verbScope))).allowed) {
+  if (!(await host.authorize(authInput(verbScope))).allowed) {
     throw WireRpcError.forbidden(verbScope);
   }
   // A declared role is ADDITIVE — required ON TOP of the verb scope, never
   // in place of it. Both must pass; the verb gate is never widened.
   if (methodAuth?.scope !== undefined) {
-    if (!(await authorizer.authorize(authInput(methodAuth.scope))).allowed) {
+    if (!(await host.authorize(authInput(methodAuth.scope))).allowed) {
       throw WireRpcError.forbidden(methodAuth.scope);
     }
   }

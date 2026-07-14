@@ -78,6 +78,9 @@ const TYPED_VERBS: ReadonlyArray<readonly [op: string, onBefore: string, onAfter
   // ── Gateway ──
   ["gateway:command:start", "onBeforeGatewayStart", "onAfterGatewayStart"],
   ["gateway:command:close", "onBeforeGatewayClose", "onAfterGatewayClose"],
+  ["gateway:command:create-app", "onBeforeGatewayCreateApp", "onAfterGatewayCreateApp"],
+  // ── Authorizer (ADR 84 §5 — the fine contextual auth layer) ──
+  ["authorizer:command:authorize", "onBeforeAuthorizerAuthorize", "onAfterAuthorizerAuthorize"],
 ];
 
 /**

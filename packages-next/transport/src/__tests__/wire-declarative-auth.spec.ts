@@ -99,6 +99,13 @@ function host(
     app: () => app,
     wireExtensions: () => registry,
     authorizer,
+    // ADR 84 §5 — `authorizeDispatch` routes its policy calls through
+    // `host.authorize`, the real gateway's hookable `authorizer:authorize` op.
+    // This fake mirrors that: delegate to the same authorizer so the `seen`
+    // recorder observes every scope the gate asks about. Never reached when
+    // `authorizer` is undefined (the no-authorizer guard returns first).
+    authorize: (input: AuthorizeInput) =>
+      authorizer ? authorizer.authorize(input) : Promise.resolve({ allowed: true }),
     runWireDispatch: (_m: unknown, _p: unknown, run: () => Promise<unknown>) => run(),
   } as unknown as GatewayHarnessProtocol;
 }

@@ -416,6 +416,70 @@ all.
 > ceiling-un-waivable) and the framework `wire-framework-extensions` /
 > `wire-lane-e2e` suites. See [ADR 51 — invocation & authorization](../../docs/proposals/v2/blueprint/51-invocation-and-authorization.md).
 
+### The fine contextual auth layer — `onBeforeAuthorizerAuthorize` (ADR 84 §5)
+
+The authorizer POLICY call (§2/§3) itself routes through a hookable op —
+`gateway.authorize(input)`, the `authorizer:authorize` op. This gives auth **two
+layers**, and they must not be confused:
+
+- **The floor (un-waivable, OUTSIDE the seam).** The structural `requiredScopes`
+  ceiling is checked _before_ the op ever fires. No hook can widen it — a hook
+  that grants `["*"]` still cannot save a caller who lacks the ceiling scope,
+  because the ceiling denied before the op ran (so the hook never even fires).
+- **The fine layer (contextual, ON TOP of the floor).** `onBeforeAuthorizerAuthorize`
+  runs around each policy ask. It can augment the `AuthorizeInput` from request
+  context — grant a **contextual scope** the static grants table couldn't know
+  about (a per-request entitlement, a just-in-time elevation) — or throw to deny.
+  `onAfterAuthorizerAuthorize` observes/audits the `AuthorizeResult`. It can make
+  auth stricter or grant contextually; it can NEVER waive the ceiling.
+
+```ts
+// Grant a per-request contextual scope (e.g. derived from a feature flag or
+// a downstream entitlement check) on TOP of the static policy:
+gateway.hooks.onBeforeAuthorizerAuthorize((input) =>
+  tenantHasEntitlement(input.principal, input.scope)
+    ? { ...input, tokenScopes: [...(input.tokenScopes ?? []), input.scope] }
+    : input,
+);
+// Audit every decision:
+gateway.hooks.onAfterAuthorizerAuthorize((result) => {
+  audit.record(result);
+  return result;
+});
+```
+
+This is the ADR 84 §5 refinement of "the authorizer needs no hooks": the
+**structural** pre-gate needs none (it is the security floor), but the **policy**
+op is exactly the seam where contextual, application-specific auth belongs.
+
+> **Verified by** `@agentick/transport-next` — `authorize-seam.spec.ts`
+> (contextual scope flips a policy deny→allow around a live dispatch;
+> `onAfterAuthorizerAuthorize` observes; the `requiredScopes` ceiling denies
+> regardless and the hook never fires). Name-locked in
+> `@agentick/runtime-next` `hook-lifecycle-names.spec.ts`. See
+> [ADR 84 §5](../../docs/proposals/v2/blueprint/84-gateway-lifecycle-and-transports.md).
+
+### Multi-tenant app-mount gating — `onBeforeGatewayCreateApp` (ADR 84 §4)
+
+`gateway.createApp(...)` is itself a hookable op (`gateway:create-app`). The
+before-hook receives the normalized `CreateGatewayAppInput` and can **veto** an
+app mount (throw) or **transform** it (stamp a tenant-scoped `appId`, inject
+tenant metadata) before the app is constructed; `onAfterGatewayCreateApp`
+observes the mounted `AppHarnessProtocol`. This is the seam for multi-tenant
+provisioning gates that must run at the deployment root.
+
+```ts
+gateway.hooks.onBeforeGatewayCreateApp((input) => {
+  if (!isProvisioned(input.metadata?.tenantId)) throw new Error("tenant not provisioned");
+  return { ...input, appId: `tenant:${input.metadata?.tenantId}` };
+});
+```
+
+> **Verified by** `src/__tests__/harness.spec.ts` (before-hook transforms the
+> mount input and after-hook sees the app; a throwing before-hook vetoes the
+> mount and nothing is registered). Name-locked in `@agentick/runtime-next`
+> `hook-lifecycle-names.spec.ts`.
+
 ### 4. Contextual policy — guards on the seam (ADR 83)
 
 The `Authorizer` (§2) and the structural ceiling are **coarse, structural, and

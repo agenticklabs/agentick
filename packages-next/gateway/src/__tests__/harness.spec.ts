@@ -149,6 +149,47 @@ describe("GatewayHarness — gateway:close op (ADR 84 §1)", () => {
   });
 });
 
+describe("GatewayHarness — gateway:create-app op (ADR 84 §4)", () => {
+  it("onBeforeGatewayCreateApp transforms the mount input; onAfterGatewayCreateApp sees the app", async () => {
+    const gateway = await createGateway();
+    let afterSawId: string | undefined;
+    // Multi-tenant gating: the before-hook rewrites the mount input (here,
+    // stamping a tenant-scoped appId) and the after-hook observes the mounted
+    // app. Both run around `createApp` via the hookable op.
+    gateway.hook({
+      onBeforeGatewayCreateApp: (input) => ({ ...input, appId: "tenant-scoped-app" }),
+      onAfterGatewayCreateApp: (app) => {
+        afterSawId = app.id;
+        return app;
+      },
+    });
+    // Caller passes NO appId; the before-hook supplies one.
+    const app = await gateway.createApp({
+      rootElement: {} as unknown,
+      options: makeAppOptions() as never,
+    });
+    expect(app.id).toBe("tenant-scoped-app");
+    expect(afterSawId).toBe("tenant-scoped-app");
+    expect(gateway.app("tenant-scoped-app")).toBe(app);
+    await gateway.closeGateway();
+  });
+
+  it("onBeforeGatewayCreateApp can VETO a mount by throwing — no app is registered", async () => {
+    const gateway = await createGateway();
+    gateway.hook({
+      onBeforeGatewayCreateApp: () => {
+        throw new Error("tenant not provisioned");
+      },
+    });
+    await expect(
+      gateway.createApp({ rootElement: {} as unknown, options: makeAppOptions() as never }),
+    ).rejects.toThrow(/tenant not provisioned/);
+    // The veto short-circuited the mount body: nothing was registered.
+    expect(gateway.apps()).toEqual([]);
+    await gateway.closeGateway();
+  });
+});
+
 describe("GatewayHarness — createApp", () => {
   it("creates an app inheriting gateway substrate by default", async () => {
     const gateway = await createGateway();

@@ -31,6 +31,7 @@ import type { MessageInbox, MessageInboxFactory } from "./inbox.js";
 import type { AppHarnessProtocol } from "./app-harness.js";
 import type { WireExtensionRegistry } from "../wire/registry.js";
 import type { WireMethod } from "../wire/params.js";
+import type { AuthorizeInput, AuthorizeResult } from "../wire/authorizer.js";
 
 // ============================================================================
 // Gateway substrate parent
@@ -160,6 +161,26 @@ export interface GatewayHarnessProtocol {
    * handler runs (§3.3 anti-bypass: one gate, both lanes).
    */
   readonly authorizer?: import("../wire/authorizer.js").Authorizer;
+
+  /**
+   * The **fine contextual** authorization layer (ADR 84 §5). Wraps
+   * {@link authorizer}.authorize in the hookable `authorizer:authorize` op,
+   * so `onBeforeAuthorizerAuthorize` can augment the {@link AuthorizeInput}
+   * from request context (grant a contextual scope) or throw to deny, and
+   * `onAfterAuthorizerAuthorize` can observe/audit the decision. The wire
+   * dispatch gate (`authorizeDispatch` in `@agentick/transport-next`) routes
+   * its policy calls through THIS method rather than {@link authorizer}
+   * directly.
+   *
+   * The **structural ceiling** (`SessionHarnessProtocol.requiredScopes`)
+   * stays un-waivable and OUTSIDE this seam — it is checked BEFORE this op
+   * ever fires, so no hook can widen it. This method is only the policy
+   * layer that sits ON TOP of that floor.
+   *
+   * A stub host may implement it as a pass-through to its authorizer; the
+   * reference `GatewayHarness` routes through `runOperation`.
+   */
+  authorize(input: AuthorizeInput): Promise<AuthorizeResult>;
 
   // ─── Lifecycle ──────────────────────────────────────────────────
 

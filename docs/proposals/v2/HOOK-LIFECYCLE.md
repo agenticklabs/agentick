@@ -104,6 +104,8 @@ the `harness.hooks.on…` proxy, or — full middleware — `harness.on<X>`).
 | Sandbox | `sandbox:exec` | ✅ typed | `onSandboxExec` | `onBeforeSandboxExec` | `onAfterSandboxExec` | sibling file verbs (`read-file`/…) stay untyped until asked for |
 | Gateway | `gateway:start` | ✅ typed | `onGatewayStart` | `onBeforeGatewayStart` | `onAfterGatewayStart` | `gateway.listen()` — fan out to `transport.listen()`; nullary op (`void`→`void`) |
 | Gateway | `gateway:close` | ✅ typed | `onGatewayClose` | `onBeforeGatewayClose` | `onAfterGatewayClose` | `gateway.close({ drain })` — terminal teardown; nullary op (`void`→`void`) |
+| Gateway | `gateway:create-app` | ✅ typed | `onGatewayCreateApp` | `onBeforeGatewayCreateApp` | `onAfterGatewayCreateApp` | `gateway.createApp(...)` — multi-tenant app-mount gating; before = normalized `CreateGatewayAppInput` (veto/transform), after = mounted `AppHarnessProtocol` |
+| **Auth** | `authorizer:authorize` | ✅ typed | `onAuthorizerAuthorize` | `onBeforeAuthorizerAuthorize` | `onAfterAuthorizerAuthorize` | `gateway.authorize(input)` — the FINE contextual auth layer (ADR 84 §5). before = `AuthorizeInput` (add contextual scope / deny), after = `AuthorizeResult`. The structural `requiredScopes` ceiling stays un-waivable and OUTSIDE this seam — checked before the op fires |
 | **Tasks** | `tasks:submit` | ⛔ deferred | `onTasksSubmit` | `onBeforeTasksSubmit` | `onAfterTasksSubmit` | async-seam boundary — the seam is async (`asBefore`/`asAfter` await) but `submit` returns `TaskHandle` synchronously; see [ADR 83 §hookability](./blueprint/83-one-interceptor-primitive.md) |
 | Tasks | `tasks:settle` | ⛔ deferred | `onTasksSettle` | `onBeforeTasksSettle` | `onAfterTasksSettle` | same async-seam boundary as `tasks:submit` |
 
@@ -130,9 +132,7 @@ the table above.
 
 | Command | `on<X>` | `onBefore<X>` | `onAfter<X>` | Purpose |
 | --- | --- | --- | --- | --- |
-| `authorizer:authorize` | `onAuthorizerAuthorize` | `onBeforeAuthorizerAuthorize` | `onAfterAuthorizerAuthorize` | fine contextual auth layer (ceiling stays un-waivable, outside the seam) |
 | `gateway:accept` | `onGatewayAccept` | `onBeforeGatewayAccept` | `onAfterGatewayAccept` | per-connection admission / rate-limit / observe |
-| `gateway:create-app` | `onGatewayCreateApp` | `onBeforeGatewayCreateApp` | `onAfterGatewayCreateApp` | multi-tenant app-mount gating |
 
 ## The async-only property (deliberate)
 

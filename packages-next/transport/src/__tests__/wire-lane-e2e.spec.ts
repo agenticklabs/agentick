@@ -12,7 +12,12 @@
 import { Effect } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { ErrorCode, type JsonRpcResponse } from "@agentick/spec-next";
+import {
+  ErrorCode,
+  type Authorizer,
+  type AuthorizeInput,
+  type JsonRpcResponse,
+} from "@agentick/spec-next";
 import { dispatchRequest, type DispatchSink } from "../server/dispatch.js";
 
 import { fromHandler } from "@agentick/timeline-next/strategies";
@@ -188,6 +193,9 @@ describe("dispatch choke point — one gate, both lanes (review findings)", () =
     const app = { getSession: (id: string) => (id === "s1" ? session : undefined) } as never;
     return {
       authorizer,
+      // ADR 84 §5 — the dispatch gate routes policy through `host.authorize`;
+      // delegate to the same authorizer so the auth assertions still hold.
+      authorize: (i: AuthorizeInput) => (authorizer as Authorizer).authorize(i),
       app: () => app,
       apps: () => [app],
       runWireDispatch: (_m: unknown, _p: unknown, run: () => Promise<unknown>) => run(),
@@ -257,8 +265,10 @@ describe("scope refinement — downscoping (#198) + session ceiling (#199)", () 
     const host = (() => {
       const session = { id: "s1" } as never;
       const app = { getSession: (id: string) => (id === "s1" ? session : undefined) } as never;
+      const authorizer = claimsAuthorizer();
       return {
-        authorizer: claimsAuthorizer(),
+        authorizer,
+        authorize: (i: AuthorizeInput) => authorizer.authorize(i),
         app: () => app,
         apps: () => [app],
         runWireDispatch: (_m: unknown, _p: unknown, run: () => Promise<unknown>) => run(),
@@ -321,8 +331,10 @@ describe("scope refinement — downscoping (#198) + session ceiling (#199)", () 
   it("session requiredScopes is a structural ceiling no grant can waive", async () => {
     const session = { id: "s1", requiredScopes: ["kyc:verified"] } as never;
     const app = { getSession: (id: string) => (id === "s1" ? session : undefined) } as never;
+    const authorizer = staticAuthorizer({ grants: { alice: ["*"] } }); // star grant!
     const host = {
-      authorizer: staticAuthorizer({ grants: { alice: ["*"] } }), // star grant!
+      authorizer,
+      authorize: (i: AuthorizeInput) => authorizer.authorize(i),
       app: () => app,
       apps: () => [app],
       runWireDispatch: (_m: unknown, _p: unknown, run: () => Promise<unknown>) => run(),
@@ -365,8 +377,10 @@ describe("scope refinement — review-fix coverage (glob semantics, structural c
   it("star/glob claims satisfy the ceiling (cover-aware)", async () => {
     const session = { id: "s1", requiredScopes: ["kyc:verified"] } as never;
     const app = { getSession: (id: string) => (id === "s1" ? session : undefined) } as never;
+    const authorizer = staticAuthorizer({ grants: { alice: ["*"] } });
     const host = {
-      authorizer: staticAuthorizer({ grants: { alice: ["*"] } }),
+      authorizer,
+      authorize: (i: AuthorizeInput) => authorizer.authorize(i),
       app: () => app,
       apps: () => [app],
       runWireDispatch: (_m: unknown, _p: unknown, run: () => Promise<unknown>) => run(),
