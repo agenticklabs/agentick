@@ -462,6 +462,19 @@ export interface AppHarnessOptions<P = unknown> {
   readonly hooks?: CommandHooks;
 
   /**
+   * LIVE interceptor parent (ADR 83 §4 / ADR 84 §3) — the GatewayHarness that
+   * created this app. `gateway.createApp` passes `interceptorParent: gateway`
+   * so the app registers as a live interceptor child of the gateway: a LATER
+   * `gateway.use()` / `gateway.guard()` / `gateway.hook()` reaches this app's
+   * ops — and cascades on to its sessions and sub-harnesses — not just the
+   * construction snapshot. Forwarded to {@link BaseHarness}. Omitted for a
+   * standalone app (`createApp` with no gateway above it).
+   *
+   * @see docs/proposals/v2/blueprint/84-gateway-lifecycle-and-transports.md
+   */
+  readonly interceptorParent?: BaseHarness;
+
+  /**
    * Pluggable extensions. Each extension is a `{ name, install }`
    * record produced by an extension package's `withX()` factory.
    * AppHarness invokes `install(installer)` for each extension at
@@ -692,6 +705,9 @@ export class AppHarness<P = unknown>
           bus: options.bus,
           inbox: options.inbox,
           telemetryNamespace: options.telemetryNamespace,
+          // ADR 84 §3 — live interceptor link to the gateway that created this
+          // app. A gateway hook registered LATER folds down through this app.
+          interceptorParent: options.interceptorParent,
         }),
         policy: mergeLayered<JournalingPolicy>(DEFAULT_JOURNALING_POLICY, {
           override: { "app:command:close-app": "bus-only" },

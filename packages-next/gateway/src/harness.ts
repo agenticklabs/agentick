@@ -78,14 +78,18 @@ import { mergeLayered } from "@agentick/utils-next";
 import { AppHarness, builtinWireExtensions, type AppHarnessOptions } from "@agentick/app-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 
-// ADR 80/83 — light up the gateway teardown verb. `gateway:close-gateway`
-// routes through `runOperation` (see `closeGateway`), so typing it mints
-// `onBeforeGatewayCloseGateway` / `onAfterGatewayCloseGateway` on the derived
-// `CommandHooks` surface. The op is nullary — `Operation<undefined, void>` —
-// so both sides are typed from that declaration.
+// ADR 80/83/84 — light up the gateway lifecycle verbs. Both `gateway:start`
+// (see `listen`) and `gateway:close` (see `closeGateway`) route through
+// `runOperation`, so typing them mints `onBeforeGatewayStart` /
+// `onAfterGatewayStart` and `onBeforeGatewayClose` / `onAfterGatewayClose` on
+// the derived `CommandHooks` surface. Both ops are nullary —
+// `Operation<undefined, void>` — so both sides are typed from these
+// declarations. (`gateway:close` is the ADR 84 rename of `gateway:close-gateway`
+// — `onGatewayClose`, dropping the redundant `Gateway` suffix.)
 declare module "@agentick/runtime-next" {
   interface CommandRegistry {
-    "gateway:close-gateway": { input: undefined; output: void };
+    "gateway:start": { input: undefined; output: void };
+    "gateway:close": { input: undefined; output: void };
   }
 }
 
@@ -181,6 +185,8 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
    *  both lanes) and by commands/list's visibility filter. */
   readonly authorizer!: import("@agentick/spec-next").Authorizer;
   private gatewayClosed = false;
+  /** Idempotency latch for {@link listen} — a second `listen()` is a no-op. */
+  private gatewayStarted = false;
 
   /**
    * Gateway-extension bridges (ADR 50) — the `gateway.bridges.<name>`
@@ -239,14 +245,15 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
       options.inbox instanceof Function ? undefined : (options.inbox as MessageInbox | undefined);
 
     // Merge close-op policy override into adopter-supplied policy.
-    // `gateway:command:close-gateway` envelopes route bus-only — same
-    // Option G pattern AppHarness/SessionHarness use to prevent
-    // "writing to a closed journal" crashes when substrate teardown
-    // handlers fire inside super.close(). `mergeLayered` deep-merges
-    // the `override` map automatically; adding fields to
-    // JournalingPolicy doesn't require touching this site.
+    // `gateway:command:close` envelopes route bus-only — same Option G
+    // pattern AppHarness/SessionHarness use to prevent "writing to a closed
+    // journal" crashes when substrate teardown handlers fire inside
+    // super.close(). `mergeLayered` deep-merges the `override` map
+    // automatically; adding fields to JournalingPolicy doesn't require
+    // touching this site. `gateway:start` needs NO override — it does not
+    // tear down the substrate, so its envelopes journal normally.
     const policy = mergeLayered<JournalingPolicy>(DEFAULT_JOURNALING_POLICY, options.policy, {
-      override: { "gateway:command:close-gateway": "bus-only" },
+      override: { "gateway:command:close": "bus-only" },
     });
 
     super(
@@ -570,6 +577,12 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
       ...input.options,
       appId,
       rootElement: input.rootElement,
+      // ADR 84 §3 — the CAPSTONE live link: the app registers as a live
+      // interceptor child of this gateway. A hook/guard/use registered on the
+      // gateway AFTER the app (and its sessions) exist folds down live through
+      // the whole chain gateway → app → session → sub-harnesses. This is the
+      // top edge of the ADR 83 §4 uniform cascade, not a special case.
+      interceptorParent: this,
       ...(cascadedExtensions !== undefined ? { extensions: cascadedExtensions } : {}),
       // Substrate at the App slot — see AppHarnessOptions.bus/inbox/journal.
       // Cast tolerated here because the spec's parent typing differs
@@ -604,25 +617,63 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     return app;
   }
 
-  closeGateway(): Promise<void> {
-    if (this.gatewayClosed) {
+  /**
+   * Bind the gateway's server transports and flip ready (ADR 84 §1). The
+   * canonical server `listen()` — pairs with {@link close}. Runs as the
+   * hookable `gateway:start` op through `runOperation`, so a gateway
+   * `onBeforeGatewayStart` guard can gate/feature-flag transports and an
+   * `onAfterGatewayStart` observer can log bound addresses.
+   *
+   * Idempotent: a second call is a safe no-op (the transports are already
+   * bound). Fans out to every owned `ServerTransport` — but that abstraction
+   * lands in a later arc (ADR 84 §2), so today the body just ensures ready.
+   *
+   * @see docs/proposals/v2/blueprint/84-gateway-lifecycle-and-transports.md
+   */
+  listen(): Promise<void> {
+    if (this.gatewayStarted) {
       return Promise.resolve();
     }
-    this.gatewayClosed = true;
-    // ADR 51 classification: serializable (no input) — a declared-
-    // command candidate; exposure is a verb-matrix decision (remote
-    // gateway shutdown) deferred with slice 5.
+    this.gatewayStarted = true;
     const op: Operation<undefined, void, never> = {
-      opId: `gateway:close:${ulid()}`,
+      opId: `gateway:start:${ulid()}`,
       surface: SURFACE,
-      name: "gateway:command:close-gateway",
+      name: "gateway:command:start",
       scope: { gatewayId: this.scopeId },
       input: undefined,
     };
     return runHarnessProtocol(
       this.runOperation(op, () =>
         Effect.tryPromise({
-          try: () => this.closeGatewayBody(),
+          try: () => this.listenBody(),
+          catch: (cause): never => {
+            throw cause;
+          },
+        }),
+      ),
+    );
+  }
+
+  closeGateway(opts: { drain?: boolean } = {}): Promise<void> {
+    if (this.gatewayClosed) {
+      return Promise.resolve();
+    }
+    this.gatewayClosed = true;
+    const drain = opts.drain ?? true;
+    // ADR 51 classification: serializable (no input) — a declared-
+    // command candidate; exposure is a verb-matrix decision (remote
+    // gateway shutdown) deferred with slice 5.
+    const op: Operation<undefined, void, never> = {
+      opId: `gateway:close:${ulid()}`,
+      surface: SURFACE,
+      name: "gateway:command:close",
+      scope: { gatewayId: this.scopeId },
+      input: undefined,
+    };
+    return runHarnessProtocol(
+      this.runOperation(op, () =>
+        Effect.tryPromise({
+          try: () => this.closeGatewayBody(drain),
           catch: (cause): never => {
             // Rethrow as plain — Effect's failure channel for the
             // close body is unconstrained; we surface the underlying
@@ -634,8 +685,15 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     );
   }
 
-  close(): Promise<void> {
-    return this.closeGateway();
+  /**
+   * Terminal teardown (ADR 84 §1) — symmetric with {@link listen}. Alias for
+   * {@link closeGateway}, gaining the graceful-vs-forced `{ drain }` argument:
+   * `close({ drain: false })` is the forced variant. Drain-by-default. There is
+   * deliberately NO `destroy()` twin — graceful-vs-forced is a parameter, not a
+   * second verb (ADR 84 §1).
+   */
+  close(opts?: { drain?: boolean }): Promise<void> {
+    return this.closeGateway(opts);
   }
 
   events(filter: EventQuery = {}, options: SubscribeOptions = {}): AsyncIterable<ProtocolEvent> {
@@ -649,7 +707,25 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
   // Lifecycle helpers
   // ============================================================================
 
-  private async closeGatewayBody(): Promise<void> {
+  /**
+   * Start-op body (ADR 84 §1). Today a near-no-op: it just ensures the
+   * gateway is ready. The point of landing it now is the hookable
+   * `gateway:start` op + `listen()` method shape.
+   */
+  private async listenBody(): Promise<void> {
+    // TODO(adr-84): fan out to serverTransports.map(t => t.listen(this)).
+    // The ServerTransport abstraction (ADR 84 §2) lands in a later arc; until
+    // then `listen()` on zero transports is a no-op that just flips ready.
+    await this.gatewayReady;
+  }
+
+  private async closeGatewayBody(drain: boolean): Promise<void> {
+    // TODO(adr-84): thread `drain` into the ServerTransport fan-out —
+    // `drain === false` is the forced variant (stop accepting immediately,
+    // skip the graceful in-flight drain). Until ServerTransport (ADR 84 §2)
+    // exists there is nothing to drain; the flag is accepted and the SHAPE is
+    // wired so `close({ drain: false })` type-checks and reaches here today.
+    void drain;
     // Close every registered App. Each App's close cascades into its
     // sessions; we await sequentially to preserve teardown ordering.
     const apps = Array.from(this._apps.values());

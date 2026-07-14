@@ -82,6 +82,71 @@ describe("GatewayHarness — construction + lifecycle", () => {
     // No assertion needed; throwing the second close should be a no-op.
     await gateway.close();
   });
+
+  it("close({ drain: false }) is the forced variant — resolves and closes", async () => {
+    const gateway = await createGateway();
+    await gateway.close({ drain: false });
+    // Idempotent regardless of the drain flag.
+    await gateway.close({ drain: false });
+  });
+});
+
+describe("GatewayHarness — listen() + gateway:start op (ADR 84 §1)", () => {
+  it("listen() runs the hookable gateway:start op — onBefore/onAfterGatewayStart fire", async () => {
+    const gateway = await createGateway();
+    let before = 0;
+    let after = 0;
+    gateway.hook({
+      onBeforeGatewayStart: (input) => {
+        before++;
+        return input;
+      },
+      onAfterGatewayStart: (output) => {
+        after++;
+        return output;
+      },
+    });
+    await gateway.listen();
+    expect(before).toBe(1);
+    expect(after).toBe(1);
+    await gateway.closeGateway();
+  });
+
+  it("listen() is idempotent — a second call is a no-op (op does not re-fire)", async () => {
+    const gateway = await createGateway();
+    let fired = 0;
+    gateway.hook({
+      onBeforeGatewayStart: (input) => {
+        fired++;
+        return input;
+      },
+    });
+    await gateway.listen();
+    await gateway.listen();
+    expect(fired).toBe(1);
+    await gateway.closeGateway();
+  });
+});
+
+describe("GatewayHarness — gateway:close op (ADR 84 §1)", () => {
+  it("closeGateway() runs the hookable gateway:close op — onBefore/onAfterGatewayClose fire", async () => {
+    const gateway = await createGateway();
+    let before = 0;
+    let after = 0;
+    gateway.hook({
+      onBeforeGatewayClose: (input) => {
+        before++;
+        return input;
+      },
+      onAfterGatewayClose: (output) => {
+        after++;
+        return output;
+      },
+    });
+    await gateway.closeGateway();
+    expect(before).toBe(1);
+    expect(after).toBe(1);
+  });
 });
 
 describe("GatewayHarness — createApp", () => {

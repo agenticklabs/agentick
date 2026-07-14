@@ -164,6 +164,21 @@ export interface GatewayHarnessProtocol {
   // ─── Lifecycle ──────────────────────────────────────────────────
 
   /**
+   * Bind the gateway's server transports and flip ready (ADR 84 §1). The
+   * canonical server start verb — pairs with {@link close}, reads identically
+   * to each `transport.listen()`. Fans out to every owned `ServerTransport`
+   * (that abstraction lands in a later arc); `listen()` on zero transports is
+   * a no-op that just flips ready. Idempotent — a second call is a safe no-op.
+   *
+   * Runs as the hookable `gateway:start` op, so `onBeforeGatewayStart` can
+   * gate/feature-flag transports and `onAfterGatewayStart` can observe bound
+   * addresses.
+   *
+   * @see docs/proposals/v2/blueprint/84-gateway-lifecycle-and-transports.md
+   */
+  listen(): Promise<void>;
+
+  /**
    * Close every App, run substrate teardown, and emit
    * `gateway:lifecycle:closed`. Subsequent calls reject with
    * `GatewayClosedError`.
@@ -171,10 +186,15 @@ export interface GatewayHarnessProtocol {
    * Close-op envelopes are bus-only per the Operation framework's
    * `JournalingPolicy.override` (matches `app.closeApp` semantics).
    */
-  closeGateway(): Promise<void>;
+  closeGateway(opts?: { readonly drain?: boolean }): Promise<void>;
 
-  /** Alias for {@link closeGateway} — symmetry with `app.close()`. */
-  close(): Promise<void>;
+  /**
+   * Terminal teardown, symmetric with {@link listen} (ADR 84 §1). Alias for
+   * {@link closeGateway}, taking the graceful-vs-forced `{ drain }` argument:
+   * `close({ drain: false })` forces teardown. Drain-by-default. There is NO
+   * `destroy()` twin — graceful-vs-forced is a parameter, not a second verb.
+   */
+  close(opts?: { readonly drain?: boolean }): Promise<void>;
 
   // ─── Observation ────────────────────────────────────────────────
 

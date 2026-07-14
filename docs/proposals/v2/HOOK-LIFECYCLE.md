@@ -101,7 +101,8 @@ the `harness.hooks.on…` proxy, or — full middleware — `harness.on<X>`).
 | Session | `session:apply-tool-results` | ✅ typed | `onSessionApplyToolResults` | `onBeforeSessionApplyToolResults` | `onAfterSessionApplyToolResults` | fires on the public facade, not the loop's in-fiber `*Fx` path |
 | Timeline | `timeline:compact` | ✅ typed | `onTimelineCompact` | `onBeforeTimelineCompact` | `onAfterTimelineCompact` | before = wire-safe compact SIGNAL; the explicit-arg form shares the op name, so it fires too |
 | Sandbox | `sandbox:exec` | ✅ typed | `onSandboxExec` | `onBeforeSandboxExec` | `onAfterSandboxExec` | sibling file verbs (`read-file`/…) stay untyped until asked for |
-| Gateway | `gateway:close-gateway` | ✅ typed | `onGatewayCloseGateway` | `onBeforeGatewayCloseGateway` | `onAfterGatewayCloseGateway` | nullary op — **ADR 84 renames to `gateway:close` → `onGatewayClose`** |
+| Gateway | `gateway:start` | ✅ typed | `onGatewayStart` | `onBeforeGatewayStart` | `onAfterGatewayStart` | `gateway.listen()` — fan out to `transport.listen()`; nullary op (`void`→`void`) |
+| Gateway | `gateway:close` | ✅ typed | `onGatewayClose` | `onBeforeGatewayClose` | `onAfterGatewayClose` | `gateway.close({ drain })` — terminal teardown; nullary op (`void`→`void`) |
 | **Tasks** | `tasks:submit` | ⛔ deferred | `onTasksSubmit` | `onBeforeTasksSubmit` | `onAfterTasksSubmit` | async-seam boundary — the seam is async (`asBefore`/`asAfter` await) but `submit` returns `TaskHandle` synchronously; see [ADR 83 §hookability](./blueprint/83-one-interceptor-primitive.md) |
 | Tasks | `tasks:settle` | ⛔ deferred | `onTasksSettle` | `onBeforeTasksSettle` | `onAfterTasksSettle` | same async-seam boundary as `tasks:submit` |
 
@@ -128,8 +129,6 @@ the table above.
 
 | Command | `on<X>` | `onBefore<X>` | `onAfter<X>` | Purpose |
 | --- | --- | --- | --- | --- |
-| `gateway:start` | `onGatewayStart` | `onBeforeGatewayStart` | `onAfterGatewayStart` | `gateway.listen()` — fan out to `transport.listen()` |
-| `gateway:close` | `onGatewayClose` | `onBeforeGatewayClose` | `onAfterGatewayClose` | rename of `gateway:close-gateway` |
 | `authorizer:authorize` | `onAuthorizerAuthorize` | `onBeforeAuthorizerAuthorize` | `onAfterAuthorizerAuthorize` | fine contextual auth layer (ceiling stays un-waivable, outside the seam) |
 | `gateway:accept` | `onGatewayAccept` | `onBeforeGatewayAccept` | `onAfterGatewayAccept` | per-connection admission / rate-limit / observe |
 | `gateway:create-app` | `onGatewayCreateApp` | `onBeforeGatewayCreateApp` | `onAfterGatewayCreateApp` | multi-tenant app-mount gating |
