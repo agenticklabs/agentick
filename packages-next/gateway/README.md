@@ -12,26 +12,27 @@ landed; pass `cluster: ClusterFactory` to `createGateway`).
 ## What this package is
 
 Phase 4 of the v2 implementation plan landed the thin
-`GatewayHarness` scaffold. It implements
-`GatewayHarnessProtocol` from `@agentick/spec-next` and is the
+`GatewayHarness` scaffold. It implemauents `GatewayHarnessProtocol` from `@agentick/spec-next` and is the
 runtime-root harness in every deployment tier — embedded library
 (in-process), single-process server, multi-tenant cloud, clustered.
 
 Gateway responsibilities:
 
 - **Multi-app hosting** — `createApp(input)` instantiates an
-  `AppHarness` that inherits the gateway's substrate by default, or
-  takes a per-app substrate factory override.
+`AppHarness` that inherits the gateway's substrate by default, or
+takes a per-app substrate factory override.
 - **Substrate inheritance** — apps see the gateway's journal / bus /
-  inbox unless they explicitly override.
+inbox unless they explicitly override.
 - **Lifecycle cascade** — `closeGateway()` shuts down every hosted
-  app cleanly.
+app cleanly.
 - **Cross-app observation** — `gateway.events(filter?)` returns an
-  `AsyncIterable<ProtocolEvent>` fanned in from every hosted app.
+`AsyncIterable<ProtocolEvent>` fanned in from every hosted app.
 - **Read-side protocol surface** — `gateway.app(id)`, `gateway.apps()`
-  for protocol consumers; `createApp` is on the concrete impl
-  (typed input opts in spec would force pulling app-next types into
-  spec).
+for protocol consumers; `createApp` is on the concrete impl
+(typed input opts in spec would force pulling app-next types into
+spec).
+
+
 
 ## Quick start
 
@@ -51,6 +52,8 @@ const result = await session.send({ messages: [...] }).result;
 
 await gateway.closeGateway();
 ```
+
+
 
 ## Cluster integration (Phase 5)
 
@@ -96,6 +99,8 @@ if you need the combination.
 
 ## API surface
 
+
+
 ### `createGateway(options?): Promise<GatewayHarness>`
 
 ```ts
@@ -131,6 +136,8 @@ class GatewayHarness extends BaseHarness<"gateway"> implements GatewayHarnessPro
   close(): Promise<void>; // alias for closeGateway
 }
 ```
+
+
 
 ## Wire extensions (ADR 46)
 
@@ -195,6 +202,8 @@ const gateway = await createGateway({
 });
 ```
 
+
+
 ### Discovery
 
 The gateway ships a built-in `_extensions/list` wire method that
@@ -208,25 +217,27 @@ const { extensions } = await client.request("_extensions/list", {});
 // -> [{ name: "@my-org/crm", namespace: "crm", methods: [...], notifications: [...] }]
 ```
 
+
+
 ### Constraints
 
 - Namespaces reserved for framework-internal use (`_*`) can't be
-  claimed by adopter extensions — the `defineWireExtension`
-  validator rejects.
+claimed by adopter extensions — the `defineWireExtension`
+validator rejects.
 - Framework-supplied namespaces (`gateway`, `app`, `session`,
-  `sub`) are registered by `GatewayHarness` construction. Adopter
-  attempts to claim those namespaces fail with
-  `WireExtensionDefinitionError` — the registry rejects duplicates
-  and framework registration runs FIRST.
+`sub`) are registered by `GatewayHarness` construction. Adopter
+attempts to claim those namespaces fail with
+`WireExtensionDefinitionError` — the registry rejects duplicates
+and framework registration runs FIRST.
 - Registered namespaces must be unique per gateway. Duplicate
-  registration throws `WireExtensionDefinitionError` at construction
-  time (not first-request time).
+registration throws `WireExtensionDefinitionError` at construction
+time (not first-request time).
 - The registry is sealed once `gateway.ready` resolves — extensions
-  cannot be added post-hoc. To layer additional extensions,
-  reconstruct the gateway.
+cannot be added post-hoc. To layer additional extensions,
+reconstruct the gateway.
 
 See [ADR 46 — Wire extensions](../../docs/proposals/v2/blueprint/46-wire-extensions.md)
-and [`@agentick/spec-next/wire`](../spec/src/wire/README.md) for the
+and `[@agentick/spec-next/wire](../spec/src/wire/README.md)` for the
 extension authoring guide.
 
 ## Authentication & authorization
@@ -247,6 +258,8 @@ Harnesses are authz-unaware: there are no in-handler permission checks.
                        ▼ allowed
                      handler runs
 ```
+
+
 
 ### 1. Authentication — the `AuthSource`
 
@@ -269,10 +282,10 @@ const authSource = staticTokenAuthSource({
 
 Two poles, by design:
 
-- **No `AuthSource`** → local/trusted pole: no principal is stamped; only the
-  anonymous-local path the authorizer permits passes.
-- **`AuthSource` configured** → **fail-closed**: a missing or invalid credential is
-  rejected at ingress, before dispatch ever runs.
+- **No** `AuthSource` → local/trusted pole: no principal is stamped; only the
+anonymous-local path the authorizer permits passes.
+- `AuthSource` **configured** → **fail-closed**: a missing or invalid credential is
+rejected at ingress, before dispatch ever runs.
 
 The source runs at the transport server via `authenticateIngress` (the ADR 50
 `GatewayInstaller.interceptIngress` seam generalizes where it's wired). Identity
@@ -298,16 +311,16 @@ const gateway = await createGateway({
 });
 ```
 
-- **`staticAuthorizer({ grants })`** — a server-side table: principal → scope
-  patterns. Cover-aware (`session:*` satisfies `session:send`).
-- **`claimsAuthorizer()`** — allow iff the credential's OWN scope claims cover the
-  requested scope (OAuth-shaped; grants ride the token, no server table).
-- **`permissiveAuthorizer()`** — allow everything. Explicit opt-in for no-auth
-  local deployments.
-- **Default when unset: `unconfiguredAuthorizer` — deny-by-default.** An
-  authenticated principal against no policy is DENIED (auth-without-policy is a
-  misconfiguration); only the anonymous-local pole passes. You never ship ungated
-  by accident.
+- `staticAuthorizer({ grants })` — a server-side table: principal → scope
+patterns. Cover-aware (`session:*` satisfies `session:send`).
+- `claimsAuthorizer()` — allow iff the credential's OWN scope claims cover the
+requested scope (OAuth-shaped; grants ride the token, no server table).
+- `permissiveAuthorizer()` — allow everything. Explicit opt-in for no-auth
+local deployments.
+- **Default when unset:** `unconfiguredAuthorizer` **— deny-by-default.** An
+authenticated principal against no policy is DENIED (auth-without-policy is a
+misconfiguration); only the anonymous-local pole passes. You never ship ungated
+by accident.
 
 The same-principal rule (ADR 48): a method targeting a session whose owning
 principal differs from the caller's is denied unless a grant explicitly elevates.
@@ -334,14 +347,16 @@ const crmExt = defineWireExtension({
 });
 ```
 
-- **`required: false`** → **open**: the authorizer policy is skipped. The target
-  session's structural `requiredScopes` ceiling still applies — open does not waive
-  the resource ceiling. Reserve for methods with no gated dynamic-lane counterpart.
-- **`scope: "role"`** → **additive**: required ON TOP of the verb scope, never in
-  place of it. A role can only _tighten_, so a method is never reachable under a
-  label different from its verb (§3.3 anti-bypass). `crm/deleteContact` requires
-  BOTH `crm:deleteContact` AND `crm:admin`.
+- `required: false` → **open**: the authorizer policy is skipped. The target
+session's structural `requiredScopes` ceiling still applies — open does not waive
+the resource ceiling. Reserve for methods with no gated dynamic-lane counterpart.
+- `scope: "role"` → **additive**: required ON TOP of the verb scope, never in
+place of it. A role can only *tighten*, so a method is never reachable under a
+label different from its verb (§3.3 anti-bypass). `crm/deleteContact` requires
+BOTH `crm:deleteContact` AND `crm:admin`.
 - **absent** → verb scope, gated (the default; the common case).
+
+
 
 ### The structural ceiling (`requiredScopes`)
 
@@ -355,6 +370,57 @@ all.
 > (verb-scope default, `required:false` open, additive role, §3.3 anti-bypass,
 > ceiling-un-waivable) and the framework `wire-framework-extensions` /
 > `wire-lane-e2e` suites. See [ADR 51 — invocation & authorization](../../docs/proposals/v2/blueprint/51-invocation-and-authorization.md).
+
+### 4. Contextual policy — guards on the seam (ADR 83)
+
+The `Authorizer` (§2) and the structural ceiling are **coarse, structural, and
+un-waivable** — the security boundary. They answer "may this principal call this
+verb at all," from the credential + scopes, *before* the handler runs. They are
+deliberately **not hooks** — a security boundary must not be a waivable,
+reorderable userland transform.
+
+For **fine-grained, contextual, application-specific** admission — "deny this
+send while the tenant is over quota," "require a second factor for high-value
+tool calls," "rate-limit per session" — use the interceptor seam. Since wire
+dispatch now routes through the gateway's `runOperation` (ADR 83 §wire), a
+gateway hook/guard fires AROUND the dispatch, AFTER the authorizer pre-gate. Two
+forms, by how rich a decision you need:
+
+```ts
+const gateway = await createGateway({
+  // (1) STRUCTURAL — coarse scope authz, un-waivable pre-gate:
+  authorizer: staticAuthorizer({ grants: { alice: ["session:*"] } }),
+});
+
+// (2a) CONTEXTUAL DENY, per-verb typed — a before-hook throws to veto.
+// `session/send` (wire) Pascalizes to SessionSend → onBeforeSessionSend.
+gateway.hooks.onBeforeSessionSend((params, ctx) => {
+  if (overQuota(ctx.principal)) throw new Error("quota exceeded"); // any throw → terminal:failed = the call is vetoed
+  return params; // (or return a reshaped params to transform the request)
+});
+
+// (2b) RICHER VERDICT (veto / replace / defer) — a guard returns the DSL.
+// `guard` is harness-scoped, so branch on ctx.op to target one verb:
+gateway.guard((params, ctx) =>
+  ctx.op === "SessionSend" && rateLimited(ctx.principal)
+    ? { kind: "defer", retryAfter: 1000 } // → JSON-RPC deferred, client retries
+    : { kind: "proceed" },
+);
+```
+
+The two layers compose cleanly: **authz decides *reachability* (structural,
+un-waivable); the hook/guard decides *this specific call* (contextual)** — and
+the guard only ever sees calls the authorizer already admitted. A guard can
+`veto`, `replace` (serve a cached result), `defer` (rate-limit → retry-later), or
+observe (audit). This is the whole point of routing wire dispatch through the
+seam: your app's auth/authz can be as bespoke as it needs, **without touching the
+framework's enforcement point** — which is exactly why the `Authorizer` stays a
+structural pre-gate and does NOT itself become a hook.
+
+> The same `onBeforeSessionSend` name is the operation seen at three layers —
+> `client` (request leaving) · `gateway` (wire dispatch, here) · `session` (the
+> op) — scoped by where you register. See
+> [`docs/proposals/v2/HOOK-LIFECYCLE.md`](../../docs/proposals/v2/HOOK-LIFECYCLE.md).
 
 ## Server-initiated notifications — the control-plane bus (ADR 47)
 
@@ -411,7 +477,11 @@ and its end-to-end delivery are proven now. See the e2e coverage below.
 > `sub/subscribe` → subscriber delivery, fan-out to every gateway-scope
 > subscriber). See [ADR 47](../../docs/proposals/v2/blueprint/47-reactive-signals-ride-the-bus.md).
 
+
+
 ## Patterns
+
+
 
 ### Multi-app cross-tenant hosting (single gateway, multi-app)
 
@@ -441,6 +511,8 @@ for await (const ev of gateway.events()) {
 }
 ```
 
+
+
 ### As a `ClientTransport` host
 
 The WebSocket / HTTP / Unix-socket transports mount on a
@@ -461,6 +533,7 @@ socket adapter over it; there is no bespoke per-transport wire logic.
 
 ## Verified by
 
+
 | Concern                                                | Test file                                                    |
 | ------------------------------------------------------ | ------------------------------------------------------------ |
 | Construction + default in-memory substrate             | `src/__tests__/harness.spec.ts`                              |
@@ -474,6 +547,9 @@ socket adapter over it; there is no bespoke per-transport wire logic.
 | Wire extension registry — register / resolve / seal    | `src/__tests__/wire-registry.spec.ts`                        |
 | Wire extension dispatch end-to-end                     | `../transport/src/__tests__/wire-extension-dispatch.spec.ts` |
 | Framework wire extensions + namespace-conflict reject  | `src/__tests__/wire-framework-extensions.spec.ts`            |
+
+
+
 
 ## Status
 
@@ -489,49 +565,54 @@ See `docs/proposals/v2/STATUS.md`.
 ## Roadmap & known gaps
 
 - **No transports / plugins / auth in this package.** ADR 31 +
-  ADR 32 land transports as separate `@agentick/transport-*-next`
-  packages and plugins as extensions (shape-1 per ADR 32). This
-  package only ships the runtime-root harness.
+ADR 32 land transports as separate `@agentick/transport-*-next`
+packages and plugins as extensions (shape-1 per ADR 32). This
+package only ships the runtime-root harness.
 - **No cluster substrate.** ADR 29 Phase D substrate (Redis Streams /
-  Kafka) lands in `@agentick/cluster-next`; this package's
-  `GatewayHarness` accepts any `EventBus` impl so cluster mode is
-  a substrate swap, not a gateway rewrite.
-- **`GatewayHarnessProtocol.createApp` is on the concrete impl, not
-  the protocol** — see comments in the implementation. Typing input
-  opts in spec would force pulling `@agentick/app-next` types into
-  spec. Concrete impls expose their typed `createApp`; protocol
-  consumers can enumerate apps but not construct them.
-- **`AppHarnessProtocol.id` / `SessionHarnessProtocol.id`** added in
-  Phase 5 follow-up (2026-06-07). Gateway gains a public `id` too
-  for cluster routing.
-- **No `GatewayExtension` impls yet.** ADR 32 names the extension
-  shape; the spec ships `GatewayExtension` / `GatewayInstaller`
-  interfaces. Concrete extensions land per their owning scope
-  (auth in ADR 34, mcp-surface in 33.I, transports as their own
-  packages).
+Kafka) lands in `@agentick/cluster-next`; this package's
+`GatewayHarness` accepts any `EventBus` impl so cluster mode is
+a substrate swap, not a gateway rewrite.
+- `GatewayHarnessProtocol.createApp` **is on the concrete impl, not
+the protocol** — see comments in the implementation. Typing input
+opts in spec would force pulling `@agentick/app-next` types into
+spec. Concrete impls expose their typed `createApp`; protocol
+consumers can enumerate apps but not construct them.
+- `AppHarnessProtocol.id` **/** `SessionHarnessProtocol.id` added in
+Phase 5 follow-up (2026-06-07). Gateway gains a public `id` too
+for cluster routing.
+- **No** `GatewayExtension` **impls yet.** ADR 32 names the extension
+shape; the spec ships `GatewayExtension` / `GatewayInstaller`
+interfaces. Concrete extensions land per their owning scope
+(auth in ADR 34, mcp-surface in 33.I, transports as their own
+packages).
 - **All framework methods dispatch through the wire extension
-  registry.** #295 Phase B/C + #303 streaming primitives landed
-  the full ADR 46 eat-our-own-dogfood commitment. Only bootstrap
-  builtins (`initialize`, `ping`, `_extensions/list`) remain
-  hardcoded — they run BEFORE the registry is queryable, which is
-  intentional.
-- **`bridges()` on wire-extension context is empty.** No
-  framework-supplied extension needs bridges today. Phase F (#298 —
-  `mcpControlWireExtension`) is the first consumer; it will resolve
-  bridges from the target session's session-extension registry.
-- **`_extensions/list` is unauthenticated for now.** Discovery is
-  intended to be open — clients need it to know what they can
-  reach. If future deployments want gated discovery, the wire method
-  can grow an auth entry in Phase C.
+registry.** #295 Phase B/C + #303 streaming primitives landed
+the full ADR 46 eat-our-own-dogfood commitment. Only bootstrap
+builtins (`initialize`, `ping`, `_extensions/list`) remain
+hardcoded — they run BEFORE the registry is queryable, which is
+intentional.
+- `bridges()` **on wire-extension context is empty.** No
+framework-supplied extension needs bridges today. Phase F (#298 —
+`mcpControlWireExtension`) is the first consumer; it will resolve
+bridges from the target session's session-extension registry.
+- `_extensions/list` **is unauthenticated for now.** Discovery is
+intended to be open — clients need it to know what they can
+reach. If future deployments want gated discovery, the wire method
+can grow an auth entry in Phase C.
+
+
 
 ## Development plan
 
-| Phase                 | What lands                                                                                                                            |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| Phase 4 (done)        | This package — gateway scaffold                                                                                                       |
-| Phase 5 (done)        | `AppHarnessProtocol.id` / `SessionHarnessProtocol.id`                                                                                 |
-| Phase 33.C–E          | Transports mount on `GatewayHarness` (no changes to this package)                                                                     |
-| Phase 33.D (done)     | Shared dispatcher `dispatchRequest` landed in `@agentick/transport-next` — every transport routes wire frames through it |
-| ADR 34                | `@agentick/auth-next` adds a `GatewayExtension` for auth                                                                              |
-| Phase 33.I            | `@agentick/mcp-surface-next` adds a `GatewayExtension` that mounts MCP method namespaces                                              |
-| ADR 29 Phase D        | `@agentick/cluster-next` substrate impl — gateway gets a cluster journal/bus                                                          |
+
+| Phase             | What lands                                                                                                               |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Phase 4 (done)    | This package — gateway scaffold                                                                                          |
+| Phase 5 (done)    | `AppHarnessProtocol.id` / `SessionHarnessProtocol.id`                                                                    |
+| Phase 33.C–E      | Transports mount on `GatewayHarness` (no changes to this package)                                                        |
+| Phase 33.D (done) | Shared dispatcher `dispatchRequest` landed in `@agentick/transport-next` — every transport routes wire frames through it |
+| ADR 34            | `@agentick/auth-next` adds a `GatewayExtension` for auth                                                                 |
+| Phase 33.I        | `@agentick/mcp-surface-next` adds a `GatewayExtension` that mounts MCP method namespaces                                 |
+| ADR 29 Phase D    | `@agentick/cluster-next` substrate impl — gateway gets a cluster journal/bus                                             |
+
+

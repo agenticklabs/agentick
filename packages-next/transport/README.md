@@ -125,11 +125,14 @@ export function myTransport(opts: { ... }): ClientTransport {
 - `dispatchRequest(host, req, sink, identity?)` — transport-agnostic
   JSON-RPC dispatcher. Resolves each method through the gateway's
   `WireExtension` registry and authorizes it (verb-derived scope label,
-  target-session ceiling) before running the handler. `identity` is the
-  ingress identity stamped at the edge (see below); WS, HTTP,
-  Unix-socket adapters all call this. Per-connection state (auth,
-  subscriptions, in-flight ids) lives on the adapter, not in the
-  dispatcher.
+  target-session ceiling) before running the handler. The authorized
+  handler then routes through `host.runWireDispatch` — the gateway's
+  interceptor seam (ADR 83 §wire) — so a wire method fires the gateway's
+  guards/hooks (`gateway.hooks.onBeforeSessionSend` around `session/send`)
+  AFTER the un-waivable auth pre-gate. `identity` is the ingress identity
+  stamped at the edge (see below); WS, HTTP, Unix-socket adapters all call
+  this. Per-connection state (auth, subscriptions, in-flight ids) lives on
+  the adapter, not in the dispatcher.
 - `DispatchHost = GatewayHarnessProtocol` — type alias
 - `DispatchSink` — contract every connection adapter implements:
   - `sendNotification(notification)` — emit a notification frame to the client

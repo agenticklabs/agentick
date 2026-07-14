@@ -101,10 +101,15 @@ the `harness.hooks.on…` proxy, or — full middleware — `harness.on<X>`).
 | **Tasks** | `tasks:submit` | ⛔ deferred | `onTasksSubmit` | `onBeforeTasksSubmit` | `onAfterTasksSubmit` | async-seam boundary — the seam is async (`asBefore`/`asAfter` await) but `submit` returns `TaskHandle` synchronously; see [ADR 83 §hookability](./blueprint/83-one-interceptor-primitive.md) |
 | Tasks | `tasks:settle` | ⛔ deferred | `onTasksSettle` | `onBeforeTasksSettle` | `onAfterTasksSettle` | same async-seam boundary as `tasks:submit` |
 
-**Wire methods** (JSON-RPC over `transport`) currently bypass `runOperation`
-(`transport/server/dispatch.ts` calls the handler directly), so they fire NO
-hooks. Routing wire dispatch through `runOperation` (ADR 80 §9) is planned; `authorizeDispatch`
-stays the un-waivable pre-gate.
+**Wire methods** (JSON-RPC over `transport`) now route through the **gateway's**
+`runOperation` (`GatewayHarness.runWireDispatch`), so a wire method fires the
+gateway's seam — `gateway.hooks.onBeforeSessionSend` fires around a `session/send`
+dispatch (op name = the wire method; `deriveHookNames` splits `/`, so it
+Pascalizes to `SessionSend`). `authorizeDispatch` stays the un-waivable pre-gate.
+It's the same operation at three layers — client request · gateway wire · session
+op — one name, scoped by where you register (ADR 83 §"Wire dispatch"). Wire hooks
+fire (mechanism) but aren't typed yet — that needs the registry-agnostic
+derivation fed `WireMethods` (the client-alignment follow-on).
 
 ## The async-only property (deliberate)
 
