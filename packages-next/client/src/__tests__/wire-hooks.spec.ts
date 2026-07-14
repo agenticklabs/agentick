@@ -126,10 +126,11 @@ describe("client wire hooks", () => {
     // The `wire:` prefix is the whole point — this command key must NOT
     // collide with the server-side `session:send` op hook.
     expect(commandForMethod("session/send")).toBe("WireSessionSend");
-    // Snake_case segments are NOT further split (the derivation splits on
-    // `-:/` only) — `Pascal` and `deriveHookNames` agree on this, so the
+    // Snake_case segments split too (the derivation splits on `-:/_`, all four
+    // word boundaries), so the snake_case wire id `app/run_once` mints the clean
+    // camelCase `WireAppRunOnce` — `Pascal` and `deriveHookNames` agree, so the
     // type-level `WireHooks` key and the runtime command key match.
-    expect(commandForMethod("app/run_once")).toBe("WireAppRun_once");
+    expect(commandForMethod("app/run_once")).toBe("WireAppRunOnce");
   });
 
   it("onBeforeWireSessionSend transforms params reaching the transport", async () => {

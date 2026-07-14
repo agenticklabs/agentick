@@ -22,9 +22,10 @@ just a command hook on a built-in verb.
 
 A hook name is a **total function of the command id**:
 `hook = on(+ Before|After) + PascalCase(<surface>:<action>)`. The id splits on
-`:` `/` and `-` (kebab), so `session:apply-executor-result` →
-`onBeforeSessionApplyExecutorResult`. Type-level `Pascal<K>` === runtime
-`deriveHookNames` (lockstep-tested).
+`:` `/` `-` (kebab) and `_` (snake) — all four word boundaries — so
+`session:apply-executor-result` → `onBeforeSessionApplyExecutorResult` and the
+snake_case wire id `app/run_once` → `onBeforeWireAppRunOnce`. Type-level
+`Pascal<K>` === runtime `deriveHookNames` (lockstep-tested).
 
 ## The four surfaces (all typed off `CommandRegistry`)
 

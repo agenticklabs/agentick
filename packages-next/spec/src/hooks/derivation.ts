@@ -23,9 +23,11 @@ import type { Unsubscribe } from "../protocol/inbox.js";
 export type Cap<S extends string> = S extends `${infer H}${infer T}` ? `${Uppercase<H>}${T}` : S;
 
 /**
- * PascalCase a command id, splitting on the `:` (command), `/` (wire), and `-`
- * (kebab word) delimiters — so `session:apply-executor-result` mints the clean,
- * dot-accessible `onBeforeSessionApplyExecutorResult`, not a hyphenated key.
+ * PascalCase a command id, splitting on the `:` (command), `/` (wire), `-`
+ * (kebab word), and `_` (snake word) delimiters — so `session:apply-executor-result`
+ * mints the clean, dot-accessible `onBeforeSessionApplyExecutorResult`, and the
+ * snake_case wire id `app/run_once` mints `onBeforeWireAppRunOnce` (not the
+ * mangled `…AppRun_once`). All four are word boundaries.
  */
 export type Pascal<S extends string> = S extends `${infer A}:${infer B}`
   ? `${Cap<A>}${Pascal<B>}`
@@ -33,7 +35,9 @@ export type Pascal<S extends string> = S extends `${infer A}:${infer B}`
     ? `${Cap<A>}${Pascal<B>}`
     : S extends `${infer A}-${infer B}`
       ? `${Cap<A>}${Pascal<B>}`
-      : Cap<S>;
+      : S extends `${infer A}_${infer B}`
+        ? `${Cap<A>}${Pascal<B>}`
+        : Cap<S>;
 
 // ============================================================================
 // Hook shapes (context-parametric)
@@ -110,7 +114,7 @@ export type RegistrarsOf<Reg, Ctx> = {
 export function deriveHookNames(opName: string): [string, string] {
   const pascal = opName
     .replace(":command:", ":")
-    .split(/[-:/]/)
+    .split(/[-:/_]/)
     .map((seg) => (seg === "" ? seg : seg.charAt(0).toUpperCase() + seg.slice(1)))
     .join("");
   return [`onBefore${pascal}`, `onAfter${pascal}`];
