@@ -97,11 +97,16 @@ const handle = client.send(sessionId, { messages });
 for await (const event of handle.events()) render(event); // ← the event stream
 await handle.result;                              //   ← …and the final result
 
-// Observe, uniformly — all instance methods, all return an Unsubscribe:
+// Observe, uniformly — all return an Unsubscribe:
 client.onStateChange((s) => setBadge(s));         // connection state
 client.onCapabilitiesChange((c) => gate(c));      // feature flags, live across reconnect
-client.onLog({ kind: "session", id }, (e) => log(e.level, e.data));
-client.onProgress({ kind: "session", id }, (e) => bar(e.progress, e.total));
+
+// Signals + channels are PRE-SCOPED on the handle — no repeating { kind, id }:
+client.session(id).onLog((e) => log(e.level, e.data));
+client.session(id).onProgress((e) => bar(e.progress, e.total));
+client.session(id).channelView("task-status");    // zero-config: latest frame wins
+// …the generic client.onLog(scope, cb) stays as the escape hatch for a
+// scope you don't hold a handle for.
 
 // Intercept outbound requests by method, typed off the wire:
 client.hook({
@@ -128,10 +133,20 @@ interface CreateClientOptions {
   transport: ClientTransport;
   extensions?: readonly ClientExtension[];
   id?: string;
+  // Client-LOCAL lifetime observers, registered at construction:
+  onStateChange?: (state: ClientState) => void;
+  onCapabilitiesChange?: (caps: ClientCapabilities) => void;
 }
 ```
 
 Returns a `Client` (= `ClientProtocol` widened with any extension-registered namespaces via `ClientNamespaces` declaration merging).
+
+`onStateChange` / `onCapabilitiesChange` are convenience shorthands for
+`client.onStateChange(fn)` / `client.onCapabilitiesChange(fn)` — wire a status
+badge or feature-gate at construction without threading the instance. They live
+for the client's lifetime. (Signal receivers `onLog` / `onProgress` are NOT
+client-config options: they are scoped, so they belong on the resource handles —
+`client.session(id).onLog(cb)`.)
 
 ### Resource handles
 
@@ -141,6 +156,12 @@ Returns a `Client` (= `ClientProtocol` widened with any extension-registered nam
 
 Shapes mirror the in-process `GatewayHarnessProtocol` / `AppHarnessProtocol` / `SessionHarnessProtocol`.
 
+Every handle also carries the subscription surface **pre-scoped to its scope** —
+`onLog(handler, opts?)`, `onProgress(handler, opts?)`, `channelView(channel, config?)`
+— so `client.session(id).onLog(cb)` scopes to `{ kind: "session", id }` for you.
+This is the 90% form. The generic `client.onLog(scope, cb)` / `client.channelView(scope, …)`
+are the escape hatch for a scope you don't hold a handle for.
+
 ### Runtime signals — `onLog` / `onProgress` (ADR 64)
 
 Tools and harnesses emit `log` / `progress` signals as bus events; the
@@ -149,28 +170,33 @@ existing `subscribe` channel. `onLog` / `onProgress` build the
 cross-surface wildcard query and map each envelope to its decoded
 payload plus origin scope, so app code doesn't hand-roll it.
 
-**Two surfaces, same types — pick your ergonomics:**
+**Three surfaces, same types — the pre-scoped handle form is the 90%:**
 
 ```ts
-// (a) instance method — reads right next to onStateChange / onCapabilitiesChange:
-const off = client.onLog({ kind: "session", id: sessionId }, (e) => {
+// (a) PRE-SCOPED on the handle — the 90%: no repeating { kind, id }:
+const off = client.session(sessionId).onLog((e) => {
   // e: { level, data, logger?, scope }
   console.log(e.level, e.data);
 });
-client.onProgress({ kind: "session", id: sessionId }, (e) => {
+client.session(sessionId).onProgress((e) => {
   // e: { token, progress, total?, message?, scope }
 });
 off(); // closes the underlying subscription
+// …also client.app(id).onLog(cb) and client.gateway().onProgress(cb).
 
-// (b) free function — same call, tree-shakeable, works against any
-//     ClientProtocol impl (the method just delegates to this):
+// (b) generic instance method — the escape hatch for a scope you don't
+//     hold a handle for; you pass the scope explicitly:
+client.onLog({ kind: "session", id: sessionId }, (e) => console.log(e.level, e.data));
+
+// (c) free function — same call, tree-shakeable, works against any
+//     ClientProtocol impl (the instance methods just delegate to this):
 import { onLog, onProgress } from "@agentick/client-next";
 onLog(client, { kind: "session", id: sessionId }, (e) => console.log(e.level, e.data));
 ```
 
-The method is `ClientProtocol.onLog(scope, handler, opts?)`; the free function is
-`onLog(client, scope, handler, opts?)` — both take a client, so the method is a
-one-line delegation. Use whichever fits; they share the exact same types.
+The handle method is `client.session(id).onLog(handler, opts?)`; it bakes the
+scope in and delegates to `onLog(client, scope, handler, opts?)`. Use whichever
+fits; all three share the exact same types.
 
 A `useLog` React hook is deferred until a `client-react` surface exists
 (see `TODO(#19-react)` in `src/signals.ts`); `onLog` is the framework-
@@ -182,31 +208,43 @@ agnostic primitive it will wrap.
 on the client: a pure **fold** over one channel subscription (the K8s
 watch-list / `sendInitialEvents` model).
 
-Two surfaces, same types — pick your ergonomics:
+Three surfaces, same types — the pre-scoped handle form is the 90%:
 
 ```ts
 import { channelView, type ChannelView } from "@agentick/client-next";
 
-// (a) instance method — reads right next to client.onLog / client.onProgress:
-const view: ChannelView<Store> = client.channelView(scope, channel, {
+// (a) PRE-SCOPED + ZERO-CONFIG — the 90%. No scope, no config: the default
+//     fold is last-frame-payload-wins, so the view holds the latest frame
+//     payload (undefined before the first frame):
+const status = client.session(sessionId).channelView("task-status");
+status.get(); // the whole latest task-status object, or undefined
+
+// (b) pre-scoped WITH an explicit reducer — for snapshot+delta channels:
+const view: ChannelView<Store> = client.session(sessionId).channelView("knobs-state", {
   initial: {}, // value get() returns until the first frame folds in
   reduce: (state, frame) => (frame.kind === "snapshot" ? seed(frame) : fold(state, frame)),
 });
 
-// (b) free function — same call, tree-shakeable, works against any
-//     ClientProtocol impl (the method just delegates to this):
-const view2 = channelView<Store, Frame>(client, scope, channel, { initial: {}, reduce });
+// (c) generic instance method / free function — the escape hatch, scope explicit:
+const view2 = client.channelView(scope, "knobs-state", { initial: {}, reduce });
+const view3 = channelView<Store, Frame>(client, scope, "knobs-state", { initial: {}, reduce });
 
 const off = view.subscribe(() => render(view.get())); // useSyncExternalStore contract
 view.get(); // current folded state
 view.close(); // tears down the subscription
 ```
 
-The method is `ClientProtocol.channelView(scope, channel, config)`; the free
-function is `channelView(client, scope, channel, config)` — both take a client,
-so the method is a one-line delegation. Use whichever fits; they share the exact
-same `ChannelView` / `ChannelViewConfig` types (defined in `@agentick/spec-next`,
-re-exported here).
+**`config` is OPTIONAL everywhere.** Omitted, the default fold is
+**last-frame-payload-wins** (`initial = undefined`, `reduce = (_prev, frame) => frame`).
+That suits **full-object-per-frame** channels like `task-status`, where every
+frame carries the whole object. **Snapshot+delta** channels like `knobs-state`
+still need an explicit `reduce` — which is exactly why the typed façades
+(`knobsStateView`) supply one.
+
+The handle method `client.session(id).channelView(channel, config?)` bakes the
+scope in and delegates to `channelView(client, scope, channel, config?)`. All
+three share the same `ChannelView` / `ChannelViewConfig` types (defined in
+`@agentick/spec-next`, re-exported here).
 
 The subscription **opens with a snapshot frame**, then streams deltas on the
 **same** ordered stream — so there is **no baseline pull and no cursor**. The
@@ -443,6 +481,9 @@ under "Roadmap & known gaps" with an explicit marker.
 | `onLog` / `onProgress` cross-surface query + envelope→payload mapping + unsubscribe closes stream, AND `client.onLog`/`client.onProgress` instance-method delegation (ADR 64) | `src/__tests__/signals.spec.ts`                               |
 | `channelView` snapshot-seed + delta-fold, `useSyncExternalStore` contract, `close()` teardown, malformed-frame isolation, AND `client.channelView` instance-method delegation (ADR 33) | `src/__tests__/channel-view.spec.ts`                          |
 | Wire hooks — `onBeforeWire<Method>` param transform + abort, `onAfterWire<Method>` result transform, method-scoping, `client.hook`/`client.hooks` register + unsubscribe, empty-registry fast-path (ADR 83) | `src/__tests__/wire-hooks.spec.ts`                            |
+| Pre-scoped handle `onLog` / `onProgress` bake the session / app / gateway scope (asserted on `transport.subscribe`); pre-scoped zero-config `channelView` yields a last-frame-wins view | `src/__tests__/handle-subscriptions.spec.ts`                  |
+| `channelView` zero-config default fold (no config → view = latest frame payload, `undefined` before first frame) | `src/__tests__/handle-subscriptions.spec.ts`                  |
+| `createClient({ onStateChange, onCapabilitiesChange })` client-LOCAL observers fire on state / capability changes | `src/__tests__/handle-subscriptions.spec.ts`                  |
 
 ## Roadmap & known gaps
 

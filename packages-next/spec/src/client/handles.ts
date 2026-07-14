@@ -21,6 +21,39 @@ import type {
 } from "../wire/params.js";
 import type { ClientElicitationStream } from "./elicitation.js";
 import type { SubscriptionStream } from "./transport.js";
+import type { Unsubscribe } from "../protocol/inbox.js";
+import type { OnSignalOptions, ReceivedLog, ReceivedProgress } from "./signals.js";
+import type { ChannelView, ChannelViewConfig } from "./channel.js";
+
+// ============================================================================
+// Scoped subscriptions — the runtime-signal / channel-view subscriptions
+// PRE-SCOPED to the handle's scope, so callers don't repeat `{ kind, id }`.
+// `client.session(id).onLog(cb)` is the 90% ergonomic; the generic
+// `client.onLog(scope, cb)` on `ClientProtocol` is the escape hatch for a
+// scope you don't hold a handle for.
+// ============================================================================
+
+export interface HandleSubscriptions {
+  /**
+   * Subscribe to `log` runtime signals for THIS handle's scope. Pre-scoped
+   * twin of `client.onLog(scope, …)`. Returns an {@link Unsubscribe}.
+   */
+  onLog(handler: (event: ReceivedLog) => void, opts?: OnSignalOptions): Unsubscribe;
+  /**
+   * Subscribe to `progress` runtime signals for THIS handle's scope.
+   * Pre-scoped twin of `client.onProgress(scope, …)`.
+   */
+  onProgress(handler: (event: ReceivedProgress) => void, opts?: OnSignalOptions): Unsubscribe;
+  /**
+   * Open a reduced {@link ChannelView} over one `session:channel:<channel>`
+   * for THIS handle's scope. Pre-scoped twin of
+   * `client.channelView(scope, …)`. `config` is OPTIONAL — omitted, the
+   * default fold is last-frame-payload-wins (the view holds the latest
+   * frame payload, `undefined` before the first frame).
+   */
+  channelView<T, F>(channel: string, config: ChannelViewConfig<T, F>): ChannelView<T>;
+  channelView<T = unknown>(channel: string): ChannelView<T | undefined>;
+}
 
 // ============================================================================
 // Common — every handle exposes resource id + event subscription
@@ -35,7 +68,7 @@ export interface ResourceHandle {
 // GatewayHandle
 // ============================================================================
 
-export interface GatewayHandle {
+export interface GatewayHandle extends HandleSubscriptions {
   listApps(): Promise<GatewayListAppsResult>;
   getApp(id: string): Promise<GatewayListAppsResult["apps"][number]>;
   events(query?: EventQuery, fromCursor?: Cursor): SubscriptionStream;
@@ -46,7 +79,7 @@ export interface GatewayHandle {
 // AppHandle
 // ============================================================================
 
-export interface AppHandle extends ResourceHandle {
+export interface AppHandle extends ResourceHandle, HandleSubscriptions {
   createSession<P = unknown>(input?: CreateSessionInput<P>): Promise<AppCreateSessionResult>;
   getSession(sessionId: string): Promise<SessionEntry>;
   listSessions(filter?: SessionFilter): Promise<readonly SessionEntry[]>;
@@ -66,7 +99,7 @@ export interface AppHandle extends ResourceHandle {
  * `.result` + `abort()`), guaranteeing in-process and remote calls have
  * identical types.
  */
-export interface SessionHandle extends ResourceHandle {
+export interface SessionHandle extends ResourceHandle, HandleSubscriptions {
   send<P = unknown>(input: SendInput<P>): ClientSessionExecutionHandle;
   dispatch(tool: string, input: unknown): Promise<readonly ContentBlock[]>;
   abort(reason?: string): Promise<void>;

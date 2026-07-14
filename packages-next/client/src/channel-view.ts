@@ -43,13 +43,40 @@ interface ChannelClient {
   readonly transport: Pick<ClientTransport, "subscribe">;
 }
 
+// With an explicit config the view holds the reducer's accumulator type `T`.
 export function channelView<T, F>(
   client: ChannelClient,
   scope: SubscriptionScope,
   channel: string,
   config: ChannelViewConfig<T, F>,
-): ChannelView<T> {
-  let state = config.initial;
+): ChannelView<T>;
+/**
+ * Zero-config: the default fold is LAST-FRAME-PAYLOAD-WINS
+ * (`initial = undefined`, `reduce = (_prev, frame) => frame`). The view
+ * holds the latest frame payload, `undefined` before the first frame.
+ * This suits FULL-OBJECT-per-frame channels (e.g. `task-status`, where
+ * every frame carries the whole object). Snapshot+delta channels (knobs)
+ * still need an explicit `reduce` — which is why the typed façades
+ * (`knobsStateView`) supply one.
+ */
+export function channelView<T = unknown>(
+  client: ChannelClient,
+  scope: SubscriptionScope,
+  channel: string,
+): ChannelView<T | undefined>;
+export function channelView(
+  client: ChannelClient,
+  scope: SubscriptionScope,
+  channel: string,
+  config?: ChannelViewConfig<unknown, unknown>,
+): ChannelView<unknown> {
+  // Default fold: last-frame-payload-wins. Every frame replaces held
+  // state; `get()` is `undefined` until the first frame folds in.
+  const cfg: ChannelViewConfig<unknown, unknown> = config ?? {
+    initial: undefined,
+    reduce: (_prev, frame) => frame,
+  };
+  let state = cfg.initial;
   let closed = false;
   const listeners = new Set<() => void>();
 
@@ -72,7 +99,7 @@ export function channelView<T, F>(
       const payload = frame.envelope.payload;
       if (payload === undefined) continue;
       try {
-        state = config.reduce(state, payload as F);
+        state = cfg.reduce(state, payload);
         notify();
       } catch {
         // A malformed frame must not tear down the stream.
@@ -84,7 +111,7 @@ export function channelView<T, F>(
   })();
 
   return {
-    get: (): T => state,
+    get: (): unknown => state,
     subscribe(listener: () => void): Unsubscribe {
       listeners.add(listener);
       return () => {

@@ -11,6 +11,8 @@
 
 import type {
   AppHandle,
+  ChannelView,
+  ChannelViewConfig,
   ClientElicitation,
   ClientElicitationHandle,
   ClientElicitationStream,
@@ -22,16 +24,20 @@ import type {
   EventQuery,
   GatewayHandle,
   GatewayListAppsResult,
+  HandleSubscriptions,
   SendInput,
   SendMessageInput,
   SessionEntry,
   SessionFilter,
   SessionHandle,
   StreamEvent,
+  SubscriptionScope,
   SubscriptionStream,
 } from "@agentick/spec-next";
 import type { Cursor } from "@agentick/spec-next";
 import { omitUndefined } from "@agentick/utils-next";
+import { onLog as onLogFn, onProgress as onProgressFn } from "./signals.js";
+import { channelView as channelViewFn } from "./channel-view.js";
 
 interface InternalClient {
   readonly id: string;
@@ -39,8 +45,36 @@ interface InternalClient {
   readonly transport: ClientProtocol["transport"];
 }
 
+/**
+ * Build the {@link HandleSubscriptions} surface pre-scoped to `scope` —
+ * each method bakes the handle's scope into the corresponding free
+ * function, so callers write `handle.onLog(cb)` instead of
+ * `onLog(client, scope, cb)`. Shared by all three make*Handle factories.
+ */
+function scopedSubscriptions(
+  client: InternalClient,
+  scope: SubscriptionScope,
+): HandleSubscriptions {
+  function channelView<T, F>(channel: string, config: ChannelViewConfig<T, F>): ChannelView<T>;
+  function channelView<T = unknown>(channel: string): ChannelView<T | undefined>;
+  function channelView(
+    channel: string,
+    config?: ChannelViewConfig<unknown, unknown>,
+  ): ChannelView<unknown> {
+    return config === undefined
+      ? channelViewFn(client, scope, channel)
+      : channelViewFn(client, scope, channel, config);
+  }
+  return {
+    onLog: (handler, opts) => onLogFn(client, scope, handler, opts),
+    onProgress: (handler, opts) => onProgressFn(client, scope, handler, opts),
+    channelView,
+  };
+}
+
 export function makeGatewayHandle(client: InternalClient): GatewayHandle {
   return {
+    ...scopedSubscriptions(client, { kind: "gateway" }),
     async listApps(): Promise<GatewayListAppsResult> {
       return client.request("gateway/list_apps", {});
     },
@@ -58,6 +92,7 @@ export function makeGatewayHandle(client: InternalClient): GatewayHandle {
 
 export function makeAppHandle(client: InternalClient, appId: string): AppHandle {
   return {
+    ...scopedSubscriptions(client, { kind: "app", id: appId }),
     id: appId,
     async createSession<P = unknown>(input?: CreateSessionInput<P>) {
       return client.request("app/create_session", {
@@ -98,6 +133,7 @@ export function makeAppHandle(client: InternalClient, appId: string): AppHandle 
 
 export function makeSessionHandle(client: InternalClient, sessionId: string): SessionHandle {
   return {
+    ...scopedSubscriptions(client, { kind: "session", id: sessionId }),
     id: sessionId,
     send<P = unknown>(input: SendInput<P>): ClientSessionExecutionHandle {
       return createSessionExecutionHandle(client, sessionId, input);

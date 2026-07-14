@@ -140,12 +140,19 @@ export interface ClientProtocol {
    * method simply delegates. This is the LOW-LEVEL escape hatch: the typed
    * façades `knobsStateView` / `taskStatusView` (in their harness packages)
    * are the sugar on top, supplying the channel name and `reduce`.
+   *
+   * `config` is OPTIONAL. Omitted, the default fold is
+   * LAST-FRAME-PAYLOAD-WINS (`initial = undefined`, `reduce = (_p, f) => f`):
+   * the view holds the latest frame payload, `undefined` before the first
+   * frame. Suits FULL-OBJECT-per-frame channels (`task-status`);
+   * snapshot+delta channels (knobs) still need an explicit `reduce`.
    */
   channelView<T, F>(
     scope: SubscriptionScope,
     channel: string,
     config: ChannelViewConfig<T, F>,
   ): ChannelView<T>;
+  channelView<T = unknown>(scope: SubscriptionScope, channel: string): ChannelView<T | undefined>;
 
   /**
    * Resolve once any in-flight post-reconnect handshake completes.

@@ -64,6 +64,19 @@ export interface CreateClientOptions {
   readonly transport: ClientTransport;
   readonly extensions?: readonly ClientExtension[];
   readonly id?: string;
+  /**
+   * Client-LOCAL observer of connection-state transitions. Registered
+   * for the client's lifetime via {@link ClientProtocol.onStateChange}.
+   * Convenience for the common "wire a status indicator at construction"
+   * case — equivalent to calling `client.onStateChange(fn)` yourself.
+   */
+  readonly onStateChange?: (state: ClientState) => void;
+  /**
+   * Client-LOCAL observer of capability-set changes. Registered for the
+   * client's lifetime via {@link ClientProtocol.onCapabilitiesChange}.
+   * Fires after each handshake / reconnect with the fresh snapshot.
+   */
+  readonly onCapabilitiesChange?: (caps: ClientCapabilities) => void;
 }
 
 /**
@@ -77,6 +90,11 @@ export interface CreateClientOptions {
  */
 export async function createClient(options: CreateClientOptions): Promise<Client> {
   const client = new AgentickClient(options);
+  // Client-LOCAL lifetime observers, if the adopter supplied them at
+  // construction. They live for the client's lifetime (no unsubscribe
+  // surfaced — the client owning them is the lifetime boundary).
+  if (options.onStateChange) client.onStateChange(options.onStateChange);
+  if (options.onCapabilitiesChange) client.onCapabilitiesChange(options.onCapabilitiesChange);
   await client.installExtensions();
   return client as unknown as Client;
 }
@@ -375,8 +393,16 @@ class AgentickClient implements ClientProtocol {
     scope: SubscriptionScope,
     channel: string,
     config: ChannelViewConfig<T, F>,
-  ): ChannelView<T> {
-    return channelViewFn(this, scope, channel, config);
+  ): ChannelView<T>;
+  channelView<T = unknown>(scope: SubscriptionScope, channel: string): ChannelView<T | undefined>;
+  channelView(
+    scope: SubscriptionScope,
+    channel: string,
+    config?: ChannelViewConfig<unknown, unknown>,
+  ): ChannelView<unknown> {
+    return config === undefined
+      ? channelViewFn(this, scope, channel)
+      : channelViewFn(this, scope, channel, config);
   }
 
   /**
