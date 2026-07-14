@@ -69,18 +69,55 @@ const client = await createClient({
 
 await client.connect();
 
-// Flat shortcut for the 90% case
-const result = await client.send("sess-123", {
+// Flat shortcut for the 90% case. `send()` returns the handle synchronously
+// (AsyncIterable of events + `.result`) — no await here; you await `.result`.
+const handle = client.send("sess-123", {
   messages: [{ role: "user", content: "hello" }],
-}).result;
+});
 
 // Or as an async iterable for event-by-event observation
-for await (const event of client.send("sess-123", { messages: [...] })) {
+for await (const event of handle) {
   console.log(event);
 }
 
+const finalResult = await handle.result;
+
 await client.close();
 ```
+
+## Everything hangs off one `client`
+
+No context objects, no emitter strings, no hand-rolled queries — the whole
+surface is discoverable on the client instance, and each streaming call is
+directly `for await`-able:
+
+```ts
+// Run + stream, all on the handle:
+const handle = client.send(sessionId, { messages });
+for await (const event of handle) render(event); //   ← the handle IS the stream
+await handle.result;                              //   ← …and the final result
+
+// Observe, uniformly — all instance methods, all return an Unsubscribe:
+client.onStateChange((s) => setBadge(s));         // connection state
+client.onCapabilitiesChange((c) => gate(c));      // feature flags, live across reconnect
+client.onLog({ kind: "session", id }, (e) => log(e.level, e.data));
+client.onProgress({ kind: "session", id }, (e) => bar(e.progress, e.total));
+
+// Intercept outbound requests by method, typed off the wire:
+client.hook({
+  onBeforeWireSessionSend: (params) => ({ ...params }), // or throw to abort
+  onAfterWireSessionSend: (result) => result,
+});
+
+// Resource handles mirror the server harnesses 1:1:
+client.gateway().listApps();
+client.app(appId).createSession();
+client.session(id).dispatch("tool", input);
+```
+
+Prefer free functions (tree-shaking, or code typed against bare `ClientProtocol`)?
+`onLog` / `onProgress` also ship as `onLog(client, scope, cb)` — the instance
+methods just delegate. Same types, your call.
 
 ## API surface
 
@@ -108,23 +145,32 @@ Shapes mirror the in-process `GatewayHarnessProtocol` / `AppHarnessProtocol` / `
 
 Tools and harnesses emit `log` / `progress` signals as bus events; the
 gateway projects matching events to subscribed clients over the
-existing `subscribe` channel. `onLog` / `onProgress` are typed sugar
-over `client.transport.subscribe(scope, query)` — they build the
+existing `subscribe` channel. `onLog` / `onProgress` build the
 cross-surface wildcard query and map each envelope to its decoded
-payload plus origin scope, so app code doesn't hand-roll it:
+payload plus origin scope, so app code doesn't hand-roll it.
+
+**Two surfaces, same types — pick your ergonomics:**
 
 ```ts
-import { onLog, onProgress } from "@agentick/client-next";
-
-const off = onLog(client, { kind: "session", id: sessionId }, (e) => {
+// (a) instance method — reads right next to onStateChange / onCapabilitiesChange:
+const off = client.onLog({ kind: "session", id: sessionId }, (e) => {
   // e: { level, data, logger?, scope }
   console.log(e.level, e.data);
 });
-onProgress(client, { kind: "session", id: sessionId }, (e) => {
+client.onProgress({ kind: "session", id: sessionId }, (e) => {
   // e: { token, progress, total?, message?, scope }
 });
 off(); // closes the underlying subscription
+
+// (b) free function — same call, tree-shakeable, works against any
+//     ClientProtocol impl (the method just delegates to this):
+import { onLog, onProgress } from "@agentick/client-next";
+onLog(client, { kind: "session", id: sessionId }, (e) => console.log(e.level, e.data));
 ```
+
+The method is `ClientProtocol.onLog(scope, handler, opts?)`; the free function is
+`onLog(client, scope, handler, opts?)` — both take a client, so the method is a
+one-line delegation. Use whichever fits; they share the exact same types.
 
 A `useLog` React hook is deferred until a `client-react` surface exists
 (see `TODO(#19-react)` in `src/signals.ts`); `onLog` is the framework-
@@ -374,7 +420,7 @@ under "Roadmap & known gaps" with an explicit marker.
 | `ClientHandlerRegistry` per-event merge kinds (`observer` / `first-non-null-wins` / `any-reconnect-wins`)                         | `src/__tests__/handler-registry.spec.ts`                      |
 | `effectMiddleware` Effect↔Promise adapter, error propagation, interleave with Promise middleware                                  | `src/__tests__/effect-middleware.spec.ts`                     |
 | `client.send(sessionId, input)` shortcut shape equivalence with `client.session(id).send(input)`                                  | `../transport-in-process/src/__tests__/send-shortcut.spec.ts` |
-| `onLog` / `onProgress` cross-surface query + envelope→payload mapping + unsubscribe closes stream (ADR 64)                        | `src/__tests__/signals.spec.ts`                               |
+| `onLog` / `onProgress` cross-surface query + envelope→payload mapping + unsubscribe closes stream, AND `client.onLog`/`client.onProgress` instance-method delegation (ADR 64) | `src/__tests__/signals.spec.ts`                               |
 | `channelView` snapshot-seed + delta-fold, `useSyncExternalStore` contract, `close()` teardown, malformed-frame isolation (ADR 33) | `src/__tests__/channel-view.spec.ts`                          |
 | Wire hooks — `onBeforeWire<Method>` param transform + abort, `onAfterWire<Method>` result transform, method-scoping, `client.hook`/`client.hooks` register + unsubscribe, empty-registry fast-path (ADR 83) | `src/__tests__/wire-hooks.spec.ts`                            |
 

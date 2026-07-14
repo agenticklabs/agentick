@@ -9,15 +9,20 @@
 
 import { describe, expect, it } from "vitest";
 import type {
+  ClientState,
+  ClientTransport,
   Cursor,
   EventFrame,
   EventQuery,
+  ProgressStream,
   ProtocolEvent,
   SubscriptionScope,
   SubscriptionStream,
+  TransportCapabilities,
 } from "@agentick/spec-next";
 import { logEventName, progressEventName } from "@agentick/spec-next";
 
+import { createClient } from "../client.js";
 import { onLog, onProgress, type ReceivedLog, type ReceivedProgress } from "../signals.js";
 
 type ClosableStream = SubscriptionStream & { closed: boolean };
@@ -150,6 +155,94 @@ describe("onProgress (ADR 64)", () => {
 
     const got: ReceivedProgress[] = [];
     onProgress(client, { kind: "session", id: "s1" }, (e) => got.push(e));
+    await tick();
+
+    expect(captured.query).toEqual({ name: { wildcard: "*:signal:progress" } });
+    expect(got).toEqual([
+      { token: "tok-1", progress: 2, total: 10, message: "go", scope: { executionId: "e1" } },
+    ]);
+  });
+});
+
+/**
+ * `client.onLog` / `client.onProgress` — the instance-method sugar delegates to
+ * the free functions (both take a client first-arg, so `this` threads through).
+ * Same query + payload mapping as the free-function tests above, reached via the
+ * real `createClient` client rather than the minimal fake.
+ */
+function subscribeOnlyTransport(stream: SubscriptionStream, captured: Captured): ClientTransport {
+  let state: ClientState = "idle";
+  const listeners = new Set<(s: ClientState) => void>();
+  return {
+    id: "fake",
+    capabilities: {
+      bidirectional: true,
+      streamingRequest: true,
+      reconnectable: false,
+      binaryFrames: false,
+    } satisfies TransportCapabilities,
+    get state() {
+      return state;
+    },
+    async connect() {
+      state = "open";
+      for (const l of listeners) l(state);
+    },
+    async close() {
+      state = "closed";
+    },
+    request: (async () => ({})) as ClientTransport["request"],
+    subscribe(scope, query, fromCursor) {
+      captured.scope = scope;
+      captured.query = query;
+      captured.fromCursor = fromCursor;
+      return stream;
+    },
+    progress: (): ProgressStream => {
+      throw new Error("progress not implemented in this fake");
+    },
+    onStateChange(h) {
+      listeners.add(h);
+      return () => listeners.delete(h);
+    },
+  };
+}
+
+describe("client.onLog / client.onProgress instance methods", () => {
+  it("client.onLog delegates to the free function (same query + mapping)", async () => {
+    const stream = streamOf([
+      frame({
+        name: logEventName("tool"),
+        scope: { executionId: "e1" },
+        payload: { level: "info", data: "hi" },
+      }),
+    ]);
+    const captured: Captured = {};
+    const client = await createClient({ transport: subscribeOnlyTransport(stream, captured) });
+
+    const got: ReceivedLog[] = [];
+    const off = client.onLog({ kind: "session", id: "s1" }, (e) => got.push(e));
+    await tick();
+
+    expect(captured.query).toEqual({ name: { wildcard: "*:signal:log" } });
+    expect(got).toEqual([{ level: "info", data: "hi", scope: { executionId: "e1" } }]);
+    off();
+    expect((stream as SubscriptionStream & { closed: boolean }).closed).toBe(true);
+  });
+
+  it("client.onProgress delegates to the free function", async () => {
+    const stream = streamOf([
+      frame({
+        name: progressEventName("tool"),
+        scope: { executionId: "e1" },
+        payload: { token: "tok-1", progress: 2, total: 10, message: "go" },
+      }),
+    ]);
+    const captured: Captured = {};
+    const client = await createClient({ transport: subscribeOnlyTransport(stream, captured) });
+
+    const got: ReceivedProgress[] = [];
+    client.onProgress({ kind: "session", id: "s1" }, (e) => got.push(e));
     await tick();
 
     expect(captured.query).toEqual({ name: { wildcard: "*:signal:progress" } });

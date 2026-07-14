@@ -26,28 +26,27 @@
 // there. Until then adopters call `onLog` directly.
 
 import type {
-  Cursor,
   ClientTransport,
   EventScope,
   LogEventPayload,
+  OnSignalOptions,
   ProgressEventPayload,
+  ReceivedLog,
+  ReceivedProgress,
   SubscriptionScope,
   Unsubscribe,
 } from "@agentick/spec-next";
 import { logEventQuery, progressEventQuery } from "@agentick/spec-next";
 
+// `ReceivedLog` / `ReceivedProgress` / `OnSignalOptions` moved to
+// `@agentick/spec-next/client` (they type BOTH these free functions AND the
+// `ClientProtocol.onLog` / `.onProgress` methods). Re-exported here so the
+// `@agentick/client-next` surface is unchanged.
+export type { ReceivedLog, ReceivedProgress, OnSignalOptions } from "@agentick/spec-next";
+
 /** Minimal client surface these helpers need. */
 interface SignalClient {
   readonly transport: Pick<ClientTransport, "subscribe">;
-}
-
-/** A received signal event: the decoded payload plus its origin scope. */
-export type ReceivedLog = LogEventPayload & { readonly scope: EventScope };
-export type ReceivedProgress = ProgressEventPayload & { readonly scope: EventScope };
-
-export interface OnSignalOptions {
-  /** Resume from a prior cursor. Omit to read from the current head. */
-  readonly fromCursor?: Cursor;
 }
 
 /**

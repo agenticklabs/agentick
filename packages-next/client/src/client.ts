@@ -28,8 +28,12 @@ import type {
   GatewayHandle,
   InitializeResult,
   ClientHookContext,
+  OnSignalOptions,
+  ReceivedLog,
+  ReceivedProgress,
   SendInput,
   ServerInfo,
+  SubscriptionScope,
   Unsubscribe,
   WireHooks,
   WireMethod,
@@ -38,6 +42,7 @@ import type {
   WireResult,
 } from "@agentick/spec-next";
 import { EMPTY_CLIENT_CAPABILITIES, ErrorCode } from "@agentick/spec-next";
+import { onLog as onLogSignal, onProgress as onProgressSignal } from "./signals.js";
 import { createLocalPubSub, createNotifier, type LocalPubSub } from "@agentick/pubsub-next";
 import { Deferred, Effect, Stream } from "effect";
 import { buildClientCapabilities } from "./capabilities.js";
@@ -337,6 +342,26 @@ class AgentickClient implements ClientProtocol {
 
   onCapabilitiesChange(listener: (capabilities: ClientCapabilities) => void): () => void {
     return this.capabilityListeners.subscribe(listener);
+  }
+
+  // Runtime signals (ADR 64) — instance sugar delegating to the tree-shakeable
+  // free functions (both take a client as the first arg, so `this` threads
+  // straight through). Keeps `client.onLog(scope, cb)` next to
+  // `client.onCapabilitiesChange`; `onLog(client, scope, cb)` stays exported.
+  onLog(
+    scope: SubscriptionScope,
+    handler: (event: ReceivedLog) => void,
+    opts?: OnSignalOptions,
+  ): Unsubscribe {
+    return onLogSignal(this, scope, handler, opts);
+  }
+
+  onProgress(
+    scope: SubscriptionScope,
+    handler: (event: ReceivedProgress) => void,
+    opts?: OnSignalOptions,
+  ): Unsubscribe {
+    return onProgressSignal(this, scope, handler, opts);
   }
 
   /**

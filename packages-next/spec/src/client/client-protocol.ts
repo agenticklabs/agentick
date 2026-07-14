@@ -15,6 +15,8 @@ import type { Unsubscribe } from "../protocol/inbox.js";
 import type { Cursor } from "../protocol/event-log.js";
 import type { SendInput } from "../protocol/session-harness.js";
 import type { WireMethod, WireParams, WireResult } from "../wire/params.js";
+import type { SubscriptionScope } from "../wire/scope.js";
+import type { ReceivedLog, ReceivedProgress, OnSignalOptions } from "./signals.js";
 import type { ClientEvent, ClientEventFilter } from "./events.js";
 import type { ClientNamespaces } from "./extension.js";
 import type { WireHooks, WireRegistrars } from "./hooks.js";
@@ -96,6 +98,31 @@ export interface ClientProtocol {
    * Returns an unsubscribe. Symmetric with {@link onStateChange}.
    */
   onCapabilitiesChange(listener: (capabilities: ClientCapabilities) => void): () => void;
+
+  // ── runtime signals (ADR 64) ───────────────────────────────────────────
+
+  /**
+   * Subscribe to `log` runtime signals for `scope` (a session / app /
+   * gateway subscription target). `handler` fires once per event with the
+   * decoded payload plus its origin scope. Returns an {@link Unsubscribe}
+   * that closes the underlying subscription.
+   *
+   * The instance-method twin of the tree-shakeable `onLog(client, …)` free
+   * function in `@agentick/client-next` — both take a client, so the method
+   * simply delegates. Symmetric with {@link onCapabilitiesChange}.
+   */
+  onLog(
+    scope: SubscriptionScope,
+    handler: (event: ReceivedLog) => void,
+    opts?: OnSignalOptions,
+  ): Unsubscribe;
+
+  /** Subscribe to `progress` runtime signals for `scope`. See {@link onLog}. */
+  onProgress(
+    scope: SubscriptionScope,
+    handler: (event: ReceivedProgress) => void,
+    opts?: OnSignalOptions,
+  ): Unsubscribe;
 
   /**
    * Resolve once any in-flight post-reconnect handshake completes.
