@@ -147,7 +147,10 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
     inbox: MessageInbox,
     options: ToolExecutorHarnessOptions,
   ) {
-    super("tool", scopeId, journal, bus, inbox, { hooks: options.hooks });
+    super("tool", scopeId, journal, bus, inbox, {
+      hooks: options.hooks,
+      inheritedInterceptors: options.inheritedInterceptors,
+    });
     this.handlerResolver = options.handlerResolver;
     this.defaultTimeoutMs = options.defaultTimeoutMs;
     this.defaultConfirmationTimeoutMs = options.defaultConfirmationTimeoutMs;

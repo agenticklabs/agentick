@@ -52,6 +52,7 @@ import { Effect, Stream } from "effect";
 import {
   BaseHarness,
   type Hooks,
+  type Middleware,
   ulid,
   SESSION_ESCALATION_MESSAGE_TYPE,
   ESCALATION_TIMEOUT_MS,
@@ -214,6 +215,13 @@ export interface TasksHarnessOptions {
    * value, forwarded to {@link BaseHarness}. Defaults to `Hooks.empty`.
    */
   readonly hooks?: Hooks;
+  /**
+   * Resolved interceptor snapshot (ADR 76 tier 3) — the parent scope's
+   * resolved interceptors, folded in at construction and forwarded to
+   * {@link BaseHarness} so `.use()` / `.guard()` from ancestor scopes wrap this
+   * harness's ops. Mirrors {@link hooks}. Defaults to `[]`.
+   */
+  readonly inheritedInterceptors?: readonly Middleware<unknown, unknown, unknown>[];
 }
 
 // ============================================================================
@@ -260,7 +268,10 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
     inbox: MessageInbox,
     options: TasksHarnessOptions = {},
   ) {
-    super("tasks", scopeId, journal, bus, inbox, { hooks: options.hooks });
+    super("tasks", scopeId, journal, bus, inbox, {
+      hooks: options.hooks,
+      inheritedInterceptors: options.inheritedInterceptors,
+    });
     this.parentScope = options.parentScope;
     this.scope = options.parentScope ?? {};
     this.store = options.store ?? new InMemoryTaskStore();

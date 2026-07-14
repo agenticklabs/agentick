@@ -39,14 +39,15 @@
  * absent everywhere (the session constructs its knobs with
  * `parentLayer` undefined), so the chain is just `[self]` and behavior is
  * byte-identical to a single layer — the seam merely lets a future app
- * tier drop in with no rewrite. (Named `parentLayer` to disambiguate from
- * `BaseHarness.parent`, the ADR 31 harness-hierarchy parent reference.)
+ * tier drop in with no rewrite. (Named `parentLayer` — the parent *knob layer*
+ * in a value-resolution cascade — to distinguish it from the harness scope
+ * hierarchy that the interceptor/hook construction-fold threads.)
  *
  * @see docs/proposals/v2/blueprint/26-harness-api-shape.md
  */
 
 import { Effect } from "effect";
-import { BaseHarness, type Hooks, type Unsubscribe } from "@agentick/runtime-next";
+import { BaseHarness, type Hooks, type Middleware, type Unsubscribe } from "@agentick/runtime-next";
 import type {
   ContentBlock,
   EventBus,
@@ -98,6 +99,13 @@ export interface KnobsHarnessOptions {
    * value, forwarded to {@link BaseHarness}. Defaults to `Hooks.empty`.
    */
   readonly hooks?: Hooks;
+  /**
+   * Resolved interceptor snapshot (ADR 76 tier 3) — the session's resolved
+   * interceptors, folded in at construction and forwarded to {@link BaseHarness}
+   * so `session.use()` / `app.use()` wrap `knobs:set`. Mirrors {@link hooks}.
+   * Defaults to `[]`.
+   */
+  readonly inheritedInterceptors?: readonly Middleware<unknown, unknown, unknown>[];
 }
 
 export class KnobsHarness
@@ -124,9 +132,9 @@ export class KnobsHarness
    * mutated — writes hit SELF only. Absent today ⇒ single-layer behavior
    * (see class doc).
    *
-   * Distinct from `BaseHarness.parent` (ADR 31 harness hierarchy — the
-   * parent *harness* reference): this is the parent *knob layer* in a
-   * value-resolution cascade, hence the disambiguating name.
+   * This is the parent *knob layer* in a value-resolution cascade — distinct
+   * from the harness scope hierarchy (whose interceptor/hook inheritance is a
+   * construction-fold), hence the disambiguating name.
    */
   private readonly parentLayer?: KnobsHarnessProtocol;
 
@@ -171,7 +179,10 @@ export class KnobsHarness
     parentLayer?: KnobsHarnessProtocol,
     options: KnobsHarnessOptions = {},
   ) {
-    super("knobs", scopeId, journal, bus, inbox, { hooks: options.hooks });
+    super("knobs", scopeId, journal, bus, inbox, {
+      hooks: options.hooks,
+      inheritedInterceptors: options.inheritedInterceptors,
+    });
     this.parentLayer = parentLayer;
     const scope = () => ({ sessionId: this.scopeId });
     this.set = this.command({

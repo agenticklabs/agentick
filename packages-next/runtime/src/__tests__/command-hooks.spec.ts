@@ -46,7 +46,7 @@ declare module "../substrate/base-harness.js" {
   }
 }
 
-class HookTestHarness extends BaseHarness<"tool", HookTestHarness> {
+class HookTestHarness extends BaseHarness<"tool"> {
   /** Public probe method (command path — auto opId, empty scope). */
   readonly probe: (input: ProbeInput) => Promise<ProbeOutput>;
 
@@ -55,11 +55,10 @@ class HookTestHarness extends BaseHarness<"tool", HookTestHarness> {
     journal: MemoryJournal,
     bus: LocalEventBus,
     inbox: LocalInbox,
-    opts: { readonly hooks?: Hooks; readonly parent?: HookTestHarness } = {},
+    opts: { readonly hooks?: Hooks } = {},
   ) {
     super("tool", scopeId, journal, bus, inbox, {
       ...(opts.hooks ? { hooks: opts.hooks } : {}),
-      ...(opts.parent ? { parent: opts.parent } : {}),
     });
     this.probe = this.command<ProbeInput, ProbeOutput, never>({
       name: "tool:probe",
@@ -105,7 +104,6 @@ class HookTestHarness extends BaseHarness<"tool", HookTestHarness> {
 async function mkHarness(
   opts: {
     readonly hooks?: Hooks;
-    readonly parent?: HookTestHarness;
   } = {},
 ): Promise<HookTestHarness> {
   const h = new HookTestHarness(

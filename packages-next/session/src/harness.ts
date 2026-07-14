@@ -14,6 +14,7 @@ import { Effect, Fiber, ManagedRuntime, Stream } from "effect";
 import {
   BaseHarness,
   type Hooks,
+  type Middleware,
   runHarnessProtocol,
   ulid,
   SESSION_ESCALATION_MESSAGE_TYPE,
@@ -276,14 +277,18 @@ export interface SessionHarnessOptions<P = unknown> {
    */
   readonly telemetryNamespace?: string;
   /**
-   * Construction parent (ADR 76 tier 3 — structural middleware
-   * inheritance). Typically the AppHarness. When set, middleware
-   * registered via `app.use(...)` composes OUTERMOST of the session's own
-   * chain around every session operation — deployment-global concerns
-   * (audit / trace / journal) wrapping session commands. Undefined →
-   * top-of-tree, inherits nothing (behavior-preserving).
+   * Resolved interceptor snapshot (ADR 76 tier 3 — structural middleware
+   * inheritance as a construction-fold). The app's resolved interceptors,
+   * computed once by `createSessionBody` and folded in here. Middleware
+   * registered via `app.use(...)` / `app.guard(...)` composes OUTERMOST of the
+   * session's own chain around every session operation — deployment-global
+   * concerns (audit / trace / journal / policy gates) wrapping session
+   * commands. Forwarded to {@link BaseHarness} for the session's own commands
+   * AND onto the per-session bridges (knobs / state / …) via the session's own
+   * `resolvedInterceptors()`. Undefined → top-of-tree, inherits nothing.
+   * Mirrors {@link hooks}.
    */
-  readonly parent?: unknown;
+  readonly inheritedInterceptors?: readonly Middleware<unknown, unknown, unknown>[];
   /**
    * Resolved command lifecycle hooks (ADR 82) — the session's cascade-folded
    * {@link Hooks} value (app + session, composed), supplied by the app's
@@ -411,9 +416,10 @@ export class SessionHarness<P = unknown>
         bus: options.bus,
         inbox: options.inbox,
         telemetryNamespace: options.telemetryNamespace,
-        // ADR 76 tier 3 — the app is the session's construction parent, so
-        // `app.use(...)` structurally wraps every session operation.
-        parent: options.parent,
+        // ADR 76 tier 3 — the app's resolved interceptor snapshot, folded in
+        // at construction so `app.use(...)` / `app.guard(...)` structurally
+        // wraps every session operation. Mirrors `hooks`, no parent pointer.
+        inheritedInterceptors: options.inheritedInterceptors,
         // ADR 82 — the session's resolved (app + session) hook layer.
         hooks: options.hooks,
       }),
@@ -429,11 +435,11 @@ export class SessionHarness<P = unknown>
     const resolvedInbox = this.inbox;
 
     this.store = new SessionStateStore(options.sessionId);
-    // TODO(adr-76: bridge-parent-threading) — pass `parent: this` to the
-    // per-session bridge harnesses (knobs/state/gates/timeline) so
-    // `session.use()` structurally wraps their ops (tier 3). Safe because the
-    // bridges are per-session (no cross-session leak). Not wired yet — the
-    // bridge constructors don't take a parent; app→session (above) is live.
+    // ADR 76 tier 3 — the per-session bridges (knobs/state/…) inherit
+    // `session.use()` / `app.use()` via the construction-fold: the session's
+    // `resolvedInterceptors()` snapshot is threaded to `buildSessionBridges`
+    // below (see `inheritedInterceptors` there). Safe because the bridges are
+    // per-session (no cross-session leak).
     this.bridges = buildSessionBridges(
       this.store,
       { journal: resolvedJournal, bus: resolvedBus, inbox: resolvedInbox },
@@ -451,6 +457,10 @@ export class SessionHarness<P = unknown>
         // `knobs:set` folds the same app+session cascade. `this.hooks` was set
         // by `super(...)` above.
         hooks: this.hooks,
+        // ADR 76 tier 3 — the session's RESOLVED interceptors (app-inherited +
+        // the session's own), so `session.use()` / `app.use()` wraps the
+        // per-session bridges' ops too. Mirrors `hooks`.
+        inheritedInterceptors: this.resolvedInterceptors(),
       },
     );
     if (options.initialKnobs) {

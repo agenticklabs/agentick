@@ -592,26 +592,13 @@ export interface HarnessShell {
   onClose(handler: () => void | Promise<void>): void;
 }
 
-export interface BaseHarnessOptions<P = unknown, I = unknown> {
+export interface BaseHarnessOptions<I = unknown> {
   readonly policy?: JournalingPolicy;
   /**
    * Auto-register on the inbox at construction. Set false for harnesses
    * that handle their own registration timing. Default: true.
    */
   readonly autoRegisterInbox?: boolean;
-  /**
-   * Parent harness reference. Set by the framework when this harness
-   * is constructed as a child of another (e.g. an AppHarness child
-   * within a Gateway, a SessionHarness child within an App). Top-of-tree
-   * harnesses have `parent === undefined`.
-   *
-   * Factories at slots inside this harness receive `this` as their
-   * own `parent` argument; chain via `parent.parent` for grandparent
-   * access. Typed when known by the harness subclass.
-   *
-   * @see docs/proposals/v2/blueprint/31-harness-hierarchy.md
-   */
-  readonly parent?: P;
   /**
    * Construction input as supplied by the caller (or its merged form
    * after framework defaults). Stored on the harness for factories
@@ -686,13 +673,18 @@ export interface BaseHarnessOptions<P = unknown, I = unknown> {
    * that owns the option (`createApp`/`createSession`) — not here.
    */
   readonly hooks?: Hooks;
+  /**
+   * The parent scope's resolved interceptor snapshot (ADR 76 tier 3), folded
+   * in at construction — mirrors {@link hooks}. Guards + transforms both live
+   * on `this.middleware` and inherit via this seam: the caller computes the
+   * value once (`parent.resolvedInterceptors()`) and hands it down, so no op
+   * ever walks a construction-parent chain. Composed OUTERMOST of this
+   * harness's own middleware (broader scope first). Defaults to `[]`.
+   */
+  readonly inheritedInterceptors?: readonly Middleware<unknown, unknown, unknown>[];
 }
 
-export abstract class BaseHarness<
-  Surface extends EventSurface = EventSurface,
-  Parent = unknown,
-  Input = unknown,
-> {
+export abstract class BaseHarness<Surface extends EventSurface = EventSurface, Input = unknown> {
   /**
    * Cluster-portable inbox address — `${surface}:${scopeId}`. Public
    * so other harnesses can send `inbox.send(address, ...)` messages
@@ -702,12 +694,6 @@ export abstract class BaseHarness<
   public readonly address: string;
   protected readonly middleware = new MiddlewareChain();
 
-  /**
-   * Parent harness reference, if any. Top-of-tree harnesses have
-   * `parent === undefined`. Set from `BaseHarnessOptions.parent` at
-   * construction.
-   */
-  readonly parent: Parent | undefined;
   /**
    * Construction input as supplied by the caller. Set from
    * `BaseHarnessOptions.input` at construction. Factories inside this
@@ -762,6 +748,15 @@ export abstract class BaseHarness<
    * @see BaseHarnessOptions.hooks
    */
   protected readonly hooks: Hooks;
+  /**
+   * The parent scope's RESOLVED interceptor snapshot (ADR 76 tier 3), folded
+   * in at construction — the middleware twin of {@link hooks}. The cascade
+   * lives in the FOLD (the parent computed `resolvedInterceptors()` and passed
+   * the value), not a per-op parent-walk. Composed OUTERMOST of this harness's
+   * own `this.middleware` per op; `[]` when top-of-tree.
+   * @see BaseHarnessOptions.inheritedInterceptors
+   */
+  protected readonly inheritedInterceptors: readonly Middleware<unknown, unknown, unknown>[];
   private readonly policy: JournalingPolicy;
   private inboxUnsubscribe?: Unsubscribe;
 
@@ -826,30 +821,24 @@ export abstract class BaseHarness<
   }
 
   /**
-   * ADR 76 — structural middleware inheritance (tier 3).
+   * ADR 76 — structural middleware inheritance (tier 3) as a CONSTRUCTION-FOLD.
    *
-   * Collect this harness's middleware plus every *construction*-ancestor's,
-   * ordered **root-outermost**: the returned list is
-   * `[...root.mw, …, ...parent.mw, ...this.mw]`. Recursion up the `parent`
-   * pointer (ADR 31) terminates at the first non-`BaseHarness` parent
-   * (top-of-tree). Collected **fresh per operation** so a late `use()` /
-   * unsubscribe on an ancestor is honored.
+   * The value a parent hands its children: this harness's inherited layer
+   * (folded in at construction) followed by its OWN registered middleware,
+   * ordered **root-outermost** — `[...inheritedInterceptors, ...ownMiddleware]`.
+   * A child snapshots this at ITS construction (`inheritedInterceptors:
+   * parent.resolvedInterceptors()`), so the cascade is a static fold down the
+   * scope chain, not a per-op walk up a parent pointer. Mirrors {@link Hooks}
+   * (ADR 82): the fold IS the walk, memoized at each node.
    *
-   * Behavior-preserving: a root harness returns exactly its own chain; a
-   * child whose ancestors registered nothing returns exactly its own chain.
-   * The inherited stack only does something once an ancestor is `.use()`d.
-   *
-   * TODO(perf): walks the ancestor chain each op. Depth is ≈3–4
-   * (gateway→app→session→sub); memoize + invalidate-on-`use` only if a hot
-   * path profiles badly. See ADR 76 open question Q1.
+   * Guards (`.guard()`) and transforms (`.use()`) both live on `this.middleware`,
+   * so both inherit through this one seam. Snapshots the OWN chain live, so a
+   * child sees registrations made on the parent BEFORE the child was
+   * constructed; registrations made AFTER are outside the child's static fold.
    */
-  protected ownAndInheritedMiddleware(): Middleware<unknown, unknown, unknown>[] {
-    // `parent` is typed `Parent | undefined`; narrow structurally. Protected
-    // access across instances of the same class is permitted within the class.
-    const inherited =
-      this.parent instanceof BaseHarness ? this.parent.ownAndInheritedMiddleware() : [];
-    // Ancestors are broader scope → outermost → first in the list.
-    return [...inherited, ...this.middleware.snapshot()];
+  protected resolvedInterceptors(): readonly Middleware<unknown, unknown, unknown>[] {
+    // Inherited layer is broader scope → outermost → first in the list.
+    return [...this.inheritedInterceptors, ...this.middleware.snapshot()];
   }
 
   /**
@@ -921,7 +910,11 @@ export abstract class BaseHarness<
    * in-fiber.
    */
   listInterceptors(opName: string): InterceptorKind[] {
-    const assembled = [...this.ownAndInheritedMiddleware(), ...this.hooks.forOp(opName)];
+    const assembled = [
+      ...this.inheritedInterceptors,
+      ...this.middleware.snapshot(),
+      ...this.hooks.forOp(opName),
+    ];
     return orderInterceptors(assembled).map(interceptorKind);
   }
 
@@ -940,16 +933,16 @@ export abstract class BaseHarness<
     defaultJournal: OperationJournal,
     defaultBus: EventBus,
     defaultInbox: MessageInbox,
-    options: BaseHarnessOptions<Parent, Input> = {},
+    options: BaseHarnessOptions<Input> = {},
   ) {
     this.address = `${surface}:${scopeId}`;
     this.policy = options.policy ?? DEFAULT_JOURNALING_POLICY;
-    this.parent = options.parent;
     this.input = options.input;
     this.metadata = Object.freeze({ ...(options.metadata ?? {}) });
     this.principal = options.principal;
     this.telemetryNamespace = options.telemetryNamespace ?? "agentick";
     this.hooks = options.hooks ?? Hooks.empty;
+    this.inheritedInterceptors = options.inheritedInterceptors ?? [];
 
     // Substrate slot resolution (ADR 31). Build a shell exposing the
     // positional substrate defaults as the parent-side upstream, then
@@ -1073,8 +1066,10 @@ export abstract class BaseHarness<
             // 4. Assemble the ONE interceptor list around the body and compose
             //    it. Assembly order (outermost → innermost):
             //      call-scoped (tier 4, FiberRef — broadest)
-            //        → inherited ancestors (tier 3, root → parent)
-            //          → this harness (tier 2, incl. guards from `.guard()`)
+            //        → inherited layer (tier 3, folded at construction — no
+            //          walk; the parent's `resolvedInterceptors()` snapshot)
+            //          → this harness's own middleware (tier 2, read locally
+            //            per op, incl. guards from `.guard()`)
             //            → command hooks (ADR 82)
             //    Then a STABLE guard-outermost sort floats every `guard`-kind
             //    interceptor ahead of the transforms (deny-before-transform),
@@ -1083,7 +1078,8 @@ export abstract class BaseHarness<
             const callMiddleware = yield* getCallMiddleware;
             const assembled = [
               ...callMiddleware,
-              ...this.ownAndInheritedMiddleware(),
+              ...this.inheritedInterceptors,
+              ...this.middleware.snapshot(),
               ...this.hooks.forOp(resolvedOp.name),
             ];
             const composed = composeMiddleware<I, R, E>(

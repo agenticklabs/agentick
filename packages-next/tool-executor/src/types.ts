@@ -24,7 +24,7 @@ import type {
   ToolRegistration,
   Validator,
 } from "@agentick/spec-next";
-import type { Hooks } from "@agentick/runtime-next";
+import type { Hooks, Middleware } from "@agentick/runtime-next";
 
 // Re-export the moved types so existing import paths keep working.
 export type {
@@ -173,4 +173,11 @@ export interface ToolExecutorHarnessOptions {
    * Defaults to `Hooks.empty`.
    */
   readonly hooks?: Hooks;
+  /**
+   * Resolved interceptor snapshot (ADR 76 tier 3) — the session's resolved
+   * interceptors (app-inherited + session's own), folded in at construction and
+   * forwarded to {@link BaseHarness} so `app.use()` / `session.use()` /
+   * `app.guard()` wrap `tool:dispatch`. Mirrors {@link hooks}. Defaults to `[]`.
+   */
+  readonly inheritedInterceptors?: readonly Middleware<unknown, unknown, unknown>[];
 }

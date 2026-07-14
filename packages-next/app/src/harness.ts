@@ -1238,6 +1238,13 @@ export class AppHarness<P = unknown>
     // COMPOSES per command (app-outer, session-inner both fire).
     const sessionHooks = this.hooks.extend(Hooks.from(input.hooks ?? {}));
 
+    // ADR 76 tier 3 — the middleware twin of the hook fold. Snapshot the app's
+    // RESOLVED interceptors NOW (captures boot-time `app.use()` / `app.guard()`)
+    // and thread this VALUE into the SessionHarness AND every per-session
+    // sub-harness below — the exact mirror of `sessionHooks`. No parent pointer:
+    // the fold IS the walk, memoized here.
+    const inheritedInterceptors = this.resolvedInterceptors();
+
     // Per-session elicitation harness. Owns the request/response
     // correlation engine for tool confirmation, MCP elicitation, and
     // any other "ask user X" step. The same instance is threaded into
@@ -1248,18 +1255,17 @@ export class AppHarness<P = unknown>
     // ADR 82 — the hook cascade reaches these per-session sub-harnesses via the
     // resolved `sessionHooks` VALUE (folded above), threaded into each `hooks`
     // option. No parent pointer needed for hooks.
-    // TODO(adr-81): the ADR-76 MIDDLEWARE cascade (`app.use()` / `session.use()`)
-    // still doesn't reach them — that walk needs the construction-parent pointer
-    // these harnesses drop (built here at app scope, not born from the session).
-    // Fix = relocate construction into the SessionHarness via app-provided
-    // factory injection (`(parent) => new XHarness(…, { parent })`). See
-    // blueprint/81 (now narrowed to middleware-only by ADR 82).
+    // ADR 76 — the MIDDLEWARE cascade (`app.use()` / `app.guard()`) now reaches
+    // them the SAME way: the `inheritedInterceptors` VALUE (the app's resolved
+    // interceptor snapshot, computed above) is threaded into each harness. This
+    // replaces the construction-parent WALK (ADR 81's pointer, now deleted) —
+    // guards + transforms both inherit through this fold.
     const elicitation = new ElicitationHarness(
       `${sessionId}:elicitation`,
       this.journal,
       this.bus,
       this.inbox,
-      { parentScope: { sessionId }, hooks: sessionHooks },
+      { parentScope: { sessionId }, hooks: sessionHooks, inheritedInterceptors },
     );
 
     // Per-session tasks harness — substrate-level long-running tool
@@ -1277,6 +1283,8 @@ export class AppHarness<P = unknown>
       executors: this.taskExecutors,
       // ADR 82 — session's resolved hook layer.
       hooks: sessionHooks,
+      // ADR 76 tier 3 — the app's resolved interceptor snapshot.
+      inheritedInterceptors,
     });
 
     // Per-session resources harness (ADR 62) — the application-controlled
@@ -1292,7 +1300,8 @@ export class AppHarness<P = unknown>
       this.bus,
       this.inbox,
       // ADR 82 — session's resolved hook layer.
-      { hooks: sessionHooks },
+      // ADR 76 tier 3 — the app's resolved interceptor snapshot.
+      { hooks: sessionHooks, inheritedInterceptors },
     );
 
     // ── Session extension lifecycle (#150) ────────────────────────
@@ -1409,6 +1418,9 @@ export class AppHarness<P = unknown>
           // ADR 82 — session's resolved hook layer. `tool:dispatch` routes
           // through `runOperation`, so `onBefore/AfterToolDispatch` fire here.
           hooks: sessionHooks,
+          // ADR 76 tier 3 — the app's resolved interceptor snapshot, so
+          // `app.use()` / `app.guard()` wraps `tool:dispatch`.
+          inheritedInterceptors,
         });
 
     // Cascade: per-call `createSession.*` > per-app `session.*` >
@@ -1439,9 +1451,11 @@ export class AppHarness<P = unknown>
       // (ADR 78 brick #2), not per-harness fields. Nesting is unaffected.
       telemetryNamespace: this.telemetryNamespace,
       ...(this.telemetryRuntime !== undefined ? { telemetryRuntime: this.telemetryRuntime } : {}),
-      // ADR 76 tier 3 — the app is the session's construction parent, so
-      // `app.use(...)` middleware wraps every session op (deployment-global).
-      parent: this,
+      // ADR 76 tier 3 — the app's resolved interceptor snapshot, folded in at
+      // construction so `app.use(...)` / `app.guard(...)` wraps every session op
+      // (deployment-global). The SessionHarness re-folds this onto its own
+      // per-session bridges. Mirrors `hooks` — no parent pointer.
+      inheritedInterceptors,
       // ADR 82 — session's resolved hook layer (app + session, composed). The
       // SessionHarness reads it per-op AND forwards it to its per-session
       // bridges (knobs / state / …) so their commands fold the same cascade.

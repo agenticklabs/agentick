@@ -25,15 +25,21 @@ interface In {
 let counter = 0;
 
 class GuardHarness extends BaseHarness<"tool"> {
-  constructor(id: string, parent?: BaseHarness<"tool">) {
+  constructor(id: string, parent?: GuardHarness) {
     super(
       "tool",
       id,
       new MemoryJournal(),
       new LocalEventBus(),
       new LocalInbox(),
-      parent ? { parent } : {},
+      // ADR 76 fold — snapshot the parent's resolved interceptors at construction.
+      parent ? { inheritedInterceptors: parent.resolvedInterceptorsForTest() } : {},
     );
+  }
+
+  /** Public test accessor for the `protected resolvedInterceptors()` fold value. */
+  resolvedInterceptorsForTest(): readonly Middleware<unknown, unknown, unknown>[] {
+    return this.resolvedInterceptors();
   }
 
   /** Run `a + b` through the full interceptor seam. */
@@ -60,7 +66,7 @@ class GuardHarness extends BaseHarness<"tool"> {
   }
 }
 
-async function mk(id: string, parent?: BaseHarness<"tool">): Promise<GuardHarness> {
+async function mk(id: string, parent?: GuardHarness): Promise<GuardHarness> {
   const h = new GuardHarness(id, parent);
   await h.ready;
   return h;
@@ -99,11 +105,20 @@ describe("ADR 83 — deny-before-transform ordering", () => {
 
   it("a BROAD-scope (ancestor) guard denies BEFORE a NARROW-scope (descendant) transform", async () => {
     const app = await mk("app");
-    const session = await mk("session", app);
 
     const order: string[] = [];
     let transformRan = false;
     let gateSawA: number | undefined;
+
+    // Broad (app) guard — registered BEFORE the session is constructed, so the
+    // fold snapshots it into the session's inherited layer; composes outermost.
+    app.guard<In, number>((input) => {
+      gateSawA = input.a;
+      order.push("app:guard");
+      return { kind: "veto", reason: "app-policy" };
+    });
+
+    const session = await mk("session", app);
 
     // Narrow (session) transform — reshapes input.
     session.useTransform((_input, next) =>
@@ -113,13 +128,6 @@ describe("ADR 83 — deny-before-transform ordering", () => {
         return yield* next({ a: 100, b: 100 });
       }),
     );
-
-    // Broad (app) guard — inherited onto the session op, composes outermost.
-    app.guard<In, number>((input) => {
-      gateSawA = input.a;
-      order.push("app:guard");
-      return { kind: "veto", reason: "app-policy" };
-    });
 
     await expect(Effect.runPromise(session.run({ a: 1, b: 2 }))).rejects.toBeTruthy();
     expect(order).toEqual(["app:guard"]);

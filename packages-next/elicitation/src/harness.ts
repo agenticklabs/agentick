@@ -33,7 +33,7 @@
  */
 
 import { Effect, Either } from "effect";
-import { BaseHarness, type Hooks } from "@agentick/runtime-next";
+import { BaseHarness, type Hooks, type Middleware } from "@agentick/runtime-next";
 import { reasonOf, omitUndefined } from "@agentick/utils-next";
 import type { RequestError } from "@agentick/runtime-next";
 import type {
@@ -90,6 +90,13 @@ export interface ElicitationHarnessOptions {
    * composed layer per-op. Defaults to `Hooks.empty`.
    */
   readonly hooks?: Hooks;
+  /**
+   * Resolved interceptor snapshot (ADR 76 tier 3) — the parent scope's
+   * resolved interceptors, folded in at construction and forwarded to
+   * {@link BaseHarness} so `.use()` / `.guard()` from ancestor scopes wrap this
+   * harness's ops. Mirrors {@link hooks}. Defaults to `[]`.
+   */
+  readonly inheritedInterceptors?: readonly Middleware<unknown, unknown, unknown>[];
 }
 
 // ============================================================================
@@ -114,7 +121,10 @@ export class ElicitationHarness
     inbox: MessageInbox,
     options: ElicitationHarnessOptions = {},
   ) {
-    super("elicitation", scopeId, journal, bus, inbox, { hooks: options.hooks });
+    super("elicitation", scopeId, journal, bus, inbox, {
+      hooks: options.hooks,
+      inheritedInterceptors: options.inheritedInterceptors,
+    });
     this.defaultTimeoutMs = options.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.parentScope = options.parentScope;
   }

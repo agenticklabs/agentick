@@ -33,7 +33,7 @@
  */
 
 import { Effect } from "effect";
-import { BaseHarness, type Hooks, type Unsubscribe } from "@agentick/runtime-next";
+import { BaseHarness, type Hooks, type Middleware, type Unsubscribe } from "@agentick/runtime-next";
 import type {
   EventBus,
   MessageEnvelope,
@@ -93,6 +93,13 @@ export interface ResourcesHarnessOptions {
    * value, forwarded to {@link BaseHarness}. Defaults to `Hooks.empty`.
    */
   readonly hooks?: Hooks;
+  /**
+   * Resolved interceptor snapshot (ADR 76 tier 3) — the parent scope's
+   * resolved interceptors, folded in at construction and forwarded to
+   * {@link BaseHarness} so `.use()` / `.guard()` from ancestor scopes wrap this
+   * harness's ops. Mirrors {@link hooks}. Defaults to `[]`.
+   */
+  readonly inheritedInterceptors?: readonly Middleware<unknown, unknown, unknown>[];
 }
 
 interface FixedBinding {
@@ -151,7 +158,10 @@ export class ResourcesHarness
     inbox: MessageInbox,
     options: ResourcesHarnessOptions = {},
   ) {
-    super(SURFACE, scopeId, journal, bus, inbox, { hooks: options.hooks });
+    super(SURFACE, scopeId, journal, bus, inbox, {
+      hooks: options.hooks,
+      inheritedInterceptors: options.inheritedInterceptors,
+    });
     this.pageSize = options.pageSize ?? DEFAULT_PAGE_SIZE;
     this.backend = options.backend ?? "memory";
 
