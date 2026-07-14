@@ -216,12 +216,18 @@ export interface CommandRegistry {}
 
 /** Uppercase the first char of `S`, leaving the tail untouched. */
 type Cap<S extends string> = S extends `${infer H}${infer T}` ? `${Uppercase<H>}${T}` : S;
-/** PascalCase a command id, splitting on the `:` (command) and `/` (wire) delimiters. */
+/**
+ * PascalCase a command id, splitting on the `:` (command), `/` (wire), and `-`
+ * (kebab word) delimiters — so `session:apply-executor-result` mints the clean,
+ * dot-accessible `onBeforeSessionApplyExecutorResult`, not a hyphenated key.
+ */
 type Pascal<S extends string> = S extends `${infer A}:${infer B}`
   ? `${Cap<A>}${Pascal<B>}`
   : S extends `${infer A}/${infer B}`
     ? `${Cap<A>}${Pascal<B>}`
-    : Cap<S>;
+    : S extends `${infer A}-${infer B}`
+      ? `${Cap<A>}${Pascal<B>}`
+      : Cap<S>;
 
 /**
  * The derived, never-hand-written hook surface (ADR 80 §5): each
@@ -361,7 +367,7 @@ export function liftMiddleware<I = unknown, R = unknown, E = unknown>(
 export function deriveHookNames(opName: string): [string, string] {
   const pascal = opName
     .replace(":command:", ":")
-    .split(/[:/]/)
+    .split(/[-:/]/)
     .map((seg) => (seg === "" ? seg : seg.charAt(0).toUpperCase() + seg.slice(1)))
     .join("");
   return [`onBefore${pascal}`, `onAfter${pascal}`];

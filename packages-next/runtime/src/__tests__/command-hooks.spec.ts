@@ -167,6 +167,17 @@ describe("deriveHookNames", () => {
     expect(deriveHookNames("knobs/set")).toEqual(["onBeforeKnobsSet", "onAfterKnobsSet"]);
   });
 
+  it("splits on `-` (kebab whats) → clean, dot-accessible camelCase hook names", () => {
+    expect(deriveHookNames("session:command:apply-executor-result")).toEqual([
+      "onBeforeSessionApplyExecutorResult",
+      "onAfterSessionApplyExecutorResult",
+    ]);
+    expect(deriveHookNames("loop:command:run-execution")).toEqual([
+      "onBeforeLoopRunExecution",
+      "onAfterLoopRunExecution",
+    ]);
+  });
+
   it("is a total function of the op name — a rename renames its surfaces", () => {
     expect(deriveHookNames("tool:command:execute")).toEqual([
       "onBeforeToolExecute",

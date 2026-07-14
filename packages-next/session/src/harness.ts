@@ -68,6 +68,7 @@ import type {
   SpawnContext,
   SpawnInput,
   StateApplyError,
+  SubstrateError,
   TickEndForwardDecision,
   TickResult,
   TimelineEntry,
@@ -96,6 +97,29 @@ import type { TimelineHandle, TimelineHarnessOptions } from "@agentick/timeline-
 import { buildSessionBridges, type SessionHookBridges } from "./session-bridges.js";
 import { SessionStateStore } from "./session-state.js";
 import { createSessionExecutionHandle, type SessionEmitInput } from "./session-execution-handle.js";
+
+// ============================================================================
+// Command lifecycle hooks (ADR 80/83) — typed CommandRegistry augmentation.
+// ============================================================================
+//
+// The four public session verbs now route through `runOperation` (see
+// `sessionOp`), so each mints a typed `onBefore…` / `onAfter…` hook via the
+// derived `CommandHooks` surface. The registry key is the canonical
+// `session:<verb>` form (the `:command:` infix `deriveHookNames` strips), so
+// `session:send` → `onBeforeSessionSend` / `onAfterSessionSend`.
+//
+// WIRE (ADR 51): these ops are HOOKABLE but NON-ADDRESSABLE — see the note at
+// `handleMessage`. `SendInput` carries non-serializable per-call overrides, so
+// no wire command descriptor is declared here; this augmentation is purely the
+// in-process hook surface.
+declare module "@agentick/runtime-next" {
+  interface CommandRegistry {
+    "session:send": { input: SendInput<unknown>; output: SessionExecutionHandle };
+    "session:append": { input: AppendEntryInput; output: ApplyResult };
+    "session:apply-executor-result": { input: ApplyExecutorResultInput; output: ApplyResult };
+    "session:apply-tool-results": { input: ApplyToolResultsInput; output: ApplyResult };
+  }
+}
 
 // ============================================================================
 // Construction options
@@ -577,10 +601,12 @@ export class SessionHarness<P = unknown>
 
   send(input: SendInput<P>): Promise<SessionExecutionHandle> {
     return runHarnessProtocol(
-      Effect.tryPromise({
-        try: () => this.sendBody(input),
-        catch: (cause): SessionError => coerceSessionError(cause),
-      }),
+      this.sessionOp("send", input, (i) =>
+        Effect.tryPromise({
+          try: () => this.sendBody(i),
+          catch: (cause): SessionError => coerceSessionError(cause),
+        }),
+      ),
     );
   }
 
@@ -697,6 +723,14 @@ export class SessionHarness<P = unknown>
    * in the loop's fiber rather than launching its own `runPromise` root.
    * {@link applyExecutorResult} is the facade.
    */
+  // HOOK SCOPE (ADR 83): the `*Fx` twins are what the LOOP composes in-fiber
+  // (ADR 77 Stage 3) — deliberately UNWRAPPED, so the loop's hot per-tick result
+  // application is not re-wrapped in a `runOperation`. Consequently the
+  // `apply-executor-result` / `apply-tool-results` hooks fire on the PUBLIC
+  // facade (a direct `session.applyExecutorResult(...)` call), NOT on the loop's
+  // internal application. `send` / `append` (user-facing) hooks fire always.
+  // Lighting up the loop path would mean wrapping the Fx twins — a follow-up
+  // that must preserve the ADR-77 in-fiber composition.
   private applyExecutorResultFx(
     input: ApplyExecutorResultInput,
   ): Effect.Effect<ApplyResult, StateApplyError, never> {
@@ -707,7 +741,9 @@ export class SessionHarness<P = unknown>
   }
 
   applyExecutorResult(input: ApplyExecutorResultInput): Promise<ApplyResult> {
-    return runHarnessProtocol(this.applyExecutorResultFx(input));
+    return runHarnessProtocol(
+      this.sessionOp("apply-executor-result", input, (i) => this.applyExecutorResultFx(i)),
+    );
   }
 
   /** The composable `applyToolResults` Effect — see {@link applyExecutorResultFx}. */
@@ -721,15 +757,19 @@ export class SessionHarness<P = unknown>
   }
 
   applyToolResults(input: ApplyToolResultsInput): Promise<ApplyResult> {
-    return runHarnessProtocol(this.applyToolResultsFx(input));
+    return runHarnessProtocol(
+      this.sessionOp("apply-tool-results", input, (i) => this.applyToolResultsFx(i)),
+    );
   }
 
   appendEntry(input: AppendEntryInput): Promise<ApplyResult> {
     return runHarnessProtocol(
-      Effect.tryPromise({
-        try: () => this.appendEntryBody(input),
-        catch: (cause): StateApplyError => new TimelineWriteFailed({ cause }),
-      }),
+      this.sessionOp("append", input, (i) =>
+        Effect.tryPromise({
+          try: () => this.appendEntryBody(i),
+          catch: (cause): StateApplyError => new TimelineWriteFailed({ cause }),
+        }),
+      ),
     );
   }
 
@@ -1025,22 +1065,28 @@ export class SessionHarness<P = unknown>
 
   // ──────── inbox dispatch ────────
 
-  // TODO(adr-51-session-verbs): session commands are NOT declared
-  // commands yet — and NOT mechanically migratable, for two recorded
-  // reasons (classified during the adr-51 wave):
-  //   1. Session's public commands (send/dispatch/queue/append) do not
-  //      run through `runOperation` at all today (the pre-existing gap
-  //      base-harness.ts §"commands don't currently go through
-  //      runOperation" notes). Declaring them is the fix, but:
-  //   2. `SendInput` carries non-serializable per-call overrides
-  //      (`executor`, `target`, `signal`, tool registrations with live
-  //      handlers) — by ADR 51 §1.2 those are in-process-only. An
-  //      ADDRESSABLE `session:send` needs a designed serializable
-  //      signal form (messages + maxTicks + stream — the subset the
-  //      wire's `session/send` porcelain already carries), same move
-  //      as `timeline:compact`'s signal form. `session:dispatch`
-  //      (name + JSON input) is fully serializable and is the easy
-  //      first declaration. Design rides the slice-5/verb-matrix pass.
+  // ADR 51 — session verbs: HOOKABLE, but NON-ADDRESSABLE (resolved).
+  //
+  //   RESOLVED (this change): the four public session verbs — `send`,
+  //   `applyExecutorResult`, `applyToolResults`, `appendEntry` — NOW route
+  //   through `runOperation` via `sessionOp`, so the ADR-83 interceptor seam
+  //   (guards / `.use()` middleware / command hooks) and the full phase
+  //   contract (`requested` → `before` → terminal) fire around each. They are
+  //   declared in the `CommandRegistry` augmentation at the top of this file,
+  //   minting `onBeforeSessionSend` / `onAfterSessionSend` (etc.). This closes
+  //   the "commands don't currently go through runOperation" gap the
+  //   base-harness §`use` note flagged for the session surface.
+  //
+  //   STILL OPEN — wire addressability. These ops remain the in-process door
+  //   only: `SendInput` carries non-serializable per-call overrides
+  //   (`executor`, `target`, `signal`, tool registrations with LIVE handlers)
+  //   which, by ADR 51 §1.2, cannot cross the wire. A wire-addressable
+  //   `session:send` needs a DESIGNED serializable input subset (`messages` +
+  //   `maxTicks` + `stream` — the porcelain the wire's `session/send` already
+  //   carries), the same move as `timeline:compact`'s signal form. That
+  //   remains future work; no wire `CommandDescriptor` is declared for these.
+  //   `session:dispatch` (name + JSON input) is fully serializable and is the
+  //   natural first wire declaration when that pass lands.
   protected handleMessage(
     msg: MessageEnvelope,
   ): Effect.Effect<unknown, MessageHandlerError, never> {
@@ -1160,6 +1206,38 @@ export class SessionHarness<P = unknown>
   }
 
   // ──────── internals ────────
+
+  /**
+   * Route a session verb's body through {@link BaseHarness.runOperation} so it
+   * fires the ADR-83 interceptor seam (guards / `.use()` middleware / command
+   * hooks) and the full phase contract (`requested` → `before` → terminal),
+   * exactly as every other harness command does. Mints a fresh `opId` per call
+   * (`session:<verb>:<ulid>`) — session verbs carry no caller-supplied
+   * idempotency key, so no replay: each invocation is its own operation. The
+   * op `name` follows the executor's convention (`<surface>:command:<verb>`),
+   * which {@link deriveHookNames} strips to the `session:<verb>` CommandRegistry
+   * key.
+   *
+   * The `body` Effect is UNCHANGED from the pre-wrap surface — the same
+   * `Effect.tryPromise` over the verb's `*Body` (or its composable `*Fx` twin),
+   * with its own error-coercion preserved. Wrapping is purely additive: with no
+   * guards/hooks registered, `runOperation` composes to a pass-through around
+   * the identical body.
+   */
+  private sessionOp<I, R, E>(
+    verb: string,
+    input: I,
+    body: (i: I) => Effect.Effect<R, E, never>,
+  ): Effect.Effect<R, E | SubstrateError, never> {
+    const op: Operation<I, R, E> = {
+      opId: `session:${verb}:${ulid()}`,
+      surface: "session",
+      name: `session:command:${verb}`,
+      scope: { sessionId: this.scopeId },
+      input,
+    };
+    return this.runOperation(op, body);
+  }
 
   private async sendBody(input: SendInput<P>): Promise<SessionExecutionHandle> {
     if (this._closed) {

@@ -395,6 +395,49 @@ spine paying off: one send is one fiber, so a call-scoped FiberRef reaches acros
 the shared harnesses. See [runtime README — Operation middleware](../runtime/README.md#operation-middleware--three-tiers-adr-76)
 for the full tier model and the `use` vs `fx.use` split.
 
+## Command hooks — the session verbs are hookable (ADR 80 / 83)
+
+The four public session verbs route through `runOperation` (via the private
+`sessionOp` wrapper), so each fires the ADR-83 interceptor seam — guards,
+`.use()` middleware, and the derived **command lifecycle hooks** — plus the
+full phase contract (`requested` → `before` → terminal). The verbs and their
+minted hook names:
+
+| Verb                    | CommandRegistry key             | Hooks                                                       |
+| ----------------------- | ------------------------------- | ---------------------------------------------------------- |
+| `send`                  | `session:send`                  | `onBeforeSessionSend` / `onAfterSessionSend`               |
+| `appendEntry`           | `session:append`                | `onBeforeSessionAppend` / `onAfterSessionAppend`           |
+| `applyExecutorResult`   | `session:apply-executor-result` | `onBeforeSessionApplyExecutorResult` / `onAfter…`          |
+| `applyToolResults`      | `session:apply-tool-results`    | `onBeforeSessionApplyToolResults` / `onAfter…`             |
+
+Kebab `-what` segments PascalCase into the hook name (`apply-executor-result` →
+`ApplyExecutorResult`), so every verb yields a clean, dot-accessible hook.
+
+```typescript
+// Declarative (returns an Unsubscribe):
+const off = session.hook({
+  onBeforeSessionSend: (input) => reshape(input), // transform, or void to observe, or throw to veto
+});
+
+// Per-verb imperative (typed Proxy):
+session.hooks.onBeforeSessionAppend((input) => audit(input));
+```
+
+A before-hook returning a value **transforms** the input; `void` passes through;
+`throw` vetoes (the op aborts on the `E` channel). After-hooks are symmetric over
+the output.
+
+### Wire limitation — hookable, NOT addressable (ADR 51)
+
+These ops are the **in-process door only**. `SendInput` carries non-serializable
+per-call overrides (`executor`, `target`, `signal`, and tool registrations with
+_live_ handlers) that, by ADR 51 §1.2, cannot cross the wire — so **no wire
+`CommandDescriptor` is declared** for the session verbs. Wire addressability
+would require a designed serializable input subset (`messages` + `maxTicks` +
+`stream` — the porcelain the wire's `session/send` already carries), which
+remains future work. `session:dispatch` (name + JSON input) is fully
+serializable and is the natural first wire declaration when that pass lands.
+
 ## API
 
 Full surface in the [typedoc]. The package root exports the thin set an
@@ -467,6 +510,11 @@ their backing.
 
 - `src/__tests__/conformance.spec.ts` — `SessionHarnessProtocol`
   conformance suite.
+- `src/__tests__/session-hooks.spec.ts` — the session verbs route through
+  `runOperation` (ADR 83): `onBeforeSessionSend` fires on `send`,
+  `onBeforeSessionAppend` on `appendEntry`, `onAfterSessionSend` sees the
+  `SessionExecutionHandle`; plus the `deriveHookNames` ↔ `Pascal` agreement
+  for `session:command:send` / `:append`.
 - `src/__tests__/define-session.spec.ts` — `defineSession` factory wiring.
 - `src/__tests__/model-bridge.spec.tsx` — tree-declared per-tick model,
   real loop resolving the `ModelBridge` (ADR 56); tick-IR precedence over
