@@ -210,15 +210,18 @@ export interface GatewayHarnessProtocol {
    * (ADR 83 §"Wire dispatch through the seam"). The transport dispatcher
    * routes the resolved handler call through this so the wire method
    * fires the gateway's interceptor seam (gateway-scoped guards/hooks)
-   * — op name = the raw wire method (`session/send`), which
-   * `deriveHookNames` Pascalizes to `SessionSend`, minting
-   * `onBeforeSessionSend` at the gateway scope.
+   * — op name = the `wire:`-prefixed wire method (`wire:session/send`),
+   * which `deriveHookNames` Pascalizes to `WireSessionSend`, minting
+   * `onBeforeWireSessionSend` at the gateway scope.
    *
    * `authorizeDispatch` stays the un-waivable pre-gate: it runs BEFORE
    * this op, so authz composes ahead of any userland wire hook. The
-   * op runs on the gateway (a fold-root), so a gateway wire hook does
-   * NOT double-fire on the inner `session:send` op — the two are
-   * distinct seams.
+   * `wire:` prefix (ADR 83 wire section) keeps the wire boundary op name
+   * DISTINCT from the `session:send` op it delegates to, so a gateway
+   * `onBeforeSessionSend` (which now folds down LIVE to the session,
+   * ADR 83 §4) fires once at the session op and the wire hook
+   * `onBeforeWireSessionSend` fires once at the boundary — two distinct
+   * seams, no collision.
    *
    * Required — the seam is part of the gateway contract, not an optional
    * capability. A stub host implements it as a pass-through

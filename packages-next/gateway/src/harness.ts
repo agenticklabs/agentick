@@ -430,11 +430,14 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
    * method fires the gateway's interceptor seam — `runOperation` runs
    * the phase contract + composed guards/hooks around `run`.
    *
-   * The op name is the RAW wire method (`session/send`), so
-   * `deriveHookNames` Pascalizes it to `SessionSend` and a
-   * gateway-scoped `onBeforeSessionSend` hook fires. A FRESH unique
-   * `opId` (`wire:<method>:<ulid>`) guarantees the idempotency replay
-   * never triggers — the pre-seam wire path had no opId at all.
+   * The op name is the `wire:`-prefixed wire method (`wire:session/send`),
+   * so `deriveHookNames` Pascalizes it to `WireSessionSend` and a
+   * gateway-scoped `onBeforeWireSessionSend` hook fires — DISTINCT from
+   * the inner `session:send` op's `onBeforeSessionSend` (ADR 83 wire
+   * section, `wire:` prefix): the wire boundary and the session op are
+   * separate seams, one fire each, no collision. A FRESH unique `opId`
+   * (`wire:<method>:<ulid>`) guarantees the idempotency replay never
+   * triggers — the pre-seam wire path had no opId at all.
    *
    * Error propagation is byte-identical to the direct call: a handler
    * rejection maps into `runOperation`'s failure channel via
@@ -447,7 +450,13 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     const op: Operation<unknown, R, unknown> = {
       opId: `wire:${method}:${ulid()}`,
       surface: SURFACE,
-      name: method,
+      // `wire:` prefix (ADR 83 wire section): the wire op name must NOT
+      // collide with the op it delegates to (`session/send` vs `session:send`
+      // both Pascalize to `SessionSend`). Prefixed → `WireSessionSend`, so the
+      // wire boundary hook is `onBeforeWireSessionSend`, distinct from the
+      // session op's `onBeforeSessionSend` (which folds down live from the
+      // gateway and fires once at the session).
+      name: `wire:${method}`,
       scope: { gatewayId: this.scopeId },
       input: params,
     };

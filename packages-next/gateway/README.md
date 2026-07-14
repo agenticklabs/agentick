@@ -12,7 +12,7 @@ landed; pass `cluster: ClusterFactory` to `createGateway`).
 ## What this package is
 
 Phase 4 of the v2 implementation plan landed the thin
-`GatewayHarness` scaffold. It implemauents `GatewayHarnessProtocol` from `@agentick/spec-next` and is the
+`GatewayHarness` scaffold. It implements `GatewayHarnessProtocol` from `@agentick/spec-next` and is the
 runtime-root harness in every deployment tier — embedded library
 (in-process), single-process server, multi-tenant cloud, clustered.
 
@@ -41,9 +41,8 @@ import { createGateway } from "@agentick/gateway-next";
 
 const gateway = await createGateway();
 
-const app = await gateway.createApp({
+const app = await gateway.createApp(<MyAgent />, {
   appId: "my-app",
-  rootElement: <MyAgent />,
   options: { executor, reconciler },
 });
 
@@ -392,15 +391,26 @@ const gateway = await createGateway({
   authorizer: staticAuthorizer({ grants: { alice: ["session:*"] } }),
 });
 
-// (2a) CONTEXTUAL DENY, per-verb typed — a before-hook throws to veto.
-// `session/send` (wire) Pascalizes to SessionSend → onBeforeSessionSend.
+// (2a) CONTEXTUAL DENY on EVERY send, per-verb typed — a before-hook throws
+// to veto. `onBeforeSessionSend` (op `session:send`) folds LIVE from the
+// gateway down to every session (ADR 83 §4) and fires once per send —
+// wire-originated OR in-process. Register it here for deployment-wide quota.
 gateway.hooks.onBeforeSessionSend((params, ctx) => {
   if (overQuota(ctx.principal)) throw new Error("quota exceeded"); // any throw → terminal:failed = the call is vetoed
   return params; // (or return a reshaped params to transform the request)
 });
 
+// (2a') WIRE-BOUNDARY only — the `wire:`-prefixed op fires just for dispatches
+// arriving over a transport (not in-process sends). Use for wire-specific
+// concerns (payload shape, per-connection rate-limit).
+gateway.hooks.onBeforeWireSessionSend((params, ctx) => {
+  /* ... */ return params;
+});
+
 // (2b) RICHER VERDICT (veto / replace / defer) — a guard returns the DSL.
-// `guard` is harness-scoped, so branch on ctx.op to target one verb:
+// `guard` is harness-scoped, so branch on ctx.op to target one verb. A gateway
+// guard folds live to sessions, so `ctx.op === "SessionSend"` targets every
+// send; use `"WireSessionSend"` to target only the wire boundary.
 gateway.guard((params, ctx) =>
   ctx.op === "SessionSend" && rateLimited(ctx.principal)
     ? { kind: "defer", retryAfter: 1000 } // → JSON-RPC deferred, client retries
@@ -417,9 +427,11 @@ seam: your app's auth/authz can be as bespoke as it needs, **without touching th
 framework's enforcement point** — which is exactly why the `Authorizer` stays a
 structural pre-gate and does NOT itself become a hook.
 
-> The same `onBeforeSessionSend` name is the operation seen at three layers —
-> `client` (request leaving) · `gateway` (wire dispatch, here) · `session` (the
-> op) — scoped by where you register. See
+> The `wire:` prefix keeps the two seams distinct (ADR 83 wire section): the
+> WIRE hops — `client` (request leaving, keyed off `WireMethods`) and `gateway`
+> (wire dispatch arriving) — share `onBeforeWireSessionSend`; the `session:send`
+> **op** is `onBeforeSessionSend`, which a gateway registration folds down to
+> live. Distinct names, one fire each. See
 > [`docs/proposals/v2/HOOK-LIFECYCLE.md`](../../docs/proposals/v2/HOOK-LIFECYCLE.md).
 
 ## Server-initiated notifications — the control-plane bus (ADR 47)

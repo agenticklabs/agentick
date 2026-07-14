@@ -4,9 +4,10 @@
  *
  * `dispatchRequest` routes the resolved handler call through the
  * gateway's `runWireDispatch`, which runs it inside `runOperation` with
- * the wire method as the op name. So a gateway-scoped command hook fires
- * around a wire dispatch — `deriveHookNames("probe/run")` Pascalizes to
- * `ProbeRun`, minting `onBeforeProbeRun` at the gateway scope.
+ * the `wire:`-prefixed wire method as the op name. So a gateway-scoped
+ * command hook fires around a wire dispatch — `deriveHookNames("wire:probe/run")`
+ * Pascalizes to `WireProbeRun`, minting `onBeforeWireProbeRun` at the gateway
+ * scope (the `wire:` prefix keeps it distinct from the op it delegates to).
  *
  * These tests use the REAL `GatewayHarness` (not the hand-rolled fake)
  * so the seam actually runs. They prove:
@@ -24,8 +25,8 @@ import { GatewayHarness } from "@agentick/gateway-next";
 
 import { dispatchRequest, type DispatchSink } from "../server/dispatch.js";
 
-// Synthetic wire methods for these tests. `probe/run` Pascalizes to
-// `ProbeRun`; `probe/other` to `ProbeOther` — used to prove op-scoping.
+// Synthetic wire methods for these tests. `wire:probe/run` Pascalizes to
+// `WireProbeRun`; `wire:probe/other` to `WireProbeOther` — used to prove op-scoping.
 declare module "@agentick/spec-next" {
   interface WireMethods {
     "probe/run": { params: { echo: string }; result: { echoed: string } };
@@ -58,7 +59,7 @@ function req(method: string, params: unknown, id = 1): JsonRpcRequest {
 
 /**
  * Wire hooks are currently UNTYPED (ADR 83 — the typed wire surface
- * off `WireMethods` is a follow-on); `onBeforeProbeRun` is not a
+ * off `WireMethods` is a follow-on); `onBeforeWireProbeRun` is not a
  * `CommandRegistry`-derived `CommandHooks` key, so the config is cast to
  * the parameter type `gw.hook` accepts.
  */
@@ -70,9 +71,9 @@ describe("dispatchRequest — wire dispatch through the gateway operation seam",
     await gw.ready;
 
     const fired: string[] = [];
-    // `onBeforeProbeRun` — before-hook keyed to the wire method's op name.
+    // `onBeforeWireProbeRun` — before-hook keyed to the wire method's `wire:`-prefixed op name.
     gw.hook({
-      onBeforeProbeRun: () => {
+      onBeforeWireProbeRun: () => {
         fired.push("run");
       },
     } as HookConfig);
@@ -92,9 +93,9 @@ describe("dispatchRequest — wire dispatch through the gateway operation seam",
     await gw.ready;
 
     const fired: string[] = [];
-    // Registered for `probe/other`, but we dispatch `probe/run`.
+    // Registered for `wire:probe/other`, but we dispatch `probe/run`.
     gw.hook({
-      onBeforeProbeOther: () => {
+      onBeforeWireProbeOther: () => {
         fired.push("other");
       },
     } as HookConfig);
@@ -102,7 +103,7 @@ describe("dispatchRequest — wire dispatch through the gateway operation seam",
     const resp = await dispatchRequest(gw, req("probe/run", { echo: "hi" }), stubSink());
 
     expect(resp).toMatchObject({ result: { echoed: "hi" } });
-    expect(fired).toEqual([]); // op-scoping: ProbeOther hook never fired on ProbeRun
+    expect(fired).toEqual([]); // op-scoping: WireProbeOther hook never fired on WireProbeRun
 
     await gw.closeGateway();
   });
@@ -115,7 +116,7 @@ describe("dispatchRequest — wire dispatch through the gateway operation seam",
 
     const fired: string[] = [];
     gw.hook({
-      onBeforeProbeRun: () => {
+      onBeforeWireProbeRun: () => {
         fired.push("run");
       },
     } as HookConfig);
