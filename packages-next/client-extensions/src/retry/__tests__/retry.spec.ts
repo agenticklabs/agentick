@@ -246,7 +246,7 @@ describe("defaultIsRetryable predicate", () => {
 describe("defaultIdempotencyKey", () => {
   it("emits keys for non-idempotent methods", () => {
     expect(defaultIdempotencyKey("session/send")).toBeDefined();
-    expect(defaultIdempotencyKey("app/runOnce")).toBeDefined();
+    expect(defaultIdempotencyKey("app/run_once")).toBeDefined();
     expect(defaultIdempotencyKey("session/dispatch")).toBeDefined();
     expect(defaultIdempotencyKey("session/queue")).toBeDefined();
   });
