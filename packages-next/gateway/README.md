@@ -577,11 +577,14 @@ seam: your app's auth/authz can be as bespoke as it needs, **without touching th
 framework's enforcement point** — which is exactly why the `Authorizer` stays a
 structural pre-gate and does NOT itself become a hook.
 
-> The `wire:` prefix keeps the two seams distinct (ADR 83 wire section): the
-> WIRE hops — `client` (request leaving, keyed off `WireMethods`) and `gateway`
-> (wire dispatch arriving) — share `onBeforeWireSessionSend`; the `session:send`
-> **op** is `onBeforeSessionSend`, which a gateway registration folds down to
-> live. Distinct names, one fire each. See
+> The `wire:` prefix keeps the seams distinct (ADR 83 wire section). The
+> `session:send` **op** is `onBeforeSessionSend` — and the **client** mirrors it
+> (its send is the op it initiates), so `client.hook({ onBeforeSessionSend })`
+> and `session.hook({ onBeforeSessionSend })` share the name. Only **this**
+> layer — the gateway's wire-dispatch boundary — carries the qualifier
+> (`onBeforeWireSessionSend`), because it's the one place `wire:session/send` and
+> the folded `session:send` op coexist. A gateway `onBeforeSessionSend` still
+> folds down live to the session op. See
 > [`docs/proposals/v2/HOOK-LIFECYCLE.md`](../../docs/proposals/v2/HOOK-LIFECYCLE.md).
 
 ## Server-initiated notifications — the control-plane bus (ADR 47)

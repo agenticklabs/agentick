@@ -340,10 +340,16 @@ delegates to.
     fires once at each `session:send` op, wire-originated or in-process alike.
 - **`authorizeDispatch` stays the un-waivable pre-gate** — it runs BEFORE the
   wire op, so authz composes ahead of any userland wire hook.
-- **Wire hooks are typed off `WireMethods`, NOT `CommandRegistry`.** The wire op
-  names derive from `WireMethods` via the shared registry-agnostic derivation
-  (`HooksOf<WireMethods, …>`, spec `hooks/derivation`) with the `wire:` prefix,
-  so the wire surface and the op surface never mint the same key. This is the
-  seam the client also types its hooks off (client-alignment follow-on) — one
-  `Pascal`, three layers (client request · gateway wire · session op), distinct
-  names, one fire each.
+- **The gateway wire op is typed off `WireMethods`, NOT `CommandRegistry`.** The
+  wire op names derive from `WireMethods` via the shared registry-agnostic
+  derivation (`HooksOf<WireMethods, …>`, spec `hooks/derivation`) **with the
+  `wire:` prefix**, so at the gateway the wire surface and the op surface never
+  mint the same key.
+- **The client mirrors the op, not the wire boundary.** The client types its
+  hooks off `WireMethods` too but WITHOUT the `wire:` prefix — its send is the
+  `session:send` op it initiates, so `client.hook({ onBeforeSessionSend })`
+  matches `session.hook({ onBeforeSessionSend })`. The client has no
+  `session:send` op to collide with, so no prefix is needed. Net: three layers,
+  two names — **`onBeforeSessionSend`** at the client (request) and the session
+  (op), **`onBeforeWireSessionSend`** only at the gateway wire-dispatch boundary,
+  the sole place the collision lives.

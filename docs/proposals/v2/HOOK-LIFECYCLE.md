@@ -118,8 +118,12 @@ name**, distinct from the op they delegate to. A `session/send` dispatch fires
 (op `session:send` → `SessionSend`), which fires once at the **session op** and,
 when declared on the gateway, folds down there via live inheritance (ADR 83 §4).
 `authorizeDispatch` stays the un-waivable pre-gate. Same logical operation, three
-layers — client request · gateway wire · session op — **distinct names, one fire
-each** (the `wire:` prefix; ADR 83 §"Wire dispatch", amended 2026-07-14). Wire
+layers, **two names**: the **client** mirrors the op (`onBeforeSessionSend` — its
+send is the op it initiates) and the **session op** is `onBeforeSessionSend`;
+only the **gateway wire-dispatch boundary** carries the `Wire` qualifier
+(`onBeforeWireSessionSend`), the sole place `wire:session/send` and the folded
+`session:send` op coexist (the `wire:` prefix; ADR 83 §"Wire dispatch", amended
+2026-07-14). One fire each. Wire
 hooks fire (mechanism); the typed client/server wire surface derives off
 `WireMethods` with the `wire:` prefix (`HooksOf<WireMethods, …>`) — the
 client-alignment follow-on.
