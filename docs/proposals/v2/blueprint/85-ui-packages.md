@@ -8,10 +8,12 @@
 Build agentick UIs in any framework by layering thin bindings over the existing
 `ClientProtocol`. The library is two tiers:
 
-1. **`@agentick/ui-core-next`** (framework-agnostic) — one new primitive, the
-   **message-fold store** (`StreamEvent`/timeline entries → `UIMessage[]` +
-   `status`), plus a **per-session store registry** for multiplexing. Everything
-   it exposes is a `get()/subscribe()` store.
+1. **`@agentick/ui-core-next`** (framework-agnostic) — opens **one firehose
+   subscription per session** (`session.events`) and **demuxes it client-side**
+   into family `get/subscribe` stores (messages, elicitation, tasks, knobs, …),
+   each seeded from a snapshot. A **per-session store registry** shares that one
+   firehose across every hook/component (multiplexing). The families are pure
+   reducers over the shared stream — not N subscriptions.
 2. **`@agentick/ui-<framework>-next`** (React, Angular, …) — ~30-line bindings
    that wrap any store in the framework's reactive primitive (`useSyncExternalStore`,
    Angular signals). Hooks: `useClient` / `useSession(id)` / `useChannel(view)`.
@@ -66,9 +68,48 @@ library stays tiny even as the surface grows** — a new family is a façade + a
 one-line hook, never a new binding.
 
 Bidirectional is not special-cased: it's the `ChannelHandle` `request`/`onRequest`
-substrate (§4 of ADR-on-channels) surfaced to the UI as *(pending request store,
-respond action)*. Elicitation is the canonical instance; a custom channel can do
-the same ask/respond.
+substrate surfaced to the UI as *(pending request store, respond action)*.
+Elicitation is the canonical instance; a custom channel can do the same ask/respond.
+
+## 2a. One firehose per session, demuxed client-side (NOT N merged streams)
+
+The families are **not** N separate wire subscriptions the UI merges. Everything
+above is already a `ProtocolEvent` on the **one substrate bus**, and
+`client.session(id).events(query)` is a single cursor-based subscription over it.
+The gateway's subscription projection (`openScopeEvents` → `app.events(query)`
+stamped with `sessionId`) applies the query with **no per-event-type gating and
+no server-only visibility flag** — auth is on the *scope* (may you watch this
+session?), not per event. So a broad `EventQuery` (surface/name-wildcard) is the
+**whole session firehose**.
+
+So `ui-core` opens **ONE** subscription per `(client, session)` and **demuxes
+client-side**:
+
+```
+session.events(query)  ──►  router (by surface + name)  ──►  message fold
+   (one cursor,                                          ├─►  elicitation queue
+    one reconnect-resume)                                ├─►  task-status view
+                                                         ├─►  knobs view
+                                                         └─►  channel views (custom)
+```
+
+The "family façades" become **pure reducers over the shared stream** — a demux
+table `(event → which family)` + each family's fold — NOT subscriptions. One
+cursor, one reconnect-resume, unified ordering across every family for free. This
+is strictly simpler than per-family subscriptions and is the model this ADR adopts.
+
+**The one completeness gap — granularity (the enabling dependency).** The COARSE
+events are all on the bus today: `timeline:append` (messages), channel publishes
+(knobs / tasks / elicitation / custom), `*:signal:*` (log / progress). What is
+NOT is the **fine token-level streaming** — `content-delta` etc. are fed to the
+*sender's* `handle.events()` via a private in-memory queue, not the session bus.
+So an observer on the firehose sees a message *append*, not token-by-token
+streaming. To make the firehose complete for collaborative live rendering, the
+executor must **emit streaming deltas on the session bus** (a `session:stream:*`
+family, or the timeline channel carrying streaming deltas). Until then: firehose
+= coarse/complete for every family + message *appends*; live token streaming stays
+the sender-handle path. This is the concrete "do they all make it over the wire?"
+answer, and the dependency this ADR names.
 
 ## 3. The `UIMessage` model + the fold (StreamEvent-native)
 
@@ -96,14 +137,38 @@ The **fold** is the one piece of real logic — a pure reducer
 part, `tool-call-*` opens/fills a tool part, `usage`/terminal marks the message
 `complete`. Pure and unit-testable; the store just runs it over the stream.
 
-## 4. Message source — the timeline channel (the pinned seam)
+## 4. Message source — snapshot bootstrap + firehose demux (no new channel needed)
 
-The **messages** family (§2) is the most involved — it's the one that needs a new
-server projection. The other families mostly wrap seams that already exist
-(`onProgress`/`onLog` signals, `knobsStateView`, `session.elicitations()`); this
-section pins the messages one.
+Under the firehose model (§2a) the messages family needs no new server projection.
+Live message events (`timeline:append`) already ride the firehose; the only thing
+the firehose can't give you is **history from before you subscribed**. So messages
+= **snapshot bootstrap + delta fold**:
 
-**The conversation is the timeline harness** — already an append-only event log
+- **Seed** from a timeline snapshot on mount — `session.snapshot()` /
+  `exportSnapshot()` already exist (the timeline is SnapshotCapable).
+- **Fold** `timeline:append` (+ compact/replace) deltas demuxed from the firehose.
+
+This is the K8s **list + watch** shape, but with **one** watch (the firehose) and a
+per-stateful-family **list** (its snapshot). Every stateful family (messages, knobs,
+tasks) follows it: snapshot-seed once, fold firehose deltas. A dedicated
+`session:channel:timeline` channel becomes **optional** — the firehose + the
+existing snapshot cover live + history — which is a real simplification the
+firehose model buys.
+
+> **Deferred to prior art if needed:** the channel's open-with-snapshot bundling
+> (`resolveChannelSnapshot`, §channels) is the tidy alternative if we'd rather the
+> server atomically bundle snapshot+deltas per family than have the client fetch a
+> snapshot alongside the firehose. Both work; the firehose+snapshot is fewer moving
+> parts for the UI. Pick during implementation.
+
+The remaining real dependency is granularity (§2a): fine token-streaming isn't on
+the firehose. Until the executor emits streaming deltas on the session bus, the
+message fold renders appends live and reserves token-by-token for the sender's
+`handle.events()`.
+
+---
+
+**Historical note — the conversation is the timeline harness** — already an append-only event log
 (a fold), with `exportSnapshot()` (snapshot) and `timeline:append` bus events
 (deltas). For a **multiplexed / collaborative** UI you must fold the *session's*
 stream (all activity — another client or the agent itself can produce messages),
@@ -134,12 +199,15 @@ from the wire channel.
 ## 5. Multiplexing — the per-session store registry
 
 "Multiple clients subscribed to different sessions at once" forbids a global
-singleton. `ui-core` holds a **store registry keyed by `(client, sessionId)`**:
+singleton. `ui-core` holds a **store registry keyed by `(client, sessionId)`**,
+and that key owns exactly **one firehose subscription** (§2a) whose demux feeds
+every family store for the session:
 
-- `useSession(id)` **gets-or-creates** the fold store for that key, so N components
-  rendering the same session share **one** fold + **one** wire subscription.
-- Stores are **ref-counted** — created on first subscriber, torn down (channel
-  `close()`) when the last unmounts.
+- `useSession(id)` (and `useElicitation`/`useTasks`/… for the same session)
+  **share the one firehose** for that key — N components, N families, **one** wire
+  subscription and **one** cursor.
+- The registry is **ref-counted** — the firehose opens on the first subscriber to
+  any family of that session, and tears down when the last unmounts.
 - A **`ClientProvider`** (React context / Angular DI) supplies the client;
   multiple clients (multiple gateways) → multiple providers or an explicit client
   arg. `useClient()` reads it.
@@ -232,9 +300,15 @@ API reference.
 - **MCP apps in the UI** — MCP resources/tools have a `mcp/src/client` surface, but
   "MCP apps" (interactive MCP UI) is the least-defined family. Scope it here or
   defer to an MCP-UI ADR?
-- **Timeline channel ownership** — does the timeline-channel projection ship in the
-  timeline harness as part of this ADR, or as its own prerequisite ADR? (leaning:
-  its own small ADR — a reusable primitive beyond UIs.)
+- **Streaming on the bus (the real dependency, §2a/§4)** — do we emit fine
+  token-streaming deltas on the session bus (a `session:stream:*` family) so the
+  firehose is complete for collaborative live rendering, or accept token-by-token
+  as the sender-handle-only path and render appends live for observers? This is
+  the one thing that isn't already over the wire.
+- **Bootstrap: snapshot-fetch vs open-with-snapshot (§4)** — seed stateful family
+  stores from a separate snapshot read alongside the firehose, or use the channel
+  `resolveChannelSnapshot` bundling per family? (leaning firehose + snapshot fetch —
+  fewer moving parts, and it drops the need for a dedicated timeline channel.)
 - **`UIMessage` parts coverage** — files/images, sources, step boundaries — model
   now or grow as `StreamEvent` grows?
 
