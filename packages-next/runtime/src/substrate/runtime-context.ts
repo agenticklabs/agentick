@@ -91,6 +91,15 @@ export interface RuntimeContext extends EventScope {
   readonly opId?: string;
   /** Parent operation id for causality. */
   readonly parentOpId?: string;
+  /**
+   * The current operation's command SUFFIX (ADR 83 amendment) — the Pascal
+   * key `deriveHookNames` yields for `op.name` (e.g. `"tool:command:dispatch"`
+   * → `"ToolDispatch"`). Set by `runOperation` for the op's lifetime. An
+   * `on<Command>` middleware (a hook desugared onto the shared `.use` chain via
+   * `scopeToCommand`) self-scopes by comparing `ctx.op` to its command — the
+   * per-middleware replacement for the old keyed `Hooks` map lookup.
+   */
+  readonly op?: string;
 
   // ── Diagnostic ephemera (per-request bundle, OTel trace context) ───
 

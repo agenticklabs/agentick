@@ -47,7 +47,7 @@
  */
 
 import { Effect } from "effect";
-import { BaseHarness, type Hooks, type Middleware, type Unsubscribe } from "@agentick/runtime-next";
+import { BaseHarness, type Middleware, type Unsubscribe } from "@agentick/runtime-next";
 import type {
   ContentBlock,
   EventBus,
@@ -95,15 +95,11 @@ import {
  */
 export interface KnobsHarnessOptions {
   /**
-   * Resolved command lifecycle hooks (ADR 82) — the cascade-folded {@link Hooks}
-   * value, forwarded to {@link BaseHarness}. Defaults to `Hooks.empty`.
-   */
-  readonly hooks?: Hooks;
-  /**
-   * Resolved interceptor snapshot (ADR 76 tier 3) — the session's resolved
-   * interceptors, folded in at construction and forwarded to {@link BaseHarness}
-   * so `session.use()` / `app.use()` wrap `knobs:set`. Mirrors {@link hooks}.
-   * Defaults to `[]`.
+   * Resolved interceptor snapshot (ADR 76 tier 3 + ADR 83 amendment) — the
+   * session's resolved interceptors (guards, `.use` transforms, AND declarative
+   * command hooks adapted to op-scoped middleware), folded in at construction
+   * and forwarded to {@link BaseHarness} so `session.use()` / `app.use()` and the
+   * app/session `hooks` config all wrap `knobs:set`. Defaults to `[]`.
    */
   readonly inheritedInterceptors?: readonly Middleware<unknown, unknown, unknown>[];
 }
@@ -180,7 +176,6 @@ export class KnobsHarness
     options: KnobsHarnessOptions = {},
   ) {
     super("knobs", scopeId, journal, bus, inbox, {
-      hooks: options.hooks,
       inheritedInterceptors: options.inheritedInterceptors,
     });
     this.parentLayer = parentLayer;

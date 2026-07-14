@@ -26,7 +26,7 @@ import { TasksHarness } from "@agentick/tasks-next";
 import { ResourcesHarness } from "@agentick/resources-next";
 import { GatesController, type GateOverrideAudit } from "@agentick/gates-next";
 import { TimelineHarness, type TimelineHarnessOptions } from "@agentick/timeline-next";
-import { type Hooks, type Middleware, ulid } from "@agentick/runtime-next";
+import { type Middleware, ulid } from "@agentick/runtime-next";
 import type {
   ElicitationHarnessProtocol,
   EventBus,
@@ -181,19 +181,13 @@ export interface BuildSessionBridgesOptions {
    */
   readonly timeline?: Pick<TimelineHarnessOptions, "store" | "writePolicy" | "compact">;
   /**
-   * Resolved command lifecycle hooks (ADR 82) — the session's cascade-folded
-   * {@link Hooks} value, forwarded by the SessionHarness. Threaded into the
-   * per-session bridges built here (today: knobs) so their commands
-   * (`knobs:set`, …) fold the same app+session cascade. Defaults to
-   * `Hooks.empty` per bridge.
-   */
-  readonly hooks?: Hooks;
-  /**
-   * Resolved interceptor snapshot (ADR 76 tier 3) — the session's
-   * `resolvedInterceptors()` (app-inherited + the session's own), forwarded by
-   * the SessionHarness. Threaded into the per-session bridges built here
-   * (today: knobs) so their commands inherit `session.use()` / `app.use()` via
-   * the construction-fold. Mirrors {@link hooks}. Defaults to `[]` per bridge.
+   * Resolved interceptor snapshot (ADR 76 tier 3 + ADR 83 amendment) — the
+   * session's `resolvedInterceptors()` (app-inherited incl. the app+session
+   * command hooks as op-scoped middleware, plus the session's own), forwarded by
+   * the SessionHarness. Threaded into the per-session bridges built here (today:
+   * knobs) so their commands (`knobs:set`, …) inherit `session.use()` /
+   * `app.use()` AND the hook cascade via the construction-fold. Defaults to `[]`
+   * per bridge.
    */
   readonly inheritedInterceptors?: readonly Middleware<unknown, unknown, unknown>[];
 }
@@ -228,11 +222,10 @@ export function buildSessionBridges(
     // app-scoped KnobsHarness drops in here with no rewrite. Session
     // snapshots capture the self layer only (never inherited app state).
     undefined,
-    // ADR 82 — the session's resolved hook layer, so `knobs:set` folds the
-    // app+session cascade.
-    // ADR 76 tier 3 — the session's resolved interceptor snapshot, so
-    // `knobs:set` inherits `session.use()` / `app.use()`.
-    { hooks: options.hooks, inheritedInterceptors: options.inheritedInterceptors },
+    // ADR 76 tier 3 + ADR 83 amendment — the session's resolved interceptor
+    // snapshot (incl. the app+session command hooks as op-scoped middleware), so
+    // `knobs:set` inherits `session.use()` / `app.use()` AND the hook cascade.
+    { inheritedInterceptors: options.inheritedInterceptors },
   );
   const state = new StateHarness(
     `${store.id}:state`,

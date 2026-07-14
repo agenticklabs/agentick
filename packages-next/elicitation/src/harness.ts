@@ -33,13 +33,7 @@
  */
 
 import { Effect, Either } from "effect";
-import {
-  BaseHarness,
-  runHarnessProtocol,
-  ulid,
-  type Hooks,
-  type Middleware,
-} from "@agentick/runtime-next";
+import { BaseHarness, runHarnessProtocol, ulid, type Middleware } from "@agentick/runtime-next";
 import { reasonOf, omitUndefined } from "@agentick/utils-next";
 import type { RequestError } from "@agentick/runtime-next";
 import type {
@@ -123,16 +117,11 @@ export interface ElicitationHarnessOptions {
    */
   readonly parentScope?: import("@agentick/spec-next").EventScope;
   /**
-   * Resolved command lifecycle hooks (ADR 82) — the cascade-folded {@link Hooks}
-   * value, forwarded to {@link BaseHarness} so this harness's commands read the
-   * composed layer per-op. Defaults to `Hooks.empty`.
-   */
-  readonly hooks?: Hooks;
-  /**
-   * Resolved interceptor snapshot (ADR 76 tier 3) — the parent scope's
-   * resolved interceptors, folded in at construction and forwarded to
-   * {@link BaseHarness} so `.use()` / `.guard()` from ancestor scopes wrap this
-   * harness's ops. Mirrors {@link hooks}. Defaults to `[]`.
+   * Resolved interceptor snapshot (ADR 76 tier 3 + ADR 83 amendment) — the
+   * parent scope's resolved interceptors (guards, `.use` transforms, AND
+   * declarative command hooks adapted to op-scoped middleware), folded in at
+   * construction and forwarded to {@link BaseHarness} so ancestor-scope
+   * interceptors wrap this harness's ops. Defaults to `[]`.
    */
   readonly inheritedInterceptors?: readonly Middleware<unknown, unknown, unknown>[];
 }
@@ -160,7 +149,6 @@ export class ElicitationHarness
     options: ElicitationHarnessOptions = {},
   ) {
     super("elicitation", scopeId, journal, bus, inbox, {
-      hooks: options.hooks,
       inheritedInterceptors: options.inheritedInterceptors,
     });
     this.defaultTimeoutMs = options.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS;

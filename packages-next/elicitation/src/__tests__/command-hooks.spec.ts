@@ -20,7 +20,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { Chunk, Effect, Fiber, Stream } from "effect";
 import type { ProtocolEvent, StandardSchemaV1 } from "@agentick/spec-next";
 import { jsonSchema } from "@agentick/spec-next";
-import { deriveHookNames, Hooks, type LocalEventBus } from "@agentick/runtime-next";
+import { deriveHookNames, type LocalEventBus } from "@agentick/runtime-next";
 
 import { ELICITATION_CHANNEL_FQN } from "../channel.js";
 import { fakeElicitation, type FakeElicitationBundle } from "../testing/fake-elicitation.js";
@@ -87,11 +87,11 @@ describe("ElicitationHarness — elicit is hookable (round-trip)", () => {
   it("onBefore observes the outbound request before it is published", async () => {
     let seenMessage: string | undefined;
     bundle = await fakeElicitation({
-      hooks: Hooks.from({
+      hooks: {
         onBeforeElicitationElicit: (req) => {
           seenMessage = req.message;
         },
-      }),
+      },
     });
     const envP = nextRequestEnvelope(bundle.bus);
     const pending = bundle.harness.elicit(
@@ -109,9 +109,9 @@ describe("ElicitationHarness — elicit is hookable (round-trip)", () => {
 
   it("onBefore transforms the request — the reshaped prompt is what goes on the wire", async () => {
     bundle = await fakeElicitation({
-      hooks: Hooks.from({
+      hooks: {
         onBeforeElicitationElicit: (req) => ({ ...req, message: "TRANSFORMED" }),
-      }),
+      },
     });
     const envP = nextRequestEnvelope(bundle.bus);
     const pending = bundle.harness.elicit(
@@ -131,9 +131,9 @@ describe("ElicitationHarness — elicit is hookable (round-trip)", () => {
 
   it("onAfter transforms the terminal ElicitationResult", async () => {
     bundle = await fakeElicitation({
-      hooks: Hooks.from({
+      hooks: {
         onAfterElicitationElicit: () => ({ outcome: "declined", reason: "hooked" }),
-      }),
+      },
     });
     const envP = nextRequestEnvelope(bundle.bus);
     const pending = bundle.harness.elicit(
@@ -154,11 +154,11 @@ describe("ElicitationHarness — elicit is hookable (round-trip)", () => {
 
   it("a throw in onBefore vetoes — no request is published and elicit rejects", async () => {
     bundle = await fakeElicitation({
-      hooks: Hooks.from({
+      hooks: {
         onBeforeElicitationElicit: () => {
           throw new Error("elicit blocked");
         },
-      }),
+      },
     });
     let published = 0;
     const watcher = Effect.runFork(

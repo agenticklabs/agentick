@@ -51,7 +51,6 @@
 import { Effect, Stream } from "effect";
 import {
   BaseHarness,
-  type Hooks,
   type Middleware,
   ulid,
   SESSION_ESCALATION_MESSAGE_TYPE,
@@ -211,15 +210,11 @@ export interface TasksHarnessOptions {
    */
   readonly buildElicit?: TaskElicitFactory;
   /**
-   * Resolved command lifecycle hooks (ADR 82) — the cascade-folded {@link Hooks}
-   * value, forwarded to {@link BaseHarness}. Defaults to `Hooks.empty`.
-   */
-  readonly hooks?: Hooks;
-  /**
-   * Resolved interceptor snapshot (ADR 76 tier 3) — the parent scope's
-   * resolved interceptors, folded in at construction and forwarded to
-   * {@link BaseHarness} so `.use()` / `.guard()` from ancestor scopes wrap this
-   * harness's ops. Mirrors {@link hooks}. Defaults to `[]`.
+   * Resolved interceptor snapshot (ADR 76 tier 3 + ADR 83 amendment) — the
+   * parent scope's resolved interceptors (guards, `.use` transforms, AND
+   * declarative command hooks adapted to op-scoped middleware), folded in at
+   * construction and forwarded to {@link BaseHarness} so ancestor-scope
+   * interceptors wrap this harness's ops. Defaults to `[]`.
    */
   readonly inheritedInterceptors?: readonly Middleware<unknown, unknown, unknown>[];
 }
@@ -269,7 +264,6 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
     options: TasksHarnessOptions = {},
   ) {
     super("tasks", scopeId, journal, bus, inbox, {
-      hooks: options.hooks,
       inheritedInterceptors: options.inheritedInterceptors,
     });
     this.parentScope = options.parentScope;
@@ -327,8 +321,8 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
   //   1. Make `submit` async (`Promise<TaskHandle<T>>`). The ONLY way to host
   //      async before-hooks. Violates today's "public types unchanged"
   //      constraint + breaks synchronous `handle.taskId` reads.
-  //   2. A synchronous-hook fast-path in `@agentick/runtime-next` (`Hooks.forOp`
-  //      / the `asBefore`/`asAfter` lift): keep a synchronous hook synchronous
+  //   2. A synchronous-hook fast-path in `@agentick/runtime-next` (the
+  //      `asBefore`/`asAfter` lift): keep a synchronous hook synchronous
   //      (`Effect.sync`), only going async when the hook returns a Promise. Lets
   //      `runSyncExit` host sync hooks; async submit hooks would still throw
   //      loudly (documented). Does NOT fix the async-inherited-interceptor

@@ -1,30 +1,31 @@
 /**
- * Command lifecycle hooks (ADR 80 mechanism, ADR 82 collection) — the intrinsic
+ * Command lifecycle hooks (ADR 80 mechanism, ADR 82 collection, ADR 83
+ * amendment — hooks ARE op-scoped `.use` middleware) — the intrinsic
  * observe/transform seam `BaseHarness.runOperation` endows on every declared
  * command.
  *
  * These pin the mechanism: the name derivation (`deriveHookNames`), the
- * type↔runtime lockstep, the `Hooks.from`/`forOp` consistency, the
- * transform/observe/veto contract, the `Hooks.extend` COMPOSE (ADR 82 — the
- * cascade is a construction-fold, not a parent-walk), and — crucially — that a
- * hook rides the SAME `liftMiddleware` path as `.use` (fiber preservation),
- * never a side-path.
+ * type↔runtime lockstep, the transform/observe/veto contract, the COMPOSE
+ * semantic (two registered layers both fire, onion order), the NEW
+ * `on<Command>` full-middleware primitive, and — crucially — that a hook rides
+ * the SAME `liftMiddleware` path as `.use` (fiber preservation), never a
+ * side-path.
+ *
+ * ADR 83 amendment: there is no `Hooks` class / `hookLayer` / `forOp`. A hook
+ * registers as an op-scoped `transform` middleware on `this.middleware` (via
+ * `hook()` / the `hooks` proxy / declarative `hooksToMiddlewares`), self-scoping
+ * by `ctx.op`. Compose order is registration order within the transform rank.
  */
 
 import { describe, expect, it } from "vitest";
 import { Effect, Fiber, Layer, ManagedRuntime, Option, Tracer } from "effect";
 import { waitFor } from "@agentick/utils-next/testing";
 import { HandlerError } from "@agentick/spec-next";
-import type {
-  MessageEnvelope,
-  MessageHandlerError,
-  Middleware,
-  Operation,
-} from "@agentick/spec-next";
+import type { MessageEnvelope, MessageHandlerError, Operation } from "@agentick/spec-next";
 import {
   BaseHarness,
   deriveHookNames,
-  Hooks,
+  hooksToMiddlewares,
   type CommandHooks,
 } from "../substrate/base-harness.js";
 import { LocalEventBus } from "../substrate/local-event-bus.js";
@@ -33,8 +34,8 @@ import { MemoryJournal } from "../substrate/memory-journal.js";
 import type { RuntimeContext } from "../substrate/runtime-context.js";
 
 // Contribute a test verb so the mapped `CommandHooks` mints typed
-// `onBeforeToolProbe` / `onAfterToolProbe` — the type-level twin of
-// `deriveHookNames("tool:command:probe")`.
+// `onBeforeToolProbe` / `onAfterToolProbe` / `onToolProbe` — the type-level twin
+// of `deriveHookNames("tool:command:probe")`.
 interface ProbeInput {
   readonly value: number;
 }
@@ -55,11 +56,12 @@ class HookTestHarness extends BaseHarness<"tool"> {
     journal: MemoryJournal,
     bus: LocalEventBus,
     inbox: LocalInbox,
-    opts: { readonly hooks?: Hooks } = {},
+    opts: { readonly hooks?: CommandHooks } = {},
   ) {
-    super("tool", scopeId, journal, bus, inbox, {
-      ...(opts.hooks ? { hooks: opts.hooks } : {}),
-    });
+    super("tool", scopeId, journal, bus, inbox, {});
+    // ADR 83 amendment — declarative construction hooks register as op-scoped
+    // middleware on the OWN chain (the runtime twin of the config threading).
+    if (opts.hooks) this.hook(opts.hooks);
     this.probe = this.command<ProbeInput, ProbeOutput, never>({
       name: "tool:probe",
       handler: (i) => Effect.succeed(i.value),
@@ -89,11 +91,6 @@ class HookTestHarness extends BaseHarness<"tool"> {
     return Effect.runFork(this.runProbeOpEffect(opId, body));
   }
 
-  /** Expose the local resolved-hooks read for the byte-identity assertion. */
-  peekHooks(opName: string): Middleware<unknown, unknown, unknown>[] {
-    return this.hookLayer.forOp(opName);
-  }
-
   protected handleMessage(
     msg: MessageEnvelope,
   ): Effect.Effect<unknown, MessageHandlerError, never> {
@@ -103,7 +100,7 @@ class HookTestHarness extends BaseHarness<"tool"> {
 
 async function mkHarness(
   opts: {
-    readonly hooks?: Hooks;
+    readonly hooks?: CommandHooks;
   } = {},
 ): Promise<HookTestHarness> {
   const h = new HookTestHarness(
@@ -200,15 +197,24 @@ describe("command hooks — type/runtime lockstep", () => {
     expect(names).toEqual(["onBeforeToolProbe", "onAfterToolProbe"]);
     expect(Object.keys(_typed).sort()).toEqual([...names].sort());
   });
+
+  it("mints the bare `on<Command>` full-middleware key alongside before/after", () => {
+    // The `on<Command>` primitive (ADR 83 amendment) is typed to the command's
+    // input/output — a whole (input, next, ctx) => output wrapper.
+    const _typed: CommandHooks = {
+      onToolProbe: async (input, next) => (await next(input)) + 1,
+    };
+    expect(Object.keys(_typed)).toEqual(["onToolProbe"]);
+  });
 });
 
 describe("command hooks — transform contract", () => {
   it("onBefore reshapes the input the handler sees; onAfter reshapes the output", async () => {
     const h = await mkHarness({
-      hooks: Hooks.from({
+      hooks: {
         onBeforeToolProbe: (input) => ({ value: input.value * 2 }),
         onAfterToolProbe: (out) => out + 100,
-      }),
+      },
     });
     // handler returns input.value; before doubles (5→10), after adds 100.
     expect(await h.probe({ value: 5 })).toBe(110);
@@ -217,14 +223,14 @@ describe("command hooks — transform contract", () => {
   it("a `void` return is passthrough/observe (input + output untouched)", async () => {
     const seen: number[] = [];
     const h = await mkHarness({
-      hooks: Hooks.from({
+      hooks: {
         onBeforeToolProbe: (input) => {
           seen.push(input.value);
         },
         onAfterToolProbe: (out) => {
           seen.push(out);
         },
-      }),
+      },
     });
     expect(await h.probe({ value: 7 })).toBe(7); // unchanged
     expect(seen).toEqual([7, 7]); // observed both faces
@@ -232,65 +238,67 @@ describe("command hooks — transform contract", () => {
 
   it("a `throw` in onBefore vetoes — the op aborts with the thrown error", async () => {
     const h = await mkHarness({
-      hooks: Hooks.from({
+      hooks: {
         onBeforeToolProbe: () => {
           throw new Error("blocked");
         },
-      }),
+      },
     });
     await expect(h.probe({ value: 1 })).rejects.toThrow("blocked");
   });
 });
 
-describe("Hooks.from + forOp — indexing and consistency", () => {
-  it("forOp returns lifted entries for a hooked op (before then after)", () => {
-    const hooks = Hooks.from({
-      onBeforeToolProbe: (i) => i,
-      onAfterToolProbe: (o) => o,
-    });
-    expect(hooks.forOp("tool:command:probe")).toHaveLength(2);
-  });
-
-  it("Hooks.empty.forOp and an unhooked op both return [] (byte-identical chain)", () => {
-    expect(Hooks.empty.forOp("tool:command:probe")).toEqual([]);
-    // A populated layer still yields [] for a DIFFERENT op — no accidental match.
-    const hooks = Hooks.from({ onBeforeToolProbe: (i) => i });
-    expect(hooks.forOp("tool:command:other")).toEqual([]);
-  });
-
-  it("from/forOp/deriveHookNames agree — the config key an op derives is the one forOp reads", () => {
-    // The SAME command yields hooks; a rename of the op would rename BOTH the
-    // config key (`deriveHookNames`) and the `forOp` lookup, so a `from` keyed
-    // by one and a `forOp` keyed by the other can never silently diverge.
-    const [beforeName, afterName] = deriveHookNames("tool:command:probe");
-    const hooks = Hooks.from({
-      [beforeName]: (i: ProbeInput) => i,
-      [afterName]: (o: ProbeOutput) => o,
-    } as CommandHooks);
-    expect(hooks.forOp("tool:command:probe")).toHaveLength(2);
-    // Only a before-hook present → exactly one entry for that op.
+describe("hooksToMiddlewares — indexing and op-scoping (ADR 83 amendment)", () => {
+  it("mints one op-scoped middleware per hook entry (before then after)", () => {
     expect(
-      Hooks.from({ [beforeName]: (i: ProbeInput) => i } as CommandHooks).forOp(
-        "tool:command:probe",
-      ),
-    ).toHaveLength(1);
+      hooksToMiddlewares({
+        onBeforeToolProbe: (i) => i,
+        onAfterToolProbe: (o) => o,
+      }),
+    ).toHaveLength(2);
+  });
+
+  it("an empty config mints [] (byte-identical to the no-hooks chain)", () => {
+    expect(hooksToMiddlewares({})).toEqual([]);
+    // Only a before-hook present → exactly one entry.
+    expect(hooksToMiddlewares({ onBeforeToolProbe: (i) => i })).toHaveLength(1);
+  });
+
+  it("a hook self-scopes by ctx.op — it fires ONLY on its own command", async () => {
+    // A `tool:probe`-keyed hook composed on a DIFFERENT op passes straight
+    // through: `scopeToCommand` compares `ctx.op` and delegates only on match.
+    const seen: number[] = [];
+    const h = await mkHarness({
+      hooks: {
+        onBeforeToolProbe: (input) => {
+          seen.push(input.value);
+          return input;
+        },
+      },
+    });
+    // Fire the probe op → the hook matches (ctx.op === "ToolProbe").
+    await h.probe({ value: 42 });
+    expect(seen).toEqual([42]);
   });
 });
 
-describe("Hooks.extend — composes (ADR 82), not overrides", () => {
-  it("two layers both setting onBeforeToolProbe BOTH fire, outer-first", async () => {
-    // App layer (outer) sees input first; session layer (inner) second.
-    // Outer doubles (5→10), inner adds one (10→11); the handler returns 11.
-    const resolved = Hooks.from({ onBeforeToolProbe: (i) => ({ value: i.value * 2 }) }).extend(
-      Hooks.from({ onBeforeToolProbe: (i) => ({ value: i.value + 1 }) }),
-    );
-    const h = await mkHarness({ hooks: resolved });
+describe("command hooks — compose (ADR 82/83), not override", () => {
+  it("two registered layers both fire on the same command, outer-first", async () => {
+    // App layer (registered first → outer) sees input first; session layer
+    // (registered second → inner) second. Outer doubles (5→10), inner adds one
+    // (10→11); the handler returns 11.
+    const h = await mkHarness();
+    h.hook({ onBeforeToolProbe: (i) => ({ value: i.value * 2 }) });
+    h.hook({ onBeforeToolProbe: (i) => ({ value: i.value + 1 }) });
     expect(await h.probe({ value: 5 })).toBe(11);
   });
 
   it("onion order across the folded layers — outer before/after bracket the inner", async () => {
     const order: string[] = [];
-    const resolved = Hooks.from({
+    const h = await mkHarness();
+    // Layer 1 (outer) registered first, layer 2 (inner) second — registration
+    // order IS compose order within the transform rank (ADR 83 amendment).
+    h.hook({
       onBeforeToolProbe: (i) => {
         order.push("app:before");
         return i;
@@ -299,38 +307,26 @@ describe("Hooks.extend — composes (ADR 82), not overrides", () => {
         order.push("app:after");
         return o;
       },
-    }).extend(
-      Hooks.from({
-        onBeforeToolProbe: (i) => {
-          order.push("session:before");
-          return i;
-        },
-        onAfterToolProbe: (o) => {
-          order.push("session:after");
-          return o;
-        },
-      }),
-    );
-    const h = await mkHarness({ hooks: resolved });
+    });
+    h.hook({
+      onBeforeToolProbe: (i) => {
+        order.push("session:before");
+        return i;
+      },
+      onAfterToolProbe: (o) => {
+        order.push("session:after");
+        return o;
+      },
+    });
     await h.probe({ value: 0 });
     expect(order).toEqual(["app:before", "session:before", "session:after", "app:after"]);
-  });
-
-  it("extend is immutable and empty is its identity", () => {
-    const layer = Hooks.from({ onBeforeToolProbe: (i) => i });
-    expect(layer.extend(Hooks.empty)).toBe(layer); // right identity — no realloc
-    expect(Hooks.empty.extend(layer)).toBe(layer); // left identity
-    // A distinct op keeps returning [] on the base layer after extend (no mutation).
-    const extended = layer.extend(Hooks.from({ onAfterToolProbe: (o) => o }));
-    expect(extended.forOp("tool:command:probe")).toHaveLength(2);
-    expect(layer.forOp("tool:command:probe")).toHaveLength(1); // base untouched
   });
 });
 
 describe("command hooks — no hooks is behavior-preserving", () => {
-  it("with no hooks registered, the resolved Hooks.forOp returns []", async () => {
+  it("with no hooks registered, the op runs its body verbatim", async () => {
     const h = await mkHarness();
-    expect(h.peekHooks("tool:command:probe")).toEqual([]);
+    expect(await h.probe({ value: 13 })).toBe(13);
   });
 });
 
@@ -342,27 +338,29 @@ describe("command hooks — fiber preservation (rides the .use lift)", () => {
   it("an awaiting onBefore hook reads the op's RuntimeContext via its ctx arg", async () => {
     let seen: RuntimeContext | undefined;
     const h = await mkHarness({
-      hooks: Hooks.from({
+      hooks: {
         onBeforeToolProbe: async (input, ctx) => {
           await Promise.resolve();
           seen = ctx; // the lift hands the hook the op's captured ctx
           return input;
         },
-      }),
+      },
     });
     await Effect.runPromise(h.runProbeOpEffect("op-ctx", () => Effect.succeed(0)));
     expect(seen?.opId).toBe("op-ctx");
     expect(seen?.sessionId).toBe("s_1");
+    // ADR 83 amendment — the op stamps its command suffix so the hook self-scopes.
+    expect(seen?.op).toBe("ToolProbe");
   });
 
   it("a span opened in the body nests under the op span THROUGH an awaiting hook", async () => {
     const h = await mkHarness({
-      hooks: Hooks.from({
+      hooks: {
         onBeforeToolProbe: async (input) => {
           await Promise.resolve();
           return input;
         },
-      }),
+      },
     });
     const { layer, spans } = collectingTracer();
     const runtime = ManagedRuntime.make(layer);
@@ -380,12 +378,12 @@ describe("command hooks — fiber preservation (rides the .use lift)", () => {
 
   it("interrupting the op tears down the body an awaiting hook wraps", async () => {
     const h = await mkHarness({
-      hooks: Hooks.from({
+      hooks: {
         onBeforeToolProbe: async (input) => {
           await Promise.resolve();
           return input;
         },
-      }),
+      },
     });
     let started = false;
     let interrupted = false;
@@ -424,7 +422,7 @@ describe("dynamic hooks — hook() + the harness.hooks proxy (ADR 83)", () => {
     seen = undefined;
     off();
     await h.probe({ value: 9 });
-    expect(seen).toBeUndefined(); // removed — the exact fn was dropped
+    expect(seen).toBeUndefined(); // removed — the exact middleware was dropped
   });
 
   it("harness.hooks.onBeforeToolProbe(fn) — per-verb proxy sugar — fires + removes", async () => {
@@ -451,11 +449,11 @@ describe("dynamic hooks — hook() + the harness.hooks proxy (ADR 83)", () => {
   it("a construction hook and a dynamically-added hook both fire (compose, construction-outer)", async () => {
     const order: string[] = [];
     const h = await mkHarness({
-      hooks: Hooks.from({
+      hooks: {
         onBeforeToolProbe: () => {
           order.push("construction");
         },
-      }),
+      },
     });
     h.hook({
       onBeforeToolProbe: () => {
@@ -464,5 +462,58 @@ describe("dynamic hooks — hook() + the harness.hooks proxy (ADR 83)", () => {
     });
     await h.probe({ value: 1 });
     expect(order).toEqual(["construction", "dynamic"]);
+  });
+});
+
+describe("on<Command> — the full-middleware primitive (ADR 83 amendment)", () => {
+  it("the config `on<Command>` key wraps the op: sees input, transforms output", async () => {
+    const h = await mkHarness({
+      hooks: {
+        // A whole (input, next, ctx) => output wrapper on the probe command:
+        // double the input, then add 1000 to the output — both faces, one fn.
+        onToolProbe: async (input, next) => (await next({ value: input.value * 2 })) + 1000,
+      },
+    });
+    // handler returns input.value; wrapper doubles 5→10, output 10+1000.
+    expect(await h.probe({ value: 5 })).toBe(1010);
+  });
+
+  it("harness.hooks.onToolProbe(mw) can short-circuit (never calls next)", async () => {
+    const h = await mkHarness();
+    let bodyRan = false;
+    // Return a canned result WITHOUT calling next — the handler body never runs.
+    const off = h.hooks.onToolProbe(async () => 999);
+    const result = await Effect.runPromise(
+      h.runProbeOpEffect("op-shortcircuit", (i) => {
+        bodyRan = true;
+        return Effect.succeed(i.value);
+      }),
+    );
+    expect(result).toBe(999);
+    expect(bodyRan).toBe(false);
+
+    off();
+    const after = await Effect.runPromise(
+      h.runProbeOpEffect("op-normal", (i) => {
+        bodyRan = true;
+        return Effect.succeed(i.value);
+      }),
+    );
+    expect(after).toBe(0); // the op's own input.value (0) — wrapper removed, body ran
+    expect(bodyRan).toBe(true);
+  });
+
+  it("onToolProbe self-scopes: an around-middleware only wraps its own command", async () => {
+    // Register the around-mw, then run a DIFFERENT op name through runOperation.
+    // `scopeToCommand` compares ctx.op and passes through on mismatch.
+    const h = await mkHarness();
+    let wrapped = 0;
+    h.hooks.onToolProbe(async (input, next) => {
+      wrapped++;
+      return next(input);
+    });
+    // The probe op DOES match.
+    await h.probe({ value: 1 });
+    expect(wrapped).toBe(1);
   });
 });

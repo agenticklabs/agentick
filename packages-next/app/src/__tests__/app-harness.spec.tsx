@@ -329,20 +329,28 @@ describe("AppHarness — middleware on app commands (command refactor)", () => {
 
   it("app.fx.use(middleware) wraps runOnce too", async () => {
     const { Effect } = await import("effect");
-    const calls: string[] = [];
+    const { getContext } = await import("@agentick/runtime-next");
+    const ops: string[] = [];
     const app = await mkApp();
+    // Registered BEFORE runOnce creates its ephemeral session, so the
+    // construction-fold (ADR 76/83) threads this app-level middleware down into
+    // that session and its sub-harnesses — app.use wraps not just the app's OWN
+    // `run-once` op but every op the fold reaches (session send, tool dispatch).
     app.fx.use((input, next) =>
       Effect.gen(function* () {
-        calls.push("in");
-        const r = yield* next(input);
-        calls.push("out");
-        return r;
+        const ctx = yield* getContext;
+        ops.push(ctx.op ?? "?");
+        return yield* next(input);
       }),
     );
     await app.runOnce({
       send: { messages: [{ role: "user", content: "x" }] },
     });
-    expect(calls).toEqual(["in", "out"]);
+    // The app's own run-once op is the OUTERMOST wrap (composed first).
+    expect(ops[0]).toBe("AppRunOnce");
+    // The fold reaches the ephemeral session's ops too (deployment-global reach).
+    expect(ops).toContain("SessionSend");
+    expect(ops).toContain("ToolDispatch");
     await app.closeApp();
   });
 

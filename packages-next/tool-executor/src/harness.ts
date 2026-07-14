@@ -148,7 +148,6 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
     options: ToolExecutorHarnessOptions,
   ) {
     super("tool", scopeId, journal, bus, inbox, {
-      hooks: options.hooks,
       inheritedInterceptors: options.inheritedInterceptors,
     });
     this.handlerResolver = options.handlerResolver;

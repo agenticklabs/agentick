@@ -243,6 +243,15 @@ export type CommandHooks = {
   [K in keyof CommandRegistry as `onAfter${Pascal<K & string>}`]?: AfterHook<
     CommandRegistry[K] extends { output: infer O } ? O : never
   >;
+} & {
+  // ADR 83 amendment — the bare `on<Command>` full-middleware key: the whole
+  // `(input, next, ctx) => output` wrapper (wrap / retry / short-circuit /
+  // try-finally / shared state across both faces), typed to the command, unlike
+  // raw `.use` (untyped, global). before/after are one-sided sugar on top.
+  [K in keyof CommandRegistry as `on${Pascal<K & string>}`]?: AsyncMiddleware<
+    CommandRegistry[K] extends { input: infer I } ? I : never,
+    CommandRegistry[K] extends { output: infer O } ? O : never
+  >;
 };
 
 /**
@@ -253,6 +262,22 @@ export type CommandHooks = {
  * hook dynamically and returns its remover. Typed exactly like the declarative
  * form; only augmented verbs are callable keys.
  */
+/**
+ * The per-verb IMPERATIVE full-middleware registrar surface (ADR 83 amendment)
+ * — the `on<Command>` primitive as `(mw) => Unsubscribe` methods. Mirrors
+ * {@link HookRegistrars}'s before/after halves but valued with the whole
+ * {@link AsyncMiddleware} typed to the command's input/output. Folded into
+ * {@link HookRegistrars} so `harness.hooks.on<Command>(mw)` is typed.
+ */
+export type CommandMiddlewares = {
+  [K in keyof CommandRegistry as `on${Pascal<K & string>}`]: (
+    mw: AsyncMiddleware<
+      CommandRegistry[K] extends { input: infer I } ? I : never,
+      CommandRegistry[K] extends { output: infer O } ? O : never
+    >,
+  ) => Unsubscribe;
+};
+
 export type HookRegistrars = {
   [K in keyof CommandRegistry as `onBefore${Pascal<K & string>}`]: (
     fn: BeforeHook<CommandRegistry[K] extends { input: infer I } ? I : never>,
@@ -261,7 +286,7 @@ export type HookRegistrars = {
   [K in keyof CommandRegistry as `onAfter${Pascal<K & string>}`]: (
     fn: AfterHook<CommandRegistry[K] extends { output: infer O } ? O : never>,
   ) => Unsubscribe;
-};
+} & CommandMiddlewares;
 
 // ============================================================================
 // MiddlewareChain — outer→inner composition
@@ -393,143 +418,85 @@ const asAfter =
   };
 
 /**
- * Parse a {@link CommandHooks} key into its `{ kind, command }` — the single
- * strip both {@link Hooks.from} (over config keys) and {@link Hooks.forOp} (over
- * {@link deriveHookNames} output) route through, so they key `byCommand` by the
- * IDENTICAL Pascal command suffix. `deriveHookNames` mints `onBefore${Pascal}` /
- * `onAfter${Pascal}`; config keys ARE `onBefore${Pascal}` / `onAfter${Pascal}`
- * (type-guaranteed) — stripping the prefix from either yields the same key, which
- * is why `from`/`forOp` provably agree (a test). Returns `undefined` for a
- * non-hook key (defensive; `CommandHooks` admits only hook keys).
+ * Parse a {@link CommandHooks} / {@link HookRegistrars} key into its
+ * `{ kind, command }`. The single strip both {@link commandHookMiddleware} (over
+ * config/registrar keys) and `runOperation`'s `ctx.op` derivation (over
+ * {@link deriveHookNames} output) route through, so a hook registered under
+ * `onBefore<Pascal>` and the op that fires it key by the IDENTICAL Pascal
+ * command suffix. Recognizes `onBefore` / `onAfter` (one-sided sugar) and the
+ * bare `on<Suffix>` (full-middleware `on<Command>`, ADR 83 amendment). Returns
+ * `undefined` for a non-hook key (defensive).
  */
-function parseHookKey(key: string): { kind: "before" | "after"; command: string } | undefined {
+function parseHookKey(
+  key: string,
+): { kind: "before" | "after" | "around"; command: string } | undefined {
+  // ORDER MATTERS: the `onBefore` / `onAfter` prefixes are tested FIRST so they
+  // don't get swallowed by the bare `on<Suffix>` (around) case below.
   if (key.startsWith("onBefore")) return { kind: "before", command: key.slice("onBefore".length) };
   if (key.startsWith("onAfter")) return { kind: "after", command: key.slice("onAfter".length) };
+  // Bare `on<Suffix>` (ADR 83 amendment) — the full-middleware `on<Command>`
+  // registrar. `fn` is already an AsyncMiddleware; no before/after adaptation.
+  if (key.startsWith("on")) return { kind: "around", command: key.slice("on".length) };
   return undefined;
 }
 
 /**
- * An immutable, per-command layer of {@link CommandHooks} (ADR 82).
- *
- * Holds LISTS per command so layers **compose** — two layers both setting
- * `onBeforeToolDispatch` can't share a flat object key, hence the class. The
- * construction cascade (gateway → app → session → sub-harness) folds down the
- * scope chain ONCE at construction via {@link extend}: `resolved =
- * parentResolved.extend(ownHooks)`. Every op then reads its local, fully-resolved
- * `Hooks` through {@link forOp} — the fold IS the walk, memoized at each node.
- * This replaces ADR 80's per-op `ownAndInheritedHooks` parent-walk.
- *
- * `byCommand` is keyed by the Pascal command suffix (`"ToolProbe"`), the shared
- * output of {@link parseHookKey} over both config keys and `deriveHookNames`.
- *
- * @see docs/proposals/v2/blueprint/82-hooks-cascade-as-construction-fold.md
+ * Self-scope an {@link AsyncMiddleware} to a single command on the shared `.use`
+ * chain (ADR 83 amendment). The lifted middleware composes on EVERY op; this
+ * wrapper compares the op's `ctx.op` (the command suffix `runOperation` stamps)
+ * to `command` and delegates to `mw` only on a match, otherwise passes straight
+ * through to `next`. This is the per-middleware `ctx` compare that replaced the
+ * old keyed `Hooks` map — one chain, one cascade, op-scoping by tag + compare.
  */
-export class Hooks {
-  private constructor(
-    private readonly byCommand: ReadonlyMap<
-      string,
-      { readonly before: BeforeHook<unknown>[]; readonly after: AfterHook<unknown>[] }
-    >,
-  ) {}
+export const scopeToCommand =
+  <I, R>(command: string, mw: AsyncMiddleware<I, R>): AsyncMiddleware<I, R> =>
+  (input, next, ctx) =>
+    ctx.op === command ? mw(input, next, ctx) : next(input);
 
-  /** The identity element of {@link extend}: contributes no hooks. */
-  static readonly empty = new Hooks(new Map());
+/**
+ * The Effect-native `guard`/`transform`/`observe` middleware for ONE command
+ * hook config entry — the shared core of {@link BaseHarness.hook} (own,
+ * dynamic) and {@link hooksToMiddlewares} (the declarative session-config fold).
+ * `before`/`after` keys desugar via {@link asBefore}/{@link asAfter}; a bare
+ * `on<Command>` key IS already an {@link AsyncMiddleware} (used as-is). The
+ * result is op-scoped via {@link scopeToCommand}, lifted through the SAME
+ * {@link liftMiddleware} fiber path `.use` uses, and tagged `transform`.
+ * Returns `undefined` for a non-hook key (defensive).
+ */
+function commandHookMiddleware(
+  key: string,
+  fn: unknown,
+): Middleware<unknown, unknown, unknown> | undefined {
+  const parsed = parseHookKey(key);
+  if (parsed === undefined) return undefined;
+  const wrapped: AsyncMiddleware<unknown, unknown> =
+    parsed.kind === "before"
+      ? asBefore(fn as BeforeHook<unknown>)
+      : parsed.kind === "after"
+        ? asAfter(fn as AfterHook<unknown>)
+        : (fn as AsyncMiddleware<unknown, unknown>);
+  return tagInterceptor(
+    "transform",
+    liftMiddleware(scopeToCommand(parsed.command, wrapped)),
+  ) as Middleware<unknown, unknown, unknown>;
+}
 
-  /**
-   * Index a declarative {@link CommandHooks} object into per-command
-   * before/after lists — the reverse of {@link deriveHookNames}: each
-   * `onBefore<Pascal>` / `onAfter<Pascal>` key maps to
-   * `byCommand[<Pascal>].{before,after}` via {@link parseHookKey}.
-   */
-  static from(config: CommandHooks): Hooks {
-    const byCommand = new Map<
-      string,
-      { before: BeforeHook<unknown>[]; after: AfterHook<unknown>[] }
-    >();
-    for (const [key, fn] of Object.entries(config as Record<string, unknown>)) {
-      if (fn === undefined) continue;
-      const parsed = parseHookKey(key);
-      if (parsed === undefined) continue;
-      let slot = byCommand.get(parsed.command);
-      if (slot === undefined) {
-        slot = { before: [], after: [] };
-        byCommand.set(parsed.command, slot);
-      }
-      if (parsed.kind === "before") slot.before.push(fn as BeforeHook<unknown>);
-      else slot.after.push(fn as AfterHook<unknown>);
-    }
-    return byCommand.size === 0 ? Hooks.empty : new Hooks(byCommand);
+/**
+ * Adapt a declarative {@link CommandHooks} config into op-scoped `transform`
+ * middlewares (ADR 83 amendment) — the pure function the app/session config
+ * fold uses to thread declarative hooks through the SAME `inheritedInterceptors`
+ * cascade that carries guards + `.use` middleware. Each entry rides
+ * {@link commandHookMiddleware}: before/after desugar, `on<Command>` passes
+ * through, all self-scope by `ctx.op`. `[]` for an empty config.
+ */
+export function hooksToMiddlewares(config: CommandHooks): Middleware<unknown, unknown, unknown>[] {
+  const out: Middleware<unknown, unknown, unknown>[] = [];
+  for (const [key, fn] of Object.entries(config as Record<string, unknown>)) {
+    if (fn === undefined) continue;
+    const mw = commandHookMiddleware(key, fn);
+    if (mw !== undefined) out.push(mw);
   }
-
-  /**
-   * COMPOSE, not override: append `child`'s lists AFTER this layer's, per command
-   * (outer-first — this layer is the ancestor, so its before-hooks see the input
-   * first and its after-hooks transform the output last). Immutable — returns a
-   * new `Hooks`. This is the ONE place hooks diverge from tools (last-wins
-   * override); an ancestor AND a descendant hook on the same command both fire.
-   */
-  extend(child: Hooks): Hooks {
-    if (child.byCommand.size === 0) return this;
-    if (this.byCommand.size === 0) return child;
-    const merged = new Map<
-      string,
-      { before: BeforeHook<unknown>[]; after: AfterHook<unknown>[] }
-    >();
-    for (const [command, slot] of this.byCommand) {
-      merged.set(command, { before: [...slot.before], after: [...slot.after] });
-    }
-    for (const [command, slot] of child.byCommand) {
-      const existing = merged.get(command);
-      if (existing === undefined) {
-        merged.set(command, { before: [...slot.before], after: [...slot.after] });
-      } else {
-        existing.before.push(...slot.before);
-        existing.after.push(...slot.after);
-      }
-    }
-    return new Hooks(merged);
-  }
-
-  /**
-   * Remove — by reference identity — every hook fn present in `other` from this
-   * layer's per-command lists. The inverse of {@link extend} for a known layer:
-   * `hook()` extends with `Hooks.from(config)` and its Unsubscribe calls
-   * `without(thatSameLayer)`, so exactly the added fns are dropped. Immutable.
-   */
-  without(other: Hooks): Hooks {
-    if (other.byCommand.size === 0 || this.byCommand.size === 0) return this;
-    const kept = new Map<string, { before: BeforeHook<unknown>[]; after: AfterHook<unknown>[] }>();
-    for (const [command, slot] of this.byCommand) {
-      const rm = other.byCommand.get(command);
-      if (rm === undefined) {
-        kept.set(command, slot);
-        continue;
-      }
-      const before = slot.before.filter((h) => !rm.before.includes(h));
-      const after = slot.after.filter((h) => !rm.after.includes(h));
-      if (before.length > 0 || after.length > 0) kept.set(command, { before, after });
-    }
-    return kept.size === 0 ? Hooks.empty : new Hooks(kept);
-  }
-
-  /**
-   * The composed middleware entries for one op — already cascade-resolved,
-   * lifted through the SAME {@link liftMiddleware} path `.use` uses (the ADR 80
-   * §7 fiber invariant, unchanged). Before-hooks precede after-hooks; both fire
-   * in list (outer-first) order. `[]` for an unhooked op — a byte-identical
-   * composed chain to the no-hooks case.
-   */
-  forOp(opName: string): Middleware<unknown, unknown, unknown>[] {
-    const [beforeName] = deriveHookNames(opName);
-    const parsed = parseHookKey(beforeName);
-    if (parsed === undefined) return [];
-    const slot = this.byCommand.get(parsed.command);
-    if (slot === undefined) return [];
-    return [
-      ...slot.before.map((h) => liftMiddleware(asBefore(h))),
-      ...slot.after.map((h) => liftMiddleware(asAfter(h))),
-    ];
-  }
+  return out;
 }
 
 // ============================================================================
@@ -711,21 +678,12 @@ export interface BaseHarnessOptions<I = unknown> {
    */
   readonly telemetryNamespace?: string;
   /**
-   * Command lifecycle hooks (ADR 82) — the RESOLVED per-command {@link Hooks}
-   * value, already cascade-folded down the construction scope chain by the
-   * caller (`resolved = parentResolved.extend(Hooks.from(ownConfig))`). The
-   * harness reads it locally per op via {@link Hooks.forOp}; each entry rides
-   * the `liftMiddleware` fiber path verbatim (§7). Defaults to {@link Hooks.empty}.
-   *
-   * The declarative `CommandHooks` config is folded into this value by the scope
-   * that owns the option (`createApp`/`createSession`) — not here.
-   */
-  readonly hooks?: Hooks;
-  /**
-   * The parent scope's resolved interceptor snapshot (ADR 76 tier 3), folded
-   * in at construction — mirrors {@link hooks}. Guards + transforms both live
-   * on `this.middleware` and inherit via this seam: the caller computes the
-   * value once (`parent.resolvedInterceptors()`) and hands it down, so no op
+   * The parent scope's resolved interceptor snapshot (ADR 76 tier 3 + ADR 83
+   * amendment), folded in at construction. Guards, `.use` transforms, AND
+   * declarative command hooks (adapted to op-scoped middleware via
+   * {@link hooksToMiddlewares}) all inherit through this ONE seam — the caller
+   * computes the value once (`parent.resolvedInterceptors()`, plus any session
+   * config hooks) and hands it down, so no op
    * ever walks a construction-parent chain. Composed OUTERMOST of this
    * harness's own middleware (broader scope first). Defaults to `[]`.
    */
@@ -788,19 +746,10 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
    */
   protected readonly telemetryNamespace: string;
   /**
-   * The RESOLVED command lifecycle hooks (ADR 82) — a cascade-folded
-   * {@link Hooks} value. Consulted per-op by {@link Hooks.forOp}, which lifts
-   * each matching hook into the command's middleware chain. {@link Hooks.empty}
-   * when none were supplied. The inherited layer arrives via the FOLD (the
-   * caller's `extend`); {@link BaseHarness.hook} mutates this holder to add/remove
-   * hooks dynamically at runtime (own-harness scope). Not `readonly` for that
-   * reason — the VALUE stays immutable, the holder is reassigned.
-   * @see BaseHarnessOptions.hooks
-   */
-  protected hookLayer: Hooks;
-  /**
    * The parent scope's RESOLVED interceptor snapshot (ADR 76 tier 3), folded
-   * in at construction — the middleware twin of {@link hooks}. The cascade
+   * in at construction. Guards, `.use` transforms, AND command hooks (ADR 83
+   * amendment — hooks are now op-scoped `transform` middleware on `.use`) all
+   * inherit through this ONE seam. The cascade
    * lives in the FOLD (the parent computed `resolvedInterceptors()` and passed
    * the value), not a per-op parent-walk. Composed OUTERMOST of this harness's
    * own `this.middleware` per op; `[]` when top-of-tree.
@@ -878,13 +827,15 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
    * ordered **root-outermost** — `[...inheritedInterceptors, ...ownMiddleware]`.
    * A child snapshots this at ITS construction (`inheritedInterceptors:
    * parent.resolvedInterceptors()`), so the cascade is a static fold down the
-   * scope chain, not a per-op walk up a parent pointer. Mirrors {@link Hooks}
-   * (ADR 82): the fold IS the walk, memoized at each node.
+   * scope chain, not a per-op walk up a parent pointer. The fold IS the walk,
+   * memoized at each node (ADR 82, generalized by ADR 83).
    *
-   * Guards (`.guard()`) and transforms (`.use()`) both live on `this.middleware`,
-   * so both inherit through this one seam. Snapshots the OWN chain live, so a
-   * child sees registrations made on the parent BEFORE the child was
-   * constructed; registrations made AFTER are outside the child's static fold.
+   * Guards (`.guard()`), transforms (`.use()`), AND command hooks (`.hook()` —
+   * op-scoped `transform` middleware, ADR 83 amendment) all live on
+   * `this.middleware`, so all inherit through this one seam. Snapshots the OWN
+   * chain live, so a child sees registrations made on the parent BEFORE the
+   * child was constructed; registrations made AFTER are outside the child's
+   * static fold.
    */
   protected resolvedInterceptors(): readonly Middleware<unknown, unknown, unknown>[] {
     // Inherited layer is broader scope → outermost → first in the list.
@@ -952,12 +903,28 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
   }
 
   /**
+   * Register ONE command hook config entry onto this harness's `.use` chain
+   * (ADR 83 amendment) — the shared impl behind {@link hook} and the
+   * {@link hooks} proxy. Desugars the key via {@link commandHookMiddleware}
+   * (before/after → sugar, bare `on<Command>` → the middleware as-is), op-scopes
+   * it by `ctx.op`, and registers it as a `transform`-kind middleware. The
+   * returned {@link Unsubscribe} is the chain's native remover — a hook is now
+   * just op-scoped middleware, no separate `Hooks` storage.
+   */
+  private registerCommandHook(key: string, fn: unknown): Unsubscribe {
+    const mw = commandHookMiddleware(key, fn);
+    if (mw === undefined) return () => {};
+    return this.middleware.use(mw);
+  }
+
+  /**
    * Register command lifecycle hooks IMPERATIVELY (ADR 83) — the runtime twin of
-   * the declarative `{ hooks }` construction option, taking the SAME
-   * {@link CommandHooks} object. Adds each hook to this harness's local hook layer
-   * and returns an {@link Unsubscribe} that removes exactly those fns (by
-   * reference). Affects this harness's OWN future ops; like `use`/`guard`, it does
-   * NOT retroactively reach already-constructed children (the fold snapshot).
+   * the declarative `{ hooks }` construction config, taking the SAME
+   * {@link CommandHooks} object. Each entry registers as an op-scoped
+   * `transform` middleware on this harness's OWN `.use` chain; the returned
+   * {@link Unsubscribe} removes exactly those middlewares. Affects this
+   * harness's OWN future ops; like `use`/`guard`, it does NOT retroactively
+   * reach already-constructed children (the fold snapshot).
    *
    * ```ts
    * const off = harness.hook({ onBeforeToolDispatch: (input) => reshape(input) });
@@ -968,29 +935,32 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
    * (`harness.hooks.onBeforeToolDispatch(fn)`), which is a Proxy over this.
    */
   hook(config: CommandHooks): Unsubscribe {
-    const added = Hooks.from(config);
-    if (added === Hooks.empty) return () => {};
-    this.hookLayer = this.hookLayer.extend(added);
+    const unsubs: Unsubscribe[] = [];
+    for (const [key, fn] of Object.entries(config as Record<string, unknown>)) {
+      if (fn === undefined) continue;
+      unsubs.push(this.registerCommandHook(key, fn));
+    }
+    if (unsubs.length === 0) return () => {};
     let live = true;
     return () => {
       if (!live) return;
       live = false;
-      this.hookLayer = this.hookLayer.without(added);
+      for (const off of unsubs) off();
     };
   }
 
   /**
-   * Per-verb imperative hook registrars (ADR 83) — a typed Proxy over
-   * {@link BaseHarness.hook}. `harness.hooks.onBeforeToolDispatch(fn)` registers
-   * the hook and returns its {@link Unsubscribe}. Only augmented verbs are
-   * callable keys ({@link HookRegistrars}); an unknown name is an inert no-op.
+   * Per-verb imperative registrars (ADR 83) — a typed Proxy over
+   * {@link registerCommandHook}. Uniformly covers the before/after sugar
+   * (`harness.hooks.onBeforeToolDispatch(fn)`) AND the full-middleware
+   * `on<Command>` primitive (`harness.hooks.onToolDispatch(mw)`), each returning
+   * its {@link Unsubscribe}. Only augmented verbs are callable keys
+   * ({@link HookRegistrars}); an unknown name is an inert no-op.
    */
   get hooks(): HookRegistrars {
     return (this._hookRegistrars ??= new Proxy({} as HookRegistrars, {
       get: (_target, name) =>
-        typeof name === "string"
-          ? (fn: unknown) => this.hook({ [name]: fn } as CommandHooks)
-          : undefined,
+        typeof name === "string" ? (fn: unknown) => this.registerCommandHook(name, fn) : undefined,
     }));
   }
   private _hookRegistrars?: HookRegistrars;
@@ -1003,12 +973,13 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
    * the tier-4 (FiberRef) call-scoped middleware, which is only resolvable
    * in-fiber.
    */
-  listInterceptors(opName: string): InterceptorKind[] {
-    const assembled = [
-      ...this.inheritedInterceptors,
-      ...this.middleware.snapshot(),
-      ...this.hookLayer.forOp(opName),
-    ];
+  listInterceptors(_opName: string): InterceptorKind[] {
+    // Hooks now live on `this.middleware` as op-scoped `transform` middlewares
+    // (ADR 83 amendment), so `resolvedInterceptors()` already includes them —
+    // no separate hook-layer term. Each hook enumerates as `transform`
+    // regardless of `_opName` (the op-scoping is a runtime `ctx.op` compare,
+    // opaque to static kind introspection).
+    const assembled = [...this.inheritedInterceptors, ...this.middleware.snapshot()];
     return orderInterceptors(assembled).map(interceptorKind);
   }
 
@@ -1035,7 +1006,6 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
     this.metadata = Object.freeze({ ...(options.metadata ?? {}) });
     this.principal = options.principal;
     this.telemetryNamespace = options.telemetryNamespace ?? "agentick";
-    this.hookLayer = options.hooks ?? Hooks.empty;
     this.inheritedInterceptors = options.inheritedInterceptors ?? [];
 
     // Substrate slot resolution (ADR 31). Build a shell exposing the
@@ -1128,6 +1098,10 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
         opId: resolvedOp.opId,
         parentOpId: resolvedOp.parentOpId,
         correlationId: resolvedOp.correlationId,
+        // ADR 83 amendment — the op's command SUFFIX, the same Pascal key the
+        // old `hookLayer` map keyed on. An `on<Command>` middleware self-scopes
+        // by comparing `ctx.op` to this (see `scopeToCommand`).
+        op: parseHookKey(deriveHookNames(resolvedOp.name)[0])?.command,
       };
 
       return yield* withContext(
@@ -1161,20 +1135,23 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
             //    it. Assembly order (outermost → innermost):
             //      call-scoped (tier 4, FiberRef — broadest)
             //        → inherited layer (tier 3, folded at construction — no
-            //          walk; the parent's `resolvedInterceptors()` snapshot)
+            //          walk; the parent's `resolvedInterceptors()` snapshot,
+            //          incl. inherited command hooks as op-scoped middleware)
             //          → this harness's own middleware (tier 2, read locally
-            //            per op, incl. guards from `.guard()`)
-            //            → command hooks (ADR 82)
+            //            per op, incl. guards from `.guard()` AND own command
+            //            hooks from `.hook()` — ADR 83 amendment: hooks are just
+            //            op-scoped `transform` middleware on `.use`, no separate
+            //            hook layer/`forOp` term)
             //    Then a STABLE guard-outermost sort floats every `guard`-kind
             //    interceptor ahead of the transforms (deny-before-transform),
             //    preserving tier order within each kind. Everything reduces to
-            //    a pass-through when nothing is registered.
+            //    a pass-through when nothing is registered. Each hook self-filters
+            //    by `ctx.op` (the command suffix set on the RuntimeContext above).
             const callMiddleware = yield* getCallMiddleware;
             const assembled = [
               ...callMiddleware,
               ...this.inheritedInterceptors,
               ...this.middleware.snapshot(),
-              ...this.hookLayer.forOp(resolvedOp.name),
             ];
             const composed = composeMiddleware<I, R, E>(
               orderInterceptors(assembled) as Middleware<I, R, E>[],

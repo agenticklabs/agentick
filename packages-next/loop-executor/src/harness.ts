@@ -40,7 +40,7 @@
 
 import { Effect, Either } from "effect";
 
-import { BaseHarness, type Hooks, runHarnessProtocol, ulid } from "@agentick/runtime-next";
+import { BaseHarness, type Middleware, runHarnessProtocol, ulid } from "@agentick/runtime-next";
 import type {
   ContentBlock,
   ExecutionRunResult,
@@ -124,15 +124,17 @@ function zeroUsage(): MutableUsage {
 
 /**
  * Construction options for {@link LoopExecutorHarness}. Minimal today — the
- * loop takes its substrate positionally; this carries the ADR 82 resolved hook
- * layer (the app-shared spine folds the APP's layer here).
+ * loop takes its substrate positionally; this carries the ADR 76/83 resolved
+ * interceptor snapshot (the app-shared spine folds the APP's layer here).
  */
 export interface LoopExecutorHarnessOptions {
   /**
-   * Resolved command lifecycle hooks (ADR 82) — the cascade-folded {@link Hooks}
-   * value, forwarded to {@link BaseHarness}. Defaults to `Hooks.empty`.
+   * Resolved interceptor snapshot (ADR 76 tier 3 + ADR 83 amendment) — the
+   * app's resolved interceptors (guards, `.use` transforms, AND declarative
+   * `createApp({ hooks })` adapted to op-scoped middleware), folded in at
+   * construction and forwarded to {@link BaseHarness}. Defaults to `[]`.
    */
-  readonly hooks?: Hooks;
+  readonly inheritedInterceptors?: readonly Middleware<unknown, unknown, unknown>[];
 }
 
 export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExecutorProtocol {
@@ -146,7 +148,9 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
     inbox: MessageInbox,
     options: LoopExecutorHarnessOptions = {},
   ) {
-    super("loop", scopeId, journal, bus, inbox, { hooks: options.hooks });
+    super("loop", scopeId, journal, bus, inbox, {
+      inheritedInterceptors: options.inheritedInterceptors,
+    });
   }
 
   // ──────── LoopExecutorProtocol ────────

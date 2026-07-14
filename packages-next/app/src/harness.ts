@@ -26,7 +26,7 @@ import {
   type CommandHooks,
   forkBusSubscription,
   type HarnessShell,
-  Hooks,
+  hooksToMiddlewares,
   LocalEventBus,
   LocalInbox,
   MemoryJournal,
@@ -110,14 +110,14 @@ import type {
   OperationJournalFactory,
 } from "@agentick/spec-next";
 
-// ADR 82 — declarative per-session hook layer. `CommandHooks` is derived from
-// the runtime-augmented `CommandRegistry`, so it lives in `@agentick/runtime-next`
-// and cannot be referenced from `@agentick/spec-next` (foundation layer — no
-// upward dep). The app is the scope that OWNS `createSession` and folds the hook
-// cascade, so it augments spec's protocol shell here (the same `declare module`
-// pattern harness packages use for `HookBridges` / `CommandRegistry`). The value
-// is folded onto the app's resolved layer via `this.hookLayer.extend(Hooks.from(...))`
-// in `createSessionBody`.
+// ADR 82 / ADR 83 amendment — declarative per-session hooks. `CommandHooks` is
+// derived from the runtime-augmented `CommandRegistry`, so it lives in
+// `@agentick/runtime-next` and cannot be referenced from `@agentick/spec-next`
+// (foundation layer — no upward dep). The app OWNS `createSession` and folds the
+// hook cascade, so it augments spec's protocol shell here (the same `declare
+// module` pattern harness packages use for `HookBridges` / `CommandRegistry`).
+// The value is adapted to op-scoped middleware (`hooksToMiddlewares`) and
+// appended to the app's resolved interceptor snapshot in `createSessionBody`.
 declare module "@agentick/spec-next" {
   // `P` matches the augmented interface's arity (declaration merging requires
   // identical type parameters); it is unused in this augmentation body.
@@ -425,16 +425,18 @@ export interface AppHarnessOptions<P = unknown> {
   readonly telemetryNamespace?: string;
 
   /**
-   * App-level command lifecycle hooks (ADR 82) — declarative
-   * {@link CommandHooks}. Folded ONCE at construction into the app's resolved
-   * {@link Hooks} layer (`Hooks.from(options.hooks)`) and threaded down the
-   * scope chain: the app-shared spine (loop / executor) and every per-session
-   * sub-harness fold it (`this.hookLayer.extend(Hooks.from(input.hooks))`). Hooks
-   * COMPOSE across scopes (app-outer, session-inner both fire) — they never
-   * override. A before-hook reshapes/vetos the command input; an after-hook the
-   * output. `createApp({ hooks: { onBeforeToolDispatch: (i) => reshaped } })`.
+   * App-level command lifecycle hooks (ADR 82 / ADR 83 amendment) — declarative
+   * {@link CommandHooks}. Registered ONCE at construction as op-scoped
+   * `transform` middleware on the app's OWN `.use` chain (`this.hook(...)`), so
+   * they inherit down the scope chain through the SAME `inheritedInterceptors`
+   * fold that carries `.use()` / `.guard()`: the app-shared spine (loop /
+   * executor) and every per-session sub-harness snapshot it. Hooks COMPOSE
+   * across scopes (app-outer, session-inner both fire) — they never override. A
+   * before-hook reshapes/vetos the command input; an after-hook the output; the
+   * bare `on<Command>` key is the whole middleware.
+   * `createApp({ hooks: { onBeforeToolDispatch: (i) => reshaped } })`.
    *
-   * @see docs/proposals/v2/blueprint/82-hooks-cascade-as-construction-fold.md
+   * @see docs/proposals/v2/blueprint/83-one-interceptor-primitive.md
    */
   readonly hooks?: CommandHooks;
 
@@ -670,15 +672,18 @@ export class AppHarness<P = unknown>
           inbox: options.inbox,
           telemetryNamespace: options.telemetryNamespace,
         }),
-        // ADR 82 — fold the app's declarative hooks into its resolved layer
-        // ONCE, at the construction boundary. `this.hookLayer` is now the app's
-        // cascade base; `createSessionBody` extends it per session.
-        hooks: Hooks.from(options.hooks ?? {}),
         policy: mergeLayered<JournalingPolicy>(DEFAULT_JOURNALING_POLICY, {
           override: { "app:command:close-app": "bus-only" },
         }),
       },
     );
+    // ADR 83 amendment — register the app's declarative hooks as op-scoped
+    // middleware on the app's OWN `.use` chain, ONCE at the construction
+    // boundary and BEFORE the shared spine (executor/loop) is built, so their
+    // `inheritedInterceptors: this.resolvedInterceptors()` snapshot (below)
+    // picks them up. `createSessionBody` folds the app's resolved layer per
+    // session. This is the app's cascade base (was `this.hookLayer`).
+    this.hook(options.hooks ?? {});
     // Local aliases for convenience in the rest of the constructor.
     const journal = this.journal;
     const bus = this.bus;
@@ -710,9 +715,11 @@ export class AppHarness<P = unknown>
       options.model !== undefined
         ? new TheLanguageModelExecutor(`${appId}:executor`, journal, bus, inbox, {
             adapter: options.model,
-            // ADR 82 — app-shared spine folds the APP's resolved layer (session
-            // hooks never reach shared harnesses).
-            hooks: this.hookLayer,
+            // ADR 76/83 — app-shared spine folds the APP's resolved interceptor
+            // snapshot (incl. the app's declarative hooks registered just above;
+            // no `app.use()` has run yet at construction, so this equals the old
+            // app-hook-only layer). Session hooks never reach shared harnesses.
+            inheritedInterceptors: this.resolvedInterceptors(),
           })
         : isExecutorFactory(options.executor)
           ? options.executor({
@@ -758,8 +765,11 @@ export class AppHarness<P = unknown>
     this.loop = isLoopExecutorFactory(options.loop)
       ? options.loop({ scopeId: appId, journal, bus, inbox })
       : (options.loop ??
-        // ADR 82 — app-shared spine folds the APP's resolved layer.
-        new LoopExecutorHarness(appId, journal, bus, inbox, { hooks: this.hookLayer }));
+        // ADR 76/83 — app-shared spine folds the APP's resolved interceptor
+        // snapshot (incl. the app's declarative hooks registered above).
+        new LoopExecutorHarness(appId, journal, bus, inbox, {
+          inheritedInterceptors: this.resolvedInterceptors(),
+        }));
 
     // Persistent-tasks substrate (ADR 68) — app-scoped store + executor
     // registry, constructed ONCE (NOT a cascade — detached tasks +
@@ -1230,20 +1240,20 @@ export class AppHarness<P = unknown>
       return existing.session as SessionHarnessProtocol<P>;
     }
 
-    // ADR 82 — the construction-fold. Compute the session's resolved hook layer
-    // ONCE, before any harness exists: `this.hookLayer` (app's resolved layer)
-    // `.extend` the session's own declarative layer. This VALUE is threaded into
-    // the SessionHarness AND every per-session sub-harness below — no parent
-    // pointer, no ordering knot (the fold IS the walk, memoized here). `extend`
-    // COMPOSES per command (app-outer, session-inner both fire).
-    const sessionHooks = this.hookLayer.extend(Hooks.from(input.hooks ?? {}));
-
-    // ADR 76 tier 3 — the middleware twin of the hook fold. Snapshot the app's
-    // RESOLVED interceptors NOW (captures boot-time `app.use()` / `app.guard()`)
-    // and thread this VALUE into the SessionHarness AND every per-session
-    // sub-harness below — the exact mirror of `sessionHooks`. No parent pointer:
-    // the fold IS the walk, memoized here.
-    const inheritedInterceptors = this.resolvedInterceptors();
+    // ADR 76 tier 3 + ADR 83 amendment — ONE construction-fold value. Snapshot
+    // the app's RESOLVED interceptors NOW (captures boot-time `app.use()` /
+    // `app.guard()` AND the app's declarative hooks, registered in the app ctor)
+    // then APPEND the session's own declarative `createSession({ hooks })`
+    // adapted to op-scoped middleware. Guards, `.use` transforms, AND the
+    // app+session command hooks now ride this SINGLE value (was two: a separate
+    // `sessionHooks` layer + `inheritedInterceptors`). Threaded into the
+    // SessionHarness AND every per-session sub-harness below — no parent pointer,
+    // the fold IS the walk, memoized here. App-outer, session-inner: the app
+    // interceptors precede the session-hook middleware in registration order.
+    const inheritedInterceptors = [
+      ...this.resolvedInterceptors(),
+      ...hooksToMiddlewares(input.hooks ?? {}),
+    ];
 
     // Per-session elicitation harness. Owns the request/response
     // correlation engine for tool confirmation, MCP elicitation, and
@@ -1252,20 +1262,17 @@ export class AppHarness<P = unknown>
     // session bridges (so React-side `bridges.elicitation` and
     // server-side `bridges.elicitation.respond(...)` from clients
     // reach the same registry the tool executor is awaiting).
-    // ADR 82 — the hook cascade reaches these per-session sub-harnesses via the
-    // resolved `sessionHooks` VALUE (folded above), threaded into each `hooks`
-    // option. No parent pointer needed for hooks.
-    // ADR 76 — the MIDDLEWARE cascade (`app.use()` / `app.guard()`) now reaches
-    // them the SAME way: the `inheritedInterceptors` VALUE (the app's resolved
-    // interceptor snapshot, computed above) is threaded into each harness. This
-    // replaces the construction-parent WALK (ADR 81's pointer, now deleted) —
-    // guards + transforms both inherit through this fold.
+    // ADR 76 + ADR 83 amendment — the interception cascade reaches these
+    // per-session sub-harnesses via the ONE `inheritedInterceptors` VALUE
+    // (folded above): `app.use()` / `app.guard()` MIDDLEWARE, guards, AND the
+    // app+session command hooks (as op-scoped middleware) all inherit through
+    // this single fold. No parent pointer, one threaded value (was two).
     const elicitation = new ElicitationHarness(
       `${sessionId}:elicitation`,
       this.journal,
       this.bus,
       this.inbox,
-      { parentScope: { sessionId }, hooks: sessionHooks, inheritedInterceptors },
+      { parentScope: { sessionId }, inheritedInterceptors },
     );
 
     // Per-session tasks harness — substrate-level long-running tool
@@ -1281,9 +1288,8 @@ export class AppHarness<P = unknown>
       // `{ sessionId }` above.
       store: this.taskStore,
       executors: this.taskExecutors,
-      // ADR 82 — session's resolved hook layer.
-      hooks: sessionHooks,
-      // ADR 76 tier 3 — the app's resolved interceptor snapshot.
+      // ADR 76/83 — the app's resolved interceptor snapshot incl. the app+session
+      // command hooks as op-scoped middleware.
       inheritedInterceptors,
     });
 
@@ -1299,9 +1305,9 @@ export class AppHarness<P = unknown>
       this.journal,
       this.bus,
       this.inbox,
-      // ADR 82 — session's resolved hook layer.
-      // ADR 76 tier 3 — the app's resolved interceptor snapshot.
-      { hooks: sessionHooks, inheritedInterceptors },
+      // ADR 76/83 — the app's resolved interceptor snapshot incl. the app+session
+      // command hooks as op-scoped middleware.
+      { inheritedInterceptors },
     );
 
     // ── Session extension lifecycle (#150) ────────────────────────
@@ -1415,11 +1421,10 @@ export class AppHarness<P = unknown>
           tasks,
           resources,
           ...omitUndefined({ ctxExtensions }),
-          // ADR 82 — session's resolved hook layer. `tool:dispatch` routes
-          // through `runOperation`, so `onBefore/AfterToolDispatch` fire here.
-          hooks: sessionHooks,
-          // ADR 76 tier 3 — the app's resolved interceptor snapshot, so
-          // `app.use()` / `app.guard()` wraps `tool:dispatch`.
+          // ADR 76/83 — the ONE resolved interceptor snapshot: `app.use()` /
+          // `app.guard()` AND the app+session `onBefore/After/AroundToolDispatch`
+          // hooks (as op-scoped middleware) all wrap `tool:dispatch`, which
+          // routes through `runOperation`.
           inheritedInterceptors,
         });
 
@@ -1451,15 +1456,12 @@ export class AppHarness<P = unknown>
       // (ADR 78 brick #2), not per-harness fields. Nesting is unaffected.
       telemetryNamespace: this.telemetryNamespace,
       ...(this.telemetryRuntime !== undefined ? { telemetryRuntime: this.telemetryRuntime } : {}),
-      // ADR 76 tier 3 — the app's resolved interceptor snapshot, folded in at
-      // construction so `app.use(...)` / `app.guard(...)` wraps every session op
-      // (deployment-global). The SessionHarness re-folds this onto its own
-      // per-session bridges. Mirrors `hooks` — no parent pointer.
+      // ADR 76/83 — the ONE resolved interceptor snapshot: `app.use(...)` /
+      // `app.guard(...)` AND the app+session command hooks (as op-scoped
+      // middleware) wrap every session op, folded in at construction. The
+      // SessionHarness re-folds this onto its own per-session bridges. No parent
+      // pointer, one value (was `inheritedInterceptors` + `hooks`).
       inheritedInterceptors,
-      // ADR 82 — session's resolved hook layer (app + session, composed). The
-      // SessionHarness reads it per-op AND forwards it to its per-session
-      // bridges (knobs / state / …) so their commands fold the same cascade.
-      hooks: sessionHooks,
       defaultMaxTicks: input.maxTicks ?? this.sessionDefaults.defaultMaxTicks ?? 8,
       ...(input.requiredScopes !== undefined ? { requiredScopes: input.requiredScopes } : {}),
       ...(this.models !== undefined ? { models: this.models } : {}),
