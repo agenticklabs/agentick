@@ -100,6 +100,16 @@ declare module "@agentick/runtime-next" {
     // after-hook sees and may return a `DispatchResult`, so it can't silently
     // strip `isError`/metadata off `session.dispatch()`.
     "tool:dispatch": { input: DispatchInput; output: DispatchResult };
+    // The remaining tool verbs (ADR 80/83). Each routes through `runOperation`
+    // (`tool:abort` is a declared command; `register` / `unregister` /
+    // `remove-bound-tools` / `replace-reconciler-tools` build hand-rolled ops),
+    // so typing them mints `onBefore/After<Verb>` on `CommandHooks`. Registry
+    // mutations all resolve to `void`; generics are the declaration sites'.
+    "tool:abort": { input: AbortInput; output: void };
+    "tool:register": { input: RegisterToolInput; output: void };
+    "tool:unregister": { input: UnregisterToolInput; output: void };
+    "tool:remove-bound-tools": { input: RemoveBoundToolsInput; output: void };
+    "tool:replace-reconciler-tools": { input: ReplaceReconcilerToolsInput; output: void };
   }
 }
 

@@ -133,6 +133,27 @@ declare module "@agentick/spec-next" {
   }
 }
 
+// ADR 80/83 — light up the two app-edge lifecycle verbs. Both already route
+// through `runOperation` (see `createSession` / `runOnce`), so typing them here
+// mints `onBefore/AfterAppCreateSession` and `onBefore/AfterAppRunOnce` on the
+// derived `CommandHooks` surface. `CommandRegistry` carries no type parameter,
+// so the generic `P` is pinned to `unknown` at the key (matching how
+// `session:send` pins `SendInput<unknown>`). Generics of the `runOperation`
+// Operations below.
+declare module "@agentick/runtime-next" {
+  interface CommandRegistry {
+    "app:create-session": {
+      input: CreateSessionInput<unknown>;
+      output: SessionHarnessProtocol<unknown>;
+    };
+    "app:run-once": { input: RunOnceInput<unknown>; output: RunOnceResult };
+    // `close-app` (ADR 80/83) — a nullary lifecycle op routed through
+    // `runOperation` (see `closeApp`). Input/output are both `void` (the
+    // Operation's generics). Mints `onBefore/AfterAppCloseApp`.
+    "app:close-app": { input: void; output: void };
+  }
+}
+
 // ============================================================================
 // Construction options
 //

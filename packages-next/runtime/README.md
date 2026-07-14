@@ -321,7 +321,9 @@ machinery lives here ONCE; each streaming edge supplies only its sink-fold
 
 `runOperation` composes ONE interceptor list around every operation body. It
 assembles `[ ...callMiddleware (tier-4), ...inheritedInterceptors (tier-3,
-folded at construction), ...ownMiddleware (tier-2), ...hooks.forOp(name) ]`, then
+folded at construction), ...ownMiddleware (tier-2) ]` — hooks are op-scoped
+`transform` middleware living IN `ownMiddleware`/`inheritedInterceptors` (ADR 83
+amendment), not a separate term — then
 a **stable, guard-outermost sort** (`orderInterceptors` — `guard ≺ transform ≺
 observe`) floats every `guard`-kind interceptor to the front (preserving relative
 order within a kind), so admission control always runs before any transform:
@@ -609,55 +611,36 @@ are type-safe keys — the surface is **exposure-gated**. The type-level `Pascal
 and the runtime `deriveHookNames(id)` are lockstep-tested so a name can never
 drift between them.
 
-### The cascade is a construction-fold, not a parent-walk (ADR 82 / 83)
+### Hooks ARE op-scoped middleware (ADR 83 amendment)
 
-Hooks **fold once at construction** into an immutable `Hooks` value threaded into
-every harness a scope builds. As of ADR 83 the middleware/guard tiers fold the
-**same way** (`inheritedInterceptors` snapshotted at construction — see [tier 3
-above](#operation-middleware--three-tiers-adr-76--83)); the parent-walk is gone.
-The hooks fold is the original template the interceptor fold now mirrors:
-
-```ts
-// each scope folds its own hooks onto its parent's RESOLVED value:
-this.hooks = parentResolved.extend(Hooks.from(options.hooks ?? {}));
-// createApp({ hooks }) → app.hooks;  createSession({ hooks }) composes onto app's.
-```
-
-`Hooks.extend` **composes** per command (ancestor + descendant both fire,
-outer-first) — deliberately NOT tools' last-wins override. Each op reads the
-local, already-resolved `this.hooks.forOp(name)` — no parent pointer, no
-construction-ordering knot (a value needs no live parent). The fold _is_ the
-walk, memoized at each node.
-
-The trade vs a walk: the fold **snapshots** the parent's hooks at the child's
-birth. So a declarative `createApp({ hooks })` / `createSession({ hooks })` folds
-down the scope chain, while `app.hook(...)` after a session exists does not reach
-that session (its fold already ran) — it affects the app's own future ops.
-
-Hooks are also registrable **imperatively at runtime**, mirroring `use`/`guard`:
+There is no separate `Hooks` subsystem. A hook registers as an op-scoped
+`transform` middleware on the ONE `.use` chain (`registerCommandHook` →
+`this.middleware.use`), self-scoping via `ctx.op` (the op's Pascal suffix). So
+hooks cascade through the SAME `inheritedInterceptors` construction-fold as guards
+and middleware (see [tier 3 above](#operation-middleware--three-tiers-adr-76--83)) —
+one chain, one fold. `on<Command>` is the primitive (the full typed middleware for
+a verb); `onBefore/onAfter<Command>` are `asBefore`/`asAfter` sugar over it.
 
 ```ts
+// declarative (folds down the construction tree):
+createApp({ hooks: { onBeforeToolDispatch, onAfterToolDispatch, onToolDispatch } });
+
+// imperative (own future ops; returns Unsubscribe = removal):
 const off = harness.hook({ onBeforeToolDispatch: (input) => reshape(input) });
-off(); // remove — the Unsubscribe drops exactly the fns it added
-
-harness.hooks.onAfterToolDispatch((output) => redact(output)); // per-verb proxy → Unsubscribe
+harness.hooks.onAfterToolDispatch((output) => redact(output)); // per-verb proxy
+harness.hooks.onToolDispatch((input, next, ctx) => next(input)); // full typed middleware
 ```
 
-`harness.hook(config)` is the imperative twin of the declarative `{ hooks }`
-option (same `CommandHooks` type); `harness.hooks` is a typed Proxy
-({@link HookRegistrars}) over it for the per-verb call style. Both mutate the
-harness's LOCAL hook layer and return an `Unsubscribe`; both observe the same
-static boundary as `use`/`guard` (own future ops, not already-constructed
-children). A call-scoped transform that must reach a _shared_ harness (the model
-executor) belongs in **tier-4** middleware (`withCallMiddleware`, above), not the
-harness fold.
+Same static boundary as `use`/`guard` (own future ops, not already-constructed
+children — the fold snapshots at construction). A call-scoped transform that must
+reach a _shared_ harness (the model executor) is **tier-4** (`withCallMiddleware`,
+above), not the fold. Mechanism pinned by `src/__tests__/command-hooks.spec.ts`.
 
-The mechanism (transform / veto / compose-outer-first / fiber preservation /
-`from`↔`forOp` agreement) is pinned generically by
-`src/__tests__/command-hooks.spec.ts`.
-
-> **Full write-ups:** [ADR 80 — command lifecycle hooks](../../docs/proposals/v2/blueprint/80-command-lifecycle-hooks.md),
-> [ADR 82 — the cascade is a construction-fold](../../docs/proposals/v2/blueprint/82-hooks-cascade-as-construction-fold.md).
+> **The canonical hook taxonomy — every hookable verb, all four surfaces, the full
+> lifecycle table:** [`docs/proposals/v2/HOOK-LIFECYCLE.md`](../../docs/proposals/v2/HOOK-LIFECYCLE.md).
+> Design: [ADR 83](../../docs/proposals/v2/blueprint/83-one-interceptor-primitive.md)
+> (amends [ADR 80](../../docs/proposals/v2/blueprint/80-command-lifecycle-hooks.md) /
+> [82](../../docs/proposals/v2/blueprint/82-hooks-cascade-as-construction-fold.md)).
 
 ---
 

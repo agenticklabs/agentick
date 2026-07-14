@@ -72,6 +72,18 @@ import {
   toRegistration,
 } from "@agentick/spec-next";
 
+// ADR 80/83 — light up the execution-lifecycle verb. `loop:run-execution`
+// (op `loop:command:run-execution`) already routes through `runOperation`
+// (see `runExecutionFx`), so typing it here mints `onBeforeLoopRunExecution`
+// / `onAfterLoopRunExecution` on the derived `CommandHooks` surface. Input is
+// the execution request; output the settled `ExecutionTerminal` — the exact
+// generics of the `runExecutionFx` Operation below.
+declare module "@agentick/runtime-next" {
+  interface CommandRegistry {
+    "loop:run-execution": { input: RunExecutionInput; output: ExecutionTerminal };
+  }
+}
+
 // ============================================================================
 // Internal types
 // ============================================================================

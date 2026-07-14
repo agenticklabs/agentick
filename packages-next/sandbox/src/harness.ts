@@ -92,6 +92,18 @@ import {
   SandboxUnsupportedError,
 } from "./errors.js";
 
+// ADR 80/83 — light up the sandbox exec verb. `sandbox:exec` is a declared
+// command (`execCmd`) routed through `runOperation`, so typing it mints
+// `onBeforeSandboxExec` / `onAfterSandboxExec` on the derived `CommandHooks`
+// surface. Generics are the `execCmd` declaration site's (`SandboxExecInput` →
+// `SandboxExecResult`). Only `exec` is requested; the sibling file verbs
+// (`read-file`/`write-file`/…) stay `mechanism` until asked for.
+declare module "@agentick/runtime-next" {
+  interface CommandRegistry {
+    "sandbox:exec": { input: SandboxExecInput; output: SandboxExecResult };
+  }
+}
+
 // ============================================================================
 // Options
 // ============================================================================

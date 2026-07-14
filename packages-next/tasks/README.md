@@ -884,8 +884,8 @@ so both want explicit sign-off):
 
 1. Make `submit` async (`Promise<TaskHandle<T>>`) — the only way to host async
    before-hooks; breaks the synchronous `handle.taskId` contract.
-2. A synchronous-hook fast-path in `runtime-next` (`Hooks.forOp` / the
-   `asBefore`/`asAfter` lift): keep a synchronous hook synchronous, only going
+2. A synchronous-hook fast-path in `runtime-next` (the `asBefore`/`asAfter` lift
+   + `registerCommandHook`): keep a synchronous hook synchronous, only going
    async when the hook returns a Promise. Lets `runSyncExit` host sync hooks;
    async submit hooks still throw loudly. Necessary-but-insufficient — it does
    not fix the async-inherited-interceptor regression.

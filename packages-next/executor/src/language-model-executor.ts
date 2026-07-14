@@ -87,6 +87,40 @@ import {
 
 import { ExecutorLifecycle, type ExecutorInFlightEntry } from "./executor-lifecycle.js";
 
+// ADR 80/83 — light up the two model-path verbs. Both already route through
+// `runOperation` via their `*Fx` twins (`projectFx` / the `execute` facade),
+// so typing them here mints `onBefore/AfterExecutorProject` and
+// `onBefore/AfterExecutorExecute` on the derived `CommandHooks` surface.
+//
+//   - `executor:project` — compile → `LanguageModelInput` (the
+//     media-reconciliation seam). Generics of the `projectFx` Operation.
+//   - `executor:execute` — the provider call. The `execute` facade builds
+//     `Operation<ExecuteInput<LanguageModelInput>, unknown>` — the raw
+//     provider output is erased (`TRaw`), so `output` is genuinely `unknown`.
+//
+// These fire on the DIRECT facades (`executor.project(...)` /
+// `executor.execute(...)`). The loop's hot path (`executor.fx.run` →
+// `runBody`) inlines `projectImpl` / `executeBody` under the ONE
+// `executor:command:run` op, so a loop tick does NOT re-fire these sub-op
+// seams (by design — one span per tick).
+declare module "@agentick/runtime-next" {
+  interface CommandRegistry {
+    "executor:project": { input: ProjectInput; output: LanguageModelInput };
+    "executor:execute": { input: ExecuteInput<LanguageModelInput>; output: unknown };
+    // The remaining model verbs (ADR 80/83). `run` (the loop's per-tick
+    // entry) and `normalize` (output normalization) each route through
+    // `runOperation` via their `*Fx` twins, so typing them mints
+    // `onBefore/After<Verb>` on `CommandHooks`. Generics are the `runFx` /
+    // `normalizeFx` Operations'. `run` is the ONE seam a loop tick fires
+    // (project/execute inline beneath it — see the note above).
+    "executor:run": { input: RunInput; output: ExecutorTerminal<LanguageModelExecutionResult> };
+    "executor:normalize": {
+      input: NormalizeInput<unknown>;
+      output: LanguageModelExecutionResult;
+    };
+  }
+}
+
 // ============================================================================
 // Internals
 // ============================================================================

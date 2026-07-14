@@ -77,6 +77,23 @@ import {
   TimelineWriteFailed,
 } from "@agentick/spec-next";
 
+// ADR 80/83 — light up the compaction verb. `timeline:compact` is a DECLARED
+// command (`compactCmd`, the signal form) routed through `runOperation`, so
+// typing it here mints `onBeforeTimelineCompact` / `onAfterTimelineCompact` on
+// the derived `CommandHooks` surface. Input is the wire-safe compact SIGNAL
+// (the `compactCmd` generic — the resident strategy never travels); output the
+// `CompactResult`. The in-process-only explicit-arg `compact(strategy)` form
+// shares the op name, so its hooks fire too; the signal input is the widest
+// type both carry on the registry key.
+declare module "@agentick/runtime-next" {
+  interface CommandRegistry {
+    "timeline:compact": {
+      input: { readonly instructions?: string | readonly unknown[] };
+      output: CompactResult;
+    };
+  }
+}
+
 /** A declared command's public invoker (ADR 51). */
 type Cmd<I, R> = (input: I, opts?: { readonly origin?: OperationOrigin }) => Promise<R>;
 

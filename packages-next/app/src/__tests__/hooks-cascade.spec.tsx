@@ -9,11 +9,12 @@
  * folded hooks fire as middleware around the dispatch body — the handler sees
  * the reshaped input.
  *
- * `tool:dispatch` is (today) the ONLY command with a `CommandRegistry`
- * augmentation, so `onBefore/AfterToolDispatch` are the only type-safe hook
- * keys. The other per-session harnesses (knobs / tasks / resources) receive the
- * same resolved `Hooks` VALUE and route through `runOperation`, but stay
- * TYPE-dormant until they augment `CommandRegistry` — see the package report.
+ * `tool:dispatch` is the command this test exercises end-to-end; many other
+ * built-in verbs now carry `CommandRegistry` augmentations too (see
+ * `docs/proposals/v2/HOOK-LIFECYCLE.md`), so their `onBefore/After` keys are
+ * likewise type-safe. Harnesses without an augmentation still receive the same
+ * resolved `Hooks` VALUE and route through `runOperation`, but stay TYPE-dormant
+ * until they augment `CommandRegistry`.
  *
  * @see docs/proposals/v2/blueprint/82-hooks-cascade-as-construction-fold.md
  */

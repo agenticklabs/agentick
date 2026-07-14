@@ -91,6 +91,30 @@ import {
   type DefinedFormatter,
 } from "@agentick/formatters-next";
 
+// ADR 80/83 — light up the compile verb. `reconciler:render-tree` (op
+// `reconciler:command:render-tree`) already routes through `runOperation`
+// (see `renderTreeFx`), so typing it here mints `onBeforeReconcilerRenderTree`
+// / `onAfterReconcilerRenderTree` on the derived `CommandHooks` surface. Input
+// is the render request; output the settled `RenderTreeResult` — the exact
+// generics of the `renderTreeFx` Operation below.
+declare module "@agentick/runtime-next" {
+  interface CommandRegistry {
+    "reconciler:render-tree": { input: RenderTreeInput; output: RenderTreeResult };
+    // The remaining compile verbs (ADR 80/83). `mount` / `rerender` /
+    // `render-to-string` each build a hand-rolled Operation and route through
+    // `runOperation`, so typing them mints `onBefore/After<Verb>` on
+    // `CommandHooks`. Generics are the declaration sites'.
+    //
+    // `reconciler:unmount` is DELIBERATELY absent: its method is a plain
+    // synchronous teardown that does NOT route through `runOperation`, so a
+    // typed hook would never fire (misleading). It stays `mechanism`/deferred
+    // until the teardown is wrapped.
+    "reconciler:mount": { input: MountInput; output: MountResult };
+    "reconciler:rerender": { input: RerenderInput; output: void };
+    "reconciler:render-to-string": { input: RenderToStringInput; output: RenderToStringResult };
+  }
+}
+
 interface MountState {
   readonly mountId: string;
   element: ReactNode;

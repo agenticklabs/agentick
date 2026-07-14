@@ -77,6 +77,17 @@ import { mergeLayered } from "@agentick/utils-next";
 import { AppHarness, builtinWireExtensions, type AppHarnessOptions } from "@agentick/app-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 
+// ADR 80/83 — light up the gateway teardown verb. `gateway:close-gateway`
+// routes through `runOperation` (see `closeGateway`), so typing it mints
+// `onBeforeGatewayCloseGateway` / `onAfterGatewayCloseGateway` on the derived
+// `CommandHooks` surface. The op is nullary — `Operation<undefined, void>` —
+// so both sides are typed from that declaration.
+declare module "@agentick/runtime-next" {
+  interface CommandRegistry {
+    "gateway:close-gateway": { input: undefined; output: void };
+  }
+}
+
 // ============================================================================
 // Options
 // ============================================================================
