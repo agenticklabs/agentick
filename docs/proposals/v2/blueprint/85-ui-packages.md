@@ -1,0 +1,190 @@
+# ADR 85 — UI packages: framework bindings over the client
+
+**Status:** DRAFT / WORKSHOPPING 2026-07-14 (Fable, with Ryan)
+**Depends on:** ADR 33 (client + transports + `channelView`), ADR 64 (signals), the timeline harness (conversation store), ADR 83/84 (client hooks). **Assumes** the `reconciler → compiler` rename (#243) for the naming split below.
+
+## TL;DR
+
+Build agentick UIs in any framework by layering thin bindings over the existing
+`ClientProtocol`. The library is two tiers:
+
+1. **`@agentick/ui-core-next`** (framework-agnostic) — one new primitive, the
+   **message-fold store** (`StreamEvent`/timeline entries → `UIMessage[]` +
+   `status`), plus a **per-session store registry** for multiplexing. Everything
+   it exposes is a `get()/subscribe()` store.
+2. **`@agentick/ui-<framework>-next`** (React, Angular, …) — ~30-line bindings
+   that wrap any store in the framework's reactive primitive (`useSyncExternalStore`,
+   Angular signals). Hooks: `useClient` / `useSession(id)` / `useChannel(view)`.
+
+The thesis: **everything a UI consumes from agentick is a `get/subscribe` store**
+— messages, channels, and status are all instances of one consumption primitive.
+That single idea is what makes the library tiny and multiplexing free.
+
+## 1. Motivation
+
+The client (`@agentick/client-next`) is already transport-agnostic (ws / http /
+in-process) and exposes typed streams (`handle.events()`), scoped subscriptions
+(`onLog` / `onProgress`), and channel views (`channelView`). What's missing is
+the last mile: turning those streams into **reactive UI state** in whatever
+framework an adopter uses, without re-implementing transport/reconnect/capabilities
+per framework. Analogous to the Vercel AI SDK's split of a framework-agnostic
+`AbstractChat` core + thin `@ai-sdk/{react,vue,svelte}` bindings — except our
+"core" is already the client, and channels are first-class instead of bolted-on
+`data-*` parts.
+
+## 2. Thesis — one consumption primitive: the `get/subscribe` store
+
+agentick already committed to the `useSyncExternalStore` contract: `channelView`
+returns `{ get(); subscribe(); close() }`. The UI library leans all the way in —
+**every UI-facing source is that same store**:
+
+| UI concept | store | folds |
+| --- | --- | --- |
+| the conversation | message-fold store | the timeline channel (§4) → `UIMessage[]` + `status` |
+| structured side-state | `channelView` | any `session:channel:<x>` (knobs, tasks, custom) |
+| connection / capabilities | client-local notifiers | `onStateChange` / `onCapabilitiesChange` |
+
+A framework binding is then a **single** adapter — "wrap a `get/subscribe` store"
+— reused for all three. There is no message-specific binding, no channel-specific
+binding: `useSession(id).messages` and `useChannel(todosView)` are the same
+`useStore(...)` underneath.
+
+## 3. The `UIMessage` model + the fold (StreamEvent-native)
+
+`ui-core` defines the normalized UI message model — a **UI concern, not spec**
+(spec stays wire/protocol). It is derived straight from agentick's `StreamEvent`
+union (not an AI-SDK clone):
+
+```ts
+interface UIMessage {
+  id: string;
+  role: "user" | "assistant" | "system";
+  parts: UIPart[];          // ordered, incrementally built
+  status: "streaming" | "complete";
+}
+type UIPart =
+  | { type: "text"; text: string }                        // ← content / content-delta
+  | { type: "reasoning"; text: string }                   // ← reasoning-*
+  | { type: "tool-call"; callId; name; input; output? }   // ← tool-call-*
+  | { type: "custom"; tag: string; data: unknown };       // ← custom-block-*
+```
+
+The **fold** is the one piece of real logic — a pure reducer
+`(messages, event) => messages`:
+`content-delta` appends to the open text part, `reasoning-delta` to a reasoning
+part, `tool-call-*` opens/fills a tool part, `usage`/terminal marks the message
+`complete`. Pure and unit-testable; the store just runs it over the stream.
+
+## 4. Message source — the timeline channel (the pinned seam)
+
+**The conversation is the timeline harness** — already an append-only event log
+(a fold), with `exportSnapshot()` (snapshot) and `timeline:append` bus events
+(deltas). For a **multiplexed / collaborative** UI you must fold the *session's*
+stream (all activity — another client or the agent itself can produce messages),
+NOT your own `send()` handle. `handle.events()` covers one execution; the UI's
+live view is the session-wide stream.
+
+So `useSession(id).messages` folds a **timeline channel** —
+`session:channel:timeline`, snapshot+delta, consumed via a `timelineView` client
+façade that mirrors `knobsStateView`. This does **not exist yet** and is ADR 85's
+**enabling dependency**:
+
+- **Server projection (to build):** the timeline harness publishes its channel —
+  a `snapshot` frame from `exportSnapshot()` on subscribe, then `delta` frames
+  from `timeline:append`. This is the exact knobs-state pattern (ADR 73) applied
+  to the timeline. It lives in `timeline/src/client/` (façade) + a harness-side
+  publisher.
+- **`useSession(id).messages` = `timelineView(client, id)` folded by §3's reducer.**
+- **Interim fallback:** fold `client.session(id).events()` (the raw
+  `SubscriptionStream`) with a timeline-name query — works today, lower-level;
+  the channel is the clean end-state.
+
+This makes the message list "just another channel," which is *why* multiplexing
+(§5) falls out for free. It also makes the client `useSession(id).messages` the
+**over-the-wire twin** of the existing in-process `useTimeline` (`timeline/src/react`,
+via `useBridges`): same conversation, one bridged into the render tree, one folded
+from the wire channel.
+
+## 5. Multiplexing — the per-session store registry
+
+"Multiple clients subscribed to different sessions at once" forbids a global
+singleton. `ui-core` holds a **store registry keyed by `(client, sessionId)`**:
+
+- `useSession(id)` **gets-or-creates** the fold store for that key, so N components
+  rendering the same session share **one** fold + **one** wire subscription.
+- Stores are **ref-counted** — created on first subscriber, torn down (channel
+  `close()`) when the last unmounts.
+- A **`ClientProvider`** (React context / Angular DI) supplies the client;
+  multiple clients (multiple gateways) → multiple providers or an explicit client
+  arg. `useClient()` reads it.
+
+The transport already multiplexes the underlying wire subscriptions; the registry
+multiplexes the *stores* on top.
+
+## 6. Hooks — the hierarchy mirrors the handles
+
+```ts
+useClient(): Client                                  // from ClientProvider
+useGateway(): { apps, status, … }
+useApp(appId): { sessions, createSession, … }
+useSession(id): { messages, status, send, stop, dispatch, … }   // the 90% hook
+useChannel(view): T                                  // any channelView (custom channels)
+```
+
+`useSession(id)` returns `{ messages: UIMessage[], status, send(text), stop() }`
+— `send` → `client.session(id).send()`, `stop` → `handle.abort()`, `status` from
+the fold + handle status. `useChannel(view)` wraps any `channelView` (the `data-*`
+analog — todos, presence, knobs). Custom channels surface here (see §8).
+
+## 7. Package topology + dependencies
+
+```
+@agentick/ui-core-next        // UIMessage model, fold reducer, store registry,
+                              //   ClientProvider-agnostic core; re-exports channelView
+@agentick/ui-react-next       // useClient/useSession/useChannel = useSyncExternalStore
+@agentick/ui-angular-next     // the same over Angular signals + DI
+```
+
+- **`ui-core` types against `ClientProtocol` (spec), not `client-next`** — so it
+  works against ANY conforming client (the reference impl, a Worker-thread proxy,
+  a test mock). `client-next` is the reference, not a hard dep.
+- Framework bindings take the framework as a **peer dependency**.
+- Naming follows the `{layer}-{framework}` rule. It is unambiguous once #243 lands:
+  **`ui-<framework>` = client consume**; **`compiler-<framework>` = server author**
+  (today's `reconciler-react`). Until #243, note the split in the READMEs.
+
+## 8. Custom channels are a UI feature slice
+
+A custom channel is a vertical slice and the canonical way to stream app-specific
+structured state to a UI (the `data-*` analog):
+
+1. **Server:** `session.channel<Todo[]>("todos").publish(...)` from a tool/harness.
+2. **Client façade (colocated with the owner, mirroring `knobsStateView`):**
+   `todosView(client, sessionId) = channelView(client, { kind: "session", id }, "todos", reduce)`.
+3. **UI:** `const todos = useChannel(todosView(client, id))`.
+
+The **runnable end-to-end example** belongs in a **v2 example app** (`example/v2*`
+— none demonstrate channels today; this fills the gap), as a feature slice with
+the façade colocated. README snippets (session publish / client consume) are the
+API reference.
+
+## 9. Open decisions (workshop)
+
+- **Launch scope** — `ui-core` + React first (Angular next), or React + Angular
+  together? (leaning core+React first.)
+- **`useSession` return shape** — how much beyond `{ messages, status, send, stop }`
+  (regenerate? edit? input state?).
+- **Timeline channel ownership** — does the timeline-channel projection ship in the
+  timeline harness (`timeline/src/client/` + publisher) as part of this ADR, or as
+  its own prerequisite ADR? (leaning: its own small ADR — it's a reusable primitive
+  beyond UIs.)
+- **`UIMessage` parts coverage** — files/images, sources, step boundaries — model
+  now or grow as `StreamEvent` grows?
+
+## 10. Non-goals
+
+- No server-side rendering framework — this is client consume; authoring is the
+  compiler (`reconciler`) side.
+- No bespoke transport — rides `ClientTransport`.
+- Not tied to "chat" — `useSession` is agent-session-centric; a chat UI is one
+  shape built on it.
