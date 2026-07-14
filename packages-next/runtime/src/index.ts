@@ -45,6 +45,7 @@ export {
   type BaseHarnessOptions,
   type BeforeHook,
   type CommandHooks,
+  type HookRegistrars,
   type CommandRegistry,
   type GuardDecider,
   type HarnessFx,

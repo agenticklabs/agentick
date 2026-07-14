@@ -116,7 +116,7 @@ import type {
 // upward dep). The app is the scope that OWNS `createSession` and folds the hook
 // cascade, so it augments spec's protocol shell here (the same `declare module`
 // pattern harness packages use for `HookBridges` / `CommandRegistry`). The value
-// is folded onto the app's resolved layer via `this.hooks.extend(Hooks.from(...))`
+// is folded onto the app's resolved layer via `this.hookLayer.extend(Hooks.from(...))`
 // in `createSessionBody`.
 declare module "@agentick/spec-next" {
   // `P` matches the augmented interface's arity (declaration merging requires
@@ -429,7 +429,7 @@ export interface AppHarnessOptions<P = unknown> {
    * {@link CommandHooks}. Folded ONCE at construction into the app's resolved
    * {@link Hooks} layer (`Hooks.from(options.hooks)`) and threaded down the
    * scope chain: the app-shared spine (loop / executor) and every per-session
-   * sub-harness fold it (`this.hooks.extend(Hooks.from(input.hooks))`). Hooks
+   * sub-harness fold it (`this.hookLayer.extend(Hooks.from(input.hooks))`). Hooks
    * COMPOSE across scopes (app-outer, session-inner both fire) — they never
    * override. A before-hook reshapes/vetos the command input; an after-hook the
    * output. `createApp({ hooks: { onBeforeToolDispatch: (i) => reshaped } })`.
@@ -671,7 +671,7 @@ export class AppHarness<P = unknown>
           telemetryNamespace: options.telemetryNamespace,
         }),
         // ADR 82 — fold the app's declarative hooks into its resolved layer
-        // ONCE, at the construction boundary. `this.hooks` is now the app's
+        // ONCE, at the construction boundary. `this.hookLayer` is now the app's
         // cascade base; `createSessionBody` extends it per session.
         hooks: Hooks.from(options.hooks ?? {}),
         policy: mergeLayered<JournalingPolicy>(DEFAULT_JOURNALING_POLICY, {
@@ -712,7 +712,7 @@ export class AppHarness<P = unknown>
             adapter: options.model,
             // ADR 82 — app-shared spine folds the APP's resolved layer (session
             // hooks never reach shared harnesses).
-            hooks: this.hooks,
+            hooks: this.hookLayer,
           })
         : isExecutorFactory(options.executor)
           ? options.executor({
@@ -759,7 +759,7 @@ export class AppHarness<P = unknown>
       ? options.loop({ scopeId: appId, journal, bus, inbox })
       : (options.loop ??
         // ADR 82 — app-shared spine folds the APP's resolved layer.
-        new LoopExecutorHarness(appId, journal, bus, inbox, { hooks: this.hooks }));
+        new LoopExecutorHarness(appId, journal, bus, inbox, { hooks: this.hookLayer }));
 
     // Persistent-tasks substrate (ADR 68) — app-scoped store + executor
     // registry, constructed ONCE (NOT a cascade — detached tasks +
@@ -1231,12 +1231,12 @@ export class AppHarness<P = unknown>
     }
 
     // ADR 82 — the construction-fold. Compute the session's resolved hook layer
-    // ONCE, before any harness exists: `this.hooks` (app's resolved layer)
+    // ONCE, before any harness exists: `this.hookLayer` (app's resolved layer)
     // `.extend` the session's own declarative layer. This VALUE is threaded into
     // the SessionHarness AND every per-session sub-harness below — no parent
     // pointer, no ordering knot (the fold IS the walk, memoized here). `extend`
     // COMPOSES per command (app-outer, session-inner both fire).
-    const sessionHooks = this.hooks.extend(Hooks.from(input.hooks ?? {}));
+    const sessionHooks = this.hookLayer.extend(Hooks.from(input.hooks ?? {}));
 
     // ADR 76 tier 3 — the middleware twin of the hook fold. Snapshot the app's
     // RESOLVED interceptors NOW (captures boot-time `app.use()` / `app.guard()`)

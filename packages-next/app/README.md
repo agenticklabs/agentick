@@ -275,10 +275,13 @@ const app = await createApp(<Agent />, {
 `createSession({ hooks })` composes the session's own onto the app's (both fire,
 **app-outer**). Guards and `use` middleware inherit through the **same
 construction-fold** (ADR 83) — one snapshot at the session's birth, no live
-parent-walk. Hooks are declarative at construction today; a runtime-imperative
-overlay onto a live session is designed (ADR 82 §4) but not yet built. Full
-mechanism (naming as a total function of the command id, the typed
-`CommandRegistry`, compose-not-override, the construction-fold): [runtime README — Command lifecycle hooks](../runtime/README.md#command-lifecycle-hooks-adr-80--82).
+parent-walk. Hooks can also be registered **imperatively at runtime** on any
+harness: `harness.hook({ onBeforeToolDispatch: fn })` or the per-verb proxy
+`harness.hooks.onBeforeToolDispatch(fn)` — each returns an `Unsubscribe`. Like
+`use`/`guard`, imperative registration affects that harness's own future ops, not
+already-constructed children (the fold snapshot). Full mechanism (naming as a
+total function of the command id, the typed `CommandRegistry`, compose-not-override,
+the construction-fold): [runtime README — Command lifecycle hooks](../runtime/README.md#command-lifecycle-hooks-adr-80--82).
 
 ## Status
 

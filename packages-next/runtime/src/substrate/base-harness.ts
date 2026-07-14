@@ -239,6 +239,24 @@ export type CommandHooks = {
   >;
 };
 
+/**
+ * The per-verb IMPERATIVE registrar surface — the same `Pascal<K>` derivation as
+ * {@link CommandHooks}, valued as `(fn) => Unsubscribe` methods instead of
+ * optional properties. Reached via {@link BaseHarness.hooks} (a Proxy over
+ * {@link BaseHarness.hook}): `harness.hooks.onBeforeToolDispatch(fn)` registers a
+ * hook dynamically and returns its remover. Typed exactly like the declarative
+ * form; only augmented verbs are callable keys.
+ */
+export type HookRegistrars = {
+  [K in keyof CommandRegistry as `onBefore${Pascal<K & string>}`]: (
+    fn: BeforeHook<CommandRegistry[K] extends { input: infer I } ? I : never>,
+  ) => Unsubscribe;
+} & {
+  [K in keyof CommandRegistry as `onAfter${Pascal<K & string>}`]: (
+    fn: AfterHook<CommandRegistry[K] extends { output: infer O } ? O : never>,
+  ) => Unsubscribe;
+};
+
 // ============================================================================
 // MiddlewareChain — outer→inner composition
 // ============================================================================
@@ -464,6 +482,28 @@ export class Hooks {
       }
     }
     return new Hooks(merged);
+  }
+
+  /**
+   * Remove — by reference identity — every hook fn present in `other` from this
+   * layer's per-command lists. The inverse of {@link extend} for a known layer:
+   * `hook()` extends with `Hooks.from(config)` and its Unsubscribe calls
+   * `without(thatSameLayer)`, so exactly the added fns are dropped. Immutable.
+   */
+  without(other: Hooks): Hooks {
+    if (other.byCommand.size === 0 || this.byCommand.size === 0) return this;
+    const kept = new Map<string, { before: BeforeHook<unknown>[]; after: AfterHook<unknown>[] }>();
+    for (const [command, slot] of this.byCommand) {
+      const rm = other.byCommand.get(command);
+      if (rm === undefined) {
+        kept.set(command, slot);
+        continue;
+      }
+      const before = slot.before.filter((h) => !rm.before.includes(h));
+      const after = slot.after.filter((h) => !rm.after.includes(h));
+      if (before.length > 0 || after.length > 0) kept.set(command, { before, after });
+    }
+    return kept.size === 0 ? Hooks.empty : new Hooks(kept);
   }
 
   /**
@@ -742,14 +782,16 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
    */
   protected readonly telemetryNamespace: string;
   /**
-   * The RESOLVED command lifecycle hooks (ADR 82) — a fully cascade-folded
+   * The RESOLVED command lifecycle hooks (ADR 82) — a cascade-folded
    * {@link Hooks} value. Consulted per-op by {@link Hooks.forOp}, which lifts
    * each matching hook into the command's middleware chain. {@link Hooks.empty}
-   * when none were supplied. The cascade lives in the FOLD (the caller's
-   * `extend`), not a per-op parent-walk.
+   * when none were supplied. The inherited layer arrives via the FOLD (the
+   * caller's `extend`); {@link BaseHarness.hook} mutates this holder to add/remove
+   * hooks dynamically at runtime (own-harness scope). Not `readonly` for that
+   * reason — the VALUE stays immutable, the holder is reassigned.
    * @see BaseHarnessOptions.hooks
    */
-  protected readonly hooks: Hooks;
+  protected hookLayer: Hooks;
   /**
    * The parent scope's RESOLVED interceptor snapshot (ADR 76 tier 3), folded
    * in at construction — the middleware twin of {@link hooks}. The cascade
@@ -904,6 +946,50 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
   }
 
   /**
+   * Register command lifecycle hooks IMPERATIVELY (ADR 83) — the runtime twin of
+   * the declarative `{ hooks }` construction option, taking the SAME
+   * {@link CommandHooks} object. Adds each hook to this harness's local hook layer
+   * and returns an {@link Unsubscribe} that removes exactly those fns (by
+   * reference). Affects this harness's OWN future ops; like `use`/`guard`, it does
+   * NOT retroactively reach already-constructed children (the fold snapshot).
+   *
+   * ```ts
+   * const off = harness.hook({ onBeforeToolDispatch: (input) => reshape(input) });
+   * off(); // remove
+   * ```
+   *
+   * Prefer {@link BaseHarness.hooks} for the per-verb call style
+   * (`harness.hooks.onBeforeToolDispatch(fn)`), which is a Proxy over this.
+   */
+  hook(config: CommandHooks): Unsubscribe {
+    const added = Hooks.from(config);
+    if (added === Hooks.empty) return () => {};
+    this.hookLayer = this.hookLayer.extend(added);
+    let live = true;
+    return () => {
+      if (!live) return;
+      live = false;
+      this.hookLayer = this.hookLayer.without(added);
+    };
+  }
+
+  /**
+   * Per-verb imperative hook registrars (ADR 83) — a typed Proxy over
+   * {@link BaseHarness.hook}. `harness.hooks.onBeforeToolDispatch(fn)` registers
+   * the hook and returns its {@link Unsubscribe}. Only augmented verbs are
+   * callable keys ({@link HookRegistrars}); an unknown name is an inert no-op.
+   */
+  get hooks(): HookRegistrars {
+    return (this._hookRegistrars ??= new Proxy({} as HookRegistrars, {
+      get: (_target, name) =>
+        typeof name === "string"
+          ? (fn: unknown) => this.hook({ [name]: fn } as CommandHooks)
+          : undefined,
+    }));
+  }
+  private _hookRegistrars?: HookRegistrars;
+
+  /**
    * INTROSPECTION (ADR 83) — enumerate the effective interceptor
    * kinds for `opName`, in composed (outermost-first) order after the
    * guard-outermost sort. Proves the collapsed seam stays enumerable: guards,
@@ -915,7 +1001,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
     const assembled = [
       ...this.inheritedInterceptors,
       ...this.middleware.snapshot(),
-      ...this.hooks.forOp(opName),
+      ...this.hookLayer.forOp(opName),
     ];
     return orderInterceptors(assembled).map(interceptorKind);
   }
@@ -943,7 +1029,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
     this.metadata = Object.freeze({ ...(options.metadata ?? {}) });
     this.principal = options.principal;
     this.telemetryNamespace = options.telemetryNamespace ?? "agentick";
-    this.hooks = options.hooks ?? Hooks.empty;
+    this.hookLayer = options.hooks ?? Hooks.empty;
     this.inheritedInterceptors = options.inheritedInterceptors ?? [];
 
     // Substrate slot resolution (ADR 31). Build a shell exposing the
@@ -1082,7 +1168,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
               ...callMiddleware,
               ...this.inheritedInterceptors,
               ...this.middleware.snapshot(),
-              ...this.hooks.forOp(resolvedOp.name),
+              ...this.hookLayer.forOp(resolvedOp.name),
             ];
             const composed = composeMiddleware<I, R, E>(
               orderInterceptors(assembled) as Middleware<I, R, E>[],

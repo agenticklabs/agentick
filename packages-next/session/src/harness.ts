@@ -454,9 +454,9 @@ export class SessionHarness<P = unknown>
         }),
         // ADR 82 — forward the session's resolved hook layer to the per-session
         // bridges (knobs / state) built inside `buildSessionBridges`, so e.g.
-        // `knobs:set` folds the same app+session cascade. `this.hooks` was set
+        // `knobs:set` folds the same app+session cascade. `this.hookLayer` was set
         // by `super(...)` above.
-        hooks: this.hooks,
+        hooks: this.hookLayer,
         // ADR 76 tier 3 — the session's RESOLVED interceptors (app-inherited +
         // the session's own), so `session.use()` / `app.use()` wraps the
         // per-session bridges' ops too. Mirrors `hooks`.

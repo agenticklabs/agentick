@@ -91,7 +91,7 @@ class HookTestHarness extends BaseHarness<"tool"> {
 
   /** Expose the local resolved-hooks read for the byte-identity assertion. */
   peekHooks(opName: string): Middleware<unknown, unknown, unknown>[] {
-    return this.hooks.forOp(opName);
+    return this.hookLayer.forOp(opName);
   }
 
   protected handleMessage(
@@ -395,5 +395,63 @@ describe("command hooks — fiber preservation (rides the .use lift)", () => {
     await Effect.runPromise(Fiber.interrupt(fiber));
     await waitFor(() => interrupted);
     expect(interrupted).toBe(true);
+  });
+});
+
+describe("dynamic hooks — hook() + the harness.hooks proxy (ADR 83)", () => {
+  it("hook({ onBeforeToolProbe }) fires on a probe; the Unsubscribe removes it", async () => {
+    const h = await mkHarness();
+    let seen: number | undefined;
+    const off = h.hook({
+      onBeforeToolProbe: (input) => {
+        seen = input.value;
+      },
+    });
+    await h.probe({ value: 7 });
+    expect(seen).toBe(7);
+
+    seen = undefined;
+    off();
+    await h.probe({ value: 9 });
+    expect(seen).toBeUndefined(); // removed — the exact fn was dropped
+  });
+
+  it("harness.hooks.onBeforeToolProbe(fn) — per-verb proxy sugar — fires + removes", async () => {
+    const h = await mkHarness();
+    let seen: number | undefined;
+    const off = h.hooks.onBeforeToolProbe((input) => {
+      seen = input.value;
+    });
+    await h.probe({ value: 3 });
+    expect(seen).toBe(3);
+
+    seen = undefined;
+    off();
+    await h.probe({ value: 4 });
+    expect(seen).toBeUndefined();
+  });
+
+  it("harness.hooks.onAfterToolProbe(fn) transforms the output", async () => {
+    const h = await mkHarness();
+    h.hooks.onAfterToolProbe((output) => output * 10);
+    expect(await h.probe({ value: 5 })).toBe(50);
+  });
+
+  it("a construction hook and a dynamically-added hook both fire (compose, construction-outer)", async () => {
+    const order: string[] = [];
+    const h = await mkHarness({
+      hooks: Hooks.from({
+        onBeforeToolProbe: () => {
+          order.push("construction");
+        },
+      }),
+    });
+    h.hook({
+      onBeforeToolProbe: () => {
+        order.push("dynamic");
+      },
+    });
+    await h.probe({ value: 1 });
+    expect(order).toEqual(["construction", "dynamic"]);
   });
 });

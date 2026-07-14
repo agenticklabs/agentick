@@ -630,15 +630,27 @@ construction-ordering knot (a value needs no live parent). The fold _is_ the
 walk, memoized at each node.
 
 The trade vs a walk: the fold **snapshots** the parent's hooks at the child's
-birth, so hooks today are **declarative at construction** (`createApp({ hooks })`
-/ `createSession({ hooks })`). `app.hooks` mutated after a session exists would
-not reach that session (its fold already ran). A runtime-imperative overlay onto
-a _live_ harness — `Hooks` gaining `append` / `remove`, surfaced as a public
-`session.hooks` accessor — is **designed (ADR 82 §4) but not yet built**; the
-`Hooks` primitive is `empty` / `from` / `extend` / `forOp` only. The 10% that
-overlay would buy is runtime-retroactive deployment policy — and a call-scoped
-transform that must reach a _shared_ harness (the model executor) belongs in
-**tier-4** middleware anyway (`withCallMiddleware`, above), not the harness fold.
+birth. So a declarative `createApp({ hooks })` / `createSession({ hooks })` folds
+down the scope chain, while `app.hook(...)` after a session exists does not reach
+that session (its fold already ran) — it affects the app's own future ops.
+
+Hooks are also registrable **imperatively at runtime**, mirroring `use`/`guard`:
+
+```ts
+const off = harness.hook({ onBeforeToolDispatch: (input) => reshape(input) });
+off(); // remove — the Unsubscribe drops exactly the fns it added
+
+harness.hooks.onAfterToolDispatch((output) => redact(output)); // per-verb proxy → Unsubscribe
+```
+
+`harness.hook(config)` is the imperative twin of the declarative `{ hooks }`
+option (same `CommandHooks` type); `harness.hooks` is a typed Proxy
+({@link HookRegistrars}) over it for the per-verb call style. Both mutate the
+harness's LOCAL hook layer and return an `Unsubscribe`; both observe the same
+static boundary as `use`/`guard` (own future ops, not already-constructed
+children). A call-scoped transform that must reach a _shared_ harness (the model
+executor) belongs in **tier-4** middleware (`withCallMiddleware`, above), not the
+harness fold.
 
 The mechanism (transform / veto / compose-outer-first / fiber preservation /
 `from`↔`forOp` agreement) is pinned generically by
