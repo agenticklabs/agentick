@@ -30,6 +30,7 @@ import type { OperationJournal, OperationJournalFactory } from "./journal.js";
 import type { MessageInbox, MessageInboxFactory } from "./inbox.js";
 import type { AppHarnessProtocol } from "./app-harness.js";
 import type { WireExtensionRegistry } from "../wire/registry.js";
+import type { WireMethod } from "../wire/params.js";
 
 // ============================================================================
 // Gateway substrate parent
@@ -203,6 +204,32 @@ export interface GatewayHarnessProtocol {
    * @see docs/proposals/v2/blueprint/46-wire-extensions.md
    */
   wireExtensions?(): WireExtensionRegistry;
+
+  /**
+   * Run a wire (JSON-RPC) dispatch through the gateway's operation seam
+   * (ADR 83 §"Wire dispatch through the seam"). The transport dispatcher
+   * routes the resolved handler call through this so the wire method
+   * fires the gateway's interceptor seam (gateway-scoped guards/hooks)
+   * — op name = the raw wire method (`session/send`), which
+   * `deriveHookNames` Pascalizes to `SessionSend`, minting
+   * `onBeforeSessionSend` at the gateway scope.
+   *
+   * `authorizeDispatch` stays the un-waivable pre-gate: it runs BEFORE
+   * this op, so authz composes ahead of any userland wire hook. The
+   * op runs on the gateway (a fold-root), so a gateway wire hook does
+   * NOT double-fire on the inner `session:send` op — the two are
+   * distinct seams.
+   *
+   * Required — the seam is part of the gateway contract, not an optional
+   * capability. A stub host implements it as a pass-through
+   * (`(_m, _p, run) => run()`); the reference `GatewayHarness` routes
+   * through `runOperation`.
+   *
+   * @param method - the raw wire method being dispatched (op name).
+   * @param params - the request params (the op's input).
+   * @param run - invokes the resolved handler; its result is the op result.
+   */
+  runWireDispatch<R>(method: WireMethod, params: unknown, run: () => Promise<R>): Promise<R>;
 
   /**
    * Emit the control-plane signal that the gateway's wire-extension

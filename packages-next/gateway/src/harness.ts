@@ -55,6 +55,7 @@ import type {
   Unsubscribe,
   WireExtension,
   WireExtensionRegistry,
+  WireMethod,
 } from "@agentick/spec-next";
 import {
   AppAlreadyExistsError,
@@ -420,6 +421,44 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
    */
   wireExtensions(): WireExtensionRegistry {
     return this._wireExtensions;
+  }
+
+  /**
+   * Route a wire (JSON-RPC) dispatch through this gateway's operation
+   * seam (ADR 83 §"Wire dispatch through the seam"). The transport
+   * dispatcher calls this AROUND the resolved handler so the wire
+   * method fires the gateway's interceptor seam — `runOperation` runs
+   * the phase contract + composed guards/hooks around `run`.
+   *
+   * The op name is the RAW wire method (`session/send`), so
+   * `deriveHookNames` Pascalizes it to `SessionSend` and a
+   * gateway-scoped `onBeforeSessionSend` hook fires. A FRESH unique
+   * `opId` (`wire:<method>:<ulid>`) guarantees the idempotency replay
+   * never triggers — the pre-seam wire path had no opId at all.
+   *
+   * Error propagation is byte-identical to the direct call: a handler
+   * rejection maps into `runOperation`'s failure channel via
+   * `Effect.tryPromise`'s `catch`, `runOperation` re-raises the ORIGINAL
+   * error after `terminal:failed`, and `runHarnessProtocol` rejects the
+   * returned promise with it — surfacing to the dispatcher's outer
+   * try/catch exactly as before.
+   */
+  runWireDispatch<R>(method: WireMethod, params: unknown, run: () => Promise<R>): Promise<R> {
+    const op: Operation<unknown, R, unknown> = {
+      opId: `wire:${method}:${ulid()}`,
+      surface: SURFACE,
+      name: method,
+      scope: { gatewayId: this.scopeId },
+      input: params,
+    };
+    return runHarnessProtocol(
+      this.runOperation(op, () =>
+        Effect.tryPromise({
+          try: run,
+          catch: (cause) => cause,
+        }),
+      ),
+    );
   }
 
   /**

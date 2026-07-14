@@ -285,5 +285,27 @@ cannot be hooked without making it async. The things worth intercepting (model
 calls, dispatch, elicits, sends) are inherently async; tasks is the one harness
 whose valuable hooks sit on sync surfaces.
 
-@see ADR 76 (tiers this re-collects), ADR 80 (hooks + fiber invariant), ADR 82
-(the fold this generalizes), ADR 81 (superseded).
+## Wire dispatch through the seam (ADR 80 §9, resolved 2026-07-14)
+
+Wire (JSON-RPC) methods bypassed the seam: `transport/server/dispatch.ts` called
+`resolution.handler(params, ctx)` directly. Now the handler call routes through
+the **gateway's** `runOperation` (the `DispatchHost` IS the `GatewayHarness`), op
+name = the wire method (`session/send`). So a wire method fires the gateway's
+interceptor seam — guards/hooks around the dispatch.
+
+- **`authorizeDispatch` stays the un-waivable pre-gate** — it runs BEFORE the wire
+  op, so authz composes ahead of any userland wire hook.
+- **Gateway-scoped, no double-fire.** The wire op runs on the gateway; its hooks
+  are gateway-scoped. The gateway does NOT fold `inheritedInterceptors` into the
+  app (the app is a fold-root), so a gateway wire hook does NOT also fire on the
+  inner `session:send` op. The two are distinct seams.
+- **The name collision IS the symmetry.** `session/send` (wire, `/`) and
+  `session:send` (op, `:`) both Pascalize to `SessionSend` → `onBeforeSessionSend`.
+  That is the same logical operation at different layers — `client` (request
+  leaving, keyed by `WireMethods`) · `gateway` (wire dispatch arriving) · `session`
+  (op running) — one name, scoped by where you register.
+- **Wire hooks are typed off `WireMethods`, NOT `CommandRegistry`.** Putting a wire
+  method in `CommandRegistry` would collide with its op in the `CommandHooks`
+  mapped type (two keys minting the same `onBeforeSessionSend`). The typed wire
+  surface needs a registry-agnostic derivation fed `WireMethods` — the client-
+  alignment follow-on. Until then wire hooks fire (mechanism) but are untyped.

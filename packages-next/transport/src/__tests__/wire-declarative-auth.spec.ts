@@ -99,6 +99,7 @@ function host(
     app: () => app,
     wireExtensions: () => registry,
     authorizer,
+    runWireDispatch: (_m: unknown, _p: unknown, run: () => Promise<unknown>) => run(),
   } as unknown as GatewayHarnessProtocol;
 }
 

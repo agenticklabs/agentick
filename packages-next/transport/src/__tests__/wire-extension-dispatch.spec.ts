@@ -107,6 +107,7 @@ function fakeGateway(
     closeGateway: async () => {},
     close: async () => {},
     events: () => ({ [Symbol.asyncIterator]: async function* () {} }),
+    runWireDispatch: (_m, _p, run) => run(),
     wireExtensions: () => registry,
     _wireExtensions: registry,
     _apps: augmentedApps,
@@ -254,6 +255,7 @@ describe("dispatchRequest — wire extension registry integration", () => {
       closeGateway: async () => {},
       close: async () => {},
       events: () => ({ [Symbol.asyncIterator]: async function* () {} }),
+      runWireDispatch: (_m, _p, run) => run(),
     };
     const resp = await dispatchRequest(bareGw, req("_extensions/list", {}), stubSink());
     expect(resp).toMatchObject({

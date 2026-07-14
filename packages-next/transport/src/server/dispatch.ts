@@ -129,7 +129,14 @@ export async function dispatchRequest(
           identity,
         );
         try {
-          const result = await resolution.handler(req.params, ctx);
+          // ADR 83 §"Wire dispatch through the seam": route the handler
+          // call through the gateway's operation seam so the wire method
+          // fires the gateway's interceptor seam (gateway-scoped
+          // guards/hooks), keyed by the wire method as op name. Auth
+          // (above) stays the un-waivable pre-gate — it runs BEFORE the op.
+          const result = await host.runWireDispatch(req.method as WireMethod, req.params, () =>
+            resolution.handler(req.params, ctx),
+          );
           return success(req.id, result);
         } finally {
           // Streaming handlers may have registered a cancel callback
