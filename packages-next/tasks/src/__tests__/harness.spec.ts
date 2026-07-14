@@ -368,6 +368,26 @@ describe("TasksHarness — events()", () => {
     });
   });
 
+  it("direct iteration yields the same events as events(); .result resolves independently", async () => {
+    bundle = await fakeTasks();
+    const handle = bundle.harness.submit(async () => "done");
+    // `.result` resolves independently of any iteration.
+    const result = await handle.result;
+    expect(result).toBe("done");
+
+    // Direct iteration over the handle (sugar) — post-terminal, yields
+    // the completed snapshot then closes.
+    const directKinds: string[] = [];
+    for await (const ev of handle) directKinds.push(ev.kind);
+
+    // events() accessor draws from the SAME source: identical sequence.
+    const accessorKinds: string[] = [];
+    for await (const ev of handle.events()) accessorKinds.push(ev.kind);
+
+    expect(directKinds).toEqual(["status"]);
+    expect(directKinds).toEqual(accessorKinds);
+  });
+
   it("events() on unknown id throws UnknownTaskError", async () => {
     bundle = await fakeTasks();
     expect(() => bundle!.harness.events("task:nope")).toThrowError(

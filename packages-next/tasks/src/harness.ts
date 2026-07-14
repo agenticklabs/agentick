@@ -949,14 +949,17 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
   }
 
   private makeHandle<T>(live: LiveTask): TaskHandle<T> {
-    return {
+    const handle: TaskHandle<T> = {
       taskId: live.record.taskId,
       initialStatus: live.record.status,
       result: live.resultDeferred.promise as Promise<T>,
       info: () => this.snapshot(live.record),
       events: () => this.subscribeToTask(live),
+      // Direct iteration is sugar over `events()` — ONE stream source.
+      [Symbol.asyncIterator]: () => handle.events()[Symbol.asyncIterator](),
       cancel: (reason?: string) => this.cancel(live.record.taskId, reason),
     };
+    return handle;
   }
 
   /**

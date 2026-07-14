@@ -80,7 +80,7 @@ export function stubTasks(options: StubTasksOptions = {}): TasksHarnessProtocol 
     known.set(taskId, info);
 
     const result = Promise.resolve(cannedResult as unknown as T);
-    return {
+    const handle: TaskHandle<T> = {
       taskId,
       initialStatus: "completed",
       result,
@@ -100,10 +100,14 @@ export function stubTasks(options: StubTasksOptions = {}): TasksHarnessProtocol 
           };
         },
       }),
+      // Direct iteration is sugar over `events()` — ONE stream source.
+      [Symbol.asyncIterator]: (): AsyncIterator<TaskEvent> =>
+        handle.events()[Symbol.asyncIterator](),
       cancel: async (): Promise<void> => {
         // No-op — the canned task is already terminal.
       },
     };
+    return handle;
   }
 
   // Silence unused-var hints for unused stub features.

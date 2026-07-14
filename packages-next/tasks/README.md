@@ -247,7 +247,11 @@ see the four tools.
 
 ### Observe events directly (advanced)
 
-The `TaskHandle` exposes an event stream and a snapshot accessor:
+The `TaskHandle` exposes an event stream and a snapshot accessor. The
+handle is itself `AsyncIterable<TaskEvent>`, so you can iterate it
+directly (sugar) or call `.events()` (the explicit accessor) — both
+draw from the SAME source with identical events and consumption
+semantics:
 
 ```ts
 const handle = session.tasks.submit(async ({ onProgress }) => {
@@ -258,12 +262,18 @@ const handle = session.tasks.submit(async ({ onProgress }) => {
   return [{ type: "text", text: "done" }];
 });
 
-for await (const event of handle.events()) {
+// Direct iteration — sugar over `.events()`:
+for await (const event of handle) {
   if (event.kind === "progress") {
     console.log(`progress: ${event.current}/${event.total}`);
   } else if (event.kind === "status" && event.info.status === "completed") {
     break;
   }
+}
+
+// Equivalent — the explicit accessor for the SAME stream:
+for await (const event of handle.events()) {
+  /* identical TaskEvents */
 }
 
 const result = await handle.result; // resolves with ContentBlock[]
@@ -471,15 +481,20 @@ proof through a real 2-session chain).
 
 ### `TaskHandle<T>`
 
+`extends AsyncIterable<TaskEvent>` — iterate the handle directly
+(`for await (const ev of handle)`) as sugar over `.events()`; both draw
+from the SAME source.
+
 - `taskId: string`
 - `initialStatus: TaskStatus` — snapshot at handle construction.
 - `result: Promise<T>` — resolves on `completed` with the work's
   return value; rejects with `TaskRejection` on `failed` /
-  `cancelled`.
+  `cancelled`. Resolves independently of iterating events.
 - `info(): TaskInfo` — live snapshot.
-- `events(): AsyncIterable<TaskEvent>` — emits the current status
-  snapshot, then live progress + status transitions, closes on
-  terminal.
+- `events(): AsyncIterable<TaskEvent>` — explicit accessor for the
+  event stream; emits the current status snapshot, then live progress +
+  status transitions, closes on terminal. Direct iteration of the
+  handle delegates to this — one stream source.
 - `cancel(reason?: string): Promise<void>` — cluster-portable cancel.
   No-op if already terminal.
 
@@ -918,11 +933,13 @@ See the in-code `NOTE(adr-83, …)` blocks at `submit` and `applyTransition` in
 
 ## Verified by
 
-- `src/__tests__/harness.spec.ts` — 30 tests covering submit /
+- `src/__tests__/harness.spec.ts` — 31 tests covering submit /
   result / progress envelope / cancel / close / events / errors /
   identity / subscriber fan-out / synchronous-first-tick abort
   semantics / Effect-typed work (interrupt, Cause handling, settled
-  cancel). The bus-envelope tests pin the byte-identical
+  cancel). Includes a direct-iteration equivalence test: iterating the
+  handle yields the SAME events as `handle.events()` while `.result`
+  resolves independently. The bus-envelope tests pin the byte-identical
   `task-status` / `task-progress` wire payloads (ADR 68 parity gate).
 - `src/__tests__/store.spec.ts` — 15 tests: `runTaskStoreConformance`
   against `InMemoryTaskStore` (10) + the ADR 68 durability behaviors —

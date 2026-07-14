@@ -126,6 +126,10 @@ export function createSessionExecutionHandle(args: SessionExecutionHandleArgs): 
     get status() {
       return status;
     },
+    // `events()` and direct iteration share ONE source: both draw from
+    // the same private queue/resolvers via `makeAsyncIterator`. No second
+    // subscription — identical multi-consumer semantics either way.
+    events: () => handle,
     abort: async (reason) => {
       if (status === "running") status = "aborted";
       await abort(reason);

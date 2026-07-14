@@ -306,6 +306,13 @@ export interface SendResult {
  * subscription — keeps per-session cost O(1) per event regardless of
  * how many concurrent sessions exist.
  *
+ * The event stream is reachable two ways, both backed by the SAME
+ * underlying source (identical events, identical consumption
+ * semantics): iterate the handle directly
+ * (`for await (const ev of handle)`) — sugar — or call
+ * {@link SessionExecutionHandle.events} for an explicit accessor. This
+ * mirrors {@link TaskHandle}, which is dual-shape the same way.
+ *
  * Bus envelopes still fire for observability (devtools, telemetry,
  * `app.events()` subscribers), but in parallel — not on the handle's
  * hot path.
@@ -317,6 +324,13 @@ export interface SessionExecutionHandle extends AsyncIterable<StreamEvent> {
   readonly executionId: string;
   readonly result: Promise<SendResult>;
   readonly status: "running" | "completed" | "error" | "aborted";
+  /**
+   * Explicit accessor for the event stream — the SAME source iterating
+   * the handle directly draws from. Sugar equivalence:
+   * `for await (const ev of handle.events())` yields exactly what
+   * `for await (const ev of handle)` yields.
+   */
+  events(): AsyncIterable<StreamEvent>;
   abort(reason?: string): Promise<void>;
 }
 

@@ -297,8 +297,15 @@ export interface TaskCreationInput {
  * `T` defaults to the canonical tool-handler return shape
  * (`readonly ContentBlock[]`) so the common "tool returns a task"
  * pattern types cleanly without type params.
+ *
+ * The event stream is reachable two ways, both backed by the SAME
+ * underlying source (identical events, identical consumption
+ * semantics): iterate the handle directly
+ * (`for await (const ev of handle)`) — sugar — or call
+ * {@link TaskHandle.events} for an explicit accessor. This mirrors
+ * {@link SessionExecutionHandle}, which is dual-shape the same way.
  */
-export interface TaskHandle<T = readonly ContentBlock[]> {
+export interface TaskHandle<T = readonly ContentBlock[]> extends AsyncIterable<TaskEvent> {
   readonly taskId: string;
   /** Status at handle construction; live state via `info()` or `events()`. */
   readonly initialStatus: TaskStatus;
@@ -311,7 +318,12 @@ export interface TaskHandle<T = readonly ContentBlock[]> {
   readonly result: Promise<T>;
   /** Live snapshot. */
   info(): TaskInfo;
-  /** Live event stream. Tears down on terminal status or harness close. */
+  /**
+   * Live event stream. Tears down on terminal status or harness close.
+   * The SAME source iterating the handle directly draws from — sugar
+   * equivalence: `for await (const ev of handle.events())` yields
+   * exactly what `for await (const ev of handle)` yields.
+   */
   events(): AsyncIterable<TaskEvent>;
   /** Caller-driven cancel. No-op if already terminal. */
   cancel(reason?: string): Promise<void>;

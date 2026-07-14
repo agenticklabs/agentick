@@ -167,6 +167,35 @@ describe("SessionExecutionHandle — typed streaming events", () => {
     await session.close();
   });
 
+  it("events() yields the same stream as direct iteration; .result resolves independently", async () => {
+    // Direct iteration on one execution.
+    const s1 = await mkSession();
+    const h1 = await s1.send({ messages: [{ role: "user", content: "hi" }] });
+    const directTypes: string[] = [];
+    for await (const ev of h1) directTypes.push(ev.type);
+    await s1.close();
+
+    // events() accessor on an equivalent execution.
+    const s2 = await mkSession();
+    const h2 = await s2.send({ messages: [{ role: "user", content: "hi" }] });
+    const accessorTypes: string[] = [];
+    for await (const ev of h2.events()) accessorTypes.push(ev.type);
+    // `.result` still resolves after fully iterating via events().
+    const result = await h2.result;
+    expect(result).toBeDefined();
+    await s2.close();
+
+    expect(accessorTypes).toEqual(directTypes);
+
+    // events() returns the SAME underlying source as the handle: calling
+    // it hands back the handle itself, so its iterator is the handle's.
+    const s3 = await mkSession();
+    const h3 = await s3.send({ messages: [{ role: "user", content: "hi" }] });
+    expect(h3.events()).toBe(h3);
+    for await (const _ev of h3) void _ev; // drain so teardown completes
+    await s3.close();
+  });
+
   it("non-streaming path: synthesizes summary events; no delta events", async () => {
     const session = await mkSession();
     const handle = await session.send({
