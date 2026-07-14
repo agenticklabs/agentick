@@ -33,7 +33,13 @@
  */
 
 import { Effect, Either } from "effect";
-import { BaseHarness, type Hooks, type Middleware } from "@agentick/runtime-next";
+import {
+  BaseHarness,
+  runHarnessProtocol,
+  ulid,
+  type Hooks,
+  type Middleware,
+} from "@agentick/runtime-next";
 import { reasonOf, omitUndefined } from "@agentick/utils-next";
 import type { RequestError } from "@agentick/runtime-next";
 import type {
@@ -47,6 +53,7 @@ import type {
   MessageEnvelope,
   MessageHandlerError,
   MessageInbox,
+  Operation,
   OperationJournal,
   StandardSchemaResult,
   StandardSchemaV1,
@@ -56,6 +63,37 @@ import { HandlerError, toJsonSchema } from "@agentick/spec-next";
 
 import { ELICITATION_CHANNEL } from "./channel.js";
 import type { ElicitRequestInboxPayload } from "./inbox-protocol.js";
+
+// ============================================================================
+// Command lifecycle hooks (ADR 80/83) — typed CommandRegistry augmentation.
+// ============================================================================
+//
+// The elicit round-trip now routes through `runOperation` (see `elicitOp`), so
+// it mints a typed `onBefore…` / `onAfter…` hook pair via the derived
+// `CommandHooks` surface. ONE op models the WHOLE request→await→response
+// round-trip: the `before` face is the outbound request (transform the prompt,
+// or veto); the `after` face is the resolved `ElicitationResult` (observe /
+// transform the reply). Form and URL modes share this one op — they are two
+// modes of the same "ask the user" verb (mirrors MCP `elicitation/create`), so
+// `request.mode` on the input discriminates.
+//
+// The registry key is the canonical `elicitation:elicit` form (the `:command:`
+// infix `deriveHookNames` strips), so it derives to
+// `onBeforeElicitationElicit` / `onAfterElicitationElicit`.
+//
+// WIRE (ADR 51): unlike a purely in-process command, an elicit INHERENTLY
+// crosses to the client — the op body's inner `this.request(ELICITATION_CHANNEL,
+// …)` publishes the prompt on the bus and awaits the client's `respond()`. The
+// HOOKS, however, run server-side around that round-trip: `onBefore…` fires
+// before the request envelope is published, `onAfter…` after the reply resolves
+// locally. So the op is hookable server-side even though its effect is a wire
+// crossing; the op itself is NOT wire-addressable (no `CommandDescriptor` — the
+// elicit is DRIVEN locally and only its payload projects to the client).
+declare module "@agentick/runtime-next" {
+  interface CommandRegistry {
+    "elicitation:elicit": { input: ElicitationRequest; output: ElicitationResult };
+  }
+}
 
 // ============================================================================
 // Constants
@@ -139,14 +177,83 @@ export class ElicitationHarness
     request: UrlElicitationRequest,
     opts?: { readonly timeoutMs?: number; readonly signal?: AbortSignal },
   ): Promise<ElicitationResult<undefined>>;
-  async elicit<TSchema extends StandardSchemaV1>(
+  elicit<TSchema extends StandardSchemaV1>(
     request: ElicitationRequest<TSchema>,
     opts: { readonly timeoutMs?: number; readonly signal?: AbortSignal } = {},
   ): Promise<ElicitationResult<InferOutput<TSchema>> | ElicitationResult<undefined>> {
-    if (request.mode === "url") {
-      return await this.elicitUrl(request, opts);
-    }
-    return await this.elicitForm(request, opts);
+    // Model the whole request→await→response round-trip as ONE
+    // `elicitation:elicit` operation so the ADR-83 interceptor seam fires
+    // around it (guards / `.use()` middleware / the derived command hooks):
+    //
+    //   onBeforeElicitationElicit(request) — before the request is published:
+    //                                        transform the prompt, or veto.
+    //   onAfterElicitationElicit(result)   — when the reply resolves locally:
+    //                                        observe / transform the terminal.
+    //
+    // The op input is the SEMANTIC request (carrying `mode`); a before-hook's
+    // reshaped request is what the body dispatches. `opts` (timeout / signal)
+    // is per-call transport config — NOT part of the hookable request — so it
+    // rides the closure. Both form + url variants share this ONE op (see the
+    // CommandRegistry note above). `respond()` stays outside: it is the reply
+    // DELIVERY that unblocks the awaiting body — the "after" side of the op —
+    // not a separate operation.
+    return this.elicitOp<ElicitationResult<InferOutput<TSchema>> | ElicitationResult<undefined>>(
+      request,
+      (req) => {
+        if (req.mode === "url") {
+          return this.elicitUrl(req, opts);
+        }
+        return this.elicitForm(req as FormElicitationRequest<TSchema>, opts);
+      },
+    );
+  }
+
+  /**
+   * Wrap an elicit round-trip in {@link BaseHarness.runOperation} so it fires
+   * the ADR-83 interceptor seam and the full phase contract (`requested` →
+   * `before` → terminal), exactly as every other harness command does. Mints a
+   * fresh `opId` per call (`elicitation:elicit:<ulid>`) — an elicit carries no
+   * caller-supplied idempotency key, so each invocation is its own operation
+   * (no journal replay). The op `name` follows the executor convention
+   * (`<surface>:command:<verb>`), which {@link deriveHookNames} strips to the
+   * `elicitation:elicit` CommandRegistry key.
+   *
+   * The op scope reuses this harness's `parentScope` (the owning session's
+   * `{ sessionId }` in production) so the op's `requested` / `before` /
+   * `terminal` envelopes carry the same scope as the inner request envelope the
+   * body publishes — session-scoped subscribers see one coherent scope.
+   *
+   * The `body` is UNCHANGED from the pre-wrap surface: the same `elicitForm` /
+   * `elicitUrl` promise, dispatched on the (possibly hook-reshaped) request.
+   * Wrapping is purely additive — with no guards/hooks registered,
+   * `runOperation` composes to a pass-through around the identical body. The
+   * body is long-lived (it awaits the client reply); that is fine —
+   * `runOperation` bodies may be long, and interruption already works.
+   */
+  private elicitOp<R>(
+    request: ElicitationRequest,
+    run: (request: ElicitationRequest) => Promise<R>,
+  ): Promise<R> {
+    const op: Operation<ElicitationRequest, R> = {
+      opId: `elicitation:elicit:${ulid()}`,
+      surface: "elicitation",
+      name: "elicitation:command:elicit",
+      scope: this.parentScope ?? {},
+      input: request,
+    };
+    return runHarnessProtocol(
+      this.runOperation(op, (req) =>
+        Effect.tryPromise({
+          // `elicitForm` / `elicitUrl` NEVER reject — every terminal
+          // (user-driven, transport, timeout, schema) lands on an
+          // `ElicitationResult`. The `catch` re-raises verbatim purely to
+          // preserve the pre-wrap async surface's contract (a bug that DID
+          // throw would have rejected `elicit()` before too).
+          try: () => run(req),
+          catch: (cause) => cause,
+        }),
+      ),
+    );
   }
 
   private async elicitForm<TSchema extends StandardSchemaV1>(

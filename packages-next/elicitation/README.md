@@ -142,6 +142,65 @@ Transports / devtools / MCP hosts subscribe to the channel, render the
 prompt, and reply via `harness.respond({ correlationId, outcome,
 value?, reason? })`.
 
+## Command hooks — `elicit` is hookable (ADR 80 / 83)
+
+The elicit round-trip routes through `BaseHarness.runOperation` (via the private
+`elicitOp` wrapper), so it fires the ADR-83 interceptor seam — guards, `.use()`
+middleware, and the derived **command lifecycle hooks** — plus the full phase
+contract (`requested` → `before` → terminal). **ONE op models the WHOLE
+round-trip:** the `before` face is the outbound request; the `after` face is
+the resolved `ElicitationResult`.
+
+| Verb     | CommandRegistry key   | Hooks                                                   |
+| -------- | --------------------- | ------------------------------------------------------ |
+| `elicit` | `elicitation:elicit`  | `onBeforeElicitationElicit` / `onAfterElicitationElicit` |
+
+```typescript
+// Declarative (returns an Unsubscribe):
+const off = harness.hook({
+  onBeforeElicitationElicit: (request) => ({ ...request, message: reword(request.message) }),
+  onAfterElicitationElicit: (result) => audit(result), // void observes; return to transform
+});
+
+// Per-verb imperative (typed Proxy):
+harness.hooks.onBeforeElicitationElicit((request) => vetIfUnsafe(request));
+```
+
+- **`onBeforeElicitationElicit(request)`** fires **before the request envelope
+  is published**. Return a reshaped request to **transform** the prompt (the
+  reshaped request is what goes on the wire), `void` to **observe**, or `throw`
+  to **veto** (the op aborts on the `E` channel — no request is published and
+  `elicit()` rejects).
+- **`onAfterElicitationElicit(result)`** fires **when the reply resolves
+  locally** — after schema re-validation, on the single `ElicitationResult`
+  discriminated union. Return a value to **transform** the terminal the caller
+  sees, `void` to **observe**.
+
+**Form + URL share ONE op.** They are two `mode`s of the same "ask the user"
+verb (mirrors MCP's single `elicitation/create`), so `request.mode` on the
+hook's input discriminates. There is no `onBeforeElicitationElicitUrl` — one
+verb, one hook pair.
+
+**`respond()` is NOT a separate op.** It is the reply **delivery** that unblocks
+the awaiting op body — the "after" side of the round-trip — so it stays outside
+the op surface. The after-hook, not a `respond` hook, is where you observe the
+reply.
+
+### Wire nuance — hookable server-side, effect crosses to the client
+
+Unlike a purely in-process command, an elicit **inherently crosses to the
+client**: the op body's inner `this.request(ELICITATION_CHANNEL, …)` publishes
+the prompt on the bus and awaits the client's `respond()`. The **hooks run
+server-side** around that crossing — `onBefore…` before the request envelope is
+published, `onAfter…` after the reply resolves locally — so the op is fully
+hookable even though its _effect_ is a wire round-trip.
+
+The op itself is **not wire-addressable** (no `CommandDescriptor` is declared):
+an elicit is _driven_ locally (by a tool handler, session code, or an inbound
+`elicit-request` from another harness) and only its **payload** projects to the
+client. A remote client can't invoke `elicitation:elicit` as a command — it
+participates only as the far side of the round-trip via `respond()`.
+
 ## Form-mode schema flatness (#271) — utility for MCP wire callers
 
 The MCP `elicitation/create` request schema is a restricted subset of
@@ -429,6 +488,13 @@ elicitationId, ... })`. `accepted` outcome signals user consent
   declined result, custom canned result, failed result shape,
   `onElicit` spy hook fires with request + opts, respond + close
   no-ops. (9 tests)
+- `src/__tests__/command-hooks.spec.ts` — `elicit` is hookable via
+  `runOperation`: `deriveHookNames("elicitation:command:elicit")` ===
+  `["onBeforeElicitationElicit", "onAfterElicitationElicit"]`; `onBefore`
+  observes the outbound request; `onBefore` transforms the prompt (verified
+  on the published wire envelope); `onAfter` transforms the terminal result;
+  a `throw` in `onBefore` vetoes (no request published, `elicit()` rejects).
+  (5 tests)
 
 @see [`docs/proposals/v2/blueprint/26-harness-api-shape.md`](../../docs/proposals/v2/blueprint/26-harness-api-shape.md)
 @see [`docs/proposals/v2/blueprint/27-modular-built-ins.md`](../../docs/proposals/v2/blueprint/27-modular-built-ins.md)
