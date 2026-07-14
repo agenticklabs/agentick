@@ -98,18 +98,23 @@ table `(event → which family)` + each family's fold — NOT subscriptions. One
 cursor, one reconnect-resume, unified ordering across every family for free. This
 is strictly simpler than per-family subscriptions and is the model this ADR adopts.
 
-**The one completeness gap — granularity (the enabling dependency).** The COARSE
-events are all on the bus today: `timeline:append` (messages), channel publishes
-(knobs / tasks / elicitation / custom), `*:signal:*` (log / progress). What is
-NOT is the **fine token-level streaming** — `content-delta` etc. are fed to the
-*sender's* `handle.events()` via a private in-memory queue, not the session bus.
-So an observer on the firehose sees a message *append*, not token-by-token
-streaming. To make the firehose complete for collaborative live rendering, the
-executor must **emit streaming deltas on the session bus** (a `session:stream:*`
-family, or the timeline channel carrying streaming deltas). Until then: firehose
-= coarse/complete for every family + message *appends*; live token streaming stays
-the sender-handle path. This is the concrete "do they all make it over the wire?"
-answer, and the dependency this ADR names.
+**Granularity — DECIDED: token streaming is sender-only.** The COARSE events are
+all on the bus: `timeline:append` (messages), channel publishes (knobs / tasks /
+elicitation / custom), `*:signal:*` (log / progress), plus lifecycle including
+**abort** (execution terminal / `stopReason: "aborted"`). Fine token-level
+streaming (`content-delta`) is fed to the *sender's* `handle.events()` queue and
+is **intentionally not** put on the session bus. So:
+
+- **The sender** renders token-by-token from its own `handle.events()`.
+- **Observers** (other clients on the same session) render from the firehose —
+  message *appends* as they land, plus lifecycle (started / aborted / completed).
+  No token-by-token for observers; that's the deliberate trade (no
+  `session:stream:*` fan-out, less wire traffic).
+
+This means the firehose is **complete for every family** for the observer's needs;
+the sender's live typing effect is a local concern on its handle. Abort is a
+firehose lifecycle event — the fold marks the in-flight message `aborted` for
+everyone (a first-class `onAbort` hook is a convenience over the same event).
 
 ## 3. The `UIMessage` model + the fold (StreamEvent-native)
 
@@ -282,6 +287,35 @@ The **runnable end-to-end example** belongs in a **v2 example app** (`example/v2
 the façade colocated. README snippets (session publish / client consume) are the
 API reference.
 
+## 8b. Prior art (AI-SDK) — three patterns we already have primitives for
+
+- **Backpressure** ([ai-sdk backpressure](https://ai-sdk.dev/docs/advanced/backpressure)).
+  A push firehose into a UI must not buffer unboundedly. agentick's
+  `MultiplexedStream` already ships per-stream backpressure — `unbounded` /
+  `drop-oldest` / `drop-newest` / `close-on-overflow` + `capacity`. `ui-core`'s
+  firehose consumer picks a bounded policy (a UI can safely **`drop-oldest`**
+  intermediate coarse frames — the next snapshot/append supersedes them; never
+  drop lifecycle/terminal). The fold is pull-shaped (`for await` over the
+  demux), so slow renders exert backpressure naturally. No new primitive — a
+  policy choice on an existing one.
+- **Multiple streamables** ([ai-sdk multiple streamables](https://ai-sdk.dev/docs/advanced/multiple-streamables)).
+  This is **exactly the channel model.** Each family / `channelView` is an
+  independent streamable `get/subscribe` store; a response streams several at once
+  (messages + a `todos` channel + a `plan` channel). agentick has this natively —
+  the UI composes N stores, all demuxed from the one firehose (§2a). No `createStreamableUI`
+  equivalent needed; channels *are* the streamables.
+- **Generative UI — tools rendered as UI** ([ai-sdk rendering-ui](https://ai-sdk.dev/docs/advanced/rendering-ui-with-language-models)).
+  A tool's output renders as a component, not text. Two agentick paths:
+  1. **Tool-call parts** — the `UIMessage` `tool-call` part carries `{ name, input,
+     output }`; the binding takes a **render map** `Record<toolName, Component>` and
+     renders the part with it (the static/one-shot case).
+  2. **Tool-owned channel** — for *interactive/live* generative UI, the tool opens a
+     `session.channel<T>(name)` and the component is a `useChannel(view)` over it
+     (a live widget the tool keeps updating, even bidirectional via the channel's
+     `request`). This is the richer path and the one custom channels (§8) unlock.
+  So generative UI isn't a separate subsystem — it's a render map for the static
+  case and a channel for the live case.
+
 ## 9. Open decisions (workshop)
 
 - **Launch scope** — `ui-core` + React first (Angular next), or React + Angular
@@ -300,17 +334,24 @@ API reference.
 - **MCP apps in the UI** — MCP resources/tools have a `mcp/src/client` surface, but
   "MCP apps" (interactive MCP UI) is the least-defined family. Scope it here or
   defer to an MCP-UI ADR?
-- **Streaming on the bus (the real dependency, §2a/§4)** — do we emit fine
-  token-streaming deltas on the session bus (a `session:stream:*` family) so the
-  firehose is complete for collaborative live rendering, or accept token-by-token
-  as the sender-handle-only path and render appends live for observers? This is
-  the one thing that isn't already over the wire.
+- ~~Streaming on the bus~~ **DECIDED (§2a): token streaming is sender-only.** The
+  sender renders token-by-token from its handle; observers render appends +
+  lifecycle from the firehose. No `session:stream:*` fan-out.
 - **Bootstrap: snapshot-fetch vs open-with-snapshot (§4)** — seed stateful family
   stores from a separate snapshot read alongside the firehose, or use the channel
   `resolveChannelSnapshot` bundling per family? (leaning firehose + snapshot fetch —
   fewer moving parts, and it drops the need for a dedicated timeline channel.)
 - **`UIMessage` parts coverage** — files/images, sources, step boundaries — model
   now or grow as `StreamEvent` grows?
+- **First-class `onAbort` (follow-up, both sides)** — today abort is observed via
+  the firehose terminal event (UI covered) and `handle.status`; there's no
+  dedicated `onAbort`. Propose: server = a hookable execution-abort op
+  (`onExecutionAbort`, alongside the existing `tool:abort` hooks); client = an
+  `onAbort` on the handle + a session-scoped observer. Small, orthogonal to the UI
+  package — tracked here because the UI motivated it.
+- **Render map for generative UI (§8b)** — does the render map
+  (`toolName → Component`) live in `ui-core` (framework-agnostic registration) or
+  per-binding? Leaning: registration in core, resolution in the binding.
 
 ## 10. Non-goals
 
