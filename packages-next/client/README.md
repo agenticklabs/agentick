@@ -108,10 +108,11 @@ client.session(id).channelView("task-status");    // zero-config: latest frame w
 // …the generic client.onLog(scope, cb) stays as the escape hatch for a
 // scope you don't hold a handle for.
 
-// Intercept outbound requests by method, typed off the wire:
+// Intercept outbound requests by method, typed off the wire. The hook
+// mirrors the session op it initiates — `onBeforeSessionSend`, no prefix:
 client.hook({
-  onBeforeWireSessionSend: (params) => ({ ...params }), // or throw to abort
-  onAfterWireSessionSend: (result) => result,
+  onBeforeSessionSend: (params) => ({ ...params }), // or throw to abort
+  onAfterSessionSend: (result) => result,
 });
 
 // Resource handles mirror the server harnesses 1:1:
@@ -373,7 +374,7 @@ Opt-in adapter for adopters who prefer the Effect-native signature
 middleware shape is Promise-based because most adopters write trivial
 wrappers.
 
-### Wire hooks — `client.hook` / `client.hooks`
+### Client hooks — `client.hook` / `client.hooks`
 
 Intercept outbound wire requests by method, symmetric with the server's
 `harness.hook` / `harness.hooks` (ADR 83). A **before-hook** transforms the
@@ -382,11 +383,14 @@ request `params` (or throws to abort the request before it leaves); an
 per request — register or remove them any time — and when none are registered
 the request path is zero-overhead.
 
-The names are typed off `WireMethods` with a `wire:` prefix, so
-`session/send` → `onBeforeWireSessionSend`. That prefix is deliberate: it's the
-**same op at two wire layers** — the client request leaving here and the gateway
-wire dispatch arriving there both key on `onBeforeWireSessionSend`, distinct from
-the server-side `session:send` op's `onBeforeSessionSend`.
+The names are typed off `WireMethods`, and the client hook **mirrors the
+session op it initiates**: the client is the side that INITIATES the send the
+session executes, so `session/send` → `onBeforeSessionSend` — the same name as
+the session's op hook, because it IS that send observed from the initiating end.
+No `wire:` prefix here. The `Wire*` qualifier lives on the GATEWAY's
+wire-dispatch boundary, where the inbound `wire:session/send` op and the folded
+`session:send` op collide under live inheritance and must stay distinguishable;
+the client has no such collision.
 
 Two surfaces, both returning an `Unsubscribe`:
 
@@ -400,12 +404,12 @@ const off = client.hook({
   // before: `throw` to abort, return reshaped params to transform, or
   // return nothing to pass them through unchanged. `params` is typed as
   // WireParams<"session/send">.
-  onBeforeWireSessionSend: (params, ctx) => {
+  onBeforeSessionSend: (params, ctx) => {
     if (overBudget()) throw new Error("client budget exceeded"); // request never leaves
     return params; // (or a reshaped copy)
   },
   // after: observe or transform the result the caller receives
-  onAfterWireSessionSend: (result, ctx) => {
+  onAfterSessionSend: (result, ctx) => {
     metrics.record(ctx.method);
     return result; // (or a reshaped copy)
   },
@@ -413,7 +417,7 @@ const off = client.hook({
 off(); // remove them all
 
 // 2. Per-method proxy — one registrar, live:
-const stop = client.hooks.onBeforeWireAppRunOnce((params, ctx) => {
+const stop = client.hooks.onBeforeAppRunOnce((params, ctx) => {
   audit(ctx.method); // ctx.method === "app/run_once"
   return params;
 });
@@ -503,24 +507,25 @@ const knobs = knobsStateView(client, id);           // snapshot+delta handled fo
 All three return the same `useSyncExternalStore` contract (`get()` / `subscribe()`
 / `close()`), so a React binding is one `useSyncExternalStore` call over any of them.
 
-### Cross-cutting request policy with wire hooks
+### Cross-cutting request policy with client hooks
 
-Hooks are method-scoped, typed off the wire, and live — add or remove them any
-time; an empty registry is zero-overhead:
+Hooks are method-scoped, typed off the wire, mirror the session op they
+initiate (`onBeforeSessionSend`, no prefix), and are live — add or remove them
+any time; an empty registry is zero-overhead:
 
 ```ts
 // gate sends on a local budget, observe/reshape results. ctx is { method, signal }:
 const off = client.hook({
-  onBeforeWireSessionSend: (params) => {
+  onBeforeSessionSend: (params) => {
     if (overBudget()) throw new Error("client budget exceeded"); // never leaves
     return params;                                                // or a reshaped copy
   },
-  onAfterWireSessionSend: (result, ctx) => {
+  onAfterSessionSend: (result, ctx) => {
     metrics.timing(ctx.method, result);          // observe, or reshape the result
     return result;
   },
 });
-client.hooks.onBeforeWireAppRunOnce((p) => ({ ...p, idempotencyKey: p.idempotencyKey ?? ulid() }));
+client.hooks.onBeforeAppRunOnce((p) => ({ ...p, idempotencyKey: p.idempotencyKey ?? ulid() }));
 off();                                           // remove the batch
 ```
 
@@ -574,7 +579,7 @@ under "Roadmap & known gaps" with an explicit marker.
 | `client.send(sessionId, input)` shortcut shape equivalence with `client.session(id).send(input)`                                  | `../transport-in-process/src/__tests__/send-shortcut.spec.ts` |
 | `onLog` / `onProgress` cross-surface query + envelope→payload mapping + unsubscribe closes stream, AND `client.onLog`/`client.onProgress` instance-method delegation (ADR 64) | `src/__tests__/signals.spec.ts`                               |
 | `channelView` snapshot-seed + delta-fold, `useSyncExternalStore` contract, `close()` teardown, malformed-frame isolation, AND `client.channelView` instance-method delegation (ADR 33) | `src/__tests__/channel-view.spec.ts`                          |
-| Wire hooks — `onBeforeWire<Method>` param transform + abort, `onAfterWire<Method>` result transform, method-scoping, `client.hook`/`client.hooks` register + unsubscribe, empty-registry fast-path (ADR 83) | `src/__tests__/wire-hooks.spec.ts`                            |
+| Client hooks — `onBefore<Method>` param transform + abort, `onAfter<Method>` result transform, method-scoping, `client.hook`/`client.hooks` register + unsubscribe, empty-registry fast-path (ADR 83) | `src/__tests__/hooks.spec.ts`                                 |
 | Pre-scoped handle `onLog` / `onProgress` bake the session / app / gateway scope (asserted on `transport.subscribe`); pre-scoped zero-config `channelView` yields a last-frame-wins view | `src/__tests__/handle-subscriptions.spec.ts`                  |
 | `channelView` zero-config default fold (no config → view = latest frame payload, `undefined` before first frame) | `src/__tests__/handle-subscriptions.spec.ts`                  |
 | `createClient({ onStateChange, onCapabilitiesChange })` client-LOCAL observers fire on state / capability changes | `src/__tests__/handle-subscriptions.spec.ts`                  |

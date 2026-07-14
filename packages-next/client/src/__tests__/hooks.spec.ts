@@ -1,11 +1,12 @@
 /**
- * Client wire hooks (ADR 83 §"Wire dispatch through the seam").
+ * Client hooks (ADR 83 §"Wire dispatch through the seam").
  *
  * Verifies the CLIENT-side twin of `harness.hook()`: `client.hook({...})`
- * and the `client.hooks` Proxy register `wire:`-prefixed before/after
- * hooks that fire on matching requests — before-hooks transform params
- * (or throw to abort) on the way out, after-hooks transform the result on
- * the way back. Uses a hand-rolled fake transport (mirrors
+ * and the `client.hooks` Proxy register before/after hooks that fire on
+ * matching requests — before-hooks transform params (or throw to abort)
+ * on the way out, after-hooks transform the result on the way back. The
+ * client hook mirrors the session op it initiates (`onBeforeSessionSend`),
+ * so no `wire:` prefix. Uses a hand-rolled fake transport (mirrors
  * capabilities.spec.ts) so the suite isolates the hook plumbing from
  * execution semantics.
  */
@@ -121,23 +122,24 @@ const SEND_PARAMS: SessionSendParams = {
   messages: [{ role: "user", content: "hi" }],
 };
 
-describe("client wire hooks", () => {
-  it("derives WireSessionSend (not SessionSend) for session/send", () => {
-    // The `wire:` prefix is the whole point — this command key must NOT
-    // collide with the server-side `session:send` op hook.
-    expect(commandForMethod("session/send")).toBe("WireSessionSend");
+describe("client hooks", () => {
+  it("derives SessionSend (no wire prefix) for session/send", () => {
+    // The client hook MIRRORS the session op it initiates, so the command
+    // key is the plain derived name — no `wire:` prefix (that's the
+    // gateway boundary's concern).
+    expect(commandForMethod("session/send")).toBe("SessionSend");
     // Snake_case segments split too (the derivation splits on `-:/_`, all four
     // word boundaries), so the snake_case wire id `app/run_once` mints the clean
-    // camelCase `WireAppRunOnce` — `Pascal` and `deriveHookNames` agree, so the
-    // type-level `WireHooks` key and the runtime command key match.
-    expect(commandForMethod("app/run_once")).toBe("WireAppRunOnce");
+    // camelCase `AppRunOnce` — `Pascal` and `deriveHookNames` agree, so the
+    // type-level `ClientHooks` key and the runtime command key match.
+    expect(commandForMethod("app/run_once")).toBe("AppRunOnce");
   });
 
-  it("onBeforeWireSessionSend transforms params reaching the transport", async () => {
+  it("onBeforeSessionSend transforms params reaching the transport", async () => {
     const { client, seen } = await makeClient();
 
     client.hook({
-      onBeforeWireSessionSend: (params) => ({
+      onBeforeSessionSend: (params) => ({
         ...params,
         metadata: { tagged: true },
       }),
@@ -157,7 +159,7 @@ describe("client wire hooks", () => {
     const ctxSeen: unknown[] = [];
 
     client.hook({
-      onBeforeWireSessionSend: (_params, ctx) => {
+      onBeforeSessionSend: (_params, ctx) => {
         ctxSeen.push(ctx);
       },
     });
@@ -171,7 +173,7 @@ describe("client wire hooks", () => {
     seen.delete("session/send");
 
     client.hook({
-      onBeforeWireSessionSend: () => {
+      onBeforeSessionSend: () => {
         throw new Error("vetoed by hook");
       },
     });
@@ -181,11 +183,11 @@ describe("client wire hooks", () => {
     expect(seen.has("session/send")).toBe(false);
   });
 
-  it("onAfterWireSessionSend transforms the result the caller sees", async () => {
+  it("onAfterSessionSend transforms the result the caller sees", async () => {
     const { client } = await makeClient();
 
     client.hook({
-      onAfterWireSessionSend: (result) => ({
+      onAfterSessionSend: (result) => ({
         ...result,
         executionId: "rewritten",
       }),
@@ -199,7 +201,7 @@ describe("client wire hooks", () => {
     const { client } = await makeClient();
     const beforeSend = vi.fn((p: SessionSendParams) => p);
 
-    client.hook({ onBeforeWireSessionSend: beforeSend });
+    client.hook({ onBeforeSessionSend: beforeSend });
 
     await client.request("session/abort", { sessionId: "s1" });
     expect(beforeSend).not.toHaveBeenCalled();
@@ -211,7 +213,7 @@ describe("client wire hooks", () => {
   it("client.hooks proxy registers a single hook; unsubscribe removes it", async () => {
     const { client, seen } = await makeClient();
 
-    const off = client.hooks.onBeforeWireSessionSend((params) => ({
+    const off = client.hooks.onBeforeSessionSend((params) => ({
       ...params,
       metadata: { viaProxy: true },
     }));
@@ -231,8 +233,8 @@ describe("client wire hooks", () => {
     const after = vi.fn((r: SessionSendResult) => r);
 
     const off = client.hook({
-      onBeforeWireSessionSend: before,
-      onAfterWireSessionSend: after,
+      onBeforeSessionSend: before,
+      onAfterSessionSend: after,
     });
 
     await client.request("session/send", SEND_PARAMS);

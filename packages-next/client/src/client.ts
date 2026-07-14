@@ -30,6 +30,8 @@ import type {
   GatewayHandle,
   InitializeResult,
   ClientHookContext,
+  ClientHooks,
+  ClientRegistrars,
   OnSignalOptions,
   ReceivedLog,
   ReceivedProgress,
@@ -37,10 +39,8 @@ import type {
   ServerInfo,
   SubscriptionScope,
   Unsubscribe,
-  WireHooks,
   WireMethod,
   WireParams,
-  WireRegistrars,
   WireResult,
 } from "@agentick/spec-next";
 import { EMPTY_CLIENT_CAPABILITIES, ErrorCode } from "@agentick/spec-next";
@@ -113,7 +113,7 @@ class AgentickClient implements ClientProtocol {
    * request path fast-paths straight to `composedRequest` when so.
    */
   private readonly hookRegistry = new ClientHookRegistry();
-  private _hookRegistrars?: WireRegistrars;
+  private _hookRegistrars?: ClientRegistrars;
   private readonly clientBus: LocalEventBus;
   /**
    * Dedicated client-event emitter. Deliberately DECOUPLED from
@@ -429,8 +429,8 @@ class AgentickClient implements ClientProtocol {
 
   /**
    * The hooked request path (ADR 83). Wraps the extension pipeline
-   * OUTERMOST: `onBeforeWire<Method>` hooks transform `params` (or throw
-   * to abort) before extension middleware sees them; `onAfterWire<Method>`
+   * OUTERMOST: `onBefore<Method>` hooks transform `params` (or throw to
+   * abort) before extension middleware sees them; `onAfter<Method>`
    * hooks transform the `result` after the pipeline resolves. Both are
    * method-scoped via the shared command derivation.
    */
@@ -464,11 +464,11 @@ class AgentickClient implements ClientProtocol {
   }
 
   /**
-   * Register client wire hooks declaratively (ADR 83) — the runtime twin
-   * of the server's `harness.hook()`. Returns an {@link Unsubscribe}
+   * Register client hooks declaratively (ADR 83) — the runtime twin of
+   * the server's `harness.hook()`. Returns an {@link Unsubscribe}
    * removing every hook in the config.
    */
-  hook(config: WireHooks): Unsubscribe {
+  hook(config: ClientHooks): Unsubscribe {
     const unsubs: Unsubscribe[] = [];
     for (const [key, fn] of Object.entries(config as Record<string, unknown>)) {
       if (fn === undefined) continue;
@@ -486,11 +486,11 @@ class AgentickClient implements ClientProtocol {
   /**
    * Per-method imperative registrars (ADR 83) — a typed Proxy over
    * single-hook registration, mirroring the server's `harness.hooks`.
-   * `client.hooks.onBeforeWireSessionSend(fn)` registers a hook and
-   * returns its {@link Unsubscribe}.
+   * `client.hooks.onBeforeSessionSend(fn)` registers a hook and returns
+   * its {@link Unsubscribe}.
    */
-  get hooks(): WireRegistrars {
-    return (this._hookRegistrars ??= new Proxy({} as WireRegistrars, {
+  get hooks(): ClientRegistrars {
+    return (this._hookRegistrars ??= new Proxy({} as ClientRegistrars, {
       get: (_target, name) =>
         typeof name === "string"
           ? (fn: unknown) => this.hookRegistry.register(name, fn)
