@@ -91,7 +91,7 @@ export function defaultIdempotencyKey(method: string): string | undefined {
     method === "session/send" ||
     method === "session/dispatch" ||
     method === "session/queue" ||
-    method === "app/runOnce"
+    method === "app/run_once"
   ) {
     return generateIdempotencyKey();
   }
@@ -103,6 +103,9 @@ export function defaultIdempotencyKey(method: string): string | undefined {
  * available (Node 19+, browser, edge); falls back to a Math.random
  * variant for older runtimes. Adopters who need cryptographic
  * uniqueness should ensure they're on a runtime with native UUID.
+ *
+ * TODO(utils): surely the generation of a UUID is a utility that should be in a separate package.
+ * This is a client-side utility, but still...
  */
 export function generateIdempotencyKey(): string {
   const g = globalThis as { crypto?: { randomUUID?: () => string } };
