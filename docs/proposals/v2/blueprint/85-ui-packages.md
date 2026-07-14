@@ -201,6 +201,41 @@ This makes the message list "just another channel," which is *why* multiplexing
 via `useBridges`): same conversation, one bridged into the render tree, one folded
 from the wire channel.
 
+## 4a. Fold location — client by default, server when needed (one reducer)
+
+The `foldMessage` reducer (Appendix A) is agentick's `toUIMessageStream` — it turns
+the raw event stream into `UIMessage[]`. **Where it runs is a deliberate decision,
+and it differs from AI-SDK for a structural reason.**
+
+AI-SDK runs it **server-side**: it's a stateless route handler, so the `POST` is
+where the model call happens and its **wire *is* the UI message stream**
+(`createUIMessageStreamResponse`); the client just accumulates. agentick's topology
+is inverted — the model call runs **inside the session/harness**, events flow onto
+the **bus → firehose**, and our **wire is the raw substrate event stream**
+(UI-agnostic, serving *every* consumer: other agents, logging, tooling, N UIs). A
+UIMessage-shaped wire would couple the substrate to one UI model — against
+"substrate, not opinion."
+
+**DECIDED: client-side by default.**
+- The `UIMessage` model + `foldMessage` are a **UI concern** → they live in
+  `ui-core`, folding the raw firehose on the consumer.
+- The adopter writes **no route handler** — the gateway already serves the
+  firehose; `ui-core` folds it. That's *less* server code than AI-SDK's pattern,
+  not more.
+
+**Server-side is the escape hatch, via the SAME reducer.** Because `foldMessage`
+is pure, it also runs server-side for consumers that can't fold:
+- **Thin / non-TS / SSR clients** (a Python client, an edge SSR endpoint): run the
+  fold server-side and project a **`session:channel:messages` UIMessage channel**
+  (the fold as a channel producer). A dumb client then reads pre-normalized
+  `UIMessage`s — AI-SDK's shape, opt-in, without making the default wire
+  UI-opinionated.
+
+So it is not client-*or*-server: **one shared reducer, client by default, server
+when a consumer can't fold.** `ui-core` ships `foldMessage` + a
+`toUIMessageStream(events)` wrapper usable on either side; the optional
+`session:channel:messages` projection is the server-side deployment of it.
+
 ## 5. Multiplexing — the per-session store registry
 
 "Multiple clients subscribed to different sessions at once" forbids a global
