@@ -247,9 +247,27 @@ await knobs.set("verbosity", 3); // write — lands back on the view as a delta
 knobs.close();
 ```
 
-Per-knob handle (`session.knob(name)` → `KnobHandle<T>`) and the top-level
-`session.knobs` accessor are owned by `@agentick/session-next` (which
-augments `SessionHarnessProtocol`), not by this package.
+**Install-to-appear ([ADR 87](../../docs/proposals/v2/blueprint/87-client-sub-handles.md)).**
+Importing this subpath also registers `knobsHandle` as a self-assembling slot on
+the client `SessionHandle`, so you rarely call it by hand:
+
+```ts
+import "@agentick/knobs-next/client"; // side-effect: types + registers the slot
+
+client.session(id).knobs.get(); // KnobsState (the folded store)
+await client.session(id).knobs.set("verbosity", 3);
+```
+
+**Two `session.knobs`, one noun — mind the vantage.** The CLIENT slot above
+(`client.session(id).knobs`, a `KnobsHandleView` = the `KnobsState` fold + a
+flat `set(key, value)`) is a read-replica of the SERVER `session.knobs` (the
+curated `KnobsHandle` owned by `@agentick/session-next` — per-knob
+`get(name)` / `set({ id, value })` / `subscribe(name, …)`, the authority). Same
+facet, CQRS split: the server holds truth and rich per-knob ops; the client
+holds a folded view and a fire-and-observe write. The per-knob handle
+(`session.knob(name)` → `KnobHandle<T>`) and the server `session.knobs` accessor
+are augmented onto `SessionHarnessProtocol` by `@agentick/session-next`, not this
+package.
 
 See the generated typedoc for the exhaustive descriptor / input types.
 

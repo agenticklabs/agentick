@@ -9,6 +9,7 @@
  * registry, not the slots.
  *
  * @see docs/proposals/v2/blueprint/87-client-sub-handles.md
+ * @verifiedBy packages-next/client/src/__tests__/session-handle-extensions.spec.ts
  */
 
 import type { ClientProtocol } from "@agentick/spec-next";

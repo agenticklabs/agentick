@@ -67,6 +67,20 @@ const off = tasks.subscribe(() => render(tasks.get())); // useSyncExternalStore 
 tasks.close();
 ```
 
+**Install-to-appear ([ADR 87](../../docs/proposals/v2/blueprint/87-client-sub-handles.md)).**
+Importing this subpath also registers the view as a self-assembling slot on the
+client `SessionHandle`, so you rarely call `taskStatusView` by hand:
+
+```ts
+import "@agentick/tasks-next/client"; // side-effect: types + registers the slot
+
+client.session(id).tasks.get(); // same ChannelView<Record<taskId, TaskInfo>>
+```
+
+`client.session(id).tasks` is the CLIENT replica (a read-only status fold);
+the server-side `session.tasks` (`TasksHarness`, with `.submit(...)`) is the
+authority. Same noun, two vantages — CQRS by design (see the DX note in ADR 87).
+
 Each frame is one task's current `TaskInfo` (published on every FSM transition);
 the view folds them by `taskId`, latest wins. The channel has no open-with-snapshot
 today, so a subscriber sees tasks as they transition, not a backfill of the
