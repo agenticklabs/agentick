@@ -460,6 +460,100 @@ websocket({ url, WebSocket: (await import("ws")).WebSocket });
 > The `createClient({ transport })` seam is the extension point either
 > will slot into with no application-code change.
 
+### Scope escalation — the same subscription, wider
+
+The pre-scoped handle methods are the 90%; the tiers below them exist for when
+you need a wider net or don't hold the handle:
+
+```ts
+client.session(id).onLog(cb);                 // this session
+client.app(appId).onLog(cb);                  // every session under an app — one subscription
+client.gateway().onLog(cb);                   // deployment-wide
+
+// don't hold a handle? pass the scope. Same call, same types:
+client.onLog({ kind: "session", id }, cb);
+
+// resume from a persisted cursor after a reconnect gap:
+client.session(id).onProgress(render, { fromCursor: savedCursor });
+```
+
+### channelView — three levels of control
+
+```ts
+// (1) zero-config: full-object-per-frame channel, latest wins
+const status = client.session(id).channelView<TaskStatus>("task-status");
+status.get();                                 // TaskStatus | undefined
+
+// (2) custom fold: derive whatever state you want from snapshot + deltas
+const online = client.session(id).channelView<Set<string>, PresenceFrame>("presence", {
+  initial: new Set(),
+  reduce: (set, frame) =>
+    frame.kind === "snapshot"
+      ? new Set(frame.ids)
+      : frame.op === "join"
+        ? new Set(set).add(frame.id)
+        : (set.delete(frame.id), set),
+});
+
+// (3) typed façade — zero config AND the correct fold, from the harness package
+import { knobsStateView } from "@agentick/knobs-next/client";
+const knobs = knobsStateView(client, id);           // snapshot+delta handled for you
+```
+
+All three return the same `useSyncExternalStore` contract (`get()` / `subscribe()`
+/ `close()`), so a React binding is one `useSyncExternalStore` call over any of them.
+
+### Cross-cutting request policy with wire hooks
+
+Hooks are method-scoped, typed off the wire, and live — add or remove them any
+time; an empty registry is zero-overhead:
+
+```ts
+// gate sends on a local budget, observe/reshape results. ctx is { method, signal }:
+const off = client.hook({
+  onBeforeWireSessionSend: (params) => {
+    if (overBudget()) throw new Error("client budget exceeded"); // never leaves
+    return params;                                                // or a reshaped copy
+  },
+  onAfterWireSessionSend: (result, ctx) => {
+    metrics.timing(ctx.method, result);          // observe, or reshape the result
+    return result;
+  },
+});
+client.hooks.onBeforeWireAppRunOnce((p) => ({ ...p, idempotencyKey: p.idempotencyKey ?? ulid() }));
+off();                                           // remove the batch
+```
+
+### Consuming the execution stream
+
+`events()` yields typed `StreamEvent`s; `.result` assembles the final answer
+independently; `.abort()` cancels in flight:
+
+```ts
+const handle = client.send(id, { messages });
+
+for await (const ev of handle.events()) {
+  if (ev.type === "content-delta") ui.append(ev.delta);
+  if (ev.type === "tool-call") ui.showToolCall(ev);
+  if (cancelled) await handle.abort();           // structured cancel
+}
+
+const { response, usage, stopReason } = await handle.result;
+if (stopReason === "aborted") ui.markCancelled();
+```
+
+### One handle, the whole session
+
+The scoped subscriptions, the channel views, and `send` all hang off the one
+session handle — reach for it once:
+
+```ts
+const s = client.session(id);
+s.onLog(logPanel.add);
+const status = s.channelView("task-status");   // zero-config view — stays on the handle
+const handle = s.send({ messages });
+```
+
 ## Status
 
 Phase 33.B of the v2 implementation plan — see `docs/proposals/v2/STATUS.md` and `docs/proposals/v2/blueprint/33-client-and-transports.md`.
