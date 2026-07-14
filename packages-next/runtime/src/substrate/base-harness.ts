@@ -1,14 +1,16 @@
 /**
  * BaseHarness — the inheritance point every concrete harness sits on.
  *
- * Composes journal + bus + inbox into the five-surface model:
+ * Composes journal + bus + inbox into the four-surface model:
  *
  *   ① Commands     — `runOperation` (heavy path with phase contract,
  *                    idempotency, journaling, observability)
  *   ② Inbox        — `handleMessage` (concrete subclass implements)
- *   ③ Lifecycle    — `.on*(fn)` via HandlerRegistry
- *   ④ Middleware   — `.use(mw)` via MiddlewareChain
- *   ⑤ Events       — `emit` (light path) + `emitDelta` (in-flight)
+ *   ③ Interceptors — ONE composed seam around every command (ADR 83):
+ *                    `.guard()` (admission), `.use(mw)` (middleware), and
+ *                    hooks (keyed transform) — three kinds of one `Middleware`,
+ *                    inherited via the construction-fold (`inheritedInterceptors`)
+ *   ④ Events       — `emit` (light path) + `emitDelta` (in-flight)
  *
  * Substrate-internal API is Effect-typed end-to-end. Concrete harnesses
  * MAY expose Promise-typed protocol surfaces (e.g., ReconcilerProtocol)

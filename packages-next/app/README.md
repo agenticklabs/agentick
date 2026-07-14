@@ -215,7 +215,16 @@ The app is each session's **construction parent**, so `app.use(mw)`
 structurally wraps _every_ operation of _every_ session it creates — the
 deployment-global seam for audit, tracing, journaling, and metrics (ADR 76,
 tier 3). It's the same middleware primitive every harness exposes; registering
-it on the app just gives it the broadest structural scope.
+it on the app just gives it the broadest structural scope. **Guards
+(`harness.guard(...)`, ADR 83) inherit the same way** — guards and transforms
+ride one interceptor chain, folded down the construction tree together.
+
+**The cascade is a construction-fold (ADR 83).** Each session snapshots the
+app's resolved interceptors at construction; there is no live parent-walk. So
+`app.use` / `app.guard` registered BEFORE a session is created reaches that
+session; registered AFTER it does not (its fold already ran). Guards are
+registered imperatively via `harness.guard(...)` — there is **no
+`createApp({ guards })` option** (unlike `hooks`, which folds declaratively).
 
 ```typescript
 // Pure-JS async form — reads the op's RuntimeContext (ctx) and severs the
@@ -264,7 +273,9 @@ const app = await createApp(<Agent />, {
 
 **The cascade composes, it does not override.** App hooks fold at construction;
 `createSession({ hooks })` composes the session's own onto the app's (both fire,
-**app-outer**). Hooks are declarative at construction today; a runtime-imperative
+**app-outer**). Guards and `use` middleware inherit through the **same
+construction-fold** (ADR 83) — one snapshot at the session's birth, no live
+parent-walk. Hooks are declarative at construction today; a runtime-imperative
 overlay onto a live session is designed (ADR 82 §4) but not yet built. Full
 mechanism (naming as a total function of the command id, the typed
 `CommandRegistry`, compose-not-override, the construction-fold): [runtime README — Command lifecycle hooks](../runtime/README.md#command-lifecycle-hooks-adr-80--82).

@@ -358,11 +358,15 @@ typed hooks on `CommandHooks`:
 | `onAfterToolDispatch`  | post-dispatch | `DispatchResult` — transform the **full** result (not bare `content`), so an after-hook can't strip `isError` / `structuredContent` / metadata |
 
 Register them at any scope that folds down to the dispatch (`createApp({ hooks })`
-or `createSession({ hooks })`; composed app-outer). **Distinct from the
-`onBeforeDispatch` _verdict_ handler** (the validate → authorize → confirm gate
-below), which decides whether a dispatch proceeds; the lifecycle hooks transform
-its input/output. Mechanism, naming, and the construction-fold cascade:
-[runtime README — Command lifecycle hooks](../runtime/README.md#command-lifecycle-hooks-adr-80--82).
+or `createSession({ hooks })`; composed app-outer). **Distinct from
+`guardDispatch`** — the dispatch **guard** (ADR 83; renamed from the old
+`onBeforeDispatch` verdict handler), which decides whether a dispatch proceeds
+(`proceed` / `veto` / `replace` / `defer`) at the validate → authorize → confirm
+gate; the lifecycle hooks transform its input/output. `guardDispatch(handler)` is
+the tool-typed name for the universal `BaseHarness.guardEffect(...)` seam — an
+op-admission guard, NOT the `gate` package (loop continuation): _guard :
+operation :: gate : loop_. Mechanism, naming, and the construction-fold cascade:
+[runtime README — Command lifecycle hooks](../runtime/README.md#command-lifecycle-hooks-adr-80--82--83).
 
 ## Testing
 
@@ -433,7 +437,7 @@ fixture behaviors into concrete handlers.
 - `src/__tests__/registry.spec.ts` + `layered-tools.spec.ts` —
   multi-binding storage, precedence resolution, idempotency.
 - `src/__tests__/middleware-and-hooks.spec.ts` — `use(middleware)` +
-  `onBeforeDispatch` verdicts.
+  `guardDispatch(handler)` verdicts (guard admission, ADR 83).
 - `src/__tests__/command-hooks-augmentation.spec.ts` — the `tool:dispatch`
   `CommandRegistry` augmentation mints `onBeforeToolDispatch` (← `DispatchInput`)
   / `onAfterToolDispatch` (← `DispatchResult`), and the type-level names agree

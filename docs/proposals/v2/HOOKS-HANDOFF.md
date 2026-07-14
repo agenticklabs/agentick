@@ -1,5 +1,7 @@
 # Command Lifecycle Hooks — Handoff / Continuation Doc
 
+> **⚠️ LANDED AS ADR 83 (2026-07-13). Read [`blueprint/83-one-interceptor-primitive.md`](blueprint/83-one-interceptor-primitive.md) first.** This arc completed with a wider collapse than the doc below anticipated: there is now **ONE interceptor primitive** (`Middleware`) with three KINDS — `guard` (op admission), `transform` (reshape; hooks are its keyed sugar), `observe` (side-effect). The verdict subsystem (`HandlerRegistry`/`mergeVerdict`/`runInheritedBefore`) is **deleted**, and the cascade is a **construction-FOLD** (`inheritedInterceptors` snapshotted at construction) — the `parent`-pointer walk this doc still describes (§`ownAndInheritedMiddleware`, §28) is GONE, and **ADR 81 is superseded**. The op-admission seam is named **`guard`** (`harness.guard` / `guardEffect` / `guardDispatch`), NOT `gate` — `SessionHarness.gate(name)` is loop continuation (guard : operation :: gate : loop). The **hooks** parts below (naming as a total function of the command id, the typed `CommandRegistry` → `CommandHooks`, compose-not-override, the fold) remain accurate; the "before-verdict handler" and parent-walk framing is historical. See STATUS.md 2026-07-13 (later⁵).
+
 **As of 2026-07-13. Branch `feat/v2`.** Read this to charge through the remaining hook-cascade work without re-deriving. Companion to STATUS.md (the whole-v2 log); this is the arc-specific deep guide.
 
 ## Where this came from (the through-line)

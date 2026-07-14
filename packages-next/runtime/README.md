@@ -317,21 +317,29 @@ machinery lives here ONCE; each streaming edge supplies only its sink-fold
 `onAbort`, `runtime`). The executor's `executeStream` facade is
 `runHarnessStream((sink) => this.executeStreamFx(input, sink), { … })`.
 
-## Operation middleware — three tiers (ADR 76)
+## Operation middleware — three tiers (ADR 76 / 83)
 
-`runOperation` composes middleware around every operation body,
-**outermost → innermost**:
+`runOperation` composes ONE interceptor list around every operation body. It
+assembles `[ ...callMiddleware (tier-4), ...inheritedInterceptors (tier-3,
+folded at construction), ...ownMiddleware (tier-2), ...hooks.forOp(name) ]`, then
+a **stable, guard-outermost sort** (`orderInterceptors` — `guard ≺ transform ≺
+observe`) floats every `guard`-kind interceptor to the front (preserving relative
+order within a kind), so admission control always runs before any transform:
 
 ```
+guard-outermost, then by tier (broadest → innermost):
 tier 4 — call-scoped (FiberRef, broadest)
-  → tier 3 — inherited construction-ancestors (root → parent)
-    → tier 2 — this harness's own chain
-      → before-verdict handlers (veto > replace > defer > proceed)
+  → tier 3 — inherited construction-ancestors (folded at construction)
+    → tier 2 — this harness's own chain (guards + transforms)
+      → hooks (onBefore*/onAfter* — transform-kind sugar)
         → operation body
 ```
 
 Within any one chain, first-registered is outermost. A `Middleware` wraps the
-body: call `next(input)` to proceed, or return a value to short-circuit.
+body: call `next(input)` to proceed, or return a value to short-circuit. There is
+**one interceptor primitive** — see [Command lifecycle hooks](#command-lifecycle-hooks-adr-80--82--83)
+below for its three kinds (`guard` / `transform` / `observe`) and the `guard()`
+admission-control sugar.
 
 ```ts
 import type { Middleware } from "@agentick/runtime-next";
@@ -445,13 +453,23 @@ harness.use(async (input, next) => {
 **Tier 2 — per-instance** (`harness.use(mw)`): wraps that harness's own ops.
 Returns an `Unsubscribe`.
 
-**Tier 3 — structural inheritance:** a harness's effective stack is its
-**construction-ancestors'** chains, root-outermost, wrapping its own. The app
-is each session's construction parent, so `app.use(mw)` structurally wraps
-every session op — deployment-global tracing / journaling / audit. The
-before-verdict handlers inherit the same way (`app.on*()` reaches a descendant
-op). Walked fresh per op (late registration honored); behavior-preserving when
-no ancestor registered anything. The SHARED spine harnesses (loop / executor /
+**Tier 3 — structural inheritance (a construction-FOLD, ADR 83):** a harness's
+effective stack is its **construction-ancestors'** chains, root-outermost,
+wrapping its own. The app is each session's construction parent, so `app.use(mw)`
+structurally wraps every session op — deployment-global tracing / journaling /
+audit. **Guards inherit the SAME way** (they live on the same
+`this.middleware` chain and ride the fold with transforms) — there is no separate
+before-verdict subsystem anymore.
+
+The cascade no longer WALKS a `parent` pointer per op. Each scope **snapshots**
+its parent's `resolvedInterceptors()` at construction into a frozen
+`inheritedInterceptors` (mirroring the hooks fold, ADR 82; `parent` and
+`ownAndInheritedMiddleware` are deleted). The trade is a **static boundary**:
+registration BEFORE a child's construction inherits into it; `app.use` AFTER a
+session already exists does not reach that session (its fold already ran). Own
+tier-2 registration (`harness.use` / `harness.guard` on a harness's own ops) stays
+fully dynamic — a local `this.middleware.snapshot()` read per op; only the
+INHERITED layer is snapshotted. The SHARED spine harnesses (loop / executor /
 tool) are construction-_siblings_, not children — a session-scoped concern
 around the model call is tier 4, not tier 3.
 
@@ -475,13 +493,75 @@ yield * withCallMiddleware([budgetCap], loop.fx.runExecution(sendInput));
 
 ---
 
-## Command lifecycle hooks (ADR 80 / 82)
+## Command lifecycle hooks (ADR 80 / 82 / 83)
 
 Every harness verb — `tool:dispatch`, `knobs:set`, `session:send`, … — is a
 `command("<who>:<what>", body)` routed through `runOperation`. That one seam
 already emits phase envelopes and composes middleware; **lifecycle hooks ride it
 too.** No privileged "core" layer: every verb on every harness gets the same
 before/after participation, uniformly.
+
+### One interceptor primitive, three kinds (ADR 83)
+
+There is exactly **one** interception primitive — the wrapping `Middleware`
+`(input, next, ctx) => output`. Everything at the operation boundary is a **kind**
+of it (`InterceptorKind = "guard" | "transform" | "observe"`, tagged via
+`tagInterceptor`; untagged defaults to `"transform"`) or **sugar** over it. The
+verdict subsystem (`HandlerRegistry` / `mergeVerdict` / `runInheritedBefore`) is
+**deleted**.
+
+| Kind        | Intent                                         | Surface                                            |
+| ----------- | ---------------------------------------------- | -------------------------------------------------- |
+| `guard`     | Admission control before the body              | `harness.guard(decide)` sugar / `guardEffect`      |
+| `transform` | Reshape input/output                           | plain `harness.use` / `fx.use`; **hooks** are sugar |
+| `observe`   | Pure side-effect (metrics, logging)            | `harness.use` that just reads + returns `next(...)` |
+
+**`guard` — admission control.** A guard decides `proceed | veto | replace |
+defer` before the body. The ergonomic surface is `harness.guard(decide)` where
+`decide` returns a `HandlerVerdict` (or `void` ≡ proceed), sync or Promise:
+
+```ts
+harness.guard((input, ctx) =>
+  input.locked ? { kind: "veto", reason: "locked" } : undefined,
+);
+```
+
+`HandlerVerdict` (from `@agentick/spec-next`) is discriminated by `kind`:
+`{ kind: "proceed" }` · `{ kind: "veto"; reason? }` ·
+`{ kind: "replace"; result; reason? }` · `{ kind: "defer"; retryAfter? }`. A
+non-`proceed` verdict is desugared (`signalFromVerdict`) into a typed
+`OperationSignal` (`OperationVeto` / `OperationReplace` / `OperationDefer`, in
+`op-signals.ts`) that the guard **raises** on the failure channel;
+`runOperation`'s settle step catches it (`isOperationSignal`) and maps it to the
+matching terminal. **Terminal semantics are byte-identical** to the old verdict
+switch — `terminateFromSignal` delegates to the same `terminate()` path (`vetoed`
+/ `deferred` fail with `OperationOutcomeError`; `replaced` succeeds with the
+result). Only the *trigger* changed: a caught signal instead of a separate phase.
+
+Guards compose **outermost** (the guard-outermost sort above), so a retry /
+transform middleware cannot swallow a raised veto. `harness.listInterceptors(op)`
+enumerates the composed kinds for introspection. Multi-guard precedence is
+**compose-order** (first non-`proceed` guard in composed order wins; stable sort =
+guard-outermost, then scope, then registration) — ADR 83 replaced the old
+order-independent `veto > replace > defer` priority-merge (a hardcoded substrate
+policy) with a caller-controlled composition order.
+
+**`transform` — reshape input/output.** This is plain `Middleware`. **Hooks
+(`onBefore*` / `onAfter*`, below) are keyed sugar over transform** — `onBefore`
+reshapes the command input, `onAfter` reshapes the output.
+
+**`observe` — pure side-effect.** A middleware that reads and returns the value
+unchanged.
+
+> **`guard : operation :: gate : loop`.** The `guard` seam is op admission. It is
+> NOT the `gate` package (`@agentick/gates-next` / `SessionHarness.gate(name) =>
+> GateHandle`), which is **loop continuation** — a different concept at a
+> different scope. The distinction is load-bearing: a `guard(decide)` method on
+> `BaseHarness` collided (TS2416) with `SessionHarness.gate(name)`, which forced
+> the naming. The tool-executor's `guardDispatch` (was `onBeforeDispatch`) follows
+> the same rule.
+
+> **Full write-up:** [ADR 83 — one interceptor primitive](../../docs/proposals/v2/blueprint/83-one-interceptor-primitive.md).
 
 ### Two surfaces, one seam
 
@@ -529,11 +609,13 @@ are type-safe keys — the surface is **exposure-gated**. The type-level `Pascal
 and the runtime `deriveHookNames(id)` are lockstep-tested so a name can never
 drift between them.
 
-### The cascade is a construction-fold, not a parent-walk (ADR 82)
+### The cascade is a construction-fold, not a parent-walk (ADR 82 / 83)
 
-Unlike the middleware tiers above (which walk construction-ancestors per op),
-hooks **fold once at construction** into an immutable `Hooks` value threaded into
-every harness a scope builds:
+Hooks **fold once at construction** into an immutable `Hooks` value threaded into
+every harness a scope builds. As of ADR 83 the middleware/guard tiers fold the
+**same way** (`inheritedInterceptors` snapshotted at construction — see [tier 3
+above](#operation-middleware--three-tiers-adr-76--83)); the parent-walk is gone.
+The hooks fold is the original template the interceptor fold now mirrors:
 
 ```ts
 // each scope folds its own hooks onto its parent's RESOLVED value:
