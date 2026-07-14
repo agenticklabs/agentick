@@ -9,17 +9,22 @@
 
 import { describe, expect, it } from "vitest";
 import type {
+  ClientState,
+  ClientTransport,
   Cursor,
   EventFrame,
   EventQuery,
+  ProgressStream,
   ProtocolEvent,
   SubscriptionScope,
   SubscriptionStream,
+  TransportCapabilities,
 } from "@agentick/spec-next";
 import { channelEventName } from "@agentick/spec-next";
 import { waitFor } from "@agentick/utils-next/testing";
 
 import { channelView } from "../channel-view.js";
+import { createClient } from "../client.js";
 
 const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 5));
 
@@ -181,5 +186,82 @@ describe("channelView — fold over a channel subscription", () => {
     view.subscribe(() => good++);
     stream.emit({ kind: "snapshot", values: { a: 1 } });
     await waitFor(() => good === 1); // the second listener still ran
+  });
+});
+
+/**
+ * `client.channelView(scope, channel, config)` — the instance-method sugar
+ * delegates to the free function (both take a client first-arg, so `this`
+ * threads through). Reached via a real `createClient` client rather than the
+ * minimal fake, proving the delegation folds an actual channel.
+ */
+function subscribeOnlyTransport(stream: SubscriptionStream, captured: Captured): ClientTransport {
+  let state: ClientState = "idle";
+  const listeners = new Set<(s: ClientState) => void>();
+  return {
+    id: "fake",
+    capabilities: {
+      bidirectional: true,
+      streamingRequest: true,
+      reconnectable: false,
+      binaryFrames: false,
+    } satisfies TransportCapabilities,
+    get state() {
+      return state;
+    },
+    async connect() {
+      state = "open";
+      for (const l of listeners) l(state);
+    },
+    async close() {
+      state = "closed";
+    },
+    request: (async () => ({})) as ClientTransport["request"],
+    subscribe(scope, query): SubscriptionStream {
+      captured.scope = scope;
+      captured.query = query;
+      return stream;
+    },
+    progress: (): ProgressStream => {
+      throw new Error("progress not implemented in this fake");
+    },
+    onStateChange(h) {
+      listeners.add(h);
+      return () => listeners.delete(h);
+    },
+  };
+}
+
+describe("client.channelView instance method", () => {
+  it("delegates to the free function — seeds from the snapshot, folds deltas", async () => {
+    const stream = pushStream("test");
+    const captured: Captured = {};
+    const client = await createClient({ transport: subscribeOnlyTransport(stream, captured) });
+
+    const view = client.channelView<Doc, Frame>(scope, "test", { initial: {}, reduce });
+
+    // Same subscription the free function opens: this channel, no baseline pull.
+    expect(captured.scope).toEqual(scope);
+    expect(captured.query).toEqual({ surface: "session", name: { exact: "session:channel:test" } });
+    expect(view.get()).toEqual({}); // initial, before the first frame
+
+    stream.emit({ kind: "snapshot", values: { a: 1 } }); // frame one = snapshot seeds
+    await waitFor(() => view.get().a === 1);
+    expect(view.get()).toEqual({ a: 1 });
+
+    stream.emit({ kind: "delta", set: { b: 2 } }); // subsequent = delta folds
+    await waitFor(() => "b" in view.get());
+    expect(view.get()).toEqual({ a: 1, b: 2 });
+
+    // get()/subscribe()/close() are the live view surface.
+    let count = 0;
+    const unsub = view.subscribe(() => count++);
+    stream.emit({ kind: "delta", set: { c: 3 } });
+    await waitFor(() => count === 1);
+    unsub();
+
+    view.close();
+    expect(view.closed).toBe(true);
+    expect(stream.isClosed).toBe(true);
   });
 });

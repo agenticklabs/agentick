@@ -15,5 +15,6 @@ export * from "./elicitation.js";
 export * from "./extension.js";
 export * from "./hooks.js";
 export * from "./signals.js";
+export * from "./channel.js";
 export * from "./capabilities.js";
 export * from "./client-protocol.js";

@@ -13,6 +13,8 @@
 
 import { LocalEventBus } from "@agentick/runtime-next";
 import type {
+  ChannelView,
+  ChannelViewConfig,
   Client,
   ClientAuthSurface,
   ClientCapabilities,
@@ -43,6 +45,7 @@ import type {
 } from "@agentick/spec-next";
 import { EMPTY_CLIENT_CAPABILITIES, ErrorCode } from "@agentick/spec-next";
 import { onLog as onLogSignal, onProgress as onProgressSignal } from "./signals.js";
+import { channelView as channelViewFn } from "./channel-view.js";
 import { createLocalPubSub, createNotifier, type LocalPubSub } from "@agentick/pubsub-next";
 import { Deferred, Effect, Stream } from "effect";
 import { buildClientCapabilities } from "./capabilities.js";
@@ -362,6 +365,18 @@ class AgentickClient implements ClientProtocol {
     opts?: OnSignalOptions,
   ): Unsubscribe {
     return onProgressSignal(this, scope, handler, opts);
+  }
+
+  // Channel views (ADR 33) — instance sugar delegating to the tree-shakeable
+  // free function (it takes a client as the first arg, so `this` threads
+  // straight through). The low-level escape hatch; the typed façades
+  // `knobsStateView` / `taskStatusView` are the sugar on top.
+  channelView<T, F>(
+    scope: SubscriptionScope,
+    channel: string,
+    config: ChannelViewConfig<T, F>,
+  ): ChannelView<T> {
+    return channelViewFn(this, scope, channel, config);
   }
 
   /**

@@ -15,8 +15,13 @@
  * @verifiedBy packages-next/knobs/src/client/__tests__/knobs-state-view.spec.ts
  */
 
-import { channelView, type ChannelView } from "@agentick/client-next";
-import type { ClientTransport, KnobPrimitive, SubscriptionScope } from "@agentick/spec-next";
+import { channelView } from "@agentick/client-next";
+import type {
+  ChannelView,
+  ClientTransport,
+  KnobPrimitive,
+  SubscriptionScope,
+} from "@agentick/spec-next";
 import { applyJsonPatch } from "@agentick/utils-next";
 
 import { KNOBS_STATE_CHANNEL, type KnobsStateFrame } from "../channel.js";

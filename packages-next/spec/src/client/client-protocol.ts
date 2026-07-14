@@ -17,6 +17,7 @@ import type { SendInput } from "../protocol/session-harness.js";
 import type { WireMethod, WireParams, WireResult } from "../wire/params.js";
 import type { SubscriptionScope } from "../wire/scope.js";
 import type { ReceivedLog, ReceivedProgress, OnSignalOptions } from "./signals.js";
+import type { ChannelView, ChannelViewConfig } from "./channel.js";
 import type { ClientEvent, ClientEventFilter } from "./events.js";
 import type { ClientNamespaces } from "./extension.js";
 import type { WireHooks, WireRegistrars } from "./hooks.js";
@@ -123,6 +124,28 @@ export interface ClientProtocol {
     handler: (event: ReceivedProgress) => void,
     opts?: OnSignalOptions,
   ): Unsubscribe;
+
+  // ── channel views (ADR 33) ─────────────────────────────────────────────
+
+  /**
+   * Open a live reduced view over one `session:channel:<channel>` — a pure
+   * FOLD over the channel subscription. The stream opens with a snapshot
+   * frame, then streams deltas on the same ordered stream; `config.reduce`
+   * seeds on the snapshot and folds the deltas. The returned
+   * {@link ChannelView} exposes the held state via the `useSyncExternalStore`
+   * contract (`get()` / `subscribe()`); `close()` tears down the subscription.
+   *
+   * The instance-method twin of the tree-shakeable `channelView(client, …)`
+   * free function in `@agentick/client-next` — both take a client, so the
+   * method simply delegates. This is the LOW-LEVEL escape hatch: the typed
+   * façades `knobsStateView` / `taskStatusView` (in their harness packages)
+   * are the sugar on top, supplying the channel name and `reduce`.
+   */
+  channelView<T, F>(
+    scope: SubscriptionScope,
+    channel: string,
+    config: ChannelViewConfig<T, F>,
+  ): ChannelView<T>;
 
   /**
    * Resolve once any in-flight post-reconnect handshake completes.

@@ -75,9 +75,14 @@ const handle = client.send("sess-123", {
   messages: [{ role: "user", content: "hello" }],
 });
 
-// Or as an async iterable for event-by-event observation
+// Or as an async iterable for event-by-event observation. The handle IS
+// the stream (sugar); `handle.events()` is the explicit accessor for the
+// SAME stream — pick either.
 for await (const event of handle) {
   console.log(event);
+}
+for await (const event of handle.events()) {
+  console.log(event); // identical StreamEvents
 }
 
 const finalResult = await handle.result;
@@ -95,6 +100,8 @@ directly `for await`-able:
 // Run + stream, all on the handle:
 const handle = client.send(sessionId, { messages });
 for await (const event of handle) render(event); //   ← the handle IS the stream
+// …or the explicit accessor for the SAME stream:
+for await (const event of handle.events()) render(event);
 await handle.result;                              //   ← …and the final result
 
 // Observe, uniformly — all instance methods, all return an Unsubscribe:
@@ -182,18 +189,31 @@ agnostic primitive it will wrap.
 on the client: a pure **fold** over one channel subscription (the K8s
 watch-list / `sendInitialEvents` model).
 
+Two surfaces, same types — pick your ergonomics:
+
 ```ts
 import { channelView, type ChannelView } from "@agentick/client-next";
 
-const view: ChannelView<Store> = channelView(client, scope, channel, {
+// (a) instance method — reads right next to client.onLog / client.onProgress:
+const view: ChannelView<Store> = client.channelView(scope, channel, {
   initial: {}, // value get() returns until the first frame folds in
   reduce: (state, frame) => (frame.kind === "snapshot" ? seed(frame) : fold(state, frame)),
 });
+
+// (b) free function — same call, tree-shakeable, works against any
+//     ClientProtocol impl (the method just delegates to this):
+const view2 = channelView<Store, Frame>(client, scope, channel, { initial: {}, reduce });
 
 const off = view.subscribe(() => render(view.get())); // useSyncExternalStore contract
 view.get(); // current folded state
 view.close(); // tears down the subscription
 ```
+
+The method is `ClientProtocol.channelView(scope, channel, config)`; the free
+function is `channelView(client, scope, channel, config)` — both take a client,
+so the method is a one-line delegation. Use whichever fits; they share the exact
+same `ChannelView` / `ChannelViewConfig` types (defined in `@agentick/spec-next`,
+re-exported here).
 
 The subscription **opens with a snapshot frame**, then streams deltas on the
 **same** ordered stream — so there is **no baseline pull and no cursor**. The
@@ -214,6 +234,13 @@ It is knobs/tasks-**agnostic**: typed façades (`knobsStateView`,
 `taskStatusView`, `collectionView`) live in their own **harness** packages
 (e.g. `@agentick/knobs-next/client`) and supply `reduce` — they do not live
 here. Config: `ChannelViewConfig<T, F>` = `{ initial: T; reduce: (state, frame) => T }`.
+
+**Layering:** the typed façades (`knobsStateView` / `taskStatusView`) are the
+**sugar on top** — they hide the channel name, frame kinds, and reducer.
+`channelView` is the **generic escape hatch** beneath them, shipped as **both**
+`client.channelView(…)` (instance method) and `channelView(client, …)` (free
+function). Reach for the façade for a known resource; drop to `channelView` for
+a bespoke channel.
 
 ### Capabilities + server info
 
@@ -421,7 +448,7 @@ under "Roadmap & known gaps" with an explicit marker.
 | `effectMiddleware` Effect↔Promise adapter, error propagation, interleave with Promise middleware                                  | `src/__tests__/effect-middleware.spec.ts`                     |
 | `client.send(sessionId, input)` shortcut shape equivalence with `client.session(id).send(input)`                                  | `../transport-in-process/src/__tests__/send-shortcut.spec.ts` |
 | `onLog` / `onProgress` cross-surface query + envelope→payload mapping + unsubscribe closes stream, AND `client.onLog`/`client.onProgress` instance-method delegation (ADR 64) | `src/__tests__/signals.spec.ts`                               |
-| `channelView` snapshot-seed + delta-fold, `useSyncExternalStore` contract, `close()` teardown, malformed-frame isolation (ADR 33) | `src/__tests__/channel-view.spec.ts`                          |
+| `channelView` snapshot-seed + delta-fold, `useSyncExternalStore` contract, `close()` teardown, malformed-frame isolation, AND `client.channelView` instance-method delegation (ADR 33) | `src/__tests__/channel-view.spec.ts`                          |
 | Wire hooks — `onBeforeWire<Method>` param transform + abort, `onAfterWire<Method>` result transform, method-scoping, `client.hook`/`client.hooks` register + unsubscribe, empty-registry fast-path (ADR 83) | `src/__tests__/wire-hooks.spec.ts`                            |
 
 ## Roadmap & known gaps

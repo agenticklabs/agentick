@@ -23,30 +23,24 @@
  * @verifiedBy packages-next/client/src/__tests__/channel-view.spec.ts
  */
 
-import type { ClientTransport, SubscriptionScope, Unsubscribe } from "@agentick/spec-next";
+import type {
+  ChannelView,
+  ChannelViewConfig,
+  ClientTransport,
+  SubscriptionScope,
+  Unsubscribe,
+} from "@agentick/spec-next";
 import { channelEventQuery } from "@agentick/spec-next";
+
+// `ChannelView` / `ChannelViewConfig` moved to `@agentick/spec-next/client`
+// (they type BOTH this free function AND the `ClientProtocol.channelView`
+// method). Re-exported here so the `@agentick/client-next` surface is
+// unchanged.
+export type { ChannelView, ChannelViewConfig } from "@agentick/spec-next";
 
 /** Minimal client surface a channel view needs. */
 interface ChannelClient {
   readonly transport: Pick<ClientTransport, "subscribe">;
-}
-
-export interface ChannelViewConfig<T, F> {
-  /** Value `get()` returns until the first (snapshot) frame folds in. */
-  readonly initial: T;
-  /** Fold one channel frame (`envelope.payload`) onto the held state. */
-  readonly reduce: (state: T, frame: F) => T;
-}
-
-/**
- * A live reduced view of one channel. `get()`/`subscribe()` are the
- * `useSyncExternalStore` contract; `close()` tears down the subscription.
- */
-export interface ChannelView<T> {
-  get(): T;
-  subscribe(listener: () => void): Unsubscribe;
-  readonly closed: boolean;
-  close(): void;
 }
 
 export function channelView<T, F>(
