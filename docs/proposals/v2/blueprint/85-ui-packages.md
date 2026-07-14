@@ -360,3 +360,100 @@ API reference.
 - No bespoke transport — rides `ClientTransport`.
 - Not tied to "chat" — `useSession` is agent-session-centric; a chat UI is one
   shape built on it.
+
+## Appendix A — `ui-core` sketch (illustrative, not final)
+
+The whole library is: **the model, one router, one fold, a store, a registry, and
+`useStore`.** Everything below is framework-agnostic (`@agentick/ui-core-next`); a
+binding is `useSyncExternalStore` over any `Store`.
+
+```ts
+// ── 1. The store contract — the ONE thing bindings wrap ───────────────────
+interface Store<T> { get(): T; subscribe(cb: () => void): () => void; }
+// channelView already IS this; every family store is too.
+
+// ── 2. The UIMessage model (StreamEvent-native, a UI concern) ─────────────
+type UIPart =
+  | { type: "text"; text: string }                                   // content(-delta)
+  | { type: "reasoning"; text: string }                              // reasoning(-delta)
+  | { type: "tool-call"; callId: string; name: string; input: unknown; output?: unknown } // tool-call-*
+  | { type: "custom"; tag: string; data: unknown };                  // custom-block-*
+interface UIMessage {
+  id: string; role: "user" | "assistant" | "system";
+  parts: UIPart[]; status: "streaming" | "complete" | "aborted";
+}
+
+// ── 3. The message fold — one pure reducer (unit-testable) ────────────────
+// Handles BOTH the sender's fine StreamEvents AND observers' coarse timeline
+// appends + terminal. `ev` is the union of {StreamEvent | TimelineAppend | Terminal}.
+function foldMessage(msgs: UIMessage[], ev: MessageInput): UIMessage[] { /* … */ }
+
+// ── 4. The demux router — firehose ProtocolEvent → which family ───────────
+// A table of matchers over (surface, name); each routes to a family store's push.
+interface FamilyRoute { match(ev: ProtocolEvent): boolean; push(ev: ProtocolEvent): void; }
+function demux(ev: ProtocolEvent, routes: FamilyRoute[]) {
+  for (const r of routes) if (r.match(ev)) return r.push(ev);
+}
+// routes (built per session):
+//   name "timeline:append"        → messages.applyAppend
+//   name "session:channel:elicitation" → elicitation.push
+//   name "session:channel:knobs-state" → knobs.applyDelta
+//   name "session:channel:task-status" → tasks.applyDelta
+//   name wildcard "*:signal:log"  → logs.push   /  "*:signal:progress" → progress.push
+//   terminal (outcome: aborted|…) → messages.finalize + status
+//   custom "session:channel:<x>"  → the matching channelView
+
+// ── 5. The per-session store — ONE firehose, demuxed ──────────────────────
+class SessionStore {
+  readonly messages: Store<UIMessage[]>;
+  readonly elicitations: Store<ElicitationRequest[]>;
+  readonly status: Store<SessionStatus>;
+  // …knobs, tasks, logs, progress, custom channels lazily.
+  constructor(private client: ClientProtocol, private id: string) {
+    // seed stateful families from a snapshot (list), then watch the firehose:
+    void this.bootstrap();                     // session.snapshot() → messages/knobs/tasks
+    void this.watch();                         // for await (session.events(BROAD)) → demux
+  }
+  private async watch() {
+    const stream = this.client.session(this.id).events(BROAD_QUERY); // ONE subscription
+    for await (const ev of stream) demux(ev, this.routes);           // backpressure: pull-shaped
+  }
+  send(input: SendInput) {                     // sender path: also fold my token stream
+    const h = this.client.session(this.id).send(input);
+    void (async () => { for await (const e of h.events()) this.messages.applyStream(e); })();
+    return h;                                  // .result / .abort() still available
+  }
+  close() { /* cancel the firehose, close channelViews */ }
+}
+const BROAD_QUERY: EventQuery = { scope: { /* sessionId stamped by the gateway */ } };
+
+// ── 6. The registry — multiplexing (one firehose per (client, session)) ───
+const stores = new Map<string, { store: SessionStore; refs: number }>();
+function acquireSession(client: ClientProtocol, id: string): SessionStore {
+  const key = `${client.id}:${id}`;
+  const e = stores.get(key) ?? { store: new SessionStore(client, id), refs: 0 };
+  e.refs++; stores.set(key, e); return e.store;
+}
+function releaseSession(client: ClientProtocol, id: string) {
+  const key = `${client.id}:${id}`, e = stores.get(key);
+  if (e && --e.refs === 0) { e.store.close(); stores.delete(key); }
+}
+
+// ── 7. The React binding (@agentick/ui-react-next) — the whole thing ──────
+function useSession(id: string) {
+  const client = useClient();
+  const store = useMemo(() => acquireSession(client, id), [client, id]);
+  useEffect(() => () => releaseSession(client, id), [client, id]);
+  const messages = useSyncExternalStore(store.messages.subscribe, store.messages.get);
+  const status   = useSyncExternalStore(store.status.subscribe, store.status.get);
+  return { messages, status, send: store.send.bind(store), stop: /* handle.abort */ };
+}
+function useChannel<T>(view: Store<T>): T {           // any channelView / family store
+  return useSyncExternalStore(view.subscribe, view.get);
+}
+```
+
+Angular is the same shape over signals + DI: `acquireSession` in a service,
+`toSignal(fromStore(store.messages))`. **The only real logic is `foldMessage` and
+the `routes` table** — everything else is plumbing over primitives that exist.
+
