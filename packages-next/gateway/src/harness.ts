@@ -504,7 +504,25 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     return Array.from(this._apps.values());
   }
 
-  async createApp<P>(input: CreateGatewayAppInput<P>): Promise<AppHarnessProtocol<P>> {
+  async createApp<P>(
+    rootElement: CreateGatewayAppInput<P>["rootElement"],
+    input: Omit<CreateGatewayAppInput<P>, "rootElement">,
+  ): Promise<AppHarnessProtocol<P>>;
+  async createApp<P>(input: CreateGatewayAppInput<P>): Promise<AppHarnessProtocol<P>>;
+  async createApp<P>(
+    rootOrInput: CreateGatewayAppInput<P>["rootElement"] | CreateGatewayAppInput<P>,
+    maybeInput?: Omit<CreateGatewayAppInput<P>, "rootElement">,
+  ): Promise<AppHarnessProtocol<P>> {
+    // Two-door signature, mirroring `createApp(rootElement, options)`: the
+    // positional form is discriminated by the presence of the second arg
+    // (arity), so no structural sniffing of the first is needed.
+    const input: CreateGatewayAppInput<P> =
+      maybeInput === undefined
+        ? (rootOrInput as CreateGatewayAppInput<P>)
+        : ({
+            ...maybeInput,
+            rootElement: rootOrInput as CreateGatewayAppInput<P>["rootElement"],
+          } as CreateGatewayAppInput<P>);
     if (this.gatewayClosed) {
       const err: GatewayError = new GatewayClosedError();
       throw err;
