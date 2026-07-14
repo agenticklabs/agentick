@@ -29,6 +29,13 @@ export interface UnixSocketServerOptions {
   readonly path: string;
   readonly gateway: DispatchHost;
   /**
+   * Stable id of the owning `ServerTransport`, threaded into the
+   * `gateway:accept` op's `ConnectionInfo.transportId` (ADR 84 §4). The
+   * `unixSocketServerTransport` wrapper passes its own id; a direct caller may
+   * override it. Defaults to `"unix"`.
+   */
+  readonly transportId?: string;
+  /**
    * Ingress authentication (ADR 61). A unix socket is host-local trust,
    * so the default crossing carries `credential.kind: "none"` — no
    * principal, the local pole. An adopter MAY supply an AuthSource for
@@ -49,6 +56,7 @@ export interface UnixSocketServerHandle {
 
 export function unixSocketServer(options: UnixSocketServerOptions): UnixSocketServerHandle {
   const liveConnections = new Set<ConnectionContext>();
+  const transportId = options.transportId ?? "unix";
 
   const server = netCreateServer((socket) => {
     // Authenticate the crossing once per connection (ADR 61). Default
@@ -59,7 +67,16 @@ export function unixSocketServer(options: UnixSocketServerOptions): UnixSocketSe
       { transportKind: "unix", credential: { kind: "none" } },
       options.authSource,
     )
-      .then((ingress) => {
+      .then(async (ingress) => {
+        // ADR 84 §4 — per-connection admission. Fire `gateway:accept` AFTER
+        // ingress-authn and BEFORE the ConnectionContext attaches its `data`
+        // listener. A throwing `onBeforeGatewayAccept` REJECTS the connection:
+        // destroy the socket and never wire it up. (Bytes buffer on the paused
+        // socket meanwhile — dropping it loses nothing.)
+        await options.gateway.accept({
+          transportId,
+          ...(ingress.identity !== undefined ? { identity: ingress.identity } : {}),
+        });
         const ctx = new ConnectionContext(socket, options.gateway, ingress.identity);
         liveConnections.add(ctx);
         socket.on("close", () => {
@@ -71,7 +88,9 @@ export function unixSocketServer(options: UnixSocketServerOptions): UnixSocketSe
         });
       })
       .catch(() => {
-        // Fail closed — a configured AuthSource rejected the crossing.
+        // Fail closed — either the AuthSource rejected the crossing (ADR 61) or
+        // `onBeforeGatewayAccept` rejected the connection (ADR 84 §4). Either
+        // way the socket is dropped; one rejection never disturbs the listener.
         socket.destroy();
       });
   });

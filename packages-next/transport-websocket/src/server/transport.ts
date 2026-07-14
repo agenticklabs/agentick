@@ -48,22 +48,26 @@ export function webSocketServerTransport(config: WebSocketServerTransportConfig)
   // adopter-supplied server is never touched.
   let ownedServer: NodeHttpServer | undefined;
 
+  // Stable transport id — also threaded into each connection's `gateway:accept`
+  // op (ADR 84 §4) so `onBeforeGatewayAccept` sees which transport admitted it.
+  const id = "httpServer" in config ? "websocket:attached" : `websocket:${config.port}`;
+
   return {
-    id: "httpServer" in config ? "websocket:attached" : `websocket:${config.port}`,
+    id,
 
     async listen(host: GatewayHarnessProtocol): Promise<void> {
       if (wsHandle) return; // idempotent — already bound
 
       if ("httpServer" in config) {
         // Adopter owns the Node server; just attach the WS upgrade handler.
-        wsHandle = websocketServer({ ...config, gateway: host });
+        wsHandle = websocketServer({ ...config, gateway: host, transportId: id });
         return;
       }
 
       const { port, host: bindHost, ...rest } = config;
       const server = createServer();
       ownedServer = server;
-      wsHandle = websocketServer({ ...rest, httpServer: server, gateway: host });
+      wsHandle = websocketServer({ ...rest, httpServer: server, gateway: host, transportId: id });
       await new Promise<void>((resolve, reject) => {
         const onError = (err: Error): void => reject(err);
         server.once("error", onError);

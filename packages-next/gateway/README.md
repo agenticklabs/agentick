@@ -483,6 +483,43 @@ gateway.hooks.onBeforeGatewayCreateApp((input) => {
 > mount and nothing is registered). Name-locked in `@agentick/runtime-next`
 > `hook-lifecycle-names.spec.ts`.
 
+### Per-connection admission — `onBeforeGatewayAccept` (ADR 84 §4)
+
+`gateway.accept(info)` is the hookable op (`gateway:accept`) fired **once per
+newly-accepted persistent connection** — after ingress-authn, before the
+connection is wired to receive frames. The before-hook receives a
+`ConnectionInfo` (`{ transportId, identity?, remoteAddress? }`) and can **reject**
+the connection (throw — the transport drops it), **rate-limit**, or simply
+**observe**; `onAfterGatewayAccept` observes the admission.
+
+```ts
+gateway.hooks.onBeforeGatewayAccept((info) => {
+  if (tooManyConnections(info.identity?.principal)) throw new Error("connection limit");
+  return info; // admit
+});
+```
+
+**`accept` is a CONNECTION concept — `authorize` is a REQUEST concept.** They are
+deliberately distinct seams:
+
+- **`accept`** fires per persistent connection on **connection-oriented**
+  transports (WebSocket, Unix socket). One connection carries many requests; the
+  admission runs once, at connection time. Use it for connection-count limits,
+  per-peer rate-limiting, connection-level observability.
+- **`authorize`** (§2/§3, and the `onBeforeAuthorizerAuthorize` layer above)
+  fires per **request**. Request-oriented **HTTP** has no persistent connection to
+  admit — each request authenticates its own header — so HTTP fires `authorize`
+  and **never** `accept`. A per-request admission decision belongs in `authorize`,
+  not `accept`, regardless of transport.
+
+> **Verified by** `src/__tests__/harness.spec.ts` (`gateway.accept` fires the op
+> with the `ConnectionInfo`; a throwing before-hook rejects; the after-hook
+> observes). Real-loopback: `@agentick/transport-websocket-next` and
+> `@agentick/transport-unix-socket-next` `server-transport.spec.ts` prove a
+> throwing `onBeforeGatewayAccept` DROPS a client connection while a permitting
+> hook lets a request round-trip and fires exactly once. Name-locked in
+> `@agentick/runtime-next` `hook-lifecycle-names.spec.ts`.
+
 ### 4. Contextual policy — guards on the seam (ADR 83)
 
 The `Authorizer` (§2) and the structural ceiling are **coarse, structural, and

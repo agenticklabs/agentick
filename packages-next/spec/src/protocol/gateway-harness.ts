@@ -31,7 +31,7 @@ import type { MessageInbox, MessageInboxFactory } from "./inbox.js";
 import type { AppHarnessProtocol } from "./app-harness.js";
 import type { WireExtensionRegistry } from "../wire/registry.js";
 import type { WireMethod } from "../wire/params.js";
-import type { AuthorizeInput, AuthorizeResult } from "../wire/authorizer.js";
+import type { AuthorizeInput, AuthorizeResult, ConnectionInfo } from "../wire/authorizer.js";
 
 // ============================================================================
 // Gateway substrate parent
@@ -182,6 +182,27 @@ export interface GatewayHarnessProtocol {
    * reference `GatewayHarness` routes through `runOperation`.
    */
   authorize(input: AuthorizeInput): Promise<AuthorizeResult>;
+
+  /**
+   * Per-connection admission (ADR 84 §4). Fired ONCE per newly-accepted
+   * persistent connection by a connection-oriented transport (WebSocket, Unix
+   * socket) — AFTER ingress-authn and BEFORE the connection is wired to receive
+   * frames. Wraps a `gateway:accept` op through `runOperation`, so
+   * `onBeforeGatewayAccept` sees the {@link ConnectionInfo} and can gate /
+   * rate-limit / observe (throw to REJECT the connection — the transport drops
+   * it), and `onAfterGatewayAccept` observes the admission.
+   *
+   * A **connection** concept, deliberately distinct from {@link authorize}
+   * (the per-request policy layer): request-oriented HTTP does NOT call this —
+   * its admission is per-request `authorize`, not per-connection `accept`. Only
+   * a bound transport calls it, and a transport only accepts connections after
+   * `listen()`, so a live connection already implies a started gateway (no
+   * redundant started-gate here).
+   *
+   * A stub host may implement it as a no-op; the reference `GatewayHarness`
+   * routes through `runOperation`.
+   */
+  accept(info: ConnectionInfo): Promise<void>;
 
   // ─── Lifecycle ──────────────────────────────────────────────────
 

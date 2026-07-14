@@ -30,12 +30,16 @@ export function unixSocketServerTransport(
 ): ServerTransport {
   let handle: UnixSocketServerHandle | undefined;
 
+  // Stable transport id — also threaded into each connection's `gateway:accept`
+  // op (ADR 84 §4) so `onBeforeGatewayAccept` sees which transport admitted it.
+  const id = `unix-socket:${config.path}`;
+
   return {
-    id: `unix-socket:${config.path}`,
+    id,
 
     async listen(host: GatewayHarnessProtocol): Promise<void> {
       if (handle) return; // idempotent — already bound
-      const bound = unixSocketServer({ ...config, gateway: host });
+      const bound = unixSocketServer({ ...config, gateway: host, transportId: id });
       handle = bound;
       // `unixSocketServer` calls `server.listen(path)` for us; wait for the
       // socket to actually be accepting so a resolved `listen()` is honest.

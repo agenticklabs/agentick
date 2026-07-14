@@ -173,7 +173,7 @@ Each routes through `BaseHarness.runOperation`, so each mints the full triad
 | `gateway:start` | `onGatewayStart` triad | before = gate / feature-flag transports; after = log bound addresses |
 | `gateway:close` (was `gateway:close-gateway`) | `onGatewayClose` triad | terminal teardown; symmetric with start |
 | `authorizer:authorize` | `onBeforeAuthorize` / `onAfterAuthorize` | the **fine contextual** auth layer (see §5) |
-| `gateway:accept` | `onBeforeGatewayAccept` / `onAfter…` | per-connection admission / rate-limit / observe; a transport accepted a client connection |
+| `gateway:accept` | `onBeforeGatewayAccept` / `onAfter…` | **LANDED.** Per-CONNECTION admission / rate-limit / observe — fired ONCE when a **connection-oriented** transport (WebSocket / Unix socket) accepts a persistent client connection, after ingress-authn, before frames flow. `onBeforeGatewayAccept` throws to REJECT (the transport drops the connection). Request-oriented HTTP does NOT fire it — its admission is the per-request `authorize` path |
 | `gateway:create-app` | `onBeforeGatewayCreateApp` / `onAfter…` | multi-tenant gating — veto/transform an app mount |
 | `wire:<method>` | `onBeforeWire<Method>` … | the wire boundary (ADR 83 wire section) |
 
@@ -206,8 +206,13 @@ identity enrichment — lower priority, same rules.
   interceptor sets, that is a future opt-in, not a parallel code path.
 - **Federated / cluster gateways** (multi-node) remain out of scope; this is the
   single-node deployment root.
-- **`gateway:accept` per-connection identity plumbing** lands with the
-  `ServerTransport` connection lifecycle, not before it.
+- **`gateway:accept` per-connection identity plumbing** — LANDED. It rides the
+  `ServerTransport` connection lifecycle: the WebSocket and Unix-socket servers
+  call `host.accept({ transportId, identity, remoteAddress? })` at the
+  connection-accepted point (after ingress-authn, before wiring frames); a
+  throwing `onBeforeGatewayAccept` drops the connection. Scoped to
+  connection-oriented transports only — HTTP is request-oriented and fires
+  `authorize`, not `accept`.
 
 ## 7. Rollout
 
@@ -221,8 +226,11 @@ identity enrichment — lower priority, same rules.
    (`webSocketServerTransport` / `httpServerTransport` /
    `unixSocketServerTransport` / `inProcessServerTransport`) — **LANDED**
    (§2), each with conformance + a real gateway-owned bind test.
-5. Gateway op surface — `authorizer:authorize`, `gateway:accept`,
-   `gateway:create-app` through `runOperation`.
+5. Gateway op surface — `authorizer:authorize`, `gateway:create-app`, and
+   `gateway:accept` through `runOperation` — **LANDED**. `gateway:accept` is
+   scoped to connection-oriented transports (WebSocket / Unix socket); the
+   servers call `host.accept(...)` at connection-accept time and drop the
+   connection when `onBeforeGatewayAccept` throws.
 
 Each step ships with conformance + a firing test and updates
 [`HOOK-LIFECYCLE.md`](../HOOK-LIFECYCLE.md).

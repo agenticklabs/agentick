@@ -77,6 +77,14 @@ export function httpServer(options: HttpServerOptions): HttpServerHandle {
   // Per-session connection state, keyed by session id.
   const sessions = new Map<string, SessionConnection>();
 
+  // ADR 84 §4 — NO `gateway:accept` here. `gateway:accept` is a per-CONNECTION
+  // admission seam for connection-oriented transports (WebSocket / Unix socket),
+  // fired once when a persistent connection is accepted. HTTP is REQUEST-oriented:
+  // there is no persistent connection to admit — each request authenticates its
+  // own `Authorization` header, and its admission is the per-request `authorize`
+  // path (handled inside `dispatchRequest` via the gateway's `authorizeDispatch`
+  // pre-gate + hookable `authorizer:authorize` op). So this transport fires
+  // `authorize`, never `accept`.
   const handler = (req: IncomingMessage, res: ServerResponse): void => {
     const url = req.url ?? "/";
     if (!url.startsWith(path)) {

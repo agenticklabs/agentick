@@ -33,6 +33,7 @@ import type {
   AppHarnessProtocol,
   AuthorizeInput,
   AuthorizeResult,
+  ConnectionInfo,
   CreateAppInput,
   EventBus,
   EventQuery,
@@ -103,12 +104,21 @@ import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next
 //     `AuthorizeInput` (add contextual scopes) or throw to deny; after-hook
 //     observes the `AuthorizeResult`. The structural ceiling (`requiredScopes`)
 //     stays un-waivable and OUTSIDE this seam — checked before the op fires.
+//   - `gateway:accept` (see `accept`) mints `onBeforeGatewayAccept` /
+//     `onAfterGatewayAccept` — the per-connection admission seam (ADR 84 §4).
+//     Fired ONCE per newly-accepted persistent connection by a
+//     connection-oriented transport (WebSocket / Unix socket), after
+//     ingress-authn and before the connection is wired to receive frames. The
+//     before-hook sees the `ConnectionInfo` and throws to REJECT (the transport
+//     drops the connection); the after-hook observes. HTTP is request-oriented
+//     and does NOT fire it — its admission is the per-request `authorize` path.
 declare module "@agentick/runtime-next" {
   interface CommandRegistry {
     "gateway:start": { input: undefined; output: void };
     "gateway:close": { input: undefined; output: void };
     "gateway:create-app": { input: CreateGatewayAppInput; output: AppHarnessProtocol };
     "authorizer:authorize": { input: AuthorizeInput; output: AuthorizeResult };
+    "gateway:accept": { input: ConnectionInfo; output: void };
   }
 }
 
@@ -814,6 +824,44 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
       this.runOperation(op, (i) =>
         Effect.tryPromise({
           try: () => this.authorizer.authorize(i),
+          catch: (cause): never => {
+            throw cause;
+          },
+        }),
+      ),
+    );
+  }
+
+  /**
+   * Per-connection admission (ADR 84 §4). Wraps the hookable `gateway:accept`
+   * op via `runOperation` (mirroring {@link authorize} / {@link close}): the
+   * before-hook (`onBeforeGatewayAccept`) sees the {@link ConnectionInfo} and
+   * gates / rate-limits / observes — throwing REJECTS the connection, which the
+   * calling transport drops; the after-hook (`onAfterGatewayAccept`) observes.
+   * The op body is a pure no-op — admission IS the before-hook seam; there is
+   * nothing to do on the happy path but let the connection through.
+   *
+   * Only a bound transport calls this, and a transport only accepts connections
+   * after {@link listen} has bound it — so a live connection already implies a
+   * started gateway. No redundant started-gate is added here (unlike
+   * {@link createApp}, which an adopter can call directly on a not-started
+   * gateway).
+   */
+  accept(info: ConnectionInfo): Promise<void> {
+    const op: Operation<ConnectionInfo, void, never> = {
+      opId: `gateway:accept:${ulid()}`,
+      surface: SURFACE,
+      name: "gateway:command:accept",
+      scope: { gatewayId: this.scopeId },
+      input: info,
+    };
+    return runHarnessProtocol(
+      this.runOperation(op, () =>
+        Effect.tryPromise({
+          // No body — admission is the `onBeforeGatewayAccept` seam. A throwing
+          // before-hook short-circuits before this ever runs (the rejection
+          // propagates out to the transport, which drops the connection).
+          try: () => Promise.resolve(),
           catch: (cause): never => {
             throw cause;
           },

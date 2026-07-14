@@ -10,7 +10,7 @@
  * @see docs/proposals/v2/blueprint/33-client-and-transports.md
  */
 
-import type { Server as HttpServer } from "node:http";
+import type { Server as HttpServer, IncomingMessage } from "node:http";
 import { WebSocketServer, type WebSocket as WSConnection } from "ws";
 import { ErrorCode, type IngressIdentity, type JsonRpcFrame } from "@agentick/spec-next";
 import {
@@ -23,6 +23,13 @@ import { AGENTICK_SUBPROTOCOL, decodeFrame, encodeFrame } from "../shared/codec.
 export interface WebSocketServerOptions {
   readonly httpServer: HttpServer;
   readonly gateway: DispatchHost;
+  /**
+   * Stable id of the owning `ServerTransport`, threaded into the
+   * `gateway:accept` op's `ConnectionInfo.transportId` (ADR 84 §4). The
+   * `webSocketServerTransport` wrapper passes its own id; a direct caller may
+   * override it. Defaults to `"websocket"`.
+   */
+  readonly transportId?: string;
   readonly path?: string;
   readonly allowedOrigins?: readonly string[] | "*";
   /** Idle ping interval in ms. WS-level ping/pong, not application ping. */
@@ -117,15 +124,46 @@ export function websocketServer(options: WebSocketServerOptions): WebSocketServe
   options.httpServer.on("upgrade", upgradeHandler);
 
   const heartbeatMs = options.heartbeatIntervalMs ?? 30_000;
+  const transportId = options.transportId ?? "websocket";
   const liveSockets = new Set<WSConnection>();
 
-  wss.on("connection", (ws: WSConnection) => {
+  wss.on("connection", (ws: WSConnection, req: IncomingMessage) => {
+    const identity = (
+      ws as WSConnection & { identity?: import("@agentick/spec-next").IngressIdentity }
+    ).identity;
+    // ADR 84 §4 — per-connection admission. Fire `gateway:accept` AFTER
+    // ingress-authn (identity is already stamped on the socket) and BEFORE the
+    // connection is wired to receive frames. A throwing `onBeforeGatewayAccept`
+    // REJECTS the connection: close it with a policy-violation code (1008) and
+    // never wire it up. Non-fatal to the listener — one rejected connection must
+    // not kill the server, so the rejection is swallowed at this edge.
+    void (async () => {
+      try {
+        await options.gateway.accept({
+          transportId,
+          ...(identity !== undefined ? { identity } : {}),
+          ...(req.socket.remoteAddress !== undefined
+            ? { remoteAddress: req.socket.remoteAddress }
+            : {}),
+        });
+      } catch {
+        try {
+          ws.close(1008, "connection rejected");
+        } catch {
+          /* swallow — the socket may already be gone */
+        }
+        return;
+      }
+      wireConnection(ws, identity);
+    })();
+  });
+
+  function wireConnection(
+    ws: WSConnection,
+    identity?: import("@agentick/spec-next").IngressIdentity,
+  ): void {
     liveSockets.add(ws);
-    const ctx = new ConnectionContext(
-      ws,
-      options.gateway,
-      (ws as WSConnection & { identity?: import("@agentick/spec-next").IngressIdentity }).identity,
-    );
+    const ctx = new ConnectionContext(ws, options.gateway, identity);
 
     let alive = true;
     ws.on("pong", () => {
@@ -159,7 +197,7 @@ export function websocketServer(options: WebSocketServerOptions): WebSocketServe
     ws.on("error", () => {
       /* swallow — close handler does the cleanup */
     });
-  });
+  }
 
   return {
     async close() {

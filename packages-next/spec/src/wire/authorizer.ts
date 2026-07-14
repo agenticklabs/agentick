@@ -77,6 +77,25 @@ export interface IngressIdentity {
 }
 
 /**
+ * A newly-accepted persistent connection, presented to the hookable
+ * `gateway:accept` op (ADR 84 §4). Fired ONCE per connection on
+ * connection-oriented transports (WebSocket, Unix socket) — AFTER
+ * ingress-authn (so {@link identity} is already stamped) and BEFORE the
+ * connection is wired to receive frames. An `onBeforeGatewayAccept` hook
+ * that throws REJECTS the connection (the transport drops it). Purely a
+ * connection concept: request-oriented HTTP does NOT fire it — its
+ * per-request admission is the `authorize` path.
+ */
+export interface ConnectionInfo {
+  /** Stable id of the transport that accepted the connection (`websocket:8080`, `unix-socket:/run/agentick.sock`). */
+  readonly transportId: string;
+  /** Ingress identity stamped at authn (ADR 61). Undefined = the local pole. */
+  readonly identity?: IngressIdentity;
+  /** Remote peer address, when the transport exposes one (TCP-backed). */
+  readonly remoteAddress?: string;
+}
+
+/**
  * What the transport supplies at a single trust-boundary crossing
  * (ADR 61). Discriminated by `credential.kind` — one seam normalizes
  * every ingress edge (client transports AND connectors) through the

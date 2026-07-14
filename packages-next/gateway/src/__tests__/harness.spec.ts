@@ -196,6 +196,51 @@ describe("GatewayHarness — gateway:create-app op (ADR 84 §4)", () => {
   });
 });
 
+describe("GatewayHarness — gateway:accept op (ADR 84 §4)", () => {
+  const connInfo = {
+    transportId: "websocket:test",
+    identity: { principal: "alice" },
+    remoteAddress: "127.0.0.1",
+  };
+
+  it("accept() runs the hookable op — onBeforeGatewayAccept sees the ConnectionInfo, onAfterGatewayAccept observes", async () => {
+    const gateway = await createGateway();
+    let seen: unknown;
+    let after = 0;
+    gateway.hook({
+      onBeforeGatewayAccept: (info) => {
+        seen = info;
+        return info;
+      },
+      onAfterGatewayAccept: (output) => {
+        after++;
+        return output;
+      },
+    });
+    await gateway.accept(connInfo);
+    expect(seen).toEqual(connInfo);
+    expect(after).toBe(1);
+    await gateway.close();
+  });
+
+  it("a throwing onBeforeGatewayAccept makes accept() reject — the connection admission is vetoed", async () => {
+    const gateway = await createGateway();
+    gateway.hook({
+      onBeforeGatewayAccept: () => {
+        throw new Error("connection limit reached");
+      },
+    });
+    await expect(gateway.accept(connInfo)).rejects.toThrow(/connection limit reached/);
+    await gateway.close();
+  });
+
+  it("accept() with no hook resolves (pure admission — the before-hook IS the gate)", async () => {
+    const gateway = await createGateway();
+    await expect(gateway.accept(connInfo)).resolves.toBeUndefined();
+    await gateway.close();
+  });
+});
+
 describe("GatewayHarness — createApp lifecycle gate (ADR 84 §1)", () => {
   it("throws GatewayNotStartedError before listen(); succeeds after listen()", async () => {
     const gateway = await createGateway();

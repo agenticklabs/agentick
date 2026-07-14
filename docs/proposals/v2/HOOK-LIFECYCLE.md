@@ -105,6 +105,7 @@ the `harness.hooks.on…` proxy, or — full middleware — `harness.on<X>`).
 | Gateway | `gateway:start` | ✅ typed | `onGatewayStart` | `onBeforeGatewayStart` | `onAfterGatewayStart` | `gateway.listen()` — fan out to `transport.listen()`; nullary op (`void`→`void`) |
 | Gateway | `gateway:close` | ✅ typed | `onGatewayClose` | `onBeforeGatewayClose` | `onAfterGatewayClose` | `gateway.close({ drain })` — terminal teardown; nullary op (`void`→`void`) |
 | Gateway | `gateway:create-app` | ✅ typed | `onGatewayCreateApp` | `onBeforeGatewayCreateApp` | `onAfterGatewayCreateApp` | `gateway.createApp(...)` — multi-tenant app-mount gating; before = normalized `CreateGatewayAppInput` (veto/transform), after = mounted `AppHarnessProtocol` |
+| Gateway | `gateway:accept` | ✅ typed | `onGatewayAccept` | `onBeforeGatewayAccept` | `onAfterGatewayAccept` | `gateway.accept(info)` — per-CONNECTION admission (ADR 84 §4). Fires ONCE per newly-accepted persistent connection on connection-oriented transports (WebSocket / Unix socket), after ingress-authn, before frames flow; before = `ConnectionInfo` (throw to REJECT the connection / rate-limit / observe), after = observe. NOT fired by request-oriented HTTP — its admission is per-request `authorize` |
 | **Auth** | `authorizer:authorize` | ✅ typed | `onAuthorizerAuthorize` | `onBeforeAuthorizerAuthorize` | `onAfterAuthorizerAuthorize` | `gateway.authorize(input)` — the FINE contextual auth layer (ADR 84 §5). before = `AuthorizeInput` (add contextual scope / deny), after = `AuthorizeResult`. The structural `requiredScopes` ceiling stays un-waivable and OUTSIDE this seam — checked before the op fires |
 | **Tasks** | `tasks:submit` | ⛔ deferred | `onTasksSubmit` | `onBeforeTasksSubmit` | `onAfterTasksSubmit` | async-seam boundary — the seam is async (`asBefore`/`asAfter` await) but `submit` returns `TaskHandle` synchronously; see [ADR 83 §hookability](./blueprint/83-one-interceptor-primitive.md) |
 | Tasks | `tasks:settle` | ⛔ deferred | `onTasksSettle` | `onBeforeTasksSettle` | `onAfterTasksSettle` | same async-seam boundary as `tasks:submit` |
@@ -123,16 +124,9 @@ hooks fire (mechanism); the typed client/server wire surface derives off
 `WireMethods` with the `wire:` prefix (`HooksOf<WireMethods, …>`) — the
 client-alignment follow-on.
 
-## Planned — ADR 84 gateway op surface (not yet augmented)
-
-These land per the [ADR 84](./blueprint/84-gateway-lifecycle-and-transports.md)
-rollout. Listed here so the design is visible; each row flips to ✅ typed (with a
-name-lock entry) as its arc lands — until then no hook fires, so they are NOT in
-the table above.
-
-| Command | `on<X>` | `onBefore<X>` | `onAfter<X>` | Purpose |
-| --- | --- | --- | --- | --- |
-| `gateway:accept` | `onGatewayAccept` | `onBeforeGatewayAccept` | `onAfterGatewayAccept` | per-connection admission / rate-limit / observe |
+The ADR 84 gateway op surface (`gateway:start`, `gateway:close`,
+`gateway:create-app`, `authorizer:authorize`, `gateway:accept`) is now fully
+landed and typed — every row is in the table above.
 
 ## The async-only property (deliberate)
 
