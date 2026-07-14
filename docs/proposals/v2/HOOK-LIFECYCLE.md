@@ -47,9 +47,13 @@ harness.guard(decide);
 `on<Command>` is the ultimate low-level *typed* registrar (the whole
 `(input,next,ctx)=>output`); `onBefore/onAfter` are one-sided sugar over it; raw
 `harness.use(mw)` is the untyped, global floor. Removal is always the returned
-`Unsubscribe`. Registration affects the harness's own future ops; inherited hooks
-fold at construction (registration before a child's construction inherits; after
-does not).
+`Unsubscribe`. Registration affects the harness's own future ops AND propagates
+**live** down the construction tree: a hook registered on a parent reaches every
+live descendant, and a new descendant pulls the parent's current set at
+construction (ADR 83 §4, amended 2026-07-14 — was a frozen construction-fold, now
+live inheritance). So a hook declared on the **gateway** reaches all apps —
+created before AND after it — and cascades to their sessions and sub-harnesses
+(ADR 84). Unsubscribe cascades to descendants.
 
 ## The complete lifecycle
 
@@ -97,19 +101,38 @@ the `harness.hooks.on…` proxy, or — full middleware — `harness.on<X>`).
 | Session | `session:apply-tool-results` | ✅ typed | `onSessionApplyToolResults` | `onBeforeSessionApplyToolResults` | `onAfterSessionApplyToolResults` | fires on the public facade, not the loop's in-fiber `*Fx` path |
 | Timeline | `timeline:compact` | ✅ typed | `onTimelineCompact` | `onBeforeTimelineCompact` | `onAfterTimelineCompact` | before = wire-safe compact SIGNAL; the explicit-arg form shares the op name, so it fires too |
 | Sandbox | `sandbox:exec` | ✅ typed | `onSandboxExec` | `onBeforeSandboxExec` | `onAfterSandboxExec` | sibling file verbs (`read-file`/…) stay untyped until asked for |
-| Gateway | `gateway:close-gateway` | ✅ typed | `onGatewayCloseGateway` | `onBeforeGatewayCloseGateway` | `onAfterGatewayCloseGateway` | nullary op |
+| Gateway | `gateway:close-gateway` | ✅ typed | `onGatewayCloseGateway` | `onBeforeGatewayCloseGateway` | `onAfterGatewayCloseGateway` | nullary op — **ADR 84 renames to `gateway:close` → `onGatewayClose`** |
 | **Tasks** | `tasks:submit` | ⛔ deferred | `onTasksSubmit` | `onBeforeTasksSubmit` | `onAfterTasksSubmit` | async-seam boundary — the seam is async (`asBefore`/`asAfter` await) but `submit` returns `TaskHandle` synchronously; see [ADR 83 §hookability](./blueprint/83-one-interceptor-primitive.md) |
 | Tasks | `tasks:settle` | ⛔ deferred | `onTasksSettle` | `onBeforeTasksSettle` | `onAfterTasksSettle` | same async-seam boundary as `tasks:submit` |
 
-**Wire methods** (JSON-RPC over `transport`) now route through the **gateway's**
-`runOperation` (`GatewayHarness.runWireDispatch`), so a wire method fires the
-gateway's seam — `gateway.hooks.onBeforeSessionSend` fires around a `session/send`
-dispatch (op name = the wire method; `deriveHookNames` splits `/`, so it
-Pascalizes to `SessionSend`). `authorizeDispatch` stays the un-waivable pre-gate.
-It's the same operation at three layers — client request · gateway wire · session
-op — one name, scoped by where you register (ADR 83 §"Wire dispatch"). Wire hooks
-fire (mechanism) but aren't typed yet — that needs the registry-agnostic
-derivation fed `WireMethods` (the client-alignment follow-on).
+**Wire methods** (JSON-RPC over `transport`) route through the **gateway's**
+`runOperation` (`GatewayHarness.runWireDispatch`) under a **`wire:`-prefixed op
+name**, distinct from the op they delegate to. A `session/send` dispatch fires
+`gateway.hooks.onBeforeWireSessionSend` (op `wire:session/send` → `WireSessionSend`)
+— the **wire boundary**. It does NOT collide with `onBeforeSessionSend`
+(op `session:send` → `SessionSend`), which fires once at the **session op** and,
+when declared on the gateway, folds down there via live inheritance (ADR 83 §4).
+`authorizeDispatch` stays the un-waivable pre-gate. Same logical operation, three
+layers — client request · gateway wire · session op — **distinct names, one fire
+each** (the `wire:` prefix; ADR 83 §"Wire dispatch", amended 2026-07-14). Wire
+hooks fire (mechanism); the typed client/server wire surface derives off
+`WireMethods` with the `wire:` prefix (`HooksOf<WireMethods, …>`) — the
+client-alignment follow-on.
+
+## Planned — ADR 84 gateway op surface (not yet augmented)
+
+These land per the [ADR 84](./blueprint/84-gateway-lifecycle-and-transports.md)
+rollout. Listed here so the design is visible; each row flips to ✅ typed (with a
+name-lock entry) as its arc lands — until then no hook fires, so they are NOT in
+the table above.
+
+| Command | `on<X>` | `onBefore<X>` | `onAfter<X>` | Purpose |
+| --- | --- | --- | --- | --- |
+| `gateway:start` | `onGatewayStart` | `onBeforeGatewayStart` | `onAfterGatewayStart` | `gateway.listen()` — fan out to `transport.listen()` |
+| `gateway:close` | `onGatewayClose` | `onBeforeGatewayClose` | `onAfterGatewayClose` | rename of `gateway:close-gateway` |
+| `authorizer:authorize` | `onAuthorizerAuthorize` | `onBeforeAuthorizerAuthorize` | `onAfterAuthorizerAuthorize` | fine contextual auth layer (ceiling stays un-waivable, outside the seam) |
+| `gateway:accept` | `onGatewayAccept` | `onBeforeGatewayAccept` | `onAfterGatewayAccept` | per-connection admission / rate-limit / observe |
+| `gateway:create-app` | `onGatewayCreateApp` | `onBeforeGatewayCreateApp` | `onAfterGatewayCreateApp` | multi-tenant app-mount gating |
 
 ## The async-only property (deliberate)
 

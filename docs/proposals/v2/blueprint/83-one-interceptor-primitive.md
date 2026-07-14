@@ -110,24 +110,47 @@ a `gate(decide)` on `BaseHarness` collided with `SessionHarness.gate(name)`
 `onBeforeDispatch`) follow. This also dissolves the earlier `onBeforeDispatch`
 (gate) vs `onBeforeToolDispatch` (hook) collision — the gate one is now a guard.
 
-### 4. The cascade is a construction-fold (generalizes ADR 82; deletes ADR 81)
+### 4. The cascade is live inheritance down the construction tree (generalizes ADR 82; deletes ADR 81)
+
+> **Amended 2026-07-14 (gateway hook propagation, ADR 84).** The cascade was a
+> _frozen construction-fold_ (each scope snapshotted its parent's
+> `resolvedInterceptors()` once, at construction; a registration after a child
+> existed did NOT reach it). That static boundary is now **live inheritance**:
+> registering an interceptor on a harness propagates to every _live_ descendant,
+> and a new descendant pulls the parent's current set at construction. The
+> motivating requirement (ADR 84): a hook declared on the gateway must reach
+> apps created **after** it, and cascade on down to their sessions and
+> sub-harnesses. The paragraphs below describe the amended, live mechanism.
 
 Guards + transforms inherit down the construction tree the SAME way hooks do
-(ADR 82): each scope snapshots its parent's `resolvedInterceptors()` at
-construction into `this.inheritedInterceptors` (a frozen value threaded through
-options, mirroring the `hooks` layer), and reads it locally per op. **No parent
-pointer, no per-op walk** — which deletes `ownAndInheritedMiddleware`,
-`runInheritedBefore`, and the construction-parent that ADR 81 was about.
+(ADR 82) — as a **live** relation, not a one-time snapshot:
 
-Own tier-2 registration (`harness.use`/`harness.guard` on a harness's own ops)
-stays fully dynamic — a local `this.middleware.snapshot()` read per op. What the
-fold snapshots is only the INHERITED layer. As with hooks, the trade is the
-static boundary: `app.use` after a session exists does not reach that session
-(nothing built-in relies on this; a sweep found the walk functional on exactly
-one edge — App→Session — and every sub-harness dropped `parent`, so the fold
-also _fixes_ a latent gap: per-session sub-harnesses now inherit app-level
-guards/middleware). A per-request concern around a SHARED harness (the model
-executor) is tier-4 (`withCallMiddleware`), not the fold — unchanged.
+- **Data.** Each harness holds `ownInterceptors` (its own registrations) and a
+  live-maintained `inheritedInterceptors` (received from its parent). Each also
+  holds a live `children` set. `resolvedInterceptors()` is the stable-sorted
+  merge (guard-outermost, then scope, then registration — §5) of the two,
+  memoized behind a dirty-bit invalidated on any mutation, so op-time stays O(1).
+- **Construction (pull).** A child, on construction, registers with its parent,
+  seeding `inheritedInterceptors` from `parent.resolvedInterceptors()` (the
+  parent's current own+inherited set) and adding itself to `parent.children`.
+  This preserves the old construction-time behavior exactly — a child still
+  inherits everything registered before it existed.
+- **Registration (push).** `harness.use`/`harness.guard`/`harness.hook` appends
+  to `ownInterceptors` AND pushes the interceptor to every live `child`, which
+  appends to its own `inheritedInterceptors` and recurses to grandchildren. The
+  returned `Unsubscribe` removes it locally and cascades the removal to
+  descendants by interceptor identity (`tagInterceptor`).
+- **Teardown.** A destroyed child deregisters from `parent.children`; its
+  inherited list is collected with it. No parent pointer survives teardown.
+
+There is **no per-op parent walk** — op-time still reads only the local merged
+list. The move from ADR 81's parent-walk was about not walking *per op*; live
+inheritance keeps that (push-on-register, read-local-per-op) while restoring the
+late-registration propagation the frozen fold gave up. This is what closes the
+**gateway→app** gap (a gateway hook now reaches apps created afterward) without a
+gateway special-case — every edge propagates identically. A per-request concern
+around a SHARED harness (the model executor) is tier-4 (`withCallMiddleware`),
+not the cascade — unchanged.
 
 ### 5. Precedence by composition order (capability, not opinion)
 
@@ -289,23 +312,38 @@ whose valuable hooks sit on sync surfaces.
 
 Wire (JSON-RPC) methods bypassed the seam: `transport/server/dispatch.ts` called
 `resolution.handler(params, ctx)` directly. Now the handler call routes through
-the **gateway's** `runOperation` (the `DispatchHost` IS the `GatewayHarness`), op
-name = the wire method (`session/send`). So a wire method fires the gateway's
-interceptor seam — guards/hooks around the dispatch.
+the **gateway's** `runOperation` (the `DispatchHost` IS the `GatewayHarness`). So
+a wire method fires the gateway's interceptor seam — guards/hooks around the
+dispatch — BUT under a **`wire:`-prefixed op name**, distinct from the op it
+delegates to.
 
-- **`authorizeDispatch` stays the un-waivable pre-gate** — it runs BEFORE the wire
-  op, so authz composes ahead of any userland wire hook.
-- **Gateway-scoped, no double-fire.** The wire op runs on the gateway; its hooks
-  are gateway-scoped. The gateway does NOT fold `inheritedInterceptors` into the
-  app (the app is a fold-root), so a gateway wire hook does NOT also fire on the
-  inner `session:send` op. The two are distinct seams.
-- **The name collision IS the symmetry.** `session/send` (wire, `/`) and
-  `session:send` (op, `:`) both Pascalize to `SessionSend` → `onBeforeSessionSend`.
-  That is the same logical operation at different layers — `client` (request
-  leaving, keyed by `WireMethods`) · `gateway` (wire dispatch arriving) · `session`
-  (op running) — one name, scoped by where you register.
-- **Wire hooks are typed off `WireMethods`, NOT `CommandRegistry`.** Putting a wire
-  method in `CommandRegistry` would collide with its op in the `CommandHooks`
-  mapped type (two keys minting the same `onBeforeSessionSend`). The typed wire
-  surface needs a registry-agnostic derivation fed `WireMethods` — the client-
-  alignment follow-on. Until then wire hooks fire (mechanism) but are untyped.
+> **Amended 2026-07-14.** The first cut named the wire op after the bare wire
+> method (`session/send`) and called the resulting `session/send ≡ session:send`
+> Pascal collision "the symmetry." That only held because the gateway did NOT
+> propagate hooks to apps — a bug (§4, now fixed) the design was leaning on. With
+> live inheritance, a gateway `onBeforeSessionSend` folds down and fires at the
+> `session:send` op; a wire op *also* named `SessionSend` would then fire the
+> same hook a SECOND time at the wire boundary (double-fire, inconsistent between
+> wire-originated and in-process sends). The fix is to stop the collision at its
+> root: **give the wire op its own name.**
+
+- **The name is the routing.** A hook fires wherever an op's name matches it, so
+  every op must have a unique name. The wire dispatch op is `wire:<method>` —
+  `wire:session/send` → `WireSessionSend` → `onBeforeWireSessionSend`. It no
+  longer collides with `session:send` → `SessionSend` → `onBeforeSessionSend`.
+  Each name now lands on exactly one layer:
+  - `onBeforeWireSessionSend` — the **wire boundary** (gateway's own op): a
+    session-send request arriving over a transport. Wire-specific concerns —
+    rate-limit a method, transform wire params — live here.
+  - `onBeforeSessionSend` — **every session send**, deployment-wide. Registered
+    on the gateway it folds through apps to sessions (live inheritance, §4) and
+    fires once at each `session:send` op, wire-originated or in-process alike.
+- **`authorizeDispatch` stays the un-waivable pre-gate** — it runs BEFORE the
+  wire op, so authz composes ahead of any userland wire hook.
+- **Wire hooks are typed off `WireMethods`, NOT `CommandRegistry`.** The wire op
+  names derive from `WireMethods` via the shared registry-agnostic derivation
+  (`HooksOf<WireMethods, …>`, spec `hooks/derivation`) with the `wire:` prefix,
+  so the wire surface and the op surface never mint the same key. This is the
+  seam the client also types its hooks off (client-alignment follow-on) — one
+  `Pascal`, three layers (client request · gateway wire · session op), distinct
+  names, one fire each.
