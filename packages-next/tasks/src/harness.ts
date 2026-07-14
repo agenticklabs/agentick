@@ -955,8 +955,6 @@ export class TasksHarness extends BaseHarness<"tasks"> implements TasksHarnessPr
       result: live.resultDeferred.promise as Promise<T>,
       info: () => this.snapshot(live.record),
       events: () => this.subscribeToTask(live),
-      // Direct iteration is sugar over `events()` — ONE stream source.
-      [Symbol.asyncIterator]: () => handle.events()[Symbol.asyncIterator](),
       cancel: (reason?: string) => this.cancel(live.record.taskId, reason),
     };
     return handle;

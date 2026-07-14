@@ -79,7 +79,7 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
         let n = 0;
         (async () => {
           try {
-            for await (const event of handle) {
+            for await (const event of handle.events()) {
               n++;
               reporter.push({
                 id: `progress-${n}`,

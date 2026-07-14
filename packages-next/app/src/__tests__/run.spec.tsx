@@ -30,19 +30,19 @@ describe("run() — one-shot execution", () => {
       messages: [{ role: "user", content: "hi" }],
     });
     const types: string[] = [];
-    for await (const event of handle) types.push(event.type);
+    for await (const event of handle.events()) types.push(event.type);
     expect(types.length).toBeGreaterThan(0);
     const result = await handle.result;
     expect(result.response).toContain("streamed pong");
   });
 
-  it("`for await` directly on the run handle works (no intermediate await)", async () => {
+  it("`.events()` directly on the run handle works (no intermediate await)", async () => {
     const handle = run(React.createElement(MinimalAgent), {
       model: scriptedAdapter("direct iteration"),
       messages: [{ role: "user", content: "hi" }],
     });
     const types: string[] = [];
-    for await (const event of handle) types.push(event.type);
+    for await (const event of handle.events()) types.push(event.type);
     expect(types.length).toBeGreaterThan(0);
     expect((await handle.result).response).toContain("direct iteration");
   });

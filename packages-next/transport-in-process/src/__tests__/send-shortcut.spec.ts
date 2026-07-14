@@ -85,7 +85,8 @@ describe("client.send(sessionId, input) shortcut", () => {
     const handle = client.send("sess-x", { messages: [{ role: "user", content: "hi" }] });
     expect(typeof handle.abort).toBe("function");
     expect(handle.result).toBeInstanceOf(Promise);
-    expect(typeof handle[Symbol.asyncIterator]).toBe("function");
+    expect(typeof handle.events).toBe("function");
+    expect(typeof handle.events()[Symbol.asyncIterator]).toBe("function");
     await handle.result;
     await client.close();
   });

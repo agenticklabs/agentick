@@ -70,19 +70,14 @@ const client = await createClient({
 await client.connect();
 
 // Flat shortcut for the 90% case. `send()` returns the handle synchronously
-// (AsyncIterable of events + `.result`) — no await here; you await `.result`.
+// (events via `.events()` + `.result`) — no await here; you await `.result`.
 const handle = client.send("sess-123", {
   messages: [{ role: "user", content: "hello" }],
 });
 
-// Or as an async iterable for event-by-event observation. The handle IS
-// the stream (sugar); `handle.events()` is the explicit accessor for the
-// SAME stream — pick either.
-for await (const event of handle) {
-  console.log(event);
-}
+// Observe events one at a time via `.events()`:
 for await (const event of handle.events()) {
-  console.log(event); // identical StreamEvents
+  console.log(event);
 }
 
 const finalResult = await handle.result;
@@ -93,15 +88,13 @@ await client.close();
 ## Everything hangs off one `client`
 
 No context objects, no emitter strings, no hand-rolled queries — the whole
-surface is discoverable on the client instance, and each streaming call is
-directly `for await`-able:
+surface is discoverable on the client instance, and each streaming call
+exposes its event stream via `.events()`:
 
 ```ts
 // Run + stream, all on the handle:
 const handle = client.send(sessionId, { messages });
-for await (const event of handle) render(event); //   ← the handle IS the stream
-// …or the explicit accessor for the SAME stream:
-for await (const event of handle.events()) render(event);
+for await (const event of handle.events()) render(event); // ← the event stream
 await handle.result;                              //   ← …and the final result
 
 // Observe, uniformly — all instance methods, all return an Unsubscribe:

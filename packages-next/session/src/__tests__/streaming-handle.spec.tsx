@@ -103,7 +103,7 @@ describe("SessionExecutionHandle — typed streaming events", () => {
     const handle = await session.send({ messages: [{ role: "user", content: "hi" }] });
 
     const events: StreamEvent[] = [];
-    for await (const ev of handle) events.push(ev);
+    for await (const ev of handle.events()) events.push(ev);
     const result = await handle.result;
 
     const types = events.map((e) => e.type);
@@ -128,7 +128,7 @@ describe("SessionExecutionHandle — typed streaming events", () => {
     const session = await mkSession();
     const handle = await session.send({ messages: [{ role: "user", content: "hi" }] });
     const seqs: number[] = [];
-    for await (const ev of handle) seqs.push(ev.sequence);
+    for await (const ev of handle.events()) seqs.push(ev.sequence);
     expect(seqs[0]).toBe(1);
     for (let i = 1; i < seqs.length; i++) {
       expect(seqs[i]).toBe(seqs[i - 1]! + 1);
@@ -139,7 +139,7 @@ describe("SessionExecutionHandle — typed streaming events", () => {
   it("stamps sessionId + executionId on every event", async () => {
     const session = await mkSession();
     const handle = await session.send({ messages: [{ role: "user", content: "hi" }] });
-    for await (const ev of handle) {
+    for await (const ev of handle.events()) {
       expect(ev.sessionId).toBe("s");
       expect(ev.executionId).toBe(handle.executionId);
     }
@@ -153,7 +153,7 @@ describe("SessionExecutionHandle — typed streaming events", () => {
       stream: true,
     });
     const events: { type: string; delta?: string }[] = [];
-    for await (const ev of handle) {
+    for await (const ev of handle.events()) {
       if (ev.type === "content-delta") events.push({ type: ev.type, delta: ev.delta });
       else events.push({ type: ev.type });
     }
@@ -167,33 +167,17 @@ describe("SessionExecutionHandle — typed streaming events", () => {
     await session.close();
   });
 
-  it("events() yields the same stream as direct iteration; .result resolves independently", async () => {
-    // Direct iteration on one execution.
-    const s1 = await mkSession();
-    const h1 = await s1.send({ messages: [{ role: "user", content: "hi" }] });
-    const directTypes: string[] = [];
-    for await (const ev of h1) directTypes.push(ev.type);
-    await s1.close();
-
-    // events() accessor on an equivalent execution.
-    const s2 = await mkSession();
-    const h2 = await s2.send({ messages: [{ role: "user", content: "hi" }] });
-    const accessorTypes: string[] = [];
-    for await (const ev of h2.events()) accessorTypes.push(ev.type);
+  it("events() yields the stream; .result resolves independently", async () => {
+    const session = await mkSession();
+    const handle = await session.send({ messages: [{ role: "user", content: "hi" }] });
+    const types: string[] = [];
+    for await (const ev of handle.events()) types.push(ev.type);
+    expect(types).toContain("execution-start");
+    expect(types[types.length - 1]).toBe("result");
     // `.result` still resolves after fully iterating via events().
-    const result = await h2.result;
+    const result = await handle.result;
     expect(result).toBeDefined();
-    await s2.close();
-
-    expect(accessorTypes).toEqual(directTypes);
-
-    // events() returns the SAME underlying source as the handle: calling
-    // it hands back the handle itself, so its iterator is the handle's.
-    const s3 = await mkSession();
-    const h3 = await s3.send({ messages: [{ role: "user", content: "hi" }] });
-    expect(h3.events()).toBe(h3);
-    for await (const _ev of h3) void _ev; // drain so teardown completes
-    await s3.close();
+    await session.close();
   });
 
   it("non-streaming path: synthesizes summary events; no delta events", async () => {
@@ -203,7 +187,7 @@ describe("SessionExecutionHandle — typed streaming events", () => {
       stream: false,
     });
     const types: string[] = [];
-    for await (const ev of handle) types.push(ev.type);
+    for await (const ev of handle.events()) types.push(ev.type);
     expect(types).not.toContain("content-delta");
     expect(types).toContain("content");
     expect(types).toContain("message-end");

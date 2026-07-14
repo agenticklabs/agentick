@@ -274,7 +274,7 @@ function wrapHandle(
 /**
  * Issues `session/send` with a progress token, opens a `progress(token)`
  * stream on the transport, and stitches both into a single
- * `ClientSessionExecutionHandle` shape (AsyncIterable + `.result` + abort).
+ * `ClientSessionExecutionHandle` shape (`events()` + `.result` + abort).
  */
 function createSessionExecutionHandle<P>(
   client: InternalClient,
@@ -322,14 +322,11 @@ function createSessionExecutionHandle<P>(
       await client.request("session/abort", { sessionId, reason });
       await progressStream.close();
     },
-    // `events()` and direct iteration share ONE source (the progress
-    // stream): the accessor hands back the handle itself, so its
-    // async-iterator IS the handle's. Sugar equivalence, matching the
-    // server-side `SessionExecutionHandle`.
-    events(): AsyncIterable<StreamEvent> {
-      return this;
-    },
-    async *[Symbol.asyncIterator](): AsyncIterator<StreamEvent> {
+    // `events()` returns the event stream, backed by the progress
+    // stream. The handle is not itself iterable; `events()` is the one
+    // way to consume the stream — matching the server-side
+    // `SessionExecutionHandle`.
+    async *events(): AsyncGenerator<StreamEvent> {
       for await (const frame of progressStream) {
         // The envelope's payload IS the StreamEvent — server already
         // normalized it.

@@ -100,9 +100,6 @@ export function stubTasks(options: StubTasksOptions = {}): TasksHarnessProtocol 
           };
         },
       }),
-      // Direct iteration is sugar over `events()` — ONE stream source.
-      [Symbol.asyncIterator]: (): AsyncIterator<TaskEvent> =>
-        handle.events()[Symbol.asyncIterator](),
       cancel: async (): Promise<void> => {
         // No-op — the canned task is already terminal.
       },

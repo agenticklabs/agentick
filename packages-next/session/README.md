@@ -183,20 +183,14 @@ const session = new SessionHarness(journal, bus, inbox, {
 const handle = await session.send({
   messages: [{ role: "user", content: "Hello" }],
 });
-for await (const event of handle) {
-  /* StreamEvent: tick-start | model deltas | tool-dispatch | result | ... */
-}
-// Equivalent — `.events()` is the explicit accessor for the SAME stream:
 for await (const event of handle.events()) {
-  /* identical StreamEvents; direct iteration above is just sugar */
+  /* StreamEvent: tick-start | model deltas | tool-dispatch | result | ... */
 }
 const result = await handle.result; // SendResult
 ```
 
-`send` returns a `SessionExecutionHandle` — an
-`AsyncIterable<StreamEvent>` (iterate the handle directly) that also
-exposes `.events(): AsyncIterable<StreamEvent>` (the explicit accessor;
-same underlying source, same consumption semantics), plus
+`send` returns a `SessionExecutionHandle` — its event stream is reached
+via `.events(): AsyncIterable<StreamEvent>`, plus
 `.result: Promise<SendResult>`, `.status`, and `.abort(reason?)`. A
 `send()` while an execution is
 running is **steering** (ADR 53): the messages append to the timeline
@@ -540,8 +534,8 @@ their backing.
 - `src/__tests__/streaming-handle.spec.tsx` — `SessionExecutionHandle`
   streaming iterator (event order, dense monotonic sequence,
   id/sessionId/executionId stamping, streaming vs non-streaming paths,
-  and `handle.events()` yielding the SAME stream as direct iteration
-  while `.result` resolves independently).
+  and `handle.events()` yielding the event stream while `.result`
+  resolves independently).
 - `src/__tests__/extended-surface.spec.ts`,
   `layered-tools.spec.ts` — host-side `dispatch` (incl.
   `ToolPermissionError`), timeline handle append/`trailingInput`,

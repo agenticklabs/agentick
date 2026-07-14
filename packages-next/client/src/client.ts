@@ -488,7 +488,7 @@ class AgentickClient implements ClientProtocol {
    * @verifiedBy ../transport-in-process/src/__tests__/send-shortcut.spec.ts —
    *             emits the same `session/send` RPC params as
    *             `client.session(id).send(input)` and returns the canonical
-   *             `ClientSessionExecutionHandle` shape (AsyncIterable +
+   *             `ClientSessionExecutionHandle` shape (`events()` +
    *             `.result` + `abort()`).
    */
   send<P = unknown>(sessionId: string, input: SendInput<P>) {

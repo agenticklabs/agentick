@@ -532,8 +532,8 @@ export function runSessionConformance(factory: SessionConformanceFactory): void 
     });
   });
 
-  describe("SessionHarnessProtocol — execution handle dual-shape", () => {
-    it("handle is both AsyncIterable and exposes .result", async () => {
+  describe("SessionHarnessProtocol — execution handle shape", () => {
+    it("handle exposes events() and .result", async () => {
       const session = await factory({
         harnessId: "session-conf-handle-1",
         deps: defaultSessionConformanceDeps(),
@@ -541,10 +541,9 @@ export function runSessionConformance(factory: SessionConformanceFactory): void 
       const handle = await session.send({
         messages: [{ role: "user", content: "x" }],
       });
-      // Should have the iteration symbol.
-      expect(
-        typeof (handle as unknown as { [Symbol.asyncIterator]: unknown })[Symbol.asyncIterator],
-      ).toBe("function");
+      // `events()` returns the AsyncIterable event stream.
+      expect(typeof handle.events).toBe("function");
+      expect(typeof handle.events()[Symbol.asyncIterator]).toBe("function");
       // And a result Promise.
       expect(typeof handle.result.then).toBe("function");
       const result = await handle.result;

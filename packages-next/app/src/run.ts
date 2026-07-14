@@ -15,9 +15,9 @@
  * const result = await run(<Agent />, { model: openai("gpt-4o"), messages }).result;
  *
  * const handle = await run(<Agent />, { model, messages });
- * for await (const event of handle) render(event);
+ * for await (const event of handle.events()) render(event);
  *
- * for await (const event of run(<Agent />, { model, messages })) render(event);
+ * for await (const event of run(<Agent />, { model, messages }).events()) render(event);
  * ```
  */
 
@@ -59,14 +59,14 @@ export interface RunOptions<P = unknown> extends CreateAppOptions<P> {
 
 /**
  * The value `run()` returns: a promise of the live
- * `SessionExecutionHandle`, augmented so `.result` and `for await`
+ * `SessionExecutionHandle`, augmented so `.result` and `.events()`
  * work without the intermediate `await` (v1 `ProcedurePromise`
  * ergonomics).
  */
-export type RunHandle = Promise<SessionExecutionHandle> &
-  AsyncIterable<StreamEvent> & {
-    readonly result: Promise<SendResult>;
-  };
+export type RunHandle = Promise<SessionExecutionHandle> & {
+  readonly result: Promise<SendResult>;
+  events(): AsyncIterable<StreamEvent>;
+};
 
 /**
  * Execute an agent element once. Creates a temporary app + session,
@@ -129,11 +129,15 @@ export function run<P = unknown>(rootElement: unknown, options: RunOptions<P>): 
 
   return Object.assign(handlePromise, {
     result,
-    [Symbol.asyncIterator](): AsyncIterator<StreamEvent> {
-      const iterPromise = handlePromise.then((h) => h[Symbol.asyncIterator]());
+    events(): AsyncIterable<StreamEvent> {
       return {
-        async next(): Promise<IteratorResult<StreamEvent>> {
-          return (await iterPromise).next();
+        [Symbol.asyncIterator](): AsyncIterator<StreamEvent> {
+          const iterPromise = handlePromise.then((h) => h.events()[Symbol.asyncIterator]());
+          return {
+            async next(): Promise<IteratorResult<StreamEvent>> {
+              return (await iterPromise).next();
+            },
+          };
         },
       };
     },

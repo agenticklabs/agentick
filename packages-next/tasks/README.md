@@ -247,11 +247,8 @@ see the four tools.
 
 ### Observe events directly (advanced)
 
-The `TaskHandle` exposes an event stream and a snapshot accessor. The
-handle is itself `AsyncIterable<TaskEvent>`, so you can iterate it
-directly (sugar) or call `.events()` (the explicit accessor) — both
-draw from the SAME source with identical events and consumption
-semantics:
+The `TaskHandle` exposes an event stream via `.events()` and a snapshot
+accessor:
 
 ```ts
 const handle = session.tasks.submit(async ({ onProgress }) => {
@@ -262,18 +259,13 @@ const handle = session.tasks.submit(async ({ onProgress }) => {
   return [{ type: "text", text: "done" }];
 });
 
-// Direct iteration — sugar over `.events()`:
-for await (const event of handle) {
+// The event stream via `.events()`:
+for await (const event of handle.events()) {
   if (event.kind === "progress") {
     console.log(`progress: ${event.current}/${event.total}`);
   } else if (event.kind === "status" && event.info.status === "completed") {
     break;
   }
-}
-
-// Equivalent — the explicit accessor for the SAME stream:
-for await (const event of handle.events()) {
-  /* identical TaskEvents */
 }
 
 const result = await handle.result; // resolves with ContentBlock[]
@@ -481,20 +473,15 @@ proof through a real 2-session chain).
 
 ### `TaskHandle<T>`
 
-`extends AsyncIterable<TaskEvent>` — iterate the handle directly
-(`for await (const ev of handle)`) as sugar over `.events()`; both draw
-from the SAME source.
-
 - `taskId: string`
 - `initialStatus: TaskStatus` — snapshot at handle construction.
 - `result: Promise<T>` — resolves on `completed` with the work's
   return value; rejects with `TaskRejection` on `failed` /
   `cancelled`. Resolves independently of iterating events.
 - `info(): TaskInfo` — live snapshot.
-- `events(): AsyncIterable<TaskEvent>` — explicit accessor for the
-  event stream; emits the current status snapshot, then live progress +
-  status transitions, closes on terminal. Direct iteration of the
-  handle delegates to this — one stream source.
+- `events(): AsyncIterable<TaskEvent>` — the event stream
+  (`for await (const ev of handle.events())`); emits the current status
+  snapshot, then live progress + status transitions, closes on terminal.
 - `cancel(reason?: string): Promise<void>` — cluster-portable cancel.
   No-op if already terminal.
 

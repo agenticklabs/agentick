@@ -126,15 +126,14 @@ export function createSessionExecutionHandle(args: SessionExecutionHandleArgs): 
     get status() {
       return status;
     },
-    // `events()` and direct iteration share ONE source: both draw from
-    // the same private queue/resolvers via `makeAsyncIterator`. No second
-    // subscription — identical multi-consumer semantics either way.
-    events: () => handle,
+    // `events()` returns the stream — backed by the private
+    // queue/resolvers via `makeAsyncIterator`. The handle is not itself
+    // iterable; `events()` is the one way to consume the stream.
+    events: () => ({ [Symbol.asyncIterator]: makeAsyncIterator }),
     abort: async (reason) => {
       if (status === "running") status = "aborted";
       await abort(reason);
     },
-    [Symbol.asyncIterator]: makeAsyncIterator,
   };
 
   return { handle, emit, close };
