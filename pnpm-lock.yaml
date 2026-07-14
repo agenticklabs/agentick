@@ -1380,6 +1380,9 @@ importers:
 
   packages-next/tasks:
     dependencies:
+      '@agentick/client-next':
+        specifier: workspace:*
+        version: link:../client
       '@agentick/pubsub-next':
         specifier: workspace:*
         version: link:../pubsub

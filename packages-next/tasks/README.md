@@ -51,6 +51,28 @@ seam is what unlocks the later tiers without a rewrite:
 Private workspace package. Bundled into the `agentick` metapackage;
 not published independently.
 
+## Client — `taskStatusView` (`@agentick/tasks-next/client`)
+
+The far side of the `session:channel:task-status` channel: a reactive view a
+frontend subscribes to. Mirrors `knobsStateView` — depends on the generic
+`@agentick/client-next` `channelView`, NOT the tasks harness, so it stays out of
+the server bundle.
+
+```ts
+import { taskStatusView } from "@agentick/tasks-next/client";
+
+const tasks = taskStatusView(client, sessionId); // ChannelView<Record<taskId, TaskInfo>>
+tasks.get();                    // the folded map, latest status per task
+const off = tasks.subscribe(() => render(tasks.get())); // useSyncExternalStore contract
+tasks.close();
+```
+
+Each frame is one task's current `TaskInfo` (published on every FSM transition);
+the view folds them by `taskId`, latest wins. The channel has no open-with-snapshot
+today, so a subscriber sees tasks as they transition, not a backfill of the
+pre-existing list — seed from a snapshot frame here once the channel projects one.
+This is the `useTasks` family source in [ADR 85](../../docs/proposals/v2/blueprint/85-ui-packages.md).
+
 ## Status
 
 🚧 In active development as part of v2 (`feat/v2`).
