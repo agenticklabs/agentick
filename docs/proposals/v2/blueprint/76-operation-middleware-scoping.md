@@ -1,6 +1,14 @@
 # ADR 76 — Operation middleware scoping: per-harness, structural inheritance, and the call-scoped seam
 
-**Status:** DRAFT 2026-07-10 (Fable, for Ryan). **Builds on:** ADR 19
+**Status:** AMENDED 2026-07-13 by [ADR 83](./83-one-interceptor-primitive.md) — the
+tier-3 structural inheritance no longer *walks* the construction tree per op; it
+**folds** at construction (a value snapshotted into `inheritedInterceptors`),
+deleting `ownAndInheritedMiddleware` and the `parent` pointer. The tier model
+(2 = own, 3 = inherited, 4 = call-scoped FiberRef) and the `use`/`fx.use` split
+stand; only the tier-3 *collection mechanism* changed (walk → fold). Middleware
+is now the `transform`/`guard`/`observe` interceptor of ADR 83.
+
+**Status (original):** DRAFT 2026-07-10 (Fable, for Ryan). **Builds on:** ADR 19
 (foundation — `Operation`, `runOperation`, the phase contract, the
 `RuntimeContext` FiberRef), ADR 31 (harness hierarchy — two-phase construction,
 parent-provided substrate, the `parent` reference every `BaseHarness` carries),

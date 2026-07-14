@@ -1,6 +1,13 @@
 # ADR 80 — Command lifecycle: intrinsic observe/transform hooks across all harnesses
 
-**Status:** PROPOSED 2026-07-13 (Fable, for Ryan)
+**Status:** AMENDED 2026-07-13 by [ADR 83](./83-one-interceptor-primitive.md).
+The hooks here (`onBefore`/`onAfter`, the typed `CommandRegistry`→`CommandHooks`
+derivation, the `liftMiddleware` fiber invariant) stand verbatim. What changed:
+they are now one **kind** (`transform`) of a single interceptor primitive
+alongside `guard` (op admission — the old before-verdict handler, renamed) and
+`observe`. The separate verdict subsystem is deleted.
+
+**Status (original):** PROPOSED 2026-07-13 (Fable, for Ryan)
 **Depends on:** ADR 26 (harness as the single shape), ADR 27 (modular built-ins / module augmentation), ADR 31 (self-similar harness hierarchy), ADR 45 (runtime context), ADR 51 (invocation model — `command()` + `runOperation`), ADR 76 (operation-middleware scoping + the `liftMiddleware` fiber fix)
 **Fixes:** #17-adjacent (the `onBeforeModelGenerate` seam media reconciliation needs), the three-fragmented-lifecycle-vocabulary problem, the loop-coupled/observer-only `useOn*` surface, the session lifecycle vacuum
 **Adjacent:** ADR 52 (executor/adapter split — where `model:generate` lives), ADR 55 (render-context), ADR 56 (tree-declared per-tick model — why a construction-time model wrapper is wrong), ADR 57 (the `LanguageModelInput` currency reshaped by `onBeforeModelGenerate`), ADR 74 (media normalization — one consumer of `onBeforeModelGenerate`)

@@ -1,6 +1,13 @@
 # ADR 81 — The construction parent is a mandatory, explicit invariant
 
-**Status:** PROPOSED 2026-07-13 (Fable, for Ryan)
+**Status:** SUPERSEDED 2026-07-13 by [ADR 83](./83-one-interceptor-primitive.md).
+The construction-parent pointer is no longer needed: guards, transforms, and
+hooks all inherit via a construction-**fold** (a value snapshotted at
+construction), not a runtime parent-walk. `this.parent`'s interception role and
+the walk (`ownAndInheritedMiddleware`) are deleted. This ADR is retained for
+historical context only.
+
+**Status (original):** PROPOSED 2026-07-13 (Fable, for Ryan)
 **Amends:** ADR 31 (self-similar slottable harness hierarchy), ADR 76 (operation-middleware structural inheritance)
 **Depends on / unblocks:** ADR 80 (the hook cascade needs the parent chain to reach real harnesses)
 **Fixes:** a live, silent gap — the parent chain that middleware, hooks, telemetry, and structural auth all ride is threaded inconsistently, so the cascade is half-wired today

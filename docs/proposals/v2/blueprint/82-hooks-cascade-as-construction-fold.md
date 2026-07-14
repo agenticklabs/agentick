@@ -1,6 +1,12 @@
 # ADR 82 — The hook cascade is a construction-fold, not a parent-walk
 
-**Status:** PROPOSED 2026-07-13 (Fable, for Ryan)
+**Status:** GENERALIZED 2026-07-13 by [ADR 83](./83-one-interceptor-primitive.md).
+The construction-fold this ADR introduced for hooks is now the cascade for ALL
+interceptors — guards and transforms (middleware) fold at construction the same
+way, and the parent-walk is deleted outright (not just for hooks). The fold
+mechanism here stands verbatim; ADR 83 applies it framework-wide.
+
+**Status (original):** PROPOSED 2026-07-13 (Fable, for Ryan)
 **Revises:** ADR 80 §6 (cascade) + §7's `ownAndInheritedHooks` — replaces the runtime parent-walk with a construction-time fold. The naming (`on[When][Who][What]`), the typed `CommandRegistry`→`CommandHooks` derivation, the `(value, ctx)` contract, and the `liftMiddleware` fiber invariant (§4/§5/§7) are **unchanged**.
 **Defers:** ADR 81 to middleware-only — the hook cascade no longer needs the construction-parent pointer.
 
