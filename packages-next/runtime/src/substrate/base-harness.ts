@@ -37,8 +37,13 @@ import {
 } from "effect";
 import { unwrapExit, omitUndefined, isThenable } from "@agentick/utils-next";
 import type {
+  AfterHook,
   AsyncStream,
+  BeforeHook,
   CommandOutcome,
+  HooksOf,
+  Pascal,
+  RegistrarsOf,
   EventBus,
   CommandDescriptor,
   CommandExposure,
@@ -72,7 +77,9 @@ import {
   AgentickError,
   CommandDeclarationError,
   DEFAULT_JOURNALING_POLICY,
+  deriveHookNames,
   logEventName,
+  parseHookKey,
   progressEventName,
   HandlerError,
   InvalidPayload,
@@ -106,6 +113,12 @@ export {
 } from "./op-signals.js";
 
 export type { Unsubscribe } from "@agentick/spec-next";
+
+// Re-export the pure hook-derivation pieces moved to `@agentick/spec-next`
+// (ADR 80) so downstream `@agentick/runtime-next` imports keep resolving —
+// the move is a re-home, not a public-surface change.
+export { deriveHookNames } from "@agentick/spec-next";
+export type { BeforeHook, AfterHook } from "@agentick/spec-next";
 
 /**
  * A declared command in a harness's registry (ADR 51): the wire-safe
@@ -188,22 +201,9 @@ export type AsyncMiddleware<I = unknown, R = unknown> = (
 // so, like AsyncMiddleware, it can't live in spec without a wrong-direction dep.
 // ============================================================================
 
-/**
- * A before-hook (ADR 80 §4): receives the command's input plus the op's
- * {@link RuntimeContext}. Return the reshaped input to **transform**, `void`
- * to **observe/passthrough**, or `throw` to **veto** (the op aborts with the
- * thrown error on the `E` channel — no verdict DSL).
- */
-export type BeforeHook<In, Ctx = RuntimeContext> = (
-  input: In,
-  ctx: Ctx,
-) => In | void | Promise<In | void>;
-
-/** An after-hook — symmetric to {@link BeforeHook} over the command's output. */
-export type AfterHook<Out, Ctx = RuntimeContext> = (
-  output: Out,
-  ctx: Ctx,
-) => Out | void | Promise<Out | void>;
+// `BeforeHook<In, Ctx>` / `AfterHook<Out, Ctx>` are now defined in
+// `@agentick/spec-next` (pure, context-parametric) and re-exported above. The
+// server binds `Ctx = RuntimeContext` at each derivation site below.
 
 /**
  * Empty-seed registry (ADR 80 §5) — the single source of truth mapping a
@@ -214,45 +214,30 @@ export type AfterHook<Out, Ctx = RuntimeContext> = (
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface CommandRegistry {}
 
-/** Uppercase the first char of `S`, leaving the tail untouched. */
-type Cap<S extends string> = S extends `${infer H}${infer T}` ? `${Uppercase<H>}${T}` : S;
 /**
- * PascalCase a command id, splitting on the `:` (command), `/` (wire), and `-`
- * (kebab word) delimiters — so `session:apply-executor-result` mints the clean,
- * dot-accessible `onBeforeSessionApplyExecutorResult`, not a hyphenated key.
+ * The bare `on<Command>` full-middleware key half of {@link CommandHooks}
+ * (ADR 83 amendment) — the whole `(input, next, ctx) => output` wrapper (wrap /
+ * retry / short-circuit / try-finally / shared state across both faces), typed
+ * to the command, unlike raw `.use` (untyped, global). before/after are
+ * one-sided sugar on top. AsyncMiddleware-valued, so it stays runtime-owned
+ * (distinct from the spec-owned {@link HooksOf} before/after halves).
  */
-type Pascal<S extends string> = S extends `${infer A}:${infer B}`
-  ? `${Cap<A>}${Pascal<B>}`
-  : S extends `${infer A}/${infer B}`
-    ? `${Cap<A>}${Pascal<B>}`
-    : S extends `${infer A}-${infer B}`
-      ? `${Cap<A>}${Pascal<B>}`
-      : Cap<S>;
-
-/**
- * The derived, never-hand-written hook surface (ADR 80 §5): each
- * {@link CommandRegistry} entry mints `onBefore<Pascal>?` (over its input) and
- * `onAfter<Pascal>?` (over its output). The type-level `Pascal` is the exact
- * twin of the runtime {@link deriveHookNames} — they MUST agree (a test).
- */
-export type CommandHooks = {
-  [K in keyof CommandRegistry as `onBefore${Pascal<K & string>}`]?: BeforeHook<
-    CommandRegistry[K] extends { input: infer I } ? I : never
-  >;
-} & {
-  [K in keyof CommandRegistry as `onAfter${Pascal<K & string>}`]?: AfterHook<
-    CommandRegistry[K] extends { output: infer O } ? O : never
-  >;
-} & {
-  // ADR 83 amendment — the bare `on<Command>` full-middleware key: the whole
-  // `(input, next, ctx) => output` wrapper (wrap / retry / short-circuit /
-  // try-finally / shared state across both faces), typed to the command, unlike
-  // raw `.use` (untyped, global). before/after are one-sided sugar on top.
+type CommandAroundHooks = {
   [K in keyof CommandRegistry as `on${Pascal<K & string>}`]?: AsyncMiddleware<
     CommandRegistry[K] extends { input: infer I } ? I : never,
     CommandRegistry[K] extends { output: infer O } ? O : never
   >;
 };
+
+/**
+ * The derived, never-hand-written hook surface (ADR 80 §5): each
+ * {@link CommandRegistry} entry mints `onBefore<Pascal>?` (over its input) and
+ * `onAfter<Pascal>?` (over its output) via the spec-owned {@link HooksOf}
+ * generic (bound to `RuntimeContext`), plus the bare `on<Command>?`
+ * full-middleware key ({@link CommandAroundHooks}). The type-level `Pascal` is
+ * the exact twin of the runtime {@link deriveHookNames} — they MUST agree (a test).
+ */
+export type CommandHooks = HooksOf<CommandRegistry, RuntimeContext> & CommandAroundHooks;
 
 /**
  * The per-verb IMPERATIVE registrar surface — the same `Pascal<K>` derivation as
@@ -278,15 +263,7 @@ export type CommandMiddlewares = {
   ) => Unsubscribe;
 };
 
-export type HookRegistrars = {
-  [K in keyof CommandRegistry as `onBefore${Pascal<K & string>}`]: (
-    fn: BeforeHook<CommandRegistry[K] extends { input: infer I } ? I : never>,
-  ) => Unsubscribe;
-} & {
-  [K in keyof CommandRegistry as `onAfter${Pascal<K & string>}`]: (
-    fn: AfterHook<CommandRegistry[K] extends { output: infer O } ? O : never>,
-  ) => Unsubscribe;
-} & CommandMiddlewares;
+export type HookRegistrars = RegistrarsOf<CommandRegistry, RuntimeContext> & CommandMiddlewares;
 
 // ============================================================================
 // MiddlewareChain — outer→inner composition
@@ -382,23 +359,6 @@ export function liftMiddleware<I = unknown, R = unknown, E = unknown>(
 }
 
 /**
- * Resolve a command's op name (`"<surface>:command:<verb>"`) to its
- * `[onBefore…, onAfter…]` hook names (ADR 80 §5). Strips the `:command:`
- * infix to the canonical `"<who>:<what>"`, then PascalCases (splitting on `:`
- * AND `/`). The runtime twin of the type-level `Pascal` — they MUST agree, so
- * `deriveHookNames("tool:command:dispatch")` === `["onBeforeToolDispatch",
- * "onAfterToolDispatch"]`, the names `CommandHooks` mints for `"tool:dispatch"`.
- */
-export function deriveHookNames(opName: string): [string, string] {
-  const pascal = opName
-    .replace(":command:", ":")
-    .split(/[-:/]/)
-    .map((seg) => (seg === "" ? seg : seg.charAt(0).toUpperCase() + seg.slice(1)))
-    .join("");
-  return [`onBefore${pascal}`, `onAfter${pascal}`];
-}
-
-/**
  * Adapt a {@link BeforeHook} into an {@link AsyncMiddleware}: await the hook,
  * thread its reshaped input (or the original on `void`) into `next`; a `throw`
  * propagates as a veto. Lifted through the SAME `liftMiddleware` path `.use`
@@ -416,29 +376,6 @@ const asAfter =
     const out = await next(input);
     return ((await hook(out, ctx)) ?? out) as R;
   };
-
-/**
- * Parse a {@link CommandHooks} / {@link HookRegistrars} key into its
- * `{ kind, command }`. The single strip both {@link commandHookMiddleware} (over
- * config/registrar keys) and `runOperation`'s `ctx.op` derivation (over
- * {@link deriveHookNames} output) route through, so a hook registered under
- * `onBefore<Pascal>` and the op that fires it key by the IDENTICAL Pascal
- * command suffix. Recognizes `onBefore` / `onAfter` (one-sided sugar) and the
- * bare `on<Suffix>` (full-middleware `on<Command>`, ADR 83 amendment). Returns
- * `undefined` for a non-hook key (defensive).
- */
-function parseHookKey(
-  key: string,
-): { kind: "before" | "after" | "around"; command: string } | undefined {
-  // ORDER MATTERS: the `onBefore` / `onAfter` prefixes are tested FIRST so they
-  // don't get swallowed by the bare `on<Suffix>` (around) case below.
-  if (key.startsWith("onBefore")) return { kind: "before", command: key.slice("onBefore".length) };
-  if (key.startsWith("onAfter")) return { kind: "after", command: key.slice("onAfter".length) };
-  // Bare `on<Suffix>` (ADR 83 amendment) — the full-middleware `on<Command>`
-  // registrar. `fn` is already an AsyncMiddleware; no before/after adaptation.
-  if (key.startsWith("on")) return { kind: "around", command: key.slice("on".length) };
-  return undefined;
-}
 
 /**
  * Self-scope an {@link AsyncMiddleware} to a single command on the shared `.use`

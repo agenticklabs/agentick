@@ -15,3 +15,4 @@ export * from "./protocol/index.js";
 export * from "./wire/index.js";
 export * from "./client/index.js";
 export * from "./guards/index.js";
+export * from "./hooks/derivation.js";
