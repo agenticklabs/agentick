@@ -16,9 +16,12 @@ Build agentick UIs in any framework by layering thin bindings over the existing
    that wrap any store in the framework's reactive primitive (`useSyncExternalStore`,
    Angular signals). Hooks: `useClient` / `useSession(id)` / `useChannel(view)`.
 
-The thesis: **everything a UI consumes from agentick is a `get/subscribe` store**
-— messages, channels, and status are all instances of one consumption primitive.
-That single idea is what makes the library tiny and multiplexing free.
+The thesis: a UI composes a **family** of reactive sources — messages, progress,
+logs, task status, knobs, **elicitation**, MCP, custom channels, connection — and
+**every one is the same `get/subscribe` store** on the read side, with the
+bidirectional ones (elicitation, knobs, …) adding an action verb. One consumption
+primitive; a new family is a façade + a one-line hook. That's what keeps the
+library tiny (and multiplexing free) even as the surface grows.
 
 ## 1. Motivation
 
@@ -32,22 +35,40 @@ per framework. Analogous to the Vercel AI SDK's split of a framework-agnostic
 "core" is already the client, and channels are first-class instead of bolted-on
 `data-*` parts.
 
-## 2. Thesis — one consumption primitive: the `get/subscribe` store
+## 2. Thesis — a UI composes a FAMILY of reactive sources, all one primitive
 
-agentick already committed to the `useSyncExternalStore` contract: `channelView`
-returns `{ get(); subscribe(); close() }`. The UI library leans all the way in —
-**every UI-facing source is that same store**:
+A real agentick UI is not "render messages." It responds to **many** server-side
+projections at once — messages are one family. And several are **bidirectional**:
+the server asks, the UI shows an affordance, the user answers.
 
-| UI concept | store | folds |
-| --- | --- | --- |
-| the conversation | message-fold store | the timeline channel (§4) → `UIMessage[]` + `status` |
-| structured side-state | `channelView` | any `session:channel:<x>` (knobs, tasks, custom) |
-| connection / capabilities | client-local notifiers | `onStateChange` / `onCapabilitiesChange` |
+agentick already committed to the `useSyncExternalStore` contract (`channelView`
+→ `{ get(); subscribe(); close() }`). Every family below reduces to that same
+`get/subscribe` store on the READ side; the bidirectional ones add **action
+verbs** on top (respond / accept / set / call):
 
-A framework binding is then a **single** adapter — "wrap a `get/subscribe` store"
-— reused for all three. There is no message-specific binding, no channel-specific
-binding: `useSession(id).messages` and `useChannel(todosView)` are the same
-`useStore(...)` underneath.
+| Family | client seam (today) | UI hook | kind |
+| --- | --- | --- | --- |
+| **messages** | timeline channel — §4 (to build) | `useSession(id).messages` | read |
+| **elicitation** | `session.elicitations()` + `respondToElicitation` ✅ | `useElicitation(session)` | **bidirectional** (accept / decline) |
+| **progress** | `onProgress(scope)` ✅ | `useProgress(scope)` | read |
+| **logs** | `onLog(scope)` ✅ | `useLogs(scope)` | read |
+| **task status** | `session:channel:task-status` (façade to build) | `useTasks(session)` | read (+ cancel) |
+| **knobs** | `knobsStateView` ✅ | `useKnobs(session)` | **bidirectional** (set) |
+| **MCP apps / resources** | `mcp/src/client` ✅ | `useMcp…` | read (+ tool actions) |
+| **connection / capabilities** | `onStateChange` / `onCapabilitiesChange` ✅ | `useClient().status` | read |
+| **custom** | `channelView` + a colocated façade | `useChannel(view)` | read (or bidir via the channel's `request`) |
+
+The framework binding is a **single** adapter — "wrap a `get/subscribe` store" —
+reused across every family; the bidirectional hooks just also return the action
+verb. `useSession(id).messages`, `useChannel(todosView)`, and the read side of
+`useElicitation` are the same `useStore(...)` underneath. **This is why the
+library stays tiny even as the surface grows** — a new family is a façade + a
+one-line hook, never a new binding.
+
+Bidirectional is not special-cased: it's the `ChannelHandle` `request`/`onRequest`
+substrate (§4 of ADR-on-channels) surfaced to the UI as *(pending request store,
+respond action)*. Elicitation is the canonical instance; a custom channel can do
+the same ask/respond.
 
 ## 3. The `UIMessage` model + the fold (StreamEvent-native)
 
@@ -76,6 +97,11 @@ part, `tool-call-*` opens/fills a tool part, `usage`/terminal marks the message
 `complete`. Pure and unit-testable; the store just runs it over the stream.
 
 ## 4. Message source — the timeline channel (the pinned seam)
+
+The **messages** family (§2) is the most involved — it's the one that needs a new
+server projection. The other families mostly wrap seams that already exist
+(`onProgress`/`onLog` signals, `knobsStateView`, `session.elicitations()`); this
+section pins the messages one.
 
 **The conversation is the timeline harness** — already an append-only event log
 (a fold), with `exportSnapshot()` (snapshot) and `timeline:append` bus events
@@ -121,20 +147,40 @@ singleton. `ui-core` holds a **store registry keyed by `(client, sessionId)`**:
 The transport already multiplexes the underlying wire subscriptions; the registry
 multiplexes the *stores* on top.
 
-## 6. Hooks — the hierarchy mirrors the handles
+## 6. Hooks — a family per projection, hierarchy mirrors the handles
 
 ```ts
-useClient(): Client                                  // from ClientProvider
-useGateway(): { apps, status, … }
+// structural (mirror the handle hierarchy):
+useClient(): { client, status, capabilities }        // from ClientProvider
 useApp(appId): { sessions, createSession, … }
 useSession(id): { messages, status, send, stop, dispatch, … }   // the 90% hook
-useChannel(view): T                                  // any channelView (custom channels)
+
+// the read families (each wraps a get/subscribe store):
+useProgress(scope): ProgressState
+useLogs(scope): LogEntry[]
+useTasks(session): TaskStatus[]
+useKnobs(session): { values, set }                   // read + set (bidirectional)
+useChannel(view): T                                  // any channelView — custom channels
+
+// the bidirectional family (the exemplar):
+useElicitation(session): {
+  pending: ElicitationRequest[];                     // the read store
+  // each request carries its own accept/decline/cancel (typed by schema):
+}
 ```
 
-`useSession(id)` returns `{ messages: UIMessage[], status, send(text), stop() }`
-— `send` → `client.session(id).send()`, `stop` → `handle.abort()`, `status` from
-the fold + handle status. `useChannel(view)` wraps any `channelView` (the `data-*`
-analog — todos, presence, knobs). Custom channels surface here (see §8).
+Each hook is `useStore(sourceForThatFamily)` under the hood. The **structural**
+hooks are convenience aggregations (`useSession(id).messages` is `useChannel` over
+the timeline view; its `send`/`stop` are `client.session(id).send()` /
+`handle.abort()`).
+
+**Bidirectional** hooks return `(store, action)`. `useElicitation(session)`
+surfaces the pending elicitation requests as a store; each request is a
+`ClientElicitationHandle` with typed `.accept(value)` / `.decline()` — so a UI
+renders the server's question (form/confirm/choice) and the user's answer routes
+back via `session/respond_to_elicitation`. `useKnobs` is the same shape (read the
+values, `set(id, value)`). This is the `ChannelHandle` `request`/`onRequest` loop
+surfaced to the UI; a custom channel can expose the same ask/respond.
 
 ## 7. Package topology + dependencies
 
@@ -174,10 +220,21 @@ API reference.
   together? (leaning core+React first.)
 - **`useSession` return shape** — how much beyond `{ messages, status, send, stop }`
   (regenerate? edit? input state?).
+- **Bidirectional hook shape** — `(store, action)` vs each item carrying its own
+  verbs (elicitation already does the latter — each `ClientElicitationHandle` has
+  `.accept`/`.decline`). Standardize one shape across elicitation / knobs / tool
+  confirm / custom-channel-request?
+- **Client façades to build** — which families need a new typed client façade:
+  **timeline** (§4) and **task-status** (`taskStatusView`) don't exist yet;
+  **elicitation** and **knobs** do. Do those façades live in their harness packages
+  (`timeline/src/client/`, `tasks/src/client/`) — the established pattern — and does
+  ADR 85 depend on them or drive them?
+- **MCP apps in the UI** — MCP resources/tools have a `mcp/src/client` surface, but
+  "MCP apps" (interactive MCP UI) is the least-defined family. Scope it here or
+  defer to an MCP-UI ADR?
 - **Timeline channel ownership** — does the timeline-channel projection ship in the
-  timeline harness (`timeline/src/client/` + publisher) as part of this ADR, or as
-  its own prerequisite ADR? (leaning: its own small ADR — it's a reusable primitive
-  beyond UIs.)
+  timeline harness as part of this ADR, or as its own prerequisite ADR? (leaning:
+  its own small ADR — a reusable primitive beyond UIs.)
 - **`UIMessage` parts coverage** — files/images, sources, step boundaries — model
   now or grow as `StreamEvent` grows?
 
