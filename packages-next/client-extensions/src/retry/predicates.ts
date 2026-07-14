@@ -67,7 +67,7 @@ export function defaultIsRetryable(err: unknown): boolean {
  * inherently idempotent (POST-like semantics) and need a server-side
  * dedup hint so retries don't cause double-execution.
  *
- * `session/send`, `app/runOnce`, `session/dispatch`, `session/queue` are
+ * `session/send`, `app/run_once`, `session/dispatch`, `session/queue` are
  * the canonical agentick examples. Read-shaped methods (`gateway/list*`,
  * `app/get*`) don't get keys — replaying them is naturally idempotent.
  *
