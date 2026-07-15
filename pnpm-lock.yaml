@@ -202,6 +202,61 @@ importers:
         specifier: ^5.4.11
         version: 5.4.21(@types/node@25.0.9)
 
+  example/v2-coding-agent:
+    dependencies:
+      '@agentick/client-next':
+        specifier: workspace:*
+        version: link:../../packages-next/client
+      '@agentick/gateway-next':
+        specifier: workspace:*
+        version: link:../../packages-next/gateway
+      '@agentick/knobs-next':
+        specifier: workspace:*
+        version: link:../../packages-next/knobs
+      '@agentick/model-ai-sdk-next':
+        specifier: workspace:*
+        version: link:../../packages-next/model-ai-sdk
+      '@agentick/reconciler-react-next':
+        specifier: workspace:*
+        version: link:../../packages-next/reconciler-react
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../../packages-next/spec
+      '@agentick/timeline-next':
+        specifier: workspace:*
+        version: link:../../packages-next/timeline
+      '@agentick/transport-in-process-next':
+        specifier: workspace:*
+        version: link:../../packages-next/transport-in-process
+      '@agentick/transport-next':
+        specifier: workspace:*
+        version: link:../../packages-next/transport
+      '@ai-sdk/openai':
+        specifier: ^2.0.0
+        version: 2.0.89(zod@4.3.6)
+      dotenv:
+        specifier: ^16.4.5
+        version: 16.6.1
+      react:
+        specifier: ^19.2.4
+        version: 19.2.4
+      zod:
+        specifier: ^4.3.6
+        version: 4.3.6
+    devDependencies:
+      '@types/node':
+        specifier: ^22.5.4
+        version: 22.19.7
+      '@types/react':
+        specifier: ^19.2.13
+        version: 19.2.13
+      tsx:
+        specifier: ^4.19.2
+        version: 4.21.0
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+
   example/v2-otto:
     dependencies:
       '@agentick/app-next':
