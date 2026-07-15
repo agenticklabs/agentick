@@ -1721,6 +1721,33 @@ explicit `typescript` + `vitest` devDeps. Both removed:
 Running record of decisions made during execution (separate from the
 blueprint's design decisions; this is execution-level).
 
+### 2026-07-15
+
+- **`session.tasks` completed to a CQRS handle** (`e271c834`): added
+  `tasksWireExtension` (`tasks/cancel`) + `tasksHandle` (client) so
+  `session.tasks` is now `ChannelView & { cancel(taskId, reason?) }` — uniform
+  with `session.knobs` (view + `set`) and `session.elicitations` (stream +
+  `respond`). Reads are uniform (channelView/channelStream); writes are per-domain
+  commands, NOT divergence. `tasks/cancel` rides `builtinWireExtensions` (owned by
+  app-next), so every gateway registers it. Closes the "read-only until its wire
+  method lands" note in `builtin-wire.ts`.
+- **Ambient-module shadow trap — root-caused a 1575-error regression.** A wire
+  `wire-augment.ts` with a bare `declare module "@agentick/spec-next" { … }` and
+  NO top-level `import`/`export` is a SCRIPT, so TS reads the block as an *ambient
+  module declaration that shadows the entire spec package* (every export vanishes)
+  rather than a merging augmentation. Symptom: `example-v2-real` went 0 → 1575
+  "has no exported member" errors while every changed package typechecked clean in
+  isolation. Fix: `export {}` at the top makes it a module → augmentation. The
+  knobs twin dodged this only incidentally (`import type { CommandInfo }`). Load-
+  bearing comment added at the seam. **Watch for this on every new type-only
+  augmentation file.**
+- **Proportionality call:** `tasks/cancel` is a structural twin of `knobs/set`
+  (plain request/response wire method), so it gets the knobs test treatment
+  (wire-unit + client-handle-unit + real-gateway registration), NOT a heavier
+  inProcessTransport full-stack e2e. The elicitation e2e existed because
+  elicitation had novel correlationId-routed-stream machinery; tasks/cancel has
+  none, and a dedicated e2e would only re-prove the generic dispatch path.
+
 ### 2026-07-09
 
 - **Tasks/escalation close-out batch (4 built + verified):** (1) escalation routes
