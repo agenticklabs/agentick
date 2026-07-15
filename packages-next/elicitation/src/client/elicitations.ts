@@ -31,6 +31,11 @@ import { omitUndefined } from "@agentick/utils-next";
 
 import { ELICITATION_CHANNEL_FQN } from "../channel.js";
 
+// TODO(ui-core): `session.onElicitation(cb)` callback sugar over elicitationStream
+// — thin wrapper (one subscription, same cost as the stream). The performant
+// N-families-one-subscription form is the ADR 85 firehose demux (one session
+// subscription → tasks/knobs/elicitation stores), not per-family callbacks.
+
 /** The reply body for a pending elicitation. */
 export interface ElicitationReplyInput {
   readonly correlationId: string;
