@@ -46,6 +46,8 @@
     "@agentick/reconciler-next": "workspace:*",
     "@agentick/runtime-next": "workspace:*",
     "@agentick/spec-conformance-next": "workspace:*",
+    "@agentick/tasks-next": "workspace:*",
+    "@agentick/utils-next": "workspace:*",
     "effect": "^3.21.2",
     "typescript": "^5.7.3",
     "vitest": "^4.0.18"

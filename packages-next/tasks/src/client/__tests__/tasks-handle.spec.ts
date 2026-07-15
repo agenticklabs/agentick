@@ -23,6 +23,7 @@ import type {
   TaskStatus,
   WireMethod,
   WireParams,
+  WireResult,
 } from "@agentick/spec-next";
 import { channelEventName } from "@agentick/spec-next";
 import { waitFor } from "@agentick/utils-next/testing";
@@ -76,10 +77,15 @@ function fakeCommandClient(
       subscribe(_scope: SubscriptionScope, _query?: EventQuery): SubscriptionStream {
         return stream;
       },
-      async request<M extends WireMethod>(method: M, params: WireParams<M>): Promise<unknown> {
+      async request<M extends WireMethod>(
+        method: M,
+        params: WireParams<M>,
+      ): Promise<WireResult<M>> {
         captured.method = method;
         captured.params = params;
-        return null;
+        // `tasks/cancel` resolves to `null`; typed against the precise
+        // `WireResult<M>` (not the `unknown`-absorbing knobs shortcut).
+        return null as unknown as WireResult<M>;
       },
     },
   };

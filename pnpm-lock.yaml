@@ -1688,6 +1688,12 @@ importers:
       '@agentick/spec-conformance-next':
         specifier: workspace:*
         version: link:../spec-conformance
+      '@agentick/tasks-next':
+        specifier: workspace:*
+        version: link:../tasks
+      '@agentick/utils-next':
+        specifier: workspace:*
+        version: link:../utils
       effect:
         specifier: ^3.21.2
         version: 3.21.2
