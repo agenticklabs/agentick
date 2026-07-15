@@ -14,6 +14,7 @@
 export { defineEval } from "./define-eval.js";
 export { registerEvalPlugin, registeredEvalPlugins } from "./plugins.js";
 export { formatResult, formatMatrix } from "./report.js";
+export { renderHtmlReport, type HtmlReportOptions } from "./html-report.js";
 export type {
   AppFactory,
   AssertionKind,

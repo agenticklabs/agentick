@@ -156,6 +156,20 @@ returns `{ myCheck }`, reading the run via the `EvalRunContext`
 scorecard string (assertions, scores, tool calls; matrix adds per-cell
 rows + mean-per-score aggregation).
 
+`renderHtmlReport(matrix, opts?)` returns a **self-contained HTML**
+string — a dependency-free, theme-aware page you write to disk, open,
+drop in a PR comment, or publish as an artifact. It renders a summary
+stat row, a score heatmap (cost-like labels colored inverted), a
+cost-vs-quality scatter (inline SVG), and a per-run trajectory trace
+(the tool-call sequence + assertions + scores). Zero JS (native
+`<details>`), CSP-safe (no external hosts). `opts.fragment` emits just
+`<style>` + markup for embedding.
+
+```ts
+import { renderHtmlReport } from "@agentick/eval-next";
+await writeFile("eval.html", renderHtmlReport(await myEval.matrix({ model: [a, b] })));
+```
+
 ### `EvalResult`
 
 ```ts
@@ -257,6 +271,9 @@ for (const a of result.assertions) {
   the plugin seam (per-eval `plugins`), the workspace plugin
   (`t.sh` / `t.file`), and the judge plugin (grades via injected `generate`,
   records assertion + score).
+- `src/__tests__/html-report.spec.ts` — `renderHtmlReport` produces a
+  self-contained document carrying the cells / scores / trajectory / verdict,
+  with no external hosts (CSP-safe); fragment mode omits the skeleton.
 
 A worked end-to-end example lives in
 `example/v2-coding-agent/src/eval/coding.eval.tsx` — executable scoring
