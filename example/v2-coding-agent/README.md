@@ -72,8 +72,16 @@ await t.judge("greeting.js exports a correct farewell…");          // LLM-as-j
 ```
 
 `t.sh` / `t.file` come from `@agentick/eval-next/plugins/workspace`; `t.judge`
-from `.../plugins/judge` — both installed via the `plugins: [...]` seam. Set
-`EVAL_MATRIX=1` to benchmark across models. The agent runs headless in eval
+from `.../plugins/judge` — both installed via the `plugins: [...]` seam.
+
+```bash
+EVAL_MATRIX=1 pnpm --filter example-v2-coding-agent eval
+```
+
+benchmarks across **gpt-4o-mini vs gpt-4o over 3 trials each** — so each score
+is a distribution (mean ±stddev), each pass a rate, with unbiased `pass@k` — and
+writes a self-contained `eval-report.html` (heatmap + cost/quality scatter +
+per-run trajectory traces). The agent runs headless in eval
 (`setAutoApproveWrites(true)`) since there's no client to answer `write_file`'s
 elicitation.
 

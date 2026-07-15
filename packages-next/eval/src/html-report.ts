@@ -14,7 +14,7 @@
  * sequence + assertions + scores behind each cell).
  */
 
-import type { EvalResult, MatrixResult, ObservedToolCall } from "./types.js";
+import type { EvalResult, MatrixCell, MatrixResult, ObservedToolCall, ScoreAgg } from "./types.js";
 
 export interface HtmlReportOptions {
   readonly title?: string;
@@ -30,6 +30,11 @@ function esc(s: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+/** Score-appropriate precision: token-ish magnitudes → integer, else 2dp. */
+function fmtNum(v: number): string {
+  return Math.abs(v) >= 100 ? Math.round(v).toLocaleString() : v.toFixed(2);
 }
 
 /** Label a cell from its axes object: `model=gpt-4o · case=refactor`. */
@@ -57,17 +62,17 @@ interface ScoreStat {
   readonly max: number;
 }
 
-/** Collect the distinct score labels + their per-cell values across the matrix. */
+/** Collect the distinct score labels + their per-cell MEANS across the matrix. */
 function scoreStats<O>(matrix: MatrixResult<O>): ScoreStat[] {
   const order: string[] = [];
   const byLabel = new Map<string, number[]>();
   for (const cell of matrix.cells) {
-    for (const s of cell.result.scores) {
-      if (!byLabel.has(s.label)) {
-        byLabel.set(s.label, []);
-        order.push(s.label);
+    for (const [label, agg] of Object.entries(cell.stats.scores)) {
+      if (!byLabel.has(label)) {
+        byLabel.set(label, []);
+        order.push(label);
       }
-      byLabel.get(s.label)!.push(s.value);
+      byLabel.get(label)!.push(agg.mean);
     }
   }
   return order.map((label) => {
@@ -82,8 +87,8 @@ function norm(v: number, stat: ScoreStat): number {
   return (v - stat.min) / (stat.max - stat.min);
 }
 
-function scoreFor(result: EvalResult, label: string): number | undefined {
-  return result.scores.find((s) => s.label === label)?.value;
+function aggFor<O>(cell: MatrixCell<O>, label: string): ScoreAgg | undefined {
+  return cell.stats.scores[label];
 }
 
 function findLabel(stats: ScoreStat[], re: RegExp): ScoreStat | undefined {
@@ -94,7 +99,7 @@ function findLabel(stats: ScoreStat[], re: RegExp): ScoreStat | undefined {
 
 function summary<O>(matrix: MatrixResult<O>, stats: ScoreStat[]): string {
   const n = matrix.cells.length;
-  const passed = matrix.cells.filter((c) => c.result.passed).length;
+  const passed = matrix.cells.filter((c) => c.stats.passRate > 0.5).length;
   const rate = n ? Math.round((passed / n) * 100) : 0;
   const cards: Array<[string, string, string]> = [
     ["pass rate", `${rate}%`, `${passed}/${n} cells`],
@@ -132,17 +137,16 @@ function heatmap<O>(matrix: MatrixResult<O>, stats: ScoreStat[]): string {
     .map((cell) => {
       const cells = stats
         .map((s) => {
-          const v = scoreFor(cell.result, s.label);
-          if (v === undefined) return `<td class="heat empty">·</td>`;
-          const n = norm(v, s);
-          const bg = ramp(COST_LABEL.test(s.label) ? 1 - n : n);
-          const shown = Math.abs(v) >= 100 ? Math.round(v).toLocaleString() : v.toFixed(2);
-          return `<td class="heat" style="--c:${bg}">${esc(shown)}</td>`;
+          const agg = aggFor(cell, s.label);
+          if (agg === undefined) return `<td class="heat empty">·</td>`;
+          const bg = ramp(COST_LABEL.test(s.label) ? 1 - norm(agg.mean, s) : norm(agg.mean, s));
+          const band = agg.n > 1 ? `<span class="sd">±${esc(fmtNum(agg.stddev))}</span>` : "";
+          return `<td class="heat" style="--c:${bg}">${esc(fmtNum(agg.mean))}${band}</td>`;
         })
         .join("");
-      const pass = cell.result.passed
-        ? `<td class="pass ok">pass</td>`
-        : `<td class="pass bad">fail</td>`;
+      const st = cell.stats;
+      const rate = st.trials > 1 ? `${st.passed}/${st.trials}` : st.passed ? "pass" : "fail";
+      const pass = `<td class="pass ${st.passRate > 0.5 ? "ok" : "bad"}">${rate}</td>`;
       return `<tr><th class="run">${esc(axesLabel(cell.axes))}</th>${pass}${cells}</tr>`;
     })
     .join("");
@@ -160,10 +164,12 @@ function scatter<O>(matrix: MatrixResult<O>, stats: ScoreStat[]): string {
   const py = (v: number): number => H - pad - norm(v, y) * (H - pad * 2);
   const pts = matrix.cells
     .map((cell) => {
-      const xv = scoreFor(cell.result, x.label);
-      const yv = scoreFor(cell.result, y.label);
-      if (xv === undefined || yv === undefined) return "";
-      const good = cell.result.passed;
+      const xa = aggFor(cell, x.label);
+      const ya = aggFor(cell, y.label);
+      if (!xa || !ya) return "";
+      const xv = xa.mean;
+      const yv = ya.mean;
+      const good = cell.stats.passRate > 0.5;
       return `<circle cx="${px(xv).toFixed(1)}" cy="${py(yv).toFixed(1)}" r="6" class="${good ? "pt ok" : "pt bad"}"><title>${esc(axesLabel(cell.axes))}\n${esc(x.label)}=${xv}\n${esc(y.label)}=${yv}</title></circle>`;
     })
     .join("");
@@ -191,24 +197,29 @@ function trace(calls: readonly ObservedToolCall[]): string {
   return `<div class="trace">${chips}</div>`;
 }
 
-function runDetails(result: EvalResult, axes: unknown): string {
-  const asserts = result.assertions
+function runDetails<O>(cell: MatrixCell<O>): string {
+  const st = cell.stats;
+  const rep: EvalResult | undefined = cell.trials[0]; // representative trial for the trace
+  const asserts = (rep?.assertions ?? [])
     .map(
       (a) =>
         `<li class="${a.passed ? "ok" : "bad"}"><span class="mk">${a.passed ? "✓" : "✗"}</span> ${esc(a.label ?? a.kind)}${a.passed ? "" : ` <span class="muted">— ${esc(a.message)}</span>`}</li>`,
     )
     .join("");
-  const scores = result.scores
+  const scores = Object.entries(st.scores)
     .map(
-      (s) =>
-        `<li><span class="mk muted">~</span> ${esc(s.label)}: <b>${esc(String(s.value))}</b></li>`,
+      ([label, a]) =>
+        `<li><span class="mk muted">~</span> ${esc(label)}: <b>${esc(fmtNum(a.mean))}</b>${a.n > 1 ? ` <span class="muted">±${esc(fmtNum(a.stddev))} · n=${a.n}</span>` : ""}</li>`,
     )
     .join("");
-  const summaryMark = result.passed ? "ok" : "bad";
+  const rate = st.trials > 1 ? `${st.passed}/${st.trials} passed` : st.passed ? "pass" : "fail";
+  const atK = st.passAtK !== undefined ? ` · pass@k ${st.passAtK.toFixed(2)}` : "";
+  const mk = st.passRate > 0.5 ? "ok" : "bad";
   return `<details class="run">
-    <summary><span class="dot ${summaryMark}"></span>${esc(axesLabel(axes))}<span class="ms">${result.elapsedMs}ms</span></summary>
+    <summary><span class="dot ${mk}"></span>${esc(axesLabel(cell.axes))}<span class="ms">${rate}${atK}</span></summary>
     <div class="run-body">
-      ${trace(result.toolCalls)}
+      ${st.trials > 1 ? `<div class="muted repnote">trajectory shown for trial 1 of ${st.trials}</div>` : ""}
+      ${rep ? trace(rep.toolCalls) : ""}
       <div class="cols">
         <ul class="asserts">${asserts || '<li class="muted">no assertions</li>'}</ul>
         <ul class="scorelist">${scores || '<li class="muted">no scores</li>'}</ul>
@@ -269,6 +280,7 @@ table.grid thead, table.grid tr:last-child td { border-bottom:0; }
 table.grid tr th:first-child, table.grid th.run { text-align:left; color:var(--muted); font-weight:500; }
 table.grid > tr:first-child th { color:var(--muted); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; background:var(--panel); }
 td.heat { color:#fff; font-weight:600; background: var(--c); }
+td.heat .sd { display:block; font-size:9px; font-weight:400; opacity:.82; margin-top:1px; }
 td.heat.empty { background:transparent; color:var(--muted); }
 td.pass.ok { color: var(--ok); } td.pass.bad { color: var(--bad); }
 
@@ -288,6 +300,7 @@ details.run summary { cursor:pointer; padding:12px 16px; display:flex; align-ite
 details.run summary::-webkit-details-marker { display:none; }
 details.run summary .ms { margin-left:auto; color:var(--muted); font-size:11px; }
 .run-body { padding: 4px 16px 16px; border-top:1px solid var(--line); }
+.repnote { font-size:11px; margin:12px 0 -4px; }
 .trace { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin:14px 0; }
 .chip { display:inline-flex; align-items:center; gap:6px; font-family:var(--mono); font-size:12px;
   padding:4px 10px 4px 5px; border-radius:999px; border:1px solid var(--line); background:var(--bg); }
@@ -316,7 +329,7 @@ details.run summary .ms { margin-left:auto; color:var(--muted); font-size:11px; 
 export function renderHtmlReport<O>(matrix: MatrixResult<O>, opts?: HtmlReportOptions): string {
   const title = opts?.title ?? "Agent eval report";
   const stats = scoreStats(matrix);
-  const passed = matrix.cells.filter((c) => c.result.passed).length;
+  const passed = matrix.cells.filter((c) => c.stats.passRate > 0.5).length;
   const verdict = matrix.passed ? "ok" : "bad";
 
   const body = `<div class="rep"><div class="wrap">
@@ -330,7 +343,7 @@ export function renderHtmlReport<O>(matrix: MatrixResult<O>, opts?: HtmlReportOp
     ${scatter(matrix, stats) ? `<h2>Cost vs quality</h2>${scatter(matrix, stats)}` : ""}
 
     <h2>Runs</h2>
-    <div class="runs">${matrix.cells.map((c) => runDetails(c.result, c.axes)).join("")}</div>
+    <div class="runs">${matrix.cells.map((c) => runDetails(c)).join("")}</div>
   </div></div>`;
 
   const styleTag = `<style>${STYLE}</style>`;

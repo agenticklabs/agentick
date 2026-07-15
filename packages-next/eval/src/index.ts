@@ -15,11 +15,13 @@ export { defineEval } from "./define-eval.js";
 export { registerEvalPlugin, registeredEvalPlugins } from "./plugins.js";
 export { formatResult, formatMatrix } from "./report.js";
 export { renderHtmlReport, type HtmlReportOptions } from "./html-report.js";
+export { passAtK, aggregate, cellStats } from "./stats.js";
 export type {
   AppFactory,
   AssertionKind,
   AssertionResult,
   CallableEval,
+  CellStats,
   DefaultAppOverrides,
   EvalContext,
   EvalContextExtensions,
@@ -33,5 +35,6 @@ export type {
   MatrixResult,
   ObservedToolCall,
   PluginAssertionInput,
+  ScoreAgg,
   ScoreResult,
 } from "./types.js";

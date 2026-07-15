@@ -13,10 +13,12 @@
 import { cartesian, mapConcurrent } from "@agentick/utils-next";
 
 import { runEval } from "./runner.js";
+import { cellStats } from "./stats.js";
 import type {
   CallableEval,
   DefaultAppOverrides,
   EvalDefinition,
+  EvalResult,
   MatrixCell,
   MatrixOptions,
   MatrixResult,
@@ -51,8 +53,9 @@ async function runMatrix<O, P>(
 ): Promise<MatrixResult<O>> {
   const started = Date.now();
   const concurrency = opts?.concurrency ?? 1;
+  const trials = Math.max(1, Math.trunc(opts?.trials ?? 1));
 
-  // cartesian() produces one cell per combination. The TYPE here is
+  // cartesian() produces one combination per cell. The TYPE here is
   // sloppy (Record<string, unknown>) but we cast at the boundary —
   // CallableEval.matrix's signature pins the shape for the adopter.
   const productCells = cartesian(axes) as Array<O>;
@@ -60,15 +63,23 @@ async function runMatrix<O, P>(
     return { cells: [], passed: true, elapsedMs: Date.now() - started };
   }
 
-  const cells: MatrixCell<O>[] = await mapConcurrent(
-    productCells,
-    concurrency,
-    async (axesCell) => {
-      const result = await runEval<O, P>(definition, axesCell);
-      return { axes: axesCell, result };
-    },
+  // Flatten to (cellIndex, trial) units so concurrency spans trials too —
+  // N stochastic runs per cell should parallelize like any other work.
+  const units = productCells.flatMap((axesCell, cellIndex) =>
+    Array.from({ length: trials }, () => ({ axesCell, cellIndex })),
+  );
+  const runs = await mapConcurrent(units, concurrency, async ({ axesCell }) =>
+    runEval<O, P>(definition, axesCell),
   );
 
-  const passed = cells.every((c) => c.result.passed);
+  // Regroup by cell (units were emitted cell-major, so slice in order).
+  const cells: MatrixCell<O>[] = productCells.map((axesCell, cellIndex) => {
+    const cellRuns: EvalResult[] = runs.slice(cellIndex * trials, (cellIndex + 1) * trials);
+    return { axes: axesCell, trials: cellRuns, stats: cellStats(cellRuns, opts?.k) };
+  });
+
+  // A cell "passes" if a majority of its trials passed — a single flaky run
+  // no longer flips the whole matrix.
+  const passed = cells.every((c) => c.stats.passRate > 0.5);
   return { cells, passed, elapsedMs: Date.now() - started };
 }

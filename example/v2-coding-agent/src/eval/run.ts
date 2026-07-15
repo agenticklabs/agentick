@@ -8,7 +8,8 @@
  */
 
 import "dotenv/config";
-import { formatResult, formatMatrix } from "@agentick/eval-next";
+import { writeFile } from "node:fs/promises";
+import { formatResult, formatMatrix, renderHtmlReport } from "@agentick/eval-next";
 import { aisdk } from "@agentick/model-ai-sdk-next";
 import { openai } from "@ai-sdk/openai";
 
@@ -24,13 +25,18 @@ async function main(): Promise<void> {
   const result = await codingEval();
   console.log(formatResult(result));
 
-  // The same definition is a benchmark — uncomment to compare models:
+  // The same definition is a benchmark: EVAL_MATRIX=1 compares models over
+  // several trials each (so the numbers are distributions, not coin flips) and
+  // writes a self-contained HTML report.
   if (process.env.EVAL_MATRIX) {
-    console.log("\nBenchmark across models:\n");
-    const matrix = await codingEval.matrix({
-      model: [aisdk(openai("gpt-4o-mini")), aisdk(openai("gpt-4o"))],
-    });
+    console.log("\nBenchmark across models (3 trials/cell):\n");
+    const matrix = await codingEval.matrix(
+      { model: [aisdk(openai("gpt-4o-mini")), aisdk(openai("gpt-4o"))] },
+      { trials: 3, k: 2, concurrency: 2 },
+    );
     console.log(formatMatrix(matrix));
+    await writeFile("eval-report.html", renderHtmlReport(matrix, { title: "Coding agent" }));
+    console.log("\nwrote eval-report.html");
   }
 
   process.exit(result.passed ? 0 : 1);

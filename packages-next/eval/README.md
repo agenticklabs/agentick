@@ -20,7 +20,7 @@ across many evals.
 | Iteration | Surface                                                         | State   |
 | --------- | --------------------------------------------------------------- | ------- |
 | 1 (MVP)   | `defineEval` + `t.send/completed/calledTool/notCalled/noFailed` | shipped |
-| 2         | `.matrix(axes, { concurrency? })` parameter sweeps              | shipped |
+| 2         | `.matrix(axes, { concurrency?, trials?, k? })` sweeps + pass@k  | shipped |
 | 3         | `t.judge(...)` LLM-as-judge                                     | planned |
 | 4         | Tool stubs, fixtures, cost accounting                           | planned |
 | 5         | Cassette replay (record → freeze → replay)                      | planned |
@@ -199,10 +199,10 @@ const expensive = await myEval({ executor: gpt4oExecutor });
 console.log({ cheap: cheap.passed, expensive: expensive.passed });
 ```
 
-### Matrix sweeps
+### Matrix sweeps + trials (benchmarking)
 
-`.matrix(axes, opts?)` runs the cartesian product of axis values.
-One cell per combination; `passed` aggregates AND across cells.
+`.matrix(axes, opts?)` runs the cartesian product of axis values —
+this is where a single definition becomes a benchmark.
 
 ```ts
 const matrix = await calculatorAgent.matrix(
@@ -210,18 +210,43 @@ const matrix = await calculatorAgent.matrix(
     executor: [openaiExec, anthropicExec],
     promptVariant: ["concise", "verbose"],
   },
-  { concurrency: 4 }, // default 1 — sequential — to avoid rate-limit blowups
+  { concurrency: 4, trials: 5, k: 2 },
 );
 
-console.log(`${matrix.cells.filter((c) => c.result.passed).length} / ${matrix.cells.length}`);
-for (const cell of matrix.cells) {
-  console.log(cell.axes, cell.result.passed);
+console.log(formatMatrix(matrix)); // or renderHtmlReport(matrix)
+```
+
+**`trials: N` is the difference between a number and a coin flip.** Agents
+are stochastic — a single run's pass/fail and score value are noise. With
+`trials > 1`, each cell runs N times and collapses into a **distribution**:
+
+```ts
+interface MatrixCell<O> {
+  axes: O;
+  trials: EvalResult[];   // all N runs
+  stats: CellStats;       // the distribution
+}
+interface CellStats {
+  trials: number;
+  passed: number;         // # of trials that passed
+  passRate: number;       // passed / trials = pass@1
+  passAtK?: number;       // unbiased pass@k (Chen et al.), when `k` is set
+  scores: Record<string, { mean; stddev; min; max; n }>;
 }
 ```
 
+So `quality: 0.62` becomes `0.62 ±0.18 (n=5)`, and a flaky model that
+passes 2/5 stops looking like a clean 40%. `pass@k` uses the unbiased
+HumanEval/SWE-bench estimator (`1 − C(n−c,k)/C(n,k)`), exposed standalone as
+`passAtK(n, c, k)`. A cell "passes" if a **majority** of its trials pass, so
+one flaky run no longer flips the matrix.
+
+Single config, N times: `myEval.matrix({}, { trials: 20 })` — one cell, 20
+trials. Concurrency spans cells × trials.
+
 Edge cases:
 
-- `matrix({})` → 1 cell (equivalent to `myEval()`)
+- `matrix({})` → 1 cell (equivalent to `myEval()`; `trials` defaults to 1)
 - `matrix({ executor: [] })` → 0 cells (mathematical product), `passed: true` (vacuous)
 - Missing axes in `O` → that key is `undefined` in the cell; the
   factory's `??` defaults take over.
@@ -284,7 +309,8 @@ A worked end-to-end example lives in
 - **Shipped:** `t.result` (full run access), `t.expect` / `t.score`, the
   plugin seam (`EvalContextExtensions` + `registerEvalPlugin` / per-eval
   `plugins`), the `workspace` (`t.sh` / `t.file`) and `judge` (`t.judge`)
-  plugins, `formatResult` / `formatMatrix` reporters.
+  plugins, `formatResult` / `formatMatrix` / `renderHtmlReport` reporters,
+  **`trials: N` + unbiased `pass@k`** (distributions per cell).
 - **`t.onElicit(responder)`** — answer/assert elicitations from the eval, so
   human-in-the-loop paths (a coding agent's write-approval) are evaluable
   without a live client. The example runs headless (`setAutoApproveWrites`)
@@ -293,8 +319,11 @@ A worked end-to-end example lives in
   fast runs (no real fs / network).
 - **`t.withinBudget({ tokens, latencyMs, ticks })`** — budget-assertion sugar
   over `t.result.usage` (the raw data is now exposed; this is convenience).
-- **Trials + `pass@k`** — run each matrix cell N times and aggregate
-  mean±stddev / pass@k (agents are stochastic — the honest metric).
+- **Persistence + baselines** — store each run per-SHA, diff vs. a committed
+  baseline, gate CI on regressions. (Distributions now exist; this is the
+  loop that makes them a trend.)
+- **Cross-cell significance** — is cell A actually better than B, or noise?
+  Needs a reference-cell concept; distributions get you there by eye today.
 - **Fixtures / cassettes** — record→freeze→replay so CI matches a known-good
   run exactly (`executor: replayExecutor(...)`).
 - **Streaming evals** — assertions against intermediate `delta` events.

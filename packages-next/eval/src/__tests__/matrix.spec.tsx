@@ -93,14 +93,39 @@ describe("CallableEval.matrix", () => {
 
     // All cells pass → aggregate passed.
     expect(matrix.passed).toBe(true);
-    expect(matrix.cells.every((c) => c.result.passed)).toBe(true);
+    expect(matrix.cells.every((c) => c.stats.passRate > 0.5)).toBe(true);
   });
 
   it("empty axes record yields one cell (equivalent to myEval())", async () => {
     const matrix = await myEval.matrix({});
     expect(matrix.cells).toHaveLength(1);
-    expect(matrix.cells[0]!.result.passed).toBe(true);
+    expect(matrix.cells[0]!.stats.passRate > 0.5).toBe(true);
     expect(matrix.passed).toBe(true);
+  });
+
+  it("trials runs each cell N times and collapses into a distribution", async () => {
+    // A fresh executor per call (so each of the N trials is an independent run),
+    // one config → `matrix({}, { trials })` is the single-config-N-times form.
+    const trialsEval = defineEval<Overrides>({
+      description: "trials",
+      app: () =>
+        createApp(React.createElement(Agent), { executor: mkOkExecutor("t"), target: mkTarget() }),
+      async test(t) {
+        await t.send("hi");
+        t.completed();
+        t.score("q", 1);
+      },
+    });
+
+    const matrix = await trialsEval.matrix({}, { trials: 3, k: 2 });
+    expect(matrix.cells).toHaveLength(1);
+    const cell = matrix.cells[0]!;
+    expect(cell.trials).toHaveLength(3); // ran 3 times
+    expect(cell.stats.trials).toBe(3);
+    expect(cell.stats.passed).toBe(3);
+    expect(cell.stats.passRate).toBe(1);
+    expect(cell.stats.passAtK).toBe(1); // k set → pass@k present
+    expect(cell.stats.scores.q).toMatchObject({ mean: 1, n: 3, stddev: 0 });
   });
 
   it("axis with empty array yields zero cells (vacuous pass)", async () => {
@@ -127,7 +152,7 @@ describe("CallableEval.matrix", () => {
 
     const matrix = await failing.matrix({ tag: ["a", "b"] });
     expect(matrix.cells).toHaveLength(2);
-    expect(matrix.cells.every((c) => !c.result.passed)).toBe(true);
+    expect(matrix.cells.every((c) => c.stats.passRate <= 0.5)).toBe(true);
     expect(matrix.passed).toBe(false);
   });
 

@@ -174,20 +174,52 @@ export interface CallableEval<O = DefaultAppOverrides, P = unknown> {
 // ============================================================================
 
 export interface MatrixOptions {
-  /** Max concurrent eval runs. Default `1` (sequential). */
+  /** Max concurrent eval runs (spans cells × trials). Default `1` (sequential). */
   readonly concurrency?: number;
+  /**
+   * Runs per cell. Default `1`. Agents are stochastic — a single run's
+   * pass/fail and score value are noise; `trials > 1` collapses each cell into
+   * a distribution (mean ± stddev, pass rate, `pass@k`).
+   */
+  readonly trials?: number;
+  /** `pass@k` to report per cell (unbiased estimator). Omit to skip it. */
+  readonly k?: number;
+}
+
+/** Aggregate of one score label across a cell's trials. */
+export interface ScoreAgg {
+  readonly mean: number;
+  readonly stddev: number;
+  readonly min: number;
+  readonly max: number;
+  readonly n: number;
+}
+
+/** A cell's `trials` runs collapsed into a distribution. */
+export interface CellStats {
+  readonly trials: number;
+  /** Number of trials whose `result.passed` was true. */
+  readonly passed: number;
+  /** `passed / trials` — i.e. `pass@1`. */
+  readonly passRate: number;
+  /** Unbiased `pass@k` for the `MatrixOptions.k` (present only when `k` set). */
+  readonly passAtK?: number;
+  /** Per-score-label aggregate across the trials. */
+  readonly scores: Readonly<Record<string, ScoreAgg>>;
 }
 
 export interface MatrixCell<O = DefaultAppOverrides> {
   /** The resolved override record handed to the factory for this cell. */
   readonly axes: O;
-  /** The eval's result for this cell. */
-  readonly result: EvalResult;
+  /** Every trial's result for this cell (length === `stats.trials`). */
+  readonly trials: ReadonlyArray<EvalResult>;
+  /** The trials collapsed into a distribution. */
+  readonly stats: CellStats;
 }
 
 export interface MatrixResult<O = DefaultAppOverrides> {
   readonly cells: ReadonlyArray<MatrixCell<O>>;
-  /** True iff every cell's `result.passed` is true. */
+  /** True iff every cell passed a MAJORITY of its trials (`passRate > 0.5`). */
   readonly passed: boolean;
   /** Wall-clock duration (ms) of the whole sweep. */
   readonly elapsedMs: number;

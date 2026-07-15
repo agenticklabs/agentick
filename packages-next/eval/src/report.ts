@@ -28,34 +28,48 @@ export function formatResult(result: EvalResult): string {
   return lines.join("\n");
 }
 
+/** Show a value at score-appropriate precision (token-ish → integer). */
+function fmtNum(v: number): string {
+  return Math.abs(v) >= 100 ? Math.round(v).toLocaleString() : v.toFixed(2);
+}
+
 /**
- * A matrix scorecard: one row per cell, plus aggregate pass-rate and, for each
- * score label, the mean across cells. This is where the testing-shaped model
- * reads as a benchmark.
+ * A matrix scorecard: one row per cell (pass rate over trials + each score's
+ * mean±stddev), plus aggregate mean-per-score across cells. This is where the
+ * testing-shaped model reads as a benchmark — and, with `trials > 1`, where the
+ * numbers stop being coin flips.
  */
 export function formatMatrix<O>(matrix: MatrixResult<O>): string {
   const lines: string[] = [];
-  const passCount = matrix.cells.filter((c) => c.result.passed).length;
+  const passCount = matrix.cells.filter((c) => c.stats.passRate > 0.5).length;
   lines.push(
     `${mark(matrix.passed)} matrix: ${passCount}/${matrix.cells.length} cells passed  (${matrix.elapsedMs}ms)`,
   );
   for (const cell of matrix.cells) {
+    const { stats } = cell;
     const axes = JSON.stringify(cell.axes);
-    const scores = cell.result.scores.map((s) => `${s.label}=${s.value.toFixed(2)}`).join(" ");
-    lines.push(`    ${mark(cell.result.passed)} ${axes}${scores ? `  ${scores}` : ""}`);
+    const rate =
+      stats.trials > 1 ? `${stats.passed}/${stats.trials}` : stats.passed ? "pass" : "fail";
+    const atK = stats.passAtK !== undefined ? ` pass@k=${stats.passAtK.toFixed(2)}` : "";
+    const scores = Object.entries(stats.scores)
+      .map(([label, a]) => `${label}=${fmtNum(a.mean)}${a.n > 1 ? `±${fmtNum(a.stddev)}` : ""}`)
+      .join(" ");
+    lines.push(
+      `    ${mark(stats.passRate > 0.5)} ${axes}  ${rate}${atK}${scores ? `  ${scores}` : ""}`,
+    );
   }
-  // Aggregate mean per score label across cells.
+  // Aggregate mean per score label across cells (mean of per-cell means).
   const byLabel = new Map<string, number[]>();
   for (const cell of matrix.cells) {
-    for (const s of cell.result.scores) {
-      const arr = byLabel.get(s.label) ?? [];
-      arr.push(s.value);
-      byLabel.set(s.label, arr);
+    for (const [label, a] of Object.entries(cell.stats.scores)) {
+      const arr = byLabel.get(label) ?? [];
+      arr.push(a.mean);
+      byLabel.set(label, arr);
     }
   }
-  for (const [label, values] of byLabel) {
-    const mean = values.reduce((a, b) => a + b, 0) / values.length;
-    lines.push(`    ~ mean ${label}: ${mean.toFixed(2)} (n=${values.length})`);
+  for (const [label, means] of byLabel) {
+    const mean = means.reduce((a, b) => a + b, 0) / means.length;
+    lines.push(`    ~ mean ${label}: ${fmtNum(mean)} (cells=${means.length})`);
   }
   return lines.join("\n");
 }
