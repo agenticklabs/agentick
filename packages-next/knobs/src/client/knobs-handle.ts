@@ -2,8 +2,8 @@
  * `knobsHandle` — the client-side knobs resource handle (read + write).
  *
  * Completes the CQRS loop the read view (`knobsStateView`) opened: it
- * composes that live channel fold for the READ half (get/subscribe/closed/
- * close) and adds `set(key, value)`, the WRITE command over `knobs/set`.
+ * composes that live channel fold for the READ half (get/subscribe/onChange/
+ * status/close) and adds `set(key, value)`, the WRITE command over `knobs/set`.
  *
  * The write is deliberately fire-and-observe: `set` issues the RPC and
  * resolves `void`. It does NOT hand-patch the local view — the write's

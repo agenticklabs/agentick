@@ -1052,6 +1052,27 @@ completed` status timeline (bus envelopes) with the paused-state
   PRODUCED `input_required` projecting onto the wire (`tasks/get`
   reports the paused state a task entered via `ctx.awaitingInput`).
 
+The `session.tasks` CQRS client handle (read view + `cancel` write):
+
+- `src/__tests__/wire.spec.ts` — the `tasksWireExtension` (`tasks/cancel`)
+  handler: session resolution across the gateway's apps, `taskId` / `reason`
+  passthrough to `session.tasks.cancel`, `null` result (state flows via the
+  channel), and `AppNotFoundError` on an unresolved session.
+- `src/client/__tests__/task-status-view.spec.ts` — `taskStatusView` folds
+  `TaskInfo` frames into a map by `taskId` (latest wins), seeds the whole store
+  from the opening `snapshot` frame, and builds the session scope + channel
+  query.
+- `src/client/__tests__/tasks-handle.spec.ts` — `tasksHandle`: `cancel(taskId,
+  reason?)` issues the wire-shaped `tasks/cancel` request (reason omitted when
+  absent), the read half seeds from a snapshot, the CQRS round-trip (a cancel
+  delta re-folds the view; no local hand-patch), and `onChange` fires per frame.
+- `packages-next/transport-in-process/src/__tests__/tasks-cancel-e2e.spec.ts`
+  (sibling package) — the full client ↔ gateway ↔ session round-trip through the
+  REAL `GatewayHarness` + `inProcessTransport`: `client.session(id).tasks.cancel`
+  transitions the server task to `cancelled` (with the reason) and the transition
+  re-folds the client view; cancelling an unknown id surfaces the harness error
+  over the wire.
+
 ## Roadmap & known gaps
 
 - **ADR 68 pg (`@agentick/tasks-store-postgres-next`)** — LANDED. A durable
