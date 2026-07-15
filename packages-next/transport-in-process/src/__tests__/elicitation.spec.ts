@@ -4,7 +4,7 @@
  * Verifies the client/server contract introduced for "client speaks
  * elicitation":
  *
- *   1. `session.respondToElicitation(...)` routes through the new
+ *   1. `session.elicitations.respond(...)` routes through the new
  *      `session/respond_to_elicitation` wire method.
  *   2. `session.elicitations` returns an AsyncIterable of parsed
  *      `ClientElicitationHandle` values — verified by feeding a stub
@@ -17,7 +17,7 @@
  */
 
 import "@agentick/elicitation-next";
-// ADR 87 — contributes `session.elicitations` / `.respondToElicitation()`.
+// ADR 87 — contributes `session.elicitations` / `.elicitations.respond()`.
 import "@agentick/elicitation-next/client";
 
 import { createClient } from "@agentick/client-core-next";
@@ -50,7 +50,7 @@ describe("client elicitation surface — wire method", () => {
     const client = await createClient({ transport: inProcessTransport({ handler }) });
     await client.connect();
 
-    await client.session("sess-1").respondToElicitation({
+    await client.session("sess-1").elicitations.respond({
       correlationId: "req:abc",
       outcome: "accepted",
       value: { approved: true },
@@ -84,12 +84,12 @@ describe("client elicitation surface — wire method", () => {
     await client.connect();
     const sess = client.session("sess-2");
 
-    await sess.respondToElicitation({
+    await sess.elicitations.respond({
       correlationId: "req:1",
       outcome: "declined",
       reason: "user clicked Deny",
     });
-    await sess.respondToElicitation({
+    await sess.elicitations.respond({
       correlationId: "req:2",
       outcome: "cancelled",
       reason: "modal dismissed",
@@ -127,9 +127,9 @@ describe("client elicitation surface — type checks", () => {
     await client.connect();
     const sess = client.session("sess-3");
 
-    // Both surfaces exist and are callable.
-    expect(typeof sess.respondToElicitation).toBe("function");
-    expect(typeof sess.elicitations.onChange).toBe("function"); // ChannelStream, not a fn
+    // The resource handle: read surface + write command, on one object.
+    expect(typeof sess.elicitations.respond).toBe("function"); // write command
+    expect(typeof sess.elicitations.onChange).toBe("function"); // read feed (ChannelStream)
     expect(typeof sess.elicitations[Symbol.asyncIterator]).toBe("function");
 
     // Surface-level response shape matches the wire — we use the
@@ -137,7 +137,7 @@ describe("client elicitation surface — type checks", () => {
     // subscription events to exercise the handle's convenience
     // methods organically.
     await expect(
-      sess.respondToElicitation({
+      sess.elicitations.respond({
         correlationId: "req:any",
         outcome: "accepted",
         value: { approved: true } satisfies Record<string, unknown>,

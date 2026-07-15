@@ -15,6 +15,7 @@ export {
   elicitationStream,
   respondToElicitation,
   type ElicitationReplyInput,
+  type ElicitationsHandle,
 } from "./elicitations.js";
 
 // Side-effect: contribute the elicitation slots to the client SessionHandle.

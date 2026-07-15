@@ -45,19 +45,29 @@ interface EnvelopeWithMetadata extends EventEnvelope {
 }
 
 /**
- * The elicitation read surface as a {@link ChannelStream} — the SAME uniform
- * shape as tasks/knobs (`onChange` + async-iterable + `close`), not a bespoke
- * type. Elicitation opts OUT of the {@link channelView} fold (each frame is a
- * discrete request you answer, not state to materialize), and it taps the raw
- * subscription because it needs the envelope's correlation metadata — but it
- * PRESENTS `ChannelStream<ClientElicitationHandle>`, so `session.elicitations`
- * reads identically to `session.tasks`. Single-consumer.
+ * The elicitation resource handle — the CQRS shape shared by every sub-handle:
+ * the READ surface ({@link ChannelStream}, uniform with `session.tasks`) PLUS
+ * the domain WRITE command. Read via `.onChange`/`for await` (each frame a
+ * {@link ClientElicitationHandle} with typed `.accept`/`.decline`/`.cancel`);
+ * write via `.respond(input)` by `correlationId` (the by-id escape hatch for
+ * code not holding a handle — the per-item `.accept` etc. use the same path).
+ */
+export interface ElicitationsHandle extends ChannelStream<ClientElicitationHandle<unknown>> {
+  respond(input: ElicitationReplyInput): Promise<void>;
+}
+
+/**
+ * Open the elicitation resource handle. Elicitation opts OUT of the
+ * {@link channelView} fold (each frame is a discrete request you answer, not
+ * state to materialize); it taps the raw subscription for the envelope's
+ * correlation metadata but PRESENTS the uniform `ChannelStream` + `.respond`.
+ * Single-consumer.
  */
 export function elicitationStream(
   client: ClientProtocol,
   sessionId: string,
   fromCursor?: Cursor,
-): ChannelStream<ClientElicitationHandle<unknown>> {
+): ElicitationsHandle {
   const sub = client.transport.subscribe(
     { kind: "session", id: sessionId },
     { surface: "session", name: { exact: ELICITATION_CHANNEL_FQN } },
@@ -93,6 +103,9 @@ export function elicitationStream(
       return () => {
         active = false;
       };
+    },
+    respond(input: ElicitationReplyInput): Promise<void> {
+      return respondToElicitation(client, sessionId, input);
     },
     close(): void {
       void sub.close();

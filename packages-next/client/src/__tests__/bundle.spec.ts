@@ -1,7 +1,7 @@
 /**
  * The bundle's whole job: importing it registers EVERY built-in session
  * sub-handle (ADR 87), so `client.session(id).tasks` / `.knobs` /
- * `.elicitations()` self-assemble with no per-harness imports.
+ * `.elicitations` self-assemble with no per-harness imports.
  */
 
 import { describe, expect, it } from "vitest";
@@ -26,9 +26,7 @@ function neverStream(): SubscriptionStream {
 describe("@agentick/client-bundle-next", () => {
   it("registers every built-in session sub-handle slot on import", () => {
     const names = registeredSessionHandleExtensions();
-    expect(names).toEqual(
-      expect.arrayContaining(["tasks", "knobs", "elicitations", "respondToElicitation"]),
-    );
+    expect(names).toEqual(expect.arrayContaining(["tasks", "knobs", "elicitations"]));
   });
 
   it("a session handle self-assembles all built-in slots (no per-harness imports)", () => {
@@ -44,8 +42,8 @@ describe("@agentick/client-bundle-next", () => {
     const session = makeSessionHandle(fakeClient, "s1");
 
     expect(session.tasks).toBeDefined(); // ChannelView<TaskStatusMap>
-    expect(session.knobs).toBeDefined(); // KnobsHandleView
-    expect(typeof session.elicitations).toBe("function"); // stream factory
-    expect(typeof session.respondToElicitation).toBe("function"); // reply command
+    expect(session.knobs).toBeDefined(); // KnobsHandleView (view + set)
+    expect(typeof session.elicitations.onChange).toBe("function"); // ChannelStream read
+    expect(typeof session.elicitations.respond).toBe("function"); // write command on the handle
   });
 });

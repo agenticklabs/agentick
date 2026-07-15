@@ -14,39 +14,23 @@
  */
 
 import { registerSessionHandleExtension } from "@agentick/client-core-next";
-import type { ChannelStream, ClientElicitationHandle } from "@agentick/spec-next";
 
-import {
-  elicitationStream,
-  respondToElicitation,
-  type ElicitationReplyInput,
-} from "./elicitations.js";
+import { elicitationStream, type ElicitationsHandle } from "./elicitations.js";
 
 declare module "@agentick/spec-next" {
   interface SessionHandleExtensions {
     /**
-     * Inbound elicitation requests for this session as a {@link ChannelStream}
-     * — the SAME read surface as `session.tasks`/`.knobs`: consume via
-     * `session.elicitations.onChange((e) => e.accept(value))` or
-     * `for await (const e of session.elicitations)`. Each yielded
+     * The elicitation resource handle — read surface + write command, the CQRS
+     * shape shared by `session.knobs` (view + `set`) and `session.tasks`. Read
+     * via `session.elicitations.onChange((e) => e.accept(value))` or
+     * `for await (const e of session.elicitations)`; write by `correlationId`
+     * via `session.elicitations.respond(input)`. Each yielded
      * {@link ClientElicitationHandle} carries typed `.accept`/`.decline`/`.cancel`.
      */
-    readonly elicitations: ChannelStream<ClientElicitationHandle<unknown>>;
-    /**
-     * Reply to a pending elicitation by `correlationId` — the direct command
-     * for code not holding a handle (the handle's `.accept` etc. use this).
-     */
-    respondToElicitation(input: ElicitationReplyInput): Promise<void>;
+    readonly elicitations: ElicitationsHandle;
   }
 }
 
 registerSessionHandleExtension("elicitations", (client, sessionId) =>
   elicitationStream(client, sessionId),
-);
-
-registerSessionHandleExtension(
-  "respondToElicitation",
-  (client, sessionId) =>
-    (input: ElicitationReplyInput): Promise<void> =>
-      respondToElicitation(client, sessionId, input),
 );

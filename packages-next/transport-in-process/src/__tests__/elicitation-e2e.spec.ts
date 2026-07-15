@@ -24,7 +24,7 @@ import "@agentick/elicitation-next";
 
 import { describe, expect, it } from "vitest";
 
-// ADR 87 — contributes `session.elicitations` / `.respondToElicitation()`.
+// ADR 87 — contributes `session.elicitations` / `.elicitations.respond()`.
 import "@agentick/elicitation-next/client";
 import { createClient } from "@agentick/client-core-next";
 import { FakeLanguageModelExecutor } from "@agentick/executor-next";
@@ -268,7 +268,7 @@ describe("elicitation end-to-end — client ↔ gateway ↔ session", () => {
     const next = await firstP;
     const elic = next.value!;
     // Client sends a malformed accept — `approved` is missing.
-    await client.session(sessionId).respondToElicitation({
+    await client.session(sessionId).elicitations.respond({
       correlationId: elic.correlationId,
       outcome: "accepted",
       value: { unrelated: true },
@@ -289,7 +289,7 @@ describe("elicitation end-to-end — client ↔ gateway ↔ session", () => {
   it("unknown correlationId: respondToElicitation is a silent no-op", async () => {
     const { client, sessionId, cleanup } = await makeStack();
     await expect(
-      client.session(sessionId).respondToElicitation({
+      client.session(sessionId).elicitations.respond({
         correlationId: "req:does-not-exist",
         outcome: "declined",
       }),
