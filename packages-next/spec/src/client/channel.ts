@@ -2,7 +2,7 @@
  * Client channel-view types (ADR 33) — the config a `channelView` folds with
  * and the live reduced view it returns. Defined in spec so they can type BOTH
  * the `ClientProtocol.channelView` instance method AND the tree-shakeable
- * `channelView(client, …)` free function in `@agentick/client-next` — one set
+ * `channelView(client, …)` free function in `@agentick/client-core-next` — one set
  * of types, two surfaces.
  *
  * A `channelView` is a pure FOLD over one `session:channel:<x>` subscription

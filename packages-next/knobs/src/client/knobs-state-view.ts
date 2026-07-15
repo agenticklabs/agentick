@@ -15,7 +15,7 @@
  * @verifiedBy packages-next/knobs/src/client/__tests__/knobs-state-view.spec.ts
  */
 
-import { channelView } from "@agentick/client-next";
+import { channelView } from "@agentick/client-core-next";
 import type {
   ChannelView,
   ClientTransport,

@@ -8,7 +8,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { WebSocket as WsLib } from "ws";
 import { createGateway } from "@agentick/gateway-next";
-import { createClient } from "@agentick/client-next";
+import { createClient } from "@agentick/client-core-next";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { WebSocketTransportOptions } from "../client/transport.js";
 

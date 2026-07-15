@@ -1,6 +1,6 @@
 # `@agentick/client-extensions-next/offline`
 
-Offline-queue extension for `@agentick/client-next`. Buffers outbound
+Offline-queue extension for `@agentick/client-core-next`. Buffers outbound
 RPCs when the wire is closed; replays FIFO on reconnect.
 
 Subpath of [`@agentick/client-extensions-next`](../../README.md) — the
@@ -19,7 +19,7 @@ behaviors via their subpath for tree-shaking + dependency isolation.
 ## Quick start
 
 ```ts
-import { createClient } from "@agentick/client-next";
+import { createClient } from "@agentick/client-core-next";
 import { offline } from "@agentick/client-extensions-next/offline";
 
 const client = await createClient({

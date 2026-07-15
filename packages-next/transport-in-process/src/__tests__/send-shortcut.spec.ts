@@ -6,7 +6,7 @@
  * the same RPC params.
  */
 
-import { createClient } from "@agentick/client-next";
+import { createClient } from "@agentick/client-core-next";
 import { describe, expect, it } from "vitest";
 import type { JsonRpcRequest, JsonRpcResponse } from "@agentick/spec-next";
 

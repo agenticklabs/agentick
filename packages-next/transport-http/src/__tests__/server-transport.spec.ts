@@ -11,7 +11,7 @@
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createGateway } from "@agentick/gateway-next";
-import { createClient } from "@agentick/client-next";
+import { createClient } from "@agentick/client-core-next";
 import { runServerTransportConformance } from "@agentick/spec-conformance-next";
 import { describe, expect, it } from "vitest";
 

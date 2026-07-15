@@ -10,7 +10,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { Effect } from "effect";
 import { createGateway } from "@agentick/gateway-next";
-import { createClient } from "@agentick/client-next";
+import { createClient } from "@agentick/client-core-next";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { http } from "../client/index.js";

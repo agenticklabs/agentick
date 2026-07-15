@@ -300,7 +300,7 @@ export interface GatewayHarnessProtocol {
    * Emit the control-plane signal that the gateway's wire-extension
    * set changed (ADR 47). Appends a {@link GATEWAY_CAPABILITIES_CHANGED}
    * event to the gateway bus on the gateway scope; clients subscribed
-   * to the gateway control-plane scope (every `@agentick/client-next`
+   * to the gateway control-plane scope (every `@agentick/client-core-next`
    * does so on connect) receive it via `notifications/subscription/event`
    * and refetch `_extensions/list`.
    *

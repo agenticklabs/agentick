@@ -1,61 +1,37 @@
 /**
- * `@agentick/client-next` — canonical TypeScript client implementation
- * of agentick's `ClientProtocol`.
+ * `@agentick/client-next` — the batteries-included agentick client (the default).
  *
- * Runs in every JS runtime (Node, browser, Bun, Deno, edge) — no
- * DOM-specific assumptions. Transports are pluggable via
- * `ClientTransport` (defined in `@agentick/spec-next/client`).
+ * Re-exports everything from `@agentick/client-core-next` (the lean,
+ * harness-agnostic core) AND side-effect-imports every built-in `/client`
+ * subpath, so their session sub-handles self-assemble on the client
+ * `SessionHandle` (ADR 87) with no per-harness imports:
  *
- * @see docs/proposals/v2/blueprint/33-client-and-transports.md
+ * ```ts
+ * import { createClient } from "@agentick/client-next";
+ * const client = await createClient({ transport });
+ * const session = client.session(id);
+ * session.tasks.get();                       // @agentick/tasks-next/client
+ * await session.knobs.set("temperature", 1); // @agentick/knobs-next/client
+ * for await (const e of session.elicitations()) await e.accept({}); // elicitation
+ * ```
+ *
+ * This is the client twin of how the public `agentick` metapackage bundles the
+ * server built-ins — `client-next` is the default (everything works), while
+ * `@agentick/client-core-next` is the opt-in lean core for adopters who want
+ * minimal imports and add only the `/client` subpaths they need. At the v2 cut
+ * these become `@agentick/client` (this bundle) + `@agentick/client-core`.
+ *
+ * @see docs/proposals/v2/blueprint/27-modular-built-ins.md (bundled, not privileged)
+ * @see docs/proposals/v2/blueprint/87-client-sub-handles.md
+ * @verifiedBy packages-next/client/src/__tests__/bundle.spec.ts
  */
 
-export { createClient, type CreateClientOptions } from "./client.js";
-export { composeRequest, composeSubscribe } from "./pipeline.js";
-export { ClientHandlerRegistry } from "./handler-registry.js";
-export { ClientHookRegistry, commandForMethod } from "./hook-registry.js";
-export { effectMiddleware, type EffectRequestMiddleware } from "./effect-middleware.js";
-export { makeAppHandle, makeGatewayHandle, makeSessionHandle } from "./handles.js";
-export {
-  onLog,
-  onProgress,
-  type OnSignalOptions,
-  type ReceivedLog,
-  type ReceivedProgress,
-} from "./signals.js";
-export { channelView, type ChannelView, type ChannelViewConfig } from "./channel-view.js";
-export {
-  registerSessionHandleExtension,
-  registeredSessionHandleExtensions,
-  type SessionSubHandleFactory,
-} from "./session-handle-extensions.js";
+// Side-effect: each import types its slot (declare module) AND registers its
+// runtime factory. Order is irrelevant — the registry is keyed by name.
+import "@agentick/tasks-next/client";
+import "@agentick/knobs-next/client";
+import "@agentick/elicitation-next/client";
 
-// Re-export protocol types adopters need to write extensions, for the
-// "one import" ergonomic. Spec is the canonical source.
-export type {
-  Client,
-  ClientAuthSurface,
-  ClientEvent,
-  ClientEventFilter,
-  ClientEventSurface,
-  ClientExtension,
-  ClientHookContext,
-  ClientHooks,
-  ClientInstaller,
-  ClientLifecycleEvents,
-  ClientNamespaces,
-  ClientProtocol,
-  ClientRegistrars,
-  ClientState,
-  ClientTransport,
-  EventFrame,
-  LifecycleEventSpec,
-  LifecycleHandlerFor,
-  ProgressStream,
-  RequestInput,
-  RequestMiddleware,
-  SubscribeInput,
-  SubscribeMiddleware,
-  SubscriptionStream,
-  TransportCapabilities,
-  TransportError,
-} from "@agentick/spec-next";
+// Re-export the full client-core surface (createClient, handles, channelView,
+// the sub-handle registry, protocol type re-exports, …).
+export * from "@agentick/client-core-next";

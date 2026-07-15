@@ -23,7 +23,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { createClient } from "@agentick/client-next";
+import { createClient } from "@agentick/client-core-next";
 import { FakeLanguageModelExecutor } from "@agentick/executor-next";
 import { createGateway } from "@agentick/gateway-next";
 import { fakeReconciler } from "@agentick/reconciler-next/testing";

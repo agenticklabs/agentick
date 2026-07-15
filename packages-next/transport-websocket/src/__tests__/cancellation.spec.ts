@@ -16,7 +16,7 @@
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { WebSocket, WebSocketServer } from "ws";
-import { createClient } from "@agentick/client-next";
+import { createClient } from "@agentick/client-core-next";
 import { createGateway } from "@agentick/gateway-next";
 import { drainRejection } from "@agentick/utils-next/testing";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";

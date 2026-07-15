@@ -55,7 +55,7 @@ not published independently.
 
 The far side of the `session:channel:task-status` channel: a reactive view a
 frontend subscribes to. Mirrors `knobsStateView` — depends on the generic
-`@agentick/client-next` `channelView`, NOT the tasks harness, so it stays out of
+`@agentick/client-core-next` `channelView`, NOT the tasks harness, so it stays out of
 the server bundle.
 
 ```ts

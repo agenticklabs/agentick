@@ -2,7 +2,7 @@
   "name": "@agentick/client-extensions-next",
   "version": "0.0.0",
   "private": true,
-  "description": "First-party extensions (middleware) for @agentick/client-next. Subpath exports — adopters opt into individual behaviors: retry, telemetry, cache, offline. Tree-shakeable. Same family pattern as Apollo Link / TanStack Query plugins.",
+  "description": "First-party extensions (middleware) for @agentick/client-core-next. Subpath exports — adopters opt into individual behaviors: retry, telemetry, cache, offline. Tree-shakeable. Same family pattern as Apollo Link / TanStack Query plugins.",
   "keywords": [
     "agent",
     "agentick",
@@ -62,7 +62,7 @@
     "@agentick/spec-next": "workspace:*"
   },
   "devDependencies": {
-    "@agentick/client-next": "workspace:*",
+    "@agentick/client-core-next": "workspace:*",
     "@agentick/transport-in-process-next": "workspace:*",
     "typescript": "^5.7.3",
     "vitest": "^4.0.18"

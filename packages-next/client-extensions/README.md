@@ -1,6 +1,6 @@
 # @agentick/client-extensions-next
 
-First-party extensions (middleware) for `@agentick/client-next`. Each
+First-party extensions (middleware) for `@agentick/client-core-next`. Each
 behavior is opt-in via a **subpath import** — adopters install one
 package and pick exactly the behaviors they need; unused subpaths are
 tree-shaken away. The package is dependency-free at the root (no
@@ -32,7 +32,7 @@ The first-party naming is a convention, not a requirement on adopters.
 ## Quick start
 
 ```ts
-import { createClient } from "@agentick/client-next";
+import { createClient } from "@agentick/client-core-next";
 import { retry } from "@agentick/client-extensions-next/retry";
 import { telemetry, noopAdapter } from "@agentick/client-extensions-next/telemetry";
 import { cache } from "@agentick/client-extensions-next/cache";

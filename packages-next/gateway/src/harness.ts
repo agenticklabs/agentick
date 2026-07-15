@@ -537,7 +537,7 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
    * Emit the control-plane "wire-extension set changed" signal
    * (ADR 47). Appends a {@link GATEWAY_CAPABILITIES_CHANGED} event to
    * the gateway bus on the gateway scope. Clients subscribed to the
-   * gateway control-plane scope (every `@agentick/client-next` on
+   * gateway control-plane scope (every `@agentick/client-core-next` on
    * connect) receive it via `notifications/subscription/event` and
    * refetch `_extensions/list`.
    *

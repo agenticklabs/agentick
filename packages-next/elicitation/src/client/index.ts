@@ -3,7 +3,7 @@
  *
  * The far side of the `session:channel:elicitation` request channel + the
  * `session/respond_to_elicitation` reply command. Depends on
- * `@agentick/client-next` (the sub-handle registry) + spec types — NOT on the
+ * `@agentick/client-core-next` (the sub-handle registry) + spec types — NOT on the
  * elicitation harness runtime, so it stays out of a browser bundle. Mirrors the
  * tasks/knobs `/client` convention.
  *

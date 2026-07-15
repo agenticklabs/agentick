@@ -55,7 +55,7 @@ import { makeAppHandle, makeGatewayHandle, makeSessionHandle } from "./handles.j
 import { composeRequest } from "./pipeline.js";
 
 /** Fixed client identity broadcast in `initialize.clientInfo`. */
-const CLIENT_NAME = "@agentick/client-next";
+const CLIENT_NAME = "@agentick/client-core-next";
 const CLIENT_VERSION = "0.0.0";
 
 let clientCounter = 0;

@@ -2,14 +2,13 @@
   "name": "@agentick/client-next",
   "version": "0.0.0",
   "private": true,
-  "description": "Canonical TypeScript implementation of the agentick `ClientProtocol`. Runs in Node, browser, Bun, Deno, and edge runtimes. Wraps any `ClientTransport` (in-process, WebSocket, Streamable HTTP, Unix socket) and exposes `GatewayHandle` / `AppHandle` / `SessionHandle` views over the wire.",
+  "description": "Batteries-included agentick client: re-exports `@agentick/client-core-next` and side-effect-imports every built-in `/client` subpath (tasks, knobs, elicitation) so their session sub-handles (`session.tasks` / `.knobs` / `.elicitations()`) self-assemble with no per-harness imports. Interim stand-in for the public `agentick/client` metapackage entry until the v2 cut.",
   "keywords": [
     "agent",
     "agentick",
     "ai",
     "client",
-    "json-rpc",
-    "mcp"
+    "bundle"
   ],
   "license": "MIT",
   "author": "Ryan Lindgren",
@@ -35,14 +34,12 @@
     "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
   },
   "dependencies": {
-    "@agentick/pubsub-next": "workspace:*",
-    "@agentick/runtime-next": "workspace:*",
-    "@agentick/spec-next": "workspace:*",
-    "@agentick/utils-next": "workspace:*",
-    "effect": "^3.21.2"
+    "@agentick/client-core-next": "workspace:*",
+    "@agentick/elicitation-next": "workspace:*",
+    "@agentick/knobs-next": "workspace:*",
+    "@agentick/tasks-next": "workspace:*"
   },
   "devDependencies": {
-    "@agentick/spec-conformance-next": "workspace:*",
     "typescript": "^5.7.3",
     "vitest": "^4.0.18"
   }

@@ -169,3 +169,26 @@ app/gateway bridge scoping.
    `session.elicitation`.
 4. Update the client README (the handle surface), ADR 85 (families = sub-handles),
    and each harness README.
+
+## 9. Packaging — core vs bundle (landed)
+
+The agnostic core and the batteries-included bundle are **two packages**, the
+client twin of how the `agentick` metapackage bundles server built-ins:
+
+- **`@agentick/client-core-next`** — the lean core. Owns `createClient`,
+  `makeSessionHandle`, the `registerSessionHandleExtension` registry, the handle
+  surface. Depends on **no** harness (the whole point — augmentation, not import).
+- **`@agentick/client-next`** — the default. Re-exports the core AND
+  side-effect-imports every built-in `/client` subpath (`tasks`, `knobs`,
+  `elicitation`), so all slots self-assemble with zero per-harness imports. Carries
+  no logic — three imports + `export *`.
+
+Harness `/client` packages depend on **`client-core-next`** (never the bundle —
+that would be a cycle). At the v2 cut these become `@agentick/client` (bundle) +
+`@agentick/client-core` (core). Elicitation, once hardcoded in the core, is now a
+registrant like tasks/knobs — the core knows about no harness at all.
+
+A wire-method a client sub-handle calls (e.g. knobs' `knobs/set`) needs its
+`WireMethods` augmentation loadable from the `/client` subpath alone — so that
+augmentation lives in a dedicated type-only file (`wire-augment.ts`) the client
+index side-effect-imports, NOT bundled with the server-bridge augmentation.

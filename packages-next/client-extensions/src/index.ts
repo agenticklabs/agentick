@@ -1,6 +1,6 @@
 /**
  * `@agentick/client-extensions-next` — first-party extensions
- * (middleware) for `@agentick/client-next`.
+ * (middleware) for `@agentick/client-core-next`.
  *
  * Adopters typically opt into individual behaviors via the subpath
  * exports — tree-shakeable, dependency-isolated:

@@ -32,7 +32,7 @@ export interface TelemetrySpan {
 
 /**
  * BYO tracer adapter — adopter typically wraps `@opentelemetry/api`'s
- * `trace.getTracer("@agentick/client-next").startSpan(name, { kind: SpanKind.CLIENT })`.
+ * `trace.getTracer("@agentick/client-core-next").startSpan(name, { kind: SpanKind.CLIENT })`.
  *
  * The adapter is also responsible for telling us what
  * `traceparent` / `tracestate` to propagate downstream so the

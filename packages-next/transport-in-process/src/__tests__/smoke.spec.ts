@@ -1,4 +1,4 @@
-import { createClient } from "@agentick/client-next";
+import { createClient } from "@agentick/client-core-next";
 import type { JsonRpcRequest, JsonRpcResponse } from "@agentick/spec-next";
 import { ErrorCode } from "@agentick/spec-next";
 import { describe, expect, it } from "vitest";

@@ -34,7 +34,7 @@ import { channelEventQuery } from "@agentick/spec-next";
 
 // `ChannelView` / `ChannelViewConfig` moved to `@agentick/spec-next/client`
 // (they type BOTH this free function AND the `ClientProtocol.channelView`
-// method). Re-exported here so the `@agentick/client-next` surface is
+// method). Re-exported here so the `@agentick/client-core-next` surface is
 // unchanged.
 export type { ChannelView, ChannelViewConfig } from "@agentick/spec-next";
 

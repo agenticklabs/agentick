@@ -7,7 +7,7 @@
  * `bridges.tasks`. Client-core stays agnostic; this is the harness's contribution.
  */
 
-import { registerSessionHandleExtension, type ChannelView } from "@agentick/client-next";
+import { registerSessionHandleExtension, type ChannelView } from "@agentick/client-core-next";
 import { taskStatusView, type TaskStatusMap } from "./task-status-view.js";
 
 declare module "@agentick/spec-next" {

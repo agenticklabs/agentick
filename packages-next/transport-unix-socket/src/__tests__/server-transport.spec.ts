@@ -15,7 +15,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { connect as netConnect } from "node:net";
 import { createGateway } from "@agentick/gateway-next";
-import { createClient } from "@agentick/client-next";
+import { createClient } from "@agentick/client-core-next";
 import { runServerTransportConformance } from "@agentick/spec-conformance-next";
 import { afterAll, describe, expect, it } from "vitest";
 

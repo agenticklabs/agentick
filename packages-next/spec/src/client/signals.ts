@@ -3,7 +3,7 @@
  * `onProgress` deliver. Defined in spec so they can type BOTH the
  * `ClientProtocol.onLog` / `.onProgress` instance methods AND the
  * tree-shakeable `onLog(client, …)` / `onProgress(client, …)` free
- * functions in `@agentick/client-next` — one set of types, two surfaces.
+ * functions in `@agentick/client-core-next` — one set of types, two surfaces.
  *
  * A tool / harness emits a `log` / `progress` bus event; the gateway
  * projects matching events to subscribed clients over the `subscribe`

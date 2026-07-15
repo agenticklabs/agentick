@@ -18,7 +18,7 @@ import type {
   TaskStatus,
 } from "@agentick/spec-next";
 import { channelEventName } from "@agentick/spec-next";
-import { makeSessionHandle } from "@agentick/client-next";
+import { makeSessionHandle } from "@agentick/client-core-next";
 import { waitFor } from "@agentick/utils-next/testing";
 
 import { TASK_STATUS_CHANNEL } from "../../channel.js";

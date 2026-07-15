@@ -6,7 +6,7 @@
  * every FSM transition); the view folds them into a map keyed by `taskId`
  * (latest wins) so a UI renders a live task list.
  *
- * Mirrors {@link knobsStateView} — depends on `@agentick/client-next` (the
+ * Mirrors {@link knobsStateView} — depends on `@agentick/client-core-next` (the
  * generic `channelView`), NOT on the tasks harness runtime, so it stays out of
  * the server bundle. The `/client` subpath convention (like `/react`): a harness
  * package may add a client surface over the generic client.
@@ -23,7 +23,7 @@
  * @verifiedBy packages-next/tasks/src/client/__tests__/task-status-view.spec.ts
  */
 
-import { channelView, type ChannelView } from "@agentick/client-next";
+import { channelView, type ChannelView } from "@agentick/client-core-next";
 import type { ClientTransport, SubscriptionScope, TaskInfo } from "@agentick/spec-next";
 import { TASK_STATUS_CHANNEL, type TaskStatusFrame } from "../channel.js";
 

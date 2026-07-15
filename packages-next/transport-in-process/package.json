@@ -39,7 +39,7 @@
   },
   "devDependencies": {
     "@agentick/app-next": "workspace:*",
-    "@agentick/client-next": "workspace:*",
+    "@agentick/client-core-next": "workspace:*",
     "@agentick/elicitation-next": "workspace:*",
     "@agentick/executor-next": "workspace:*",
     "@agentick/gateway-next": "workspace:*",

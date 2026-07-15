@@ -2,7 +2,7 @@
  * `ClientProtocol` — the TypeScript contract every agentick TS client
  * implementation satisfies.
  *
- * `@agentick/client-next` ships the canonical impl. Other impls
+ * `@agentick/client-core-next` ships the canonical impl. Other impls
  * (Worker-thread proxy, test mocks) conform to the same interface.
  *
  * The wire is the language-agnostic contract; this is the TypeScript
@@ -109,7 +109,7 @@ export interface ClientProtocol {
    * that closes the underlying subscription.
    *
    * The instance-method twin of the tree-shakeable `onLog(client, …)` free
-   * function in `@agentick/client-next` — both take a client, so the method
+   * function in `@agentick/client-core-next` — both take a client, so the method
    * simply delegates. Symmetric with {@link onCapabilitiesChange}.
    */
   onLog(
@@ -136,7 +136,7 @@ export interface ClientProtocol {
    * contract (`get()` / `subscribe()`); `close()` tears down the subscription.
    *
    * The instance-method twin of the tree-shakeable `channelView(client, …)`
-   * free function in `@agentick/client-next` — both take a client, so the
+   * free function in `@agentick/client-core-next` — both take a client, so the
    * method simply delegates. This is the LOW-LEVEL escape hatch: the typed
    * façades `knobsStateView` / `taskStatusView` (in their harness packages)
    * are the sugar on top, supplying the channel name and `reduce`.
@@ -249,7 +249,7 @@ export interface ClientProtocol {
  * Concrete client type with extension-registered namespaces flattened
  * onto the surface via declaration merging.
  *
- * `@agentick/client-next` returns `Client` from `createClient()`. Any
+ * `@agentick/client-core-next` returns `Client` from `createClient()`. Any
  * adopter extending `ClientNamespaces` sees their namespaces typed
  * here automatically.
  */

@@ -1,6 +1,6 @@
 /**
  * `@agentick/client-extensions-next/retry` — retry extension for
- * `@agentick/client-next`.
+ * `@agentick/client-core-next`.
  *
  * Exponential backoff with full jitter (per AWS Builder's Library,
  * "Timeouts, retries, and backoff with jitter" — Marc Brooker),

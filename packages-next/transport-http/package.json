@@ -52,7 +52,7 @@
     "@agentick/transport-next": "workspace:*"
   },
   "devDependencies": {
-    "@agentick/client-next": "workspace:*",
+    "@agentick/client-core-next": "workspace:*",
     "@agentick/gateway-next": "workspace:*",
     "@agentick/spec-conformance-next": "workspace:*",
     "effect": "^3.21.2",

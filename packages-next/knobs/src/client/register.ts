@@ -7,7 +7,7 @@
  * `KnobsState` view plus `set(key, value)` over `knobs/set` (bidirectional).
  */
 
-import { registerSessionHandleExtension } from "@agentick/client-next";
+import { registerSessionHandleExtension } from "@agentick/client-core-next";
 import { knobsHandle, type KnobsHandleView } from "./knobs-handle.js";
 
 declare module "@agentick/spec-next" {

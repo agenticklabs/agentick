@@ -1,4 +1,3 @@
-import type { CommandInfo } from "@agentick/spec-next";
 /**
  * Module augmentation — adds the knobs slot to two spec interfaces:
  *
@@ -19,6 +18,10 @@ import type { CommandInfo } from "@agentick/spec-next";
 import type { KnobsHarnessProtocol } from "@agentick/spec-next";
 import type { KnobsHandle } from "./handle.js";
 
+// The `WireMethods` rows (knobs/set, knobs/commands) live in their own file so
+// the client subpath can load them without the server-bridge augmentations.
+import "./wire-augment.js";
+
 declare module "@agentick/spec-next" {
   interface HookBridges {
     readonly knobs: KnobsHarnessProtocol;
@@ -34,20 +37,5 @@ declare module "@agentick/spec-next" {
      * For per-knob handles, use `session.knob(name)`.
      */
     readonly knobs: KnobsHandle;
-  }
-}
-
-// ADR 51 slice 5 (#141) — knobs/set is the ratified user-facing wire
-// row (v1 precedent: set_knob + UI).
-declare module "@agentick/spec-next" {
-  interface WireMethods {
-    "knobs/set": {
-      params: { sessionId: string; key: string; value: unknown };
-      result: unknown;
-    };
-    "knobs/commands": {
-      params: { sessionId: string };
-      result: { commands: readonly CommandInfo[] };
-    };
   }
 }

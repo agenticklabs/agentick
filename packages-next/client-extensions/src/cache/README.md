@@ -1,6 +1,6 @@
 # `@agentick/client-extensions-next/cache`
 
-Read-through cache extension for `@agentick/client-next`.
+Read-through cache extension for `@agentick/client-core-next`.
 **Method-explicit-allowlist by default** — most agentick methods are
 stateful (sessions, executions); adopters opt specific read-shaped
 methods into the cache with per-method TTL.
@@ -46,7 +46,7 @@ cache({
 ## Quick start
 
 ```ts
-import { createClient } from "@agentick/client-next";
+import { createClient } from "@agentick/client-core-next";
 import { cache } from "@agentick/client-extensions-next/cache";
 
 const client = await createClient({

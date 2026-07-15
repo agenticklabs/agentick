@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { JsonRpcRequest, JsonRpcResponse } from "@agentick/spec-next";
-import { createClient } from "@agentick/client-next";
+import { createClient } from "@agentick/client-core-next";
 import { inProcessTransport, withHandshake } from "@agentick/transport-in-process-next";
 
 import { offline, InMemoryOfflineStore } from "../index.js";

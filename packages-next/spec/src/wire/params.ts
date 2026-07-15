@@ -398,7 +398,7 @@ export interface ExtensionsListResult {
 
 /**
  * Canonical map of every wire method to its (params, result) tuple.
- * Used by `@agentick/client-next` for typed `client.request(method, ...)`
+ * Used by `@agentick/client-core-next` for typed `client.request(method, ...)`
  * and by `@agentick/wire-openrpc-next` (deferred) for schema export.
  *
  * Adopters extending the wire add entries via declaration merging:

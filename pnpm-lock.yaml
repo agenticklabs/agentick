@@ -400,6 +400,28 @@ importers:
 
   packages-next/client:
     dependencies:
+      '@agentick/client-core-next':
+        specifier: workspace:*
+        version: link:../client-core
+      '@agentick/elicitation-next':
+        specifier: workspace:*
+        version: link:../elicitation
+      '@agentick/knobs-next':
+        specifier: workspace:*
+        version: link:../knobs
+      '@agentick/tasks-next':
+        specifier: workspace:*
+        version: link:../tasks
+    devDependencies:
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+      vitest:
+        specifier: ^4.0.18
+        version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@25.0.9)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.4)
+
+  packages-next/client-core:
+    dependencies:
       '@agentick/pubsub-next':
         specifier: workspace:*
         version: link:../pubsub
@@ -432,9 +454,9 @@ importers:
         specifier: workspace:*
         version: link:../spec
     devDependencies:
-      '@agentick/client-next':
+      '@agentick/client-core-next':
         specifier: workspace:*
-        version: link:../client
+        version: link:../client-core
       '@agentick/transport-in-process-next':
         specifier: workspace:*
         version: link:../transport-in-process
@@ -584,9 +606,9 @@ importers:
 
   packages-next/elicitation:
     dependencies:
-      '@agentick/client-next':
+      '@agentick/client-core-next':
         specifier: workspace:*
-        version: link:../client
+        version: link:../client-core
       '@agentick/runtime-next':
         specifier: workspace:*
         version: link:../runtime
@@ -724,9 +746,9 @@ importers:
 
   packages-next/knobs:
     dependencies:
-      '@agentick/client-next':
+      '@agentick/client-core-next':
         specifier: workspace:*
-        version: link:../client
+        version: link:../client-core
       '@agentick/pubsub-next':
         specifier: workspace:*
         version: link:../pubsub
@@ -1383,9 +1405,9 @@ importers:
 
   packages-next/tasks:
     dependencies:
-      '@agentick/client-next':
+      '@agentick/client-core-next':
         specifier: workspace:*
-        version: link:../client
+        version: link:../client-core
       '@agentick/pubsub-next':
         specifier: workspace:*
         version: link:../pubsub
@@ -1553,9 +1575,9 @@ importers:
         specifier: workspace:*
         version: link:../transport
     devDependencies:
-      '@agentick/client-next':
+      '@agentick/client-core-next':
         specifier: workspace:*
-        version: link:../client
+        version: link:../client-core
       '@agentick/gateway-next':
         specifier: workspace:*
         version: link:../gateway
@@ -1584,9 +1606,9 @@ importers:
       '@agentick/app-next':
         specifier: workspace:*
         version: link:../app
-      '@agentick/client-next':
+      '@agentick/client-core-next':
         specifier: workspace:*
-        version: link:../client
+        version: link:../client-core
       '@agentick/elicitation-next':
         specifier: workspace:*
         version: link:../elicitation
@@ -1624,9 +1646,9 @@ importers:
         specifier: workspace:*
         version: link:../transport
     devDependencies:
-      '@agentick/client-next':
+      '@agentick/client-core-next':
         specifier: workspace:*
-        version: link:../client
+        version: link:../client-core
       '@agentick/gateway-next':
         specifier: workspace:*
         version: link:../gateway
@@ -1658,9 +1680,9 @@ importers:
       '@agentick/app-next':
         specifier: workspace:*
         version: link:../app
-      '@agentick/client-next':
+      '@agentick/client-core-next':
         specifier: workspace:*
-        version: link:../client
+        version: link:../client-core
       '@agentick/gateway-next':
         specifier: workspace:*
         version: link:../gateway

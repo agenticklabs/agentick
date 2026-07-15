@@ -18,7 +18,7 @@
  * client self-maintenance will. See ADR 47.
  */
 
-import { createClient } from "@agentick/client-next";
+import { createClient } from "@agentick/client-core-next";
 import { createGateway } from "@agentick/gateway-next";
 import {
   GATEWAY_CAPABILITIES_CHANGED,

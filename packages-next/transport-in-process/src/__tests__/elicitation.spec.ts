@@ -20,7 +20,7 @@ import "@agentick/elicitation-next";
 // ADR 87 — contributes `session.elicitations()` / `.respondToElicitation()`.
 import "@agentick/elicitation-next/client";
 
-import { createClient } from "@agentick/client-next";
+import { createClient } from "@agentick/client-core-next";
 import type {
   ElicitationResponse,
   JsonRpcRequest,

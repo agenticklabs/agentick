@@ -1,6 +1,6 @@
 # `@agentick/client-extensions-next/telemetry`
 
-Telemetry extension for `@agentick/client-next` — span per logical RPC,
+Telemetry extension for `@agentick/client-core-next` — span per logical RPC,
 W3C Trace Context propagation, OpenTelemetry RPC semantic conventions.
 
 Subpath of [`@agentick/client-extensions-next`](../../README.md) — the
@@ -25,10 +25,10 @@ opentelemetry-api in.
 
 ```ts
 import { trace, SpanKind } from "@opentelemetry/api";
-import { createClient } from "@agentick/client-next";
+import { createClient } from "@agentick/client-core-next";
 import { telemetry, type TelemetryAdapter } from "@agentick/client-extensions-next/telemetry";
 
-const tracer = trace.getTracer("@agentick/client-next");
+const tracer = trace.getTracer("@agentick/client-core-next");
 
 const adapter: TelemetryAdapter = {
   startSpan(name, attributes) {

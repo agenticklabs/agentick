@@ -2,7 +2,7 @@
  * Command hook-name derivation (ADR 80) — the pure, registry-agnostic core
  * shared by BOTH sides of the wire: the server (`CommandRegistry` →
  * `CommandHooks` in `@agentick/runtime-next`) and the client (`WireMethods` →
- * typed hooks in `@agentick/client-next`). One generic, zero duplication.
+ * typed hooks in `@agentick/client-core-next`). One generic, zero duplication.
  *
  * Everything here is PURE — no Effect, no `RuntimeContext`, no runtime deps.
  * The context type (`Ctx`) is a free type parameter each consumer binds to its

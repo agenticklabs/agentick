@@ -19,7 +19,7 @@ import type {
   WireParams,
 } from "@agentick/spec-next";
 import { channelEventName } from "@agentick/spec-next";
-import { makeSessionHandle } from "@agentick/client-next";
+import { makeSessionHandle } from "@agentick/client-core-next";
 import { waitFor } from "@agentick/utils-next/testing";
 
 import { KNOBS_STATE_CHANNEL, type KnobsStateFrame } from "../../channel.js";

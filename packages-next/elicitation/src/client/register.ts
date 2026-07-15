@@ -13,7 +13,7 @@
  * `session.elicitations(opts?)` / `session.respondToElicitation(input)`.
  */
 
-import { registerSessionHandleExtension } from "@agentick/client-next";
+import { registerSessionHandleExtension } from "@agentick/client-core-next";
 import type { ClientElicitationStream, Cursor } from "@agentick/spec-next";
 
 import {

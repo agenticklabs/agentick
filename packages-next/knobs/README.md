@@ -210,7 +210,7 @@ sets every settable knob in that group atomically after a shared type-check.
 
 The far side of the `knobs-state` channel: the client-side projection of knob
 state an app frontend subscribes to. It depends on the generic `channelView`
-from `@agentick/client-next` — **not** on the knobs harness runtime — so a
+from `@agentick/client-core-next` — **not** on the knobs harness runtime — so a
 browser bundle never pulls the server harness in. Mirrors the `/react` subpath
 convention.
 
@@ -327,7 +327,7 @@ Frames carry a monotonic `version`; a gap signals a dropped delta → re-seed vi
 `stateSnapshotFrame()`. Emission is fire-and-forget and **bus-only** (unjournaled).
 The **client-side apply** lands as the [`/client` subpath](#agentickknobs-nextclient):
 `knobsStateView` / `knobsHandle` fold this channel on the far side. It is built on
-the generic per-channel `channelView` primitive in `@agentick/client-next` (shared
+the generic per-channel `channelView` primitive in `@agentick/client-core-next` (shared
 with `task-status`, not knobs-bespoke) — the harness package only supplies the
 typed façade and the `reduce` that seeds from the `snapshot` frame and applies each
 `delta` with `applyJsonPatch`. Gates already project their boolean value through

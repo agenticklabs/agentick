@@ -261,7 +261,7 @@ spec — there is no "shallow nesting OK" middle ground.
 The far side of the `session:channel:elicitation` request channel + the
 `session/respond_to_elicitation` reply command: the surface an app frontend
 uses to render pending elicitations and answer them. Depends on
-`@agentick/client-next` (the ADR 87 sub-handle registry) + spec types — NOT on
+`@agentick/client-core-next` (the ADR 87 sub-handle registry) + spec types — NOT on
 the elicitation harness runtime, so it stays out of a browser bundle. Mirrors
 the tasks/knobs `/client` convention.
 

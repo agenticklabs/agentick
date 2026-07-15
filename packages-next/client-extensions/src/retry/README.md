@@ -1,6 +1,6 @@
 # `@agentick/client-extensions-next/retry`
 
-Retry extension for `@agentick/client-next`. Exponential backoff with
+Retry extension for `@agentick/client-core-next`. Exponential backoff with
 full jitter, configurable retryable predicate, idempotency-key
 propagation, per-method overrides.
 
@@ -21,7 +21,7 @@ behaviors via their subpath for tree-shaking + dependency isolation.
 ## Quick start
 
 ```ts
-import { createClient } from "@agentick/client-next";
+import { createClient } from "@agentick/client-core-next";
 import { retry } from "@agentick/client-extensions-next/retry";
 
 const client = await createClient({

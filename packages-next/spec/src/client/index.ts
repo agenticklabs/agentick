@@ -1,5 +1,5 @@
 /**
- * Client protocol — the TypeScript contract a `@agentick/client-next`-
+ * Client protocol — the TypeScript contract a `@agentick/client-core-next`-
  * style client exposes. Multiple impls conform; the wire defined in
  * `@agentick/spec-next/wire/` is the language-agnostic contract beneath.
  *

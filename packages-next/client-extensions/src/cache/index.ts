@@ -1,6 +1,6 @@
 /**
  * `@agentick/client-extensions-next/cache` — read-through cache
- * extension for `@agentick/client-next`.
+ * extension for `@agentick/client-core-next`.
  *
  * Method-explicit-allowlist by default — most agentick methods are
  * stateful (sessions, executions) and MUST NOT be cached. Adopters opt

@@ -41,7 +41,7 @@ import { logEventQuery, progressEventQuery } from "@agentick/spec-next";
 // `ReceivedLog` / `ReceivedProgress` / `OnSignalOptions` moved to
 // `@agentick/spec-next/client` (they type BOTH these free functions AND the
 // `ClientProtocol.onLog` / `.onProgress` methods). Re-exported here so the
-// `@agentick/client-next` surface is unchanged.
+// `@agentick/client-core-next` surface is unchanged.
 export type { ReceivedLog, ReceivedProgress, OnSignalOptions } from "@agentick/spec-next";
 
 /** Minimal client surface these helpers need. */
