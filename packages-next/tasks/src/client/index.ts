@@ -8,7 +8,12 @@
  * generic client without pulling the server harness into a browser bundle.
  */
 
+// Type-only side effect: makes `tasks/cancel` a valid `WireMethods` row for the
+// handle's `transport.request("tasks/cancel", …)` — no server code.
+import "../wire-augment.js";
+
 export { taskStatusView, type TaskStatusClient, type TaskStatusMap } from "./task-status-view.js";
+export { tasksHandle, type TasksHandleView, type TasksCommandClient } from "./tasks-handle.js";
 
 // Side-effect: contribute `session.tasks` to the client SessionHandle (ADR 87).
 import "./register.js";

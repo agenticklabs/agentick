@@ -55,17 +55,23 @@ describe("GatewayHarness — framework wire extensions", () => {
     await gw.close();
   });
 
-  it("registers built-in harness wire-extensions (knobs/set) by default", async () => {
-    // `knobs/set` rides `builtinWireExtensions` (owned by `@agentick/app-next`,
-    // which depends on the built-in harness packages), registered in the gateway's
-    // bundled tier. Asserted by namespace/name so this test needs no knobs dep.
+  it("registers built-in harness wire-extensions (knobs/set, tasks/cancel) by default", async () => {
+    // `knobs/set` and `tasks/cancel` ride `builtinWireExtensions` (owned by
+    // `@agentick/app-next`, which depends on the built-in harness packages),
+    // registered in the gateway's bundled tier. Asserted by namespace/name so
+    // this test needs no knobs/tasks dep.
     const gw = new GatewayHarness();
     await gw.ready;
 
-    const resolved = gw.wireExtensions().resolve("knobs/set");
-    expect(resolved).toBeDefined();
-    expect(resolved?.extension.namespace).toBe("knobs");
-    expect(resolved?.extension.name).toBe("@agentick/knobs-next#wire");
+    const knobs = gw.wireExtensions().resolve("knobs/set");
+    expect(knobs).toBeDefined();
+    expect(knobs?.extension.namespace).toBe("knobs");
+    expect(knobs?.extension.name).toBe("@agentick/knobs-next#wire");
+
+    const tasks = gw.wireExtensions().resolve("tasks/cancel");
+    expect(tasks).toBeDefined();
+    expect(tasks?.extension.namespace).toBe("tasks");
+    expect(tasks?.extension.name).toBe("@agentick/tasks-next#wire");
 
     await gw.close();
   });

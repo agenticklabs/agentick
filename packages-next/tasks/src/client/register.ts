@@ -7,19 +7,19 @@
  * `bridges.tasks`. Client-core stays agnostic; this is the harness's contribution.
  */
 
-import { registerSessionHandleExtension, type ChannelView } from "@agentick/client-core-next";
-import { taskStatusView, type TaskStatusMap } from "./task-status-view.js";
-import type { TaskStatusFrame } from "../channel.js";
+import { registerSessionHandleExtension } from "@agentick/client-core-next";
+import { tasksHandle, type TasksHandleView } from "./tasks-handle.js";
 
 declare module "@agentick/spec-next" {
   interface SessionHandleExtensions {
     /**
-     * Live task-status view for this session — the folded map of tasks by
-     * `taskId` (`== taskStatusView(client, id)`). Read-only today; task action
-     * verbs (`cancel`, …) land when their client wire methods do (ADR 87 §3).
+     * The tasks resource handle for this session — the CQRS shape shared by
+     * `session.knobs` (view + `set`): the live `task-status` `ChannelView`
+     * (read: `get`/`subscribe`/`onChange`) PLUS the `cancel(taskId)` write
+     * command (`== tasksHandle(client, id)`).
      */
-    readonly tasks: ChannelView<TaskStatusMap, TaskStatusFrame>;
+    readonly tasks: TasksHandleView;
   }
 }
 
-registerSessionHandleExtension("tasks", (client, sessionId) => taskStatusView(client, sessionId));
+registerSessionHandleExtension("tasks", (client, sessionId) => tasksHandle(client, sessionId));

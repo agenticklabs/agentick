@@ -13,7 +13,8 @@
  *
  * Add a built-in's wire-extension here as it gains a client-reachable command:
  *   - `knobs/set` (knobs) — landed.
- *   - tasks / state / gates — when they add write commands.
+ *   - `tasks/cancel` (tasks) — landed.
+ *   - state / gates — when they add write commands.
  *
  * NOTE: these are WRITE surfaces (client → server mutations). They are
  * registered in the bundled tier (not the framework-privileged tier), so an
@@ -27,5 +28,9 @@
 
 import type { WireExtension } from "@agentick/spec-next";
 import { knobsWireExtension } from "@agentick/knobs-next";
+import { tasksWireExtension } from "@agentick/tasks-next";
 
-export const builtinWireExtensions: readonly WireExtension[] = [knobsWireExtension];
+export const builtinWireExtensions: readonly WireExtension[] = [
+  knobsWireExtension,
+  tasksWireExtension,
+];

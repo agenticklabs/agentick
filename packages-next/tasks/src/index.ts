@@ -98,3 +98,5 @@ export {
   type TasksResultMessageType,
   type TasksResultReply,
 } from "./inbox-protocol.js";
+
+export { tasksWireExtension } from "./wire.js";
