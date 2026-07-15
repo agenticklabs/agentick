@@ -3,7 +3,7 @@
  *
  * Everything a frontend needs comes from ONE import: `@agentick/client-next`,
  * the batteries-included bundle. Importing it lights up every built-in session
- * sub-handle (`session.knobs` / `session.tasks` / `session.elicitations()`)
+ * sub-handle (`session.knobs` / `session.tasks` / `session.elicitations`)
  * with no per-harness imports — that's the ADR 87 seam + the core/bundle split.
  *
  * This module wires an in-process transport to the gateway, then drives one
@@ -50,29 +50,26 @@ export async function runCodingSession(
     console.log(`   · log[${e.level}] ${JSON.stringify(e.data)}`);
   });
 
-  // ── 2. session.knobs — live view + a client-driven write ─────────────────
-  // `onChange` hands you the new value (subscribe + get under the hood). Then
-  // FLIP a knob from the client — fire-and-observe: the write returns as a
-  // channel delta that re-folds the view (CQRS) and the agent re-renders.
-  session.knobs.onChange((knobs) => console.log(`   · knobs ${JSON.stringify(knobs)}`));
+  // ── 2. session.knobs — STATE feed (subscribe) + a client-driven write ────
+  // We want the whole knob store to display → `subscribe` hands you the folded
+  // STATE. Then FLIP a knob — fire-and-observe: the write returns as a channel
+  // delta that re-folds the view (CQRS) and the agent re-renders.
+  session.knobs.subscribe((knobs) => console.log(`   · knobs ${JSON.stringify(knobs)}`));
   await session.knobs.set("explainSteps", true);
 
-  // ── 3. session.tasks — live task-status view (run_shell submits tasks) ───
-  const seenTasks = new Set<string>();
-  session.tasks.onChange((tasks) => {
-    for (const t of Object.values(tasks)) {
-      const key = `${t.taskId}:${t.status}`;
-      if (seenTasks.has(key)) continue;
-      seenTasks.add(key);
-      console.log(`   · task[${t.status}] ${t.statusMessage ?? t.taskId}`);
-    }
+  // ── 3. session.tasks — CHANGE feed (onChange): the task that transitioned ─
+  // `onChange` hands you the FRAME — the one task that changed — not the whole
+  // map, so no dedup bookkeeping. (For the full list, use `.subscribe(map =>…)`.)
+  session.tasks.onChange((frame) => {
+    if ("kind" in frame) return; // skip the opening snapshot; deltas are TaskInfo
+    console.log(`   · task[${frame.status}] ${frame.statusMessage ?? frame.taskId}`);
   });
 
-  // ── 4. session.onElicit — approve write_file, human-in-the-loop ──────────
+  // ── 4. session.elicitations.onChange — approve write_file, human-in-the-loop ──────────
   // write_file calls ctx.elicit.confirm(...) server-side; the request arrives
-  // here. `onElicit` runs the callback per request (stream handled under the
+  // here. `.onChange` runs the callback per request (stream handled under the
   // hood) — mirrors onLog/onProgress. We auto-approve; a real UI would prompt.
-  const stopElicit = session.onElicit((e) => {
+  const stopElicit = session.elicitations.onChange((e) => {
     console.log(`   · elicit "${e.message}" → approve`);
     void e.accept(true);
   });

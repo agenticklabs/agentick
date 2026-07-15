@@ -231,7 +231,7 @@ describe("pre-scoped handle channelView (zero-config)", () => {
     expect(view.get()).toEqual({ id: "t1", status: "completed" });
 
     view.close();
-    expect(view.closed).toBe(true);
+    expect(view.status).toBe("closed");
     expect((stream as PushStream).isClosed).toBe(true);
   });
 

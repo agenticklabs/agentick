@@ -14,16 +14,10 @@
  */
 
 import { registerSessionHandleExtension } from "@agentick/client-core-next";
-import type {
-  ClientElicitationHandle,
-  ClientElicitationStream,
-  Cursor,
-  Unsubscribe,
-} from "@agentick/spec-next";
+import type { ChannelStream, ClientElicitationHandle } from "@agentick/spec-next";
 
 import {
   elicitationStream,
-  onElicit,
   respondToElicitation,
   type ElicitationReplyInput,
 } from "./elicitations.js";
@@ -31,18 +25,13 @@ import {
 declare module "@agentick/spec-next" {
   interface SessionHandleExtensions {
     /**
-     * AsyncIterable of inbound elicitation requests for this session. Each
-     * yielded {@link ClientElicitationHandle} carries typed `.accept` /
-     * `.decline` / `.cancel`. Pass `fromCursor` to resume from a saved point.
+     * Inbound elicitation requests for this session as a {@link ChannelStream}
+     * — the SAME read surface as `session.tasks`/`.knobs`: consume via
+     * `session.elicitations.onChange((e) => e.accept(value))` or
+     * `for await (const e of session.elicitations)`. Each yielded
+     * {@link ClientElicitationHandle} carries typed `.accept`/`.decline`/`.cancel`.
      */
-    elicitations(opts?: { fromCursor?: Cursor }): ClientElicitationStream;
-    /**
-     * Callback sugar over {@link elicitations}: run `listener` on each inbound
-     * request (subscription under the hood). Returns an unsubscribe. Mirrors
-     * `session.onLog` / `session.onProgress`. The common case:
-     * `session.onElicit((e) => e.accept(value))`.
-     */
-    onElicit(listener: (elicitation: ClientElicitationHandle<unknown>) => void): Unsubscribe;
+    readonly elicitations: ChannelStream<ClientElicitationHandle<unknown>>;
     /**
      * Reply to a pending elicitation by `correlationId` — the direct command
      * for code not holding a handle (the handle's `.accept` etc. use this).
@@ -51,18 +40,8 @@ declare module "@agentick/spec-next" {
   }
 }
 
-registerSessionHandleExtension(
-  "elicitations",
-  (client, sessionId) =>
-    (opts?: { fromCursor?: Cursor }): ClientElicitationStream =>
-      elicitationStream(client, sessionId, opts?.fromCursor),
-);
-
-registerSessionHandleExtension(
-  "onElicit",
-  (client, sessionId) =>
-    (listener: (e: ClientElicitationHandle<unknown>) => void): Unsubscribe =>
-      onElicit(client, sessionId, listener),
+registerSessionHandleExtension("elicitations", (client, sessionId) =>
+  elicitationStream(client, sessionId),
 );
 
 registerSessionHandleExtension(

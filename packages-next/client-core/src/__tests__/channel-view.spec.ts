@@ -153,23 +153,40 @@ describe("channelView — fold over a channel subscription", () => {
     expect(view.get()).toEqual({ a: 1, b: 2 }); // state still folds; only the listener detached
   });
 
-  it("onChange() delivers the new value to the listener (subscribe + get sugar)", async () => {
+  it("onChange() delivers each FRAME (change feed); subscribe() delivers STATE", async () => {
     const stream = pushStream("test");
     const view = channelView<Doc, Frame>(fakeClient(stream, {}), scope, "test", {
       initial: {},
       reduce,
     });
 
-    const seen: Doc[] = [];
-    const unsub = view.onChange((value) => seen.push(value));
-    stream.emit({ kind: "snapshot", values: { a: 1 } });
-    await waitFor(() => seen.length === 1);
-    expect(seen[0]).toEqual({ a: 1 }); // listener RECEIVES the value
+    const frames: Frame[] = [];
+    const states: Doc[] = [];
+    view.onChange((frame) => frames.push(frame)); // the change
+    view.subscribe((state) => states.push(state)); // the folded state
 
-    unsub();
+    stream.emit({ kind: "snapshot", values: { a: 1 } });
+    await waitFor(() => frames.length === 1);
+    expect(frames[0]).toEqual({ kind: "snapshot", values: { a: 1 } }); // the raw FRAME
+    expect(states[0]).toEqual({ a: 1 }); // the folded STATE
+
     stream.emit({ kind: "delta", set: { b: 2 } });
-    await waitFor(() => "b" in view.get());
-    expect(seen).toHaveLength(1); // detached after unsubscribe
+    await waitFor(() => frames.length === 2);
+    expect(frames[1]).toEqual({ kind: "delta", set: { b: 2 } });
+    expect(states[1]).toEqual({ a: 1, b: 2 });
+  });
+
+  it("status goes loading → live → closed", async () => {
+    const stream = pushStream("test");
+    const view = channelView<Doc, Frame>(fakeClient(stream, {}), scope, "test", {
+      initial: {},
+      reduce,
+    });
+    expect(view.status).toBe("loading"); // before the first frame
+    stream.emit({ kind: "snapshot", values: { a: 1 } });
+    await waitFor(() => view.status === "live");
+    view.close();
+    expect(view.status).toBe("closed");
   });
 
   it("close() stops folding and closes the underlying stream", async () => {
@@ -183,7 +200,7 @@ describe("channelView — fold over a channel subscription", () => {
     await waitFor(() => view.get().a === 1);
 
     view.close();
-    expect(view.closed).toBe(true);
+    expect(view.status).toBe("closed");
     expect(stream.isClosed).toBe(true);
 
     stream.emit({ kind: "delta", set: { b: 2 } });
@@ -280,7 +297,7 @@ describe("client.channelView instance method", () => {
     unsub();
 
     view.close();
-    expect(view.closed).toBe(true);
+    expect(view.status).toBe("closed");
     expect(stream.isClosed).toBe(true);
   });
 });

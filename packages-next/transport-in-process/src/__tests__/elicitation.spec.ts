@@ -6,7 +6,7 @@
  *
  *   1. `session.respondToElicitation(...)` routes through the new
  *      `session/respond_to_elicitation` wire method.
- *   2. `session.elicitations()` returns an AsyncIterable of parsed
+ *   2. `session.elicitations` returns an AsyncIterable of parsed
  *      `ClientElicitationHandle` values — verified by feeding a stub
  *      handler that fakes a subscription event.
  *
@@ -17,7 +17,7 @@
  */
 
 import "@agentick/elicitation-next";
-// ADR 87 — contributes `session.elicitations()` / `.respondToElicitation()`.
+// ADR 87 — contributes `session.elicitations` / `.respondToElicitation()`.
 import "@agentick/elicitation-next/client";
 
 import { createClient } from "@agentick/client-core-next";
@@ -129,7 +129,8 @@ describe("client elicitation surface — type checks", () => {
 
     // Both surfaces exist and are callable.
     expect(typeof sess.respondToElicitation).toBe("function");
-    expect(typeof sess.elicitations).toBe("function");
+    expect(typeof sess.elicitations.onChange).toBe("function"); // ChannelStream, not a fn
+    expect(typeof sess.elicitations[Symbol.asyncIterator]).toBe("function");
 
     // Surface-level response shape matches the wire — we use the
     // long-form here because the in-process stub doesn't push

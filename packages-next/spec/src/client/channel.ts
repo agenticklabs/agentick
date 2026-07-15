@@ -25,19 +25,51 @@ export interface ChannelViewConfig<T, F> {
 }
 
 /**
- * A live reduced view of one channel. `get()`/`subscribe()` are the
- * `useSyncExternalStore` contract; `close()` tears down the subscription.
+ * The GROUND-FLOOR read primitive: a channel's ordered stream of frames
+ * (`envelope.payload`), snapshot-first then deltas. It materializes NOTHING —
+ * so it is the general construct for ANY state shape (a small value, a large
+ * collection, a paginated feed, a request/event channel like elicitation).
+ * Every typed read surface bottoms out here.
+ *
+ * Consume it two ways, both the same feed:
+ *   - `for await (const frame of stream)` — sequential, with backpressure.
+ *   - `stream.onChange((frame) => …)` — fire-and-forget callback.
+ *
+ * {@link ChannelView} is the OPT-IN fold sugar on top of this (materialize the
+ * frames into a `T`); channels with no meaningful materialized state (or too
+ * large to hold) use the stream directly.
  */
-export interface ChannelView<T> {
+export interface ChannelStream<F> extends AsyncIterable<F> {
+  /** The change feed as a callback (sugar over the async iterator). */
+  onChange(listener: (frame: F) => void): Unsubscribe;
+  /** Tear down the underlying subscription. */
+  close(): void;
+}
+
+/**
+ * The fold sugar over a {@link ChannelStream}: materializes the frames into a
+ * live `T` via `reduce`. Two feeds, one subscription:
+ *   - `subscribe((state) => …)` — the STATE feed (the folded value; also the
+ *     `useSyncExternalStore` contract with `get`).
+ *   - `onChange((frame) => …)` — the CHANGE feed (the individual frames it is
+ *     folding), identical to the underlying stream's `onChange`.
+ * `status` reports readiness; `close()` tears down.
+ *
+ * `F` defaults to `unknown` so generic `ChannelView<T>` uses still compile;
+ * typed façades specify `F` to type the change feed.
+ */
+export interface ChannelView<T, F = unknown> {
+  /** The current folded state — synchronous (also the React `getSnapshot`). */
   get(): T;
-  /** The `useSyncExternalStore` contract: notify (no args); read via `get()`. */
-  subscribe(listener: () => void): Unsubscribe;
   /**
-   * Ergonomic sugar over `subscribe` + `get`: `listener` receives the new value
-   * on every change (no separate `get()` call). Returns an unsubscribe. Use
-   * this for imperative code; use `subscribe` for framework store bindings.
+   * STATE feed: `listener` receives the folded state on every change. Also
+   * satisfies `useSyncExternalStore(view.subscribe, view.get)` — React passes a
+   * `() => void` and re-reads via `get()`, ignoring the value we hand it.
    */
-  onChange(listener: (value: T) => void): Unsubscribe;
-  readonly closed: boolean;
+  subscribe(listener: (state: T) => void): Unsubscribe;
+  /** CHANGE feed: `listener` receives each frame the view folds. */
+  onChange(listener: (frame: F) => void): Unsubscribe;
+  /** `loading` before the first frame folds, then `live`, then `closed`. */
+  readonly status: "loading" | "live" | "closed";
   close(): void;
 }

@@ -9,6 +9,7 @@
 
 import { registerSessionHandleExtension, type ChannelView } from "@agentick/client-core-next";
 import { taskStatusView, type TaskStatusMap } from "./task-status-view.js";
+import type { TaskStatusFrame } from "../channel.js";
 
 declare module "@agentick/spec-next" {
   interface SessionHandleExtensions {
@@ -17,7 +18,7 @@ declare module "@agentick/spec-next" {
      * `taskId` (`== taskStatusView(client, id)`). Read-only today; task action
      * verbs (`cancel`, …) land when their client wire methods do (ADR 87 §3).
      */
-    readonly tasks: ChannelView<TaskStatusMap>;
+    readonly tasks: ChannelView<TaskStatusMap, TaskStatusFrame>;
   }
 }
 

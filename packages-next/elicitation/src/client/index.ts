@@ -13,7 +13,6 @@
 
 export {
   elicitationStream,
-  onElicit,
   respondToElicitation,
   type ElicitationReplyInput,
 } from "./elicitations.js";

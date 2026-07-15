@@ -101,16 +101,6 @@ export interface ClientElicitationHandle<TValue = unknown> extends ClientElicita
   cancel(reason?: string): Promise<void>;
 }
 
-// ============================================================================
-// Stream type
-// ============================================================================
-
-/**
- * AsyncIterable of inbound elicitations for a single session.
- * Yields each request as a {@link ClientElicitationHandle}. Closing
- * the stream unsubscribes from the underlying session-events
- * subscription.
- */
-export interface ClientElicitationStream extends AsyncIterable<ClientElicitationHandle<unknown>> {
-  close(): Promise<void>;
-}
+// The elicitation read surface is a `ChannelStream<ClientElicitationHandle>`
+// (uniform with tasks/knobs) — see `@agentick/elicitation-next/client`. There is
+// no bespoke stream type; that's the point (ADR 33 — one read primitive).

@@ -22,7 +22,7 @@
 import type {
   ClientElicitation,
   ClientElicitationHandle,
-  ClientElicitationStream,
+  ChannelStream,
   ClientProtocol,
   Cursor,
   EventEnvelope,
@@ -31,11 +31,6 @@ import type {
 import { omitUndefined } from "@agentick/utils-next";
 
 import { ELICITATION_CHANNEL_FQN } from "../channel.js";
-
-// TODO(ui-core): `session.onElicitation(cb)` callback sugar over elicitationStream
-// — thin wrapper (one subscription, same cost as the stream). The performant
-// N-families-one-subscription form is the ADR 85 firehose demux (one session
-// subscription → tasks/knobs/elicitation stores), not per-family callbacks.
 
 /** The reply body for a pending elicitation. */
 export interface ElicitationReplyInput {
@@ -50,30 +45,30 @@ interface EnvelopeWithMetadata extends EventEnvelope {
 }
 
 /**
- * Build a session-scoped subscription filtered to elicitation request
- * envelopes; parse each into a {@link ClientElicitationHandle} and
- * yield. Closing the stream tears down the underlying subscription.
+ * The elicitation read surface as a {@link ChannelStream} — the SAME uniform
+ * shape as tasks/knobs (`onChange` + async-iterable + `close`), not a bespoke
+ * type. Elicitation opts OUT of the {@link channelView} fold (each frame is a
+ * discrete request you answer, not state to materialize), and it taps the raw
+ * subscription because it needs the envelope's correlation metadata — but it
+ * PRESENTS `ChannelStream<ClientElicitationHandle>`, so `session.elicitations`
+ * reads identically to `session.tasks`. Single-consumer.
  */
 export function elicitationStream(
   client: ClientProtocol,
   sessionId: string,
   fromCursor?: Cursor,
-): ClientElicitationStream {
+): ChannelStream<ClientElicitationHandle<unknown>> {
   const sub = client.transport.subscribe(
     { kind: "session", id: sessionId },
-    {
-      surface: "session",
-      name: { exact: ELICITATION_CHANNEL_FQN },
-    },
+    { surface: "session", name: { exact: ELICITATION_CHANNEL_FQN } },
     fromCursor,
   );
 
-  async function* iterator(): AsyncGenerator<ClientElicitationHandle<unknown>> {
+  async function* iterate(): AsyncGenerator<ClientElicitationHandle<unknown>> {
     for await (const frame of sub) {
       const env = frame.envelope as EnvelopeWithMetadata;
-      // Only request envelopes — responses go on the inbox, not the
-      // bus, but a defensive guard keeps us robust if something else
-      // ever lands on this channel name.
+      // Only request envelopes — responses go on the inbox, not the bus; a
+      // defensive guard keeps us robust if something else lands on this channel.
       if (env.metadata?.requestType !== "request") continue;
       const parsed = parseElicitation(env);
       if (parsed === undefined) continue;
@@ -81,38 +76,27 @@ export function elicitationStream(
     }
   }
 
-  const gen = iterator();
   return {
-    [Symbol.asyncIterator](): AsyncIterator<ClientElicitationHandle<unknown>> {
-      return gen;
+    [Symbol.asyncIterator]: iterate,
+    onChange(listener: (e: ClientElicitationHandle<unknown>) => void): Unsubscribe {
+      let active = true;
+      void (async () => {
+        try {
+          for await (const e of iterate()) {
+            if (!active) break;
+            listener(e);
+          }
+        } catch {
+          // torn down — nothing to surface
+        }
+      })();
+      return () => {
+        active = false;
+      };
     },
-    async close(): Promise<void> {
-      await sub.close();
+    close(): void {
+      void sub.close();
     },
-  };
-}
-
-/**
- * Callback sugar over {@link elicitationStream}: run `listener` on each inbound
- * elicitation request (subscription handled under the hood). Returns an
- * unsubscribe that tears down the stream. Mirrors `session.onLog` /
- * `session.onProgress`; use the raw stream for cursor resume / manual control.
- */
-export function onElicit(
-  client: ClientProtocol,
-  sessionId: string,
-  listener: (elicitation: ClientElicitationHandle<unknown>) => void,
-): Unsubscribe {
-  const stream = elicitationStream(client, sessionId);
-  void (async () => {
-    try {
-      for await (const e of stream) listener(e);
-    } catch {
-      // Stream closed / torn down — nothing to surface.
-    }
-  })();
-  return () => {
-    void stream.close();
   };
 }
 

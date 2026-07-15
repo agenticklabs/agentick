@@ -51,7 +51,10 @@ export interface KnobsCommandClient {
  * A live view of `session`'s knob state. Opens with the current snapshot,
  * then folds `knobs-state` deltas (JSON-Patch, one op per changed knob).
  */
-export function knobsStateView(client: KnobsClient, sessionId: string): ChannelView<KnobsState> {
+export function knobsStateView(
+  client: KnobsClient,
+  sessionId: string,
+): ChannelView<KnobsState, KnobsStateFrame> {
   const scope: SubscriptionScope = { kind: "session", id: sessionId };
   return channelView<KnobsState, KnobsStateFrame>(client, scope, KNOBS_STATE_CHANNEL, {
     initial: {},

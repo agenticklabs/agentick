@@ -6,7 +6,7 @@
  *
  *   1. Server triggers `session.elicitation.elicit(...)`. The harness
  *      publishes a request envelope on `session:channel:elicitation`.
- *   2. Client subscription via `session.elicitations()` parses the
+ *   2. Client subscription via `session.elicitations` parses the
  *      envelope into a `ClientElicitationHandle` and yields it.
  *   3. Client calls `elic.accept({...})`. The handle's typed
  *      convenience routes through `session/respond_to_elicitation` —
@@ -24,7 +24,7 @@ import "@agentick/elicitation-next";
 
 import { describe, expect, it } from "vitest";
 
-// ADR 87 — contributes `session.elicitations()` / `.respondToElicitation()`.
+// ADR 87 — contributes `session.elicitations` / `.respondToElicitation()`.
 import "@agentick/elicitation-next/client";
 import { createClient } from "@agentick/client-core-next";
 import { FakeLanguageModelExecutor } from "@agentick/executor-next";
@@ -128,7 +128,7 @@ describe("elicitation end-to-end — client ↔ gateway ↔ session", () => {
 
     // Start the client subscription FIRST so the bus subscriber is
     // live before the server publishes the request envelope.
-    const stream = client.session(sessionId).elicitations();
+    const stream = client.session(sessionId).elicitations;
     const iterator = stream[Symbol.asyncIterator]();
     const firstP = iterator.next();
     await settle();
@@ -175,7 +175,7 @@ describe("elicitation end-to-end — client ↔ gateway ↔ session", () => {
     // Register the callback FIRST so its subscription is live before the
     // server publishes — mirrors onLog/onProgress; no manual stream plumbing.
     let seen: string | undefined;
-    const stop = client.session(sessionId).onElicit((e) => {
+    const stop = client.session(sessionId).elicitations.onChange((e) => {
       seen = e.message;
       void e.accept({ approved: true });
     });
@@ -197,7 +197,7 @@ describe("elicitation end-to-end — client ↔ gateway ↔ session", () => {
   it("decline: server elicit() resolves with { outcome: 'declined', reason }", async () => {
     const { client, session, sessionId, cleanup } = await makeStack();
 
-    const stream = client.session(sessionId).elicitations();
+    const stream = client.session(sessionId).elicitations;
     const iterator = stream[Symbol.asyncIterator]();
     const firstP = iterator.next();
     await settle();
@@ -228,7 +228,7 @@ describe("elicitation end-to-end — client ↔ gateway ↔ session", () => {
   it("cancel: server elicit() resolves with { outcome: 'cancelled', reason }", async () => {
     const { client, session, sessionId, cleanup } = await makeStack();
 
-    const stream = client.session(sessionId).elicitations();
+    const stream = client.session(sessionId).elicitations;
     const iterator = stream[Symbol.asyncIterator]();
     const firstP = iterator.next();
     await settle();
@@ -255,7 +255,7 @@ describe("elicitation end-to-end — client ↔ gateway ↔ session", () => {
   it("schema violation: invalid accepted value surfaces as failed/schema_violation", async () => {
     const { client, session, sessionId, cleanup } = await makeStack();
 
-    const stream = client.session(sessionId).elicitations();
+    const stream = client.session(sessionId).elicitations;
     const iterator = stream[Symbol.asyncIterator]();
     const firstP = iterator.next();
     await settle();
@@ -300,7 +300,7 @@ describe("elicitation end-to-end — client ↔ gateway ↔ session", () => {
   it("concurrent elicitations: client receives both, responses route by correlationId", async () => {
     const { client, session, sessionId, cleanup } = await makeStack();
 
-    const stream = client.session(sessionId).elicitations();
+    const stream = client.session(sessionId).elicitations;
     const iterator = stream[Symbol.asyncIterator]();
 
     const firstP = iterator.next();

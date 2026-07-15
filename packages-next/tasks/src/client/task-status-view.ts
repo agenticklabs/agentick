@@ -43,7 +43,7 @@ export type TaskStatusMap = Readonly<Record<string, TaskInfo>>;
 export function taskStatusView(
   client: TaskStatusClient,
   sessionId: string,
-): ChannelView<TaskStatusMap> {
+): ChannelView<TaskStatusMap, TaskStatusFrame> {
   const scope: SubscriptionScope = { kind: "session", id: sessionId };
   return channelView<TaskStatusMap, TaskStatusFrame>(client, scope, TASK_STATUS_CHANNEL, {
     initial: {},

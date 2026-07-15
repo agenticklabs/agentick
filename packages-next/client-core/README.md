@@ -203,13 +203,22 @@ A `useLog` React hook is deferred until a `client-react` surface exists
 (see `TODO(#19-react)` in `src/signals.ts`); `onLog` is the framework-
 agnostic primitive it will wrap.
 
-### Channel consumer — `channelView` (ADR 33)
+### Channel reads — `channelStream` (primitive) + `channelView` (fold, ADR 33)
 
-`channelView` is the generic primitive for reading a `session:channel:<x>`
-on the client: a pure **fold** over one channel subscription (the K8s
-watch-list / `sendInitialEvents` model).
+The **ground-floor** read primitive is `channelStream(client, scope, channel)` —
+a channel's ordered stream of frame payloads (snapshot-first then deltas). It
+materializes nothing, so it is the general construct for any state shape (a
+value, a large collection, a paginated feed, a request/event channel). Consume
+it via `for await` or `stream.onChange(cb)`:
 
-Three surfaces, same types — the pre-scoped handle form is the 90%:
+```ts
+import { channelStream } from "@agentick/client-core-next";
+for await (const item of channelStream(client, scope, "feed")) window.push(item); // your structure
+```
+
+`channelView` is the **opt-in fold** over that stream — the K8s watch-list model,
+materializing frames into a `T`. Three surfaces, same types — the pre-scoped
+handle form is the 90%:
 
 ```ts
 import { channelView, type ChannelView } from "@agentick/client-core-next";
@@ -230,8 +239,10 @@ const view: ChannelView<Store> = client.session(sessionId).channelView("knobs-st
 const view2 = client.channelView(scope, "knobs-state", { initial: {}, reduce });
 const view3 = channelView<Store, Frame>(client, scope, "knobs-state", { initial: {}, reduce });
 
-const off = view.subscribe(() => render(view.get())); // useSyncExternalStore contract
-view.get(); // current folded state
+view.subscribe((state) => render(state)); // STATE feed (also useSyncExternalStore w/ get)
+view.onChange((frame) => react(frame)); // CHANGE feed — each frame it folds
+view.get(); // current folded state (sync)
+view.status; // "loading" | "live" | "closed"
 view.close(); // tears down the subscription
 ```
 
@@ -295,17 +306,21 @@ const client = await createClient({ transport });
 const session = client.session(id);
 
 // Non-optional slots — install-to-appear, not `?.`:
-session.tasks.onChange((tasks) => render(tasks)); // cb RECEIVES the value
-session.knobs.onChange((knobs) => render(knobs));
+session.knobs.subscribe((knobs) => render(knobs)); // STATE feed — the folded value
 await session.knobs.set("temperature", 0.7); // knobs adds the write half
-session.onElicit((e) => e.accept({ ok: true })); // mirrors onLog / onProgress
+session.tasks.onChange((task) => notify(task)); // CHANGE feed — the frame that changed
+session.elicitations.onChange((e) => e.accept({ ok: true })); // same read surface, a stream
 ```
 
-> `onChange(cb)` is the ergonomic sugar on every `ChannelView` — the callback
-> receives the new value (subscribe + get under the hood), returns an
-> unsubscribe. `subscribe(() => …)` + `get()` remain as the raw
-> `useSyncExternalStore` contract for framework store bindings. `session.onElicit`
-> joins the session-level `onLog` / `onProgress` callback family.
+> **Two feeds, one rule, everywhere.** Every channel read bottoms out in
+> `channelStream` (the frame stream — general, materializes nothing). The opt-in
+> `channelView` fold adds two feeds: `subscribe((state) => …)` (the folded STATE —
+> also the `useSyncExternalStore` contract with `get()`) and `onChange((frame) => …)`
+> (the CHANGE — each frame it folds). `status` reports readiness
+> (`"loading" | "live" | "closed"`). Stateful channels are views (`session.knobs`,
+> `session.tasks`); a request/event channel like `session.elicitations` skips the
+> fold and IS a `channelStream` — same `onChange`, no divergent API. Writes are
+> per-domain commands (`knobs.set`, `e.accept`, …).
 
 > Don't want the manual imports? **`@agentick/client-next`** is the
 > batteries-included bundle — it re-exports this package AND side-effect-imports

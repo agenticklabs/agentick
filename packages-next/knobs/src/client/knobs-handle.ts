@@ -17,9 +17,10 @@
 import type { ChannelView, KnobPrimitive } from "@agentick/spec-next";
 
 import { knobsStateView, type KnobsCommandClient, type KnobsState } from "./knobs-state-view.js";
+import type { KnobsStateFrame } from "../channel.js";
 
 /** The knobs resource handle: the read view plus the `set` command. */
-export type KnobsHandleView = ChannelView<KnobsState> & {
+export type KnobsHandleView = ChannelView<KnobsState, KnobsStateFrame> & {
   /**
    * Set a knob's value. Issues the `knobs/set` command and resolves once
    * the gateway accepts it; the resulting value lands on the view as a
@@ -39,8 +40,8 @@ export function knobsHandle(client: KnobsCommandClient, sessionId: string): Knob
     get: () => view.get(),
     subscribe: (listener) => view.subscribe(listener),
     onChange: (listener) => view.onChange(listener),
-    get closed() {
-      return view.closed;
+    get status() {
+      return view.status;
     },
     close: () => view.close(),
     set: async (key, value) => {
