@@ -204,9 +204,15 @@ importers:
 
   example/v2-coding-agent:
     dependencies:
+      '@agentick/app-next':
+        specifier: workspace:*
+        version: link:../../packages-next/app
       '@agentick/client-next':
         specifier: workspace:*
         version: link:../../packages-next/client
+      '@agentick/eval-next':
+        specifier: workspace:*
+        version: link:../../packages-next/eval
       '@agentick/gateway-next':
         specifier: workspace:*
         version: link:../../packages-next/gateway

@@ -158,3 +158,28 @@ API keys.
 - When we DO build, start with `t.send` + `t.completed` +
   `t.calledTool` only — defer judge + matrix until the basic shape
   is validated.
+
+## Landed (2026-07-14)
+
+The MVP (`defineEval` + assertions + `.matrix`) shipped, then extended:
+
+- **Run access:** `t.result` (full `SendResult` — usage/ticks/output).
+- **Scoring seam:** `t.expect(label, passed)` (gates `passed`) + `t.score(label,
+  value)` (numeric, aggregated across a matrix, does not gate).
+- **The `t` plugin seam** — the extension mechanism, following the ADR-27
+  augmentation law used everywhere else (HookBridges / SessionHandleExtensions
+  / ToolHandlerCtxExtensions): empty `EvalContextExtensions` seed + `EvalContext
+  extends` it + `registerEvalPlugin` (global) / per-eval `plugins: []`. A plugin
+  is `(rc: EvalRunContext) => methods`; the runner types the base literal as
+  `Omit<EvalContext, keyof EvalContextExtensions>` so downstream augmentation
+  never breaks the core compile.
+- **First-party plugins** (`/plugins/workspace`, `/plugins/judge`) — executable
+  scoring (`t.sh`/`t.file`, grade by running the result) and LLM-as-judge
+  (`t.judge`, model injected via `generate`). `declare module` self-augmentation
+  from a subpath works.
+- **Reporters** `formatResult` / `formatMatrix`.
+- Worked coding-agent eval: `example/v2-coding-agent/src/eval/coding.eval.tsx`.
+
+Still on the roadmap (names pinned): `t.onElicit` (evaluate human-in-the-loop
+without a live client), `t.stubTool`, `t.withinBudget`, trials + `pass@k`,
+cassette replay, streaming assertions.

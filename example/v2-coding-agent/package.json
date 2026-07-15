@@ -7,10 +7,13 @@
   "scripts": {
     "dev": "tsx --tsconfig tsconfig.json src/index.ts",
     "start": "tsx --tsconfig tsconfig.json src/index.ts",
+    "eval": "tsx --tsconfig tsconfig.json src/eval/run.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@agentick/app-next": "workspace:*",
     "@agentick/client-next": "workspace:*",
+    "@agentick/eval-next": "workspace:*",
     "@agentick/gateway-next": "workspace:*",
     "@agentick/knobs-next": "workspace:*",
     "@agentick/model-ai-sdk-next": "workspace:*",

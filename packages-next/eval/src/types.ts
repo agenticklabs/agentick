@@ -14,7 +14,7 @@
  */
 
 import type { CreateAppOptions } from "@agentick/app-next";
-import type { AppHarnessProtocol } from "@agentick/spec-next";
+import type { AppHarnessProtocol, SendResult } from "@agentick/spec-next";
 
 // ============================================================================
 // App factory + overrides
@@ -67,7 +67,75 @@ export interface EvalDefinition<O = DefaultAppOverrides, P = unknown> {
   readonly description: string;
   readonly app: AppFactory<O, P>;
   readonly test: EvalTest<P>;
+  /**
+   * Per-eval plugins that extend `t` with extra behaviors (`t.sh`,
+   * `t.file`, `t.judge`, …). Each is a factory invoked once per run with
+   * an {@link EvalRunContext}; whatever it returns is merged onto `t`.
+   * Composes with globally-{@link registerEvalPlugin}ed plugins. Type the
+   * added members by augmenting {@link EvalContextExtensions}.
+   */
+  readonly plugins?: ReadonlyArray<EvalPlugin<P>>;
 }
+
+// ============================================================================
+// Plugins — the `t` extension seam (ADR 27 install-to-appear, for eval)
+// ============================================================================
+
+/**
+ * Empty seed for plugin-contributed members on {@link EvalContext} — the
+ * eval twin of `ToolHandlerCtxExtensions` / `SessionHandleExtensions`. A
+ * plugin package augments this via `declare module "@agentick/eval-next"` to
+ * TYPE its additions, and registers a factory (globally via
+ * {@link registerEvalPlugin} or per-eval via {@link EvalDefinition.plugins})
+ * to WIRE them. eval-next core declares NO members here.
+ *
+ * @example
+ * // in @agentick/eval-next/plugins/judge:
+ * declare module "@agentick/eval-next" {
+ *   interface EvalContextExtensions {
+ *     judge(rubric: string): Promise<boolean>;
+ *   }
+ * }
+ */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+export interface EvalContextExtensions {}
+
+/** A labeled boolean a plugin records into the result ledger (like `t.expect`). */
+export interface PluginAssertionInput {
+  readonly label: string;
+  readonly passed: boolean;
+  readonly message?: string;
+  readonly details?: unknown;
+}
+
+/**
+ * What a plugin factory receives — the run's internals, so a plugin can read
+ * the outcome and record verdicts/scores without reaching through `t.app`.
+ * Accessors (`result`) are functions so a plugin method reads LIVE state when
+ * called in the test body (after `t.send`), not at build time.
+ */
+export interface EvalRunContext<P = unknown> {
+  /** The app under test for this run. */
+  readonly app: AppHarnessProtocol<P>;
+  /** The resolved overrides handed to the app factory this run. */
+  readonly overrides: unknown;
+  /** The most-recent `t.send` result (undefined before the first send). */
+  result(): SendResult | undefined;
+  /** The live observed tool-call ledger. */
+  readonly toolCalls: ReadonlyArray<ObservedToolCall>;
+  /** Record a labeled assertion into the result (contributes to `passed`). */
+  record(assertion: PluginAssertionInput): void;
+  /** Record a numeric score into the result (aggregated across matrix cells). */
+  score(label: string, value: number, details?: unknown): void;
+}
+
+/**
+ * A plugin: a factory invoked once per run with the {@link EvalRunContext}.
+ * Returns an object whose members are merged onto `t` (typed via
+ * {@link EvalContextExtensions}). Config-carrying plugins are functions that
+ * return this factory, e.g. `judge({ model })`.
+ */
+export type EvalPlugin<P = unknown> = (rc: EvalRunContext<P>) => Record<string, unknown>;
 
 /**
  * The returned callable. `await myEval()` runs with the factory's
@@ -129,10 +197,17 @@ export interface MatrixResult<O = DefaultAppOverrides> {
 // Result
 // ============================================================================
 
-export type AssertionKind = "completed" | "calledTool" | "notCalledTool" | "noFailedActions";
+export type AssertionKind =
+  | "completed"
+  | "calledTool"
+  | "notCalledTool"
+  | "noFailedActions"
+  | "expect";
 
 export interface AssertionResult {
   readonly kind: AssertionKind;
+  /** Caller-supplied label for `expect` / plugin assertions. */
+  readonly label?: string;
   readonly passed: boolean;
   /** Human-readable explanation — surfaced on failure for debugging. */
   readonly message: string;
@@ -144,10 +219,24 @@ export interface AssertionResult {
   readonly details?: unknown;
 }
 
+/**
+ * A numeric score recorded via `t.score(label, value)` (or a plugin like
+ * `t.judge`). Conventionally `0..1`. Unlike assertions, scores do NOT gate
+ * `passed` — they are graded signal the matrix reporter aggregates
+ * (mean / pass-rate / pass@k) across cells and trials.
+ */
+export interface ScoreResult {
+  readonly label: string;
+  readonly value: number;
+  readonly details?: unknown;
+}
+
 export interface EvalResult {
   readonly description: string;
   readonly passed: boolean;
   readonly assertions: ReadonlyArray<AssertionResult>;
+  /** Numeric scores recorded via `t.score` / plugins (do not gate `passed`). */
+  readonly scores: ReadonlyArray<ScoreResult>;
   /** Every tool call observed during this invocation. */
   readonly toolCalls: ReadonlyArray<ObservedToolCall>;
   /** Wall-clock duration (ms). */
@@ -187,7 +276,7 @@ export interface ObservedToolCall {
  * adopter code; the MVP doesn't use it but the shape is preserved
  * for compatibility with future fixture injection.
  */
-export interface EvalContext<P = unknown> {
+export interface EvalContext<P = unknown> extends EvalContextExtensions {
   /**
    * The app constructed by `definition.app(overrides)` for this
    * invocation. Adopters reach for this when they need primitives
@@ -198,12 +287,34 @@ export interface EvalContext<P = unknown> {
   readonly app: AppHarnessProtocol<P>;
 
   /**
+   * The most-recent `t.send` result — the full {@link SendResult}
+   * (`response`, `output` blocks, `toolResults`, `usage` tokens, `ticks`,
+   * `stopReason`). `undefined` before the first send. This is the raw run
+   * the sugar assertions and plugins read from.
+   */
+  readonly result: SendResult | undefined;
+
+  /**
    * Drive the agent. Creates a fresh session per call (sessions
    * don't persist between `t.send` calls in the MVP; multi-turn
    * evals will get a session-scoped seam in a later iteration).
    * Awaits completion. Returns the final response text.
    */
   send(prompt: string): Promise<string>;
+
+  /**
+   * Record a labeled boolean assertion — the generic scoring escape hatch.
+   * `t.expect("typechecks", (await t.sh("tsc")).ok)`. Contributes to
+   * `passed`; records into the ledger, does not throw.
+   */
+  expect(label: string, passed: boolean, details?: unknown): void;
+
+  /**
+   * Record a numeric score (conventionally `0..1`). Unlike assertions, scores
+   * do NOT gate `passed` — they are graded signal the matrix reporter
+   * aggregates across cells/trials. `t.score("quality", 0.8)`.
+   */
+  score(label: string, value: number, details?: unknown): void;
 
   /**
    * Assert the most-recent `t.send` reached a terminal stop reason

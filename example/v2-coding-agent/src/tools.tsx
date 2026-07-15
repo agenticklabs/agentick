@@ -34,6 +34,15 @@ export function setWorkspaceRoot(dir: string): void {
   workspaceRoot = dir;
 }
 
+// Headless mode — when true, write_file skips the elicitation confirm (there is
+// no human/client to answer). The eval runs headless; the interactive client
+// leaves this false so writes are human-approved. A real deployment would gate
+// this on a CI/headless flag.
+let autoApproveWrites = false;
+export function setAutoApproveWrites(on: boolean): void {
+  autoApproveWrites = on;
+}
+
 /** Resolve `rel` inside the workspace, rejecting `..` escapes. */
 function resolveInWorkspace(rel: string): string {
   const abs = nodePath.resolve(workspaceRoot, rel);
@@ -193,7 +202,8 @@ export const WriteFile = createTool({
 
     // Human-in-the-loop gate. `ctx.elicit` is undefined only on substrate-
     // stripped fixtures; a real session always has it — but guard anyway.
-    if (ctx.elicit) {
+    // Headless mode (evals) skips the confirm — no client to answer it.
+    if (!autoApproveWrites && ctx.elicit) {
       const approved = await ctx.elicit.confirm(`Write ${content.length} bytes to "${path}"?`, {
         default: false,
       });

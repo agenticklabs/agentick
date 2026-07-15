@@ -91,14 +91,70 @@ but adopters typically pin a tighter shape (`{ profile: "ci" | "prod" }`,
 | ------------------------------------------ | -------------------------------------------------------------------------------- |
 | `t.app`                                    | The `AppHarness` constructed by `definition.app(overrides)`.                     |
 | `t.send(prompt)`                           | Drive the agent. Returns the final response text.                                |
+| `t.result`                                 | The full last `SendResult` — `output`, `toolResults`, `usage` tokens, `ticks`, `stopReason`. |
 | `t.completed()`                            | Assert the most-recent send reached `stopReason: "end"`.                         |
 | `t.calledTool(name, { input?, isError? })` | Assert a specific tool was called; optionally deep-equal on `input` and outcome. |
 | `t.notCalledTool(name)`                    | Assert a specific tool was NOT called. Critical for safety evals.                |
 | `t.noFailedActions()`                      | Assert every observed tool call's `outcome === "succeeded"`.                     |
+| `t.expect(label, passed, details?)`        | Record a labeled boolean — the generic scoring escape hatch. Gates `passed`.     |
+| `t.score(label, value, details?)`          | Record a numeric score (0..1). Does NOT gate `passed`; aggregated across a matrix. |
 
 Assertions record into `result.assertions[]` rather than throwing.
 Adopters who want fail-fast check `result.passed` and decide whether
-to continue.
+to continue. `t.score` records into `result.scores[]` — graded signal
+the matrix reporter aggregates (mean / pass-rate) but which doesn't
+gate `passed`.
+
+### Plugins — extending `t` (install-to-appear)
+
+`t` is extensible the same way the rest of v2 is (ADR 27): an empty
+`EvalContextExtensions` seed + a plugin that a package augments (type)
+and registers (runtime). A plugin is a factory `(rc) => methods`;
+attach per-eval via `plugins: [...]` or globally via
+`registerEvalPlugin`. This keeps eval-next core lean and lets domains
+ship their own `t.*` vocabularies.
+
+Two ship in-box:
+
+**`@agentick/eval-next/plugins/workspace`** — executable-outcome scoring.
+The reason coding-agent evals are meaningful: grade by RUNNING the result.
+
+```ts
+import { workspace } from "@agentick/eval-next/plugins/workspace";
+defineEval({
+  plugins: [workspace({ dir: scratch })],
+  async test(t) {
+    await t.send("add a farewell export to greeting.js");
+    t.expect("exported", (await t.file("greeting.js")).includes("farewell"));
+    t.expect("still runs", (await t.sh("node -e \"require('./greeting').greet('x')\"")).ok);
+  },
+});
+```
+
+**`@agentick/eval-next/plugins/judge`** — LLM-as-judge. Model-agnostic:
+inject `generate(prompt) => text` wired to any model.
+
+```ts
+import { judge } from "@agentick/eval-next/plugins/judge";
+defineEval({
+  plugins: [judge({ generate: (p) => run(<Grader/>, { model, messages: [{ role: "user", content: p }] }).result.then(r => r.response) })],
+  async test(t) {
+    await t.send("...");
+    await t.judge("The answer is correct and cites a source."); // records assertion + score
+  },
+});
+```
+
+Write your own by mirroring either: `declare module "@agentick/eval-next"
+{ interface EvalContextExtensions { myCheck(): void } }` + a factory that
+returns `{ myCheck }`, reading the run via the `EvalRunContext`
+(`rc.result()`, `rc.toolCalls`, `rc.record`, `rc.score`).
+
+### Reporting
+
+`formatResult(result)` / `formatMatrix(matrix)` return a console
+scorecard string (assertions, scores, tool calls; matrix adds per-cell
+rows + mean-per-score aggregation).
 
 ### `EvalResult`
 
@@ -107,6 +163,7 @@ interface EvalResult {
   description: string;
   passed: boolean;
   assertions: AssertionResult[];
+  scores: ScoreResult[]; // numeric signal from t.score / plugins; does not gate `passed`
   toolCalls: ObservedToolCall[];
   elapsedMs: number;
   error?: { name: string; message: string };
@@ -196,16 +253,31 @@ for (const a of result.assertions) {
 - `src/__tests__/matrix.spec.tsx` — cartesian product, axes mirrored
   into cells, empty-axes / empty-axis edge cases, aggregate `passed`,
   `opts.concurrency` smoke.
+- `src/__tests__/plugins.spec.tsx` — `t.result` / `t.expect` / `t.score`;
+  the plugin seam (per-eval `plugins`), the workspace plugin
+  (`t.sh` / `t.file`), and the judge plugin (grades via injected `generate`,
+  records assertion + score).
+
+A worked end-to-end example lives in
+`example/v2-coding-agent/src/eval/coding.eval.tsx` — executable scoring
+(`t.file` / `t.sh`) + trajectory + budget + judge against a real coding agent.
 
 ## Roadmap & known gaps
 
-- **`t.judge(rubric)`** — LLM-as-judge. Subordinate Agentick session
-  scores the primary's transcript against an explicit rubric.
-- **Tool stubs** — `t.stubTool("name", fakeImpl)` for hermetic runs.
-- **Fixtures / cassettes** — record-mode produces a deterministic
-  trace; replay-mode plays it back so CI matches a known-good run
-  exactly. Wire via `executor: replayExecutor(...)`.
-- **Cost accounting** — per-invocation token + latency budgets;
-  assertion sugar (`t.withinBudget({ tokens, latencyMs })`).
-- **Streaming evals** — assertions against intermediate `delta`
-  events (not just terminal outcomes).
+- **Shipped:** `t.result` (full run access), `t.expect` / `t.score`, the
+  plugin seam (`EvalContextExtensions` + `registerEvalPlugin` / per-eval
+  `plugins`), the `workspace` (`t.sh` / `t.file`) and `judge` (`t.judge`)
+  plugins, `formatResult` / `formatMatrix` reporters.
+- **`t.onElicit(responder)`** — answer/assert elicitations from the eval, so
+  human-in-the-loop paths (a coding agent's write-approval) are evaluable
+  without a live client. The example runs headless (`setAutoApproveWrites`)
+  until this lands.
+- **`t.stubTool("name", fakeImpl)`** — hermetic tool stubs for deterministic,
+  fast runs (no real fs / network).
+- **`t.withinBudget({ tokens, latencyMs, ticks })`** — budget-assertion sugar
+  over `t.result.usage` (the raw data is now exposed; this is convenience).
+- **Trials + `pass@k`** — run each matrix cell N times and aggregate
+  mean±stddev / pass@k (agents are stochastic — the honest metric).
+- **Fixtures / cassettes** — record→freeze→replay so CI matches a known-good
+  run exactly (`executor: replayExecutor(...)`).
+- **Streaming evals** — assertions against intermediate `delta` events.

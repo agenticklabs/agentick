@@ -51,15 +51,44 @@ write), and run it via `node` (which runs as a task). Watch the console: the
 `·`-prefixed lines are the client's live subscriptions firing as the run
 proceeds.
 
+## Evaluate it
+
+The same agent is scored by `@agentick/eval-next` — and because its output is
+*code*, the grade is **executable**, not string-match:
+
+```bash
+pnpm --filter example-v2-coding-agent eval        # needs OPENAI_API_KEY
+```
+
+`src/eval/coding.eval.tsx` asks the agent to add a `farewell` export, then
+grades by **running** the result:
+
+```ts
+t.calledTool("write_file");                                 // trajectory
+t.expect("farewell exported", (await t.file("greeting.js")).includes("farewell"));
+t.expect("greet + farewell run", (await t.sh("node -e ...")).ok);  // executable
+t.expect("within tick budget", (t.result?.ticks ?? 99) <= 6);      // budget
+await t.judge("greeting.js exports a correct farewell…");          // LLM-as-judge
+```
+
+`t.sh` / `t.file` come from `@agentick/eval-next/plugins/workspace`; `t.judge`
+from `.../plugins/judge` — both installed via the `plugins: [...]` seam. Set
+`EVAL_MATRIX=1` to benchmark across models. The agent runs headless in eval
+(`setAutoApproveWrites(true)`) since there's no client to answer `write_file`'s
+elicitation.
+
 ## Layout
 
 ```
 src/
-  tools.tsx   — read/list/grep + elicitation-gated write_file + task-based run_shell
-  agent.tsx   — the CodingAgent JSX (System prompt, tools, knob, Timeline)
-  server.ts   — gateway + app hosting the agent (createGateway → listen → createApp)
-  client.ts   — connect over in-process transport + drive the session (THE showcase)
-  index.ts    — wires server + client, runs the scenario
+  tools.tsx        — read/list/grep + elicitation-gated write_file + task-based run_shell
+  agent.tsx        — the CodingAgent JSX (System prompt, tools, knob, Timeline)
+  server.ts        — gateway + app hosting the agent (createGateway → listen → createApp)
+  client.ts        — connect over in-process transport + drive the session (THE showcase)
+  index.ts         — wires server + client, runs the scenario
+  eval/
+    coding.eval.tsx — the eval definition (executable + trajectory + budget + judge)
+    run.ts          — runs it, prints the scorecard
 ```
 
 The server and client are fully decoupled. Swap `inProcessTransport` in

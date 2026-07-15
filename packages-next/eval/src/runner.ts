@@ -21,16 +21,26 @@
  * `result.passed` and decide whether to continue.
  */
 
-import type { AppHarnessProtocol, EventQuery, ProtocolEvent } from "@agentick/spec-next";
+import type {
+  AppHarnessProtocol,
+  EventQuery,
+  ProtocolEvent,
+  SendResult,
+} from "@agentick/spec-next";
 import { isEqual } from "@agentick/utils-next";
 import { waitFor } from "@agentick/utils-next/testing";
 
+import { registeredEvalPlugins } from "./plugins.js";
 import type {
   AssertionResult,
   EvalContext,
+  EvalContextExtensions,
   EvalDefinition,
+  EvalPlugin,
   EvalResult,
+  EvalRunContext,
   ObservedToolCall,
+  ScoreResult,
 } from "./types.js";
 
 // Subscribe to both requested + terminal so we can correlate the
@@ -63,12 +73,20 @@ export async function runEval<O, P>(
   const eventsTask = consumeEvents(app, toolCalls, eventsAbort.signal);
 
   const assertions: AssertionResult[] = [];
+  const scores: ScoreResult[] = [];
   let lastSendStop: string | undefined;
+  let lastResult: SendResult | undefined;
   let evalError: { name: string; message: string } | undefined;
 
-  // Build `t` (test context). Closes over the ledgers above.
-  const t: EvalContext<P> = {
+  // Build `t` (test context). Closes over the ledgers above. Typed against
+  // the BASE (minus plugin-augmented members) so the literal is fully checked
+  // even in a downstream compilation where `EvalContextExtensions` is
+  // augmented; plugins attach the rest below and it's asserted at `test(t)`.
+  const t: Omit<EvalContext<P>, keyof EvalContextExtensions> = {
     app,
+    get result() {
+      return lastResult;
+    },
     async send(prompt) {
       const session = await app.createSession({});
       const beforeCount = toolCalls.length;
@@ -77,6 +95,7 @@ export async function runEval<O, P>(
           messages: [{ role: "user", content: prompt }],
         });
         const result = await handle.result;
+        lastResult = result;
         lastSendStop = result.stopReason;
         // If the model called any tools during this send, wait for
         // the corresponding terminal events to land in the ledger
@@ -158,10 +177,50 @@ export async function runEval<O, P>(
         details: failures,
       });
     },
+    expect(label, passed, details) {
+      assertions.push({
+        kind: "expect",
+        label,
+        passed,
+        message: passed ? `expect "${label}" ok` : `expect "${label}" failed`,
+        ...(details !== undefined ? { details } : {}),
+      });
+    },
+    score(label, value, details) {
+      scores.push({ label, value, ...(details !== undefined ? { details } : {}) });
+    },
   };
 
+  // Compose plugins onto `t` — globally-registered first, then per-eval, in
+  // order. Each gets an EvalRunContext reading the LIVE ledgers, so a plugin
+  // method (e.g. t.judge) sees the result when CALLED in the body, not now.
+  const rc: EvalRunContext<P> = {
+    app,
+    overrides,
+    result: () => lastResult,
+    toolCalls,
+    record: (a) =>
+      assertions.push({
+        kind: "expect",
+        label: a.label,
+        passed: a.passed,
+        message: a.message ?? (a.passed ? `${a.label} ok` : `${a.label} failed`),
+        ...(a.details !== undefined ? { details: a.details } : {}),
+      }),
+    score: (label, value, details) =>
+      scores.push({ label, value, ...(details !== undefined ? { details } : {}) }),
+  };
+  const plugins: EvalPlugin[] = [
+    ...registeredEvalPlugins(),
+    ...((definition.plugins ?? []) as readonly EvalPlugin[]),
+  ];
+  const pluginRc = rc as unknown as EvalRunContext;
+  for (const plugin of plugins) {
+    Object.assign(t, plugin(pluginRc));
+  }
+
   try {
-    await definition.test(t);
+    await definition.test(t as EvalContext<P>);
   } catch (cause) {
     evalError = {
       name: cause instanceof Error ? cause.name : "EvalError",
@@ -183,6 +242,7 @@ export async function runEval<O, P>(
     description: definition.description,
     passed: allPassed,
     assertions,
+    scores,
     toolCalls,
     elapsedMs: Date.now() - started,
     ...(evalError ? { error: evalError } : {}),

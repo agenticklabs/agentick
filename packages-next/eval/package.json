@@ -25,6 +25,16 @@
       "types": "./src/index.ts",
       "import": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./plugins/workspace": {
+      "types": "./src/plugins/workspace.ts",
+      "import": "./src/plugins/workspace.ts",
+      "default": "./src/plugins/workspace.ts"
+    },
+    "./plugins/judge": {
+      "types": "./src/plugins/judge.ts",
+      "import": "./src/plugins/judge.ts",
+      "default": "./src/plugins/judge.ts"
     }
   },
   "publishConfig": {

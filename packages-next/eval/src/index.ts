@@ -12,6 +12,8 @@
  */
 
 export { defineEval } from "./define-eval.js";
+export { registerEvalPlugin, registeredEvalPlugins } from "./plugins.js";
+export { formatResult, formatMatrix } from "./report.js";
 export type {
   AppFactory,
   AssertionKind,
@@ -19,11 +21,16 @@ export type {
   CallableEval,
   DefaultAppOverrides,
   EvalContext,
+  EvalContextExtensions,
   EvalDefinition,
+  EvalPlugin,
   EvalResult,
+  EvalRunContext,
   EvalTest,
   MatrixCell,
   MatrixOptions,
   MatrixResult,
   ObservedToolCall,
+  PluginAssertionInput,
+  ScoreResult,
 } from "./types.js";
