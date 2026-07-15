@@ -14,10 +14,16 @@
  */
 
 import { registerSessionHandleExtension } from "@agentick/client-core-next";
-import type { ClientElicitationStream, Cursor } from "@agentick/spec-next";
+import type {
+  ClientElicitationHandle,
+  ClientElicitationStream,
+  Cursor,
+  Unsubscribe,
+} from "@agentick/spec-next";
 
 import {
   elicitationStream,
+  onElicit,
   respondToElicitation,
   type ElicitationReplyInput,
 } from "./elicitations.js";
@@ -31,6 +37,13 @@ declare module "@agentick/spec-next" {
      */
     elicitations(opts?: { fromCursor?: Cursor }): ClientElicitationStream;
     /**
+     * Callback sugar over {@link elicitations}: run `listener` on each inbound
+     * request (subscription under the hood). Returns an unsubscribe. Mirrors
+     * `session.onLog` / `session.onProgress`. The common case:
+     * `session.onElicit((e) => e.accept(value))`.
+     */
+    onElicit(listener: (elicitation: ClientElicitationHandle<unknown>) => void): Unsubscribe;
+    /**
      * Reply to a pending elicitation by `correlationId` — the direct command
      * for code not holding a handle (the handle's `.accept` etc. use this).
      */
@@ -43,6 +56,13 @@ registerSessionHandleExtension(
   (client, sessionId) =>
     (opts?: { fromCursor?: Cursor }): ClientElicitationStream =>
       elicitationStream(client, sessionId, opts?.fromCursor),
+);
+
+registerSessionHandleExtension(
+  "onElicit",
+  (client, sessionId) =>
+    (listener: (e: ClientElicitationHandle<unknown>) => void): Unsubscribe =>
+      onElicit(client, sessionId, listener),
 );
 
 registerSessionHandleExtension(

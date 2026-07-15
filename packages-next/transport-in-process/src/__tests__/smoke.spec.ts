@@ -2,7 +2,7 @@ import { createClient } from "@agentick/client-core-next";
 import type { JsonRpcRequest, JsonRpcResponse } from "@agentick/spec-next";
 import { ErrorCode } from "@agentick/spec-next";
 import { describe, expect, it } from "vitest";
-import { inProcessTransport, withHandshake } from "../index.js";
+import { inProcessTransport, withHandshake, type InProcessGatewayHandler } from "../index.js";
 
 /**
  * Phase 33.B smoke — client → in-process transport → stub handler.
@@ -12,9 +12,18 @@ import { inProcessTransport, withHandshake } from "../index.js";
  * registry. The handler here is a simple switch; the full
  * GatewayHarness adapter lands separately.
  */
+describe("inProcessTransport option validation", () => {
+  it("requires exactly one of gateway / handler", () => {
+    expect(() => inProcessTransport({})).toThrow(/gateway.*or.*handler/i);
+    const handler: InProcessGatewayHandler = async () => ({ jsonrpc: "2.0", id: 1, result: null });
+    const gateway = {} as never;
+    expect(() => inProcessTransport({ handler, gateway })).toThrow(/not both/i);
+  });
+});
+
 describe("client-next + in-process transport smoke", () => {
   function makeStubHandler(): {
-    handler: Parameters<typeof inProcessTransport>[0]["handler"];
+    handler: InProcessGatewayHandler;
     lastSeen: { method?: string; params?: unknown };
   } {
     const lastSeen: { method?: string; params?: unknown } = {};

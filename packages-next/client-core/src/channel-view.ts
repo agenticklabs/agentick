@@ -118,6 +118,14 @@ export function channelView(
         listeners.delete(listener);
       };
     },
+    onChange(listener: (value: unknown) => void): Unsubscribe {
+      // Sugar: fire the listener with the current folded state on each change.
+      const wrapped = (): void => listener(state);
+      listeners.add(wrapped);
+      return () => {
+        listeners.delete(wrapped);
+      };
+    },
     get closed(): boolean {
       return closed;
     },

@@ -26,6 +26,7 @@ import type {
   ClientProtocol,
   Cursor,
   EventEnvelope,
+  Unsubscribe,
 } from "@agentick/spec-next";
 import { omitUndefined } from "@agentick/utils-next";
 
@@ -88,6 +89,30 @@ export function elicitationStream(
     async close(): Promise<void> {
       await sub.close();
     },
+  };
+}
+
+/**
+ * Callback sugar over {@link elicitationStream}: run `listener` on each inbound
+ * elicitation request (subscription handled under the hood). Returns an
+ * unsubscribe that tears down the stream. Mirrors `session.onLog` /
+ * `session.onProgress`; use the raw stream for cursor resume / manual control.
+ */
+export function onElicit(
+  client: ClientProtocol,
+  sessionId: string,
+  listener: (elicitation: ClientElicitationHandle<unknown>) => void,
+): Unsubscribe {
+  const stream = elicitationStream(client, sessionId);
+  void (async () => {
+    try {
+      for await (const e of stream) listener(e);
+    } catch {
+      // Stream closed / torn down — nothing to surface.
+    }
+  })();
+  return () => {
+    void stream.close();
   };
 }
 

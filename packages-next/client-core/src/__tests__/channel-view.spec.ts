@@ -153,6 +153,25 @@ describe("channelView — fold over a channel subscription", () => {
     expect(view.get()).toEqual({ a: 1, b: 2 }); // state still folds; only the listener detached
   });
 
+  it("onChange() delivers the new value to the listener (subscribe + get sugar)", async () => {
+    const stream = pushStream("test");
+    const view = channelView<Doc, Frame>(fakeClient(stream, {}), scope, "test", {
+      initial: {},
+      reduce,
+    });
+
+    const seen: Doc[] = [];
+    const unsub = view.onChange((value) => seen.push(value));
+    stream.emit({ kind: "snapshot", values: { a: 1 } });
+    await waitFor(() => seen.length === 1);
+    expect(seen[0]).toEqual({ a: 1 }); // listener RECEIVES the value
+
+    unsub();
+    stream.emit({ kind: "delta", set: { b: 2 } });
+    await waitFor(() => "b" in view.get());
+    expect(seen).toHaveLength(1); // detached after unsubscribe
+  });
+
   it("close() stops folding and closes the underlying stream", async () => {
     const stream = pushStream("test");
     const view = channelView<Doc, Frame>(fakeClient(stream, {}), scope, "test", {

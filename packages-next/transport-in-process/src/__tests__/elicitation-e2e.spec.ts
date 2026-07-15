@@ -31,14 +31,7 @@ import { FakeLanguageModelExecutor } from "@agentick/executor-next";
 import { createGateway } from "@agentick/gateway-next";
 import { fakeReconciler } from "@agentick/reconciler-next/testing";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
-import {
-  jsonSchema,
-  type ContentBlock,
-  type JsonRpcId,
-  type JsonRpcRequest,
-  type JsonRpcResponse,
-} from "@agentick/spec-next";
-import { dispatchRequest, type DispatchSink } from "@agentick/transport-next";
+import { jsonSchema, type ContentBlock } from "@agentick/spec-next";
 
 import { inProcessTransport } from "../index.js";
 
@@ -95,29 +88,9 @@ async function makeStack(replyText = "ok") {
   // augmentation (loaded above).
   const session = await app.createSession({ sessionId: "elic-session" });
 
-  // Per-handler-invocation sink: each RPC gets a fresh sink whose
-  // sendNotification is the callback the transport passed for THAT
-  // invocation. Subscribe holds a closure reference to its own
-  // sendNotification — notifications fired later (after the handler
-  // returns) still route correctly because each invocation's callback
-  // is the one wired to that frame's response path on the transport
-  // side. A single shared forwarder would get overwritten by the next
-  // RPC and silently drop subscription events.
-  const handler = async (
-    req: JsonRpcRequest,
-    sendNotification: (n: { method: string; params?: unknown }) => void,
-  ): Promise<JsonRpcResponse> => {
-    const sink: DispatchSink = {
-      sendNotification,
-      registerSubscription: () => {},
-      unregisterSubscription: () => {},
-      registerInFlight: (_id: JsonRpcId, _abort: () => void) => {},
-      unregisterInFlight: () => {},
-    };
-    return dispatchRequest(gateway, req, sink);
-  };
-
-  const client = await createClient({ transport: inProcessTransport({ handler }) });
+  // `inProcessTransport({ gateway })` builds the per-request DispatchSink +
+  // dispatchRequest wiring internally — the whole point of the ergonomic fix.
+  const client = await createClient({ transport: inProcessTransport({ gateway }) });
   await client.connect();
 
   return {
@@ -193,6 +166,31 @@ describe("elicitation end-to-end — client ↔ gateway ↔ session", () => {
     }
 
     await stream.close();
+    await cleanup();
+  });
+
+  it("onElicit: callback sugar receives the request and accepts (subscription under the hood)", async () => {
+    const { client, session, sessionId, cleanup } = await makeStack();
+
+    // Register the callback FIRST so its subscription is live before the
+    // server publishes — mirrors onLog/onProgress; no manual stream plumbing.
+    let seen: string | undefined;
+    const stop = client.session(sessionId).onElicit((e) => {
+      seen = e.message;
+      void e.accept({ approved: true });
+    });
+    await settle();
+
+    const result = await session.elicitation.elicit(
+      { message: "Approve deploy?", schema: APPROVAL_SCHEMA },
+      { timeoutMs: 5_000 },
+    );
+
+    expect(seen).toBe("Approve deploy?");
+    expect(result.outcome).toBe("accepted");
+    if (result.outcome === "accepted") expect(result.value).toEqual({ approved: true });
+
+    stop();
     await cleanup();
   });
 

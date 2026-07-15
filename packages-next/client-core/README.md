@@ -295,12 +295,17 @@ const client = await createClient({ transport });
 const session = client.session(id);
 
 // Non-optional slots — install-to-appear, not `?.`:
-session.tasks.get(); // ChannelView<Record<taskId, TaskInfo>>
-session.tasks.subscribe(render);
-session.knobs.get(); // ChannelView<KnobsState>
+session.tasks.onChange((tasks) => render(tasks)); // cb RECEIVES the value
+session.knobs.onChange((knobs) => render(knobs));
 await session.knobs.set("temperature", 0.7); // knobs adds the write half
-for await (const e of session.elicitations()) await e.accept({ ok: true });
+session.onElicit((e) => e.accept({ ok: true })); // mirrors onLog / onProgress
 ```
+
+> `onChange(cb)` is the ergonomic sugar on every `ChannelView` — the callback
+> receives the new value (subscribe + get under the hood), returns an
+> unsubscribe. `subscribe(() => …)` + `get()` remain as the raw
+> `useSyncExternalStore` contract for framework store bindings. `session.onElicit`
+> joins the session-level `onLog` / `onProgress` callback family.
 
 > Don't want the manual imports? **`@agentick/client-next`** is the
 > batteries-included bundle — it re-exports this package AND side-effect-imports

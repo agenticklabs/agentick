@@ -10,11 +10,11 @@ import { createClient } from "@agentick/client-core-next";
 import { describe, expect, it } from "vitest";
 import type { JsonRpcRequest, JsonRpcResponse } from "@agentick/spec-next";
 
-import { inProcessTransport, withHandshake } from "../index.js";
+import { inProcessTransport, withHandshake, type InProcessGatewayHandler } from "../index.js";
 
 describe("client.send(sessionId, input) shortcut", () => {
   function makeHandler(): {
-    handler: Parameters<typeof inProcessTransport>[0]["handler"];
+    handler: InProcessGatewayHandler;
     seen: Array<{ method: string; params: unknown }>;
   } {
     const seen: Array<{ method: string; params: unknown }> = [];

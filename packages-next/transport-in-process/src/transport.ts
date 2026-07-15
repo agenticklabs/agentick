@@ -20,7 +20,12 @@ import type {
   JsonRpcResponse,
   TransportCapabilities,
 } from "@agentick/spec-next";
-import { BaseClientTransport } from "@agentick/transport-next";
+import {
+  BaseClientTransport,
+  dispatchRequest,
+  type DispatchHost,
+  type DispatchSink,
+} from "@agentick/transport-next";
 
 export type InProcessGatewayHandler = (
   request: JsonRpcRequest,
@@ -28,9 +33,36 @@ export type InProcessGatewayHandler = (
 ) => Promise<JsonRpcResponse>;
 
 export interface InProcessTransportOptions {
-  readonly handler: InProcessGatewayHandler;
+  /**
+   * The gateway to dispatch to — the common case. The transport builds the
+   * `DispatchSink` + `dispatchRequest` wiring internally, so you never touch
+   * the server plumbing: `inProcessTransport({ gateway })`.
+   */
+  readonly gateway?: DispatchHost;
+  /**
+   * A raw request handler — the escape hatch for custom dispatch (a stub
+   * server, request interception, a non-gateway host). Provide this OR
+   * `gateway`, not both.
+   */
+  readonly handler?: InProcessGatewayHandler;
   readonly wireParity?: boolean;
   readonly id?: string;
+}
+
+/** Build the handler that dispatches to a gateway — the sink is boilerplate. */
+function gatewayHandler(gateway: DispatchHost): InProcessGatewayHandler {
+  return async (request, sendNotification) => {
+    // Fresh sink per request: its `sendNotification` is THIS frame's
+    // notification route (a shared one drops subscription events).
+    const sink: DispatchSink = {
+      sendNotification,
+      registerSubscription: () => {},
+      unregisterSubscription: () => {},
+      registerInFlight: () => {},
+      unregisterInFlight: () => {},
+    };
+    return dispatchRequest(gateway, request, sink);
+  };
 }
 
 const CAPABILITIES: TransportCapabilities = {
@@ -56,7 +88,12 @@ class InProcessTransport extends BaseClientTransport {
   constructor(options: InProcessTransportOptions) {
     super();
     this.id = options.id ?? `in-process-${++transportCounter}`;
-    this.handler = options.handler;
+    if (options.handler && options.gateway) {
+      throw new Error("inProcessTransport: provide `gateway` OR `handler`, not both");
+    }
+    const handler = options.handler ?? (options.gateway && gatewayHandler(options.gateway));
+    if (!handler) throw new Error("inProcessTransport: provide `gateway` or `handler`");
+    this.handler = handler;
     this.wireParity = options.wireParity ?? false;
   }
 

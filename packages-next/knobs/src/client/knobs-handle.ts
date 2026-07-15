@@ -38,6 +38,7 @@ export function knobsHandle(client: KnobsCommandClient, sessionId: string): Knob
   return {
     get: () => view.get(),
     subscribe: (listener) => view.subscribe(listener),
+    onChange: (listener) => view.onChange(listener),
     get closed() {
       return view.closed;
     },

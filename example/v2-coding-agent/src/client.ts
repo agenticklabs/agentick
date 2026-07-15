@@ -18,30 +18,15 @@
 
 import { createClient, type Client } from "@agentick/client-next";
 import { inProcessTransport } from "@agentick/transport-in-process-next";
-import { dispatchRequest, type DispatchSink } from "@agentick/transport-next";
-import type { GatewayHarnessProtocol, JsonRpcRequest, SendResult } from "@agentick/spec-next";
+import type { GatewayHarnessProtocol, SendResult } from "@agentick/spec-next";
 
 /**
- * Connect a client to an in-process gateway. Each RPC gets a FRESH
- * `DispatchSink` whose `sendNotification` is that frame's notification route —
- * a shared forwarder would drop subscription events. Swap `inProcessTransport`
- * for `webSocketTransport(url)` and this is a remote client, unchanged.
+ * Connect a client to an in-process gateway. `inProcessTransport({ gateway })`
+ * builds the dispatch wiring internally. Swap it for `webSocketTransport(url)`
+ * and this is a remote client, unchanged.
  */
 export async function connectClient(gateway: GatewayHarnessProtocol): Promise<Client> {
-  const transport = inProcessTransport({
-    handler: async (req: JsonRpcRequest, sendNotification) => {
-      const sink: DispatchSink = {
-        sendNotification,
-        registerSubscription: () => {},
-        unregisterSubscription: () => {},
-        registerInFlight: () => {},
-        unregisterInFlight: () => {},
-      };
-      return dispatchRequest(gateway, req, sink);
-    },
-  });
-
-  const client = await createClient({ transport });
+  const client = await createClient({ transport: inProcessTransport({ gateway }) });
   await client.connect();
   return client;
 }
@@ -66,19 +51,16 @@ export async function runCodingSession(
   });
 
   // ── 2. session.knobs — live view + a client-driven write ─────────────────
-  // The bundle attached `.knobs` (a KnobsHandleView). Subscribe to the live
-  // fold, then FLIP a knob from the client. The write is fire-and-observe: it
-  // returns as a channel delta that re-folds the view (CQRS), and the server
-  // agent re-renders with the new prompt.
-  session.knobs.subscribe(() => {
-    console.log(`   · knobs ${JSON.stringify(session.knobs.get())}`);
-  });
+  // `onChange` hands you the new value (subscribe + get under the hood). Then
+  // FLIP a knob from the client — fire-and-observe: the write returns as a
+  // channel delta that re-folds the view (CQRS) and the agent re-renders.
+  session.knobs.onChange((knobs) => console.log(`   · knobs ${JSON.stringify(knobs)}`));
   await session.knobs.set("explainSteps", true);
 
   // ── 3. session.tasks — live task-status view (run_shell submits tasks) ───
   const seenTasks = new Set<string>();
-  session.tasks.subscribe(() => {
-    for (const t of Object.values(session.tasks.get())) {
+  session.tasks.onChange((tasks) => {
+    for (const t of Object.values(tasks)) {
       const key = `${t.taskId}:${t.status}`;
       if (seenTasks.has(key)) continue;
       seenTasks.add(key);
@@ -86,17 +68,14 @@ export async function runCodingSession(
     }
   });
 
-  // ── 4. session.elicitations() — approve write_file, human-in-the-loop ────
+  // ── 4. session.onElicit — approve write_file, human-in-the-loop ──────────
   // write_file calls ctx.elicit.confirm(...) server-side; the request arrives
-  // here. We auto-approve; a real UI would prompt the user. Runs in the
-  // background for the life of the session.
-  const elicitations = session.elicitations();
-  const approver = (async () => {
-    for await (const e of elicitations) {
-      console.log(`   · elicit "${e.message}" → approve`);
-      await e.accept(true);
-    }
-  })();
+  // here. `onElicit` runs the callback per request (stream handled under the
+  // hood) — mirrors onLog/onProgress. We auto-approve; a real UI would prompt.
+  const stopElicit = session.onElicit((e) => {
+    console.log(`   · elicit "${e.message}" → approve`);
+    void e.accept(true);
+  });
 
   // ── 5. Send the coding request and STREAM the run ────────────────────────
   console.log(`\n→ user: ${prompt}\n`);
@@ -118,8 +97,7 @@ export async function runCodingSession(
 
   // ── Cleanup ──────────────────────────────────────────────────────────────
   offLog();
-  await elicitations.close();
-  await approver.catch(() => undefined);
+  stopElicit();
   session.knobs.close();
   session.tasks.close();
 

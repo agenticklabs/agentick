@@ -19,35 +19,40 @@ code.
 
 ## Quick start
 
+Point it at a gateway — that's the whole thing. The transport builds the
+per-request `DispatchSink` + `dispatchRequest` wiring internally; you never
+touch the server plumbing.
+
 ```ts
 import { createClient } from "@agentick/client-next";
+import { inProcessTransport } from "@agentick/transport-in-process-next";
+
+const client = await createClient({ transport: inProcessTransport({ gateway }) });
+await client.connect();
+await client.request("ping", {});
+```
+
+### Escape hatch — a raw handler
+
+For a stub server, request interception, or a non-gateway host, pass a
+`handler` instead of `gateway` (exactly one, not both):
+
+```ts
 import { inProcessTransport, withHandshake } from "@agentick/transport-in-process-next";
 import type { JsonRpcRequest, JsonRpcResponse } from "@agentick/spec-next";
 
-// Your gateway-side request handler. In practice this is a thin adapter
-// that translates JSON-RPC frames into GatewayHarness method calls —
-// the canonical adapter is `dispatchRequest` from @agentick/transport-next.
 const handler = async (req: JsonRpcRequest): Promise<JsonRpcResponse> => {
-  switch (req.method) {
-    case "ping":
-      return { jsonrpc: "2.0", id: req.id, result: {} };
-    // ... real methods
-  }
+  if (req.method === "ping") return { jsonrpc: "2.0", id: req.id, result: {} };
   return { jsonrpc: "2.0", id: req.id, error: { code: -32601, message: "method not found" } };
 };
 
-// Since #296, `client.connect()` auto-issues `initialize` and
-// `_extensions/list`. A handler that answers neither still connects —
-// `connect()` tolerates `MethodNotFound` on both — but the client then
-// sees no `serverInfo` / capabilities. `withHandshake` wraps a stub
-// handler with real canned responses for both so the handshake actually
-// negotiates.
+// `client.connect()` auto-issues `initialize` + `_extensions/list`; a stub that
+// answers neither still connects but sees no serverInfo/capabilities.
+// `withHandshake` answers both with canned results. (A real `gateway` answers
+// these bootstrap methods itself — no wrapper needed.)
 const client = await createClient({
   transport: inProcessTransport({ handler: withHandshake(handler) }),
 });
-
-await client.connect();
-await client.request("ping", {});
 ```
 
 `withHandshake(inner, overrides?)` answers `initialize` and

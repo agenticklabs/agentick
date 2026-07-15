@@ -30,7 +30,14 @@ export interface ChannelViewConfig<T, F> {
  */
 export interface ChannelView<T> {
   get(): T;
+  /** The `useSyncExternalStore` contract: notify (no args); read via `get()`. */
   subscribe(listener: () => void): Unsubscribe;
+  /**
+   * Ergonomic sugar over `subscribe` + `get`: `listener` receives the new value
+   * on every change (no separate `get()` call). Returns an unsubscribe. Use
+   * this for imperative code; use `subscribe` for framework store bindings.
+   */
+  onChange(listener: (value: T) => void): Unsubscribe;
   readonly closed: boolean;
   close(): void;
 }
