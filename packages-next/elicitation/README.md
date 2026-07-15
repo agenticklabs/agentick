@@ -256,6 +256,43 @@ discriminated unions / intersections / property-level `anyOf` other
 than the spec-defined labeled-enum form. The rule is binary in the
 spec — there is no "shallow nesting OK" middle ground.
 
+## Client — `@agentick/elicitation-next/client`
+
+The far side of the `session:channel:elicitation` request channel + the
+`session/respond_to_elicitation` reply command: the surface an app frontend
+uses to render pending elicitations and answer them. Depends on
+`@agentick/client-next` (the ADR 87 sub-handle registry) + spec types — NOT on
+the elicitation harness runtime, so it stays out of a browser bundle. Mirrors
+the tasks/knobs `/client` convention.
+
+Importing this subpath contributes the elicitation surface to the client
+`SessionHandle` (install-to-appear — the client twin of the server's
+`bridges.elicitation`). These two members used to be hardcoded on `SessionHandle`
+in client-core; relocating them here keeps client-core harness-agnostic (same
+bundled-not-privileged law as tasks/knobs). The public API is unchanged.
+
+```ts
+import "@agentick/elicitation-next/client"; // side-effect: types + registers the slots
+
+// Iterate inbound requests; each handle has typed .accept / .decline / .cancel.
+for await (const e of client.session(id).elicitations()) {
+  if (e.mode === "form") await e.accept({ name: "Ada" });
+  else await e.decline("not now");
+}
+
+// Or reply directly by correlationId (no handle needed):
+await client.session(id).respondToElicitation({
+  correlationId,
+  outcome: "accepted",
+  value: { name: "Ada" },
+});
+```
+
+`elicitationStream(client, sessionId, fromCursor?)` and
+`respondToElicitation(client, sessionId, input)` are also exported as free
+functions (rung 2 of the escape-hatch ladder) for code that wants them without
+the handle sugar.
+
 ## API
 
 ### `ElicitationHarness` (class)

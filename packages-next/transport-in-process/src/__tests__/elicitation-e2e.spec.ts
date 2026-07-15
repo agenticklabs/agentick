@@ -24,6 +24,8 @@ import "@agentick/elicitation-next";
 
 import { describe, expect, it } from "vitest";
 
+// ADR 87 — contributes `session.elicitations()` / `.respondToElicitation()`.
+import "@agentick/elicitation-next/client";
 import { createClient } from "@agentick/client-next";
 import { FakeLanguageModelExecutor } from "@agentick/executor-next";
 import { createGateway } from "@agentick/gateway-next";

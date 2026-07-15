@@ -584,6 +584,9 @@ importers:
 
   packages-next/elicitation:
     dependencies:
+      '@agentick/client-next':
+        specifier: workspace:*
+        version: link:../client
       '@agentick/runtime-next':
         specifier: workspace:*
         version: link:../runtime
