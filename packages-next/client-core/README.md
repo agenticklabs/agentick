@@ -290,7 +290,7 @@ a bespoke channel.
 A harness's typed façade doesn't have to be summoned by hand. The client
 `SessionHandle` is the **client twin of the server's `HookBridges`**: harness
 `/client` packages augment it with a named slot and register a factory, so
-`client.session(id).tasks` / `.knobs` / `.elicitations()` **self-assemble** the
+`client.session(id).tasks` / `.knobs` / `.elicitations` **self-assemble** the
 moment you import the subpath — no client-core wiring, no manual
 `taskStatusView(client, id)`. Client-core itself knows about **none** of them —
 even elicitation, which used to be hardcoded here, is now a registrant
@@ -300,7 +300,7 @@ contributed by `@agentick/elicitation-next/client`.
 import { createClient } from "@agentick/client-core-next";
 import "@agentick/tasks-next/client"; // types `.tasks` + registers its factory
 import "@agentick/knobs-next/client"; // types `.knobs`
-import "@agentick/elicitation-next/client"; // types `.elicitations()` / `.respondToElicitation()`
+import "@agentick/elicitation-next/client"; // types `.elicitations` (stream + `.respond`)
 
 const client = await createClient({ transport });
 const session = client.session(id);
@@ -336,8 +336,9 @@ twin of the empty `HookBridges` seed) + `registerSessionHandleExtension(name,
 registered factory as a **lazy, cached getter** that never shadows a real
 handle member — so the slot costs nothing until first touched, and installing a
 harness package is the _only_ thing that makes its slot exist. A slot may be a
-view (`.tasks`) or a method (`.elicitations()` — the getter yields the
-function). Same law as the server bridges (ADR 27): built-in vs optional is a
+folded view (`.tasks` / `.knobs` — a `ChannelView` + write command) or a raw
+stream (`.elicitations` — a `ChannelStream` + `.respond`), but every slot is a
+property, never a method. Same law as the server bridges (ADR 27): built-in vs optional is a
 packaging concern, not an architectural one — the registration path is
 identical, and client-core depends on **no** harness (no cycle).
 

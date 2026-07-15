@@ -51,35 +51,44 @@ seam is what unlocks the later tiers without a rewrite:
 Private workspace package. Bundled into the `agentick` metapackage;
 not published independently.
 
-## Client — `taskStatusView` (`@agentick/tasks-next/client`)
+## Client — `tasksHandle` (`@agentick/tasks-next/client`)
 
-The far side of the `session:channel:task-status` channel: a reactive view a
-frontend subscribes to. Mirrors `knobsStateView` — depends on the generic
-`@agentick/client-core-next` `channelView`, NOT the tasks harness, so it stays out of
-the server bundle.
+The far side of the tasks resource: a read + write handle a frontend uses.
+Mirrors `knobsHandle` — the CQRS shape shared by every client sub-handle: a READ
+view (`taskStatusView` over the generic `@agentick/client-core-next`
+`channelView`, NOT the tasks harness, so it stays out of the server bundle) PLUS
+the domain WRITE command `cancel(taskId, reason?)`.
 
 ```ts
-import { taskStatusView } from "@agentick/tasks-next/client";
+import { tasksHandle } from "@agentick/tasks-next/client";
 
-const tasks = taskStatusView(client, sessionId); // ChannelView<Record<taskId, TaskInfo>>
-tasks.get();                    // the folded map, latest status per task
-const off = tasks.subscribe(() => render(tasks.get())); // useSyncExternalStore contract
+const tasks = tasksHandle(client, sessionId); // ChannelView<Record<taskId, TaskInfo>> & { cancel }
+tasks.get(); // the folded map, latest status per task
+const off = tasks.subscribe((state) => render(state)); // STATE feed (useSyncExternalStore)
+tasks.onChange((frame) => flash(frame)); // CHANGE feed — the TaskInfo that changed
+tasks.status; // "loading" | "live" | "closed"
+await tasks.cancel("task-7", "superseded"); // WRITE — lands back as a `cancelled` delta
 tasks.close();
 ```
 
 **Install-to-appear ([ADR 87](../../docs/proposals/v2/blueprint/87-client-sub-handles.md)).**
-Importing this subpath also registers the view as a self-assembling slot on the
-client `SessionHandle`, so you rarely call `taskStatusView` by hand:
+Importing this subpath also registers the handle as a self-assembling slot on the
+client `SessionHandle`, so you rarely call `tasksHandle` by hand:
 
 ```ts
 import "@agentick/tasks-next/client"; // side-effect: types + registers the slot
 
-client.session(id).tasks.get(); // same ChannelView<Record<taskId, TaskInfo>>
+client.session(id).tasks.get(); // ChannelView<Record<taskId, TaskInfo>>
+await client.session(id).tasks.cancel("task-7"); // the write command
 ```
 
-`client.session(id).tasks` is the CLIENT replica (a read-only status fold);
-the server-side `session.tasks` (`TasksHarness`, with `.submit(...)`) is the
-authority. Same noun, two vantages — CQRS by design (see the DX note in ADR 87).
+`client.session(id).tasks` is the CLIENT handle (a status fold + `cancel`); the
+server-side `session.tasks` (`TasksHarness`, the authority, with `.submit(...)`
+and the rich task API) is the truth. Same noun, two vantages — CQRS by design:
+the client's `cancel` is fire-and-observe (issues `tasks/cancel` and resolves on
+gateway accept; **no local hand-patch**), and the cancellation returns as a
+`cancelled` `task-status` delta that re-folds the view — state flows one way,
+through the channel (see the DX note in ADR 87).
 
 Each frame is one task's current `TaskInfo` (published on every FSM transition);
 the view folds them by `taskId`, latest wins. The subscription OPENS with a

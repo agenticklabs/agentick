@@ -267,31 +267,44 @@ the tasks/knobs `/client` convention.
 
 Importing this subpath contributes the elicitation surface to the client
 `SessionHandle` (install-to-appear — the client twin of the server's
-`bridges.elicitation`). These two members used to be hardcoded on `SessionHandle`
-in client-core; relocating them here keeps client-core harness-agnostic (same
-bundled-not-privileged law as tasks/knobs). The public API is unchanged.
+`bridges.elicitation`). It keeps client-core harness-agnostic (same
+bundled-not-privileged law as tasks/knobs).
+
+`session.elicitations` is the third CQRS sub-handle shape: it converges onto the
+generic `channelStream` (`@agentick/client-core-next`) — the ground-floor frame
+stream — rather than a bespoke stream type. Because inbound requests are an
+open-ended feed (not a folded snapshot), the READ surface is the raw
+`ChannelStream<ClientElicitationHandle>` (iterate with `for await`, or wire a
+callback with `.onChange`), and the WRITE command is `.respond(input)` on the
+same handle. Same read/write split as `session.knobs` (view + `set`) and
+`session.tasks` (view + `cancel`) — the read surface differs (stream vs. fold)
+only because elicitations don't materialize into a keyed store.
 
 ```ts
-import "@agentick/elicitation-next/client"; // side-effect: types + registers the slots
+import "@agentick/elicitation-next/client"; // side-effect: types + registers the slot
 
+// `session.elicitations` is a PROPERTY (a ChannelStream), not a method.
 // Iterate inbound requests; each handle has typed .accept / .decline / .cancel.
-for await (const e of client.session(id).elicitations()) {
+for await (const e of client.session(id).elicitations) {
   if (e.mode === "form") await e.accept({ name: "Ada" });
   else await e.decline("not now");
 }
 
-// Or reply directly by correlationId (no handle needed):
-await client.session(id).respondToElicitation({
+// Or wire a callback (subscription under the hood — mirrors onLog/onProgress):
+const stop = client.session(id).elicitations.onChange((e) => e.accept({ name: "Ada" }));
+
+// Or reply directly by correlationId via the handle's write command:
+await client.session(id).elicitations.respond({
   correlationId,
   outcome: "accepted",
   value: { name: "Ada" },
 });
 ```
 
-`elicitationStream(client, sessionId, fromCursor?)` and
-`respondToElicitation(client, sessionId, input)` are also exported as free
-functions (rung 2 of the escape-hatch ladder) for code that wants them without
-the handle sugar.
+`elicitationStream(client, sessionId, fromCursor?)` is also exported as a free
+function (rung 2 of the escape-hatch ladder) returning the same
+`ElicitationsHandle` (`ChannelStream<ClientElicitationHandle> & { respond }`) for
+code that wants it without the `session.` sugar.
 
 ## API
 

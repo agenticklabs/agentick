@@ -219,13 +219,16 @@ convention.
   (rung 1) over `channelView`: it hides the channel name, the frame kinds, and
   the JSON-Patch fold. The subscription opens with the current `snapshot` frame
   (which seeds the whole store), then folds `knobs-state` `delta` frames (RFC
-  6902 JSON-Patch, one op per changed knob) with `applyJsonPatch`. State is
-  exposed through the `useSyncExternalStore` contract (`get()` + `subscribe()`);
-  `close()` tears down. This is the READ half of the knobs resource (CQRS query)
-  — writes are a separate command whose effect returns here as a delta.
+  6902 JSON-Patch, one op per changed knob) with `applyJsonPatch`. Two read
+  feeds (the generic `channelView` shape): `subscribe((state) => …)` — the folded
+  STATE, also the `useSyncExternalStore` contract with `get()` — and
+  `onChange((frame) => …)` — the CHANGE feed, each frame it folds. `status`
+  reports readiness (`"loading" | "live" | "closed"`); `close()` tears down. This
+  is the READ half of the knobs resource (CQRS query) — writes are a separate
+  command whose effect returns here as a delta.
 - **`knobsHandle(client, sessionId)`** → `KnobsHandleView` — the read + write
   resource handle. It composes `knobsStateView` for the read half
-  (`get` / `subscribe` / `closed` / `close`) and adds
+  (`get` / `subscribe` / `onChange` / `status` / `close`) and adds
   **`set(key, value): Promise<void>`**, the WRITE command over `knobs/set`. The
   write is deliberately fire-and-observe: `set` issues the RPC and resolves once
   the gateway accepts it — it does **not** hand-patch the local view. The
