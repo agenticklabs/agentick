@@ -35,6 +35,7 @@ const CAPABILITIES: TransportCapabilities = {
   streamingRequest: true,
   reconnectable: true,
   binaryFrames: false,
+  media: false,
 };
 
 let transportCounter = 0;

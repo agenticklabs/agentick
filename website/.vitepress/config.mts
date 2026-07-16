@@ -92,6 +92,7 @@ const PACKAGE_GROUPS: Array<{ label: string; packages: string[] }> = [
       "@agentick/prompts-react-next",
       "@agentick/elicitation-next",
       "@agentick/resources-next",
+      "@agentick/live-next",
       "@agentick/mcp-next",
       "@agentick/gates-next",
       "@agentick/formatters-next",

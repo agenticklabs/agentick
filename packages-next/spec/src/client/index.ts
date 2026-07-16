@@ -11,6 +11,7 @@ export * from "./transport-error.js";
 export * from "./events.js";
 export * from "./transport.js";
 export * from "./handles.js";
+export * from "./live.js";
 export * from "./elicitation.js";
 export * from "./extension.js";
 export * from "./hooks.js";

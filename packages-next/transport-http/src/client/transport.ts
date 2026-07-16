@@ -48,6 +48,7 @@ const CAPABILITIES: TransportCapabilities = {
   streamingRequest: true,
   reconnectable: true,
   binaryFrames: false,
+  media: false,
 };
 
 const SESSION_ID_HEADER = "Mcp-Session-Id";

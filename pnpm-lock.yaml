@@ -845,6 +845,24 @@ importers:
         specifier: ^19.2.5
         version: 19.2.13
 
+  packages-next/live:
+    dependencies:
+      '@agentick/client-core-next':
+        specifier: workspace:*
+        version: link:../client-core
+      '@agentick/runtime-next':
+        specifier: workspace:*
+        version: link:../runtime
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../spec
+      '@agentick/utils-next':
+        specifier: workspace:*
+        version: link:../utils
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
+
   packages-next/loop-executor:
     dependencies:
       '@agentick/runtime-next':

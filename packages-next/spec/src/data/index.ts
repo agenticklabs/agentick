@@ -50,3 +50,4 @@ export * from "./tool-result.js";
 export * from "./validator.js";
 export * from "./sandbox.js";
 export * from "./mcp.js";
+export * from "./media.js";

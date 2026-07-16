@@ -55,6 +55,7 @@ function fakeTransport(handler: Handler): ClientTransport & {
       streamingRequest: true,
       reconnectable: false,
       binaryFrames: false,
+      media: false,
     } satisfies TransportCapabilities,
     get state() {
       return state;

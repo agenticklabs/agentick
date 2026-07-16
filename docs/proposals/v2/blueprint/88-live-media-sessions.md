@@ -39,7 +39,9 @@ ships the pipes; the adopter composes the rest from primitives that already exis
 ## Two planes
 
 - **Control/event plane** rides the existing agentick wire: client→server commands
-  (`live/start`, `live/stop`) are ADR 46 wire methods; server→client events
+  (`live/start`, `live/stop`, `live/interrupt` — the last a distinct within-stream
+  barge-in signal carrying `playedMs`, not folded into `stop`) are ADR 46 wire
+  methods; server→client events
   (transcripts, state) are ADR 33 channels. Already exists.
 - **Media plane** is the new primitive: opaque framed media keyed by
   `(sessionId, streamId)`. It is a **capability a transport optionally implements**,

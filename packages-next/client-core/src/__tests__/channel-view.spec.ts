@@ -241,6 +241,7 @@ function subscribeOnlyTransport(stream: SubscriptionStream, captured: Captured):
       streamingRequest: true,
       reconnectable: false,
       binaryFrames: false,
+      media: false,
     } satisfies TransportCapabilities,
     get state() {
       return state;

@@ -47,6 +47,15 @@ export interface TransportCapabilities {
   readonly reconnectable: boolean;
   /** Future: MessagePack / CBOR binary frames. */
   readonly binaryFrames: boolean;
+  /**
+   * Media plane (ADR 88) — this transport implements the {@link
+   * import("../data/media.js").MediaTransport} capability (opaque framed media
+   * keyed by `(sessionId, streamId)`). Feature-detected by `@agentick/live-next`
+   * before it opens an uplink/downlink. `false` on transports without a media
+   * path (the current default — the reference in-band impl
+   * `@agentick/transport-ws-media-next` is a Future direction).
+   */
+  readonly media: boolean;
 }
 
 /**
