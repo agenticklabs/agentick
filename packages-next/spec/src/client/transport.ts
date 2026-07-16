@@ -52,8 +52,9 @@ export interface TransportCapabilities {
    * import("../data/media.js").MediaTransport} capability (opaque framed media
    * keyed by `(sessionId, streamId)`). Feature-detected by `@agentick/live-next`
    * before it opens an uplink/downlink. `false` on transports without a media
-   * path (the current default — the reference in-band impl
-   * `@agentick/transport-ws-media-next` is a Future direction).
+   * path (the current default — the in-band network media lane is a native
+   * capability of `@agentick/transport-websocket`, a Future direction; the
+   * in-process `inProcessLiveMedia` ships in v0).
    */
   readonly media: boolean;
 }

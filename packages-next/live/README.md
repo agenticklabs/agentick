@@ -142,11 +142,14 @@ await live.stop(); // graceful end
 
 ## Roadmap & known gaps (ADR 88 Future directions — deliberately deferred)
 
-- **The reference in-band `MediaTransport`** (`@agentick/transport-ws-media-next`
-  — binary frames over the WS control socket). v0 ships the contract + fakes; the
-  server `downlinkSink` and the client media transport are injected, not built.
-  Until it lands, `stream.sendFrame` drops frames unless a `downlinkSink` is
-  wired.
+- **The network media plane — the WS media lane.** The in-process media plane
+  **landed** (`@agentick/live-next/testing` `inProcessLiveMedia(gateway)`, composed
+  via `inProcessTransport({ gateway, media })`) — frames flow client↔server in a
+  full-stack e2e. The over-the-network lane is deferred, and it is a **native
+  capability of `@agentick/transport-websocket`** (binary frames on the shared
+  control socket + the `MediaFrame` codec), **NOT a separate package** — media
+  rides the same wire as control. Only out-of-band transports (WebRTC/SIP, which
+  bring their own connection) warrant a package.
 - **The engine packaging** — `pipelineEngine` + session-oriented `SttEngine` /
   `TtsEngine` seams (validated against Google streaming-STT in ADR 88a).
 - **`TurnArbiter`** — a verdict seam for turn-triggering + barge-in (a

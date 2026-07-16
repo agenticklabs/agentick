@@ -64,10 +64,12 @@ export interface LiveHarnessOptions {
    */
   readonly session?: () => SessionHarnessProtocol | undefined;
   /**
-   * The DOWNLINK sink — where `stream.sendFrame(frame)` delivers server→client
-   * frames. Injected by the media-transport server half (the deferred
-   * `@agentick/transport-ws-media-next`). Omitted in v0 core → downlink frames
-   * are dropped (documented; a test injects a recorder).
+   * The DOWNLINK sink — an optional single sink where `stream.sendFrame(frame)`
+   * delivers server→client frames. The runtime-attachable egress is
+   * {@link LiveHarnessProtocol.onDownlink} (fan-out observers) — the media-transport
+   * server half (the WS media lane on `@agentick/transport-websocket`, or the
+   * in-process `inProcessLiveMedia`) subscribes there. This constructor option is
+   * the single-sink convenience; both fire on `sendFrame`.
    */
   readonly downlinkSink?: (ref: MediaSessionRef, frame: MediaFrame) => void | Promise<void>;
   readonly inheritedInterceptors?: readonly Middleware<unknown, unknown, unknown>[];

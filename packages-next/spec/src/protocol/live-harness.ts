@@ -91,9 +91,9 @@ export interface LiveHarnessProtocol {
 
   /**
    * Route an inbound UPLINK frame to its stream's `onFrame` observers. Called by
-   * the media-transport server half (`@agentick/transport-ws-media-next`, or the
-   * in-process `inProcessLiveMedia`) when a client frame arrives; a no-op for an
-   * unknown / closed stream.
+   * the media-transport server half (the WS media lane on
+   * `@agentick/transport-websocket`, or the in-process `inProcessLiveMedia`) when
+   * a client frame arrives; a no-op for an unknown / closed stream.
    */
   push(ref: MediaSessionRef, frame: MediaFrame): void;
 

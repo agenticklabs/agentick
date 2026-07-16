@@ -1,10 +1,11 @@
 /**
  * `inProcessLiveMedia` — the live-aware in-process `MediaTransport` (ADR 88).
  *
- * The in-process counterpart of the deferred `@agentick/transport-ws-media-next`:
- * a media plane that carries frames client↔server entirely in-memory, routing to
- * the owning session's `LiveHarness` through the gateway. Compose it with the
- * generic control transport:
+ * The in-process counterpart of the deferred WS media lane (a native capability
+ * of `@agentick/transport-websocket`, Future direction): a media plane that
+ * carries frames client↔server entirely in-memory, routing to the owning
+ * session's `LiveHarness` through the gateway. Compose it with the generic
+ * control transport:
  *
  * ```ts
  * const transport = inProcessTransport({ gateway, media: inProcessLiveMedia(gateway) });

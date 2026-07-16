@@ -63,7 +63,7 @@ export function sessionLive(client: LiveFacetClient, sessionId: string): Session
       const media = asMediaTransport(client.transport);
       if (media === undefined) {
         throw new Error(
-          "session.live.start(): the connected transport has no media capability (transport.capabilities.media is false / MediaTransport not implemented). Install a media-capable transport (e.g. @agentick/transport-ws-media-next).",
+          "session.live.start(): the connected transport has no media capability (transport.capabilities.media is false / MediaTransport not implemented). Use a media-capable transport — the WS media lane (@agentick/transport-websocket) over the network, or inProcessTransport({ gateway, media: inProcessLiveMedia(gateway) }) in-process.",
         );
       }
 

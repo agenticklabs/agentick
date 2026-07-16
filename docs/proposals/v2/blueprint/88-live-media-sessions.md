@@ -226,15 +226,52 @@ subsystem (app-composed) · **the entire engine layer** — `pipelineEngine`,
 `RealtimeModel` archetype, driven-loop/full-duplex, 2-track reflex tier. All
 deferred (Future directions).
 
-## Package shape (v0)
+## Package shape
+
+**Landed (v0 core + in-process media plane):**
 
 - **`@agentick/live-next`** (optional, public install) — `MediaSession` +
-  `MediaTransport` contracts, the `session.live` server handle + `live/*` wire
-  extension, the stream **routing** + `withLive({ onStream })` hook.
+  `LiveHarnessProtocol` (incl. the `onDownlink` egress seam), the `session.live`
+  server handle + `live/*` wire extension, the stream **routing** +
+  `withLive({ onStream })` hook.
 - **`@agentick/live-next/client`** — the `LiveSessionHandle` (`sendFrame`/`onFrame`
   spec + `uplink`/`downlink` projections).
-- **`@agentick/transport-ws-media-next`** — reference in-band `MediaTransport`
-  (binary frames over the WS control socket).
+- **`@agentick/live-next/testing`** — `inProcessLiveMedia(gateway)`, the in-memory
+  `MediaTransport`, composed via `inProcessTransport({ gateway, media })`.
+- **`@agentick/transport-in-process-next`** — gained a generic
+  `media?: MediaTransport` option (stays live-agnostic; just exposes what it is
+  handed).
+- **`@agentick/spec-next`** — `session-next` exposes optional-extension bridges as
+  `session.<name>` getters (the server twin of the ADR-87 client sub-handles), so
+  an optional extension's wire method can reach its harness (`session.live`).
+
+**Media transport is a CAPABILITY, not a package — the in-band rule.**
+`MediaTransport` is implemented BY a transport that already owns a connection;
+media rides the *same wire* as control. So there is deliberately **no
+`transport-ws-media-next` package**: the network media plane is a **native
+capability of `@agentick/transport-websocket`** (flip `binaryFrames`/`media` to
+`true`; add a `MediaFrame` binary codec beside the existing JSON codec +
+`openUplink`/`openDownlink` on the shared socket — a text-vs-binary discriminator
+distinguishes the planes), plus a ~40-line WS server router in `live-next` (the WS
+analog of `inProcessLiveMedia`). This is symmetric with how
+`transport-in-process` gained a native `media` option rather than a `-media`
+package.
+
+**The rule — in-band vs out-of-band** (the dividing line is "does it bring its own
+connection?", not "is it media?"):
+
+- **In-band** (shares the control connection: WebSocket, in-process) → a
+  *capability added to that transport*. No new package.
+- **Out-of-band** (brings its OWN connection: WebRTC / SIP — SDP/ICE, media
+  tracks, independent lifecycle) → a *new transport package*
+  (`transport-webrtc-next`). This is the only case a media package is justified.
+
+Every transport DECLARES `capabilities.media` (a required flag); only
+media-capable ones implement the optional `MediaTransport` methods (which are NOT
+on the base `ClientTransport`). `session.live.start()` feature-detects and throws
+loud on a media-less transport (HTTP sets `media: false` — you cannot run a
+continuous bidirectional stream over stateless request/response, so it fails
+loud, correctly).
 
 ## Future directions (explored, deliberately deferred)
 

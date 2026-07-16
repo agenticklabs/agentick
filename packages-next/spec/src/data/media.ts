@@ -104,10 +104,11 @@ export interface TranscriptDelta {
 /**
  * The media-plane capability a transport OPTIONALLY implements (feature-detected
  * via `TransportCapabilities.media`). In-band transports (WebSocket) implement
- * it with binary frames on the control socket; out-of-band transports (WebRTC)
- * negotiate a media track and hand back an opaque sink/source. The reference
- * in-band impl (`@agentick/transport-ws-media-next`) is a Future direction — v0
- * ships the contract + fakes.
+ * it with binary frames on the control socket (a native capability of
+ * `@agentick/transport-websocket`, NOT a separate package — Future direction);
+ * out-of-band transports (WebRTC) negotiate a media track and hand back an opaque
+ * sink/source (those DO warrant their own package). v0 ships the contract + the
+ * in-process `inProcessLiveMedia`.
  *
  * Verbatim from ADR 88 §Two planes.
  */
