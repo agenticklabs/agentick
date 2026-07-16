@@ -1723,6 +1723,22 @@ blueprint's design decisions; this is execution-level).
 
 ### 2026-07-15
 
+- **ADR 88 + 88a — live media sessions (DRAFT).** Designed the "live" capability
+  grounded in OpenAI Realtime / Gemini Live / AI SDK / LiveKit / Pipecat + Knowify
+  v1 parity. **Retargeted to a minimal core (rev 3):** a `MediaTransport` *capability*
+  (feature-detected, backpressured uplink/downlink, keyed by `(sessionId, streamId)`),
+  a continuous `MediaSession`, and the `session.live` handle — client `sendFrame`/
+  `onFrame` spec + `uplink`/`downlink` stream projections; server `withLive({ onStream })`
+  routing + a per-stream context. Everything above the pipes (STT/TTS engine packaging,
+  `TurnArbiter`, capability record, `RealtimeModel` archetype, driven-loop/full-duplex,
+  2-track reflex tier) is **app-composed from existing primitives** (`session.send`,
+  `guard`, steering, tasks) or **demoted to Future directions**. Key design calls:
+  callback/imperative is the spec (no stream-type dep in spec), streams are the
+  runtime projection; barge-in = `abort` + steering (not a subsystem); hooks are
+  server-lifecycle-grained + opt-in (client is a projection: callbacks + middleware).
+  88a validates the deferred engine layer against session-required streaming STT
+  (Google) over a continuous multi-turn call (one recognizer, many turns, rotation
+  at turn boundaries, Timeline = memory). **Next:** scaffold `@agentick/live-next` v0.
 - **`session.tasks` completed to a CQRS handle** (`e271c834`): added
   `tasksWireExtension` (`tasks/cancel`) + `tasksHandle` (client) so
   `session.tasks` is now `ChannelView & { cancel(taskId, reason?) }` — uniform
