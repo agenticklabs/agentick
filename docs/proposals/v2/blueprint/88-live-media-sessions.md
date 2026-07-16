@@ -273,6 +273,27 @@ loud on a media-less transport (HTTP sets `media: false` — you cannot run a
 continuous bidirectional stream over stateless request/response, so it fails
 loud, correctly).
 
+**WebRTC — adopt, don't build; and the plane split.** When it lands,
+`transport-webrtc-next` is a **provider-adapter shape, not an SFU we implement**:
+because `MediaTransport` is just `openUplink`/`openDownlink` of opaque
+`MediaFrame`s, a LiveKit / Daily / Twilio / OpenAI-Realtime *room* is *itself* a
+`MediaTransport` — the adapter plugs a provider's WebRTC media plane into the seam
+and agentick gets UDP/Opus/jitter-buffer/PLC/AEC/NAT-traversal/video for free
+(the wins WS-binary can't match: no TCP head-of-line stall, ~10× less bandwidth via
+Opus+DTX, native video tracks). It earns its complexity specifically for
+**browser/mobile clients on real networks doing full-duplex conversation** — not
+server-to-server glue, where WS-binary is simpler and fine.
+
+Crucially, **the media plane and the control plane may ride DIFFERENT transports.**
+`MediaTransport` is a *separately injectable* capability, not fused to the control
+transport's methods — `inProcessTransport({ gateway, media })` already proved the
+shape. So the canonical realtime split — **JSON-RPC control on WebSocket, media
+frames on WebRTC** (`webSocketTransport({ …, media: webrtcMedia(…) })`) — is
+admitted with no new machinery. It's exactly what OpenAI Realtime does (WebRTC
+media + a paired control channel). The two planes were designed independent so
+they can ride independent wires; nothing above the transport (`session.live`, the
+handle, `onStream`, barge-in, app code) changes when they do.
+
 ## Future directions (explored, deliberately deferred)
 
 These were designed in depth in the thread that produced this ADR; the reasoning is
