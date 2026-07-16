@@ -38,6 +38,11 @@
       "types": "./src/client/index.ts",
       "import": "./src/client/index.ts",
       "default": "./src/client/index.ts"
+    },
+    "./testing": {
+      "types": "./src/testing/index.ts",
+      "import": "./src/testing/index.ts",
+      "default": "./src/testing/index.ts"
     }
   },
   "scripts": {
@@ -53,5 +58,11 @@
     "@agentick/spec-next": "workspace:*",
     "@agentick/utils-next": "workspace:*",
     "effect": "^3.21.2"
+  },
+  "devDependencies": {
+    "@agentick/executor-next": "workspace:*",
+    "@agentick/gateway-next": "workspace:*",
+    "@agentick/reconciler-next": "workspace:*",
+    "@agentick/transport-in-process-next": "workspace:*"
   }
 }

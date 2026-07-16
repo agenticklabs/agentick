@@ -498,6 +498,26 @@ export class SessionHarness<P = unknown>
     if (options.initialState) {
       this.bridges.state.importSnapshot(options.initialState);
     }
+
+    // Expose optional-extension bridges (registered via `installer.registerNamespace`
+    // — sandbox, live, credentials, …) as `session.<name>` getters — the server
+    // twin of the ADR-87 client sub-handles. Built-ins keep their explicit typed
+    // getters (`get tasks()`, `get elicitation()`); only names NOT already a member
+    // are defined, so an extension can never shadow a real one. This is what lets an
+    // optional extension's wire method reach its harness server-side
+    // (`session.live` in `liveWireExtension`), not just at render time (`bridges.live`).
+    const extBridges = options.extensionBridges;
+    if (extBridges) {
+      for (const name of extBridges.keys()) {
+        if (name in this) continue; // never shadow a built-in getter / real member
+        Object.defineProperty(this, name, {
+          get: () => extBridges.get(name),
+          enumerable: false,
+          configurable: true,
+        });
+      }
+    }
+
     this.reconciler = options.reconciler;
     this.loop = options.loop;
     this.executor = options.executor;

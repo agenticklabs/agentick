@@ -91,10 +91,20 @@ export interface LiveHarnessProtocol {
 
   /**
    * Route an inbound UPLINK frame to its stream's `onFrame` observers. Called by
-   * the media-transport server half (deferred `@agentick/transport-ws-media-next`)
-   * when a client frame arrives; a no-op for an unknown / closed stream.
+   * the media-transport server half (`@agentick/transport-ws-media-next`, or the
+   * in-process `inProcessLiveMedia`) when a client frame arrives; a no-op for an
+   * unknown / closed stream.
    */
   push(ref: MediaSessionRef, frame: MediaFrame): void;
+
+  /**
+   * Observe DOWNLINK frames the harness emits (from `stream.sendFrame`) — the
+   * egress mirror of {@link push}. The media-transport server half subscribes
+   * here to forward server→client frames down the wire. Fans out to every
+   * observer; returns an unsubscribe. (The constructor `downlinkSink` option is
+   * the single-sink convenience; this is the runtime-attachable seam.)
+   */
+  onDownlink(cb: (ref: MediaSessionRef, frame: MediaFrame) => void): Unsubscribe;
 
   /**
    * Deliver a client interrupt (barge-in) signal to the stream's `onInterrupt`

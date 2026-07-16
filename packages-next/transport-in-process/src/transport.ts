@@ -18,6 +18,10 @@ import type {
   JsonRpcFrame,
   JsonRpcRequest,
   JsonRpcResponse,
+  MediaDownlink,
+  MediaSessionRef,
+  MediaTransport,
+  MediaUplink,
   TransportCapabilities,
 } from "@agentick/spec-next";
 import {
@@ -47,6 +51,14 @@ export interface InProcessTransportOptions {
   readonly handler?: InProcessGatewayHandler;
   readonly wireParity?: boolean;
   readonly id?: string;
+  /**
+   * Optional media-plane implementation (ADR 88). When provided, the transport
+   * advertises `capabilities.media = true` and delegates `openUplink` /
+   * `openDownlink` to it — the control transport stays generic and knows nothing
+   * about `live`; the live-aware in-process router (`inProcessLiveMedia` from
+   * `@agentick/live-next`) is what wires frames to the session's `LiveHarness`.
+   */
+  readonly media?: MediaTransport;
 }
 
 /** Build the handler that dispatches to a gateway — the sink is boilerplate. */
@@ -65,26 +77,19 @@ function gatewayHandler(gateway: DispatchHost): InProcessGatewayHandler {
   };
 }
 
-const CAPABILITIES: TransportCapabilities = {
-  bidirectional: true,
-  streamingRequest: true,
-  reconnectable: false,
-  binaryFrames: true,
-  media: false,
-};
-
 let transportCounter = 0;
 
 export function inProcessTransport(options: InProcessTransportOptions): ClientTransport {
   return new InProcessTransport(options);
 }
 
-class InProcessTransport extends BaseClientTransport {
+class InProcessTransport extends BaseClientTransport implements MediaTransport {
   readonly id: string;
-  readonly capabilities = CAPABILITIES;
+  readonly capabilities: TransportCapabilities;
 
   private readonly handler: InProcessGatewayHandler;
   private readonly wireParity: boolean;
+  private readonly media?: MediaTransport;
 
   constructor(options: InProcessTransportOptions) {
     super();
@@ -96,6 +101,33 @@ class InProcessTransport extends BaseClientTransport {
     if (!handler) throw new Error("inProcessTransport: provide `gateway` or `handler`");
     this.handler = handler;
     this.wireParity = options.wireParity ?? false;
+    this.media = options.media;
+    this.capabilities = {
+      bidirectional: true,
+      streamingRequest: true,
+      reconnectable: false,
+      binaryFrames: true,
+      media: options.media !== undefined,
+    };
+  }
+
+  // ─── MediaTransport (ADR 88) — delegates to the injected media impl ───
+
+  openUplink(ref: MediaSessionRef): MediaUplink {
+    return this.requireMedia().openUplink(ref);
+  }
+
+  openDownlink(ref: MediaSessionRef): MediaDownlink {
+    return this.requireMedia().openDownlink(ref);
+  }
+
+  private requireMedia(): MediaTransport {
+    if (!this.media) {
+      throw new Error(
+        "inProcessTransport: no media capability — pass `media` (e.g. inProcessLiveMedia(gateway)) to open a media plane.",
+      );
+    }
+    return this.media;
   }
 
   protected async openConnection(): Promise<void> {

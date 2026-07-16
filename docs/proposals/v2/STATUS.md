@@ -1738,7 +1738,25 @@ blueprint's design decisions; this is execution-level).
   server-lifecycle-grained + opt-in (client is a projection: callbacks + middleware).
   88a validates the deferred engine layer against session-required streaming STT
   (Google) over a continuous multi-turn call (one recognizer, many turns, rotation
-  at turn boundaries, Timeline = memory). **Next:** scaffold `@agentick/live-next` v0.
+  at turn boundaries, Timeline = memory). Scaffolded v0 (`ba3d5770`): harness +
+  handle + routing + wire + client, fake-transport unit tested (31 tests).
+- **live-next increment 2 — frames actually flow (in-process media plane).** Added
+  `inProcessLiveMedia(gateway)` (`@agentick/live-next/testing`) — the in-memory
+  `MediaTransport` — composed with the generic control transport via a new optional
+  `inProcessTransport({ gateway, media })` hook (transport-in-process stays live-agnostic;
+  the coupling lives in live-next). Spec: `onDownlink` egress seam on `LiveHarnessProtocol`
+  (the mirror of `push`). 4-test full-stack e2e proves a client `sendFrame` reaches the
+  server `onStream.onFrame` and a server `sendFrame` reaches the client `onFrame`, +
+  concurrent-stream routing by `streamId`. **Finding (real gap the e2e surfaced):**
+  optional-extension bridges (registered via `installer.registerNamespace` →
+  `extensionBridges`) had **no server-side `session.<name>` getter** — only built-ins
+  (`get tasks()`/`get elicitation()`) did — so `session.live` was `undefined` and the wire
+  handler couldn't reach the harness. `live` is the first optional extension with a wire
+  method, so nothing hit it before. **Fixed generally in `session-next`:** the SessionHarness
+  now exposes every `extensionBridges` name as a `session.<name>` getter (never shadowing a
+  built-in) — the server twin of the ADR-87 client sub-handles; makes `session.sandbox`/
+  `.credentials`/`.live`/etc. all resolve. Gates: `pnpm typecheck --force` 150/0-cached;
+  927 tests across session/app/live/transport-in-process/sandbox/credentials/spec.
 - **`session.tasks` completed to a CQRS handle** (`e271c834`): added
   `tasksWireExtension` (`tasks/cancel`) + `tasksHandle` (client) so
   `session.tasks` is now `ChannelView & { cancel(taskId, reason?) }` — uniform

@@ -95,6 +95,7 @@ export class LiveHarness extends BaseHarness<"live"> implements LiveHarnessProto
   private readonly onStreamCb: LiveHarnessOptions["onStream"];
   private readonly resolveSession: LiveHarnessOptions["session"];
   private readonly downlinkSink: LiveHarnessOptions["downlinkSink"];
+  private readonly downlinkObservers = new Set<(ref: MediaSessionRef, frame: MediaFrame) => void>();
 
   get id(): string {
     return this.scopeId;
@@ -143,6 +144,13 @@ export class LiveHarness extends BaseHarness<"live"> implements LiveHarnessProto
     const state = this.streams.get(ref.streamId);
     if (!state || state.closed) return;
     for (const cb of state.frameListeners) cb(frame);
+  }
+
+  onDownlink(cb: (ref: MediaSessionRef, frame: MediaFrame) => void): Unsubscribe {
+    this.downlinkObservers.add(cb);
+    return () => {
+      this.downlinkObservers.delete(cb);
+    };
   }
 
   interrupt(streamId: string, playedMs?: number): void {
@@ -251,6 +259,7 @@ export class LiveHarness extends BaseHarness<"live"> implements LiveHarnessProto
   }
 
   private async sendDownlink(ref: MediaSessionRef, frame: MediaFrame): Promise<void> {
+    for (const cb of this.downlinkObservers) cb(ref, frame);
     await this.downlinkSink?.(ref, frame);
   }
 
