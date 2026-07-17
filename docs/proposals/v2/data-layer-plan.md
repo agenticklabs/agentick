@@ -665,12 +665,21 @@ criterion) **adoptable one store at a time, coexisting with the old**.
       `description?` (the app generates them — auto-summary / user-edit; framework is
       blind to the semantics), `metadata?: Record<string, unknown>` (the open bag /
       over-fetch home).
-  Open (Ryan's call): **agent binding** — a session is a *context*, agents run within
-  it (spawn/send can run different agents), so DON'T hardcode an agent field; `agentId`
-  lives in `metadata` unless a first-class optional slot is wanted. Deferred: whether
-  **executions** get their own store (`ExecutionStore`) — the level below session; the
-  timeline already captures the conversation, so an execution record (inputs/outputs/
-  ticks/tokens/status per turn) is audit/replay sugar, not yet required.
+  **Model RESOLVED (Ryan):** **1 agent : 1 session** — the spawn tree IS the session
+  tree. A sub-agent is spawned with a **child session** (`parentSessionId`), either
+  clean-slate or **inheriting context from the parent via store cascade** (the knobs
+  `parentLayer` read-through fallback is the existing prototype — a child store reads
+  through to the parent's). `executionId` is `exec:${ulid()}` (globally unique,
+  sortable; already in `EventScope`), so executions stay addressable across the tree.
+  ⇒ `agentId?` is a legitimate **optional first-class slot** (1:1 makes it meaningful
+  for the sessions-list), populated when the agent has a stable id/name; not required.
+  **The live-registry-vs-record-store distinction (falls out):** the app's session
+  registry maps `sessionId → LIVE SessionHarness` (routing, in-memory, ephemeral — a
+  live-object map like tasks' `live`) and is NOT replaced. The `SessionStore` holds
+  `sessionId → SessionRecord` (durable metadata, queryable) — the **superset** (every
+  session ever, incl. closed/historical) + the durable + enumerable surface. Deferred:
+  an `ExecutionStore` (level below session) — the timeline already captures the
+  conversation, so per-execution records are audit/replay sugar, not yet required.
 - **E12 — Restore ordering (new).** Today none (`Promise.all`). Derived stores need
   the journal restored first; timeline-before-mount already exists. Manifest restore
   introduces a dependency order: journal → derived stores → mount.
