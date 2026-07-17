@@ -7,7 +7,8 @@
  * idempotency replay, journaling).
  *
  *   Sync surface   — get / has / list / subscribe / subscribeAll.
- *                     Reads from local Map; no envelopes.
+ *                     Reads the sync {@link CollectionProjection} (the store's
+ *                     read cache); no envelopes.
  *   Async surface  — set / delete. Declared commands (ADR 51): each
  *                     runs through `runOperation` with canonical
  *                     naming; the terminal envelope IS the change-event
@@ -18,6 +19,17 @@
  * Snapshot/restore — `exportSnapshot()` / `importSnapshot()` round-trip
  * the entries. Used by SnapshotHarness for hibernate/resume.
  *
+ * Storification (data-layer plan §3.5) — the near-identical twin of knobs.
+ * State is store-derived AND store-persisted: a durable {@link CollectionStore}
+ * of `{ key, value }` cells is the authority, and a synchronous
+ * {@link CollectionProjection} is its read cache (reads never touch the async
+ * store). Every value mutation dual-writes through the projection (sync cache
+ * first, durable store off the critical path); `hydrate()` reloads the store
+ * into the projection on resume. The projection is a WRITE SINK beside the
+ * `notifier` / `changes` reactive seam, NEVER a source of it — every mutation
+ * writes it AND drives the seam by hand, exactly as before. State has no
+ * client-facing channel, so no projection routes through the store.
+ *
  * @see docs/proposals/v2/blueprint/26-harness-api-shape.md
  * @see docs/proposals/v2/blueprint/51-invocation-and-authorization.md
  */
@@ -25,6 +37,7 @@
 import { Effect } from "effect";
 import { BaseHarness, type Unsubscribe } from "@agentick/runtime-next";
 import type {
+  CollectionStore,
   EventBus,
   MessageEnvelope,
   MessageHandlerError,
@@ -42,9 +55,36 @@ import {
   type ChangeNotifier,
   type KeyedNotifier,
 } from "@agentick/pubsub-next";
+import { CollectionProjection } from "@agentick/store-next";
+import { createStateStore, type StateEntry, type StateStoreQuery } from "./store.js";
+
+/**
+ * Construction options for {@link StateHarness}. Minimal — state takes its
+ * substrate positionally; this carries only the durable store override.
+ */
+export interface StateHarnessOptions {
+  /**
+   * Durable backing for state VALUES (data-layer plan §3.5, Phase 3). Defaults
+   * to a fresh per-harness in-memory {@link createStateStore}. The store holds
+   * `{ key, value }` cells; it is the durable truth, the synchronous
+   * {@link CollectionProjection} is its sync read cache (reads never touch the
+   * store). Injecting a durable adapter (Postgres, …) is how state survives
+   * process restart; `hydrate()` loads it back into the projection.
+   */
+  readonly store?: CollectionStore<StateEntry, StateStoreQuery>;
+}
 
 export class StateHarness extends BaseHarness<"state"> implements StateHarnessProtocol {
-  private readonly values = new Map<string, unknown>();
+  /**
+   * The synchronous read PROJECTION of the value store (data-layer plan §3.5
+   * P5) — `get` / `has` / `list` / `subscribe` read it, so state reads stay
+   * sync (never async-through-the-store). The shared {@link CollectionProjection}
+   * owns the dual-write (sync cache first, durable {@link StateEntry} store off
+   * the critical path) and the {@link CollectionProjection.hydrate} merge. It is
+   * a WRITE SINK beside the `notifier` / `changes` seam, never a source: every
+   * mutation writes it AND drives the seam by hand, exactly as before.
+   */
+  private readonly projection: CollectionProjection<StateEntry, StateStoreQuery>;
   private readonly notifier: KeyedNotifier = createKeyedNotifier();
 
   /**
@@ -68,8 +108,18 @@ export class StateHarness extends BaseHarness<"state"> implements StateHarnessPr
     return this.scopeId;
   }
 
-  constructor(scopeId: string, journal: OperationJournal, bus: EventBus, inbox: MessageInbox) {
+  constructor(
+    scopeId: string,
+    journal: OperationJournal,
+    bus: EventBus,
+    inbox: MessageInbox,
+    options: StateHarnessOptions = {},
+  ) {
     super("state", scopeId, journal, bus, inbox);
+    this.projection = new CollectionProjection<StateEntry, StateStoreQuery>(
+      options.store ?? createStateStore(),
+      (entry) => entry.key,
+    );
     const scope = () => ({ sessionId: this.scopeId });
     this.set = this.command({
       name: "state:set",
@@ -86,15 +136,18 @@ export class StateHarness extends BaseHarness<"state"> implements StateHarnessPr
   // ─────────── Sync surface ───────────
 
   get(key: string): unknown {
-    return this.values.get(key);
+    // Mirrors `Map.get`: a stored `{ key, value: undefined }` and an absent key
+    // both read back as `undefined`. Callers that must distinguish use `has`
+    // (backed by `hasSync`, a key-membership check independent of the value).
+    return this.projection.getSync(key)?.value;
   }
 
   has(key: string): boolean {
-    return this.values.has(key);
+    return this.projection.hasSync(key);
   }
 
   list(): readonly string[] {
-    return [...this.values.keys()];
+    return this.projection.listSync().map((entry) => entry.key);
   }
 
   subscribe(key: string, listener: () => void): Unsubscribe {
@@ -123,17 +176,48 @@ export class StateHarness extends BaseHarness<"state"> implements StateHarnessPr
 
   exportSnapshot(): Readonly<Record<string, unknown>> {
     const out: Record<string, unknown> = {};
-    for (const [k, v] of this.values) out[k] = v;
+    for (const { key, value } of this.projection.listSync()) out[key] = value;
     return out;
   }
 
   importSnapshot(values: Readonly<Record<string, unknown>>): void {
-    const oldKeys = new Set(this.values.keys());
+    const oldKeys = new Set(this.projection.listSync().map((entry) => entry.key));
     const newKeys = new Set(Object.keys(values));
     const changed = new Set<string>([...oldKeys, ...newKeys]);
-    this.values.clear();
-    for (const [k, v] of Object.entries(values)) this.values.set(k, v);
+    // Wholesale replace: a key present before but absent from `values` is
+    // dropped from BOTH the projection cache and the store (delete-not-present),
+    // then the snapshot's cells dual-write through the projection. In every real
+    // call path (seed, restore) the harness is fresh so the drop loop is a
+    // no-op; the loop makes a theoretical re-import onto a populated harness an
+    // honest replace rather than an upsert that would leave the store to
+    // resurface stale keys via `hydrate()`.
+    //
+    // TODO(store-phase-4): `importSnapshot` is the ACTIVE snapshot-based resume
+    // path. The Phase-4 manifest sweep replaces it with `hydrate()` once the
+    // store is the authority (and picks up the durable-write flush barrier now
+    // centralized in `CollectionProjection.write`). Do NOT wire `hydrate()`
+    // into resume while this method still owns it.
+    for (const k of oldKeys) if (!newKeys.has(k)) this.projection.deleteSync(k);
+    for (const [k, v] of Object.entries(values)) this.projection.write({ key: k, value: v });
     for (const key of changed) this.fireListeners(key);
+  }
+
+  /**
+   * Load the durable value store into the sync projection — the future manifest
+   * resume path (data-layer plan Phase 4 / BaseHarness §2.3). The projection
+   * owns the store→cache merge and returns the keys it loaded; the harness owns
+   * notification (the primitive is a write sink, not a notifier). Pings each
+   * hydrated key so both per-key and wildcard subscribers re-read. This is a
+   * MERGE (store cells overlay the projection), not a clear-first replace — a
+   * fresh session's store is empty ⇒ a no-op.
+   *
+   * NOT wired into session resume in this run: `importSnapshot` remains the
+   * active resume path. `hydrate()` is the seam the Phase-4 manifest sweep flips
+   * to once the store is authority.
+   */
+  async hydrate(): Promise<void> {
+    const keys = await this.projection.hydrate();
+    for (const k of keys) this.fireListeners(k);
   }
 
   // ─────────── Inbox routing ───────────
@@ -153,10 +237,14 @@ export class StateHarness extends BaseHarness<"state"> implements StateHarnessPr
 
   private applySet(input: StateSetInput): void {
     // `existed`, not `prev !== undefined`: state may store `undefined` as a
-    // real value, so a `has` check is the exact add-vs-update discriminator.
-    const existed = this.values.has(input.key);
-    const prev = this.values.get(input.key);
-    this.values.set(input.key, input.value);
+    // real value, so a `hasSync` check is the exact add-vs-update discriminator.
+    const existed = this.projection.hasSync(input.key);
+    const prev = this.projection.getSync(input.key)?.value;
+    // Dual-write through the projection: sync cache first (reads reflect it
+    // now), durable store off the critical path. The notify seam below
+    // (`fireListeners` + `changes`) is driven by hand, exactly as before — the
+    // projection is a write sink beside it, never a source.
+    this.projection.write({ key: input.key, value: input.value });
     this.fireListeners(input.key);
     this.changes.emitChange(
       existed
@@ -166,9 +254,9 @@ export class StateHarness extends BaseHarness<"state"> implements StateHarnessPr
   }
 
   private applyDelete(input: StateDeleteInput): void {
-    if (!this.values.has(input.key)) return;
-    const prev = this.values.get(input.key);
-    this.values.delete(input.key);
+    if (!this.projection.hasSync(input.key)) return;
+    const prev = this.projection.getSync(input.key)?.value;
+    this.projection.deleteSync(input.key);
     this.fireListeners(input.key);
     // Remove — value omitted. `changeKind` reads this as "remove" regardless
     // of whether the stored value was itself `undefined`.

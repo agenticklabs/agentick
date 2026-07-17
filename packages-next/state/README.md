@@ -15,10 +15,11 @@ published independently.
 
 ## What it is
 
-A `Map<string, unknown>` behind the full harness contract. Two surfaces:
+A store-backed key/value cell set behind the full harness contract — the
+near-identical twin of knobs, minus the model-facing descriptors. Two surfaces:
 
 - **Sync reads** — `get(key)` · `has(key)` · `list()` · `subscribe(key, fn)`
-  · `subscribeAll(fn)`. Cheap Map reads; no envelopes.
+  · `subscribeAll(fn)`. Served from a synchronous read cache; no envelopes.
 - **Async writes** — `set({ key, value })` · `delete({ key })`. Declared
   commands (ADR 51): each runs through `runOperation`, so the terminal
   envelope IS the change-event audit trail, and both verbs are
@@ -34,6 +35,27 @@ per-key subscribers (a delete fires the key's subscribers too), so
 `SnapshotHarness` drives them for hibernate/resume. Because values are
 `unknown` and stored as-is, snapshot durability is bounded by JSON
 serializability — the same rule the rest of the substrate follows.
+
+### Store-backed (data-layer plan §3.5)
+
+State is store-derived AND store-persisted, exactly like knobs. A durable
+`CollectionStore<StateEntry>` of `{ key, value }` cells is the authority; a
+synchronous `CollectionProjection` is its read cache, so the sync surface never
+touches the async store. Every mutation **dual-writes** through the projection
+(sync cache first, durable store off the critical path); `hydrate()` reloads the
+store into the projection on resume. The default store is a fresh in-memory
+`createStateStore()` (`:memory:`, lost on exit); inject a durable adapter via
+`new StateHarness(..., { store })` or `withState({ store })` to survive restart.
+
+The projection is a **write sink** beside the `notifier` / `changes` reactive
+seam — never a source. State is session-internal with no client-facing channel,
+so nothing routes through the store's change stream; the seam stays harness-level.
+
+One state-only wrinkle vs knobs: values are `unknown`, so a `set(key, undefined)`
+stores a **present** key whose value is `undefined`. Presence is a key-membership
+fact (`has` → `hasSync`), never a `value !== undefined` check, all the way down
+to the store cell — `undefined`-valued cells round-trip through write-through,
+`hydrate()`, and export/import intact.
 
 ## Contrast with knobs
 
@@ -88,7 +110,9 @@ an unmount → remount of the component and a hibernate → resume of the sessio
 ### `@agentick/state-next`
 
 - **`StateHarness`** — `BaseHarness<"state">` impl of `StateHarnessProtocol`.
-  Construct with `(scopeId, journal, bus, inbox)`.
+  Construct with `(scopeId, journal, bus, inbox, options?)`;
+  `StateHarnessOptions.store` overrides the durable value store (defaults to a
+  fresh in-memory `createStateStore()`).
   - Sync reads: `get(key)` · `has(key)` · `list()` · `subscribe(key, fn)` ·
     `subscribeAll(fn)`.
   - Notify seam (ADR 75): `onChange(fn)` — typed push carrying the delta
@@ -97,10 +121,17 @@ an unmount → remount of the component and a hibernate → resume of the sessio
     snapshot+delta channel projects from.
   - Async commands: `set({ key, value })` · `delete({ key })`.
   - Snapshot: `exportSnapshot()` / `importSnapshot(values)`.
+  - Store: `hydrate()` reloads the durable store into the sync projection
+    (resume seam; not wired into session resume — `importSnapshot` owns that).
+- **`createStateStore()`** — the bundled in-memory default value store
+  (`CollectionStore<StateEntry, StateStoreQuery>`); single source of the default
+  store config. **Types `StateEntry`** (`{ key, value }` cell) / **`StateStoreQuery`**
+  (empty — state has no scoped read).
 - **`withState(options?)`** — `SessionExtension` factory.
   `WithStateOptions.initial` seeds entries at construction (via
-  `importSnapshot`). Adopters wanting a custom backend (e.g. redis-backed)
-  pass their own configured `withState({ ... })`.
+  `importSnapshot`); `WithStateOptions.store` threads a durable store through.
+  Adopters wanting a custom backend (e.g. redis-backed) pass their own
+  configured `withState({ ... })`.
 - **`runStateHarnessConformance({ make })`** — protocol conformance suite for
   alternative impls.
 - **Type `StateHandle`** — the curated `session.state` surface (hides `id` /
@@ -153,6 +184,12 @@ Extracted per ADR 26 Step 3a, modularized per ADR 27. Green.
   `list`), async commands (`set` / `delete`) through the Operation envelope,
   per-key + wildcard subscription fan, and snapshot round-trip firing
   subscribers on changed keys.
+- `src/__tests__/store-backing.spec.ts` (12 tests) — the storification contract:
+  every `set` / `delete` / `importSnapshot` dual-writes (projection + store),
+  `hydrate()` rebuilds the projection from a pre-seeded store and pings
+  subscribers (merge, not clear-first), `import`/`export` coexist with the
+  store, and the `undefined`-value round-trip (write-through, `hydrate`,
+  export/import all keep an `undefined`-valued cell present).
 - `src/__tests__/change-stream.spec.ts` (4 tests) — the `onChange` notify seam:
   add (no prev) / update (with prev) on `set`, `remove` (value omitted) on
   `delete` / no-op delete emits nothing, the `existed`-not-`prev!==undefined`

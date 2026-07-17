@@ -15,12 +15,21 @@
  * configured `withState({ ... })` in `AppHarnessOptions.extensions`.
  */
 
-import type { SessionExtension, SessionInstaller } from "@agentick/spec-next";
+import type { CollectionStore, SessionExtension, SessionInstaller } from "@agentick/spec-next";
 import { StateHarness } from "./harness.js";
+import type { StateEntry, StateStoreQuery } from "./store.js";
 
 export interface WithStateOptions {
   /** Initial entries seeded at construction. */
   readonly initial?: Readonly<Record<string, unknown>>;
+  /**
+   * Durable backing for state VALUES (data-layer plan §3.5, Phase 3). Passed
+   * through to the {@link StateHarness}; when omitted the harness defaults to a
+   * fresh in-memory store. Inject a durable adapter to make state survive
+   * restart. NOTE: session-level hydrate-on-resume is NOT wired here — that is
+   * the Phase-4 manifest concern; `importSnapshot` remains the resume path.
+   */
+  readonly store?: CollectionStore<StateEntry, StateStoreQuery>;
 }
 
 export function withState(options: WithStateOptions = {}): SessionExtension {
@@ -33,6 +42,7 @@ export function withState(options: WithStateOptions = {}): SessionExtension {
         installer.substrate.journal,
         installer.substrate.bus,
         installer.substrate.inbox,
+        options.store !== undefined ? { store: options.store } : {},
       );
       await harness.ready;
 

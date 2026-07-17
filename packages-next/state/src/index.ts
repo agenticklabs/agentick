@@ -14,7 +14,8 @@
 // harness package owns its own slot declaration.
 import "./augment.js";
 
-export { StateHarness } from "./harness.js";
+export { StateHarness, type StateHarnessOptions } from "./harness.js";
 export type { StateHandle } from "./handle.js";
 export { withState, type WithStateOptions } from "./extension.js";
 export { runStateHarnessConformance } from "./conformance.js";
+export { createStateStore, type StateEntry, type StateStoreQuery } from "./store.js";
