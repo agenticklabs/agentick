@@ -13,6 +13,18 @@
  * for presence; there is no no-op fallback because the slot
  * intentionally signals "no credential storage is wired."
  *
+ * **Empty wire surface (data-layer Playbook P6 / E7).** Credentials is
+ * the valid EMPTY-wire-surface store: it projects NOTHING to the client.
+ * Where knobs and tasks project their collection to a client mirror
+ * (`CollectionProjection` + a wire channel), credentials deliberately has
+ * no client projection at all — the substrate is server-resident and the
+ * material never crosses the wire. This is the concrete proof that "a
+ * store-backed harness projects to the client" is CONDITIONAL: a
+ * server-only store's correct wire surface is empty. Client-driven
+ * credential lifecycle (re-auth, disconnect) travels as action VERBS over
+ * the wire-extensions framework (#280) and resolves server-side; the
+ * response carries status, never tokens.
+ *
  * **NOT `SnapshotCapable`.** The session snapshot/restore machinery
  * (`reconciler-react` iterates `HookBridges` via feature detection
  * for `snapshot()` / `restore()`) intentionally skips this slot —

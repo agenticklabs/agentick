@@ -1,15 +1,30 @@
 /**
- * `inMemoryCredentialsStore` — `Map`-backed reference adapter.
+ * `inMemoryCredentialsStore` — `MemoryCollection`-backed reference adapter.
  *
  * Default for tests and ephemeral CLIs; data is lost on process exit.
  * Production deployments swap in keychain / libsecret /
  * encrypted-file / KV.
  *
+ * Composes the generic {@link MemoryCollection} from `@agentick/store-next`
+ * rather than hand-rolling a `Map` + a bespoke change fan-out. The credentials
+ * KV surface (`get`/`set(ns,key,val)`/`has`/`keys(ns)`/`delete`/`onChange`) is a
+ * different method SHAPE than `CollectionStore` (composite `(namespace, key)`
+ * addressing, value-projection on read), so this adapter does NOT extend
+ * `CollectionStore` — it COMPOSES a `MemoryCollection<CredentialEntry>` and maps
+ * its KV verbs onto the collection's `put`/`get`/`list`/`delete`. The composite
+ * key `namespace\x1fkey` is the collection's primary key; the store's own
+ * `onChange` adapts the collection's `{ key, value?, prev? }` delta back to the
+ * credentials `{ namespace, key }` event.
+ *
  * Supports optional external-change notification — useful for tests
  * that simulate "another process edited the keychain" by calling
  * `store.set(...)` from outside the harness and checking that
- * subscribers see the change.
+ * subscribers see the change. That reactivity is now inherited from
+ * `MemoryCollection.onChange` (the shared-store observation seam) — the
+ * hand-rolled listener set this adapter previously carried is gone.
  */
+
+import { MemoryCollection } from "@agentick/store-next";
 
 import type { CredentialsStore } from "../store.js";
 
@@ -20,61 +35,72 @@ import type { CredentialsStore } from "../store.js";
 const SEP = "\x1f";
 const compositeKey = (namespace: string, key: string): string => `${namespace}${SEP}${key}`;
 
+/**
+ * The record `MemoryCollection` holds: the composite-addressed
+ * `(namespace, key)` pair plus its opaque value. `namespace` + `key` are stored
+ * as fields (not only encoded in the composite key) so `keys(namespace)`
+ * enumeration and `onChange` decoding read them directly rather than splitting
+ * the separator-encoded string.
+ */
+interface CredentialEntry {
+  readonly namespace: string;
+  readonly key: string;
+  readonly value: unknown;
+}
+
+/** Query shape for `keys(namespace)` — filters the collection to one namespace. */
+interface CredentialQuery {
+  readonly namespace: string;
+}
+
 class InMemoryCredentialsStore implements CredentialsStore {
   readonly backend = "in-memory" as const;
 
-  private readonly entries = new Map<string, unknown>();
-  private readonly listeners = new Set<
-    (event: { readonly namespace: string; readonly key: string }) => void
-  >();
+  private readonly collection = new MemoryCollection<CredentialEntry, CredentialQuery>({
+    backend: "in-memory",
+    keyOf: (e) => compositeKey(e.namespace, e.key),
+    // Namespace match — `list(undefined)` (no query) returns every entry; a
+    // `{ namespace }` query filters to that namespace. Matched on the stored
+    // field rather than a composite-key prefix so it can't false-positive on a
+    // namespace that is a string prefix of another.
+    matchQuery: (e, q) => q === undefined || e.namespace === q.namespace,
+  });
 
   async get<T>(namespace: string, key: string): Promise<T | undefined> {
-    return this.entries.get(compositeKey(namespace, key)) as T | undefined;
+    const entry = await this.collection.get(compositeKey(namespace, key));
+    return entry?.value as T | undefined;
   }
 
   async set<T>(namespace: string, key: string, value: T): Promise<void> {
-    this.entries.set(compositeKey(namespace, key), value);
-    this.notify({ namespace, key });
+    await this.collection.put({ namespace, key, value });
   }
 
   async delete(namespace: string, key: string): Promise<boolean> {
-    const removed = this.entries.delete(compositeKey(namespace, key));
-    if (removed) this.notify({ namespace, key });
-    return removed;
+    return this.collection.delete(compositeKey(namespace, key));
   }
 
   async has(namespace: string, key: string): Promise<boolean> {
-    return this.entries.has(compositeKey(namespace, key));
+    return (await this.collection.get(compositeKey(namespace, key))) !== undefined;
   }
 
   async keys(namespace: string): Promise<readonly string[]> {
-    const prefix = `${namespace}${SEP}`;
-    const out: string[] = [];
-    for (const k of this.entries.keys()) {
-      if (k.startsWith(prefix)) out.push(k.slice(prefix.length));
-    }
-    return out;
+    const entries = await this.collection.list({ namespace });
+    return entries.map((e) => e.key);
   }
 
   onChange(
     listener: (event: { readonly namespace: string; readonly key: string }) => void,
   ): () => void {
-    this.listeners.add(listener);
-    return () => {
-      this.listeners.delete(listener);
-    };
-  }
-
-  private notify(event: { readonly namespace: string; readonly key: string }): void {
-    for (const listener of this.listeners) {
-      try {
-        listener(event);
-      } catch {
-        // Listener errors are not the store's concern — swallow to
-        // protect remaining subscribers. Harness-level fan-out has
-        // its own error policy via PubSub.
-      }
-    }
+    // Adapt the collection's `{ key: composite, value?, prev? }` delta back to
+    // the credentials `{ namespace, key }` event. On a `put` the new value
+    // carries the pair; on a `delete` only `prev` does — take whichever side is
+    // present. The collection already fires only on real changes (every put;
+    // deletes that removed a key), matching this store's prior notify semantics.
+    return this.collection.onChange((change) => {
+      const entry = change.value ?? change.prev;
+      if (entry === undefined) return;
+      listener({ namespace: entry.namespace, key: entry.key });
+    });
   }
 }
 

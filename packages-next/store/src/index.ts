@@ -26,7 +26,11 @@
  * @see docs/proposals/v2/data-layer-plan.md
  */
 
-export { MemoryCollection, type MemoryCollectionConfig } from "./memory-collection.js";
+export {
+  MemoryCollection,
+  type MemoryCollectionConfig,
+  type CollectionChangeEvent,
+} from "./memory-collection.js";
 export { CollectionProjection } from "./collection-projection.js";
 export {
   runStoreConformance,

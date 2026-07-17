@@ -14,11 +14,37 @@
  * semantics — state is lost on process exit; a durable adapter (Postgres, …)
  * conforms to the same port with its own storage.
  *
+ * ## `onChange` — the shared-store observation seam
+ *
+ * `onChange` observes changes to the (possibly **SHARED**) store — the
+ * cross-consumer / external-observation seam. This is distinct from a single
+ * harness's self-caused change stream: a harness that owns its store privately
+ * and is the ONLY writer already knows what it changed (it just wrote it) and
+ * does NOT need `onChange` — knobs, whose `MemoryCollection` sits behind a
+ * private {@link CollectionProjection}, deliberately does not subscribe (a
+ * listener-less `onChange` is a no-op cost). `onChange` earns its keep when a
+ * store is shared across consumers OR a durable backend surfaces changes the
+ * process did not originate (a sibling process editing a keychain, an admin
+ * pushing to KV) — credentials is its first real consumer, forwarding these
+ * into its harness fan-out. Fan-out is synchronous, in registration order, and
+ * error-isolated (one throwing listener never breaks the write or a sibling) —
+ * it composes the canonical {@link ChangeNotifier} notify seam rather than
+ * re-deriving a `Set` + try/catch loop.
+ *
  * @see docs/proposals/v2/data-layer-plan.md §2.2
  * @verifiedBy packages-next/store/src/__tests__/memory-collection.spec.ts
  */
 
 import type { CollectionStore } from "@agentick/spec-next";
+import { createChangeNotifier, type ChangeEvent, type ChangeNotifier } from "@agentick/pubsub-next";
+
+/**
+ * The delta a {@link MemoryCollection.onChange} listener receives — the canonical
+ * push-delta {@link ChangeEvent} keyed by the store's primary key (the `Map`
+ * key produced by `keyOf`). Re-exported so consumers don't reach into
+ * `@agentick/pubsub-next` for the shape.
+ */
+export type CollectionChangeEvent<T> = ChangeEvent<T>;
 
 /**
  * The per-store parameterization. Everything store-specific about a collection
@@ -49,6 +75,14 @@ export class MemoryCollection<T, Q, PruneArg = never> implements CollectionStore
   readonly backend: string;
   private readonly items = new Map<string, T>();
   private readonly config: MemoryCollectionConfig<T, Q, PruneArg>;
+  /**
+   * The push-delta notify seam for {@link onChange} — the canonical
+   * {@link ChangeNotifier}, error-isolated and snapshot-safe against
+   * mid-fan-out (un)subscription. Empty until a consumer subscribes; the
+   * `emitChange` calls in {@link put} / {@link delete} are then a bare `Set`
+   * iteration (a no-op when no one is listening).
+   */
+  private readonly changes: ChangeNotifier<T> = createChangeNotifier<T>();
 
   /**
    * Present only when the config supplies a `prunePredicate` — attached in the
@@ -63,6 +97,11 @@ export class MemoryCollection<T, Q, PruneArg = never> implements CollectionStore
     if (config.prunePredicate !== undefined) {
       const predicate = config.prunePredicate;
       this.prune = (arg: PruneArg): Promise<void> => {
+        // TODO(store-phase-4): prune does NOT emit `onChange` per-key removals
+        // today — no shared-store consumer needs bulk-eviction observation yet
+        // (tasks, the only pruner, drives its own bus and does not subscribe to
+        // the collection). When a shared store wants to observe pruning, emit a
+        // `{ key, prev }` removal per dropped item here.
         for (const [key, item] of this.items) {
           if (predicate(item, arg)) this.items.delete(key);
         }
@@ -72,7 +111,13 @@ export class MemoryCollection<T, Q, PruneArg = never> implements CollectionStore
   }
 
   put(item: T): Promise<void> {
-    this.items.set(this.config.keyOf(item), item);
+    const key = this.config.keyOf(item);
+    const prev = this.items.get(key);
+    this.items.set(key, item);
+    // Always notify on `put` (upsert). `prev` is omitted on first insert per
+    // the ChangeEvent presence convention (a side is absent when its property
+    // is `undefined`).
+    this.changes.emitChange(prev === undefined ? { key, value: item } : { key, value: item, prev });
     return Promise.resolve();
   }
 
@@ -91,6 +136,25 @@ export class MemoryCollection<T, Q, PruneArg = never> implements CollectionStore
 
   /** Idempotent — returns whether the key existed. */
   delete(key: string): Promise<boolean> {
-    return Promise.resolve(this.items.delete(key));
+    const prev = this.items.get(key);
+    const existed = this.items.delete(key);
+    // Notify ONLY when the key existed — a no-op delete is not a change. The
+    // removal carries `prev` (the value dropped) and omits `value`.
+    if (existed) {
+      this.changes.emitChange(prev === undefined ? { key } : { key, prev });
+    }
+    return Promise.resolve(existed);
+  }
+
+  /**
+   * Subscribe to changes to this (possibly SHARED) store — the cross-consumer
+   * observation seam. Fires synchronously after every `put` (upsert) and after
+   * every `delete` that removed a key; a no-op delete fires nothing. Returns an
+   * unsubscribe function. See the class doc for when `onChange` earns its keep
+   * (shared stores / externally-mutated durable backends) versus a single
+   * private-store harness that already knows its own writes.
+   */
+  onChange(listener: (change: CollectionChangeEvent<T>) => void): () => void {
+    return this.changes.onChange(listener);
   }
 }

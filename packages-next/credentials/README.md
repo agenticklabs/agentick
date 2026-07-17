@@ -107,6 +107,27 @@ credentials harness; the response carries status (`connected`,
 See `feedback_credentials_never_cross_wire` memory and #279 for the
 client wire projection design.
 
+### Async-only, no projection, empty wire surface
+
+Credentials is the data-layer store-substrate's deliberate
+counter-example — the store-backed harness that proves three Playbook
+rules are CONDITIONAL, not universal:
+
+- **No projection (P5).** The harness reads its `CredentialsStore`
+  LIVE and async — `get`/`has`/`keys` are bare `await store.<verb>()`,
+  with NO synchronous cache. Tasks and knobs hold a
+  `CollectionProjection` only because their reads are served during
+  render (synchronous); credentials' reads are off the render path, so
+  "store-backed ⟹ projection" does not apply here.
+- **Empty wire surface (P6).** The harness projects NOTHING to the
+  client — the valid empty case. Client-driven lifecycle travels as
+  action verbs, not a state mirror.
+- **`onChange` as change SOURCE.** When the adapter exposes
+  `onChange`, the harness forwards THAT (a possibly-shared,
+  externally-mutated store) as its change source rather than
+  publishing a self-caused stream — the cross-consumer observation
+  seam, not a single-writer's own echo.
+
 ## Quick start
 
 ```ts
@@ -164,8 +185,18 @@ Namespace conventions:
 
 ### `inMemoryCredentialsStore()`
 
-`Map`-backed, lost on process exit. Default for tests and ephemeral
-CLIs. Supports reactive change notification.
+Lost on process exit. Default for tests and ephemeral CLIs. Supports
+reactive change notification.
+
+Composes `MemoryCollection` from `@agentick/store-next` (composite
+`namespace\x1fkey` primary key over a `CredentialEntry` record) rather
+than hand-rolling a `Map` + listener set — the KV surface
+(`get`/`set`/`has`/`keys`/`delete`) maps onto the collection's
+`put`/`get`/`list`/`delete`, and `onChange` adapts the collection's
+`{ key, value?, prev? }` delta back to the credentials
+`{ namespace, key }` event. It keeps the KV port shape (it does NOT
+extend `CollectionStore` — different method signature) while inheriting
+the generic's mechanics and the shared-store `onChange` observation seam.
 
 ### `envCredentialsStore(options?)`
 
