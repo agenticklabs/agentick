@@ -425,8 +425,19 @@ already converged on the primitives; the playbook is mostly *conform + verify*, 
       throw-on-pending** = the `useData` model for **load-once definition sources**
       (prompts/skills/resources). An **async-only, never-rendered** harness
       (credentials — server-resident) needs **NO projection**: read the async store
-      directly. Never hold the full log (§2.7); tasks = eager *augmented-cache*
-      variant (record + non-persisted live handles), timeline = bounded fold.
+      directly. Never hold the full log (§2.7). **Projection archetypes:** eager
+      *pure-mirror* collection = `CollectionProjection` (knobs, state); eager
+      *augmented* collection = hand-rolled, cache holds the record + non-persisted
+      extras (tasks: `live` = record + fibers/abort); eager *augmented single-record*
+      = hand-rolled, one record + ephemeral extras (session: `SessionRuntime` = record
+      + `currentTick`/listeners); *lazy* = `useData` (prompts/skills/resources); *none*
+      = async-only (credentials); *bounded fold* (timeline). Augmented/single-record
+      cases stay hand-rolled — a collection primitive for one record, or one wrapping
+      non-persisted handles, is ceremony (the call tasks + session made). **NAMING
+      (non-negotiable): the durable backing is a `Store` (`CollectionStore`/`LogStore`
+      + a `createXStore` factory); the live sync working copy is a PROJECTION — name
+      it by role (`projection` / `live` / `runtime`), NEVER `…Store`.** (`SessionStateStore`
+      next to `SessionStore` was the one violation; fixed in `2f85520e`.)
 - [ ] **P6 — Client surface.** Framework-minimum: `enumerate` + `page` wire methods
       + one change channel. App extends freely. `⊇` pass-through over-fetch.
       (credentials = empty surface, and that's valid — E7.)
