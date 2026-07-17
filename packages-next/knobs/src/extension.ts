@@ -16,8 +16,9 @@
  * @see docs/proposals/v2/blueprint/26-harness-api-shape.md
  */
 
-import type { SessionExtension, SessionInstaller } from "@agentick/spec-next";
+import type { CollectionStore, SessionExtension, SessionInstaller } from "@agentick/spec-next";
 import { KnobsHarness } from "./harness.js";
+import type { KnobEntry, KnobStoreQuery } from "./store.js";
 
 export interface WithKnobsOptions {
   /**
@@ -26,6 +27,14 @@ export interface WithKnobsOptions {
    * stored primitives.
    */
   readonly initial?: Readonly<Record<string, string | number | boolean>>;
+  /**
+   * Durable backing for knob VALUES (data-layer plan §3.5, Phase 3). Passed
+   * through to the {@link KnobsHarness}; when omitted the harness defaults to a
+   * fresh in-memory store. Inject a durable adapter to make knob values survive
+   * restart. NOTE: session-level hydrate-on-resume is NOT wired here — that is
+   * the Phase-4 manifest concern; `importSnapshot` remains the resume path.
+   */
+  readonly store?: CollectionStore<KnobEntry, KnobStoreQuery>;
 }
 
 // NOTE: `knobsWireExtension` (./wire.js) IS registered in production — via
@@ -55,6 +64,8 @@ export function withKnobs(options: WithKnobsOptions = {}): SessionExtension {
         installer.substrate.journal,
         installer.substrate.bus,
         installer.substrate.inbox,
+        undefined,
+        options.store !== undefined ? { store: options.store } : {},
       );
       await harness.ready;
 
