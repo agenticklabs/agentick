@@ -35,6 +35,7 @@ import type { Effect } from "effect";
 
 import type { ContentBlock } from "../data/content-blocks.js";
 import type { EventScope } from "../data/events.js";
+import type { CollectionStore } from "./store.js";
 import type { ProgressUpdate, TaskFailure, TaskStatus, TaskWorkContext } from "./tasks-harness.js";
 import type { Elicit, ElicitFn } from "./elicit-api.js";
 
@@ -120,8 +121,15 @@ export interface TaskStoreQuery {
  *
  * Bundled default: `InMemoryTaskStore` (`@agentick/tasks-next`). A
  * `@agentick/tasks-store-postgres-next` conforms to this SAME protocol later.
+ *
+ * A `CollectionStore<TaskRecord, TaskStoreQuery, number>` (the collection
+ * archetype, data-layer plan §2.1) — the prune argument is the ms-epoch
+ * cutoff. The method declarations below narrow the archetype's contract to the
+ * task-specific shape (parameter names, and `delete` → `Promise<void>`); they
+ * MUST stay assignable to {@link CollectionStore} so any generic
+ * collection-store tooling accepts a `TaskStore`.
  */
-export interface TaskStore {
+export interface TaskStore extends CollectionStore<TaskRecord, TaskStoreQuery, number> {
   /** Upsert — called on every transition. Later `put`s of the same `taskId` replace. */
   put(record: TaskRecord): Promise<void>;
   get(taskId: string): Promise<TaskRecord | undefined>;

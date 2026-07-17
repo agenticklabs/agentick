@@ -23,6 +23,7 @@ import type {
   NameQuery,
 } from "@agentick/spec-next";
 import type { CommandOutcome } from "@agentick/spec-next";
+import { matchesScope, compileScopeMatcher } from "@agentick/utils-next";
 
 function asArray<T>(v: T | readonly T[] | undefined): readonly T[] | undefined {
   if (v === undefined) return undefined;
@@ -86,11 +87,7 @@ export function matchesQuery(event: ProtocolEvent, query: EventQuery): boolean {
   }
 
   if (query.scope) {
-    const evScope = event.scope ?? {};
-    for (const [k, v] of Object.entries(query.scope)) {
-      if (v === undefined) continue;
-      if ((evScope as Record<string, unknown>)[k] !== v) return false;
-    }
+    if (!matchesScope(query.scope, event.scope ?? {})) return false;
   }
 
   return true;
@@ -228,24 +225,15 @@ export function compileQuery(query: EventQuery): CompiledMatcher {
     });
   }
 
-  // scope — pre-snapshot the present keys so we don't re-enter
-  // Object.entries on every event.
+  // scope — pre-compile the constraining filter ONCE (hot path: this closure
+  // runs per event on the publish loop). `compileScopeMatcher` pre-extracts the
+  // constrained keys so we don't re-walk `Object.keys(filter)` per event, and
+  // returns a constant-`true` closure for an all-`undefined` filter (the
+  // match-everything contract). Same semantics as `matchesQuery`'s cold
+  // `matchesScope` clause — one source of truth for scope containment.
   if (query.scope !== undefined) {
-    const entries: Array<[string, unknown]> = [];
-    for (const [k, v] of Object.entries(query.scope)) {
-      if (v !== undefined) entries.push([k, v]);
-    }
-    if (entries.length > 0) {
-      checks.push((e) => {
-        const evScope = e.scope as Record<string, unknown> | undefined;
-        if (!evScope) return false;
-        for (let i = 0; i < entries.length; i++) {
-          const [k, v] = entries[i]!;
-          if (evScope[k] !== v) return false;
-        }
-        return true;
-      });
-    }
+    const matchScope = compileScopeMatcher(query.scope);
+    checks.push((e) => matchScope(e.scope ?? {}));
   }
 
   if (checks.length === 0) return () => true;

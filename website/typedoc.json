@@ -72,6 +72,7 @@
     "../packages-next/gateway",
     "../packages-next/utils",
     "../packages-next/pubsub",
+    "../packages-next/store",
     "../packages-next/tasks",
     "../packages-next/live",
     "../packages-next/cluster",

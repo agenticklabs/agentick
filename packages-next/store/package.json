@@ -1,0 +1,51 @@
+{
+  "name": "@agentick/store-next",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Generic store substrate for Agentick v2 — the `MemoryCollection<T, Q>` in-memory collection-store generic and the `runStoreConformance` shared conformance skeleton. Parameterize one generic (backend / keyOf / matchQuery / prunePredicate) to get a store-backed harness's default backing; no hand-rolled `Map` per harness. Implements the `CollectionStore<T, Q>` port from `@agentick/spec-next`. Bundled into the agentick metapackage; not published independently.",
+  "keywords": [
+    "agentick",
+    "collection",
+    "store",
+    "substrate",
+    "conformance"
+  ],
+  "license": "MIT",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages-next/store"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
+  },
+  "dependencies": {
+    "@agentick/spec-next": "workspace:*"
+  }
+}

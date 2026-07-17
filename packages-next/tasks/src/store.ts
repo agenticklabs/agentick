@@ -1,7 +1,14 @@
 /**
  * `InMemoryTaskStore` — the bundled, zero-dependency {@link TaskStore}
- * default (ADR 68). A `Map<taskId, TaskRecord>` with scope + status
- * filtering. `:memory:` semantics — lost on process exit.
+ * default (ADR 68). Scope + status filtering over a keyed collection with
+ * `:memory:` semantics — lost on process exit.
+ *
+ * Built by parameterizing the generic {@link MemoryCollection}
+ * (`@agentick/store-next`): the only task-specific code is `keyOf`
+ * (`taskId`), the `matchQuery` predicate (scope containment via the shared
+ * `matchesScope` + task-local `statusMatches`), and the `prunePredicate`
+ * (terminal-and-old). The `Map` mechanics, fresh-array `list`, idempotent
+ * delete, and predicate-driven prune are the generic's.
  *
  * This is the store the `TasksHarness` uses when the app/gateway doesn't
  * inject a durable one, and the reference the `runTaskStoreConformance`
@@ -16,16 +23,11 @@
  * @see docs/proposals/v2/blueprint/68-persistent-tasks.md
  */
 
-import type { TaskRecord, TaskStore, TaskStoreQuery, EventScope } from "@agentick/spec-next";
+import type { TaskRecord, TaskStore, TaskStoreQuery } from "@agentick/spec-next";
+import { MemoryCollection } from "@agentick/store-next";
+import { matchesScope } from "@agentick/utils-next";
 
-/** Does `record.scope` contain every dimension of `filter`? */
-function scopeMatches(scope: EventScope, filter: Partial<EventScope>): boolean {
-  for (const key of Object.keys(filter) as Array<keyof EventScope>) {
-    if (filter[key] !== undefined && scope[key] !== filter[key]) return false;
-  }
-  return true;
-}
-
+/** Does `record.status` satisfy the query's `status` filter (single value or set)? */
 function statusMatches(record: TaskRecord, query: TaskStoreQuery): boolean {
   if (query.status === undefined) return true;
   return Array.isArray(query.status)
@@ -33,32 +35,44 @@ function statusMatches(record: TaskRecord, query: TaskStoreQuery): boolean {
     : record.status === query.status;
 }
 
+/** `true` when a terminal record was last touched before the cutoff. */
+function isPrunable(record: TaskRecord, before: number): boolean {
+  const terminal =
+    record.status === "completed" ||
+    record.status === "failed" ||
+    record.status === "cancelled" ||
+    record.status === "interrupted";
+  return terminal && record.updatedAt < before;
+}
+
 export class InMemoryTaskStore implements TaskStore {
   readonly backend = "memory";
-  private readonly records = new Map<string, TaskRecord>();
+  private readonly collection = new MemoryCollection<TaskRecord, TaskStoreQuery, number>({
+    backend: "memory",
+    keyOf: (record) => record.taskId,
+    matchQuery: (record, query) => {
+      if (query === undefined) return true;
+      // Scope: every provided dimension must match (shared containment predicate).
+      if (query.scope !== undefined && !matchesScope(query.scope, record.scope)) return false;
+      return statusMatches(record, query);
+    },
+    prunePredicate: isPrunable,
+  });
 
   put(record: TaskRecord): Promise<void> {
-    this.records.set(record.taskId, record);
-    return Promise.resolve();
+    return this.collection.put(record);
   }
 
   get(taskId: string): Promise<TaskRecord | undefined> {
-    return Promise.resolve(this.records.get(taskId));
+    return this.collection.get(taskId);
   }
 
   list(query?: TaskStoreQuery): Promise<readonly TaskRecord[]> {
-    const out: TaskRecord[] = [];
-    for (const record of this.records.values()) {
-      if (query?.scope !== undefined && !scopeMatches(record.scope, query.scope)) continue;
-      if (query !== undefined && !statusMatches(record, query)) continue;
-      out.push(record);
-    }
-    return Promise.resolve(out);
+    return this.collection.list(query);
   }
 
-  delete(taskId: string): Promise<void> {
-    this.records.delete(taskId);
-    return Promise.resolve();
+  async delete(taskId: string): Promise<void> {
+    await this.collection.delete(taskId);
   }
 
   /**
@@ -67,14 +81,7 @@ export class InMemoryTaskStore implements TaskStore {
    * `input_required` task is never pruned no matter how old.
    */
   prune(before: number): Promise<void> {
-    for (const [taskId, record] of this.records) {
-      const terminal =
-        record.status === "completed" ||
-        record.status === "failed" ||
-        record.status === "cancelled" ||
-        record.status === "interrupted";
-      if (terminal && record.updatedAt < before) this.records.delete(taskId);
-    }
-    return Promise.resolve();
+    // `prunePredicate` is configured above, so the generic's `prune` is present.
+    return this.collection.prune!(before);
   }
 }

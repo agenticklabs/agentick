@@ -141,3 +141,74 @@ export function matchesEventFilter(filter: EventFilterShape, event: EventLike): 
   }
   return true;
 }
+
+// ============================================================================
+// Scope filter — the containment predicate every store/query scope share
+// ============================================================================
+
+/**
+ * `true` when `scope` contains every dimension present in `filter` — the
+ * canonical "every present key in `filter` must strictly-equal `scope[key]`"
+ * predicate. `undefined` values in `filter` are ignored (a filter key set to
+ * `undefined` is not a constraint), so an empty filter matches every scope.
+ *
+ * This is the ONE implementation of scope containment for the whole
+ * substrate. It backs:
+ *   - `matchesQuery` / `compileQuery`'s `scope` clause (`@agentick/runtime-next`),
+ *   - every `CollectionStore`'s scope-filtered `list` (e.g. the tasks store).
+ *
+ * Structural + generic by design so `@agentick/utils-next` stays a leaf: the
+ * relationship "`filter` is a partial of `scope`'s shape" is captured by the
+ * type parameter `S` rather than importing `EventScope` from spec-next. Any
+ * `S extends object` works — pass `EventScope`, `TaskStoreQuery["scope"]`, or
+ * a plain record. Interface-typed scopes (which lack an implicit index
+ * signature and so are NOT assignable to `Record<string, unknown>`) flow
+ * through cleanly via the type parameter.
+ *
+ * @verifiedBy packages-next/utils/src/__tests__/match-scope.spec.ts
+ */
+export function matchesScope<S extends object>(filter: Partial<S>, scope: S): boolean {
+  const f = filter as Record<string, unknown>;
+  const s = scope as Record<string, unknown>;
+  for (const key of Object.keys(f)) {
+    const v = f[key];
+    if (v === undefined) continue;
+    if (s[key] !== v) return false;
+  }
+  return true;
+}
+
+/**
+ * Compiled form of {@link matchesScope} for hot per-event paths. Pre-extracts
+ * the constraining `(key, value)` entries from `filter` ONCE, then returns a
+ * closure that checks only those — avoiding a fresh `Object.keys(filter)` walk
+ * on every invocation.
+ *
+ * Use this when the same filter is matched against many values: `compileQuery`'s
+ * scope clause on the publish loop (`@agentick/runtime-next`) builds one matcher
+ * at subscribe time and invokes it per event. Cold single-shot callers
+ * (`matchesQuery`, a store's `list`) use {@link matchesScope} directly — same
+ * semantics, no closure to build.
+ *
+ * Total over `S`: an empty (or all-`undefined`) filter yields a constant-`true`
+ * closure — the match-everything contract, identical to `matchesScope`.
+ *
+ * @verifiedBy packages-next/utils/src/__tests__/match-scope.spec.ts
+ */
+export function compileScopeMatcher<S extends object>(filter: Partial<S>): (scope: S) => boolean {
+  const entries: Array<[string, unknown]> = [];
+  const f = filter as Record<string, unknown>;
+  for (const key of Object.keys(f)) {
+    const v = f[key];
+    if (v !== undefined) entries.push([key, v]);
+  }
+  if (entries.length === 0) return () => true;
+  return (scope: S): boolean => {
+    const s = scope as Record<string, unknown>;
+    for (let i = 0; i < entries.length; i++) {
+      const [key, v] = entries[i]!;
+      if (s[key] !== v) return false;
+    }
+    return true;
+  };
+}

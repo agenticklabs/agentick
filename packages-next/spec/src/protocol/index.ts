@@ -16,6 +16,7 @@
  */
 
 export * from "./factory.js";
+export * from "./store.js";
 export * from "./event-log.js";
 export * from "./journal.js";
 export * from "./bus.js";
