@@ -62,7 +62,9 @@ import type {
   SessionError,
   SessionExecutionHandle,
   SessionHarnessProtocol,
+  SessionRecord,
   SessionSnapshot,
+  SessionStore,
   SessionSubstrateParent,
   SpawnContext,
   SpawnInput,
@@ -282,6 +284,30 @@ export interface SessionHarnessOptions<P = unknown> {
   /** Parent session id when this session is itself a spawned child. */
   readonly parentSessionId?: string;
   /**
+   * Durable session registry (E11). When injected, the session mirrors its
+   * metadata into this store off the critical path — an initial record at
+   * construction, then on every status transition / execution boundary (async,
+   * NO projection: `void store.put(record).catch(...)`, like tasks' persist).
+   * Injected app-singleton by the AppHarness (mirrors `TasksHarness.store`);
+   * omitted for ephemeral / standalone sessions, which then persist nothing.
+   * @see docs/proposals/v2/data-layer-plan.md §E11
+   */
+  readonly sessionStore?: SessionStore;
+  /** Owning app id — stamped on the session's `SessionRecord.appId`. */
+  readonly appId?: string;
+  /**
+   * Stable agent id / name for the `SessionRecord.agentId` slot (1 agent : 1
+   * session). Optional — the app passes it when the agent has a stable id.
+   */
+  readonly agentId?: string;
+  /**
+   * App-owned descriptive slots seeded onto the initial `SessionRecord`
+   * (E11 — the framework STORES these, never populates their semantics). The
+   * app may also set them later via {@link SessionHarness.setMeta}.
+   */
+  readonly title?: string;
+  readonly description?: string;
+  /**
    * Telemetry runtime (ADR 77 Stage 4 / ADR 78). The app-scoped
    * `ManagedRuntime` built ONCE from the adopter's `telemetry` Layer.
    * The session runs the composed execution (`loop.fx.runExecution`) on
@@ -345,6 +371,27 @@ export class SessionHarness<P = unknown>
   private readonly target: ExecutionTarget;
   private readonly spawnContext: SpawnContext<P> | undefined;
   private readonly parentSessionId: string | undefined;
+  /**
+   * Durable session registry (E11) — the app-singleton {@link SessionStore}
+   * this session mirrors its metadata into. `undefined` for ephemeral /
+   * standalone sessions (they persist nothing). Written async, off the render
+   * hot path; NO projection (async-read, like credentials).
+   */
+  private readonly sessionStore: SessionStore | undefined;
+  /** `SessionRecord` fields captured once at construction (E11 identity). */
+  private readonly createdAt: number = Date.now();
+  private readonly appId: string | undefined;
+  private readonly agentId: string | undefined;
+  /**
+   * App-owned descriptive slots for the `SessionRecord` (E11) — the framework
+   * STORES these, never populates their semantics. Seeded from construction
+   * options; mutated by {@link setMeta}; folded into every record write.
+   */
+  private _meta: {
+    title?: string;
+    description?: string;
+    metadata?: Record<string, unknown>;
+  };
   /**
    * Lazily-built index of the channel-owning harnesses among this
    * session's bridges (knobs, tasks, state, gates, timeline). Keyed by
@@ -525,6 +572,18 @@ export class SessionHarness<P = unknown>
     this.target = options.target;
     this.spawnContext = options.spawnContext;
     this.parentSessionId = options.parentSessionId;
+    this.sessionStore = options.sessionStore;
+    this.appId = options.appId;
+    this.agentId = options.agentId;
+    this._meta = {
+      ...omitUndefined({
+        title: options.title,
+        description: options.description,
+        // The adopter's session metadata bag doubles as the record's open
+        // over-fetch bag (E11) — one adopter-owned bag, not two.
+        metadata: options.metadata as Record<string, unknown> | undefined,
+      }),
+    };
     this.telemetryRuntime = options.telemetryRuntime;
     this.defaultMaxTicks = options.defaultMaxTicks ?? 8;
     this.requiredScopes = options.requiredScopes;
@@ -556,6 +615,76 @@ export class SessionHarness<P = unknown>
         }),
       )
       .then(() => {});
+
+    // E11 — mirror session metadata into the durable SessionStore, off the
+    // critical path. ONE subscription to the state store catches every
+    // `setStatus` (running / idle / failed / closed) and re-writes the record;
+    // the execution boundary additionally bumps `executionCount` / toggles
+    // `currentExecutionId` before `setStatus`, so a single write per transition
+    // captures the full delta. NO projection — the record is written, never
+    // read during render. No-op when no store is injected (ephemeral sessions).
+    if (this.sessionStore !== undefined) {
+      this.store.subscribeMetadata(() => this.syncSessionRecord());
+      // Initial record — createdAt / status "idle" / executionCount 0.
+      this.syncSessionRecord();
+    }
+  }
+
+  /**
+   * Build the current {@link SessionRecord} from live state + the captured
+   * identity / app-owned slots and upsert it into the durable
+   * {@link SessionStore} — async, fire-and-forget, error-isolated (E11:
+   * `void store.put(record).catch(...)`, mirroring tasks' persist). NO
+   * projection: nothing reads this back during render. No-op when no store is
+   * injected.
+   */
+  private syncSessionRecord(): void {
+    const store = this.sessionStore;
+    if (store === undefined) return;
+    const currentExecutionId = this.store.currentExecutionId();
+    const record: SessionRecord = {
+      id: this.store.id,
+      createdAt: this.createdAt,
+      updatedAt: Date.now(),
+      status: this.store.status(),
+      executionCount: this.store.executionCount(),
+      usage: this.store.usage(),
+      ...omitUndefined({
+        parentSessionId: this.parentSessionId,
+        appId: this.appId,
+        agentId: this.agentId,
+        currentExecutionId: currentExecutionId ?? undefined,
+        title: this._meta.title,
+        description: this._meta.description,
+        metadata: this._meta.metadata,
+      }),
+    };
+    void store.put(record).catch(() => undefined);
+  }
+
+  /**
+   * Set the app-owned descriptive slots (`title` / `description` / `metadata`)
+   * on this session's durable {@link SessionRecord} (E11). These are the
+   * **app's** to populate — the framework STORES them and is blind to their
+   * semantics (auto-summary, user-edit, the open over-fetch bag). Provided
+   * fields overwrite; omitted fields are left as-is. Re-writes the record
+   * immediately. No-op (still updates in-memory slots) when no store is
+   * injected.
+   */
+  setMeta(meta: {
+    readonly title?: string;
+    readonly description?: string;
+    readonly metadata?: Record<string, unknown>;
+  }): void {
+    this._meta = {
+      ...this._meta,
+      ...omitUndefined({
+        title: meta.title,
+        description: meta.description,
+        metadata: meta.metadata,
+      }),
+    };
+    this.syncSessionRecord();
   }
 
   /**
@@ -1320,6 +1449,11 @@ export class SessionHarness<P = unknown>
     this._executionUsage = undefined;
 
     const executionId = `exec:${ulid()}`;
+    // E11 accounting: bump the execution count + set the in-flight id BEFORE
+    // `setStatus("running")` — that status notify fires `syncSessionRecord`,
+    // so one write captures the full execution-start delta (count +
+    // currentExecutionId + running).
+    this.store.bumpExecutionCount();
     this.store.setCurrentExecutionId(executionId);
     this.store.setStatus("running");
 

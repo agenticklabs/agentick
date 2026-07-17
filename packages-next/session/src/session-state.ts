@@ -22,6 +22,7 @@ export class SessionStateStore {
 
   private _status: SessionStatus = "idle";
   private _currentTick = 0;
+  private _executionCount = 0;
   private _currentExecutionId: string | null = null;
   private readonly _listeners: Notifier = createNotifier();
   private readonly _usage: UsageStats = {
@@ -62,6 +63,20 @@ export class SessionStateStore {
   }
   setCurrentExecutionId(id: string | null): void {
     this._currentExecutionId = id;
+  }
+
+  /**
+   * Number of executions started against this session — hierarchy-aware
+   * accounting (session → execution → tick) for the durable
+   * `SessionRecord` (E11). Bumped once per `send` at execution start.
+   * Distinct from `currentTick`, which is execution-local (resets per
+   * execution) and never enters the session record.
+   */
+  executionCount(): number {
+    return this._executionCount;
+  }
+  bumpExecutionCount(): number {
+    return ++this._executionCount;
   }
 
   // ────────── usage ──────────

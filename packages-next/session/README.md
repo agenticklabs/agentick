@@ -404,12 +404,12 @@ The four public session verbs route through `runOperation` (via the private
 full phase contract (`requested` → `before` → terminal). The verbs and their
 minted hook names:
 
-| Verb                    | CommandRegistry key             | Hooks                                                       |
-| ----------------------- | ------------------------------- | ---------------------------------------------------------- |
-| `send`                  | `session:send`                  | `onBeforeSessionSend` / `onAfterSessionSend`               |
-| `appendEntry`           | `session:append`                | `onBeforeSessionAppend` / `onAfterSessionAppend`           |
-| `applyExecutorResult`   | `session:apply-executor-result` | `onBeforeSessionApplyExecutorResult` / `onAfter…`          |
-| `applyToolResults`      | `session:apply-tool-results`    | `onBeforeSessionApplyToolResults` / `onAfter…`             |
+| Verb                  | CommandRegistry key             | Hooks                                             |
+| --------------------- | ------------------------------- | ------------------------------------------------- |
+| `send`                | `session:send`                  | `onBeforeSessionSend` / `onAfterSessionSend`      |
+| `appendEntry`         | `session:append`                | `onBeforeSessionAppend` / `onAfterSessionAppend`  |
+| `applyExecutorResult` | `session:apply-executor-result` | `onBeforeSessionApplyExecutorResult` / `onAfter…` |
+| `applyToolResults`    | `session:apply-tool-results`    | `onBeforeSessionApplyToolResults` / `onAfter…`    |
 
 Kebab `-what` segments PascalCase into the hook name (`apply-executor-result` →
 `ApplyExecutorResult`), so every verb yields a clean, dot-accessible hook.
@@ -444,12 +444,68 @@ serializable and is the natural first wire declaration when that pass lands.
 Full surface in the [typedoc]. The package root exports the thin set an
 adopter or the app harness actually constructs against:
 
-| Export                                     | What                                                                      |
-| ------------------------------------------ | ------------------------------------------------------------------------- |
-| `SessionHarness` / `SessionHarnessOptions` | Reference `SessionHarnessProtocol` impl + its construction options bag.   |
-| `defineSession` / `DefineSessionInput`     | Callback-style factory for custom / test session topologies.              |
-| `SessionStateStore`                        | Per-session status / tick / usage store (advanced; the harness owns one). |
-| `SessionSubstrateParent`                   | Re-exported from spec — portable factory-typing for substrate overrides.  |
+| Export                                                 | What                                                                           |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------ |
+| `SessionHarness` / `SessionHarnessOptions`             | Reference `SessionHarnessProtocol` impl + its construction options bag.        |
+| `defineSession` / `DefineSessionInput`                 | Callback-style factory for custom / test session topologies.                   |
+| `SessionStateStore`                                    | Per-session status / tick / usage store (advanced; the harness owns one).      |
+| `InMemorySessionStore`                                 | Bundled in-memory `SessionStore` default (E11) — the durable session registry. |
+| `runSessionStoreConformance`                           | Conformance suite every `SessionStore` adapter must pass.                      |
+| `SessionRecord` / `SessionStore` / `SessionStoreQuery` | Re-exported from spec — the E11 record + port + query.                         |
+| `SessionSubstrateParent`                               | Re-exported from spec — portable factory-typing for substrate overrides.       |
+
+## The durable session registry — `SessionStore` (E11)
+
+The `SessionStateStore` above is the harness's synchronous in-memory metadata
+cell (status / tick / usage). The **`SessionStore`** is the harness's _durable_
+metadata mirror — the collection-archetype store (`@agentick/store-next`
+`MemoryCollection` under the bundled `InMemorySessionStore`) holding
+`sessionId → SessionRecord`. It is bigger than a metadata bag: per the data-layer
+plan (E11) it is the **session registry + resume index + the backing for every
+"list / resume my sessions" surface**, and the `SessionRecord` is the natural
+home for the Phase-4 per-store cursor **manifest** (`stores?`, not populated
+yet).
+
+### The live-registry vs. record-store split
+
+Two structures, deliberately NOT merged:
+
+|             | Live registry (app)               | `SessionStore` (this)                                             |
+| ----------- | --------------------------------- | ----------------------------------------------------------------- |
+| Key → value | `sessionId → live SessionHarness` | `sessionId → SessionRecord`                                       |
+| Purpose     | routing / interaction             | durable, queryable metadata                                       |
+| Lifetime    | ephemeral — dropped on close      | the **superset** — every non-ephemeral session ever, incl. closed |
+| Read via    | `app.getSession(id)`              | `app.listSessions(query)` / `app.getSessionRecord(id)`            |
+
+The app's `getSession` routes to the live object; `listSessions` /
+`getSessionRecord` read the durable store. They coexist — this run is additive
+and does not replace `SessionSnapshot` or the live registry.
+
+### How the harness populates its record
+
+The `SessionHarness` mirrors its metadata into an injected `SessionStore` **off
+the critical path** — `void store.put(record).catch(() => undefined)`, exactly
+like the tasks store, and with **NO projection** (the record is written, never
+read back during render). One subscription to the `SessionStateStore`'s metadata
+notify catches every `setStatus` (running / idle / failed / closed); the
+execution boundary bumps `executionCount` + toggles `currentExecutionId` before
+`setStatus`, so a single write per transition captures the full delta:
+
+| Site              | Record delta                                                              |
+| ----------------- | ------------------------------------------------------------------------- |
+| construction      | initial record — `createdAt`, `status: idle`, `executionCount: 0`         |
+| status transition | `status` + `updatedAt`                                                    |
+| execution start   | `currentExecutionId` set, `executionCount++`, `status: running`           |
+| execution end     | `currentExecutionId` cleared, `usage` aggregated, `status: idle`/`failed` |
+| `close()`         | `status: closed`                                                          |
+
+`title` / `description` / `metadata` are **app-owned slots** (the framework
+STORES them, never populates their semantics). Seed them at
+`createSession({ title, description })` or set them later via
+`app.setSessionMeta(sessionId, ...)` (routed through the live session's
+`setMeta`, which is the single writer). There is **no `currentTick`** on the
+record — a tick is execution-local, so it is execution-scoped runtime, not
+session metadata.
 
 `session.send` / `dispatch` / `snapshot` / `spawn` / `channel` / `knob` /
 `gate` and the harness surfaces (`timeline`, `knobs`, `state`, `gates`,
@@ -479,6 +535,8 @@ their backing.
 - ✅ Lifecycle bridge driving the reconciler `useOn*` hook family (#206)
 - ✅ Model registry injection (`models`, #206) + `requiredScopes`
   ceiling (#199)
+- ✅ Durable `SessionStore` (E11) — `InMemorySessionStore` + record
+  population at construction / status / execution boundary / close
 - ⏳ `session.prompts` — depends on whether withPrompts is mounted (ADR 42 audit)
 
 ## Roadmap & known gaps
@@ -506,9 +564,26 @@ their backing.
 - **Snapshot carries the persisted log only.** The (potentially
   compacted) projection is not yet round-tripped via `SessionSnapshot` —
   the composed per-harness `SnapshotHarness` is a later step.
+- **`SessionStore` coexists with `SessionSnapshot`; the manifest is not
+  built.** This run is additive — the durable `SessionRecord` is written
+  alongside (not instead of) `SessionSnapshot`. The `SessionRecord.stores?`
+  per-store cursor manifest is a documented `TODO(store-phase-4)` placeholder
+  (commented in `spec-next/protocol/session-store.ts`); the Phase-4 manifest
+  sweep populates it at `snapshot()` and consumes it at a net-new
+  `SessionHarness.restore(manifest)`, and subsumes `SessionSnapshot` then.
+- **`setSessionMeta` targets LIVE sessions only.** Editing a closed
+  session's record (absent from the live registry) needs a store
+  read-modify-write path — `TODO(store-phase-4)`.
 
 ## Verified by
 
+- `src/__tests__/session-store.spec.ts` — `InMemorySessionStore` runs the
+  full `runSessionStoreConformance` suite (E11): put/get round-trip, upsert,
+  `list` filtered by `appId` / `status` / `parentSessionId` / `updatedAfter`
+  recency, enumerate-all, delete, and prune-of-closed. The harness's own
+  record population (construction / execution boundary / usage aggregation /
+  close) is verified in `@agentick/app-next`'s `app-harness.spec.tsx`, where a
+  real `SessionHarness` + store are wired together.
 - `src/__tests__/conformance.spec.ts` — `SessionHarnessProtocol`
   conformance suite.
 - `src/__tests__/session-hooks.spec.ts` — the session verbs route through

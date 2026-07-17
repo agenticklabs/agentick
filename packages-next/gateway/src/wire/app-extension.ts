@@ -20,8 +20,49 @@ import {
   AppNotFoundError,
   defineWireExtension,
   SessionNotFoundError,
+  type SessionEntry,
+  type SessionFilter,
+  type SessionRecord,
+  type SessionStoreQuery,
   type WireExtension,
 } from "@agentick/spec-next";
+
+/**
+ * Project a durable {@link SessionRecord} (E11 store) onto the wire's
+ * {@link SessionEntry} shape. The wire keeps `SessionEntry` for now — the
+ * per-store wire surface (carrying the full record) is Phase 7. `updatedAt`
+ * maps to the wire's `lastActiveAt`.
+ */
+function toSessionEntry(record: SessionRecord): SessionEntry {
+  return {
+    id: record.id,
+    status: record.status,
+    metadata: record.metadata ?? {},
+    createdAt: record.createdAt,
+    lastActiveAt: record.updatedAt,
+  };
+}
+
+/**
+ * Map the wire's {@link SessionFilter} onto the store's
+ * {@link SessionStoreQuery}. `status` maps directly; `metadata` has no store
+ * dimension (E11's query is scope/status/tree/recency) — it is applied as an
+ * in-process post-filter below so the wire's metadata filter does not regress.
+ */
+function toQuery(filter?: SessionFilter): SessionStoreQuery | undefined {
+  if (filter?.status === undefined) return undefined;
+  return { status: filter.status };
+}
+
+/** In-process metadata containment post-filter (the store query has no metadata dim). */
+function metadataMatches(record: SessionRecord, filter?: SessionFilter): boolean {
+  if (filter?.metadata === undefined) return true;
+  const meta = record.metadata ?? {};
+  for (const [k, v] of Object.entries(filter.metadata)) {
+    if (meta[k] !== v) return false;
+  }
+  return true;
+}
 
 export const appWireExtension: WireExtension = defineWireExtension({
   name: "@agentick/gateway-next#app",
@@ -40,14 +81,18 @@ export const appWireExtension: WireExtension = defineWireExtension({
     "app/get_session": async ({ appId, sessionId }, ctx) => {
       const app = ctx.gateway.app(appId);
       if (!app) throw new AppNotFoundError({ appId });
-      const entry = app.listSessions().find((e) => e.id === sessionId);
-      if (!entry) throw new SessionNotFoundError({ sessionId });
-      return entry;
+      // E11 — read the durable record (the superset: resolves closed/historical
+      // sessions too), not the live registry.
+      const record = await app.getSessionRecord(sessionId);
+      if (!record) throw new SessionNotFoundError({ sessionId });
+      return toSessionEntry(record);
     },
     "app/list_sessions": async ({ appId, filter }, ctx) => {
       const app = ctx.gateway.app(appId);
       if (!app) throw new AppNotFoundError({ appId });
-      return { sessions: app.listSessions(filter) };
+      const records = await app.listSessions(toQuery(filter));
+      const sessions = records.filter((r) => metadataMatches(r, filter)).map(toSessionEntry);
+      return { sessions };
     },
   },
 });

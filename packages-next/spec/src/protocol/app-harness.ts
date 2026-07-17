@@ -24,6 +24,7 @@
 import type { Layer } from "effect";
 import type { EventQuery, ProtocolEvent } from "../data/events.js";
 import type { SessionStatus } from "./hook-bridges.js";
+import type { SessionRecord, SessionStoreQuery } from "./session-store.js";
 import type { ExecutorFactory, ExecutorProtocol, LanguageModelExecutor } from "./executor.js";
 import type { EventBus, EventBusFactory, SubscribeOptions } from "./bus.js";
 import type { MessageInbox, MessageInboxFactory } from "./inbox.js";
@@ -55,6 +56,16 @@ export interface CreateSessionInput<P = unknown> {
    * Framework defines no keys.
    */
   readonly metadata?: Readonly<Record<string, unknown>>;
+  /**
+   * App-owned descriptive slots seeded onto the session's durable
+   * `SessionRecord` (E11). The framework STORES these and is blind to their
+   * semantics (auto-summary, user-edit). The app may also set them later via
+   * `app.setSessionMeta(sessionId, ...)`. `agentId` is the stable agent id /
+   * name for the record's `agentId` slot (1 agent : 1 session).
+   */
+  readonly title?: string;
+  readonly description?: string;
+  readonly agentId?: string;
   /** Initial component props injected into the agent root element. */
   readonly initialProps?: P;
   /** Initial knob values copied into the session's knob bridge. */
@@ -251,17 +262,49 @@ export interface AppHarnessProtocol<P = unknown> {
   runOnce(input: RunOnceInput<P>): Promise<RunOnceResult>;
 
   /**
-   * Look up a session by id. Returns `undefined` if no session with
-   * that id is currently registered (includes closed-and-removed
-   * sessions).
+   * Look up a LIVE session by id — the in-memory routing handle. Returns
+   * `undefined` if no session with that id is currently live (a closed session
+   * is dropped from the live registry, but its durable {@link SessionRecord}
+   * survives in the store — read it via {@link getSessionRecord}).
+   *
+   * This is the **live-registry** half of the E11 split: `sessionId → live
+   * SessionHarness` (routing, ephemeral). {@link listSessions} /
+   * {@link getSessionRecord} are the **record-store** half (durable metadata,
+   * the superset).
    */
   getSession(sessionId: string): SessionHarnessProtocol<P> | undefined;
 
   /**
-   * Enumerate the session registry. Filters apply in-process (no
-   * substrate round-trip).
+   * Enumerate the durable session registry — the {@link SessionStore} (E11).
+   * Returns {@link SessionRecord}s (the superset: every non-ephemeral session
+   * ever, including closed ones the live registry dropped), filtered by app /
+   * status / parent / recency. This — not the live registry — is the backing
+   * for every "list / resume my sessions" surface.
    */
-  listSessions(filter?: SessionFilter): readonly SessionListEntry[];
+  listSessions(query?: SessionStoreQuery): Promise<readonly SessionRecord[]>;
+
+  /**
+   * Read one durable {@link SessionRecord} by id from the {@link SessionStore}
+   * (E11) — the durable superset, so a closed / historical session (absent from
+   * the live registry) still resolves. `undefined` when unknown.
+   */
+  getSessionRecord(sessionId: string): Promise<SessionRecord | undefined>;
+
+  /**
+   * Set the app-owned descriptive slots (`title` / `description` / `metadata`)
+   * on a session's durable {@link SessionRecord} (E11). These are the app's to
+   * populate (auto-summary, user-edit, the open over-fetch bag) — the framework
+   * STORES them and is blind to their semantics. No-op when the session is not
+   * live.
+   */
+  setSessionMeta(
+    sessionId: string,
+    meta: {
+      readonly title?: string;
+      readonly description?: string;
+      readonly metadata?: Record<string, unknown>;
+    },
+  ): Promise<void>;
 
   /**
    * Cross-session event subscription. Returns an `AsyncIterable` over

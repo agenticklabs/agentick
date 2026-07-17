@@ -136,15 +136,54 @@ describe("AppHarness — createSession + send", () => {
     await app.closeApp();
   });
 
-  it("listSessions filters by status + metadata", async () => {
+  it("mirrors lifecycle + execution accounting into the durable SessionRecord (E11)", async () => {
+    const app = await mkApp();
+    const session = await app.createSession({ sessionId: "acct", title: "My chat" });
+
+    // Construction write — initial record.
+    const initial = await app.getSessionRecord("acct");
+    expect(initial?.status).toBe("idle");
+    expect(initial?.executionCount).toBe(0);
+    expect(initial?.currentExecutionId).toBeUndefined();
+    expect(initial?.title).toBe("My chat");
+    expect(initial?.appId).toBe(app.id);
+
+    const handle = await session.send({ messages: [{ role: "user", content: "47 * 23" }] });
+    await handle.result;
+
+    // Execution-boundary write: status back to idle, count bumped, in-flight id
+    // cleared, usage aggregated across both ticks (8+10 in / 4+8 out / 12+18).
+    const after = await app.getSessionRecord("acct");
+    expect(after?.status).toBe("idle");
+    expect(after?.executionCount).toBe(1);
+    expect(after?.currentExecutionId).toBeUndefined();
+    expect(after?.usage.totalTokens).toBe(30);
+
+    // App-owned descriptive slot — the framework STORES, never populates it.
+    await app.setSessionMeta("acct", { description: "arithmetic" });
+    expect((await app.getSessionRecord("acct"))?.description).toBe("arithmetic");
+
+    // close() lands the record on a terminal status.
+    await session.close();
+    expect((await app.getSessionRecord("acct"))?.status).toBe("closed");
+
+    await app.closeApp();
+  });
+
+  it("listSessions enumerates non-ephemeral sessions from the durable store (E11)", async () => {
     const app = await mkApp();
     await app.createSession({ sessionId: "s1", metadata: { tier: "free" } });
     await app.createSession({ sessionId: "s2", metadata: { tier: "pro" } });
-    const all = app.listSessions();
+    // Durable store-backed superset — async, returns SessionRecord[].
+    const all = await app.listSessions();
     expect(all.map((e) => e.id).sort()).toEqual(["s1", "s2"]);
-    const pro = app.listSessions({ metadata: { tier: "pro" } });
-    expect(pro).toHaveLength(1);
-    expect(pro[0]!.id).toBe("s2");
+    // Filter by status (scope/status/tree/recency is the store query).
+    const idle = await app.listSessions({ status: "idle" });
+    expect(idle.map((e) => e.id).sort()).toEqual(["s1", "s2"]);
+    // The adopter metadata bag rides the record's open over-fetch slot.
+    const s2 = await app.getSessionRecord("s2");
+    expect(s2?.metadata).toEqual({ tier: "pro" });
+    expect(s2?.appId).toBe(app.id);
     await app.closeApp();
   });
 
@@ -155,7 +194,7 @@ describe("AppHarness — createSession + send", () => {
     // create AND resume are the same call — stateless-replica deployments
     // open a session by id without knowing whether it's already live.
     expect(second).toBe(first);
-    expect(app.listSessions().filter((s) => s.id === "dup")).toHaveLength(1);
+    expect((await app.listSessions()).filter((s) => s.id === "dup")).toHaveLength(1);
     await app.closeApp();
   });
 });
@@ -168,8 +207,9 @@ describe("AppHarness — runOnce", () => {
     });
     expect(result.response).toContain("1081");
     expect(sessionId).toMatch(/^runonce:/);
-    // Registry should be empty after dispose.
-    expect(app.listSessions()).toHaveLength(0);
+    // Ephemeral runOnce sessions get NO durable store (throwaway), so the
+    // durable "list my sessions" superset stays empty.
+    expect(await app.listSessions()).toHaveLength(0);
     expect(app.getSession(sessionId)).toBeUndefined();
     await app.closeApp();
   });

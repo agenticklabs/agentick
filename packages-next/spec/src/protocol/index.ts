@@ -34,6 +34,7 @@ export * from "./tool-executor.js";
 export * from "./executor.js";
 export * from "./loop-executor.js";
 export * from "./session-harness.js";
+export * from "./session-store.js";
 export * from "./app-harness.js";
 export * from "./app-extension.js";
 export * from "./gateway-harness.js";

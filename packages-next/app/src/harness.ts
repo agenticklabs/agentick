@@ -40,7 +40,12 @@ import { ResourcesHarness } from "@agentick/resources-next";
 import { LoopExecutorHarness } from "@agentick/loop-executor-next";
 import { isLanguageModelAdapter, type LanguageModelAdapter } from "@agentick/model-next";
 import { LanguageModelExecutor as TheLanguageModelExecutor } from "@agentick/executor-next";
-import { SessionHarness, type SessionHarnessOptions } from "@agentick/session-next";
+import {
+  SessionHarness,
+  InMemorySessionStore,
+  type SessionHarnessOptions,
+} from "@agentick/session-next";
+import type { SessionRecord, SessionStore, SessionStoreQuery } from "@agentick/spec-next";
 import {
   InMemoryHandlerResolver,
   ToolExecutorHarness,
@@ -88,16 +93,12 @@ import type {
   SendInput,
   SendResult,
   ServiceRegistry,
-  SessionEntry,
   SessionExtension,
   SessionInstaller,
   TelemetryLayer,
   ToolRegistration,
   Validator,
-  SessionFilter,
   SessionHarnessProtocol,
-  SessionListEntry,
-  SessionStatus,
   SpawnContext,
   SpawnContextChildInput,
   LoopExecutorFactory,
@@ -303,6 +304,25 @@ export interface AppHarnessOptions<P = unknown> {
   readonly tasks?: {
     readonly store?: TaskStore;
     readonly executors?: readonly TaskExecutor[];
+  };
+
+  /**
+   * Durable session registry (E11) — the {@link SessionStore} holding
+   * `sessionId → SessionRecord`, constructed ONCE at app scope and injected
+   * into every non-ephemeral session's `SessionHarness`.
+   *
+   * **App-scoped, NOT a cascade** — mirrors the `tasks` slot. The store is the
+   * durable SUPERSET of the app's in-memory live-session registry (every
+   * session ever, including closed ones the live registry drops) and the
+   * backing for `listSessions` / `getSessionRecord`.
+   *
+   *   - `store` — defaults to a node-local `InMemorySessionStore`. Swap a
+   *     durable store (`@agentick/session-store-postgres-next`, same port) for
+   *     survival across app restart — the store's reason to exist as the resume
+   *     index.
+   */
+  readonly sessions?: {
+    readonly store?: SessionStore;
   };
 
   // ────────── Per-session defaults (constructed per createSession) ──────────
@@ -599,6 +619,17 @@ export class AppHarness<P = unknown>
   private readonly taskExecutors: readonly TaskExecutor[];
 
   /**
+   * App-scoped durable session registry (E11). Constructed ONCE (from
+   * `options.sessions.store`, else a node-local `InMemorySessionStore`) and
+   * injected into every NON-ephemeral session's `SessionHarness`, which mirrors
+   * its metadata in off the critical path. The durable SUPERSET of the live
+   * `registry` map: `listSessions` / `getSessionRecord` read it, so a closed /
+   * historical session (dropped from the live map) still resolves. A durable
+   * store swapped in here — same port — adds survival across app restart.
+   */
+  private readonly sessionStore: SessionStore;
+
+  /**
    * App-scoped telemetry runtime (ADR 78). Built ONCE from the adopter's
    * `telemetry` Layer at construction (`ManagedRuntime.make`) — NOT a per-call
    * `Effect.provide`, which would rebuild the Layer (and its exporter) on every
@@ -821,6 +852,7 @@ export class AppHarness<P = unknown>
     // session). Injected into every session's TasksHarness below.
     this.taskStore = options.tasks?.store ?? new InMemoryTaskStore();
     this.taskExecutors = options.tasks?.executors ?? [];
+    this.sessionStore = options.sessions?.store ?? new InMemorySessionStore();
 
     this.handlerResolver = new InMemoryHandlerResolver();
     if (options.toolHandlers) {
@@ -1100,22 +1132,50 @@ export class AppHarness<P = unknown>
     return this.registry.get(sessionId)?.session;
   }
 
-  listSessions(filter?: SessionFilter): readonly SessionListEntry[] {
-    const out: SessionListEntry[] = [];
-    for (const entry of this.registry.values()) {
-      if (entry.ephemeral) continue;
-      const status = entry.session.snapshot().status as SessionStatus;
-      if (!matchesFilter(status, entry.metadata, filter)) continue;
-      const listing: SessionListEntry = {
-        id: entry.id,
-        status,
-        metadata: entry.metadata,
-        createdAt: entry.createdAt,
-        ...omitUndefined({ lastActiveAt: entry.lastActiveAt }),
-      };
-      out.push(listing);
-    }
-    return out;
+  /**
+   * Enumerate the durable session registry — the {@link SessionStore} (E11).
+   * Returns {@link SessionRecord}s (the superset: every non-ephemeral session
+   * ever, including closed ones the live `registry` dropped), filtered by app /
+   * status / parent / recency. This — NOT the live registry — backs every
+   * "list / resume my sessions" surface. See {@link getSession} for the live
+   * routing half of the E11 split.
+   */
+  listSessions(query?: SessionStoreQuery): Promise<readonly SessionRecord[]> {
+    return this.sessionStore.list(query);
+  }
+
+  /**
+   * Read one durable {@link SessionRecord} by id from the {@link SessionStore}
+   * (E11). Resolves even for a closed / historical session the live registry
+   * has dropped. `undefined` when unknown.
+   */
+  getSessionRecord(sessionId: string): Promise<SessionRecord | undefined> {
+    return this.sessionStore.get(sessionId);
+  }
+
+  /**
+   * Set the app-owned descriptive slots on a session's durable
+   * {@link SessionRecord} (E11) — the app's to populate (auto-summary,
+   * user-edit, the open bag); the framework STORES them, blind to semantics.
+   * Routed through the LIVE session so its own record writes stay the single
+   * writer (last-writer-wins is otherwise racy). No-op when the session is not
+   * live.
+   *
+   * TODO(store-phase-4): editing meta on a CLOSED session (absent from the live
+   * registry) needs a store read-modify-write path; deferred with the manifest
+   * sweep.
+   */
+  async setSessionMeta(
+    sessionId: string,
+    meta: {
+      readonly title?: string;
+      readonly description?: string;
+      readonly metadata?: Record<string, unknown>;
+    },
+  ): Promise<void> {
+    const session = this.registry.get(sessionId)?.session;
+    session?.setMeta(meta);
+    await Promise.resolve();
   }
 
   events(filter: EventQuery = {}, options: SubscribeOptions = {}): AsyncIterable<ProtocolEvent> {
@@ -1591,6 +1651,20 @@ export class AppHarness<P = unknown>
         : input.parentSessionId !== undefined
           ? { parentSessionId: input.parentSessionId }
           : {}),
+      // E11 — the durable session registry. Injected app-singleton (mirrors
+      // `taskStore`), so the session mirrors its metadata into the store off
+      // the critical path. Ephemeral (`runOnce`) sessions get NO store — they
+      // are throwaway and must not pollute the durable "list my sessions"
+      // superset (parity with the old registry-listing's `ephemeral` skip).
+      ...(ephemeral ? {} : { sessionStore: this.sessionStore }),
+      appId: this.id,
+      // App-owned descriptive slots seeded at construction (E11) — the
+      // framework stores, never populates. `metadata` already flows above.
+      ...omitUndefined({
+        title: input.title,
+        description: input.description,
+        agentId: input.agentId,
+      }),
     });
 
     // `ready` / `close` aren't on `ToolExecutorProtocol` — duck-type
@@ -1766,24 +1840,6 @@ export class AppHarness<P = unknown>
 // Helpers
 // ============================================================================
 
-function matchesFilter(
-  status: SessionStatus,
-  metadata: Readonly<Record<string, unknown>>,
-  filter?: SessionFilter,
-): boolean {
-  if (!filter) return true;
-  if (filter.status !== undefined) {
-    const allowed = Array.isArray(filter.status) ? filter.status : [filter.status];
-    if (!allowed.includes(status)) return false;
-  }
-  if (filter.metadata !== undefined) {
-    for (const [k, v] of Object.entries(filter.metadata)) {
-      if (metadata[k] !== v) return false;
-    }
-  }
-  return true;
-}
-
 function mapAppError(cause: unknown): AppError {
   if (
     cause &&
@@ -1910,6 +1966,3 @@ class InMemoryServiceRegistry implements ServiceRegistry {
     return this.store.has(token);
   }
 }
-
-// Re-export the SessionEntry shape for ergonomic imports.
-export type { SessionEntry };

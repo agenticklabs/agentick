@@ -126,7 +126,7 @@ throws (it belongs on `model`).
 | `loop`               | `LoopExecutorProtocol` or factory            | Optional. Defaults to the bundled `LoopExecutorHarness`.                                                                                                                                                                                                      |
 | `cluster`            | `ClusterFactory`                             | Optional. See "Cluster integration" above.                                                                                                                                                                                                                    |
 | `tools`              | `ToolDeclaration[]`                          | App-scope tool registry. Threads to every session.                                                                                                                                                                                                            |
-| `hooks`              | `CommandHooks`                               | App-scope command-lifecycle hooks (`onBefore*` / `onAfter*`, ADR 80). Folded once at construction; every session composes its own onto these (ADR 82). See the "Hooks" pattern below.                                                                          |
+| `hooks`              | `CommandHooks`                               | App-scope command-lifecycle hooks (`onBefore*` / `onAfter*`, ADR 80). Folded once at construction; every session composes its own onto these (ADR 82). See the "Hooks" pattern below.                                                                         |
 | `extensions`         | `Extension[]`                                | App + session extensions. Composed at construction.                                                                                                                                                                                                           |
 | `bus`                | `EventBus` or factory                        | Optional substrate override.                                                                                                                                                                                                                                  |
 | `inbox`              | `MessageInbox` or factory                    | Optional substrate override.                                                                                                                                                                                                                                  |
@@ -161,6 +161,35 @@ the registry that `ctx.*` vs `bridges.*` vs `session.*` resolve to. They
 consume the wired instance instead (e.g. `withResources` registers the
 `resource_*` model tools; `withMCP` proxy-registers remote resources into
 `installer.resources`).
+
+### `app.getSession(id)` vs. `app.listSessions(query)` — the E11 split
+
+The app keeps **two** structures for sessions, deliberately not merged (data-layer
+plan E11):
+
+- The **live registry** — `sessionId → live SessionHarness`, in-memory,
+  ephemeral (a session is dropped from it on close). Read it for **routing /
+  interaction** via `app.getSession(id)`.
+- The durable **`SessionStore`** — `sessionId → SessionRecord`, the queryable
+  **superset** (every non-ephemeral session ever, including closed ones the live
+  registry dropped). It is the backing for every "list / resume my sessions"
+  surface. Read it via:
+  - `app.listSessions(query?)` → `Promise<readonly SessionRecord[]>`, filtered by
+    `appId` / `status` / `parentSessionId` / `updatedAfter` recency.
+  - `app.getSessionRecord(id)` → `Promise<SessionRecord | undefined>` (resolves
+    closed / historical sessions too).
+
+The store is an app-singleton (`createApp({ sessions: { store } })`, defaults to a
+node-local `InMemorySessionStore` — swap a durable adapter for survival across app
+restart, the store's purpose as the resume index). Each non-ephemeral session
+mirrors its metadata into it off the critical path (no projection). Ephemeral
+`runOnce` sessions get NO store — they are throwaway and stay out of the durable
+list.
+
+App-owned descriptive slots (`title` / `description` / `metadata`) are the app's
+to populate — seed them at `createSession({ title, description })` or set them
+later via `app.setSessionMeta(id, { title?, description?, metadata? })`. The
+framework STORES them and is blind to their semantics.
 
 ### `app.closeApp()` / `app.close()`
 
@@ -292,7 +321,12 @@ counterpart (see [ADR 38](../../docs/proposals/v2/blueprint/38-cluster-lifecycle
 ## Verified by
 
 - `src/__tests__/app-harness.spec.tsx` — construction + session
-  lifecycle + close cascade.
+  lifecycle + close cascade; the durable `SessionStore` (E11):
+  `listSessions` / `getSessionRecord` read the store, records mirror
+  lifecycle + execution accounting (status, `executionCount`,
+  `currentExecutionId`, aggregated `usage`, close→`closed`),
+  `setSessionMeta` sets app-owned slots, and ephemeral `runOnce` sessions
+  stay out of the durable list.
 - `src/__tests__/create-app-cluster.spec.tsx` — `cluster: ...`
   wiring, factory-substrate rejection, close-via-registry-removal.
 - `src/__tests__/session-extensions.spec.ts` — extension target

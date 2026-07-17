@@ -1358,6 +1358,9 @@ importers:
       '@agentick/state-next':
         specifier: workspace:*
         version: link:../state
+      '@agentick/store-next':
+        specifier: workspace:*
+        version: link:../store
       '@agentick/tasks-next':
         specifier: workspace:*
         version: link:../tasks
