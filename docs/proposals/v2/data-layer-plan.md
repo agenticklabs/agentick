@@ -1,9 +1,11 @@
 # v2 Data Layer / Store Substrate — Plan of Attack
 
-**Status: LOCKED (shape + algorithm) — iterating via the first entity (tasks).**
-The load-bearing forks are resolved (§6); the §3.5 Playbook is the ratified
-per-harness algorithm. Tasks is the crucible: we refine the playbook + the generics
-against it, then apply the locked pattern to every other entity in the run list.
+**Status: LOCKED (shape + algorithm) — EXECUTING the run list.** Committed: tasks
+✓, knobs ✓, `CollectionProjection` ✓; credentials in flight. The load-bearing
+forks are resolved (§6); the §3.5 Playbook (P0–P9) is the ratified per-harness
+algorithm, refined against each entity as we go. Remaining: state, session,
+timeline, prompts/skills/resources, then Phase-2 (`StoreCtx`/journal) + Phase-4
+(manifest).
 Consumes [`data-layer-working-notes.md`](./data-layer-working-notes.md)
 (the exploration log). Built from three ground-truth code surveys of the
 current snapshot/restore flow, the timeline tiers, and the store/conventions —
@@ -345,22 +347,32 @@ The rule that predicts "needs a store": **does the state have a lifecycle
 independent of the session-snapshot envelope?** If yes → store. If it's derivable
 by re-render / re-declaration → intent, not store.
 
-| Harness | State | Lifecycle indep.? | Disposition |
-|---|---|---|---|
-| timeline | conversation log | yes (spans/forks) | `LogStore` (has one); manifest = log cursor (E5) |
-| tasks | task FSM records | yes (detached outlive session) | `CollectionStore` (has one); app-singleton |
-| credentials | secrets | yes (app-wide) | `CollectionStore` (has one); **empty wire surface** |
-| **knobs** | model-set values | **no** (session config) — but *wants* to be | **→ `KnobStore` (`MemoryCollection`)**; delete bespoke export/import; collapse state-channel onto store `onChange` |
-| **state** | `useState` cells | no (session) | **→ `StateStore` (`MemoryCollection`)** |
-| **prompts** | registered prompts | **derivable** (re-render) | **→ intent / re-declare** (remove from snapshot) — §6-C |
-| **skills** | registered skills | derivable | **→ intent / re-declare** — §6-C |
-| data | fetch cache | derivable (re-fetch) | stays `dataCache` (declare `SubscriptionIntent`, already does) |
-| **session** | tick/usage/status/metadata | yes | **→ `SessionStore`** — the session harness is stateful too; no scalar exception (E11) |
+Every entity is store-backed (the store is the single source of truth); the
+column that matters for *how* is the **projection strategy** — eager write-through
+(`CollectionProjection`) for read-after-write-hot mutable state, lazy
+throw-on-pending (`useData`) for load-once definition sources, or none for
+async-only/never-rendered state.
 
-The interesting collapses: **knobs/state gain stores** (uniformity + durable
-opt-in for free); **prompts/skills likely LOSE their snapshot participation**
-(reclassified as re-declared intents) rather than gaining stores — which
-*removes* code, not adds it.
+| Harness | State | Store | Projection strategy |
+|---|---|---|---|
+| timeline | conversation log | `LogStore` (has one); manifest = log cursor (E5) | **bounded fold** (not a mirror) |
+| tasks ✓ | task FSM records | `CollectionStore` (has one); app-singleton | **eager augmented-cache** (record + non-persisted live handles) |
+| credentials ✓ | secrets | composes `MemoryCollection`; app-singleton; **empty wire surface**; `onChange` source | **NONE** — async-only, server-resident, never rendered (the counter-example) |
+| knobs ✓ | model-set values | store-backed (`MemoryCollection` via `CollectionProjection`) | **eager pure-mirror**; channel stays harness-level; `exportSnapshot` coexists → Phase-4 sweep. ADDITIVE, not a deletion |
+| state | `useState` cells | `CollectionProjection` (eager) | **eager pure-mirror** (same shape as knobs) |
+| session | tick/usage/status/metadata | `SessionStore` (E11 — no scalar exception) | **eager**, likely single-record |
+| prompts | prompt definitions | **definition-source store** (may be filesystem) + tree-declared registration | **lazy** (`useData`/throw-on-pending) — load-once, NOT eager |
+| skills | skill definitions | **definition-source store** (may be filesystem) | **lazy** (`useData`) |
+| resources | URI-addressed content | **definition-source store**, URI-keyed (filesystem-natural) | **lazy** (`useData`) |
+| data | fetch cache | already the `DataBridge` | **lazy** (`useData`) — the reference lazy case |
+
+The corrected picture (runs #1–#3 + the reconciler discussion): storifying a
+render-read harness is **additive** (add store + projection beside the existing
+notify seam), NOT a code-deletion win — the `exportSnapshot` deletion is the
+coordinated **Phase-4 manifest sweep**, not per-run. prompts/skills/resources are
+NOT "intent, remove from snapshot"; they get **definition-source stores** read via
+the **lazy `useData` path** (load-once, so eager write-through is the wrong tool).
+credentials proves an async-only harness needs **no projection at all**.
 
 ---
 
@@ -403,9 +415,18 @@ already converged on the primitives; the playbook is mostly *conform + verify*, 
       `MemoryCollection<T,Q>` (collection) with `{ backend, keyOf, matchQuery,
       prunePredicate? }`. The ONLY store-specific code is the matcher/keyOf. This is
       the default backing; conformance-green = done.
-- [ ] **P5 — Wire to BaseHarness.** Mount on the `store?` slot; hydration via the
-      `hydrate()`-into-`ready` hook (§2.3). Hold only the **bounded projection** +
-      counters in memory, never the full log (§2.7).
+- [ ] **P5 — Wire to BaseHarness + choose the projection.** Mount on the `store?`
+      slot; hydration via the `hydrate()`-into-`ready` hook (§2.3). A render-read
+      harness needs a **sync-read cache** (mandatory — each render pass is sync and
+      the throw-on-pending render loop needs a cache to terminate; `useData` is an
+      instance of this, not a counter-example). The FREE choice is *population*:
+      **EAGER write-through** = `CollectionProjection<T>` (`store-next`) for
+      read-after-write-hot MUTABLE state (knobs/state/session); **LAZY
+      throw-on-pending** = the `useData` model for **load-once definition sources**
+      (prompts/skills/resources). An **async-only, never-rendered** harness
+      (credentials — server-resident) needs **NO projection**: read the async store
+      directly. Never hold the full log (§2.7); tasks = eager *augmented-cache*
+      variant (record + non-persisted live handles), timeline = bounded fold.
 - [ ] **P6 — Client surface.** Framework-minimum: `enumerate` + `page` wire methods
       + one change channel. App extends freely. `⊇` pass-through over-fetch.
       (credentials = empty surface, and that's valid — E7.)
@@ -414,11 +435,23 @@ already converged on the primitives; the playbook is mostly *conform + verify*, 
 - [ ] **P8 — Conformance + parity.** Extend `runStoreConformance` with the entity's
       cases; every prior behavior maps or is a *documented* drop (§7). Type-enforce
       the shape via the shared archetype interfaces so drift breaks the build.
+- [ ] **P9 — Update README if necessary, when and where applicable.** Any package
+      whose public surface, patterns, or "Verified by" changed gets its README
+      brought current (new exports like `CollectionProjection`, the store the harness
+      now takes, the projection strategy it uses). Skip only when nothing
+      user-facing changed. Back-propagate to earlier runs' packages too.
 
 ### Guidelines (augment as we learn)
 
-- **All harness/layer state comes from a store.** No exceptions — including the
-  session harness itself (`SessionStore`, E11) and the substrates.
+- **All state is store-derived AND store-persisted — the store is the single
+  source of truth.** Every harness/layer's state *comes from* the store (read /
+  hydrate) and is *stored to* the store (write / persist). No exceptions —
+  including the session harness itself (`SessionStore`, E11) and the substrates.
+  Any in-memory projection is a **DERIVED cache** (reconstructible from the store
+  via `hydrate`), NEVER a second home for state; the manifest references the
+  store, never the cache. The purest form holds no cache at all (credentials:
+  read the async store live). A cache is an optimization on top of this invariant,
+  not an exception to it.
 - **The query/input identifies scope + range + order + basic params; the store
   decides how to fulfill.** Could be event-sourced (journal projection) or
   otherwise persisted — **the framework does not care**, it just asks and receives.
@@ -460,12 +493,14 @@ sources definitions; the tree references them; restore re-declares the
 references). Resources especially fit — they're already URI-addressed
 (`resources/src/uri-template.ts`), i.e. a collection keyed by URI, filesystem-natural.
 
-### Validated by run #1 (tasks) — findings that refine the pattern
+### Validated by runs #1–2.5 (tasks, knobs, CollectionProjection) — findings that refine the pattern
 
-Run #1 built `@agentick/store-next` (`MemoryCollection` + `runStoreConformance`),
-the `CollectionStore` port in spec-next, and `matchesScope`/`compileScopeMatcher`
-in utils, then refactored tasks onto them (signature-preserving, conformance
-green). What it taught us:
+Committed: #1 tasks (`24e23740` — `@agentick/store-next` with `MemoryCollection` +
+`runStoreConformance`, `CollectionStore` port in spec-next,
+`matchesScope`/`compileScopeMatcher` in utils, tasks refactored on), #2 knobs
+(`8a57e663` — first storification), 2.5 (`36b74fc4` — `CollectionProjection`
+extracted, knobs retrofit, tasks documented-variant). Run #3 credentials in flight.
+What they taught us:
 
 1. **The shared conformance is deliberately THIN — only 3 archetype-agnostic
    cases** (backend-id, empty-read, idempotent-delete); everything else is
@@ -480,10 +515,22 @@ green). What it taught us:
    store's `list`), and `compileScopeMatcher(filter) → (scope)=>bool` for hot
    per-event paths (`compileQuery` on the publish loop) — pre-extracts the
    constrained keys once. One semantics, two entry points.
-4. **`onChange` / `StoreCtx` are deferred, not forgotten.** `MemoryCollection`
-   ships without them (TODO-marked); `onChange` lands with **knobs** (to collapse
-   its state-channel), `StoreCtx`/`ctx.journal` is the Phase-2 seam.
-5. **CLAUDE.md's New Package Checklist is stale for `-next` packages** —
+4. **`onChange` is for EXTERNAL / cross-consumer observation, NOT self-caused
+   changes.** (Corrected — the reverted doc said "lands with knobs", which run #2
+   disproved.) A single harness's self-caused change stream (knobs' `set` → its
+   own channel) stays harness-level; the store never sources it. `onChange`
+   observes changes to a **shared** store that a consumer did *not* cause
+   (credentials app-singleton: consumer A sees consumer B's writes; a keychain
+   rotation). So `onChange` lands with **credentials** (run #3), not knobs.
+   `StoreCtx`/`ctx.journal` (+ idempotency, E16) is the Phase-2 seam.
+5. **Storification is ADDITIVE + splits eager/lazy (runs #2, 2.5, reconciler
+   discussion).** A render-read harness needs a sync-read cache (mandatory: sync
+   render passes + the throw-on-pending loop needs a cache to terminate; `useData`
+   is an instance). EAGER write-through (`CollectionProjection`) for
+   read-after-write-hot mutable state; LAZY `useData` for load-once definition
+   sources (prompts/skills/resources); NONE for async-only (credentials). The
+   `exportSnapshot` deletion is the Phase-4 sweep, not per-run — expect net-additive.
+6. **CLAUDE.md's New Package Checklist is stale for `-next` packages** —
    `.changeset/config.json` `linked` is `[]` and tracks no `-next` package, so
    `store-next` was (correctly) NOT changeset-registered. Revisit tracking policy
    at v2 cut.
@@ -520,11 +567,16 @@ criterion) **adoptable one store at a time, coexisting with the old**.
 - Ship one reference **derived** `CollectionStore` (folds the journal) + conformance for the derived path + a time-travel (`asOf`) test.
 - *Gate:* pure stores unaffected; derived store passes the same collection conformance + a replay/`asOf` test.
 
-### Phase 3 — knobs + state become store-backed *(first embedded→store migration)*
-- `KnobStore` = `MemoryCollection<KnobPrimitive>`; `StateStore` = `MemoryCollection<unknown>`.
-- Delete knobs' bespoke `exportSnapshot`/`importSnapshot`; **collapse the `knobs-state` channel onto the store's `onChange`** (verify JSON-Patch delta parity).
-- Same for state.
-- *Gate:* knobs channel snapshot+delta parity; kill/resume with knobs/state; **prove code deleted > added.**
+### Phase 3 — knobs ✓ + state become store-backed *(first storification; additive)*
+- knobs (DONE, run #2 8a57e663 + run 2.5 36b74fc4): `MemoryCollection` via
+  `CollectionProjection` (eager pure-mirror); `values: Map` becomes the sync
+  projection; the `knobs-state` channel stays **harness-level** (self-caused — NOT
+  `store.onChange`); `exportSnapshot` COEXISTS (Phase-4 sweep deletes it).
+- state: same template — `CollectionProjection` (eager), sync projection kept,
+  channel harness-level, `exportSnapshot` coexists.
+- *Gate:* channel snapshot+delta parity; kill/resume with knobs/state; sync reads
+  unchanged; **net-additive is expected** (store + projection beside the notify
+  seam) — the deletion is Phase 4, not here.
 
 ### Phase 4 — Manifest + `SessionStore` + `SessionHarness.restore` *(the un-built Step 6)*
 - **`SessionStore`** — migrate session metadata (currentTick / usage / status / session-state) into a store (E11); the session harness becomes store-backed like the rest. No manifest scalars.
@@ -591,13 +643,34 @@ criterion) **adoptable one store at a time, coexisting with the old**.
   time or it's disqualified.
 - **E10 — `SessionHarness.restore` is net-new.** No session-level restore exists.
   Building the manifest means building the inverse from scratch, plus its ordering.
-- **E11 — Session metadata (tick/usage/status). RESOLVED — the session gets a
-  store.** The session harness is itself stateful (it holds session metadata /
-  session-state), so it follows the same pattern: a **`SessionStore`** (a
-  `MemoryCollection`, or a single-record store) holding tick/usage/status/metadata.
-  *All* state is store-backed — no manifest scalars carved out as an exception. The
-  manifest then references the session store like any other. Uniformity over the
-  special case.
+- **E11 — Session metadata → `SessionStore`. RESOLVED + fleshed out.** The session
+  harness is itself stateful, so it gets a **`SessionStore = CollectionStore<SessionRecord,
+  SessionStoreQuery>`** (keyed by `id`, **app-singleton** like `TaskStore`; port +
+  record in spec-next, `InMemorySessionStore` composing `MemoryCollection` in
+  session-next). It is bigger than it looks: this store IS **the session registry +
+  the resume index + the backing for every "list/resume my sessions" UI** — its
+  `list(query)` (by `appId`/`status`/`parentSessionId`/recent-`updatedAt`) *is* the
+  sessions-list wire surface, `enumerate` is foundational, and the SessionRecord is
+  the natural home for the Phase-4 per-store cursor **manifest** (`stores?`), making
+  it the entry point for resume. Projection: **none** (async-read, like credentials —
+  read by the client/app, not hot render-read). `SessionRecord` shape, grouped by
+  ownership:
+    - *identity/lifecycle (framework-owned):* `id`, `createdAt`, `updatedAt`,
+      `status`, `parentSessionId?` (spawn ancestry → session tree), `appId?`.
+    - *runtime accounting (framework-owned), hierarchy-aware (session → execution →
+      tick):* `currentExecutionId?` + `executionCount` (NOT `currentTick` — tick is
+      **execution-local**, resets per execution, so it's execution-scoped runtime,
+      not session metadata); `usage` aggregates across executions.
+    - *descriptive (app-owned SLOTS — framework STORES, never POPULATES):* `title?` /
+      `description?` (the app generates them — auto-summary / user-edit; framework is
+      blind to the semantics), `metadata?: Record<string, unknown>` (the open bag /
+      over-fetch home).
+  Open (Ryan's call): **agent binding** — a session is a *context*, agents run within
+  it (spawn/send can run different agents), so DON'T hardcode an agent field; `agentId`
+  lives in `metadata` unless a first-class optional slot is wanted. Deferred: whether
+  **executions** get their own store (`ExecutionStore`) — the level below session; the
+  timeline already captures the conversation, so an execution record (inputs/outputs/
+  ticks/tokens/status per turn) is audit/replay sugar, not yet required.
 - **E12 — Restore ordering (new).** Today none (`Promise.all`). Derived stores need
   the journal restored first; timeline-before-mount already exists. Manifest restore
   introduces a dependency order: journal → derived stores → mount.
@@ -613,6 +686,18 @@ criterion) **adoptable one store at a time, coexisting with the old**.
   surplus generates wire deltas the framework is nominally blind to. Lean: the app
   asked for them, it pays for the deltas; verify it doesn't re-import the
   merge/consistency problem behind the bright line.
+- **E16 — Idempotency: reuse the existing key, thread it to the store (Phase 2).**
+  Idempotency already exists two-layered: operation-level
+  `OperationJournal.lookupTerminal(opId)` (replay short-circuit at command entry) +
+  wire-level `_meta.idempotencyKey` (client `retry` generates it for non-idempotent
+  methods, omits it for naturally-idempotent `get*` —
+  `client-extensions/retry/predicates.ts:72`). The store seam is NOT a new key — it
+  is threading the EXISTING key (`opId` / `_meta.idempotencyKey`) into the write
+  path via `StoreCtx` so a store that owns persistence MAY dedupe. Load-bearing for
+  **`append`** (log — retrying an append duplicates); `put` (collection) is
+  naturally idempotent by key. Framework provides key + seam; store/app owns the
+  guarantee (dedup needs persistence). Complements, not replaces, the journal's
+  operation-level idempotency.
 
 ---
 
