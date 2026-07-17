@@ -8,7 +8,7 @@
  *
  * Listener errors are caught per-listener; a buggy consumer cannot
  * corrupt sibling listeners or the producer's state. This matches the
- * `SessionStateStore` semantics that predated the consolidation
+ * `SessionRuntime` semantics that predated the consolidation
  * (which silently caught listener throws).
  *
  *   const n = createNotifier();

@@ -96,7 +96,7 @@ import type { StateHandle } from "@agentick/state-next";
 import type { TimelineHandle, TimelineHarnessOptions } from "@agentick/timeline-next";
 
 import { buildSessionBridges, type SessionHookBridges } from "./session-bridges.js";
-import { SessionStateStore } from "./session-state.js";
+import { SessionRuntime } from "./session-state.js";
 import { createSessionExecutionHandle, type SessionEmitInput } from "./session-execution-handle.js";
 
 // ============================================================================
@@ -361,7 +361,7 @@ export class SessionHarness<P = unknown>
     return this.scopeId;
   }
 
-  private readonly store: SessionStateStore;
+  private readonly runtime: SessionRuntime;
   private readonly bridges: SessionHookBridges;
   private readonly mountId: string;
   private readonly reconciler: ReconcilerProtocol;
@@ -507,14 +507,14 @@ export class SessionHarness<P = unknown>
     const resolvedBus = this.bus;
     const resolvedInbox = this.inbox;
 
-    this.store = new SessionStateStore(options.sessionId);
+    this.runtime = new SessionRuntime(options.sessionId);
     // ADR 76 tier 3 — the per-session bridges (knobs/state/…) inherit
     // `session.use()` / `app.use()` via the construction-fold: the session's
     // `resolvedInterceptors()` snapshot is threaded to `buildSessionBridges`
     // below (see `inheritedInterceptors` there). Safe because the bridges are
     // per-session (no cross-session leak).
     this.bridges = buildSessionBridges(
-      this.store,
+      this.runtime,
       { journal: resolvedJournal, bus: resolvedBus, inbox: resolvedInbox },
       {
         ...omitUndefined({
@@ -624,7 +624,7 @@ export class SessionHarness<P = unknown>
     // captures the full delta. NO projection — the record is written, never
     // read during render. No-op when no store is injected (ephemeral sessions).
     if (this.sessionStore !== undefined) {
-      this.store.subscribeMetadata(() => this.syncSessionRecord());
+      this.runtime.subscribeMetadata(() => this.syncSessionRecord());
       // Initial record — createdAt / status "idle" / executionCount 0.
       this.syncSessionRecord();
     }
@@ -641,14 +641,14 @@ export class SessionHarness<P = unknown>
   private syncSessionRecord(): void {
     const store = this.sessionStore;
     if (store === undefined) return;
-    const currentExecutionId = this.store.currentExecutionId();
+    const currentExecutionId = this.runtime.currentExecutionId();
     const record: SessionRecord = {
-      id: this.store.id,
+      id: this.runtime.id,
       createdAt: this.createdAt,
       updatedAt: Date.now(),
-      status: this.store.status(),
-      executionCount: this.store.executionCount(),
-      usage: this.store.usage(),
+      status: this.runtime.status(),
+      executionCount: this.runtime.executionCount(),
+      usage: this.runtime.usage(),
       ...omitUndefined({
         parentSessionId: this.parentSessionId,
         appId: this.appId,
@@ -826,19 +826,19 @@ export class SessionHarness<P = unknown>
     // snapshots into the session shape and carry both layers.
     return {
       specVersion: SPEC_VERSION,
-      id: this.store.id,
-      status: this.store.status(),
-      currentTick: this.store.currentTick(),
+      id: this.runtime.id,
+      status: this.runtime.status(),
+      currentTick: this.runtime.currentTick(),
       timeline: [...this.bridges.timeline.readPersisted()],
       knobs: this.bridges.knobs.exportSnapshot(),
-      usage: this.store.usage(),
+      usage: this.runtime.usage(),
     };
   }
 
   async close(): Promise<void> {
     if (this._closed) return;
     this._closed = true;
-    this.store.setStatus("closed" as never);
+    this.runtime.setStatus("closed" as never);
     // Tear down the reconciler mount; ignore errors during shutdown.
     try {
       await this.reconciler.unmount({ mountId: this.mountId });
@@ -983,7 +983,7 @@ export class SessionHarness<P = unknown>
       }) satisfies SessionError;
     }
     const childInput = {
-      parentSessionId: this.store.id,
+      parentSessionId: this.runtime.id,
       agent: input.agent,
       ...omitUndefined({
         sessionId: input.sessionId,
@@ -1017,7 +1017,7 @@ export class SessionHarness<P = unknown>
       toolCallId: `host:${ulid()}`,
       name,
       input,
-      context: { via: "dispatch", sessionId: this.store.id },
+      context: { via: "dispatch", sessionId: this.runtime.id },
       ...(options?.task !== undefined ? { task: options.task } : {}),
     });
     return result.content;
@@ -1025,7 +1025,7 @@ export class SessionHarness<P = unknown>
 
   channel<T = unknown>(name: string): ChannelHandle<T> {
     const fullName = `session:channel:${name}`;
-    const sessionId = this.store.id;
+    const sessionId = this.runtime.id;
     const bus = this.bus;
     const inbox = this.inbox;
     const sessionAddress = this.address;
@@ -1150,7 +1150,7 @@ export class SessionHarness<P = unknown>
       name: channelEventName(channel),
       phase: "delta",
       timestamp: Date.now(),
-      scope: { sessionId: this.store.id },
+      scope: { sessionId: this.runtime.id },
       payload,
     };
   }
@@ -1453,9 +1453,9 @@ export class SessionHarness<P = unknown>
     // `setStatus("running")` — that status notify fires `syncSessionRecord`,
     // so one write captures the full execution-start delta (count +
     // currentExecutionId + running).
-    this.store.bumpExecutionCount();
-    this.store.setCurrentExecutionId(executionId);
-    this.store.setStatus("running");
+    this.runtime.bumpExecutionCount();
+    this.runtime.setCurrentExecutionId(executionId);
+    this.runtime.setStatus("running");
 
     // Per-call overrides — executor + target — fall through from
     // SendInput. The app-level executor/target is the default; this
@@ -1490,15 +1490,15 @@ export class SessionHarness<P = unknown>
       this._currentExecution = null;
       this._currentHandle = null;
       this._handleReservation = null;
-      this.store.setCurrentExecutionId(null);
-      this.store.setStatus(durabilityFailed ? "failed" : "idle");
+      this.runtime.setCurrentExecutionId(null);
+      this.runtime.setStatus(durabilityFailed ? "failed" : "idle");
     });
     resultPromise.catch(() => {
       // Prevent unhandled rejections — handle has its own .result.
     });
 
     const { handle, emit, close } = createSessionExecutionHandle({
-      sessionId: this.store.id,
+      sessionId: this.runtime.id,
       executionId,
       resultPromise,
       abort: async (reason) => {
@@ -1528,7 +1528,7 @@ export class SessionHarness<P = unknown>
         runHarnessProtocol(
           this.loop.fx.runExecution({
             executionId,
-            sessionId: this.store.id,
+            sessionId: this.runtime.id,
             reconciler: this.reconciler,
             mountId: this.mountId,
             executor: executorForCall,
@@ -1791,8 +1791,8 @@ export class SessionHarness<P = unknown>
       this._executionUsage && input.result.usage
         ? mergeUsageStats(this._executionUsage, input.result.usage)
         : (input.result.usage ?? this._executionUsage);
-    this.store.addUsage(input.result.usage);
-    this.store.bumpTick();
+    this.runtime.addUsage(input.result.usage);
+    this.runtime.bumpTick();
     return { appendedEntryIds: ids };
   }
 

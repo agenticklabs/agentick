@@ -41,7 +41,7 @@ import type {
   ToolBridge,
 } from "@agentick/spec-next";
 
-import type { SessionStateStore } from "./session-state.js";
+import type { SessionRuntime } from "./session-state.js";
 import { omitUndefined } from "@agentick/utils-next";
 
 /**
@@ -84,7 +84,7 @@ export function recordingLoopBridge(): RecordingLoopBridge {
   };
 }
 
-export function sessionBridgeFor(store: SessionStateStore): SessionBridge {
+export function sessionBridgeFor(store: SessionRuntime): SessionBridge {
   return {
     id: store.id,
     get status() {
@@ -200,7 +200,7 @@ export interface BuildSessionBridgesOptions {
 }
 
 export function buildSessionBridges(
-  store: SessionStateStore,
+  store: SessionRuntime,
   substrate: {
     readonly journal: OperationJournal;
     readonly bus: EventBus;

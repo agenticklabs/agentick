@@ -1,23 +1,41 @@
 /**
- * `SessionStateStore` — in-memory metadata owned by a `SessionHarness`.
+ * `SessionRuntime` — the current session's **live, synchronous** runtime state,
+ * owned by a `SessionHarness`.
  *
- * Holds session-level status, tick counter, current execution id, and
- * usage stats. The timeline itself lives in the `TimelineHarness` since
- * ADR 26 Step 5a — that two-tier surface (append-only log + projection)
- * doesn't fit in this synchronous metadata bag.
+ * This is the **projection** half of the session's (projection, store) pair —
+ * NOT a store (do not confuse with the durable `SessionStore`, which is the
+ * app-singleton `CollectionStore<SessionRecord>` holding every session's
+ * record). `SessionRuntime` is the sync working copy of THIS session's
+ * `SessionRecord`: it holds the record's mutable subset (`status`,
+ * `currentExecutionId`, `executionCount`, `usage`) plus non-persisted live
+ * extras (`currentTick`, the metadata-change listeners). The harness bridges it
+ * to the durable store — `subscribeMetadata → rebuild SessionRecord →
+ * void sessionStore.put(...)` (write-through, off the critical path).
  *
- * Synchronous on purpose. The substrate's FiberRef scope still flows
- * through the harness's `runOperation` wrap; this layer is the
- * underlying mutable cell.
+ * It is the **augmented single-record projection** archetype — the
+ * session-scoped sibling of tasks' `live` (record + non-persisted handles):
+ * the durable fields mirror the `SessionRecord`, the live extras never persist.
+ * Held as a single record (not a collection), so it is a hand-rolled variant
+ * rather than a `CollectionProjection` (a collection primitive for one item
+ * would be ceremony) — same call the tasks harness made.
  *
- * Future phases (persistence backends, hibernate/restore) wrap this
- * with durable storage; the interface stays the same.
+ * Synchronous on purpose: the runtime reads `status`/`currentTick`/`usage` per
+ * tick, and the substrate's FiberRef scope flows through the harness's
+ * `runOperation` wrap around this mutable cell. The timeline lives in the
+ * `TimelineHarness` (ADR 26 Step 5a) — its two-tier log+projection surface
+ * doesn't fit this synchronous metadata cell.
+ *
+ * TODO(store-phase-N): `currentTick` is **execution-local** (resets per
+ * execution — session → execution → tick), so it does not belong in session
+ * state at all; its clean home is execution-scoped state (ADR 77 execution
+ * spine). It lives here today only for lack of an execution-state holder, and
+ * is correctly excluded from the durable `SessionRecord`.
  */
 
 import type { SessionStatus, UsageStats } from "@agentick/spec-next";
 import { createNotifier, type Notifier } from "@agentick/pubsub-next";
 
-export class SessionStateStore {
+export class SessionRuntime {
   readonly id: string;
 
   private _status: SessionStatus = "idle";
@@ -47,6 +65,8 @@ export class SessionStateStore {
     this._status = next;
     this.notify();
   }
+
+  // ────────── tick (execution-local — see the file TODO; not in SessionRecord) ──────────
 
   currentTick(): number {
     return this._currentTick;
@@ -109,7 +129,7 @@ export class SessionStateStore {
   }
 
   private notify(): void {
-    // Notifier isolates listener errors so store state can't be corrupted.
+    // Notifier isolates listener errors so state can't be corrupted.
     this._listeners.notify();
   }
 }

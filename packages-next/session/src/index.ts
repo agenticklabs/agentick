@@ -8,7 +8,7 @@
  */
 
 export { SessionHarness, type SessionHarnessOptions } from "./harness.js";
-export { SessionStateStore } from "./session-state.js";
+export { SessionRuntime } from "./session-state.js";
 export { defineSession, type DefineSessionInput } from "./define-session.js";
 // E11 — the durable session registry / resume index. The `SessionStore` port +
 // record + query live in spec-next; the bundled in-memory default + its
