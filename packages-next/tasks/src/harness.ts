@@ -239,7 +239,36 @@ export class TasksHarness
   extends BaseHarness<"tasks">
   implements TasksHarnessProtocol, ChannelSnapshotProvider
 {
-  /** In-process projection of the store, scoped to this harness's tasks. */
+  /**
+   * In-process projection of the store, scoped to this harness's tasks.
+   *
+   * This is the **augmented-cache VARIANT** of `@agentick/store-next`'s
+   * {@link CollectionProjection} — NOT a composition of it. The primitive is a
+   * PURE MIRROR: its cache value equals the stored record type `T`, so
+   * `getSync`/`write`/`hydrate` all traffic in `T`. Tasks breaks that
+   * assumption: the cache value is a {@link LiveTask} = the persisted
+   * `TaskRecord` slice (`live.record`, a strict mirror of the last `store.put`)
+   * PLUS live-only runtime handles (AbortController, per-task event bus, result
+   * deferred, executor handle, ttl timer) that are NEVER persisted. The record
+   * slice mirrors the store exactly the way the primitive prescribes —
+   * write-through on every transition ({@link persist} → `store.put`) and merge
+   * on resume ({@link hydrateOrphans} → `store.list`) — but the cache holds
+   * MORE than the store does.
+   *
+   * Composing `CollectionProjection<TaskRecord>` here would split the record
+   * onto the projection and the handles onto a parallel `Map<taskId, …>` kept
+   * in lockstep — but record and handles are co-accessed at essentially every
+   * site (submit, applyTransition, settle, cancel, close, events, the ttl
+   * reaper, the report closures: ~70 references against 2 store touchpoints).
+   * `LiveTask` exists precisely to carry them together; splitting them trades a
+   * clean single map for two lockstep maps + doubled lookups across the file.
+   * That's distortion for the sake of reuse, so tasks stays hand-rolled.
+   *
+   * TODO(store-phase-N): revisit only if `CollectionProjection` grows a
+   * pure-mirror-with-sidecar shape (cache value = `T` + a per-key sidecar) that
+   * fits without the lockstep-map penalty. Until such a shape earns its keep
+   * across ≥2 augmented-cache harnesses, the variant is the right call.
+   */
   private readonly live = new Map<string, LiveTask>();
   private readonly parentScope: EventScope | undefined;
   /** `parentScope ?? {}` — stamped on records + used as the store filter. */
