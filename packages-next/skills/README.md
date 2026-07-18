@@ -103,13 +103,30 @@ withSkills(mySharedSkillsHarness);
 withSkills({
   initial: [/* SkillsRegisterInput[] */],
   loaders: [fromArray([...]), fromDirectory("./skills")],
+  store: myDurableSkillStore, // optional — durable backing (see below)
 
-  // OR — adopter-supplied instance (mutually exclusive with initial / loaders)
+  // OR — adopter-supplied instance (mutually exclusive with initial / loaders / store)
   use: mySharedSkillsHarness,
 });
 ```
 
-**Lifecycle ownership.** Forms A / C-with-`initial`/`loaders` → extension constructs a per-session harness and closes it on session teardown. Forms B / C-with-`use:` → adopter owns the source's lifecycle; the extension publishes the same instance under the session's `skills` namespace but never closes it.
+**Lifecycle ownership.** Forms A / C-with-`initial`/`loaders`/`store` → extension constructs a per-session harness and closes it on session teardown. Forms B / C-with-`use:` → adopter owns the source's lifecycle; the extension publishes the same instance under the session's `skills` namespace but never closes it.
+
+## Store backing — the definition-library archetype
+
+The harness is **store-derived and store-persisted** ([data-layer plan §6-C](../../docs/proposals/v2/data-layer-plan.md)). Skills are the archetype's **pure floor**: a serializable `Skill` record keyed by `name` in a `SkillStore` (= `CollectionStore<Skill, SkillStoreQuery>`), fed by pluggable `Loader` sources, with **no runtime augmentation** (unlike prompts' `render`/`template` fn, or resources' `resolver`). Every field of a `Skill` is plain data, so the store round-trips it whole.
+
+```ts
+import { InMemorySkillStore } from "@agentick/skills-next";
+// The SkillStore / SkillStoreQuery ports live in @agentick/spec-next.
+
+withSkills({ store: new InMemorySkillStore() }); // the bundled default (implicit)
+```
+
+- **`register` / `update` / `remove`** write through to `store.put` / `store.delete`.
+- **Loaders stay _sources_ that FEED the store** — they are not dissolved into it. `reload()` runs each loader's `load()` and puts the results; `resolve(name)` (lookup-on-miss) asks each loader's `lookup()` then puts the hit.
+- **`get` / `has` / `list` / `search` are synchronous**, served from an eager `CollectionProjection` (a sync read cache the harness keeps in lockstep with the store: write-through on mutation, `hydrate()` on resume). This mirrors the `KnobsHarness`. The projection is required, not incidental — the sync `exportSnapshot()` (`SnapshotCapable`, captured synchronously by the reconciler) and the sync read surface are both load-bearing sync callers, so a synchronous materialized view is mandatory. (Credentials, the async counter-example, has _no_ snapshot surface, which is why it needs no projection.)
+- **`exportSnapshot` / `importSnapshot` coexist** with the store today (a Phase-4 manifest sweep makes the store the sole snapshot authority later). A durable adapter (Postgres, a filesystem source) conforms to the same `SkillStore` port.
 
 ## Backend swap
 
@@ -196,7 +213,8 @@ const skill = await session.skills.require("must_exist");
 - `SkillsHarness` reference impl (in-memory, journal-backed)
 - `withSkills` session-extension factory (accepts `loaders`)
 - `SkillLoader[]` — `fromArray` / `fromUrl` / `fromManifest` (`/loaders`) and `fromFile` / `fromDirectory` (`/loaders/node`)
-- Conformance suite (`runSkillsHarnessConformance`)
+- Store backing — `SkillStore` port (spec-next), bundled `InMemorySkillStore`, `store` slot on `withSkills`
+- Conformance suites — `runSkillsHarnessConformance` (harness) + `runSkillStoreConformance` (store)
 - `/testing` subpath with `stubSkillsHarness`
 - Module augmentation: `session.skills` typed via `SkillsHandle`
 
@@ -251,6 +269,7 @@ const skill = await session.skills.require("must_exist");
 ## Verified by
 
 - `src/__tests__/harness.spec.ts` — full conformance suite + sync/async surface + envelope flow + snapshot round-trip + inbox routing
+- `src/__tests__/store-backing.spec.ts` — write-through to the injected store, loaders (`reload` / `resolve`) feed the store, `search` through the projection, `exportSnapshot`↔`hydrate()` round-trip, plus `runSkillStoreConformance` against `InMemorySkillStore`
 - Cross-harness integration tests live in adopter packages (`@agentick/session-next`, `@agentick/app-next`)
 
 ## See also

@@ -31,9 +31,11 @@ import {
   isSkillsInstance,
   type SessionExtension,
   type SessionInstaller,
+  type SkillStore,
   type Skills,
   type SkillsRegisterInput,
 } from "@agentick/spec-next";
+import { omitUndefined } from "@agentick/utils-next";
 import { SkillsHarness } from "./harness.js";
 import type { SkillLoader } from "./loaders.js";
 
@@ -56,6 +58,14 @@ export interface WithSkillsOptions {
    * for `fromFile` / `fromDirectory`.
    */
   readonly loaders?: readonly SkillLoader[];
+  /**
+   * Durable backing for skill records (data-layer plan §6-C). Defaults to a
+   * fresh per-session in-memory store; inject a durable adapter (Postgres, a
+   * filesystem source) conforming to the {@link SkillStore} port to survive
+   * process restart. Built-in path only — mutually exclusive with `use` (an
+   * adopter-supplied instance brings its own backing).
+   */
+  readonly store?: SkillStore;
   /**
    * Adopter-supplied `Skills` instance. The extension uses this as-is
    * across every session — NO per-session construction, NO close on
@@ -97,6 +107,7 @@ export function withSkills(slot: WithSkillsSlot = {}): SessionExtension {
         installer.substrate.journal,
         installer.substrate.bus,
         installer.substrate.inbox,
+        omitUndefined({ store: options.store }),
       );
       await harness.ready;
 
@@ -143,10 +154,13 @@ export function resolveSlot(slot: WithSkillsSlot): WithSkillsOptions {
     return { use: slot };
   }
   const cfg = slot as WithSkillsOptions;
-  if (cfg.use !== undefined && (cfg.initial !== undefined || cfg.loaders !== undefined)) {
+  if (
+    cfg.use !== undefined &&
+    (cfg.initial !== undefined || cfg.loaders !== undefined || cfg.store !== undefined)
+  ) {
     throw new Error(
-      "withSkills: `use:` is mutually exclusive with `initial` / `loaders` — " +
-        "adopter-supplied instances own their seeding and reload lifecycle.",
+      "withSkills: `use:` is mutually exclusive with `initial` / `loaders` / `store` — " +
+        "adopter-supplied instances own their seeding, reload, and durable backing.",
     );
   }
   return cfg;

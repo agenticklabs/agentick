@@ -12,7 +12,16 @@
 // `HookBridges` via TypeScript module augmentation.
 import "./augment.js";
 
-export { SkillsHarness } from "./harness.js";
+export { SkillsHarness, type SkillsHarnessOptions } from "./harness.js";
 export type { SkillsHandle } from "./handle.js";
 export { withSkills, type WithSkillsOptions } from "./extension.js";
 export { runSkillsHarnessConformance } from "./conformance.js";
+// ADR 68-style store archetype (data-layer plan §6-C — the definition-library
+// PURE floor). The bundled in-memory default + its search predicate; the
+// `SkillStore` / `SkillStoreQuery` ports live in `@agentick/spec-next`. A
+// durable adapter conforms to the SAME port later.
+export { InMemorySkillStore, matchesSkillQuery } from "./store.js";
+export {
+  runSkillStoreConformance,
+  type SkillStoreConformanceOptions,
+} from "./store-conformance.js";

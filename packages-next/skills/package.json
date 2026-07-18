@@ -58,6 +58,7 @@
     "@agentick/pubsub-next": "workspace:*",
     "@agentick/runtime-next": "workspace:*",
     "@agentick/spec-next": "workspace:*",
+    "@agentick/store-next": "workspace:*",
     "@agentick/utils-next": "workspace:*",
     "effect": "^3.21.2"
   },

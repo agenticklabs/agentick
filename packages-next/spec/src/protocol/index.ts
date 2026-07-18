@@ -48,6 +48,7 @@ export * from "./tasks-store.js";
 export * from "./live-harness.js";
 export * from "./knobs-harness.js";
 export * from "./skills-harness.js";
+export * from "./skills-store.js";
 export * from "./prompts-harness.js";
 export * from "./resources-harness.js";
 export * from "./mcp-server-harness.js";
