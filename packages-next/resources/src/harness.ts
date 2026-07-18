@@ -1,34 +1,58 @@
 /**
- * `ResourcesHarness` — a read-projection seam, NOT a store (ADR 62).
+ * `ResourcesHarness` — a read-projection seam, store-BACKED but NOT
+ * `SnapshotCapable` (ADR 62 + data-layer plan §6-C, Phase 5 run #9).
  *
- * Extends {@link BaseHarness} so the read verbs journal + wire-expose
- * through the substrate's phase contract and the change stream rides the
- * inherited machinery. The harness holds a **registry of `URI →
- * resolver` bindings** (plus `uriTemplate → resolver`) and the subscribe
- * / `list_changed` notifier — it owns NO content. A resolver reads from
- * wherever the content already lives (the sandbox fs, a store, a
- * computed view); `read(uri)` routes to the matching resolver.
+ * Extends {@link BaseHarness} so the read verbs journal + wire-expose through the
+ * substrate's phase contract and the change stream rides the inherited machinery.
+ * The harness owns NO content: a resolver reads from wherever the content already
+ * lives (the sandbox fs, a store, a computed view); `read(uri)` routes to the
+ * matching resolver.
  *
- * **Invocation (ADR 51).** `read` / `list` / `listTemplates` are
- * DECLARED COMMANDS (`this.command()`): serializable data in, wire-safe
- * data out → journaled, inbox-addressable, and wire-enumerable exactly
- * like `prompts:get`. `register` / `registerTemplate` carry a REQUIRED
- * resolver function, so per ADR 51 §1.2 (ops with required function
- * params must NOT be declared) they stay plain in-process methods — a
- * synchronous registry insert returning an `Unsubscribe`. The change
- * stream (`subscribe` / `subscribeListChanged` / `notifyUpdated`) is a
- * notifier fan-out, also plain methods (mirrors `PromptsHarness`'s
- * `subscribe` / `subscribeAll`).
+ * ## The three internal structures (data-layer plan run #9, "option a")
  *
- * Two distinct notifier streams — kept separate because the events are
- * semantically distinct (unlike prompts, where every change is "a
- * declaration changed"):
+ * Resources is the definition-library archetype's richest instance. Its state is
+ * split across three structures:
+ *
+ *   1. **Durable store** ({@link ResourceStore}) — holds the SERIALIZABLE
+ *      {@link ResourceDeclarationRecord} slice (`uri` / `uriTemplate` / `kind` / `meta`)
+ *      for **durable** resources sourced from a {@link ResourceLoader} (DB / fs —
+ *      the source resources lacks today). Transient bindings NEVER touch it.
+ *   2. **Eager catalog projection** ({@link fixed} / {@link templates}) — the
+ *      synchronous, sorted, cached declaration slice `snapshot()` reads (folded
+ *      into the IR during a render pass — data-layer plan §3.5 P5 "render-read").
+ *      It overlays BOTH durable declarations (mirrored from the store) AND
+ *      transient declarations (from `register` / `registerTemplate` / `<Resource>`
+ *      tree-mounts). Authoritative for presence (`has`) + the catalog.
+ *   3. **Resolver sidecar** ({@link fixedResolvers} / {@link templateResolvers}) —
+ *      the NON-serializable `resolver` fn (+ a template's compiled `RegExp`),
+ *      keyed by uri / uriTemplate, for BOTH durable-from-loader AND
+ *      transient-from-register bindings. `resolverFor` reads it (fixed-first, then
+ *      template-match). NEVER reaches the store — the `ResourceDeclarationRecord` type
+ *      makes that a compile-time guarantee (mirrors prompts' `render`/`template`
+ *      sidecar).
+ *
+ * ## NOT `SnapshotCapable` — store-backed ≠ snapshot-backed
+ *
+ * The harness carries NO `exportSnapshot`/`importSnapshot`. Durability = the
+ * store reloads durable declarations from its `ResourceLoader` source on restart
+ * (`reload()`); transient bindings re-mount from the tree. On restart the catalog
+ * projection surfaces the durable declarations (`hydrate()` from the store) but
+ * resolvers do not survive serialization — `read()` throws `ResourceNotFound`
+ * until the loaders re-run and re-attach the sidecar, exactly as a restored
+ * prompt has no content until re-registered. This is the clean "store-backed but
+ * not snapshot-backed" case (data-layer plan §3 disposition).
+ *
+ * **Invocation (ADR 51).** `read` / `list` / `listTemplates` are DECLARED
+ * COMMANDS. `register` / `registerTemplate` carry a REQUIRED resolver function
+ * (ADR 51 §1.2) so they stay plain in-process methods — a synchronous registry
+ * insert returning an `Unsubscribe`. Two distinct notifier streams:
  *   - `subscribe(uri, listener)`   fires on `notifyUpdated(uri)`
  *     → MCP `notifications/resources/updated`.
- *   - `subscribeListChanged(listener)` fires on register / unregister
+ *   - `subscribeListChanged(listener)` fires on register / unregister / reload
  *     → MCP `notifications/resources/list_changed`.
  *
  * @see docs/proposals/v2/blueprint/62-resources-harness.md
+ * @see docs/proposals/v2/data-layer-plan.md §6-C
  * @see packages-next/spec/src/protocol/resources-harness.ts
  */
 
@@ -52,6 +76,7 @@ import type {
   ResourcesListTemplatesResult,
   ResourcesReadInput,
   ResourcesSnapshot,
+  ResourceStore,
   ResourceTemplateDescriptor,
   ResourceTemplateMeta,
   TemplateResolver,
@@ -62,6 +87,7 @@ import {
   ResourceNotFound,
   ResourceResolverFailed,
   ResourcesBackendError,
+  resourceDeclarationKey,
 } from "@agentick/spec-next";
 import {
   createKeyedNotifier,
@@ -71,6 +97,8 @@ import {
 } from "@agentick/pubsub-next";
 import { omitUndefined } from "@agentick/utils-next";
 
+import type { ResourceLoader, ResourceLoaderItem } from "./loaders.js";
+import { InMemoryResourceStore } from "./store.js";
 import { compileUriTemplate, matchesTemplate } from "./uri-template.js";
 
 const SURFACE = "resources" as const;
@@ -78,6 +106,12 @@ type ResourcesSurface = typeof SURFACE;
 
 /** Default pagination page size when the caller doesn't override it. */
 const DEFAULT_PAGE_SIZE = 100;
+
+/** A template's non-serializable sidecar entry: the resolver + its compiled pattern. */
+interface TemplateResolverEntry {
+  readonly resolver: TemplateResolver;
+  readonly compiled: RegExp;
+}
 
 export interface ResourcesHarnessOptions {
   /**
@@ -88,6 +122,27 @@ export interface ResourcesHarnessOptions {
   readonly pageSize?: number;
   /** Backend discriminator surfaced via `.backend`. Default `"memory"`. */
   readonly backend?: string;
+  /**
+   * Durable backing for the DURABLE resource declarations (data-layer plan §6-C,
+   * Phase 5 run #9). Defaults to a fresh per-harness in-memory
+   * {@link InMemoryResourceStore}. The store holds ONLY the serializable
+   * {@link ResourceDeclarationRecord} slice — the `resolver` fn stays in the harness's
+   * sidecar and never reaches it. Injecting a durable adapter is how durable
+   * resource declarations survive process restart; `reload()` re-runs the
+   * loaders (the source) and `hydrate()` mirrors the store into the catalog
+   * projection. **Transient** register / `<Resource>` bindings never touch the
+   * store (they re-mount from the tree), so the harness is deliberately NOT
+   * `SnapshotCapable`.
+   */
+  readonly store?: ResourceStore;
+  /**
+   * Loaders for DURABLE resources (data-layer plan Phase 5). Retained for
+   * post-startup `reload()` + lookup-on-miss in `read()`; each loaded item
+   * carries a {@link ResourceDeclarationRecord} (→ store) and its live `resolver`
+   * (→ sidecar). Adopters can also swap the loader set at runtime via
+   * {@link ResourcesHarness.setLoaders}.
+   */
+  readonly loaders?: readonly ResourceLoader[];
   /**
    * Resolved interceptor snapshot (ADR 76 tier 3 + ADR 83 amendment) — the
    * parent scope's resolved interceptors (guards, `.use` transforms, AND
@@ -105,34 +160,51 @@ export interface ResourcesHarnessOptions {
   readonly interceptorParent?: BaseHarness;
 }
 
-interface FixedBinding {
-  readonly resolver: ResourceResolver;
-  readonly meta?: ResourceMeta;
-}
-
-interface TemplateBinding {
-  readonly resolver: TemplateResolver;
-  readonly meta?: ResourceTemplateMeta;
-  readonly compiled: RegExp;
-}
-
 export class ResourcesHarness
   extends BaseHarness<ResourcesSurface>
   implements ResourcesHarnessProtocol
 {
-  /** Fixed `uri → resolver` bindings. Insertion order is not significant. */
-  private readonly fixed = new Map<string, FixedBinding>();
-  /** `uriTemplate → resolver` bindings. Insertion order = match priority. */
-  private readonly templates = new Map<string, TemplateBinding>();
+  /**
+   * Eager catalog projection — fixed `uri → meta` declaration slice (data-layer
+   * plan §3.5 P5). Durable declarations mirrored from {@link store} PLUS transient
+   * `register` / `<Resource>` declarations overlaid. Authoritative for `has()` +
+   * `snapshot()`. Insertion order is not significant for fixed resources.
+   */
+  private readonly fixed = new Map<string, ResourceMeta | undefined>();
+  /**
+   * Eager catalog projection — `uriTemplate → meta` declaration slice. Insertion
+   * order = match priority (mirrored into {@link templateResolvers}).
+   */
+  private readonly templates = new Map<string, ResourceTemplateMeta | undefined>();
+
+  /**
+   * Resolver sidecar — fixed `uri → resolver`. NON-serializable; never reaches
+   * the store. Holds resolvers for BOTH durable-from-loader AND
+   * transient-from-register bindings. After `hydrate()` on restart this map is
+   * empty (resolvers don't survive) until the loaders re-run.
+   */
+  private readonly fixedResolvers = new Map<string, ResourceResolver>();
+  /** Resolver sidecar — `uriTemplate → { resolver, compiled RegExp }`. */
+  private readonly templateResolvers = new Map<string, TemplateResolverEntry>();
 
   /** Content-update fan-out, keyed by uri (`notifyUpdated`). */
   private readonly updatedNotifier: KeyedNotifier = createKeyedNotifier();
-  /** Registry-topology fan-out (`register` / unregister → `list_changed`). */
+  /** Registry-topology fan-out (`register` / unregister / reload → `list_changed`). */
   private readonly listChangedNotifier: Notifier = createNotifier();
 
   /** Cached, sorted descriptor snapshots. Invalidated on every mutation. */
   private listCache: readonly ResourceDescriptor[] | null = null;
   private templatesCache: readonly ResourceTemplateDescriptor[] | null = null;
+
+  /**
+   * Durable backing for DURABLE declarations (data-layer plan §6-C). Fed by
+   * loaders only; transient bindings never write to it. The catalog projection
+   * is the sync read cache — reads never touch the (async) store.
+   */
+  private readonly store: ResourceStore;
+
+  /** Loaders for durable resources — drive `reload()` + lookup-on-miss in `read()`. */
+  private loaders: readonly ResourceLoader[] = [];
 
   private readonly pageSize: number;
   readonly backend: string;
@@ -167,6 +239,10 @@ export class ResourcesHarness
     });
     this.pageSize = options.pageSize ?? DEFAULT_PAGE_SIZE;
     this.backend = options.backend ?? "memory";
+    this.store = options.store ?? new InMemoryResourceStore();
+    if (options.loaders && options.loaders.length > 0) {
+      this.loaders = options.loaders;
+    }
 
     const scope = () => ({ sessionId: this.scopeId });
     this.readCommand = this.command({
@@ -190,16 +266,30 @@ export class ResourcesHarness
     });
   }
 
-  // ─────────── Registration (plain methods — ADR 51 §1.2) ───────────
+  /**
+   * Replace the loader set used by `reload()` and the lookup-on-miss fallback in
+   * `read()`. Called by the AppHarness at install time (once the durable-source
+   * plumbing lands, see the extension TODO); adopters can also swap it at runtime.
+   */
+  setLoaders(loaders: readonly ResourceLoader[]): void {
+    this.loaders = loaders;
+  }
+
+  // ─────────── Registration (plain methods — ADR 51 §1.2, TRANSIENT) ───────────
 
   register(uri: string, resolver: ResourceResolver, meta?: ResourceMeta): Unsubscribe {
     if (this.fixed.has(uri)) {
       throw new ResourceAlreadyRegistered({ uri });
     }
-    this.fixed.set(uri, omitUndefined({ resolver, meta }) as FixedBinding);
+    // TRANSIENT: projection + resolver sidecar, NEVER the store (re-mounts on restart).
+    this.fixed.set(uri, meta);
+    this.fixedResolvers.set(uri, resolver);
     this.invalidateAndNotifyList();
     return () => {
-      if (this.fixed.delete(uri)) this.invalidateAndNotifyList();
+      if (this.fixed.delete(uri)) {
+        this.fixedResolvers.delete(uri);
+        this.invalidateAndNotifyList();
+      }
     };
   }
 
@@ -211,18 +301,110 @@ export class ResourcesHarness
     if (this.templates.has(uriTemplate)) {
       throw new ResourceAlreadyRegistered({ uri: uriTemplate });
     }
-    this.templates.set(
-      uriTemplate,
-      omitUndefined({
-        resolver,
-        meta,
-        compiled: compileUriTemplate(uriTemplate),
-      }) as TemplateBinding,
-    );
+    // TRANSIENT: projection + resolver sidecar, NEVER the store.
+    this.templates.set(uriTemplate, meta);
+    this.templateResolvers.set(uriTemplate, {
+      resolver,
+      compiled: compileUriTemplate(uriTemplate),
+    });
     this.invalidateAndNotifyList();
     return () => {
-      if (this.templates.delete(uriTemplate)) this.invalidateAndNotifyList();
+      if (this.templates.delete(uriTemplate)) {
+        this.templateResolvers.delete(uriTemplate);
+        this.invalidateAndNotifyList();
+      }
     };
+  }
+
+  // ─────────── Durable source (loaders → store + projection + sidecar) ───────────
+
+  /**
+   * Re-run every configured loader and upsert each loaded item into the durable
+   * store (declaration), the catalog projection (declaration), and the resolver
+   * sidecar (resolver fn). Returns the keys touched, split into first-seen
+   * (`added`) vs already-present (`updated`). Fires `list_changed` once.
+   *
+   * Unlike `register`, this is an UPSERT (re-running a loader refreshes its
+   * declarations) — it does NOT throw on an existing key.
+   */
+  async reload(): Promise<{
+    readonly added: readonly string[];
+    readonly updated: readonly string[];
+  }> {
+    const batches = await Promise.all(this.loaders.map((l) => l.load()));
+    const added: string[] = [];
+    const updated: string[] = [];
+    for (const batch of batches) {
+      for (const item of batch) {
+        const key = resourceDeclarationKey(item.declaration);
+        const existed = this.fixed.has(key) || this.templates.has(key);
+        await this.putDurable(item);
+        (existed ? updated : added).push(key);
+      }
+    }
+    this.invalidateAndNotifyList();
+    return { added, updated };
+  }
+
+  /**
+   * Load the durable store into the catalog projection — the future manifest
+   * resume path (data-layer plan Phase 4). Mirrors DECLARATIONS only; the
+   * resolver sidecar is NOT touched (resolvers don't survive serialization), so a
+   * hydrated resource surfaces in the catalog but `read()` throws
+   * `ResourceNotFound` until the loaders re-run (`reload()`) and re-attach the
+   * resolver. NOT wired into session resume in this run.
+   */
+  async hydrate(): Promise<void> {
+    const declarations = await this.store.list();
+    for (const d of declarations) {
+      if (d.kind === "template" && d.uriTemplate !== undefined) {
+        this.templates.set(d.uriTemplate, d.meta);
+      } else if (d.uri !== undefined) {
+        this.fixed.set(d.uri, d.meta);
+      }
+    }
+    this.invalidateAndNotifyList();
+  }
+
+  /**
+   * Upsert one durable loader item into store + projection + sidecar. Does NOT
+   * notify (callers batch the notification). The store write is awaited so
+   * durability errors surface to the async caller.
+   */
+  private async putDurable(item: ResourceLoaderItem): Promise<void> {
+    const d = item.declaration;
+    await this.store.put(d);
+    if (d.kind === "template" && d.uriTemplate !== undefined) {
+      this.templates.set(d.uriTemplate, d.meta);
+      this.templateResolvers.set(d.uriTemplate, {
+        resolver: item.resolver,
+        compiled: compileUriTemplate(d.uriTemplate),
+      });
+    } else if (d.uri !== undefined) {
+      this.fixed.set(d.uri, d.meta);
+      this.fixedResolvers.set(d.uri, item.resolver);
+    }
+  }
+
+  /**
+   * Lookup-on-miss: ask each loader for the exact key, and on a hit populate
+   * store + projection + sidecar. Returns whether any loader had it. Keys by the
+   * concrete uri, so this resolves FIXED resources (a template's key is its
+   * pattern, which a concrete read-uri won't equal).
+   */
+  private async resolveFromLoaders(uri: string): Promise<boolean> {
+    for (const loader of this.loaders) {
+      const found = loader.lookup
+        ? await loader.lookup(uri)
+        : ((await loader.load()).find((i) => resourceDeclarationKey(i.declaration) === uri) ??
+          null);
+      if (found) {
+        await this.putDurable(found);
+        this.invalidateAndNotifyList();
+        return true;
+      }
+    }
+    return false;
   }
 
   // ─────────── Sync surface ───────────
@@ -232,9 +414,10 @@ export class ResourcesHarness
   }
 
   /**
-   * Synchronous, unpaginated registry snapshot (sorted, cached). The
-   * sync-read counterpart to {@link list} / {@link listTemplates} used
-   * by the `resources` compiler-surfacing default projection.
+   * Synchronous, unpaginated registry snapshot (sorted, cached). The sync-read
+   * counterpart to {@link list} / {@link listTemplates} used by the `resources`
+   * compiler-surfacing default projection — folds the combined durable+transient
+   * catalog into the IR during a render pass (ADR 63).
    */
   snapshot(): ResourcesSnapshot {
     return {
@@ -289,15 +472,22 @@ export class ResourcesHarness
   private applyRead(
     input: ResourcesReadInput,
   ): Effect.Effect<readonly ResourceContents[], ResourcesError, never> {
-    return Effect.suspend(() => {
-      const resolver = this.resolverFor(input.uri);
-      if (resolver === null) {
-        return Effect.fail<ResourcesError>(new ResourceNotFound({ uri: input.uri }));
-      }
-      return Effect.tryPromise<readonly ResourceContents[], ResourcesError>({
-        try: async () => resolver(input.uri),
-        catch: (cause): ResourcesError => new ResourceResolverFailed({ uri: input.uri, cause }),
-      });
+    return Effect.tryPromise({
+      try: async (): Promise<readonly ResourceContents[]> => {
+        let resolver = this.resolverFor(input.uri);
+        // Lookup-on-miss: an unresolved uri asks the durable loaders, which
+        // re-attach the resolver to the sidecar on a hit.
+        if (resolver === null && this.loaders.length > 0) {
+          await this.resolveFromLoaders(input.uri);
+          resolver = this.resolverFor(input.uri);
+        }
+        if (resolver === null) throw new ResourceNotFound({ uri: input.uri });
+        return resolver(input.uri);
+      },
+      // A ResourcesError (ResourceNotFound) passes through as-is; anything the
+      // resolver throws is wrapped as a resolver failure.
+      catch: (cause): ResourcesError =>
+        isResourcesError(cause) ? cause : new ResourceResolverFailed({ uri: input.uri, cause }),
     });
   }
 
@@ -331,10 +521,10 @@ export class ResourcesHarness
 
   /** Fixed binding wins; then the first template whose pattern matches. */
   private resolverFor(uri: string): ResourceResolver | TemplateResolver | null {
-    const exact = this.fixed.get(uri);
-    if (exact) return exact.resolver;
-    for (const binding of this.templates.values()) {
-      if (matchesTemplate(binding.compiled, uri)) return binding.resolver;
+    const exact = this.fixedResolvers.get(uri);
+    if (exact) return exact;
+    for (const entry of this.templateResolvers.values()) {
+      if (matchesTemplate(entry.compiled, uri)) return entry.resolver;
     }
     return null;
   }
@@ -342,16 +532,16 @@ export class ResourcesHarness
   private snapshotResources(): readonly ResourceDescriptor[] {
     if (this.listCache !== null) return this.listCache;
     const out: ResourceDescriptor[] = [];
-    for (const [uri, binding] of this.fixed) {
+    for (const [uri, meta] of this.fixed) {
       out.push(
         omitUndefined({
           uri,
-          name: binding.meta?.name ?? uri,
-          description: binding.meta?.description,
-          mimeType: binding.meta?.mimeType,
-          size: binding.meta?.size,
-          title: binding.meta?.title,
-          metadata: binding.meta?.metadata,
+          name: meta?.name ?? uri,
+          description: meta?.description,
+          mimeType: meta?.mimeType,
+          size: meta?.size,
+          title: meta?.title,
+          metadata: meta?.metadata,
         }) as ResourceDescriptor,
       );
     }
@@ -363,15 +553,15 @@ export class ResourcesHarness
   private snapshotTemplates(): readonly ResourceTemplateDescriptor[] {
     if (this.templatesCache !== null) return this.templatesCache;
     const out: ResourceTemplateDescriptor[] = [];
-    for (const [uriTemplate, binding] of this.templates) {
+    for (const [uriTemplate, meta] of this.templates) {
       out.push(
         omitUndefined({
           uriTemplate,
-          name: binding.meta?.name ?? uriTemplate,
-          description: binding.meta?.description,
-          mimeType: binding.meta?.mimeType,
-          title: binding.meta?.title,
-          metadata: binding.meta?.metadata,
+          name: meta?.name ?? uriTemplate,
+          description: meta?.description,
+          mimeType: meta?.mimeType,
+          title: meta?.title,
+          metadata: meta?.metadata,
         }) as ResourceTemplateDescriptor,
       );
     }
@@ -385,6 +575,24 @@ export class ResourcesHarness
     this.templatesCache = null;
     this.listChangedNotifier.notify();
   }
+}
+
+// ============================================================================
+// Error discrimination
+// ============================================================================
+
+const RESOURCES_ERROR_TAGS = [
+  "ResourceNotFound",
+  "ResourceAlreadyRegistered",
+  "ResourceResolverFailed",
+  "ResourcesBackendError",
+] as const;
+
+function isResourcesError(value: unknown): value is ResourcesError {
+  if (typeof value !== "object" || value === null) return false;
+  const tag = (value as { _tag?: unknown })._tag;
+  if (typeof tag !== "string") return false;
+  return (RESOURCES_ERROR_TAGS as readonly string[]).includes(tag);
 }
 
 // ============================================================================

@@ -47,6 +47,16 @@ export interface WithResourcesOptions {
   readonly registerModelTools?: boolean;
 }
 
+// TODO(store-phase-4): thread durable `store?` + `loaders?` to the ResourcesHarness.
+// The seam already exists on `ResourcesHarnessOptions` (constructor) and is exercised
+// by the store-backing spec, but `withResources()` does NOT construct the harness —
+// the AppHarness owns the single construction site (#159, to avoid an inbox-address
+// collision). Wiring adopter loaders/store from here requires the AppHarness
+// construction path (`session/src/session-bridges.ts` + `define-session.ts`) to accept
+// and forward them, a cross-package SessionOptions change. Deferred until that plumbing
+// lands; until then adopters inject `{ store, loaders }` directly at the harness
+// constructor (or via `harness.setLoaders(...)`) and call `reload()`.
+
 export function withResources(options: WithResourcesOptions = {}): SessionExtension {
   const registerModelTools = options.registerModelTools !== false;
   return {

@@ -99,6 +99,63 @@ declaration changed"):
 - `subscribeListChanged(listener)` fires on register / unregister →
   MCP `notifications/resources/list_changed`.
 
+## Durable backing (store + loaders)
+
+Resources is the definition-library archetype's **richest instance**
+(data-layer plan §6-C, Phase 5). Its state lives in **three** structures,
+and — crucially — the harness is **store-backed but NOT `SnapshotCapable`**
+(store-backed ≠ snapshot-backed):
+
+| Structure               | Holds                                       | Fed by                                    |
+| ----------------------- | ------------------------------------------- | ----------------------------------------- |
+| **`ResourceStore`**     | serializable `ResourceDeclarationRecord`    | **durable** loaders only                  |
+| **catalog projection**  | declaration slice `snapshot()` reads        | durable (mirrored) + transient (overlaid) |
+| **resolver sidecar**    | the non-serializable `resolver` fn          | both durable + transient                  |
+
+Two **source classes** coexist:
+
+- **Durable** resources come from a `ResourceLoader` (array / module /
+  DB / fs — the source resources lacked before). A loaded item carries a
+  `declaration` (→ the store) **and** a `resolver` (→ the sidecar).
+  `reload()` upserts them; `read()` does lookup-on-miss against the
+  loaders. These survive a restart via the store (declarations reload
+  from the loader source).
+- **Transient** resources come from `register` / `registerTemplate` /
+  `<Resource>` tree-mounts. They are registry-only — they **never** touch
+  the store and re-mount from the tree on restart.
+
+Because the resolver is non-serializable (a live fn), it lives in the
+sidecar and can **never** reach the store — the `ResourceDeclarationRecord`
+type makes that a compile-time guarantee, exactly as `PromptDeclarationRecord`
+excludes `render`/`template`. On resume `hydrate()` mirrors the store's
+declarations into the catalog (so the model still sees the resource
+listed), but `read()` throws `ResourceNotFound` until the loaders re-run
+and re-attach the resolver.
+
+**Dual-key store — one collection, `kind`-discriminated.** Fixed resources
+key by `uri`, templates by `uriTemplate`; the record's `kind` field
+discriminates. A single `MemoryCollection` (keyed by `uri ?? uriTemplate`)
+backs both — template keys always contain `{…}` and fixed uris never do,
+so the key-spaces are disjoint in practice. `ResourceStoreQuery` enumerates
+one class (`list({ kind: "template" })`) or filters by `uri` substring;
+exact lookup is `get(uri)`. A durable adapter (Postgres, a filesystem
+source) conforms to the same `ResourceStore` port and passes
+`runResourceStoreConformance`.
+
+```ts
+import { fromArray } from "@agentick/resources-next";
+
+harness.setLoaders([
+  fromArray([
+    {
+      declaration: { uri: "db://doc", kind: "fixed", meta: { name: "Doc" } },
+      resolver: () => [{ uri: "db://doc", mimeType: "text/plain", text: "…" }],
+    },
+  ]),
+]);
+await harness.reload(); // → store.put(declaration) + sidecar(resolver) + catalog
+```
+
 ## URI templates
 
 `registerTemplate` compiles an RFC 6570-lite pattern:
@@ -144,7 +201,21 @@ resources stays content-agnostic (it owns the seam, not the backend).
 
 `extends BaseHarness<"resources">`. Construct with
 `(scopeId, journal, bus, inbox, options?)`. Options: `pageSize`
-(default 100), `backend` (default `"memory"`).
+(default 100), `backend` (default `"memory"`), `store?`
+(`ResourceStore`; defaults to a fresh `InMemoryResourceStore`), `loaders?`
+(`ResourceLoader[]` for the durable source). See **Durable backing**.
+Beyond the protocol surface the class also exposes `setLoaders(loaders)`,
+`reload()`, and `hydrate()`.
+
+### `InMemoryResourceStore` · `ResourceStore` · `ResourceLoader`
+
+The bundled in-memory default store, its port (`ResourceStore extends
+CollectionStore<ResourceDeclarationRecord, ResourceStoreQuery>`, in
+`@agentick/spec-next`), and the loader type + factories (`fromArray`,
+`fromModule`). `runResourceStoreConformance({ label, factory })` validates
+any adapter against the port. There is deliberately **no** URL loader — a
+JSON source cannot carry a resolver fn, and a resolver-less resource can
+never be `read()`.
 
 ### `withResources(options?)` — `SessionExtension`
 
@@ -254,7 +325,15 @@ Wave 4b pt2 (ADR 62 / 63 / #237) — the front-ends
 (`ctx.resource` · `session.resources` · `<Resource>` · `withResources`
 model tools), the `resources` catalog default projection, and `withMCP`
 remote-resource surfacing (keyed by adopter alias) all landed on top of
-Wave 4a (harness + conformance + MCP server projection). Green.
+Wave 4a (harness + conformance + MCP server projection).
+
+Data-layer Phase 5 run #9 added the **durable store backing** — a
+`ResourceStore` (dual-key, `kind`-discriminated), `ResourceLoader`
+sources, the durable/transient/resolver-sidecar split, and
+`runResourceStoreConformance` — WITHOUT making the harness
+`SnapshotCapable` (the store is the durable source, not a snapshot). The
+`resources` catalog default projection (the render-read IR fold) is
+unchanged. Green.
 
 ## Roadmap & known gaps
 
@@ -299,6 +378,15 @@ Wave 4a (harness + conformance + MCP server projection). Green.
   unmount unregisters, and the `resources` catalog default projection
   (folds a `SectionEntry` tagged `default:resources`; empty registry
   contributes nothing; `<Project>` override suppresses). (7 tests)
+- `src/__tests__/store-backing.spec.ts` — the durable/transient/sidecar
+  split: a durable loader feeds the store (declaration) + sidecar
+  (resolver, never the store); transient `register`/`registerTemplate`
+  stay registry-only; `resolverFor` fixed-over-template precedence;
+  `snapshot()` combines durable + transient; lookup-on-miss; `hydrate()`
+  surfaces declarations while `read()` waits for the resolver; the harness
+  is NOT `SnapshotCapable`. Plus `runResourceStoreConformance` against
+  `InMemoryResourceStore` (backend id, empty-read, idempotent delete,
+  put/get round-trip both kinds, upsert, `kind`/`uri` list filters).
 - `@agentick/app-next` `substrate-single-construction-site.spec.ts` —
   `installer.resources` === `session.resources` (single site) +
   `resource_read` reaches the same harness via `ctx.resource`
