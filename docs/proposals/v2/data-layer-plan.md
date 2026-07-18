@@ -309,35 +309,44 @@ A store projects a canonical client surface, decomposed on the CQRS line:
 > augmentation** — allow multiple contributors to one namespace, ergonomic for
 > "just one more method."
 
-### 2.7 The log IS the store — hold only the bounded projection *(RESOLVED)*
+### 2.7 Timeline: the log is the store; compaction is an overlay event *(RESOLVED — de-opinionated)*
 
-The current timeline harness keeps a **full in-memory mirror** of the log
-(`_persisted`) and is **memory-authoritative** (store lags via write-behind) —
-§1.5. This is the naive-load ghost and it is the *reason* the snapshot embeds the
-whole timeline. **Correction, applied as a principle to every store-backed
-harness:**
+**Correction (Ryan, on my over-reach):** an earlier draft here mandated a
+*bounded* projection + write policy at the framework level. That is **impl
+opinion and belongs in the in-memory store default, not the framework.** The
+framework's line for the timeline:
 
-- **The store is the source of truth and the full log.** The harness holds only
-  the **bounded projection** (the working set — that's what compaction is for),
-  the un-flushed write buffer, and small **incremental counters**. It never holds
-  the full history in RAM.
-- Every current `_persisted` consumer re-expresses without a full mirror:
-  `readPersisted()` → async `store.read()`/`history()`; compaction `source:
-  "persisted"` → async store read (you cannot fold 100k entries through an LLM
-  anyway); steering `inputEntryCount()` → an **incremental counter**, not an array
-  scan; turn-boundary detection → the projection tail; `snapshot()` embed → a
-  **manifest cursor** (§2.5).
-- **`hydrate()` becomes bounded too:** resume re-derives a *bounded* projection
-  (recent tail via `history({limit})` + last-compaction summary), not
-  `[...store.load()]` of the entire log. This is the "store-BOUNDED read" the
-  working notes flagged (open #1) — the store decides how much.
-- Write-behind survives as a **performance** choice (batch flushing), but the
-  store is conceptually truth; only the un-flushed tail is memory-only (bounded by
-  the flush barrier — the E3 window, unchanged).
+- **Contract (framework):** the entry store is a **`LogStore`** — append + a
+  cursored read (+ ordering). The harness *appends to it* and *reads what it needs
+  to compile* through that contract. Nothing more.
+- **Opinion (in-memory default, swappable):** full array vs bounded window, write-
+  behind vs -through, eviction, how much lives in RAM. `MemoryLog` holding a full
+  array is a **fine default**, not a smell to legislate away. A durable adapter
+  picks differently; the framework never sees it.
+- The one non-opinion cleanup: `_persisted` is a full log mirror living **in the
+  harness** (storage in the logic layer). Move log storage *into the store* (the
+  store it moves into may still hold a full array) — separation of concerns, a
+  *harness* refactor separable from the store-contract run.
 
-This is a concrete early cleanup that *proves* the whole thesis: remove
-`_persisted`, and the god-blob problem dissolves at the root instead of being
-managed in the manifest.
+**Compaction = an overlay event, not a rewrite and not a second store (Ryan).**
+The timeline stays **one append-only log, never rewritten**. A compaction is an
+**event in it** — a `TimelineEntry` carrying a first-class optional `compaction`
+bag: `{ range: {fromSeq,toSeq}; summary: ContentBlock[]|string; metadata? }`. The
+raw entries it covers **stay** in the log; the compaction event is an *overlay*
+("for the model view, render this range as this summary"). So:
+
+- **`projection = fold(timeline)`** — walk the log; at a compaction event, collapse
+  its `range` with its `summary`. Held as a **plain in-memory list** (Ryan's call —
+  start simple, graduate later; NOT mandated bounded).
+- **Deterministic** — the non-determinism happened once, when the compaction was
+  *created* (the LLM); the summary is **durable on the event**. Replay is a
+  deterministic fold → **§6-E dissolves**, no re-running the model, no
+  projection-cache store.
+- **Framework knows the *structure* (range + summary) to fold for the MODEL; the
+  app owns the *content* (summary text, strategy) + *UI rendering*** (full history,
+  compacted view, or "span summarized" markers — it has raw entries + overlays).
+  Capability/opinion drawn at the seam; the `compaction` bag is the over-fetch
+  principle on the entry.
 
 ---
 
@@ -602,11 +611,27 @@ criterion) **adoptable one store at a time, coexisting with the old**.
 - If intent: emit `SubscriptionIntent`s on render; restore re-declares. Remove their `exportSnapshot`.
 - *Gate:* resume reconstructs prompts/skills via re-render; snapshot no longer carries them.
 
-### Phase 6 — Timeline manifest + the projection problem *(the hard one)*
-- Manifest for timeline = **log cursor reference** (deterministic replay of `_persisted`).
-- Resolve E5: the **non-deterministic projection** — (a) a projection-cache store (persist compacted projections as a second store, keyed by log-cursor), or (b) manifest carries log-cursor + `lastCompaction` provenance and accepts re-derivation (possibly different). Decide §6-E.
-- Retire the `TimelineImportMode` enum ("as-is/persisted-only/rehydrate" that Ryan dislikes) in favor of `restore(cursor, derive?)` if the projection decision allows.
-- *Gate:* two-tier conformance; time-travel-to-cursor on the log; projection re-derivation documented.
+### Phase 6a — Timeline **entry-log store** *(the clean, opinion-free run — next)*
+- Bring `TimelineStore` onto the shared **`LogStore` archetype**: contract in
+  spec-next (append + cursored read + `seq`), `MemoryLog<T>` generic default (a
+  full array is a fine default — NO memory-strategy opinion, §2.7),
+  `runStoreConformance` delegation, port-home → spec (§6-D).
+- Does NOT touch the harness `_persisted`/`_projection`/write-behind (impl
+  opinion, left as-is) — this is *just the store archetype*, like every prior run.
+- *Gate:* existing timeline store-conformance green via the shared skeleton; `seq`
+  contract preserved; no behavior delta.
+
+### Phase 6b — Compaction overlay + fold *(additive, follows 6a)*
+- Add the first-class optional **`compaction` bag** to `TimelineEntry` (`{ range;
+  summary; metadata? }`, §2.7). `projection = fold(timeline)` applies overlays;
+  raw entries stay (append-only). Held as a plain list.
+- **Resolves E5/§6-E deterministically** — summaries are durable on the events, so
+  replay is a deterministic fold; no projection-cache store, no re-running the LLM.
+- Retire the `TimelineImportMode` enum ("as-is/persisted-only/rehydrate") — restore
+  becomes replay-the-log-and-fold.
+- The `_persisted`-in-harness → move-to-store cleanup (§2.7) rides here or separately.
+- *Gate:* fold determinism (same log ⇒ same projection); full-vs-compacted render
+  from one log; append-only preserved (compaction never deletes entries).
 
 ### Phase 7 — Client data-plane
 - Per-store wire surface (`enumerate` + `page`) + change channel (framework minimum); `.passthrough()` over-fetch.
@@ -635,12 +660,12 @@ criterion) **adoptable one store at a time, coexisting with the old**.
   fold is only real if `EventQuery` can filter to one harness's events. Verify the
   `EventScope`/`EventQuery` shape covers `(surface, scopeId, principal)`. If not,
   extend it — this is the load-bearing unknown for §2.4.
-- **E5 — Non-deterministic timeline projection. RESOLVED (§6-E).** The log
-  replays deterministically; the LLM projection does not. Default: re-derive on
-  restore (a different *valid* projection is acceptable). Exact/fast restore:
-  event-sourcing snapshots (projection checkpoints in the log). No separate cache
-  concept. Timeline stays Phase 6 for the `_persisted` removal + bounded-hydrate,
-  not for this.
+- **E5 — Non-deterministic timeline projection. RESOLVED (§2.7 / Phase 6b) —
+  compaction-as-overlay-event.** The LLM non-determinism happens once, when a
+  compaction is *created*; its `summary` is stored **on the compaction event** in
+  the one append-only log. Replay is then a **deterministic `fold(timeline)`** —
+  no re-running the model, no projection-cache store, no `TimelineImportMode`. The
+  raw entries stay (append-only); the compaction event is an overlay.
 - **E6 — knobs values vs descriptors.** Store holds **values**; descriptors stay
   tree-derived (re-registered on render). Clean — the current channel already does
   exactly this.
@@ -718,6 +743,18 @@ criterion) **adoptable one store at a time, coexisting with the old**.
   naturally idempotent by key. Framework provides key + seam; store/app owns the
   guarantee (dedup needs persistence). Complements, not replaces, the journal's
   operation-level idempotency.
+- **E17 — Notify seam duplicated across harnesses. PARKED (teed up, do after the
+  run list).** Every state-holding harness re-hand-rolls `subscribe` /
+  `subscribeAll` (bare render pings, `KeyedNotifier`) + `onChange` (typed
+  `ChangeEvent` stream, `ChangeNotifier`) — knobs, state, and more, plus the
+  `TODO(notify-seam): promote to protocol` trailhead. The *primitives* already
+  exist cross-platform in `pubsub-next` (`createNotifier`/`createKeyedNotifier`/
+  `createChangeNotifier`) — NOT Node's `EventEmitter`. What's duplicated is the
+  method boilerplate + protocol typing. Formalize-on-recurrence (same rule as
+  `CollectionProjection`): a **composable `Notifiable` capability** near
+  `BaseHarness` — NOT baked into every harness (stateless ones don't need it) — and
+  it likely **unifies with the store's `onChange`** (E14 / the `MemoryCollection`
+  seam). Do NOT touch mid-run-list; revisit after timeline + prompts/skills/resources.
 
 ---
 
@@ -734,13 +771,15 @@ Each is a real choice with a cost, not a detail. My lean is stated; none is rati
   registration (they can be both). See §3.5 run list. Churn accepted (below).
 - **§6-D — Store port home: spec-next canonical?** Lean: yes — ports + data shapes
   in spec-next, defaults + conformance in the harness package; unify timeline.
-- **§6-E — Timeline projection on restore. RESOLVED (event sourcing).** The log
-  is the event source; time-travel = replay the log to cursor N and **re-derive**
-  the projection. Default = re-derive (an LLM compaction may yield a *different
-  valid* projection — honest, and fine when exactness wasn't needed). For
-  exact/fast restore, use **event-sourcing snapshots**: periodic projection
-  checkpoints written into the log, replay from the nearest one — textbook ES
-  snapshotting in the *same* substrate, **not** a separate cache-store.
+- **§6-E — Timeline projection on restore. RESOLVED — compaction-as-overlay-event
+  (Ryan).** Not re-derive-and-accept-difference, and not a separate checkpoint
+  store: a **compaction is a `TimelineEntry` with a `compaction` bag** (`range` +
+  `summary` + `metadata?`) in the one append-only log. The LLM runs once at
+  create-time; the `summary` is durable on the event; `projection = fold(timeline)`
+  is a **deterministic** replay (collapse each compaction's range with its stored
+  summary). Same-log ⇒ same-projection, exactly, with no re-run and no second
+  store. Raw entries never deleted (overlay, not rewrite). Retires
+  `TimelineImportMode`. See §2.7 / Phase 6b.
 - **§6-F — Consistency default. RESOLVED (event sourcing baked in).** Event
   sourcing is a **first-class, always-available capability** (the `ctx.journal`
   seam). Default resume = latest-from-each-store (eventually-consistent, simple).
