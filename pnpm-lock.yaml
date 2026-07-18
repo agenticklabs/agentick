@@ -1106,6 +1106,9 @@ importers:
       '@agentick/spec-next':
         specifier: workspace:*
         version: link:../spec
+      '@agentick/store-next':
+        specifier: workspace:*
+        version: link:../store
       '@agentick/utils-next':
         specifier: workspace:*
         version: link:../utils

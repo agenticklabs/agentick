@@ -22,3 +22,14 @@ export { PromptsHarness, type PromptsHarnessOptions } from "./harness.js";
 export type { PromptsHandle } from "./handle.js";
 export { withPrompts, type WithPromptsOptions } from "./extension.js";
 export { isMessageEntryArray, stringToSystemMessage, type PromptRenderer } from "./renderer.js";
+// Store archetype (data-layer plan §6-C — the definition-library archetype's
+// first AUGMENTED instance: skills' pure record PLUS a non-serializable
+// `{ template, render }` sidecar). The bundled in-memory default holds the
+// serializable `PromptDeclarationRecord` slice only; the `PromptStore` /
+// `PromptStoreQuery` ports live in `@agentick/spec-next`. A durable adapter
+// conforms to the SAME port later.
+export { InMemoryPromptStore, matchesPromptQuery } from "./store.js";
+export {
+  runPromptStoreConformance,
+  type PromptStoreConformanceOptions,
+} from "./store-conformance.js";

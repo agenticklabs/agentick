@@ -259,14 +259,33 @@ export interface PromptsHarnessProtocol {
 }
 
 /**
- * Snapshot shape for a single prompt. Excludes `template` + `render`
- * (functions / React nodes aren't serializable). Adopters who want
- * full round-trip on restore re-register content alongside loading
- * the snapshot.
+ * The **serializable slice** of a {@link PromptDeclaration} — the persisted
+ * record the {@link import("./prompts-store.js").PromptStore} holds and the
+ * snapshot serializes. It is `PromptDeclaration` MINUS the two non-serializable
+ * runtime-augmentation fields (`template`, `render`): the prompts harness is the
+ * definition-library archetype's first **augmented instance** — skills' pure
+ * record PLUS a non-persisted `{ template, render }` sidecar (data-layer plan
+ * §6-C / Phase 5). The store round-trips this record whole; the augmentation
+ * lives in a parallel harness-local map and is re-registered on restore (fns
+ * cannot survive serialization).
+ *
+ * The snapshot's own entry shape ({@link PromptsSnapshotEntry}) is exactly this
+ * record — they are aliases, one canonical definition. Should they diverge (a
+ * versioned snapshot envelope, say), split them then.
  */
-export interface PromptsSnapshotEntry {
+export interface PromptDeclarationRecord {
   readonly name: string;
   readonly description: string;
   readonly arguments?: readonly PromptArgument[];
   readonly metadata?: Readonly<Record<string, unknown>>;
 }
+
+/**
+ * Snapshot shape for a single prompt. Excludes `template` + `render`
+ * (functions / React nodes aren't serializable). Adopters who want
+ * full round-trip on restore re-register content alongside loading
+ * the snapshot. Structurally identical to — and an alias of —
+ * {@link PromptDeclarationRecord} (the store's persisted record): a snapshot
+ * cell IS a store record.
+ */
+export type PromptsSnapshotEntry = PromptDeclarationRecord;

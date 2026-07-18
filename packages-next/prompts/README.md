@@ -121,6 +121,30 @@ withPrompts({
 
 **Lifecycle ownership.** Forms A / C-with-`initial`/`loaders` → extension constructs a per-session harness and closes it on session teardown. Forms B / C-with-`use:` → adopter owns the lifecycle; the extension publishes the same instance under the session's `prompts` namespace but never closes it.
 
+## Store backing — the definition-library archetype's _augmented instance_
+
+The harness is **store-derived and store-persisted** ([data-layer plan §6-C](../../docs/proposals/v2/data-layer-plan.md)). Prompts is the archetype's first **augmented instance**: it is [`@agentick/skills-next`](../skills)'s pure floor **PLUS a non-serializable runtime augmentation**. A `PromptDeclaration` splits along the serialization boundary:
+
+| Slice                       | Fields                                       | Where it lives                                                     |
+| --------------------------- | -------------------------------------------- | ----------------------------------------------------------------- |
+| **Serializable record**     | `name`, `description`, `arguments`, `metadata` | the `PromptStore` (= `CollectionStore<PromptDeclarationRecord, PromptStoreQuery>`) — this is exactly `PromptsSnapshotEntry` |
+| **Runtime augmentation**    | `template`, `render`                         | a parallel harness-local **sidecar** `Map<name, { template, render }>` — NEVER the store |
+
+```ts
+import { InMemoryPromptStore } from "@agentick/prompts-next";
+// The PromptStore / PromptStoreQuery ports live in @agentick/spec-next.
+
+withPrompts({ store: new InMemoryPromptStore() }); // the bundled default (implicit)
+```
+
+The split **composes** rather than being hand-rolled: an eager `CollectionProjection<PromptDeclarationRecord>` (the same sync-cache-over-async-store primitive `skills` and `knobs` use) holds the record slice, and the sidecar holds the fns. The two are re-joined into a full `PromptDeclaration` by a single private `declarationOf(name)` combine at every read that hands out a declaration.
+
+- **`register` / `update`** dual-write the record through the projection (`store.put`) **and** re-attach `{ template, render }` to the sidecar. **`remove`** drops both.
+- **`render`/`template` can NEVER reach the store** — the `PromptDeclarationRecord` type makes that a _compile-time_ guarantee, not a discipline. (Contrast tasks' hand-rolled `LiveTask` cache, where the record and the live handles are read together at every site AND the snapshot includes the record slice, so splitting would only distort. Prompts is the opposite: `exportSnapshot` and the store want records _without_ the fns, so the split earns its keep.)
+- **Loaders stay _sources_ that FEED the store + sidecar** — not dissolved into them. `reload()` runs each loader's `load()` and registers the results; `resolve(name)` (lookup-on-miss) asks each loader's `lookup()` then registers the hit. `fromModule`/`fromArray` carry `render` fns (→ sidecar); `fromStaticUrl` is template-only.
+- **`getDeclaration` / `has` / `list` are synchronous**, served from the eager projection (write-through on mutation, `hydrate()` on resume). The projection is required, not incidental — the sync `exportSnapshot()` (`SnapshotCapable`, captured synchronously by the reconciler) and the sync read surface are both load-bearing sync callers, so a synchronous materialized view is mandatory.
+- **`exportSnapshot` / `importSnapshot` coexist** with the store today (a Phase-4 manifest sweep makes the store the sole snapshot authority later). `exportSnapshot` materializes the projection records directly — the augmentation is dropped **by construction**, not by per-field stripping. A durable adapter (Postgres, a filesystem source) conforms to the same `PromptStore` port.
+
 ## API — `PromptsHandle` on `session.prompts`
 
 | Method                          | Async? | Effect                                                   |
@@ -208,7 +232,7 @@ await inbox.send({
 
 ## Snapshot / restore
 
-`exportSnapshot()` returns `Record<string, PromptsSnapshotEntry>` carrying `name + description + arguments + metadata`. **The `template` and `render` fields are NOT serializable** — adopters reload content via `withPrompts({ initial })` or direct `register` calls when restoring.
+`exportSnapshot()` returns `Record<string, PromptsSnapshotEntry>` carrying `name + description + arguments + metadata` — exactly the store's `PromptDeclarationRecord` slice, materialized straight from the projection. **The `template` and `render` fields are NOT serializable** (they live in the sidecar, never the store) — adopters reload content via `withPrompts({ initial })` or direct `register` calls when restoring. `importSnapshot` writes the records back through the projection and **clears the sidecar**; `hydrate()` (the future Phase-4 resume seam) pulls records from a durable store into the projection, likewise leaving the sidecar empty.
 
 ```ts
 const snapshot = harness.exportSnapshot();
@@ -278,6 +302,8 @@ const decl = await session.prompts.require("must_exist");
 - `PromptRenderer` interface + native handlers (`string`, `MessageEntry[]`)
 - Argument validation via Standard-Schema
 - Module augmentation: `session.prompts` typed via `PromptsHandle`
+- Store backing — `PromptStore` port (spec-next), bundled `InMemoryPromptStore` (record slice only), `store` slot on `withPrompts`; record/sidecar split via `CollectionProjection` + augmentation `Map`
+- Conformance suite — `runPromptStoreConformance` (store)
 
 **Planned:**
 
@@ -293,6 +319,7 @@ const decl = await session.prompts.require("must_exist");
 ## Verified by
 
 - `src/__tests__/harness.spec.ts` — full surface coverage (register/update/remove, invoke + get, native + custom content dispatch, argument validation, snapshot round-trip, typed errors)
+- `src/__tests__/store-backing.spec.ts` — the record/sidecar split: record written to the store WITHOUT the fns, `update`/`remove` propagation, loaders (`reload` / `resolve`) feed store + sidecar, `invoke`/`get` combine the two halves, `exportSnapshot` drops fns, `hydrate()` restores records-only, plus `runPromptStoreConformance` against `InMemoryPromptStore`
 
 ## See also
 
