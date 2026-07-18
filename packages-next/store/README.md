@@ -1,15 +1,16 @@
 # @agentick/store-next
 
-Generic **store substrate** for Agentick v2 — the reusable in-memory
-collection-store generic and the shared conformance skeleton every store-backed
-harness parameterizes instead of hand-rolling a `Map`.
+Generic **store substrate** for Agentick v2 — the reusable in-memory store
+generics (both archetypes) and the shared conformance skeleton every
+store-backed harness parameterizes instead of hand-rolling a `Map`.
 
-`@agentick/store-next` is the "conform, don't reinvent" package for the
-**collection** store archetype (data-layer plan §2.1/§2.2). A store-backed
+`@agentick/store-next` is the "conform, don't reinvent" package for **both**
+store archetypes (data-layer plan §2.1/§2.2): the **collection** (keyed upsert,
+queryable) and the **log** (append-only, ordered, cursored). A store-backed
 harness gets its default backing by parameterizing one generic; a store adapter
 proves itself by delegating to one conformance suite. The archetype **port**
-shapes (`CollectionStore<T, Q>`) live in `@agentick/spec-next` (the cross-package
-contract) — the defaults and conformance live here.
+shapes (`CollectionStore<T, Q>`, `LogStore<T>`) live in `@agentick/spec-next`
+(the cross-package contract) — the defaults and conformance live here.
 
 Private workspace package. Bundled into the `agentick` metapackage; not
 published independently.
@@ -25,6 +26,13 @@ copy-pasted conformance suite. This package factors all three out:
   knobs / state / session. The only per-store code is a `keyOf` accessor and a
   `matchQuery` predicate. Exposes an optional **`onChange`** shared-store
   observation seam (below).
+- **`MemoryLog<T>`** — the **log**-archetype sibling: a `Map`-of-`{ entries,
+  baseSeq }` generic that fully backs `MemoryTimelineStore` (`T =
+  TimelineEntry`). Append→`seq`, cursored `history`, `keys` enumerate,
+  prune-by-absolute-seq, defensive-copy read — payload-agnostic over `T`. A
+  **full in-memory array per log is the intended default** (no bounding /
+  eviction — that is a durable adapter's concern, data-layer plan §2.7); the
+  only per-store knob is the `backend` label.
 - **`CollectionProjection<T, Q, PruneArg>`** — the synchronous read-model over
   an async `CollectionStore`: sync cache + write-through + hydrate. The
   primitive that fell out of runs #1 (tasks) and #2 (knobs) — a store-backed
@@ -37,7 +45,10 @@ copy-pasted conformance suite. This package factors all three out:
   `runCredentialsStoreConformance`) delegate their store-agnostic cases to
   (backend-id stable + non-empty; unknown-key → empty; delete idempotent). The
   KV `(namespace, key)` credentials store proves the probes accommodate keyed
-  values via read/delete closures, not just single-key collections.
+  values via read/delete closures, not just single-key collections; the timeline
+  store proves they work for the **log** archetype too — its empty-read value is
+  `[]` (not the collection's `undefined`), passed through the same `emptyRead`
+  closure.
 
 ## Quick Start
 
@@ -118,6 +129,30 @@ originate. `inMemoryCredentialsStore` is its first real consumer, forwarding
 these into the credentials harness fan-out. It composes the canonical
 `ChangeNotifier` notify seam rather than re-deriving a `Set` + try/catch loop.
 
+### `MemoryLog<T>` implements `LogStore<T>`
+
+The **log**-archetype default backing — an in-process append-only log per
+`logKey`, payload-agnostic over `T`. Binds trivially to a concrete entry type
+(`MemoryTimelineStore extends MemoryLog<TimelineEntry>` is an empty subclass —
+timeline needs nothing the generic doesn't provide).
+
+| Member                          | Behavior                                                             |
+| ------------------------------- | ------------------------------------------------------------------- |
+| `new MemoryLog(config?)`        | `config`: `{ backend? }` — backend label, defaults to `"memory"`   |
+| `append(logKey, entries)`       | Append in order; returns the assigned `seq[]` (strictly increasing) |
+| `read(logKey)`                  | Full ordered read; `[]` when absent; **defensive copy** each call   |
+| `history?(logKey, opts?)`       | Cursored seq-tagged read: `{ fromSeq?, limit? }` → `SeqTagged<T>[]`  |
+| `keys()`                        | Enumerate log keys that hold entries (foundational enumerate verb)   |
+| `delete(logKey)`                | Idempotent; returns whether entries were removed; ends the `seq` run |
+| `prune?(logKey, { seq })`       | Erase entries below an ABSOLUTE `seq`; survivors keep their `seq`    |
+| `backend`                       | The configured backend label                                        |
+
+The frozen `seq` contract (strictly increasing, never reused, stable across
+`prune`) is tracked as `baseSeq + index`; `baseSeq` advances on `prune` so a
+pruned-empty log's next append never reuses a retired `seq`. **No memory
+strategy is legislated** — a full array is the intended default; a durable
+adapter picks differently behind the same `LogStore` port.
+
 ### `CollectionProjection<T, Q = unknown, PruneArg = never>`
 
 The synchronous read-model over an async `CollectionStore` — exactly three
@@ -163,9 +198,12 @@ projection" is conditional on render-read, not universal.
   is a `@agentick/spec-next` type; the generic and the suite are here. A durable
   adapter (Postgres, …) imports the port from spec and the conformance from the
   owning harness package.
-- **No supertype `Store`.** Two structural archetypes (log = `EventLog` /
-  `TimelineStore`; collection = `CollectionStore`) sharing characteristics, not
-  a nominal base class.
+- **No supertype `Store`.** Two structural archetypes (log = `LogStore<T>` /
+  `MemoryLog`; collection = `CollectionStore` / `MemoryCollection`) sharing
+  characteristics — `backend`, an enumerate verb, optional `prune`, a
+  conformance suite — not a nominal base class. (`EventLog<E>` in spec is the
+  Effect-flavored *substrate* log — bus / journal — a different beast from the
+  Promise-shaped `LogStore` adopter store.)
 - **`prune` presence is a capability signal.** Omit `prunePredicate` and the
   method is genuinely absent, so `typeof store.prune === "function"` — the
   conformance capability gate — reads correctly.
@@ -185,13 +223,16 @@ Landed across the data-layer store-substrate runs:
   key)` addressing) instead of a hand-rolled `Map` + listener set, and
   `runCredentialsStoreConformance` delegates its store-agnostic trio to
   `runStoreConformance` via KV closures.
+- **Run #6 (timeline)** — `MemoryLog<T>` extracted (the **log**-archetype
+  generic); `MemoryTimelineStore` collapses to an empty
+  `extends MemoryLog<TimelineEntry>` subclass, the `LogStore<T>` port lands in
+  spec-next (`TimelineStore extends LogStore<TimelineEntry>`, port-home §6-D),
+  and `runTimelineStoreConformance` delegates its store-agnostic trio to
+  `runStoreConformance` — proving the shared skeleton generalizes to the **log**
+  archetype (empty-read `[]`), the first non-collection to meet it.
 
 ## Roadmap & known gaps
 
-- `MemoryLog<T>` (the **log** archetype generic) is not yet extracted here —
-  the timeline store still ships its own `MemoryTimelineStore`. Extracting it
-  and having `runTimelineStoreConformance` delegate to `runStoreConformance` is
-  the next run. <!-- TODO(store-phase-2): extract MemoryLog + delegate timeline conformance. -->
 - `StoreCtx` (`{ journal, scope, principal, signal, asOf }`) is not threaded
   into store methods yet (data-layer plan §2.4) — the pure in-memory stores
   don't need it. Threading it (and the journal-derived reference store) is a
@@ -206,6 +247,10 @@ Landed across the data-layer store-substrate runs:
   skeleton driven against a throwaway record type, and the `onChange`
   seam (put insert/overwrite deltas, delete `prev`, no-op-delete and prune
   silence, unsubscribe, listener-error isolation, registration-order fan-out).
+- `src/__tests__/memory-log.spec.ts` — the log generic's append→seq / read /
+  history-paging / keys / delete / prune-by-absolute-seq behavior, defensive-copy
+  read, per-log isolation, configurable backend, and the shared skeleton driven
+  against the LOG archetype (empty-read `[]`).
 - `src/__tests__/collection-projection.spec.ts` — the sync read-model: sync
   reads never touch the store, write-through, and hydrate-as-overlay returning
   loaded keys.
@@ -215,3 +260,7 @@ Landed across the data-layer store-substrate runs:
   (`src/__tests__/conformance.spec.ts`) — end-to-end proof `MemoryCollection`
   backs a composite-keyed KV credentials store AND that `runStoreConformance`'s
   probes accommodate the KV shape via closures.
+- `@agentick/timeline-next` `runTimelineStoreConformance`
+  (`src/__tests__/store.spec.ts`) — end-to-end proof `MemoryLog` fully backs a
+  real `TimelineStore` AND that `runStoreConformance`'s probes accommodate the
+  LOG archetype (empty-read `[]`) via closures.

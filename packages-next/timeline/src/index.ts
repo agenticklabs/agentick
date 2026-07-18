@@ -23,13 +23,15 @@ export { runTimelineHarnessConformance } from "./conformance.js";
 // subpath (parallel to skills' `/loaders`) — they return CompactStrategy
 // VALUES, not `withX` session extensions. See ./strategies.ts.
 
-// ADR 49 — "stores, not snapshots" durability. The persisted-tier store
-// port + bundled in-memory default + its conformance suite.
-export { MemoryTimelineStore, type SeqTaggedEntry, type TimelineStore } from "./store.js";
+// ADR 49 — "stores, not snapshots" durability. The bundled in-memory default;
+// the port + `SeqTagged` shape now live in `@agentick/spec-next` (the LOG
+// archetype `TimelineStore extends LogStore<TimelineEntry>`; data-layer plan
+// §6-D).
+export { MemoryTimelineStore } from "./store.js";
 // Re-exported so store adapters (`@agentick/timeline-fs-next`,
-// `-postgres-next`, adopter-written) get the entry type from the same
-// package as the port they implement — one dep, not two.
-export type { TimelineEntry } from "@agentick/spec-next";
+// `-postgres-next`, adopter-written) get the port + entry + seq-tag types from
+// the same package as the harness they back — one dep, not two.
+export type { SeqTagged, TimelineEntry, TimelineStore } from "@agentick/spec-next";
 export {
   runTimelineStoreConformance,
   type TimelineStoreConformanceOptions,

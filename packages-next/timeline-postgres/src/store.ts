@@ -2,7 +2,7 @@
  * `postgresTimelineStore` — Postgres {@link TimelineStore} adapter (ADR 49,
  * reference-adapter rung 4, the cloud pole). The **shared source of truth
  * across stateless replicas**: any node rehydrates a session with
- * `load(sessionId)`; SQLite-on-local-disk cannot fill this role.
+ * `read(sessionId)`; SQLite-on-local-disk cannot fill this role.
  *
  * Per ADR 49's "NO `define*` helper" amendment, this follows the
  * `CredentialsStore` precedent exactly — a factory returning an object that
@@ -50,7 +50,7 @@
 
 import type { Pool as PgPool } from "pg";
 
-import type { SeqTaggedEntry, TimelineEntry, TimelineStore } from "@agentick/timeline-next";
+import type { SeqTagged, TimelineEntry, TimelineStore } from "@agentick/timeline-next";
 
 import {
   DEFAULT_COLUMNS,
@@ -89,15 +89,15 @@ export interface QueryExecutor {
  * column names), so the store can read results back:
  *
  *   - `append` → `RETURNING <seq>` (one row per inserted entry);
- *   - `load` → rows with `<payload>` and `<schemaVer>`, in `seq` order;
- *   - `sessions` → rows with `<sessionId>`;
+ *   - `read` → rows with `<payload>` and `<schemaVer>`, in `seq` order;
+ *   - `keys` → rows with `<sessionId>`;
  *   - `delete` → `RETURNING <seq>` (the store counts rows);
  *   - `prune` → `RETURNING <seq>` (the store counts rows).
  */
 export interface TimelineSqlOverrides {
   append?(input: { sessionId: string; payloads: readonly unknown[] }): SqlQuery;
-  load?(input: { sessionId: string }): SqlQuery;
-  sessions?(): SqlQuery;
+  read?(input: { sessionId: string }): SqlQuery;
+  keys?(): SqlQuery;
   delete?(input: { sessionId: string }): SqlQuery;
   prune?(input: { sessionId: string; beforeSeq: number }): SqlQuery;
 }
@@ -201,9 +201,9 @@ class PostgresTimelineStore implements TimelineStore {
     return this.codec.decode(row[this.cols.payload], schemaVer);
   }
 
-  async load(sessionId: string): Promise<readonly TimelineEntry[]> {
+  async read(sessionId: string): Promise<readonly TimelineEntry[]> {
     const query =
-      this.sql?.load?.({ sessionId }) ??
+      this.sql?.read?.({ sessionId }) ??
       ({
         text: `SELECT ${this.q.payload}, ${this.q.schemaVer} FROM ${this.q.table} WHERE ${this.q.sessionId} = $1 ORDER BY ${this.q.seq}`,
         values: [sessionId],
@@ -215,7 +215,7 @@ class PostgresTimelineStore implements TimelineStore {
   async history(
     sessionId: string,
     options?: { readonly fromSeq?: number; readonly limit?: number },
-  ): Promise<ReadonlyArray<SeqTaggedEntry>> {
+  ): Promise<readonly SeqTagged<TimelineEntry>[]> {
     const fromSeq = options?.fromSeq ?? 0;
     const values: unknown[] = [sessionId, fromSeq];
     let text =
@@ -226,7 +226,9 @@ class PostgresTimelineStore implements TimelineStore {
       text += ` LIMIT $3`;
     }
     const rows = await this.run({ text, values });
-    return rows.map((r): SeqTaggedEntry => ({ seq: this.toSeq(r), entry: this.toEntry(r) }));
+    return rows.map(
+      (r): SeqTagged<TimelineEntry> => ({ seq: this.toSeq(r), entry: this.toEntry(r) }),
+    );
   }
 
   async append(sessionId: string, entries: readonly TimelineEntry[]): Promise<readonly number[]> {
@@ -250,9 +252,9 @@ class PostgresTimelineStore implements TimelineStore {
     };
   }
 
-  async sessions(): Promise<readonly string[]> {
+  async keys(): Promise<readonly string[]> {
     const query =
-      this.sql?.sessions?.() ??
+      this.sql?.keys?.() ??
       ({
         text: `SELECT DISTINCT ${this.q.sessionId} FROM ${this.q.table}`,
         values: [],

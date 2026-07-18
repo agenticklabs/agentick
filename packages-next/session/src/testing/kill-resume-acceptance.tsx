@@ -361,7 +361,7 @@ export function runKillResumeAcceptance(opts: KillResumeAcceptanceOptions): void
       // Synchronously after resolution — no settle window, no adopter
       // flush() — the durable log already holds the user + assistant
       // entries. This is the barrier: resolution implies durability.
-      const persisted = await store.load(`${sessionId}:timeline`);
+      const persisted = await store.read(`${sessionId}:timeline`);
       expect(persisted.length).toBeGreaterThanOrEqual(2);
       expect(JSON.stringify(persisted)).toContain("barrier check");
 

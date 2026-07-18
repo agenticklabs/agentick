@@ -8,6 +8,10 @@
  *     collection-archetype in-memory store (tasks today; credentials / knobs /
  *     state / session next). Parameterize `{ backend, keyOf, matchQuery,
  *     prunePredicate? }`; the mechanics are the generic's.
+ *   - {@link MemoryLog} — the log-side sibling: the `Map`-backed generic that
+ *     subsumes every log-archetype in-memory store (timeline today). A full
+ *     in-memory array per log is the intended default (no bounding — §2.7);
+ *     the only per-store knob is the `backend` label.
  *   - {@link CollectionProjection} — the synchronous read-model over an async
  *     `CollectionStore`: sync cache + write-through + hydrate, the primitive
  *     that fell out of runs #1 (tasks) and #2 (knobs). A store-backed harness
@@ -31,6 +35,7 @@ export {
   type MemoryCollectionConfig,
   type CollectionChangeEvent,
 } from "./memory-collection.js";
+export { MemoryLog, type MemoryLogConfig } from "./memory-log.js";
 export { CollectionProjection } from "./collection-projection.js";
 export {
   runStoreConformance,

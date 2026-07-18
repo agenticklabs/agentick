@@ -1,4 +1,3 @@
-import type { SeqTaggedEntry } from "./store.js";
 /**
  * `TimelineHandle` — the user-facing surface of the timeline harness
  * as exposed on `session.timeline`.
@@ -23,6 +22,7 @@ import type { Unsubscribe, MessageTimelineEntry, TimelineEndTurnInput } from "@a
 import type {
   CompactResult,
   CompactStrategy,
+  SeqTagged,
   TimelineEntry,
   TimelineSnapshot,
 } from "@agentick/spec-next";
@@ -57,5 +57,5 @@ export interface TimelineHandle {
   history(options?: {
     readonly fromSeq?: number;
     readonly limit?: number;
-  }): Promise<ReadonlyArray<SeqTaggedEntry>>;
+  }): Promise<ReadonlyArray<SeqTagged<TimelineEntry>>>;
 }

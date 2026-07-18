@@ -138,7 +138,7 @@ describe("SessionHarness — flush barrier at execution end (ADR 49 A2.2)", () =
     // The barrier ran before resolution: the durable log already holds
     // the drained user message + the assistant output — no flush() call
     // by the adopter, no settle window.
-    const persisted = await store.load("s-flush:timeline");
+    const persisted = await store.read("s-flush:timeline");
     expect(persisted.length).toBeGreaterThanOrEqual(2);
     await session.close();
     await tools.close();
@@ -147,11 +147,11 @@ describe("SessionHarness — flush barrier at execution end (ADR 49 A2.2)", () =
   it("a buffered store-write failure rejects the send with TimelineWriteFailed and lands status=failed", async () => {
     const failingStore: TimelineStore = {
       backend: "failing",
-      load: async () => [],
+      read: async () => [],
       append: async () => {
         throw new Error("disk full");
       },
-      sessions: async () => [],
+      keys: async () => [],
       delete: async () => false,
     };
     const { session, tools } = await mkSession({

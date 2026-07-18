@@ -17,6 +17,8 @@
 
 export * from "./factory.js";
 export * from "./store.js";
+export * from "./log-store.js";
+export * from "./timeline-store.js";
 export * from "./event-log.js";
 export * from "./journal.js";
 export * from "./bus.js";

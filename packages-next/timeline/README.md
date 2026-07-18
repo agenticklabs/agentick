@@ -238,10 +238,18 @@ Declared commands (ADR 51): `timeline:append`, `timeline:compact`
 (wire-exposed, signal form — the resident strategy runs), `timeline:replaceProjection`,
 `timeline:resetProjection`. Enumerable via `timeline:commands`.
 
-`TimelineStore` port: `load` / `append → seq[]` / `sessions` / `delete`
-/ optional `prune` + `history`. Entries are opaque to the store; `seq`
-is the frozen ordering identity (#133/#168). Reference impl:
-`MemoryTimelineStore`; certify adapters with `runTimelineStoreConformance`.
+`TimelineStore` is the concrete **log** archetype — `TimelineStore extends
+LogStore<TimelineEntry>` (the port lives in `@agentick/spec-next`, port-home
+§6-D; its `logKey` IS the `sessionId`). Port surface: `append → seq[]` / `read`
+/ `keys` / `delete` / optional `prune` + `history` (seq-tagged `SeqTagged<T>`).
+Entries are opaque to the store; `seq` is the frozen ordering identity
+(#133/#168). Reference impl: `MemoryTimelineStore`, an empty
+`extends MemoryLog<TimelineEntry>` subclass (`@agentick/store-next`) — the store
+needs nothing the generic log doesn't provide (a full in-memory array is the
+intended default, no memory strategy legislated, §2.7). Certify adapters with
+`runTimelineStoreConformance`, which delegates its store-agnostic trio
+(backend-id, empty-read → `[]`, idempotent-delete) to the shared
+`runStoreConformance` skeleton.
 
 ## Verified by
 

@@ -21,9 +21,9 @@ import type {
   SessionExtension,
   SessionInstaller,
   TimelineEntry,
+  TimelineStore,
 } from "@agentick/spec-next";
 import { TimelineHarness } from "./harness.js";
-import type { TimelineStore } from "./store.js";
 
 export interface WithTimelineOptions {
   /**

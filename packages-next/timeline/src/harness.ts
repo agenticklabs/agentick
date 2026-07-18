@@ -45,7 +45,7 @@ import {
 } from "@agentick/runtime-next";
 import { createNotifier, type Notifier } from "@agentick/pubsub-next";
 
-import { MemoryTimelineStore, type SeqTaggedEntry, type TimelineStore } from "./store.js";
+import { MemoryTimelineStore } from "./store.js";
 import type {
   CompactResult,
   CompactStrategy,
@@ -57,10 +57,12 @@ import type {
   Operation,
   OperationJournal,
   OperationOrigin,
+  SeqTagged,
   StandardSchemaV1,
   TimelineAppendInput,
   TimelineEntry,
   TimelineHarnessProtocol,
+  TimelineStore,
   TimelineHarnessSnapshot,
   TimelineImportSnapshotOptions,
   TimelineReplaceProjectionInput,
@@ -313,7 +315,7 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
   async history(options?: {
     readonly fromSeq?: number;
     readonly limit?: number;
-  }): Promise<ReadonlyArray<SeqTaggedEntry>> {
+  }): Promise<ReadonlyArray<SeqTagged<TimelineEntry>>> {
     await this.flush();
     if (this.store.history === undefined) {
       throw new Error(
@@ -372,7 +374,7 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
    * A no-op in `"through"` mode (nothing is ever buffered). Rejects if a
    * buffered store write failed.
    *
-   * Invariant: any process that subsequently `load`s the store sees every
+   * Invariant: any process that subsequently `read`s the store sees every
    * completed execution.
    */
   async flush(): Promise<void> {
@@ -400,7 +402,7 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
    * projection reconstructs by re-render / a subsequent compaction).
    */
   async hydrate(): Promise<void> {
-    const entries = await this.store.load(this.scopeId);
+    const entries = await this.store.read(this.scopeId);
     this._persisted = [...entries];
     this._projection = [...entries];
     this._persistedVersion += 1;

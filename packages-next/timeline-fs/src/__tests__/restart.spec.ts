@@ -47,16 +47,16 @@ describe("fsTimelineStore — restart durability across prune-to-empty", () => {
     // Erase everything — the transcript is now empty.
     const removed = await first.prune!("s1", { seq: 3 });
     expect(removed).toBe(3);
-    expect(await first.load("s1")).toEqual([]);
+    expect(await first.read("s1")).toEqual([]);
 
     // Simulate a process restart: a brand-new store over the SAME dir has a
     // cold cursor and must recover the high-water mark from the sidecar.
     const second = fsTimelineStore({ dir });
-    expect(await second.load("s1")).toEqual([]); // still empty after "restart"
+    expect(await second.read("s1")).toEqual([]); // still empty after "restart"
 
     const [sd] = await second.append("s1", [entry("d")]);
     expect(sd).toBe(3); // continues past c (seq 2) — NOT restarted at 0
-    expect((await second.load("s1")).map(idOf)).toEqual(["d"]);
+    expect((await second.read("s1")).map(idOf)).toEqual(["d"]);
   });
 
   it("a cursor held across the restart still sees the new entry", async () => {
@@ -91,7 +91,7 @@ describe("fsTimelineStore — restart durability across prune-to-empty", () => {
     expect(sa).toBe(0); // delete ended the session → fresh sequence
   });
 
-  it("sessions() never enumerates the .hwm sidecar", async () => {
+  it("keys() never enumerates the .hwm sidecar", async () => {
     const store = fsTimelineStore({ dir });
     await store.append("s4", [entry("a")]); // 0
     await store.prune!("s4", { seq: 1 }); // empty + writes s4.hwm
@@ -100,10 +100,10 @@ describe("fsTimelineStore — restart durability across prune-to-empty", () => {
     const names = await readdir(dir);
     expect(names.some((n) => n.endsWith(".hwm"))).toBe(true);
     // ...but a pruned-empty session holds nothing, so it is not enumerated.
-    expect(await store.sessions()).not.toContain("s4");
+    expect(await store.keys()).not.toContain("s4");
 
     // A fresh instance over the same dir agrees.
     const restarted = fsTimelineStore({ dir });
-    expect(await restarted.sessions()).not.toContain("s4");
+    expect(await restarted.keys()).not.toContain("s4");
   });
 });

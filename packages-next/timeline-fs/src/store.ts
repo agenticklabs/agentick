@@ -38,7 +38,7 @@
  * erasure stays GDPR-clean). The (now-empty) `.jsonl` is **retained** so
  * `delete` still reports the session as present (matching
  * {@link MemoryTimelineStore}, whose record persists after a prune-to-empty)
- * and `sessions()` still excludes it by size. On restart, `seed` falls back
+ * and `keys()` still excludes it by size. On restart, `seed` falls back
  * to the sidecar, so a later append continues past the erased seqs and never
  * reuses one — honoring the frozen contract's "never reused across `prune`"
  * clause even across a process restart. (Normal seeding still reads the
@@ -49,7 +49,7 @@
  * The filename is `base64url(sessionId) + ".jsonl"`. base64url emits only
  * `[A-Za-z0-9_-]`, so a session id can never escape `dir` — path traversal
  * (`../`, absolute paths, NUL bytes) is *structurally* impossible, not
- * merely validated against. `sessions()` decodes the names back.
+ * merely validated against. `keys()` decodes the names back.
  *
  * @see docs/proposals/v2/blueprint/49-stores-not-snapshots.md
  */
@@ -57,7 +57,7 @@
 import { appendFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import type { SeqTaggedEntry, TimelineEntry, TimelineStore } from "@agentick/timeline-next";
+import type { SeqTagged, TimelineEntry, TimelineStore } from "@agentick/timeline-next";
 
 export interface FsTimelineStoreOptions {
   /**
@@ -90,7 +90,7 @@ const encodeId = (sessionId: string): string =>
 const fileName = (sessionId: string): string => `${encodeId(sessionId)}${EXT}`;
 
 /** Inverse of {@link fileName}; `undefined` for names we didn't write (incl.
- *  the `.hwm` sidecars, so `sessions()` never enumerates them). */
+ *  the `.hwm` sidecars, so `keys()` never enumerates them). */
 function decodeName(name: string): string | undefined {
   if (!name.endsWith(EXT)) return undefined;
   return Buffer.from(name.slice(0, -EXT.length), "base64url").toString("utf8");
@@ -198,7 +198,7 @@ class FsTimelineStore implements TimelineStore {
     return next;
   }
 
-  load(sessionId: string): Promise<readonly TimelineEntry[]> {
+  read(sessionId: string): Promise<readonly TimelineEntry[]> {
     return this.lock(sessionId, async () => {
       const lines = await this.readLines(sessionId);
       // Fresh parse per call → inherently a defensive copy.
@@ -209,13 +209,13 @@ class FsTimelineStore implements TimelineStore {
   history(
     sessionId: string,
     options?: { readonly fromSeq?: number; readonly limit?: number },
-  ): Promise<ReadonlyArray<SeqTaggedEntry>> {
+  ): Promise<readonly SeqTagged<TimelineEntry>[]> {
     return this.lock(sessionId, async () => {
       const lines = await this.readLines(sessionId);
       const fromSeq = options?.fromSeq ?? 0;
       const matched = lines.filter((l) => l.seq >= fromSeq);
       const limited = options?.limit !== undefined ? matched.slice(0, options.limit) : matched;
-      return limited.map((l): SeqTaggedEntry => ({ seq: l.seq, entry: l.entry }));
+      return limited.map((l): SeqTagged<TimelineEntry> => ({ seq: l.seq, entry: l.entry }));
     });
   }
 
@@ -236,7 +236,7 @@ class FsTimelineStore implements TimelineStore {
     });
   }
 
-  sessions(): Promise<readonly string[]> {
+  keys(): Promise<readonly string[]> {
     return this.lock("\x00sessions", async () => {
       let names: string[];
       try {
@@ -250,7 +250,7 @@ class FsTimelineStore implements TimelineStore {
         const id = decodeName(name);
         if (id === undefined) continue;
         // A file that exists but holds no lines (pruned-empty) is not
-        // enumerated — matches MemoryTimelineStore.sessions(). Size 0 ⟺ no
+        // enumerated — matches MemoryTimelineStore.keys(). Size 0 ⟺ no
         // lines, since we only ever write whole `<json>\n` records.
         const info = await stat(join(this.dir, name)).catch(() => undefined);
         if (info && info.size > 0) held.push(id);

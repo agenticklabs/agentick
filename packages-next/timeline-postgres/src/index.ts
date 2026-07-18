@@ -3,7 +3,7 @@
  * adapter (ADR 49 reference-adapter rung 4, the cloud pole).
  *
  * The shared source of truth across stateless replicas: any node
- * rehydrates a session with `load(sessionId)`. BYO `pg.Pool`; DB-assigned
+ * rehydrates a session with `read(sessionId)`. BYO `pg.Pool`; DB-assigned
  * `bigint IDENTITY` `seq`; opaque `jsonb` payloads; schema escape hatches.
  *
  * ```ts
