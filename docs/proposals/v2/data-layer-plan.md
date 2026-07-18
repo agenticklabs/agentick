@@ -370,8 +370,8 @@ async-only/never-rendered state.
 | knobs ✓ | model-set values | store-backed (`MemoryCollection` via `CollectionProjection`) | **eager pure-mirror**; channel stays harness-level; `exportSnapshot` coexists → Phase-4 sweep. ADDITIVE, not a deletion |
 | state | `useState` cells | `CollectionProjection` (eager) | **eager pure-mirror** (same shape as knobs) |
 | session | tick/usage/status/metadata | `SessionStore` (E11 — no scalar exception) | **eager**, likely single-record |
-| **skills** | `Skill` (all strings) | `CollectionStore<Skill>` + loaders | **none** (async) — the definition-library PURE floor |
-| **prompts** | `PromptDeclaration` | `CollectionStore` + loaders + `render`/`template` augmentation | **none** (async) — skills + augmentation |
+| **skills** ✓ | `Skill` (all strings) | `CollectionStore<Skill>` + loaders | **eager** (forced by sync `exportSnapshot`, not render) — pure floor: no augmentation |
+| **prompts** | `PromptDeclaration` | `CollectionStore` + loaders + `render`/`template` augmentation | **eager** (same sync-`exportSnapshot` constraint) — skills + augmentation |
 | **resources** | `{uri, meta, sourceConfig}` | `CollectionStore` + tree-mount **+ DB/fs loader** + `resolver` augmentation | **eager** (catalog folded into IR) — the rich instance |
 | data | fetch cache | already the `DataBridge` | **lazy** (`useData`) — the reference lazy case |
 
@@ -436,16 +436,23 @@ already converged on the primitives; the playbook is mostly *conform + verify*, 
       prunePredicate? }`. The ONLY store-specific code is the matcher/keyOf. This is
       the default backing; conformance-green = done.
 - [ ] **P5 — Wire to BaseHarness + choose the projection.** Mount on the `store?`
-      slot; hydration via the `hydrate()`-into-`ready` hook (§2.3). A render-read
-      harness needs a **sync-read cache** (mandatory — each render pass is sync and
-      the throw-on-pending render loop needs a cache to terminate; `useData` is an
-      instance of this, not a counter-example). The FREE choice is *population*:
-      **EAGER write-through** = `CollectionProjection<T>` (`store-next`) for
-      read-after-write-hot MUTABLE state (knobs/state/session); **LAZY
-      throw-on-pending** = the `useData` model for **load-once definition sources**
-      (prompts/skills/resources). An **async-only, never-rendered** harness
-      (credentials — server-resident) needs **NO projection**: read the async store
-      directly. Never hold the full log (§2.7). **Projection archetypes:** eager
+      slot; hydration via the `hydrate()`-into-`ready` hook (§2.3). A harness needs a
+      **sync-read cache (projection)** iff its state is read **synchronously** — and
+      there are **TWO** sync-read triggers, not one (run #7 correction): (1)
+      **render-read** (a hook reads it during the sync render pass), and (2) a **sync
+      `exportSnapshot`** — `captureBridgeSnapshots` calls `exportSnapshot()`
+      *synchronously, un-awaited* (`reconciler-harness.ts:926`), so a `SnapshotCapable`
+      harness must serve it from a sync materialized view. A harness escapes the
+      projection ONLY if it has **neither** — async reads AND no snapshot
+      (**credentials**: server-resident, not `SnapshotCapable`). So skills/prompts,
+      though not render-read, still need the **eager** projection until the Phase-4
+      sweep makes `captureBridgeSnapshots` async-aware (E18). The FREE choice, when a
+      projection IS needed, is *population*: **EAGER write-through** =
+      `CollectionProjection<T>` (`store-next`) — the default for every store-backed
+      harness pre-Phase-4; **LAZY** `useData` throw-on-pending is only reachable for
+      genuinely load-once, non-snapshot data (the `DataBridge` itself). An
+      **async-only, non-`SnapshotCapable`** harness (credentials) needs **NO
+      projection**: read the async store directly. Never hold the full log (§2.7). **Projection archetypes:** eager
       *pure-mirror* collection = `CollectionProjection` (knobs, state); eager
       *augmented* collection = hand-rolled, cache holds the record + non-persisted
       extras (tasks: `live` = record + fibers/abort); eager *augmented single-record*
@@ -779,6 +786,17 @@ augmentation + a projection strategy. Run by axes-turned-on:
   `BaseHarness` — NOT baked into every harness (stateless ones don't need it) — and
   it likely **unifies with the store's `onChange`** (E14 / the `MemoryCollection`
   seam). Do NOT touch mid-run-list; revisit after timeline + prompts/skills/resources.
+- **E18 — Async-aware `captureBridgeSnapshots` unlocks projection-free stores
+  (Phase-4 enabler, from run #7).** `captureBridgeSnapshots` calls
+  `exportSnapshot()` **synchronously** (`reconciler-harness.ts:926`), which is why
+  every `SnapshotCapable` store-backed harness (skills, prompts, knobs, state, …)
+  is *forced* to keep an **eager** sync projection to serve it — even the ones that
+  aren't render-read. The Phase-4 manifest sweep (which makes the store the sole
+  snapshot authority and can flip resume from `exportSnapshot`→`hydrate()`) should
+  ALSO make snapshot capture **async-aware** (`await`-able) — that single change
+  lets non-render-read definition-library harnesses (skills/prompts) drop their
+  projection and read the store async, the async-endgame the disposition table
+  originally (wrongly) assumed was available now.
 
 ---
 
