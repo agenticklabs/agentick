@@ -370,18 +370,29 @@ async-only/never-rendered state.
 | knobs ✓ | model-set values | store-backed (`MemoryCollection` via `CollectionProjection`) | **eager pure-mirror**; channel stays harness-level; `exportSnapshot` coexists → Phase-4 sweep. ADDITIVE, not a deletion |
 | state | `useState` cells | `CollectionProjection` (eager) | **eager pure-mirror** (same shape as knobs) |
 | session | tick/usage/status/metadata | `SessionStore` (E11 — no scalar exception) | **eager**, likely single-record |
-| prompts | prompt definitions | **definition-source store** (may be filesystem) + tree-declared registration | **lazy** (`useData`/throw-on-pending) — load-once, NOT eager |
-| skills | skill definitions | **definition-source store** (may be filesystem) | **lazy** (`useData`) |
-| resources | URI-addressed content | **definition-source store**, URI-keyed (filesystem-natural) | **lazy** (`useData`) |
+| **skills** | `Skill` (all strings) | `CollectionStore<Skill>` + loaders | **none** (async) — the definition-library PURE floor |
+| **prompts** | `PromptDeclaration` | `CollectionStore` + loaders + `render`/`template` augmentation | **none** (async) — skills + augmentation |
+| **resources** | `{uri, meta, sourceConfig}` | `CollectionStore` + tree-mount **+ DB/fs loader** + `resolver` augmentation | **eager** (catalog folded into IR) — the rich instance |
 | data | fetch cache | already the `DataBridge` | **lazy** (`useData`) — the reference lazy case |
 
-The corrected picture (runs #1–#3 + the reconciler discussion): storifying a
-render-read harness is **additive** (add store + projection beside the existing
-notify seam), NOT a code-deletion win — the `exportSnapshot` deletion is the
-coordinated **Phase-4 manifest sweep**, not per-run. prompts/skills/resources are
-NOT "intent, remove from snapshot"; they get **definition-source stores** read via
-the **lazy `useData` path** (load-once, so eager write-through is the wrong tool).
-credentials proves an async-only harness needs **no projection at all**.
+**The definition-library archetype (corrected — supersedes both "lazy `useData`"
+and "resources is a different kind"; verified by a 3-harness compare).**
+prompts/skills/resources are ONE archetype: a `CollectionStore<Declaration>`
+(serializable, string-keyed) + pluggable **sources** (the shared `Loader<T>`:
+array/module/url/fs/**DB**/tree-mount) + an optional **non-serializable runtime
+augmentation** re-attached at restore (the tasks pattern: `render`/`resolver` fn;
+skills has none) + a **projection strategy** set by the read pattern (none for
+async reads; eager for resources' render-read catalog). Skills is the pure floor,
+prompts adds one augmentation, resources is the rich instance (augmentation +
+eager catalog projection + dual-key `uri`/`uriTemplate` query + the durable DB/fs
+source it lacks today, overlaid by transient `<Resource>` tree-mounts). The
+`Loader` (read-only source) stays a source that FEEDS the store — it is not
+dissolved into it. Run order by axes-turned-on: **skills → prompts → resources**.
+
+The broader picture (runs #1–6a): storifying a render-read harness is **additive**
+(add store + projection beside the existing notify seam), NOT a code-deletion win —
+the `exportSnapshot` deletion is the coordinated **Phase-4 manifest sweep**, not
+per-run. credentials proves an async-only harness needs **no projection at all**.
 
 ---
 
@@ -606,10 +617,21 @@ criterion) **adoptable one store at a time, coexisting with the old**.
 - Document the **eventually-consistent resume** guarantee (E2).
 - *Gate:* kill/resume acceptance passes via manifest for all migrated harnesses; skew-window test; heterogeneous (some embedded, some manifest) resume.
 
-### Phase 5 — prompts/skills disposition
-- Decide store vs intent (§6-C) via the discriminator; my lean = **intent/re-declare**, removing them from snapshot.
-- If intent: emit `SubscriptionIntent`s on render; restore re-declares. Remove their `exportSnapshot`.
-- *Gate:* resume reconstructs prompts/skills via re-render; snapshot no longer carries them.
+### Phase 5 — definition-library stores (skills → prompts → resources)
+The three unify under the **definition-library archetype** (§3 disposition):
+`CollectionStore<Declaration>` + `Loader<T>` sources + optional non-serializable
+augmentation + a projection strategy. Run by axes-turned-on:
+- **skills** (pure floor): async `CollectionStore<Skill>`; loaders feed it; register/
+  update/remove → put/delete; NO augmentation, NO projection; `exportSnapshot`
+  coexists (Phase-4 sweep). The template.
+- **prompts** = skills + the `render`/`template` **runtime augmentation** (re-attached
+  on restore, tasks-style; snapshot drops it as today).
+- **resources** = the rich instance: + **eager catalog projection** (the render-read
+  IR fold), + dual-key `uri`/`uriTemplate` query, + a NEW durable **DB/fs `Loader`**
+  source (it has none today) overlaid by transient `<Resource>` tree-mounts. Touches
+  the reconciler default-projection — do last, with care.
+- *Gate:* per harness — store round-trip + loader population + (resources) catalog
+  projection parity + template resolution; existing conformance green.
 
 ### Phase 6a — Timeline **entry-log store** *(the clean, opinion-free run — next)*
 - Bring `TimelineStore` onto the shared **`LogStore` archetype**: contract in
@@ -671,8 +693,10 @@ criterion) **adoptable one store at a time, coexisting with the old**.
   exactly this.
 - **E7 — credentials empty wire surface.** A store that projects *nothing* to the
   client. Proves the wire surface is optional; must not assume every store has one.
-- **E8 — prompts/skills: store or intent?** §6-C. Reclassify as re-declared intents
-  (removes code) vs storify (adds it). Discriminator says intent.
+- **E8 — prompts/skills/resources: RESOLVED → the definition-library archetype
+  (§6-C).** Not intent, not lazy-`useData`: one `CollectionStore<Declaration>` +
+  `Loader<T>` sources + optional augmentation + projection strategy. Run
+  skills→prompts→resources.
 - **E9 — Incremental migration / heterogeneity.** During migration, some harnesses
   are manifest-backed, some still embedded. The feature-detection tolerates it;
   the manifest+embedded coexist until all migrate. Hard criterion: one store at a
@@ -765,10 +789,15 @@ Each is a real choice with a cost, not a detail. My lean is stated; none is rati
 - **§6-A — `ctx` on all store methods or reads only?** Lean: all, uniform.
 - **§6-B — Extend built-in store namespace: co-locate vs augment?** Lean: co-locate
   (keep namespaces exclusive), revisit if the "one more method" ergonomics bite.
-- **§6-C — prompts/skills/resources: RESOLVED — they get stores.** Their store is
-  the **definition source** (may be filesystem-backed: markdown prompts, skill
-  files, URI-addressed resources). Orthogonal to their tree-declared session
-  registration (they can be both). See §3.5 run list. Churn accepted (below).
+- **§6-C — prompts/skills/resources: RESOLVED — one definition-library archetype.**
+  (Supersedes "lazy `useData`" AND "resources is a different kind" — a 3-harness
+  compare showed prompts≈skills mirror line-for-line, resources is the same
+  archetype with more axes on.) All three: `CollectionStore<Declaration>` + shared
+  `Loader<T>` sources + optional non-serializable augmentation (`render`/`resolver`;
+  skills none) + projection strategy (none async / eager for resources' catalog).
+  skills = pure floor, prompts = + augmentation, resources = + eager projection +
+  dual-key query + a durable DB/fs source it lacks today. Run skills→prompts→
+  resources. See §3 disposition + Phase 5.
 - **§6-D — Store port home: spec-next canonical?** Lean: yes — ports + data shapes
   in spec-next, defaults + conformance in the harness package; unify timeline.
 - **§6-E — Timeline projection on restore. RESOLVED — compaction-as-overlay-event
