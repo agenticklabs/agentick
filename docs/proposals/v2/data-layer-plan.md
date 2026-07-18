@@ -489,7 +489,14 @@ already converged on the primitives; the playbook is mostly *conform + verify*, 
   via `hydrate`), NEVER a second home for state; the manifest references the
   store, never the cache. The purest form holds no cache at all (credentials:
   read the async store live). A cache is an optimization on top of this invariant,
-  not an exception to it.
+  not an exception to it. **QUALIFICATION (run #9, resources):** the exception is
+  genuinely *tree-derived transient* state — a `<Resource>` tree-mount is NOT
+  store-backed; it re-mounts on restart (the `SubscriptionIntent` / re-declare side
+  of the P0 discriminator). So a harness may be a **hybrid**: durable state
+  store-backed, transient tree-declared state re-mounted. "Store = single source of
+  truth" governs the *durable* half; it does not conscript state whose home is the
+  tree. This is why such a harness stays NOT `SnapshotCapable` — its store is a
+  *durable-source backing*, not a hibernate snapshot.
 - **The query/input identifies scope + range + order + basic params; the store
   decides how to fulfill.** Could be event-sourced (journal projection) or
   otherwise persisted — **the framework does not care**, it just asks and receives.
