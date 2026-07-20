@@ -49,7 +49,7 @@
 import { Effect } from "effect";
 import { BaseHarness, type Middleware, type Unsubscribe } from "@agentick/runtime-next";
 import type {
-  CollectionStore,
+  CollectionMutation,
   ContentBlock,
   EventBus,
   KnobDescriptor,
@@ -65,19 +65,13 @@ import type {
   MessageHandlerError,
   MessageInbox,
   OperationJournal,
+  ReactiveStore,
   StoreCtx,
 } from "@agentick/spec-next";
 import { HandlerError } from "@agentick/spec-next";
-import {
-  changeKind,
-  createChangeNotifier,
-  createKeyedNotifier,
-  type ChangeEvent,
-  type ChangeNotifier,
-  type KeyedNotifier,
-} from "@agentick/pubsub-next";
+import { changeKind, type ChangeEvent } from "@agentick/pubsub-next";
 import { ulid, type JsonPatchOp } from "@agentick/utils-next";
-import { CollectionProjection } from "@agentick/store-next";
+import { ReactiveView } from "@agentick/store-next";
 import type { ChannelSnapshotProvider } from "@agentick/spec-next";
 import {
   KNOBS_STATE_CHANNEL,
@@ -117,12 +111,13 @@ export interface KnobsHarnessOptions {
    * Durable backing for knob VALUES (data-layer plan §3.5, Phase 3). Defaults
    * to a fresh per-harness in-memory {@link createKnobStore}. The store holds
    * `{ id, value }` cells only — descriptors are tree-derived and never stored.
-   * It is the durable truth; the synchronous {@link CollectionProjection} is its
-   * sync read cache (reads never touch the store). Injecting a durable adapter
+   * It is the durable truth; the synchronous {@link ReactiveView} is its sync
+   * read cache (reads never touch the store). Injecting a durable adapter
    * (Postgres, …) is how knob values survive process restart; `hydrate()` loads
-   * it back into the projection.
+   * it back into the view. Typed against the `ReactiveStore` SEAM — a durable
+   * adapter need only implement `query`/`mutate`.
    */
-  readonly store?: CollectionStore<KnobEntry, KnobStoreQuery>;
+  readonly store?: ReactiveStore<KnobEntry, KnobStoreQuery, CollectionMutation<KnobEntry>>;
 }
 
 export class KnobsHarness
@@ -130,32 +125,19 @@ export class KnobsHarness
   implements KnobsHarnessProtocol, ChannelSnapshotProvider
 {
   /**
-   * The synchronous read PROJECTION of the value store (data-layer plan §3.5
-   * P5) — `get` / `has` / `list` / `subscribe` read it during render, so knob
-   * reads stay sync (never async-through-the-store). The shared
-   * {@link CollectionProjection} owns the two moves this used to hand-roll: the
-   * dual-write (sync cache first, durable {@link KnobEntry} store off the
-   * critical path via {@link CollectionProjection.write}) and the merge
-   * {@link CollectionProjection.hydrate}. The projection is a WRITE SINK beside
-   * the harness's notify seam (`fireListeners` + the `changes` StateDelta
-   * channel), never a source of it — every mutation writes it AND drives the
-   * seam by hand, exactly as before. It stores values keyed by knob id; the
-   * durable store holds `{ id, value }` cells only (descriptors are
-   * tree-derived and never stored).
+   * The synchronous {@link ReactiveView} of the value store — ONE primitive that
+   * collapses the three fields this used to hand-roll (a `CollectionProjection`
+   * for the sync cache + write-through, a `KeyedNotifier` for render pings, a
+   * `ChangeNotifier` for the typed StateDelta stream). `get` / `has` / `list` /
+   * `subscribe` read it during render (sync, never async-through-the-store);
+   * `applySet` / `applyRegister` write through it (sync cache first, durable
+   * `{ id, value }` store off the critical path via the `query`/`mutate` seam),
+   * and each single write pings the id AND emits the typed change the
+   * constructor-wired StateDelta channel projects. The store holds value cells
+   * only — descriptors are tree-derived and merged over them at read time.
    */
-  private readonly projection: CollectionProjection<KnobEntry, KnobStoreQuery>;
+  private readonly view: ReactiveView<KnobEntry, KnobStoreQuery, CollectionMutation<KnobEntry>>;
   private readonly descriptors = new Map<string, KnobRegistration>();
-  private readonly notifier: KeyedNotifier = createKeyedNotifier();
-
-  /**
-   * The notify seam (ADR 75): typed push carrying the delta. Distinct from
-   * `notifier` (bare render pings) — mutation sites emit a semantic
-   * `ChangeEvent` here; projections (the StateDelta channel wired in the
-   * constructor, and future timeline / AG-UI projections) subscribe via
-   * {@link onChange}. The mutation logic stays ignorant of any specific
-   * projection.
-   */
-  private readonly changes: ChangeNotifier<KnobPrimitive> = createChangeNotifier<KnobPrimitive>();
 
   /**
    * Optional read-only fallback LAYER (ADR 34 cascade). Reads fall
@@ -215,10 +197,7 @@ export class KnobsHarness
       interceptorParent: options.interceptorParent,
     });
     this.parentLayer = parentLayer;
-    this.projection = new CollectionProjection<KnobEntry, KnobStoreQuery>(
-      options.store ?? createKnobStore(),
-      (entry) => entry.id,
-    );
+    this.view = ReactiveView.collection(options.store ?? createKnobStore(), (entry) => entry.id);
     const scope = () => ({ sessionId: this.scopeId });
     this.set = this.command({
       name: "knobs:set",
@@ -249,11 +228,12 @@ export class KnobsHarness
           return this.executeDispatch(i, yield* this.storeCtxEffect());
         }),
     });
-    // Wire the StateDelta (ADR 73) projection onto the change stream:
-    // mutation sites emit a semantic ChangeEvent; this projection derives the
-    // JSON-Patch op. Decoupled so additional projections attach to the same
-    // stream without touching the mutation logic.
-    this.changes.onChange((change) => this.projectStateDelta(change));
+    // Wire the StateDelta (ADR 73) projection onto the view's change stream:
+    // each single write emits a semantic ChangeEvent; this projection derives
+    // the JSON-Patch op. Decoupled so additional projections attach to the same
+    // stream without touching the mutation logic. (Bulk paths — importSnapshot's
+    // replace — are change-silent; the harness emits its own snapshot frame.)
+    this.view.onChange((change) => this.projectStateDelta(change));
   }
 
   /**
@@ -274,13 +254,11 @@ export class KnobsHarness
 
   get(id: string): KnobPrimitive | undefined {
     // Self shadows parent; fall through only when self has no cell.
-    return this.projection.hasSync(id)
-      ? this.projection.getSync(id)?.value
-      : this.parentLayer?.get(id);
+    return this.view.hasSync(id) ? this.view.getSync(id)?.value : this.parentLayer?.get(id);
   }
 
   has(id: string): boolean {
-    return this.projection.hasSync(id) || (this.parentLayer?.has(id) ?? false);
+    return this.view.hasSync(id) || (this.parentLayer?.has(id) ?? false);
   }
 
   list(): readonly KnobDescriptor[] {
@@ -296,9 +274,9 @@ export class KnobsHarness
     // Descriptor-known ids first (registration order), then value-only
     // ids (set without a prior descriptor registration).
     for (const [id, descriptor] of this.descriptors) {
-      byId.set(id, { id, value: this.projection.getSync(id)?.value, ...descriptor });
+      byId.set(id, { id, value: this.view.getSync(id)?.value, ...descriptor });
     }
-    for (const { id, value } of this.projection.listSync()) {
+    for (const { id, value } of this.view.listSync()) {
       if (this.descriptors.has(id)) continue;
       byId.set(id, { id, value });
     }
@@ -308,11 +286,11 @@ export class KnobsHarness
   }
 
   subscribe(id: string, listener: () => void): Unsubscribe {
-    return this.notifier.subscribe(id, listener);
+    return this.view.subscribe(id, listener);
   }
 
   subscribeAll(listener: () => void): Unsubscribe {
-    return this.notifier.subscribeAll(listener);
+    return this.view.subscribeAll(listener);
   }
 
   /**
@@ -328,40 +306,37 @@ export class KnobsHarness
    * consumer exists.
    */
   onChange(listener: (change: ChangeEvent<KnobPrimitive>) => void): Unsubscribe {
-    return this.changes.onChange(listener);
+    // The view's change stream is ENTRY-typed (`{ id, value }`); the public
+    // notify seam is VALUE-typed. Project entry → primitive, preserving
+    // key-presence (`"value"`/`"prev" in c`) so add/update/remove classify the
+    // same as before the ReactiveView collapse.
+    return this.view.onChange((c) => listener(toValueChange(c, (e) => e.value)));
   }
 
   // ─────────── Snapshot / restore ───────────
 
   exportSnapshot(): Readonly<Record<string, KnobPrimitive>> {
     const out: Record<string, KnobPrimitive> = {};
-    for (const { id, value } of this.projection.listSync()) out[id] = value;
+    for (const { id, value } of this.view.listSync()) out[id] = value;
     return out;
   }
 
   importSnapshot(values: Readonly<Record<string, KnobPrimitive>>): void {
-    const oldKeys = new Set(this.projection.listSync().map((entry) => entry.id));
-    const newKeys = new Set(Object.keys(values));
-    const changed = new Set<string>([...oldKeys, ...newKeys]);
-    // Wholesale replace: a key present before but absent from `values` is
-    // dropped from BOTH the projection cache and the store (delete-not-present),
-    // then the snapshot's cells dual-write through the projection. In every
-    // real call path (seed, restore) the harness is fresh so the drop loop is a
-    // no-op; the loop makes a theoretical re-import onto a populated harness an
-    // honest replace rather than an upsert that would leave the store to
-    // resurface stale keys via `hydrate()`.
+    // Wholesale replace via the view: keys absent from `values` are dropped from
+    // BOTH the cache and the store; the snapshot's cells write through. The view
+    // updates the whole cache FIRST then batch-pings the union — so invalidate
+    // `listCache` BEFORE `replace` and a `useSyncExternalStore` consumer reading
+    // during a ping sees the complete post-import list. `replace` is
+    // change-SILENT; the single snapshot frame below IS the wire delta (not N
+    // per-key deltas).
     //
     // TODO(store-phase-4): `importSnapshot` is the ACTIVE snapshot-based resume
     // path. The Phase-4 manifest sweep replaces it with `hydrate()` once the
-    // store is the authority (and picks up the durable-write flush barrier now
-    // centralized in `CollectionProjection.write`). Do NOT wire `hydrate()`
-    // into resume while this method still owns it.
-    for (const k of oldKeys) if (!newKeys.has(k)) this.projection.deleteSync(k, this.storeCtx());
-    for (const [k, v] of Object.entries(values)) {
-      this.projection.write({ id: k, value: v }, this.storeCtx());
-    }
+    // store is the authority (and picks up the durable-write flush barrier).
+    // Do NOT wire `hydrate()` into resume while this method still owns it.
+    const entries: KnobEntry[] = Object.entries(values).map(([id, value]) => ({ id, value }));
     this.listCache = null;
-    for (const id of changed) this.fireListeners(id);
+    this.view.replace(entries, this.storeCtx());
     // Wholesale replacement — a fresh full-store frame, not N per-key deltas.
     this.publishStateFrame({
       kind: "snapshot",
@@ -383,14 +358,12 @@ export class KnobsHarness
    * the seam the Phase-4 manifest sweep flips to once the store is authority.
    */
   async hydrate(): Promise<void> {
-    // The projection owns the store→cache merge and returns the keys it
-    // loaded; the harness owns notification (the primitive is a write sink,
-    // not a notifier). Ping each hydrated key so both per-knob and wildcard
-    // subscribers re-read (mirrors importSnapshot's per-key fan-out rather than
-    // a wildcard-only `notifyAll`).
-    const keys = await this.projection.hydrate(undefined, this.storeCtx());
+    // The view merges the store projection into the cache and pings each loaded
+    // key (a MERGE, not clear-first — a fresh store is empty ⇒ a no-op).
+    // Invalidate `listCache` BEFORE the merge+ping so a `useSyncExternalStore`
+    // consumer re-reads the hydrated list. Change-silent — no per-key deltas.
     this.listCache = null;
-    for (const k of keys) this.fireListeners(k);
+    await this.view.hydrate(undefined, this.storeCtx());
   }
 
   // ─────────── State channel (ADR 73) ───────────
@@ -428,18 +401,19 @@ export class KnobsHarness
   }
 
   /**
-   * The single StateDelta subscriber on the change stream (wired in the
-   * constructor). Derives the JSON-Patch op from the change's value/prev
-   * presence via `changeKind`: add → `add`, update → `replace`, remove →
-   * `remove` (knobs don't remove today, but the mapping is total).
+   * The single StateDelta subscriber on the view's change stream (wired in the
+   * constructor). The stream is ENTRY-typed (`{ id, value }`); classify via
+   * `changeKind` (the entry object is present on add/update, absent on remove —
+   * knobs never remove today, but the mapping is total) and unwrap the
+   * primitive from the entry for the op value.
    */
-  private projectStateDelta(change: ChangeEvent<KnobPrimitive>): void {
+  private projectStateDelta(change: ChangeEvent<KnobEntry>): void {
     const path = knobPointer(change.key);
     const kind = changeKind(change);
     const op: JsonPatchOp =
       kind === "remove"
         ? { op: "remove", path }
-        : { op: kind === "add" ? "add" : "replace", path, value: change.value as KnobPrimitive };
+        : { op: kind === "add" ? "add" : "replace", path, value: change.value!.value };
     this.emitStateDelta([op]);
   }
 
@@ -479,43 +453,31 @@ export class KnobsHarness
   // ─────────── Internals ───────────
 
   private applySet(input: KnobsSetInput, ctx: StoreCtx = this.storeCtx()): void {
-    const prev = this.projection.getSync(input.id)?.value;
-    // Dual-write through the projection: sync cache first (reads reflect it
-    // now), durable store off the critical path. The notify seam below
-    // (`fireListeners` + `changes`) is driven by hand, exactly as before — the
-    // projection is a write sink beside it, never a source. `ctx` is the
-    // enriched store-ctx the command handler read inside the fiber (carrying
-    // the live op's `opId`); a direct caller with no fiber falls back to base.
-    this.projection.write({ id: input.id, value: input.value }, ctx);
+    // One write through the view: sync cache first (reads reflect it now),
+    // durable store off the critical path via the seam, a render ping, and the
+    // typed change the constructor-wired StateDelta channel projects — the whole
+    // trio (dual-write + fireListeners + emitChange) collapsed. Invalidate
+    // `listCache` BEFORE the write so a subscriber that reads during the ping
+    // sees the fresh list. `ctx` is the enriched store-ctx the command handler
+    // read inside the fiber (carrying the live op's `opId`); a direct caller
+    // with no fiber falls back to base.
     this.listCache = null;
-    this.fireListeners(input.id);
-    // Emit the semantic change; the constructor-wired StateDelta projection
-    // derives the JSON-Patch op. Prev present ⇒ update (existing id); absent
-    // ⇒ add (new id) — KnobPrimitive never holds `undefined`, so prev
-    // presence is an exact existed-check.
-    this.changes.emitChange(
-      prev !== undefined
-        ? { key: input.id, value: input.value, prev }
-        : { key: input.id, value: input.value },
-    );
+    this.view.write({ id: input.id, value: input.value }, ctx);
   }
 
   private applyRegister(input: KnobsRegisterInput, ctx: StoreCtx = this.storeCtx()): void {
     this.descriptors.set(input.id, input.descriptor);
     const defaultValue = input.descriptor.defaultValue;
-    const applied = !this.projection.hasSync(input.id) && defaultValue !== undefined;
-    if (applied) {
-      // A registration that SEEDS a default value is a value mutation, so it
-      // dual-writes through the projection. A descriptor-only registration
-      // mutates no cell → no store write.
-      this.projection.write({ id: input.id, value: defaultValue }, ctx);
-    }
+    // A registration that SEEDS a default (no prior cell) is a value mutation:
+    // write through the view (ping + `add` change). A descriptor-only
+    // registration mutates no cell → a bare render ping only (no store write, no
+    // change). Invalidate `listCache` BEFORE either so a subscriber re-reads.
+    const applied = !this.view.hasSync(input.id) && defaultValue !== undefined;
     this.listCache = null;
-    this.fireListeners(input.id);
-    // A registration is a change only when it seeds a value (an `add`); a
-    // descriptor-only registration mutates no cell → no change event.
-    if (applied && defaultValue !== undefined) {
-      this.changes.emitChange({ key: input.id, value: defaultValue });
+    if (applied) {
+      this.view.write({ id: input.id, value: defaultValue }, ctx);
+    } else {
+      this.view.notify(input.id);
     }
   }
 
@@ -586,15 +548,24 @@ export class KnobsHarness
       },
     ];
   }
-
-  private fireListeners(id: string): void {
-    this.notifier.notify(id);
-  }
 }
 
 // ============================================================================
 // Helpers
 // ============================================================================
+
+/**
+ * Project an ENTRY-typed change (the view's `{ id, value }` stream) onto a
+ * VALUE-typed one (the public notify seam), preserving KEY-PRESENCE so
+ * add/update/remove classify identically — `"value" in c` / `"prev" in c`, NOT
+ * `!== undefined` (a stored value may legitimately be `undefined`).
+ */
+function toValueChange<T, V>(c: ChangeEvent<T>, valueOf: (t: T) => V): ChangeEvent<V> {
+  const out: { key: string; value?: V; prev?: V } = { key: c.key };
+  if ("value" in c) out.value = valueOf(c.value as T);
+  if ("prev" in c) out.prev = valueOf(c.prev as T);
+  return out;
+}
 
 function err(text: string): readonly ContentBlock[] {
   return [{ type: "text", text }];

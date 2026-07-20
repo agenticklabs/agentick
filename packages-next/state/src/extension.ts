@@ -15,7 +15,12 @@
  * configured `withState({ ... })` in `AppHarnessOptions.extensions`.
  */
 
-import type { CollectionStore, SessionExtension, SessionInstaller } from "@agentick/spec-next";
+import type {
+  CollectionMutation,
+  ReactiveStore,
+  SessionExtension,
+  SessionInstaller,
+} from "@agentick/spec-next";
 import { StateHarness } from "./harness.js";
 import type { StateEntry, StateStoreQuery } from "./store.js";
 
@@ -29,7 +34,7 @@ export interface WithStateOptions {
    * restart. NOTE: session-level hydrate-on-resume is NOT wired here — that is
    * the Phase-4 manifest concern; `importSnapshot` remains the resume path.
    */
-  readonly store?: CollectionStore<StateEntry, StateStoreQuery>;
+  readonly store?: ReactiveStore<StateEntry, StateStoreQuery, CollectionMutation<StateEntry>>;
 }
 
 export function withState(options: WithStateOptions = {}): SessionExtension {

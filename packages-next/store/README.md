@@ -40,6 +40,29 @@ copy-pasted conformance suite. This package factors all three out:
   composes this instead of re-deriving the projection + dual-write by hand.
   Async-only, never-rendered harnesses (credentials) read the store live and
   need NO projection — the projection rule is conditional on render-read.
+- **`ReactiveView<T, Q, M>`** — the convergence of `CollectionProjection` + a
+  `KeyedNotifier` (render pings) + a `ChangeNotifier` (typed `{ key, value?,
+  prev? }` deltas) into **one** harness-side sync projection of a
+  [`ReactiveStore`](../spec/src/protocol/reactive-store.ts). It drives the store
+  through the `query`/`mutate` **seam** (never the profile methods), so a store
+  that only implements `ReactiveStore` works. Two notify contracts: the
+  **single-mutation** path (`write` / `deleteSync`) pings the key AND emits a
+  typed change; the **bulk** path (`replace` / `hydrate`) mutates the whole
+  cache first, batches the render pings, and is **change-silent** (a wholesale
+  replace is the harness's own aggregate/snapshot frame, not N deltas).
+  Add-vs-update rides cache **presence** (`cache.has`), never `value !==
+  undefined` — so a legitimately `undefined` stored value classifies correctly.
+  Knobs + state compose this in Cut 1; the remaining harnesses fan out in Cut 2,
+  where it retires `CollectionProjection`.
+
+  ```ts
+  import { ReactiveView } from "@agentick/store-next";
+
+  // keyOf is the only per-store code; toPut/toDelete are the CollectionMutation shape.
+  const view = ReactiveView.collection(createKnobStore(), (e) => e.id);
+  view.write({ id: "verbose", value: true }, ctx); // sync cache → store → ping + change
+  const keys = await view.hydrate(undefined, ctx); // merge store projection, ping loaded keys
+  ```
 - **`runStoreConformance`** — the shared conformance skeleton the per-store
   suites (`runTaskStoreConformance`, `runTimelineStoreConformance`,
   `runCredentialsStoreConformance`) delegate their store-agnostic cases to
@@ -180,6 +203,30 @@ LIVE and hold no projection — credentials is the deliberate counter-example
 (`get`/`has`/`keys` each `await` the store directly). "Store-backed harness ⟹
 projection" is conditional on render-read, not universal.
 
+### `ReactiveView<T, Q = void, M = never>`
+
+The harness-side sync projection of a `ReactiveStore` — `CollectionProjection` +
+a `KeyedNotifier` + a `ChangeNotifier`, collapsed. Drives the store through the
+`query`/`mutate` **seam**.
+
+| Member                                        | Behavior                                                                 |
+| --------------------------------------------- | ------------------------------------------------------------------------ |
+| `ReactiveView.collection(store, keyOf)`       | Factory over a `CollectionMutation` store (`toPut`/`toDelete` prefilled) |
+| `new ReactiveView({ store, keyOf, toPut, toDelete })` | Full config for a bespoke mutation vocabulary `M`                 |
+| `getSync(key)` / `hasSync(key)` / `listSync()`| Sync reads; NEVER touch the store                                        |
+| `write(item, ctx)`                            | Cache → `store.mutate({ put })` → ping + typed change (add/update by presence) |
+| `deleteSync(key, ctx): boolean`               | Idempotent; on real delete: cache → `mutate({ delete })` → ping + removal change |
+| `replace(items, ctx)`                         | Bulk wholesale replace; cache-first, batched pings, **change-silent**    |
+| `hydrate(q, ctx): Promise<keys>`              | Merge `store.query(q)` overlay; batched pings; **change-silent**; returns loaded keys |
+| `subscribe` / `subscribeAll` / `notify`       | Render-ping seam (delegates to `KeyedNotifier`)                          |
+| `onChange(fn)`                                | Typed `ChangeEvent<T>` push seam (delegates to `ChangeNotifier`)         |
+
+**Single vs bulk.** `write`/`deleteSync` emit a typed change (one JSON-Patch
+delta on a harness channel); `replace`/`hydrate` are change-silent — a wholesale
+replace is the harness's own snapshot frame, not N deltas. Bulk paths mutate the
+whole cache before any ping so a subscriber reading during a ping sees the
+complete post-mutation state.
+
 ### `runStoreConformance<S>(options)`
 
 | Option             | Purpose                                                              |
@@ -254,6 +301,11 @@ Landed across the data-layer store-substrate runs:
 - `src/__tests__/collection-projection.spec.ts` — the sync read-model: sync
   reads never touch the store, write-through, and hydrate-as-overlay returning
   loaded keys.
+- `src/__tests__/reactive-view.spec.ts` — the `ReactiveView` convergence: sync
+  reads, `write` fires ping + typed change (add/update by cache presence),
+  idempotent `deleteSync`, undefined-value classification, change-silent
+  `hydrate` (overlay merge) and `replace` (drop + add, union ping), and that the
+  view drives a `query`/`mutate`-only store (the seam is load-bearing).
 - `@agentick/tasks-next` `runTaskStoreConformance` (`src/__tests__/store.spec.ts`)
   — end-to-end proof `MemoryCollection` fully backs a real `TaskStore`.
 - `@agentick/credentials-next` `runCredentialsStoreConformance`

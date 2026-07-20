@@ -6,10 +6,10 @@
  * state has no descriptors (it is session-internal, not model-facing), so the
  * cell IS the whole record; there is nothing tree-derived to merge over it.
  *
- * There is no named `StateStore` port: the generic {@link CollectionStore}
- * (`@agentick/spec-next`) IS the contract. Typing the harness field against the
- * generic keeps the seam lean — a durable adapter (Postgres, …) conforms to the
- * same port and can alias later if a named port ever earns its keep.
+ * There is no named `StateStore` port: the `ReactiveStore` seam
+ * (`@agentick/spec-next`) IS the contract the harness types its field against.
+ * Keeping the seam lean means a durable adapter (Postgres, …) need only
+ * implement `query`/`mutate` (+ optional `watch`) — no profile methods required.
  *
  * `StateStoreQuery` is intentionally empty: state has no scoped read today
  * (`list()` returns every key), so the query carries no dimensions and the
@@ -18,7 +18,6 @@
  * @see docs/proposals/v2/data-layer-plan.md §3.5 "The storification model"
  */
 
-import type { CollectionStore } from "@agentick/spec-next";
 import { MemoryCollection } from "@agentick/store-next";
 
 /**
@@ -42,10 +41,15 @@ export type StateStoreQuery = Record<string, never>;
  * The bundled, zero-dependency default state value store — the generic
  * {@link MemoryCollection} parameterized for state cells. `:memory:` semantics
  * (lost on process exit); a durable adapter conforms to the same
- * {@link CollectionStore} port. Single source of truth for the default store
+ * {@link ReactiveStore} seam. Single source of truth for the default store
  * config so the harness default and test-constructed stores never drift.
+ *
+ * Returns the CONCRETE `MemoryCollection` (which implements BOTH the
+ * `CollectionStore` profile AND the `ReactiveStore` seam) so callers that poke
+ * the store directly keep `get`/`put`/`list`; the harness widens it to the
+ * `ReactiveStore` seam at its option boundary.
  */
-export function createStateStore(): CollectionStore<StateEntry, StateStoreQuery> {
+export function createStateStore(): MemoryCollection<StateEntry, StateStoreQuery> {
   return new MemoryCollection<StateEntry, StateStoreQuery>({
     backend: "memory",
     keyOf: (entry) => entry.key,

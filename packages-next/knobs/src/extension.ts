@@ -16,7 +16,12 @@
  * @see docs/proposals/v2/blueprint/26-harness-api-shape.md
  */
 
-import type { CollectionStore, SessionExtension, SessionInstaller } from "@agentick/spec-next";
+import type {
+  CollectionMutation,
+  ReactiveStore,
+  SessionExtension,
+  SessionInstaller,
+} from "@agentick/spec-next";
 import { KnobsHarness } from "./harness.js";
 import type { KnobEntry, KnobStoreQuery } from "./store.js";
 
@@ -34,7 +39,7 @@ export interface WithKnobsOptions {
    * restart. NOTE: session-level hydrate-on-resume is NOT wired here — that is
    * the Phase-4 manifest concern; `importSnapshot` remains the resume path.
    */
-  readonly store?: CollectionStore<KnobEntry, KnobStoreQuery>;
+  readonly store?: ReactiveStore<KnobEntry, KnobStoreQuery, CollectionMutation<KnobEntry>>;
 }
 
 // NOTE: `knobsWireExtension` (./wire.js) IS registered in production — via

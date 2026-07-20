@@ -12,12 +12,14 @@ import { describe, expect, it } from "vitest";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import { stubStoreCtx } from "@agentick/store-next";
 
+import { MemoryCollection } from "@agentick/store-next";
+
 import { KnobsHarness } from "../harness.js";
 import { createKnobStore, type KnobEntry, type KnobStoreQuery } from "../store.js";
-import type { CollectionStore, KnobPrimitive } from "@agentick/spec-next";
+import type { KnobPrimitive } from "@agentick/spec-next";
 
 async function makeHarness(
-  store?: CollectionStore<KnobEntry, KnobStoreQuery>,
+  store?: MemoryCollection<KnobEntry, KnobStoreQuery>,
   scope = "store-test",
 ): Promise<KnobsHarness> {
   const harness = new KnobsHarness(

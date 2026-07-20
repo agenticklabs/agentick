@@ -7,8 +7,8 @@
  * idempotency replay, journaling).
  *
  *   Sync surface   — get / has / list / subscribe / subscribeAll.
- *                     Reads the sync {@link CollectionProjection} (the store's
- *                     read cache); no envelopes.
+ *                     Reads the sync {@link ReactiveView} (the store's read
+ *                     cache); no envelopes.
  *   Async surface  — set / delete. Declared commands (ADR 51): each
  *                     runs through `runOperation` with canonical
  *                     naming; the terminal envelope IS the change-event
@@ -20,15 +20,16 @@
  * the entries. Used by SnapshotHarness for hibernate/resume.
  *
  * Storification (data-layer plan §3.5) — the near-identical twin of knobs.
- * State is store-derived AND store-persisted: a durable {@link CollectionStore}
+ * State is store-derived AND store-persisted: a durable {@link ReactiveStore}
  * of `{ key, value }` cells is the authority, and a synchronous
- * {@link CollectionProjection} is its read cache (reads never touch the async
- * store). Every value mutation dual-writes through the projection (sync cache
- * first, durable store off the critical path); `hydrate()` reloads the store
- * into the projection on resume. The projection is a WRITE SINK beside the
- * `notifier` / `changes` reactive seam, NEVER a source of it — every mutation
- * writes it AND drives the seam by hand, exactly as before. State has no
- * client-facing channel, so no projection routes through the store.
+ * {@link ReactiveView} is its read cache (reads never touch the async store).
+ * Every value mutation writes through the view (sync cache first, durable store
+ * off the critical path via the `query`/`mutate` seam) AND, in the same call,
+ * pings render subscribers and emits the typed change — the sync-cache,
+ * write-through, render-ping, and delta-stream machinery all live in the ONE
+ * `ReactiveView` (they were three hand-rolled fields). `hydrate()` reloads the
+ * store into the view on resume. State has no client-facing channel, so nothing
+ * projects the change stream to the wire today (see the `state-deltas` TODO).
  *
  * @see docs/proposals/v2/blueprint/26-harness-api-shape.md
  * @see docs/proposals/v2/blueprint/51-invocation-and-authorization.md
@@ -37,26 +38,21 @@
 import { Effect } from "effect";
 import { BaseHarness, type Unsubscribe } from "@agentick/runtime-next";
 import type {
-  CollectionStore,
+  CollectionMutation,
   EventBus,
   MessageEnvelope,
   MessageHandlerError,
   MessageInbox,
   OperationJournal,
+  ReactiveStore,
   StateDeleteInput,
   StateHarnessProtocol,
   StateSetInput,
   StoreCtx,
 } from "@agentick/spec-next";
 import { HandlerError } from "@agentick/spec-next";
-import {
-  createChangeNotifier,
-  createKeyedNotifier,
-  type ChangeEvent,
-  type ChangeNotifier,
-  type KeyedNotifier,
-} from "@agentick/pubsub-next";
-import { CollectionProjection } from "@agentick/store-next";
+import { type ChangeEvent } from "@agentick/pubsub-next";
+import { ReactiveView } from "@agentick/store-next";
 import { createStateStore, type StateEntry, type StateStoreQuery } from "./store.js";
 
 /**
@@ -68,35 +64,28 @@ export interface StateHarnessOptions {
    * Durable backing for state VALUES (data-layer plan §3.5, Phase 3). Defaults
    * to a fresh per-harness in-memory {@link createStateStore}. The store holds
    * `{ key, value }` cells; it is the durable truth, the synchronous
-   * {@link CollectionProjection} is its sync read cache (reads never touch the
-   * store). Injecting a durable adapter (Postgres, …) is how state survives
-   * process restart; `hydrate()` loads it back into the projection.
+   * {@link ReactiveView} is its sync read cache (reads never touch the store).
+   * Injecting a durable adapter (Postgres, …) is how state survives process
+   * restart; `hydrate()` loads it back into the view. Typed against the
+   * `ReactiveStore` SEAM — a durable adapter need only implement `query`/`mutate`.
    */
-  readonly store?: CollectionStore<StateEntry, StateStoreQuery>;
+  readonly store?: ReactiveStore<StateEntry, StateStoreQuery, CollectionMutation<StateEntry>>;
 }
 
 export class StateHarness extends BaseHarness<"state"> implements StateHarnessProtocol {
   /**
-   * The synchronous read PROJECTION of the value store (data-layer plan §3.5
-   * P5) — `get` / `has` / `list` / `subscribe` read it, so state reads stay
-   * sync (never async-through-the-store). The shared {@link CollectionProjection}
-   * owns the dual-write (sync cache first, durable {@link StateEntry} store off
-   * the critical path) and the {@link CollectionProjection.hydrate} merge. It is
-   * a WRITE SINK beside the `notifier` / `changes` seam, never a source: every
-   * mutation writes it AND drives the seam by hand, exactly as before.
+   * The synchronous {@link ReactiveView} of the value store — ONE primitive that
+   * collapses the three fields this used to hand-roll (a `CollectionProjection`
+   * for the sync cache + write-through, a `KeyedNotifier` for render pings, a
+   * `ChangeNotifier` for the typed delta stream). `get` / `has` / `list` /
+   * `subscribe` read it (sync, never async-through-the-store); `applySet` /
+   * `applyDelete` write through it (sync cache first, durable `{ key, value }`
+   * store off the critical path via the `query`/`mutate` seam) and each single
+   * write pings the key AND emits the typed change. Add-vs-update rides the
+   * view's cache PRESENCE (`hasSync`), NOT `prev !== undefined` — state may
+   * legitimately store `undefined`.
    */
-  private readonly projection: CollectionProjection<StateEntry, StateStoreQuery>;
-  private readonly notifier: KeyedNotifier = createKeyedNotifier();
-
-  /**
-   * The notify seam (ADR 75): typed push carrying the delta. Distinct from
-   * `notifier` (bare render pings) — mutation sites emit a semantic
-   * `ChangeEvent` here; projections (a future `state` snapshot+delta channel,
-   * timeline events) subscribe via {@link onChange}. Values are `unknown`, so
-   * add-vs-update is decided by an `existed` (`has`) check, NOT
-   * `prev !== undefined` — state may legitimately store `undefined`.
-   */
-  private readonly changes: ChangeNotifier<unknown> = createChangeNotifier<unknown>();
+  private readonly view: ReactiveView<StateEntry, StateStoreQuery, CollectionMutation<StateEntry>>;
 
   /**
    * Declared commands (ADR 51) — pure layer logic in the handlers; the
@@ -117,10 +106,7 @@ export class StateHarness extends BaseHarness<"state"> implements StateHarnessPr
     options: StateHarnessOptions = {},
   ) {
     super("state", scopeId, journal, bus, inbox);
-    this.projection = new CollectionProjection<StateEntry, StateStoreQuery>(
-      options.store ?? createStateStore(),
-      (entry) => entry.key,
-    );
+    this.view = ReactiveView.collection(options.store ?? createStateStore(), (entry) => entry.key);
     const scope = () => ({ sessionId: this.scopeId });
     this.set = this.command({
       name: "state:set",
@@ -148,23 +134,23 @@ export class StateHarness extends BaseHarness<"state"> implements StateHarnessPr
     // Mirrors `Map.get`: a stored `{ key, value: undefined }` and an absent key
     // both read back as `undefined`. Callers that must distinguish use `has`
     // (backed by `hasSync`, a key-membership check independent of the value).
-    return this.projection.getSync(key)?.value;
+    return this.view.getSync(key)?.value;
   }
 
   has(key: string): boolean {
-    return this.projection.hasSync(key);
+    return this.view.hasSync(key);
   }
 
   list(): readonly string[] {
-    return this.projection.listSync().map((entry) => entry.key);
+    return this.view.listSync().map((entry) => entry.key);
   }
 
   subscribe(key: string, listener: () => void): Unsubscribe {
-    return this.notifier.subscribe(key, listener);
+    return this.view.subscribe(key, listener);
   }
 
   subscribeAll(listener: () => void): Unsubscribe {
-    return this.notifier.subscribeAll(listener);
+    return this.view.subscribeAll(listener);
   }
 
   /**
@@ -178,38 +164,34 @@ export class StateHarness extends BaseHarness<"state"> implements StateHarnessPr
    * consumer exists.
    */
   onChange(listener: (change: ChangeEvent<unknown>) => void): Unsubscribe {
-    return this.changes.onChange(listener);
+    // The view's change stream is ENTRY-typed (`{ key, value }`); the public
+    // notify seam is VALUE-typed. Project entry → value, preserving key-presence
+    // (`"value"`/`"prev" in c`) so add/update/remove classify identically —
+    // critically for `undefined` values, which key-presence handles but a
+    // `!== undefined` check would misread.
+    return this.view.onChange((c) => listener(toValueChange(c, (e) => e.value)));
   }
 
   // ─────────── Snapshot / restore ───────────
 
   exportSnapshot(): Readonly<Record<string, unknown>> {
     const out: Record<string, unknown> = {};
-    for (const { key, value } of this.projection.listSync()) out[key] = value;
+    for (const { key, value } of this.view.listSync()) out[key] = value;
     return out;
   }
 
   importSnapshot(values: Readonly<Record<string, unknown>>): void {
-    const oldKeys = new Set(this.projection.listSync().map((entry) => entry.key));
-    const newKeys = new Set(Object.keys(values));
-    const changed = new Set<string>([...oldKeys, ...newKeys]);
-    // Wholesale replace: a key present before but absent from `values` is
-    // dropped from BOTH the projection cache and the store (delete-not-present),
-    // then the snapshot's cells dual-write through the projection. In every real
-    // call path (seed, restore) the harness is fresh so the drop loop is a
-    // no-op; the loop makes a theoretical re-import onto a populated harness an
-    // honest replace rather than an upsert that would leave the store to
-    // resurface stale keys via `hydrate()`.
+    // Wholesale replace via the view: keys absent from `values` are dropped from
+    // BOTH the cache and the store; the snapshot's cells write through. The view
+    // updates the whole cache FIRST then batch-pings the union (drops ∪ upserts),
+    // and is change-SILENT (state has no channel, so no per-key deltas anyway).
     //
     // TODO(store-phase-4): `importSnapshot` is the ACTIVE snapshot-based resume
     // path. The Phase-4 manifest sweep replaces it with `hydrate()` once the
-    // store is the authority (and picks up the durable-write flush barrier now
-    // centralized in `CollectionProjection.write`). Do NOT wire `hydrate()`
-    // into resume while this method still owns it.
-    for (const k of oldKeys) if (!newKeys.has(k)) this.projection.deleteSync(k, this.storeCtx());
-    for (const [k, v] of Object.entries(values))
-      this.projection.write({ key: k, value: v }, this.storeCtx());
-    for (const key of changed) this.fireListeners(key);
+    // store is the authority. Do NOT wire `hydrate()` into resume while this
+    // method still owns it.
+    const entries: StateEntry[] = Object.entries(values).map(([key, value]) => ({ key, value }));
+    this.view.replace(entries, this.storeCtx());
   }
 
   /**
@@ -226,8 +208,10 @@ export class StateHarness extends BaseHarness<"state"> implements StateHarnessPr
    * to once the store is authority.
    */
   async hydrate(): Promise<void> {
-    const keys = await this.projection.hydrate(undefined, this.storeCtx());
-    for (const k of keys) this.fireListeners(k);
+    // The view merges the store projection into the cache and pings each loaded
+    // key (a MERGE, not clear-first — a fresh store is empty ⇒ a no-op).
+    // Change-silent.
+    await this.view.hydrate(undefined, this.storeCtx());
   }
 
   // ─────────── Inbox routing ───────────
@@ -246,47 +230,49 @@ export class StateHarness extends BaseHarness<"state"> implements StateHarnessPr
   // ─────────── Internals ───────────
 
   private applySet(input: StateSetInput, ctx: StoreCtx = this.storeCtx()): void {
-    // `existed`, not `prev !== undefined`: state may store `undefined` as a
-    // real value, so a `hasSync` check is the exact add-vs-update discriminator.
-    const existed = this.projection.hasSync(input.key);
-    const prev = this.projection.getSync(input.key)?.value;
-    // Dual-write through the projection: sync cache first (reads reflect it
-    // now), durable store off the critical path. The notify seam below
-    // (`fireListeners` + `changes`) is driven by hand, exactly as before — the
-    // projection is a write sink beside it, never a source. `ctx` is the
-    // enriched store-ctx the command handler read inside the fiber.
-    this.projection.write({ key: input.key, value: input.value }, ctx);
-    this.fireListeners(input.key);
-    this.changes.emitChange(
-      existed
-        ? { key: input.key, value: input.value, prev }
-        : { key: input.key, value: input.value },
-    );
+    // One write through the view: sync cache first (reads reflect it now),
+    // durable store off the critical path via the seam, a render ping, and the
+    // typed change — the whole trio (dual-write + fireListeners + emitChange)
+    // collapsed. Add-vs-update rides the view's cache PRESENCE (`hasSync`), NOT
+    // `prev !== undefined`, so a `set(key, undefined)` on a NEW key classifies
+    // as an add and on an EXISTING key as an update. `ctx` is the enriched
+    // store-ctx the command handler read inside the fiber.
+    this.view.write({ key: input.key, value: input.value }, ctx);
   }
 
   private applyDelete(input: StateDeleteInput, ctx: StoreCtx = this.storeCtx()): void {
-    if (!this.projection.hasSync(input.key)) return;
-    const prev = this.projection.getSync(input.key)?.value;
-    this.projection.deleteSync(input.key, ctx);
-    this.fireListeners(input.key);
-    // Remove — value omitted. `changeKind` reads this as "remove" regardless
-    // of whether the stored value was itself `undefined`.
-    this.changes.emitChange({ key: input.key, prev });
-  }
-
-  private fireListeners(key: string): void {
-    this.notifier.notify(key);
+    // Idempotent inside the view: a no-op delete of an absent key fires nothing
+    // and emits no change; a real removal pings + emits `{ key, prev }`.
+    this.view.deleteSync(input.key, ctx);
   }
 
   // TODO(state-deltas): project a `state` snapshot+delta channel like
-  // KnobsHarness does (packages-next/knobs/src/channel.ts, ADR 73) — but as a
-  // SUBSCRIBER of `changes.onChange`, exactly as knobs' `projectStateDelta`
+  // KnobsHarness does (packages-next/knobs/src/channel.ts, ADR 73) — as a
+  // SUBSCRIBER of `this.view.onChange`, exactly as knobs' `projectStateDelta`
   // now does: `changeKind(change)` → add/replace/remove op, `importSnapshot`
-  // → a full snapshot frame; consumers apply with `applyJsonPatch`. One
-  // caveat for `unknown` values: a `set(key, undefined)` yields a ChangeEvent
-  // whose `value` is absent, which `changeKind` classifies as "remove" — the
-  // channel must special-case undefined-valued sets (emit an explicit JSON
-  // `null` or a presence flag) so the far side doesn't drop the key. A shared
-  // "SnapshotCapable reactive harness projects snapshot+deltas from its
-  // change stream" mixin would DRY knobs + state.
+  // → a full snapshot frame; consumers apply with `applyJsonPatch`. The view's
+  // stream is ENTRY-typed (`{ key, value }`), so a `set(key, undefined)` carries
+  // a present entry (add/update classifies correctly) — the far-side wire codec
+  // must still encode the unwrapped `undefined` value explicitly (JSON `null` or
+  // a presence flag) so the key is not dropped on apply. A shared "SnapshotCapable
+  // reactive harness projects snapshot+deltas from its change stream" mixin would
+  // DRY knobs + state.
+}
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+/**
+ * Project an ENTRY-typed change (the view's `{ key, value }` stream) onto a
+ * VALUE-typed one (the public notify seam), preserving KEY-PRESENCE so
+ * add/update/remove classify identically — `"value" in c` / `"prev" in c`, NOT
+ * `!== undefined`, which is load-bearing for state's legitimately-`undefined`
+ * values.
+ */
+function toValueChange<T, V>(c: ChangeEvent<T>, valueOf: (t: T) => V): ChangeEvent<V> {
+  const out: { key: string; value?: V; prev?: V } = { key: c.key };
+  if ("value" in c) out.value = valueOf(c.value as T);
+  if ("prev" in c) out.prev = valueOf(c.prev as T);
+  return out;
 }

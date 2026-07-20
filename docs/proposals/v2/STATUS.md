@@ -1721,6 +1721,39 @@ explicit `typescript` + `vitest` devDeps. Both removed:
 Running record of decisions made during execution (separate from the
 blueprint's design decisions; this is execution-level).
 
+### 2026-07-20
+
+- **ReactiveStore convergence — Cut 1 LANDED (foundation + pilot proof).** The
+  nine store-backed harnesses each hand-rolled the same reactive machine; the
+  convergence collapses it. Design: `docs/proposals/v2/reactive-store.md`
+  (grounded in TanStack Query / RxDB / Svelte-stores; the "Locked" section).
+  **The seam** (`ReactiveStore<T,Q,M>` in spec-next): three verbs — `query(q,ctx)`
+  (read = projection from the source), `mutate(m,ctx)` (write), optional
+  `watch?(q,ctx)` (reactivity is a capability, not a mandate). `Q` = a
+  serializable query DESCRIPTION (never a query language), defaults to `void`; `M`
+  the mutation vocab. `CollectionStore`/`LogStore` are ergonomic PROFILES over it
+  (Cut 1: coexist additively — `MemoryCollection` implements both `get/list/put`
+  AND `query/mutate`; the formal `extends` sweep is Cut 2). **The collapse**
+  (`ReactiveView` in store-next): ONE harness-side sync projection that subsumes
+  `CollectionProjection` + `KeyedNotifier` (render pings) + `ChangeNotifier`
+  (typed deltas) — sync reads (`getSync`/`listSync`, render + sync-`exportSnapshot`
+  safe), single-mutation `write`/`deleteSync` (cache → seam `mutate` off the
+  critical path → ping + typed change), and CHANGE-SILENT bulk `replace`/`hydrate`
+  (cache-first, batched pings — a wholesale replace is the harness's own aggregate
+  frame, not N spurious deltas). **Pilot:** knobs + state migrated (3 fields → 1
+  `view`; `applySet`/`applyRegister`/`applyDelete`/`importSnapshot`/`hydrate`
+  boilerplate collapsed). Parity held on the delicate points: knobs `knobs-state`
+  JSON-Patch channel (entry-typed stream, `projectStateDelta` unwrap), state's
+  `undefined`-value classification (add/update rides `cache.has`, NOT
+  `prev !== undefined` — a stored value may legitimately BE `undefined`). Gates:
+  **152/152 typecheck 0-cached, 1043 tests / 64 files, oxfmt + oxlint clean.**
+  Residual drift (deferred to Cut 2 per the three-consumers rule): a ~7-line
+  `toValueChange` entry→value unwrap is duplicated in knobs + state — hoist to a
+  `store-next` `mapChange` export during the fan-out. **Cut 2+:** fan `ReactiveView`
+  out to the remaining 7 harnesses, retire `CollectionProjection`, make the
+  profiles formally `extends ReactiveStore`. TODO markers greppable:
+  `TODO(reactive-store-cut2)`.
+
 ### 2026-07-15
 
 - **ADR 88 + 88a — live media sessions (DRAFT).** Designed the "live" capability

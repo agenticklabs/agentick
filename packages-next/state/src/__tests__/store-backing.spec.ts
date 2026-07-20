@@ -15,12 +15,13 @@ import { describe, expect, it } from "vitest";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import { stubStoreCtx } from "@agentick/store-next";
 
+import { MemoryCollection } from "@agentick/store-next";
+
 import { StateHarness } from "../harness.js";
 import { createStateStore, type StateEntry, type StateStoreQuery } from "../store.js";
-import type { CollectionStore } from "@agentick/spec-next";
 
 async function makeHarness(
-  store?: CollectionStore<StateEntry, StateStoreQuery>,
+  store?: MemoryCollection<StateEntry, StateStoreQuery>,
   scope = "store-test",
 ): Promise<StateHarness> {
   const harness = new StateHarness(

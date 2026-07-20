@@ -35,7 +35,12 @@
  * @verifiedBy packages-next/store/src/__tests__/memory-collection.spec.ts
  */
 
-import type { CollectionStore, StoreCtx } from "@agentick/spec-next";
+import type {
+  CollectionMutation,
+  CollectionStore,
+  ReactiveStore,
+  StoreCtx,
+} from "@agentick/spec-next";
 import { createChangeNotifier, type ChangeEvent, type ChangeNotifier } from "@agentick/pubsub-next";
 
 /**
@@ -71,7 +76,14 @@ export interface MemoryCollectionConfig<T, Q, PruneArg = never> {
   readonly prunePredicate?: (item: T, arg: PruneArg) => boolean;
 }
 
-export class MemoryCollection<T, Q, PruneArg = never> implements CollectionStore<T, Q, PruneArg> {
+// TODO(reactive-store-cut2): collapse get/list/put/delete into query/mutate
+// profile sugar (make CollectionStore formally `extends ReactiveStore`). Today
+// the two surfaces COEXIST additively — the profile methods for direct callers,
+// the seam for the harness-side ReactiveView — so no store is forced to
+// reimplement query/mutate before the Cut 2 sweep.
+export class MemoryCollection<T, Q, PruneArg = never>
+  implements CollectionStore<T, Q, PruneArg>, ReactiveStore<T, Q, CollectionMutation<T>>
+{
   readonly backend: string;
   private readonly items = new Map<string, T>();
   private readonly config: MemoryCollectionConfig<T, Q, PruneArg>;
@@ -144,6 +156,28 @@ export class MemoryCollection<T, Q, PruneArg = never> implements CollectionStore
       this.changes.emitChange(prev === undefined ? { key } : { key, prev });
     }
     return Promise.resolve(existed);
+  }
+
+  // ─────────── ReactiveStore seam (query / mutate over the same Map) ───────────
+
+  /**
+   * The seam READ — a projection shaped by a query. Delegates to {@link list}
+   * (the collection profile's query IS its `list`); omitting the query returns
+   * every record.
+   */
+  query(q: Q | undefined, ctx: StoreCtx): Promise<readonly T[]> {
+    return this.list(q, ctx);
+  }
+
+  /**
+   * The seam WRITE — a {@link CollectionMutation} applied to the source. A `put`
+   * upserts (delegates to {@link put}); a `delete` removes by key (delegates to
+   * {@link delete}, discarding the existed-boolean to satisfy the `Promise<void>`
+   * seam). Notification + `onChange` fan-out ride the delegated methods
+   * unchanged.
+   */
+  mutate(m: CollectionMutation<T>, ctx: StoreCtx): Promise<void> {
+    return "put" in m ? this.put(m.put, ctx) : this.delete(m.delete, ctx).then(() => undefined);
   }
 
   /**
