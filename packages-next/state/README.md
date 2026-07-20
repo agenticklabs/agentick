@@ -39,10 +39,10 @@ serializability — the same rule the rest of the substrate follows.
 ### Store-backed (data-layer plan §3.5)
 
 State is store-derived AND store-persisted, exactly like knobs. A durable
-`CollectionStore<StateEntry>` of `{ key, value }` cells is the authority; a
-synchronous `CollectionProjection` is its read cache, so the sync surface never
-touches the async store. Every mutation **dual-writes** through the projection
-(sync cache first, durable store off the critical path); `hydrate()` reloads the
+`ReactiveStore<StateEntry>` of `{ key, value }` cells is the authority; a
+synchronous `ReactiveView` is its read cache, so the sync surface never
+touches the async store. Every mutation **writes through** the view (sync
+cache first, durable store off the critical path); `hydrate()` reloads the
 store into the projection on resume. The default store is a fresh in-memory
 `createStateStore()` (`:memory:`, lost on exit); inject a durable adapter via
 `new StateHarness(..., { store })` or `withState({ store })` to survive restart.

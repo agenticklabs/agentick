@@ -16,7 +16,13 @@
  * @see docs/proposals/v2/data-layer-plan.md §6-C
  */
 
-import type { Skill, SkillStore, SkillStoreQuery, StoreCtx } from "@agentick/spec-next";
+import type {
+  CollectionMutation,
+  Skill,
+  SkillStore,
+  SkillStoreQuery,
+  StoreCtx,
+} from "@agentick/spec-next";
 import { MemoryCollection } from "@agentick/store-next";
 
 /**
@@ -74,5 +80,16 @@ export class InMemorySkillStore implements SkillStore {
 
   async delete(name: string, ctx: StoreCtx): Promise<void> {
     await this.collection.delete(name, ctx);
+  }
+
+  // TODO(reactive-store-cut2): drops out once CollectionStore extends ReactiveStore
+  // (Cut 2b) — the composed MemoryCollection already implements the seam, so these
+  // two delegates are the whole cost of satisfying `ReactiveStore` today.
+  query(q: SkillStoreQuery | undefined, ctx: StoreCtx): Promise<readonly Skill[]> {
+    return this.collection.query(q, ctx);
+  }
+
+  mutate(m: CollectionMutation<Skill>, ctx: StoreCtx): Promise<void> {
+    return this.collection.mutate(m, ctx);
   }
 }

@@ -37,6 +37,7 @@
 import { Effect } from "effect";
 import { BaseHarness, type Unsubscribe } from "@agentick/runtime-next";
 import type {
+  CollectionMutation,
   EventBus,
   MessageEntry,
   MessageEnvelope,
@@ -46,7 +47,6 @@ import type {
   PromptArgument,
   PromptDeclaration,
   PromptDeclarationRecord,
-  PromptStore,
   PromptStoreQuery,
   PromptsError,
   PromptsGetInput,
@@ -57,6 +57,7 @@ import type {
   PromptsRemoveInput,
   PromptsSnapshotEntry,
   PromptsUpdateInput,
+  ReactiveStore,
   StandardSchemaIssue,
   StandardSchemaV1,
   TimelineHarnessProtocol,
@@ -71,8 +72,7 @@ import {
   PromptRenderFailed,
   PromptsBackendError,
 } from "@agentick/spec-next";
-import { createKeyedNotifier, type KeyedNotifier } from "@agentick/pubsub-next";
-import { CollectionProjection } from "@agentick/store-next";
+import { ReactiveView } from "@agentick/store-next";
 import { omitUndefined, ulid } from "@agentick/utils-next";
 
 import type { PromptLoader } from "./loaders.js";
@@ -114,43 +114,59 @@ export interface PromptsHarnessOptions {
    * store holds ONLY the serializable {@link PromptDeclarationRecord} — the
    * `template`/`render` augmentation stays in the harness's sidecar and never
    * reaches the store. It is the durable truth; the synchronous
-   * {@link CollectionProjection} is its sync read cache (reads never touch the
-   * store). Injecting a durable adapter is how prompt declarations survive
-   * process restart; `hydrate()` loads them back into the projection. The
-   * sidecar does NOT survive — the adopter re-registers `render`/`template`
+   * {@link ReactiveView} is its sync read cache (reads never touch the store).
+   * Injecting a durable adapter is how prompt declarations survive process
+   * restart; `hydrate()` loads them back into the view. Typed against the
+   * `ReactiveStore` SEAM — a durable adapter need only implement `query`/`mutate`.
+   * The sidecar does NOT survive — the adopter re-registers `render`/`template`
    * alongside restore (fns aren't serializable).
    *
-   * A projection (not async-through-the-store): prompts carries a SYNC
+   * A view (not async-through-the-store): prompts carries a SYNC
    * `exportSnapshot()` (the generic `captureBridgeSnapshots` calls it un-awaited,
    * SnapshotCapable) AND a sync `getDeclaration`/`has`/`list` surface — both are
    * load-bearing sync callers, so a synchronous materialized view is required.
    */
-  readonly store?: PromptStore;
+  readonly store?: ReactiveStore<
+    PromptDeclarationRecord,
+    PromptStoreQuery,
+    CollectionMutation<PromptDeclarationRecord>
+  >;
 }
 
 export class PromptsHarness extends BaseHarness<PromptsSurface> implements PromptsHarnessProtocol {
   /**
-   * The synchronous read PROJECTION of the prompt store (data-layer plan §3.5
-   * P5) — holds the SERIALIZABLE {@link PromptDeclarationRecord} slice.
-   * `getDeclaration` / `has` / `list` read it during render, and
-   * `exportSnapshot` materializes it synchronously (records ARE the snapshot —
-   * fns are excluded by construction). The shared {@link CollectionProjection}
-   * owns the dual-write (sync cache first, durable store off the critical path)
-   * and the merge {@link CollectionProjection.hydrate}. Keyed by record `name`.
+   * The synchronous {@link ReactiveView} of the prompt store (data-layer plan
+   * §3.5 P5) — ONE primitive that collapses the two fields this used to
+   * hand-roll (a `CollectionProjection` for the sync cache + write-through and a
+   * `KeyedNotifier` for render pings). Holds the SERIALIZABLE
+   * {@link PromptDeclarationRecord} slice. `getDeclaration` / `has` / `list` read
+   * it during render; `exportSnapshot` materializes it synchronously (records ARE
+   * the snapshot — fns are excluded by construction); the mutation helpers write
+   * through it (sync cache first, durable store off the critical path via the
+   * `query`/`mutate` seam) and each single write pings the key. The record slice
+   * is a pure-mirror collection (cache value IS the stored record), so the view
+   * fits without refinement; the non-serializable `{ template, render }`
+   * augmentation lives in the parallel {@link augmentations} sidecar the view is
+   * agnostic to. Keyed by record `name`. No `onChange` subscriber — prompts has
+   * no client-facing change channel.
    */
-  private readonly projection: CollectionProjection<PromptDeclarationRecord, PromptStoreQuery>;
+  private readonly view: ReactiveView<
+    PromptDeclarationRecord,
+    PromptStoreQuery,
+    CollectionMutation<PromptDeclarationRecord>
+  >;
   /**
    * The NON-serializable augmentation sidecar (data-layer plan §6-C — the
-   * "augmented instance" split). Parallel to {@link projection}, keyed by the
-   * SAME `name`. Holds `{ template?, render? }` — written at register/update,
-   * dropped at remove, CLEARED on `importSnapshot` (fns can't survive
-   * serialization; the adopter re-registers). NEVER written to the store — the
-   * `PromptDeclarationRecord` type makes that a compile-time guarantee. Only
-   * entries with a defined `template` or `render` are kept (see
+   * "augmented instance" split). Parallel to {@link view}, keyed by the SAME
+   * `name`. Holds `{ template?, render? }` — written at register/update, dropped
+   * at remove, CLEARED on `importSnapshot` (fns can't survive serialization; the
+   * adopter re-registers). NEVER written to the store — the
+   * `PromptDeclarationRecord` type makes that a compile-time guarantee, and the
+   * {@link ReactiveView} never touches it (it mirrors the record slice only).
+   * Only entries with a defined `template` or `render` are kept (see
    * {@link setAugmentation}).
    */
   private readonly augmentations = new Map<string, PromptAugmentation>();
-  private readonly notifier: KeyedNotifier = createKeyedNotifier();
   private readonly renderers: readonly PromptRenderer[];
   private readonly timeline?: TimelineHarnessProtocol;
 
@@ -194,10 +210,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
     super(SURFACE, scopeId, journal, bus, inbox);
     this.renderers = options.renderers ?? [];
     this.timeline = options.timeline;
-    this.projection = new CollectionProjection<PromptDeclarationRecord, PromptStoreQuery>(
-      options.store ?? new InMemoryPromptStore(),
-      (record) => record.name,
-    );
+    this.view = ReactiveView.collection(options.store ?? new InMemoryPromptStore(), (r) => r.name);
 
     // ─── Declared commands (ADR 51) — the single declaration site per
     // verb. Inbox message types, canonical op naming, and enumeration
@@ -283,7 +296,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
     const added: string[] = [];
     const updated: string[] = [];
     for (const [name, decl] of fresh) {
-      if (this.projection.hasSync(name)) {
+      if (this.view.hasSync(name)) {
         await this.update({
           name,
           declaration: {
@@ -302,7 +315,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
     }
     const removed: string[] = [];
     if (opts.pruneMissing) {
-      for (const name of this.projection.listSync().map((r) => r.name)) {
+      for (const name of this.view.listSync().map((r) => r.name)) {
         if (!fresh.has(name)) {
           await this.remove({ name });
           removed.push(name);
@@ -359,7 +372,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
    * cannot occur, they are written and dropped together — would be ignored).
    */
   private declarationOf(name: string): PromptDeclaration | undefined {
-    const record = this.projection.getSync(name);
+    const record = this.view.getSync(name);
     if (!record) return undefined;
     const aug = this.augmentations.get(name);
     return aug ? { ...record, ...aug } : record;
@@ -370,75 +383,78 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
   }
 
   has(name: string): boolean {
-    return this.projection.hasSync(name);
+    return this.view.hasSync(name);
   }
 
   list(): readonly PromptDeclaration[] {
     if (this.listCache !== null) return this.listCache;
-    const out = this.projection.listSync().map((r) => this.declarationOf(r.name)!);
+    const out = this.view.listSync().map((r) => this.declarationOf(r.name)!);
     out.sort((a, b) => a.name.localeCompare(b.name));
     this.listCache = out;
     return out;
   }
 
   subscribe(name: string, listener: () => void): Unsubscribe {
-    return this.notifier.subscribe(name, listener);
+    return this.view.subscribe(name, listener);
   }
 
   subscribeAll(listener: () => void): Unsubscribe {
-    return this.notifier.subscribeAll(listener);
+    return this.view.subscribeAll(listener);
   }
 
   // ─────────── Snapshot / restore ───────────
 
   exportSnapshot(): Readonly<Record<string, PromptsSnapshotEntry>> {
-    // Reads the sync projection cache — MUST stay synchronous: the generic
+    // Reads the sync view cache — MUST stay synchronous: the generic
     // `captureBridgeSnapshots` invokes this un-awaited (SnapshotCapable). The
-    // projection holds ONLY records (a `PromptsSnapshotEntry` IS a record), so
-    // the augmentation is dropped by construction — no per-field stripping.
+    // view holds ONLY records (a `PromptsSnapshotEntry` IS a record), so the
+    // augmentation is dropped by construction — no per-field stripping.
     const out: Record<string, PromptsSnapshotEntry> = {};
-    for (const record of this.projection.listSync()) out[record.name] = record;
+    for (const record of this.view.listSync()) out[record.name] = record;
     return out;
   }
 
   importSnapshot(snapshot: Readonly<Record<string, PromptsSnapshotEntry>>): void {
-    // Wholesale replace through the projection: drop keys absent from the
-    // snapshot (from BOTH cache and store), then dual-write each snapshot record.
+    // Wholesale replace via the view: keys absent from the snapshot are dropped
+    // from BOTH the cache and the store; each snapshot record writes through. The
+    // view mutates the whole cache FIRST then batch-pings the union (drops ∪
+    // upserts), so invalidate `listCache` BEFORE `replace`. `replace` is
+    // change-SILENT (prompts has no per-key change channel). NOTE: the old
+    // `notifier.notifyAll()` fired the wildcard once; `replace` pings each touched
+    // key — the keyed bucket AND the wildcard per key — a superset, never fewer.
+    //
     // The augmentation sidecar is CLEARED — `template`/`render` are
     // non-serializable, so a restored prompt has no content until the adopter
     // re-registers it (invoke/get then throw `PromptMissingContent` until they do).
+    // The `ReactiveView` is agnostic to the sidecar; the clear is harness-owned.
     //
     // TODO(store-phase-4): `importSnapshot` is the ACTIVE snapshot-based resume
     // path. The Phase-4 manifest sweep replaces it with `hydrate()` once the
     // store is the authority. Do NOT wire `hydrate()` into resume while this
     // method still owns it.
-    const oldKeys = new Set(this.projection.listSync().map((r) => r.name));
-    const newKeys = new Set(Object.keys(snapshot));
-    for (const k of oldKeys) if (!newKeys.has(k)) this.projection.deleteSync(k, this.storeCtx());
-    for (const entry of Object.values(snapshot)) this.projection.write(entry, this.storeCtx());
-    this.augmentations.clear();
     this.listCache = null;
-    // Snapshot import: wildcard-only signal so global views refresh without
-    // per-id firings flooding.
-    this.notifier.notifyAll();
+    this.view.replace(Object.values(snapshot), this.storeCtx());
+    this.augmentations.clear();
   }
 
   /**
-   * Load the durable store into the sync projection — the future manifest resume
-   * path (data-layer plan Phase 4). A MERGE (store records overlay the
-   * projection), not a clear-first replace — a fresh session's store is empty ⇒
-   * a no-op. The augmentation sidecar is NOT touched: records survive the store,
+   * Load the durable store into the sync view — the future manifest resume
+   * path (data-layer plan Phase 4). A MERGE (store records overlay the view),
+   * not a clear-first replace — a fresh session's store is empty ⇒ a no-op. The
+   * augmentation sidecar is NOT touched: records survive the store,
    * `template`/`render` do not, so a hydrated prompt has record-only content
-   * until re-registered. Invalidates `list()` and pings each hydrated key.
+   * until re-registered. Invalidates `list()`; the view pings each hydrated key.
    *
    * NOT wired into session resume in this run: `importSnapshot` remains the
    * active resume path. `hydrate()` is the seam the Phase-4 manifest sweep flips
    * to once the store is authority.
    */
   async hydrate(): Promise<void> {
-    const keys = await this.projection.hydrate(undefined, this.storeCtx());
+    // The view merges the store projection into the cache and pings each loaded
+    // key. Invalidate `listCache` BEFORE the merge+ping so a subscriber re-reads
+    // the hydrated list. The sidecar is left untouched (parity).
     this.listCache = null;
-    for (const k of keys) this.notifier.notify(k);
+    await this.view.hydrate(undefined, this.storeCtx());
   }
 
   // ─────────── Inbox routing ───────────
@@ -461,20 +477,23 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
   ): Effect.Effect<PromptDeclaration, PromptsError, never> {
     return Effect.suspend((): Effect.Effect<PromptDeclaration, PromptsError, never> => {
       const decl = input.declaration;
-      if (this.projection.hasSync(decl.name)) {
+      if (this.view.hasSync(decl.name)) {
         return Effect.fail(new PromptAlreadyExists({ name: decl.name }));
       }
-      // Split: the serializable record dual-writes through the projection (sync
-      // cache first, durable store off the critical path); the non-serializable
+      // Split: the serializable record writes through the view (sync cache first,
+      // durable store off the critical path, a render ping); the non-serializable
       // `{ template, render }` re-attaches to the sidecar, never the store.
+      // Invalidate `listCache` and populate the sidecar BEFORE the view write so a
+      // subscriber that reads during the write's synchronous ping sees BOTH the
+      // fresh list and the combined declaration (the sidecar-merged view).
       const record: PromptDeclarationRecord = {
         name: decl.name,
         description: decl.description,
         ...omitUndefined({ arguments: decl.arguments, metadata: decl.metadata }),
       };
-      this.projection.write(record, this.storeCtx());
+      this.listCache = null;
       this.setAugmentation(decl.name, decl);
-      this.invalidateAndNotify(decl.name);
+      this.view.write(record, this.storeCtx());
       return Effect.succeed(this.declarationOf(decl.name)!);
     });
   }
@@ -483,7 +502,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
     input: PromptsUpdateInput,
   ): Effect.Effect<PromptDeclaration, PromptsError, never> {
     return Effect.suspend((): Effect.Effect<PromptDeclaration, PromptsError, never> => {
-      const existingRecord = this.projection.getSync(input.name);
+      const existingRecord = this.view.getSync(input.name);
       if (!existingRecord) {
         return Effect.fail(new PromptNotFound({ name: input.name }));
       }
@@ -497,23 +516,29 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
           metadata: patch.metadata ?? existingRecord.metadata,
         }),
       };
-      this.projection.write(updatedRecord, this.storeCtx());
-      // Merge the augmentation: incoming `template`/`render` win; absent → keep
-      // the existing sidecar value (same `??` merge the record fields use).
+      // Invalidate `listCache` and merge the sidecar BEFORE the view write so a
+      // subscriber reading during the write's synchronous ping sees the combined
+      // declaration. Merge: incoming `template`/`render` win; absent → keep the
+      // existing sidecar value (same `??` merge the record fields use).
+      this.listCache = null;
       this.setAugmentation(input.name, {
         template: patch.template ?? existingAug?.template,
         render: patch.render ?? existingAug?.render,
       });
-      this.invalidateAndNotify(input.name);
+      this.view.write(updatedRecord, this.storeCtx());
       return Effect.succeed(this.declarationOf(input.name)!);
     });
   }
 
   private applyRemove(input: PromptsRemoveInput): void {
-    if (this.projection.hasSync(input.name)) {
-      this.projection.deleteSync(input.name, this.storeCtx());
+    // Idempotent — the view's `deleteSync` fires nothing on an absent name. The
+    // `hasSync` guard keeps the `listCache`/sidecar mutations off the no-op path.
+    // Drop the sidecar and invalidate BEFORE the view delete so a subscriber
+    // reading during the ping sees the entry fully gone.
+    if (this.view.hasSync(input.name)) {
+      this.listCache = null;
       this.augmentations.delete(input.name);
-      this.invalidateAndNotify(input.name);
+      this.view.deleteSync(input.name, this.storeCtx());
     }
   }
 
@@ -543,7 +568,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
         // configured loaders. On hit, the prompt is registered (a
         // nested `prompts:register` command) + invoke proceeds; on
         // miss, `renderToMessages` throws `PromptNotFound`.
-        if (!this.projection.hasSync(input.name) && this.loaders.length > 0) {
+        if (!this.view.hasSync(input.name) && this.loaders.length > 0) {
           await this.resolve(input.name);
         }
         const result = await this.renderToMessages(input.name, input.args);
@@ -578,7 +603,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
     return Effect.tryPromise({
       try: async () => {
         // Same lookup-on-miss path as `applyInvoke`.
-        if (!this.projection.hasSync(input.name) && this.loaders.length > 0) {
+        if (!this.view.hasSync(input.name) && this.loaders.length > 0) {
           await this.resolve(input.name);
         }
         return this.renderToMessages(input.name, input.args);
@@ -642,11 +667,6 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
       name,
       cause: `no registered renderer handles content (typeof=${typeof content}); registered: [${this.renderers.map((r) => r.name).join(", ")}]`,
     });
-  }
-
-  private invalidateAndNotify(name: string): void {
-    this.listCache = null;
-    this.notifier.notify(name);
   }
 }
 

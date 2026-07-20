@@ -21,6 +21,7 @@
  */
 
 import type {
+  CollectionMutation,
   PromptDeclarationRecord,
   PromptStore,
   PromptStoreQuery,
@@ -77,5 +78,19 @@ export class InMemoryPromptStore implements PromptStore {
 
   async delete(name: string, ctx: StoreCtx): Promise<void> {
     await this.collection.delete(name, ctx);
+  }
+
+  // TODO(reactive-store-cut2): drops out once CollectionStore extends ReactiveStore
+  // (Cut 2b) — the composed MemoryCollection already implements the seam, so these
+  // two delegates are the whole cost of satisfying `ReactiveStore` today.
+  query(
+    q: PromptStoreQuery | undefined,
+    ctx: StoreCtx,
+  ): Promise<readonly PromptDeclarationRecord[]> {
+    return this.collection.query(q, ctx);
+  }
+
+  mutate(m: CollectionMutation<PromptDeclarationRecord>, ctx: StoreCtx): Promise<void> {
+    return this.collection.mutate(m, ctx);
   }
 }

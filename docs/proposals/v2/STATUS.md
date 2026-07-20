@@ -1754,6 +1754,31 @@ blueprint's design decisions; this is execution-level).
   profiles formally `extends ReactiveStore`. TODO markers greppable:
   `TODO(reactive-store-cut2)`.
 
+- **ReactiveStore Cut 2a LANDED — skills + prompts migrated, `CollectionProjection`
+  RETIRED.** The seven remaining harnesses do NOT fan out uniformly (map in the
+  Cut-2 planning): only skills (pure mirror) and prompts (mirror + harness-owned
+  `augmentations` split-map sidecar) were the other `CollectionProjection` holders,
+  so migrating them onto `ReactiveView` left the old primitive with zero consumers
+  — deleted `collection-projection.ts` + its spec (−287 lines), dropped the barrel
+  export. Both in-memory stores gained additive `query`/`mutate` delegates to their
+  composed `MemoryCollection` (`TODO(reactive-store-cut2)`); store options widened
+  to the `ReactiveStore` seam. Prompts parity detail: the `augmentations` sidecar
+  stays harness-owned (cleared on import, untouched on hydrate) and is populated
+  BEFORE the now-synchronous `view.write` ping so a subscriber sees the combined
+  `declarationOf`. Also fixed Cut-1 doc-rot (state README + store-backing spec still
+  named `CollectionProjection`). Gates: **152/152 typecheck 0-cached, 225 tests /
+  17 files, oxfmt + oxlint clean.** Net −254 lines.
+  **DEFERRED (each needs a design decision, not a sweep):** tasks (cache-type ≠
+  store-type `LiveTask` sidecar — needs a `ReactiveView` refinement + honors tasks'
+  own ≥2-augmented-consumer gate), session (single-record `SessionRuntime` → wants
+  a `ReactiveCell` sibling; one consumer, three-consumers rule), resources (hybrid
+  raw-Map catalog + resolver sidecars — partial fit), timeline (LOG archetype →
+  needs a `ReactiveLogView` sibling, not `ReactiveView`), credentials (async-only,
+  untouched — the standing counter-example). **Cut 2b (next mechanical step):**
+  `CollectionStore`/`LogStore` formally `extends ReactiveStore` (in-memory defaults
+  inherit `query`/`mutate` free; hand-write on the Postgres/Fs adapters + MemoryLog
+  + Idempotent/Journal stores) — retires the coexistence TODOs.
+
 ### 2026-07-15
 
 - **ADR 88 + 88a — live media sessions (DRAFT).** Designed the "live" capability

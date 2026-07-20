@@ -33,27 +33,27 @@ copy-pasted conformance suite. This package factors all three out:
   **full in-memory array per log is the intended default** (no bounding /
   eviction — that is a durable adapter's concern, data-layer plan §2.7); the
   only per-store knob is the `backend` label.
-- **`CollectionProjection<T, Q, PruneArg>`** — the synchronous read-model over
-  an async `CollectionStore`: sync cache + write-through + hydrate. The
-  primitive that fell out of runs #1 (tasks) and #2 (knobs) — a store-backed
-  harness whose protocol reads are **synchronous** (served during render)
-  composes this instead of re-deriving the projection + dual-write by hand.
-  Async-only, never-rendered harnesses (credentials) read the store live and
-  need NO projection — the projection rule is conditional on render-read.
-- **`ReactiveView<T, Q, M>`** — the convergence of `CollectionProjection` + a
-  `KeyedNotifier` (render pings) + a `ChangeNotifier` (typed `{ key, value?,
-  prev? }` deltas) into **one** harness-side sync projection of a
-  [`ReactiveStore`](../spec/src/protocol/reactive-store.ts). It drives the store
-  through the `query`/`mutate` **seam** (never the profile methods), so a store
-  that only implements `ReactiveStore` works. Two notify contracts: the
-  **single-mutation** path (`write` / `deleteSync`) pings the key AND emits a
-  typed change; the **bulk** path (`replace` / `hydrate`) mutates the whole
-  cache first, batches the render pings, and is **change-silent** (a wholesale
-  replace is the harness's own aggregate/snapshot frame, not N deltas).
-  Add-vs-update rides cache **presence** (`cache.has`), never `value !==
-  undefined` — so a legitimately `undefined` stored value classifies correctly.
-  Knobs + state compose this in Cut 1; the remaining harnesses fan out in Cut 2,
-  where it retires `CollectionProjection`.
+- **`ReactiveView<T, Q, M>`** — the harness-side SYNCHRONOUS projection of a
+  [`ReactiveStore`](../spec/src/protocol/reactive-store.ts): a sync read cache +
+  write-through + a `KeyedNotifier` (render pings) + a `ChangeNotifier` (typed
+  `{ key, value?, prev? }` deltas), all in **one** primitive. This is the
+  convergence that **retired** the earlier `CollectionProjection` (sync cache +
+  write-through + hydrate, the read-model that fell out of runs #1 tasks / #2
+  knobs) once every store-backed harness moved onto it — a store-backed harness
+  whose protocol reads are **synchronous** (served during render) composes this
+  instead of re-deriving the projection + notify seams by hand. Async-only,
+  never-rendered harnesses (credentials) read the store live and need NO view —
+  the rule is conditional on render-read. It drives the store through the
+  `query`/`mutate` **seam** (never the profile methods), so a store that only
+  implements `ReactiveStore` works. Two notify contracts: the **single-mutation**
+  path (`write` / `deleteSync`) pings the key AND emits a typed change; the
+  **bulk** path (`replace` / `hydrate`) mutates the whole cache first, batches
+  the render pings, and is **change-silent** (a wholesale replace is the
+  harness's own aggregate/snapshot frame, not N deltas). Add-vs-update rides
+  cache **presence** (`cache.has`), never `value !== undefined` — so a
+  legitimately `undefined` stored value classifies correctly. Composed by knobs +
+  state (Cut 1) and skills + prompts (Cut 2a); the remaining store-backed
+  harnesses fan out in later cuts.
 
   ```ts
   import { ReactiveView } from "@agentick/store-next";
@@ -145,7 +145,7 @@ never breaks the write or a sibling):
 This is the **cross-consumer / external-observation** seam — distinct from a
 single harness's self-caused change stream. A harness that owns its store
 privately and is the only writer already knows what it changed and does not
-subscribe (knobs, behind a private `CollectionProjection`, deliberately does
+subscribe (knobs, behind a private `ReactiveView`, deliberately does
 not — a listener-less `onChange` is a no-op cost). `onChange` earns its keep
 when a store is shared OR a durable backend surfaces changes the process did not
 originate. `inMemoryCredentialsStore` is its first real consumer, forwarding
@@ -176,38 +176,21 @@ pruned-empty log's next append never reuses a retired `seq`. **No memory
 strategy is legislated** — a full array is the intended default; a durable
 adapter picks differently behind the same `LogStore` port.
 
-### `CollectionProjection<T, Q = unknown, PruneArg = never>`
-
-The synchronous read-model over an async `CollectionStore` — exactly three
-things: a sync read cache, write-through, and hydrate. A store-backed harness
-whose protocol reads must be **synchronous** (served during render) composes
-this instead of hand-rolling a `Map` projection kept in lockstep with the store.
-
-| Member                        | Behavior                                                              |
-| ----------------------------- | -------------------------------------------------------------------- |
-| `new CollectionProjection(store, keyOf)` | Wrap an async `CollectionStore` with a sync read-model    |
-| `getSync(key)`                | Read the cache; NEVER touches the store                              |
-| `hasSync(key)`                | Presence in the cache                                                |
-| `listSync()`                  | Fresh array of every cached record                                   |
-| `write(item)`                 | Set cache synchronously, then fire-and-forget `store.put` off-path   |
-| `deleteSync(key)`             | Drop from cache synchronously, then fire-and-forget `store.delete`   |
-| `hydrate(query?)`             | Load `store.list()` into the cache as an OVERLAY; returns loaded keys |
-
-Deliberately NOT owned here: change-notification, the substrate channel, list
-invalidation, layer chains — all harness-specific. This is a **write sink** that
-sits beside the harness's notify seam, never a source of it (`hydrate` returns
-changed keys so the harness fires its own notifications).
-
-**When you do NOT need it.** Async-only, never-rendered harnesses read the store
-LIVE and hold no projection — credentials is the deliberate counter-example
-(`get`/`has`/`keys` each `await` the store directly). "Store-backed harness ⟹
-projection" is conditional on render-read, not universal.
-
 ### `ReactiveView<T, Q = void, M = never>`
 
-The harness-side sync projection of a `ReactiveStore` — `CollectionProjection` +
-a `KeyedNotifier` + a `ChangeNotifier`, collapsed. Drives the store through the
-`query`/`mutate` **seam**.
+The harness-side sync projection of a `ReactiveStore` — a sync read cache +
+write-through + a `KeyedNotifier` (render pings) + a `ChangeNotifier` (typed
+deltas), collapsed into one primitive. This RETIRED the earlier
+`CollectionProjection` (sync cache + write-through + hydrate) once every
+store-backed harness moved onto it. Drives the store through the `query`/`mutate`
+**seam**.
+
+A store-backed harness whose protocol reads must be **synchronous** (served
+during render) composes this instead of hand-rolling a `Map` projection kept in
+lockstep with the store. **When you do NOT need it:** async-only, never-rendered
+harnesses read the store LIVE and hold no view — credentials is the deliberate
+counter-example (`get`/`has`/`keys` each `await` the store directly).
+"Store-backed harness ⟹ view" is conditional on render-read, not universal.
 
 | Member                                        | Behavior                                                                 |
 | --------------------------------------------- | ------------------------------------------------------------------------ |
@@ -263,7 +246,14 @@ Landed across the data-layer store-substrate runs:
   task store refactored onto the generic; `runTaskStoreConformance` delegates
   its store-agnostic cases.
 - **Run #2 / 2.5 (knobs)** — `CollectionProjection` extracted (the sync
-  read-model + write-through + hydrate that both tasks and knobs hand-rolled).
+  read-model + write-through + hydrate that both tasks and knobs hand-rolled),
+  then **retired in the ReactiveStore convergence** (see below) once its
+  responsibilities folded into `ReactiveView`.
+- **ReactiveStore convergence (Cut 1 + Cut 2a)** — `ReactiveView` landed as the
+  single harness-side sync projection over a `ReactiveStore`, folding
+  `CollectionProjection` + `KeyedNotifier` + `ChangeNotifier` into one primitive.
+  Knobs + state moved onto it (Cut 1); skills + prompts followed (Cut 2a), at
+  which point `CollectionProjection` had zero consumers and was deleted.
 - **Run #3 (credentials)** — `MemoryCollection.onChange` (the shared-store
   observation seam) landed with `inMemoryCredentialsStore` as its first
   consumer; that store now composes `MemoryCollection` (composite `(namespace,
@@ -298,9 +288,6 @@ Landed across the data-layer store-substrate runs:
   history-paging / keys / delete / prune-by-absolute-seq behavior, defensive-copy
   read, per-log isolation, configurable backend, and the shared skeleton driven
   against the LOG archetype (empty-read `[]`).
-- `src/__tests__/collection-projection.spec.ts` — the sync read-model: sync
-  reads never touch the store, write-through, and hydrate-as-overlay returning
-  loaded keys.
 - `src/__tests__/reactive-view.spec.ts` — the `ReactiveView` convergence: sync
   reads, `write` fires ping + typed change (add/update by cache presence),
   idempotent `deleteSync`, undefined-value classification, change-silent

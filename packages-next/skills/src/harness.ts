@@ -23,13 +23,14 @@
 import { Effect } from "effect";
 import { BaseHarness, type Unsubscribe } from "@agentick/runtime-next";
 import type {
+  CollectionMutation,
   EventBus,
   MessageEnvelope,
   MessageHandlerError,
   MessageInbox,
   OperationJournal,
+  ReactiveStore,
   Skill,
-  SkillStore,
   SkillStoreQuery,
   SkillsError,
   SkillsHarnessProtocol,
@@ -39,8 +40,7 @@ import type {
   SkillsUpdateInput,
 } from "@agentick/spec-next";
 import { HandlerError, SkillAlreadyExists, SkillNotFound } from "@agentick/spec-next";
-import { createKeyedNotifier, type KeyedNotifier } from "@agentick/pubsub-next";
-import { CollectionProjection } from "@agentick/store-next";
+import { ReactiveView } from "@agentick/store-next";
 import { omitUndefined } from "@agentick/utils-next";
 
 import type { SkillLoader } from "./loaders.js";
@@ -69,7 +69,7 @@ type SkillsSurface = typeof SURFACE;
 /**
  * Construction options for {@link SkillsHarness}. Threaded through
  * `withSkills({ store })` for adopters who want a durable backing (Postgres, a
- * filesystem source) behind the same {@link SkillStore} port.
+ * filesystem source) behind the same {@link ReactiveStore} seam.
  */
 export interface SkillsHarnessOptions {
   /**
@@ -77,34 +77,37 @@ export interface SkillsHarnessOptions {
    * to a fresh per-harness in-memory {@link InMemorySkillStore}. The store holds
    * the WHOLE `Skill` (skills are fully serializable — the archetype's pure
    * floor, no runtime augmentation to strip). It is the durable truth; the
-   * synchronous {@link CollectionProjection} is its sync read cache (reads never
-   * touch the store). Injecting a durable adapter is how skills survive process
-   * restart; `hydrate()` loads it back into the projection.
+   * synchronous {@link ReactiveView} is its sync read cache (reads never touch
+   * the store). Injecting a durable adapter is how skills survive process
+   * restart; `hydrate()` loads it back into the view. Typed against the
+   * `ReactiveStore` SEAM — a durable adapter need only implement `query`/`mutate`.
    *
-   * NOTE the projection (not async-through-the-store like credentials): skills
+   * NOTE the view (not async-through-the-store like credentials): skills
    * carries a SYNC `exportSnapshot(): Record<string, Skill>` (the generic
    * `captureBridgeSnapshots` calls it synchronously, un-awaited) AND a sync
    * `get`/`has`/`list`/`search` protocol surface — both are load-bearing sync
    * callers, so a synchronous materialized view is required. Credentials, the
    * async counter-example, has NO snapshot surface, which is why it needs no
-   * projection.
+   * view.
    */
-  readonly store?: SkillStore;
+  readonly store?: ReactiveStore<Skill, SkillStoreQuery, CollectionMutation<Skill>>;
 }
 
 export class SkillsHarness extends BaseHarness<SkillsSurface> implements SkillsHarnessProtocol {
   /**
-   * The synchronous read PROJECTION of the skill store (data-layer plan §3.5
-   * P5) — `get` / `has` / `list` / `search` read it during render, and
-   * `exportSnapshot` materializes it synchronously. The shared
-   * {@link CollectionProjection} owns the dual-write (sync cache first, durable
-   * store off the critical path via {@link CollectionProjection.write}) and the
-   * merge {@link CollectionProjection.hydrate}. It is a WRITE SINK beside the
-   * harness's notify seam (`notifier` + `listCache`), never a source of it —
-   * every mutation writes it AND drives the seam by hand. Keyed by `Skill.name`.
+   * The synchronous {@link ReactiveView} of the skill store (data-layer plan
+   * §3.5 P5) — ONE primitive that collapses the two fields this used to
+   * hand-roll (a `CollectionProjection` for the sync cache + write-through and a
+   * `KeyedNotifier` for render pings). `get` / `has` / `list` / `search` read it
+   * during render (sync, never async-through-the-store); `exportSnapshot`
+   * materializes it synchronously; `applyRegister` / `applyUpdate` / `applyRemove`
+   * write through it (sync cache first, durable store off the critical path via
+   * the `query`/`mutate` seam) and each single write pings the key. Skills are
+   * whole serializable records (the cache value IS the stored `Skill`), so the
+   * pure-mirror collection view fits without refinement. Keyed by `Skill.name`.
+   * No `onChange` subscriber — skills has no client-facing change channel.
    */
-  private readonly projection: CollectionProjection<Skill, SkillStoreQuery>;
-  private readonly notifier: KeyedNotifier = createKeyedNotifier();
+  private readonly view: ReactiveView<Skill, SkillStoreQuery, CollectionMutation<Skill>>;
 
   /** Cached snapshot for `list()`. Invalidated on every mutation. */
   private listCache: readonly Skill[] | null = null;
@@ -140,10 +143,7 @@ export class SkillsHarness extends BaseHarness<SkillsSurface> implements SkillsH
     options: SkillsHarnessOptions = {},
   ) {
     super(SURFACE, scopeId, journal, bus, inbox);
-    this.projection = new CollectionProjection<Skill, SkillStoreQuery>(
-      options.store ?? new InMemorySkillStore(),
-      (skill) => skill.name,
-    );
+    this.view = ReactiveView.collection(options.store ?? new InMemorySkillStore(), (s) => s.name);
     const scope = () => ({ sessionId: this.scopeId });
     this.register = this.command({
       name: "skills:register",
@@ -202,8 +202,8 @@ export class SkillsHarness extends BaseHarness<SkillsSurface> implements SkillsH
     const added: string[] = [];
     const updated: string[] = [];
     for (const [name, record] of fresh) {
-      if (this.projection.hasSync(name)) {
-        const existing = this.projection.getSync(name)!;
+      if (this.view.hasSync(name)) {
+        const existing = this.view.getSync(name)!;
         if (skillContentChanged(existing, record)) {
           await this.update({
             name,
@@ -221,7 +221,7 @@ export class SkillsHarness extends BaseHarness<SkillsSurface> implements SkillsH
     }
     const removed: string[] = [];
     if (opts.pruneMissing) {
-      for (const name of this.projection.listSync().map((s) => s.name)) {
+      for (const name of this.view.listSync().map((s) => s.name)) {
         if (!fresh.has(name)) {
           await this.remove({ name });
           removed.push(name);
@@ -237,7 +237,7 @@ export class SkillsHarness extends BaseHarness<SkillsSurface> implements SkillsH
    * the first match. Returns `null` if no loader has the name.
    */
   async resolve(name: string): Promise<Skill | null> {
-    const existing = this.projection.getSync(name);
+    const existing = this.view.getSync(name);
     if (existing) return existing;
     for (const loader of this.loaders) {
       const found = loader.lookup
@@ -245,7 +245,7 @@ export class SkillsHarness extends BaseHarness<SkillsSurface> implements SkillsH
         : ((await loader.load()).find((s) => s.name === name) ?? null);
       if (found) {
         await this.register(found);
-        return this.projection.getSync(name) ?? null;
+        return this.view.getSync(name) ?? null;
       }
     }
     return null;
@@ -266,16 +266,16 @@ export class SkillsHarness extends BaseHarness<SkillsSurface> implements SkillsH
   // ─────────── Sync surface ───────────
 
   get(name: string): Skill | undefined {
-    return this.projection.getSync(name);
+    return this.view.getSync(name);
   }
 
   has(name: string): boolean {
-    return this.projection.hasSync(name);
+    return this.view.hasSync(name);
   }
 
   list(): readonly Skill[] {
     if (this.listCache !== null) return this.listCache;
-    const out: Skill[] = this.projection.listSync().slice();
+    const out: Skill[] = this.view.listSync().slice();
     out.sort((a, b) => a.name.localeCompare(b.name));
     this.listCache = out;
     return out;
@@ -300,60 +300,59 @@ export class SkillsHarness extends BaseHarness<SkillsSurface> implements SkillsH
   }
 
   subscribe(name: string, listener: () => void): Unsubscribe {
-    return this.notifier.subscribe(name, listener);
+    return this.view.subscribe(name, listener);
   }
 
   subscribeAll(listener: () => void): Unsubscribe {
-    return this.notifier.subscribeAll(listener);
+    return this.view.subscribeAll(listener);
   }
 
   // ─────────── Snapshot / restore ───────────
 
   exportSnapshot(): Readonly<Record<string, Skill>> {
-    // Reads the sync projection cache — MUST stay synchronous: the generic
+    // Reads the sync view cache — MUST stay synchronous: the generic
     // `captureBridgeSnapshots` invokes this un-awaited (SnapshotCapable). Skills
     // are whole records (no augmentation to strip), so the cell IS the snapshot.
     const out: Record<string, Skill> = {};
-    for (const skill of this.projection.listSync()) out[skill.name] = skill;
+    for (const skill of this.view.listSync()) out[skill.name] = skill;
     return out;
   }
 
   importSnapshot(snapshot: Readonly<Record<string, Skill>>): void {
-    // Wholesale replace through the projection: drop keys absent from the
-    // snapshot (from BOTH cache and store), then dual-write each snapshot cell.
-    // In every real call path (seed / restore) the harness is fresh so the drop
-    // loop is a no-op; the loop makes a re-import onto a populated harness an
-    // honest replace rather than an upsert that would resurface stale keys via
-    // `hydrate()`.
+    // Wholesale replace via the view: keys absent from the snapshot are dropped
+    // from BOTH the cache and the store; each snapshot cell writes through. The
+    // view mutates the whole cache FIRST then batch-pings the union (drops ∪
+    // upserts), so invalidate `listCache` BEFORE `replace` and a subscriber
+    // reading during a ping sees the complete post-import list. `replace` is
+    // change-SILENT (skills has no per-key change channel). NOTE: the old
+    // `notifier.notifyAll()` fired the wildcard once; `replace` pings each
+    // touched key, which fires the keyed bucket AND the wildcard per key — a
+    // superset (more precise), never fewer.
     //
     // TODO(store-phase-4): `importSnapshot` is the ACTIVE snapshot-based resume
     // path. The Phase-4 manifest sweep replaces it with `hydrate()` once the
     // store is the authority. Do NOT wire `hydrate()` into resume while this
     // method still owns it.
-    const oldKeys = new Set(this.projection.listSync().map((s) => s.name));
-    const newKeys = new Set(Object.keys(snapshot));
-    for (const k of oldKeys) if (!newKeys.has(k)) this.projection.deleteSync(k, this.storeCtx());
-    for (const skill of Object.values(snapshot)) this.projection.write(skill, this.storeCtx());
     this.listCache = null;
-    // Snapshot import: wildcard-only signal so global views refresh
-    // without per-id firings flooding.
-    this.notifier.notifyAll();
+    this.view.replace(Object.values(snapshot), this.storeCtx());
   }
 
   /**
-   * Load the durable store into the sync projection — the future manifest resume
+   * Load the durable store into the sync view — the future manifest resume
    * path (data-layer plan Phase 4 / BaseHarness §2.3). A MERGE (store records
-   * overlay the projection), not a clear-first replace — a fresh session's store
-   * is empty ⇒ a no-op. Invalidates `list()` and pings each hydrated key.
+   * overlay the view), not a clear-first replace — a fresh session's store
+   * is empty ⇒ a no-op. Invalidates `list()`; the view pings each hydrated key.
    *
    * NOT wired into session resume in this run: `importSnapshot` remains the
    * active resume path. `hydrate()` is the seam the Phase-4 manifest sweep flips
    * to once the store is authority.
    */
   async hydrate(): Promise<void> {
-    const keys = await this.projection.hydrate(undefined, this.storeCtx());
+    // The view merges the store projection into the cache and pings each loaded
+    // key. Invalidate `listCache` BEFORE the merge+ping so a subscriber re-reads
+    // the hydrated list.
     this.listCache = null;
-    for (const k of keys) this.notifier.notify(k);
+    await this.view.hydrate(undefined, this.storeCtx());
   }
 
   // ─────────── Inbox routing ───────────
@@ -373,7 +372,7 @@ export class SkillsHarness extends BaseHarness<SkillsSurface> implements SkillsH
 
   private applyRegister(input: SkillsRegisterInput): Effect.Effect<Skill, SkillsError, never> {
     return Effect.suspend((): Effect.Effect<Skill, SkillsError, never> => {
-      if (this.projection.hasSync(input.name)) {
+      if (this.view.hasSync(input.name)) {
         return Effect.fail(new SkillAlreadyExists({ name: input.name }));
       }
       const now = Date.now();
@@ -385,18 +384,19 @@ export class SkillsHarness extends BaseHarness<SkillsSurface> implements SkillsH
         createdAt: now,
         updatedAt: now,
       };
-      // Dual-write through the projection: sync cache first (reads reflect it
-      // now), durable store off the critical path. The notify seam below is
-      // driven by hand — the projection is a write sink beside it, never a source.
-      this.projection.write(skill, this.storeCtx());
-      this.invalidateAndNotify(input.name);
+      // One write through the view: sync cache first (reads reflect it now),
+      // durable store off the critical path via the seam, and a render ping —
+      // the dual-write + notify collapsed. Invalidate `listCache` BEFORE the
+      // write so a subscriber that reads during the ping sees the fresh list.
+      this.listCache = null;
+      this.view.write(skill, this.storeCtx());
       return Effect.succeed(skill);
     });
   }
 
   private applyUpdate(input: SkillsUpdateInput): Effect.Effect<Skill, SkillsError, never> {
     return Effect.suspend((): Effect.Effect<Skill, SkillsError, never> => {
-      const existing = this.projection.getSync(input.name);
+      const existing = this.view.getSync(input.name);
       if (!existing) {
         return Effect.fail(new SkillNotFound({ name: input.name }));
       }
@@ -412,22 +412,18 @@ export class SkillsHarness extends BaseHarness<SkillsSurface> implements SkillsH
           : {}),
         updatedAt: Date.now(),
       };
-      this.projection.write(updated, this.storeCtx());
-      this.invalidateAndNotify(input.name);
+      this.listCache = null;
+      this.view.write(updated, this.storeCtx());
       return Effect.succeed(updated);
     });
   }
 
   private applyRemove(input: SkillsRemoveInput): void {
-    // Idempotent — remove of unknown name is a no-op (no error, no notify).
-    if (this.projection.hasSync(input.name)) {
-      this.projection.deleteSync(input.name, this.storeCtx());
-      this.invalidateAndNotify(input.name);
+    // Idempotent — the view's `deleteSync` fires nothing on an absent name. The
+    // `hasSync` guard keeps the `listCache` invalidation off the no-op path.
+    if (this.view.hasSync(input.name)) {
+      this.listCache = null;
+      this.view.deleteSync(input.name, this.storeCtx());
     }
-  }
-
-  private invalidateAndNotify(name: string): void {
-    this.listCache = null;
-    this.notifier.notify(name);
   }
 }

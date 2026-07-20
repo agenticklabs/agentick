@@ -11,7 +11,6 @@
 
 import { describe, expect, it } from "vitest";
 import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime-next";
-import type { SkillStore } from "@agentick/spec-next";
 import { stubStoreCtx } from "@agentick/store-next";
 
 import { SkillsHarness } from "../harness.js";
@@ -25,7 +24,7 @@ runSkillStoreConformance({
   factory: () => new InMemorySkillStore(),
 });
 
-function makeHarness(store: SkillStore): SkillsHarness {
+function makeHarness(store: InMemorySkillStore): SkillsHarness {
   return new SkillsHarness(
     `store-backing:${ulid()}`,
     new MemoryJournal({ capacity: 1024 }),

@@ -2,9 +2,9 @@
  * StateHarness — store-backing (data-layer plan §3.5, Phase 3 storification).
  *
  * The store holds state VALUES as durable backing; a synchronous
- * {@link CollectionProjection} stays the render read cache. These tests pin the
- * additive contract: every value mutation dual-writes (projection + store),
- * `hydrate()` rebuilds the projection from a pre-seeded store, and
+ * {@link ReactiveView} stays the render read cache. These tests pin the
+ * additive contract: every value mutation writes through (view + store),
+ * `hydrate()` rebuilds the view from a pre-seeded store, and
  * `importSnapshot`/`exportSnapshot` coexist with the store (import
  * write-through; export round-trips). State is the knobs twin, plus one wrinkle
  * of its own: `unknown` values, so a `set(key, undefined)` must round-trip as a

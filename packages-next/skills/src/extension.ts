@@ -29,9 +29,12 @@
 
 import {
   isSkillsInstance,
+  type CollectionMutation,
+  type ReactiveStore,
   type SessionExtension,
   type SessionInstaller,
-  type SkillStore,
+  type Skill,
+  type SkillStoreQuery,
   type Skills,
   type SkillsRegisterInput,
 } from "@agentick/spec-next";
@@ -61,11 +64,11 @@ export interface WithSkillsOptions {
   /**
    * Durable backing for skill records (data-layer plan §6-C). Defaults to a
    * fresh per-session in-memory store; inject a durable adapter (Postgres, a
-   * filesystem source) conforming to the {@link SkillStore} port to survive
+   * filesystem source) conforming to the {@link ReactiveStore} seam to survive
    * process restart. Built-in path only — mutually exclusive with `use` (an
    * adopter-supplied instance brings its own backing).
    */
-  readonly store?: SkillStore;
+  readonly store?: ReactiveStore<Skill, SkillStoreQuery, CollectionMutation<Skill>>;
   /**
    * Adopter-supplied `Skills` instance. The extension uses this as-is
    * across every session — NO per-session construction, NO close on

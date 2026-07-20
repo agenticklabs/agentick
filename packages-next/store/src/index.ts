@@ -12,17 +12,15 @@
  *     subsumes every log-archetype in-memory store (timeline today). A full
  *     in-memory array per log is the intended default (no bounding — §2.7);
  *     the only per-store knob is the `backend` label.
- *   - {@link CollectionProjection} — the synchronous read-model over an async
- *     `CollectionStore`: sync cache + write-through + hydrate, the primitive
- *     that fell out of runs #1 (tasks) and #2 (knobs). A store-backed harness
- *     whose protocol reads are synchronous composes this instead of
- *     re-deriving the projection + dual-write by hand.
- *   - {@link ReactiveView} — the convergence of `CollectionProjection` + a
- *     `KeyedNotifier` (render pings) + a `ChangeNotifier` (typed deltas) into
- *     ONE harness-side sync projection of a `ReactiveStore`. Drives the store
- *     through the `query`/`mutate` seam. Knobs + state compose this (Cut 1); the
- *     remaining harnesses fan out in Cut 2. Coexists with `CollectionProjection`
- *     until then.
+ *   - {@link ReactiveView} — the harness-side SYNCHRONOUS projection of a
+ *     `ReactiveStore`: sync read cache + write-through (via the `query`/`mutate`
+ *     seam) + a `KeyedNotifier` (render pings) + a `ChangeNotifier` (typed
+ *     deltas), all in ONE primitive. This is the convergence that RETIRED the
+ *     earlier `CollectionProjection` (sync cache + write-through + hydrate) once
+ *     every store-backed harness — knobs, state (Cut 1), skills, prompts (Cut 2a)
+ *     — moved onto it. A store-backed harness whose protocol reads are
+ *     synchronous composes this instead of re-deriving the projection + notify
+ *     seams by hand.
  *   - {@link runStoreConformance} — the shared conformance skeleton the
  *     per-store suites (`runTaskStoreConformance`, `runTimelineStoreConformance`)
  *     delegate their store-agnostic cases to.
@@ -42,7 +40,6 @@ export {
   type CollectionChangeEvent,
 } from "./memory-collection.js";
 export { MemoryLog, type MemoryLogConfig } from "./memory-log.js";
-export { CollectionProjection } from "./collection-projection.js";
 export { ReactiveView, type ReactiveViewConfig } from "./reactive-view.js";
 export { JournalProjectedStore, type JournalProjectedConfig } from "./journal-projected.js";
 export { IdempotentCollectionStore, idempotentWrite } from "./idempotent-write.js";

@@ -15,7 +15,6 @@
 
 import { describe, expect, it } from "vitest";
 import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime-next";
-import type { PromptStore } from "@agentick/spec-next";
 import { stubStoreCtx } from "@agentick/store-next";
 
 import { PromptsHarness } from "../harness.js";
@@ -29,7 +28,7 @@ runPromptStoreConformance({
   factory: () => new InMemoryPromptStore(),
 });
 
-function makeHarness(store: PromptStore): PromptsHarness {
+function makeHarness(store: InMemoryPromptStore): PromptsHarness {
   return new PromptsHarness(
     `store-backing:${ulid()}`,
     new MemoryJournal({ capacity: 1024 }),

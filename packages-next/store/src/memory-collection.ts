@@ -21,7 +21,7 @@
  * harness's self-caused change stream: a harness that owns its store privately
  * and is the ONLY writer already knows what it changed (it just wrote it) and
  * does NOT need `onChange` — knobs, whose `MemoryCollection` sits behind a
- * private {@link CollectionProjection}, deliberately does not subscribe (a
+ * private {@link ReactiveView}, deliberately does not subscribe (a
  * listener-less `onChange` is a no-op cost). `onChange` earns its keep when a
  * store is shared across consumers OR a durable backend surfaces changes the
  * process did not originate (a sibling process editing a keychain, an admin
