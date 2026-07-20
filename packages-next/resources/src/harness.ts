@@ -355,7 +355,7 @@ export class ResourcesHarness
    * resolver. NOT wired into session resume in this run.
    */
   async hydrate(): Promise<void> {
-    const declarations = await this.store.list();
+    const declarations = await this.store.list(undefined, this.storeCtx());
     for (const d of declarations) {
       if (d.kind === "template" && d.uriTemplate !== undefined) {
         this.templates.set(d.uriTemplate, d.meta);
@@ -373,7 +373,7 @@ export class ResourcesHarness
    */
   private async putDurable(item: ResourceLoaderItem): Promise<void> {
     const d = item.declaration;
-    await this.store.put(d);
+    await this.store.put(d, this.storeCtx());
     if (d.kind === "template" && d.uriTemplate !== undefined) {
       this.templates.set(d.uriTemplate, d.meta);
       this.templateResolvers.set(d.uriTemplate, {

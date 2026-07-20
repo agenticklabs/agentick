@@ -41,6 +41,7 @@
 import type { UsageStats } from "../data/execution-result.js";
 import type { SessionStatus } from "./hook-bridges.js";
 import type { CollectionStore } from "./store.js";
+import type { StoreCtx } from "./store-ctx.js";
 
 // ============================================================================
 // SessionRecord — the durable session-metadata record
@@ -166,13 +167,13 @@ export interface SessionStoreQuery {
  */
 export interface SessionStore extends CollectionStore<SessionRecord, SessionStoreQuery, number> {
   /** Upsert — a later `put` of the same `id` replaces the record. */
-  put(record: SessionRecord): Promise<void>;
-  get(id: string): Promise<SessionRecord | undefined>;
+  put(record: SessionRecord, ctx: StoreCtx): Promise<void>;
+  get(id: string, ctx: StoreCtx): Promise<SessionRecord | undefined>;
   /** By app / status / parent / recency. Omitting the query returns every record. */
-  list(query?: SessionStoreQuery): Promise<readonly SessionRecord[]>;
-  delete(id: string): Promise<void>;
+  list(query: SessionStoreQuery | undefined, ctx: StoreCtx): Promise<readonly SessionRecord[]>;
+  delete(id: string, ctx: StoreCtx): Promise<void>;
   /** Optional GC of CLOSED sessions older than `before` (ms-epoch `updatedAt`). */
-  prune?(before: number): Promise<void>;
+  prune?(before: number, ctx: StoreCtx): Promise<void>;
   /** Self-identifying backend label for observability (`"memory"`, `"postgres"`, …). */
   readonly backend: string;
 }

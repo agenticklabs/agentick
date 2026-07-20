@@ -35,7 +35,7 @@
  * @verifiedBy packages-next/store/src/__tests__/memory-log.spec.ts
  */
 
-import type { LogStore, SeqTagged } from "@agentick/spec-next";
+import type { LogStore, SeqTagged, StoreCtx } from "@agentick/spec-next";
 
 /** Per-log record: the live entries plus the `seq` of `entries[0]`. */
 interface LogWindow<T> {
@@ -63,7 +63,7 @@ export class MemoryLog<T> implements LogStore<T> {
     this.backend = config.backend ?? "memory";
   }
 
-  read(logKey: string): Promise<readonly T[]> {
+  read(logKey: string, _ctx: StoreCtx): Promise<readonly T[]> {
     const rec = this.logs.get(logKey);
     // Defensive copy — callers must not mutate our backing array, and our
     // append must not be visible through a reference the caller retained.
@@ -72,7 +72,8 @@ export class MemoryLog<T> implements LogStore<T> {
 
   history(
     logKey: string,
-    options?: { readonly fromSeq?: number; readonly limit?: number },
+    options: { readonly fromSeq?: number; readonly limit?: number } | undefined,
+    _ctx: StoreCtx,
   ): Promise<readonly SeqTagged<T>[]> {
     const rec = this.logs.get(logKey);
     if (!rec) return Promise.resolve([]);
@@ -90,7 +91,7 @@ export class MemoryLog<T> implements LogStore<T> {
     return Promise.resolve(out);
   }
 
-  append(logKey: string, entries: readonly T[]): Promise<readonly number[]> {
+  append(logKey: string, entries: readonly T[], _ctx: StoreCtx): Promise<readonly number[]> {
     if (entries.length === 0) return Promise.resolve([]);
     let rec = this.logs.get(logKey);
     if (!rec) {
@@ -103,7 +104,7 @@ export class MemoryLog<T> implements LogStore<T> {
     return Promise.resolve(entries.map((_, i) => start + i));
   }
 
-  keys(): Promise<readonly string[]> {
+  keys(_ctx: StoreCtx): Promise<readonly string[]> {
     // Only logs that currently hold entries — a pruned-empty log retains its
     // `seq` counter but has nothing to enumerate.
     const held: string[] = [];
@@ -113,11 +114,11 @@ export class MemoryLog<T> implements LogStore<T> {
     return Promise.resolve(held);
   }
 
-  delete(logKey: string): Promise<boolean> {
+  delete(logKey: string, _ctx: StoreCtx): Promise<boolean> {
     return Promise.resolve(this.logs.delete(logKey));
   }
 
-  prune(logKey: string, before: { seq: number }): Promise<number> {
+  prune(logKey: string, before: { seq: number }, _ctx: StoreCtx): Promise<number> {
     const rec = this.logs.get(logKey);
     if (!rec) return Promise.resolve(0);
     // Erase entries with absolute seq < before.seq. entries[i] has absolute

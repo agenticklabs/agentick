@@ -37,5 +37,8 @@
   },
   "dependencies": {
     "@agentick/timeline-next": "workspace:*"
+  },
+  "devDependencies": {
+    "@agentick/store-next": "workspace:*"
   }
 }

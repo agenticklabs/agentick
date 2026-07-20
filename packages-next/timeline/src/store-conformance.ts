@@ -35,7 +35,7 @@
 import { expect, it } from "vitest";
 
 import type { TimelineEntry, TimelineStore } from "@agentick/spec-next";
-import { runStoreConformance } from "@agentick/store-next";
+import { runStoreConformance, stubStoreCtx } from "@agentick/store-next";
 
 export interface TimelineStoreConformanceOptions {
   /** Display label for the suite (`describe` block heading). */
@@ -78,27 +78,27 @@ export function runTimelineStoreConformance(opts: TimelineStoreConformanceOption
     capabilities: opts.capabilities,
     // Store-agnostic: the LOG archetype's empty read is `[]`; delete of an
     // absent key settles.
-    emptyRead: { read: (store, key) => store.read(key), expected: [] },
-    idempotentDelete: (store, key) => store.delete(key),
+    emptyRead: { read: (store, key) => store.read(key, stubStoreCtx()), expected: [] },
+    idempotentDelete: (store, key) => store.delete(key, stubStoreCtx()),
     cases: ({ setup, capabilities }) => {
       it("append then read round-trips entries in order", async () => {
         const store = await setup();
-        await store.append("s1", [entry("a"), entry("b")]);
-        await store.append("s1", [entry("c")]);
-        const loaded = await store.read("s1");
+        await store.append("s1", [entry("a"), entry("b")], stubStoreCtx());
+        await store.append("s1", [entry("c")], stubStoreCtx());
+        const loaded = await store.read("s1", stubStoreCtx());
         expect(loaded.map(idOf)).toEqual(["a", "b", "c"]);
       });
 
       it("append([]) is a no-op and returns no seqs", async () => {
         const store = await setup();
-        expect(await store.append("s1", [])).toEqual([]);
-        expect(await store.read("s1")).toEqual([]);
+        expect(await store.append("s1", [], stubStoreCtx())).toEqual([]);
+        expect(await store.read("s1", stubStoreCtx())).toEqual([]);
       });
 
       it("append returns one seq per entry, strictly increasing and never reused", async () => {
         const store = await setup();
-        const first = await store.append("s1", [entry("a"), entry("b")]);
-        const second = await store.append("s1", [entry("c")]);
+        const first = await store.append("s1", [entry("a"), entry("b")], stubStoreCtx());
+        const second = await store.append("s1", [entry("c")], stubStoreCtx());
         expect(first).toHaveLength(2);
         expect(second).toHaveLength(1);
         const all = [...first, ...second];
@@ -110,56 +110,60 @@ export function runTimelineStoreConformance(opts: TimelineStoreConformanceOption
         const store = await setup();
         if (store.history === undefined) return ctx.skip();
         const sid = "conf-history";
-        const seqs = await store.append(sid, [entry("a"), entry("b"), entry("c"), entry("d")]);
+        const seqs = await store.append(
+          sid,
+          [entry("a"), entry("b"), entry("c"), entry("d")],
+          stubStoreCtx(),
+        );
         // Full read is seq-tagged and ordered.
-        const all = await store.history(sid);
+        const all = await store.history(sid, undefined, stubStoreCtx());
         expect(all.map((t) => t.seq)).toEqual([...seqs]);
         expect(all.map((t) => idOf(t.entry))).toEqual(["a", "b", "c", "d"]);
         // Cursor: inclusive-from semantics (seq >= fromSeq).
-        const fromSecond = await store.history(sid, { fromSeq: seqs[1]! });
+        const fromSecond = await store.history(sid, { fromSeq: seqs[1]! }, stubStoreCtx());
         expect(fromSecond.map((t) => idOf(t.entry))).toEqual(["b", "c", "d"]);
         // Paging.
-        const page = await store.history(sid, { fromSeq: seqs[1]!, limit: 2 });
+        const page = await store.history(sid, { fromSeq: seqs[1]!, limit: 2 }, stubStoreCtx());
         expect(page.map((t) => idOf(t.entry))).toEqual(["b", "c"]);
         // Prune-stability: survivors keep their seq; cursor still lands right.
         if (store.prune) {
-          await store.prune(sid, { seq: seqs[2]! });
-          const after = await store.history(sid, { fromSeq: 0 });
+          await store.prune(sid, { seq: seqs[2]! }, stubStoreCtx());
+          const after = await store.history(sid, { fromSeq: 0 }, stubStoreCtx());
           expect(after.map((t) => t.seq)).toEqual([seqs[2], seqs[3]]);
         }
       });
 
       it("isolates entries across sessions (no bleed)", async () => {
         const store = await setup();
-        await store.append("s1", [entry("a")]);
-        await store.append("s2", [entry("x")]);
-        expect((await store.read("s1")).map(idOf)).toEqual(["a"]);
-        expect((await store.read("s2")).map(idOf)).toEqual(["x"]);
+        await store.append("s1", [entry("a")], stubStoreCtx());
+        await store.append("s2", [entry("x")], stubStoreCtx());
+        expect((await store.read("s1", stubStoreCtx())).map(idOf)).toEqual(["a"]);
+        expect((await store.read("s2", stubStoreCtx())).map(idOf)).toEqual(["x"]);
       });
 
       it("read() returns a defensive copy — mutating the result never mutates the store", async () => {
         const store = await setup();
-        await store.append("s1", [entry("a")]);
-        const first = await store.read("s1");
+        await store.append("s1", [entry("a")], stubStoreCtx());
+        const first = await store.read("s1", stubStoreCtx());
         (first as TimelineEntry[]).push(entry("rogue"));
-        expect((await store.read("s1")).map(idOf)).toEqual(["a"]);
+        expect((await store.read("s1", stubStoreCtx())).map(idOf)).toEqual(["a"]);
       });
 
       it("enumerates sessions that hold entries", async () => {
         const store = await setup();
-        await store.append("s1", [entry("a")]);
-        await store.append("s2", [entry("b")]);
-        expect([...(await store.keys())].sort()).toEqual(["s1", "s2"]);
+        await store.append("s1", [entry("a")], stubStoreCtx());
+        await store.append("s2", [entry("b")], stubStoreCtx());
+        expect([...(await store.keys(stubStoreCtx()))].sort()).toEqual(["s1", "s2"]);
       });
 
       it("delete() removes a session and is idempotent", async () => {
         const store = await setup();
-        await store.append("s1", [entry("a")]);
-        expect(await store.delete("s1")).toBe(true);
-        expect(await store.read("s1")).toEqual([]);
-        expect(await store.keys()).not.toContain("s1");
+        await store.append("s1", [entry("a")], stubStoreCtx());
+        expect(await store.delete("s1", stubStoreCtx())).toBe(true);
+        expect(await store.read("s1", stubStoreCtx())).toEqual([]);
+        expect(await store.keys(stubStoreCtx())).not.toContain("s1");
         // Second delete: absent → false, no throw.
-        expect(await store.delete("s1")).toBe(false);
+        expect(await store.delete("s1", stubStoreCtx())).toBe(false);
       });
 
       const prune = capabilities?.prune;
@@ -168,16 +172,15 @@ export function runTimelineStoreConformance(opts: TimelineStoreConformanceOption
         async () => {
           const store = await setup();
           if (!store.prune) return; // capability absent → nothing to assert
-          const [, , sc] = await store.append("s1", [
-            entry("a"),
-            entry("b"),
-            entry("c"),
-            entry("d"),
-          ]);
+          const [, , sc] = await store.append(
+            "s1",
+            [entry("a"), entry("b"), entry("c"), entry("d")],
+            stubStoreCtx(),
+          );
           // Erase everything strictly below c's seq → a, b.
-          const removed = await store.prune("s1", { seq: sc! });
+          const removed = await store.prune("s1", { seq: sc! }, stubStoreCtx());
           expect(removed).toBe(2);
-          expect((await store.read("s1")).map(idOf)).toEqual(["c", "d"]);
+          expect((await store.read("s1", stubStoreCtx())).map(idOf)).toEqual(["c", "d"]);
         },
       );
 
@@ -186,16 +189,20 @@ export function runTimelineStoreConformance(opts: TimelineStoreConformanceOption
         async () => {
           const store = await setup();
           if (!store.prune) return;
-          const seqs = await store.append("s1", [entry("a"), entry("b"), entry("c"), entry("d")]);
-          await store.prune("s1", { seq: seqs[2]! }); // erase a, b (seq < c)
+          const seqs = await store.append(
+            "s1",
+            [entry("a"), entry("b"), entry("c"), entry("d")],
+            stubStoreCtx(),
+          );
+          await store.prune("s1", { seq: seqs[2]! }, stubStoreCtx()); // erase a, b (seq < c)
           // A fresh append continues PAST d — never reuses a retired seq.
-          const [se] = await store.append("s1", [entry("e")]);
+          const [se] = await store.append("s1", [entry("e")], stubStoreCtx());
           expect(se).toBeGreaterThan(seqs[3]!);
           // A second prune uses the SAME absolute seq space (positional would
           // over-erase): erase everything below d → drops c only.
-          const removed2 = await store.prune("s1", { seq: seqs[3]! });
+          const removed2 = await store.prune("s1", { seq: seqs[3]! }, stubStoreCtx());
           expect(removed2).toBe(1);
-          expect((await store.read("s1")).map(idOf)).toEqual(["d", "e"]);
+          expect((await store.read("s1", stubStoreCtx())).map(idOf)).toEqual(["d", "e"]);
         },
       );
 
@@ -204,10 +211,10 @@ export function runTimelineStoreConformance(opts: TimelineStoreConformanceOption
         async () => {
           const store = await setup();
           if (!store.prune) return;
-          const seqs = await store.append("s1", [entry("a"), entry("b")]);
-          await store.prune("s1", { seq: seqs[1]! + 1 }); // erase all
-          expect(await store.read("s1")).toEqual([]);
-          const [sc] = await store.append("s1", [entry("c")]);
+          const seqs = await store.append("s1", [entry("a"), entry("b")], stubStoreCtx());
+          await store.prune("s1", { seq: seqs[1]! + 1 }, stubStoreCtx()); // erase all
+          expect(await store.read("s1", stubStoreCtx())).toEqual([]);
+          const [sc] = await store.append("s1", [entry("c")], stubStoreCtx());
           expect(sc).toBeGreaterThan(seqs[1]!); // continues, no reuse
         },
       );
@@ -215,7 +222,7 @@ export function runTimelineStoreConformance(opts: TimelineStoreConformanceOption
       it.skipIf(prune === false)("prune() on an unknown session returns 0", async () => {
         const store = await setup();
         if (!store.prune) return;
-        expect(await store.prune("nope", { seq: 5 })).toBe(0);
+        expect(await store.prune("nope", { seq: 5 }, stubStoreCtx())).toBe(0);
       });
     },
   });

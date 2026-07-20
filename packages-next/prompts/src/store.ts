@@ -20,7 +20,12 @@
  * @see docs/proposals/v2/data-layer-plan.md §6-C
  */
 
-import type { PromptDeclarationRecord, PromptStore, PromptStoreQuery } from "@agentick/spec-next";
+import type {
+  PromptDeclarationRecord,
+  PromptStore,
+  PromptStoreQuery,
+  StoreCtx,
+} from "@agentick/spec-next";
 import { MemoryCollection } from "@agentick/store-next";
 
 /**
@@ -55,19 +60,22 @@ export class InMemoryPromptStore implements PromptStore {
     matchQuery: matchesPromptQuery,
   });
 
-  put(record: PromptDeclarationRecord): Promise<void> {
-    return this.collection.put(record);
+  put(record: PromptDeclarationRecord, ctx: StoreCtx): Promise<void> {
+    return this.collection.put(record, ctx);
   }
 
-  get(name: string): Promise<PromptDeclarationRecord | undefined> {
-    return this.collection.get(name);
+  get(name: string, ctx: StoreCtx): Promise<PromptDeclarationRecord | undefined> {
+    return this.collection.get(name, ctx);
   }
 
-  list(query?: PromptStoreQuery): Promise<readonly PromptDeclarationRecord[]> {
-    return this.collection.list(query);
+  list(
+    query: PromptStoreQuery | undefined,
+    ctx: StoreCtx,
+  ): Promise<readonly PromptDeclarationRecord[]> {
+    return this.collection.list(query, ctx);
   }
 
-  async delete(name: string): Promise<void> {
-    await this.collection.delete(name);
+  async delete(name: string, ctx: StoreCtx): Promise<void> {
+    await this.collection.delete(name, ctx);
   }
 }

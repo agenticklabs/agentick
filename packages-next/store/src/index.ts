@@ -43,3 +43,4 @@ export {
   type StoreConformanceContext,
   type StoreConformanceOptions,
 } from "./store-conformance.js";
+export { stubStoreCtx } from "./stub-store-ctx.js";

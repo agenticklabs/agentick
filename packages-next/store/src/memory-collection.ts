@@ -35,7 +35,7 @@
  * @verifiedBy packages-next/store/src/__tests__/memory-collection.spec.ts
  */
 
-import type { CollectionStore } from "@agentick/spec-next";
+import type { CollectionStore, StoreCtx } from "@agentick/spec-next";
 import { createChangeNotifier, type ChangeEvent, type ChangeNotifier } from "@agentick/pubsub-next";
 
 /**
@@ -89,14 +89,14 @@ export class MemoryCollection<T, Q, PruneArg = never> implements CollectionStore
    * constructor rather than declared as a method so the `typeof`-based
    * capability detection stays honest for prune-less stores.
    */
-  prune?: (arg: PruneArg) => Promise<void>;
+  prune?: (arg: PruneArg, ctx: StoreCtx) => Promise<void>;
 
   constructor(config: MemoryCollectionConfig<T, Q, PruneArg>) {
     this.config = config;
     this.backend = config.backend;
     if (config.prunePredicate !== undefined) {
       const predicate = config.prunePredicate;
-      this.prune = (arg: PruneArg): Promise<void> => {
+      this.prune = (arg: PruneArg, _ctx: StoreCtx): Promise<void> => {
         // TODO(store-phase-4): prune does NOT emit `onChange` per-key removals
         // today — no shared-store consumer needs bulk-eviction observation yet
         // (tasks, the only pruner, drives its own bus and does not subscribe to
@@ -110,7 +110,7 @@ export class MemoryCollection<T, Q, PruneArg = never> implements CollectionStore
     }
   }
 
-  put(item: T): Promise<void> {
+  put(item: T, _ctx: StoreCtx): Promise<void> {
     const key = this.config.keyOf(item);
     const prev = this.items.get(key);
     this.items.set(key, item);
@@ -121,12 +121,12 @@ export class MemoryCollection<T, Q, PruneArg = never> implements CollectionStore
     return Promise.resolve();
   }
 
-  get(key: string): Promise<T | undefined> {
+  get(key: string, _ctx: StoreCtx): Promise<T | undefined> {
     return Promise.resolve(this.items.get(key));
   }
 
   /** Iterate values, filter by `matchQuery`, return a FRESH array each call. */
-  list(query?: Q): Promise<readonly T[]> {
+  list(query: Q | undefined, _ctx: StoreCtx): Promise<readonly T[]> {
     const out: T[] = [];
     for (const item of this.items.values()) {
       if (this.config.matchQuery(item, query)) out.push(item);
@@ -135,7 +135,7 @@ export class MemoryCollection<T, Q, PruneArg = never> implements CollectionStore
   }
 
   /** Idempotent — returns whether the key existed. */
-  delete(key: string): Promise<boolean> {
+  delete(key: string, _ctx: StoreCtx): Promise<boolean> {
     const prev = this.items.get(key);
     const existed = this.items.delete(key);
     // Notify ONLY when the key existed — a no-op delete is not a change. The

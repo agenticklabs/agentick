@@ -50,7 +50,7 @@
 
 import type { Pool as PgPool } from "pg";
 
-import type { SeqTagged, TimelineEntry, TimelineStore } from "@agentick/timeline-next";
+import type { SeqTagged, StoreCtx, TimelineEntry, TimelineStore } from "@agentick/timeline-next";
 
 import {
   DEFAULT_COLUMNS,
@@ -144,6 +144,10 @@ const IDENTITY_CODEC: TimelineCodec = {
   decode: (payload) => payload as TimelineEntry,
 };
 
+// TODO(store-phase-B): use ctx.opId for idempotency / ctx for scoping — every
+// DATA method accepts a `StoreCtx` but currently ignores it. A durable store
+// should dedup writes on `ctx.opId` (append idempotency) and may scope
+// reads/writes by identity fields carried on the ctx.
 class PostgresTimelineStore implements TimelineStore {
   readonly backend = "postgres" as const;
 
@@ -201,7 +205,7 @@ class PostgresTimelineStore implements TimelineStore {
     return this.codec.decode(row[this.cols.payload], schemaVer);
   }
 
-  async read(sessionId: string): Promise<readonly TimelineEntry[]> {
+  async read(sessionId: string, _ctx: StoreCtx): Promise<readonly TimelineEntry[]> {
     const query =
       this.sql?.read?.({ sessionId }) ??
       ({
@@ -214,7 +218,8 @@ class PostgresTimelineStore implements TimelineStore {
 
   async history(
     sessionId: string,
-    options?: { readonly fromSeq?: number; readonly limit?: number },
+    options: { readonly fromSeq?: number; readonly limit?: number } | undefined,
+    _ctx: StoreCtx,
   ): Promise<readonly SeqTagged<TimelineEntry>[]> {
     const fromSeq = options?.fromSeq ?? 0;
     const values: unknown[] = [sessionId, fromSeq];
@@ -231,7 +236,11 @@ class PostgresTimelineStore implements TimelineStore {
     );
   }
 
-  async append(sessionId: string, entries: readonly TimelineEntry[]): Promise<readonly number[]> {
+  async append(
+    sessionId: string,
+    entries: readonly TimelineEntry[],
+    _ctx: StoreCtx,
+  ): Promise<readonly number[]> {
     if (entries.length === 0) return [];
     const payloads = entries.map((e) => this.codec.encode(e));
     const query =
@@ -252,7 +261,7 @@ class PostgresTimelineStore implements TimelineStore {
     };
   }
 
-  async keys(): Promise<readonly string[]> {
+  async keys(_ctx: StoreCtx): Promise<readonly string[]> {
     const query =
       this.sql?.keys?.() ??
       ({
@@ -263,7 +272,7 @@ class PostgresTimelineStore implements TimelineStore {
     return rows.map((r) => String(r[this.cols.sessionId]));
   }
 
-  async delete(sessionId: string): Promise<boolean> {
+  async delete(sessionId: string, _ctx: StoreCtx): Promise<boolean> {
     const query =
       this.sql?.delete?.({ sessionId }) ??
       ({
@@ -275,7 +284,7 @@ class PostgresTimelineStore implements TimelineStore {
     return rows.length > 0;
   }
 
-  async prune(sessionId: string, before: { seq: number }): Promise<number> {
+  async prune(sessionId: string, before: { seq: number }, _ctx: StoreCtx): Promise<number> {
     const query =
       this.sql?.prune?.({ sessionId, beforeSeq: before.seq }) ??
       ({

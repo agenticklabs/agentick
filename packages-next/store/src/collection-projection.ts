@@ -48,7 +48,7 @@
  * @verifiedBy packages-next/store/src/__tests__/collection-projection.spec.ts
  */
 
-import type { CollectionStore } from "@agentick/spec-next";
+import type { CollectionStore, StoreCtx } from "@agentick/spec-next";
 
 export class CollectionProjection<T, Q = unknown, PruneArg = never> {
   /**
@@ -96,9 +96,9 @@ export class CollectionProjection<T, Q = unknown, PruneArg = never> {
    * the ONE site that decision belongs — previously duplicated in knobs'
    * `persistValue` and the tasks harness's `persist`.
    */
-  write(item: T): void {
+  write(item: T, ctx: StoreCtx): void {
     this.cache.set(this.keyOf(item), item);
-    void this.store.put(item).catch(() => undefined);
+    void this.store.put(item, ctx).catch(() => undefined);
   }
 
   /**
@@ -106,9 +106,9 @@ export class CollectionProjection<T, Q = unknown, PruneArg = never> {
    * fire-and-forget the store delete (same off-critical-path policy as
    * {@link write}). Idempotent — deleting an absent key is a no-op.
    */
-  deleteSync(key: string): void {
+  deleteSync(key: string, ctx: StoreCtx): void {
     this.cache.delete(key);
-    void Promise.resolve(this.store.delete(key)).catch(() => undefined);
+    void Promise.resolve(this.store.delete(key, ctx)).catch(() => undefined);
   }
 
   // ─────────── Hydrate (store → cache, on resume) ───────────
@@ -121,8 +121,8 @@ export class CollectionProjection<T, Q = unknown, PruneArg = never> {
    * has not yet seen survives hydration. A fresh store is empty ⇒ a no-op
    * returning `[]`.
    */
-  async hydrate(query?: Q): Promise<readonly string[]> {
-    const items = await this.store.list(query);
+  async hydrate(query: Q | undefined, ctx: StoreCtx): Promise<readonly string[]> {
+    const items = await this.store.list(query, ctx);
     const keys: string[] = [];
     for (const item of items) {
       const key = this.keyOf(item);

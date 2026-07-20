@@ -36,6 +36,7 @@ import type { Effect } from "effect";
 import type { ContentBlock } from "../data/content-blocks.js";
 import type { EventScope } from "../data/events.js";
 import type { CollectionStore } from "./store.js";
+import type { StoreCtx } from "./store-ctx.js";
 import type { ProgressUpdate, TaskFailure, TaskStatus, TaskWorkContext } from "./tasks-harness.js";
 import type { Elicit, ElicitFn } from "./elicit-api.js";
 
@@ -131,13 +132,13 @@ export interface TaskStoreQuery {
  */
 export interface TaskStore extends CollectionStore<TaskRecord, TaskStoreQuery, number> {
   /** Upsert — called on every transition. Later `put`s of the same `taskId` replace. */
-  put(record: TaskRecord): Promise<void>;
-  get(taskId: string): Promise<TaskRecord | undefined>;
+  put(record: TaskRecord, ctx: StoreCtx): Promise<void>;
+  get(taskId: string, ctx: StoreCtx): Promise<TaskRecord | undefined>;
   /** By scope / status. Omitting the query returns every record. */
-  list(query?: TaskStoreQuery): Promise<readonly TaskRecord[]>;
-  delete(taskId: string): Promise<void>;
+  list(query: TaskStoreQuery | undefined, ctx: StoreCtx): Promise<readonly TaskRecord[]>;
+  delete(taskId: string, ctx: StoreCtx): Promise<void>;
   /** Optional GC of terminal records older than `before` (ms-epoch `updatedAt`). */
-  prune?(before: number): Promise<void>;
+  prune?(before: number, ctx: StoreCtx): Promise<void>;
   /** Self-identifying backend label for observability (e.g. `"memory"`, `"postgres"`). */
   readonly backend: string;
 }

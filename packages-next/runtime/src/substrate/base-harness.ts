@@ -71,6 +71,7 @@ import type {
   OperationOrigin,
   ProtocolEvent,
   StandardSchemaV1,
+  StoreCtx,
   SubstrateError,
   TerminalEvent,
   Unsubscribe,
@@ -1100,6 +1101,29 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
     } else {
       this.ready = Promise.resolve();
     }
+  }
+
+  /**
+   * Build the {@link StoreCtx} threaded (as the FINAL argument) into every store
+   * DATA-method call this harness makes — the explicit runtime-scope carrier
+   * across the **Effect→Promise boundary** a Promise-shaped store lives behind
+   * (it cannot read the ambient `RuntimeContext` FiberRef off-fiber).
+   *
+   * Run A builds the BASE from construction slots only: the harness's scope id
+   * (as `sessionId` — the store-backed harnesses are session-scoped; a harness
+   * whose scope key differs overrides this), the construction-bound `principal`
+   * when present, and the harness's journal as the READ-slice `journalReader`
+   * (`OperationJournal` is structurally a {@link JournalReader}, so `this.journal`
+   * passes with no adapter — it is the event-sourcing fold input a derived store
+   * consumes in Run B). Run B enriches this with the live `getContext` snapshot
+   * (opId as idempotency key, correlationId, traceparent) at the op boundary.
+   */
+  protected storeCtx(): StoreCtx {
+    return {
+      sessionId: this.scopeId,
+      ...(this.principal !== undefined ? { principal: this.principal } : {}),
+      journalReader: this.journal,
+    };
   }
 
   // ──────── ① Commands (heavy path) ────────

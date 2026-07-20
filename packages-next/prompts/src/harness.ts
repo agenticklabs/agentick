@@ -414,8 +414,8 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
     // method still owns it.
     const oldKeys = new Set(this.projection.listSync().map((r) => r.name));
     const newKeys = new Set(Object.keys(snapshot));
-    for (const k of oldKeys) if (!newKeys.has(k)) this.projection.deleteSync(k);
-    for (const entry of Object.values(snapshot)) this.projection.write(entry);
+    for (const k of oldKeys) if (!newKeys.has(k)) this.projection.deleteSync(k, this.storeCtx());
+    for (const entry of Object.values(snapshot)) this.projection.write(entry, this.storeCtx());
     this.augmentations.clear();
     this.listCache = null;
     // Snapshot import: wildcard-only signal so global views refresh without
@@ -436,7 +436,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
    * to once the store is authority.
    */
   async hydrate(): Promise<void> {
-    const keys = await this.projection.hydrate();
+    const keys = await this.projection.hydrate(undefined, this.storeCtx());
     this.listCache = null;
     for (const k of keys) this.notifier.notify(k);
   }
@@ -472,7 +472,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
         description: decl.description,
         ...omitUndefined({ arguments: decl.arguments, metadata: decl.metadata }),
       };
-      this.projection.write(record);
+      this.projection.write(record, this.storeCtx());
       this.setAugmentation(decl.name, decl);
       this.invalidateAndNotify(decl.name);
       return Effect.succeed(this.declarationOf(decl.name)!);
@@ -497,7 +497,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
           metadata: patch.metadata ?? existingRecord.metadata,
         }),
       };
-      this.projection.write(updatedRecord);
+      this.projection.write(updatedRecord, this.storeCtx());
       // Merge the augmentation: incoming `template`/`render` win; absent → keep
       // the existing sidecar value (same `??` merge the record fields use).
       this.setAugmentation(input.name, {
@@ -511,7 +511,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
 
   private applyRemove(input: PromptsRemoveInput): void {
     if (this.projection.hasSync(input.name)) {
-      this.projection.deleteSync(input.name);
+      this.projection.deleteSync(input.name, this.storeCtx());
       this.augmentations.delete(input.name);
       this.invalidateAndNotify(input.name);
     }

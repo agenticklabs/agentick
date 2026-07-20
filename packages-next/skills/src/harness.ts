@@ -332,8 +332,8 @@ export class SkillsHarness extends BaseHarness<SkillsSurface> implements SkillsH
     // method still owns it.
     const oldKeys = new Set(this.projection.listSync().map((s) => s.name));
     const newKeys = new Set(Object.keys(snapshot));
-    for (const k of oldKeys) if (!newKeys.has(k)) this.projection.deleteSync(k);
-    for (const skill of Object.values(snapshot)) this.projection.write(skill);
+    for (const k of oldKeys) if (!newKeys.has(k)) this.projection.deleteSync(k, this.storeCtx());
+    for (const skill of Object.values(snapshot)) this.projection.write(skill, this.storeCtx());
     this.listCache = null;
     // Snapshot import: wildcard-only signal so global views refresh
     // without per-id firings flooding.
@@ -351,7 +351,7 @@ export class SkillsHarness extends BaseHarness<SkillsSurface> implements SkillsH
    * to once the store is authority.
    */
   async hydrate(): Promise<void> {
-    const keys = await this.projection.hydrate();
+    const keys = await this.projection.hydrate(undefined, this.storeCtx());
     this.listCache = null;
     for (const k of keys) this.notifier.notify(k);
   }
@@ -388,7 +388,7 @@ export class SkillsHarness extends BaseHarness<SkillsSurface> implements SkillsH
       // Dual-write through the projection: sync cache first (reads reflect it
       // now), durable store off the critical path. The notify seam below is
       // driven by hand — the projection is a write sink beside it, never a source.
-      this.projection.write(skill);
+      this.projection.write(skill, this.storeCtx());
       this.invalidateAndNotify(input.name);
       return Effect.succeed(skill);
     });
@@ -412,7 +412,7 @@ export class SkillsHarness extends BaseHarness<SkillsSurface> implements SkillsH
           : {}),
         updatedAt: Date.now(),
       };
-      this.projection.write(updated);
+      this.projection.write(updated, this.storeCtx());
       this.invalidateAndNotify(input.name);
       return Effect.succeed(updated);
     });
@@ -421,7 +421,7 @@ export class SkillsHarness extends BaseHarness<SkillsSurface> implements SkillsH
   private applyRemove(input: SkillsRemoveInput): void {
     // Idempotent — remove of unknown name is a no-op (no error, no notify).
     if (this.projection.hasSync(input.name)) {
-      this.projection.deleteSync(input.name);
+      this.projection.deleteSync(input.name, this.storeCtx());
       this.invalidateAndNotify(input.name);
     }
   }

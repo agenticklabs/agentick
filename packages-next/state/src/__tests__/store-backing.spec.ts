@@ -13,6 +13,7 @@
 
 import { describe, expect, it } from "vitest";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
+import { stubStoreCtx } from "@agentick/store-next";
 
 import { StateHarness } from "../harness.js";
 import { createStateStore, type StateEntry, type StateStoreQuery } from "../store.js";
@@ -42,9 +43,12 @@ describe("StateHarness — store write-through", () => {
     await harness.set({ key: "count", value: 42 });
 
     // Store mirrors the projection (durable truth), keyed by state key.
-    expect(await store.get("user")).toEqual({ key: "user", value: { name: "ada" } });
-    expect(await store.get("count")).toEqual({ key: "count", value: 42 });
-    const listed = await store.list();
+    expect(await store.get("user", stubStoreCtx())).toEqual({
+      key: "user",
+      value: { name: "ada" },
+    });
+    expect(await store.get("count", stubStoreCtx())).toEqual({ key: "count", value: 42 });
+    const listed = await store.list(undefined, stubStoreCtx());
     expect(new Map(listed.map((e) => [e.key, e.value]))).toEqual(
       new Map<string, unknown>([
         ["user", { name: "ada" }],
@@ -63,8 +67,8 @@ describe("StateHarness — store write-through", () => {
     await harness.set({ key: "mode", value: "draft" });
     await harness.set({ key: "mode", value: "final" });
 
-    expect(await store.get("mode")).toEqual({ key: "mode", value: "final" });
-    expect((await store.list()).length).toBe(1);
+    expect(await store.get("mode", stubStoreCtx())).toEqual({ key: "mode", value: "final" });
+    expect((await store.list(undefined, stubStoreCtx())).length).toBe(1);
     await harness.close();
   });
 
@@ -72,11 +76,11 @@ describe("StateHarness — store write-through", () => {
     const store = createStateStore();
     const harness = await makeHarness(store);
     await harness.set({ key: "temp", value: 1 });
-    expect(await store.get("temp")).toEqual({ key: "temp", value: 1 });
+    expect(await store.get("temp", stubStoreCtx())).toEqual({ key: "temp", value: 1 });
 
     await harness.delete({ key: "temp" });
 
-    expect(await store.get("temp")).toBeUndefined();
+    expect(await store.get("temp", stubStoreCtx())).toBeUndefined();
     expect(harness.has("temp")).toBe(false);
     await harness.close();
   });
@@ -91,8 +95,8 @@ describe("StateHarness — store write-through", () => {
     expect(harness.has("maybe")).toBe(true);
     expect(harness.get("maybe")).toBeUndefined();
     // The store holds the cell too — presence, not `value !== undefined`.
-    expect(await store.get("maybe")).toEqual({ key: "maybe", value: undefined });
-    expect((await store.list()).map((e) => e.key)).toEqual(["maybe"]);
+    expect(await store.get("maybe", stubStoreCtx())).toEqual({ key: "maybe", value: undefined });
+    expect((await store.list(undefined, stubStoreCtx())).map((e) => e.key)).toEqual(["maybe"]);
     await harness.close();
   });
 });
@@ -100,9 +104,9 @@ describe("StateHarness — store write-through", () => {
 describe("StateHarness — hydrate() from a pre-seeded store", () => {
   it("repopulates the sync projection from the store", async () => {
     const store = createStateStore();
-    await store.put({ key: "alpha", value: 1 });
-    await store.put({ key: "beta", value: "two" });
-    await store.put({ key: "gamma", value: false });
+    await store.put({ key: "alpha", value: 1 }, stubStoreCtx());
+    await store.put({ key: "beta", value: "two" }, stubStoreCtx());
+    await store.put({ key: "gamma", value: false }, stubStoreCtx());
 
     const harness = await makeHarness(store);
     // Before hydrate the projection is empty (store is not the sync read path).
@@ -119,7 +123,7 @@ describe("StateHarness — hydrate() from a pre-seeded store", () => {
 
   it("hydrates an `undefined`-valued cell as a present key", async () => {
     const store = createStateStore();
-    await store.put({ key: "maybe", value: undefined });
+    await store.put({ key: "maybe", value: undefined }, stubStoreCtx());
     const harness = await makeHarness(store);
 
     await harness.hydrate();
@@ -131,7 +135,7 @@ describe("StateHarness — hydrate() from a pre-seeded store", () => {
 
   it("pings subscribers so a useSyncExternalStore consumer re-reads", async () => {
     const store = createStateStore();
-    await store.put({ key: "x", value: 7 });
+    await store.put({ key: "x", value: 7 }, stubStoreCtx());
     const harness = await makeHarness(store);
 
     let allHits = 0;
@@ -152,7 +156,7 @@ describe("StateHarness — hydrate() from a pre-seeded store", () => {
 
   it("merges store cells over the projection (does not clear-first)", async () => {
     const store = createStateStore();
-    await store.put({ key: "fromStore", value: "s" });
+    await store.put({ key: "fromStore", value: "s" }, stubStoreCtx());
     const harness = await makeHarness(store);
     // A live set the store also has NOT seen wiped by hydrate.
     await harness.set({ key: "live", value: "l" });
@@ -177,9 +181,9 @@ describe("StateHarness — importSnapshot / exportSnapshot coexist with the stor
     expect(harness.get("b")).toBe("two");
     expect(harness.get("c")).toBe(true);
     // Store write-through.
-    expect(await store.get("a")).toEqual({ key: "a", value: 1 });
-    expect(await store.get("b")).toEqual({ key: "b", value: "two" });
-    expect(await store.get("c")).toEqual({ key: "c", value: true });
+    expect(await store.get("a", stubStoreCtx())).toEqual({ key: "a", value: 1 });
+    expect(await store.get("b", stubStoreCtx())).toEqual({ key: "b", value: "two" });
+    expect(await store.get("c", stubStoreCtx())).toEqual({ key: "c", value: true });
     await harness.close();
   });
 
@@ -192,8 +196,8 @@ describe("StateHarness — importSnapshot / exportSnapshot coexist with the stor
 
     expect(harness.has("drop")).toBe(false);
     expect(harness.get("keep")).toBe(9);
-    expect(await store.get("drop")).toBeUndefined();
-    expect(await store.get("keep")).toEqual({ key: "keep", value: 9 });
+    expect(await store.get("drop", stubStoreCtx())).toBeUndefined();
+    expect(await store.get("keep", stubStoreCtx())).toEqual({ key: "keep", value: 9 });
     await harness.close();
   });
 
@@ -208,15 +212,15 @@ describe("StateHarness — importSnapshot / exportSnapshot coexist with the stor
     restored.importSnapshot(snap);
 
     expect(restored.exportSnapshot()).toEqual({ a: 1, b: "two" });
-    expect(await store.get("a")).toEqual({ key: "a", value: 1 });
-    expect(await store.get("b")).toEqual({ key: "b", value: "two" });
+    expect(await store.get("a", stubStoreCtx())).toEqual({ key: "a", value: 1 });
+    expect(await store.get("b", stubStoreCtx())).toEqual({ key: "b", value: "two" });
     await source.close();
     await restored.close();
   });
 
   it("a store-hydrated projection is re-exportable (store → projection → snapshot)", async () => {
     const store = createStateStore();
-    await store.put({ key: "k", value: "v" });
+    await store.put({ key: "k", value: "v" }, stubStoreCtx());
     const harness = await makeHarness(store);
     await harness.hydrate();
 

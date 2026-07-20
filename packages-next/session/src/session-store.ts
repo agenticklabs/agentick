@@ -24,7 +24,7 @@
  * @see docs/proposals/v2/data-layer-plan.md §E11
  */
 
-import type { SessionRecord, SessionStore, SessionStoreQuery } from "@agentick/spec-next";
+import type { SessionRecord, SessionStore, SessionStoreQuery, StoreCtx } from "@agentick/spec-next";
 import { MemoryCollection } from "@agentick/store-next";
 import { matchesScope } from "@agentick/utils-next";
 
@@ -76,20 +76,20 @@ export class InMemorySessionStore implements SessionStore {
     prunePredicate: isPrunable,
   });
 
-  put(record: SessionRecord): Promise<void> {
-    return this.collection.put(record);
+  put(record: SessionRecord, ctx: StoreCtx): Promise<void> {
+    return this.collection.put(record, ctx);
   }
 
-  get(id: string): Promise<SessionRecord | undefined> {
-    return this.collection.get(id);
+  get(id: string, ctx: StoreCtx): Promise<SessionRecord | undefined> {
+    return this.collection.get(id, ctx);
   }
 
-  list(query?: SessionStoreQuery): Promise<readonly SessionRecord[]> {
-    return this.collection.list(query);
+  list(query: SessionStoreQuery | undefined, ctx: StoreCtx): Promise<readonly SessionRecord[]> {
+    return this.collection.list(query, ctx);
   }
 
-  async delete(id: string): Promise<void> {
-    await this.collection.delete(id);
+  async delete(id: string, ctx: StoreCtx): Promise<void> {
+    await this.collection.delete(id, ctx);
   }
 
   /**
@@ -97,8 +97,8 @@ export class InMemorySessionStore implements SessionStore {
    * completed / failed records are eligible — an in-flight session is never
    * pruned no matter how old.
    */
-  prune(before: number): Promise<void> {
+  prune(before: number, ctx: StoreCtx): Promise<void> {
     // `prunePredicate` is configured above, so the generic's `prune` is present.
-    return this.collection.prune!(before);
+    return this.collection.prune!(before, ctx);
   }
 }

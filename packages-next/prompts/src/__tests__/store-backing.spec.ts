@@ -16,6 +16,7 @@
 import { describe, expect, it } from "vitest";
 import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime-next";
 import type { PromptStore } from "@agentick/spec-next";
+import { stubStoreCtx } from "@agentick/store-next";
 
 import { PromptsHarness } from "../harness.js";
 import { InMemoryPromptStore } from "../store.js";
@@ -53,7 +54,7 @@ describe("PromptsHarness — store backing (the augmentation split)", () => {
     });
 
     // The durable store holds ONLY the serializable slice — no fns.
-    const persisted = await store.get("summarize");
+    const persisted = await store.get("summarize", stubStoreCtx());
     expect(persisted).toEqual({
       name: "summarize",
       description: "Summarize",
@@ -80,8 +81,8 @@ describe("PromptsHarness — store backing (the augmentation split)", () => {
     });
     await h.update({ name: "p", declaration: { description: "new" } });
 
-    expect((await store.get("p"))?.description).toBe("new");
-    expect(await store.get("p")).not.toHaveProperty("render");
+    expect((await store.get("p", stubStoreCtx()))?.description).toBe("new");
+    expect(await store.get("p", stubStoreCtx())).not.toHaveProperty("render");
     // The sidecar render survives the update (not overwritten by the patch).
     expect(typeof h.getDeclaration("p")?.render).toBe("function");
     await h.close();
@@ -93,7 +94,7 @@ describe("PromptsHarness — store backing (the augmentation split)", () => {
     await h.ready;
     await h.register({ declaration: { name: "p", description: "p", render: () => "x" } });
     await h.remove({ name: "p" });
-    expect(await store.get("p")).toBeUndefined();
+    expect(await store.get("p", stubStoreCtx())).toBeUndefined();
     expect(h.has("p")).toBe(false);
     expect(h.getDeclaration("p")).toBeUndefined();
     await h.close();
@@ -112,8 +113,11 @@ describe("PromptsHarness — store backing (the augmentation split)", () => {
     const summary = await h.reload();
     expect([...summary.added].sort()).toEqual(["alpha", "beta"]);
     // Records landed in the durable store (fns stripped).
-    expect((await store.list()).map((r) => r.name).sort()).toEqual(["alpha", "beta"]);
-    expect(await store.get("alpha")).not.toHaveProperty("render");
+    expect((await store.list(undefined, stubStoreCtx())).map((r) => r.name).sort()).toEqual([
+      "alpha",
+      "beta",
+    ]);
+    expect(await store.get("alpha", stubStoreCtx())).not.toHaveProperty("render");
     // But the harness can render alpha — its sidecar has the fn.
     const result = await h.get({ name: "alpha" });
     expect(result.messages[0]!.content).toEqual([{ type: "text", text: "a" }]);
@@ -127,12 +131,12 @@ describe("PromptsHarness — store backing (the augmentation split)", () => {
     h.setLoaders([
       fromArray([{ declaration: { name: "lazy", description: "L", render: () => "l" } }]),
     ]);
-    expect(await store.get("lazy")).toBeUndefined();
+    expect(await store.get("lazy", stubStoreCtx())).toBeUndefined();
     const resolved = await h.resolve("lazy");
     expect(resolved?.name).toBe("lazy");
     expect(typeof resolved?.render).toBe("function");
     // The lookup-on-miss registered the record — now durable (fns still sidecar).
-    expect((await store.get("lazy"))?.description).toBe("L");
+    expect((await store.get("lazy", stubStoreCtx()))?.description).toBe("L");
     await h.close();
   });
 

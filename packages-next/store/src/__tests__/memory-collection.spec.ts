@@ -7,6 +7,8 @@
 
 import { describe, expect, it } from "vitest";
 
+import { stubStoreCtx } from "@agentick/store-next";
+
 import { MemoryCollection } from "../memory-collection.js";
 import { runStoreConformance } from "../store-conformance.js";
 
@@ -32,38 +34,38 @@ function rows(): MemoryCollection<Row, RowQuery, number> {
 describe("MemoryCollection", () => {
   it("put upserts in place and get round-trips", async () => {
     const c = rows();
-    await c.put({ id: "a", group: "g1", n: 1 });
-    await c.put({ id: "a", group: "g1", n: 2 });
-    expect(await c.get("a")).toEqual({ id: "a", group: "g1", n: 2 });
-    expect(await c.list()).toHaveLength(1);
+    await c.put({ id: "a", group: "g1", n: 1 }, stubStoreCtx());
+    await c.put({ id: "a", group: "g1", n: 2 }, stubStoreCtx());
+    expect(await c.get("a", stubStoreCtx())).toEqual({ id: "a", group: "g1", n: 2 });
+    expect(await c.list(undefined, stubStoreCtx())).toHaveLength(1);
   });
 
   it("get returns undefined for an unknown key", async () => {
-    expect(await rows().get("nope")).toBeUndefined();
+    expect(await rows().get("nope", stubStoreCtx())).toBeUndefined();
   });
 
   it("list() with no query returns every record; a query filters", async () => {
     const c = rows();
-    await c.put({ id: "a", group: "g1", n: 1 });
-    await c.put({ id: "b", group: "g2", n: 2 });
-    expect((await c.list()).map((r) => r.id).sort()).toEqual(["a", "b"]);
-    expect((await c.list({ group: "g1" })).map((r) => r.id)).toEqual(["a"]);
+    await c.put({ id: "a", group: "g1", n: 1 }, stubStoreCtx());
+    await c.put({ id: "b", group: "g2", n: 2 }, stubStoreCtx());
+    expect((await c.list(undefined, stubStoreCtx())).map((r) => r.id).sort()).toEqual(["a", "b"]);
+    expect((await c.list({ group: "g1" }, stubStoreCtx())).map((r) => r.id)).toEqual(["a"]);
   });
 
   it("list() returns a fresh array — mutating it never mutates the store", async () => {
     const c = rows();
-    await c.put({ id: "a", group: "g1", n: 1 });
-    const first = await c.list();
+    await c.put({ id: "a", group: "g1", n: 1 }, stubStoreCtx());
+    const first = await c.list(undefined, stubStoreCtx());
     (first as Row[]).push({ id: "rogue", group: "g1", n: 9 });
-    expect(await c.list()).toHaveLength(1);
+    expect(await c.list(undefined, stubStoreCtx())).toHaveLength(1);
   });
 
   it("delete removes and reports whether the key existed", async () => {
     const c = rows();
-    await c.put({ id: "a", group: "g1", n: 1 });
-    expect(await c.delete("a")).toBe(true);
-    expect(await c.get("a")).toBeUndefined();
-    expect(await c.delete("a")).toBe(false);
+    await c.put({ id: "a", group: "g1", n: 1 }, stubStoreCtx());
+    expect(await c.delete("a", stubStoreCtx())).toBe(true);
+    expect(await c.get("a", stubStoreCtx())).toBeUndefined();
+    expect(await c.delete("a", stubStoreCtx())).toBe(false);
   });
 
   it("prune is present only when a prunePredicate is configured", () => {
@@ -78,10 +80,10 @@ describe("MemoryCollection", () => {
 
   it("prune drops every record the predicate selects", async () => {
     const c = rows();
-    await c.put({ id: "a", group: "g1", n: 1 });
-    await c.put({ id: "b", group: "g1", n: 5 });
-    await c.prune!(3);
-    expect((await c.list()).map((r) => r.id)).toEqual(["b"]);
+    await c.put({ id: "a", group: "g1", n: 1 }, stubStoreCtx());
+    await c.put({ id: "b", group: "g1", n: 5 }, stubStoreCtx());
+    await c.prune!(3, stubStoreCtx());
+    expect((await c.list(undefined, stubStoreCtx())).map((r) => r.id)).toEqual(["b"]);
   });
 });
 
@@ -90,17 +92,17 @@ describe("MemoryCollection.onChange", () => {
     const c = rows();
     const events: Array<{ key: string; value?: Row; prev?: Row }> = [];
     c.onChange((ch) => events.push(ch));
-    await c.put({ id: "a", group: "g1", n: 1 });
+    await c.put({ id: "a", group: "g1", n: 1 }, stubStoreCtx());
     expect(events).toEqual([{ key: "a", value: { id: "a", group: "g1", n: 1 } }]);
     expect("prev" in events[0]!).toBe(false);
   });
 
   it("fires on put (overwrite) carrying the previous value as prev", async () => {
     const c = rows();
-    await c.put({ id: "a", group: "g1", n: 1 });
+    await c.put({ id: "a", group: "g1", n: 1 }, stubStoreCtx());
     const events: Array<{ key: string; value?: Row; prev?: Row }> = [];
     c.onChange((ch) => events.push(ch));
-    await c.put({ id: "a", group: "g1", n: 2 });
+    await c.put({ id: "a", group: "g1", n: 2 }, stubStoreCtx());
     expect(events).toEqual([
       { key: "a", value: { id: "a", group: "g1", n: 2 }, prev: { id: "a", group: "g1", n: 1 } },
     ]);
@@ -108,10 +110,10 @@ describe("MemoryCollection.onChange", () => {
 
   it("fires on delete of an existing key with prev and no value", async () => {
     const c = rows();
-    await c.put({ id: "a", group: "g1", n: 1 });
+    await c.put({ id: "a", group: "g1", n: 1 }, stubStoreCtx());
     const events: Array<{ key: string; value?: Row; prev?: Row }> = [];
     c.onChange((ch) => events.push(ch));
-    await c.delete("a");
+    await c.delete("a", stubStoreCtx());
     expect(events).toEqual([{ key: "a", prev: { id: "a", group: "g1", n: 1 } }]);
     expect("value" in events[0]!).toBe(false);
   });
@@ -120,16 +122,16 @@ describe("MemoryCollection.onChange", () => {
     const c = rows();
     const events: unknown[] = [];
     c.onChange((ch) => events.push(ch));
-    expect(await c.delete("nope")).toBe(false);
+    expect(await c.delete("nope", stubStoreCtx())).toBe(false);
     expect(events).toEqual([]);
   });
 
   it("does NOT fire on prune (no shared-store consumer needs bulk-eviction observation yet)", async () => {
     const c = rows();
-    await c.put({ id: "a", group: "g1", n: 1 });
+    await c.put({ id: "a", group: "g1", n: 1 }, stubStoreCtx());
     const events: unknown[] = [];
     c.onChange((ch) => events.push(ch));
-    await c.prune!(3);
+    await c.prune!(3, stubStoreCtx());
     expect(events).toEqual([]);
   });
 
@@ -137,9 +139,9 @@ describe("MemoryCollection.onChange", () => {
     const c = rows();
     const events: unknown[] = [];
     const off = c.onChange((ch) => events.push(ch));
-    await c.put({ id: "a", group: "g1", n: 1 });
+    await c.put({ id: "a", group: "g1", n: 1 }, stubStoreCtx());
     off();
-    await c.put({ id: "b", group: "g1", n: 2 });
+    await c.put({ id: "b", group: "g1", n: 2 }, stubStoreCtx());
     expect(events).toHaveLength(1);
   });
 
@@ -151,8 +153,8 @@ describe("MemoryCollection.onChange", () => {
     });
     c.onChange((ch) => good.push(ch.key));
     // The write itself must still succeed despite the throwing listener.
-    await c.put({ id: "a", group: "g1", n: 1 });
-    expect(await c.get("a")).toEqual({ id: "a", group: "g1", n: 1 });
+    await c.put({ id: "a", group: "g1", n: 1 }, stubStoreCtx());
+    expect(await c.get("a", stubStoreCtx())).toEqual({ id: "a", group: "g1", n: 1 });
     expect(good).toEqual(["a"]);
   });
 
@@ -161,7 +163,7 @@ describe("MemoryCollection.onChange", () => {
     const order: string[] = [];
     c.onChange(() => order.push("first"));
     c.onChange(() => order.push("second"));
-    await c.put({ id: "a", group: "g1", n: 1 });
+    await c.put({ id: "a", group: "g1", n: 1 }, stubStoreCtx());
     expect(order).toEqual(["first", "second"]);
   });
 });
@@ -170,13 +172,13 @@ describe("MemoryCollection.onChange", () => {
 runStoreConformance<MemoryCollection<Row, RowQuery, number>>({
   label: "MemoryCollection<Row>",
   factory: rows,
-  emptyRead: { read: (store, key) => store.get(key), expected: undefined },
-  idempotentDelete: (store, key) => store.delete(key),
+  emptyRead: { read: (store, key) => store.get(key, stubStoreCtx()), expected: undefined },
+  idempotentDelete: (store, key) => store.delete(key, stubStoreCtx()),
   cases: ({ setup }) => {
     it("shared skeleton nests store-specific cases under its describe", async () => {
       const store = await setup();
-      await store.put({ id: "a", group: "g1", n: 1 });
-      expect((await store.list()).map((r) => r.id)).toEqual(["a"]);
+      await store.put({ id: "a", group: "g1", n: 1 }, stubStoreCtx());
+      expect((await store.list(undefined, stubStoreCtx())).map((r) => r.id)).toEqual(["a"]);
     });
   },
 });

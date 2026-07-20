@@ -23,7 +23,7 @@
  * @see docs/proposals/v2/blueprint/68-persistent-tasks.md
  */
 
-import type { TaskRecord, TaskStore, TaskStoreQuery } from "@agentick/spec-next";
+import type { StoreCtx, TaskRecord, TaskStore, TaskStoreQuery } from "@agentick/spec-next";
 import { MemoryCollection } from "@agentick/store-next";
 import { matchesScope } from "@agentick/utils-next";
 
@@ -59,20 +59,20 @@ export class InMemoryTaskStore implements TaskStore {
     prunePredicate: isPrunable,
   });
 
-  put(record: TaskRecord): Promise<void> {
-    return this.collection.put(record);
+  put(record: TaskRecord, ctx: StoreCtx): Promise<void> {
+    return this.collection.put(record, ctx);
   }
 
-  get(taskId: string): Promise<TaskRecord | undefined> {
-    return this.collection.get(taskId);
+  get(taskId: string, ctx: StoreCtx): Promise<TaskRecord | undefined> {
+    return this.collection.get(taskId, ctx);
   }
 
-  list(query?: TaskStoreQuery): Promise<readonly TaskRecord[]> {
-    return this.collection.list(query);
+  list(query: TaskStoreQuery | undefined, ctx: StoreCtx): Promise<readonly TaskRecord[]> {
+    return this.collection.list(query, ctx);
   }
 
-  async delete(taskId: string): Promise<void> {
-    await this.collection.delete(taskId);
+  async delete(taskId: string, ctx: StoreCtx): Promise<void> {
+    await this.collection.delete(taskId, ctx);
   }
 
   /**
@@ -80,8 +80,8 @@ export class InMemoryTaskStore implements TaskStore {
    * terminal records are eligible — an in-flight `working` /
    * `input_required` task is never pruned no matter how old.
    */
-  prune(before: number): Promise<void> {
+  prune(before: number, ctx: StoreCtx): Promise<void> {
     // `prunePredicate` is configured above, so the generic's `prune` is present.
-    return this.collection.prune!(before);
+    return this.collection.prune!(before, ctx);
   }
 }

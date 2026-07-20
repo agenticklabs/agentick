@@ -28,7 +28,7 @@
 import { expect, it } from "vitest";
 
 import type { PromptDeclarationRecord, PromptStore } from "@agentick/spec-next";
-import { runStoreConformance } from "@agentick/store-next";
+import { runStoreConformance, stubStoreCtx } from "@agentick/store-next";
 
 export interface PromptStoreConformanceOptions {
   /** Display label for the suite (`describe` block heading). */
@@ -61,8 +61,8 @@ export function runPromptStoreConformance(opts: PromptStoreConformanceOptions): 
     factory: opts.factory,
     skip: opts.skip,
     // Store-agnostic: unknown key → undefined; delete of an absent key settles.
-    emptyRead: { read: (store, key) => store.get(key), expected: undefined },
-    idempotentDelete: (store, key) => store.delete(key),
+    emptyRead: { read: (store, key) => store.get(key, stubStoreCtx()), expected: undefined },
+    idempotentDelete: (store, key) => store.delete(key, stubStoreCtx()),
     cases: ({ setup }) => {
       it("put then get round-trips the record (name-keyed)", async () => {
         const store = await setup();
@@ -70,44 +70,47 @@ export function runPromptStoreConformance(opts: PromptStoreConformanceOptions): 
           arguments: [{ name: "docId", required: true }],
           metadata: { version: 2 },
         });
-        await store.put(r);
-        expect(await store.get("summarize")).toEqual(r);
+        await store.put(r, stubStoreCtx());
+        expect(await store.get("summarize", stubStoreCtx())).toEqual(r);
       });
 
       it("put upserts in place — a later put of the same name replaces", async () => {
         const store = await setup();
-        await store.put(record("greet", { description: "old" }));
-        await store.put(record("greet", { description: "new" }));
-        const got = await store.get("greet");
+        await store.put(record("greet", { description: "old" }), stubStoreCtx());
+        await store.put(record("greet", { description: "new" }), stubStoreCtx());
+        const got = await store.get("greet", stubStoreCtx());
         expect(got?.description).toBe("new");
         // Still one record, not two.
-        expect(await store.list()).toHaveLength(1);
+        expect(await store.list(undefined, stubStoreCtx())).toHaveLength(1);
       });
 
       it("list() with no query returns every record", async () => {
         const store = await setup();
-        await store.put(record("a"));
-        await store.put(record("b"));
-        expect((await store.list()).map((r) => r.name).sort()).toEqual(["a", "b"]);
+        await store.put(record("a"), stubStoreCtx());
+        await store.put(record("b"), stubStoreCtx());
+        expect((await store.list(undefined, stubStoreCtx())).map((r) => r.name).sort()).toEqual([
+          "a",
+          "b",
+        ]);
       });
 
       it("list(query) filters by name substring (case-insensitive)", async () => {
         const store = await setup();
-        await store.put(record("git_push"));
-        await store.put(record("git_pull"));
-        await store.put(record("docker_build"));
-        const got = await store.list({ name: "GIT" });
+        await store.put(record("git_push"), stubStoreCtx());
+        await store.put(record("git_pull"), stubStoreCtx());
+        await store.put(record("docker_build"), stubStoreCtx());
+        const got = await store.list({ name: "GIT" }, stubStoreCtx());
         expect(got.map((r) => r.name).sort()).toEqual(["git_pull", "git_push"]);
       });
 
       it("delete() removes a record and is idempotent", async () => {
         const store = await setup();
-        await store.put(record("fade"));
-        await store.delete("fade");
-        expect(await store.get("fade")).toBeUndefined();
-        expect(await store.list()).toEqual([]);
+        await store.put(record("fade"), stubStoreCtx());
+        await store.delete("fade", stubStoreCtx());
+        expect(await store.get("fade", stubStoreCtx())).toBeUndefined();
+        expect(await store.list(undefined, stubStoreCtx())).toEqual([]);
         // Second delete: absent → resolves, no throw.
-        await expect(store.delete("fade")).resolves.toBeUndefined();
+        await expect(store.delete("fade", stubStoreCtx())).resolves.toBeUndefined();
       });
     },
   });

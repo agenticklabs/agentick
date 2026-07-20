@@ -41,6 +41,7 @@ import type { Pool as PgPool } from "pg";
 
 import type {
   EventScope,
+  StoreCtx,
   TaskRecord,
   TaskStatus,
   TaskStore,
@@ -160,6 +161,10 @@ const TERMINAL_STATUSES: readonly TaskStatus[] = [
   "interrupted",
 ];
 
+// TODO(store-phase-B): use ctx.opId for idempotency / ctx for scoping — every
+// DATA method accepts the `StoreCtx` as its final arg but ignores it today; the
+// durable dedup (write on ctx.opId) and event-sourced as-of read fold land in
+// Run B.
 class PostgresTaskStore implements TaskStore {
   readonly backend = "postgres" as const;
 
@@ -214,7 +219,7 @@ class PostgresTaskStore implements TaskStore {
     return this.codec.decode(row[this.cols.payload], schemaVer);
   }
 
-  async put(record: TaskRecord): Promise<void> {
+  async put(record: TaskRecord, _ctx: StoreCtx): Promise<void> {
     const projection: TaskPutProjection = {
       taskId: record.taskId,
       scope: record.scope,
@@ -245,7 +250,7 @@ class PostgresTaskStore implements TaskStore {
     };
   }
 
-  async get(taskId: string): Promise<TaskRecord | undefined> {
+  async get(taskId: string, _ctx: StoreCtx): Promise<TaskRecord | undefined> {
     const query =
       this.sql?.get?.({ taskId }) ??
       ({
@@ -256,7 +261,7 @@ class PostgresTaskStore implements TaskStore {
     return rows.length > 0 ? this.toRecord(rows[0]!) : undefined;
   }
 
-  async list(query?: TaskStoreQuery): Promise<readonly TaskRecord[]> {
+  async list(query: TaskStoreQuery | undefined, _ctx: StoreCtx): Promise<readonly TaskRecord[]> {
     const sqlQuery = this.sql?.list?.({ query }) ?? this.defaultListSql(query);
     const rows = await this.run(sqlQuery);
     return rows.map((r) => this.toRecord(r));
@@ -284,7 +289,7 @@ class PostgresTaskStore implements TaskStore {
     };
   }
 
-  async delete(taskId: string): Promise<void> {
+  async delete(taskId: string, _ctx: StoreCtx): Promise<void> {
     const query =
       this.sql?.delete?.({ taskId }) ??
       ({
@@ -300,7 +305,7 @@ class PostgresTaskStore implements TaskStore {
    * terminal records are eligible — an in-flight `working` /
    * `input_required` task is never pruned no matter how old.
    */
-  async prune(before: number): Promise<void> {
+  async prune(before: number, _ctx: StoreCtx): Promise<void> {
     const query =
       this.sql?.prune?.({ before }) ??
       ({

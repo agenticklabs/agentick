@@ -1141,7 +1141,7 @@ export class AppHarness<P = unknown>
    * routing half of the E11 split.
    */
   listSessions(query?: SessionStoreQuery): Promise<readonly SessionRecord[]> {
-    return this.sessionStore.list(query);
+    return this.sessionStore.list(query, this.storeCtx());
   }
 
   /**
@@ -1150,7 +1150,7 @@ export class AppHarness<P = unknown>
    * has dropped. `undefined` when unknown.
    */
   getSessionRecord(sessionId: string): Promise<SessionRecord | undefined> {
-    return this.sessionStore.get(sessionId);
+    return this.sessionStore.get(sessionId, this.storeCtx());
   }
 
   /**

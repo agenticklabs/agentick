@@ -324,7 +324,7 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
           "or use readPersisted() for the seq-less full read.",
       );
     }
-    return this.store.history(this.scopeId, options);
+    return this.store.history(this.scopeId, options, this.storeCtx());
   }
 
   readPersisted(): readonly TimelineEntry[] {
@@ -356,7 +356,8 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
         // operational failure). The harness wraps whatever the adapter
         // rejected with, so adapters need not import spec errors.
         yield* Effect.tryPromise({
-          try: () => Promise.resolve(this.store.append(this.scopeId, input.entries)),
+          try: () =>
+            Promise.resolve(this.store.append(this.scopeId, input.entries, this.storeCtx())),
           catch: (cause) => new TimelineWriteFailed({ cause }),
         });
       } else {
@@ -402,7 +403,7 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
    * projection reconstructs by re-render / a subsequent compaction).
    */
   async hydrate(): Promise<void> {
-    const entries = await this.store.read(this.scopeId);
+    const entries = await this.store.read(this.scopeId, this.storeCtx());
     this._persisted = [...entries];
     this._projection = [...entries];
     this._persistedVersion += 1;
@@ -433,7 +434,7 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
       while (this.writeBuffer.length > 0) {
         const batch = this.writeBuffer;
         this.writeBuffer = [];
-        await this.store.append(this.scopeId, batch);
+        await this.store.append(this.scopeId, batch, this.storeCtx());
       }
     } catch (err) {
       // Absorb — never reject the pump promise (an un-awaited pump would

@@ -24,9 +24,15 @@
  * hand-rolled listener set this adapter previously carried is gone.
  */
 
+import type { StoreCtx } from "@agentick/spec-next";
 import { MemoryCollection } from "@agentick/store-next";
 
 import type { CredentialsStore } from "../store.js";
+
+// credentials' package-local port isn't ctx-threaded (Run A scope); the
+// in-memory collection ignores ctx anyway. Synthesize a minimal StoreCtx (all
+// fields optional) to satisfy the collection's now-mandatory ctx parameter.
+const STORE_CTX: StoreCtx = {};
 
 // ASCII Unit Separator (US, 0x1F) — purpose-built field separator that
 // can't appear in any sensible namespace or key string. Explicit escape
@@ -67,24 +73,24 @@ class InMemoryCredentialsStore implements CredentialsStore {
   });
 
   async get<T>(namespace: string, key: string): Promise<T | undefined> {
-    const entry = await this.collection.get(compositeKey(namespace, key));
+    const entry = await this.collection.get(compositeKey(namespace, key), STORE_CTX);
     return entry?.value as T | undefined;
   }
 
   async set<T>(namespace: string, key: string, value: T): Promise<void> {
-    await this.collection.put({ namespace, key, value });
+    await this.collection.put({ namespace, key, value }, STORE_CTX);
   }
 
   async delete(namespace: string, key: string): Promise<boolean> {
-    return this.collection.delete(compositeKey(namespace, key));
+    return this.collection.delete(compositeKey(namespace, key), STORE_CTX);
   }
 
   async has(namespace: string, key: string): Promise<boolean> {
-    return (await this.collection.get(compositeKey(namespace, key))) !== undefined;
+    return (await this.collection.get(compositeKey(namespace, key), STORE_CTX)) !== undefined;
   }
 
   async keys(namespace: string): Promise<readonly string[]> {
-    const entries = await this.collection.list({ namespace });
+    const entries = await this.collection.list({ namespace }, STORE_CTX);
     return entries.map((e) => e.key);
   }
 

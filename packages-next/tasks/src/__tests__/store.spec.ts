@@ -17,6 +17,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type { TaskRecord } from "@agentick/spec-next";
+import { stubStoreCtx } from "@agentick/store-next";
 import { drainRejection } from "@agentick/utils-next/testing";
 
 import { InMemoryTaskStore } from "../store.js";
@@ -77,14 +78,14 @@ describe("TasksHarness — detached lifetime (ADR 68)", () => {
 
     // Detached: STILL working, record persisted in the shared store.
     expect(harness.get(detached.taskId)?.status).toBe("working");
-    const persisted = await store.get(detached.taskId);
+    const persisted = await store.get(detached.taskId, stubStoreCtx());
     expect(persisted?.status).toBe("working");
     expect(persisted?.detached).toBe(true);
 
     // It runs to completion after close (the store record follows it).
     releaseDetached("done-after-close");
     expect(await detached.result).toBe("done-after-close");
-    expect((await store.get(detached.taskId))?.status).toBe("completed");
+    expect((await store.get(detached.taskId, stubStoreCtx()))?.status).toBe("completed");
   });
 
   it("every transition is persisted to the store (get/list are the store projection)", async () => {
@@ -94,14 +95,14 @@ describe("TasksHarness — detached lifetime (ADR 68)", () => {
 
     const handle = harness.submit(async () => 42);
     // Initial working record is in the store synchronously after submit.
-    expect((await store.get(handle.taskId))?.status).toBe("working");
+    expect((await store.get(handle.taskId, stubStoreCtx()))?.status).toBe("working");
     await handle.result;
-    expect((await store.get(handle.taskId))?.status).toBe("completed");
+    expect((await store.get(handle.taskId, stubStoreCtx()))?.status).toBe("completed");
 
     // list() reflects the harness's scope-filtered projection.
     expect(harness.list().map((t) => t.taskId)).toEqual([handle.taskId]);
     // The store holds it under this session's scope.
-    const scoped = await store.list({ scope: { sessionId: "s-persist" } });
+    const scoped = await store.list({ scope: { sessionId: "s-persist" } }, stubStoreCtx());
     expect(scoped.map((r) => r.taskId)).toEqual([handle.taskId]);
   });
 });
@@ -120,7 +121,7 @@ describe("TasksHarness — shared app-scoped store isolation (ADR 68)", () => {
       expect(a.list().map((t) => t.taskId)).toEqual([ha.taskId]);
       expect(b.list().map((t) => t.taskId)).toEqual([hb.taskId]);
       // The store holds both.
-      expect((await store.list()).map((r) => r.taskId).sort()).toEqual(
+      expect((await store.list(undefined, stubStoreCtx())).map((r) => r.taskId).sort()).toEqual(
         [ha.taskId, hb.taskId].sort(),
       );
     } finally {
@@ -146,7 +147,7 @@ describe("TasksHarness — interrupted on hydration (ADR 68)", () => {
       createdAt: now - 10_000,
       updatedAt: now - 10_000,
     };
-    await store.put(orphan);
+    await store.put(orphan, stubStoreCtx());
 
     const harness = mkHarness(store, "s-hydrate");
     try {
@@ -154,7 +155,7 @@ describe("TasksHarness — interrupted on hydration (ADR 68)", () => {
       // Projection + store both report interrupted.
       expect(harness.status("task:orphan")).toBe("interrupted");
       expect(harness.get("task:orphan")?.failure?.reason).toBe("interrupted");
-      expect((await store.get("task:orphan"))?.status).toBe("interrupted");
+      expect((await store.get("task:orphan", stubStoreCtx()))?.status).toBe("interrupted");
       // result() on the orphan rejects with an interrupted TaskRejection.
       await expect(harness.result("task:orphan")).rejects.toMatchObject({
         _tag: "TaskRejection",
@@ -180,7 +181,7 @@ describe("TasksHarness — interrupted on hydration (ADR 68)", () => {
       createdAt: now - 10_000,
       updatedAt: now - 9_000,
     };
-    await store.put(done);
+    await store.put(done, stubStoreCtx());
 
     const harness = mkHarness(store, "s-hydrate2");
     try {

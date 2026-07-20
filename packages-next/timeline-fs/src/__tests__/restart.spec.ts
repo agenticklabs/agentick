@@ -19,6 +19,7 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { TimelineEntry } from "@agentick/timeline-next";
+import { stubStoreCtx } from "@agentick/store-next";
 
 import { fsTimelineStore } from "../store.js";
 
@@ -41,69 +42,69 @@ describe("fsTimelineStore — restart durability across prune-to-empty", () => {
 
   it("a cold instance continues seq past pruned-away entries (no reuse)", async () => {
     const first = fsTimelineStore({ dir });
-    const seqs = await first.append("s1", [entry("a"), entry("b"), entry("c")]);
+    const seqs = await first.append("s1", [entry("a"), entry("b"), entry("c")], stubStoreCtx());
     expect(seqs).toEqual([0, 1, 2]);
 
     // Erase everything — the transcript is now empty.
-    const removed = await first.prune!("s1", { seq: 3 });
+    const removed = await first.prune!("s1", { seq: 3 }, stubStoreCtx());
     expect(removed).toBe(3);
-    expect(await first.read("s1")).toEqual([]);
+    expect(await first.read("s1", stubStoreCtx())).toEqual([]);
 
     // Simulate a process restart: a brand-new store over the SAME dir has a
     // cold cursor and must recover the high-water mark from the sidecar.
     const second = fsTimelineStore({ dir });
-    expect(await second.read("s1")).toEqual([]); // still empty after "restart"
+    expect(await second.read("s1", stubStoreCtx())).toEqual([]); // still empty after "restart"
 
-    const [sd] = await second.append("s1", [entry("d")]);
+    const [sd] = await second.append("s1", [entry("d")], stubStoreCtx());
     expect(sd).toBe(3); // continues past c (seq 2) — NOT restarted at 0
-    expect((await second.read("s1")).map(idOf)).toEqual(["d"]);
+    expect((await second.read("s1", stubStoreCtx())).map(idOf)).toEqual(["d"]);
   });
 
   it("a cursor held across the restart still sees the new entry", async () => {
     const first = fsTimelineStore({ dir });
-    await first.append("s2", [entry("a"), entry("b"), entry("c")]); // 0,1,2
-    await first.prune!("s2", { seq: 3 }); // empty
+    await first.append("s2", [entry("a"), entry("b"), entry("c")], stubStoreCtx()); // 0,1,2
+    await first.prune!("s2", { seq: 3 }, stubStoreCtx()); // empty
 
     const second = fsTimelineStore({ dir });
-    const [sd] = await second.append("s2", [entry("d")]);
+    const [sd] = await second.append("s2", [entry("d")], stubStoreCtx());
     expect(sd).toBe(3);
 
     // A consumer that recorded fromSeq=3 before the crash finds exactly the
     // new entry at its true seq — it is NOT hidden behind a reused seq 0.
-    const page = await second.history!("s2", { fromSeq: 3 });
+    const page = await second.history!("s2", { fromSeq: 3 }, stubStoreCtx());
     expect(page).toEqual([{ seq: 3, entry: entry("d") }]);
     // And a full scan from 0 sees only the surviving entry, tagged seq 3.
-    const all = await second.history!("s2", { fromSeq: 0 });
+    const all = await second.history!("s2", { fromSeq: 0 }, stubStoreCtx());
     expect(all.map((t) => t.seq)).toEqual([3]);
   });
 
   it("delete after prune-to-empty ends the session — a later append restarts at 0", async () => {
     const first = fsTimelineStore({ dir });
-    await first.append("s3", [entry("a"), entry("b")]); // 0,1
-    await first.prune!("s3", { seq: 2 }); // empty, hwm sidecar = 2
+    await first.append("s3", [entry("a"), entry("b")], stubStoreCtx()); // 0,1
+    await first.prune!("s3", { seq: 2 }, stubStoreCtx()); // empty, hwm sidecar = 2
 
     // delete must report the pruned-empty session as present (matches
     // MemoryTimelineStore) and remove BOTH the transcript and the sidecar.
-    expect(await first.delete("s3")).toBe(true);
+    expect(await first.delete("s3", stubStoreCtx())).toBe(true);
 
     const second = fsTimelineStore({ dir });
-    const [sa] = await second.append("s3", [entry("a2")]);
+    const [sa] = await second.append("s3", [entry("a2")], stubStoreCtx());
     expect(sa).toBe(0); // delete ended the session → fresh sequence
   });
 
   it("keys() never enumerates the .hwm sidecar", async () => {
     const store = fsTimelineStore({ dir });
-    await store.append("s4", [entry("a")]); // 0
-    await store.prune!("s4", { seq: 1 }); // empty + writes s4.hwm
+    await store.append("s4", [entry("a")], stubStoreCtx()); // 0
+    await store.prune!("s4", { seq: 1 }, stubStoreCtx()); // empty + writes s4.hwm
 
     // The sidecar exists on disk...
     const names = await readdir(dir);
     expect(names.some((n) => n.endsWith(".hwm"))).toBe(true);
     // ...but a pruned-empty session holds nothing, so it is not enumerated.
-    expect(await store.keys()).not.toContain("s4");
+    expect(await store.keys(stubStoreCtx())).not.toContain("s4");
 
     // A fresh instance over the same dir agrees.
     const restarted = fsTimelineStore({ dir });
-    expect(await restarted.keys()).not.toContain("s4");
+    expect(await restarted.keys(stubStoreCtx())).not.toContain("s4");
   });
 });

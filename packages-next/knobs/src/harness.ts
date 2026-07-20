@@ -343,9 +343,9 @@ export class KnobsHarness
     // store is the authority (and picks up the durable-write flush barrier now
     // centralized in `CollectionProjection.write`). Do NOT wire `hydrate()`
     // into resume while this method still owns it.
-    for (const k of oldKeys) if (!newKeys.has(k)) this.projection.deleteSync(k);
+    for (const k of oldKeys) if (!newKeys.has(k)) this.projection.deleteSync(k, this.storeCtx());
     for (const [k, v] of Object.entries(values)) {
-      this.projection.write({ id: k, value: v });
+      this.projection.write({ id: k, value: v }, this.storeCtx());
     }
     this.listCache = null;
     for (const id of changed) this.fireListeners(id);
@@ -375,7 +375,7 @@ export class KnobsHarness
     // not a notifier). Ping each hydrated key so both per-knob and wildcard
     // subscribers re-read (mirrors importSnapshot's per-key fan-out rather than
     // a wildcard-only `notifyAll`).
-    const keys = await this.projection.hydrate();
+    const keys = await this.projection.hydrate(undefined, this.storeCtx());
     this.listCache = null;
     for (const k of keys) this.fireListeners(k);
   }
@@ -471,7 +471,7 @@ export class KnobsHarness
     // now), durable store off the critical path. The notify seam below
     // (`fireListeners` + `changes`) is driven by hand, exactly as before — the
     // projection is a write sink beside it, never a source.
-    this.projection.write({ id: input.id, value: input.value });
+    this.projection.write({ id: input.id, value: input.value }, this.storeCtx());
     this.listCache = null;
     this.fireListeners(input.id);
     // Emit the semantic change; the constructor-wired StateDelta projection
@@ -493,7 +493,7 @@ export class KnobsHarness
       // A registration that SEEDS a default value is a value mutation, so it
       // dual-writes through the projection. A descriptor-only registration
       // mutates no cell → no store write.
-      this.projection.write({ id: input.id, value: defaultValue });
+      this.projection.write({ id: input.id, value: defaultValue }, this.storeCtx());
     }
     this.listCache = null;
     this.fireListeners(input.id);

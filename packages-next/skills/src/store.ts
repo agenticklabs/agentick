@@ -16,7 +16,7 @@
  * @see docs/proposals/v2/data-layer-plan.md §6-C
  */
 
-import type { Skill, SkillStore, SkillStoreQuery } from "@agentick/spec-next";
+import type { Skill, SkillStore, SkillStoreQuery, StoreCtx } from "@agentick/spec-next";
 import { MemoryCollection } from "@agentick/store-next";
 
 /**
@@ -60,19 +60,19 @@ export class InMemorySkillStore implements SkillStore {
     matchQuery: matchesSkillQuery,
   });
 
-  put(skill: Skill): Promise<void> {
-    return this.collection.put(skill);
+  put(skill: Skill, ctx: StoreCtx): Promise<void> {
+    return this.collection.put(skill, ctx);
   }
 
-  get(name: string): Promise<Skill | undefined> {
-    return this.collection.get(name);
+  get(name: string, ctx: StoreCtx): Promise<Skill | undefined> {
+    return this.collection.get(name, ctx);
   }
 
-  list(query?: SkillStoreQuery): Promise<readonly Skill[]> {
-    return this.collection.list(query);
+  list(query: SkillStoreQuery | undefined, ctx: StoreCtx): Promise<readonly Skill[]> {
+    return this.collection.list(query, ctx);
   }
 
-  async delete(name: string): Promise<void> {
-    await this.collection.delete(name);
+  async delete(name: string, ctx: StoreCtx): Promise<void> {
+    await this.collection.delete(name, ctx);
   }
 }

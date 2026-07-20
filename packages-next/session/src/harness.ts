@@ -659,7 +659,7 @@ export class SessionHarness<P = unknown>
         metadata: this._meta.metadata,
       }),
     };
-    void store.put(record).catch(() => undefined);
+    void store.put(record, this.storeCtx()).catch(() => undefined);
   }
 
   /**

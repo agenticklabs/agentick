@@ -98,7 +98,7 @@ describe("run({ history }) — timeline seeding (#187)", () => {
     const { MemoryTimelineStore } = await import("@agentick/timeline-next");
     const { createApp } = await import("../react.js");
     const store = new MemoryTimelineStore();
-    await store.append("seeded-session:timeline", history);
+    await store.append("seeded-session:timeline", history, { sessionId: "seeded-session" });
     const app = await createApp(React.createElement(MinimalAgent), {
       model: scriptedAdapter("ok"),
       session: { timeline: { store } },

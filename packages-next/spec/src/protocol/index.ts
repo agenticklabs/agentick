@@ -17,6 +17,7 @@
 
 export * from "./factory.js";
 export * from "./store.js";
+export * from "./store-ctx.js";
 export * from "./log-store.js";
 export * from "./timeline-store.js";
 export * from "./event-log.js";

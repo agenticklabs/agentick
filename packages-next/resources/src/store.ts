@@ -24,6 +24,7 @@ import type {
   ResourceDeclarationRecord,
   ResourceStore,
   ResourceStoreQuery,
+  StoreCtx,
 } from "@agentick/spec-next";
 import { resourceDeclarationKey } from "@agentick/spec-next";
 import { MemoryCollection } from "@agentick/store-next";
@@ -65,19 +66,22 @@ export class InMemoryResourceStore implements ResourceStore {
     },
   );
 
-  put(declaration: ResourceDeclarationRecord): Promise<void> {
-    return this.collection.put(declaration);
+  put(declaration: ResourceDeclarationRecord, ctx: StoreCtx): Promise<void> {
+    return this.collection.put(declaration, ctx);
   }
 
-  get(key: string): Promise<ResourceDeclarationRecord | undefined> {
-    return this.collection.get(key);
+  get(key: string, ctx: StoreCtx): Promise<ResourceDeclarationRecord | undefined> {
+    return this.collection.get(key, ctx);
   }
 
-  list(query?: ResourceStoreQuery): Promise<readonly ResourceDeclarationRecord[]> {
-    return this.collection.list(query);
+  list(
+    query: ResourceStoreQuery | undefined,
+    ctx: StoreCtx,
+  ): Promise<readonly ResourceDeclarationRecord[]> {
+    return this.collection.list(query, ctx);
   }
 
-  async delete(key: string): Promise<void> {
-    await this.collection.delete(key);
+  async delete(key: string, ctx: StoreCtx): Promise<void> {
+    await this.collection.delete(key, ctx);
   }
 }

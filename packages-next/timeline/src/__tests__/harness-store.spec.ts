@@ -14,6 +14,8 @@
 import { describe, expect, it } from "vitest";
 import { TimelineWriteFailed, type TimelineEntry, type TimelineStore } from "@agentick/spec-next";
 
+import { stubStoreCtx } from "@agentick/store-next";
+
 import { MemoryTimelineStore } from "../store.js";
 import { stubTimelineHarness } from "../testing/index.js";
 
@@ -33,13 +35,13 @@ function failingStore(failOnAppend: number): TimelineStore {
   let appends = 0;
   return {
     backend: "failing",
-    read: (s) => inner.read(s),
-    keys: () => inner.keys(),
-    delete: (s) => inner.delete(s),
-    append: (s, entries) => {
+    read: (s, ctx) => inner.read(s, ctx),
+    keys: (ctx) => inner.keys(ctx),
+    delete: (s, ctx) => inner.delete(s, ctx),
+    append: (s, entries, ctx) => {
       appends += 1;
       if (appends >= failOnAppend) return Promise.reject(new Error("store append boom"));
-      return inner.append(s, entries);
+      return inner.append(s, entries, ctx);
     },
   };
 }
@@ -55,7 +57,7 @@ describe("TimelineHarness — write-behind (default)", () => {
     expect(ids(h.readPersisted())).toEqual(["a", "b", "c"]);
 
     await h.flush();
-    expect(ids(await store.read(h.id))).toEqual(["a", "b", "c"]);
+    expect(ids(await store.read(h.id, stubStoreCtx()))).toEqual(["a", "b", "c"]);
   });
 
   it("flush() is idempotent and a no-op when nothing is buffered", async () => {
@@ -65,7 +67,7 @@ describe("TimelineHarness — write-behind (default)", () => {
     await h.append(messageEntry("a"));
     await h.flush();
     await h.flush(); // already drained
-    expect(ids(await store.read(h.id))).toEqual(["a"]);
+    expect(ids(await store.read(h.id, stubStoreCtx()))).toEqual(["a"]);
   });
 
   it("reports the store's backend identifier", () => {
@@ -88,9 +90,9 @@ describe("TimelineHarness — write-through", () => {
 
     await h.append(messageEntry("a"));
     // No flush needed — the append awaited the store.
-    expect(ids(await store.read(h.id))).toEqual(["a"]);
+    expect(ids(await store.read(h.id, stubStoreCtx()))).toEqual(["a"]);
     await h.append(messageEntry("b"));
-    expect(ids(await store.read(h.id))).toEqual(["a", "b"]);
+    expect(ids(await store.read(h.id, stubStoreCtx()))).toEqual(["a", "b"]);
   });
 });
 
@@ -98,14 +100,14 @@ describe("TimelineHarness — hydrate (resume path)", () => {
   it("loads the durable log into both tiers", async () => {
     const store = new MemoryTimelineStore();
     // Simulate a prior process that persisted this session.
-    await store.append("stub-session", [messageEntry("x"), messageEntry("y")]);
+    await store.append("stub-session", [messageEntry("x"), messageEntry("y")], stubStoreCtx());
 
     // New harness bound to the same store + same session id.
     const h = stubTimelineHarness([], { store });
     // Override: stubTimelineHarness generates its own id, so hydrate reads
     // from the harness's own id. Seed under that id instead.
-    await store.delete("stub-session");
-    await store.append(h.id, [messageEntry("x"), messageEntry("y")]);
+    await store.delete("stub-session", stubStoreCtx());
+    await store.append(h.id, [messageEntry("x"), messageEntry("y")], stubStoreCtx());
 
     expect(ids(h.readPersisted())).toEqual([]); // nothing loaded yet
     await h.hydrate();
@@ -120,7 +122,7 @@ describe("TimelineHarness — close flushes", () => {
     const h = stubTimelineHarness([], { store });
     await h.append(messageEntry("a"), messageEntry("b"));
     await h.close();
-    expect(ids(await store.read(h.id))).toEqual(["a", "b"]);
+    expect(ids(await store.read(h.id, stubStoreCtx()))).toEqual(["a", "b"]);
   });
 });
 
@@ -141,7 +143,7 @@ describe("TimelineHarness — compaction never touches the store", () => {
     // Projection collapsed…
     expect(ids(h.read().entries)).toEqual(["summary"]);
     // …but the store's append-only log is exactly the original three.
-    expect(ids(await store.read(h.id))).toEqual(["a", "b", "c"]);
+    expect(ids(await store.read(h.id, stubStoreCtx()))).toEqual(["a", "b", "c"]);
   });
 });
 
@@ -194,10 +196,10 @@ describe("timeline.history() — cursored read (#187)", () => {
     const store = new MemoryTimelineStore();
     const bare: TimelineStore = {
       backend: "no-history",
-      read: (sid) => store.read(sid),
-      append: (sid, e) => store.append(sid, e),
-      keys: () => store.keys(),
-      delete: (sid) => store.delete(sid),
+      read: (sid, ctx) => store.read(sid, ctx),
+      append: (sid, e, ctx) => store.append(sid, e, ctx),
+      keys: (ctx) => store.keys(ctx),
+      delete: (sid, ctx) => store.delete(sid, ctx),
     };
     const h = stubTimelineHarness([], { store: bare });
     await h.append(messageEntry("a"));
@@ -213,7 +215,7 @@ describe("turnBoundaries: false opt-out (ADR 53)", () => {
     await h.endTurn({ executionId: "e1", outcome: "succeeded" });
     await h.flush();
     expect(h.readPersisted().filter((e) => e.kind === "boundary")).toEqual([]);
-    const loaded = await store.read(h.id.replace(/^timeline:/, ""));
+    const loaded = await store.read(h.id.replace(/^timeline:/, ""), stubStoreCtx());
     expect(loaded.filter((e) => e.kind === "boundary")).toEqual([]);
   });
 });

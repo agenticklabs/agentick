@@ -935,7 +935,7 @@ export class TasksHarness
    * await today.
    */
   private persist(record: TaskRecord): void {
-    void this.store.put(record).catch(() => undefined);
+    void this.store.put(record, this.storeCtx()).catch(() => undefined);
   }
 
   // ─────────── Status channel snapshot (ADR 87 / K8s watch-list) ───────────
@@ -1041,7 +1041,7 @@ export class TasksHarness
    * in the projection. For a fresh session the store is empty → no-op.
    */
   private async hydrateOrphans(): Promise<void> {
-    const records = await this.store.list({ scope: this.scope });
+    const records = await this.store.list({ scope: this.scope }, this.storeCtx());
     for (const record of records) {
       if (this.live.has(record.taskId)) continue; // this harness owns it live
       if (record.status !== "working" && record.status !== "input_required") {

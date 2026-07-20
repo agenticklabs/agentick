@@ -17,6 +17,7 @@
 import { describe, expect, it } from "vitest";
 import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime-next";
 import type { ResourceContents, ResourceStore } from "@agentick/spec-next";
+import { stubStoreCtx } from "@agentick/store-next";
 
 import { ResourcesHarness } from "../harness.js";
 import { InMemoryResourceStore } from "../store.js";
@@ -69,14 +70,14 @@ describe("ResourcesHarness — store backing (durable / transient / sidecar spli
     expect([...summary.added].sort()).toEqual(["db://doc", "db://users/{id}"]);
 
     // The durable store holds ONLY the declaration slice — no resolver fn.
-    const persisted = await store.get("db://doc");
+    const persisted = await store.get("db://doc", stubStoreCtx());
     expect(persisted).toEqual({
       uri: "db://doc",
       kind: "fixed",
       meta: { name: "Doc", mimeType: "text/plain" },
     });
     expect(persisted).not.toHaveProperty("resolver");
-    const persistedTemplate = await store.get("db://users/{id}");
+    const persistedTemplate = await store.get("db://users/{id}", stubStoreCtx());
     expect(persistedTemplate?.kind).toBe("template");
     expect(persistedTemplate).not.toHaveProperty("resolver");
 
@@ -99,9 +100,9 @@ describe("ResourcesHarness — store backing (durable / transient / sidecar spli
     expect(await h.read("mem://t/9")).toEqual([text("mem://t/9", "mem://t/9")]);
 
     // ...but the durable store never saw them.
-    expect(await store.get("mem://live")).toBeUndefined();
-    expect(await store.get("mem://t/{id}")).toBeUndefined();
-    expect(await store.list()).toEqual([]);
+    expect(await store.get("mem://live", stubStoreCtx())).toBeUndefined();
+    expect(await store.get("mem://t/{id}", stubStoreCtx())).toBeUndefined();
+    expect(await store.list(undefined, stubStoreCtx())).toEqual([]);
     await h.close();
   });
 
@@ -161,11 +162,11 @@ describe("ResourcesHarness — store backing (durable / transient / sidecar spli
       ]),
     ]);
     // Not yet loaded — a read triggers lookup-on-miss.
-    expect(await store.get("db://lazy")).toBeUndefined();
+    expect(await store.get("db://lazy", stubStoreCtx())).toBeUndefined();
     expect(await h.read("db://lazy")).toEqual([text("db://lazy", "loaded")]);
     // The miss registered the declaration — now durable (resolver still sidecar-only).
-    expect((await store.get("db://lazy"))?.meta?.name).toBe("Lazy");
-    expect(await store.get("db://lazy")).not.toHaveProperty("resolver");
+    expect((await store.get("db://lazy", stubStoreCtx()))?.meta?.name).toBe("Lazy");
+    expect(await store.get("db://lazy", stubStoreCtx())).not.toHaveProperty("resolver");
     await h.close();
   });
 

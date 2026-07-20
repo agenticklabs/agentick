@@ -24,6 +24,7 @@
 
 import type { Skill } from "./skills-harness.js";
 import type { CollectionStore } from "./store.js";
+import type { StoreCtx } from "./store-ctx.js";
 
 /**
  * Filter for {@link SkillStore.list} — the store-level twin of the harness's
@@ -60,11 +61,11 @@ export interface SkillStoreQuery {
  */
 export interface SkillStore extends CollectionStore<Skill, SkillStoreQuery> {
   /** Upsert — a later `put` of the same `name` replaces the record. */
-  put(skill: Skill): Promise<void>;
-  get(name: string): Promise<Skill | undefined>;
+  put(skill: Skill, ctx: StoreCtx): Promise<void>;
+  get(name: string, ctx: StoreCtx): Promise<Skill | undefined>;
   /** By substring / tags. Omitting the query returns every skill. */
-  list(query?: SkillStoreQuery): Promise<readonly Skill[]>;
-  delete(name: string): Promise<void>;
+  list(query: SkillStoreQuery | undefined, ctx: StoreCtx): Promise<readonly Skill[]>;
+  delete(name: string, ctx: StoreCtx): Promise<void>;
   /** Self-identifying backend label for observability (`"memory"`, `"postgres"`, …). */
   readonly backend: string;
 }

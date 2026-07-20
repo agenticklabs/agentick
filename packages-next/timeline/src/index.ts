@@ -31,7 +31,7 @@ export { MemoryTimelineStore } from "./store.js";
 // Re-exported so store adapters (`@agentick/timeline-fs-next`,
 // `-postgres-next`, adopter-written) get the port + entry + seq-tag types from
 // the same package as the harness they back — one dep, not two.
-export type { SeqTagged, TimelineEntry, TimelineStore } from "@agentick/spec-next";
+export type { SeqTagged, StoreCtx, TimelineEntry, TimelineStore } from "@agentick/spec-next";
 export {
   runTimelineStoreConformance,
   type TimelineStoreConformanceOptions,

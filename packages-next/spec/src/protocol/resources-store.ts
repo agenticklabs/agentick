@@ -42,6 +42,7 @@
 
 import type { ResourceMeta } from "./resources-harness.js";
 import type { CollectionStore } from "./store.js";
+import type { StoreCtx } from "./store-ctx.js";
 
 /**
  * The **serializable slice** of a resource binding — the persisted record the
@@ -100,13 +101,16 @@ export interface ResourceStore extends CollectionStore<
   ResourceStoreQuery
 > {
   /** Upsert — a later `put` of the same key (`uri`/`uriTemplate`) replaces the record. */
-  put(declaration: ResourceDeclarationRecord): Promise<void>;
+  put(declaration: ResourceDeclarationRecord, ctx: StoreCtx): Promise<void>;
   /** By exact key (`uri` for fixed, `uriTemplate` for template). `undefined` when absent. */
-  get(key: string): Promise<ResourceDeclarationRecord | undefined>;
+  get(key: string, ctx: StoreCtx): Promise<ResourceDeclarationRecord | undefined>;
   /** By `kind` / `uri` substring. Omitting the query returns every declaration. */
-  list(query?: ResourceStoreQuery): Promise<readonly ResourceDeclarationRecord[]>;
+  list(
+    query: ResourceStoreQuery | undefined,
+    ctx: StoreCtx,
+  ): Promise<readonly ResourceDeclarationRecord[]>;
   /** Idempotent — deleting an absent key never throws. */
-  delete(key: string): Promise<void>;
+  delete(key: string, ctx: StoreCtx): Promise<void>;
   /** Self-identifying backend label for observability (`"memory"`, `"postgres"`, …). */
   readonly backend: string;
 }

@@ -90,7 +90,10 @@ export function run<P = unknown>(rootElement: unknown, options: RunOptions<P>): 
       // the ADR 49 hydration path — seeding IS resuming.
       const store = new MemoryTimelineStore();
       // The timeline harness keys the store by its scopeId — `${sessionId}:timeline`.
-      await store.append(`${sessionId}:timeline`, history);
+      // Seeding happens before the harness exists, so build the StoreCtx from the
+      // run's known session id directly (the store ignores it — MemoryTimelineStore
+      // is in-memory — but the signature is mandatory across the Effect→Promise seam).
+      await store.append(`${sessionId}:timeline`, history, { sessionId });
       finalOptions = {
         ...finalOptions,
         session: {

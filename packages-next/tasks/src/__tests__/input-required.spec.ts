@@ -21,6 +21,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { LocalEventBus } from "@agentick/runtime-next";
 import type { ProtocolEvent, TaskInfo } from "@agentick/spec-next";
 import { drainRejection, waitFor } from "@agentick/utils-next/testing";
+import { stubStoreCtx } from "@agentick/store-next";
 
 import { TASK_STATUS_CHANNEL_FQN } from "../channel.js";
 import { InMemoryTaskStore } from "../store.js";
@@ -80,8 +81,10 @@ describe("TasksHarness — input_required (awaitingInput)", () => {
     expect(bundle.harness.get(handle.taskId)?.statusMessage).toBe("need input");
 
     // The durable record reflects the paused state (the store put landed).
-    await waitFor(async () => (await store.get(handle.taskId))?.status === "input_required");
-    expect((await store.get(handle.taskId))?.statusMessage).toBe("need input");
+    await waitFor(
+      async () => (await store.get(handle.taskId, stubStoreCtx()))?.status === "input_required",
+    );
+    expect((await store.get(handle.taskId, stubStoreCtx()))?.statusMessage).toBe("need input");
 
     // Provide the input → back to working, then completes.
     gate.resolve("hello");

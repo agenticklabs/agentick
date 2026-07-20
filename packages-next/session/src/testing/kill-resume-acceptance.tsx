@@ -49,6 +49,7 @@ import { LoopExecutorHarness } from "@agentick/loop-executor-next";
 import { ReconcilerHarness } from "@agentick/reconciler-react-next";
 import { Timeline } from "@agentick/timeline-next/react";
 import type { TimelineStore } from "@agentick/timeline-next";
+import { stubStoreCtx } from "@agentick/store-next";
 import type {
   ExecutionTarget,
   ExecutorFx,
@@ -361,7 +362,7 @@ export function runKillResumeAcceptance(opts: KillResumeAcceptanceOptions): void
       // Synchronously after resolution — no settle window, no adopter
       // flush() — the durable log already holds the user + assistant
       // entries. This is the barrier: resolution implies durability.
-      const persisted = await store.read(`${sessionId}:timeline`);
+      const persisted = await store.read(`${sessionId}:timeline`, stubStoreCtx());
       expect(persisted.length).toBeGreaterThanOrEqual(2);
       expect(JSON.stringify(persisted)).toContain("barrier check");
 
@@ -383,7 +384,7 @@ export function runKillResumeAcceptance(opts: KillResumeAcceptanceOptions): void
       // End the session's durable life — the store key convention is
       // `${sessionId}:timeline`.
       const store2 = await opts.makeStore();
-      const deleted = await store2.delete(`${sessionId}:timeline`);
+      const deleted = await store2.delete(`${sessionId}:timeline`, stubStoreCtx());
       expect(deleted).toBe(true);
 
       // A fresh open by the same id starts empty — no ghost history.

@@ -49,6 +49,8 @@
  * @see docs/proposals/v2/data-layer-plan.md §2.1, §2.7
  */
 
+import type { StoreCtx } from "./store-ctx.js";
+
 /**
  * An entry tagged with its store-assigned ordering identity (`seq`) — the unit
  * a cursored {@link LogStore.history} read returns. Generic over the payload
@@ -92,14 +94,14 @@ export interface LogStore<T> {
    * error) — a consuming harness wraps the rejection into its typed boundary
    * error; adapters need not import spec error types.
    */
-  append(logKey: string, entries: readonly T[]): Promise<readonly number[]>;
+  append(logKey: string, entries: readonly T[], ctx: StoreCtx): Promise<readonly number[]>;
 
   /**
    * Full ordered read of a log's persisted entries — the fold input for
    * hydration. Returns `[]` for a `logKey` the store has never seen. Returns a
    * defensive copy: mutating the result never mutates the store.
    */
-  read(logKey: string): Promise<readonly T[]>;
+  read(logKey: string, ctx: StoreCtx): Promise<readonly T[]>;
 
   /**
    * OPTIONAL cursored read (#187) — the additive extension the frozen `seq`
@@ -113,7 +115,8 @@ export interface LogStore<T> {
    */
   history?(
     logKey: string,
-    options?: { readonly fromSeq?: number; readonly limit?: number },
+    options: { readonly fromSeq?: number; readonly limit?: number } | undefined,
+    ctx: StoreCtx,
   ): Promise<readonly SeqTagged<T>[]>;
 
   /**
@@ -125,7 +128,7 @@ export interface LogStore<T> {
    * away is not listed (it holds nothing), though its `seq` counter continues
    * if it is appended to again.
    */
-  keys(): Promise<readonly string[]>;
+  keys(ctx: StoreCtx): Promise<readonly string[]>;
 
   /**
    * Remove a log's entries entirely — log lifecycle end. Idempotent: deleting
@@ -133,7 +136,7 @@ export interface LogStore<T> {
    * actually removed, `false` if the log was absent. Unlike {@link prune}, this
    * ends the log: a subsequent append starts a fresh `seq` sequence.
    */
-  delete(logKey: string): Promise<boolean>;
+  delete(logKey: string, ctx: StoreCtx): Promise<boolean>;
 
   /**
    * DESTRUCTIVE retention / GDPR-class erasure — drop the entries of `logKey`
@@ -145,7 +148,7 @@ export interface LogStore<T> {
    * **Never called by compaction** — the log is otherwise append-only.
    * Optional: adapters with no erasure requirement omit it.
    */
-  prune?(logKey: string, before: { seq: number }): Promise<number>;
+  prune?(logKey: string, before: { seq: number }, ctx: StoreCtx): Promise<number>;
 
   /** Self-identifying backend label for observability (e.g. `"memory"`, `"fs"`). */
   readonly backend: string;

@@ -1562,6 +1562,9 @@ importers:
         specifier: ^8.13.1
         version: 8.22.0
     devDependencies:
+      '@agentick/store-next':
+        specifier: workspace:*
+        version: link:../store
       '@agentick/tasks-next':
         specifier: workspace:*
         version: link:../tasks
@@ -1611,6 +1614,10 @@ importers:
       '@agentick/timeline-next':
         specifier: workspace:*
         version: link:../timeline
+    devDependencies:
+      '@agentick/store-next':
+        specifier: workspace:*
+        version: link:../store
 
   packages-next/timeline-postgres:
     dependencies:

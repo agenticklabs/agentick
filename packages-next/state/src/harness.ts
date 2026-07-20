@@ -197,8 +197,9 @@ export class StateHarness extends BaseHarness<"state"> implements StateHarnessPr
     // store is the authority (and picks up the durable-write flush barrier now
     // centralized in `CollectionProjection.write`). Do NOT wire `hydrate()`
     // into resume while this method still owns it.
-    for (const k of oldKeys) if (!newKeys.has(k)) this.projection.deleteSync(k);
-    for (const [k, v] of Object.entries(values)) this.projection.write({ key: k, value: v });
+    for (const k of oldKeys) if (!newKeys.has(k)) this.projection.deleteSync(k, this.storeCtx());
+    for (const [k, v] of Object.entries(values))
+      this.projection.write({ key: k, value: v }, this.storeCtx());
     for (const key of changed) this.fireListeners(key);
   }
 
@@ -216,7 +217,7 @@ export class StateHarness extends BaseHarness<"state"> implements StateHarnessPr
    * to once the store is authority.
    */
   async hydrate(): Promise<void> {
-    const keys = await this.projection.hydrate();
+    const keys = await this.projection.hydrate(undefined, this.storeCtx());
     for (const k of keys) this.fireListeners(k);
   }
 
@@ -244,7 +245,7 @@ export class StateHarness extends BaseHarness<"state"> implements StateHarnessPr
     // now), durable store off the critical path. The notify seam below
     // (`fireListeners` + `changes`) is driven by hand, exactly as before — the
     // projection is a write sink beside it, never a source.
-    this.projection.write({ key: input.key, value: input.value });
+    this.projection.write({ key: input.key, value: input.value }, this.storeCtx());
     this.fireListeners(input.key);
     this.changes.emitChange(
       existed
@@ -256,7 +257,7 @@ export class StateHarness extends BaseHarness<"state"> implements StateHarnessPr
   private applyDelete(input: StateDeleteInput): void {
     if (!this.projection.hasSync(input.key)) return;
     const prev = this.projection.getSync(input.key)?.value;
-    this.projection.deleteSync(input.key);
+    this.projection.deleteSync(input.key, this.storeCtx());
     this.fireListeners(input.key);
     // Remove — value omitted. `changeKind` reads this as "remove" regardless
     // of whether the stored value was itself `undefined`.

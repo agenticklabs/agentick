@@ -28,6 +28,7 @@
 
 import type { PromptDeclarationRecord } from "./prompts-harness.js";
 import type { CollectionStore } from "./store.js";
+import type { StoreCtx } from "./store-ctx.js";
 
 /**
  * Filter for {@link PromptStore.list}. Prompts has NO rich search surface (the
@@ -57,11 +58,14 @@ export interface PromptStoreQuery {
  */
 export interface PromptStore extends CollectionStore<PromptDeclarationRecord, PromptStoreQuery> {
   /** Upsert — a later `put` of the same `name` replaces the record. */
-  put(record: PromptDeclarationRecord): Promise<void>;
-  get(name: string): Promise<PromptDeclarationRecord | undefined>;
+  put(record: PromptDeclarationRecord, ctx: StoreCtx): Promise<void>;
+  get(name: string, ctx: StoreCtx): Promise<PromptDeclarationRecord | undefined>;
   /** By `name` substring. Omitting the query returns every record. */
-  list(query?: PromptStoreQuery): Promise<readonly PromptDeclarationRecord[]>;
-  delete(name: string): Promise<void>;
+  list(
+    query: PromptStoreQuery | undefined,
+    ctx: StoreCtx,
+  ): Promise<readonly PromptDeclarationRecord[]>;
+  delete(name: string, ctx: StoreCtx): Promise<void>;
   /** Self-identifying backend label for observability (`"memory"`, `"postgres"`, …). */
   readonly backend: string;
 }

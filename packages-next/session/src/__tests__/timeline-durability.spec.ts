@@ -25,6 +25,7 @@ import { InMemoryHandlerResolver, ToolExecutorHarness } from "@agentick/tool-exe
 import { LoopExecutorHarness } from "@agentick/loop-executor-next";
 import { ReconcilerHarness } from "@agentick/reconciler-react-next";
 import { MemoryTimelineStore, type TimelineStore } from "@agentick/timeline-next";
+import { stubStoreCtx } from "@agentick/store-next";
 import type { ExecutionTarget, TimelineEntry } from "@agentick/spec-next";
 import { TimelineWriteFailed } from "@agentick/spec-next";
 
@@ -99,7 +100,7 @@ describe("SessionHarness — open-or-rehydrate (ADR 49 A2.2)", () => {
   it("hydrates the persisted tier from the injected store before first render", async () => {
     const store = new MemoryTimelineStore();
     // The harness keys the store by its scopeId — `${sessionId}:timeline`.
-    await store.append("s-resume:timeline", [entry("m1"), entry("m2")]);
+    await store.append("s-resume:timeline", [entry("m1"), entry("m2")], stubStoreCtx());
 
     const { session, tools } = await mkSession({
       sessionId: "s-resume",
@@ -138,7 +139,7 @@ describe("SessionHarness — flush barrier at execution end (ADR 49 A2.2)", () =
     // The barrier ran before resolution: the durable log already holds
     // the drained user message + the assistant output — no flush() call
     // by the adopter, no settle window.
-    const persisted = await store.read("s-flush:timeline");
+    const persisted = await store.read("s-flush:timeline", stubStoreCtx());
     expect(persisted.length).toBeGreaterThanOrEqual(2);
     await session.close();
     await tools.close();

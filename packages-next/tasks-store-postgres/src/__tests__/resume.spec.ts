@@ -30,6 +30,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { Pool } from "pg";
 import { fakeTasks } from "@agentick/tasks-next/testing";
+import { stubStoreCtx } from "@agentick/store-next";
 
 import { postgresTaskStore } from "../store.ts";
 
@@ -90,7 +91,9 @@ describe.skipIf(pool === undefined)("postgresTaskStore — cross-process resume 
     void handle.result.catch(() => undefined);
 
     // Await the DURABLE write — persist is fire-and-forget.
-    await until(async () => (await store1.get(handle.taskId))?.status === "working");
+    await until(
+      async () => (await store1.get(handle.taskId, stubStoreCtx()))?.status === "working",
+    );
 
     // ── CRASH: abandon harness #1 WITHOUT close() → orphaned `working`. ──
 
@@ -103,7 +106,9 @@ describe.skipIf(pool === undefined)("postgresTaskStore — cross-process resume 
     // after hydrated) AND durably in pg (hydration's re-persist is itself
     // fire-and-forget, so poll the durable write rather than race it).
     expect(b2.harness.status(handle.taskId)).toBe("interrupted");
-    await until(async () => (await store2.get(handle.taskId))?.status === "interrupted");
+    await until(
+      async () => (await store2.get(handle.taskId, stubStoreCtx()))?.status === "interrupted",
+    );
     await expect(b2.harness.result(handle.taskId)).rejects.toMatchObject({
       _tag: "TaskRejection",
       taskId: handle.taskId,
@@ -125,7 +130,9 @@ describe.skipIf(pool === undefined)("postgresTaskStore — cross-process resume 
 
     const handle = b1.harness.submit(async () => blocks);
     await handle.result;
-    await until(async () => (await store1.get(handle.taskId))?.status === "completed");
+    await until(
+      async () => (await store1.get(handle.taskId, stubStoreCtx()))?.status === "completed",
+    );
     await b1.close(); // graceful — already terminal, nothing to cancel.
 
     // ── "new process": harness #2 hydrates the terminal record. ──

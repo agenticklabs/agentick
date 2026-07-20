@@ -57,7 +57,7 @@
 import { appendFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import type { SeqTagged, TimelineEntry, TimelineStore } from "@agentick/timeline-next";
+import type { SeqTagged, StoreCtx, TimelineEntry, TimelineStore } from "@agentick/timeline-next";
 
 export interface FsTimelineStoreOptions {
   /**
@@ -198,7 +198,7 @@ class FsTimelineStore implements TimelineStore {
     return next;
   }
 
-  read(sessionId: string): Promise<readonly TimelineEntry[]> {
+  read(sessionId: string, _ctx: StoreCtx): Promise<readonly TimelineEntry[]> {
     return this.lock(sessionId, async () => {
       const lines = await this.readLines(sessionId);
       // Fresh parse per call → inherently a defensive copy.
@@ -208,7 +208,8 @@ class FsTimelineStore implements TimelineStore {
 
   history(
     sessionId: string,
-    options?: { readonly fromSeq?: number; readonly limit?: number },
+    options: { readonly fromSeq?: number; readonly limit?: number } | undefined,
+    _ctx: StoreCtx,
   ): Promise<readonly SeqTagged<TimelineEntry>[]> {
     return this.lock(sessionId, async () => {
       const lines = await this.readLines(sessionId);
@@ -219,7 +220,11 @@ class FsTimelineStore implements TimelineStore {
     });
   }
 
-  append(sessionId: string, entries: readonly TimelineEntry[]): Promise<readonly number[]> {
+  append(
+    sessionId: string,
+    entries: readonly TimelineEntry[],
+    _ctx: StoreCtx,
+  ): Promise<readonly number[]> {
     return this.lock(sessionId, async () => {
       if (entries.length === 0) return [];
       const start = await this.seed(sessionId);
@@ -236,7 +241,7 @@ class FsTimelineStore implements TimelineStore {
     });
   }
 
-  keys(): Promise<readonly string[]> {
+  keys(_ctx: StoreCtx): Promise<readonly string[]> {
     return this.lock("\x00sessions", async () => {
       let names: string[];
       try {
@@ -259,7 +264,7 @@ class FsTimelineStore implements TimelineStore {
     });
   }
 
-  delete(sessionId: string): Promise<boolean> {
+  delete(sessionId: string, _ctx: StoreCtx): Promise<boolean> {
     return this.lock(sessionId, async () => {
       // The session ends — drop the cursor AND the hwm sidecar so a later
       // append starts a fresh seq sequence from 0.
@@ -278,7 +283,7 @@ class FsTimelineStore implements TimelineStore {
     });
   }
 
-  prune(sessionId: string, before: { seq: number }): Promise<number> {
+  prune(sessionId: string, before: { seq: number }, _ctx: StoreCtx): Promise<number> {
     return this.lock(sessionId, async () => {
       // Seed the cursor first so the persisted hwm reflects the true
       // high-water mark even when we erase every line.

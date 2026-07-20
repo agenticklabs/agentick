@@ -12,6 +12,7 @@
 import { describe, expect, it } from "vitest";
 import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime-next";
 import type { SkillStore } from "@agentick/spec-next";
+import { stubStoreCtx } from "@agentick/store-next";
 
 import { SkillsHarness } from "../harness.js";
 import { InMemorySkillStore } from "../store.js";
@@ -42,7 +43,7 @@ describe("SkillsHarness — store backing", () => {
     await h.register({ name: "git_push", description: "Push", content: "git push", tags: ["git"] });
 
     // The durable store holds the whole record (skills have no augmentation).
-    const persisted = await store.get("git_push");
+    const persisted = await store.get("git_push", stubStoreCtx());
     expect(persisted?.name).toBe("git_push");
     expect(persisted?.tags).toEqual(["git"]);
     expect(persisted?.createdAt).toBeGreaterThan(0);
@@ -57,10 +58,10 @@ describe("SkillsHarness — store backing", () => {
     await h.ready;
     await h.register({ name: "task", description: "old", content: "body" });
     await h.update({ name: "task", description: "new" });
-    expect((await store.get("task"))?.description).toBe("new");
+    expect((await store.get("task", stubStoreCtx()))?.description).toBe("new");
 
     await h.remove({ name: "task" });
-    expect(await store.get("task")).toBeUndefined();
+    expect(await store.get("task", stubStoreCtx())).toBeUndefined();
     expect(h.has("task")).toBe(false);
     await h.close();
   });
@@ -78,7 +79,10 @@ describe("SkillsHarness — store backing", () => {
     const summary = await h.reload();
     expect([...summary.added].sort()).toEqual(["alpha", "beta"]);
     // Loader output landed in the durable store, not just the projection.
-    expect((await store.list()).map((s) => s.name).sort()).toEqual(["alpha", "beta"]);
+    expect((await store.list(undefined, stubStoreCtx())).map((s) => s.name).sort()).toEqual([
+      "alpha",
+      "beta",
+    ]);
     await h.close();
   });
 
@@ -87,11 +91,11 @@ describe("SkillsHarness — store backing", () => {
     const h = makeHarness(store);
     await h.ready;
     h.setLoaders([fromArray([{ name: "lazy", description: "L", content: "l" }])]);
-    expect(await store.get("lazy")).toBeUndefined();
+    expect(await store.get("lazy", stubStoreCtx())).toBeUndefined();
     const resolved = await h.resolve("lazy");
     expect(resolved?.name).toBe("lazy");
     // The lookup-on-miss registered it — now durable.
-    expect((await store.get("lazy"))?.content).toBe("l");
+    expect((await store.get("lazy", stubStoreCtx()))?.content).toBe("l");
     await h.close();
   });
 
