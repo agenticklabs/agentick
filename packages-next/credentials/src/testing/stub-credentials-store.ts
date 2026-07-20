@@ -18,6 +18,7 @@
  */
 
 import { CredentialsBackendUnavailable, CredentialsWriteFailed } from "@agentick/spec-next";
+import type { StoreCtx } from "@agentick/spec-next";
 
 import type { CredentialsStore } from "../store.js";
 
@@ -43,11 +44,11 @@ export function stubCredentialsStore(options: StubCredentialsStoreOptions): Cred
   return {
     backend: "stub",
 
-    async get<T>(namespace: string, key: string): Promise<T | undefined> {
+    async get<T>(namespace: string, key: string, _ctx: StoreCtx): Promise<T | undefined> {
       return seed.get(keyOf(namespace, key)) as T | undefined;
     },
 
-    async set<T>(namespace: string, key: string, value: T): Promise<void> {
+    async set<T>(namespace: string, key: string, value: T, _ctx: StoreCtx): Promise<void> {
       if (readOnly) {
         throw new CredentialsWriteFailed({
           namespace,
@@ -58,7 +59,7 @@ export function stubCredentialsStore(options: StubCredentialsStoreOptions): Cred
       seed.set(keyOf(namespace, key), value);
     },
 
-    async delete(namespace: string, key: string): Promise<boolean> {
+    async delete(namespace: string, key: string, _ctx: StoreCtx): Promise<boolean> {
       if (readOnly) {
         throw new CredentialsWriteFailed({
           namespace,
@@ -69,11 +70,11 @@ export function stubCredentialsStore(options: StubCredentialsStoreOptions): Cred
       return seed.delete(keyOf(namespace, key));
     },
 
-    async has(namespace: string, key: string): Promise<boolean> {
+    async has(namespace: string, key: string, _ctx: StoreCtx): Promise<boolean> {
       return seed.has(keyOf(namespace, key));
     },
 
-    async keys(namespace: string): Promise<readonly string[]> {
+    async keys(namespace: string, _ctx: StoreCtx): Promise<readonly string[]> {
       const prefix = keyOf(namespace, "");
       const out: string[] = [];
       for (const k of seed.keys()) {

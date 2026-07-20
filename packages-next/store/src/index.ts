@@ -37,6 +37,8 @@ export {
 } from "./memory-collection.js";
 export { MemoryLog, type MemoryLogConfig } from "./memory-log.js";
 export { CollectionProjection } from "./collection-projection.js";
+export { JournalProjectedStore, type JournalProjectedConfig } from "./journal-projected.js";
+export { IdempotentCollectionStore, idempotentWrite } from "./idempotent-write.js";
 export {
   runStoreConformance,
   type StoreCapabilities,

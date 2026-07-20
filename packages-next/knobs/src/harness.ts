@@ -65,6 +65,7 @@ import type {
   MessageHandlerError,
   MessageInbox,
   OperationJournal,
+  StoreCtx,
 } from "@agentick/spec-next";
 import { HandlerError } from "@agentick/spec-next";
 import {
@@ -224,17 +225,29 @@ export class KnobsHarness
       // VERB-MATRIX ratified wire row (#140/#141) — grantable, deny-by-default.
       exposure: "wire",
       scope,
-      handler: (i: KnobsSetInput) => Effect.sync(() => this.applySet(i)),
+      // Run B: read the ENRICHED store-ctx inside the fiber (carries the live
+      // op's `opId` etc.) and thread it to the mutation, instead of the helper
+      // synthesizing a construction-only base ctx.
+      handler: (i: KnobsSetInput) =>
+        Effect.gen(this, function* () {
+          this.applySet(i, yield* this.storeCtxEffect());
+        }),
     });
     this.register = this.command({
       name: "knobs:register",
       scope,
-      handler: (i: KnobsRegisterInput) => Effect.sync(() => this.applyRegister(i)),
+      handler: (i: KnobsRegisterInput) =>
+        Effect.gen(this, function* () {
+          this.applyRegister(i, yield* this.storeCtxEffect());
+        }),
     });
     this.dispatch = this.command({
       name: "knobs:dispatch",
       scope,
-      handler: (i: KnobsDispatchInput) => Effect.sync(() => this.executeDispatch(i)),
+      handler: (i: KnobsDispatchInput) =>
+        Effect.gen(this, function* () {
+          return this.executeDispatch(i, yield* this.storeCtxEffect());
+        }),
     });
     // Wire the StateDelta (ADR 73) projection onto the change stream:
     // mutation sites emit a semantic ChangeEvent; this projection derives the
@@ -465,13 +478,15 @@ export class KnobsHarness
 
   // ─────────── Internals ───────────
 
-  private applySet(input: KnobsSetInput): void {
+  private applySet(input: KnobsSetInput, ctx: StoreCtx = this.storeCtx()): void {
     const prev = this.projection.getSync(input.id)?.value;
     // Dual-write through the projection: sync cache first (reads reflect it
     // now), durable store off the critical path. The notify seam below
     // (`fireListeners` + `changes`) is driven by hand, exactly as before — the
-    // projection is a write sink beside it, never a source.
-    this.projection.write({ id: input.id, value: input.value }, this.storeCtx());
+    // projection is a write sink beside it, never a source. `ctx` is the
+    // enriched store-ctx the command handler read inside the fiber (carrying
+    // the live op's `opId`); a direct caller with no fiber falls back to base.
+    this.projection.write({ id: input.id, value: input.value }, ctx);
     this.listCache = null;
     this.fireListeners(input.id);
     // Emit the semantic change; the constructor-wired StateDelta projection
@@ -485,7 +500,7 @@ export class KnobsHarness
     );
   }
 
-  private applyRegister(input: KnobsRegisterInput): void {
+  private applyRegister(input: KnobsRegisterInput, ctx: StoreCtx = this.storeCtx()): void {
     this.descriptors.set(input.id, input.descriptor);
     const defaultValue = input.descriptor.defaultValue;
     const applied = !this.projection.hasSync(input.id) && defaultValue !== undefined;
@@ -493,7 +508,7 @@ export class KnobsHarness
       // A registration that SEEDS a default value is a value mutation, so it
       // dual-writes through the projection. A descriptor-only registration
       // mutates no cell → no store write.
-      this.projection.write({ id: input.id, value: defaultValue }, this.storeCtx());
+      this.projection.write({ id: input.id, value: defaultValue }, ctx);
     }
     this.listCache = null;
     this.fireListeners(input.id);
@@ -511,7 +526,10 @@ export class KnobsHarness
    * an error ContentBlock array; on success, mutates + returns a
    * confirmation message.
    */
-  private executeDispatch(input: KnobsDispatchInput): readonly ContentBlock[] {
+  private executeDispatch(
+    input: KnobsDispatchInput,
+    ctx: StoreCtx = this.storeCtx(),
+  ): readonly ContentBlock[] {
     const hasName = input.name !== undefined && input.name !== "";
     const hasGroup = input.group !== undefined && input.group !== "";
 
@@ -532,7 +550,7 @@ export class KnobsHarness
       }
       const reason = validateValue(knob, input.value);
       if (reason) return err(reason);
-      this.applySet({ id: knob.id, value: input.value });
+      this.applySet({ id: knob.id, value: input.value }, ctx);
       return [{ type: "text", text: `Set ${knob.id} to ${fmt(input.value)}.` }];
     }
 
@@ -559,7 +577,7 @@ export class KnobsHarness
       const reason = validateValue(t, input.value);
       if (reason) return err(reason);
     }
-    for (const t of targets) this.applySet({ id: t.id, value: input.value });
+    for (const t of targets) this.applySet({ id: t.id, value: input.value }, ctx);
     const names = targets.map((t) => t.id).join(", ");
     return [
       {

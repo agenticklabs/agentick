@@ -29,11 +29,6 @@ import { MemoryCollection } from "@agentick/store-next";
 
 import type { CredentialsStore } from "../store.js";
 
-// credentials' package-local port isn't ctx-threaded (Run A scope); the
-// in-memory collection ignores ctx anyway. Synthesize a minimal StoreCtx (all
-// fields optional) to satisfy the collection's now-mandatory ctx parameter.
-const STORE_CTX: StoreCtx = {};
-
 // ASCII Unit Separator (US, 0x1F) — purpose-built field separator that
 // can't appear in any sensible namespace or key string. Explicit escape
 // keeps the intent visible in source (vs. embedding a literal control
@@ -72,25 +67,28 @@ class InMemoryCredentialsStore implements CredentialsStore {
     matchQuery: (e, q) => q === undefined || e.namespace === q.namespace,
   });
 
-  async get<T>(namespace: string, key: string): Promise<T | undefined> {
-    const entry = await this.collection.get(compositeKey(namespace, key), STORE_CTX);
+  // The in-memory collection holds no identity-scoped state, so `ctx` is
+  // forwarded verbatim and ignored — an identity-aware adapter would resolve
+  // `ctx.principal` here instead.
+  async get<T>(namespace: string, key: string, ctx: StoreCtx): Promise<T | undefined> {
+    const entry = await this.collection.get(compositeKey(namespace, key), ctx);
     return entry?.value as T | undefined;
   }
 
-  async set<T>(namespace: string, key: string, value: T): Promise<void> {
-    await this.collection.put({ namespace, key, value }, STORE_CTX);
+  async set<T>(namespace: string, key: string, value: T, ctx: StoreCtx): Promise<void> {
+    await this.collection.put({ namespace, key, value }, ctx);
   }
 
-  async delete(namespace: string, key: string): Promise<boolean> {
-    return this.collection.delete(compositeKey(namespace, key), STORE_CTX);
+  async delete(namespace: string, key: string, ctx: StoreCtx): Promise<boolean> {
+    return this.collection.delete(compositeKey(namespace, key), ctx);
   }
 
-  async has(namespace: string, key: string): Promise<boolean> {
-    return (await this.collection.get(compositeKey(namespace, key), STORE_CTX)) !== undefined;
+  async has(namespace: string, key: string, ctx: StoreCtx): Promise<boolean> {
+    return (await this.collection.get(compositeKey(namespace, key), ctx)) !== undefined;
   }
 
-  async keys(namespace: string): Promise<readonly string[]> {
-    const entries = await this.collection.list({ namespace }, STORE_CTX);
+  async keys(namespace: string, ctx: StoreCtx): Promise<readonly string[]> {
+    const entries = await this.collection.list({ namespace }, ctx);
     return entries.map((e) => e.key);
   }
 

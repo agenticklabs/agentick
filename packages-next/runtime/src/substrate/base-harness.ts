@@ -1126,6 +1126,31 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
     };
   }
 
+  /**
+   * The Effect-side twin of {@link storeCtx} — the ENRICHED {@link StoreCtx} a
+   * write-path command handler threads to a store mutation. Run B: fold the
+   * live ambient {@link RuntimeContext} (read from the FiberRef via `getContext`)
+   * over the construction-slot base, so `opId` (the idempotency key), the
+   * causality `parentOpId`, the request `correlationId`, and W3C `traceparent`
+   * reach the store the moment it crosses the Effect→Promise boundary.
+   *
+   * Only reachable from INSIDE an Effect fiber (a command handler running under
+   * `runOperation`) — that is exactly where the ambient scope is live. The base
+   * fields win on the store-only slots the runtime context does not carry
+   * (`journalReader`); the ambient scope wins on the identity/operation fields,
+   * which is the whole point (it carries the CURRENT op's `opId`, not a
+   * construction-time blank). A `RuntimeContext` value is structurally
+   * assignable to `StoreCtx` (every field `StoreCtx` adds is optional), so the
+   * spread merges with no adapter.
+   *
+   * Sync-only write sites that cannot reach a fiber (`hydrate`,
+   * `importSnapshot`, `app/run.ts`) keep the base {@link storeCtx} — they carry
+   * no live op to enrich from.
+   */
+  protected storeCtxEffect(): Effect.Effect<StoreCtx> {
+    return Effect.map(getContext, (rc) => ({ ...this.storeCtx(), ...rc }));
+  }
+
   // ──────── ① Commands (heavy path) ────────
 
   /**

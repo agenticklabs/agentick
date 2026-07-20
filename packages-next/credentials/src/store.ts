@@ -36,6 +36,8 @@
  * @see #281 — CredentialsHarness substrate
  */
 
+import type { StoreCtx } from "@agentick/spec-next";
+
 /**
  * Adopter-pluggable credentials backend. The harness scopes every call
  * to a `(namespace, key)` pair — convention is `<harness>:<discriminator>`
@@ -49,6 +51,19 @@
  *
  * All operations are async — real backends hit IPC / disk / network;
  * in-memory impls resolve synchronously inside Promises.
+ *
+ * ## `ctx: StoreCtx` — the runtime-scope carrier (Run B, Ryan's call)
+ *
+ * Every DATA method takes a mandatory {@link StoreCtx} as its FINAL argument —
+ * the same explicit runtime-scope carrier every other store archetype threads
+ * across the Effect→Promise boundary. A secrets adapter needs it to resolve
+ * WHOSE / WHICH secret: a real backend (AWS Secrets Manager, HashiCorp Vault,
+ * 1Password) reads `ctx.principal` (the identity the credential belongs to) and
+ * `ctx.scope` fields to pick the right secret path / tenant / vault mount. The
+ * bundled in-memory / env reference adapters IGNORE `ctx` — they hold no
+ * identity-scoped state — but the port carries it so an identity-aware adapter
+ * conforms to the SAME shape. `onChange` stays ctx-less: it is a registration,
+ * not a scoped data operation.
  */
 export interface CredentialsStore {
   /**
@@ -59,30 +74,31 @@ export interface CredentialsStore {
    *
    * MAY throw `CredentialsBackendUnavailable` if the backend is
    * unreachable, `CredentialsCorrupted` if the value cannot be
-   * deserialized.
+   * deserialized. `ctx` — see {@link StoreCtx}; an identity-aware
+   * backend resolves the secret against `ctx.principal`.
    */
-  get<T>(namespace: string, key: string): Promise<T | undefined>;
+  get<T>(namespace: string, key: string, ctx: StoreCtx): Promise<T | undefined>;
 
   /**
    * Persist credentials. Overwrites any prior entry for the same
    * `(namespace, key)`. MAY throw `CredentialsBackendUnavailable` or
-   * `CredentialsWriteFailed`.
+   * `CredentialsWriteFailed`. `ctx` — see {@link StoreCtx}.
    */
-  set<T>(namespace: string, key: string, value: T): Promise<void>;
+  set<T>(namespace: string, key: string, value: T, ctx: StoreCtx): Promise<void>;
 
   /**
    * Drop credentials. Idempotent — deleting an unknown key resolves
    * normally. Returns `true` if a value was actually removed, `false`
-   * if the key was absent.
+   * if the key was absent. `ctx` — see {@link StoreCtx}.
    */
-  delete(namespace: string, key: string): Promise<boolean>;
+  delete(namespace: string, key: string, ctx: StoreCtx): Promise<boolean>;
 
   /**
    * Existence check. Cheap when the backend supports it; MAY fall
    * back to `get(...) !== undefined` for backends that don't have a
-   * dedicated existence verb.
+   * dedicated existence verb. `ctx` — see {@link StoreCtx}.
    */
-  has(namespace: string, key: string): Promise<boolean>;
+  has(namespace: string, key: string, ctx: StoreCtx): Promise<boolean>;
 
   /**
    * Enumerate keys in a namespace.
@@ -92,9 +108,11 @@ export interface CredentialsStore {
    * have?" without prior knowledge of any specific key. Without this
    * primitive, every harness invents its own out-of-band discovery.
    *
-   * Returns `[]` for unknown namespaces. Order is not specified.
+   * Returns `[]` for unknown namespaces. Order is not specified. `ctx`
+   * — see {@link StoreCtx}; an identity-aware backend scopes the
+   * enumeration to `ctx.principal`.
    */
-  keys(namespace: string): Promise<readonly string[]>;
+  keys(namespace: string, ctx: StoreCtx): Promise<readonly string[]>;
 
   /**
    * Optional external-change notification hook. Backends that natively

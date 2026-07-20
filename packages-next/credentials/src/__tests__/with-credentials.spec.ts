@@ -19,6 +19,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
+import { stubStoreCtx } from "@agentick/store-next";
 import type { AppInstaller } from "@agentick/spec-next";
 
 import { CredentialsHarness, inMemoryCredentialsStore, withCredentials } from "../index.js";
@@ -101,7 +102,7 @@ describe("withCredentials", () => {
 
     // Round-trip through the underlying store proves the harness is
     // wired to the adopter-supplied adapter (not to some internal one).
-    expect(await store.get<{ access_token: string }>("mcp", "srv-a")).toEqual({
+    expect(await store.get<{ access_token: string }>("mcp", "srv-a", stubStoreCtx())).toEqual({
       access_token: "via-harness",
     });
   });

@@ -14,6 +14,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { CredentialsHarnessProtocol } from "@agentick/spec-next";
+import { stubStoreCtx } from "@agentick/store-next";
 
 import type { CredentialsStore } from "./store.js";
 
@@ -64,7 +65,7 @@ export function runCredentialsHarnessConformance(opts: CredentialsHarnessConform
       });
       // Write through the adapter directly — simulates a sibling
       // process editing the keychain.
-      await store.set("mcp", "srv-b", { access_token: "external" });
+      await store.set("mcp", "srv-b", { access_token: "external" }, stubStoreCtx());
       off();
       expect(events).toEqual([{ namespace: "mcp", key: "srv-b" }]);
       await harness.close();
@@ -131,7 +132,7 @@ export function runCredentialsHarnessConformance(opts: CredentialsHarnessConform
       // the harness failed to unsubscribe its forwarder OR failed to
       // clear its notifier, the listener would fire here.
       if (store.onChange) {
-        await store.set("ns", "post-close", "v");
+        await store.set("ns", "post-close", "v", stubStoreCtx());
       }
       // ...and through the harness itself, for impls whose set/delete
       // path publishes independently of the adapter's onChange.

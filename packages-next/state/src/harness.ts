@@ -46,6 +46,7 @@ import type {
   StateDeleteInput,
   StateHarnessProtocol,
   StateSetInput,
+  StoreCtx,
 } from "@agentick/spec-next";
 import { HandlerError } from "@agentick/spec-next";
 import {
@@ -124,12 +125,20 @@ export class StateHarness extends BaseHarness<"state"> implements StateHarnessPr
     this.set = this.command({
       name: "state:set",
       scope,
-      handler: (i: StateSetInput) => Effect.sync(() => this.applySet(i)),
+      // Run B: read the ENRICHED store-ctx inside the fiber (carries the live
+      // op's `opId`) and thread it to the mutation.
+      handler: (i: StateSetInput) =>
+        Effect.gen(this, function* () {
+          this.applySet(i, yield* this.storeCtxEffect());
+        }),
     });
     this.delete = this.command({
       name: "state:delete",
       scope,
-      handler: (i: StateDeleteInput) => Effect.sync(() => this.applyDelete(i)),
+      handler: (i: StateDeleteInput) =>
+        Effect.gen(this, function* () {
+          this.applyDelete(i, yield* this.storeCtxEffect());
+        }),
     });
   }
 
@@ -236,7 +245,7 @@ export class StateHarness extends BaseHarness<"state"> implements StateHarnessPr
 
   // ─────────── Internals ───────────
 
-  private applySet(input: StateSetInput): void {
+  private applySet(input: StateSetInput, ctx: StoreCtx = this.storeCtx()): void {
     // `existed`, not `prev !== undefined`: state may store `undefined` as a
     // real value, so a `hasSync` check is the exact add-vs-update discriminator.
     const existed = this.projection.hasSync(input.key);
@@ -244,8 +253,9 @@ export class StateHarness extends BaseHarness<"state"> implements StateHarnessPr
     // Dual-write through the projection: sync cache first (reads reflect it
     // now), durable store off the critical path. The notify seam below
     // (`fireListeners` + `changes`) is driven by hand, exactly as before — the
-    // projection is a write sink beside it, never a source.
-    this.projection.write({ key: input.key, value: input.value }, this.storeCtx());
+    // projection is a write sink beside it, never a source. `ctx` is the
+    // enriched store-ctx the command handler read inside the fiber.
+    this.projection.write({ key: input.key, value: input.value }, ctx);
     this.fireListeners(input.key);
     this.changes.emitChange(
       existed
@@ -254,10 +264,10 @@ export class StateHarness extends BaseHarness<"state"> implements StateHarnessPr
     );
   }
 
-  private applyDelete(input: StateDeleteInput): void {
+  private applyDelete(input: StateDeleteInput, ctx: StoreCtx = this.storeCtx()): void {
     if (!this.projection.hasSync(input.key)) return;
     const prev = this.projection.getSync(input.key)?.value;
-    this.projection.deleteSync(input.key, this.storeCtx());
+    this.projection.deleteSync(input.key, ctx);
     this.fireListeners(input.key);
     // Remove — value omitted. `changeKind` reads this as "remove" regardless
     // of whether the stored value was itself `undefined`.

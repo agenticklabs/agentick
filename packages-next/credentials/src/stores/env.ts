@@ -32,6 +32,7 @@ import {
   CredentialsCorrupted,
   CredentialsWriteFailed,
 } from "@agentick/spec-next";
+import type { StoreCtx } from "@agentick/spec-next";
 import type { CredentialsStore } from "../store.js";
 
 export interface EnvCredentialsStoreOptions {
@@ -66,7 +67,10 @@ class EnvCredentialsStore implements CredentialsStore {
     this.writable = options.writable ?? false;
   }
 
-  async get<T>(namespace: string, key: string): Promise<T | undefined> {
+  // `ctx` is accepted for port conformance and ignored — env vars are a flat
+  // process-global namespace with no per-principal scoping. An identity-aware
+  // adapter would read `ctx.principal` to select the secret path.
+  async get<T>(namespace: string, key: string, _ctx: StoreCtx): Promise<T | undefined> {
     if (typeof process === "undefined" || !process.env) {
       throw new CredentialsBackendUnavailable({
         backend: this.backend,
@@ -82,7 +86,7 @@ class EnvCredentialsStore implements CredentialsStore {
     }
   }
 
-  async set<T>(namespace: string, key: string, value: T): Promise<void> {
+  async set<T>(namespace: string, key: string, value: T, _ctx: StoreCtx): Promise<void> {
     if (!this.writable) {
       throw new CredentialsWriteFailed({
         namespace,
@@ -99,7 +103,7 @@ class EnvCredentialsStore implements CredentialsStore {
     }
   }
 
-  async delete(namespace: string, key: string): Promise<boolean> {
+  async delete(namespace: string, key: string, _ctx: StoreCtx): Promise<boolean> {
     if (!this.writable) {
       throw new CredentialsWriteFailed({
         namespace,
@@ -113,11 +117,11 @@ class EnvCredentialsStore implements CredentialsStore {
     return true;
   }
 
-  async has(namespace: string, key: string): Promise<boolean> {
+  async has(namespace: string, key: string, _ctx: StoreCtx): Promise<boolean> {
     return envName(this.prefix, namespace, key) in (process.env ?? {});
   }
 
-  async keys(namespace: string): Promise<readonly string[]> {
+  async keys(namespace: string, _ctx: StoreCtx): Promise<readonly string[]> {
     const namespacePrefix = `${this.prefix}_${slug(namespace)}_`;
     const out: string[] = [];
     for (const name of Object.keys(process.env ?? {})) {

@@ -29,6 +29,7 @@
 
 import { describe, expect, it } from "vitest";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
+import { stubStoreCtx } from "@agentick/store-next";
 import { CredentialsHarness } from "../harness.js";
 import { inMemoryCredentialsStore } from "../stores/in-memory.js";
 
@@ -57,8 +58,8 @@ describe("ADR 48 — per-scope harness over shared resource", () => {
 
     // Both writes are in the SAME backing store (shared resource) —
     // readable directly off the store, no second connection.
-    expect(await store.get("user-a", "linear.token")).toBe("tok-A");
-    expect(await store.get("user-b", "linear.token")).toBe("tok-B");
+    expect(await store.get("user-a", "linear.token", stubStoreCtx())).toBe("tok-A");
+    expect(await store.get("user-b", "linear.token", stubStoreCtx())).toBe("tok-B");
 
     await userA.close();
     await userB.close();

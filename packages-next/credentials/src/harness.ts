@@ -113,12 +113,17 @@ export class CredentialsHarness
 
   // ── Public surface — protocol-typed CRUD ────────────────────────
 
+  // The harness surface is plain-async Promise CRUD consumed off the render /
+  // fiber path (a tool handler, a gateway verb resolver), so it threads the BASE
+  // `storeCtx()` (construction-slot scope: sessionId + principal) — there is no
+  // live op-fiber to enrich `opId` from at these callsites. An identity-aware
+  // adapter reads `ctx.principal` to resolve the right secret.
   async get<T>(namespace: string, key: string): Promise<T | undefined> {
-    return this.store.get<T>(namespace, key);
+    return this.store.get<T>(namespace, key, this.storeCtx());
   }
 
   async set<T>(namespace: string, key: string, value: T): Promise<void> {
-    await this.store.set(namespace, key, value);
+    await this.store.set(namespace, key, value, this.storeCtx());
     // If the store natively notifies, the forwarder fires; avoid
     // double-publishing. Otherwise publish ourselves.
     if (!this.store.onChange) {
@@ -127,7 +132,7 @@ export class CredentialsHarness
   }
 
   async delete(namespace: string, key: string): Promise<boolean> {
-    const removed = await this.store.delete(namespace, key);
+    const removed = await this.store.delete(namespace, key, this.storeCtx());
     if (removed && !this.store.onChange) {
       this.changes.notify({ namespace, key });
     }
@@ -135,11 +140,11 @@ export class CredentialsHarness
   }
 
   async has(namespace: string, key: string): Promise<boolean> {
-    return this.store.has(namespace, key);
+    return this.store.has(namespace, key, this.storeCtx());
   }
 
   async keys(namespace: string): Promise<readonly string[]> {
-    return this.store.keys(namespace);
+    return this.store.keys(namespace, this.storeCtx());
   }
 
   subscribe(listener: (event: CredentialsChangeEvent) => void): Unsubscribe {

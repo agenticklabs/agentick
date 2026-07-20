@@ -27,9 +27,14 @@
 
 import { expect, it } from "vitest";
 
-import { runStoreConformance } from "@agentick/store-next";
+import { runStoreConformance, stubStoreCtx } from "@agentick/store-next";
 
 import type { CredentialsStore } from "./store.js";
+
+// The credentials port now threads a `StoreCtx` as the final arg of every DATA
+// method (Run B). The bundled reference adapters ignore it; conformance passes
+// the canned `stubStoreCtx()` per call.
+const ctx = stubStoreCtx();
 
 export interface CredentialsStoreConformanceOptions {
   /** Display label for the suite (`describe` block heading). */
@@ -63,10 +68,10 @@ export function runCredentialsStoreConformance(opts: CredentialsStoreConformance
     label: opts.label,
     factory: opts.factory,
     emptyRead: {
-      read: (store, key) => store.get("ns", key),
+      read: (store, key) => store.get("ns", key, ctx),
       expected: undefined,
     },
-    idempotentDelete: (store, key) => (writable ? store.delete("ns", key) : Promise.resolve()),
+    idempotentDelete: (store, key) => (writable ? store.delete("ns", key, ctx) : Promise.resolve()),
     // Credentials-specific cases nest under the shared describe. These exercise
     // the KV composite-key shape the generic skeleton can't: value round-trip,
     // namespace isolation, per-namespace enumeration, and the credentials
@@ -74,8 +79,8 @@ export function runCredentialsStoreConformance(opts: CredentialsStoreConformance
     cases: () => {
       it.skipIf(!writable)("round-trips a value through set/get", async () => {
         const store = await setupStore();
-        await store.set("ns", "k", { token: "abc", expires: 1000 });
-        expect(await store.get<{ token: string; expires: number }>("ns", "k")).toEqual({
+        await store.set("ns", "k", { token: "abc", expires: 1000 }, ctx);
+        expect(await store.get<{ token: string; expires: number }>("ns", "k", ctx)).toEqual({
           token: "abc",
           expires: 1000,
         });
@@ -83,47 +88,47 @@ export function runCredentialsStoreConformance(opts: CredentialsStoreConformance
 
       it.skipIf(!writable)("isolates entries across namespaces", async () => {
         const store = await setupStore();
-        await store.set("ns-a", "k", "value-a");
-        await store.set("ns-b", "k", "value-b");
-        expect(await store.get<string>("ns-a", "k")).toBe("value-a");
-        expect(await store.get<string>("ns-b", "k")).toBe("value-b");
+        await store.set("ns-a", "k", "value-a", ctx);
+        await store.set("ns-b", "k", "value-b", ctx);
+        expect(await store.get<string>("ns-a", "k", ctx)).toBe("value-a");
+        expect(await store.get<string>("ns-b", "k", ctx)).toBe("value-b");
       });
 
       it.skipIf(!writable)("overwrites prior values on repeat set", async () => {
         const store = await setupStore();
-        await store.set("ns", "k", "first");
-        await store.set("ns", "k", "second");
-        expect(await store.get<string>("ns", "k")).toBe("second");
+        await store.set("ns", "k", "first", ctx);
+        await store.set("ns", "k", "second", ctx);
+        expect(await store.get<string>("ns", "k", ctx)).toBe("second");
       });
 
       it.skipIf(!writable)("has() returns true after set, false after delete", async () => {
         const store = await setupStore();
-        expect(await store.has("ns", "k")).toBe(false);
-        await store.set("ns", "k", "v");
-        expect(await store.has("ns", "k")).toBe(true);
-        const removed = await store.delete("ns", "k");
+        expect(await store.has("ns", "k", ctx)).toBe(false);
+        await store.set("ns", "k", "v", ctx);
+        expect(await store.has("ns", "k", ctx)).toBe(true);
+        const removed = await store.delete("ns", "k", ctx);
         expect(removed).toBe(true);
-        expect(await store.has("ns", "k")).toBe(false);
+        expect(await store.has("ns", "k", ctx)).toBe(false);
       });
 
       it.skipIf(!writable)("delete() returns false on an absent key", async () => {
         const store = await setupStore();
-        expect(await store.delete("ns", "never-set")).toBe(false);
+        expect(await store.delete("ns", "never-set", ctx)).toBe(false);
       });
 
       it.skipIf(!writable)("keys() enumerates only the named namespace", async () => {
         const store = await setupStore();
-        await store.set("ns-a", "key1", "v1");
-        await store.set("ns-a", "key2", "v2");
-        await store.set("ns-b", "key3", "v3");
+        await store.set("ns-a", "key1", "v1", ctx);
+        await store.set("ns-a", "key2", "v2", ctx);
+        await store.set("ns-b", "key3", "v3", ctx);
 
-        const aKeys = [...(await store.keys("ns-a"))].sort();
+        const aKeys = [...(await store.keys("ns-a", ctx))].sort();
         expect(aKeys).toEqual(["key1", "key2"]);
 
-        const bKeys = await store.keys("ns-b");
+        const bKeys = await store.keys("ns-b", ctx);
         expect(bKeys).toEqual(["key3"]);
 
-        const emptyKeys = await store.keys("ns-c");
+        const emptyKeys = await store.keys("ns-c", ctx);
         expect(emptyKeys).toEqual([]);
       });
 
@@ -141,8 +146,8 @@ export function runCredentialsStoreConformance(opts: CredentialsStoreConformance
             events.push({ namespace: ev.namespace, key: ev.key });
           });
 
-          await store.set("ns", "k", "v");
-          await store.delete("ns", "k");
+          await store.set("ns", "k", "v", ctx);
+          await store.delete("ns", "k", ctx);
 
           expect(events).toEqual([
             { namespace: "ns", key: "k" },
@@ -150,7 +155,7 @@ export function runCredentialsStoreConformance(opts: CredentialsStoreConformance
           ]);
 
           unsubscribe();
-          await store.set("ns", "k2", "v2");
+          await store.set("ns", "k2", "v2", ctx);
           expect(events).toHaveLength(2);
         },
       );
