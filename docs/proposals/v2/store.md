@@ -1,4 +1,4 @@
-# ReactiveStore — the foundational data-source seam
+# Store — the foundational data-source seam
 
 **Status: DESIGN — for review. Nothing built.** The convergence pivot: the
 nine store-backed harnesses each hand-roll the same machine. This names the
@@ -37,7 +37,7 @@ export interface Change<T> {
 }
 
 /**
- * ReactiveStore — the thin, source-agnostic seam every store IS.
+ * Store — the thin, source-agnostic seam every store IS.
  *
  * Three verbs. `Q` is the store's QUERY vocabulary (how you ask the source for
  * a projection), `M` is its MUTATION vocabulary (how you change the source).
@@ -45,7 +45,7 @@ export interface Change<T> {
  * LANGUAGE, only that a query is a small, serializable description the store
  * translates however it wants (a WHERE clause, a key, a cursor, a path glob).
  */
-export interface ReactiveStore<T, Q = void, M = never> {
+export interface Store<T, Q = void, M = never> {
   /** Read = a PROJECTION from the source, shaped by a query. Always. */
   query(q: Q, ctx: StoreCtx): Promise<readonly T[]>;
 
@@ -73,14 +73,14 @@ source-agnostic.
 
 Earlier I resisted a `Store` supertype because the *collection* and *log*
 conformance barely shared. That still holds — and this doesn't violate it,
-because **`ReactiveStore` is a query/mutation seam, not an inheritance root.**
+because **`Store` is a query/mutation seam, not an inheritance root.**
 The two archetypes are not subclasses that inherit machinery; they are
 **ergonomic profiles** — named query/mutation vocabularies over the same three
 verbs. You reach for the profile, not the raw seam, day to day:
 
 ```ts
 // COLLECTION profile — keyed CRUD. `Q` = a filter; `M` = put | delete.
-export interface CollectionStore<T, Q> extends ReactiveStore<T, Q, CollectionMutation<T>> {
+export interface CollectionStore<T, Q> extends Store<T, Q, CollectionMutation<T>> {
   // Ergonomic sugar over the seam; each compiles to query()/mutate():
   get(key: string, ctx: StoreCtx): Promise<T | undefined>;      // = query(byKey(key))[0]
   list(query: Q, ctx: StoreCtx): Promise<readonly T[]>;         // = query(query)
@@ -90,7 +90,7 @@ export interface CollectionStore<T, Q> extends ReactiveStore<T, Q, CollectionMut
 type CollectionMutation<T> = { readonly put: T } | { readonly delete: string };
 
 // LOG profile — append-only, ordered, cursored. `Q` = a cursor window.
-export interface LogStore<T> extends ReactiveStore<T, LogCursor, LogMutation<T>> {
+export interface LogStore<T> extends Store<T, LogCursor, LogMutation<T>> {
   read(logKey: string, ctx: StoreCtx): Promise<readonly T[]>;                // = query({ logKey })
   history(logKey: string, w: Window, ctx: StoreCtx): Promise<readonly SeqTagged<T>[]>;
   append(logKey: string, entries: readonly T[], ctx: StoreCtx): Promise<readonly number[]>;
@@ -100,7 +100,7 @@ type LogMutation<T> = { readonly append: { logKey: string; entries: readonly T[]
 ```
 
 A store author implements **either profile** (or a bespoke one) — the
-`ReactiveStore` seam is what the *generic* infrastructure (a conformance runner,
+`Store` seam is what the *generic* infrastructure (a conformance runner,
 a manifest, a wire projector) targets when it must be archetype-agnostic. The
 profiles keep the ergonomics; the seam keeps the uniformity. *Both, at different
 layers* — no god-object.
@@ -127,11 +127,11 @@ implements the underlying logic."
 This is the part the convergence actually collapses. Today nine harnesses
 hand-roll: a sync projection + write-through + `hydrate` + a notify seam +
 `exportSnapshot`. That machine is one composable primitive — call it a
-**`ReactiveView`** — and it is *harness-side*, pulling from the store:
+**`View`** — and it is *harness-side*, pulling from the store:
 
 ```ts
 /**
- * ReactiveView<T> — the harness-held, synchronous PROJECTION of a store.
+ * View<T> — the harness-held, synchronous PROJECTION of a store.
  *
  * The store is where data lives; the view is the sync working copy the render
  * pass and the sync `exportSnapshot` read (both cannot await — Phase-3 finding).
@@ -144,11 +144,11 @@ hand-roll: a sync projection + write-through + `hydrate` + a notify seam +
  * cache. Timeline is the log case — `read()` is a query; the view holds the
  * bounded/compacted projection the model sees.
  */
-export class ReactiveView<T, Q, M> {
+export class View<T, Q, M> {
   private readonly cache = new Map<string, T>();
   private readonly changes = createChangeNotifier<T>();
   constructor(
-    private readonly store: ReactiveStore<T, Q, M>,
+    private readonly store: Store<T, Q, M>,
     private readonly keyOf: (t: T) => string,
     private readonly toMutation: (t: T) => M, // how a record becomes a store write
   ) {}
@@ -174,18 +174,18 @@ export class ReactiveView<T, Q, M> {
 }
 ```
 
-A harness then becomes: **`ReactiveView` + its domain logic** (commands, wire,
-channel). knobs = `ReactiveView<KnobEntry>`. state = `ReactiveView<StateEntry>`.
+A harness then becomes: **`View` + its domain logic** (commands, wire,
+channel). knobs = `View<KnobEntry>`. state = `View<StateEntry>`.
 The *augmented* cases (tasks' live handles, prompts' `render` sidecar) compose a
-`ReactiveView` + a sidecar `Map` — the pattern prompts already proved. The
+`View` + a sidecar `Map` — the pattern prompts already proved. The
 async-only cases (credentials) skip the view and hit the store directly. Nine
 hand-rolls collapse to one primitive + thin configs; the notify seam (E17)
-dissolves into `ReactiveView.onChange`; conformance is the parity guardrail.
+dissolves into `View.onChange`; conformance is the parity guardrail.
 
 ## What this is and isn't
 
-- **Is:** a thin seam (`ReactiveStore`) + two ergonomic profiles + one harness-
-  side projection primitive (`ReactiveView`). Net *subtraction*: the nine
+- **Is:** a thin seam (`Store`) + two ergonomic profiles + one harness-
+  side projection primitive (`View`). Net *subtraction*: the nine
   storification hand-rolls collapse; E17 and the CollectionProjection variants
   fold in.
 - **Isn't:** a mandate that every store be reactive (opt-in `watch`/`onChange`),
@@ -200,7 +200,7 @@ dissolves into `ReactiveView.onChange`; conformance is the parity guardrail.
    TanStack Query — the cleanest, most-loved library here — has *one* query/
    mutation seam with a serializable key and no "collection vs log" store types;
    the ergonomics (`queryOptions`, `createEntityAdapter`) are sugar on top. We
-   follow: `ReactiveStore.query/mutate` is the seam; `CollectionStore`/`LogStore`
+   follow: `Store.query/mutate` is the seam; `CollectionStore`/`LogStore`
    `get`/`list`/`put`/`append` are ergonomic profiles over it.
 2. **The query object stays, `queryKey`-disciplined.** Even TanStack *requires*
    `queryKey`, so `q` is needed — it's what lets the store push the projection
@@ -214,19 +214,19 @@ dissolves into `ReactiveView.onChange`; conformance is the parity guardrail.
    exactly this and is loved; real sources push (Postgres LISTEN/NOTIFY, keychain
    rotation). Optional; harnesses that own their writes drive their own notify and
    ignore it.
-4. **`ReactiveView` (Svelte-store-shaped) replaces `CollectionProjection`** in
+4. **`View` (Svelte-store-shaped) replaces `CollectionProjection`** in
    `store-next` and subsumes the notify seam (E17). We hold this ONE tiny sync
    cache; we do NOT own a client cache/sync engine (the bright line — that's the
    adopter's TanStack/ngrx). We are the seam those libraries are built *on*.
 
 ## The convergence cuts (staged, each net-removes + conformance-green)
 
-- **Cut 1 (foundation + proof):** land `ReactiveStore` seam (spec), `MemoryStore`
-  (the in-memory ReactiveStore) + `ReactiveView` (store-next), and migrate
+- **Cut 1 (foundation + proof):** land `Store` seam (spec), `MemoryStore`
+  (the in-memory Store) + `View` (store-next), and migrate
   **knobs + state** onto them — collapsing their `CollectionProjection` + the
-  hand-rolled `KeyedNotifier`/`ChangeNotifier` into `ReactiveView`. Measure lines
+  hand-rolled `KeyedNotifier`/`ChangeNotifier` into `View`. Measure lines
   removed; knobs/state conformance + channel parity green. Other 7 harnesses stay
   on the old surface (Cut 2+).
-- **Cut 2+:** fan out `ReactiveView` to the remaining harnesses (augmented cases
+- **Cut 2+:** fan out `View` to the remaining harnesses (augmented cases
   compose view + sidecar); retire `CollectionProjection`; make
   `CollectionStore`/`LogStore` formal profiles over the seam.

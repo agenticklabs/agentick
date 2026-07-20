@@ -7,7 +7,7 @@
  * idempotency replay, journaling).
  *
  *   Sync surface   — get / has / list / subscribe / subscribeAll.
- *                     Reads the sync {@link ReactiveView} (the store's read
+ *                     Reads the sync {@link View} (the store's read
  *                     cache); no envelopes.
  *   Async surface  — set / delete. Declared commands (ADR 51): each
  *                     runs through `runOperation` with canonical
@@ -20,14 +20,14 @@
  * the entries. Used by SnapshotHarness for hibernate/resume.
  *
  * Storification (data-layer plan §3.5) — the near-identical twin of knobs.
- * State is store-derived AND store-persisted: a durable {@link ReactiveStore}
+ * State is store-derived AND store-persisted: a durable {@link Store}
  * of `{ key, value }` cells is the authority, and a synchronous
- * {@link ReactiveView} is its read cache (reads never touch the async store).
+ * {@link View} is its read cache (reads never touch the async store).
  * Every value mutation writes through the view (sync cache first, durable store
  * off the critical path via the `query`/`mutate` seam) AND, in the same call,
  * pings render subscribers and emits the typed change — the sync-cache,
  * write-through, render-ping, and delta-stream machinery all live in the ONE
- * `ReactiveView` (they were three hand-rolled fields). `hydrate()` reloads the
+ * `View` (they were three hand-rolled fields). `hydrate()` reloads the
  * store into the view on resume. State has no client-facing channel, so nothing
  * projects the change stream to the wire today (see the `state-deltas` TODO).
  *
@@ -44,7 +44,7 @@ import type {
   MessageHandlerError,
   MessageInbox,
   OperationJournal,
-  ReactiveStore,
+  Store,
   StateDeleteInput,
   StateHarnessProtocol,
   StateSetInput,
@@ -52,7 +52,7 @@ import type {
 } from "@agentick/spec-next";
 import { HandlerError } from "@agentick/spec-next";
 import { type ChangeEvent } from "@agentick/pubsub-next";
-import { ReactiveView } from "@agentick/store-next";
+import { View } from "@agentick/store-next";
 import { createStateStore, type StateEntry, type StateStoreQuery } from "./store.js";
 
 /**
@@ -64,17 +64,17 @@ export interface StateHarnessOptions {
    * Durable backing for state VALUES (data-layer plan §3.5, Phase 3). Defaults
    * to a fresh per-harness in-memory {@link createStateStore}. The store holds
    * `{ key, value }` cells; it is the durable truth, the synchronous
-   * {@link ReactiveView} is its sync read cache (reads never touch the store).
+   * {@link View} is its sync read cache (reads never touch the store).
    * Injecting a durable adapter (Postgres, …) is how state survives process
    * restart; `hydrate()` loads it back into the view. Typed against the
-   * `ReactiveStore` SEAM — a durable adapter need only implement `query`/`mutate`.
+   * `Store` SEAM — a durable adapter need only implement `query`/`mutate`.
    */
-  readonly store?: ReactiveStore<StateEntry, StateStoreQuery, CollectionMutation<StateEntry>>;
+  readonly store?: Store<StateEntry, StateStoreQuery, CollectionMutation<StateEntry>>;
 }
 
 export class StateHarness extends BaseHarness<"state"> implements StateHarnessProtocol {
   /**
-   * The synchronous {@link ReactiveView} of the value store — ONE primitive that
+   * The synchronous {@link View} of the value store — ONE primitive that
    * collapses the three fields this used to hand-roll (a `CollectionProjection`
    * for the sync cache + write-through, a `KeyedNotifier` for render pings, a
    * `ChangeNotifier` for the typed delta stream). `get` / `has` / `list` /
@@ -85,7 +85,7 @@ export class StateHarness extends BaseHarness<"state"> implements StateHarnessPr
    * view's cache PRESENCE (`hasSync`), NOT `prev !== undefined` — state may
    * legitimately store `undefined`.
    */
-  private readonly view: ReactiveView<StateEntry, StateStoreQuery, CollectionMutation<StateEntry>>;
+  private readonly view: View<StateEntry, StateStoreQuery, CollectionMutation<StateEntry>>;
 
   /**
    * Declared commands (ADR 51) — pure layer logic in the handlers; the
@@ -106,7 +106,7 @@ export class StateHarness extends BaseHarness<"state"> implements StateHarnessPr
     options: StateHarnessOptions = {},
   ) {
     super("state", scopeId, journal, bus, inbox);
-    this.view = ReactiveView.collection(options.store ?? createStateStore(), (entry) => entry.key);
+    this.view = View.collection(options.store ?? createStateStore(), (entry) => entry.key);
     const scope = () => ({ sessionId: this.scopeId });
     this.set = this.command({
       name: "state:set",

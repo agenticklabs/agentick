@@ -30,7 +30,7 @@
 import {
   isSkillsInstance,
   type CollectionMutation,
-  type ReactiveStore,
+  type Store,
   type SessionExtension,
   type SessionInstaller,
   type Skill,
@@ -64,11 +64,11 @@ export interface WithSkillsOptions {
   /**
    * Durable backing for skill records (data-layer plan §6-C). Defaults to a
    * fresh per-session in-memory store; inject a durable adapter (Postgres, a
-   * filesystem source) conforming to the {@link ReactiveStore} seam to survive
+   * filesystem source) conforming to the {@link Store} seam to survive
    * process restart. Built-in path only — mutually exclusive with `use` (an
    * adopter-supplied instance brings its own backing).
    */
-  readonly store?: ReactiveStore<Skill, SkillStoreQuery, CollectionMutation<Skill>>;
+  readonly store?: Store<Skill, SkillStoreQuery, CollectionMutation<Skill>>;
   /**
    * Adopter-supplied `Skills` instance. The extension uses this as-is
    * across every session — NO per-session construction, NO close on

@@ -6,7 +6,7 @@
  * state has no descriptors (it is session-internal, not model-facing), so the
  * cell IS the whole record; there is nothing tree-derived to merge over it.
  *
- * There is no named `StateStore` port: the `ReactiveStore` seam
+ * There is no named `StateStore` port: the `Store` seam
  * (`@agentick/spec-next`) IS the contract the harness types its field against.
  * Keeping the seam lean means a durable adapter (Postgres, …) need only
  * implement `query`/`mutate` (+ optional `watch`) — no profile methods required.
@@ -41,13 +41,13 @@ export type StateStoreQuery = Record<string, never>;
  * The bundled, zero-dependency default state value store — the generic
  * {@link MemoryCollection} parameterized for state cells. `:memory:` semantics
  * (lost on process exit); a durable adapter conforms to the same
- * {@link ReactiveStore} seam. Single source of truth for the default store
+ * {@link Store} seam. Single source of truth for the default store
  * config so the harness default and test-constructed stores never drift.
  *
  * Returns the CONCRETE `MemoryCollection` (which implements BOTH the
- * `CollectionStore` profile AND the `ReactiveStore` seam) so callers that poke
+ * `CollectionStore` profile AND the `Store` seam) so callers that poke
  * the store directly keep `get`/`put`/`list`; the harness widens it to the
- * `ReactiveStore` seam at its option boundary.
+ * `Store` seam at its option boundary.
  */
 export function createStateStore(): MemoryCollection<StateEntry, StateStoreQuery> {
   return new MemoryCollection<StateEntry, StateStoreQuery>({

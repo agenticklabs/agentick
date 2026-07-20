@@ -12,8 +12,8 @@
  *     subsumes every log-archetype in-memory store (timeline today). A full
  *     in-memory array per log is the intended default (no bounding — §2.7);
  *     the only per-store knob is the `backend` label.
- *   - {@link ReactiveView} — the harness-side SYNCHRONOUS projection of a
- *     `ReactiveStore`: sync read cache + write-through (via the `query`/`mutate`
+ *   - {@link View} — the harness-side SYNCHRONOUS projection of a
+ *     `Store`: sync read cache + write-through (via the `query`/`mutate`
  *     seam) + a `KeyedNotifier` (render pings) + a `ChangeNotifier` (typed
  *     deltas), all in ONE primitive. This is the convergence that RETIRED the
  *     earlier `CollectionProjection` (sync cache + write-through + hydrate) once
@@ -40,7 +40,7 @@ export {
   type CollectionChangeEvent,
 } from "./memory-collection.js";
 export { MemoryLog, type MemoryLogConfig } from "./memory-log.js";
-export { ReactiveView, type ReactiveViewConfig } from "./reactive-view.js";
+export { View, type ViewConfig } from "./view.js";
 export { JournalProjectedStore, type JournalProjectedConfig } from "./journal-projected.js";
 export { IdempotentCollectionStore, idempotentWrite } from "./idempotent-write.js";
 export {

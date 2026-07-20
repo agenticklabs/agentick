@@ -1723,18 +1723,18 @@ blueprint's design decisions; this is execution-level).
 
 ### 2026-07-20
 
-- **ReactiveStore convergence — Cut 1 LANDED (foundation + pilot proof).** The
+- **Store convergence — Cut 1 LANDED (foundation + pilot proof).** The
   nine store-backed harnesses each hand-rolled the same reactive machine; the
-  convergence collapses it. Design: `docs/proposals/v2/reactive-store.md`
+  convergence collapses it. Design: `docs/proposals/v2/store.md`
   (grounded in TanStack Query / RxDB / Svelte-stores; the "Locked" section).
-  **The seam** (`ReactiveStore<T,Q,M>` in spec-next): three verbs — `query(q,ctx)`
+  **The seam** (`Store<T,Q,M>` in spec-next): three verbs — `query(q,ctx)`
   (read = projection from the source), `mutate(m,ctx)` (write), optional
   `watch?(q,ctx)` (reactivity is a capability, not a mandate). `Q` = a
   serializable query DESCRIPTION (never a query language), defaults to `void`; `M`
   the mutation vocab. `CollectionStore`/`LogStore` are ergonomic PROFILES over it
   (Cut 1: coexist additively — `MemoryCollection` implements both `get/list/put`
   AND `query/mutate`; the formal `extends` sweep is Cut 2). **The collapse**
-  (`ReactiveView` in store-next): ONE harness-side sync projection that subsumes
+  (`View` in store-next): ONE harness-side sync projection that subsumes
   `CollectionProjection` + `KeyedNotifier` (render pings) + `ChangeNotifier`
   (typed deltas) — sync reads (`getSync`/`listSync`, render + sync-`exportSnapshot`
   safe), single-mutation `write`/`deleteSync` (cache → seam `mutate` off the
@@ -1749,33 +1749,33 @@ blueprint's design decisions; this is execution-level).
   **152/152 typecheck 0-cached, 1043 tests / 64 files, oxfmt + oxlint clean.**
   Residual drift (deferred to Cut 2 per the three-consumers rule): a ~7-line
   `toValueChange` entry→value unwrap is duplicated in knobs + state — hoist to a
-  `store-next` `mapChange` export during the fan-out. **Cut 2+:** fan `ReactiveView`
+  `store-next` `mapChange` export during the fan-out. **Cut 2+:** fan `View`
   out to the remaining 7 harnesses, retire `CollectionProjection`, make the
-  profiles formally `extends ReactiveStore`. TODO markers greppable:
-  `TODO(reactive-store-cut2)`.
+  profiles formally `extends Store`. TODO markers greppable:
+  `TODO(store-cut2)`.
 
-- **ReactiveStore Cut 2a LANDED — skills + prompts migrated, `CollectionProjection`
+- **Store Cut 2a LANDED — skills + prompts migrated, `CollectionProjection`
   RETIRED.** The seven remaining harnesses do NOT fan out uniformly (map in the
   Cut-2 planning): only skills (pure mirror) and prompts (mirror + harness-owned
   `augmentations` split-map sidecar) were the other `CollectionProjection` holders,
-  so migrating them onto `ReactiveView` left the old primitive with zero consumers
+  so migrating them onto `View` left the old primitive with zero consumers
   — deleted `collection-projection.ts` + its spec (−287 lines), dropped the barrel
   export. Both in-memory stores gained additive `query`/`mutate` delegates to their
-  composed `MemoryCollection` (`TODO(reactive-store-cut2)`); store options widened
-  to the `ReactiveStore` seam. Prompts parity detail: the `augmentations` sidecar
+  composed `MemoryCollection` (`TODO(store-cut2)`); store options widened
+  to the `Store` seam. Prompts parity detail: the `augmentations` sidecar
   stays harness-owned (cleared on import, untouched on hydrate) and is populated
   BEFORE the now-synchronous `view.write` ping so a subscriber sees the combined
   `declarationOf`. Also fixed Cut-1 doc-rot (state README + store-backing spec still
   named `CollectionProjection`). Gates: **152/152 typecheck 0-cached, 225 tests /
   17 files, oxfmt + oxlint clean.** Net −254 lines.
   **DEFERRED (each needs a design decision, not a sweep):** tasks (cache-type ≠
-  store-type `LiveTask` sidecar — needs a `ReactiveView` refinement + honors tasks'
+  store-type `LiveTask` sidecar — needs a `View` refinement + honors tasks'
   own ≥2-augmented-consumer gate), session (single-record `SessionRuntime` → wants
   a `ReactiveCell` sibling; one consumer, three-consumers rule), resources (hybrid
   raw-Map catalog + resolver sidecars — partial fit), timeline (LOG archetype →
-  needs a `ReactiveLogView` sibling, not `ReactiveView`), credentials (async-only,
+  needs a `ReactiveLogView` sibling, not `View`), credentials (async-only,
   untouched — the standing counter-example). **Cut 2b (next mechanical step):**
-  `CollectionStore`/`LogStore` formally `extends ReactiveStore` (in-memory defaults
+  `CollectionStore`/`LogStore` formally `extends Store` (in-memory defaults
   inherit `query`/`mutate` free; hand-write on the Postgres/Fs adapters + MemoryLog
   + Idempotent/Journal stores) — retires the coexistence TODOs.
 

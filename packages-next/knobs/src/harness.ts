@@ -65,13 +65,13 @@ import type {
   MessageHandlerError,
   MessageInbox,
   OperationJournal,
-  ReactiveStore,
+  Store,
   StoreCtx,
 } from "@agentick/spec-next";
 import { HandlerError } from "@agentick/spec-next";
 import { changeKind, type ChangeEvent } from "@agentick/pubsub-next";
 import { ulid, type JsonPatchOp } from "@agentick/utils-next";
-import { ReactiveView } from "@agentick/store-next";
+import { View } from "@agentick/store-next";
 import type { ChannelSnapshotProvider } from "@agentick/spec-next";
 import {
   KNOBS_STATE_CHANNEL,
@@ -111,13 +111,13 @@ export interface KnobsHarnessOptions {
    * Durable backing for knob VALUES (data-layer plan §3.5, Phase 3). Defaults
    * to a fresh per-harness in-memory {@link createKnobStore}. The store holds
    * `{ id, value }` cells only — descriptors are tree-derived and never stored.
-   * It is the durable truth; the synchronous {@link ReactiveView} is its sync
+   * It is the durable truth; the synchronous {@link View} is its sync
    * read cache (reads never touch the store). Injecting a durable adapter
    * (Postgres, …) is how knob values survive process restart; `hydrate()` loads
-   * it back into the view. Typed against the `ReactiveStore` SEAM — a durable
+   * it back into the view. Typed against the `Store` SEAM — a durable
    * adapter need only implement `query`/`mutate`.
    */
-  readonly store?: ReactiveStore<KnobEntry, KnobStoreQuery, CollectionMutation<KnobEntry>>;
+  readonly store?: Store<KnobEntry, KnobStoreQuery, CollectionMutation<KnobEntry>>;
 }
 
 export class KnobsHarness
@@ -125,7 +125,7 @@ export class KnobsHarness
   implements KnobsHarnessProtocol, ChannelSnapshotProvider
 {
   /**
-   * The synchronous {@link ReactiveView} of the value store — ONE primitive that
+   * The synchronous {@link View} of the value store — ONE primitive that
    * collapses the three fields this used to hand-roll (a `CollectionProjection`
    * for the sync cache + write-through, a `KeyedNotifier` for render pings, a
    * `ChangeNotifier` for the typed StateDelta stream). `get` / `has` / `list` /
@@ -136,7 +136,7 @@ export class KnobsHarness
    * constructor-wired StateDelta channel projects. The store holds value cells
    * only — descriptors are tree-derived and merged over them at read time.
    */
-  private readonly view: ReactiveView<KnobEntry, KnobStoreQuery, CollectionMutation<KnobEntry>>;
+  private readonly view: View<KnobEntry, KnobStoreQuery, CollectionMutation<KnobEntry>>;
   private readonly descriptors = new Map<string, KnobRegistration>();
 
   /**
@@ -197,7 +197,7 @@ export class KnobsHarness
       interceptorParent: options.interceptorParent,
     });
     this.parentLayer = parentLayer;
-    this.view = ReactiveView.collection(options.store ?? createKnobStore(), (entry) => entry.id);
+    this.view = View.collection(options.store ?? createKnobStore(), (entry) => entry.id);
     const scope = () => ({ sessionId: this.scopeId });
     this.set = this.command({
       name: "knobs:set",
@@ -309,7 +309,7 @@ export class KnobsHarness
     // The view's change stream is ENTRY-typed (`{ id, value }`); the public
     // notify seam is VALUE-typed. Project entry → primitive, preserving
     // key-presence (`"value"`/`"prev" in c`) so add/update/remove classify the
-    // same as before the ReactiveView collapse.
+    // same as before the View collapse.
     return this.view.onChange((c) => listener(toValueChange(c, (e) => e.value)));
   }
 

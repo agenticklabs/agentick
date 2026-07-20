@@ -21,7 +21,7 @@
  * harness's self-caused change stream: a harness that owns its store privately
  * and is the ONLY writer already knows what it changed (it just wrote it) and
  * does NOT need `onChange` — knobs, whose `MemoryCollection` sits behind a
- * private {@link ReactiveView}, deliberately does not subscribe (a
+ * private {@link View}, deliberately does not subscribe (a
  * listener-less `onChange` is a no-op cost). `onChange` earns its keep when a
  * store is shared across consumers OR a durable backend surfaces changes the
  * process did not originate (a sibling process editing a keychain, an admin
@@ -35,12 +35,7 @@
  * @verifiedBy packages-next/store/src/__tests__/memory-collection.spec.ts
  */
 
-import type {
-  CollectionMutation,
-  CollectionStore,
-  ReactiveStore,
-  StoreCtx,
-} from "@agentick/spec-next";
+import type { CollectionMutation, CollectionStore, Store, StoreCtx } from "@agentick/spec-next";
 import { createChangeNotifier, type ChangeEvent, type ChangeNotifier } from "@agentick/pubsub-next";
 
 /**
@@ -76,13 +71,13 @@ export interface MemoryCollectionConfig<T, Q, PruneArg = never> {
   readonly prunePredicate?: (item: T, arg: PruneArg) => boolean;
 }
 
-// TODO(reactive-store-cut2): collapse get/list/put/delete into query/mutate
-// profile sugar (make CollectionStore formally `extends ReactiveStore`). Today
+// TODO(store-cut2): collapse get/list/put/delete into query/mutate
+// profile sugar (make CollectionStore formally `extends Store`). Today
 // the two surfaces COEXIST additively — the profile methods for direct callers,
-// the seam for the harness-side ReactiveView — so no store is forced to
+// the seam for the harness-side View — so no store is forced to
 // reimplement query/mutate before the Cut 2 sweep.
 export class MemoryCollection<T, Q, PruneArg = never>
-  implements CollectionStore<T, Q, PruneArg>, ReactiveStore<T, Q, CollectionMutation<T>>
+  implements CollectionStore<T, Q, PruneArg>, Store<T, Q, CollectionMutation<T>>
 {
   readonly backend: string;
   private readonly items = new Map<string, T>();
@@ -158,7 +153,7 @@ export class MemoryCollection<T, Q, PruneArg = never>
     return Promise.resolve(existed);
   }
 
-  // ─────────── ReactiveStore seam (query / mutate over the same Map) ───────────
+  // ─────────── Store seam (query / mutate over the same Map) ───────────
 
   /**
    * The seam READ — a projection shaped by a query. Delegates to {@link list}

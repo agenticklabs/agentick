@@ -82,9 +82,9 @@ export class InMemorySkillStore implements SkillStore {
     await this.collection.delete(name, ctx);
   }
 
-  // TODO(reactive-store-cut2): drops out once CollectionStore extends ReactiveStore
+  // TODO(store-cut2): drops out once CollectionStore extends Store
   // (Cut 2b) — the composed MemoryCollection already implements the seam, so these
-  // two delegates are the whole cost of satisfying `ReactiveStore` today.
+  // two delegates are the whole cost of satisfying `Store` today.
   query(q: SkillStoreQuery | undefined, ctx: StoreCtx): Promise<readonly Skill[]> {
     return this.collection.query(q, ctx);
   }

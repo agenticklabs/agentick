@@ -57,7 +57,7 @@ import type {
   PromptsRemoveInput,
   PromptsSnapshotEntry,
   PromptsUpdateInput,
-  ReactiveStore,
+  Store,
   StandardSchemaIssue,
   StandardSchemaV1,
   TimelineHarnessProtocol,
@@ -72,7 +72,7 @@ import {
   PromptRenderFailed,
   PromptsBackendError,
 } from "@agentick/spec-next";
-import { ReactiveView } from "@agentick/store-next";
+import { View } from "@agentick/store-next";
 import { omitUndefined, ulid } from "@agentick/utils-next";
 
 import type { PromptLoader } from "./loaders.js";
@@ -114,10 +114,10 @@ export interface PromptsHarnessOptions {
    * store holds ONLY the serializable {@link PromptDeclarationRecord} — the
    * `template`/`render` augmentation stays in the harness's sidecar and never
    * reaches the store. It is the durable truth; the synchronous
-   * {@link ReactiveView} is its sync read cache (reads never touch the store).
+   * {@link View} is its sync read cache (reads never touch the store).
    * Injecting a durable adapter is how prompt declarations survive process
    * restart; `hydrate()` loads them back into the view. Typed against the
-   * `ReactiveStore` SEAM — a durable adapter need only implement `query`/`mutate`.
+   * `Store` SEAM — a durable adapter need only implement `query`/`mutate`.
    * The sidecar does NOT survive — the adopter re-registers `render`/`template`
    * alongside restore (fns aren't serializable).
    *
@@ -126,7 +126,7 @@ export interface PromptsHarnessOptions {
    * SnapshotCapable) AND a sync `getDeclaration`/`has`/`list` surface — both are
    * load-bearing sync callers, so a synchronous materialized view is required.
    */
-  readonly store?: ReactiveStore<
+  readonly store?: Store<
     PromptDeclarationRecord,
     PromptStoreQuery,
     CollectionMutation<PromptDeclarationRecord>
@@ -135,7 +135,7 @@ export interface PromptsHarnessOptions {
 
 export class PromptsHarness extends BaseHarness<PromptsSurface> implements PromptsHarnessProtocol {
   /**
-   * The synchronous {@link ReactiveView} of the prompt store (data-layer plan
+   * The synchronous {@link View} of the prompt store (data-layer plan
    * §3.5 P5) — ONE primitive that collapses the two fields this used to
    * hand-roll (a `CollectionProjection` for the sync cache + write-through and a
    * `KeyedNotifier` for render pings). Holds the SERIALIZABLE
@@ -150,7 +150,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
    * agnostic to. Keyed by record `name`. No `onChange` subscriber — prompts has
    * no client-facing change channel.
    */
-  private readonly view: ReactiveView<
+  private readonly view: View<
     PromptDeclarationRecord,
     PromptStoreQuery,
     CollectionMutation<PromptDeclarationRecord>
@@ -162,7 +162,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
    * at remove, CLEARED on `importSnapshot` (fns can't survive serialization; the
    * adopter re-registers). NEVER written to the store — the
    * `PromptDeclarationRecord` type makes that a compile-time guarantee, and the
-   * {@link ReactiveView} never touches it (it mirrors the record slice only).
+   * {@link View} never touches it (it mirrors the record slice only).
    * Only entries with a defined `template` or `render` are kept (see
    * {@link setAugmentation}).
    */
@@ -210,7 +210,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
     super(SURFACE, scopeId, journal, bus, inbox);
     this.renderers = options.renderers ?? [];
     this.timeline = options.timeline;
-    this.view = ReactiveView.collection(options.store ?? new InMemoryPromptStore(), (r) => r.name);
+    this.view = View.collection(options.store ?? new InMemoryPromptStore(), (r) => r.name);
 
     // ─── Declared commands (ADR 51) — the single declaration site per
     // verb. Inbox message types, canonical op naming, and enumeration
@@ -426,7 +426,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
     // The augmentation sidecar is CLEARED — `template`/`render` are
     // non-serializable, so a restored prompt has no content until the adopter
     // re-registers it (invoke/get then throw `PromptMissingContent` until they do).
-    // The `ReactiveView` is agnostic to the sidecar; the clear is harness-owned.
+    // The `View` is agnostic to the sidecar; the clear is harness-owned.
     //
     // TODO(store-phase-4): `importSnapshot` is the ACTIVE snapshot-based resume
     // path. The Phase-4 manifest sweep replaces it with `hydrate()` once the

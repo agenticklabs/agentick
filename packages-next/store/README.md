@@ -33,8 +33,8 @@ copy-pasted conformance suite. This package factors all three out:
   **full in-memory array per log is the intended default** (no bounding /
   eviction — that is a durable adapter's concern, data-layer plan §2.7); the
   only per-store knob is the `backend` label.
-- **`ReactiveView<T, Q, M>`** — the harness-side SYNCHRONOUS projection of a
-  [`ReactiveStore`](../spec/src/protocol/reactive-store.ts): a sync read cache +
+- **`View<T, Q, M>`** — the harness-side SYNCHRONOUS projection of a
+  [`Store`](../spec/src/protocol/store.ts): a sync read cache +
   write-through + a `KeyedNotifier` (render pings) + a `ChangeNotifier` (typed
   `{ key, value?, prev? }` deltas), all in **one** primitive. This is the
   convergence that **retired** the earlier `CollectionProjection` (sync cache +
@@ -45,7 +45,7 @@ copy-pasted conformance suite. This package factors all three out:
   never-rendered harnesses (credentials) read the store live and need NO view —
   the rule is conditional on render-read. It drives the store through the
   `query`/`mutate` **seam** (never the profile methods), so a store that only
-  implements `ReactiveStore` works. Two notify contracts: the **single-mutation**
+  implements `Store` works. Two notify contracts: the **single-mutation**
   path (`write` / `deleteSync`) pings the key AND emits a typed change; the
   **bulk** path (`replace` / `hydrate`) mutates the whole cache first, batches
   the render pings, and is **change-silent** (a wholesale replace is the
@@ -56,10 +56,10 @@ copy-pasted conformance suite. This package factors all three out:
   harnesses fan out in later cuts.
 
   ```ts
-  import { ReactiveView } from "@agentick/store-next";
+  import { View } from "@agentick/store-next";
 
   // keyOf is the only per-store code; toPut/toDelete are the CollectionMutation shape.
-  const view = ReactiveView.collection(createKnobStore(), (e) => e.id);
+  const view = View.collection(createKnobStore(), (e) => e.id);
   view.write({ id: "verbose", value: true }, ctx); // sync cache → store → ping + change
   const keys = await view.hydrate(undefined, ctx); // merge store projection, ping loaded keys
   ```
@@ -145,7 +145,7 @@ never breaks the write or a sibling):
 This is the **cross-consumer / external-observation** seam — distinct from a
 single harness's self-caused change stream. A harness that owns its store
 privately and is the only writer already knows what it changed and does not
-subscribe (knobs, behind a private `ReactiveView`, deliberately does
+subscribe (knobs, behind a private `View`, deliberately does
 not — a listener-less `onChange` is a no-op cost). `onChange` earns its keep
 when a store is shared OR a durable backend surfaces changes the process did not
 originate. `inMemoryCredentialsStore` is its first real consumer, forwarding
@@ -176,9 +176,9 @@ pruned-empty log's next append never reuses a retired `seq`. **No memory
 strategy is legislated** — a full array is the intended default; a durable
 adapter picks differently behind the same `LogStore` port.
 
-### `ReactiveView<T, Q = void, M = never>`
+### `View<T, Q = void, M = never>`
 
-The harness-side sync projection of a `ReactiveStore` — a sync read cache +
+The harness-side sync projection of a `Store` — a sync read cache +
 write-through + a `KeyedNotifier` (render pings) + a `ChangeNotifier` (typed
 deltas), collapsed into one primitive. This RETIRED the earlier
 `CollectionProjection` (sync cache + write-through + hydrate) once every
@@ -194,8 +194,8 @@ counter-example (`get`/`has`/`keys` each `await` the store directly).
 
 | Member                                        | Behavior                                                                 |
 | --------------------------------------------- | ------------------------------------------------------------------------ |
-| `ReactiveView.collection(store, keyOf)`       | Factory over a `CollectionMutation` store (`toPut`/`toDelete` prefilled) |
-| `new ReactiveView({ store, keyOf, toPut, toDelete })` | Full config for a bespoke mutation vocabulary `M`                 |
+| `View.collection(store, keyOf)`       | Factory over a `CollectionMutation` store (`toPut`/`toDelete` prefilled) |
+| `new View({ store, keyOf, toPut, toDelete })` | Full config for a bespoke mutation vocabulary `M`                 |
 | `getSync(key)` / `hasSync(key)` / `listSync()`| Sync reads; NEVER touch the store                                        |
 | `write(item, ctx)`                            | Cache → `store.mutate({ put })` → ping + typed change (add/update by presence) |
 | `deleteSync(key, ctx): boolean`               | Idempotent; on real delete: cache → `mutate({ delete })` → ping + removal change |
@@ -247,10 +247,10 @@ Landed across the data-layer store-substrate runs:
   its store-agnostic cases.
 - **Run #2 / 2.5 (knobs)** — `CollectionProjection` extracted (the sync
   read-model + write-through + hydrate that both tasks and knobs hand-rolled),
-  then **retired in the ReactiveStore convergence** (see below) once its
-  responsibilities folded into `ReactiveView`.
-- **ReactiveStore convergence (Cut 1 + Cut 2a)** — `ReactiveView` landed as the
-  single harness-side sync projection over a `ReactiveStore`, folding
+  then **retired in the Store convergence** (see below) once its
+  responsibilities folded into `View`.
+- **Store convergence (Cut 1 + Cut 2a)** — `View` landed as the
+  single harness-side sync projection over a `Store`, folding
   `CollectionProjection` + `KeyedNotifier` + `ChangeNotifier` into one primitive.
   Knobs + state moved onto it (Cut 1); skills + prompts followed (Cut 2a), at
   which point `CollectionProjection` had zero consumers and was deleted.
@@ -288,7 +288,7 @@ Landed across the data-layer store-substrate runs:
   history-paging / keys / delete / prune-by-absolute-seq behavior, defensive-copy
   read, per-log isolation, configurable backend, and the shared skeleton driven
   against the LOG archetype (empty-read `[]`).
-- `src/__tests__/reactive-view.spec.ts` — the `ReactiveView` convergence: sync
+- `src/__tests__/view.spec.ts` — the `View` convergence: sync
   reads, `write` fires ping + typed change (add/update by cache presence),
   idempotent `deleteSync`, undefined-value classification, change-silent
   `hydrate` (overlay merge) and `replace` (drop + add, union ping), and that the

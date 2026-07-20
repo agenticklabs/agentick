@@ -29,7 +29,7 @@ import type {
   MessageHandlerError,
   MessageInbox,
   OperationJournal,
-  ReactiveStore,
+  Store,
   Skill,
   SkillStoreQuery,
   SkillsError,
@@ -40,7 +40,7 @@ import type {
   SkillsUpdateInput,
 } from "@agentick/spec-next";
 import { HandlerError, SkillAlreadyExists, SkillNotFound } from "@agentick/spec-next";
-import { ReactiveView } from "@agentick/store-next";
+import { View } from "@agentick/store-next";
 import { omitUndefined } from "@agentick/utils-next";
 
 import type { SkillLoader } from "./loaders.js";
@@ -69,7 +69,7 @@ type SkillsSurface = typeof SURFACE;
 /**
  * Construction options for {@link SkillsHarness}. Threaded through
  * `withSkills({ store })` for adopters who want a durable backing (Postgres, a
- * filesystem source) behind the same {@link ReactiveStore} seam.
+ * filesystem source) behind the same {@link Store} seam.
  */
 export interface SkillsHarnessOptions {
   /**
@@ -77,10 +77,10 @@ export interface SkillsHarnessOptions {
    * to a fresh per-harness in-memory {@link InMemorySkillStore}. The store holds
    * the WHOLE `Skill` (skills are fully serializable — the archetype's pure
    * floor, no runtime augmentation to strip). It is the durable truth; the
-   * synchronous {@link ReactiveView} is its sync read cache (reads never touch
+   * synchronous {@link View} is its sync read cache (reads never touch
    * the store). Injecting a durable adapter is how skills survive process
    * restart; `hydrate()` loads it back into the view. Typed against the
-   * `ReactiveStore` SEAM — a durable adapter need only implement `query`/`mutate`.
+   * `Store` SEAM — a durable adapter need only implement `query`/`mutate`.
    *
    * NOTE the view (not async-through-the-store like credentials): skills
    * carries a SYNC `exportSnapshot(): Record<string, Skill>` (the generic
@@ -90,12 +90,12 @@ export interface SkillsHarnessOptions {
    * async counter-example, has NO snapshot surface, which is why it needs no
    * view.
    */
-  readonly store?: ReactiveStore<Skill, SkillStoreQuery, CollectionMutation<Skill>>;
+  readonly store?: Store<Skill, SkillStoreQuery, CollectionMutation<Skill>>;
 }
 
 export class SkillsHarness extends BaseHarness<SkillsSurface> implements SkillsHarnessProtocol {
   /**
-   * The synchronous {@link ReactiveView} of the skill store (data-layer plan
+   * The synchronous {@link View} of the skill store (data-layer plan
    * §3.5 P5) — ONE primitive that collapses the two fields this used to
    * hand-roll (a `CollectionProjection` for the sync cache + write-through and a
    * `KeyedNotifier` for render pings). `get` / `has` / `list` / `search` read it
@@ -107,7 +107,7 @@ export class SkillsHarness extends BaseHarness<SkillsSurface> implements SkillsH
    * pure-mirror collection view fits without refinement. Keyed by `Skill.name`.
    * No `onChange` subscriber — skills has no client-facing change channel.
    */
-  private readonly view: ReactiveView<Skill, SkillStoreQuery, CollectionMutation<Skill>>;
+  private readonly view: View<Skill, SkillStoreQuery, CollectionMutation<Skill>>;
 
   /** Cached snapshot for `list()`. Invalidated on every mutation. */
   private listCache: readonly Skill[] | null = null;
@@ -143,7 +143,7 @@ export class SkillsHarness extends BaseHarness<SkillsSurface> implements SkillsH
     options: SkillsHarnessOptions = {},
   ) {
     super(SURFACE, scopeId, journal, bus, inbox);
-    this.view = ReactiveView.collection(options.store ?? new InMemorySkillStore(), (s) => s.name);
+    this.view = View.collection(options.store ?? new InMemorySkillStore(), (s) => s.name);
     const scope = () => ({ sessionId: this.scopeId });
     this.register = this.command({
       name: "skills:register",

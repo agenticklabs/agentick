@@ -1,6 +1,6 @@
 /**
- * `ReactiveView<T, Q, M>` — the harness-held, SYNCHRONOUS projection of a
- * {@link ReactiveStore}. One primitive that collapses the three things every
+ * `View<T, Q, M>` — the harness-held, SYNCHRONOUS projection of a
+ * {@link Store}. One primitive that collapses the three things every
  * store-backed harness re-hand-rolled into a `CollectionProjection` + a
  * `KeyedNotifier` + a `ChangeNotifier`:
  *
@@ -33,11 +33,11 @@
  * fire-and-forget (`void mutate(...).catch(...)`): reads are served from the
  * sync cache, so a durable-write failure must not crash the mutation.
  *
- * @see docs/proposals/v2/reactive-store.md
- * @verifiedBy packages-next/store/src/__tests__/reactive-view.spec.ts
+ * @see docs/proposals/v2/store.md
+ * @verifiedBy packages-next/store/src/__tests__/view.spec.ts
  */
 
-import type { CollectionMutation, ReactiveStore, StoreCtx } from "@agentick/spec-next";
+import type { CollectionMutation, Store, StoreCtx } from "@agentick/spec-next";
 import {
   createChangeNotifier,
   createKeyedNotifier,
@@ -48,19 +48,19 @@ import {
 } from "@agentick/pubsub-next";
 
 /**
- * How a {@link ReactiveView} maps its records onto a store. `keyOf` is the
+ * How a {@link View} maps its records onto a store. `keyOf` is the
  * cache key; `toPut` / `toDelete` translate a record (or a key) into the store's
- * mutation vocabulary `M`. The {@link ReactiveView.collection} factory fills
+ * mutation vocabulary `M`. The {@link View.collection} factory fills
  * `toPut`/`toDelete` with the trivial {@link CollectionMutation} shape.
  */
-export interface ReactiveViewConfig<T, Q, M> {
-  readonly store: ReactiveStore<T, Q, M>;
+export interface ViewConfig<T, Q, M> {
+  readonly store: Store<T, Q, M>;
   readonly keyOf: (item: T) => string;
   readonly toPut: (item: T) => M;
   readonly toDelete: (key: string) => M;
 }
 
-export class ReactiveView<T, Q = void, M = never> {
+export class View<T, Q = void, M = never> {
   /** The synchronous read cache — the materialized view of the store. */
   private readonly cache = new Map<string, T>();
   /** Bare render PINGS ("something at `key` changed, re-read"). */
@@ -68,17 +68,17 @@ export class ReactiveView<T, Q = void, M = never> {
   /** Typed push DELTAS carrying `{ key, value?, prev? }` (the notify seam). */
   private readonly changes: ChangeNotifier<T> = createChangeNotifier<T>();
 
-  constructor(private readonly cfg: ReactiveViewConfig<T, Q, M>) {}
+  constructor(private readonly cfg: ViewConfig<T, Q, M>) {}
 
   /**
    * Collection convenience — a view over a {@link CollectionMutation} store,
    * with `toPut`/`toDelete` prefilled. `keyOf` is the only per-store code.
    */
   static collection<T, Q>(
-    store: ReactiveStore<T, Q, CollectionMutation<T>>,
+    store: Store<T, Q, CollectionMutation<T>>,
     keyOf: (item: T) => string,
-  ): ReactiveView<T, Q, CollectionMutation<T>> {
-    return new ReactiveView<T, Q, CollectionMutation<T>>({
+  ): View<T, Q, CollectionMutation<T>> {
+    return new View<T, Q, CollectionMutation<T>>({
       store,
       keyOf,
       toPut: (item) => ({ put: item }),

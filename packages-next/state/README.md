@@ -39,17 +39,18 @@ serializability — the same rule the rest of the substrate follows.
 ### Store-backed (data-layer plan §3.5)
 
 State is store-derived AND store-persisted, exactly like knobs. A durable
-`ReactiveStore<StateEntry>` of `{ key, value }` cells is the authority; a
-synchronous `ReactiveView` is its read cache, so the sync surface never
+`Store<StateEntry>` of `{ key, value }` cells is the authority; a
+synchronous `View` is its read cache, so the sync surface never
 touches the async store. Every mutation **writes through** the view (sync
 cache first, durable store off the critical path); `hydrate()` reloads the
 store into the projection on resume. The default store is a fresh in-memory
 `createStateStore()` (`:memory:`, lost on exit); inject a durable adapter via
 `new StateHarness(..., { store })` or `withState({ store })` to survive restart.
 
-The projection is a **write sink** beside the `notifier` / `changes` reactive
-seam — never a source. State is session-internal with no client-facing channel,
-so nothing routes through the store's change stream; the seam stays harness-level.
+The `View` internalizes both the write-through cache and the notify seams (the
+per-key render pings and the typed change stream). State is session-internal with
+no client-facing channel, so nothing routes the change stream to the wire; it
+stays harness-level.
 
 One state-only wrinkle vs knobs: values are `unknown`, so a `set(key, undefined)`
 stores a **present** key whose value is `undefined`. Presence is a key-membership

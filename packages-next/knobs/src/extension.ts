@@ -18,7 +18,7 @@
 
 import type {
   CollectionMutation,
-  ReactiveStore,
+  Store,
   SessionExtension,
   SessionInstaller,
 } from "@agentick/spec-next";
@@ -39,7 +39,7 @@ export interface WithKnobsOptions {
    * restart. NOTE: session-level hydrate-on-resume is NOT wired here — that is
    * the Phase-4 manifest concern; `importSnapshot` remains the resume path.
    */
-  readonly store?: ReactiveStore<KnobEntry, KnobStoreQuery, CollectionMutation<KnobEntry>>;
+  readonly store?: Store<KnobEntry, KnobStoreQuery, CollectionMutation<KnobEntry>>;
 }
 
 // NOTE: `knobsWireExtension` (./wire.js) IS registered in production — via

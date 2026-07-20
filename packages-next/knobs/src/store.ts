@@ -7,7 +7,7 @@
  * NEVER stored; `KnobsHarness.list()` merges the live descriptor map over these
  * value cells at read time (unchanged by storification).
  *
- * There is no named `KnobStore` port: the `ReactiveStore` seam
+ * There is no named `KnobStore` port: the `Store` seam
  * (`@agentick/spec-next`) IS the contract the harness types its field against.
  * Keeping the seam lean means a durable adapter (Postgres, …) need only
  * implement `query`/`mutate` (+ optional `watch`) — no profile methods required.
@@ -42,13 +42,13 @@ export type KnobStoreQuery = Record<string, never>;
  * The bundled, zero-dependency default knob value store — the generic
  * {@link MemoryCollection} parameterized for knob cells. `:memory:` semantics
  * (lost on process exit); a durable adapter conforms to the same
- * {@link ReactiveStore} seam. Single source of truth for the default store
+ * {@link Store} seam. Single source of truth for the default store
  * config so the harness default and test-constructed stores never drift.
  *
  * Returns the CONCRETE `MemoryCollection` (which implements BOTH the
- * `CollectionStore` profile AND the `ReactiveStore` seam) so callers that poke
+ * `CollectionStore` profile AND the `Store` seam) so callers that poke
  * the store directly keep `get`/`put`/`list`; the harness widens it to the
- * `ReactiveStore` seam at its option boundary, where a durable adapter need only
+ * `Store` seam at its option boundary, where a durable adapter need only
  * implement `query`/`mutate`.
  */
 export function createKnobStore(): MemoryCollection<KnobEntry, KnobStoreQuery> {

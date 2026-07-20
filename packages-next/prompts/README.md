@@ -137,7 +137,7 @@ import { InMemoryPromptStore } from "@agentick/prompts-next";
 withPrompts({ store: new InMemoryPromptStore() }); // the bundled default (implicit)
 ```
 
-The split **composes** rather than being hand-rolled: an eager `ReactiveView<PromptDeclarationRecord>` (the same sync-cache-over-async-store primitive `skills` and `knobs` use, driven through the `ReactiveStore` `query`/`mutate` seam) holds the record slice, and the harness-owned sidecar holds the fns. The `ReactiveView` is agnostic to the sidecar (cleared on import, untouched on hydrate). The two are re-joined into a full `PromptDeclaration` by a single private `declarationOf(name)` combine at every read that hands out a declaration.
+The split **composes** rather than being hand-rolled: an eager `View<PromptDeclarationRecord>` (the same sync-cache-over-async-store primitive `skills` and `knobs` use, driven through the `Store` `query`/`mutate` seam) holds the record slice, and the harness-owned sidecar holds the fns. The `View` is agnostic to the sidecar (cleared on import, untouched on hydrate). The two are re-joined into a full `PromptDeclaration` by a single private `declarationOf(name)` combine at every read that hands out a declaration.
 
 - **`register` / `update`** write the record through the view (`store.mutate`) **and** re-attach `{ template, render }` to the sidecar. **`remove`** drops both.
 - **`render`/`template` can NEVER reach the store** — the `PromptDeclarationRecord` type makes that a _compile-time_ guarantee, not a discipline. (Contrast tasks' hand-rolled `LiveTask` cache, where the record and the live handles are read together at every site AND the snapshot includes the record slice, so splitting would only distort. Prompts is the opposite: `exportSnapshot` and the store want records _without_ the fns, so the split earns its keep.)
@@ -302,7 +302,7 @@ const decl = await session.prompts.require("must_exist");
 - `PromptRenderer` interface + native handlers (`string`, `MessageEntry[]`)
 - Argument validation via Standard-Schema
 - Module augmentation: `session.prompts` typed via `PromptsHandle`
-- Store backing — `PromptStore` port (spec-next), bundled `InMemoryPromptStore` (record slice only), `store` slot on `withPrompts`; record/sidecar split via `ReactiveView` + augmentation `Map`
+- Store backing — `PromptStore` port (spec-next), bundled `InMemoryPromptStore` (record slice only), `store` slot on `withPrompts`; record/sidecar split via `View` + augmentation `Map`
 - Conformance suite — `runPromptStoreConformance` (store)
 
 **Planned:**

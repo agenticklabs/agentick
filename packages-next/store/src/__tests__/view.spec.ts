@@ -1,19 +1,19 @@
 /**
- * `ReactiveView` — verified directly. The harness-side sync projection of a
- * `ReactiveStore`: sync reads, single-mutation write/delete (notify + typed
+ * `View` — verified directly. The harness-side sync projection of a
+ * `Store`: sync reads, single-mutation write/delete (notify + typed
  * change), and the CHANGE-SILENT bulk paths (replace, hydrate). The seam is
  * load-bearing here on purpose — the view drives the store through
  * `query`/`mutate` (never `get`/`list`/`put`/`delete`), so a store that ONLY
- * implements `ReactiveStore` works.
+ * implements `Store` works.
  */
 
 import { describe, expect, it, vi } from "vitest";
 
 import type { ChangeEvent } from "@agentick/pubsub-next";
-import type { CollectionMutation, ReactiveStore, StoreCtx } from "@agentick/spec-next";
+import type { CollectionMutation, Store, StoreCtx } from "@agentick/spec-next";
 
 import { MemoryCollection } from "../memory-collection.js";
-import { ReactiveView } from "../reactive-view.js";
+import { View } from "../view.js";
 import { stubStoreCtx } from "../stub-store-ctx.js";
 
 interface Cell {
@@ -30,13 +30,13 @@ function store(): MemoryCollection<Cell, Record<string, never>> {
 }
 
 function view(s: MemoryCollection<Cell, Record<string, never>> = store()): {
-  v: ReactiveView<Cell, Record<string, never>, CollectionMutation<Cell>>;
+  v: View<Cell, Record<string, never>, CollectionMutation<Cell>>;
   store: typeof s;
 } {
-  return { v: ReactiveView.collection(s, (c) => c.id), store: s };
+  return { v: View.collection(s, (c) => c.id), store: s };
 }
 
-describe("ReactiveView — sync reads reflect writes immediately", () => {
+describe("View — sync reads reflect writes immediately", () => {
   it("getSync / hasSync / listSync see a write synchronously (no await)", () => {
     const { v } = view();
     expect(v.hasSync("a")).toBe(false);
@@ -47,7 +47,7 @@ describe("ReactiveView — sync reads reflect writes immediately", () => {
   });
 });
 
-describe("ReactiveView — write fires notify + a typed change", () => {
+describe("View — write fires notify + a typed change", () => {
   it("pings the key (keyed + wildcard) and emits add-then-update by cache PRESENCE", () => {
     const { v } = view();
     const keyed = vi.fn();
@@ -83,7 +83,7 @@ describe("ReactiveView — write fires notify + a typed change", () => {
   });
 });
 
-describe("ReactiveView — delete is idempotent", () => {
+describe("View — delete is idempotent", () => {
   it("returns true + emits a removal (prev carried, value omitted) on a real delete", () => {
     const { v } = view();
     v.write({ id: "a", value: 1 }, stubStoreCtx());
@@ -108,7 +108,7 @@ describe("ReactiveView — delete is idempotent", () => {
   });
 });
 
-describe("ReactiveView — undefined-value classification rides cache presence", () => {
+describe("View — undefined-value classification rides cache presence", () => {
   it("set(undefined) on a NEW key is an add; a later set is an update (not misread by prev!==undefined)", () => {
     const { v } = view();
     const changes: ChangeEvent<Cell>[] = [];
@@ -126,7 +126,7 @@ describe("ReactiveView — undefined-value classification rides cache presence",
   });
 });
 
-describe("ReactiveView — hydrate merges + notifies (change-silent)", () => {
+describe("View — hydrate merges + notifies (change-silent)", () => {
   it("merges a pre-seeded store into the cache and pings each loaded key", async () => {
     const s = store();
     await s.put({ id: "a", value: 1 }, stubStoreCtx());
@@ -159,7 +159,7 @@ describe("ReactiveView — hydrate merges + notifies (change-silent)", () => {
   });
 });
 
-describe("ReactiveView — replace drops + adds (change-silent)", () => {
+describe("View — replace drops + adds (change-silent)", () => {
   it("deletes keys absent from the new set, upserts present ones, pings the union", () => {
     const { v } = view();
     v.write({ id: "keep", value: 1 }, stubStoreCtx());
@@ -197,10 +197,10 @@ describe("ReactiveView — replace drops + adds (change-silent)", () => {
   });
 });
 
-describe("ReactiveView — targets the pure seam (no profile methods)", () => {
-  it("works over a store that ONLY implements ReactiveStore (query/mutate)", async () => {
+describe("View — targets the pure seam (no profile methods)", () => {
+  it("works over a store that ONLY implements Store (query/mutate)", async () => {
     const backing = new Map<string, Cell>();
-    const seamOnly: ReactiveStore<Cell, Record<string, never>, CollectionMutation<Cell>> = {
+    const seamOnly: Store<Cell, Record<string, never>, CollectionMutation<Cell>> = {
       backend: "seam-only",
       query: (_q: Record<string, never> | undefined, _ctx: StoreCtx) =>
         Promise.resolve([...backing.values()]),
@@ -210,13 +210,13 @@ describe("ReactiveView — targets the pure seam (no profile methods)", () => {
         return Promise.resolve();
       },
     };
-    const v = ReactiveView.collection(seamOnly, (c) => c.id);
+    const v = View.collection(seamOnly, (c) => c.id);
 
     v.write({ id: "a", value: 1 }, stubStoreCtx());
     await Promise.resolve();
     expect(backing.get("a")).toEqual({ id: "a", value: 1 });
 
-    const v2 = ReactiveView.collection(seamOnly, (c) => c.id);
+    const v2 = View.collection(seamOnly, (c) => c.id);
     const loaded = await v2.hydrate(undefined, stubStoreCtx());
     expect(loaded).toEqual(["a"]);
     expect(v2.getSync("a")).toEqual({ id: "a", value: 1 });

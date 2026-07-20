@@ -17,7 +17,7 @@
 
 import type {
   CollectionMutation,
-  ReactiveStore,
+  Store,
   SessionExtension,
   SessionInstaller,
 } from "@agentick/spec-next";
@@ -34,7 +34,7 @@ export interface WithStateOptions {
    * restart. NOTE: session-level hydrate-on-resume is NOT wired here — that is
    * the Phase-4 manifest concern; `importSnapshot` remains the resume path.
    */
-  readonly store?: ReactiveStore<StateEntry, StateStoreQuery, CollectionMutation<StateEntry>>;
+  readonly store?: Store<StateEntry, StateStoreQuery, CollectionMutation<StateEntry>>;
 }
 
 export function withState(options: WithStateOptions = {}): SessionExtension {
