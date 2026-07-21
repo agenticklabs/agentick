@@ -43,7 +43,7 @@ import {
   type BaseHarnessOptions,
   type Unsubscribe,
 } from "@agentick/runtime-next";
-import { createNotifier, type Notifier } from "@agentick/pubsub-next";
+import { LogView } from "@agentick/store-next";
 
 import { MemoryTimelineStore } from "./store.js";
 import type {
@@ -171,18 +171,14 @@ const compactSignalSchema: StandardSchemaV1<{
 };
 
 export class TimelineHarness extends BaseHarness<"timeline"> implements TimelineHarnessProtocol {
-  // ─── Storage ───
-  private _persisted: TimelineEntry[] = [];
-  private _projection: TimelineEntry[] = [];
-  private _persistedVersion = 0;
-  private _projectionVersion = 0;
-  private _lastCompaction?: TimelineHarnessSnapshot["lastCompaction"];
-
-  // Cached snapshot reference — useSyncExternalStore identity stability.
-  // Re-allocated only when the projection mutates.
-  private _snapshot: TimelineSnapshot = { entries: [], version: 0 };
-
-  private readonly listeners: Notifier = createNotifier();
+  // ─── Storage (the LOG-archetype projection: two tiers + versions +
+  // snapshot cache + render pings + the write-behind pump — ADR 49) ───
+  //
+  // The whole two-tier / write-behind / compaction-target machine lives in
+  // `LogView<TimelineEntry>` (`@agentick/store-next`); this harness holds only
+  // its DOMAIN logic (turn boundaries, compaction STRATEGIES, the declared
+  // commands) and delegates every storage touch to `log`.
+  private readonly log: LogView<TimelineEntry>;
 
   // ─── Durable backing (ADR 49) ───
   /** Append-only durable store for the persisted tier; keyed by scopeId (= sessionId). */
@@ -190,18 +186,6 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
   /** Emit turn-boundary records (ADR 53). Default true. */
   private readonly turnBoundaries: boolean;
   private readonly writePolicy: "behind" | "through";
-  /** Write-behind buffer — entries appended to memory, not yet drained to the store. */
-  private writeBuffer: TimelineEntry[] = [];
-  /** The in-flight pump promise, or null when the buffer is empty and drained. */
-  private pumpRunning: Promise<void> | null = null;
-  /**
-   * A captured write-behind failure. Set when a pump batch fails; surfaced
-   * (and left set) by {@link flush}. The pump itself never rejects — it
-   * absorbs the error here so an un-awaited pump can't become an unhandled
-   * rejection, and so `flush()` at the barrier is the single place a
-   * durability failure is observed.
-   */
-  private pumpError: unknown = null;
   /** Construction-bound default compaction strategy (ADR 51 signal form). */
   private readonly defaultCompact?: CompactStrategy;
 
@@ -230,9 +214,19 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
     this.turnBoundaries = options?.turnBoundaries ?? true;
     this.writePolicy = options.writePolicy ?? "behind";
     this.defaultCompact = options.compact;
+    // The two-tier / write-behind / compaction-target storage machine — keyed
+    // by scopeId (= sessionId). The pump's raw store-write rejection is mapped
+    // to the typed `TimelineWriteFailed` a session barrier catchTags (write-
+    // through: `append` rejects; write-behind: `flush()` throws).
+    this.log = new LogView<TimelineEntry>({
+      store: this.store,
+      logKey: this.scopeId,
+      writePolicy: this.writePolicy,
+      wrapWriteError: (cause) => new TimelineWriteFailed({ cause }),
+    });
     // Drain buffered write-behind entries before the harness tears down —
     // ADR 49: session close() awaits the flush barrier.
-    this.onClose(() => this.flush());
+    this.onClose(() => this.log.flush());
 
     // ─── Declared commands (ADR 51) — the single declaration site per
     // verb. Inbox message types, canonical op naming, enumeration, and
@@ -296,11 +290,11 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
   // ─────────── Sync surface — projection (the primary consumer view) ───────────
 
   read(): TimelineSnapshot {
-    return this._snapshot;
+    return this.log.snapshot();
   }
 
   subscribe(listener: () => void): Unsubscribe {
-    return this.listeners.subscribe(listener);
+    return this.log.subscribe(listener);
   }
 
   // ─────────── Sync surface — pending (queued, awaiting drain) ───────────
@@ -328,7 +322,7 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
   }
 
   readPersisted(): readonly TimelineEntry[] {
-    return this._persisted;
+    return this.log.readPersisted();
   }
 
   // ─────────── Async surface — full Operations ───────────
@@ -343,28 +337,17 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
    * operation — declared in the constructor, ADR 51).
    */
   private appendBody(input: TimelineAppendInput): Effect.Effect<void, TimelineWriteFailed, never> {
-    return Effect.gen(this, function* () {
-      // Memory is authoritative — update it first, synchronously, inside
-      // the tick loop (no store latency added here).
-      this.applyAppend(input);
-      if (this.writePolicy === "through") {
-        // Zero-loss mode: the append operation does not complete until the
-        // store has the entries. A store-write failure is OPERATIONAL, not
-        // a defect — surface it as a typed `TimelineWriteFailed` in the
-        // error channel so the session barrier can `catchTag` it and
-        // transition to errored (same treatment compact() gives its own
-        // operational failure). The harness wraps whatever the adapter
-        // rejected with, so adapters need not import spec errors.
-        yield* Effect.tryPromise({
-          try: () =>
-            Promise.resolve(this.store.append(this.scopeId, input.entries, this.storeCtx())),
-          catch: (cause) => new TimelineWriteFailed({ cause }),
-        });
-      } else {
-        // Write-behind: buffer + kick the pump; the flush barrier
-        // (execution end / close) awaits durability.
-        this.enqueueWriteBehind(input.entries);
-      }
+    // `LogView.append` updates memory synchronously (both tiers), then persists
+    // per the write policy: write-through awaits the store and REJECTS with the
+    // wrapped `TimelineWriteFailed` on failure; write-behind buffers + kicks the
+    // pump and resolves immediately (durability at the `flush()` barrier). A
+    // store-write failure is OPERATIONAL, not a defect — the wrapped
+    // `TimelineWriteFailed` lands in the error channel so the session barrier
+    // can `catchTag` it (same treatment compact() gives its own failure).
+    return Effect.tryPromise({
+      try: () => this.log.append(input.entries, this.storeCtx()),
+      catch: (cause) =>
+        cause instanceof TimelineWriteFailed ? cause : new TimelineWriteFailed({ cause }),
     });
   }
 
@@ -378,20 +361,14 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
    * Invariant: any process that subsequently `read`s the store sees every
    * completed execution.
    */
-  async flush(): Promise<void> {
-    // Loop: a write that arrived after the pump settled starts a fresh one.
-    while (this.pumpRunning) {
-      await this.pumpRunning;
-    }
-    if (this.pumpError !== null) {
-      // A buffered write failed; the barrier surfaces it as the typed
-      // TimelineWriteFailed (same error the write-through path fails with),
-      // so callers catchTag one thing regardless of write policy. Left set —
-      // the harness has diverged from its store and cannot silently "recover".
-      // The session's execution-end barrier catchTags this and lands the
-      // session on "failed" status (A2.2 — see session-next sendBody).
-      throw new TimelineWriteFailed({ cause: this.pumpError });
-    }
+  flush(): Promise<void> {
+    // The write-behind barrier lives in `LogView`; it throws the wrapped
+    // `TimelineWriteFailed` (same error the write-through path fails with) if a
+    // buffered write failed, LEFT LATCHED — the harness has diverged from its
+    // store and cannot silently "recover." The session's execution-end barrier
+    // catchTags this and lands the session on "failed" status (A2.2 — see
+    // session-next sendBody).
+    return this.log.flush();
   }
 
   /**
@@ -403,47 +380,13 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
    * projection reconstructs by re-render / a subsequent compaction).
    */
   async hydrate(): Promise<void> {
-    const entries = await this.store.read(this.scopeId, this.storeCtx());
-    this._persisted = [...entries];
-    this._projection = [...entries];
-    this._persistedVersion += 1;
-    this._projectionVersion += 1;
-    this.refreshSnapshot();
-    this.notify();
+    await this.log.hydrate(this.storeCtx());
   }
 
-  /** Buffer entries for the write-behind pump and ensure it's running. */
-  private enqueueWriteBehind(entries: readonly TimelineEntry[]): void {
-    if (entries.length === 0) return;
-    this.writeBuffer.push(...entries);
-    if (!this.pumpRunning) this.pumpRunning = this.runPump();
-  }
-
-  /**
-   * Drain the write-behind buffer to the store in order. Picks up entries
-   * appended mid-drain (the buffer is re-checked each iteration), so a
-   * single pump run persists everything enqueued up to the point it empties.
-   *
-   * TODO(A2.2): on store-write failure the current batch is dropped from
-   * the buffer and the rejection surfaces via `flush()`. ADR 49 wants this
-   * to transition the session to an errored status + retry per adapter
-   * policy — that belongs in the session/loop-executor barrier, not here.
-   */
-  private async runPump(): Promise<void> {
-    try {
-      while (this.writeBuffer.length > 0) {
-        const batch = this.writeBuffer;
-        this.writeBuffer = [];
-        await this.store.append(this.scopeId, batch, this.storeCtx());
-      }
-    } catch (err) {
-      // Absorb — never reject the pump promise (an un-awaited pump would
-      // become an unhandled rejection). `flush()` surfaces this.
-      this.pumpError = err;
-    } finally {
-      this.pumpRunning = null;
-    }
-  }
+  // TODO(A2.2): on store-write failure the current pump batch is dropped and
+  // the rejection surfaces via `flush()` (now inside `LogView.runPump`). ADR 49
+  // wants this to transition the session to an errored status + retry per
+  // adapter policy — that belongs in the session/loop-executor barrier.
 
   compact(strategy?: CompactStrategy): Promise<CompactResult> {
     if (strategy === undefined) {
@@ -471,7 +414,7 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
    * The compaction body — shared by the explicit-arg operation above
    * and the declared signal-form command (constructor). `source`
    * selects the fold INPUT (full log vs current projection); the
-   * mutation target is always the projection (`applyProjectionReplace`)
+   * mutation target is always the projection (`log.replaceProjection`)
    * — the durable log is never rewritten.
    */
   private compactBody(
@@ -479,7 +422,7 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
   ): Effect.Effect<CompactResult, CompactHandlerFailed, never> {
     const source: "persisted" | "projection" = s.source ?? "persisted";
     return Effect.gen(this, function* () {
-      const sourceEntries = source === "persisted" ? this._persisted : this._projection;
+      const sourceEntries = source === "persisted" ? this.log.readPersisted() : this.log.read();
       const before = sourceEntries.length;
       // A compaction strategy's `run` is typically a model call (the
       // contract says so) — its failure is OPERATIONAL (timeout,
@@ -496,7 +439,7 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
         catch: (cause) => new CompactHandlerFailed({ cause }),
       });
       const entries = [...next];
-      this.applyProjectionReplace(entries, {
+      this.log.replaceProjection(entries, {
         at: Date.now(),
         source,
         entriesBefore: before,
@@ -522,10 +465,10 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
   ): Effect.Effect<void, never, never> {
     return Effect.sync(() => {
       const entries = [...i.entries];
-      this.applyProjectionReplace(entries, {
+      this.log.replaceProjection(entries, {
         at: Date.now(),
         source: "projection",
-        entriesBefore: this._projection.length,
+        entriesBefore: this.log.read().length,
         entriesAfter: entries.length,
       });
     });
@@ -538,11 +481,7 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
   /** The resetProjection command body (declared in the constructor). */
   private resetProjectionBody(): Effect.Effect<void, never, never> {
     return Effect.sync(() => {
-      this._projection = [...this._persisted];
-      this._projectionVersion += 1;
-      this._lastCompaction = undefined;
-      this.refreshSnapshot();
-      this.notify();
+      this.log.resetProjection();
     });
   }
 
@@ -567,17 +506,18 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
    * the trailing set correctly.
    */
   trailingInput(): readonly MessageTimelineEntry[] {
+    const persisted = this.log.readPersisted();
     let lastAssistant = -1;
-    for (let i = this._persisted.length - 1; i >= 0; i--) {
-      const e = this._persisted[i]!;
+    for (let i = persisted.length - 1; i >= 0; i--) {
+      const e = persisted[i]!;
       if (e.kind === "message" && e.message.role === "assistant") {
         lastAssistant = i;
         break;
       }
     }
     const out: MessageTimelineEntry[] = [];
-    for (let i = lastAssistant + 1; i < this._persisted.length; i++) {
-      const e = this._persisted[i]!;
+    for (let i = lastAssistant + 1; i < persisted.length; i++) {
+      const e = persisted[i]!;
       if (TimelineHarness.isInputEntry(e)) out.push(e);
     }
     return out;
@@ -588,7 +528,7 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
    *  conversation scale, revisit with a counter if it ever shows up. */
   inputEntryCount(): number {
     let n = 0;
-    for (const e of this._persisted) if (TimelineHarness.isInputEntry(e)) n++;
+    for (const e of this.log.readPersisted()) if (TimelineHarness.isInputEntry(e)) n++;
     return n;
   }
 
@@ -620,13 +560,7 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
   // ─────────── Snapshot / restore ───────────
 
   exportSnapshot(): TimelineHarnessSnapshot {
-    return {
-      persisted: [...this._persisted],
-      projection: [...this._projection],
-      persistedVersion: this._persistedVersion,
-      projectionVersion: this._projectionVersion,
-      ...omitUndefined({ lastCompaction: this._lastCompaction }),
-    };
+    return this.log.exportSnapshot();
   }
 
   async importSnapshot(
@@ -635,25 +569,15 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
   ): Promise<void> {
     const mode = options.mode ?? "as-is";
 
-    // Restore the durable log on every mode.
-    this._persisted = [...snapshot.persisted];
-    this._persistedVersion = snapshot.persistedVersion;
-
     switch (mode) {
       case "as-is": {
-        this._projection = [...snapshot.projection];
-        this._projectionVersion = snapshot.projectionVersion;
-        this._lastCompaction = snapshot.lastCompaction;
-        this.refreshSnapshot();
-        this.notify();
+        // Trust the snapshot's projection verbatim.
+        this.log.importSnapshot(snapshot, { mode: "as-is" });
         return;
       }
       case "persisted-only": {
-        this._projection = [...this._persisted];
-        this._projectionVersion += 1;
-        this._lastCompaction = undefined;
-        this.refreshSnapshot();
-        this.notify();
+        // Restore the durable log; projection re-mirrors persisted.
+        this.log.importSnapshot(snapshot, { mode: "reset-projection" });
         return;
       }
       case "rehydrate": {
@@ -664,12 +588,9 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
               "Derive it from snapshot.lastCompaction.strategyMetadata or supply a new one.",
           });
         }
-        // Reset projection to log, then re-run the strategy.
-        this._projection = [...this._persisted];
-        this._projectionVersion += 1;
-        this._lastCompaction = undefined;
-        this.refreshSnapshot();
-        this.notify();
+        // Reset projection to log, then re-run the strategy (DOMAIN — the
+        // compaction strategy stays with the harness).
+        this.log.importSnapshot(snapshot, { mode: "reset-projection" });
         await this.compact(options.rehydrateStrategy);
         return;
       }
@@ -689,41 +610,5 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
     msg: MessageEnvelope,
   ): Effect.Effect<unknown, MessageHandlerError, never> {
     return Effect.fail(new HandlerError({ cause: `Unknown timeline message type: ${msg.type}` }));
-  }
-
-  // ─────────── Internals ───────────
-
-  private applyAppend(input: TimelineAppendInput): void {
-    for (const entry of input.entries) {
-      this._persisted.push(entry);
-      this._projection.push(entry);
-    }
-    this._persistedVersion += 1;
-    this._projectionVersion += 1;
-    this.refreshSnapshot();
-    this.notify();
-  }
-
-  private applyProjectionReplace(
-    entries: TimelineEntry[],
-    provenance: NonNullable<TimelineHarnessSnapshot["lastCompaction"]>,
-  ): void {
-    this._projection = entries;
-    this._projectionVersion += 1;
-    this._lastCompaction = provenance;
-    this.refreshSnapshot();
-    this.notify();
-  }
-
-  private refreshSnapshot(): void {
-    // Clone entries so the snapshot's array reference changes on every
-    // mutation. `useSyncExternalStore` compares snapshots via Object.is,
-    // but consumers that destructure + memoize on `entries` rely on the
-    // array identity changing too. Cheap O(n) copy on infrequent writes.
-    this._snapshot = { entries: [...this._projection], version: this._projectionVersion };
-  }
-
-  private notify(): void {
-    this.listeners.notify();
   }
 }

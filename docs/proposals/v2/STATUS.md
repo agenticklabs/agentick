@@ -1725,6 +1725,26 @@ blueprint's design decisions; this is execution-level).
 
 ### 2026-07-20
 
+- **Store convergence — Run 4 LANDED: `LogView` extracted, timeline migrated.**
+  The log-archetype projection — the sibling of `View`. Timeline hand-rolled a
+  two-tier (durable `persisted` + bounded/compacted `projection`) log projection
+  with a write-behind pump + `flush()` barrier + compaction; that whole ~200-line
+  payload-agnostic machine moved verbatim into `LogView<T>` (`@agentick/store-next`).
+  Timeline harness shed net −115 lines, now holds one `log: LogView<TimelineEntry>`
+  — grep for bare `_persisted`/`_projection`/`writeBuffer`/`pumpError` fields
+  returns none. Two DI seams keep it generic: `wrapWriteError` injects the
+  `TimelineWriteFailed` mapper (a spec domain error a generic primitive must not
+  hardcode) so `flush()` throws the exact typed error; `LogProjectionMeta` carries
+  compaction provenance opaquely. `append` is `Promise<void>` (through awaits the
+  store inline + surfaces the typed error; behind buffers + pumps) — awaited via
+  `Effect.tryPromise` in `appendBody`. Two-tier kept (the §2.7 projection-only
+  drop is a separate future concern); snapshot shape unchanged so restore/
+  kill-resume untouched. Gates: typecheck --force 152/152 0-cached; store +
+  timeline 178 passed; session/timeline-fs resume green. **The projection taxonomy
+  is complete: `View` (collection / single-record / fused) + `LogView` (log), both
+  over the one `Store`.** Remaining: resources (`View` + resolver sidecar);
+  credentials stays the principled no-view case.
+
 - **Store convergence — Run 3 LANDED: session onto a single-key `View`.**
   `SessionRuntime` hand-rolled the View machine (sync cache + `syncSessionRecord`
   write-through + a `_listeners` notifier); all three fold into

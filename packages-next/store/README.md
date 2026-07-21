@@ -63,6 +63,43 @@ copy-pasted conformance suite. This package factors all three out:
   view.write({ id: "verbose", value: true }, ctx); // sync cache → store → ping + change
   const keys = await view.hydrate(undefined, ctx); // merge store projection, ping loaded keys
   ```
+- **`LogView<T>`** — the **log**-archetype sibling of `View`: the harness-side
+  SYNCHRONOUS projection of a [`LogStore<T>`](../spec/src/protocol/log-store.ts).
+  Where `View` projects a keyed `CollectionStore`, `LogView` projects an
+  append-only `LogStore`, and it is the machine every store-backed **log**
+  harness (timeline today) re-hand-rolled: **two tiers** (a durable, append-only
+  `persisted` + a materialized `projection` that a compaction target diverges),
+  monotonic version counters, an identity-stable render snapshot (`{ entries,
+  version }`), a keyless render `Notifier`, and the **write-behind pump**. Append
+  updates both tiers synchronously (memory-authoritative) and persists per
+  `writePolicy`: `"through"` awaits the store inline; `"behind"` buffers and
+  drains via a single-flight pump whose failures are absorbed into a latched
+  error that only `flush()` surfaces — mapped through the injected
+  `wrapWriteError` into the adopter's typed boundary error (timeline's
+  `TimelineWriteFailed`). `replaceProjection` is the compaction target (projection
+  tier only — the durable log is never rewritten); `resetProjection` re-mirrors
+  persisted; `hydrate` loads the durable log into both tiers (resume);
+  `export`/`importSnapshot` round-trip both tiers + versions + provenance.
+  Extracted from the timeline harness (Convergence Run 4); the harness now holds
+  a `LogView` and keeps only its DOMAIN logic (turn boundaries, compaction
+  strategies, declared commands).
+
+  ```ts
+  import { LogView } from "@agentick/store-next";
+
+  const log = new LogView<TimelineEntry>({
+    store, // a LogStore<TimelineEntry>
+    logKey: sessionId, // the partition
+    writePolicy: "behind",
+    wrapWriteError: (cause) => new TimelineWriteFailed({ cause }),
+  });
+  await log.append([entry], ctx); // both tiers sync; store lands at the flush barrier
+  log.replaceProjection(compacted, meta); // compaction target — projection only
+  await log.flush(); // write-behind barrier — throws the wrapped error if a write failed
+  ```
+
+  `View` and `LogView` are the **two projection archetypes over the two store
+  archetypes**: `View : CollectionStore :: LogView : LogStore`.
 - **`runStoreConformance`** — the shared conformance skeleton the per-store
   suites (`runTaskStoreConformance`, `runTimelineStoreConformance`,
   `runCredentialsStoreConformance`) delegate their store-agnostic cases to
@@ -210,6 +247,32 @@ replace is the harness's own snapshot frame, not N deltas. Bulk paths mutate the
 whole cache before any ping so a subscriber reading during a ping sees the
 complete post-mutation state.
 
+### `LogView<T>`
+
+The **log**-archetype sibling of `View` — the harness-side sync projection of a
+`LogStore<T>`. Owns the two-tier storage + write-behind + compaction-target
+machine every store-backed log harness (timeline) re-hand-rolled. Construct with
+`{ store, logKey, writePolicy, wrapWriteError? }`.
+
+| Member                                   | Behavior                                                                          |
+| ---------------------------------------- | --------------------------------------------------------------------------------- |
+| `new LogView({ store, logKey, writePolicy, wrapWriteError? })` | The whole machine; `wrapWriteError` maps a raw store rejection to the adopter's typed error |
+| `append(entries, ctx): Promise`          | Both tiers sync; then `through` awaits the store / `behind` buffers + kicks the pump |
+| `read()` / `readPersisted()`             | Sync reads — the projection tier / the durable log tier                           |
+| `snapshot()`                             | Identity-stable `{ entries, version }` (re-allocated only on projection mutation) |
+| `subscribe(fn)`                          | Render-ping seam (keyless `Notifier`)                                             |
+| `replaceProjection(entries, meta?)`      | Compaction target — projection tier ONLY; records `meta` provenance               |
+| `resetProjection()`                      | Re-mirror the projection to the durable log; clears provenance                    |
+| `flush(): Promise`                       | Write-behind barrier — throws the wrapped error if a buffered write failed (latched) |
+| `hydrate(ctx): Promise`                  | Load the durable log into BOTH tiers (resume path)                                |
+| `exportSnapshot()` / `importSnapshot(snap, opts?)` | Both tiers + versions + provenance; import `mode: "as-is" \| "reset-projection"` |
+
+**The pump never rejects.** A failed write-behind batch is absorbed into a
+latched error; `flush()` is the single place it surfaces (as `wrapWriteError`'s
+output). `write-through` awaits inline and rejects `append` with the same wrapped
+error. Memory is authoritative in both modes — the tiers reflect an append before
+its store write is confirmed.
+
 ### `runStoreConformance<S>(options)`
 
 | Option             | Purpose                                                              |
@@ -267,6 +330,12 @@ Landed across the data-layer store-substrate runs:
   and `runTimelineStoreConformance` delegates its store-agnostic trio to
   `runStoreConformance` — proving the shared skeleton generalizes to the **log**
   archetype (empty-read `[]`), the first non-collection to meet it.
+- **Convergence Run 4 (`LogView`)** — `LogView<T>` extracted: the log-archetype
+  PROJECTION sibling of `View`. The timeline harness's two-tier / write-behind /
+  compaction-target storage machine moved verbatim onto it (parity-only, no
+  behavior change); the harness now holds a single `LogView<TimelineEntry>` and
+  keeps only its DOMAIN logic (turn boundaries, compaction strategies, declared
+  commands). Completes the pairing: `View : CollectionStore :: LogView : LogStore`.
 
 ## Roadmap & known gaps
 
@@ -293,6 +362,17 @@ Landed across the data-layer store-substrate runs:
   idempotent `deleteSync`, undefined-value classification, change-silent
   `hydrate` (overlay merge) and `replace` (drop + add, union ping), and that the
   view drives a `query`/`mutate`-only store (the seam is load-bearing).
+- `src/__tests__/log-view.spec.ts` — the `LogView` extraction: append updates
+  both tiers + version, snapshot identity stability, write-behind buffers then
+  `flush` drains (+ latched wrapped-error surfacing), through-policy awaits (+
+  wrapped-error reject), `replaceProjection` diverges projection from persisted,
+  `resetProjection` re-mirrors, `hydrate` replaces both tiers, and export/import
+  round-trips (`as-is` verbatim vs `reset-projection` re-mirror).
+- `@agentick/timeline-next` harness + durability suites
+  (`src/__tests__/harness.spec.ts`, `harness-store.spec.ts`) — end-to-end proof
+  `LogView` backs the real timeline harness with parity: append ordering,
+  write-behind `flush` + `TimelineWriteFailed` surfacing, compaction never
+  touching the store, two-tier snapshot/restore, and kill/resume.
 - `@agentick/tasks-next` `runTaskStoreConformance` (`src/__tests__/store.spec.ts`)
   — end-to-end proof `MemoryCollection` fully backs a real `TaskStore`.
 - `@agentick/credentials-next` `runCredentialsStoreConformance`

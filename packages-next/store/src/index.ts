@@ -21,6 +21,11 @@
  *     — moved onto it. A store-backed harness whose protocol reads are
  *     synchronous composes this instead of re-deriving the projection + notify
  *     seams by hand.
+ *   - {@link LogView} — the LOG-archetype sibling of {@link View}: the
+ *     harness-side SYNCHRONOUS projection of a `LogStore`. Owns the two-tier
+ *     (durable log + materialized projection) storage + write-behind pump +
+ *     compaction-target machine the timeline harness hand-rolled, generic over
+ *     the entry type `T`. `View : CollectionStore :: LogView : LogStore`.
  *   - {@link runStoreConformance} — the shared conformance skeleton the
  *     per-store suites (`runTaskStoreConformance`, `runTimelineStoreConformance`)
  *     delegate their store-agnostic cases to.
@@ -41,6 +46,14 @@ export {
 } from "./memory-collection.js";
 export { MemoryLog, type MemoryLogConfig } from "./memory-log.js";
 export { View, type ViewConfig } from "./view.js";
+export {
+  LogView,
+  type LogViewConfig,
+  type LogViewSnapshot,
+  type LogViewReadSnapshot,
+  type LogProjectionMeta,
+  type LogViewImportMode,
+} from "./log-view.js";
 export { JournalProjectedStore, type JournalProjectedConfig } from "./journal-projected.js";
 export { IdempotentCollectionStore, idempotentWrite } from "./idempotent-write.js";
 export {
