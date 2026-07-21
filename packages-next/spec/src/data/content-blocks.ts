@@ -113,6 +113,16 @@ export interface BaseContentBlock {
    * the same block without colliding.
    */
   readonly providerMetadata?: Record<string, Record<string, unknown>>;
+  /**
+   * Source citations annotating this block. Cross-cutting provenance — any
+   * content can be cited, not only text: a web-search answer span, a grounded
+   * claim, a generated image's source, a document reference. Populated by
+   * adapters from provider citation / grounding data (see {@link Citation}).
+   * Absent when the block carries no citations. Note {@link Citation.range}
+   * (character offsets) is meaningful only for text blocks; a citation on a
+   * non-text block omits it and cites the block as a whole.
+   */
+  readonly citations?: readonly Citation[];
 }
 
 // ============================================================================
@@ -161,6 +171,68 @@ export interface GCSSource {
 }
 
 export type MediaSource = UrlSource | Base64Source | FileReferenceSource | S3Source | GCSSource;
+
+// ============================================================================
+// Citations
+// ============================================================================
+
+/**
+ * The source a {@link Citation} references. A flat bag, not a url-vs-document
+ * discriminated union: `url` present ⇒ a WEB source (provider `web_search` /
+ * grounding), `documentIndex` present ⇒ a DOCUMENT / file source (an index into
+ * the request's documents). A client branches on presence. This normalizes the
+ * three providers' citation source shapes — OpenAI `url_citation` /
+ * `file_citation`, Anthropic `web_search_result_location` /
+ * `char`|`page`|`content_block_location`, Google `groundingChunks[].web` —
+ * without inventing a taxonomy above what they emit.
+ */
+export interface CitationSource {
+  /** The cited web resource. Present ⇒ a web/grounding citation. */
+  readonly url?: string;
+  /** Human-legible source title, when the provider supplies one. */
+  readonly title?: string;
+  /**
+   * Index of the cited document among the request's documents. Present ⇒ a
+   * document/file citation (Anthropic document citations, OpenAI
+   * `file_citation`). Mutually informative with {@link url}, not exclusive —
+   * a provider may supply both.
+   */
+  readonly documentIndex?: number;
+}
+
+/**
+ * A normalized reference from a span of the assistant's text to a source that
+ * supports it. Adapters map each provider's citation format onto this shape and
+ * attach the results to the {@link TextBlock} the citations annotate — web
+ * search and grounding responses routinely carry them.
+ *
+ * `[V1-REFINED]` of v1's flat `ContentCitation { text, url?, title?, startIndex?,
+ * endIndex? }`: v1's `text` conflated the source snippet with the annotated span.
+ * Here the two are distinct — {@link range} is the span in the ASSISTANT's text,
+ * {@link citedText} is the snippet of the SOURCE — and the source is factored into
+ * {@link CitationSource}.
+ */
+export interface Citation {
+  /** The cited source (web url and/or request-document index). */
+  readonly source: CitationSource;
+  /**
+   * The snippet of the SOURCE that supports the claim (Anthropic `cited_text`,
+   * Google `groundingSupports[].segment.text`), when the provider returns it.
+   */
+  readonly citedText?: string;
+  /**
+   * Character range in a TEXT block's `text` that the citation annotates
+   * (OpenAI annotation `start_index`/`end_index`, Anthropic char indices, Google
+   * `segment` start/end). Meaningful only for text blocks; omitted when the
+   * citation hangs on a non-text block or cites a block as a whole.
+   */
+  readonly range?: { readonly start: number; readonly end: number };
+  /**
+   * Provider-supplied confidence in `[0, 1]` that the span is supported by the
+   * source (Google `groundingSupports[].confidenceScores`), when given.
+   */
+  readonly confidence?: number;
+}
 
 // ============================================================================
 // Textual blocks

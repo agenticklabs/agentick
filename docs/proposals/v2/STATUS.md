@@ -1725,6 +1725,25 @@ blueprint's design decisions; this is execution-level).
 
 ### 2026-07-21
 
+- **Citations — canonical representation LANDED (spec foundation).** Provider
+  web-search/grounding responses routinely carry citations; v2 had NO representation
+  (v1 had a flat `ContentMetadata.citations: ContentCitation{text,url?,title?,
+  startIndex?,endIndex?}` — refined here). Added `Citation` + `CitationSource` to
+  `content-blocks.ts` and `citations?: readonly Citation[]` on **`BaseContentBlock`**
+  (NOT TextBlock — citations are cross-cutting provenance: any content can be cited
+  (a generated image's source, a document reference, a grounded claim), not only
+  text; `range` char-offsets stay optional + text-only. Placed with the existing
+  cross-cutting optionals `metadata`/`providerMetadata`/`summary`).
+  Shape: `Citation { source: CitationSource; citedText?; range?{start,end};
+  confidence? }`, `CitationSource { url?; title?; documentIndex? }` — a FLAT source
+  bag (url present ⇒ web, documentIndex present ⇒ document/file), NOT a discriminated
+  union, normalizing OpenAI `url_citation`/`file_citation`, Anthropic
+  `web_search_result_location`/`char|page_location`, Google `groundingChunks`+
+  `groundingSupports` without inventing a taxonomy. Refines v1's ambiguity: `range`
+  = span in the ASSISTANT text, `citedText` = snippet of the SOURCE (v1's `text`
+  conflated them). Spec-only foundation; adapters POPULATE it in the provenance pass
+  (next) with tests. Gate: spec typecheck clean.
+
 - **Pass D adapters — REQUEST-HALF LANDED (3 of 4; ai-sdk deferred).** Each adapter
   consumes its own `input.providerTools` slice (filtered by `provider` key) and maps
   it onto the native request tools array: **openai** `{ type, ...config }` →
