@@ -1,20 +1,19 @@
 /**
- * `channelView` — the OPT-IN fold sugar over a {@link channelStream}.
+ * `channelView` — the OPT-IN fold sugar over a channel subscription:
+ * {@link eventView} pinned to one channel's query (`channelEventQuery(channel)`).
  *
  * Materializes a channel's frames into a live `T` via `reduce` (the K8s
  * watch-list model: the stream opens with a snapshot frame, then deltas, on the
- * SAME ordered stream). It single-consumes a `channelStream` and fans out TWO
- * feeds to many listeners:
+ * SAME ordered stream), single-consumes it, and fans out TWO feeds to many
+ * listeners:
  *   - `subscribe((state) => …)` — the STATE feed (folded value). Also the
  *     `useSyncExternalStore(view.subscribe, view.get)` contract — React passes a
  *     `() => void`, we hand it the state (ignored), it re-reads via `get()`.
  *   - `onChange((frame) => …)` — the CHANGE feed (each frame it folds).
  *
- * The primitive stays dumb — it does not know what a snapshot is. `reduce`
- * handles whatever the producer sends (snapshot-kind seeds, delta-kind folds),
- * which is why one `channelView` covers snapshot+delta channels (knobs) and
- * full-object-per-frame channels (tasks). Knobs/tasks-AGNOSTIC — typed façades
- * supply `reduce`.
+ * The fold machine is `eventView`; `channelView` is exactly `eventView` with
+ * the channel's `EventQuery` and no `fromCursor` (channels are snapshot-first,
+ * cursorless). Knobs/tasks-AGNOSTIC — typed façades supply `reduce`.
  *
  * Folding materializes the whole `T` in memory; that is what opting into a view
  * MEANS. Channels with no meaningful state, or too large to hold, skip the fold
@@ -25,8 +24,10 @@
  */
 
 import type { ChannelView, ChannelViewConfig, SubscriptionScope } from "@agentick/spec-next";
+import { channelEventQuery } from "@agentick/spec-next";
 
-import { channelStream, type ChannelClient } from "./channel-stream.js";
+import { eventView } from "./event-view.js";
+import type { ChannelClient } from "./channel-stream.js";
 
 // `ChannelView` / `ChannelViewConfig` live in `@agentick/spec-next/client` (they
 // type BOTH this free function AND the `ClientProtocol.channelView` method).
@@ -60,66 +61,7 @@ export function channelView(
     initial: undefined,
     reduce: (_prev, frame) => frame,
   };
-  let state = cfg.initial;
-  let closed = false;
-  let status: ChannelView<unknown, unknown>["status"] = "loading";
-  const stateListeners = new Set<(state: unknown) => void>();
-  const frameListeners = new Set<(frame: unknown) => void>();
-
-  const stream = channelStream<unknown>(client, scope, channel);
-  void (async () => {
-    for await (const frame of stream) {
-      if (closed) return;
-      let folded: unknown;
-      try {
-        folded = cfg.reduce(state, frame);
-      } catch {
-        // A malformed frame must not tear down the stream.
-        continue;
-      }
-      state = folded;
-      status = "live";
-      // Change feed first (the frame), then the state feed (the folded result).
-      for (const l of [...frameListeners]) {
-        try {
-          l(frame);
-        } catch {
-          /* isolate */
-        }
-      }
-      for (const l of [...stateListeners]) {
-        try {
-          l(state);
-        } catch {
-          /* isolate */
-        }
-      }
-    }
-  })();
-
-  return {
-    get: (): unknown => state,
-    subscribe(listener) {
-      stateListeners.add(listener);
-      return () => {
-        stateListeners.delete(listener);
-      };
-    },
-    onChange(listener) {
-      frameListeners.add(listener);
-      return () => {
-        frameListeners.delete(listener);
-      };
-    },
-    get status() {
-      return status;
-    },
-    close(): void {
-      closed = true;
-      status = "closed";
-      stateListeners.clear();
-      frameListeners.clear();
-      stream.close();
-    },
-  };
+  // `channelView` = `eventView` with the channel's query. Channels are
+  // snapshot-first and cursorless, so no `fromCursor` is threaded.
+  return eventView(client, scope, channelEventQuery(channel), cfg);
 }

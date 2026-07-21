@@ -1581,6 +1581,9 @@ importers:
 
   packages-next/timeline:
     dependencies:
+      '@agentick/client-core-next':
+        specifier: workspace:*
+        version: link:../client-core
       '@agentick/pubsub-next':
         specifier: workspace:*
         version: link:../pubsub

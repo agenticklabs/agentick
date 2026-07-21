@@ -222,6 +222,42 @@ Seeding IS resuming — `run({ history })` replays a previous session's
 `snapshot().timeline` verbatim through the same hydration path (the
 eval/replay loop).
 
+## Client timeline — `fold(session event stream)` (`/client`)
+
+The client-side timeline is a **fold over the session event stream** — no read
+RPC, no bespoke channel. Every `timeline.append(...)` runs through the harness
+command path (ADR 51); the declared verb `timeline:append` emits a
+`timeline:command:append` lifecycle whose **`requested`-phase envelope carries
+the appended entries** (`envelope.payload = { entries }`, the argument-bound
+phase). `timelineView` subscribes to exactly those envelopes (via
+`timelineEventQuery()` in `@agentick/spec-next`) and folds their entries onto a
+growing `readonly TimelineEntry[]`.
+
+```ts
+import { timelineView } from "@agentick/timeline-next/client";
+
+// `initial` seeds the fold with server-hydrated history (the AI-SDK
+// `initialMessages` pattern — e.g. loaded server-side from LogStore.history);
+// `fromCursor` resumes the live tail from AFTER that seed so appends are not
+// double-counted. Omit both → empty accumulator, tailing live from now.
+const view = timelineView(client, sessionId, {
+  initial: serverHydratedEntries,
+  fromCursor: lastSeenCursor,
+  visibility: (e) => e.visibility !== "log", // optional filter (default: all)
+});
+
+view.get(); // readonly TimelineEntry[] — synchronous (React getSnapshot)
+view.subscribe(() => rerender()); // useSyncExternalStore(view.subscribe, view.get)
+view.onChange((append) => { … }); // the raw { entries } each fold sees
+```
+
+`timelineView` is a thin façade over the generic `eventView` primitive in
+`@agentick/client-core-next` (fold ANY `EventQuery` on a scope, with an optional
+`fromCursor`); `channelView` is the same machine pinned to a channel's query.
+The `/client` subpath depends only on `client-core` + `spec` — never the
+timeline harness runtime — so it never pulls the server harness into a browser
+bundle.
+
 ## API sketch
 
 ```ts
@@ -261,6 +297,9 @@ intended default, no memory strategy legislated, §2.7). Certify adapters with
   `context.entries` (the mechanism itself).
 - Session-level: steering/join, send serialization, provenance stamps
   (`@agentick/session-next` extended-surface suite).
+- `src/client/__tests__/timeline-view.spec.ts` — the client fold: `initial`
+  seeding, `fromCursor` threading (no double-count), visibility filtering,
+  copy-on-write refs, and the `timeline:command:append` requested-phase query.
 
 ## Roadmap & known gaps
 

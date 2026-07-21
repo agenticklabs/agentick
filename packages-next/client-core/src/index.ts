@@ -22,6 +22,8 @@ export {
   type ReceivedLog,
   type ReceivedProgress,
 } from "./signals.js";
+export { eventView, type EventViewConfig } from "./event-view.js";
+export { eventStream, type EventClient } from "./event-stream.js";
 export { channelView, type ChannelView, type ChannelViewConfig } from "./channel-view.js";
 export { channelStream, type ChannelStream, type ChannelClient } from "./channel-stream.js";
 export {

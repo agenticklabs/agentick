@@ -36,6 +36,11 @@
       "import": "./src/react/index.ts",
       "default": "./src/react/index.ts"
     },
+    "./client": {
+      "types": "./src/client/index.ts",
+      "import": "./src/client/index.ts",
+      "default": "./src/client/index.ts"
+    },
     "./strategies": {
       "types": "./src/strategies.ts",
       "import": "./src/strategies.ts",
@@ -55,6 +60,7 @@
     "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
   },
   "dependencies": {
+    "@agentick/client-core-next": "workspace:*",
     "@agentick/pubsub-next": "workspace:*",
     "@agentick/reconciler-next": "workspace:*",
     "@agentick/reconciler-react-next": "workspace:*",
