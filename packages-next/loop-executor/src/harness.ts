@@ -431,6 +431,19 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         });
         const modelTools = yield* input.toolExecutor.fx.compileForTick({ exposure: "model" });
 
+        // 2b. Provider-EXECUTED tools (Pass D). Unlike `modelTools`, these
+        //     bypass the tool executor entirely — no `replaceReconcilerTools`,
+        //     no `compileForTick`, no precedence fold. The data is already in
+        //     the IR: the reconciler collected any tree-declared provider
+        //     tools into `declarations.providerTools`, so we thread that slice
+        //     straight to the executor's `project` phase. The projection
+        //     (`buildProviderTools`) dedupes by provider+name, last-wins.
+        //     TODO(pass-d): thread config-level provider tools
+        //     (createApp/createSession `{ providerTools }`) once that config
+        //     seam exists — this run threads ONLY the compiled-tree source, so
+        //     a provider tool contributes iff a rendered tree declares it.
+        const providerTools = tickCompiled.declarations?.providerTools ?? [];
+
         // 3. Execute. Streaming path (executeStream) when the caller
         //    requested streaming AND the executor supports it AND the
         //    target's capabilities don't explicitly disable it.
@@ -452,6 +465,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
             target: tickTarget,
             scope: { sessionId: input.sessionId, executionId, tickId },
             tools: modelTools,
+            ...(providerTools.length > 0 ? { providerTools } : {}),
             ...(input.narrate !== undefined ? { narrate: input.narrate } : {}),
           });
           // #182 Option A: a provider failure lands on the twin's E
@@ -491,6 +505,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
             scope: { sessionId: input.sessionId, executionId, tickId },
             tools: modelTools,
             signal: execSignal,
+            ...(providerTools.length > 0 ? { providerTools } : {}),
             ...(input.narrate !== undefined ? { narrate: input.narrate } : {}),
           });
         }

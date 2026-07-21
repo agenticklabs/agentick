@@ -103,16 +103,16 @@ The provider-normalization contract. Required members are the round
 trip; optional members are provider quirks with executor-supplied
 defaults.
 
-| Member | Role |
-| --- | --- |
-| `provider`, `target` | Identity + self-described capabilities |
-| `buildParams(input, target)` | Canonical input → provider request |
-| `call(params, signal)` | Non-streaming SDK call |
-| `openStream(params, signal)` | Streaming SDK call (Promise-wrapped OK) |
-| `mapChunk(chunk, accum)` | Provider chunk → canonical `AdapterDelta[]` |
-| `reconstructRaw(accum, modelSeen)` | Final stream state → canonical raw |
-| `normalize(raw)` | Raw → `LanguageModelExecutionResult` |
-| `project?`, `adapterTransforms?`, `postProcessForNormalize?`, `finalizeStream?`, `isAbortError?`, `mapProviderError?`, `extractMetadata?` | Optional quirk hooks |
+| Member                                                                                                                                    | Role                                        |
+| ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| `provider`, `target`                                                                                                                      | Identity + self-described capabilities      |
+| `buildParams(input, target)`                                                                                                              | Canonical input → provider request          |
+| `call(params, signal)`                                                                                                                    | Non-streaming SDK call                      |
+| `openStream(params, signal)`                                                                                                              | Streaming SDK call (Promise-wrapped OK)     |
+| `mapChunk(chunk, accum)`                                                                                                                  | Provider chunk → canonical `AdapterDelta[]` |
+| `reconstructRaw(accum, modelSeen)`                                                                                                        | Final stream state → canonical raw          |
+| `normalize(raw)`                                                                                                                          | Raw → `LanguageModelExecutionResult`        |
+| `project?`, `adapterTransforms?`, `postProcessForNormalize?`, `finalizeStream?`, `isAbortError?`, `mapProviderError?`, `extractMetadata?` | Optional quirk hooks                        |
 
 **Currencies (the no-double-normalization guardrail):**
 `LanguageModelInput`, `AdapterDelta`, and
@@ -130,8 +130,8 @@ executor.
 - `DeltaTransform` + `composeTransforms` — stateful delta pipeline.
 - `thinkTagTransform` / `customBlockTransform` / `StreamTagParser` —
   XML-tag routing (reasoning extraction, adopter custom blocks).
-- `defaultProject` + parts (`buildTools`, `buildMessages`,
-  `buildParameters`, …) — canonical RenderedTree projection.
+- `defaultProject` + parts (`buildTools`, `buildProviderTools`,
+  `buildMessages`, `buildParameters`, …) — canonical RenderedTree projection.
 - `isLanguageModelAdapter(value)` — structural guard used by app-level
   slots.
 
@@ -163,14 +163,34 @@ presentation" section.
 > tool-using tick. It defaults ON; disable app-wide via
 > `createApp(Agent, { model, narrate: false })`.
 
+### Provider-executed tools (`buildProviderTools`)
+
+`buildProviderTools(providerTools?)` projects `ProviderToolDeclaration[]`
+(OpenAI `web_search` / `code_interpreter`, Anthropic `server_tool_use`,
+Google grounding) onto `LanguageModelInput.providerTools` — a **sibling** of
+the function `tools` list. Provider tools are run **inside the provider**, so
+this projection is deliberately minimal: it resolves `name: decl.name ??
+decl.type`, copies `provider` / `type` / `config` verbatim, dedupes by
+`provider` + resolved `name` (last-wins), and returns `undefined` when empty
+so the slot is dropped.
+
+Provider tools **bypass the tool executor entirely** — they carry no
+`inputSchema` (the provider owns the arguments), never receive `_summary`
+narration, never enter the function `tools` list, and never flow through
+`compileForTick`. The loop sources them from the compiled tree's
+`declarations.providerTools` (Pass D foundation; config-level provider tools
+and the per-adapter wire mapping land in follow-on passes). A provider-tool
+result returns on the model response as a `tool_result` block stamped
+`executedBy: "provider:<key>"`.
+
 ### Combinators
 
 Adapters are plain values — resilience and routing compose:
 
 ```ts
-model: withFallback(openai("gpt-5"), anthropic("claude-sonnet-5"))  // failover; never on abort
-model: withRetry(openai("gpt-4o"), { attempts: 3 })                 // 429/5xx/network, jittered backoff
-model: tapModel(adapter, { onCall, onResult, onDelta })             // observability; never alters behavior
+model: withFallback(openai("gpt-5"), anthropic("claude-sonnet-5")); // failover; never on abort
+model: withRetry(openai("gpt-4o"), { attempts: 3 }); // 429/5xx/network, jittered backoff
+model: tapModel(adapter, { onCall, onResult, onDelta }); // observability; never alters behavior
 ```
 
 Streaming semantics: retry/failover apply through the FIRST chunk (a
@@ -208,10 +228,10 @@ providerOptions" section for the exact matrix and deferred sources.
 
 ADR 57 §2 splits the per-part provider-escape channel by direction:
 
-| Field | Direction | Meaning |
-| --- | --- | --- |
-| `providerOptions` | **input — what you send** | Adopter-stamped per-block knobs (Anthropic `cacheControl`) *and* model-produced opaque data replayed verbatim (Gemini `thoughtSignature`). Typed/augmentable, keyed by provider namespace. |
-| `providerMetadata` | **output — what the provider returned** | Written by `normalize` onto output parts (returned cache/reasoning tokens, `thoughtSignature` as produced). |
+| Field              | Direction                               | Meaning                                                                                                                                                                                    |
+| ------------------ | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `providerOptions`  | **input — what you send**               | Adopter-stamped per-block knobs (Anthropic `cacheControl`) _and_ model-produced opaque data replayed verbatim (Gemini `thoughtSignature`). Typed/augmentable, keyed by provider namespace. |
+| `providerMetadata` | **output — what the provider returned** | Written by `normalize` onto output parts (returned cache/reasoning tokens, `thoughtSignature` as produced).                                                                                |
 
 At the projection boundary a canonical block carries only one knob
 channel (`BaseContentBlock.providerMetadata`); `messagePartFromBlock`
@@ -279,9 +299,9 @@ no layer knows the model (never fabricated).
 ```ts
 import { effectiveModelInfo, contextUtilization, estimateTokens } from "@agentick/model-next";
 
-const info = effectiveModelInfo(adapter.target, myRegistry);   // { contextWindow, pricing, ... }
-contextUtilization(usedTokens, info);                          // 0..1, or undefined if no window
-estimateTokens(input, info);                                   // info.tokenEstimator ?? char/4
+const info = effectiveModelInfo(adapter.target, myRegistry); // { contextWindow, pricing, ... }
+contextUtilization(usedTokens, info); // 0..1, or undefined if no window
+estimateTokens(input, info); // info.tokenEstimator ?? char/4
 ```
 
 ### The `provider` is the SERVING provider, not the model author
@@ -293,8 +313,18 @@ serving provider, each gets its own row and never collides:
 
 ```ts
 const registry = mergeRegistry(SEED_MODELS, {
-  bedrock:    { "anthropic.claude-sonnet-4": { contextWindow: 200_000, pricing: { inputPerMTok: 3.3,  outputPerMTok: 16.5  } } },
-  openrouter: { "anthropic/claude-sonnet-4": { contextWindow: 200_000, pricing: { inputPerMTok: 3.15, outputPerMTok: 15.75 } } },
+  bedrock: {
+    "anthropic.claude-sonnet-4": {
+      contextWindow: 200_000,
+      pricing: { inputPerMTok: 3.3, outputPerMTok: 16.5 },
+    },
+  },
+  openrouter: {
+    "anthropic/claude-sonnet-4": {
+      contextWindow: 200_000,
+      pricing: { inputPerMTok: 3.15, outputPerMTok: 15.75 },
+    },
+  },
 });
 // resolveModelInfo({ provider: "bedrock",    modelId: "anthropic.claude-sonnet-4-v1:0" }) → the Bedrock row
 // resolveModelInfo({ provider: "openrouter", modelId: "anthropic/claude-sonnet-4"      }) → the OpenRouter row
@@ -307,12 +337,12 @@ source of numbers.
 
 ## Provider packages
 
-| Package | Factory |
-| --- | --- |
-| `@agentick/model-openai-next` | `openai(model?, options?)` |
+| Package                          | Factory                       |
+| -------------------------------- | ----------------------------- |
+| `@agentick/model-openai-next`    | `openai(model?, options?)`    |
 | `@agentick/model-anthropic-next` | `anthropic(model?, options?)` |
-| `@agentick/model-google-next` | `google(model?, options?)` |
-| `@agentick/model-ai-sdk-next` | `aisdk(model, options?)` |
+| `@agentick/model-google-next`    | `google(model?, options?)`    |
+| `@agentick/model-ai-sdk-next`    | `aisdk(model, options?)`      |
 
 None of them depend on `@agentick/executor-next` (or Effect) at
 runtime — an adapter is usable standalone via `generate()`.
@@ -334,7 +364,9 @@ runtime — an adapter is usable standalone via `generate()`.
 - `src/__tests__/canonical-projection.spec.ts` — projection parts,
   wire-native multimodal variants, `providerMetadata → providerOptions`,
   `SpecConfig` generation params lift (#211), message-level
-  `providerMetadata → providerOptions` carry (#173).
+  `providerMetadata → providerOptions` carry (#173), Pass D
+  `buildProviderTools` projection (name resolution, provider+name dedupe,
+  empty-slot omission, kept out of the function `tools` list).
 - `src/__tests__/narration-injection.spec.ts` — `buildTools` injects the
   reserved `_summary` narration property when enabled, and skips it on
   `narrate=false` (app-level), `annotations.narrate:false` (per-tool), an

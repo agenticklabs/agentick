@@ -577,6 +577,72 @@ export interface ModelDeclaration {
 }
 
 // ============================================================================
+// Provider tool declaration — provider-EXECUTED tools (bypass the executor)
+// ============================================================================
+
+/**
+ * A PROVIDER-EXECUTED tool request. Where a {@link ToolDeclaration} names a
+ * function the framework's tool executor dispatches, a provider tool runs
+ * entirely INSIDE the provider — OpenAI `web_search` / `code_interpreter`,
+ * Anthropic `server_tool_use`, Google grounding — and its result rides back
+ * on the model response (a `tool_result` block stamped `executedBy:
+ * "provider:<key>"`; see {@link ToolExecutor}), never entering the executor.
+ *
+ * **Why a distinct slot, not a `type: "provider"` discriminator on
+ * {@link ToolDeclaration}.** A provider tool has NONE of the executor's
+ * concerns: no `inputSchema` to validate (the provider owns the arguments),
+ * no `handlerRef` to resolve, no confirmation gate, no client-relay, no
+ * `_summary` narration. Folding it into `ToolDeclaration` would force every
+ * executor seam to special-case a "tool" that never dispatches, and would
+ * violate the executor's `handlerRef present ⇒ server / absent ⇒ client`
+ * binary — a provider tool carries no handler yet is NOT client-handled.
+ * So it is a SIBLING declaration at the IR: the loop threads it straight
+ * from `RuntimeDeclarations.providerTools` to the executor's `project`
+ * phase, never through `ToolExecutorProtocol.compileForTick`. It is never
+ * registered in the tool executor and emits no `tool:dispatch` lifecycle.
+ *
+ * The declaration is pure, serializable data — it crosses the spec firewall
+ * unchanged and projects verbatim to {@link import("../protocol/executor.js").ProviderToolWire}.
+ *
+ * @see docs/proposals/v2/blueprint/07-tool-executor.md
+ * @see import("../protocol/executor.js").ProviderToolWire — the wire twin
+ */
+export interface ProviderToolDeclaration {
+  /**
+   * Routing key — which adapter OWNS this tool
+   * (`"openai"` | `"anthropic"` | `"google"` | …). An adapter enables
+   * ONLY the provider tools whose `provider` matches its own key and maps
+   * them into the provider's native tools array; every other adapter
+   * passes them through untouched. No dispatch, no fan-out — the routing
+   * key is the sole selector.
+   */
+  readonly provider: string;
+  /**
+   * The provider-NATIVE tool type, written verbatim
+   * (`"web_search_preview"`, `"code_interpreter"`, `"web_search_20250305"`).
+   * The framework performs NO cross-provider normalization: the adopter
+   * writes the provider's own type string and the adapter forwards it as
+   * given. A portable, provider-agnostic vocabulary is a later layer built
+   * ON TOP of this raw pass-through, not baked into the substrate.
+   */
+  readonly type: string;
+  /**
+   * Stable framework id for provenance / dedup AND the `name` the model
+   * sees for this tool. Defaults to {@link type} when unset — the resolved
+   * `name ?? type` is what the projection dedupes on (with {@link provider})
+   * and emits on the wire.
+   */
+  readonly name?: string;
+  /**
+   * Provider-native configuration, passed through VERBATIM into the
+   * provider's tool shape (allowed domains, max results, container config,
+   * …). Adapter-specific and un-inspected by the substrate — the adapter
+   * that owns {@link provider} interprets it.
+   */
+  readonly config?: Record<string, unknown>;
+}
+
+// ============================================================================
 // Aggregate
 // ============================================================================
 
@@ -592,4 +658,21 @@ export interface RuntimeDeclarations {
    * falls back to the send/session executor+target.
    */
   readonly model?: ModelDeclaration;
+  /**
+   * Provider-EXECUTED tools for the tick (OpenAI `web_search`, Anthropic
+   * `server_tool_use`, Google grounding). These BYPASS the tool executor
+   * entirely — they are never registered, never dispatched, never folded
+   * by `compileForTick`; the loop threads them straight from here to the
+   * executor's `project` phase (→
+   * {@link import("../protocol/executor.js").ProjectInput.providerTools}).
+   *
+   * Merge is a simple concatenation with NO precedence ladder: the
+   * projection dedupes by `provider` + resolved `name` (`name ?? type`),
+   * last-wins. Unlike `tools` — which resolves collisions across the
+   * layered gateway/app/session/execution/extension/reconciler seams — a
+   * provider tool has no layered identity, so the flat merge is honest.
+   * TODO(pass-d): introduce a precedence ladder here if provider-tool
+   * collisions across declaration layers ever become meaningful.
+   */
+  readonly providerTools?: readonly ProviderToolDeclaration[];
 }

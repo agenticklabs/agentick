@@ -244,9 +244,31 @@ export interface VideoBlock extends BaseContentBlock {
 // ============================================================================
 
 /**
- * Executor identity for tool execution (who ran the tool).
- * Open string — recognized values: "agentick", "provider:openai",
- * "provider:anthropic", "provider:google", "mcp:<server>", etc.
+ * Executor identity stamped on a {@link ToolResultBlock} — WHO ran the tool.
+ * One provenance axis for all four execution sources the client switches on:
+ *
+ *   - `"agentick"`            — SERVER-handled: the framework's tool executor
+ *                               dispatched a local handler (`handlerRef`).
+ *   - `"client"`             — CLIENT-handled (declaration carries no
+ *                               `handlerRef`; the executor relayed the call
+ *                               to the client, stage 1).
+ *   - `"provider:openai"` |
+ *     `"provider:anthropic"` |
+ *     `"provider:google"`     — PROVIDER-executed: the provider ran the tool
+ *                               INSIDE the model call (OpenAI `web_search` /
+ *                               `code_interpreter`, Anthropic
+ *                               `server_tool_use`, Google grounding). The
+ *                               result rides THIS field on the `tool_result`
+ *                               block folded into the timeline the client
+ *                               reads — NOT a separate event, NOT the tool-
+ *                               executor dispatch stream (provider tools emit
+ *                               no `tool:dispatch` lifecycle; see
+ *                               {@link import("./declarations.js").ProviderToolDeclaration}).
+ *   - `"mcp:<server>"`        — dispatched through the MCP harness to the
+ *                               named server.
+ *
+ * Open string — the set above is the recognized vocabulary, not a closed
+ * union; adapters populate the `provider:*` stamps in the adapter pass.
  */
 export type ToolExecutor = string;
 

@@ -118,6 +118,17 @@ export interface ProjectInput {
    */
   readonly tools: readonly import("../data/declarations.js").ToolDeclaration[];
   /**
+   * Provider-EXECUTED tools the model should see this tick (OpenAI
+   * `web_search`, Anthropic `server_tool_use`, Google grounding). Sourced
+   * by the loop from the compiled tree's
+   * {@link import("../data/declarations.js").RuntimeDeclarations.providerTools}
+   * (plus config), NOT from `compileForTick` — provider tools are not
+   * executor citizens (no validation, no dispatch, no registry). The
+   * projection maps them onto {@link LanguageModelInput.providerTools};
+   * they NEVER enter the {@link tools} list and are never narrated.
+   */
+  readonly providerTools?: readonly import("../data/declarations.js").ProviderToolDeclaration[];
+  /**
    * App-level model-narration switch (default `true` at the projection
    * site). When `true`, the projector injects the reserved
    * `TOOL_NARRATION_FIELD` (`_summary`) optional property into each
@@ -158,6 +169,11 @@ export interface RunInput {
    */
   readonly tools: readonly import("../data/declarations.js").ToolDeclaration[];
   /**
+   * Provider-EXECUTED tools for this tick — threaded through to the
+   * internal `project` call. See {@link ProjectInput.providerTools}.
+   */
+  readonly providerTools?: readonly import("../data/declarations.js").ProviderToolDeclaration[];
+  /**
    * App-level model-narration switch — threaded through to the internal
    * `project` call. See {@link ProjectInput.narrate}.
    */
@@ -195,6 +211,17 @@ export interface LanguageModelInput {
    * `declarations.tools`, filtered to `exposure.includes("model")`.
    */
   readonly tools?: ReadonlyArray<LanguageModelTool>;
+  /**
+   * Provider-EXECUTED tools advertised to the model. Sourced from the
+   * rendered tree's `declarations.providerTools` and projected verbatim
+   * (no schema, no narration) to {@link ProviderToolWire}. Each shipped
+   * adapter maps ONLY the subset whose `provider` matches its own key into
+   * the provider's native tools array; the rest it ignores. Distinct from
+   * {@link tools} (function tools): a provider tool carries no
+   * `inputSchema` — the provider owns the tool's arguments — and never
+   * flows through the tool executor.
+   */
+  readonly providerTools?: ReadonlyArray<ProviderToolWire>;
   /**
    * Generation parameters (temperature / max tokens / etc.) lifted from
    * the rendered tree's `config`. Provider-specific overrides flow via
@@ -365,6 +392,31 @@ export interface LanguageModelTool {
    * for JSON-schema mode, Anthropic `cache_control` on a specific tool).
    */
   readonly providerOptions?: ProviderToolOptions;
+}
+
+/**
+ * Wire projection of a
+ * {@link import("../data/declarations.js").ProviderToolDeclaration} — a
+ * provider-EXECUTED tool as it appears on {@link LanguageModelInput}. The
+ * projection resolves `name: name ?? type` and dedupes by `provider` +
+ * `name`; adapters read this array and map the subset matching their own
+ * `provider` key into the provider's native tools shape, ignoring the rest.
+ *
+ * Deliberately NOT a variant of {@link LanguageModelTool}: a provider tool
+ * carries no `inputSchema` (the provider owns the arguments), no
+ * `outputSchema`, and no `_summary` narration — it is a provider-request
+ * declaration, not a dispatchable function. Its result returns on the model
+ * response as a `tool_result` block stamped `executedBy: "provider:<key>"`.
+ */
+export interface ProviderToolWire {
+  /** Routing key — the adapter that owns this tool (`"openai"`, …). */
+  readonly provider: string;
+  /** The provider-native tool type, verbatim (`"web_search_preview"`, …). */
+  readonly type: string;
+  /** Resolved framework id + model-visible name (`name ?? type`). */
+  readonly name: string;
+  /** Provider-native config, passed through verbatim into the tool shape. */
+  readonly config?: Record<string, unknown>;
 }
 
 export interface LanguageModelParameters {

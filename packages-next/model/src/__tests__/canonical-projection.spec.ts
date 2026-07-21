@@ -224,6 +224,81 @@ describe("defaultProject — #176 providerOptions fold", () => {
   });
 });
 
+describe("defaultProject — Pass D providerTools projection", () => {
+  const emptyTarget: ExecutionTarget = { kind: "language-model", modelId: "m" } as ExecutionTarget;
+
+  function projectWith(
+    providerTools: ProjectInput["providerTools"],
+    tools: ProjectInput["tools"] = [],
+  ): ReturnType<typeof defaultProject> {
+    const compiled: RenderedTree = {
+      specVersion: "test",
+      context: { entries: [] },
+    } as RenderedTree;
+    const input: ProjectInput = { compiled, target: emptyTarget, tools, providerTools };
+    return defaultProject(input);
+  }
+
+  it("projects providerTools onto LanguageModelInput.providerTools, resolving name ?? type", () => {
+    const out = projectWith([
+      { provider: "openai", type: "web_search_preview", config: { maxResults: 5 } },
+      { provider: "anthropic", type: "web_search_20250305", name: "web_search" },
+    ]);
+    expect(out.providerTools).toEqual([
+      {
+        provider: "openai",
+        type: "web_search_preview",
+        name: "web_search_preview",
+        config: { maxResults: 5 },
+      },
+      { provider: "anthropic", type: "web_search_20250305", name: "web_search" },
+    ]);
+  });
+
+  it("dedupes by provider + resolved name, last-wins", () => {
+    const out = projectWith([
+      { provider: "openai", type: "web_search_preview", config: { maxResults: 5 } },
+      // same provider + resolved name (name ?? type) → replaces the first
+      { provider: "openai", type: "web_search_preview", config: { maxResults: 10 } },
+      // same type but DIFFERENT provider → distinct key, survives
+      { provider: "anthropic", type: "web_search_preview" },
+    ]);
+    expect(out.providerTools).toEqual([
+      {
+        provider: "openai",
+        type: "web_search_preview",
+        name: "web_search_preview",
+        config: { maxResults: 10 },
+      },
+      { provider: "anthropic", type: "web_search_preview", name: "web_search_preview" },
+    ]);
+  });
+
+  it("omits the slot entirely when providerTools is empty or absent", () => {
+    expect(projectWith([]).providerTools).toBeUndefined();
+    expect(projectWith(undefined).providerTools).toBeUndefined();
+  });
+
+  it("keeps provider tools OUT of the function tools list and never narrates them", () => {
+    // A provider tool must not leak into `tools[]` (function tools) and
+    // must never receive the injected `_summary` narration field — it
+    // carries no schema and bypasses the executor.
+    const out = projectWith(
+      [{ provider: "openai", type: "code_interpreter" }],
+      [], // no function tools
+    );
+    expect(out.tools).toBeUndefined(); // no function tools emitted
+    expect(out.providerTools).toEqual([
+      { provider: "openai", type: "code_interpreter", name: "code_interpreter" },
+    ]);
+    // The provider-tool wire shape carries no inputSchema / _summary.
+    for (const pt of out.providerTools ?? []) {
+      expect(pt).not.toHaveProperty("inputSchema");
+      expect(JSON.stringify(pt)).not.toContain("_summary");
+    }
+  });
+});
+
 describe("buildParameters — SpecConfig generation params (#211)", () => {
   function paramsFor(config: RenderedTree["config"]) {
     const tree: RenderedTree = {

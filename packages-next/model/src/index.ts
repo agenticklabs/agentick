@@ -42,6 +42,7 @@ export {
 export {
   defaultProject,
   buildTools,
+  buildProviderTools,
   buildMessages,
   buildParameters,
   collectSectionText,

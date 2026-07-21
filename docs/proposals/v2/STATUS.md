@@ -1725,6 +1725,37 @@ blueprint's design decisions; this is execution-level).
 
 ### 2026-07-21
 
+- **Tool-config parity — Pass D FOUNDATION LANDED (provider-executed tools).**
+  Restores v1's `ToolExecutionType.PROVIDER` (provider runs the tool INSIDE the
+  model call, result bypasses the executor — OpenAI `web_search`/`code_interpreter`,
+  Anthropic `server_tool_use`, Google grounding). Design (LOCKED): a DISTINCT
+  `ProviderToolDeclaration` slot, NOT a `type:"provider"` discriminator on
+  `ToolDeclaration` — a provider tool has none of the executor's concerns (no
+  `inputSchema`, no `handlerRef`, no confirmation, no client-relay, no `_summary`),
+  so it is a SIBLING declaration at the IR that NEVER enters the executor /
+  `compileForTick`; folding it into `ToolDeclaration` would break the clean
+  `handlerRef present=server / absent=client` binary. Lean shape (no cross-provider
+  taxonomy): `{ provider (routing key), type (provider-native, verbatim), name?
+  (defaults to type), config? (passthrough) }`. **Steel-manned the null hypothesis:**
+  the escape hatch (`target.providerOptions[key]`) already lets an adopter inject
+  raw provider-native tool JSON, so the slot buys first-classness (config/tree-
+  declarable) + executor-bypass + uniform provenance stamping, NOT mere possibility.
+  Landed: `ProviderToolDeclaration` + `RuntimeDeclarations.providerTools` (spec);
+  `ProviderToolWire` + `providerTools?` on `ProjectInput`/`RunInput`/
+  `LanguageModelInput` (executor protocol); `buildProviderTools()` projection
+  (model-next, dedupe by provider+resolved-name last-wins, never narrated/schema'd);
+  loop threads `tickCompiled.declarations.providerTools` into both project + run
+  call sites (TODO(pass-d): config-level `createApp/createSession({providerTools})`
+  seam once it exists — compiled-tree source only this run). **Client provenance:**
+  the `ToolExecutor`/`executedBy` docblock rewritten to the full four-source axis
+  (`agentick`/`client`/`provider:*`/`mcp:*`) — provider results ride `executedBy`
+  on the `tool_result` block into the timeline the client folds, NOT a separate
+  event, NOT the dispatch stream (provider tools emit no `tool:dispatch`). Gates:
+  typecheck --force 152/152 0-cached; 845 tests (model+spec+loop-executor, +4
+  projection cases); oxlint/oxfmt clean. **Follow-on:** the 4 adapters consume
+  `LanguageModelInput.providerTools` + stamp `executedBy: "provider:<key>"`; a
+  `<ProviderTool>`/`<WebSearch>` tree component; the portable cross-provider vocab.
+
 - **Client timeline — mutable WINDOW LANDED (`prepend`/`append`).** `timelineView`
   (the client-side fold of `timeline:command:append` events) gained a mutable
   window: `prepend(entries)` splices OLDER history at the HEAD (scroll-back — the

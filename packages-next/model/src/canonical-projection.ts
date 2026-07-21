@@ -25,6 +25,8 @@ import type {
   LanguageModelTool,
   MediaSource,
   ProjectInput,
+  ProviderToolDeclaration,
+  ProviderToolWire,
   RenderedTree,
   SectionEntry,
   ToolDeclaration,
@@ -40,6 +42,12 @@ export function defaultProject(input: ProjectInput): LanguageModelInput {
   // the reconciler emitted but is NOT the canonical source for the
   // model's visible tool list. See `ProjectInput.tools` for context.
   const tools = buildTools(input.tools, input.narrate);
+  // Provider-EXECUTED tools (Pass D). Sourced from `input.providerTools`
+  // (the loop threads the compiled tree's `declarations.providerTools`
+  // here) — NOT from `input.tools`. Provider tools bypass the executor:
+  // they carry no schema, are never narrated (`injectNarration` never
+  // sees them), and never join the function `tools` list.
+  const providerTools = buildProviderTools(input.providerTools);
   const parameters = buildParameters(input.compiled);
   // #176: fold `tree.providerOptions` OVER `target.providerOptions`
   // (tree/per-render wins) onto the request-level channel. Previously
@@ -53,7 +61,7 @@ export function defaultProject(input: ProjectInput): LanguageModelInput {
   return {
     messages,
     ...(tools.length > 0 ? { tools } : {}),
-    ...omitUndefined({ parameters, providerOptions }),
+    ...omitUndefined({ providerTools, parameters, providerOptions }),
   };
 }
 
@@ -351,6 +359,49 @@ export function buildTools(
         : {}),
       ...omitUndefined({ providerOptions: t.providerOptions }),
     }));
+}
+
+/**
+ * Project `ProviderToolDeclaration[]` to the wire-shape
+ * {@link ProviderToolWire}[] for provider-EXECUTED tools (OpenAI
+ * `web_search`, Anthropic `server_tool_use`, Google grounding). These are
+ * a SIBLING of the function `tools` list — they bypass the tool executor
+ * entirely, so this projection is deliberately minimal: it resolves
+ * `name: decl.name ?? decl.type`, copies `provider` / `type` / `config`
+ * verbatim, and does NOTHING else — no schema projection (the provider owns
+ * the arguments), no `injectNarration` (provider tools are never narrated).
+ *
+ * Dedupe is by `provider` + resolved `name`, LAST-WINS — matching the flat,
+ * ladder-free merge documented on
+ * {@link import("@agentick/spec-next").RuntimeDeclarations.providerTools}
+ * (a provider tool has no layered identity, so there is no precedence fold
+ * like `buildTools`' exposure/collision handling). Returns `undefined` when
+ * the input is absent or projects to empty, so `defaultProject`'s
+ * `omitUndefined({...})` spread drops the slot entirely rather than emitting
+ * an empty array.
+ *
+ * @verifiedBy packages-next/model/src/__tests__/canonical-projection.spec.ts
+ *   ("defaultProject — Pass D providerTools projection")
+ */
+export function buildProviderTools(
+  providerTools?: readonly ProviderToolDeclaration[],
+): ReadonlyArray<ProviderToolWire> | undefined {
+  if (providerTools === undefined || providerTools.length === 0) return undefined;
+  // Dedupe by `provider` + resolved `name`, last-wins: a later declaration
+  // with the same key replaces an earlier one. A Map preserves first-seen
+  // insertion order for surviving keys while letting a later value win.
+  const byKey = new Map<string, ProviderToolWire>();
+  for (const decl of providerTools) {
+    const name = decl.name ?? decl.type;
+    byKey.set(`${decl.provider} ${name}`, {
+      provider: decl.provider,
+      type: decl.type,
+      name,
+      ...omitUndefined({ config: decl.config }),
+    });
+  }
+  const wire = [...byKey.values()];
+  return wire.length > 0 ? wire : undefined;
 }
 
 /**
