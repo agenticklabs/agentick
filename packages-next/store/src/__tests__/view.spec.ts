@@ -30,7 +30,7 @@ function store(): MemoryCollection<Cell, Record<string, never>> {
 }
 
 function view(s: MemoryCollection<Cell, Record<string, never>> = store()): {
-  v: View<Cell, Record<string, never>, CollectionMutation<Cell>>;
+  v: View<Cell, Cell, Record<string, never>, CollectionMutation<Cell>>;
   store: typeof s;
 } {
   return { v: View.collection(s, (c) => c.id), store: s };
@@ -194,6 +194,112 @@ describe("View — replace drops + adds (change-silent)", () => {
 
     const rows = await s.query(undefined, stubStoreCtx());
     expect(rows).toEqual([{ id: "new", value: 2 }]);
+  });
+});
+
+describe("View — cache value ≠ stored record (the fused case)", () => {
+  interface Rec {
+    readonly id: string;
+    readonly n: number;
+  }
+  // The cache value carries the record PLUS a non-serializable live handle that
+  // must never reach the store.
+  interface Wrapper {
+    readonly record: Rec;
+    readonly handle: () => void;
+  }
+
+  function fusedStore(): MemoryCollection<Rec, Record<string, never>> {
+    return new MemoryCollection<Rec, Record<string, never>>({
+      backend: "memory",
+      keyOf: (r) => r.id,
+      matchQuery: () => true,
+    });
+  }
+
+  function fused(
+    s: MemoryCollection<Rec, Record<string, never>> = fusedStore(),
+  ): View<Wrapper, Rec, Record<string, never>, CollectionMutation<Rec>> {
+    return new View<Wrapper, Rec, Record<string, never>, CollectionMutation<Rec>>({
+      store: s,
+      keyOf: (w) => w.record.id,
+      project: (w) => w.record, // strips the live handle
+      toPut: (r) => ({ put: r }),
+      toDelete: (k) => ({ delete: k }),
+      reconstruct: (r) => ({ record: r, handle: () => {} }),
+    });
+  }
+
+  it("write persists ONLY the projected record; getSync returns the wrapper", async () => {
+    const s = fusedStore();
+    const mutateSpy = vi.spyOn(s, "mutate");
+    const v = fused(s);
+    const w: Wrapper = { record: { id: "a", n: 1 }, handle: () => {} };
+
+    v.write(w, stubStoreCtx());
+
+    // Sync read returns the WRAPPER (handle intact).
+    expect(v.getSync("a")).toBe(w);
+    // The store only ever saw the RECORD — no handle crossed the seam.
+    expect(mutateSpy).toHaveBeenCalledWith({ put: { id: "a", n: 1 } }, expect.anything());
+    expect(await s.query(undefined, stubStoreCtx())).toEqual([{ id: "a", n: 1 }]);
+  });
+
+  it("seedSync inserts into the cache with NO store write and NO change emit", async () => {
+    const s = fusedStore();
+    const mutateSpy = vi.spyOn(s, "mutate");
+    const v = fused(s);
+    const changes: ChangeEvent<Wrapper>[] = [];
+    v.onChange((c) => changes.push(c));
+    const w: Wrapper = { record: { id: "seed", n: 7 }, handle: () => {} };
+
+    v.seedSync(w);
+
+    expect(v.getSync("seed")).toBe(w);
+    expect(mutateSpy).not.toHaveBeenCalled();
+    expect(changes).toEqual([]);
+    expect(await s.query(undefined, stubStoreCtx())).toEqual([]); // never persisted
+  });
+
+  it("seedSync pings the key only when { ping: true }", () => {
+    const v = fused();
+    const pings: string[] = [];
+    v.subscribe("p", () => pings.push("p"));
+
+    v.seedSync({ record: { id: "p", n: 1 }, handle: () => {} });
+    expect(pings).toEqual([]); // silent by default
+
+    v.seedSync({ record: { id: "p", n: 2 }, handle: () => {} }, { ping: true });
+    expect(pings).toEqual(["p"]);
+  });
+
+  it("hydrate reconstructs wrappers from stored records", async () => {
+    const s = fusedStore();
+    await s.put({ id: "a", n: 1 }, stubStoreCtx());
+    await s.put({ id: "b", n: 2 }, stubStoreCtx());
+    const v = fused(s);
+
+    const loaded = await v.hydrate(undefined, stubStoreCtx());
+
+    expect(new Set(loaded)).toEqual(new Set(["a", "b"]));
+    const a = v.getSync("a");
+    expect(a?.record).toEqual({ id: "a", n: 1 });
+    expect(typeof a?.handle).toBe("function"); // reconstructed live handle
+  });
+
+  it("hydrate throws when the view has no reconstruct", async () => {
+    const s = fusedStore();
+    await s.put({ id: "a", n: 1 }, stubStoreCtx());
+    // A fused view WITHOUT reconstruct — hydrate has no way to rebuild a wrapper.
+    const v = new View<Wrapper, Rec, Record<string, never>, CollectionMutation<Rec>>({
+      store: s,
+      keyOf: (w) => w.record.id,
+      project: (w) => w.record,
+      toPut: (r) => ({ put: r }),
+      toDelete: (k) => ({ delete: k }),
+    });
+
+    await expect(v.hydrate(undefined, stubStoreCtx())).rejects.toThrow(/reconstruct/);
   });
 });
 

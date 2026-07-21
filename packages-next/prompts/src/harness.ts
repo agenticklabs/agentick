@@ -152,6 +152,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
    */
   private readonly view: View<
     PromptDeclarationRecord,
+    PromptDeclarationRecord,
     PromptStoreQuery,
     CollectionMutation<PromptDeclarationRecord>
   >;

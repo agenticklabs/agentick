@@ -85,7 +85,12 @@ export class StateHarness extends BaseHarness<"state"> implements StateHarnessPr
    * view's cache PRESENCE (`hasSync`), NOT `prev !== undefined` — state may
    * legitimately store `undefined`.
    */
-  private readonly view: View<StateEntry, StateStoreQuery, CollectionMutation<StateEntry>>;
+  private readonly view: View<
+    StateEntry,
+    StateEntry,
+    StateStoreQuery,
+    CollectionMutation<StateEntry>
+  >;
 
   /**
    * Declared commands (ADR 51) — pure layer logic in the handlers; the

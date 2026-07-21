@@ -1,5 +1,5 @@
 /**
- * `View<T, Q, M>` — the harness-held, SYNCHRONOUS projection of a
+ * `View<TCache, TStore, Q, M>` — the harness-held, SYNCHRONOUS projection of a
  * {@link Store}. One primitive that collapses the three things every
  * store-backed harness re-hand-rolled into a `CollectionProjection` + a
  * `KeyedNotifier` + a `ChangeNotifier`:
@@ -12,6 +12,19 @@
  *
  * The store is where data LIVES; the view is the sync working copy. Reactivity
  * is opt-in: a view with no subscribers is a plain write-through cache.
+ *
+ * ## Cache value ≠ stored record (the augmented-fused case)
+ *
+ * The cache holds a `TCache`; the store holds a `TStore`. A pure-mirror view
+ * (knobs/state/skills/prompts) sets `TCache = TStore` — {@link View.collection}
+ * fills `project`/`reconstruct` with identity. A FUSED view (the tasks
+ * harness) caches a `TCache` that is the persisted `TStore` slice PLUS
+ * live-only, non-serializable handles (an `AbortController`, a per-task event
+ * bus, a result deferred): `project: TCache → TStore` strips the handles on
+ * every {@link write}, and `reconstruct?: TStore → TCache` rebuilds the cache
+ * value on {@link hydrate}. Sync reads always traffic in `TCache`; the store
+ * only ever sees `TStore`. {@link seedSync} adopts a record that CAME FROM the
+ * store without re-persisting it (resume / orphan accounting).
  *
  * ## Single mutation vs. bulk (the notify contract)
  *
@@ -48,47 +61,58 @@ import {
 } from "@agentick/pubsub-next";
 
 /**
- * How a {@link View} maps its records onto a store. `keyOf` is the
- * cache key; `toPut` / `toDelete` translate a record (or a key) into the store's
- * mutation vocabulary `M`. The {@link View.collection} factory fills
- * `toPut`/`toDelete` with the trivial {@link CollectionMutation} shape.
+ * How a {@link View} maps its cache values onto a store. `keyOf` is the cache
+ * key; `project` strips a cache value (`TCache`) down to the record persisted
+ * (`TStore`) — identity for a pure mirror; `toPut` / `toDelete` translate a
+ * record (or a key) into the store's mutation vocabulary `M`; `reconstruct`
+ * rebuilds a cache value from a stored record on {@link View.hydrate} (required
+ * only if `hydrate` is used). The {@link View.collection} factory fills
+ * `project`/`reconstruct` with identity and `toPut`/`toDelete` with the trivial
+ * {@link CollectionMutation} shape.
  */
-export interface ViewConfig<T, Q, M> {
-  readonly store: Store<T, Q, M>;
-  readonly keyOf: (item: T) => string;
-  readonly toPut: (item: T) => M;
+export interface ViewConfig<TCache, TStore, Q, M> {
+  readonly store: Store<TStore, Q, M>;
+  readonly keyOf: (item: TCache) => string;
+  /** Cache value → the record persisted. Identity for a pure mirror. */
+  readonly project: (item: TCache) => TStore;
+  readonly toPut: (record: TStore) => M;
   readonly toDelete: (key: string) => M;
+  /** Store record → cache value ({@link View.hydrate}). Required only if `hydrate` is used. */
+  readonly reconstruct?: (record: TStore) => TCache;
 }
 
-export class View<T, Q = void, M = never> {
+export class View<TCache, TStore = TCache, Q = void, M = never> {
   /** The synchronous read cache — the materialized view of the store. */
-  private readonly cache = new Map<string, T>();
+  private readonly cache = new Map<string, TCache>();
   /** Bare render PINGS ("something at `key` changed, re-read"). */
   private readonly notifier: KeyedNotifier = createKeyedNotifier();
   /** Typed push DELTAS carrying `{ key, value?, prev? }` (the notify seam). */
-  private readonly changes: ChangeNotifier<T> = createChangeNotifier<T>();
+  private readonly changes: ChangeNotifier<TCache> = createChangeNotifier<TCache>();
 
-  constructor(private readonly cfg: ViewConfig<T, Q, M>) {}
+  constructor(private readonly cfg: ViewConfig<TCache, TStore, Q, M>) {}
 
   /**
-   * Collection convenience — a view over a {@link CollectionMutation} store,
-   * with `toPut`/`toDelete` prefilled. `keyOf` is the only per-store code.
+   * Collection convenience — a PURE-MIRROR view (`TCache = TStore`) over a
+   * {@link CollectionMutation} store, with `project`/`reconstruct` identity and
+   * `toPut`/`toDelete` prefilled. `keyOf` is the only per-store code.
    */
   static collection<T, Q>(
     store: Store<T, Q, CollectionMutation<T>>,
     keyOf: (item: T) => string,
-  ): View<T, Q, CollectionMutation<T>> {
-    return new View<T, Q, CollectionMutation<T>>({
+  ): View<T, T, Q, CollectionMutation<T>> {
+    return new View<T, T, Q, CollectionMutation<T>>({
       store,
       keyOf,
-      toPut: (item) => ({ put: item }),
+      project: (item) => item,
+      reconstruct: (record) => record,
+      toPut: (record) => ({ put: record }),
       toDelete: (key) => ({ delete: key }),
     });
   }
 
   // ─────────── Synchronous reads (never touch the store) ───────────
 
-  getSync(key: string): T | undefined {
+  getSync(key: string): TCache | undefined {
     return this.cache.get(key);
   }
 
@@ -96,7 +120,7 @@ export class View<T, Q = void, M = never> {
     return this.cache.has(key);
   }
 
-  listSync(): readonly T[] {
+  listSync(): readonly TCache[] {
     return [...this.cache.values()];
   }
 
@@ -108,12 +132,14 @@ export class View<T, Q = void, M = never> {
    * Add-vs-update is decided by cache PRESENCE (`cache.has`), never by
    * `value !== undefined` — a stored value may legitimately BE `undefined`.
    */
-  write(item: T, ctx: StoreCtx): void {
+  write(item: TCache, ctx: StoreCtx): void {
     const key = this.cfg.keyOf(item);
     const had = this.cache.has(key);
     const prev = this.cache.get(key);
     this.cache.set(key, item);
-    void Promise.resolve(this.cfg.store.mutate(this.cfg.toPut(item), ctx)).catch(() => undefined);
+    void Promise.resolve(this.cfg.store.mutate(this.cfg.toPut(this.cfg.project(item)), ctx)).catch(
+      () => undefined,
+    );
     this.notifier.notify(key);
     this.changes.emitChange(had ? { key, value: item, prev } : { key, value: item });
   }
@@ -145,7 +171,7 @@ export class View<T, Q = void, M = never> {
    * wholesale replace is not N deltas; the harness emits its own aggregate
    * (snapshot) frame. Returns nothing — the caller owns any aggregate signal.
    */
-  replace(items: readonly T[], ctx: StoreCtx): void {
+  replace(items: readonly TCache[], ctx: StoreCtx): void {
     const nextKeys = new Set(items.map((it) => this.cfg.keyOf(it)));
     const touched = new Set<string>();
     for (const key of [...this.cache.keys()]) {
@@ -160,10 +186,27 @@ export class View<T, Q = void, M = never> {
     for (const item of items) {
       const key = this.cfg.keyOf(item);
       this.cache.set(key, item);
-      void Promise.resolve(this.cfg.store.mutate(this.cfg.toPut(item), ctx)).catch(() => undefined);
+      void Promise.resolve(
+        this.cfg.store.mutate(this.cfg.toPut(this.cfg.project(item)), ctx),
+      ).catch(() => undefined);
       touched.add(key);
     }
     for (const key of touched) this.notifier.notify(key);
+  }
+
+  /**
+   * Cache-only insert — NO store write, NO typed change emit. For adopting a
+   * cache value whose record CAME FROM the store (hydration / resume / orphan
+   * accounting), where re-persisting it would be wrong (it is already durable)
+   * and a change delta would double-count it. `ping` optionally fires the
+   * render notifier for the key (default `false` — a silent adopt). This is the
+   * seam that lets a fused view ({@link project} ≠ identity) carry live-only
+   * handles that must NOT round-trip through the store.
+   */
+  seedSync(item: TCache, opts?: { readonly ping?: boolean }): void {
+    const key = this.cfg.keyOf(item);
+    this.cache.set(key, item);
+    if (opts?.ping === true) this.notifier.notify(key);
   }
 
   /**
@@ -173,11 +216,18 @@ export class View<T, Q = void, M = never> {
    * reason as {@link replace}. A fresh store is empty ⇒ a no-op returning `[]`.
    */
   async hydrate(q: Q | undefined, ctx: StoreCtx): Promise<readonly string[]> {
-    const items = await this.cfg.store.query(q, ctx);
+    const reconstruct = this.cfg.reconstruct;
+    if (reconstruct === undefined) {
+      throw new Error(
+        "View.hydrate requires a `reconstruct` (store record → cache value); this view was constructed without one.",
+      );
+    }
+    const records = await this.cfg.store.query(q, ctx);
     const keys: string[] = [];
-    for (const it of items) {
-      const key = this.cfg.keyOf(it);
-      this.cache.set(key, it);
+    for (const record of records) {
+      const item = reconstruct(record);
+      const key = this.cfg.keyOf(item);
+      this.cache.set(key, item);
       keys.push(key);
     }
     for (const key of keys) this.notifier.notify(key);
@@ -202,7 +252,7 @@ export class View<T, Q = void, M = never> {
   }
 
   /** Subscribe to the typed change stream (the push notify seam). */
-  onChange(fn: (c: ChangeEvent<T>) => void): Unsubscribe {
+  onChange(fn: (c: ChangeEvent<TCache>) => void): Unsubscribe {
     return this.changes.onChange(fn);
   }
 }

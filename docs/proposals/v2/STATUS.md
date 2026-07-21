@@ -1725,6 +1725,35 @@ blueprint's design decisions; this is execution-level).
 
 ### 2026-07-20
 
+- **Store convergence — Run 2 LANDED: `View` generalized (cache ≠ store) + tasks
+  migrated.** The thesis test — does `View` cover the augmented FUSED case, or was
+  it only ever a pure-mirror? It covers it, cleanly. `View<TCache, TStore = TCache,
+  Q, M>` gains a symmetric CQRS boundary pair — `project: TCache→TStore` (strip on
+  write) + `reconstruct?: TStore→TCache` (rebuild on hydrate) — plus `seedSync`
+  (cache-only adopt of a record that came FROM the store, no re-persist, no
+  change-emit). `View.collection` fills identity, so the 4 pure-mirror consumers
+  are unchanged (annotations widened to 4-param, zero behavior change). **tasks**
+  dropped its hand-rolled `live: Map<string,LiveTask>` for `View<LiveTask,
+  TaskRecord,…>` (`project = lt => lt.record`): `persist()` → `view.write`,
+  adopt-from-store → `view.seedSync`, the interrupted-resume branch seeds then
+  writes to round-trip the mutation. tasks keeps its per-task `eventBus` (domain
+  event stream, NOT the projection notifier) and bespoke `hydrateOrphans`
+  (reattach) — View's notify/hydrate are opt-in, unused here. The old
+  `TODO(store-phase-N)` betting the primitive would never fit tasks is refuted and
+  removed. Gates: typecheck --force 152/152 0-cached; tasks 140 passed (kill/resume
+  + cancellation unchanged); store + pure-mirror 349 passed; oxfmt + oxlint clean.
+  **Remaining to zero straddle:** session (single-key `View`), timeline
+  (`LogView` sibling), resources (`View` + resolver sidecar); credentials stays
+  the principled no-view (async-only) case.
+
+- **Store convergence — Run 1 LANDED: `Store` is the universal store contract.**
+  `CollectionStore`/`LogStore` formally `extends Store`; every concrete store
+  (in-memory defaults, generic decorators, Postgres/Fs adapters, AND credentials)
+  implements `query`/`mutate`; the profile methods are sugar. `LogQuery`/
+  `LogMutation` defined; duplicate `backend` dropped from the profiles; Cut-1
+  coexistence TODOs removed. No store-level straddle left. Gates: typecheck
+  --force 152/152 0-cached; vitest 1000 passed (+ timeline-fs 19); oxlint clean.
+
 - **Store convergence — Cut 1 LANDED (foundation + pilot proof).** The
   nine store-backed harnesses each hand-rolled the same reactive machine; the
   convergence collapses it. Design: `docs/proposals/v2/store.md`

@@ -107,7 +107,7 @@ export class SkillsHarness extends BaseHarness<SkillsSurface> implements SkillsH
    * pure-mirror collection view fits without refinement. Keyed by `Skill.name`.
    * No `onChange` subscriber — skills has no client-facing change channel.
    */
-  private readonly view: View<Skill, SkillStoreQuery, CollectionMutation<Skill>>;
+  private readonly view: View<Skill, Skill, SkillStoreQuery, CollectionMutation<Skill>>;
 
   /** Cached snapshot for `list()`. Invalidated on every mutation. */
   private listCache: readonly Skill[] | null = null;

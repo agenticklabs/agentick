@@ -59,9 +59,11 @@ import {
   type EscalationHop,
 } from "@agentick/runtime-next";
 import { createLocalPubSub, type LocalPubSub } from "@agentick/pubsub-next";
+import { View } from "@agentick/store-next";
 import { omitUndefined } from "@agentick/utils-next";
 import type {
   ChannelSnapshotProvider,
+  CollectionMutation,
   ContentBlock,
   ElicitFn,
   ElicitationResult,
@@ -86,6 +88,7 @@ import type {
   TaskReport,
   TaskStatus,
   TaskStore,
+  TaskStoreQuery,
   TaskTransition,
   TaskWork,
   TaskWorkContext,
@@ -240,36 +243,26 @@ export class TasksHarness
   implements TasksHarnessProtocol, ChannelSnapshotProvider
 {
   /**
-   * In-process projection of the store, scoped to this harness's tasks.
-   *
-   * This is the **augmented-cache VARIANT** of `@agentick/store-next`'s
-   * {@link CollectionProjection} — NOT a composition of it. The primitive is a
-   * PURE MIRROR: its cache value equals the stored record type `T`, so
-   * `getSync`/`write`/`hydrate` all traffic in `T`. Tasks breaks that
-   * assumption: the cache value is a {@link LiveTask} = the persisted
-   * `TaskRecord` slice (`live.record`, a strict mirror of the last `store.put`)
+   * In-process projection of the store, scoped to this harness's tasks — a
+   * {@link View} in its AUGMENTED-FUSED configuration (cache value ≠ stored
+   * record). The cache value is a {@link LiveTask} (`TCache`): the persisted
+   * `TaskRecord` slice (`live.record`, a strict mirror of the last store write)
    * PLUS live-only runtime handles (AbortController, per-task event bus, result
-   * deferred, executor handle, ttl timer) that are NEVER persisted. The record
-   * slice mirrors the store exactly the way the primitive prescribes —
-   * write-through on every transition ({@link persist} → `store.put`) and merge
-   * on resume ({@link hydrateOrphans} → `store.list`) — but the cache holds
-   * MORE than the store does.
+   * deferred, executor handle, ttl timer) that are NEVER persisted. The store
+   * holds only the `TaskRecord` (`TStore`); `project: (lt) => lt.record` strips
+   * the handles on every {@link View.write}, so write-through persists the
+   * record slice while the cache carries more.
    *
-   * Composing `CollectionProjection<TaskRecord>` here would split the record
-   * onto the projection and the handles onto a parallel `Map<taskId, …>` kept
-   * in lockstep — but record and handles are co-accessed at essentially every
-   * site (submit, applyTransition, settle, cancel, close, events, the ttl
-   * reaper, the report closures: ~70 references against 2 store touchpoints).
-   * `LiveTask` exists precisely to carry them together; splitting them trades a
-   * clean single map for two lockstep maps + doubled lookups across the file.
-   * That's distortion for the sake of reuse, so tasks stays hand-rolled.
-   *
-   * TODO(store-phase-N): revisit only if `CollectionProjection` grows a
-   * pure-mirror-with-sidecar shape (cache value = `T` + a per-key sidecar) that
-   * fits without the lockstep-map penalty. Until such a shape earns its keep
-   * across ≥2 augmented-cache harnesses, the variant is the right call.
+   * The record slice mirrors the store the way {@link View} prescribes:
+   * write-through on every transition ({@link applyTransition} → `view.write`)
+   * and cache-only adoption on resume ({@link adoptHydrated} → `view.seedSync`,
+   * for records that CAME FROM the store — re-persisting them would be wrong).
+   * Tasks does NOT use `view.subscribe`/`onChange`/`hydrate`: fan-out rides the
+   * per-task `eventBus` (the DOMAIN event stream) and resume is bespoke
+   * ({@link hydrateOrphans} — reattach/interrupt logic). Holding a `View` for
+   * the cache + write-through is the conformance; the notify seams are opt-in.
    */
-  private readonly live = new Map<string, LiveTask>();
+  private readonly view: View<LiveTask, TaskRecord, TaskStoreQuery, CollectionMutation<TaskRecord>>;
   private readonly parentScope: EventScope | undefined;
   /** `parentScope ?? {}` — stamped on records + used as the store filter. */
   private readonly scope: EventScope;
@@ -314,6 +307,17 @@ export class TasksHarness
     this.parentScope = options.parentScope;
     this.scope = options.parentScope ?? {};
     this.store = options.store ?? new InMemoryTaskStore();
+    // Fused View over the store: cache = LiveTask (record + live handles),
+    // store = TaskRecord. `project` strips the non-serializable handles on
+    // every write; `keyOf` is the record's taskId. No `reconstruct` — resume
+    // is bespoke (hydrateOrphans → seedSync), never `view.hydrate`.
+    this.view = new View<LiveTask, TaskRecord, TaskStoreQuery, CollectionMutation<TaskRecord>>({
+      store: this.store,
+      keyOf: (lt) => lt.record.taskId,
+      project: (lt) => lt.record,
+      toPut: (r) => ({ put: r }),
+      toDelete: (k) => ({ delete: k }),
+    });
     // Registry = bundled default FIRST, provided list merged over it
     // (provided wins on `.kind` collision). Keyed by each executor's own
     // `.kind` — the adopter never writes a Record whose keys would just
@@ -460,11 +464,10 @@ export class TasksHarness
       resultDeferred: makeDeferred<unknown>(),
       execution: undefined,
     };
-    this.live.set(taskId, live);
-
-    // Durable-write + live-emit the initial `working` snapshot BEFORE the
-    // executor starts (so subscribers see `working` first).
-    this.persist(record);
+    // Cache (LiveTask) + durable-write (projected record) the initial
+    // `working` snapshot, then live-emit it BEFORE the executor starts (so
+    // subscribers see `working` first).
+    this.view.write(live, this.storeCtx());
     this.publishStatus(live);
 
     // Start the resolved executor. A closure executor invokes `work`
@@ -627,7 +630,7 @@ export class TasksHarness
           ...omitUndefined({ total: p.total, message: p.message }),
         },
       };
-      this.persist(live.record);
+      this.view.write(live, this.storeCtx());
       this.publishProgress(live, p);
       return;
     }
@@ -635,7 +638,7 @@ export class TasksHarness
     // Status-message-only — the `setStatusMessage` seam. Still `working`.
     if (t.statusMessage !== undefined && t.status === undefined) {
       live.record = { ...record, updatedAt: now, statusMessage: t.statusMessage };
-      this.persist(live.record);
+      this.view.write(live, this.storeCtx());
       this.publishStatus(live);
       return;
     }
@@ -650,7 +653,7 @@ export class TasksHarness
         ...(t.statusMessage !== undefined ? { statusMessage: t.statusMessage } : {}),
         ...(t.result !== undefined ? { result: t.result } : {}),
       };
-      this.persist(live.record);
+      this.view.write(live, this.storeCtx());
       this.publishStatus(live);
       if (this.isTerminal(live.record.status)) this.settle(live);
     }
@@ -680,22 +683,22 @@ export class TasksHarness
   // ─────────── lookups (served from the projection — the store read-model) ───────────
 
   get(taskId: string): TaskInfo | undefined {
-    const live = this.live.get(taskId);
+    const live = this.view.getSync(taskId);
     return live ? this.snapshot(live.record) : undefined;
   }
 
   list(): readonly TaskInfo[] {
     const out: TaskInfo[] = [];
-    for (const live of this.live.values()) out.push(this.snapshot(live.record));
+    for (const live of this.view.listSync()) out.push(this.snapshot(live.record));
     return out;
   }
 
   status(taskId: string): TaskStatus | undefined {
-    return this.live.get(taskId)?.record.status;
+    return this.view.getSync(taskId)?.record.status;
   }
 
   async result<T = readonly ContentBlock[]>(taskId: string): Promise<T> {
-    const live = this.live.get(taskId);
+    const live = this.view.getSync(taskId);
     if (!live) {
       throw new UnknownTaskError({ taskId });
     }
@@ -705,7 +708,7 @@ export class TasksHarness
   // ─────────── cancel ───────────
 
   async cancel(taskId: string, reason?: string): Promise<void> {
-    const live = this.live.get(taskId);
+    const live = this.view.getSync(taskId);
     if (!live) {
       throw new UnknownTaskError({ taskId });
     }
@@ -737,7 +740,7 @@ export class TasksHarness
   // ─────────── events ───────────
 
   events(taskId: string): AsyncIterable<TaskEvent> {
-    const live = this.live.get(taskId);
+    const live = this.view.getSync(taskId);
     if (!live) {
       throw new UnknownTaskError({ taskId });
     }
@@ -752,7 +755,7 @@ export class TasksHarness
     // DETACHED tasks are left running + persisted (ADR 68) — the shared
     // app-scoped store keeps their records; their executor keeps running.
     const pending: Array<Promise<void>> = [];
-    for (const live of this.live.values()) {
+    for (const live of this.view.listSync()) {
       if (this.isTerminal(live.record.status)) continue;
       if (live.record.detached) continue;
       pending.push(this.cancelInternal(live, "harness_closed"));
@@ -760,7 +763,7 @@ export class TasksHarness
     await Promise.all(pending);
     // Drain event buses — EXCEPT those of still-running detached tasks,
     // which keep emitting after this harness closes.
-    for (const live of this.live.values()) {
+    for (const live of this.view.listSync()) {
       if (live.record.detached && !this.isTerminal(live.record.status)) continue;
       await live.eventBus.close();
     }
@@ -802,7 +805,7 @@ export class TasksHarness
       try: async () => {
         if (msg.payload === undefined) return undefined;
         const { taskId, reason } = msg.payload;
-        const live = this.live.get(taskId);
+        const live = this.view.getSync(taskId);
         if (!live || this.isTerminal(live.record.status)) return undefined;
         await this.cancelInternal(live, reason ?? "remote_cancel");
         return undefined;
@@ -839,7 +842,7 @@ export class TasksHarness
       try: async () => {
         if (msg.payload === undefined) return undefined;
         const { taskId, replyTo, correlationId } = msg.payload;
-        const live = this.live.get(taskId);
+        const live = this.view.getSync(taskId);
         let reply: TasksResultReply<unknown>;
         if (!live) {
           reply = {
@@ -880,7 +883,7 @@ export class TasksHarness
    */
   pendingCount(): number {
     let count = 0;
-    for (const live of this.live.values()) {
+    for (const live of this.view.listSync()) {
       if (!this.isTerminal(live.record.status)) count++;
     }
     return count;
@@ -925,18 +928,12 @@ export class TasksHarness
     };
   }
 
-  /**
-   * Fire-and-forget durable write. Reads are served from the synchronous
-   * projection (updated by the caller before this runs), so the store
-   * write is off the critical path. Errors are swallowed — a store write
-   * failure MUST NOT crash the harness. TODO(#134-followup): a durable
-   * store (pg) wants a flush barrier + typed write-failed surfacing;
-   * the in-memory default resolves synchronously so there's nothing to
-   * await today.
-   */
-  private persist(record: TaskRecord): void {
-    void this.store.put(record, this.storeCtx()).catch(() => undefined);
-  }
+  // Durable write-through is the View's job now ({@link view}.write): cache the
+  // LiveTask, fire-and-forget the projected record to the store off the
+  // critical path (a store failure MUST NOT crash the harness — View swallows
+  // it). TODO(#134-followup): a durable store (pg) wants a flush barrier +
+  // typed write-failed surfacing; the in-memory default resolves synchronously
+  // so there's nothing to await today.
 
   // ─────────── Status channel snapshot (ADR 87 / K8s watch-list) ───────────
 
@@ -1043,7 +1040,7 @@ export class TasksHarness
   private async hydrateOrphans(): Promise<void> {
     const records = await this.store.list({ scope: this.scope }, this.storeCtx());
     for (const record of records) {
-      if (this.live.has(record.taskId)) continue; // this harness owns it live
+      if (this.view.hasSync(record.taskId)) continue; // this harness owns it live
       if (record.status !== "working" && record.status !== "input_required") {
         this.adoptHydrated(record); // terminal from a prior run
         continue;
@@ -1066,8 +1063,11 @@ export class TasksHarness
         failure: { kind: "aborted", reason: "interrupted" },
         updatedAt: Date.now(),
       };
-      this.persist(interrupted);
       const live = this.adoptHydrated(interrupted);
+      // The record was MUTATED (marked interrupted) — persist the mutation via
+      // write-through. `adoptHydrated` only SEEDS the cache (adopting a store
+      // record as-is); this branch changed it, so it must round-trip.
+      this.view.write(live, this.storeCtx());
       this.publishStatus(live); // record-source-of-truth: every transition emits
     }
   }
@@ -1075,7 +1075,7 @@ export class TasksHarness
   /** Report path bound to a taskId that will be adopted into the projection. */
   private makeReportFor(taskId: string): TaskReport {
     return (transition) => {
-      const live = this.live.get(taskId);
+      const live = this.view.getSync(taskId);
       if (live) this.applyTransition(live, transition);
     };
   }
@@ -1110,7 +1110,11 @@ export class TasksHarness
       resultDeferred,
       execution: undefined,
     };
-    this.live.set(record.taskId, live);
+    // Cache-only adopt: this record CAME FROM the store (hydration/resume), so
+    // re-persisting it would be wrong. `seedSync` sets the cache without a
+    // store write or a change emit. A branch that MUTATES the record (e.g.
+    // marking it interrupted) follows this with `view.write` to round-trip.
+    this.view.seedSync(live);
     return live;
   }
 }

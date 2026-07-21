@@ -136,7 +136,7 @@ export class KnobsHarness
    * constructor-wired StateDelta channel projects. The store holds value cells
    * only — descriptors are tree-derived and merged over them at read time.
    */
-  private readonly view: View<KnobEntry, KnobStoreQuery, CollectionMutation<KnobEntry>>;
+  private readonly view: View<KnobEntry, KnobEntry, KnobStoreQuery, CollectionMutation<KnobEntry>>;
   private readonly descriptors = new Map<string, KnobRegistration>();
 
   /**
