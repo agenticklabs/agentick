@@ -9,6 +9,8 @@
  */
 
 import type { ContentBlock } from "../data/content-blocks.js";
+import type { ClientToolDeclaration } from "../data/declarations.js";
+import type { ToolResultInput } from "../data/tool-result.js";
 import type { EventQuery } from "../data/events.js";
 import type { ExecutionResult } from "../data/execution-result.js";
 import type { ExecutionTarget } from "../data/execution-target.js";
@@ -234,6 +236,75 @@ export interface SessionRespondToElicitationParams extends WireRequestParams {
 export type SessionRespondToElicitationResult = null;
 
 // ============================================================================
+// session/set_client_tools — DECLARE a client's CLIENT-HANDLED tool set
+// ============================================================================
+
+/**
+ * Client → server: DECLARE the client's full client-handled tool set for a
+ * session. A client is a declarative tool SOURCE that owns a slice: it sends
+ * its ENTIRE set, and the framework REPLACES the client slice wholesale — the
+ * wire twin of the reconciler's `replaceReconcilerTools`. This one verb
+ * subsumes register (a tool present in the set), unregister (a tool absent
+ * from it), and idempotency (the set IS the truth — it's a replace, not an
+ * accumulate). Reconnect = re-declare; drift-free by construction.
+ *
+ * Each `declarations` element is the serializable {@link ClientToolDeclaration}
+ * slice (raw JSON-Schema `inputSchema`, no `handlerRef`). The gateway clears
+ * the `{ scope: "client", sessionId }` slice
+ * (`removeBoundTools({ binding: { scope: "client", sessionId } })`) then folds
+ * each declaration into a client-handled `ToolRegistration` (via
+ * `toClientToolRegistration`, `client` binding) and registers it. The tools
+ * enter the model's tool list on the next `compileForTick`; a model call is
+ * relayed to the client over the tool-call channel (answered with
+ * {@link SessionRespondToToolCallParams}).
+ *
+ * The declarations carry no live validators — a wire client can't serialize a
+ * function; each raw JSON Schema is wrapped server-side. This is the
+ * JSON-Schema-not-StandardSchema wire constraint.
+ *
+ * **Multi-client caveat.** The client slice is keyed by `sessionId`, not by
+ * connection — every client on a session shares ONE slice, so concurrent
+ * `set_client_tools` calls are last-write-wins over the whole set. Coordinating
+ * which client owns the tools (and handling unsupported-tool fallbacks) is the
+ * APP's concern; the framework presumes nothing. Per-connection sub-slices are
+ * a future extension.
+ */
+export interface SessionSetClientToolsParams extends WireRequestParams {
+  readonly sessionId: string;
+  readonly declarations: readonly ClientToolDeclaration[];
+}
+
+export interface SessionSetClientToolsResult {
+  /** Number of client tools now installed in the slice (= `declarations.length`). */
+  readonly count: number;
+}
+
+// ============================================================================
+// session/respond_to_tool_call — relay a client's tool-call result back
+// ============================================================================
+
+/**
+ * Client → server: deliver the result for a CLIENT-HANDLED tool call the
+ * server relayed on `session:channel:tool_call`. The gateway routes this RPC
+ * to the session tool executor's `respondToToolCall({ correlationId, result })`
+ * — the same `request-response` resolution path elicitation replies use, so
+ * the suspended `this.request(TOOL_CALL_CHANNEL, …)` dispatch resumes with the
+ * client's result.
+ *
+ * `correlationId` is the value carried on the tool-call REQUEST envelope's
+ * `metadata.correlationId`. `result` is the ADR 70 result currency
+ * (`string` | `ContentBlock[]` | envelope). Idempotent: unknown /
+ * already-resolved correlationIds are silent no-ops (first-write-wins).
+ */
+export interface SessionRespondToToolCallParams extends WireRequestParams {
+  readonly sessionId: string;
+  readonly correlationId: string;
+  readonly result: ToolResultInput;
+}
+
+export type SessionRespondToToolCallResult = null;
+
+// ============================================================================
 // subscribe / unsubscribe — persistent (non-execution-bound) subscriptions
 // ============================================================================
 
@@ -433,6 +504,25 @@ export interface WireMethods {
   "session/respond_to_elicitation": {
     params: SessionRespondToElicitationParams;
     result: SessionRespondToElicitationResult;
+  };
+  /**
+   * DECLARE a client's full CLIENT-HANDLED tool set into a session (raw
+   * JSON-Schema inputs, no handlers) — a whole-slice replace, the wire twin
+   * of the reconciler's `replaceReconcilerTools`. Session-namespace +
+   * gateway-resident handler, so the row lives here (spec) rather than a
+   * harness `declare module` augment — the gateway that owns
+   * `sessionWireExtension` is harness-agnostic and can't depend on
+   * `@agentick/tool-executor-next` to see an augment. Mirrors
+   * `session/respond_to_elicitation`.
+   */
+  "session/set_client_tools": {
+    params: SessionSetClientToolsParams;
+    result: SessionSetClientToolsResult;
+  };
+  /** Relay a client's result for a suspended client-handled tool call. */
+  "session/respond_to_tool_call": {
+    params: SessionRespondToToolCallParams;
+    result: SessionRespondToToolCallResult;
   };
 
   /**

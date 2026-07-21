@@ -48,6 +48,10 @@ describe("GatewayHarness — framework wire extensions", () => {
     expect(registry.resolve("session/respond_to_elicitation")?.extension).toBe(
       sessionWireExtension,
     );
+    // Client-tool wire verbs (stage 2) — session-namespace, so they ride the
+    // gateway's session extension alongside respond_to_elicitation.
+    expect(registry.resolve("session/set_client_tools")?.extension).toBe(sessionWireExtension);
+    expect(registry.resolve("session/respond_to_tool_call")?.extension).toBe(sessionWireExtension);
     // sub/* namespace (renamed from bare subscribe/unsubscribe per #300).
     expect(registry.resolve("sub/subscribe")?.extension).toBe(subscriptionsWireExtension);
     expect(registry.resolve("sub/unsubscribe")?.extension).toBe(subscriptionsWireExtension);

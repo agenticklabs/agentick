@@ -375,7 +375,16 @@ export class SessionHarness<P = unknown>
   private readonly reconciler: ReconcilerProtocol;
   private readonly loop: LoopExecutorProtocol;
   private readonly executor: SessionHarnessOptions<P>["executor"];
-  private readonly toolExecutor: ToolExecutorProtocol;
+  /**
+   * Per-session tool executor. PUBLIC (not the `private` sibling of `loop` /
+   * `executor`) because it is the seam the gateway wire routes
+   * `session/set_client_tools` (client-tool declaration) and
+   * `session/respond_to_tool_call` (client relay) through — the tool-executor
+   * twin of the public `get elicitation()` seam that backs
+   * `session/respond_to_elicitation`. The gateway stays harness-agnostic and
+   * casts to `ToolExecutorProtocol` structurally at the call site.
+   */
+  readonly toolExecutor: ToolExecutorProtocol;
   private readonly target: ExecutionTarget;
   private readonly spawnContext: SpawnContext<P> | undefined;
   private readonly parentSessionId: string | undefined;

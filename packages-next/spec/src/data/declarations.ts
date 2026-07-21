@@ -56,7 +56,16 @@ export type ToolExposure = "model" | "dispatch" | "runtime";
  *   5. `execution`  — `session.send({ tools })`, per-call
  *   6. `extension`  — installed via the extension protocol; precedence
  *                     follows the `level` at which it was installed
- *   7. `reconciler` — contributed by the reconciler from the rendered
+ *   7. `client`     — a remote declarative slice a CLIENT owns and
+ *                     REPLACES wholesale via `session/set_client_tools`
+ *                     (the wire twin of the reconciler's
+ *                     `replaceReconcilerTools`). Session-lifetime; the
+ *                     framework clears the client slice and reinstalls
+ *                     the declared set on every `set_client_tools`. Held
+ *                     DISTINCT from `session` so a client's declarative
+ *                     replace never clobbers the app's static
+ *                     `createSession({ tools })` slice.
+ *   8. `reconciler` — contributed by the reconciler from the rendered
  *                     tree (any reconciler — React/JSX, programmatic,
  *                     template-based — producing a valid RenderedTree
  *                     uses this slot); replaced fresh per render, most
@@ -64,7 +73,19 @@ export type ToolExposure = "model" | "dispatch" | "runtime";
  *
  * Precedence on name collision (low → high): runtime < gateway <
  * \{app, extension\@app\} < \{session, extension\@session\} < execution <
- * reconciler.
+ * client < reconciler.
+ *
+ * **Where `client` sits — and why.** `client` and `reconciler` are the
+ * two DECLARATIVE-SLICE-SOURCE scopes: each owns a whole slice its
+ * source replaces atomically (`set_client_tools` / `replaceReconcilerTools`),
+ * unlike the static per-layer config seams (gateway/app/session/execution).
+ * `client` is placed just BELOW `reconciler`: a live client's current
+ * declaration outranks the static session/execution config seams (it is the
+ * more specific, up-to-date remote source), but the in-process rendered tree
+ * stays authoritative — a tool the running tree declares wins over a
+ * same-named client tool. This placement is a deliberate default, not a law:
+ * it is tunable in `PRECEDENCE_RANK` (`@agentick/tool-executor-next`) should a
+ * deployment want client tools to outrank the tree.
  *
  * @see docs/proposals/v2/blueprint/07-tool-executor.md §Layered config
  */
@@ -79,6 +100,16 @@ export type ToolBinding =
       readonly extensionName: string;
       readonly level: "gateway" | "app" | "session";
     }
+  /**
+   * A CLIENT-owned declarative tool slice, keyed by `sessionId`. A client
+   * declares its FULL set over `session/set_client_tools`; the framework
+   * clears this slice (`removeBoundTools({ binding: { scope: "client",
+   * sessionId } })`) and reinstalls the declared tools — the wire twin of
+   * `replaceReconcilerTools`. Session-lifetime: reaped on session close.
+   * DISTINCT from `session` (which holds `createSession({ tools })`) so the
+   * slice-replace never clobbers app tools.
+   */
+  | { readonly scope: "client"; readonly sessionId: string }
   | { readonly scope: "reconciler"; readonly mountId: string };
 
 /**
@@ -106,18 +137,24 @@ export interface ToolAnnotations {
    * Humanized display name for a tool call ("Write file" vs
    * `write_file`). Presentation ONLY — surfaced on the tool-start
    * lifecycle event and in the resolved {@link ToolPresentation}; never
-   * sent to the model as the tool's identifier. Sits at the BOTTOM of the
-   * display precedence chain (above the bare `name`):
-   * `modelNarration ?? displaySummary ?? title ?? name`. `[V1-RESTORED]`.
+   * sent to the model as the tool's identifier. The IDENTITY axis (what
+   * the tool IS): resolved to {@link ToolPresentation.title} and surfaced
+   * DISTINCTLY alongside the author's `displaySummary` and the model's
+   * `narration` — the framework collapses none of them. A client composes
+   * identity from `title ?? name`; that precedence is the client's call,
+   * not the framework's. `[V1-RESTORED]`.
    */
   readonly title?: string;
   /**
    * Author's summary of what a SPECIFIC call is doing, for host/UI
    * display. A seam: a static `string` OR a per-call function evaluated
    * at dispatch against the VALIDATED input + live {@link ToolHandlerCtx}
-   * (sync or async). Sits in the display precedence chain BELOW the
-   * model's own `_summary` narration and ABOVE {@link title}/name:
-   * `modelNarration ?? displaySummary ?? title ?? name`.
+   * (sync or async). The author's ACTIVITY axis (what this call does):
+   * resolved to {@link ToolPresentation.summary} and surfaced DISTINCTLY
+   * from the model's own `_summary` narration ({@link ToolPresentation.narration})
+   * and from {@link title}/name — the framework collapses none of them. A
+   * client composes activity from `narration ?? summary`; that precedence is
+   * the client's call, not the framework's.
    *
    * The function form is a RUNTIME value — erased from the serialized
    * declaration (like {@link ToolConfirmationPredicate}); over-the-wire
@@ -305,6 +342,92 @@ export interface ToolDeclaration {
   readonly providerOptions?: ProviderToolOptions;
 }
 
+// ============================================================================
+// Client tool declaration — the serializable wire slice of ToolDeclaration
+// ============================================================================
+
+/**
+ * The SERIALIZABLE subset of {@link ToolAnnotations} a client may send when
+ * declaring its tool set over the wire (`session/set_client_tools`). Every
+ * field here JSON-serializes; the callable seams on {@link ToolAnnotations}
+ * (`requiresConfirmation` predicate, `confirmationMessage` / `displaySummary`
+ * / `defaultResult` FUNCTION forms, `confirmationPreview`) are runtime values
+ * that cannot cross the wire and are simply ABSENT from this projection.
+ *
+ * Structurally assignable to {@link ToolAnnotations}: each field narrows to
+ * the static form of the corresponding annotation, so a
+ * {@link ClientToolDeclaration} folds into a {@link ToolDeclaration} without
+ * a cast.
+ */
+export interface ClientToolAnnotations {
+  readonly intent?: "render" | "action" | "compute";
+  /** Humanized display identity. Presentation only. */
+  readonly title?: string;
+  /**
+   * `true` ⇒ the client-handled dispatch SUSPENDS and relays the call to the
+   * client, resolving with the client's returned result. Falsy ⇒
+   * fire-and-forget (notify + resolve with {@link defaultResult}).
+   */
+  readonly requiresResponse?: boolean;
+  /** Per-tool wait bound (ms) for the relayed result. */
+  readonly responseTimeoutMs?: number;
+  /** Per-call timeout (ms). */
+  readonly timeout?: number;
+  /**
+   * Static confirmation gate. Over the wire only the boolean form is
+   * expressible; the per-call {@link ToolConfirmationPredicate} is server-only.
+   */
+  readonly requiresConfirmation?: boolean;
+  /** Per-tool confirmation-wait timeout (ms). */
+  readonly confirmationTimeoutMs?: number;
+  /** Static confirmation prompt. The function form is server-only. */
+  readonly confirmationMessage?: string;
+  /**
+   * Static fallback result blocks — used for fire-and-forget and as the
+   * relayed-result timeout fallback. The function form is server-only.
+   */
+  readonly defaultResult?: readonly ContentBlock[];
+  /** Long-running task semantics. */
+  readonly taskSupport?: "unsupported" | "supported" | "required";
+  /** Default TTL (ms) for task-mode invocations. */
+  readonly taskTtlMs?: number;
+}
+
+/**
+ * The serializable slice of a {@link ToolDeclaration} a CLIENT sends — as one
+ * element of the full set — when it DECLARES its tools into a session over the
+ * wire (`session/set_client_tools`).
+ *
+ * Two firewall-driven differences from {@link ToolDeclaration}:
+ *
+ *   1. `inputSchema` is a raw {@link JsonSchema} object, NOT a
+ *      `StandardSchemaV1` validator — a validator is a runtime function and
+ *      cannot serialize. The server wraps it into a Standard-Schema validator
+ *      (`jsonSchema(inputSchema)`) at registration time; see
+ *      {@link import("../protocol/tool-executor.js").toClientToolRegistration}.
+ *   2. NO `handlerRef` — its absence is the CLIENT-HANDLED discriminator (the
+ *      tool executor relays dispatch to the client instead of invoking a local
+ *      handler). The registration built from this declaration deliberately
+ *      omits `handlerRef`.
+ *
+ * `annotations` is the serializable {@link ClientToolAnnotations} slice (the
+ * callable seams are server-only and absent). `id` is not carried — the
+ * server derives it from `name`.
+ */
+export interface ClientToolDeclaration {
+  readonly name: string;
+  readonly description: string;
+  /**
+   * Raw JSON Schema object for the tool input. Wrapped server-side into a
+   * `StandardSchemaV1` via `jsonSchema(...)` — the wire cannot carry a live
+   * validator.
+   */
+  readonly inputSchema: JsonSchema;
+  readonly annotations?: ClientToolAnnotations;
+  /** Alternate dispatch names. */
+  readonly aliases?: readonly string[];
+}
+
 /**
  * RESERVED model-input field name for tool-call self-narration.
  *
@@ -335,10 +458,15 @@ export const TOOL_NARRATION_FIELD = "_summary" as const;
 
 /**
  * Resolved presentation for a tool call — the "what is this call doing?"
- * answer, drawn from three sources with one precedence chain
- * (`modelNarration ?? displaySummary ?? title ?? name`). Produced by the
- * tool executor at dispatch and surfaced for host/UI display; presentation
- * only, never sent to the model.
+ * answer along TWO axes, identity (what the tool IS) and activity (what
+ * this call DOES), drawn from four sources surfaced as FOUR DISTINCT
+ * fields — `name`, `title`, `summary`, `narration` — never collapsed into a
+ * single precedence chain. Produced by the tool executor at dispatch and
+ * surfaced for host/UI display; presentation only, never sent to the model.
+ * The framework presumes NO precedence: a client composes identity from
+ * `title ?? name` and activity from `narration ?? summary` (or shows them
+ * separately, or badges the model's words) — that precedence is a client
+ * concern, not the framework's.
  */
 export interface ToolPresentation {
   /**

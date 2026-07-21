@@ -43,12 +43,15 @@ import type { HarnessFx } from "./middleware.js";
 import type { Effect } from "effect";
 import type { ContentBlock } from "../data/content-blocks.js";
 import type {
+  ClientToolDeclaration,
   ToolBinding,
   ToolDeclaration,
   ToolExposure,
   ToolPresentation,
 } from "../data/declarations.js";
+import type { ToolResultInput } from "../data/tool-result.js";
 import type { StandardSchemaIssue } from "../data/standard-schema.js";
+import { jsonSchema } from "../data/standard-schema.js";
 import type { SubstrateError } from "../data/errors.js";
 import type { ToolExecutorErrorChannel } from "../errors/harnesses.js";
 import type { PromiseView } from "./promise-view.js";
@@ -208,13 +211,14 @@ export interface DispatchResult {
   readonly cacheHit?: boolean;
   /**
    * Resolved tool-call presentation — the "what is this call doing?"
-   * answer with precedence `modelNarration ?? displaySummary ?? title ??
-   * name` (see {@link ToolPresentation}). Computed by the executor at
-   * dispatch (the single resolution site — it holds the stripped model
-   * narration, the tool annotations, and the validated input). The loop
-   * surfaces it on the tool lifecycle path. Presentation only; never sent
-   * to the model. Absent for dispatches that short-circuit before the
-   * resolution point (e.g. a confirmation denial).
+   * answer as FOUR DISTINCT fields (`name`, `title`, `summary`,
+   * `narration`), never collapsed into a precedence chain (see
+   * {@link ToolPresentation}; the client composes precedence). Computed by
+   * the executor at dispatch (the single resolution site — it holds the
+   * stripped model narration, the tool annotations, and the validated
+   * input). The loop surfaces it on the tool lifecycle path. Presentation
+   * only; never sent to the model. Absent for dispatches that short-circuit
+   * before the resolution point (e.g. a confirmation denial).
    */
   readonly presentation?: ToolPresentation;
   readonly metadata?: Readonly<Record<string, unknown>>;
@@ -304,6 +308,60 @@ export interface RegisterToolInput {
   readonly opId?: string;
 }
 
+/**
+ * Fold a {@link ClientToolDeclaration} (one element of the serializable set a
+ * client declares over `session/set_client_tools`) into a CLIENT-HANDLED
+ * {@link ToolRegistration}.
+ *
+ * Two firewall crossings happen here — the single canonical adapter the wire
+ * layer calls so the mapping is not re-derived per transport:
+ *
+ *   1. The raw `inputSchema` JSON Schema object is wrapped into a
+ *      `StandardSchemaV1` via {@link jsonSchema} (the executor validates the
+ *      dispatch input against it; the projector re-emits it to the model via
+ *      `toJsonSchema()`). A wire client cannot carry a live validator.
+ *   2. `handlerRef` is deliberately OMITTED — its absence is the
+ *      CLIENT-HANDLED discriminator (`dispatchBody` relays the call to the
+ *      client instead of resolving a local handler). Contrast
+ *      {@link toRegistration}, which fills `handlerRef` and is therefore always
+ *      server-handled.
+ *
+ * `exposure` is `["model"]` — a wire-declared client tool enters the model's
+ * tool list via the normal `compileForTick` path. The `binding` is
+ * caller-supplied (the wire layer passes `{ scope: "client", sessionId }` — the
+ * distinct client slice that `session/set_client_tools` clears-and-reinstalls
+ * and that session close reaps, held apart from `{ scope: "session" }` so a
+ * client's declarative replace never clobbers `createSession({ tools })`).
+ */
+export function toClientToolRegistration(
+  declaration: ClientToolDeclaration,
+  binding: ToolBinding,
+): ToolRegistration {
+  const decl: ToolDeclaration = {
+    id: declaration.name,
+    name: declaration.name,
+    description: declaration.description,
+    inputSchema: jsonSchema(declaration.inputSchema),
+    exposure: ["model"],
+    ...(declaration.aliases !== undefined ? { aliases: declaration.aliases } : {}),
+    ...(declaration.annotations !== undefined ? { annotations: declaration.annotations } : {}),
+    // NO handlerRef — client-handled.
+  };
+  return { declaration: decl, binding };
+}
+
+/**
+ * Input for {@link ToolExecutorProtocol.respondToToolCall}. The client's
+ * relayed result for a suspended CLIENT-HANDLED dispatch, keyed by the
+ * `correlationId` carried on the outbound tool-call request envelope's
+ * metadata.
+ */
+export interface RespondToToolCallInput {
+  readonly correlationId: string;
+  /** The ADR 70 result currency — `string` | `ContentBlock[]` | envelope. */
+  readonly result: ToolResultInput;
+}
+
 export interface UnregisterToolInput {
   readonly name: string;
   readonly opId?: string;
@@ -312,15 +370,21 @@ export interface UnregisterToolInput {
 /**
  * Input for {@link ToolExecutorProtocol.removeBoundTools}. Removes
  * every registration whose binding key matches the supplied
- * `binding`. Used by the session/execution lifecycle to clean up
- * scope-bound tools when their scope closes:
+ * `binding` (the whole slice). Used to clean up scope-bound tools when
+ * their scope closes, and to clear a declarative slice before a
+ * whole-slice replace:
  *
  *   - Execution ends → `removeBoundTools({ binding: { scope: "execution", executionId }})`
  *   - Session ends → `removeBoundTools({ binding: { scope: "session", sessionId }})`
+ *     plus the client slice `removeBoundTools({ binding: { scope: "client", sessionId }})`
+ *   - `session/set_client_tools` → clears `{ scope: "client", sessionId }`
+ *     then reinstalls the declared set (the wire twin of
+ *     `replaceReconcilerTools`).
  *
  * Equality is by `sameBindingKey` (the identity-defining fields per
  * variant — see {@link ToolBinding}). Other binding slices are
- * untouched.
+ * untouched — clearing the client slice never touches `{ scope:
+ * "session" }` app tools.
  */
 export interface RemoveBoundToolsInput {
   readonly binding: import("../data/declarations.js").ToolBinding;
@@ -613,6 +677,22 @@ export interface ToolExecutorProtocol extends PromiseView<Omit<ToolExecutorFx, "
    */
   unregister(input: UnregisterToolInput): Promise<void>;
 
+  /**
+   * Land a CLIENT's relayed result into the request/response registry,
+   * resolving the pending `this.request(TOOL_CALL_CHANNEL, …)` a
+   * client-handled dispatch (`handlerRef` absent + `requiresResponse: true`)
+   * is suspended on. The twin of the client-tool relay to
+   * {@link register}'s handler-less declarations.
+   *
+   * Mirrors `ElicitationHarnessProtocol.respond`: routes the result through
+   * the harness inbox as a `request-response` envelope so in-process and
+   * cross-process replies resolve on ONE path (`BaseHarness.dispatchMessage`
+   * auto-intercept → `requests.resolve(correlationId, result)`) — no separate
+   * suspend/resume machinery. Idempotent: unknown / already-resolved
+   * correlationIds are silent no-ops (first-write-wins on the registry).
+   */
+  respondToToolCall(input: RespondToToolCallInput): Promise<void>;
+
   // `dispatch` is derived from `PromiseView<Omit<ToolExecutorFx, "use">>` — the Promise
   // facade of the Effect-canonical {@link ToolExecutorFx.dispatch} twin.
   // The concrete harness exposes the Effect surface as `toolExecutor.fx`.
@@ -637,15 +717,19 @@ export interface ToolExecutorProtocol extends PromiseView<Omit<ToolExecutorFx, "
   list(filter?: ToolListFilter): Promise<readonly ToolDeclaration[]>;
 
   /**
-   * Bulk-remove every registration whose binding-key equals the
-   * supplied `binding`. Used by scope lifecycle hooks (execution
-   * close, session close). Returns the count of removed entries.
+   * Remove every registration whose binding-key equals the supplied
+   * `binding` (the whole slice), returning the COUNT of registrations
+   * removed (0 when nothing matched — an honest no-op). The bulk sweep used
+   * by scope lifecycle hooks (execution close, session close) and by
+   * `session/set_client_tools` to clear the `{ scope: "client", sessionId }`
+   * slice before reinstalling the declared set.
    *
-   * Distinct from {@link unregister}, which removes every binding
-   * slot for a given name (cross-scope). `removeBoundTools` removes
-   * one scope across all names.
+   * Distinct from {@link unregister}, which removes every binding slot for a
+   * given name (cross-scope). `removeBoundTools` removes one scope across all
+   * names. The count is an honest existence signal for callers that want it;
+   * the declarative `set_client_tools` clear path ignores it.
    */
-  removeBoundTools(input: RemoveBoundToolsInput): Promise<void>;
+  removeBoundTools(input: RemoveBoundToolsInput): Promise<number>;
 
   // `replaceReconcilerTools` and `compileForTick` are derived from
   // `PromiseView<Omit<ToolExecutorFx, "use">>` — the Promise facades of the

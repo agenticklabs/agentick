@@ -32,6 +32,11 @@
       "types": "./src/testing/index.ts",
       "import": "./src/testing/index.ts",
       "default": "./src/testing/index.ts"
+    },
+    "./client": {
+      "types": "./src/client/index.ts",
+      "import": "./src/client/index.ts",
+      "default": "./src/client/index.ts"
     }
   },
   "publishConfig": {
@@ -45,6 +50,11 @@
         "types": "./dist/testing/index.d.ts",
         "import": "./dist/testing/index.js",
         "default": "./dist/testing/index.js"
+      },
+      "./client": {
+        "types": "./dist/client/index.d.ts",
+        "import": "./dist/client/index.js",
+        "default": "./dist/client/index.js"
       }
     }
   },
@@ -56,6 +66,7 @@
     "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
   },
   "dependencies": {
+    "@agentick/client-core-next": "workspace:*",
     "@agentick/elicitation-next": "workspace:*",
     "@agentick/runtime-next": "workspace:*",
     "@agentick/spec-next": "workspace:*",

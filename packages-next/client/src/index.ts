@@ -31,6 +31,7 @@
 import "@agentick/tasks-next/client";
 import "@agentick/knobs-next/client";
 import "@agentick/elicitation-next/client";
+import "@agentick/tool-executor-next/client";
 
 // Re-export the full client-core surface (createClient, handles, channelView,
 // the sub-handle registry, protocol type re-exports, …).

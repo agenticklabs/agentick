@@ -114,10 +114,11 @@ export interface ToolSpec<TInput = unknown> {
   /**
    * Author's summary of what a SPECIFIC call is doing, for host/UI
    * display. A seam: a static `string` OR a per-call function on the
-   * tool's VALIDATED input + dispatch ctx (sync or async). Sits below the
-   * model's own `_summary` narration and above `title`/name in the display
-   * precedence chain (`modelNarration ?? displaySummary ?? title ??
-   * name`). Typed to `TInput`; erased to `unknown` on
+   * tool's VALIDATED input + dispatch ctx (sync or async). The author's
+   * ACTIVITY axis — resolved to `ToolPresentation.summary` and surfaced
+   * DISTINCTLY from the model's own `_summary` narration and from
+   * `title`/name; the framework collapses none of them (the client
+   * composes precedence). Typed to `TInput`; erased to `unknown` on
    * {@link ToolAnnotations.displaySummary} (same typed-on-createTool /
    * erased-on-declaration pattern as `handler`). `[V1-RESTORED]`.
    */

@@ -17,6 +17,13 @@ session.tasks.get(); // ChannelView<Record<taskId, TaskInfo>>  — @agentick/tas
 session.knobs.get(); // ChannelView<KnobsState>                — @agentick/knobs-next/client
 await session.knobs.set("temperature", 0.7);
 for await (const e of session.elicitations()) await e.accept({}); // @agentick/elicitation-next/client
+
+// Client-handled tools (stage 2 write side) — @agentick/tool-executor-next/client
+// A client is a declarative tool SOURCE: declare the FULL set; the framework
+// replaces the client slice wholesale (the wire twin of replaceReconcilerTools).
+await session.setClientTools([{ name, description, inputSchema }]); // JSON-Schema input, no handler
+await session.setClientTools([]); // clear the client slice
+await session.respondToToolCall(correlationId, [{ type: "text", text: "…" }]);
 ```
 
 That's the whole package: three side-effect imports + `export * from
@@ -59,4 +66,5 @@ public `agentick/client` metapackage entry until the v2 cut.
 
 - `src/__tests__/bundle.spec.ts` — importing the bundle registers every built-in
   slot; a session handle self-assembles `.tasks` / `.knobs` / `.elicitations()`
-  / `.respondToElicitation()` with no per-harness imports.
+  / `.respondToElicitation()` / `.setClientTools()` / `.respondToToolCall()`
+  with no per-harness imports.

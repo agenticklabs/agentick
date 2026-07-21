@@ -230,11 +230,12 @@ function stubToolExecutor(): ToolExecutorProtocol {
     },
     register: async () => undefined,
     unregister: async () => undefined,
+    respondToToolCall: async () => undefined,
     list: async () => [],
     dispatch: (input) => Effect.runPromise(dispatchFx(input)),
     abort: async () => undefined,
     replaceReconcilerTools: async () => undefined,
-    removeBoundTools: async () => undefined,
+    removeBoundTools: async () => 0,
     compileForTick: async () => [],
   };
 }

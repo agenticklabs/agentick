@@ -451,7 +451,7 @@ Two modes, chosen by `annotations.requiresResponse`:
 - **`requiresResponse` falsy (default) — fire-and-forget.** The dispatch resolves
   *immediately* with `annotations.defaultResult` (or a default
   `[{ type: "text", text: "executed successfully" }]`) and emits a one-way
-  notification (`this.notify(TOOL_CALL_CHANNEL, …)` — a `requestType: "notify"`
+  notification (`this.notifyChannel(TOOL_CALL_CHANNEL, …)` — a `requestType: "notify"`
   envelope with no `correlationId`, the fire-and-forget twin of `request`) so the
   client's tool router still runs/renders the tool. Suits render-only tools that
   the model doesn't need a real result from.
@@ -478,9 +478,103 @@ the same handler-less shape. `TOOL_CALL_CHANNEL`, `ToolCallRequestPayload`, and
 `TOOL_CALL_REQUEST_SCHEMA` are exported as the wire contract the client router
 (and the `session/respond_to_tool_call` wire method) build on.
 
-> Not yet wired: the `session/register_tool` + `session/respond_to_tool_call`
-> wire methods (stage 2) and the client-side tool router (stage 3). This section
-> documents the executor's native handling only.
+### The wire: declaring + answering client tools (stage 2)
+
+A remote client DECLARES its full client-tool set into a live session and relays
+each tool's result back over two session-namespace wire methods (typed in
+`WireMethods`; handlers in `@agentick/gateway-next`'s `sessionWireExtension`,
+mirroring `session/respond_to_elicitation`):
+
+| Wire method                     | Params                                                        | Effect                                                                                             |
+| ------------------------------- | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `session/set_client_tools`      | `{ sessionId, declarations: ClientToolDeclaration[] }`        | Clears the `{ scope: "client", sessionId }` slice, then folds each declaration into a client-handled `ToolRegistration` and `register`s it. Returns `{ count }`. A whole-slice **replace**. |
+| `session/respond_to_tool_call`  | `{ sessionId, correlationId, result: ToolResultInput }`       | Calls `respondToToolCall` — lands the result into the request/response registry, resuming the suspended dispatch. |
+
+**Declarative slice-replace — the wire twin of `replaceReconcilerTools`.** A
+client is a declarative tool SOURCE that owns a slice, exactly like the
+reconciler. It DECLARES its entire set; the framework replaces the client slice
+wholesale. One verb subsumes register (a tool present in the set), unregister (a
+tool absent from it), and idempotency (the set IS the truth — a replace, not an
+accumulate). Reconnect = re-declare; drift-free by construction.
+
+- **Its own binding — `{ scope: "client", sessionId }`.** The client slice is
+  held DISTINCT from `{ scope: "session" }` (which holds the app's
+  `createSession({ tools })`), exactly as the reconciler owns `{ scope:
+  "reconciler", mountId }`. So clearing-and-reinstalling the client slice on
+  every `set_client_tools` NEVER clobbers app tools. Session-lifetime: the
+  session-close cleanup reaps the client slice alongside the session slice.
+- **Precedence.** `client` sits just below `reconciler` and above the static
+  config seams (runtime / gateway / app / session / execution) — a live client's
+  current declaration outranks static session config, but the in-process rendered
+  tree stays authoritative. Tunable in `PRECEDENCE_RANK`. See the `ToolBinding`
+  docblock in `@agentick/spec-next`.
+- **The whole-slice clear.** `set_client_tools` calls
+  `removeBoundTools({ binding: { scope: "client", sessionId } })` (the bulk
+  binding sweep) to drop the prior set, then registers the new declarations.
+  Re-declaring a same-name tool with a changed shape swaps cleanly — the clear
+  happens before the re-add, so the registry's `ToolAlreadyRegistered` collision
+  guard never fires.
+
+> **Multi-client caveat.** The client slice is keyed by `sessionId`, not by
+> connection — every client on a session shares ONE slice, so concurrent
+> `set_client_tools` calls are last-write-wins over the whole set. Coordinating
+> which client owns the tools (and handling unsupported-tool fallbacks) is the
+> APP's concern; the framework presumes nothing. Per-connection sub-slices are a
+> future extension.
+
+**`ClientToolDeclaration` — the serializable wire slice.** A wire client cannot
+send a live validator (a function does not serialize), so the declaration carries
+its input schema as a **raw JSON Schema object**, NOT a `StandardSchemaV1`:
+
+```ts
+interface ClientToolDeclaration {
+  name: string;
+  description: string;
+  inputSchema: JsonSchema;            // raw JSON Schema — NOT a StandardSchema validator
+  annotations?: ClientToolAnnotations; // serializable subset (title, requiresResponse,
+                                        // static defaultResult / confirmationMessage, …)
+  aliases?: readonly string[];
+  // NO handlerRef ⇒ client-handled.
+}
+```
+
+`toClientToolRegistration(declaration, binding)` (exported from `@agentick/spec-next`)
+is the single adapter that performs both firewall crossings: it wraps
+`inputSchema` into a validator via `jsonSchema(...)` (the executor validates the
+dispatch input against it; the projector re-emits it to the model via
+`toJsonSchema()`), and **omits `handlerRef`** so the registration is
+client-handled. `exposure` is `["model"]`; the gateway passes a
+`{ scope: "client", sessionId }` binding so the tool lives in the client slice —
+reaped on session close, replaced wholesale on the next `set_client_tools`, and
+distinct from the app's `{ scope: "session" }` tools.
+
+Callable annotation seams (`requiresConfirmation` predicate, function-form
+`confirmationMessage` / `displaySummary` / `defaultResult`, `confirmationPreview`)
+are server-only and simply **absent** over the wire — a wire client uses the
+static forms (`ClientToolAnnotations`).
+
+**`respondToToolCall` reuses the elicitation suspend-resume — no new machinery.**
+It is byte-for-byte the inbox route `ElicitationHarness.respond` uses: send a
+`request-response` envelope to the executor's own address keyed by the dispatch's
+`correlationId`; `BaseHarness.dispatchMessage` auto-intercepts it before
+`handleMessage` and calls `requests.resolve(correlationId, result)`, unblocking
+the `this.request(TOOL_CALL_CHANNEL, …)` the client-handled dispatch is suspended
+on. Idempotent — an unknown / already-resolved `correlationId` is a silent no-op.
+
+**Client side.** `@agentick/tool-executor-next/client` contributes the client-tool
+write verbs to the client `SessionHandle` (bundled into `@agentick/client-next`):
+
+```ts
+const ack = await client.session(id).setClientTools([toolA, toolB]); // → { count: 2 }
+await client.session(id).setClientTools([toolB, toolC]); // whole-slice replace: A gone, C added
+await client.session(id).setClientTools([]); // clear the client slice
+await client.session(id).respondToToolCall(correlationId, result);
+```
+
+> Still stage 3: the client-side tool **router** — subscribing to
+> `session:channel:tool_call` requests, dispatching each to a user handler, and
+> calling `respondToToolCall` for you. Stage 2 ships only the declare / respond
+> write verbs the router will build on.
 
 ## Abort
 
@@ -517,6 +611,12 @@ package root:
 | `InMemoryHandlerResolver`                    | `handlerRef → { handler, validator }` lookup table                                   |
 | `withScope`                                  | Bind declarations to a scope for the duration of an async body; cleanup in `finally` |
 | `permissiveValidator` / `fromStandardSchema` | Validators — accept-anything, and a Standard Schema v1 adapter (Zod/Valibot/…)       |
+| `respondToToolCall` (method)                 | Land a client's relayed tool-call result — resumes a suspended client dispatch (mirrors `elicitation.respond`) |
+| `@agentick/tool-executor-next/client`        | Client `SessionHandle` verbs `setClientTools` / `respondToToolCall` (stage 2 write side) |
+
+`toClientToolRegistration` + the `ClientToolDeclaration` / `ClientToolAnnotations`
+types + the `session/set_client_tools` / `session/respond_to_tool_call` wire
+params live in `@agentick/spec-next` (the shared contract), not this package.
 
 Types: `ToolExecutorHarnessOptions`, `HandlerResolver`, `HandlerEntry`,
 `HandlerChannelSeed`, `ToolHandler`, `ToolHandlerCtx`, `Validator`,
@@ -607,6 +707,25 @@ fixture behaviors into concrete handlers.
   `origin: "host"`, asserted on the journaled `requested` envelope) plus
   inbox dispatch-by-name (a `tool:dispatch` message invokes the tool and
   returns its `DispatchResult`).
+- `src/__tests__/client-tools.spec.ts` — client-handled dispatch
+  (`requiresResponse` suspend/relay, fire-and-forget, timeout fallback) AND
+  the stage-2 wire seam: `respondToToolCall` resuming a suspended dispatch
+  (through the elicitation inbox auto-intercept, unknown-id no-op) + a client
+  tool registered via `toClientToolRegistration` entering `compileForTick` and
+  dispatching through the client path.
+- `../transport-in-process/src/__tests__/client-tools.spec.ts` — the client
+  write verbs (`session.setClientTools` → `session/set_client_tools`,
+  `session.respondToToolCall` → `session/respond_to_tool_call`) issue the right
+  wire methods with the right params.
+- `../transport-in-process/src/__tests__/client-tools-e2e.spec.ts` — the
+  stage-2 GATEWAY-handler semantics over the real wire: `set_client_tools`
+  declarative slice-replace (`[A,B]` then `[B,C]` ⇒ `compileForTick` shows
+  exactly `{B,C}`; empty set clears the slice) + the app-tools-not-clobbered
+  guarantee (a `createSession({ tools })` tool survives client-slice replaces,
+  proving `{ scope: "client" }` and `{ scope: "session" }` are distinct).
+- `../spec/src/__tests__/client-tool-declaration.spec.ts` —
+  `toClientToolRegistration` (JSON-Schema wrap round-trips, `handlerRef`
+  omission, client binding, annotation/alias passthrough).
 - `src/__tests__/confirmation.spec.ts` — the confirmation gate
   (approve / deny / always / modifiedArguments / timeout).
 - `src/__tests__/confirmation-seams.spec.ts` — the restored v1 seams:

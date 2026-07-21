@@ -96,21 +96,21 @@ export class InMemoryToolRegistry {
    * Used by lifecycle hooks — e.g., when a session closes the harness
    * calls `removeWhere(b => b.scope === "session" && b.sessionId === id)`
    * to clear that session's slice without touching app/gateway/runtime
-   * registrations.
+   * registrations. Returns the COUNT of registrations removed (0 = no-op).
    */
-  removeWhere(predicate: (binding: ToolBinding) => boolean): void {
-    let mutated = false;
+  removeWhere(predicate: (binding: ToolBinding) => boolean): number {
+    let removed = 0;
     for (const [name, list] of this.byName) {
       const kept = list.filter((r) => !predicate(r.binding));
+      removed += list.length - kept.length;
       if (kept.length === 0) {
         this.byName.delete(name);
-        mutated = true;
       } else if (kept.length !== list.length) {
         this.byName.set(name, kept);
-        mutated = true;
       }
     }
-    if (mutated) this.reindexAliases();
+    if (removed > 0) this.reindexAliases();
+    return removed;
   }
 
   /**
@@ -275,7 +275,13 @@ export const PRECEDENCE_RANK = {
   app: 2,
   session: 3,
   execution: 4,
-  reconciler: 5,
+  // A CLIENT-owned declarative slice — the wire twin of the reconciler
+  // slice — outranks the static session/execution config seams (a live
+  // client's current declaration is the more specific, up-to-date source)
+  // but stays BELOW the in-process rendered tree (`reconciler`), which is
+  // authoritative. Tunable — see the {@link ToolBinding} docblock.
+  client: 5,
+  reconciler: 6,
 } as const satisfies Record<Exclude<ToolBinding["scope"], "extension">, number>;
 
 export function precedenceOf(binding: ToolBinding): number {
@@ -309,6 +315,8 @@ export function bindingKey(b: ToolBinding): string {
       return `session:${b.sessionId}`;
     case "execution":
       return `execution:${b.executionId}`;
+    case "client":
+      return `client:${b.sessionId}`;
     case "reconciler":
       return `reconciler:${b.mountId}`;
     case "extension":

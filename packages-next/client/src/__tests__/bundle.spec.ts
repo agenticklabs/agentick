@@ -26,7 +26,15 @@ function neverStream(): SubscriptionStream {
 describe("@agentick/client-bundle-next", () => {
   it("registers every built-in session sub-handle slot on import", () => {
     const names = registeredSessionHandleExtensions();
-    expect(names).toEqual(expect.arrayContaining(["tasks", "knobs", "elicitations"]));
+    expect(names).toEqual(
+      expect.arrayContaining([
+        "tasks",
+        "knobs",
+        "elicitations",
+        "setClientTools",
+        "respondToToolCall",
+      ]),
+    );
   });
 
   it("a session handle self-assembles all built-in slots (no per-harness imports)", () => {
@@ -45,5 +53,7 @@ describe("@agentick/client-bundle-next", () => {
     expect(session.knobs).toBeDefined(); // KnobsHandleView (view + set)
     expect(typeof session.elicitations.onChange).toBe("function"); // ChannelStream read
     expect(typeof session.elicitations.respond).toBe("function"); // write command on the handle
+    expect(typeof session.setClientTools).toBe("function"); // client-tool declare verb
+    expect(typeof session.respondToToolCall).toBe("function"); // client-tool relay verb
   });
 });

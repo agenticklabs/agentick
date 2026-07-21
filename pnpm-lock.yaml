@@ -473,6 +473,9 @@ importers:
       '@agentick/tasks-next':
         specifier: workspace:*
         version: link:../tasks
+      '@agentick/tool-executor-next':
+        specifier: workspace:*
+        version: link:../tool-executor
     devDependencies:
       typescript:
         specifier: ^5.7.3
@@ -1663,6 +1666,9 @@ importers:
 
   packages-next/tool-executor:
     dependencies:
+      '@agentick/client-core-next':
+        specifier: workspace:*
+        version: link:../client-core
       '@agentick/elicitation-next':
         specifier: workspace:*
         version: link:../elicitation
@@ -1775,6 +1781,9 @@ importers:
       '@agentick/tasks-next':
         specifier: workspace:*
         version: link:../tasks
+      '@agentick/tool-executor-next':
+        specifier: workspace:*
+        version: link:../tool-executor
       '@agentick/utils-next':
         specifier: workspace:*
         version: link:../utils

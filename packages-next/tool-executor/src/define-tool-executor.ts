@@ -64,6 +64,7 @@ import type {
   RegisterToolInput,
   RemoveBoundToolsInput,
   ReplaceReconcilerToolsInput,
+  RespondToToolCallInput,
   SubstrateError,
   ToolDeclaration,
   ToolExecutorErrorChannel,
@@ -136,9 +137,12 @@ export interface DefineToolExecutorInput {
 
   /**
    * Optional custom `removeBoundTools` callback. When omitted, the
-   * harness's internal registry handles bulk removal by binding key.
+   * harness's internal registry handles removal (bulk by binding key, or
+   * the `name`-narrowed targeted remove). Returns the COUNT of
+   * registrations removed — the honest existence signal the client-tool
+   * wire path reads.
    */
-  readonly removeBoundTools?: (input: RemoveBoundToolsInput) => Promise<void>;
+  readonly removeBoundTools?: (input: RemoveBoundToolsInput) => Promise<number>;
 
   /**
    * Optional custom `compileForTick` callback. When omitted, the
@@ -258,6 +262,35 @@ class CallbackToolExecutor extends BaseHarness<"tool"> implements ToolExecutorPr
     );
   }
 
+  /**
+   * Land a CLIENT's relayed tool-call result — identical inbox route to
+   * {@link ToolExecutorHarness.respondToToolCall} (mirrors
+   * `elicitation.respond`). A `defineToolExecutor` executor is equally
+   * client-tool-capable: the result resolves through
+   * `BaseHarness.dispatchMessage`'s `request-response` auto-intercept.
+   */
+  async respondToToolCall(input: RespondToToolCallInput): Promise<void> {
+    const send = this.inbox.send(this.address, {
+      type: "request-response",
+      correlationId: input.correlationId,
+      payload: { correlationId: input.correlationId, response: input.result },
+    });
+    await Effect.runPromise(
+      send.pipe(
+        Effect.catchAll((err) => {
+          if (
+            typeof err === "object" &&
+            err !== null &&
+            (err as { _tag?: string })._tag === "AddressNotFound"
+          ) {
+            return Effect.succeed(undefined);
+          }
+          return Effect.fail(err);
+        }),
+      ),
+    );
+  }
+
   unregister(input: UnregisterToolInput): Promise<void> {
     const op: Operation<UnregisterToolInput, void> = {
       opId: input.opId ?? `tool:unregister:${input.name}:${ulid()}`,
@@ -288,8 +321,8 @@ class CallbackToolExecutor extends BaseHarness<"tool"> implements ToolExecutorPr
     return this.registry.list(filter);
   }
 
-  removeBoundTools(input: RemoveBoundToolsInput): Promise<void> {
-    const op: Operation<RemoveBoundToolsInput, void> = {
+  removeBoundTools(input: RemoveBoundToolsInput): Promise<number> {
+    const op: Operation<RemoveBoundToolsInput, number> = {
       opId: input.opId ?? `tool:remove-bound:${input.binding.scope}:${ulid()}`,
       surface: "tool",
       name: "tool:command:remove-bound-tools",
@@ -299,12 +332,13 @@ class CallbackToolExecutor extends BaseHarness<"tool"> implements ToolExecutorPr
     return runHarnessProtocol(
       this.runOperation(op, (i) =>
         Effect.tryPromise({
-          try: async () => {
+          try: async (): Promise<number> => {
             if (this.spec.removeBoundTools) {
-              await this.spec.removeBoundTools(i);
-            } else {
-              this.registry.removeWhere((b) => sameBindingKey(b, i.binding));
+              return await this.spec.removeBoundTools(i);
             }
+            // Bulk binding sweep — clears a whole slice (lifecycle close, or
+            // the `set_client_tools` client-slice clear). Reports the count.
+            return this.registry.removeWhere((b) => sameBindingKey(b, i.binding));
           },
           catch: (cause) => cause,
         }),

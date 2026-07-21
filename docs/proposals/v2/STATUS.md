@@ -1754,7 +1754,7 @@ blueprint's design decisions; this is execution-level).
   `this.request(TOOL_CALL_CHANNEL, …)`, await the client's `ContentBlock[]`
   (`executedBy: "client"`; timeout → `defaultResult` if set else
   `ToolCallTimeoutError`); falsy → resolve immediately with `defaultResult ??
-  "executed successfully"` + a fire-and-forget `this.notify(...)` (new `BaseHarness`
+  "executed successfully"` + a fire-and-forget `this.notifyChannel(...)` (new `BaseHarness`
   primitive — the one-way twin of `request`, `requestType: "notify"`, no
   correlationId). `requiresConfirmation` widened to `boolean | ((input,ctx) =>
   boolean | Promise<boolean>)`, evaluated at the gate. `createTool` handler +

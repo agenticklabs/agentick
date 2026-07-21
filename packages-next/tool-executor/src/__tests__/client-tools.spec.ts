@@ -34,7 +34,13 @@ import type {
   ToolConfirmationPredicate,
   ToolRegistration,
 } from "@agentick/spec-next";
-import { ToolCallTimeoutError, ToolHandlerMissing, jsonSchema } from "@agentick/spec-next";
+import type { ClientToolDeclaration } from "@agentick/spec-next";
+import {
+  ToolCallTimeoutError,
+  ToolHandlerMissing,
+  jsonSchema,
+  toClientToolRegistration,
+} from "@agentick/spec-next";
 
 import { createTestHarness } from "../testing/index.js";
 
@@ -281,6 +287,89 @@ describe("ToolExecutorHarness — client-handled tools (fire-and-forget)", () =>
     const result = await harness.dispatch(dispatchOf("client_fire2", "tc-5"));
     expect(result.content).toEqual([{ type: "text", text: "executed successfully" }]);
     expect(result.executedBy).toBe("client");
+  });
+});
+
+describe("ToolExecutorHarness — respondToToolCall (stage 2 wire seam)", () => {
+  it("resolves a suspended client dispatch with the relayed result (reuses the inbox auto-intercept)", async () => {
+    const { harness, bus } = await createTestHarness({
+      tools: [clientTool("client_respond", { requiresResponse: true })],
+    });
+
+    const reqP = nextEnvelope(bus, "session:channel:tool_call");
+    const dispatchP = harness.dispatch(dispatchOf("client_respond", "tc-r1", { q: "hi" }));
+    const reqEnv = await reqP;
+    const correlationId = reqEnv.metadata!.correlationId as string;
+
+    // The NEW method — the same path the gateway wire handler calls. NOT the
+    // raw inbox relay: this proves respondToToolCall lands the result through
+    // BaseHarness.dispatchMessage's request-response auto-intercept.
+    await harness.respondToToolCall({
+      correlationId,
+      result: [{ type: "text", text: "relayed via respondToToolCall" }],
+    });
+
+    const result = await dispatchP;
+    expect(result.executedBy).toBe("client");
+    expect((result.content[0] as { text: string }).text).toBe("relayed via respondToToolCall");
+  });
+
+  it("normalizes a bare string result relayed through respondToToolCall", async () => {
+    const { harness, bus } = await createTestHarness({
+      tools: [clientTool("client_respond_str", { requiresResponse: true })],
+    });
+
+    const reqP = nextEnvelope(bus, "session:channel:tool_call");
+    const dispatchP = harness.dispatch(dispatchOf("client_respond_str", "tc-r2"));
+    const correlationId = (await reqP).metadata!.correlationId as string;
+    await harness.respondToToolCall({ correlationId, result: "plain" });
+
+    const result = await dispatchP;
+    expect(result.content).toEqual([{ type: "text", text: "plain" }]);
+  });
+
+  it("an unknown correlationId is a silent no-op (first-write-wins)", async () => {
+    const { harness } = await createTestHarness({ tools: [] });
+    await expect(
+      harness.respondToToolCall({ correlationId: "never-issued", result: "x" }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("a client tool registered via toClientToolRegistration dispatches through the client path", async () => {
+    const { harness, bus } = await createTestHarness({ tools: [] });
+
+    const declaration: ClientToolDeclaration = {
+      name: "wire_registered",
+      description: "registered over the wire slice",
+      inputSchema: { type: "object", properties: { q: { type: "string" } } },
+      annotations: { requiresResponse: true },
+    };
+    // Exactly what the `session/set_client_tools` gateway handler does per
+    // declaration — fold into a client-handled registration at the `client` slice.
+    await harness.register({
+      registration: toClientToolRegistration(declaration, {
+        scope: "client",
+        sessionId: "sess-1",
+      }),
+    });
+
+    // It enters the model-visible tool list.
+    const compiled = await harness.compileForTick({ exposure: "model" });
+    expect(compiled.map((d) => d.name)).toContain("wire_registered");
+
+    // And a model call relays to the client + resumes via respondToToolCall.
+    const reqP = nextEnvelope(bus, "session:channel:tool_call");
+    const dispatchP = harness.dispatch(dispatchOf("wire_registered", "tc-r3", { q: "yo" }));
+    const reqEnv = await reqP;
+    expect((reqEnv.payload as { name: string }).name).toBe("wire_registered");
+    await harness.respondToToolCall({
+      correlationId: reqEnv.metadata!.correlationId as string,
+      result: [{ type: "text", text: "ok" }],
+    });
+
+    const result = await dispatchP;
+    expect(result.executedBy).toBe("client");
+    expect((result.content[0] as { text: string }).text).toBe("ok");
   });
 });
 

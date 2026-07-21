@@ -16,11 +16,24 @@ import {
   defineWireExtension,
   progressEventQuery,
   SessionNotFoundError,
+  toClientToolRegistration,
   type ProtocolEvent,
   type SessionHarnessProtocol,
+  type ToolExecutorProtocol,
   type WireExtension,
 } from "@agentick/spec-next";
 import { omitUndefined } from "@agentick/utils-next";
+
+/**
+ * Structural view of the session's tool executor seam. The gateway is
+ * harness-agnostic — it does NOT depend on `@agentick/tool-executor-next` — so
+ * (exactly like the `elicitation` cast below) it narrows the session to the
+ * public `toolExecutor` member at the call site. Every conforming session that
+ * speaks these wire methods exposes it (`SessionHarness.toolExecutor`).
+ */
+type SessionWithTools = SessionHarnessProtocol & {
+  readonly toolExecutor: ToolExecutorProtocol;
+};
 
 function findSession(
   ctx: { gateway: { apps(): readonly { getSession(id: string): unknown }[] } },
@@ -183,6 +196,41 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
         correlationId: params.correlationId,
         outcome: params.outcome,
         ...omitUndefined({ value: params.value, reason: params.reason }),
+      });
+      return null;
+    },
+    "session/set_client_tools": async (params, ctx) => {
+      const sess = (ctx.session ?? findSession(ctx, params.sessionId)) as SessionWithTools;
+      const binding = { scope: "client", sessionId: params.sessionId } as const;
+      // DECLARATIVE whole-slice replace — the wire twin of the reconciler's
+      // `replaceReconcilerTools`. A client is a declarative tool SOURCE that
+      // owns the `{ scope: "client", sessionId }` slice: it declares its FULL
+      // set, and we replace the slice wholesale. This subsumes register (in the
+      // set), unregister (absent), and idempotency (it's a replace). The client
+      // slice is held DISTINCT from `{ scope: "session" }` — clearing it never
+      // clobbers the app's `createSession({ tools })` slice.
+      //
+      // Clear the client slice first, then reinstall the declared set. Each
+      // declaration folds into a CLIENT-HANDLED registration via
+      // `toClientToolRegistration` (raw JSON-Schema `inputSchema` wrapped into a
+      // validator; `handlerRef` omitted ⇒ client-handled). Session-lifetime:
+      // the session-close cleanup reaps the client slice.
+      await sess.toolExecutor.removeBoundTools({ binding });
+      for (const declaration of params.declarations) {
+        const registration = toClientToolRegistration(declaration, binding);
+        await sess.toolExecutor.register({ registration });
+      }
+      return { count: params.declarations.length };
+    },
+    "session/respond_to_tool_call": async (params, ctx) => {
+      const sess = (ctx.session ?? findSession(ctx, params.sessionId)) as SessionWithTools;
+      // Same suspend-resume path as `respond_to_elicitation`: the executor
+      // routes the result through its inbox as a `request-response` envelope,
+      // resolving the pending `this.request(TOOL_CALL_CHANNEL, …)` the
+      // client-handled dispatch is blocked on.
+      await sess.toolExecutor.respondToToolCall({
+        correlationId: params.correlationId,
+        result: params.result,
       });
       return null;
     },

@@ -43,6 +43,7 @@ import type {
   OperationJournal,
   RegisterToolInput,
   RemoveBoundToolsInput,
+  RespondToToolCallInput,
   Resources,
   ReplaceReconcilerToolsInput,
   SubstrateError,
@@ -109,11 +110,14 @@ declare module "@agentick/runtime-next" {
     // (`tool:abort` is a declared command; `register` / `unregister` /
     // `remove-bound-tools` / `replace-reconciler-tools` build hand-rolled ops),
     // so typing them mints `onBefore/After<Verb>` on `CommandHooks`. Registry
-    // mutations all resolve to `void`; generics are the declaration sites'.
+    // mutations resolve to `void` except `remove-bound-tools` (the removed
+    // count); generics are the declaration sites'.
     "tool:abort": { input: AbortInput; output: void };
     "tool:register": { input: RegisterToolInput; output: void };
     "tool:unregister": { input: UnregisterToolInput; output: void };
-    "tool:remove-bound-tools": { input: RemoveBoundToolsInput; output: void };
+    // Output is the COUNT of registrations removed (bulk sweep or the
+    // `name`-narrowed targeted remove) — the honest existence signal.
+    "tool:remove-bound-tools": { input: RemoveBoundToolsInput; output: number };
     "tool:replace-reconciler-tools": { input: ReplaceReconcilerToolsInput; output: void };
   }
 }
@@ -263,6 +267,43 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
     );
   }
 
+  /**
+   * Land a CLIENT's relayed tool-call result, resolving the pending
+   * `this.request(TOOL_CALL_CHANNEL, …)` a client-handled dispatch is
+   * suspended on (the client-tool twin of `elicitation.respond`).
+   *
+   * Byte-for-byte the same inbox route `ElicitationHarness.respond` uses: send
+   * a `request-response` envelope to THIS harness's own address, keyed by the
+   * dispatch's `correlationId`. `BaseHarness.dispatchMessage` auto-intercepts
+   * it BEFORE `handleMessage` and calls `requests.resolve(correlationId,
+   * result)`, unblocking the suspended `respEffect` in `dispatchBody` — no new
+   * suspend/resume machinery. First-write-wins on the registry, so a duplicate
+   * or unknown `correlationId` is a silent no-op. A reply arriving after the
+   * inbox subscription is gone (`AddressNotFound`) is swallowed to keep the
+   * idempotence contract.
+   */
+  async respondToToolCall(input: RespondToToolCallInput): Promise<void> {
+    const send = this.inbox.send(this.address, {
+      type: "request-response",
+      correlationId: input.correlationId,
+      payload: { correlationId: input.correlationId, response: input.result },
+    });
+    await Effect.runPromise(
+      send.pipe(
+        Effect.catchAll((err) => {
+          if (
+            typeof err === "object" &&
+            err !== null &&
+            (err as { _tag?: string })._tag === "AddressNotFound"
+          ) {
+            return Effect.succeed(undefined);
+          }
+          return Effect.fail(err);
+        }),
+      ),
+    );
+  }
+
   async list(filter?: ToolListFilter): Promise<readonly ToolDeclaration[]> {
     // Pure read — bypass runOperation so list() doesn't pollute the
     // journal with no-op envelopes. Conformance only requires correct
@@ -270,8 +311,8 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
     return this.registry.list(filter);
   }
 
-  removeBoundTools(input: RemoveBoundToolsInput): Promise<void> {
-    const op: Operation<RemoveBoundToolsInput, void> = {
+  removeBoundTools(input: RemoveBoundToolsInput): Promise<number> {
+    const op: Operation<RemoveBoundToolsInput, number> = {
       opId: input.opId ?? `tool:remove-bound:${input.binding.scope}:${ulid()}`,
       surface: "tool",
       name: "tool:command:remove-bound-tools",
@@ -280,9 +321,11 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
     };
     return runHarnessProtocol(
       this.runOperation(op, (i) =>
-        Effect.sync(() => {
-          this.registry.removeWhere((b) => sameBindingKey(b, i.binding));
-        }),
+        Effect.sync(() =>
+          // Bulk binding sweep — clears a whole slice (lifecycle close, or the
+          // `set_client_tools` client-slice clear before reinstall).
+          this.registry.removeWhere((b) => sameBindingKey(b, i.binding)),
+        ),
       ),
     );
   }
@@ -983,7 +1026,7 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
           }
         } else {
           // Fire-and-forget: one-way notification, no correlation/Deferred.
-          yield* this.notify<ToolCallRequestPayload>(
+          yield* this.notifyChannel<ToolCallRequestPayload>(
             TOOL_CALL_CHANNEL,
             { toolCallId: input.toolCallId, name: input.name, input: validated },
             { scope: dispatchScope },

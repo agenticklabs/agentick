@@ -376,14 +376,15 @@ export interface LifecycleToolEnd {
   readonly durationMs: number;
   readonly executionId?: string;
   /**
-   * The fully precedence-resolved tool-call presentation
-   * (`modelNarration ?? displaySummary ?? title ?? name`) the executor
-   * computed at dispatch, carried back from `DispatchResult.presentation`.
-   * Where tool-start's `narration` is the eager live-spinner value (model
-   * narration only), THIS is the settled answer — it also reflects the
-   * author's `displaySummary`/`title` fallback when the model emitted no
-   * narration. Absent when the dispatch short-circuited before resolution
-   * (e.g. a confirmation denial) or the door produced no presentation.
+   * The fully-resolved tool-call presentation — four DISTINCT fields
+   * (`name`, `title`, `summary`, `narration`), never collapsed — the
+   * executor computed at dispatch, carried back from
+   * `DispatchResult.presentation`. Where tool-start's `narration` is the
+   * eager live-spinner value (model narration only), THIS is the settled
+   * answer — it also carries the author's `summary`/`title` when the model
+   * emitted no narration, surfaced distinctly for the client to compose.
+   * Absent when the dispatch short-circuited before resolution (e.g. a
+   * confirmation denial) or the door produced no presentation.
    */
   readonly presentation?: ToolPresentation;
   readonly metadata?: Readonly<Record<string, unknown>>;

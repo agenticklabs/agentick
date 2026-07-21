@@ -1943,8 +1943,14 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
    * (`E = never`) so a dropped notification cannot fail the caller's
    * operation. Callers `yield*` it inside an Effect body, or
    * `Effect.runFork` it.
+   *
+   * NOTE the name is `notifyChannel`, not a bare `notify`: ADR 47 ripped a
+   * bespoke gateway `notify` transport surface, and a completeness test guards
+   * that no `notify` resurfaces on a harness instance. This general channel-
+   * notification primitive is a different concern (the message-bus twin of
+   * {@link request}), so it carries the qualified name.
    */
-  protected notify<TReq>(
+  protected notifyChannel<TReq>(
     channel: string,
     payload: TReq,
     opts: { readonly scope?: EventScope } = {},
