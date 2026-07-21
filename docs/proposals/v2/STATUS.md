@@ -1725,6 +1725,37 @@ blueprint's design decisions; this is execution-level).
 
 ### 2026-07-20
 
+- **Store convergence — COMPLETE (Run 5: resources migrated, credentials closed
+  out). ZERO STRADDLE.** resources' two raw catalog Maps (`fixed`/`templates`)
+  fold into ONE `View<ResourceDeclarationRecord>` over its single kind-discriminated
+  store — durable declarations via `view.write`, transient tree-mounts via
+  `view.seedSync` (cache-only, never persisted), unmount via `view.deleteSync`,
+  `fixed`/`templates` a read-time partition by `record.kind`. Resolver sidecars +
+  both MCP notifiers (`resources/updated` content, `list_changed` topology) stay
+  domain-owned (the tasks/prompts precedent). The agent's read: a CLEANER fit than
+  the two-Map catalog — the store was already one kind-discriminated collection, so
+  the two-Map split was the outlier. Two named behavior changes: durable writes are
+  now fire-and-forget (the View trade — reads from cache, a durable failure doesn't
+  crash the mutation, same as tasks) and the single keyspace honors the disjoint-key
+  invariant the store already relied on. credentials documented as the deliberate
+  **async-only no-view case** (no sync read surface ⇒ no View, not SnapshotCapable).
+  Gates: typecheck --force 152/152 0-cached; resources+store+mcp 479 passed.
+
+  **The final taxonomy — one contract, one projection pattern, nothing hand-rolled:**
+  - `Store<T,Q,M>` — the universal store seam (`query`/`mutate`/`watch?`/`backend`).
+    Every store conforms; `CollectionStore`/`LogStore` are ergonomic profiles that
+    `extends Store`.
+  - `View<TCache, TStore, Q, M>` — the sync collection projection: pure-mirror
+    (knobs/state/skills/prompts), fused cache≠store via `project`/`reconstruct`/
+    `seedSync` (tasks), single-record single-key (session).
+  - `LogView<T>` — the sync log projection (timeline): two-tier + write-behind + flush.
+  - **Rule:** a harness holds a `View`/`LogView` IFF it has a synchronous read
+    surface. credentials (async-only) is the one principled no-view store.
+  Seven commits: 17183a4a (View foundation) · 44b00cf1 (retire CollectionProjection)
+  · 9493e505 (rename Reactive*→Store/View) · 746a0b53 (Store universal) · a9a6f64f
+  (View cache≠store + tasks) · 8b9f93f7 (session) · a80bd935 (LogView + timeline)
+  · [Run 5].
+
 - **Store convergence — Run 4 LANDED: `LogView` extracted, timeline migrated.**
   The log-archetype projection — the sibling of `View`. Timeline hand-rolled a
   two-tier (durable `persisted` + bounded/compacted `projection`) log projection

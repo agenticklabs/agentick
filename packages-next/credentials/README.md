@@ -113,12 +113,15 @@ Credentials is the data-layer store-substrate's deliberate
 counter-example — the store-backed harness that proves three Playbook
 rules are CONDITIONAL, not universal:
 
-- **No projection (P5).** The harness reads its `CredentialsStore`
+- **No `View` (P5).** The harness reads its `CredentialsStore`
   LIVE and async — `get`/`has`/`keys` are bare `await store.<verb>()`,
-  with NO synchronous cache. Tasks and knobs hold a
-  `CollectionProjection` only because their reads are served during
-  render (synchronous); credentials' reads are off the render path, so
-  "store-backed ⟹ projection" does not apply here.
+  with NO synchronous cache. Post-convergence a store-backed harness
+  holds a `View` / `LogView` **IFF it has a synchronous read surface**:
+  the render-read / sync-read harnesses (knobs, state, skills, prompts,
+  tasks, timeline, resources) all do; credentials is the deliberate
+  async-only exception — its reads are off the render path, so it holds
+  NO `View` and is not `SnapshotCapable`. The rule is "every SYNC-READ
+  harness has a view", not "every store-backed harness does".
 - **Empty wire surface (P6).** The harness projects NOTHING to the
   client — the valid empty case. Client-driven lifecycle travels as
   action verbs, not a state mirror.

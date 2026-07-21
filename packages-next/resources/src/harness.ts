@@ -17,12 +17,16 @@
  *      {@link ResourceDeclarationRecord} slice (`uri` / `uriTemplate` / `kind` / `meta`)
  *      for **durable** resources sourced from a {@link ResourceLoader} (DB / fs —
  *      the source resources lacks today). Transient bindings NEVER touch it.
- *   2. **Eager catalog projection** ({@link fixed} / {@link templates}) — the
- *      synchronous, sorted, cached declaration slice `snapshot()` reads (folded
- *      into the IR during a render pass — data-layer plan §3.5 P5 "render-read").
- *      It overlays BOTH durable declarations (mirrored from the store) AND
- *      transient declarations (from `register` / `registerTemplate` / `<Resource>`
- *      tree-mounts). Authoritative for presence (`has`) + the catalog.
+ *   2. **Catalog {@link View}** ({@link view}) — the ONE sync, cached declaration
+ *      projection `snapshot()` reads (folded into the IR during a render pass —
+ *      data-layer plan §3.5 P5 "render-read"). A pure-mirror `View` over the
+ *      single kind-discriminated store, keyed by `resourceDeclarationKey`, whose
+ *      cache value IS the {@link ResourceDeclarationRecord}. It overlays BOTH
+ *      durable declarations (`view.write` — cache + store, mirrored from loaders)
+ *      AND transient declarations (`view.seedSync` — cache-only, from `register` /
+ *      `registerTemplate` / `<Resource>` tree-mounts, NEVER persisted). The
+ *      `fixed` / `templates` split is a READ-TIME partition of `view.listSync()`
+ *      by `record.kind`. Authoritative for presence (`has`) + the catalog.
  *   3. **Resolver sidecar** ({@link fixedResolvers} / {@link templateResolvers}) —
  *      the NON-serializable `resolver` fn (+ a template's compiled `RegExp`),
  *      keyed by uri / uriTemplate, for BOTH durable-from-loader AND
@@ -59,12 +63,14 @@
 import { Effect } from "effect";
 import { BaseHarness, type Middleware, type Unsubscribe } from "@agentick/runtime-next";
 import type {
+  CollectionMutation,
   EventBus,
   MessageEnvelope,
   MessageHandlerError,
   MessageInbox,
   OperationJournal,
   ResourceContents,
+  ResourceDeclarationRecord,
   ResourceDescriptor,
   ResourceMeta,
   ResourceResolver,
@@ -77,6 +83,7 @@ import type {
   ResourcesReadInput,
   ResourcesSnapshot,
   ResourceStore,
+  ResourceStoreQuery,
   ResourceTemplateDescriptor,
   ResourceTemplateMeta,
   TemplateResolver,
@@ -96,6 +103,7 @@ import {
   type Notifier,
 } from "@agentick/pubsub-next";
 import { omitUndefined } from "@agentick/utils-next";
+import { View } from "@agentick/store-next";
 
 import type { ResourceLoader, ResourceLoaderItem } from "./loaders.js";
 import { InMemoryResourceStore } from "./store.js";
@@ -165,17 +173,25 @@ export class ResourcesHarness
   implements ResourcesHarnessProtocol
 {
   /**
-   * Eager catalog projection — fixed `uri → meta` declaration slice (data-layer
-   * plan §3.5 P5). Durable declarations mirrored from {@link store} PLUS transient
-   * `register` / `<Resource>` declarations overlaid. Authoritative for `has()` +
-   * `snapshot()`. Insertion order is not significant for fixed resources.
+   * Catalog projection — ONE pure-mirror {@link View} over the single
+   * kind-discriminated store (data-layer plan §3.5 P5), keyed by
+   * `resourceDeclarationKey` (`uri ?? uriTemplate`), whose cache value IS the
+   * {@link ResourceDeclarationRecord}. Overlays durable declarations
+   * (`view.write` — cache + store) PLUS transient `register` / `<Resource>`
+   * declarations (`view.seedSync` — cache-only, NEVER persisted; the record type
+   * makes the no-resolver-in-store guarantee, `seedSync` makes the
+   * no-transient-in-store one). Authoritative for `has()` + `snapshot()`. The
+   * `fixed` / `templates` split is a read-time partition by `record.kind`.
+   * resources drives its own `list_changed` / `updated` fan-out (below) off its
+   * register / putDurable / unmount paths, so the `View` notify seams
+   * (`subscribe` / `onChange`) stay deliberately unused here.
    */
-  private readonly fixed = new Map<string, ResourceMeta | undefined>();
-  /**
-   * Eager catalog projection — `uriTemplate → meta` declaration slice. Insertion
-   * order = match priority (mirrored into {@link templateResolvers}).
-   */
-  private readonly templates = new Map<string, ResourceTemplateMeta | undefined>();
+  private readonly view: View<
+    ResourceDeclarationRecord,
+    ResourceDeclarationRecord,
+    ResourceStoreQuery,
+    CollectionMutation<ResourceDeclarationRecord>
+  >;
 
   /**
    * Resolver sidecar — fixed `uri → resolver`. NON-serializable; never reaches
@@ -195,13 +211,6 @@ export class ResourcesHarness
   /** Cached, sorted descriptor snapshots. Invalidated on every mutation. */
   private listCache: readonly ResourceDescriptor[] | null = null;
   private templatesCache: readonly ResourceTemplateDescriptor[] | null = null;
-
-  /**
-   * Durable backing for DURABLE declarations (data-layer plan §6-C). Fed by
-   * loaders only; transient bindings never write to it. The catalog projection
-   * is the sync read cache — reads never touch the (async) store.
-   */
-  private readonly store: ResourceStore;
 
   /** Loaders for durable resources — drive `reload()` + lookup-on-miss in `read()`. */
   private loaders: readonly ResourceLoader[] = [];
@@ -239,7 +248,10 @@ export class ResourcesHarness
     });
     this.pageSize = options.pageSize ?? DEFAULT_PAGE_SIZE;
     this.backend = options.backend ?? "memory";
-    this.store = options.store ?? new InMemoryResourceStore();
+    this.view = View.collection(
+      options.store ?? new InMemoryResourceStore(),
+      resourceDeclarationKey,
+    );
     if (options.loaders && options.loaders.length > 0) {
       this.loaders = options.loaders;
     }
@@ -278,15 +290,18 @@ export class ResourcesHarness
   // ─────────── Registration (plain methods — ADR 51 §1.2, TRANSIENT) ───────────
 
   register(uri: string, resolver: ResourceResolver, meta?: ResourceMeta): Unsubscribe {
-    if (this.fixed.has(uri)) {
+    if (this.view.getSync(uri)?.kind === "fixed") {
       throw new ResourceAlreadyRegistered({ uri });
     }
-    // TRANSIENT: projection + resolver sidecar, NEVER the store (re-mounts on restart).
-    this.fixed.set(uri, meta);
+    // TRANSIENT: catalog (seedSync — cache-only) + resolver sidecar, NEVER the
+    // store (re-mounts on restart).
+    this.view.seedSync({ uri, kind: "fixed", meta });
     this.fixedResolvers.set(uri, resolver);
     this.invalidateAndNotifyList();
     return () => {
-      if (this.fixed.delete(uri)) {
+      // deleteSync drops the cache entry and fires an idempotent store-delete —
+      // a harmless no-op for a transient key the store never held.
+      if (this.view.deleteSync(uri, this.storeCtx())) {
         this.fixedResolvers.delete(uri);
         this.invalidateAndNotifyList();
       }
@@ -298,18 +313,18 @@ export class ResourcesHarness
     resolver: TemplateResolver,
     meta?: ResourceTemplateMeta,
   ): Unsubscribe {
-    if (this.templates.has(uriTemplate)) {
+    if (this.view.getSync(uriTemplate)?.kind === "template") {
       throw new ResourceAlreadyRegistered({ uri: uriTemplate });
     }
-    // TRANSIENT: projection + resolver sidecar, NEVER the store.
-    this.templates.set(uriTemplate, meta);
+    // TRANSIENT: catalog (seedSync — cache-only) + resolver sidecar, NEVER the store.
+    this.view.seedSync({ uriTemplate, kind: "template", meta });
     this.templateResolvers.set(uriTemplate, {
       resolver,
       compiled: compileUriTemplate(uriTemplate),
     });
     this.invalidateAndNotifyList();
     return () => {
-      if (this.templates.delete(uriTemplate)) {
+      if (this.view.deleteSync(uriTemplate, this.storeCtx())) {
         this.templateResolvers.delete(uriTemplate);
         this.invalidateAndNotifyList();
       }
@@ -337,8 +352,8 @@ export class ResourcesHarness
     for (const batch of batches) {
       for (const item of batch) {
         const key = resourceDeclarationKey(item.declaration);
-        const existed = this.fixed.has(key) || this.templates.has(key);
-        await this.putDurable(item);
+        const existed = this.view.hasSync(key);
+        this.putDurable(item);
         (existed ? updated : added).push(key);
       }
     }
@@ -355,33 +370,33 @@ export class ResourcesHarness
    * resolver. NOT wired into session resume in this run.
    */
   async hydrate(): Promise<void> {
-    const declarations = await this.store.list(undefined, this.storeCtx());
-    for (const d of declarations) {
-      if (d.kind === "template" && d.uriTemplate !== undefined) {
-        this.templates.set(d.uriTemplate, d.meta);
-      } else if (d.uri !== undefined) {
-        this.fixed.set(d.uri, d.meta);
-      }
-    }
+    // MERGE the durable declarations into the catalog cache (reconstruct =
+    // identity — the record IS the cache value; `View.collection` supplies it).
+    // The resolver sidecar is NOT touched (resolvers don't survive), so a
+    // hydrated resource surfaces in the catalog but `read()` throws until the
+    // loaders re-run.
+    await this.view.hydrate(undefined, this.storeCtx());
     this.invalidateAndNotifyList();
   }
 
   /**
-   * Upsert one durable loader item into store + projection + sidecar. Does NOT
-   * notify (callers batch the notification). The store write is awaited so
-   * durability errors surface to the async caller.
+   * Upsert one durable loader item into the catalog (`view.write` — cache +
+   * store) + the resolver sidecar. Does NOT notify (callers batch the
+   * notification). The store write is fire-and-forget through the {@link View}
+   * (reads are served from the sync cache; a durable-write failure must not crash
+   * the mutation — the View contract).
    */
-  private async putDurable(item: ResourceLoaderItem): Promise<void> {
+  private putDurable(item: ResourceLoaderItem): void {
     const d = item.declaration;
-    await this.store.put(d, this.storeCtx());
+    // Catalog (cache + store) via the view; the non-serializable resolver goes
+    // to the sidecar only (the record type keeps it out of the store).
+    this.view.write(d, this.storeCtx());
     if (d.kind === "template" && d.uriTemplate !== undefined) {
-      this.templates.set(d.uriTemplate, d.meta);
       this.templateResolvers.set(d.uriTemplate, {
         resolver: item.resolver,
         compiled: compileUriTemplate(d.uriTemplate),
       });
     } else if (d.uri !== undefined) {
-      this.fixed.set(d.uri, d.meta);
       this.fixedResolvers.set(d.uri, item.resolver);
     }
   }
@@ -399,7 +414,7 @@ export class ResourcesHarness
         : ((await loader.load()).find((i) => resourceDeclarationKey(i.declaration) === uri) ??
           null);
       if (found) {
-        await this.putDurable(found);
+        this.putDurable(found);
         this.invalidateAndNotifyList();
         return true;
       }
@@ -410,7 +425,7 @@ export class ResourcesHarness
   // ─────────── Sync surface ───────────
 
   has(uri: string): boolean {
-    return this.fixed.has(uri);
+    return this.view.getSync(uri)?.kind === "fixed";
   }
 
   /**
@@ -532,7 +547,10 @@ export class ResourcesHarness
   private snapshotResources(): readonly ResourceDescriptor[] {
     if (this.listCache !== null) return this.listCache;
     const out: ResourceDescriptor[] = [];
-    for (const [uri, meta] of this.fixed) {
+    // Read-time partition: the fixed slice of the single kind-discriminated view.
+    for (const rec of this.view.listSync()) {
+      if (rec.kind !== "fixed" || rec.uri === undefined) continue;
+      const { uri, meta } = rec;
       out.push(
         omitUndefined({
           uri,
@@ -553,7 +571,10 @@ export class ResourcesHarness
   private snapshotTemplates(): readonly ResourceTemplateDescriptor[] {
     if (this.templatesCache !== null) return this.templatesCache;
     const out: ResourceTemplateDescriptor[] = [];
-    for (const [uriTemplate, meta] of this.templates) {
+    // Read-time partition: the template slice of the single kind-discriminated view.
+    for (const rec of this.view.listSync()) {
+      if (rec.kind !== "template" || rec.uriTemplate === undefined) continue;
+      const { uriTemplate, meta } = rec;
       out.push(
         omitUndefined({
           uriTemplate,

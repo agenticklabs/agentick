@@ -12,22 +12,23 @@
  * lifecycle (re-auth, disconnect) flows through the wire-extensions
  * framework (#280) once that lands.
  *
- * ## Async-only, NO projection — the counter-example to "render-read ⇒ projection"
+ * ## Async-only, NO `View` — the deliberate no-view store
  *
- * Credentials is the deliberate counter-example that proves the data-layer
- * Playbook's projection rule (§3.5 P5) is CONDITIONAL, not universal. The
- * tasks (#1) and knobs (#2) harnesses each hold a synchronous
- * {@link CollectionProjection} read-model in front of their async
- * `CollectionStore` because their protocol reads are served DURING RENDER,
- * which is synchronous. This harness holds **no projection and no sync cache**:
- * every read (`get`/`has`/`keys`) awaits the store LIVE (see the methods
- * below — each is a bare `return this.store.<verb>(...)`). It can, because
- * nothing here is render-read — the credentials surface is Promise-typed CRUD
- * consumed off the render path (a tool handler, a gateway verb resolver), and
- * the slot is intentionally absent from any snapshot. "Store-backed harness
- * ⟹ projection" holds only for the render-read harnesses; the async-only,
- * never-rendered harness reads the store directly. Adding a projection here
- * would be dead weight — a cache no synchronous caller ever reads.
+ * Credentials is the counter-example that closes the store taxonomy: a
+ * store-backed harness holds a synchronous {@link View} / `LogView` read-model
+ * **IFF it has a synchronous read surface** — NOT because it is store-backed.
+ * The render-read harnesses (knobs / state / skills / prompts / tasks) each
+ * hold a `View` in front of their async store because their protocol reads are
+ * served DURING RENDER, which is synchronous. This harness holds **no `View`
+ * and no sync cache**: every read (`get`/`has`/`keys`) awaits the store LIVE
+ * (see the methods below — each is a bare `return this.store.<verb>(...)`). It
+ * can, because nothing here is render-read — the credentials surface is
+ * Promise-typed CRUD consumed off the render path (a tool handler, a gateway
+ * verb resolver), and the slot is intentionally absent from any snapshot
+ * (credentials is not `SnapshotCapable`). So the taxonomy is not "every
+ * store-backed harness holds a `View`", but "every SYNC-READ harness does";
+ * the async-only, never-rendered harness reads the store directly. Adding a
+ * `View` here would be dead weight — a cache no synchronous caller ever reads.
  *
  * ## `onChange` is the change SOURCE — cross-consumer, not self-caused
  *

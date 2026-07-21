@@ -179,10 +179,23 @@ export class View<T, Q, M> {
 
 A harness then becomes: **`View` + its domain logic** (commands, wire,
 channel). knobs = `View<KnobEntry>`. state = `View<StateEntry>`.
-The *augmented* cases (tasks' live handles, prompts' `render` sidecar) compose a
-`View` + a sidecar `Map` — the pattern prompts already proved. The
-async-only cases (credentials) skip the view and hit the store directly. Nine
-hand-rolls collapse to one primitive + thin configs; the notify seam (E17)
+The *augmented* cases (tasks' live handles, prompts' `render` sidecar,
+resources' resolver sidecars — ONE `View<ResourceDeclarationRecord>` over the
+single kind-discriminated store, `write` for durable + `seedSync` for transient,
+read-partitioned by `kind`) compose a `View` + a domain-owned sidecar — the
+pattern prompts already proved.
+
+The **taxonomy this closes** (post-convergence): a store-backed harness holds a
+`View` / `LogView` **IFF it has a synchronous read surface** — not merely
+because it is store-backed. Every render-read / sync-read harness (knobs, state,
+skills, prompts, tasks, timeline, resources) holds one; the deliberate exception
+is **credentials**, the async-only, never-rendered store — every read
+(`get`/`has`/`keys`) awaits the store LIVE, it holds NO `View` and is not
+`SnapshotCapable`. So the rule is not "every harness has a view" but "every
+SYNC-READ harness does"; the async-only harness reads the store directly (a
+`View` there would be dead weight — a cache no synchronous caller reads).
+
+Nine hand-rolls collapse to one primitive + thin configs; the notify seam (E17)
 dissolves into `View.onChange`; conformance is the parity guardrail.
 
 ## What this is and isn't
