@@ -164,6 +164,16 @@ export interface McpServerConfig {
   readonly toolPrefix?: string;
 
   /**
+   * Model-narration opt-out for THIS server's tools. MCP tools narrate
+   * by default (like any tool); set `false` to stamp
+   * `annotations.narrate: false` on this server's declarations so the
+   * projector skips injecting the `_summary` field (saving the per-tool
+   * schema property + the per-call narration tokens). Overrides the
+   * `withMCP`-level {@link WithMCPOptions.narrate}; `undefined` inherits it.
+   */
+  readonly narrate?: boolean;
+
+  /**
    * Client capability declaration sent in `initialize`. Defaults to
    * `{ elicitation: { form: {}, url: {} } }` — both substrate
    * elicit modes advertised. Roots / sampling capabilities land as
@@ -198,6 +208,16 @@ export interface McpServerConfig {
 
 export interface WithMCPOptions {
   readonly servers: readonly McpServerConfig[];
+
+  /**
+   * Model-narration default for ALL MCP tools these servers register.
+   * MCP tools narrate by default (framework-wide default ON); set
+   * `false` here to opt every MCP tool out of the injected `_summary`
+   * narration field (token cost) in one place. A per-server
+   * {@link McpServerConfig.narrate} overrides this; `undefined` leaves
+   * the framework default (ON) intact.
+   */
+  readonly narrate?: boolean;
 
   /**
    * Derive the credentials-store key for one of an MCP server's four
@@ -305,11 +325,12 @@ function mcpHandlerRef(sessionId: string, serverId: string, toolName: string): s
  * `exposure: ["model", "dispatch"]` — MCP tools are reachable from
  * both doors.
  */
-function mcpDeclaration(
+export function mcpDeclaration(
   sessionId: string,
   serverId: string,
   tool: McpToolDescriptor,
   localName: string,
+  narrate: boolean | undefined,
 ): ToolDeclaration {
   const inputSchema = jsonSchema(tool.inputSchema);
   const outputSchema = tool.outputSchema !== undefined ? jsonSchema(tool.outputSchema) : undefined;
@@ -320,10 +341,16 @@ function mcpDeclaration(
   // enum: supported|required|unsupported (matches earlier framework
   // shape predating the SDK revision).
   const mappedTaskSupport = mapMcpTaskSupport(tool.execution?.taskSupport);
-  const annotations: Readonly<Record<string, unknown>> | undefined =
+  const withTask: Readonly<Record<string, unknown>> | undefined =
     mappedTaskSupport !== undefined
       ? { ...(tool.annotations ?? {}), taskSupport: mappedTaskSupport }
       : tool.annotations;
+  // Model-narration opt-out (`withMCP({ narrate: false })` / per-server
+  // override). MCP tools narrate by default like any other tool; only an
+  // explicit `false` stamps `annotations.narrate: false` so the projector
+  // skips injecting `_summary` — `undefined` leaves the default (ON) intact.
+  const annotations: Readonly<Record<string, unknown>> | undefined =
+    narrate === false ? { ...(withTask ?? {}), narrate: false } : withTask;
   return {
     id: localName,
     name: localName,
@@ -457,9 +484,13 @@ async function discoverAndRegisterTools(
   installer: SessionInstaller,
   config: McpServerConfig,
   harness: McpClientHarness,
+  defaultNarrate: boolean | undefined,
 ): Promise<readonly Unsubscribe[]> {
   const tools = await harness.listTools();
   const prefix = config.toolPrefix ?? `${config.serverId}__`;
+  // Per-server `narrate` overrides the `withMCP`-level default; `undefined`
+  // at both levels = narration ON (the framework default).
+  const narrate = config.narrate ?? defaultNarrate;
   const unsubscribes: Unsubscribe[] = [];
   for (const tool of tools) {
     const localName = `${prefix}${tool.name}`;
@@ -512,11 +543,14 @@ async function discoverAndRegisterTools(
     unsubscribes.push(installer.registerToolHandler(handlerRef, handler));
     unsubscribes.push(
       installer.registerExtensionTool(
-        toRegistration(mcpDeclaration(installer.sessionId, config.serverId, tool, localName), {
-          scope: "extension",
-          extensionName: EXTENSION_NAME,
-          level: "session",
-        }),
+        toRegistration(
+          mcpDeclaration(installer.sessionId, config.serverId, tool, localName, narrate),
+          {
+            scope: "extension",
+            extensionName: EXTENSION_NAME,
+            level: "session",
+          },
+        ),
       ),
     );
   }
@@ -623,7 +657,12 @@ export function withMCP(options: WithMCPOptions): SessionExtension {
         let currentResourceUnsubs: readonly Unsubscribe[] = [];
         if (harness.status.kind === "connected") {
           try {
-            currentUnsubs = await discoverAndRegisterTools(installer, config, harness);
+            currentUnsubs = await discoverAndRegisterTools(
+              installer,
+              config,
+              harness,
+              options.narrate,
+            );
           } catch {
             // Tool-discovery failures are non-fatal for the
             // connection-status FSM. Adopters watching for "tools
@@ -660,7 +699,12 @@ export function withMCP(options: WithMCPOptions): SessionExtension {
             rediscoveryInFlight = rediscoveryInFlight.then(async () => {
               for (const u of currentUnsubs) u();
               try {
-                currentUnsubs = await discoverAndRegisterTools(installer, config, harness);
+                currentUnsubs = await discoverAndRegisterTools(
+                  installer,
+                  config,
+                  harness,
+                  options.narrate,
+                );
               } catch {
                 // Discovery failed on the way back — leave torn down
                 // rather than a partial re-registration. Next

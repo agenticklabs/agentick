@@ -146,6 +146,22 @@ const app = createApp({
 // call them directly. Inbound elicits flow through ElicitationHarness.
 ```
 
+**Model-narration opt-out.** MCP tools narrate by default (the framework
+injects an optional `_summary` field into every model-facing tool schema so
+the model can self-narrate a call — a per-tool + per-call token cost). Opt out
+per-`withMCP` or per-server; a server-level `narrate` overrides the `withMCP`
+default, and `undefined` at both levels leaves the framework default (ON):
+
+```ts
+withMCP({
+  narrate: false, // every MCP tool here opts out of `_summary`
+  servers: [
+    { serverId: "docs", transport },
+    { serverId: "fs", transport, narrate: true }, // …except this one, back ON
+  ],
+});
+```
+
 ## Server quickstart
 
 ```ts

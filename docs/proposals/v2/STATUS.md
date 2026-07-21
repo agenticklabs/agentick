@@ -1725,6 +1725,21 @@ blueprint's design decisions; this is execution-level).
 
 ### 2026-07-21
 
+- **Pass B narration TUNING LANDED (terse `_summary` + `withMCP({narrate})` opt-out).**
+  Two token-cost cuts. (1) The injected `_summary` schema description dropped from 24
+  words w/ an example to 12: "One short first-person sentence describing this call,
+  shown to the user." — injected into EVERY model-facing tool schema every request, so
+  every word is per-tool-per-tick. (2) `withMCP({ narrate: false })` + per-server
+  `narrate` opt-out: MCP tools narrate by default like any tool; `false` stamps
+  `annotations.narrate: false` on the declaration (`mcpDeclaration`) so `buildTools`
+  skips `_summary`. Per-server overrides the withMCP default; `undefined` at both = ON.
+  Threaded `options.narrate` → `discoverAndRegisterTools(config.narrate ?? default)` →
+  `mcpDeclaration` (merges narrate:false without clobbering mapped taskSupport / the
+  tool's own annotations). `mcpDeclaration` module-exported for a focused mapping test
+  (not on the public index); the buildTools-skips-`_summary` half is already covered by
+  narration-injection.spec. Gates: typecheck --force 152/152 0-cached; 645 mcp+model
+  tests (+4 narrate-opt-out); oxlint 0.
+
 - **Client-tools STAGE 3 LANDED (client-side router + confirmation policy).** The
   first client REQUEST-channel consumer (stages 1/2 were executor-native handling +
   the declarative `set_client_tools` write verbs). Mirrors `@agentick/elicitation-next/client`.

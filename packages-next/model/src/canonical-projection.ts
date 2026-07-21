@@ -428,9 +428,7 @@ function injectNarration(
       ...existing,
       [TOOL_NARRATION_FIELD]: {
         type: "string",
-        description:
-          "One short first-person sentence describing what you're doing with this call, " +
-          'shown to the user (e.g. "Searching the docs for retry config").',
+        description: "One short first-person sentence describing this call, shown to the user.",
       },
     },
   };
