@@ -168,6 +168,7 @@ export {
   type TimelineErrorChannel,
   ToolAbortedError,
   ToolAlreadyRegistered,
+  ToolCallTimeoutError,
   ToolConfirmationDeniedError,
   ToolConfirmationTimeoutError,
   ToolExecutorError,

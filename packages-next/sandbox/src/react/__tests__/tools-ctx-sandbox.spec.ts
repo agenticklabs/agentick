@@ -78,7 +78,7 @@ describe("built-in sandbox tools — ctx.sandbox resolution (ADR 66)", () => {
     }) as unknown as SandboxHarness["exec"];
     const bridge = stubBridge({ primary: stubHarness({ exec }) });
 
-    const out = await run(Bash.handler, { command: "ls -a" }, ctxWith(bridge));
+    const out = await run(Bash.handler!, { command: "ls -a" }, ctxWith(bridge));
 
     expect(seen).toBe("ls -a");
     expect(out).toEqual([{ type: "text", text: "ran" }]);
@@ -88,14 +88,14 @@ describe("built-in sandbox tools — ctx.sandbox resolution (ADR 66)", () => {
     const bridge = stubBridge({ primary: stubHarness() });
     const ctx = ctxWith(bridge);
 
-    expect(await run(ReadFile.handler, { path: "/a.txt" }, ctx)).toEqual([
+    expect(await run(ReadFile.handler!, { path: "/a.txt" }, ctx)).toEqual([
       { type: "text", text: "file-contents" },
     ]);
-    expect(await run(WriteFile.handler, { path: "/a.txt", content: "hi" }, ctx)).toEqual([
+    expect(await run(WriteFile.handler!, { path: "/a.txt", content: "hi" }, ctx)).toEqual([
       { type: "text", text: "Wrote 2 bytes to /a.txt" },
     ]);
     const edit = await run(
-      EditFile.handler,
+      EditFile.handler!,
       { path: "/a.txt", edits: [{ old: "x", new: "y" }] },
       ctx,
     );
@@ -110,18 +110,18 @@ describe("built-in sandbox tools — ctx.sandbox resolution (ADR 66)", () => {
     })) as unknown as SandboxHarness["exec"];
     const bridge = stubBridge({ "only-one": stubHarness({ exec }) });
 
-    const out = await run(Bash.handler, { command: "echo hi" }, ctxWith(bridge));
+    const out = await run(Bash.handler!, { command: "echo hi" }, ctxWith(bridge));
     expect(out).toEqual([{ type: "text", text: "sole" }]);
   });
 
   it("guards cleanly when no sandbox is mounted (ctx.sandbox undefined)", async () => {
-    const out = await run(Bash.handler, { command: "ls" }, ctxWith(undefined));
+    const out = await run(Bash.handler!, { command: "ls" }, ctxWith(undefined));
     expect(out).toEqual([{ type: "text", text: "Error: no sandbox available in scope" }]);
   });
 
   it("is ambiguous (no sandbox) when multiple non-primary sandboxes are registered", async () => {
     const bridge = stubBridge({ a: stubHarness(), b: stubHarness() });
-    const out = await run(ReadFile.handler, { path: "/x" }, ctxWith(bridge));
+    const out = await run(ReadFile.handler!, { path: "/x" }, ctxWith(bridge));
     expect(out).toEqual([{ type: "text", text: "Error: no sandbox available in scope" }]);
   });
 });

@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { fakeToolHandlerCtx } from "@agentick/spec-conformance-next";
 
-import { createTool } from "../create-tool.js";
+import { createTool, isCreatedTool } from "../create-tool.js";
 
 describe("createTool — bundle shape", () => {
   it("produces { declaration, handlerRef, handler, validator }", () => {
@@ -21,7 +21,7 @@ describe("createTool — bundle shape", () => {
     expect(tool.declaration.description).toBe("Evaluate arithmetic");
     expect(tool.handlerRef).toMatch(/^tool:calculator:/);
     expect(typeof tool.handler).toBe("function");
-    expect(typeof tool.validator.validate).toBe("function");
+    expect(typeof tool.validator!.validate).toBe("function");
   });
 
   it("defaults exposure to ['model']", () => {
@@ -65,7 +65,7 @@ describe("createTool — Standard Schema runtime validation", () => {
       description: "no validation",
       handler: async () => [],
     });
-    const result = await t.validator.validate({ anything: "goes" });
+    const result = await t.validator!.validate({ anything: "goes" });
     expect(result.value).toEqual({ anything: "goes" });
   });
 
@@ -77,9 +77,9 @@ describe("createTool — Standard Schema runtime validation", () => {
       inputSchema: z.object({ a: z.number(), b: z.number() }),
       handler: async ({ a, b }) => [{ type: "text", text: String(a + b) }],
     });
-    const ok = await t.validator.validate({ a: 1, b: 2 });
+    const ok = await t.validator!.validate({ a: 1, b: 2 });
     expect(ok.value).toEqual({ a: 1, b: 2 });
-    const bad = await t.validator.validate({ a: "not a number" });
+    const bad = await t.validator!.validate({ a: "not a number" });
     expect(bad.issues).toBeDefined();
   });
 });
@@ -98,8 +98,27 @@ describe("createTool — handler invocation contract", () => {
       },
     });
     const fakeCtx = fakeToolHandlerCtx({ toolCallId: "tc-1" });
-    await t.handler({ foo: 1 }, { ctx: fakeCtx, use: {} });
+    await t.handler!({ foo: 1 }, { ctx: fakeCtx, use: {} });
     expect(receivedInput).toEqual({ foo: 1 });
     expect(receivedCtx).toBe(fakeCtx);
+  });
+});
+
+describe("createTool — client-handled (no handler)", () => {
+  it("produces a declaration with handlerRef undefined + no handler/validator", () => {
+    const t = createTool({
+      name: "client_tool",
+      description: "handled by the client",
+      annotations: { requiresResponse: true },
+    });
+    expect(t.declaration.name).toBe("client_tool");
+    expect(t.declaration.handlerRef).toBeUndefined();
+    expect(t.handlerRef).toBeUndefined();
+    expect(t.handler).toBeUndefined();
+    expect(t.validator).toBeUndefined();
+    // Still a CreatedTool by the structural guard (nested declaration).
+    expect(isCreatedTool(t)).toBe(true);
+    // Annotations still flow through for the executor's client path.
+    expect(t.declaration.annotations?.requiresResponse).toBe(true);
   });
 });

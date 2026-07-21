@@ -505,6 +505,25 @@ export class ToolConfirmationTimeoutError extends ToolExecutorError {
 }
 registerAgentickError("ToolConfirmationTimeoutError", ToolConfirmationTimeoutError);
 
+/**
+ * A CLIENT-HANDLED tool dispatch (declaration carried no `handlerRef`,
+ * `annotations.requiresResponse === true`) waited past its response
+ * timeout for the client's relayed result and no `defaultResult`
+ * fallback was declared. HARD failure — the dispatch rejects. The
+ * client-tools twin of {@link ToolConfirmationTimeoutError}.
+ */
+export class ToolCallTimeoutError extends ToolExecutorError {
+  readonly _tag = "ToolCallTimeoutError" as const;
+  readonly toolName: string;
+  readonly ms: number;
+  constructor(args: { readonly toolName: string; readonly ms: number; readonly cause?: unknown }) {
+    super(`tool ${args.toolName} client call timed out after ${args.ms}ms`, { cause: args.cause });
+    this.toolName = args.toolName;
+    this.ms = args.ms;
+  }
+}
+registerAgentickError("ToolCallTimeoutError", ToolCallTimeoutError);
+
 export class ToolAbortedError extends ToolExecutorError {
   readonly _tag = "ToolAbortedError" as const;
   readonly toolCallId: string;
@@ -579,6 +598,7 @@ export type ToolExecutorErrorChannel =
   | ToolTimeoutError
   | ToolConfirmationDeniedError
   | ToolConfirmationTimeoutError
+  | ToolCallTimeoutError
   | ToolAbortedError
   | ToolAlreadyRegistered
   | ToolHandlerMissing

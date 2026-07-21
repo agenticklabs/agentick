@@ -117,6 +117,15 @@ export interface DispatchInput extends ToolCallScopedInput {
    */
   readonly confirmationTimeoutMs?: number;
   /**
+   * Per-call wait bound (ms) for a CLIENT-HANDLED tool's relayed result
+   * (the tool has no `handlerRef` and `annotations.requiresResponse ===
+   * true`). `annotations.responseTimeoutMs` takes precedence; both
+   * unset means wait forever. On timeout the executor falls back to
+   * `annotations.defaultResult` when set, else fails
+   * `ToolCallTimeoutError`.
+   */
+  readonly responseTimeoutMs?: number;
+  /**
    * Pattern selector for tools that may produce a `TaskHandle`
    * (`annotations.taskSupport === "supported" | "required"`).
    *
@@ -223,8 +232,16 @@ export interface ToolRegistration {
   /**
    * Identifier resolved by the runtime to the concrete handler. The
    * spec firewall forbids the spec from carrying executable code.
+   *
+   * ABSENT (`undefined`) marks a CLIENT-HANDLED tool: no server handler
+   * exists and the tool executor relays dispatch to the client instead
+   * of invoking locally (a handler-less `createTool`, or a wire-
+   * registered declaration). PRESENT-but-unresolvable stays a
+   * `ToolHandlerMissing` bug. `toRegistration` fills the `declaration.id`
+   * fallback, so registrations built through it are always
+   * server-handled.
    */
-  readonly handlerRef: string;
+  readonly handlerRef?: string;
   /**
    * Render-time `use:` deps. Opaque values forwarded to the handler.
    */

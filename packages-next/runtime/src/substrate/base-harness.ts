@@ -1931,6 +1931,41 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
     );
   }
 
+  /**
+   * One-way channel notification — the fire-and-forget twin of
+   * {@link request}. Publishes the SAME `session:channel:<channel>`
+   * envelope shape but registers NO Deferred and awaits no reply
+   * (`metadata.requestType: "notify"`, no correlationId/replyTo). Use
+   * when the far side runs/renders off the event but owes nothing back
+   * (e.g. a client-handled tool with `requiresResponse` falsy).
+   *
+   * Never a control path: a bus-append failure is swallowed
+   * (`E = never`) so a dropped notification cannot fail the caller's
+   * operation. Callers `yield*` it inside an Effect body, or
+   * `Effect.runFork` it.
+   */
+  protected notify<TReq>(
+    channel: string,
+    payload: TReq,
+    opts: { readonly scope?: EventScope } = {},
+  ): Effect.Effect<void, never, never> {
+    const scope: EventScope = opts.scope ?? {};
+    const fullName = `session:channel:${channel}`;
+    const envelope: ProtocolEvent = {
+      id: ulid(),
+      surface: "session",
+      name: fullName,
+      phase: "delta",
+      timestamp: Date.now(),
+      scope,
+      payload,
+      metadata: {
+        requestType: "notify",
+      },
+    } as ProtocolEvent;
+    return this.bus.append(envelope).pipe(Effect.catchAll(() => Effect.void));
+  }
+
   // ──────── lifecycle ────────
 
   /**

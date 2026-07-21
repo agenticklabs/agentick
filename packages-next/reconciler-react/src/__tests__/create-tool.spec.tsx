@@ -73,7 +73,7 @@ describe("reconciler-react createTool — bundle shape", () => {
     });
     expect(t.declaration.name).toBe("ping");
     expect(typeof t.handler).toBe("function");
-    expect(typeof t.validator.validate).toBe("function");
+    expect(typeof t.validator!.validate).toBe("function");
     expect(typeof t.Tool).toBe("function");
     expect(t.Tool.displayName).toBe("Tool(ping)");
   });

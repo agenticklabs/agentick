@@ -684,11 +684,20 @@ function resolveFromCreatedTools(
   transforms: readonly ToolTransform<McpRequestContext>[],
 ): ResolvedToolsOptions {
   const registry: ToolDeclaration[] = [];
-  const handlersByRef = new Map<string, CreatedTool["handler"]>();
+  const handlersByRef = new Map<string, NonNullable<CreatedTool["handler"]>>();
   for (const [i, t] of created.entries()) {
     if (!isCreatedTool(t)) {
       throw invalid(
         `tools[${i}] is not a CreatedTool (missing handler / handlerRef / declaration)`,
+        ["tools", String(i)],
+      );
+    }
+    // A CLIENT-HANDLED tool (handler-less `createTool`) has no server
+    // handler to project onto the MCP server — an MCP server the host
+    // OWNS must resolve its own handlers. Reject explicitly.
+    if (t.handler === undefined || t.handlerRef === undefined) {
+      throw invalid(
+        `tools[${i}] is client-handled (no handler); MCP server tools require a handler`,
         ["tools", String(i)],
       );
     }

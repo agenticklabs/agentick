@@ -1725,6 +1725,30 @@ blueprint's design decisions; this is execution-level).
 
 ### 2026-07-21
 
+- **Client-side tools — Stage 1 LANDED (executor native handling).** Baked
+  handler-less "client tool" handling + an async `requiresConfirmation` predicate
+  into the tool executor's `dispatchBody`, reusing the elicitation suspend/resume
+  infra. Discriminator: `handlerRef === undefined` → client-handled (a
+  present-but-unresolvable `handlerRef` stays `ToolHandlerMissing`). Two modes off
+  `annotations.requiresResponse`: `true` → **suspend** and relay via
+  `this.request(TOOL_CALL_CHANNEL, …)`, await the client's `ContentBlock[]`
+  (`executedBy: "client"`; timeout → `defaultResult` if set else
+  `ToolCallTimeoutError`); falsy → resolve immediately with `defaultResult ??
+  "executed successfully"` + a fire-and-forget `this.notify(...)` (new `BaseHarness`
+  primitive — the one-way twin of `request`, `requestType: "notify"`, no
+  correlationId). `requiresConfirmation` widened to `boolean | ((input,ctx) =>
+  boolean | Promise<boolean>)`, evaluated at the gate. `createTool` handler +
+  `handlerRef` now optional. New: `ToolCallTimeoutError`, `tool-call-schema.ts`
+  (`TOOL_CALL_CHANNEL`/`ToolCallRequestPayload`/`TOOL_CALL_REQUEST_SCHEMA` — the
+  stage-2/3 wire contract), `annotations.responseTimeoutMs`. Gates: typecheck
+  --force 152/152 0-cached; 1056 tests (12 new client-tools + regression guard;
+  elicitation unchanged); tool-executor README updated with the client-tool flow +
+  the confirmation seam. **Next:** the flattened-seam RESTORATION (v1→v2 audit
+  running — `confirmationMessage`/`displaySummary`/`confirmationPreview`/
+  `defaultResult`-as-function/client `policy`) BEFORE stage 2 (wire `register_tool`
+  + `respond_to_tool_call`) so the wire carries the complete declaration shape;
+  then stage 3 (client router), then custom UI for tool-use blocks.
+
 - **Phase 4a LANDED: `View.flush()` durability barrier.** View writes are
   fire-and-forget (reads served from the sync cache; a durable-write failure must
   not crash the mutation). Added a private `persist(m, ctx)` that routes the store

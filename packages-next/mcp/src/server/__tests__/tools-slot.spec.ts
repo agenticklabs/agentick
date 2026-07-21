@@ -54,7 +54,7 @@ describe("resolveToolsOption — form A: CreatedTool[] shorthand", () => {
     expect(resolved.filter).toBeNull();
     expect(resolved.transforms).toEqual([]);
 
-    const handler = resolved.resolveHandler(echo.handlerRef);
+    const handler = resolved.resolveHandler(echo.handlerRef!);
     expect(handler).not.toBeNull();
     const result = await handler!({}, fakeCtx());
     // Post-#171d.3: handler invocation returns a discriminated union
@@ -73,7 +73,7 @@ describe("resolveToolsOption — form A: CreatedTool[] shorthand", () => {
       handler: async () => "hi there",
     });
     const resolved = resolveToolsOption([t]);
-    const result = await resolved.resolveHandler(t.handlerRef)!({}, fakeCtx());
+    const result = await resolved.resolveHandler(t.handlerRef!)!({}, fakeCtx());
     expect(result.kind).toBe("inline");
     if (result.kind === "inline") {
       expect(result.content).toEqual([{ type: "text", text: "hi there" }]);
@@ -93,7 +93,7 @@ describe("resolveToolsOption — form A: CreatedTool[] shorthand", () => {
       }),
     });
     const resolved = resolveToolsOption([t]);
-    const result = await resolved.resolveHandler(t.handlerRef)!({}, fakeCtx());
+    const result = await resolved.resolveHandler(t.handlerRef!)!({}, fakeCtx());
     expect(result.kind).toBe("inline");
     if (result.kind === "inline") {
       expect(result.content).toEqual([{ type: "text", text: "72F, clear" }]);

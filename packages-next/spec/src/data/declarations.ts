@@ -11,6 +11,7 @@ import type { ContentBlock } from "./content-blocks.js";
 import type { CacheHint } from "./entries.js";
 import type { ProviderToolOptions } from "./rendered-tree.js";
 import type { StandardSchemaV1 } from "./standard-schema.js";
+import type { ToolHandlerCtx } from "./tool-handler.js";
 
 /**
  * Raw JSON Schema object — retained for WIRE-facing slots only
@@ -80,21 +81,60 @@ export type ToolBinding =
     }
   | { readonly scope: "reconciler"; readonly mountId: string };
 
+/**
+ * Predicate form of {@link ToolAnnotations.requiresConfirmation}. Runs
+ * at the confirmation gate against the VALIDATED input and the live
+ * dispatch {@link ToolHandlerCtx}, returning (sync or async) whether
+ * this specific call needs host confirmation. Lets a tool gate on the
+ * arguments — e.g. confirm `rm` only outside a scratch dir — rather
+ * than a static per-tool boolean.
+ *
+ * The function is a RUNTIME value, so it never crosses the spec
+ * firewall on the wire: like {@link ToolDeclaration.handlerRef}, it is
+ * erased from the serialized declaration and evaluated only in-process
+ * by the tool executor.
+ */
+export type ToolConfirmationPredicate = (
+  input: unknown,
+  ctx: ToolHandlerCtx,
+) => boolean | Promise<boolean>;
+
 export interface ToolAnnotations {
   /** `[V1-INHERITED]` Tool intent hint. */
   readonly intent?: "render" | "action" | "compute";
+  /**
+   * CLIENT-HANDLED tools only (declaration carries no `handlerRef`).
+   * When `true`, dispatch SUSPENDS and relays the call to the client
+   * over the tool-call channel, resolving with the client's returned
+   * result. When falsy, dispatch fire-and-forget notifies the client
+   * and resolves immediately with {@link defaultResult} (or a canned
+   * success). Ignored for server-handled tools.
+   */
   readonly requiresResponse?: boolean;
+  /**
+   * Per-tool wait bound (ms) for a CLIENT-HANDLED tool's relayed
+   * result (`requiresResponse === true`). Falls back to the caller's
+   * `DispatchInput.responseTimeoutMs`. On timeout the executor uses
+   * {@link defaultResult} when set, else fails `ToolCallTimeoutError`.
+   */
+  readonly responseTimeoutMs?: number;
   /** Milliseconds. */
   readonly timeout?: number;
   /**
-   * When true, the tool executor pauses dispatch after validation and
-   * waits for an external `confirmation-response` inbox message before
+   * Gate dispatch on host confirmation. `true` always confirms; a
+   * {@link ToolConfirmationPredicate} confirms per-call based on the
+   * validated input + ctx (evaluated at the gate, sync or async).
+   * When it resolves truthy the tool executor pauses dispatch after
+   * validation and elicits approval via the `ElicitationHarness` before
    * invoking the handler. Used for risky / side-effecting tools (file
    * delete, payment, send, etc.).
    *
+   * The predicate form is a runtime value and is erased from the
+   * serialized declaration (see {@link ToolConfirmationPredicate}).
+   *
    * `[V1-INHERITED]` from `ToolDefinition.requiresConfirmation`.
    */
-  readonly requiresConfirmation?: boolean;
+  readonly requiresConfirmation?: boolean | ToolConfirmationPredicate;
   /**
    * Per-tool override of the harness's `defaultConfirmationTimeoutMs`.
    * Milliseconds. When unset, the harness default applies (which

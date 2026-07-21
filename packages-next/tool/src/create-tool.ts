@@ -77,6 +77,12 @@ export interface ToolSpec<TInput = unknown> {
    * validated input + a `ctx` bundle (toolCallId, sessionId,
    * executionId, abort signal, channel emit).
    *
+   * OPTIONAL. Omit it to declare a CLIENT-HANDLED tool: `createTool`
+   * synthesizes no `handlerRef` (the declaration's `handlerRef` stays
+   * `undefined`) and registers no handler, so the tool executor relays
+   * dispatch to the client rather than invoking a server handler. This
+   * is the server-side way to declare a client tool.
+   *
    * Returns the ADR 70 result currency — a `string` (sugar for one
    * text block), a `ContentBlock[]`, or a `{ content, structuredContent?,
    * isError?, metadata? }` envelope (plus the `Promise` / `Effect` /
@@ -86,7 +92,7 @@ export interface ToolSpec<TInput = unknown> {
    * dispatch rejects). The three shapes stay type-discriminable, so a
    * wrong-shape return is a compile error.
    */
-  readonly handler: (input: TInput, args: { readonly ctx: ToolHandlerCtx }) => ToolHandlerResult;
+  readonly handler?: (input: TInput, args: { readonly ctx: ToolHandlerCtx }) => ToolHandlerResult;
   /**
    * Where the tool is reachable from. Defaults to `["model"]`.
    *   - `"model"` — model-callable via function-calling
@@ -119,9 +125,15 @@ export interface ToolSpec<TInput = unknown> {
  */
 export interface CreatedTool {
   readonly declaration: ToolDeclaration;
-  readonly handlerRef: string;
-  readonly handler: ToolHandler;
-  readonly validator: Validator;
+  /**
+   * All three are ABSENT for a CLIENT-HANDLED tool (created with no
+   * `handler`): there is no server handler to resolve, so
+   * `declaration.handlerRef` is `undefined` and the executor relays
+   * dispatch to the client. Present for the common server-handled tool.
+   */
+  readonly handlerRef?: string;
+  readonly handler?: ToolHandler;
+  readonly validator?: Validator;
 }
 
 /**
@@ -133,16 +145,22 @@ export interface CreatedTool {
  * raw declarations (e.g., the `mcp-next/server` tools slot). Living
  * in this package keeps the guard next to the type it discriminates
  * — no duplicated structural checks scattered across consumers.
+ *
+ * The discriminator is the NESTED `declaration` object: a raw
+ * `ToolDeclaration` carries `name`/`inputSchema` at the top level and
+ * has no `declaration` field. This admits CLIENT-HANDLED bundles
+ * (handler-less `createTool`, where `handler`/`handlerRef` are absent);
+ * when present, `handler` must be a function.
  */
 export function isCreatedTool(value: unknown): value is CreatedTool {
   if (value === null || typeof value !== "object") return false;
   const obj = value as Record<string, unknown>;
-  return (
-    typeof obj.handlerRef === "string" &&
-    typeof obj.handler === "function" &&
-    typeof obj.declaration === "object" &&
-    obj.declaration !== null
-  );
+  if (typeof obj.declaration !== "object" || obj.declaration === null) return false;
+  // A server-handled bundle carries a function handler + string ref;
+  // a client-handled bundle omits both. Reject partial/garbage shapes.
+  if (obj.handler !== undefined && typeof obj.handler !== "function") return false;
+  if (obj.handlerRef !== undefined && typeof obj.handlerRef !== "string") return false;
+  return true;
 }
 
 // ============================================================================
@@ -152,10 +170,31 @@ export function isCreatedTool(value: unknown): value is CreatedTool {
 let autoCounter = 0;
 
 export function createTool<TInput = unknown>(spec: ToolSpec<TInput>): CreatedTool {
-  const handlerRef = spec.handlerRef ?? `tool:${spec.name}:${++autoCounter}`;
-
   const schema: StandardSchemaV1<unknown, TInput> =
     spec.inputSchema ?? (jsonSchema({ type: "object" }) as StandardSchemaV1<unknown, TInput>);
+
+  // No handler → CLIENT-HANDLED tool: synthesize no handlerRef (the
+  // declaration stays `handlerRef`-less so the executor relays dispatch
+  // to the client) and register no handler / validator.
+  if (spec.handler === undefined) {
+    const declaration: ToolDeclaration = {
+      id: spec.name,
+      name: spec.name,
+      description: spec.description,
+      inputSchema: schema,
+      ...omitUndefined({ outputSchema: spec.outputSchema }),
+      exposure: spec.exposure ?? ["model"],
+      ...omitUndefined({
+        handlerRef: spec.handlerRef,
+        annotations: spec.annotations,
+        metadata: spec.metadata,
+      }),
+    };
+    return { declaration };
+  }
+
+  const specHandler = spec.handler;
+  const handlerRef = spec.handlerRef ?? `tool:${spec.name}:${++autoCounter}`;
 
   const declaration: ToolDeclaration = {
     id: spec.name,
@@ -174,7 +213,7 @@ export function createTool<TInput = unknown>(spec: ToolSpec<TInput>): CreatedToo
     // TaskHandle / wrapped TaskHandle). Wrapping in `async` here would
     // force-Promise TaskHandle returns into Promise<TaskHandle>, which
     // the executor handles, but stays one indirection cheaper without.
-    return spec.handler(input as TInput, { ctx });
+    return specHandler(input as TInput, { ctx });
   };
 
   const validator: Validator = spec.inputSchema ? fromStandardSchema(schema) : permissiveValidator;

@@ -63,6 +63,7 @@ import {
   HandlerError,
   isTaskHandle,
   ToolAbortedError,
+  ToolCallTimeoutError,
   ToolConfirmationTimeoutError,
   ToolHandlerError,
   ToolHandlerMissing,
@@ -78,13 +79,16 @@ import {
   TOOL_CONFIRMATION_REPLY_SCHEMA,
   type ToolConfirmationReply,
 } from "./confirmation-schema.js";
+import { TOOL_CALL_CHANNEL, type ToolCallRequestPayload } from "./tool-call-schema.js";
 import { InMemoryToolRegistry, sameBindingKey } from "./registry.js";
 import { fromStandardSchema } from "./validator.js";
 import type {
+  HandlerEntry,
   HandlerResolver,
   HandlerChannelSeed,
   ToolExecutorHarnessOptions,
   ToolHandlerCtx,
+  Validator,
   ValidatorResult,
 } from "./types.js";
 
@@ -556,17 +560,35 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
         }
       }
 
-      const entry = this.handlerResolver.resolve(reg.handlerRef);
-      if (!entry) {
-        return yield* Effect.fail(
-          new ToolHandlerMissing({ toolName: input.name, handlerRef: reg.handlerRef }),
-        );
+      // ─── Handler discriminator (client-handled vs server) ───────────
+      // `handlerRef` ABSENT (undefined) → CLIENT-HANDLED tool: no server
+      // handler exists; dispatch relays the call to the client (see the
+      // client-tool branch after the confirmation gate). `handlerRef`
+      // PRESENT but the resolver returns undefined stays a
+      // `ToolHandlerMissing` bug. `createTool` synthesizes a handlerRef
+      // for server tools, so absence only arises for handler-less /
+      // wire-registered declarations.
+      const isClientHandled = reg.handlerRef === undefined;
+      let entry: HandlerEntry | undefined;
+      let validator: Validator;
+      if (reg.handlerRef === undefined) {
+        // No resolver entry — validate against the declaration's own
+        // schema (client tools are still input-validated at the gate).
+        validator = fromStandardSchema(reg.declaration.inputSchema);
+      } else {
+        entry = this.handlerResolver.resolve(reg.handlerRef);
+        if (!entry) {
+          return yield* Effect.fail(
+            new ToolHandlerMissing({ toolName: input.name, handlerRef: reg.handlerRef }),
+          );
+        }
+        validator = entry.validator;
       }
 
       // Validate input. Validator may be sync or async — both shapes
       // sit inside Effect.tryPromise (sync resolves immediately).
       const result = yield* Effect.tryPromise({
-        try: async () => entry.validator.validate(input.input),
+        try: async () => validator.validate(input.input),
         catch: (cause): { readonly _tag: "ToolValidationError"; readonly cause: unknown } => ({
           _tag: "ToolValidationError",
           cause,
@@ -588,121 +610,14 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
       const onCallerAbort = () => controller.abort(callerSignal?.reason);
       callerSignal?.addEventListener("abort", onCallerAbort, { once: true });
 
-      // ─── Confirmation gate ──────────────────────────────────────────
-      // Tools annotated `requiresConfirmation: true` route through the
-      // ElicitationHarness. The wire envelope is the standard elicitation
-      // shape (session:channel:elicitation, hints.kind ===
-      // "tool_confirmation"); the response is validated against
-      // TOOL_CONFIRMATION_REPLY_SCHEMA. The harness retires its own
-      // `session:channel:tool_confirmation` channel — one substrate
-      // primitive, one wire shape.
-      if (
-        reg.declaration.annotations?.requiresConfirmation === true &&
-        !this.alwaysAllowed.has(input.name)
-      ) {
-        const confirmationTimeoutMs =
-          reg.declaration.annotations.confirmationTimeoutMs ??
-          input.confirmationTimeoutMs ??
-          this.defaultConfirmationTimeoutMs;
+      const started = Date.now();
 
-        // The signal flows through to the elicitation registry; an
-        // inbox abort or caller signal abort settles the pending
-        // elicit with `{ outcome: "failed", failure.kind: "aborted" }`.
-        const elicit = this.elicitation.elicit(
-          {
-            message: `Approve tool "${input.name}"?`,
-            schema: TOOL_CONFIRMATION_REPLY_SCHEMA,
-            hints: { kind: TOOL_CONFIRMATION_KIND },
-            metadata: {
-              toolUseId: input.toolCallId,
-              toolName: input.name,
-              arguments: validated as Record<string, unknown>,
-            },
-          },
-          {
-            ...omitUndefined({ timeoutMs: confirmationTimeoutMs }),
-            signal: controller.signal,
-          },
-        );
-
-        // `Effect.promise` bridges the elicit() Promise into the
-        // surrounding Effect generator. elicit() never throws for
-        // form-mode requests; URL-mode would throw but tool
-        // confirmation only ever sends form-mode.
-        const elicitResult = yield* Effect.promise(() => elicit);
-
-        // Timeout → caller error so the loop sees it via
-        // ToolConfirmationTimeoutError (existing contract).
-        if (elicitResult.outcome === "failed" && elicitResult.failure.kind === "timeout") {
-          return yield* Effect.fail(
-            new ToolConfirmationTimeoutError({
-              toolName: input.name,
-              ms: confirmationTimeoutMs ?? 0,
-            }),
-          );
-        }
-
-        // Approval requires accepted + reply.approved === true. Every
-        // other path — declined, cancelled, failed.aborted,
-        // failed.schema_violation, or accepted-with-approved-false —
-        // is a denial.
-        const reply = extractReply(elicitResult);
-        const approved = reply?.approved === true;
-
-        if (!approved) {
-          callerSignal?.removeEventListener("abort", onCallerAbort);
-          this.inFlight.delete(input.toolCallId);
-          const denyReason = denialReason(elicitResult, reply);
-          const denialResult: DispatchResult = {
-            toolCallId: input.toolCallId,
-            name: input.name,
-            // Denial is a SOFT error (ADR 70): the dispatch completed, the
-            // model sees the denial text and can adapt. HARD failures reject.
-            isError: true,
-            content: [
-              {
-                type: "text",
-                text: denyReason
-                  ? `Tool "${input.name}" denied: ${denyReason}`
-                  : `Tool "${input.name}" denied by user.`,
-              },
-            ],
-            executedBy: "agentick",
-            durationMs: 0,
-          };
-          return denialResult;
-        }
-
-        if (reply!.always === true) this.alwaysAllowed.add(input.name);
-
-        // Re-validate when the host returns modifiedArguments — the
-        // user may have edited the call before approving.
-        if (reply!.modifiedArguments !== undefined) {
-          const revalidated = yield* Effect.tryPromise({
-            try: async () => entry.validator.validate(reply!.modifiedArguments),
-            catch: (cause): { readonly _tag: "ToolValidationError"; readonly cause: unknown } => ({
-              _tag: "ToolValidationError",
-              cause,
-            }),
-          });
-          if (isValidationFailure(revalidated)) {
-            return yield* Effect.fail(
-              new ToolValidationError({ toolName: input.name, issues: revalidated.issues }),
-            );
-          }
-          validated = revalidated.value;
-        }
-      }
-
-      const timeoutMs =
-        input.timeoutMs ?? reg.declaration.annotations?.timeout ?? this.defaultTimeoutMs;
-      let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-      if (timeoutMs !== undefined && timeoutMs > 0) {
-        timeoutHandle = setTimeout(() => {
-          controller.abort(new ToolTimeoutError({ toolName: input.name, ms: timeoutMs }));
-        }, timeoutMs);
-      }
-
+      // ─── Handler ctx ────────────────────────────────────────────────
+      // Built BEFORE the confirmation gate so an async
+      // `requiresConfirmation` predicate receives this exact `ctx`; the
+      // (server) handler consumes it below. Client-handled dispatch never
+      // invokes a handler, but the ctx is cheap and the predicate path is
+      // shared.
       const channelEmits: HandlerChannelSeed[] = [];
       const publisher = this.channelPublisher;
       // Parent opId for channel emits (`ctx.emit`). Read from the ambient
@@ -811,12 +726,218 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
         },
       };
 
+      // ─── Confirmation gate ──────────────────────────────────────────
+      // Tools whose `requiresConfirmation` resolves truthy route through
+      // the ElicitationHarness. `true` always confirms; a predicate is
+      // evaluated (sync or async) against the validated input + this ctx.
+      // The wire envelope is the standard elicitation shape
+      // (session:channel:elicitation, hints.kind === "tool_confirmation");
+      // the response is validated against TOOL_CONFIRMATION_REPLY_SCHEMA.
+      // Applies to client-handled tools too — they gate BEFORE relaying.
+      const requiresConfirmation = reg.declaration.annotations?.requiresConfirmation;
+      const needsConfirmation =
+        typeof requiresConfirmation === "function"
+          ? yield* Effect.promise(() => Promise.resolve(requiresConfirmation(validated, ctx)))
+          : requiresConfirmation === true;
+      if (needsConfirmation && !this.alwaysAllowed.has(input.name)) {
+        const confirmationTimeoutMs =
+          reg.declaration.annotations?.confirmationTimeoutMs ??
+          input.confirmationTimeoutMs ??
+          this.defaultConfirmationTimeoutMs;
+
+        // The signal flows through to the elicitation registry; an
+        // inbox abort or caller signal abort settles the pending
+        // elicit with `{ outcome: "failed", failure.kind: "aborted" }`.
+        const elicit = this.elicitation.elicit(
+          {
+            message: `Approve tool "${input.name}"?`,
+            schema: TOOL_CONFIRMATION_REPLY_SCHEMA,
+            hints: { kind: TOOL_CONFIRMATION_KIND },
+            metadata: {
+              toolUseId: input.toolCallId,
+              toolName: input.name,
+              arguments: validated as Record<string, unknown>,
+            },
+          },
+          {
+            ...omitUndefined({ timeoutMs: confirmationTimeoutMs }),
+            signal: controller.signal,
+          },
+        );
+
+        // `Effect.promise` bridges the elicit() Promise into the
+        // surrounding Effect generator. elicit() never throws for
+        // form-mode requests; URL-mode would throw but tool
+        // confirmation only ever sends form-mode.
+        const elicitResult = yield* Effect.promise(() => elicit);
+
+        // Timeout → caller error so the loop sees it via
+        // ToolConfirmationTimeoutError (existing contract).
+        if (elicitResult.outcome === "failed" && elicitResult.failure.kind === "timeout") {
+          return yield* Effect.fail(
+            new ToolConfirmationTimeoutError({
+              toolName: input.name,
+              ms: confirmationTimeoutMs ?? 0,
+            }),
+          );
+        }
+
+        // Approval requires accepted + reply.approved === true. Every
+        // other path — declined, cancelled, failed.aborted,
+        // failed.schema_violation, or accepted-with-approved-false —
+        // is a denial.
+        const reply = extractReply(elicitResult);
+        const approved = reply?.approved === true;
+
+        if (!approved) {
+          callerSignal?.removeEventListener("abort", onCallerAbort);
+          this.inFlight.delete(input.toolCallId);
+          const denyReason = denialReason(elicitResult, reply);
+          const denialResult: DispatchResult = {
+            toolCallId: input.toolCallId,
+            name: input.name,
+            // Denial is a SOFT error (ADR 70): the dispatch completed, the
+            // model sees the denial text and can adapt. HARD failures reject.
+            isError: true,
+            content: [
+              {
+                type: "text",
+                text: denyReason
+                  ? `Tool "${input.name}" denied: ${denyReason}`
+                  : `Tool "${input.name}" denied by user.`,
+              },
+            ],
+            executedBy: "agentick",
+            durationMs: 0,
+          };
+          return denialResult;
+        }
+
+        if (reply!.always === true) this.alwaysAllowed.add(input.name);
+
+        // Re-validate when the host returns modifiedArguments — the
+        // user may have edited the call before approving.
+        if (reply!.modifiedArguments !== undefined) {
+          const revalidated = yield* Effect.tryPromise({
+            try: async () => validator.validate(reply!.modifiedArguments),
+            catch: (cause): { readonly _tag: "ToolValidationError"; readonly cause: unknown } => ({
+              _tag: "ToolValidationError",
+              cause,
+            }),
+          });
+          if (isValidationFailure(revalidated)) {
+            return yield* Effect.fail(
+              new ToolValidationError({ toolName: input.name, issues: revalidated.issues }),
+            );
+          }
+          validated = revalidated.value;
+        }
+      }
+
+      // ─── Client-handled dispatch (no server handler) ────────────────
+      // The declaration carried no `handlerRef`, so there is nothing to
+      // invoke locally. Runs AFTER validation + the confirmation gate.
+      // Per `annotations.requiresResponse`:
+      //   - `true`  → SUSPEND: relay the call to the client via
+      //     `this.request(TOOL_CALL_CHANNEL, …)` — a correlated
+      //     request/response over the SAME suspend-resume infra the
+      //     confirmation gate uses — and resolve with the client's
+      //     returned `ToolResultInput`. On timeout, fall back to
+      //     `defaultResult` when set, else fail `ToolCallTimeoutError`.
+      //   - falsy   → FIRE-AND-FORGET: notify the client (one-way bus
+      //     publish, no Deferred) and resolve immediately with
+      //     `defaultResult` (or a canned success block).
+      // Placed BEFORE the tool-timeout arming below so the client path
+      // never leaves a dangling `setTimeout`.
+      if (isClientHandled) {
+        const ann = reg.declaration.annotations;
+        let normalized: NormalizedToolResult;
+
+        if (ann?.requiresResponse === true) {
+          const respEffect = this.request<ToolCallRequestPayload, ToolResultInput>(
+            TOOL_CALL_CHANNEL,
+            { toolCallId: input.toolCallId, name: input.name, input: validated },
+            {
+              ...omitUndefined({ timeoutMs: ann.responseTimeoutMs ?? input.responseTimeoutMs }),
+              signal: controller.signal,
+              scope: dispatchScope,
+            },
+          );
+          const resp = yield* Effect.either(respEffect);
+          if (resp._tag === "Left") {
+            if (resp.left._tag === "RequestTimeoutError" && ann.defaultResult !== undefined) {
+              // Timeout with an opt-in fallback — resolve with it.
+              normalized = normalizeToolResult(ann.defaultResult);
+            } else if (resp.left._tag === "RequestTimeoutError") {
+              callerSignal?.removeEventListener("abort", onCallerAbort);
+              this.inFlight.delete(input.toolCallId);
+              return yield* Effect.fail(
+                new ToolCallTimeoutError({ toolName: input.name, ms: resp.left.ms }),
+              );
+            } else {
+              // Abort / cancel — the caller signal fired or the request
+              // was cancelled. Surface as a HARD abort, matching the
+              // server handler abort path.
+              callerSignal?.removeEventListener("abort", onCallerAbort);
+              this.inFlight.delete(input.toolCallId);
+              return yield* Effect.fail(
+                new ToolAbortedError({
+                  toolCallId: input.toolCallId,
+                  ...omitUndefined({
+                    reason:
+                      typeof controller.signal.reason === "string"
+                        ? controller.signal.reason
+                        : undefined,
+                  }),
+                }),
+              );
+            }
+          } else {
+            normalized = normalizeToolResult(resp.right);
+          }
+        } else {
+          // Fire-and-forget: one-way notification, no correlation/Deferred.
+          yield* this.notify<ToolCallRequestPayload>(
+            TOOL_CALL_CHANNEL,
+            { toolCallId: input.toolCallId, name: input.name, input: validated },
+            { scope: dispatchScope },
+          );
+          normalized = normalizeToolResult(
+            ann?.defaultResult ?? [{ type: "text", text: "executed successfully" }],
+          );
+        }
+
+        callerSignal?.removeEventListener("abort", onCallerAbort);
+        this.inFlight.delete(input.toolCallId);
+        const clientResult: DispatchResult = {
+          toolCallId: input.toolCallId,
+          name: input.name,
+          content: normalized.content,
+          ...(normalized.isError !== undefined ? { isError: normalized.isError } : {}),
+          ...(normalized.structuredContent !== undefined
+            ? { structuredContent: normalized.structuredContent }
+            : {}),
+          ...(normalized.metadata !== undefined ? { metadata: normalized.metadata } : {}),
+          // Observability — a client, not the local handler, produced this.
+          executedBy: "client",
+          durationMs: Date.now() - started,
+        };
+        return clientResult;
+      }
+
+      const timeoutMs =
+        input.timeoutMs ?? reg.declaration.annotations?.timeout ?? this.defaultTimeoutMs;
+      let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+      if (timeoutMs !== undefined && timeoutMs > 0) {
+        timeoutHandle = setTimeout(() => {
+          controller.abort(new ToolTimeoutError({ toolName: input.name, ms: timeoutMs }));
+        }, timeoutMs);
+      }
+
       const useDeps: Readonly<Record<string, unknown>> = {
         ...(reg.useDeps ?? {}),
         ...(input.context.use ?? {}),
       };
-
-      const started = Date.now();
 
       // Compose body that branches on handler shape. Resolves to the
       // ADR 70 `NormalizedToolResult` (content + optional structuredContent
@@ -828,7 +949,10 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
               controller.signal.reason ?? new ToolAbortedError({ toolCallId: input.toolCallId }),
             );
           }
-          const handlerResult = entry.handler(validated, { ctx, use: useDeps });
+          // `entry` is defined here: the `isClientHandled` branch above
+          // already returned for handler-less tools, so this path only
+          // runs when the resolver produced an entry.
+          const handlerResult = entry!.handler(validated, { ctx, use: useDeps });
 
           // Abort watcher — fails the race when the dispatch
           // controller fires (caller abort or timeout). Shared between

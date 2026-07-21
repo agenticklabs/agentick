@@ -38,6 +38,16 @@ export { permissiveValidator, fromStandardSchema } from "./validator.js";
 // origin stamped at the command gate (ADR 51 §5/§6).
 export { viaToOrigin } from "./provenance.js";
 
+// Client-handled tool dispatch — channel + wire contract (stages 2/3
+// subscribe to these). Mirror of the elicitation channel export.
+export {
+  TOOL_CALL_CHANNEL,
+  TOOL_CALL_CHANNEL_FQN,
+  TOOL_CALL_REQUEST_SCHEMA,
+  type ToolCallRequestPayload,
+  type ToolCallResponse,
+} from "./tool-call-schema.js";
+
 // Types
 export type {
   HandlerEntry,

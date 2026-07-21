@@ -134,7 +134,11 @@ export function createTool<
 
     React.useEffect(() => {
       if (!bridge) return;
-      const unregister = bridge.register(base.handlerRef, base.handler, base.validator);
+      // `base` is always server-handled here — this factory passes a
+      // `handler` to `baseCreateTool` unconditionally, so handlerRef /
+      // handler / validator are always present (only handler-less
+      // `createTool` leaves them undefined).
+      const unregister = bridge.register(base.handlerRef!, base.handler!, base.validator!);
       return () => {
         unregister();
       };

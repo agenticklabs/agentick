@@ -285,17 +285,70 @@ dispatch abort cancels the in-flight task rather than orphaning it.
 
 ## Confirmation flow
 
-Tools annotated `requiresConfirmation: true` route through the
-`ElicitationHarness` before the handler runs. The wire envelope is the
-standard elicitation shape (`session:channel:elicitation`, `hints.kind
-=== "tool_confirmation"`); the reply is validated against the internal
-`TOOL_CONFIRMATION_REPLY_SCHEMA`. Approval requires `accepted` +
-`reply.approved === true` — every other outcome (declined, cancelled,
-aborted, schema-violation, accepted-with-`approved:false`) becomes a
-denial-shaped `DispatchResult` (`succeeded: false`). A `reply.always ===
-true` marks the tool session-allowed so subsequent calls skip the gate; a
-`reply.modifiedArguments` payload is re-validated before the handler
-runs. Timeout surfaces as `ToolConfirmationTimeoutError`.
+Tools whose `annotations.requiresConfirmation` is truthy route through the
+`ElicitationHarness` before the handler runs. The annotation is a **seam, not a
+flag**:
+
+```ts
+requiresConfirmation?: boolean | ((input, ctx) => boolean | Promise<boolean>);
+```
+
+`true` always confirms; a **predicate** confirms conditionally on the validated
+input + tool ctx (e.g. confirm only when `input.amount > 100`, or when the path
+is outside a scratch dir). The predicate is evaluated at the gate and may be
+async. (Over-the-wire tool declarations use the `boolean` form — a function can't
+serialize; the predicate is a server-declared-tool affordance.)
+
+The wire envelope is the standard elicitation shape
+(`session:channel:elicitation`, `hints.kind === "tool_confirmation"`); the reply
+is validated against the internal `TOOL_CONFIRMATION_REPLY_SCHEMA`. Approval
+requires `accepted` + `reply.approved === true` — every other outcome (declined,
+cancelled, aborted, schema-violation, accepted-with-`approved:false`) becomes a
+denial-shaped `DispatchResult` (`succeeded: false`). A `reply.always === true`
+marks the tool session-allowed so subsequent calls skip the gate; a
+`reply.modifiedArguments` payload is re-validated before the handler runs.
+Timeout surfaces as `ToolConfirmationTimeoutError`.
+
+## Client-handled tools
+
+A tool whose declaration has **no `handlerRef`** is *client-handled*: there is no
+server-side handler, and the executor either relays the call to the client for
+execution or resolves it with a canned result — driven entirely by annotations.
+(A `handlerRef` that is *present but unresolvable* is still a hard
+`ToolHandlerMissing` — a real missing-handler bug, not a client tool.) A
+client-handled call still validates its input against the declaration's
+`inputSchema` and still runs the confirmation gate.
+
+Two modes, chosen by `annotations.requiresResponse`:
+
+- **`requiresResponse: true` — client-in-the-loop.** The dispatch **suspends**
+  and relays the call to the client via the executor's own request/response seam
+  (`this.request(TOOL_CALL_CHANNEL, { toolCallId, name, input })`, the same
+  Deferred-keyed-by-`correlationId` machinery the confirmation gate uses). The
+  client executes the tool (renders UI, runs browser code, …) and relays a
+  `ContentBlock[]` result back; the dispatch resumes with it (`executedBy:
+  "client"`). Timeout is bounded by `annotations.responseTimeoutMs` (or
+  per-dispatch `responseTimeoutMs`); on timeout the executor falls back to
+  `defaultResult` if one is set, else fails with `ToolCallTimeoutError`.
+- **`requiresResponse` falsy (default) — fire-and-forget.** The dispatch resolves
+  *immediately* with `annotations.defaultResult` (or a default
+  `[{ type: "text", text: "executed successfully" }]`) and emits a one-way
+  notification (`this.notify(TOOL_CALL_CHANNEL, …)` — a `requestType: "notify"`
+  envelope with no `correlationId`, the fire-and-forget twin of `request`) so the
+  client's tool router still runs/renders the tool. Suits render-only tools that
+  the model doesn't need a real result from.
+
+Either way the result re-enters the loop through the unchanged
+`DispatchResult → LoopToolResult → tool_result` timeline path. `createTool`'s
+`handler` is optional — a handler-less `createTool` is the server-side way to
+declare a client tool; the wire path (registering a raw declaration) converges on
+the same handler-less shape. `TOOL_CALL_CHANNEL`, `ToolCallRequestPayload`, and
+`TOOL_CALL_REQUEST_SCHEMA` are exported as the wire contract the client router
+(and the `session/respond_to_tool_call` wire method) build on.
+
+> Not yet wired: the `session/register_tool` + `session/respond_to_tool_call`
+> wire methods (stage 2) and the client-side tool router (stage 3). This section
+> documents the executor's native handling only.
 
 ## Abort
 
