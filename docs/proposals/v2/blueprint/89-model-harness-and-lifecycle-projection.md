@@ -20,11 +20,14 @@ the compiler owns instead of *projecting* the framework's.
 
 Both dissolve into one decision: **the model becomes a harness whose `execute` is
 the `model:generate` command; `tick` becomes a command; and React lifecycle hooks
-are the compiler registering `observe` interceptors (ADR 83) on the constituent
-command harnesses — the same hooks a user declares programmatically.** No bespoke
-lifecycle store; any command is observable; the model finally gets hooks, a guard,
-interceptors, journaling, and a **swappable backing model** on a session-persistent
-harness.
+are the compiler registering ADR-83 interceptors (`observe` / `transform` / `guard`)
+on the constituent command harnesses — the same hooks a user declares
+programmatically.** A `useOn*` hook registers a callback (closing over component
+state via a ref), not a render, so it can observe, reshape, OR veto/defer an
+operation — components become full lifecycle participants. No bespoke lifecycle
+store; any command is observable and interceptable; the model finally gets hooks, a
+guard, interceptors, journaling, and a **swappable backing model** on a
+session-persistent harness.
 
 ## Context
 
@@ -110,38 +113,52 @@ tick command's terminal (the tree-settle barrier `notifyLifecycle("tick-end")`
 currently provides) instead of a hand-coded await. This is the load-bearing part —
 kill/resume and tick ordering must survive the wrapping.
 
-### 4. Lifecycle = the compiler projecting the command-hook system (ADR 83 `observe`)
+### 4. Lifecycle = the compiler projecting the FULL command-hook system (ADR 83)
 
 There is **no bespoke `LifecycleStore`**. React lifecycle hooks are the compiler
-registering **`observe` interceptors** (ADR 83 — "pure side-effect, never changes
-the value") on the constituent command harnesses — the *exact* mechanism a user
-uses programmatically:
+registering **ADR-83 interceptors** on the constituent command harnesses — the
+*exact* mechanism a user uses programmatically. A `useOn*` hook does NOT register a
+render; it registers a **callback** (a function) closing over the component's latest
+state via a ref (as `useOnToolEnd` already does with `ref.current`). The operation
+then invokes that callback, and — because it is a function, not a render — it can be
+**any of ADR 83's three kinds**, not just observe:
 
-- `useOnToolEnd(cb)` → `toolExecutor.hooks.onAfterToolDispatch` registered as an
-  `observe` (fire-and-forget `cb`; returns the output untouched — never blocks the
-  dispatch, never reshapes it).
-- `useOnModelGenerateStart(cb)` → `model.hooks.onBeforeModelGenerate` (`observe`).
-- `useOnTickStart/End(cb)` → the `tick` command's `onBefore/After` (`observe`).
-- **Any command is observable** — the hardcoded 7-event list is gone. `model:generate`,
-  `tick`, and every future command are uniformly available; the framework owns the
-  plumbing (command hooks + `observe`), the compiler *projects* it, a dep-less
-  compiler projects the identical source.
+- **`observe`** — the common case. Fire-and-forget side-effect (update UI state, log);
+  non-blocking; returns nothing. `useOnToolEnd(cb)` → `toolExecutor.hooks.onAfterToolDispatch`
+  as an `observe`; `useOnModelGenerateStart(cb)` → `model.hooks.onBeforeModelGenerate`;
+  `useOnTickStart/End` → the `tick` command's `onBefore/After`.
+- **`transform`** — in-path, awaited; reshapes input/output. A component injecting
+  context into `model:generate`, or rewriting a tool's args, from its render state.
+- **`guard`** — in-path, awaited; returns `proceed | veto | replace | defer`. A
+  component vetoing a tool call, or **`defer`-ring to an approval UI** (component-
+  authored confirmation) — from its render-time state via the ref.
 
-The two things the store did that must be preserved:
+This is the reconciler's thesis: the tree DECLARES the agent's behavior. It already
+declares tools, sections, knobs, `gate()`; declaring a `guard`/`transform` on an
+operation is the same move (`<ToolGate>` vetoing on user state; a `useGuardToolDispatch`
+that defers to a confirm dialog). React components become full lifecycle participants,
+not passive observers.
 
-- **Non-blocking observation.** ADR 83's `observe` is a pure side-effect kind; the
-  compiler registers it fire-and-forget (schedule the React update, return
-  synchronously) so a slow/async observer can never block the operation's critical
-  path. (This is why `observe` — not `transform`/`onAfter-that-awaits` — is the
-  right kind.)
+- **Any command is observable / interceptable** — the hardcoded 7-event list is gone.
+  `model:generate`, `tick`, and every future command are uniformly available; the
+  framework owns the plumbing (command hooks + the one interceptor primitive), the
+  compiler *projects* it, a dep-less compiler projects the identical source.
+
+The one discipline (not a limitation): **`observe` is non-blocking** (fire-and-forget —
+schedule the React update, return); **`transform`/`guard` run in the operation's
+critical path (awaited)**, so they must decide promptly from captured state or `defer`
+cleanly (the elicitation-style suspend) — they cannot hang. The exact same discipline a
+programmatic interceptor has.
+
+Two things the store did that must be preserved:
+
 - **Catch-up.** A component mounting mid-tick must see the current `tick-start`. This
   stays as a **thin cache in the compiler** (the last `tick-start`/`execution-start`,
   replayed to late-registered observers) — but the *events* come from real hooks, not
   a bespoke store.
-
-Registration rides component lifecycle: the `observe` interceptor is registered when
-the React hook mounts and unsubscribed on unmount (the interceptor returns an
-`Unsubscribe`, cascaded per ADR 82/83).
+- **Unsubscribe.** Registration rides component lifecycle: the interceptor is registered
+  when the React hook mounts and unsubscribed on unmount (returns an `Unsubscribe`,
+  cascaded per ADR 82/83).
 
 ## Consequences
 
