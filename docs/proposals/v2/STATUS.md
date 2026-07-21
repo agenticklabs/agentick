@@ -1725,6 +1725,26 @@ blueprint's design decisions; this is execution-level).
 
 ### 2026-07-21
 
+- **Client-tools STAGE 3 LANDED (client-side router + confirmation policy).** The
+  first client REQUEST-channel consumer (stages 1/2 were executor-native handling +
+  the declarative `set_client_tools` write verbs). Mirrors `@agentick/elicitation-next/client`.
+  Three surfaces under `@agentick/tool-executor-next/client`: `session.clientToolCalls`
+  (a `ChannelStream<ClientToolCallHandle>` — async-iterable + onChange over
+  `TOOL_CALL_CHANNEL_FQN`; each handle `{ toolCallId, name, input, correlationId:
+  string|undefined, respond }`); `session.routeClientTools(handlers, {onUnknown?})`
+  (dispatch by name → auto-respond; throw/unknown → `{isError:true}` result, never
+  leaves a suspended call hanging; returns Unsubscribe); `session.confirmClientTools(policy)`
+  (`"approve"|"deny"|(req)=>boolean` over `tool_confirmation` elicitations). **Two
+  correctness catches over the spec (lift-heavy):** (1) approval is `accept({ approved:
+  true })` NOT `accept({})` — the gate (`harness.ts:877`) requires `accepted &&
+  approved===true`, so `{}` would silently DENY (verified vs `confirmation-schema.ts`).
+  (2) `correlationId: string | undefined` — fire-and-forget relays (stage-1 non-
+  `requiresResponse`, one-way `notifyChannel`) carry none; those frames still surface +
+  dispatch but `.respond` no-ops. Confirmation keys from the gate publish site
+  (`harness.ts:846`): `hints.kind==="tool_confirmation"`, `metadata.{toolName,toolUseId,
+  arguments,preview}` + `message`. Coordination caveat documented. Gates: typecheck
+  --force 152/152 0-cached; 355 tests (+9: 5 router, 4 confirm); oxlint 0.
+
 - **Citations/sources — PROVENANCE HALF + NORMALIZED MODEL LANDED (Pass D complete).**
   Supersedes the embedded-`Citation.source` spec foundation below. Final model is
   NORMALIZED (sources are entities, citations are edges): `Source { id (turn-stable);

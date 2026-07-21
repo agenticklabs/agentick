@@ -237,7 +237,7 @@ Every key becomes a top-level `ctx.<key>`. The executor treats the
 record as an opaque `Readonly<Record<string, unknown>>`:
 
 - **The type** of `ctx.sandbox` comes from a `declare module
-  "@agentick/spec-next"` augmentation of `ToolHandlerCtxExtensions` in
+"@agentick/spec-next"` augmentation of `ToolHandlerCtxExtensions` in
   the owning harness package (`@agentick/sandbox-next`). Spec seeds an
   empty `ToolHandlerCtxExtensions {}`; each optional harness adds its own
   slot. This executor hardcodes none.
@@ -333,8 +333,8 @@ confirmationPreview?: (input, ctx) => Promise<Record<string, unknown>>;
 - **`confirmationMessage`** — the human-legible prompt. A static `string`, or a
   per-call function on the **validated input** + dispatch `ctx` (sync or async):
   `confirmationMessage: (i) => \`Send $${i.amount} to ${i.payee}?\``. Its result
-  becomes the elicitation request's `message`. Unset ⇒ the default
-  `Approve tool "<name>"?`. (Over-the-wire declarations use the `string` form — a
+becomes the elicitation request's `message`. Unset ⇒ the default
+`Approve tool "<name>"?`. (Over-the-wire declarations use the `string` form — a
   function can't serialize.)
 - **`confirmationPreview`** — async preview metadata for the dialog (a rendered
   diff for a write/edit tool, a cost breakdown for a payment). Awaited at the
@@ -349,8 +349,8 @@ typed-on-`createTool` / erased-on-declaration pattern as `handler` and the
 
 ## Tool-call presentation
 
-"What is this call doing?" has **two axes** — *identity* (what the tool is) and
-*activity* (what this call does) — from up to four sources. The executor surfaces
+"What is this call doing?" has **two axes** — _identity_ (what the tool is) and
+_activity_ (what this call does) — from up to four sources. The executor surfaces
 them as **four DISTINCT fields, never collapsed**, and carries the result on
 `DispatchResult.presentation`. The framework presumes **no** precedence — a
 client composes identity from `title ?? name` and activity from
@@ -373,8 +373,8 @@ interface ToolPresentation {
 - **`annotations.displaySummary`** — the author's per-call activity summary. A
   **seam**: a static `string` OR a function on the **validated input** + dispatch
   `ctx` (sync or async), e.g. `displaySummary: (i) => \`Searching for ${i.query}\``.
-  Typed to the tool's input on `createTool`, erased on the declaration (same
-  pattern as `confirmationMessage`). Resolved **independently** of the model
+Typed to the tool's input on `createTool`, erased on the declaration (same
+pattern as `confirmationMessage`). Resolved **independently** of the model
   narration — both are surfaced, so the client sees the author's take and the
   model's take side by side.
 - **`_summary` model narration** — see below. The model's own words for the
@@ -429,10 +429,10 @@ injection at the projection site.
 
 ## Client-handled tools
 
-A tool whose declaration has **no `handlerRef`** is *client-handled*: there is no
+A tool whose declaration has **no `handlerRef`** is _client-handled_: there is no
 server-side handler, and the executor either relays the call to the client for
 execution or resolves it with a canned result — driven entirely by annotations.
-(A `handlerRef` that is *present but unresolvable* is still a hard
+(A `handlerRef` that is _present but unresolvable_ is still a hard
 `ToolHandlerMissing` — a real missing-handler bug, not a client tool.) A
 client-handled call still validates its input against the declaration's
 `inputSchema` and still runs the confirmation gate.
@@ -445,11 +445,11 @@ Two modes, chosen by `annotations.requiresResponse`:
   Deferred-keyed-by-`correlationId` machinery the confirmation gate uses). The
   client executes the tool (renders UI, runs browser code, …) and relays a
   `ContentBlock[]` result back; the dispatch resumes with it (`executedBy:
-  "client"`). Timeout is bounded by `annotations.responseTimeoutMs` (or
+"client"`). Timeout is bounded by `annotations.responseTimeoutMs` (or
   per-dispatch `responseTimeoutMs`); on timeout the executor falls back to
   `defaultResult` if one is set, else fails with `ToolCallTimeoutError`.
 - **`requiresResponse` falsy (default) — fire-and-forget.** The dispatch resolves
-  *immediately* with `annotations.defaultResult` (or a default
+  _immediately_ with `annotations.defaultResult` (or a default
   `[{ type: "text", text: "executed successfully" }]`) and emits a one-way
   notification (`this.notifyChannel(TOOL_CALL_CHANNEL, …)` — a `requestType: "notify"`
   envelope with no `correlationId`, the fire-and-forget twin of `request`) so the
@@ -485,10 +485,10 @@ each tool's result back over two session-namespace wire methods (typed in
 `WireMethods`; handlers in `@agentick/gateway-next`'s `sessionWireExtension`,
 mirroring `session/respond_to_elicitation`):
 
-| Wire method                     | Params                                                        | Effect                                                                                             |
-| ------------------------------- | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `session/set_client_tools`      | `{ sessionId, declarations: ClientToolDeclaration[] }`        | Clears the `{ scope: "client", sessionId }` slice, then folds each declaration into a client-handled `ToolRegistration` and `register`s it. Returns `{ count }`. A whole-slice **replace**. |
-| `session/respond_to_tool_call`  | `{ sessionId, correlationId, result: ToolResultInput }`       | Calls `respondToToolCall` — lands the result into the request/response registry, resuming the suspended dispatch. |
+| Wire method                    | Params                                                  | Effect                                                                                                                                                                                      |
+| ------------------------------ | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `session/set_client_tools`     | `{ sessionId, declarations: ClientToolDeclaration[] }`  | Clears the `{ scope: "client", sessionId }` slice, then folds each declaration into a client-handled `ToolRegistration` and `register`s it. Returns `{ count }`. A whole-slice **replace**. |
+| `session/respond_to_tool_call` | `{ sessionId, correlationId, result: ToolResultInput }` | Calls `respondToToolCall` — lands the result into the request/response registry, resuming the suspended dispatch.                                                                           |
 
 **Declarative slice-replace — the wire twin of `replaceReconcilerTools`.** A
 client is a declarative tool SOURCE that owns a slice, exactly like the
@@ -500,7 +500,7 @@ accumulate). Reconnect = re-declare; drift-free by construction.
 - **Its own binding — `{ scope: "client", sessionId }`.** The client slice is
   held DISTINCT from `{ scope: "session" }` (which holds the app's
   `createSession({ tools })`), exactly as the reconciler owns `{ scope:
-  "reconciler", mountId }`. So clearing-and-reinstalling the client slice on
+"reconciler", mountId }`. So clearing-and-reinstalling the client slice on
   every `set_client_tools` NEVER clobbers app tools. Session-lifetime: the
   session-close cleanup reaps the client slice alongside the session slice.
 - **Precedence.** `client` sits just below `reconciler` and above the static
@@ -530,9 +530,9 @@ its input schema as a **raw JSON Schema object**, NOT a `StandardSchemaV1`:
 interface ClientToolDeclaration {
   name: string;
   description: string;
-  inputSchema: JsonSchema;            // raw JSON Schema — NOT a StandardSchema validator
+  inputSchema: JsonSchema; // raw JSON Schema — NOT a StandardSchema validator
   annotations?: ClientToolAnnotations; // serializable subset (title, requiresResponse,
-                                        // static defaultResult / confirmationMessage, …)
+  // static defaultResult / confirmationMessage, …)
   aliases?: readonly string[];
   // NO handlerRef ⇒ client-handled.
 }
@@ -571,10 +571,74 @@ await client.session(id).setClientTools([]); // clear the client slice
 await client.session(id).respondToToolCall(correlationId, result);
 ```
 
-> Still stage 3: the client-side tool **router** — subscribing to
-> `session:channel:tool_call` requests, dispatching each to a user handler, and
-> calling `respondToToolCall` for you. Stage 2 ships only the declare / respond
-> write verbs the router will build on.
+### The client router + confirmation policy (stage 3)
+
+The write verbs are the primitives; stage 3 adds the CONSUMER on top — the far
+side of `session:channel:tool_call`, plus a policy over tool-confirmation
+elicitations. All three self-assemble onto the client `SessionHandle` by
+importing `@agentick/tool-executor-next/client`.
+
+**`session.clientToolCalls`** — the inbound tool-call feed, a `ChannelStream` of
+`ClientToolCallHandle` (uniform with `session.tasks` / `session.elicitations`).
+Each handle carries the validated `input` + a typed `.respond`. Read it directly
+when you want to render calls yourself; the by-id `.respond(correlationId,
+result)` is the escape hatch for code holding a bare correlationId.
+
+```ts
+for await (const call of client.session(id).clientToolCalls) {
+  const result = await runLocally(call.name, call.input);
+  await call.respond(result); // → session/respond_to_tool_call
+}
+```
+
+**`session.routeClientTools(handlers, opts?)`** — the ergonomic router. It
+subscribes to `clientToolCalls`, dispatches each call to `handlers[name]` (or
+`opts.onUnknown`), awaits it, and relays the result. A handler THROW is caught
+and answered with an error result — a suspended call is never left hanging; an
+unknown tool defaults to an error result `no client handler for "<name>"`.
+Returns an `Unsubscribe` that stops routing and closes the subscription.
+
+```ts
+const stop = client.session(id).routeClientTools({
+  get_weather: async ({ city }) => `sunny in ${city}`,
+  open_url: (input, { toolCallId }) => {
+    window.open((input as { url: string }).url);
+    return [{ type: "text", text: "opened" }];
+  },
+});
+```
+
+> **Fire-and-forget.** A stage-1 non-`requiresResponse` client tool is relayed
+> via a one-way notify with NO `correlationId`. Those calls STILL surface on
+> `clientToolCalls` (so the client can render/react) and the router STILL runs
+> their handler — but the handle's `.respond` is a no-op and the router skips the
+> relay, because there is no suspended dispatch to resume. Discriminate on
+> `call.correlationId` presence.
+
+**`session.confirmClientTools(policy)`** — the confirmation policy. Tool
+confirmations arrive as ELICITATIONS with `hints.kind === "tool_confirmation"`
+(the gate publishes them through the ElicitationHarness). This consumes the
+client elicitation stream, FILTERS to confirmations, and applies `"approve"` /
+`"deny"` / a predicate on `{ toolName, toolUseId, arguments, message, preview }`
+(the fields the gate stamps onto `metadata`). Truthy → accept `{ approved: true }`;
+falsy → decline. Returns an `Unsubscribe`.
+
+```ts
+client.session(id).confirmClientTools("approve"); // trust everything (dev)
+client.session(id).confirmClientTools((req) => !req.toolName?.startsWith("rm")); // predicate
+```
+
+> **Coordination caveat.** If you use `confirmClientTools`, do NOT also answer
+> `tool_confirmation` elicitations in your own `session.elicitations` loop — both
+> would respond to the same `correlationId` (last responder wins /
+> double-respond). `confirmClientTools` subscribes via `onChange` on its own
+> elicitation subscription and IGNORES non-confirmation elicitations, so it never
+> steals an app's other prompts.
+
+**Verified by** `src/__tests__/client-tool-router.spec.ts` (router: correlated
+relay → respond, unknown → error, throw → error, custom `onUnknown`,
+fire-and-forget → no respond) and `src/__tests__/client-tool-confirm.spec.ts`
+(policy approve/deny/predicate; non-confirmation elicitation left untouched).
 
 ## Abort
 
@@ -603,16 +667,16 @@ Aborting an unknown `toolCallId` is a safe no-op.
 Exhaustive detail is in the generated typedoc. Key exports from the
 package root:
 
-| Export                                       | What                                                                                 |
-| -------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `ToolExecutorHarness`                        | `BaseHarness<"tool">` reference impl of `ToolExecutorProtocol`                       |
-| `defineToolExecutor`                         | Callback-style `ToolExecutorFactory` factory (bring a `dispatch` callback)           |
-| `InMemoryToolRegistry`                       | Multi-binding registry with per-tick precedence resolution                           |
-| `InMemoryHandlerResolver`                    | `handlerRef → { handler, validator }` lookup table                                   |
-| `withScope`                                  | Bind declarations to a scope for the duration of an async body; cleanup in `finally` |
-| `permissiveValidator` / `fromStandardSchema` | Validators — accept-anything, and a Standard Schema v1 adapter (Zod/Valibot/…)       |
+| Export                                       | What                                                                                                           |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `ToolExecutorHarness`                        | `BaseHarness<"tool">` reference impl of `ToolExecutorProtocol`                                                 |
+| `defineToolExecutor`                         | Callback-style `ToolExecutorFactory` factory (bring a `dispatch` callback)                                     |
+| `InMemoryToolRegistry`                       | Multi-binding registry with per-tick precedence resolution                                                     |
+| `InMemoryHandlerResolver`                    | `handlerRef → { handler, validator }` lookup table                                                             |
+| `withScope`                                  | Bind declarations to a scope for the duration of an async body; cleanup in `finally`                           |
+| `permissiveValidator` / `fromStandardSchema` | Validators — accept-anything, and a Standard Schema v1 adapter (Zod/Valibot/…)                                 |
 | `respondToToolCall` (method)                 | Land a client's relayed tool-call result — resumes a suspended client dispatch (mirrors `elicitation.respond`) |
-| `@agentick/tool-executor-next/client`        | Client `SessionHandle` verbs `setClientTools` / `respondToToolCall` (stage 2 write side) |
+| `@agentick/tool-executor-next/client`        | Client `SessionHandle` verbs `setClientTools` / `respondToToolCall` (stage 2 write side)                       |
 
 `toClientToolRegistration` + the `ClientToolDeclaration` / `ClientToolAnnotations`
 types + the `session/set_client_tools` / `session/respond_to_tool_call` wire
@@ -637,9 +701,9 @@ framework-wide command-lifecycle hook surface. This package contributes the one
 `CommandRegistry` augmentation for the verb (`harness.ts`), which mints two
 typed hooks on `CommandHooks`:
 
-| Hook                   | Fires        | Receives / returns                                              |
-| ---------------------- | ------------ | -------------------------------------------------------------- |
-| `onBeforeToolDispatch` | pre-dispatch | `DispatchInput` — transform the call, or `throw` to veto it    |
+| Hook                   | Fires         | Receives / returns                                                                                                                             |
+| ---------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `onBeforeToolDispatch` | pre-dispatch  | `DispatchInput` — transform the call, or `throw` to veto it                                                                                    |
 | `onAfterToolDispatch`  | post-dispatch | `DispatchResult` — transform the **full** result (not bare `content`), so an after-hook can't strip `isError` / `structuredContent` / metadata |
 
 Register them at any scope that folds down to the dispatch (`createApp({ hooks })`
@@ -658,7 +722,7 @@ operation :: gate : loop_. Mechanism, naming, and the construction-fold cascade:
 `/testing` subpath (`@agentick/tool-executor-next/testing`):
 
 - `createTestHarness({ tools?, handlers?, elicitation?, tasks?,
-  ctxExtensions?, … })` — wires an in-memory substrate (journal / bus /
+ctxExtensions?, … })` — wires an in-memory substrate (journal / bus /
   inbox), a real `ElicitationHarness` and `TasksHarness` on the **same**
   substrate (so bus subscriptions see envelopes from all three), and a
   `ToolExecutorHarness`. Pass `ctxExtensions` to exercise the ADR-66
