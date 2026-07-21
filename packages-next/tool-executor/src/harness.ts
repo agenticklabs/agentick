@@ -745,18 +745,38 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
           input.confirmationTimeoutMs ??
           this.defaultConfirmationTimeoutMs;
 
+        // Confirmation seams (restored from v1) — evaluated INTO the
+        // existing elicit `message` / `metadata` slots, no new elicit
+        // machinery. `confirmationMessage` is a static string OR a per-call
+        // function on the validated input + ctx; it becomes the elicit
+        // `message`, falling back to the default prompt. `confirmationPreview`
+        // is awaited and merged under `metadata.preview` so the existing
+        // `toolUseId` / `toolName` / `arguments` keys stay intact.
+        const confirmationAnnotations = reg.declaration.annotations;
+        const confirmationMessage = confirmationAnnotations?.confirmationMessage;
+        const message =
+          (typeof confirmationMessage === "function"
+            ? yield* Effect.promise(() => Promise.resolve(confirmationMessage(validated, ctx)))
+            : confirmationMessage) ?? `Approve tool "${input.name}"?`;
+        const confirmationPreview = confirmationAnnotations?.confirmationPreview;
+        const preview =
+          confirmationPreview !== undefined
+            ? yield* Effect.promise(() => confirmationPreview(validated, ctx))
+            : undefined;
+
         // The signal flows through to the elicitation registry; an
         // inbox abort or caller signal abort settles the pending
         // elicit with `{ outcome: "failed", failure.kind: "aborted" }`.
         const elicit = this.elicitation.elicit(
           {
-            message: `Approve tool "${input.name}"?`,
+            message,
             schema: TOOL_CONFIRMATION_REPLY_SCHEMA,
             hints: { kind: TOOL_CONFIRMATION_KIND },
             metadata: {
               toolUseId: input.toolCallId,
               toolName: input.name,
               arguments: validated as Record<string, unknown>,
+              ...(preview !== undefined ? { preview } : {}),
             },
           },
           {
@@ -866,8 +886,15 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
           const resp = yield* Effect.either(respEffect);
           if (resp._tag === "Left") {
             if (resp.left._tag === "RequestTimeoutError" && ann.defaultResult !== undefined) {
-              // Timeout with an opt-in fallback — resolve with it.
-              normalized = normalizeToolResult(ann.defaultResult);
+              // Timeout with an opt-in fallback — resolve with it. The
+              // seam is static blocks OR a per-call function on the
+              // validated input + ctx (sync or async), evaluated here.
+              const dr = ann.defaultResult;
+              const resolvedDefault =
+                typeof dr === "function"
+                  ? yield* Effect.promise(() => Promise.resolve(dr(validated, ctx)))
+                  : dr;
+              normalized = normalizeToolResult(resolvedDefault);
             } else if (resp.left._tag === "RequestTimeoutError") {
               callerSignal?.removeEventListener("abort", onCallerAbort);
               this.inFlight.delete(input.toolCallId);
@@ -902,8 +929,16 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
             { toolCallId: input.toolCallId, name: input.name, input: validated },
             { scope: dispatchScope },
           );
+          // Fire-and-forget resolves with `defaultResult` — static blocks
+          // OR a per-call function on the validated input + ctx (sync or
+          // async), evaluated here — else a canned success block.
+          const dr = ann?.defaultResult;
+          const resolvedDefault =
+            typeof dr === "function"
+              ? yield* Effect.promise(() => Promise.resolve(dr(validated, ctx)))
+              : dr;
           normalized = normalizeToolResult(
-            ann?.defaultResult ?? [{ type: "text", text: "executed successfully" }],
+            resolvedDefault ?? [{ type: "text", text: "executed successfully" }],
           );
         }
 

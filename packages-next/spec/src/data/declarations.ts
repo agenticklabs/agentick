@@ -141,7 +141,51 @@ export interface ToolAnnotations {
    * defaults to no timeout — wait forever).
    */
   readonly confirmationTimeoutMs?: number;
-  readonly defaultResult?: readonly ContentBlock[];
+  /**
+   * Human-legible confirmation prompt. Restores v1's `confirmationMessage`.
+   * A seam: a static `string` OR a per-call function evaluated at the gate
+   * against the VALIDATED input + live dispatch {@link ToolHandlerCtx}
+   * (sync or async). When it resolves to a string, that string becomes the
+   * elicitation request's `message`; when unset, the executor falls back to
+   * its default `Approve tool "<name>"?` prompt.
+   *
+   * The function form is a RUNTIME value (like {@link ToolConfirmationPredicate}
+   * and {@link ToolDeclaration.handlerRef}) — erased from the serialized
+   * declaration, evaluated only in-process. Over-the-wire tools use the
+   * `string` form (a function can't serialize).
+   */
+  readonly confirmationMessage?:
+    | string
+    | ((input: unknown, ctx: ToolHandlerCtx) => string | Promise<string>);
+  /**
+   * Async preview metadata for the confirm UI (e.g. a rendered diff for a
+   * write/edit tool, a cost estimate for a payment). Restores v1's
+   * `confirmationPreview`. Awaited at the gate against the VALIDATED input +
+   * live {@link ToolHandlerCtx}, then merged into the elicitation request's
+   * `metadata` under `metadata.preview` (existing `toolUseId` / `toolName` /
+   * `arguments` keys stay intact) so the client dialog can render it.
+   *
+   * A RUNTIME value — erased from the serialized declaration.
+   */
+  readonly confirmationPreview?: (
+    input: unknown,
+    ctx: ToolHandlerCtx,
+  ) => Promise<Record<string, unknown>>;
+  /**
+   * Result the executor resolves with for a CLIENT-HANDLED tool when no
+   * live result is produced — fire-and-forget (`requiresResponse` falsy)
+   * always uses it; `requiresResponse: true` uses it as the timeout
+   * fallback. A seam: static `readonly ContentBlock[]` OR a per-call
+   * function on the VALIDATED input + {@link ToolHandlerCtx} (sync or
+   * async), evaluated at the resolve site. Absent ⇒ a canned success
+   * block. The function form is a runtime value, erased on the wire.
+   */
+  readonly defaultResult?:
+    | readonly ContentBlock[]
+    | ((
+        input: unknown,
+        ctx: ToolHandlerCtx,
+      ) => readonly ContentBlock[] | Promise<readonly ContentBlock[]>);
   /** `[V1-INHERITED]` MCP Apps UI hint. */
   readonly ui?: {
     readonly resourceUri?: string;
@@ -202,6 +246,16 @@ export interface ToolDeclaration {
    */
   readonly outputSchema?: StandardSchemaV1;
   readonly exposure: readonly ToolExposure[];
+  /**
+   * Alternate dispatch names for this tool. Restores v1's tool `aliases`.
+   * The registry resolves a dispatch by exact `name` first, then falls
+   * back to scanning aliases (an alias→name index), so
+   * `session.dispatch(alias, input)` reaches the same tool. Aliases are
+   * DISPATCH names — they live on the declaration, not the annotations —
+   * and an alias that collides with a real tool `name` never shadows it
+   * (exact-name lookup wins).
+   */
+  readonly aliases?: readonly string[];
   /**
    * Identifier resolved by the runtime / tool executor to a concrete
    * handler. Never executable code — the spec firewall forbids it.

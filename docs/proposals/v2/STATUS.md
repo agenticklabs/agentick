@@ -1725,6 +1725,26 @@ blueprint's design decisions; this is execution-level).
 
 ### 2026-07-21
 
+- **Tool-config parity restoration — Pass A LANDED (confirmation seams).** A full
+  v1→v2 tool-config audit found the rewrite dropped 15 fields, 4 of them
+  callable→static seam-violations (all in the confirmation-UX cluster). Pass A
+  restores the confirmation seams, reusing the elicit request's existing
+  `message`/`metadata` slots (the gate had hardcoded them) — NO new machinery:
+  `annotations.confirmationMessage` (`string | (input,ctx)=>string|Promise`) →
+  elicit `message`; `annotations.confirmationPreview` (`(input,ctx)=>Promise<Record>`,
+  e.g. a write/edit diff) → `metadata.preview`; `defaultResult` widened to a
+  callable at both the fire-and-forget + timeout-fallback sites; `ToolDeclaration.aliases`
+  with exact-name-first / alias-index dispatch resolution (an alias never shadows a
+  real tool). All typed on `createTool` (erased on the declaration, like `handler`).
+  Gates: typecheck --force 152/152 0-cached; 783 tests (9 new confirmation-seams);
+  README Confirmation-flow + Dispatch-aliases sections updated. **Restoration queue:**
+  Pass B (presentation: `title` humanized name + `displaySummary` + a model-narration
+  `_summary` field injected into every tool schema, surfaced on the tool-start event);
+  Pass C (`onComplete`/`onError` hooks); Pass D (`type:PROVIDER` provider-executed
+  tools — executor skips dispatch, provider runs it). Client `policy` (approve/deny/
+  prompt) → folded into client-tools stage 3. Then client-tools stage 2 (wire) ships
+  the complete declaration shape.
+
 - **Client-side tools — Stage 1 LANDED (executor native handling).** Baked
   handler-less "client tool" handling + an async `requiresConfirmation` predicate
   into the tool executor's `dispatchBody`, reusing the elicitation suspend/resume

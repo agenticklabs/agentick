@@ -31,6 +31,12 @@ export class InMemoryToolRegistry {
   // The array is kept short — at most one entry per layered seam.
   private readonly byName = new Map<string, ToolRegistration[]>();
 
+  // alias → canonical tool name. Built from `declaration.aliases` at
+  // register time so {@link get} resolves a dispatch by exact name first,
+  // then O(1) by alias (mirroring v1's name-then-alias resolution).
+  // Maintained incrementally on `add`; fully rebuilt on removal (rare).
+  private readonly aliasToName = new Map<string, string>();
+
   /**
    * Add a registration. Idempotent on equal shape under the same
    * binding; throws `ToolAlreadyRegistered` when re-adding a different
@@ -42,6 +48,7 @@ export class InMemoryToolRegistry {
     const list = this.byName.get(name);
     if (!list) {
       this.byName.set(name, [registration]);
+      this.indexAliases(registration);
       return;
     }
     const idx = list.findIndex((r) => sameBindingKey(r.binding, registration.binding));
@@ -52,6 +59,27 @@ export class InMemoryToolRegistry {
       throw new ToolAlreadyRegistered({ name });
     }
     list.push(registration);
+    this.indexAliases(registration);
+  }
+
+  /** Register this registration's declared aliases → its canonical name. */
+  private indexAliases(registration: ToolRegistration): void {
+    const name = registration.declaration.name;
+    for (const alias of registration.declaration.aliases ?? []) {
+      this.aliasToName.set(alias, name);
+    }
+  }
+
+  /**
+   * Full rebuild of the alias→name index from the current `byName` state.
+   * Called after removals (which are rare relative to `get`); `add` keeps
+   * the index up to date incrementally via {@link indexAliases}.
+   */
+  private reindexAliases(): void {
+    this.aliasToName.clear();
+    for (const list of this.byName.values()) {
+      for (const reg of list) this.indexAliases(reg);
+    }
   }
 
   /**
@@ -60,6 +88,7 @@ export class InMemoryToolRegistry {
    */
   remove(name: string): void {
     this.byName.delete(name);
+    this.reindexAliases();
   }
 
   /**
@@ -70,14 +99,18 @@ export class InMemoryToolRegistry {
    * registrations.
    */
   removeWhere(predicate: (binding: ToolBinding) => boolean): void {
+    let mutated = false;
     for (const [name, list] of this.byName) {
       const kept = list.filter((r) => !predicate(r.binding));
       if (kept.length === 0) {
         this.byName.delete(name);
+        mutated = true;
       } else if (kept.length !== list.length) {
         this.byName.set(name, kept);
+        mutated = true;
       }
     }
+    if (mutated) this.reindexAliases();
   }
 
   /**
@@ -87,7 +120,14 @@ export class InMemoryToolRegistry {
    */
   get(name: string): ToolRegistration | undefined {
     const list = this.byName.get(name);
-    if (!list || list.length === 0) return undefined;
+    if (!list || list.length === 0) {
+      // Exact-name miss — fall back to an alias. The index maps
+      // alias → canonical name; recurse once into the resolved name
+      // (the alias necessarily differs from a registered name, so no
+      // loop). Exact-name lookup above always wins over an alias.
+      const canonical = this.aliasToName.get(name);
+      return canonical !== undefined && canonical !== name ? this.get(canonical) : undefined;
+    }
     let best = list[0]!;
     let bestRank = precedenceOf(best.binding);
     for (let i = 1; i < list.length; i++) {
@@ -212,6 +252,7 @@ export class InMemoryToolRegistry {
   /** Drop every registration. Used on harness close. */
   clear(): void {
     this.byName.clear();
+    this.aliasToName.clear();
   }
 }
 

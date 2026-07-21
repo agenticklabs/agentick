@@ -79,6 +79,16 @@ which door is reachable:
 The harness enforces exposure at dispatch time (`ToolPermissionError`
 for the wrong door).
 
+### Dispatch aliases
+
+`ToolDeclaration.aliases` (a `readonly string[]`) gives a tool alternate dispatch
+names. The registry resolves a dispatch by **exact `name` first**, then falls
+back to an alias→name index built at register time, so
+`session.dispatch("ls", …)` reaches a tool named `list_directory` that declares
+`aliases: ["ls", "dir"]`. Exact-name lookup always wins, so an alias can never
+shadow a real tool. Aliases are dispatch names — they live on the declaration,
+not the annotations — and are surfaced on `createTool({ aliases })`.
+
 ## Quick start
 
 Most adopters never touch this package directly — they hand a tool set
@@ -309,6 +319,34 @@ marks the tool session-allowed so subsequent calls skip the gate; a
 `reply.modifiedArguments` payload is re-validated before the handler runs.
 Timeout surfaces as `ToolConfirmationTimeoutError`.
 
+### Dialog seams — `confirmationMessage` + `confirmationPreview`
+
+Two annotations shape WHAT the confirm dialog shows. They are evaluated **into
+the existing elicit request's `message` / `metadata` slots** — no separate
+dialog machinery:
+
+```ts
+confirmationMessage?: string | ((input, ctx) => string | Promise<string>);
+confirmationPreview?: (input, ctx) => Promise<Record<string, unknown>>;
+```
+
+- **`confirmationMessage`** — the human-legible prompt. A static `string`, or a
+  per-call function on the **validated input** + dispatch `ctx` (sync or async):
+  `confirmationMessage: (i) => \`Send $${i.amount} to ${i.payee}?\``. Its result
+  becomes the elicitation request's `message`. Unset ⇒ the default
+  `Approve tool "<name>"?`. (Over-the-wire declarations use the `string` form — a
+  function can't serialize.)
+- **`confirmationPreview`** — async preview metadata for the dialog (a rendered
+  diff for a write/edit tool, a cost breakdown for a payment). Awaited at the
+  gate and merged under `metadata.preview`, leaving the existing `toolUseId` /
+  `toolName` / `arguments` keys intact, so the client dialog can render a rich
+  preview without a bespoke channel.
+
+Both are typed to the tool's input on `createTool` (`(input: TInput, ctx) => …`)
+and erased to `unknown` on the serialized declaration — the same
+typed-on-`createTool` / erased-on-declaration pattern as `handler` and the
+`requiresConfirmation` predicate.
+
 ## Client-handled tools
 
 A tool whose declaration has **no `handlerRef`** is *client-handled*: there is no
@@ -337,6 +375,20 @@ Two modes, chosen by `annotations.requiresResponse`:
   envelope with no `correlationId`, the fire-and-forget twin of `request`) so the
   client's tool router still runs/renders the tool. Suits render-only tools that
   the model doesn't need a real result from.
+
+`defaultResult` is a **seam**, not just a static value:
+
+```ts
+defaultResult?:
+  | readonly ContentBlock[]
+  | ((input, ctx) => readonly ContentBlock[] | Promise<readonly ContentBlock[]>);
+```
+
+Static blocks OR a per-call function on the **validated input** + `ctx` (sync or
+async), evaluated at the resolve site. Both the fire-and-forget resolve AND the
+`requiresResponse: true` timeout fallback evaluate it, so a client tool can
+compute a call-specific default (e.g. echo the requested id) rather than a fixed
+block. Typed to the tool's input on `createTool`, erased on the declaration.
 
 Either way the result re-enters the loop through the unchanged
 `DispatchResult → LoopToolResult → tool_result` timeline path. `createTool`'s
@@ -477,6 +529,11 @@ fixture behaviors into concrete handlers.
   returns its `DispatchResult`).
 - `src/__tests__/confirmation.spec.ts` — the confirmation gate
   (approve / deny / always / modifiedArguments / timeout).
+- `src/__tests__/confirmation-seams.spec.ts` — the restored v1 seams:
+  `confirmationMessage` (string + sync/async function → elicit `message`,
+  default-prompt regression), `confirmationPreview` (→ `metadata.preview`,
+  existing keys intact), callable `defaultResult` (fire-and-forget +
+  `requiresResponse` timeout fallback), and dispatch-by-alias resolution.
 - `src/__tests__/dispatch-task-mode-matrix.spec.ts` — Pattern A vs B and
   the `ToolTaskModeConflictError` pre-flight matrix.
 - `src/__tests__/task-handle.spec.ts` — `ctx.tasks` wiring, await-vs-ref,

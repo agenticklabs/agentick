@@ -19,6 +19,7 @@
  */
 
 import type {
+  ContentBlock,
   StandardSchemaV1,
   ToolAnnotations,
   ToolDeclaration,
@@ -102,6 +103,50 @@ export interface ToolSpec<TInput = unknown> {
   readonly exposure?: readonly ToolExposure[];
   /** Annotations: requiresConfirmation, timeout, intent, etc. */
   readonly annotations?: ToolAnnotations;
+  /**
+   * Human-legible confirmation prompt for the confirmation gate. A seam:
+   * a static `string` OR a per-call function on the tool's VALIDATED input
+   * + dispatch ctx (sync or async), evaluated at the gate into the
+   * elicitation request's `message` (falling back to a default prompt).
+   * Typed here to `TInput`; erased to `unknown` on the declaration's
+   * {@link ToolAnnotations.confirmationMessage} (the same typed-on-createTool
+   * / erased-on-declaration pattern as `handler`). Threaded into
+   * `annotations.confirmationMessage` (top-level wins over any set inside
+   * `annotations`).
+   */
+  readonly confirmationMessage?:
+    | string
+    | ((input: TInput, ctx: ToolHandlerCtx) => string | Promise<string>);
+  /**
+   * Async preview metadata for the confirm UI (e.g. a diff for a
+   * write/edit tool). Awaited at the gate against the VALIDATED input + ctx
+   * and merged under the elicitation request's `metadata.preview`. Typed to
+   * `TInput`; threaded into `annotations.confirmationPreview`.
+   */
+  readonly confirmationPreview?: (
+    input: TInput,
+    ctx: ToolHandlerCtx,
+  ) => Promise<Record<string, unknown>>;
+  /**
+   * Result the executor resolves with for a CLIENT-HANDLED tool (handler
+   * omitted) when no live result is produced — fire-and-forget always uses
+   * it; `requiresResponse: true` uses it as the timeout fallback. A seam:
+   * static `readonly ContentBlock[]` OR a per-call function on the VALIDATED
+   * input + ctx (sync or async). Typed to `TInput`; threaded into
+   * `annotations.defaultResult`.
+   */
+  readonly defaultResult?:
+    | readonly ContentBlock[]
+    | ((
+        input: TInput,
+        ctx: ToolHandlerCtx,
+      ) => readonly ContentBlock[] | Promise<readonly ContentBlock[]>);
+  /**
+   * Alternate dispatch names. `session.dispatch(alias, input)` resolves to
+   * this tool (registry resolves by exact `name` first, then alias).
+   * Threaded onto {@link ToolDeclaration.aliases}.
+   */
+  readonly aliases?: readonly string[];
   /** Arbitrary metadata attached to the declaration. */
   readonly metadata?: Readonly<Record<string, unknown>>;
   /**
@@ -169,9 +214,30 @@ export function isCreatedTool(value: unknown): value is CreatedTool {
 
 let autoCounter = 0;
 
+/**
+ * Merge the typed-on-`createTool` confirmation seams (`confirmationMessage`
+ * / `confirmationPreview` / `defaultResult`) into the erased
+ * {@link ToolAnnotations} carried by the declaration. Top-level spec fields
+ * win over any equivalents set inside `spec.annotations`. The `TInput`
+ * typing erases to `unknown` here — mirroring how the typed `handler`
+ * lands on the erased declaration. Returns `undefined` when nothing
+ * contributes an annotation (so `omitUndefined` drops the slot).
+ */
+function buildAnnotations<TInput>(spec: ToolSpec<TInput>): ToolAnnotations | undefined {
+  const seams = omitUndefined({
+    confirmationMessage: spec.confirmationMessage as ToolAnnotations["confirmationMessage"],
+    confirmationPreview: spec.confirmationPreview as ToolAnnotations["confirmationPreview"],
+    defaultResult: spec.defaultResult as ToolAnnotations["defaultResult"],
+  });
+  if (spec.annotations === undefined && Object.keys(seams).length === 0) return undefined;
+  return { ...spec.annotations, ...seams };
+}
+
 export function createTool<TInput = unknown>(spec: ToolSpec<TInput>): CreatedTool {
   const schema: StandardSchemaV1<unknown, TInput> =
     spec.inputSchema ?? (jsonSchema({ type: "object" }) as StandardSchemaV1<unknown, TInput>);
+
+  const annotations = buildAnnotations(spec);
 
   // No handler → CLIENT-HANDLED tool: synthesize no handlerRef (the
   // declaration stays `handlerRef`-less so the executor relays dispatch
@@ -186,7 +252,8 @@ export function createTool<TInput = unknown>(spec: ToolSpec<TInput>): CreatedToo
       exposure: spec.exposure ?? ["model"],
       ...omitUndefined({
         handlerRef: spec.handlerRef,
-        annotations: spec.annotations,
+        aliases: spec.aliases,
+        annotations,
         metadata: spec.metadata,
       }),
     };
@@ -204,7 +271,7 @@ export function createTool<TInput = unknown>(spec: ToolSpec<TInput>): CreatedToo
     ...omitUndefined({ outputSchema: spec.outputSchema }),
     exposure: spec.exposure ?? ["model"],
     handlerRef,
-    ...omitUndefined({ annotations: spec.annotations, metadata: spec.metadata }),
+    ...omitUndefined({ aliases: spec.aliases, annotations, metadata: spec.metadata }),
   };
 
   const handler: ToolHandler = (input, { ctx }) => {

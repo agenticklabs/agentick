@@ -56,6 +56,38 @@ describe("createTool — bundle shape", () => {
     expect(t.declaration.annotations?.timeout).toBe(30_000);
     expect(t.declaration.metadata?.custom).toBe("tag");
   });
+
+  it("threads confirmation seams + aliases (typed on createTool, on the declaration)", () => {
+    type Del = { path: string };
+    const preview = async (i: Del) => ({ path: i.path });
+    const message = (i: Del) => `Delete ${i.path}?`;
+    const t = createTool<Del>({
+      name: "delete_file",
+      description: "risky",
+      inputSchema: z.object({ path: z.string() }),
+      aliases: ["rm", "del"],
+      confirmationMessage: message,
+      confirmationPreview: preview,
+      annotations: { requiresConfirmation: true },
+      handler: async () => [],
+    });
+    expect(t.declaration.aliases).toEqual(["rm", "del"]);
+    // Seams merge INTO annotations alongside the caller's annotations.
+    expect(t.declaration.annotations?.requiresConfirmation).toBe(true);
+    expect(t.declaration.annotations?.confirmationMessage).toBe(message);
+    expect(t.declaration.annotations?.confirmationPreview).toBe(preview);
+  });
+
+  it("callable defaultResult on a client-handled tool lands on annotations", () => {
+    const fn = () => [{ type: "text" as const, text: "ack" }];
+    const t = createTool({
+      name: "client_default",
+      description: "client",
+      defaultResult: fn,
+    });
+    expect(t.declaration.handlerRef).toBeUndefined();
+    expect(t.declaration.annotations?.defaultResult).toBe(fn);
+  });
 });
 
 describe("createTool — Standard Schema runtime validation", () => {
