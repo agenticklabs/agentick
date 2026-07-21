@@ -42,6 +42,7 @@ export {
   scopeToCommand,
   withCallMiddleware,
   type AsyncMiddleware,
+  type AsyncStream,
   type AfterHook,
   type BaseHarnessOptions,
   type BeforeHook,

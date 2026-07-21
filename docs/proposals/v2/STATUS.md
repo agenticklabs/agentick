@@ -1725,6 +1725,33 @@ blueprint's design decisions; this is execution-level).
 
 ### 2026-07-21
 
+- **`commandStream` substrate primitive LANDED (model-harness §1, Phase 1A).** First-class
+  STREAMING command in `BaseHarness` (`commandStream<I,Chunk,R,E>`) — the fusion of
+  `command`'s registry registration (mints `onBefore/After<Verb>` via ADR 80) +
+  `runOperation`'s interceptor cascade + `runHarnessStream`'s async-iterator bridge. Body
+  `(input, sink) => Effect<R>` emits chunks + returns the final R; ONE cascade-wrapped
+  `streamFx = runOperation(op, (i) => body(i, sink))` reused by both consumption modes —
+  the streaming facade (`runHarnessStream((sink) => streamFx…)` → `AsyncStream<Chunk,R>`)
+  and the inbox-addressable registry `run` (no-op sink drains to R). NO second interceptor
+  path. **Effect mechanics confirmed:** `Queue.bounded` + `Effect.forkDaemon` (NOT
+  `Effect.Stream`) — the daemon fiber stays live for the whole stream, backpressure via the
+  bounded queue, `forkDaemon` inherits the parent FiberRefs so ambient `getContext()` works
+  throughout; abort interrupts the op fiber (no bogus terminal). **Phase 1A = boundary
+  hooks + iterator ONLY;** per-chunk hooks (`onModelGenerateStreamChunk` observe/transform/
+  combine, sink-wrapped before the queue so the iterator sees transformed chunks; needs a
+  flush-on-terminal contract for combine) are Phase 2 (TODO(phase-2) trailhead planted).
+  14 deep tests (`command-stream.spec.ts`): hook minting, boundary ordering
+  (before→chunks→after→terminal), guard-vetoes-before-any-chunk (body never runs), abort/
+  kill-mid-stream (parks on `Effect.never` + interrupt handler proves interruption, no
+  onAfter, zero terminal:succeeded), async-iterator contract, registry-`run` drain,
+  transform-over-input/output, zero-overhead. Gates: typecheck --force 152/152 0-cached;
+  298 runtime tests; oxlint/oxfmt clean. **OPEN THREAD (decide holistically):** explicit
+  ctx-into-body (`body: (input, sink, ctx)`) — today ctx is ambient in the body / explicit
+  in middleware; if adopted, land it on `command` + `commandStream` together, not just the
+  stream. **NEXT — Phase 1B:** model-executor command-ify (`execute→model:generate`,
+  `executeStream→model:generate_stream`, `executor:*→model:*`), fake + `/testing`
+  scripted-adapter + conformance current, loop invocation, kill/resume, README/docs.
+
 - **ADR 89 REVISED + `executor → modelExecutor` rename (model-harness arc, pre-work).**
   Corrected ADR 89's stale premise: it claimed "the model is not a harness," but
   `LanguageModelExecutor extends BaseHarness<"executor">` already — session-owned

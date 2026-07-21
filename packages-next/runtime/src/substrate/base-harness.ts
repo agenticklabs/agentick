@@ -122,6 +122,9 @@ export type { Unsubscribe } from "@agentick/spec-next";
 // the move is a re-home, not a public-surface change.
 export { deriveHookNames } from "@agentick/spec-next";
 export type { BeforeHook, AfterHook } from "@agentick/spec-next";
+// The streaming-edge facade type — `commandStream` and `runHarnessStream` both
+// surface it, so re-home it onto the runtime package's public API (ADR 77).
+export type { AsyncStream } from "@agentick/spec-next";
 
 /**
  * A declared command in a harness's registry (ADR 51): the wire-safe
@@ -1717,6 +1720,153 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
       E | SubstrateError,
       never
     >;
+  }
+
+  /**
+   * Declare a STREAMING command — the streaming twin of {@link command}
+   * (ADR 51 §2 + ADR 77 dual-typed edge). Fuses the three things `command`
+   * and {@link runHarnessStream} each half-provide into ONE declaration site:
+   *
+   *   1. **Registry registration** — identical to {@link command} (same
+   *      surface-prefix check, same duplicate check, same
+   *      `opName = "${surface}:command:${verb}"`, same `commandRegistry.set`).
+   *      This is what mints the boundary hooks `onBefore<Verb>` /
+   *      `onAfter<Verb>` (ADR 80) and makes the verb inbox-addressable.
+   *   2. **Interceptor cascade** — the body runs INSIDE {@link runOperation}
+   *      exactly as a normal command's does. The ONE composed interceptor list
+   *      (guard → onBefore(input) → body → onAfter(R)) fires at the stream's
+   *      START (guard/onBefore bracket the first chunk) and TERMINAL (onAfter
+   *      over the finished `R`, then `terminal:succeeded`). There is NO second
+   *      interceptor path — this reuses `runOperation` verbatim.
+   *   3. **Async-iterator machinery** — the public method projects the
+   *      cascade-wrapped body onto the JS {@link AsyncStream} facade via
+   *      {@link runHarnessStream} (Queue / `forkDaemon` / `.result` / `abort`
+   *      all live there, once).
+   *
+   * **The body-emits-to-sink contract.** `body(input, sink)` emits each chunk
+   * as a side-effect (`sink(chunk)`) and RETURNS the final result `R`. The
+   * cascade applies to the boundary only: `input` is already guard-admitted +
+   * onBefore-transformed; the returned `R` is onAfter-transformed. Chunks flow
+   * out the sink concurrently and are NOT intercepted here.
+   *
+   * **Boundary hooks ONLY (Phase 1A).** Per-chunk interception (an
+   * `onChunk<Verb>` seam over the sink) is Phase 2 — deliberately absent here.
+   * 1A endows the boundary hooks + the iterator, nothing per-item.
+   *
+   * **Two consumption modes, ONE cascade:**
+   *   - **The stream** — the returned public method yields
+   *     `AsyncStream<Chunk, R>`: `for await` drains the chunks in order and
+   *     `.result` resolves to the body's `R`. Both observe the same single run.
+   *   - **The registry `run`** (inbox-addressable) — a remote/inbox caller of
+   *     the declared verb gets the final `R`, not a stream: the registry `run`
+   *     drives the SAME operation with a no-op sink (chunks dropped) and
+   *     returns the drained `R`. The boundary hooks + terminal fire once,
+   *     identically to the stream path.
+   *
+   * **Abort.** `stream.abort(reason)` interrupts the operation fiber (the
+   * kill/resume-critical path). Because `runOperation`'s settle step lets
+   * interrupts pass through untouched, an aborted run publishes NO
+   * `terminal:succeeded` and fires NO `onAfter` with a bogus value — `.result`
+   * rejects with the interrupted cause.
+   *
+   * The signal-form rule ({@link command}) applies unchanged: a streaming
+   * command carries verbs + serializable data only.
+   */
+  protected commandStream<I, Chunk, R, E>(def: {
+    /** Canonical verb — must be prefixed `"${this.surface}:"`. */
+    readonly name: string;
+    /** Standard Schema for the payload; validated at inbox dispatch. */
+    readonly input?: StandardSchemaV1<I>;
+    /** Reachability (ADR 51 §2.3). Default `"addressable"`. */
+    readonly exposure?: CommandExposure;
+    readonly description?: string;
+    /** Work-path scope dims (surface-specific — receives the input). */
+    readonly scope?: (input: I) => EventScope;
+    /** Deterministic opId derivation (ADR 51 idempotency). */
+    readonly opId?: (input: I) => string;
+    /**
+     * Emits chunks via `sink`, returns the final result. Runs INSIDE the
+     * operation cascade — guard/onBefore already applied to `input`, onAfter
+     * applied to the returned `R`.
+     */
+    readonly body: (
+      input: I,
+      sink: (chunk: Chunk) => Effect.Effect<void>,
+    ) => Effect.Effect<R, E, never>;
+  }): (input: I, opts?: { readonly origin?: OperationOrigin }) => AsyncStream<Chunk, R> {
+    const name = def.name;
+    if (!name.startsWith(`${this.surface}:`)) {
+      throw new CommandDeclarationError({
+        command: name,
+        reason: `verb prefix must match the declaring surface "${this.surface}"`,
+      });
+    }
+    if (this.commandRegistry.has(name)) {
+      throw new CommandDeclarationError({ command: name, reason: "duplicate declaration" });
+    }
+    const opName = `${this.surface}:command:${name.slice(this.surface.length + 1)}`;
+
+    // The cascade-wrapped, sink-folding body. ONE Effect reused by BOTH
+    // consumption modes — the streaming facade (sink tees to the bridge queue)
+    // and the registry `run` (no-op sink). Manufacturing the Operation +
+    // routing it through `runOperation` is IDENTICAL to `command`; the only
+    // delta is the body threads a `sink`. This is the fusion: no second
+    // interceptor path exists.
+    const streamFx = (
+      input: I,
+      sink: (chunk: Chunk) => Effect.Effect<void>,
+      opts: {
+        readonly origin: OperationOrigin;
+        readonly parentOpId?: string;
+        readonly correlationId?: string;
+      },
+    ): Effect.Effect<R, E | SubstrateError, never> =>
+      this.runOperation<I, R, E>(
+        {
+          opId: def.opId?.(input) ?? `${name}:${ulid()}`,
+          surface: this.surface,
+          name: opName,
+          ...omitUndefined({ parentOpId: opts.parentOpId, correlationId: opts.correlationId }),
+          scope: omitUndefined({ ...(def.scope?.(input) ?? {}), origin: opts.origin }),
+          input,
+        },
+        (i) => def.body(i, sink),
+      );
+
+    // The inbox-addressable registry `run`: drive the SAME operation to
+    // completion with a no-op sink and return the drained `R`. A remote/inbox
+    // `generate` gets the final message, not a stream — but the boundary hooks
+    // + terminal fire exactly once, identically to the stream path.
+    const run = (
+      input: I,
+      opts: {
+        readonly origin: OperationOrigin;
+        readonly parentOpId?: string;
+        readonly correlationId?: string;
+      },
+    ): Effect.Effect<R, E | SubstrateError, never> => streamFx(input, () => Effect.void, opts);
+
+    this.commandRegistry.set(name, {
+      descriptor: {
+        name,
+        exposure: def.exposure ?? "addressable",
+        ...omitUndefined({ input: def.input as StandardSchemaV1 | undefined }),
+        ...omitUndefined({ description: def.description }),
+      },
+      run: run as RegisteredCommand["run"],
+    });
+
+    // The public method = the streaming-edge bridge over the cascade-wrapped
+    // body. `runHarnessStream` owns all the Queue/fork/iterator/`.result`
+    // machinery; here we supply only the sink-fold (the SAME `streamFx`).
+    // TODO(phase-2): thread stream-policy hooks (queueCapacity / isCancellation
+    // / onStart / onAbort) into `def` so a concrete streaming command (model
+    // generate_stream needs `isCancellation: ProviderAborted`) can override
+    // the bridge defaults — deferred with the per-chunk `onChunk<Verb>` seam.
+    return (input, opts) =>
+      runHarnessStream<Chunk, R>((sink) =>
+        streamFx(input, sink, { origin: opts?.origin ?? "host" }),
+      );
   }
 
   /**

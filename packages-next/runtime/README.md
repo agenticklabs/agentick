@@ -317,6 +317,35 @@ machinery lives here ONCE; each streaming edge supplies only its sink-fold
 `onAbort`, `runtime`). The executor's `executeStream` facade is
 `runHarnessStream((sink) => this.executeStreamFx(input, sink), { … })`.
 
+### `command` vs `commandStream` — the two declaration sites
+
+`command({ name, handler })` declares a NON-streaming verb: registry
+registration (mints the boundary hooks + inbox addressability) + `runOperation`
++ the `runHarnessProtocol` Promise facade. The public method returns
+`Promise<R>`.
+
+`commandStream({ name, body })` is its **streaming twin** (ADR 77) — it fuses
+the same registry registration + the same `runOperation` cascade with
+`runHarnessStream`'s iterator. The `body(input, sink)` emits chunks as a
+side-effect and returns the final `R`; the ONE composed interceptor cascade
+(`guard → onBefore(input) → body → onAfter(R)`) fires at the stream's **start**
+(guard/onBefore bracket the first chunk) and **terminal** (onAfter over the
+finished `R`), exactly as for a non-streaming command — there is no second
+interceptor path. The public method returns `AsyncStream<Chunk, R>`.
+
+Two consumption modes over ONE cascade:
+
+- **The stream** — `for await` drains the chunks; `.result` resolves to `R`.
+- **The registry `run`** (inbox-addressable) — a remote/inbox caller of the
+  verb gets the final `R` (the registry drives the same operation with a no-op
+  sink and drains). Boundary hooks + terminal fire once, identically.
+
+`stream.abort(reason)` interrupts the operation fiber (the kill/resume path):
+an aborted run publishes NO `terminal:succeeded` and fires NO `onAfter` with a
+bogus value — `.result` rejects with the interrupted cause. **Boundary hooks
+only** (Phase 1A) — a per-chunk `onChunk<Verb>` seam over the sink is Phase 2.
+Pinned by `src/__tests__/command-stream.spec.ts`.
+
 ## Operation middleware — three tiers (ADR 76 / 83)
 
 `runOperation` composes ONE interceptor list around every operation body. It
