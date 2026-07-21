@@ -347,6 +347,86 @@ and erased to `unknown` on the serialized declaration — the same
 typed-on-`createTool` / erased-on-declaration pattern as `handler` and the
 `requiresConfirmation` predicate.
 
+## Tool-call presentation
+
+"What is this call doing?" has **two axes** — *identity* (what the tool is) and
+*activity* (what this call does) — from up to four sources. The executor surfaces
+them as **four DISTINCT fields, never collapsed**, and carries the result on
+`DispatchResult.presentation`. The framework presumes **no** precedence — a
+client composes identity from `title ?? name` and activity from
+`narration ?? summary`, or shows them separately, or badges the model's words.
+Presentation is for host/UI display only — never sent to the model as an argument.
+
+```ts
+interface ToolPresentation {
+  name: string; // the raw tool id (write_file) — always set; client falls back to it
+  title?: string; // annotations.title — humanized IDENTITY ("Write File"), when set
+  summary?: string; // annotations.displaySummary resolved — author's ACTIVITY, when set
+  narration?: string; // the model's own `_summary` — the model's ACTIVITY, when it filled it in
+}
+```
+
+- **`name`** — the raw tool id, always present, for keys/logic and as the client's
+  identity fallback.
+- **`annotations.title`** — a humanized display name (`"Write file"` vs
+  `write_file`). The IDENTITY axis.
+- **`annotations.displaySummary`** — the author's per-call activity summary. A
+  **seam**: a static `string` OR a function on the **validated input** + dispatch
+  `ctx` (sync or async), e.g. `displaySummary: (i) => \`Searching for ${i.query}\``.
+  Typed to the tool's input on `createTool`, erased on the declaration (same
+  pattern as `confirmationMessage`). Resolved **independently** of the model
+  narration — both are surfaced, so the client sees the author's take and the
+  model's take side by side.
+- **`_summary` model narration** — see below. The model's own words for the
+  activity axis, distinct from the author's `summary`.
+
+### `_summary` — model self-narration (the reserved field)
+
+`TOOL_NARRATION_FIELD` (`"_summary"`, exported from `@agentick/spec-next`) is a
+**reserved** optional `string` property the model projector injects into **every
+model-facing tool schema** (`buildTools`, `@agentick/model-next`). It lets the
+model say, in one short first-person sentence, what a call is doing — the
+sentence that lights the `useOnToolStart` spinner ("Searching the docs for retry
+config").
+
+The executor **strips `_summary` from the raw model input BEFORE schema
+validation** (a shallow copy — the caller's object is never mutated), so it:
+
+- never reaches the author's schema (the tool's real fields validate cleanly),
+- never reaches the **handler**,
+- never lands in the persisted **`tool_result`**.
+
+Stripping is **model-door only** — host `session.dispatch(...)` inputs pass
+through untouched. A tool whose own schema already declares a `_summary` property
+opts out implicitly (the injector never clobbers an author field); a tool can
+also opt out explicitly with `annotations.narrate: false`.
+
+**Surfacing.** The eager narration rides the **`tool-start` lifecycle event**
+(`LifecycleToolStart.narration`) so the spinner lights up the instant dispatch
+begins — before the handler resolves. The fully precedence-resolved
+`ToolPresentation` (which folds `displaySummary`/`title`, known only after
+validation) rides `DispatchResult.presentation` and the **`tool-end` lifecycle
+event** (`LifecycleToolEnd.presentation`). Both reuse existing events — no new
+channel.
+
+### ⚠️ Token cost + the off-switch
+
+Injecting `_summary` into every tool schema AND having the model emit an extra
+sentence per call is **real input and output token cost on every tool-using
+tick**. Narration defaults **ON**; disable it app-wide when the cost isn't worth
+the live narration:
+
+```ts
+createApp(Agent, { model, narrate: false }); // app-wide off
+createApp(Agent, { model, session: { narrate: false } }); // session default off
+app.createSession({ narrate: false }); // per-session
+createTool({ name, /* … */ narrate: false }); // opt a single tool out
+```
+
+The switch threads `createApp/createSession({ narrate }) → SessionHarness →
+loop.runExecution → ProjectInput.narrate → buildTools`, gating the schema
+injection at the projection site.
+
 ## Client-handled tools
 
 A tool whose declaration has **no `handlerRef`** is *client-handled*: there is no
@@ -534,6 +614,11 @@ fixture behaviors into concrete handlers.
   default-prompt regression), `confirmationPreview` (→ `metadata.preview`,
   existing keys intact), callable `defaultResult` (fire-and-forget +
   `requiresResponse` timeout fallback), and dispatch-by-alias resolution.
+- `src/__tests__/narration-strip.spec.ts` — tool-call presentation (Pass
+  B): `_summary` stripped pre-validation (never reaches the handler or the
+  result), the caller's object not mutated, model-door-only stripping, and
+  the four distinct presentation fields (`name`/`title`/`summary`/`narration`) on
+  `DispatchResult.presentation` (string + per-call-function `displaySummary`).
 - `src/__tests__/dispatch-task-mode-matrix.spec.ts` — Pattern A vs B and
   the `ToolTaskModeConflictError` pre-flight matrix.
 - `src/__tests__/task-handle.spec.ts` — `ctx.tasks` wiring, await-vs-ref,

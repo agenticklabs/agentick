@@ -79,6 +79,13 @@ export interface CreateSessionInput<P = unknown> {
    */
   readonly streaming?: boolean;
   /**
+   * Session-level model-narration switch. `false` disables injection of
+   * the reserved `_summary` narration field into this session's
+   * model-facing tool schemas — the token-cost off-switch. Falls through
+   * to the app default (`createApp({ narrate })`), then to `true`.
+   */
+  readonly narrate?: boolean;
+  /**
    * Per-session substrate overrides — instance or factory. When
    * omitted, the session inherits the app's substrate directly.
    *

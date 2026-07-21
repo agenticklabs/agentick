@@ -104,6 +104,35 @@ export interface ToolSpec<TInput = unknown> {
   /** Annotations: requiresConfirmation, timeout, intent, etc. */
   readonly annotations?: ToolAnnotations;
   /**
+   * Humanized display name for this tool's calls ("Write file" vs
+   * `write_file`). Presentation only — surfaced on the tool-start
+   * lifecycle event / resolved `ToolPresentation`, never the model-facing
+   * identifier. Threaded onto {@link ToolAnnotations.title} (top-level
+   * wins over any set inside `annotations`). `[V1-RESTORED]`.
+   */
+  readonly title?: string;
+  /**
+   * Author's summary of what a SPECIFIC call is doing, for host/UI
+   * display. A seam: a static `string` OR a per-call function on the
+   * tool's VALIDATED input + dispatch ctx (sync or async). Sits below the
+   * model's own `_summary` narration and above `title`/name in the display
+   * precedence chain (`modelNarration ?? displaySummary ?? title ??
+   * name`). Typed to `TInput`; erased to `unknown` on
+   * {@link ToolAnnotations.displaySummary} (same typed-on-createTool /
+   * erased-on-declaration pattern as `handler`). `[V1-RESTORED]`.
+   */
+  readonly displaySummary?:
+    | string
+    | ((input: TInput, ctx: ToolHandlerCtx) => string | Promise<string>);
+  /**
+   * Opt this tool OUT of the injected model-narration `_summary` field.
+   * `false` skips injecting `_summary` into this tool's model-facing
+   * schema even when the app-level narrate switch is ON. Default
+   * (unset / `true`): narration is injected. Threaded onto
+   * {@link ToolAnnotations.narrate}.
+   */
+  readonly narrate?: boolean;
+  /**
    * Human-legible confirmation prompt for the confirmation gate. A seam:
    * a static `string` OR a per-call function on the tool's VALIDATED input
    * + dispatch ctx (sync or async), evaluated at the gate into the
@@ -228,6 +257,12 @@ function buildAnnotations<TInput>(spec: ToolSpec<TInput>): ToolAnnotations | und
     confirmationMessage: spec.confirmationMessage as ToolAnnotations["confirmationMessage"],
     confirmationPreview: spec.confirmationPreview as ToolAnnotations["confirmationPreview"],
     defaultResult: spec.defaultResult as ToolAnnotations["defaultResult"],
+    // Pass B — tool-call presentation seams. `title`/`narrate` are plain
+    // values; `displaySummary` erases its `TInput` typing to `unknown`
+    // here, mirroring `confirmationMessage`.
+    title: spec.title,
+    displaySummary: spec.displaySummary as ToolAnnotations["displaySummary"],
+    narrate: spec.narrate,
   });
   if (spec.annotations === undefined && Object.keys(seams).length === 0) return undefined;
   return { ...spec.annotations, ...seams };

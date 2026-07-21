@@ -225,6 +225,15 @@ export interface SessionHarnessOptions<P = unknown> {
    * `target.capabilities.supportsStreaming` ≠ false).
    */
   readonly defaultStreaming?: boolean;
+  /**
+   * Model-call narration switch (default `true`). Threaded into every
+   * `loop.runExecution` so the projector gates injection of the reserved
+   * `_summary` narration field into each model-facing tool schema. Set
+   * `false` to disable narration for this session — the token-cost
+   * off-switch (an extra schema property per tool + an extra model-emitted
+   * sentence per call). Cascades from the app-level default.
+   */
+  readonly narrate?: boolean;
   /** Optional initial knob values. */
   readonly initialKnobs?: Readonly<Record<string, unknown>>;
   /** Optional initial session-state values (`useSessionState`). */
@@ -397,6 +406,8 @@ export class SessionHarness<P = unknown>
   private escalationInterceptor: EscalationInterceptor | undefined;
   private readonly defaultMaxTicks: number;
   private readonly defaultStreaming: boolean | undefined;
+  /** Model-call narration switch (default `true`). See SessionHarnessOptions.narrate. */
+  private readonly narrate: boolean;
 
   private _closed = false;
   private _mountReady: Promise<void>;
@@ -582,6 +593,8 @@ export class SessionHarness<P = unknown>
     this.requiredScopes = options.requiredScopes;
     this.models = options.models;
     this.defaultStreaming = options.defaultStreaming;
+    // Narration defaults ON — the token-cost off-switch is opt-out.
+    this.narrate = options.narrate ?? true;
     this.mountId = `mount:${options.sessionId}`;
 
     // Open-or-rehydrate (ADR 49 §Hydration): when a durable store was
@@ -1527,6 +1540,10 @@ export class SessionHarness<P = unknown>
             // targetForCall) covers the undeclared case.
             resolveModel: (ref) => this.bridges.models.resolve(ref),
             maxTicks: input.maxTicks ?? this.defaultMaxTicks,
+            // Pass B — the model-narration switch gates `_summary` schema
+            // injection at the projection site. Session default (from the
+            // app-level cascade); the projector defaults ON if unset.
+            narrate: this.narrate,
             stream: streamForCall,
             onEvent,
             // Stage 5 — per-send tool concurrency (default "unbounded" in

@@ -117,6 +117,16 @@ export interface ProjectInput {
    * tools with correct precedence.
    */
   readonly tools: readonly import("../data/declarations.js").ToolDeclaration[];
+  /**
+   * App-level model-narration switch (default `true` at the projection
+   * site). When `true`, the projector injects the reserved
+   * `TOOL_NARRATION_FIELD` (`_summary`) optional property into each
+   * model-facing tool schema so the model can self-narrate a call. When
+   * `false`, injection is skipped app-wide — the token-cost off-switch.
+   * Per-tool `ToolAnnotations.narrate: false` opts a single tool out even
+   * when this is on.
+   */
+  readonly narrate?: boolean;
 }
 
 export interface ExecuteInput<TInput = unknown> {
@@ -147,6 +157,11 @@ export interface RunInput {
    * internal `project` call.
    */
   readonly tools: readonly import("../data/declarations.js").ToolDeclaration[];
+  /**
+   * App-level model-narration switch — threaded through to the internal
+   * `project` call. See {@link ProjectInput.narrate}.
+   */
+  readonly narrate?: boolean;
 }
 
 export interface AbortExecutorInput {

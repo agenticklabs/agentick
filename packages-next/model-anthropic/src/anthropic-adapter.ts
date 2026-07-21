@@ -946,7 +946,7 @@ function anthropicProjectImpl(input: ProjectInput): LanguageModelInput {
   // provider-specific tool shape at this layer. The system-message
   // override above exists ONLY because Anthropic preserves per-section
   // cache_control; tools have no such concern.
-  const tools = buildTools(input.tools);
+  const tools = buildTools(input.tools, input.narrate);
   // Generation params are the canonical fold — Anthropic's projection
   // override exists ONLY to preserve per-section cache_control on the
   // system message; the SpecConfig → LanguageModelParameters lift is

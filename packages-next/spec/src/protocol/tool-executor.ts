@@ -42,7 +42,12 @@
 import type { HarnessFx } from "./middleware.js";
 import type { Effect } from "effect";
 import type { ContentBlock } from "../data/content-blocks.js";
-import type { ToolBinding, ToolDeclaration, ToolExposure } from "../data/declarations.js";
+import type {
+  ToolBinding,
+  ToolDeclaration,
+  ToolExposure,
+  ToolPresentation,
+} from "../data/declarations.js";
 import type { StandardSchemaIssue } from "../data/standard-schema.js";
 import type { SubstrateError } from "../data/errors.js";
 import type { ToolExecutorErrorChannel } from "../errors/harnesses.js";
@@ -201,6 +206,17 @@ export interface DispatchResult {
   readonly durationMs?: number;
   readonly retryCount?: number;
   readonly cacheHit?: boolean;
+  /**
+   * Resolved tool-call presentation — the "what is this call doing?"
+   * answer with precedence `modelNarration ?? displaySummary ?? title ??
+   * name` (see {@link ToolPresentation}). Computed by the executor at
+   * dispatch (the single resolution site — it holds the stripped model
+   * narration, the tool annotations, and the validated input). The loop
+   * surfaces it on the tool lifecycle path. Presentation only; never sent
+   * to the model. Absent for dispatches that short-circuit before the
+   * resolution point (e.g. a confirmation denial).
+   */
+  readonly presentation?: ToolPresentation;
   readonly metadata?: Readonly<Record<string, unknown>>;
 }
 

@@ -828,6 +828,7 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
         compiled: input.compiled,
         target: input.target,
         tools: input.tools,
+        ...(input.narrate !== undefined ? { narrate: input.narrate } : {}),
       });
 
       // 2. execute (provider call; may stream + emit deltas)

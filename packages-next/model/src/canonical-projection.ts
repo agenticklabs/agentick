@@ -29,7 +29,7 @@ import type {
   SectionEntry,
   ToolDeclaration,
 } from "@agentick/spec-next";
-import { mergeProviderOptions, toJsonSchema } from "@agentick/spec-next";
+import { mergeProviderOptions, TOOL_NARRATION_FIELD, toJsonSchema } from "@agentick/spec-next";
 import { omitUndefined } from "@agentick/utils-next";
 
 export function defaultProject(input: ProjectInput): LanguageModelInput {
@@ -39,7 +39,7 @@ export function defaultProject(input: ProjectInput): LanguageModelInput {
   // reconciler). The IR's `compiled.declarations.tools` records what
   // the reconciler emitted but is NOT the canonical source for the
   // model's visible tool list. See `ProjectInput.tools` for context.
-  const tools = buildTools(input.tools);
+  const tools = buildTools(input.tools, input.narrate);
   const parameters = buildParameters(input.compiled);
   // #176: fold `tree.providerOptions` OVER `target.providerOptions`
   // (tree/per-render wins) onto the request-level channel. Previously
@@ -318,17 +318,69 @@ export function imageUrlFromSource(source: MediaSource, mimeType: string | undef
  * (which folds gateway/app/session/execution/extension/reconciler
  * with correct precedence). Provider-specific executors that need to
  * stay aligned with the canonical fold should call this helper.
+ *
+ * ## Model-call narration (`_summary`)
+ *
+ * When `narrate` is `true` (the default), each model-facing tool schema
+ * gets an optional {@link TOOL_NARRATION_FIELD} (`_summary`) string
+ * property injected so the model can self-narrate what a call is doing —
+ * the sentence that lights the tool-start spinner. The tool executor
+ * STRIPS it before validation, so it never reaches the handler. Injection
+ * is skipped for a tool when `narrate` is `false` (app-level off-switch),
+ * when the tool sets `annotations.narrate === false`, or when the tool's
+ * own schema already declares a `_summary` property (implicit opt-out —
+ * we never clobber an author field). `_summary` is NEVER added to
+ * `required`. Token cost: one extra schema property per tool + one extra
+ * model-emitted sentence per call — disable app-wide via `narrate: false`.
  */
-export function buildTools(tools: readonly ToolDeclaration[]): ReadonlyArray<LanguageModelTool> {
+export function buildTools(
+  tools: readonly ToolDeclaration[],
+  narrate = true,
+): ReadonlyArray<LanguageModelTool> {
   return tools
     .filter((t) => t.exposure.includes("model"))
     .map((t) => ({
       name: t.name,
       ...omitUndefined({ description: t.description }),
-      inputSchema: toJsonSchema(t.inputSchema) as Record<string, unknown>,
+      inputSchema: injectNarration(
+        toJsonSchema(t.inputSchema) as Record<string, unknown>,
+        narrate && t.annotations?.narrate !== false,
+      ),
       ...(t.outputSchema !== undefined
         ? { outputSchema: toJsonSchema(t.outputSchema) as Record<string, unknown> }
         : {}),
       ...omitUndefined({ providerOptions: t.providerOptions }),
     }));
+}
+
+/**
+ * Inject the reserved {@link TOOL_NARRATION_FIELD} into a tool's wire JSON
+ * schema when narration is enabled for that tool. Never mutates the input
+ * (`toJsonSchema` may return a cached raw-schema reference shared across
+ * calls) — shallow-copies the schema and its `properties`. Skips injection
+ * when the schema already declares `_summary` (implicit per-tool opt-out).
+ * `_summary` is optional — never added to `required`.
+ */
+function injectNarration(
+  schema: Record<string, unknown>,
+  enabled: boolean,
+): Record<string, unknown> {
+  if (!enabled) return schema;
+  const existing = (schema.properties as Record<string, unknown> | undefined) ?? undefined;
+  if (existing && Object.prototype.hasOwnProperty.call(existing, TOOL_NARRATION_FIELD)) {
+    // The author already owns `_summary` — leave their field intact.
+    return schema;
+  }
+  return {
+    ...schema,
+    properties: {
+      ...existing,
+      [TOOL_NARRATION_FIELD]: {
+        type: "string",
+        description:
+          "One short first-person sentence describing what you're doing with this call, " +
+          'shown to the user (e.g. "Searching the docs for retry config").',
+      },
+    },
+  };
 }

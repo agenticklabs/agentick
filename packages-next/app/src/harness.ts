@@ -408,6 +408,15 @@ export interface AppHarnessOptions<P = unknown> {
    * is not explicitly false.
    */
   readonly streaming?: boolean;
+  /**
+   * App-level model-narration switch (default `true`). When `false`, the
+   * reserved `_summary` narration field is NOT injected into any
+   * model-facing tool schema — the token-cost off-switch (an extra schema
+   * property per tool + an extra model-emitted sentence per call).
+   * Overridden by `createSession({ narrate })` / `createApp({ session:
+   * { narrate } })`. Equivalent convenience for `session.narrate`.
+   */
+  readonly narrate?: boolean;
 
   /**
    * App-level tool handlers shared across sessions. Resolver keys are
@@ -1598,6 +1607,13 @@ export class AppHarness<P = unknown>
         : this.sessionDefaults.defaultStreaming !== undefined
           ? { defaultStreaming: this.sessionDefaults.defaultStreaming }
           : {}),
+      // Narration cascade (Pass B): per-session input.narrate > app-level
+      // sessionDefaults.narrate > undefined (SessionHarness defaults ON).
+      ...(input.narrate !== undefined
+        ? { narrate: input.narrate }
+        : this.sessionDefaults.narrate !== undefined
+          ? { narrate: this.sessionDefaults.narrate }
+          : {}),
       ...(input.initialProps !== undefined
         ? { props: input.initialProps }
         : this.sessionDefaults.props !== undefined
@@ -1912,6 +1928,9 @@ function mergeSessionDefaults<P>(options: AppHarnessOptions<P>): SessionDefaults
   }
   if (fromLong.defaultStreaming === undefined && options.streaming !== undefined) {
     merged.defaultStreaming = options.streaming;
+  }
+  if (fromLong.narrate === undefined && options.narrate !== undefined) {
+    merged.narrate = options.narrate;
   }
   return merged as SessionDefaults<P>;
 }

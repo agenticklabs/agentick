@@ -481,13 +481,18 @@ export class FakeLanguageModelExecutor
 
 function projectAsEffect(input: RunInput): Effect.Effect<LanguageModelInput, never, never> {
   return Effect.sync(() =>
-    projectImpl({ compiled: input.compiled, target: input.target, tools: input.tools }),
+    projectImpl({
+      compiled: input.compiled,
+      target: input.target,
+      tools: input.tools,
+      ...(input.narrate !== undefined ? { narrate: input.narrate } : {}),
+    }),
   );
 }
 
 function projectImpl(input: ProjectInput): LanguageModelInput {
   const messages = buildMessages(input.compiled);
-  const tools = buildTools(input.tools);
+  const tools = buildTools(input.tools, input.narrate);
   const parameters = buildParameters(input.compiled);
   return {
     messages,

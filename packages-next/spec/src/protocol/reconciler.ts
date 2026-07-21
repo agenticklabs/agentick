@@ -58,7 +58,7 @@
 
 import type { HarnessFx } from "./middleware.js";
 import type { Effect } from "effect";
-import type { FormatterRef, RenderedTree } from "../data/index.js";
+import type { FormatterRef, RenderedTree, ToolPresentation } from "../data/index.js";
 import type { SubstrateError } from "../data/errors.js";
 import type { ReconcileErrorChannel } from "../errors/harnesses.js";
 import type {
@@ -348,6 +348,17 @@ export interface LifecycleToolStart {
   readonly name: string;
   readonly via: string;
   readonly executionId?: string;
+  /**
+   * The model's self-narration for this call — the `_summary` field the
+   * model filled in (see `TOOL_NARRATION_FIELD`). Extracted eagerly from
+   * the raw model input so `useOnToolStart` can light the spinner with
+   * "Searching the docs for retry config…" the instant dispatch begins,
+   * BEFORE the handler resolves. The full precedence-resolved
+   * `ToolPresentation` (which folds `displaySummary`/`title` — only known
+   * after validation) rides `DispatchResult.presentation` instead.
+   * Undefined for host `dispatch` calls and when narration is disabled.
+   */
+  readonly narration?: string;
   readonly metadata?: Readonly<Record<string, unknown>>;
 }
 
@@ -364,6 +375,17 @@ export interface LifecycleToolEnd {
   readonly outcome: "succeeded" | "failed";
   readonly durationMs: number;
   readonly executionId?: string;
+  /**
+   * The fully precedence-resolved tool-call presentation
+   * (`modelNarration ?? displaySummary ?? title ?? name`) the executor
+   * computed at dispatch, carried back from `DispatchResult.presentation`.
+   * Where tool-start's `narration` is the eager live-spinner value (model
+   * narration only), THIS is the settled answer — it also reflects the
+   * author's `displaySummary`/`title` fallback when the model emitted no
+   * narration. Absent when the dispatch short-circuited before resolution
+   * (e.g. a confirmation denial) or the door produced no presentation.
+   */
+  readonly presentation?: ToolPresentation;
   readonly metadata?: Readonly<Record<string, unknown>>;
 }
 

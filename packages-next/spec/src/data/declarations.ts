@@ -103,6 +103,38 @@ export interface ToolAnnotations {
   /** `[V1-INHERITED]` Tool intent hint. */
   readonly intent?: "render" | "action" | "compute";
   /**
+   * Humanized display name for a tool call ("Write file" vs
+   * `write_file`). Presentation ONLY — surfaced on the tool-start
+   * lifecycle event and in the resolved {@link ToolPresentation}; never
+   * sent to the model as the tool's identifier. Sits at the BOTTOM of the
+   * display precedence chain (above the bare `name`):
+   * `modelNarration ?? displaySummary ?? title ?? name`. `[V1-RESTORED]`.
+   */
+  readonly title?: string;
+  /**
+   * Author's summary of what a SPECIFIC call is doing, for host/UI
+   * display. A seam: a static `string` OR a per-call function evaluated
+   * at dispatch against the VALIDATED input + live {@link ToolHandlerCtx}
+   * (sync or async). Sits in the display precedence chain BELOW the
+   * model's own `_summary` narration and ABOVE {@link title}/name:
+   * `modelNarration ?? displaySummary ?? title ?? name`.
+   *
+   * The function form is a RUNTIME value — erased from the serialized
+   * declaration (like {@link ToolConfirmationPredicate}); over-the-wire
+   * tools use the `string` form. `[V1-RESTORED]`.
+   */
+  readonly displaySummary?:
+    | string
+    | ((input: unknown, ctx: ToolHandlerCtx) => string | Promise<string>);
+  /**
+   * Opt this tool OUT of the injected model-narration `_summary` field.
+   * When `false`, the projector skips injecting {@link TOOL_NARRATION_FIELD}
+   * into this tool's model-facing schema. Default (unset / `true`):
+   * narration is injected whenever the app-level narrate switch is ON.
+   * See {@link TOOL_NARRATION_FIELD} for the token-cost tradeoff.
+   */
+  readonly narrate?: boolean;
+  /**
    * CLIENT-HANDLED tools only (declaration carries no `handlerRef`).
    * When `true`, dispatch SUSPENDS and relays the call to the client
    * over the tool-call channel, resolving with the client's returned
@@ -272,6 +304,70 @@ export interface ToolDeclaration {
    */
   readonly providerOptions?: ProviderToolOptions;
 }
+
+/**
+ * RESERVED model-input field name for tool-call self-narration.
+ *
+ * The framework injects an optional `_summary` string property into every
+ * model-facing tool schema (gated on the app-level narrate switch + a
+ * per-tool {@link ToolAnnotations.narrate} opt-out) so the model can say,
+ * in one short first-person sentence, what a call is doing. That sentence
+ * lights up the tool-start spinner ("Searching the docs for retry config").
+ *
+ * The tool executor STRIPS this field from the raw input BEFORE schema
+ * validation (a shallow copy — the caller's object is never mutated), so
+ * it NEVER reaches the handler or the persisted `tool_result`. A tool
+ * whose own schema already declares `_summary` opts out implicitly (the
+ * injector skips it to avoid clobbering the author's field).
+ *
+ * ## Token cost
+ *
+ * Injecting `_summary` adds one property to EVERY model-facing tool
+ * schema AND the model emits an extra sentence per call — real input and
+ * output tokens on every tool-using tick. The app-level narrate switch
+ * (default ON) is the off-switch; disable it app-wide when the cost isn't
+ * worth the live narration.
+ *
+ * Imported by BOTH the injector (`buildTools`, `@agentick/model-next`) and
+ * the stripper (`dispatchBody`, `@agentick/tool-executor-next`).
+ */
+export const TOOL_NARRATION_FIELD = "_summary" as const;
+
+/**
+ * Resolved presentation for a tool call — the "what is this call doing?"
+ * answer, drawn from three sources with one precedence chain
+ * (`modelNarration ?? displaySummary ?? title ?? name`). Produced by the
+ * tool executor at dispatch and surfaced for host/UI display; presentation
+ * only, never sent to the model.
+ */
+export interface ToolPresentation {
+  /**
+   * The raw tool id (`write_file`) — for keys / logic. Always set. The client
+   * falls back to this when {@link title} is absent.
+   */
+  readonly name: string;
+  /**
+   * {@link ToolAnnotations.title} — the humanized IDENTITY ("Write File"), when
+   * set. What the tool IS, distinct from what this call is doing.
+   */
+  readonly title?: string;
+  /**
+   * The author's per-call ACTIVITY description ({@link
+   * ToolAnnotations.displaySummary} resolved), when set. What this call is doing.
+   */
+  readonly summary?: string;
+  /**
+   * The model's self-narration extracted from {@link TOOL_NARRATION_FIELD},
+   * when the model filled it in. Undefined when narration is disabled or
+   * the model omitted it.
+   */
+  readonly narration?: string;
+}
+
+// The four fields are surfaced DISTINCTLY and never collapsed — the framework
+// presumes no precedence. A client composes identity from `title ?? name` and
+// activity from `narration ?? summary` (or shows them separately, or badges the
+// model's words). That precedence is a CLIENT concern, not the framework's.
 
 // ============================================================================
 // Resource declaration

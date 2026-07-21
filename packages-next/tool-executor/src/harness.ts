@@ -53,11 +53,12 @@ import type {
   ToolExecutorFx,
   ToolExecutorProtocol,
   ToolListFilter,
+  ToolPresentation,
   ToolRegistration,
   ToolResultInput,
   UnregisterToolInput,
 } from "@agentick/spec-next";
-import { normalizeToolResult } from "@agentick/spec-next";
+import { normalizeToolResult, TOOL_NARRATION_FIELD } from "@agentick/spec-next";
 import { viaToOrigin } from "./provenance.js";
 import {
   HandlerError,
@@ -585,10 +586,38 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
         validator = entry.validator;
       }
 
+      // ─── Model self-narration strip (Pass B) ────────────────────────
+      // The model MAY include the reserved `_summary` narration field —
+      // the projector injects it into every model-facing tool schema so
+      // the model can say what a call is doing. It is PRESENTATION, not an
+      // argument: strip it from the raw input BEFORE validation so the
+      // author's schema sees only real fields, and so it NEVER reaches the
+      // handler or the persisted `tool_result`. Shallow copy — the
+      // caller's object is never mutated. Only the model door carries it;
+      // host `dispatch` inputs pass through untouched.
+      let rawInput = input.input;
+      let modelNarration: string | undefined;
+      if (
+        input.context.via === "model" &&
+        rawInput !== null &&
+        typeof rawInput === "object" &&
+        Object.prototype.hasOwnProperty.call(rawInput, TOOL_NARRATION_FIELD)
+      ) {
+        const { [TOOL_NARRATION_FIELD]: narrationValue, ...rest } = rawInput as Record<
+          string,
+          unknown
+        >;
+        rawInput = rest;
+        modelNarration =
+          typeof narrationValue === "string" && narrationValue.length > 0
+            ? narrationValue
+            : undefined;
+      }
+
       // Validate input. Validator may be sync or async — both shapes
       // sit inside Effect.tryPromise (sync resolves immediately).
       const result = yield* Effect.tryPromise({
-        try: async () => validator.validate(input.input),
+        try: async () => validator.validate(rawInput),
         catch: (cause): { readonly _tag: "ToolValidationError"; readonly cause: unknown } => ({
           _tag: "ToolValidationError",
           cause,
@@ -854,6 +883,36 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
         }
       }
 
+      // ─── Tool-call presentation (Pass B) ────────────────────────────
+      // Surface the RAW materials for "what is this call doing?" as FOUR
+      // distinct fields — the client composes; the framework presumes no
+      // precedence (identity `title ?? name`, activity `narration ?? summary`
+      // are the CLIENT's call):
+      //   name      — the raw tool id (keys / logic)
+      //   title     — humanized identity (annotations.title)
+      //   summary   — the author's per-call description (displaySummary)
+      //   narration — the model's own first-person `_summary`
+      // This is the SINGLE resolution site: it holds the stripped model
+      // narration, the tool's annotations, AND the final validated input
+      // (post-confirmation, so a host-edited `modifiedArguments` is
+      // reflected). `displaySummary` is resolved INDEPENDENTLY of the model
+      // narration (both are surfaced distinctly). The result rides
+      // `DispatchResult.presentation` — the loop surfaces it on the tool
+      // lifecycle path; it is NEVER sent to the model and NEVER reaches the
+      // handler.
+      const presentationTitle = reg.declaration.annotations?.title;
+      const ds = reg.declaration.annotations?.displaySummary;
+      const resolvedDisplaySummary: string | undefined =
+        typeof ds === "function"
+          ? yield* Effect.promise(() => Promise.resolve(ds(validated, ctx)))
+          : ds;
+      const presentation: ToolPresentation = {
+        name: input.name,
+        ...(presentationTitle !== undefined ? { title: presentationTitle } : {}),
+        ...(resolvedDisplaySummary !== undefined ? { summary: resolvedDisplaySummary } : {}),
+        ...(modelNarration !== undefined ? { narration: modelNarration } : {}),
+      };
+
       // ─── Client-handled dispatch (no server handler) ────────────────
       // The declaration carried no `handlerRef`, so there is nothing to
       // invoke locally. Runs AFTER validation + the confirmation gate.
@@ -956,6 +1015,7 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
           // Observability — a client, not the local handler, produced this.
           executedBy: "client",
           durationMs: Date.now() - started,
+          presentation,
         };
         return clientResult;
       }
@@ -1186,6 +1246,7 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
           ...(normalized.metadata !== undefined ? { metadata: normalized.metadata } : {}),
           executedBy: "agentick",
           durationMs: Date.now() - started,
+          presentation,
         };
         return dispatchResult;
       }

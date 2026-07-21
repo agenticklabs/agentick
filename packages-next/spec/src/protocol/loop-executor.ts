@@ -215,6 +215,15 @@ export interface RunExecutionInput {
   readonly metadata?: Readonly<Record<string, unknown>>;
 
   /**
+   * App/session-level model-narration switch (default `true`). Threaded
+   * straight into the per-tick `project` / `run` call so the projector
+   * gates injection of the reserved `TOOL_NARRATION_FIELD` (`_summary`)
+   * into each model-facing tool schema. `false` disables narration
+   * app-wide — the token-cost off-switch. See `ProjectInput.narrate`.
+   */
+  readonly narrate?: boolean;
+
+  /**
    * When true (and `executor.executeStream` exists + the target's
    * `capabilities.supportsStreaming` is not explicitly false), the
    * loop uses streaming execution and forwards every `AdapterDelta`

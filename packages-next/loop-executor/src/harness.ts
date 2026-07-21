@@ -69,6 +69,7 @@ import {
   ExecutionError,
   HandlerError,
   ProviderRejected,
+  TOOL_NARRATION_FIELD,
   toRegistration,
 } from "@agentick/spec-next";
 
@@ -451,6 +452,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
             target: tickTarget,
             scope: { sessionId: input.sessionId, executionId, tickId },
             tools: modelTools,
+            ...(input.narrate !== undefined ? { narrate: input.narrate } : {}),
           });
           // #182 Option A: a provider failure lands on the twin's E
           // channel; `Effect.either` catches it exactly where the Promise
@@ -489,6 +491,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
             scope: { sessionId: input.sessionId, executionId, tickId },
             tools: modelTools,
             signal: execSignal,
+            ...(input.narrate !== undefined ? { narrate: input.narrate } : {}),
           });
         }
 
@@ -561,6 +564,15 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         const dispatchOne = (tc: ToolCall): Effect.Effect<LoopToolResult, never, never> =>
           Effect.gen(function* () {
             const startedAt = Date.now();
+            // Eager model self-narration (Pass B) — the model's `_summary`
+            // sentence rides straight off the raw tool input so the
+            // tool-start spinner lights up ("Searching the docs…") the
+            // instant dispatch begins, BEFORE the handler resolves. The
+            // executor strips the same field before validation; here we
+            // only READ it for display. The full precedence-resolved
+            // presentation (folding displaySummary/title — known only
+            // after validation) rides `DispatchResult.presentation`.
+            const narration = extractNarration(tc.input);
             input.onEvent?.({
               kind: "tool-dispatch-start",
               tick: tickIndex,
@@ -580,6 +592,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
                 name: tc.name,
                 via: "model",
                 executionId,
+                ...(narration !== undefined ? { narration } : {}),
               },
             });
             const dispatched = yield* Effect.either(
@@ -624,6 +637,11 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
                   outcome: dispatchSucceeded ? "succeeded" : "failed",
                   durationMs,
                   executionId,
+                  // Pass B — the fully precedence-resolved presentation the
+                  // executor computed at dispatch (folds displaySummary/
+                  // title, known only post-validation). Reuses the existing
+                  // tool-end event; no new channel.
+                  ...(ok.presentation !== undefined ? { presentation: ok.presentation } : {}),
                 },
               });
               input.onEvent?.({
@@ -910,6 +928,19 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
  */
 function awaitBridge<A>(thunk: () => Promise<A> | A): Effect.Effect<A, unknown, never> {
   return Effect.tryPromise({ try: async () => thunk(), catch: (e: unknown) => e });
+}
+
+/**
+ * Read the model's self-narration ({@link TOOL_NARRATION_FIELD}) off a raw
+ * tool-call input for the eager tool-start spinner. READ-only — the tool
+ * executor is the authority that STRIPS the field before validation; this
+ * never mutates the input. Returns `undefined` unless the field is a
+ * non-empty string.
+ */
+function extractNarration(input: unknown): string | undefined {
+  if (input === null || typeof input !== "object") return undefined;
+  const value = (input as Record<string, unknown>)[TOOL_NARRATION_FIELD];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 /**

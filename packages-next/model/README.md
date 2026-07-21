@@ -135,6 +135,34 @@ executor.
 - `isLanguageModelAdapter(value)` — structural guard used by app-level
   slots.
 
+### Tool-call narration injection (`_summary`)
+
+`buildTools(tools, narrate = true)` injects the reserved
+`TOOL_NARRATION_FIELD` (`"_summary"`, from `@agentick/spec-next`) as an
+**optional** `string` property into each model-facing tool's JSON schema, so the
+model can self-narrate what a call is doing in one short first-person sentence
+(the text that lights the `useOnToolStart` spinner). It is **never** added to
+`required`, never mutates the source schema (shallow copy — `toJsonSchema` may
+return a shared cached object), and is skipped when:
+
+- `narrate === false` (the app-level off-switch, threaded from
+  `ProjectInput.narrate`),
+- the tool sets `annotations.narrate === false`, or
+- the tool's own schema already declares a `_summary` property (implicit
+  opt-out — we never clobber an author field).
+
+The tool executor (`@agentick/tool-executor-next`) **strips `_summary` before
+validation**, so it never reaches the handler or the `tool_result`; the
+executor surfaces the model narration alongside the author's `title`/`summary`
+and the raw `name` as **four distinct fields** on the tool lifecycle events (the
+client composes them — no precedence is presumed). See that package's "Tool-call
+presentation" section.
+
+> **⚠️ Token cost.** Injecting `_summary` into every tool schema AND the extra
+> model-emitted sentence per call is real input/output token cost on every
+> tool-using tick. It defaults ON; disable app-wide via
+> `createApp(Agent, { model, narrate: false })`.
+
 ### Combinators
 
 Adapters are plain values — resilience and routing compose:
@@ -307,6 +335,11 @@ runtime — an adapter is usable standalone via `generate()`.
   wire-native multimodal variants, `providerMetadata → providerOptions`,
   `SpecConfig` generation params lift (#211), message-level
   `providerMetadata → providerOptions` carry (#173).
+- `src/__tests__/narration-injection.spec.ts` — `buildTools` injects the
+  reserved `_summary` narration property when enabled, and skips it on
+  `narrate=false` (app-level), `annotations.narrate:false` (per-tool), an
+  already-present `_summary` (author opt-out); never in `required`; source
+  schema not mutated; model-exposure filtering.
 - `src/__tests__/cache-hints.spec.ts` — `CacheHint` (#185) threading
   through section boundaries and message parts.
 - `src/__tests__/stream-tag-parser.spec.ts` — tag routing.
