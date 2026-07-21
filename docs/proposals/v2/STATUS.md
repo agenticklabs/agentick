@@ -1725,6 +1725,27 @@ blueprint's design decisions; this is execution-level).
 
 ### 2026-07-20
 
+- **Store convergence — Run 3 LANDED: session onto a single-key `View`.**
+  `SessionRuntime` hand-rolled the View machine (sync cache + `syncSessionRecord`
+  write-through + a `_listeners` notifier); all three fold into
+  `View.collection(store, r => r.id)` — one cache entry, keyed by session id. No
+  View refinement needed — proof the primitive covers the single-record cell.
+  Typed accessors stay as the session-domain facade. Parity-only: the E11
+  upsert-on-transition semantics are preserved exactly — `setStatus`/`setMeta`
+  persist (`view.write`), `addUsage`/`bumpExecutionCount`/`setCurrentExecutionId`
+  are cache-only (`view.seedSync`, riding the next status write), `currentTick`
+  stays transient. Optional `SessionStore` handled with a module `NULL_STORE`
+  (no-op mutate) so there's ONE read path and no durable mirror is introduced
+  where there wasn't one. Honest cost: scalar mutation became whole-record
+  copy-on-write (+ ~modest ceremony); session-state.ts grew (a lot of it docs +
+  identity fields relocated from the harness, which shed −48) — the trade is
+  uniformity over minimal LOC, per the explicit "everything leverages View"
+  mandate. `subscribeMetadata` is now consumer-less (folded into `view.write`);
+  the `setMeta` change fires an unobservable extra ping. Gates: typecheck --force
+  152/152 0-cached; session + app 202 passed / 4 skipped (kill-resume).
+  **Remaining:** timeline (`LogView` sibling), resources (`View` + resolver
+  sidecar); credentials stays the principled no-view case.
+
 - **Store convergence — Run 2 LANDED: `View` generalized (cache ≠ store) + tasks
   migrated.** The thesis test — does `View` cover the augmented FUSED case, or was
   it only ever a pure-mirror? It covers it, cleanly. `View<TCache, TStore = TCache,

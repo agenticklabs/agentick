@@ -62,7 +62,6 @@ import type {
   SessionError,
   SessionExecutionHandle,
   SessionHarnessProtocol,
-  SessionRecord,
   SessionSnapshot,
   SessionStore,
   SessionSubstrateParent,
@@ -372,26 +371,13 @@ export class SessionHarness<P = unknown>
   private readonly spawnContext: SpawnContext<P> | undefined;
   private readonly parentSessionId: string | undefined;
   /**
-   * Durable session registry (E11) — the app-singleton {@link SessionStore}
-   * this session mirrors its metadata into. `undefined` for ephemeral /
-   * standalone sessions (they persist nothing). Written async, off the render
-   * hot path; NO projection (async-read, like credentials).
+   * Durable session registry (E11), captured identity (`createdAt` / `appId` /
+   * `agentId`), and the app-owned descriptive slots (`title` / `description` /
+   * `metadata`) all live on {@link SessionRuntime} now — folded into the
+   * single-key `View<SessionRecord>` that subsumed the harness's former
+   * hand-rolled `syncSessionRecord` write-through + metadata notifier.
+   * {@link setMeta} delegates there.
    */
-  private readonly sessionStore: SessionStore | undefined;
-  /** `SessionRecord` fields captured once at construction (E11 identity). */
-  private readonly createdAt: number = Date.now();
-  private readonly appId: string | undefined;
-  private readonly agentId: string | undefined;
-  /**
-   * App-owned descriptive slots for the `SessionRecord` (E11) — the framework
-   * STORES these, never populates their semantics. Seeded from construction
-   * options; mutated by {@link setMeta}; folded into every record write.
-   */
-  private _meta: {
-    title?: string;
-    description?: string;
-    metadata?: Record<string, unknown>;
-  };
   /**
    * Lazily-built index of the channel-owning harnesses among this
    * session's bridges (knobs, tasks, state, gates, timeline). Keyed by
@@ -507,7 +493,26 @@ export class SessionHarness<P = unknown>
     const resolvedBus = this.bus;
     const resolvedInbox = this.inbox;
 
-    this.runtime = new SessionRuntime(options.sessionId);
+    this.runtime = new SessionRuntime({
+      id: options.sessionId,
+      // E11 durable registry (or `undefined` → no durable mirror). The runtime
+      // holds the single-key View over this store; the write-through +
+      // metadata-notifier the harness used to hand-roll (`syncSessionRecord` +
+      // `subscribeMetadata`) now live inside `view.write`.
+      store: options.sessionStore,
+      // The harness's scope carrier, threaded on every persisting record write.
+      storeCtx: () => this.storeCtx(),
+      ...omitUndefined({
+        appId: options.appId,
+        agentId: options.agentId,
+        parentSessionId: options.parentSessionId,
+        title: options.title,
+        description: options.description,
+        // The adopter's session metadata bag doubles as the record's open
+        // over-fetch bag (E11) — one adopter-owned bag, not two.
+        metadata: options.metadata as Record<string, unknown> | undefined,
+      }),
+    });
     // ADR 76 tier 3 — the per-session bridges (knobs/state/…) inherit
     // `session.use()` / `app.use()` via the construction-fold: the session's
     // `resolvedInterceptors()` snapshot is threaded to `buildSessionBridges`
@@ -572,18 +577,6 @@ export class SessionHarness<P = unknown>
     this.target = options.target;
     this.spawnContext = options.spawnContext;
     this.parentSessionId = options.parentSessionId;
-    this.sessionStore = options.sessionStore;
-    this.appId = options.appId;
-    this.agentId = options.agentId;
-    this._meta = {
-      ...omitUndefined({
-        title: options.title,
-        description: options.description,
-        // The adopter's session metadata bag doubles as the record's open
-        // over-fetch bag (E11) — one adopter-owned bag, not two.
-        metadata: options.metadata as Record<string, unknown> | undefined,
-      }),
-    };
     this.telemetryRuntime = options.telemetryRuntime;
     this.defaultMaxTicks = options.defaultMaxTicks ?? 8;
     this.requiredScopes = options.requiredScopes;
@@ -616,50 +609,16 @@ export class SessionHarness<P = unknown>
       )
       .then(() => {});
 
-    // E11 — mirror session metadata into the durable SessionStore, off the
-    // critical path. ONE subscription to the state store catches every
-    // `setStatus` (running / idle / failed / closed) and re-writes the record;
-    // the execution boundary additionally bumps `executionCount` / toggles
-    // `currentExecutionId` before `setStatus`, so a single write per transition
-    // captures the full delta. NO projection — the record is written, never
-    // read during render. No-op when no store is injected (ephemeral sessions).
-    if (this.sessionStore !== undefined) {
-      this.runtime.subscribeMetadata(() => this.syncSessionRecord());
-      // Initial record — createdAt / status "idle" / executionCount 0.
-      this.syncSessionRecord();
-    }
-  }
-
-  /**
-   * Build the current {@link SessionRecord} from live state + the captured
-   * identity / app-owned slots and upsert it into the durable
-   * {@link SessionStore} — async, fire-and-forget, error-isolated (E11:
-   * `void store.put(record).catch(...)`, mirroring tasks' persist). NO
-   * projection: nothing reads this back during render. No-op when no store is
-   * injected.
-   */
-  private syncSessionRecord(): void {
-    const store = this.sessionStore;
-    if (store === undefined) return;
-    const currentExecutionId = this.runtime.currentExecutionId();
-    const record: SessionRecord = {
-      id: this.runtime.id,
-      createdAt: this.createdAt,
-      updatedAt: Date.now(),
-      status: this.runtime.status(),
-      executionCount: this.runtime.executionCount(),
-      usage: this.runtime.usage(),
-      ...omitUndefined({
-        parentSessionId: this.parentSessionId,
-        appId: this.appId,
-        agentId: this.agentId,
-        currentExecutionId: currentExecutionId ?? undefined,
-        title: this._meta.title,
-        description: this._meta.description,
-        metadata: this._meta.metadata,
-      }),
-    };
-    void store.put(record, this.storeCtx()).catch(() => undefined);
+    // E11 — the session's durable-registry mirror. The record write-through +
+    // the metadata notifier the harness used to hand-roll here
+    // (`subscribeMetadata → syncSessionRecord → void store.put(...)`, plus the
+    // initial construction upsert) now live INSIDE the runtime's single-key
+    // `View<SessionRecord>`: `SessionRuntime` seeds + persists the initial
+    // record in its constructor, and every `setStatus` / `setMeta` write-through
+    // hits the store via `view.write`. Only a status transition (or `setMeta`)
+    // persists; `executionCount` / `currentExecutionId` / `usage` ride the next
+    // transition — the same upsert-on-transition contract, unchanged. No store
+    // injected ⇒ a NULL_STORE no-op (no durable mirror), exactly as before.
   }
 
   /**
@@ -667,24 +626,16 @@ export class SessionHarness<P = unknown>
    * on this session's durable {@link SessionRecord} (E11). These are the
    * **app's** to populate — the framework STORES them and is blind to their
    * semantics (auto-summary, user-edit, the open over-fetch bag). Provided
-   * fields overwrite; omitted fields are left as-is. Re-writes the record
-   * immediately. No-op (still updates in-memory slots) when no store is
-   * injected.
+   * fields overwrite; omitted fields are left as-is. Delegates to the runtime,
+   * which re-writes the record through its view (a NULL_STORE no-op — still
+   * updating in-memory slots — when no store is injected).
    */
   setMeta(meta: {
     readonly title?: string;
     readonly description?: string;
     readonly metadata?: Record<string, unknown>;
   }): void {
-    this._meta = {
-      ...this._meta,
-      ...omitUndefined({
-        title: meta.title,
-        description: meta.description,
-        metadata: meta.metadata,
-      }),
-    };
-    this.syncSessionRecord();
+    this.runtime.setMeta(meta);
   }
 
   /**
@@ -1450,9 +1401,10 @@ export class SessionHarness<P = unknown>
 
     const executionId = `exec:${ulid()}`;
     // E11 accounting: bump the execution count + set the in-flight id BEFORE
-    // `setStatus("running")` — that status notify fires `syncSessionRecord`,
-    // so one write captures the full execution-start delta (count +
-    // currentExecutionId + running).
+    // `setStatus("running")`. The count / id updates are cache-only on the
+    // runtime's view; the `setStatus` write-through then persists ONE record
+    // capturing the full execution-start delta (count + currentExecutionId +
+    // running) — the upsert-on-transition contract.
     this.runtime.bumpExecutionCount();
     this.runtime.setCurrentExecutionId(executionId);
     this.runtime.setStatus("running");
