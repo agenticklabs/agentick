@@ -98,8 +98,8 @@ edge-facade derivation. Stage 2 replicates the twin onto the spine protocols.
       ReconcilerHarness). E channel = the reconciler taxonomy; tightened the react catch to map
       throws → `RenderFailed` (behavior-preserving; 216 tests green).
 - [x] **`readonly fx` HOISTED onto the four spine protocols** (`c27f4235`) — THE Stage 2→3 bridge.
-      The loop holds protocol-typed refs (`RunExecutionInput.executor/.reconciler/.toolExecutor`),
-      so `yield* input.executor.fx.run(...)` requires `fx` on the PROTOCOL, not just the concrete
+      The loop holds protocol-typed refs (`RunExecutionInput.modelExecutor/.reconciler/.toolExecutor`),
+      so `yield* input.modelExecutor.fx.run(...)` requires `fx` on the PROTOCOL, not just the concrete
       class. Every impl + double now provides it — notably `FakeLanguageModelExecutor` gained
       `fx.run` + a sink-fold `fx.executeStream`; structural test doubles gained `fx` sharing the
       facade's logic (recording executors record on the fx path too). **"internal calls go through

@@ -23,7 +23,7 @@ import React from "react";
 import { describe, expect, it } from "vitest";
 
 import { createApp } from "../react.js";
-import { FakeLanguageModelExecutor } from "@agentick/executor-next";
+import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
 import { KnobsHarness } from "@agentick/knobs-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type { ContentBlock, ToolDeclaration, ToolHandler } from "@agentick/spec-next";
@@ -80,7 +80,7 @@ describe("ADR 82 — hook cascade wired end-to-end (tool:dispatch)", () => {
   it("createApp({ hooks: { onBeforeToolDispatch } }) reshapes the dispatched input", async () => {
     const seen: { value?: unknown } = {};
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       tools: [echoTool()],
       toolHandlers: new Map([[ECHO_REF, makeEchoHandler(seen)]]),
       hooks: {
@@ -107,7 +107,7 @@ describe("ADR 82 — hook cascade wired end-to-end (tool:dispatch)", () => {
     // Each before-hook APPENDS a marker. If both fire and the app layer is
     // outer, the handler sees the app suffix applied before the session suffix.
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       tools: [echoTool()],
       toolHandlers: new Map([[ECHO_REF, makeEchoHandler(seen)]]),
       hooks: {
@@ -146,7 +146,7 @@ describe("ADR 82 — hook cascade wired end-to-end (tool:dispatch)", () => {
     const seen: { value?: unknown } = {};
     let afterRan = 0;
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       tools: [echoTool()],
       toolHandlers: new Map([[ECHO_REF, makeEchoHandler(seen)]]),
       hooks: {
@@ -178,7 +178,7 @@ describe("ADR 82 — hook cascade wired end-to-end (tool:dispatch)", () => {
   it("behavior-preserving: no hooks → the handler sees the raw input", async () => {
     const seen: { value?: unknown } = {};
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       tools: [echoTool()],
       toolHandlers: new Map([[ECHO_REF, makeEchoHandler(seen)]]),
     });
@@ -211,7 +211,7 @@ describe("ADR 83 §4 — late app registration reaches already-constructed per-s
   it("app.hook + app.use registered AFTER createSession reach the tool-executor AND the knobs bridge", async () => {
     const seen: { value?: unknown } = {};
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       tools: [echoTool()],
       toolHandlers: new Map([[ECHO_REF, makeEchoHandler(seen)]]),
     });

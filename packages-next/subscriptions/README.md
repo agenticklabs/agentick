@@ -58,7 +58,7 @@ import { createApp } from "@agentick/app-next";
 import { withSubscriptions } from "@agentick/subscriptions-next";
 
 const app = await createApp(<Agent />, {
-  executor,
+  modelExecutor,
   extensions: [withSubscriptions()], // default in-process cron scheduler ON
 });
 ```

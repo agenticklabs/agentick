@@ -18,7 +18,7 @@
 import React from "react";
 import { describe, expect, it } from "vitest";
 
-import { FakeLanguageModelExecutor } from "@agentick/executor-next";
+import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
 import { KnobsHarness } from "@agentick/knobs-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import { useKnob } from "@agentick/knobs-next/react";
@@ -56,7 +56,7 @@ describe("KnobsHarness — session integration", () => {
     }
 
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
     });
     const session = await app.createSession();
 
@@ -73,7 +73,7 @@ describe("KnobsHarness — session integration", () => {
     }
 
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
     });
     const session = await app.createSession();
     const knobs = (session as unknown as { bridges: { knobs: KnobsHarness } }).bridges.knobs;
@@ -101,7 +101,7 @@ describe("KnobsHarness — session integration", () => {
     }
 
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
     });
     const s1 = await app.createSession();
     const s2 = await app.createSession();

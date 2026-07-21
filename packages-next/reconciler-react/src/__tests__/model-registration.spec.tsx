@@ -21,11 +21,11 @@ import type { HookBridges, RegisteredModel } from "@agentick/spec-next";
 import { useModelRegistration } from "../react/hooks/use-model-registration.js";
 import { ReconcilerHarness } from "../harness/reconciler-harness.js";
 
-// Inert `RegisteredModel` — the executor is NEVER invoked in this test
-// (no loop runs). We only assert the ref reaches the bridge and the IR.
-// The session integration test uses the real `FakeLanguageModelExecutor`.
+// Inert `RegisteredModel` — the model-executor is NEVER invoked in this
+// test (no loop runs). We only assert the ref reaches the bridge and the
+// IR. The session integration test uses the real `FakeLanguageModelExecutor`.
 const inertModel: RegisteredModel = {
-  executor: {} as RegisteredModel["executor"],
+  modelExecutor: {} as RegisteredModel["modelExecutor"],
   target: { kind: "language-model", provider: "mock", modelId: "m1-model" },
 };
 

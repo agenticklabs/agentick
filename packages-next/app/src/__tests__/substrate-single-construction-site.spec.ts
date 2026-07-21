@@ -38,7 +38,7 @@ import React from "react";
 import { describe, expect, it } from "vitest";
 
 import { createApp } from "../react.js";
-import { FakeLanguageModelExecutor } from "@agentick/executor-next";
+import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import { withElicitation } from "@agentick/elicitation-next";
 import { withTasks } from "@agentick/tasks-next";
@@ -72,7 +72,7 @@ describe("#159 substrate primitives — single construction site", () => {
     // Before #159 this combination would either throw at the second
     // inbox.register() or silently fork the registry.
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       extensions: [withTasks(), withElicitation()],
     });
 
@@ -105,7 +105,7 @@ describe("#159 substrate primitives — single construction site", () => {
     };
 
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       // Order matters: withTasks/withElicitation MUST NOT register a
       // different namespace before `capture` runs. Place `capture`
       // first so we see installer.* in pristine form, then let
@@ -131,7 +131,7 @@ describe("#159 substrate primitives — single construction site", () => {
     // `ctx.tasks` ever pointed at different instances, this dispatch
     // would either fail or return data from a phantom registry.
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       extensions: [withTasks(), withElicitation()],
     });
     const session = await app.createSession({ sessionId: "s-dispatch" });
@@ -179,7 +179,7 @@ describe("#159 resources — single construction site + ctx.resource", () => {
       },
     };
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       extensions: [capture, withResources()],
     });
     const session = await app.createSession({ sessionId: "s-res-identity" });
@@ -199,7 +199,7 @@ describe("#159 resources — single construction site + ctx.resource", () => {
     // bridges.resources and ctx.resource pointed at different
     // instances, the read would miss.
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       extensions: [withResources()],
     });
     const session = await app.createSession({ sessionId: "s-res-dispatch" });

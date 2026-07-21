@@ -72,7 +72,7 @@ const PACKAGE_GROUPS: Array<{ label: string; packages: string[] }> = [
       "@agentick/session-next",
       "@agentick/reconciler-next",
       "@agentick/reconciler-react-next",
-      "@agentick/executor-next",
+      "@agentick/model-executor-next",
       "@agentick/model-next",
       "@agentick/model-openai-next",
       "@agentick/model-anthropic-next",

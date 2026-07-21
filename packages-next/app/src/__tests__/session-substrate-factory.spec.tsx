@@ -13,7 +13,7 @@ import React from "react";
 import { Effect, Stream, Chunk } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { FakeLanguageModelExecutor } from "@agentick/executor-next";
+import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type {
   EventBus,
@@ -62,7 +62,7 @@ function mkTarget(): ExecutionTarget {
 describe("createSession substrate slots — default (inherit app substrate)", () => {
   it("session uses the app's substrate when no overrides are passed", async () => {
     const app = await createApp(React.createElement(MinimalAgent), {
-      executor: mkExecutor(),
+      modelExecutor: mkExecutor(),
       target: mkTarget(),
     });
     const session = await app.createSession();
@@ -81,7 +81,7 @@ describe("createSession substrate slots — factory at session level", () => {
   it("factory called with a session shell whose .bus is the app's bus", async () => {
     const seenParents: Array<{ id: string; appBus: EventBus | undefined }> = [];
     const app = await createApp(React.createElement(MinimalAgent), {
-      executor: mkExecutor(),
+      modelExecutor: mkExecutor(),
       target: mkTarget(),
     });
     const session = await app.createSession({
@@ -101,7 +101,7 @@ describe("createSession substrate slots — factory at session level", () => {
 
   it("LocalEventBus.factory() at session slot fans in to app bus by default", async () => {
     const app = await createApp(React.createElement(MinimalAgent), {
-      executor: mkExecutor(),
+      modelExecutor: mkExecutor(),
       target: mkTarget(),
     });
     const session = await app.createSession({
@@ -136,7 +136,7 @@ describe("createSession substrate slots — factory at session level", () => {
 
   it("session-local subscribers see ONLY session events (isolated reads)", async () => {
     const app = await createApp(React.createElement(MinimalAgent), {
-      executor: mkExecutor(),
+      modelExecutor: mkExecutor(),
       target: mkTarget(),
     });
     const session = await app.createSession({
@@ -177,7 +177,7 @@ describe("createSession substrate slots — factory at session level", () => {
   it("metadata flows through to substrate factory via parent.metadata", async () => {
     let factorySawTenant = "";
     const app = await createApp(React.createElement(MinimalAgent), {
-      executor: mkExecutor(),
+      modelExecutor: mkExecutor(),
       target: mkTarget(),
     });
     await app.createSession({
@@ -193,7 +193,7 @@ describe("createSession substrate slots — factory at session level", () => {
 
   it("multi-tenant: two sessions get their own per-tenant bus, app sees both via fan-in", async () => {
     const app = await createApp(React.createElement(MinimalAgent), {
-      executor: mkExecutor(),
+      modelExecutor: mkExecutor(),
       target: mkTarget(),
     });
     const tenantFactory: EventBusFactory<{
@@ -252,7 +252,7 @@ describe("createSession substrate slots — factory at session level", () => {
 
   it("factory-registered onClose fires when session.close() runs", async () => {
     const app = await createApp(React.createElement(MinimalAgent), {
-      executor: mkExecutor(),
+      modelExecutor: mkExecutor(),
       target: mkTarget(),
     });
     let tenantBusClosed = false;
@@ -276,7 +276,7 @@ describe("createSession substrate slots — factory at session level", () => {
 describe("createSession close-op semantics (ADR 31 Option G)", () => {
   it("session.close() runs cleanly even when a factory closes the per-session journal", async () => {
     const app = await createApp(React.createElement(MinimalAgent), {
-      executor: mkExecutor(),
+      modelExecutor: mkExecutor(),
       target: mkTarget(),
     });
     // Per-session journal that fans in to the app journal. The factory
@@ -306,7 +306,7 @@ describe("createSession input — new fields from ADR 31 Phase 3", () => {
   it("rootElement override changes the agent for this session", async () => {
     const OtherAgent = () => React.createElement("message" as never, { role: "user" }, "alt");
     const app = await createApp(React.createElement(MinimalAgent), {
-      executor: mkExecutor(),
+      modelExecutor: mkExecutor(),
       target: mkTarget(),
     });
     // We can't trivially observe which JSX renders without exercising
@@ -321,7 +321,7 @@ describe("createSession input — new fields from ADR 31 Phase 3", () => {
 
   it("initialState seeds the session's state handle", async () => {
     const app = await createApp(React.createElement(MinimalAgent), {
-      executor: mkExecutor(),
+      modelExecutor: mkExecutor(),
       target: mkTarget(),
     });
     const session = await app.createSession({
@@ -335,7 +335,7 @@ describe("createSession input — new fields from ADR 31 Phase 3", () => {
 
   it("parentSessionId is stored on the session when supplied", async () => {
     const app = await createApp(React.createElement(MinimalAgent), {
-      executor: mkExecutor(),
+      modelExecutor: mkExecutor(),
       target: mkTarget(),
     });
     const session = await app.createSession({
@@ -350,7 +350,7 @@ describe("createSession input — new fields from ADR 31 Phase 3", () => {
 describe("createSession substrate slots — instance form (sharing across sessions)", () => {
   it("session uses the same bus instance when passed as an instance", async () => {
     const app = await createApp(React.createElement(MinimalAgent), {
-      executor: mkExecutor(),
+      modelExecutor: mkExecutor(),
       target: mkTarget(),
     });
     const sharedSessionBus = new LocalEventBus();

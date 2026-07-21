@@ -54,7 +54,7 @@
     "@google/genai": "^1.31.0"
   },
   "devDependencies": {
-    "@agentick/executor-next": "workspace:*",
+    "@agentick/model-executor-next": "workspace:*",
     "@agentick/runtime-next": "workspace:*",
     "@agentick/spec-conformance-next": "workspace:*",
     "effect": "^3.21.2"

@@ -24,7 +24,7 @@ import type {
   GroundingMetadata,
 } from "@google/genai";
 
-import { LanguageModelExecutor } from "@agentick/executor-next";
+import { LanguageModelExecutor } from "@agentick/model-executor-next";
 
 import { google, sanitizeSchemaForGemini } from "../google-adapter.js";
 import {

@@ -3,7 +3,7 @@
 **LoopExecutorHarness — one agent execution, run tick by tick.**
 
 The orchestration harness that runs a single execution to terminal. It
-composes the four downstream harnesses — reconciler, executor,
+composes the four downstream harnesses — reconciler, model-executor,
 tool-executor, and the session's state applicator — through the
 canonical tick loop, emitting a per-phase event stream so the whole
 execution is auditable from one subscriber on `surface: "loop"`.
@@ -56,7 +56,7 @@ const terminal = await loop.runExecution({
   sessionId: "s:1",
   reconciler, // ReconcilerProtocol
   mountId, // string
-  executor, // ExecutorProtocol
+  modelExecutor, // ExecutorProtocol
   target, // ExecutionTarget
   toolExecutor, // ToolExecutorProtocol
   stateApplicator, // StateApplicator (see NoopStateApplicator)
@@ -102,7 +102,7 @@ const myLoop = defineLoop({
       mountId: input.mountId,
       sessionId: input.sessionId,
     });
-    const terminal = await input.executor.run({
+    const terminal = await input.modelExecutor.run({
       compiled: tree,
       target: input.target,
       scope: { executionId: input.executionId, sessionId: input.sessionId },
@@ -158,7 +158,7 @@ model it is about to call_ and _within the window it has left_:
   executor + target for the tick. Precedence: **tick-IR > send >
   session**. `decl.parameters` overlay the compiled tree's `config`
   (temperature, maxOutputTokens, …) for the tick. Absent, or an
-  unresolvable ref, falls back to `input.executor` / `input.target`.
+  unresolvable ref, falls back to `input.modelExecutor` / `input.target`.
 
 ### The lifecycle bridge
 
@@ -293,7 +293,7 @@ render-tree` — with `parentOpId` auto-linked via `FiberRef`. No manual
   convergence — `TODO(adr-56-slice-2: force-render activeModel)`. The
   per-tick _execution_ model resolves without that (no chicken-and-egg).
 - **`<Model model={adapter}>` sugar deferred.** The adopter face that
-  derives `{executor, target}` from a live `@agentick/model-next` adapter
+  derives `{modelExecutor, target}` from a live `@agentick/model-next` adapter
   lands in a binding package depending on both reconciler-react +
   model-next — `TODO(adr-56-slice-1)`. Until then, refs register directly
   on the `ModelBridge`.

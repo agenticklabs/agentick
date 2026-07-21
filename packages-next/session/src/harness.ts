@@ -210,8 +210,8 @@ export interface SessionHarnessOptions<P = unknown> {
    * be injected without changing the session boundary.
    */
   readonly loop: LoopExecutorProtocol;
-  /** Executor harness for model invocations. */
-  readonly executor: ExecutorProtocol<unknown, unknown, LanguageModelExecutionResult>;
+  /** Model-executor harness for model invocations. */
+  readonly modelExecutor: ExecutorProtocol<unknown, unknown, LanguageModelExecutionResult>;
   /** Tool executor harness for tool dispatch. */
   readonly toolExecutor: ToolExecutorProtocol;
   /** Default execution target — overridable per send (later). */
@@ -374,10 +374,10 @@ export class SessionHarness<P = unknown>
   private readonly mountId: string;
   private readonly reconciler: ReconcilerProtocol;
   private readonly loop: LoopExecutorProtocol;
-  private readonly executor: SessionHarnessOptions<P>["executor"];
+  private readonly modelExecutor: SessionHarnessOptions<P>["modelExecutor"];
   /**
    * Per-session tool executor. PUBLIC (not the `private` sibling of `loop` /
-   * `executor`) because it is the seam the gateway wire routes
+   * `modelExecutor`) because it is the seam the gateway wire routes
    * `session/set_client_tools` (client-tool declaration) and
    * `session/respond_to_tool_call` (client relay) through — the tool-executor
    * twin of the public `get elicitation()` seam that backs
@@ -592,7 +592,7 @@ export class SessionHarness<P = unknown>
 
     this.reconciler = options.reconciler;
     this.loop = options.loop;
-    this.executor = options.executor;
+    this.modelExecutor = options.modelExecutor;
     this.toolExecutor = options.toolExecutor;
     this.target = options.target;
     this.spawnContext = options.spawnContext;
@@ -1431,11 +1431,11 @@ export class SessionHarness<P = unknown>
     this.runtime.setCurrentExecutionId(executionId);
     this.runtime.setStatus("running");
 
-    // Per-call overrides — executor + target — fall through from
-    // SendInput. The app-level executor/target is the default; this
-    // send swaps in caller-supplied alternatives without changing
+    // Per-call overrides — model-executor + target — fall through from
+    // SendInput. The app-level model-executor/target is the default;
+    // this send swaps in caller-supplied alternatives without changing
     // session state.
-    const executorForCall = input.executor ?? this.executor;
+    const modelExecutorForCall = input.modelExecutor ?? this.modelExecutor;
     const targetForCall = input.target ?? this.target;
 
     // Resolve streaming preference. Cascade:
@@ -1445,7 +1445,7 @@ export class SessionHarness<P = unknown>
     //   - the executor exposes `executeStream`
     //   - target.capabilities.supportsStreaming is not explicitly false
     const capabilityStreamDefault =
-      typeof executorForCall.executeStream === "function" &&
+      typeof modelExecutorForCall.executeStream === "function" &&
       (targetForCall.capabilities?.supportsStreaming ?? true);
     const streamForCall = input.stream ?? this.defaultStreaming ?? capabilityStreamDefault;
 
@@ -1505,7 +1505,7 @@ export class SessionHarness<P = unknown>
             sessionId: this.runtime.id,
             reconciler: this.reconciler,
             mountId: this.mountId,
-            executor: executorForCall,
+            modelExecutor: modelExecutorForCall,
             target: targetForCall,
             toolExecutor: this.toolExecutor,
             stateApplicator: {
@@ -1545,7 +1545,7 @@ export class SessionHarness<P = unknown>
             // mount's ModelBridge. `useModelRegistration` registers models
             // here at render time; the loop looks up `declarations.model
             // .modelRef` per tick. No default registration — the loop's
-            // fallback (this.executor/target via executorForCall/
+            // fallback (this.modelExecutor/target via modelExecutorForCall/
             // targetForCall) covers the undeclared case.
             resolveModel: (ref) => this.bridges.models.resolve(ref),
             maxTicks: input.maxTicks ?? this.defaultMaxTicks,

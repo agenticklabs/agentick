@@ -1,5 +1,5 @@
 {
-  "name": "@agentick/executor-next",
+  "name": "@agentick/model-executor-next",
   "version": "0.0.0",
   "description": "THE executor harness for Agentick v2 (ADR 52). One final LanguageModelExecutor \u2014 BaseHarness plus the Effect execution engine \u2014 consuming a LanguageModelAdapter from @agentick/model-next. Ships FakeLanguageModelExecutor for tests + reference.",
   "keywords": [

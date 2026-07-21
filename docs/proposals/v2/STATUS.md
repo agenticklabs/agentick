@@ -583,7 +583,7 @@ const refBlocks = await session.dispatch("deploy", input, { task: "ref" });
 
 4. **Adopter ladder + lifecycle helper.** Added `defineLanguageModelExecutor` — callback wrapper around `BaseLanguageModelExecutor` for adopters with streaming providers who don't want subclassing. Three rungs now: `extends BaseLanguageModelExecutor` (class, full power) → `defineLanguageModelExecutor({ openStream, mapChunk, reconstructRaw, … })` (callback, same hooks) → `defineExecutor({ run })` (single-callback, simplest). Extracted `ExecutorLifecycle` (`packages-next/executor/src/executor-lifecycle.ts`) — the `inFlight: Map`, `aborted: Set`, `abort()` impl, and pre-execute aborted check that was duplicated across `BaseLanguageModelExecutor`, `FakeLanguageModelExecutor`, and `CallbackLanguageModelExecutor`. All three now hold a `lifecycle` instance and delegate. Executor README in `packages-next/executor/README.md` documents the full custom-executor authoring story.
 
-**Workspace:** 214/214 executor-layer tests passing (15-test conformance suite × 5 executors + 5 base-pipeline tests + 22 tag-parser tests + define-executor tests + define-language-model-executor tests + fake-language-model-executor tests + per-provider tests). Strict typecheck clean across executor packages. v2 modularity model preserved — no executor-anthropic/google/ai-sdk depends on executor-openai (the shared `StreamTagParser` lives in `@agentick/executor-next`).
+**Workspace:** 214/214 executor-layer tests passing (15-test conformance suite × 5 executors + 5 base-pipeline tests + 22 tag-parser tests + define-executor tests + define-language-model-executor tests + fake-language-model-executor tests + per-provider tests). Strict typecheck clean across executor packages. v2 modularity model preserved — no executor-anthropic/google/ai-sdk depends on executor-openai (the shared `StreamTagParser` lives in `@agentick/model-executor-next`).
 
 **v1 / other-library borrowings explicitly landed:**
 
@@ -839,7 +839,7 @@ The ring buffer made the unbatched baseline ~70% faster, which means **Phase B's
 
 **Phase A shipped this session**: `compileQuery(query): CompiledMatcher` exported from `@agentick/runtime-next`; specialises per-event filter from a query-union walk to a 2-comparison closure for typical `{ surface, phase }` shapes. Wired into `LocalEventBus.subscribe` (per-subscriber matcher), `MemoryJournal` tail listeners, and `MemoryJournal.read`. 24-test correctness spec assert agreement with `matchesQuery` across every shape; bench numbers (1.65× – 2.49× faster) appended to substrate.bench.ts. 89/89 runtime + 402/402 across substrate + executors green.
 
-**Previously, 2026-05-27:** **FAÇADE.6 shipped + `@agentick/reconciler-next` package extracted**. The four deferred callback-style factories landed: `defineToolExecutor`, `defineLoop`, `defineSession`, `defineReconciler` — same pattern as the existing `defineExecutor` (callback bundle → marker-tagged factory). Spec gained the corresponding `XFactory` / `XFactoryDeps` / `isXFactory` type-guard triple per harness. `AppHarness` slots widened to accept factories alongside instances/options: `tools`, `loop`, `reconciler` all detect the marker and invoke the factory with the shared substrate so harness events flow through `app.events()` automatically. `defineReconciler` initially shipped in `@agentick/runtime-next`; relocated immediately into the new **`@agentick/reconciler-next`** package as the reconciler-agnostic base. The split matches the existing pattern (`@agentick/executor-next` base + `@agentick/executor-openai-next` concrete; `@agentick/reconciler-next` base + `@agentick/reconciler-react-next` concrete). New-package checklist completed (changeset linked, typedoc entry, vitepress group, README). **Honest assessment of the factories captured in scratchpad:** they are substrate-wiring sugar, not full replacements for the reference subclasses — most reference-impl ergonomics (validation pipeline, lifecycle events, middleware hooks, state stores) are NOT replicated. defineX is the right tool for test stubs, simple adapter patterns, and protocol-conforming mocks; subclassing `BaseHarness<X>` remains the path for production-quality custom impls. Documented this trade-off so users aren't surprised. **Also captured in scratchpad: the model-catalog / `ModelAdapter` architecture** as a deferred design note (resolves the `executor-openai` naming concern by re-shaping concrete provider impls as adapters consumed by a native executor, with capabilities lookup uniform across native + ai-sdk paths). 19 new tests across the four define APIs; 5314/5314 effective tests pass; 2 pre-existing executor-ai-sdk msw failures unchanged.
+**Previously, 2026-05-27:** **FAÇADE.6 shipped + `@agentick/reconciler-next` package extracted**. The four deferred callback-style factories landed: `defineToolExecutor`, `defineLoop`, `defineSession`, `defineReconciler` — same pattern as the existing `defineExecutor` (callback bundle → marker-tagged factory). Spec gained the corresponding `XFactory` / `XFactoryDeps` / `isXFactory` type-guard triple per harness. `AppHarness` slots widened to accept factories alongside instances/options: `tools`, `loop`, `reconciler` all detect the marker and invoke the factory with the shared substrate so harness events flow through `app.events()` automatically. `defineReconciler` initially shipped in `@agentick/runtime-next`; relocated immediately into the new **`@agentick/reconciler-next`** package as the reconciler-agnostic base. The split matches the existing pattern (`@agentick/model-executor-next` base + `@agentick/executor-openai-next` concrete; `@agentick/reconciler-next` base + `@agentick/reconciler-react-next` concrete). New-package checklist completed (changeset linked, typedoc entry, vitepress group, README). **Honest assessment of the factories captured in scratchpad:** they are substrate-wiring sugar, not full replacements for the reference subclasses — most reference-impl ergonomics (validation pipeline, lifecycle events, middleware hooks, state stores) are NOT replicated. defineX is the right tool for test stubs, simple adapter patterns, and protocol-conforming mocks; subclassing `BaseHarness<X>` remains the path for production-quality custom impls. Documented this trade-off so users aren't surprised. **Also captured in scratchpad: the model-catalog / `ModelAdapter` architecture** as a deferred design note (resolves the `executor-openai` naming concern by re-shaping concrete provider impls as adapters consumed by a native executor, with capabilities lookup uniform across native + ai-sdk paths). 19 new tests across the four define APIs; 5314/5314 effective tests pass; 2 pre-existing executor-ai-sdk msw failures unchanged.
 
 **Previously, 2026-05-23:** **End-to-end real-model example landed** (`example/v2-real/`). Validates v2 ergonomics with a real OpenAI model via `@agentick/executor-ai-sdk-next` + `@ai-sdk/openai`. Writing the example surfaced three missing ergonomic affordances which were filled inline: (1) **`app.send(input: string | SendInput): Promise<SendResult>`** — Vercel-grade shortcut over `runOnce` for the 90% case (plain prompt → final result); (2) **`app.close()` alias** — natural counterpart to `session.close()` / `harness.close()` (thin alias for `closeApp`); (3) **Semantic role components** — `<System>`, `<User>`, `<Assistant>` as pass-through wrappers over `<Message role="...">`, plus block-level `<Paragraph>`, `<H1>`, `<H2>`, `<H3>` over the `paragraph` / `heading` intrinsics. All trivial wrappers (no behavior) but lift the user surface from "JSX boilerplate" to "JSX prose." The example agent (~30 LOC) renders a `<System>` prompt, declares a `Calculator` tool inline via `createTool` (zod schema + inline handler), exposes a `verbose` knob via `useKnob`, renders `<Knobs />` to auto-emit `set_knob`. The runner (~15 LOC) is `createApp(<Agent />, { executor: aisdk({ model: openai("gpt-4o-mini") }) })` + `await app.send("prompt")`. Full workspace typecheck green (86 packages). End-to-end run pending adopter's `OPENAI_API_KEY`. Lesson reinforced: the example is the unit test for ergonomics — write it BEFORE freezing the user surface. See REFACTOR-SCRATCHPAD.md "2026-05-23 — End-to-end real-model example landed" for the punt list.
 
@@ -932,7 +932,7 @@ Phase 4  ■ in progress — REMAINING HARNESSES
          ✗ 4a.8 v1 tool tests port + parity sweep
          ✓ 4b.1 ExecutorProtocol + LanguageModelExecutor spec types
          ✓ 4b.2 runExecutorConformance suite
-         ✓ 4b.3 @agentick/executor-next package + MockLanguageModelExecutor
+         ✓ 4b.3 @agentick/model-executor-next package + MockLanguageModelExecutor
                 reference impl (12/12 tests; 6 conformance + 6 impl-specific)
          ✓ 4b.4 example/v2 executor scenario — JSX → RenderedTree →
                 executor.run → streaming deltas → ExecutionResult
@@ -1724,6 +1724,42 @@ Running record of decisions made during execution (separate from the
 blueprint's design decisions; this is execution-level).
 
 ### 2026-07-21
+
+- **ADR 89 REVISED + `executor → modelExecutor` rename (model-harness arc, pre-work).**
+  Corrected ADR 89's stale premise: it claimed "the model is not a harness," but
+  `LanguageModelExecutor extends BaseHarness<"executor">` already — session-owned
+  (`session.executor`), per-send overridable, per-tick resolvable (ADR 56). Rewrote
+  the ADR around the REAL gap (the model call is a `runOperation` Operation, not a
+  `this.command` → no `model:generate` hooks/guard/journal) + added an "Actual
+  architecture" section: **session = composition root** (owns reconciler /
+  model-executor / toolExecutor / stateApplicator / models / loop as siblings, DI'd
+  into the loop); **loop = orchestrator** (owns none; drives the injected siblings).
+  Layering `RegisteredModel ⊃ modelExecutor ⊃ adapter`. Decision reframed: command-ify
+  the EXISTING model-executor (no new `ModelHarness` layer — rejected as over-layering;
+  hooks resolve by NAME so they survive per-tick executor swaps); model selection/swap
+  = a `session.model` FACADE over what the session already owns, NOT a new harness
+  sibling (escape hatch: promote to a real harness only if cluster addressability /
+  its own lifecycle FSM is needed). **Naming — it's the model-executor** (sibling of
+  `toolExecutor`): running the SURGICAL rename `session.executor → session.modelExecutor`
+  + harness type `"executor" → "model"` (the `"executor"` surface has NO production
+  consumers — contained). AVOID-LIST (overloaded look-alikes, DO NOT touch):
+  `executorFactory`, `executorTerminal`, `executorKind`/`executorState` (tasks),
+  Postgres `QueryExecutor`/`.executor` (tasks-store-postgres, timeline-postgres),
+  sandbox executor, `toolExecutor`, `tickExecutor`, `ExecutorProtocol` (generic family
+  protocol — kept), `LanguageModelExecutor` CLASS (kept; class rename batches with the
+  deferred `XHarness → X` suffix sweep). `session.modelExecutor` (runner) ≠ `session.model`
+  (selection facade) — distinct concepts. **Package renamed too** (symmetry with
+  `@agentick/tool-executor-next`): `git mv packages-next/executor → packages-next/model-executor`,
+  `@agentick/executor-next → @agentick/model-executor-next`, 89 importers updated (+ website
+  vitepress group, `pnpm install` re-link). LANDED: field/type rename (18 src, 48 test, 9
+  READMEs — the agent caught a private-field-cast runtime bug via vitest that typecheck
+  couldn't) + package rename. Gates: typecheck --force 152/152 0-cached; 1477 tests
+  (model-executor+session+loop+app+spec+model+mcp); oxfmt/oxlint clean. **Transient
+  (aligned by the command-ify pass, ADR 89 §1):** harness type is `"model"` but the emitted
+  operation-event surfaces stay `"executor:*"` (literal on the Operation objects, decoupled
+  from `this.surface`) — `model:generate` command-ification renames them. **Not renamed
+  (deliberate):** `LanguageModelExecutor` class, `ExecutorProtocol`, `family="language-model"`,
+  all Postgres/sandbox/tasks `executor` look-alikes.
 
 - **Pass B narration TUNING LANDED (terse `_summary` + `withMCP({narrate})` opt-out).**
   Two token-cost cuts. (1) The injected `_summary` schema description dropped from 24

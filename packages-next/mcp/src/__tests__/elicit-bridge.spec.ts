@@ -36,7 +36,7 @@ import { Chunk, Effect, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { createApp } from "@agentick/app-next/react";
-import { FakeLanguageModelExecutor } from "@agentick/executor-next";
+import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type { EventEnvelope } from "@agentick/spec-next";
 
@@ -158,7 +158,7 @@ describe("ElicitationBridge — server-to-client elicit routing (#133)", () => {
     const { server, clientTransport } = await mkElicitingServer();
 
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       bus,
       journal: new MemoryJournal(),
       inbox: new LocalInbox(),
@@ -204,7 +204,7 @@ describe("ElicitationBridge — server-to-client elicit routing (#133)", () => {
     const { server, clientTransport } = await mkElicitingServer();
 
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       bus,
       journal: new MemoryJournal(),
       inbox: new LocalInbox(),
@@ -240,7 +240,7 @@ describe("ElicitationBridge — server-to-client elicit routing (#133)", () => {
     const { server, clientTransport } = await mkElicitingServer();
 
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       bus,
       journal: new MemoryJournal(),
       inbox: new LocalInbox(),
@@ -320,7 +320,7 @@ describe("ElicitationBridge — capability + concurrency (#149)", () => {
     const { server, clientTransport } = await mkElicitingServer();
 
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       bus,
       journal: new MemoryJournal(),
       inbox: new LocalInbox(),
@@ -385,7 +385,7 @@ describe("ElicitationBridge — capability + concurrency (#149)", () => {
 
     const bus = new LocalEventBus();
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       bus,
       journal: new MemoryJournal(),
       inbox: new LocalInbox(),
@@ -482,7 +482,7 @@ describe("ElicitationBridge — related-task routing (#173)", () => {
 
     const bus = new LocalEventBus();
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       bus,
       journal: new MemoryJournal(),
       inbox: new LocalInbox(),
@@ -536,7 +536,7 @@ describe("ElicitationBridge — related-task routing (#173)", () => {
     const bus = new LocalEventBus();
     const { server, clientTransport } = await mkElicitingServer();
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       bus,
       journal: new MemoryJournal(),
       inbox: new LocalInbox(),
@@ -582,7 +582,7 @@ describe("ElicitationBridge — URL mode (#134a)", () => {
     const { server, clientTransport } = await mkUrlElicitingServer();
 
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       bus,
       journal: new MemoryJournal(),
       inbox: new LocalInbox(),
@@ -619,7 +619,7 @@ describe("ElicitationBridge — URL mode (#134a)", () => {
     const { server, clientTransport } = await mkUrlElicitingServer();
 
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       bus,
       journal: new MemoryJournal(),
       inbox: new LocalInbox(),
@@ -654,7 +654,7 @@ describe("ElicitationBridge — URL mode (#134a)", () => {
     const { server, clientTransport } = await mkUrlElicitingServer();
 
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       bus,
       journal: new MemoryJournal(),
       inbox: new LocalInbox(),

@@ -4,7 +4,7 @@
  *
  * Ships `openai(model?, options?)`, a factory producing the
  * provider-normalization part consumed by the ONE
- * `LanguageModelExecutor` in `@agentick/executor-next`. Zero Effect,
+ * `LanguageModelExecutor` in `@agentick/model-executor-next`. Zero Effect,
  * zero substrate — Promise/AsyncIterable-shaped against the OpenAI
  * Chat Completions API.
  *

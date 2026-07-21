@@ -11,7 +11,7 @@
 import React from "react";
 import { describe, expect, it } from "vitest";
 
-import { FakeLanguageModelExecutor } from "@agentick/executor-next";
+import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import { ElicitationHarness } from "@agentick/elicitation-next";
 import { InMemoryHandlerResolver, ToolExecutorHarness } from "@agentick/tool-executor-next";
@@ -142,7 +142,7 @@ describe("lifecycle bridge — real loop drives the WHOLE hook family (#206 / AD
       agent: React.createElement(Agent),
       reconciler,
       loop,
-      executor,
+      modelExecutor: executor,
       toolExecutor: tools,
       target,
       // No `models` injection needed — the window rides target.capabilities.

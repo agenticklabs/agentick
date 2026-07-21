@@ -25,7 +25,7 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 
 import { createApp } from "@agentick/app-next/react";
-import { FakeLanguageModelExecutor } from "@agentick/executor-next";
+import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 
 import {
@@ -122,7 +122,7 @@ describe("withMCP — transport factory (#154)", () => {
     };
 
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       extensions: [
         withMCP({
           servers: [{ serverId: "echo-server", transport: factory, auth: new NoneAuth() }],
@@ -158,7 +158,7 @@ describe("withMCP — transport factory (#154)", () => {
     };
 
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       extensions: [
         withMCP({
           servers: [{ serverId: "delayed", transport: factory, auth: new NoneAuth() }],
@@ -189,7 +189,7 @@ describe("withMCP — transport factory (#154)", () => {
     };
 
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       extensions: [
         withMCP({
           servers: [{ serverId: "elicit-test", transport: factory, auth: new NoneAuth() }],

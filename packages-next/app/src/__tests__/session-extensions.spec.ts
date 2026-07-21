@@ -29,7 +29,7 @@ import React from "react";
 import { describe, expect, it } from "vitest";
 
 import { createApp } from "../react.js";
-import { FakeLanguageModelExecutor } from "@agentick/executor-next";
+import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type {
   ContentBlock,
@@ -75,7 +75,7 @@ describe("SessionExtension — install lifecycle", () => {
     };
 
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       extensions: [ext],
     });
 
@@ -126,7 +126,7 @@ describe("SessionExtension — install lifecycle", () => {
     };
 
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       extensions: [ext],
     });
 
@@ -154,7 +154,7 @@ describe("SessionExtension — install lifecycle", () => {
     };
 
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       extensions: [ext],
     });
 
@@ -191,7 +191,7 @@ describe("SessionExtension — install lifecycle", () => {
     };
 
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       extensions: [ext],
     });
     const session = await app.createSession({ sessionId: "lifo-1" });
@@ -239,7 +239,7 @@ describe("SessionExtension — install lifecycle", () => {
     };
 
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       extensions: [ext],
     });
     const s1 = await app.createSession({ sessionId: "s-eph-1" });
@@ -280,7 +280,7 @@ describe("SessionExtension — install lifecycle", () => {
     };
 
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       extensions: [appExt, sessionExt],
     });
     // App extensions install at AppHarness construction (before any

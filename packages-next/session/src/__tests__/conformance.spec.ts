@@ -31,7 +31,7 @@ describe("SessionHarness — SessionHarnessProtocol conformance", () => {
       {
         reconciler: deps.reconciler,
         loop: deps.loop,
-        executor: deps.executor,
+        modelExecutor: deps.modelExecutor,
         toolExecutor: deps.toolExecutor,
         target: deps.target,
         agent: deps.agent,
@@ -43,7 +43,7 @@ describe("SessionHarness — SessionHarnessProtocol conformance", () => {
       agent: realDeps.agent,
       reconciler: realDeps.reconciler,
       loop: realDeps.loop,
-      executor: realDeps.executor,
+      modelExecutor: realDeps.modelExecutor,
       toolExecutor: realDeps.toolExecutor,
       target: realDeps.target,
     });

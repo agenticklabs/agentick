@@ -13,7 +13,7 @@
 import React from "react";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { FakeLanguageModelExecutor } from "@agentick/executor-next";
+import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import { reactReconciler } from "@agentick/reconciler-react-next";
 import { createGateway } from "@agentick/gateway-next";

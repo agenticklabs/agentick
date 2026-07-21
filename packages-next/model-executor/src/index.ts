@@ -1,7 +1,7 @@
 /**
- * `@agentick/executor-next` — THE executor harness (ADR 52).
+ * `@agentick/model-executor-next` — THE executor harness (ADR 52).
  *
- * Ships the ONE `LanguageModelExecutor` — `BaseHarness<"executor">`
+ * Ships the ONE `LanguageModelExecutor` — `BaseHarness<"model">`
  * plus the entire Effect execution engine — consuming a
  * `LanguageModelAdapter` part from `@agentick/model-next`. Also ships
  * `FakeLanguageModelExecutor` (scripted, no wire) for tests, examples,

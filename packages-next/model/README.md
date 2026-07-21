@@ -4,7 +4,7 @@ The **model layer** for Agentick v2 (ADR 52). Zero Effect, zero
 substrate — everything between a provider SDK and the executor harness.
 
 The split, in one analogy: **executor : adapter :: timeline : store.**
-The executor (`@agentick/executor-next`) is the harness — orchestration,
+The executor (`@agentick/model-executor-next`) is the harness — orchestration,
 streaming pipeline, backpressure, abort, observability. Provider
 normalization is a plain Promise/AsyncIterable-shaped **part** this
 package defines: `LanguageModelAdapter`.
@@ -344,7 +344,7 @@ source of numbers.
 | `@agentick/model-google-next`    | `google(model?, options?)`    |
 | `@agentick/model-ai-sdk-next`    | `aisdk(model, options?)`      |
 
-None of them depend on `@agentick/executor-next` (or Effect) at
+None of them depend on `@agentick/model-executor-next` (or Effect) at
 runtime — an adapter is usable standalone via `generate()`.
 
 ## Verified by

@@ -15,7 +15,7 @@ import { runExecutorConformance } from "@agentick/spec-conformance-next";
 import type { LanguageModelExecutionResult } from "@agentick/spec-next";
 import type { GenerateContentResponse } from "@google/genai";
 
-import { LanguageModelExecutor } from "@agentick/executor-next";
+import { LanguageModelExecutor } from "@agentick/model-executor-next";
 
 import { google } from "../google-adapter.js";
 import { StubGoogleClient, asClient, mkResponse } from "./stub-google-client.js";

@@ -21,7 +21,7 @@
  *       agent: deps.agent,
  *       reconciler: deps.reconciler,
  *       loop: deps.loop,
- *       executor: deps.executor,
+ *       modelExecutor: deps.modelExecutor,
  *       toolExecutor: deps.toolExecutor,
  *       target: deps.target,
  *     });
@@ -70,7 +70,7 @@ export interface SessionConformanceFactoryDeps {
   readonly inbox: MessageInbox;
   readonly reconciler: ReconcilerProtocol;
   readonly loop: LoopExecutorProtocol;
-  readonly executor: ExecutorProtocol<unknown, unknown, LanguageModelExecutionResult>;
+  readonly modelExecutor: ExecutorProtocol<unknown, unknown, LanguageModelExecutionResult>;
   readonly toolExecutor: ToolExecutorProtocol;
   readonly target: ExecutionTarget;
   /** Opaque agent root passed to `mount({ element })`. */
@@ -302,7 +302,7 @@ export function defaultSessionConformanceDeps(
     inbox: base.inbox,
     reconciler: overrides.reconciler ?? stubReconciler(),
     loop: overrides.loop ?? stubLoop("hi"),
-    executor: overrides.executor ?? stubExecutor(),
+    modelExecutor: overrides.modelExecutor ?? stubExecutor(),
     toolExecutor: overrides.toolExecutor ?? stubToolExecutor(),
     target: overrides.target ?? mkTarget(),
     agent: overrides.agent ?? null,

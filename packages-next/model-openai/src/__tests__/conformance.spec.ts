@@ -5,7 +5,7 @@
  * The factory installs a stubbed OpenAI client that returns canned
  * ChatCompletion payloads matching the scripted
  * `LanguageModelExecutionResult` the suite expects. The same protocol
- * checks pass against `FakeLanguageModelExecutor` (in `@agentick/executor-next`).
+ * checks pass against `FakeLanguageModelExecutor` (in `@agentick/model-executor-next`).
  */
 
 import { describe } from "vitest";
@@ -15,7 +15,7 @@ import { runExecutorConformance } from "@agentick/spec-conformance-next";
 import type { LanguageModelExecutionResult } from "@agentick/spec-next";
 import type { ChatCompletion, ChatCompletionChunk } from "openai/resources/chat/completions";
 
-import { LanguageModelExecutor } from "@agentick/executor-next";
+import { LanguageModelExecutor } from "@agentick/model-executor-next";
 
 import { openai } from "../openai-adapter.js";
 import { StubOpenAIClient, asClient } from "./stub-openai-client.js";

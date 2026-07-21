@@ -21,7 +21,7 @@ import type { GenerateContentResponse } from "@google/genai";
 import type { LanguageModelTarget, RenderedTree } from "@agentick/spec-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 
-import { LanguageModelExecutor } from "@agentick/executor-next";
+import { LanguageModelExecutor } from "@agentick/model-executor-next";
 
 import { google } from "../google-adapter.js";
 import {

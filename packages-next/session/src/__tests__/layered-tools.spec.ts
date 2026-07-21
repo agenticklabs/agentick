@@ -128,7 +128,7 @@ async function mkSession(opts: { sessionTools?: readonly ToolRegistration[] }): 
     agent: null,
     reconciler,
     loop,
-    executor,
+    modelExecutor: executor,
     toolExecutor,
     target,
   });

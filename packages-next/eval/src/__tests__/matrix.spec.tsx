@@ -12,7 +12,7 @@
 import React from "react";
 
 import { createApp } from "@agentick/app-next/react";
-import { FakeLanguageModelExecutor } from "@agentick/executor-next";
+import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type { ExecutionTarget } from "@agentick/spec-next";
 import { describe, expect, it } from "vitest";
@@ -62,7 +62,7 @@ const myEval = defineEval<Overrides>({
   description: "matrix smoke",
   app: (o) =>
     createApp(React.createElement(Agent), {
-      executor: o?.executor ?? mkOkExecutor("default"),
+      modelExecutor: o?.executor ?? mkOkExecutor("default"),
       target: mkTarget(),
     }),
   async test(t) {
@@ -109,7 +109,10 @@ describe("CallableEval.matrix", () => {
     const trialsEval = defineEval<Overrides>({
       description: "trials",
       app: () =>
-        createApp(React.createElement(Agent), { executor: mkOkExecutor("t"), target: mkTarget() }),
+        createApp(React.createElement(Agent), {
+          modelExecutor: mkOkExecutor("t"),
+          target: mkTarget(),
+        }),
       async test(t) {
         await t.send("hi");
         t.completed();
@@ -139,7 +142,7 @@ describe("CallableEval.matrix", () => {
       description: "matrix failure",
       app: (o) =>
         createApp(React.createElement(Agent), {
-          executor: o?.executor ?? mkOkExecutor("default"),
+          modelExecutor: o?.executor ?? mkOkExecutor("default"),
           target: mkTarget(),
         }),
       // Assert completed only — but flip the bar by asserting a tool
@@ -163,7 +166,7 @@ describe("CallableEval.matrix", () => {
       description: "concurrency probe",
       app: (o) =>
         createApp(React.createElement(Agent), {
-          executor: o?.executor ?? mkOkExecutor("c"),
+          modelExecutor: o?.executor ?? mkOkExecutor("c"),
           target: mkTarget(),
         }),
       async test(t) {

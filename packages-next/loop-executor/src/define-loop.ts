@@ -7,7 +7,7 @@
  * `createApp({ loop: ... })`.
  *
  * The MVP is intentionally raw: the callback receives the full
- * `RunExecutionInput` (reconciler / executor / tool-executor /
+ * `RunExecutionInput` (reconciler / model-executor / tool-executor /
  * stateApplicator references) and returns an `ExecutionTerminal`.
  * Adopters who want a custom loop architecture (parallel multi-model,
  * single-call no-tool-loop, test harness, …) write the whole thing.
@@ -18,11 +18,11 @@
  * const myLoop = defineLoop({
  *   async runExecution(input) {
  *     // single tick, no tool loop
- *     const projected = await input.executor.project({
+ *     const projected = await input.modelExecutor.project({
  *       compiled: (await input.reconciler.renderTree({ mountId: input.mountId })).tree,
  *       target: input.target,
  *     });
- *     const terminal = await input.executor.run({
+ *     const terminal = await input.modelExecutor.run({
  *       compiled: ...,
  *       target: input.target,
  *       scope: { executionId: input.executionId, sessionId: input.sessionId },
@@ -79,7 +79,7 @@ import { ExecutionError, HandlerError } from "@agentick/spec-next";
 export interface DefineLoopInput {
   /**
    * Run one full agent execution from start to terminal. The callback
-   * receives the orchestration handles (reconciler / executor /
+   * receives the orchestration handles (reconciler / model-executor /
    * tool-executor / stateApplicator) and the bounds (`maxTicks`,
    * `signal`). Returns the assembled `ExecutionTerminal`.
    *

@@ -41,7 +41,7 @@ import React from "react";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { FakeLanguageModelExecutor } from "@agentick/executor-next";
+import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import { ElicitationHarness } from "@agentick/elicitation-next";
 import { InMemoryHandlerResolver, ToolExecutorHarness } from "@agentick/tool-executor-next";
@@ -263,7 +263,7 @@ async function mkSession(opts: {
     agent: <ResumeAgent />,
     reconciler,
     loop,
-    executor: opts.executor,
+    modelExecutor: opts.executor,
     toolExecutor: tools,
     target,
     timeline: { store: opts.store, writePolicy: "behind" },

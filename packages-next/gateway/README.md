@@ -46,7 +46,7 @@ await gateway.listen(); // REQUIRED before createApp — fires the gateway:start
 
 const app = await gateway.createApp(<MyAgent />, {
   appId: "my-app",
-  options: { executor, reconciler },
+  options: { modelExecutor, reconciler },
 });
 
 const session = await app.createSession({});
@@ -75,11 +75,11 @@ await gateway.listen();
 
 const app1 = await gateway.createApp({
   rootElement: <Agent1 />,
-  options: { executor: ... },
+  options: { modelExecutor: ... },
 });
 const app2 = await gateway.createApp({
   rootElement: <Agent2 />,
-  options: { executor: ... },
+  options: { modelExecutor: ... },
 });
 
 // `close()` closes all apps first, then the cluster

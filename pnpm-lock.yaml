@@ -443,12 +443,12 @@ importers:
         specifier: ^3.21.2
         version: 3.21.2
     devDependencies:
-      '@agentick/executor-next':
-        specifier: workspace:*
-        version: link:../executor
       '@agentick/knobs-next':
         specifier: workspace:*
         version: link:../knobs
+      '@agentick/model-executor-next':
+        specifier: workspace:*
+        version: link:../model-executor
       '@agentick/reconciler-react-next':
         specifier: workspace:*
         version: link:../reconciler-react
@@ -627,12 +627,12 @@ importers:
       '@agentick/elicitation-next':
         specifier: workspace:*
         version: link:../elicitation
-      '@agentick/executor-next':
-        specifier: workspace:*
-        version: link:../executor
       '@agentick/gateway-next':
         specifier: workspace:*
         version: link:../gateway
+      '@agentick/model-executor-next':
+        specifier: workspace:*
+        version: link:../model-executor
       '@agentick/model-next':
         specifier: workspace:*
         version: link:../model
@@ -705,9 +705,9 @@ importers:
         specifier: workspace:*
         version: link:../utils
     devDependencies:
-      '@agentick/executor-next':
+      '@agentick/model-executor-next':
         specifier: workspace:*
-        version: link:../executor
+        version: link:../model-executor
       '@agentick/reconciler-react-next':
         specifier: workspace:*
         version: link:../reconciler-react
@@ -720,28 +720,6 @@ importers:
       react:
         specifier: ^19.2.4
         version: 19.2.4
-
-  packages-next/executor:
-    dependencies:
-      '@agentick/model-next':
-        specifier: workspace:*
-        version: link:../model
-      '@agentick/runtime-next':
-        specifier: workspace:*
-        version: link:../runtime
-      '@agentick/spec-next':
-        specifier: workspace:*
-        version: link:../spec
-      effect:
-        specifier: ^3.21.2
-        version: 3.21.2
-    devDependencies:
-      '@agentick/spec-conformance-next':
-        specifier: workspace:*
-        version: link:../spec-conformance
-      '@agentick/utils-next':
-        specifier: workspace:*
-        version: link:../utils
 
   packages-next/formatters:
     dependencies:
@@ -801,9 +779,9 @@ importers:
         specifier: ^3.21.2
         version: 3.21.2
     devDependencies:
-      '@agentick/executor-next':
+      '@agentick/model-executor-next':
         specifier: workspace:*
-        version: link:../executor
+        version: link:../model-executor
       '@agentick/reconciler-react-next':
         specifier: workspace:*
         version: link:../reconciler-react
@@ -872,12 +850,12 @@ importers:
         specifier: ^3.21.2
         version: 3.21.2
     devDependencies:
-      '@agentick/executor-next':
-        specifier: workspace:*
-        version: link:../executor
       '@agentick/gateway-next':
         specifier: workspace:*
         version: link:../gateway
+      '@agentick/model-executor-next':
+        specifier: workspace:*
+        version: link:../model-executor
       '@agentick/reconciler-next':
         specifier: workspace:*
         version: link:../reconciler
@@ -903,9 +881,9 @@ importers:
       '@agentick/elicitation-next':
         specifier: workspace:*
         version: link:../elicitation
-      '@agentick/executor-next':
+      '@agentick/model-executor-next':
         specifier: workspace:*
-        version: link:../executor
+        version: link:../model-executor
       '@agentick/spec-conformance-next':
         specifier: workspace:*
         version: link:../spec-conformance
@@ -955,9 +933,9 @@ importers:
       '@agentick/credentials-next':
         specifier: workspace:*
         version: link:../credentials
-      '@agentick/executor-next':
+      '@agentick/model-executor-next':
         specifier: workspace:*
-        version: link:../executor
+        version: link:../model-executor
       '@agentick/reconciler-next':
         specifier: workspace:*
         version: link:../reconciler
@@ -998,9 +976,9 @@ importers:
         specifier: ^5.0.0
         version: 5.0.123(zod@4.3.6)
     devDependencies:
-      '@agentick/executor-next':
+      '@agentick/model-executor-next':
         specifier: workspace:*
-        version: link:../executor
+        version: link:../model-executor
       '@agentick/runtime-next':
         specifier: workspace:*
         version: link:../runtime
@@ -1029,9 +1007,9 @@ importers:
         specifier: ^0.39.0
         version: 0.39.0
     devDependencies:
-      '@agentick/executor-next':
+      '@agentick/model-executor-next':
         specifier: workspace:*
-        version: link:../executor
+        version: link:../model-executor
       '@agentick/runtime-next':
         specifier: workspace:*
         version: link:../runtime
@@ -1041,6 +1019,28 @@ importers:
       effect:
         specifier: ^3.21.2
         version: 3.21.2
+
+  packages-next/model-executor:
+    dependencies:
+      '@agentick/model-next':
+        specifier: workspace:*
+        version: link:../model
+      '@agentick/runtime-next':
+        specifier: workspace:*
+        version: link:../runtime
+      '@agentick/spec-next':
+        specifier: workspace:*
+        version: link:../spec
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
+    devDependencies:
+      '@agentick/spec-conformance-next':
+        specifier: workspace:*
+        version: link:../spec-conformance
+      '@agentick/utils-next':
+        specifier: workspace:*
+        version: link:../utils
 
   packages-next/model-google:
     dependencies:
@@ -1057,9 +1057,9 @@ importers:
         specifier: ^1.31.0
         version: 1.38.0(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))
     devDependencies:
-      '@agentick/executor-next':
+      '@agentick/model-executor-next':
         specifier: workspace:*
-        version: link:../executor
+        version: link:../model-executor
       '@agentick/runtime-next':
         specifier: workspace:*
         version: link:../runtime
@@ -1085,9 +1085,9 @@ importers:
         specifier: ^6.0.0
         version: 6.16.0(ws@8.19.0)(zod@4.3.6)
     devDependencies:
-      '@agentick/executor-next':
+      '@agentick/model-executor-next':
         specifier: workspace:*
-        version: link:../executor
+        version: link:../model-executor
       '@agentick/runtime-next':
         specifier: workspace:*
         version: link:../runtime
@@ -1386,9 +1386,9 @@ importers:
         specifier: ^19.2.4
         version: 19.2.4
     devDependencies:
-      '@agentick/executor-next':
+      '@agentick/model-executor-next':
         specifier: workspace:*
-        version: link:../executor
+        version: link:../model-executor
       '@agentick/reconciler-react-next':
         specifier: workspace:*
         version: link:../reconciler-react
@@ -1763,12 +1763,12 @@ importers:
       '@agentick/elicitation-next':
         specifier: workspace:*
         version: link:../elicitation
-      '@agentick/executor-next':
-        specifier: workspace:*
-        version: link:../executor
       '@agentick/gateway-next':
         specifier: workspace:*
         version: link:../gateway
+      '@agentick/model-executor-next':
+        specifier: workspace:*
+        version: link:../model-executor
       '@agentick/reconciler-next':
         specifier: workspace:*
         version: link:../reconciler

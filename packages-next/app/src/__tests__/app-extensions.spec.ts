@@ -16,7 +16,7 @@ import React from "react";
 import { describe, expect, it } from "vitest";
 
 import { createApp } from "../react.js";
-import { FakeLanguageModelExecutor } from "@agentick/executor-next";
+import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type { AppExtension, AppInstaller, ContentBlock } from "@agentick/spec-next";
 import type { ToolExecutorProtocol } from "@agentick/spec-next";
@@ -54,7 +54,7 @@ describe("AppExtension — install lifecycle", () => {
       { name: "second", target: "app", install: () => void seen.push("second") },
     ];
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       extensions: exts,
     });
     expect(seen).toEqual(["first", "second"]);
@@ -80,7 +80,7 @@ describe("AppExtension — install lifecycle", () => {
       },
     ];
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       extensions: exts,
     });
     await app.closeApp();
@@ -99,7 +99,7 @@ describe("AppExtension — install lifecycle", () => {
       },
     };
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       extensions: [ext],
     });
     expect(done).toBe(true);
@@ -120,7 +120,7 @@ describe("AppExtension — installer surfaces", () => {
       },
     };
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       extensions: [ext],
     });
     expect(captured).not.toBeNull();
@@ -153,7 +153,7 @@ describe("AppExtension — installer surfaces", () => {
       },
     ];
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       extensions: exts,
     });
     expect(observed).toEqual({ tag: "knobs-stub" });
@@ -173,7 +173,7 @@ describe("AppExtension — installer surfaces", () => {
       },
     };
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       extensions: [ext],
     });
     const session = await app.createSession();
@@ -216,7 +216,7 @@ describe("AppExtension — installer surfaces", () => {
       },
     };
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       extensions: [ext],
     });
     const session = await app.createSession();
@@ -248,7 +248,7 @@ describe("AppExtension — ctx extension threading (ADR 66)", () => {
       },
     };
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       extensions: [...exts, probe],
     });
     const session = await app.createSession();

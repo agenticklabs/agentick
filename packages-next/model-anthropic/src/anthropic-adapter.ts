@@ -157,7 +157,7 @@ export interface AnthropicAdapterOptions {
   readonly target?: ExecutionTarget;
 }
 
-// Re-export from @agentick/executor-next so adopters that import from
+// Re-export from @agentick/model-executor-next so adopters that import from
 // @agentick/model-anthropic-next keep the same surface.
 export type { CustomBlockDefinition } from "@agentick/model-next";
 
@@ -205,7 +205,7 @@ function getAnthropicState(accum: StreamAccumulatorView): AnthropicStreamState {
 
 /**
  * Construct the Anthropic `LanguageModelAdapter`. Pass it wherever an
- * adapter is accepted — the app's `executor:` slot (wrapped in the ONE
+ * adapter is accepted — the app's `modelExecutor:` slot (wrapped in the ONE
  * `LanguageModelExecutor`), `generate({ model:
  * anthropic("claude-sonnet-5"), ... })`, or a hand-constructed
  * executor.

@@ -183,7 +183,7 @@ export interface OpenAIAdapterOptions {
   readonly target?: ExecutionTarget;
 }
 
-// Re-export from @agentick/executor-next so adopters that import from
+// Re-export from @agentick/model-executor-next so adopters that import from
 // @agentick/model-openai-next keep the same surface.
 export type { CustomBlockDefinition } from "@agentick/model-next";
 
@@ -221,7 +221,7 @@ const RESERVED_REASONING_BLOCK_INDEX = -1; // OpenAI emits reasoning BEFORE text
 
 /**
  * Construct the OpenAI `LanguageModelAdapter`. Pass it wherever an
- * adapter is accepted — the app's `executor:` slot (wrapped in the ONE
+ * adapter is accepted — the app's `modelExecutor:` slot (wrapped in the ONE
  * `LanguageModelExecutor`), `generate({ model: openai("gpt-4o"), ... })`,
  * or a hand-constructed executor:
  *
@@ -746,7 +746,7 @@ function buildOpenAIProviderTools(
 
 // ============================================================================
 // IR projection — identical to FakeLanguageModelExecutor (kept local so the
-// adapter does not depend on @agentick/executor-next).
+// adapter does not depend on @agentick/model-executor-next).
 // ============================================================================
 
 // ============================================================================

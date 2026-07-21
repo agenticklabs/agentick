@@ -53,7 +53,7 @@ export interface ExecutorInFlightEntry {
  * Shared in-flight + aborted bookkeeping. One instance per executor.
  *
  * @example
- * class MyExecutor extends BaseHarness<"executor"> implements LanguageModelExecutor {
+ * class MyExecutor extends BaseHarness<"model"> implements LanguageModelExecutor {
  *   private readonly lifecycle = new ExecutorLifecycle();
  *
  *   abort(input: AbortExecutorInput): Promise<void> {

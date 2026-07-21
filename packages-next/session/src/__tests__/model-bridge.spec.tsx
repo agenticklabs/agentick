@@ -18,7 +18,7 @@
 import React from "react";
 import { describe, expect, it } from "vitest";
 
-import { FakeLanguageModelExecutor } from "@agentick/executor-next";
+import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import { ElicitationHarness } from "@agentick/elicitation-next";
 import { InMemoryHandlerResolver, ToolExecutorHarness } from "@agentick/tool-executor-next";
@@ -93,7 +93,7 @@ async function makeRig(agent: React.ReactElement, sessionExecutor: FakeLanguageM
     agent,
     reconciler,
     loop,
-    executor: sessionExecutor,
+    modelExecutor: sessionExecutor,
     toolExecutor: tools,
     target,
   });
@@ -113,8 +113,8 @@ async function makeRig(agent: React.ReactElement, sessionExecutor: FakeLanguageM
 describe("tree-declared per-tick model — real loop resolves the ModelBridge (ADR 56)", () => {
   it("tick-IR model wins: the declared fake M1 executor runs, NOT the session default", async () => {
     // Stable RegisteredModel identity — one registration across renders.
-    const m1: RegisteredModel = { executor: replyExec("FROM-M1"), target: m1Target };
-    await m1.executor.ready;
+    const m1: RegisteredModel = { modelExecutor: replyExec("FROM-M1"), target: m1Target };
+    await m1.modelExecutor.ready;
 
     function Agent() {
       const decl = useModelRegistration("m1", m1);

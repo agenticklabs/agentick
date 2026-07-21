@@ -16,7 +16,7 @@ import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next
 import { runExecutorConformance } from "@agentick/spec-conformance-next";
 import type { LanguageModelExecutionResult } from "@agentick/spec-next";
 
-import { LanguageModelExecutor } from "@agentick/executor-next";
+import { LanguageModelExecutor } from "@agentick/model-executor-next";
 
 import { aisdk } from "../ai-sdk-adapter.js";
 

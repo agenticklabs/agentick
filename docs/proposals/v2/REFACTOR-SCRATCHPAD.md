@@ -383,7 +383,7 @@ library and `executor-ai-sdk` correctly names that relationship.
                 supportsImages, supportsAudio, supportsReasoning,
                 pricePerInputToken, pricePerOutputToken, ...
 
-@agentick/executor-next (the native executor, framework-level)
+@agentick/model-executor-next (the native executor, framework-level)
   Consumes a ModelAdapter (protocol — new, in spec)
   Native adapters: @agentick/openai, @agentick/anthropic,
                    @agentick/google, @agentick/vertex
@@ -424,7 +424,7 @@ true`; framework collects reasoning tokens, preserves Anthropic
 
 - `@agentick/executor-openai-next` → `@agentick/openai` (adapter, not executor)
 - (future) `@agentick/anthropic`, `@agentick/google`, `@agentick/vertex`
-- `@agentick/executor-next` (currently scaffold + mock + defineExecutor) →
+- `@agentick/model-executor-next` (currently scaffold + mock + defineExecutor) →
   also bundles the native executor impl that consumes `ModelAdapter`
 - `@agentick/executor-ai-sdk-next` — stays, name fits
 
@@ -439,7 +439,7 @@ policy now has somewhere to land.
 
 1. `@agentick/spec-next`: `ModelAdapter` interface + `ModelCapabilities`
 2. `@agentick/model-catalog`: static table seeded with major models
-3. `@agentick/executor-next`: native executor consuming `ModelAdapter`
+3. `@agentick/model-executor-next`: native executor consuming `ModelAdapter`
 4. ONE concrete adapter (likely `@agentick/anthropic` first — Claude
    is the assistant building the framework, dogfoods nicely)
 5. `@agentick/executor-ai-sdk-next`: capability lookup via catalog

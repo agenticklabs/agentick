@@ -534,7 +534,7 @@ Tests:
 
 ```
 Tasks:
-  □ Base ExecutorHarness extends BaseHarness<"executor">
+  □ Base ExecutorHarness extends BaseHarness<"model">
   □ LanguageModelExecutor base class (project/execute/normalize phases)
   □ ExecutorTerminal envelope + outcome handling
   □ Streaming with ExecutorDelta events

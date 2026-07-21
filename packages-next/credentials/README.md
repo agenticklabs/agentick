@@ -147,7 +147,7 @@ const envStore = envCredentialsStore({ prefix: "AGENTICK_CRED" });
 
 // Adopter use — app-level install (the production path):
 const app = await createApp(<Agent />, {
-  executor,
+  modelExecutor,
   extensions: [
     withCredentials({ store: envStore }),
   ],

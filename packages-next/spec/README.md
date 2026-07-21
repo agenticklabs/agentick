@@ -185,7 +185,7 @@ the tool `handlerRef`/handler split exactly:
   The **serializable** selection a render contributes to
   `RuntimeDeclarations.model`. Single per tick (one model per model
   call); nearest-scope / last-wins if nested.
-- `RegisteredModel` (`protocol/hook-bridges.ts`) — `{ executor, target }`.
+- `RegisteredModel` (`protocol/hook-bridges.ts`) — `{ modelExecutor, target }`.
   The **live**, run-ready model. Both fields are spec types, so the loop
   and `reconciler-react` thread it _without_ importing `model-next` — the
   firewall holds.

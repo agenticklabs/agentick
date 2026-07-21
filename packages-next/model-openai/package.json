@@ -1,7 +1,7 @@
 {
   "name": "@agentick/model-openai-next",
   "version": "0.0.0",
-  "description": "OpenAI LanguageModelAdapter for Agentick v2 (ADR 52). openai(model?, options?) \u2014 the provider-normalization part consumed by @agentick/executor-next's LanguageModelExecutor. Zero Effect, zero substrate.",
+  "description": "OpenAI LanguageModelAdapter for Agentick v2 (ADR 52). openai(model?, options?) \u2014 the provider-normalization part consumed by @agentick/model-executor-next's LanguageModelExecutor. Zero Effect, zero substrate.",
   "keywords": [
     "agent",
     "agentick",
@@ -53,7 +53,7 @@
     "openai": "^6.0.0"
   },
   "devDependencies": {
-    "@agentick/executor-next": "workspace:*",
+    "@agentick/model-executor-next": "workspace:*",
     "@agentick/runtime-next": "workspace:*",
     "@agentick/spec-conformance-next": "workspace:*",
     "effect": "^3.21.2"

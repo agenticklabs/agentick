@@ -1,7 +1,7 @@
 /**
  * `FakeLanguageModelExecutor` — reference implementation of
  * `LanguageModelExecutor` for tests, examples, and the v2 substrate
- * proof. Inherits from `BaseHarness<"executor">` for the full phase
+ * proof. Inherits from `BaseHarness<"model">` for the full phase
  * contract + FiberRef scope + lazy delta emission.
  *
  * Behavior:
@@ -136,7 +136,7 @@ const DEFAULT_MOCK_TARGET: ExecutionTarget = {
 };
 
 export class FakeLanguageModelExecutor
-  extends BaseHarness<"executor">
+  extends BaseHarness<"model">
   implements LanguageModelExecutor
 {
   readonly family = "language-model" as const;
@@ -153,7 +153,7 @@ export class FakeLanguageModelExecutor
     inbox: MessageInbox,
     options: FakeLanguageModelExecutorOptions = {},
   ) {
-    super("executor", scopeId, journal, bus, inbox);
+    super("model", scopeId, journal, bus, inbox);
     this.target = options.target ?? DEFAULT_MOCK_TARGET;
     this.scriptedSequence = options.scripted
       ? Array.isArray(options.scripted)

@@ -1,7 +1,7 @@
-# @agentick/executor-next
+# @agentick/model-executor-next
 
 THE executor harness for Agentick v2 (ADR 52). One final
-`LanguageModelExecutor` — `BaseHarness<"executor">` plus the entire
+`LanguageModelExecutor` — `BaseHarness<"model">` plus the entire
 Effect execution engine — consuming a `LanguageModelAdapter` part from
 [`@agentick/model-next`](../model/README.md).
 
@@ -20,7 +20,7 @@ dialect, as plain Promise/AsyncIterable-shaped hooks.
 ## Quick Start
 
 Most apps never construct this class — pass an adapter to the app's
-`executor:` slot and the app wraps it on its own substrate:
+`modelExecutor:` slot and the app wraps it on its own substrate:
 
 ```ts
 const app = await createApp(<Agent />, { model: openai("gpt-4o") });
@@ -29,7 +29,7 @@ const app = await createApp(<Agent />, { model: openai("gpt-4o") });
 Hand construction (tests, standalone harness use):
 
 ```ts
-import { LanguageModelExecutor } from "@agentick/executor-next";
+import { LanguageModelExecutor } from "@agentick/model-executor-next";
 import { openai } from "@agentick/model-openai-next";
 
 const exec = new LanguageModelExecutor("my-exec", journal, bus, inbox, {

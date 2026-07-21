@@ -22,7 +22,7 @@ import React from "react";
 import { describe, expect, it } from "vitest";
 
 import { createApp } from "@agentick/app-next/react";
-import { FakeLanguageModelExecutor } from "@agentick/executor-next";
+import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -127,7 +127,7 @@ describe("withMCP — end-to-end", () => {
     const { server, clientTransport } = await mkMcpServer();
 
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       extensions: [
         withMCP({
           servers: [
@@ -156,7 +156,7 @@ describe("withMCP — end-to-end", () => {
     const { server, clientTransport } = await mkMcpServer();
 
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       extensions: [
         withMCP({
           servers: [{ serverId: "math", transport: clientTransport, auth: new NoneAuth() }],
@@ -185,7 +185,7 @@ describe("withMCP — end-to-end", () => {
     const { server, clientTransport } = await mkMcpServer();
 
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       extensions: [
         withMCP({
           servers: [
@@ -214,7 +214,7 @@ describe("withMCP — end-to-end", () => {
   it("dispatched tool result content is shaped as ContentBlock[] (text passthrough)", async () => {
     const { server, clientTransport } = await mkMcpServer();
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       extensions: [
         withMCP({
           servers: [{ serverId: "shape", transport: clientTransport, auth: new NoneAuth() }],
@@ -235,7 +235,7 @@ describe("withMCP — end-to-end", () => {
     const { server, clientTransport } = await mkMcpServer();
 
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       extensions: [
         withMCP({
           servers: [{ serverId: "closeme", transport: clientTransport, auth: new NoneAuth() }],

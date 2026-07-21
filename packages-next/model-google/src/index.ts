@@ -4,7 +4,7 @@
  *
  * Ships `google(model?, options?)`, a factory producing the
  * provider-normalization part consumed by the ONE
- * `LanguageModelExecutor` in `@agentick/executor-next`. Supports both
+ * `LanguageModelExecutor` in `@agentick/model-executor-next`. Supports both
  * the Gemini Developer API (apiKey) and Vertex AI
  * (project/location/auth) paths.
  *

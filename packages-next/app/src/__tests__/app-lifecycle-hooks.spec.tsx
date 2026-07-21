@@ -11,7 +11,7 @@ import React from "react";
 import { describe, expect, it } from "vitest";
 
 import { createApp } from "../react.js";
-import { FakeLanguageModelExecutor } from "@agentick/executor-next";
+import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type { ContentBlock } from "@agentick/spec-next";
 
@@ -42,7 +42,7 @@ describe("AppHarness — lifecycle hooks (ADR 83)", () => {
   it("onBeforeAppCreateSession fires when createSession() is called", async () => {
     let fired = 0;
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       hooks: {
         onBeforeAppCreateSession: () => {
           fired += 1;
@@ -59,7 +59,7 @@ describe("AppHarness — lifecycle hooks (ADR 83)", () => {
   it("onBeforeAppRunOnce fires when runOnce() runs an ephemeral send", async () => {
     let fired = 0;
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       hooks: {
         onBeforeAppRunOnce: () => {
           fired += 1;

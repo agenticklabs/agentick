@@ -53,7 +53,7 @@
   },
   "devDependencies": {
     "@agentick/elicitation-next": "workspace:*",
-    "@agentick/executor-next": "workspace:*",
+    "@agentick/model-executor-next": "workspace:*",
     "@agentick/spec-conformance-next": "workspace:*",
     "@agentick/tool-executor-next": "workspace:*"
   }

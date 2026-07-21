@@ -10,7 +10,7 @@
 import React from "react";
 import { describe, expect, it } from "vitest";
 
-import { FakeLanguageModelExecutor } from "@agentick/executor-next";
+import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import { ReconcilerHarness, reactReconciler } from "@agentick/reconciler-react-next";
 import type { ContentBlock, ExecutionTarget, ExecutorFactoryDeps } from "@agentick/spec-next";
@@ -112,7 +112,7 @@ async function mkApp(opts: { shareSubstrate?: boolean } = {}) {
     ],
   ]);
   return createApp(React.createElement(MinimalAgent), {
-    executor,
+    modelExecutor: executor,
     target: mkTarget(),
     toolHandlers,
     ...(opts.shareSubstrate ? { journal, bus, inbox } : {}),
@@ -426,7 +426,7 @@ describe("AppHarness — telemetry slot (4f.7 placeholder)", () => {
     const executor = mkExecutor(journal, bus, inbox);
     await executor.ready;
     const app = await createApp(React.createElement(MinimalAgent), {
-      executor,
+      modelExecutor: executor,
       telemetry: noopLayer,
       journal,
       bus,
@@ -574,7 +574,7 @@ describe("AppHarness — executor factory slot (FAÇADE.3)", () => {
     );
 
     const app = await createApp(React.createElement(MinimalAgent), {
-      executor: factory,
+      modelExecutor: factory,
       journal,
       bus,
       inbox,
@@ -626,7 +626,7 @@ describe("AppHarness — slot cascade", () => {
     await reconciler.ready;
 
     const app = await createApp(React.createElement(MinimalAgent), {
-      executor,
+      modelExecutor: executor,
       target: mkTarget(),
       reconciler,
       journal,
@@ -656,7 +656,7 @@ describe("AppHarness — slot cascade", () => {
     await executor.ready;
     const app = new AppHarness({
       rootElement: React.createElement(MinimalAgent),
-      executor,
+      modelExecutor: executor,
       reconciler: reactReconciler(),
       target: mkTarget(),
       defaultMaxTicks: 999, // shorthand
@@ -688,7 +688,7 @@ describe("AppHarness — slot cascade", () => {
     await executor.ready;
     const app = new AppHarness({
       rootElement: React.createElement(MinimalAgent),
-      executor,
+      modelExecutor: executor,
       reconciler: reactReconciler(),
       target: mkTarget(),
       defaultMaxTicks: 1, // shorthand
@@ -722,7 +722,7 @@ describe("AppHarness — constructor variant", () => {
     await executor.ready;
     const app = new AppHarness({
       rootElement: React.createElement(MinimalAgent),
-      executor,
+      modelExecutor: executor,
       reconciler: reactReconciler(),
       target: mkTarget(),
       toolHandlers: new Map([

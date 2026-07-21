@@ -11,7 +11,7 @@ import * as nodePath from "node:path";
 
 import React from "react";
 import { createApp } from "@agentick/app-next/react";
-import { FakeLanguageModelExecutor } from "@agentick/executor-next";
+import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type { ExecutionTarget } from "@agentick/spec-next";
 import { afterEach, describe, expect, it } from "vitest";
@@ -55,7 +55,7 @@ function mkExecutor(): FakeLanguageModelExecutor {
   );
 }
 
-const app = () => createApp(React.createElement(Agent), { executor: mkExecutor(), target });
+const app = () => createApp(React.createElement(Agent), { modelExecutor: mkExecutor(), target });
 
 const tmpDirs: string[] = [];
 afterEach(async () => {

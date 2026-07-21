@@ -15,7 +15,7 @@ import React from "react";
 import { describe, expect, it } from "vitest";
 
 import { createApp } from "@agentick/app-next/react";
-import { FakeLanguageModelExecutor } from "@agentick/executor-next";
+import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import { waitFor } from "@agentick/utils-next/testing";
 
@@ -119,7 +119,7 @@ describe("withMCP — notifications/tools/list_changed reactivity", () => {
     setTools([initialTool]);
 
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       extensions: [
         withMCP({
           servers: [
@@ -190,7 +190,7 @@ describe("withMCP — notifications/tools/list_changed reactivity", () => {
     const observed: string[] = [];
 
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       extensions: [
         withMCP({
           servers: [

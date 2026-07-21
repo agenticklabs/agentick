@@ -38,7 +38,7 @@ import type {
 } from "@agentick/spec-next";
 import { SPEC_VERSION, GatewayBridgeSlotOccupied, defineWireExtension } from "@agentick/spec-next";
 import { waitFor } from "@agentick/utils-next/testing";
-import { FakeLanguageModelExecutor } from "@agentick/executor-next";
+import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import { ReconcilerHarness } from "@agentick/reconciler-react-next";
 

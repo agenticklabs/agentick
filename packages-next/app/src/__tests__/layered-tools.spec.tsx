@@ -15,7 +15,7 @@ import React from "react";
 import { describe, expect, it } from "vitest";
 
 import { createApp } from "../react.js";
-import { FakeLanguageModelExecutor } from "@agentick/executor-next";
+import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type { ContentBlock, ToolDeclaration, ToolExecutorProtocol } from "@agentick/spec-next";
 import { jsonSchema } from "@agentick/spec-next";
@@ -58,7 +58,7 @@ function tool(name: string, description = name): ToolDeclaration {
 describe("AppHarness — layered tools (#140)", () => {
   it("registers app-bound tools so every session sees them via compileForTick", async () => {
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       tools: [tool("search")],
     });
 
@@ -75,7 +75,7 @@ describe("AppHarness — layered tools (#140)", () => {
 
   it("app-bound tools persist across multiple sessions of the same app", async () => {
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       tools: [tool("ping")],
     });
     const s1 = await app.createSession();
@@ -91,7 +91,7 @@ describe("AppHarness — layered tools (#140)", () => {
 
   it("session-bound tool overrides app-bound tool of the same name", async () => {
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       tools: [tool("calc", "app calc")],
     });
     const session = await app.createSession({

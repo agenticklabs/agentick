@@ -140,7 +140,7 @@ function baseInput(
     sessionId: "s_c",
     mountId: "c-mount",
     reconciler: stubReconciler(),
-    executor,
+    modelExecutor: executor,
     toolExecutor,
     target: executor.target,
     stateApplicator: new NoopStateApplicator(),

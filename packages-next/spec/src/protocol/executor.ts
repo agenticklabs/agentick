@@ -8,7 +8,7 @@
  * audio, retrieval) implement the same protocol against different targets.
  *
  * Implementations:
- *   - `FakeLanguageModelExecutor` (in `@agentick/executor-next`; reference impl)
+ *   - `FakeLanguageModelExecutor` (in `@agentick/model-executor-next`; reference impl)
  *   - `@agentick/model-openai-next`, `-anthropic`, `-google`, `-ai-sdk`
  *     (Phase 4c — real provider adapters)
  *
@@ -541,7 +541,7 @@ export interface ExecutorProtocol<
    * The Effect-canonical composable surface (ADR 77, the dual-typed edge)
    * — the twins the spine composes in-fiber (`yield* executor.fx.run(...)`).
    * On the protocol so a protocol-typed ref (e.g. the loop's
-   * `RunExecutionInput.executor`) can compose without severing the fiber
+   * `RunExecutionInput.modelExecutor`) can compose without severing the fiber
    * at the Promise facade.
    */
   readonly fx: ExecutorFx<TInput, TOutput, TResult>;
@@ -611,7 +611,7 @@ export interface ExecutorProtocol<
 /**
  * `ExecutorProtocol` narrowed to the language-model family. The
  * shipped reference impl is `FakeLanguageModelExecutor` in
- * `@agentick/executor-next`; provider adapters in Phase 4c.
+ * `@agentick/model-executor-next`; provider adapters in Phase 4c.
  */
 export interface LanguageModelExecutor extends ExecutorProtocol<
   LanguageModelInput,

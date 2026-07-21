@@ -8,7 +8,7 @@
  * ```ts
  * import { describe } from "vitest";
  * import { runExecutorConformance } from "@agentick/spec-conformance-next";
- * import { FakeLanguageModelExecutor } from "@agentick/executor-next";
+ * import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
  *
  * describe("FakeLanguageModelExecutor", () =>
  *   runExecutorConformance(({ harnessId }) =>

@@ -12,7 +12,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { FakeLanguageModelExecutor } from "@agentick/executor-next";
+import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal, deriveHookNames } from "@agentick/runtime-next";
 import { ElicitationHarness } from "@agentick/elicitation-next";
 import { InMemoryHandlerResolver, ToolExecutorHarness } from "@agentick/tool-executor-next";
@@ -67,7 +67,7 @@ async function mkSession() {
     agent: null,
     reconciler,
     loop,
-    executor,
+    modelExecutor: executor,
     toolExecutor: tools,
     target,
   });

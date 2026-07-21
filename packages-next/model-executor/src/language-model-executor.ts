@@ -1,7 +1,7 @@
 /**
  * `LanguageModelExecutor<TRaw, TChunk>` — THE executor harness (ADR 52).
  *
- * One final class: `BaseHarness<"executor">` (substrate phase contract,
+ * One final class: `BaseHarness<"model">` (substrate phase contract,
  * FiberRef scope, OTel spans, lazy delta emission) plus the entire
  * execution engine, consuming a `LanguageModelAdapter` part for
  * provider normalization. There is no subclass tier — providers ship
@@ -165,7 +165,7 @@ export interface LanguageModelExecutorOptions<TRaw = unknown, TChunk = unknown> 
 }
 
 export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
-  extends BaseHarness<"executor">
+  extends BaseHarness<"model">
   implements LanguageModelExecutorProtocol
 {
   readonly family = "language-model" as const;
@@ -204,7 +204,7 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
     inbox: MessageInbox,
     options: LanguageModelExecutorOptions<TRaw, TChunk>,
   ) {
-    super("executor", scopeId, journal, bus, inbox, {
+    super("model", scopeId, journal, bus, inbox, {
       inheritedInterceptors: options.inheritedInterceptors,
       interceptorParent: options.interceptorParent,
     });

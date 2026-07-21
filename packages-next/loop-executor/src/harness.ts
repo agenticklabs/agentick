@@ -377,14 +377,14 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         // ADR 56 — tree-declared per-tick model. If THIS render's IR
         // declared a model, resolve its ref (via the session-supplied
         // `resolveModel`, closing over the mount's ModelBridge) to the
-        // run-ready RegisteredModel and run THAT executor + target for
-        // this tick INSTEAD of input.executor/input.target. Absent, or a
-        // ref that doesn't resolve, falls back to input.executor/target —
+        // run-ready RegisteredModel and run THAT model-executor + target for
+        // this tick INSTEAD of input.modelExecutor/input.target. Absent, or a
+        // ref that doesn't resolve, falls back to input.modelExecutor/target —
         // today's behavior, untouched. This IS the precedence: tick-IR >
         // send > session.
         //
         // TODO(adr-56-slice-1: adapter <Model> sugar) — the adopter face
-        // (`<Model model={adapter}>` deriving {executor,target} from a
+        // (`<Model model={adapter}>` deriving {modelExecutor,target} from a
         // live model-next adapter, then calling useModelRegistration)
         // lands in a binding package that deps BOTH reconciler-react +
         // model-next. Until then the ref is registered directly on the
@@ -396,7 +396,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         // egg), so it is orthogonal to that slice. See ADR 56 §Deferred (2).
         const modelDecl = renderResult.tree.declarations?.model;
         const resolvedModel = modelDecl ? input.resolveModel?.(modelDecl.modelRef) : undefined;
-        const tickExecutor = resolvedModel?.executor ?? input.executor;
+        const tickModelExecutor = resolvedModel?.modelExecutor ?? input.modelExecutor;
         const tickTarget = resolvedModel?.target ?? input.target;
         // `decl.parameters` overlay the compiled tree's generation config
         // for this tick (temperature, maxOutputTokens, …) — the same
@@ -449,7 +449,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         //    target's capabilities don't explicitly disable it.
         const wantsStreaming =
           (input.stream ?? false) &&
-          typeof tickExecutor.executeStream === "function" &&
+          typeof tickModelExecutor.executeStream === "function" &&
           (tickTarget.capabilities?.supportsStreaming ?? true);
 
         let executorTerminal: ExecutorTerminal<LanguageModelExecutionResult>;
@@ -460,7 +460,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           // forwards each AdapterDelta (including the symmetric summary
           // events) as a `model` event — NO loop-side synthesis on this
           // path (adapter already owns symmetric event emission).
-          const projected = yield* tickExecutor.fx.project({
+          const projected = yield* tickModelExecutor.fx.project({
             compiled: tickCompiled,
             target: tickTarget,
             scope: { sessionId: input.sessionId, executionId, tickId },
@@ -472,7 +472,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           // channel; `Effect.either` catches it exactly where the Promise
           // version caught the `.result` rejection → a failed terminal.
           const streamed = yield* Effect.either(
-            tickExecutor.fx.executeStream(
+            tickModelExecutor.fx.executeStream(
               {
                 targetInput: projected,
                 target: tickTarget,
@@ -491,7 +491,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
             stopReason = "executor_failed";
             break;
           }
-          const normalized = yield* tickExecutor.fx.normalize({
+          const normalized = yield* tickModelExecutor.fx.normalize({
             targetOutput: streamed.right,
             target: tickTarget,
             scope: { sessionId: input.sessionId, executionId, tickId },
@@ -499,7 +499,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           executorTerminal = { outcome: "succeeded", result: normalized };
         } else {
           // Non-streaming path: classic project → execute → normalize via run.
-          executorTerminal = yield* tickExecutor.fx.run({
+          executorTerminal = yield* tickModelExecutor.fx.run({
             compiled: tickCompiled,
             target: tickTarget,
             scope: { sessionId: input.sessionId, executionId, tickId },

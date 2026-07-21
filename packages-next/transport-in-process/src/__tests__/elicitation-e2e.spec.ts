@@ -27,7 +27,7 @@ import { describe, expect, it } from "vitest";
 // ADR 87 — contributes `session.elicitations` / `.elicitations.respond()`.
 import "@agentick/elicitation-next/client";
 import { createClient } from "@agentick/client-core-next";
-import { FakeLanguageModelExecutor } from "@agentick/executor-next";
+import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
 import { createGateway } from "@agentick/gateway-next";
 import { fakeReconciler } from "@agentick/reconciler-next/testing";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
@@ -81,7 +81,7 @@ async function makeStack(replyText = "ok") {
   const app = await gateway.createApp({
     appId: "elic-app",
     rootElement: null,
-    options: { executor, reconciler: fakeReconciler() },
+    options: { modelExecutor: executor, reconciler: fakeReconciler() },
   });
   // AppHarness.createSession returns a real SessionHarnessProtocol<P>
   // — its `elicitation` slot is added by the elicitation-next module

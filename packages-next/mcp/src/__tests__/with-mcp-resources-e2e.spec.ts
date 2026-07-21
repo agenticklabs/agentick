@@ -15,7 +15,7 @@ import React from "react";
 import { describe, expect, it } from "vitest";
 
 import { createApp } from "@agentick/app-next/react";
-import { FakeLanguageModelExecutor } from "@agentick/executor-next";
+import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import { waitFor } from "@agentick/utils-next/testing";
 import { withResources } from "@agentick/resources-next";
@@ -93,7 +93,7 @@ describe("withMCP — resource surfacing e2e", () => {
   it("surfaces a remote resource under the alias; session.resources.read round-trips", async () => {
     const { server, clientTransport } = await mkResourceServer();
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       extensions: [
         withMCP({
           servers: [{ serverId: "docs", transport: clientTransport, auth: new NoneAuth() }],
@@ -119,7 +119,7 @@ describe("withMCP — resource surfacing e2e", () => {
   it("the resource_read tool (withResources) reads a surfaced remote uri", async () => {
     const { server, clientTransport } = await mkResourceServer();
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       extensions: [
         withResources(),
         withMCP({
@@ -146,7 +146,7 @@ describe("withMCP — resource surfacing e2e", () => {
   it("re-surfaces on notifications/resources/list_changed", async () => {
     const { server, clientTransport, setResources, notifyChange } = await mkResourceServer();
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       extensions: [
         withMCP({
           servers: [{ serverId: "docs", transport: clientTransport, auth: new NoneAuth() }],
@@ -179,7 +179,7 @@ describe("withMCP — resource surfacing e2e", () => {
   it("session close unregisters the surfaced bindings", async () => {
     const { server, clientTransport } = await mkResourceServer();
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       extensions: [
         withMCP({
           servers: [{ serverId: "docs", transport: clientTransport, auth: new NoneAuth() }],

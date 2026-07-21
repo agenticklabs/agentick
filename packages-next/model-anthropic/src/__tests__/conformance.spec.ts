@@ -19,7 +19,7 @@ import type {
   RawMessageStreamEvent,
 } from "@anthropic-ai/sdk/resources/messages";
 
-import { LanguageModelExecutor } from "@agentick/executor-next";
+import { LanguageModelExecutor } from "@agentick/model-executor-next";
 
 import { anthropic } from "../anthropic-adapter.js";
 import { StubAnthropicClient, asClient } from "./stub-anthropic-client.js";

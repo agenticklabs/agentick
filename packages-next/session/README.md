@@ -3,7 +3,7 @@
 **SessionHarness — one agent run, one long-lived conversation.**
 
 The integration site where v2's harness surfaces — reconciler, loop
-executor, tool executor, timeline, knobs, state, elicitation, tasks,
+model-executor, tool executor, timeline, knobs, state, elicitation, tasks,
 prompts — wire together for a single conversation. One session per
 human dialog; sessions are created by an app harness and persist
 across ticks.
@@ -174,7 +174,7 @@ const session = new SessionHarness(journal, bus, inbox, {
   agent: <MyAgent />, // opaque — forwarded to reconciler.mount({ element })
   reconciler, // ReconcilerProtocol
   loop, // LoopExecutorProtocol
-  executor, // ExecutorProtocol
+  modelExecutor, // ExecutorProtocol
   toolExecutor, // ToolExecutorProtocol
   target, // ExecutionTarget — the default model; overridable per send
   defaultMaxTicks: 8,

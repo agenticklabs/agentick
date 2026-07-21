@@ -160,12 +160,12 @@ export interface RunExecutionInput {
    * tick's IR carries `declarations.model`, the loop resolves
    * `modelRef → RegisteredModel` and runs THAT executor + target for the
    * tick (precedence: tick-IR > send > session). Undefined, or a ref that
-   * resolves to `undefined`, falls back to {@link executor} / {@link target}.
+   * resolves to `undefined`, falls back to {@link modelExecutor} / {@link target}.
    */
   readonly resolveModel?: (modelRef: string) => RegisteredModel | undefined;
 
-  /** Executor harness for the model run. */
-  readonly executor: ExecutorProtocol<unknown, unknown, LanguageModelExecutionResult>;
+  /** Model-executor harness for the model run. */
+  readonly modelExecutor: ExecutorProtocol<unknown, unknown, LanguageModelExecutionResult>;
   readonly target: ExecutionTarget;
 
   /** Tool executor harness for dispatch of `result.toolCalls`. */

@@ -30,7 +30,7 @@ import type {
   ToolRegistration,
 } from "@agentick/spec-next";
 import { SPEC_VERSION, jsonSchema } from "@agentick/spec-next";
-import { FakeLanguageModelExecutor } from "@agentick/executor-next";
+import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
 import { ToolExecutorHarness, InMemoryHandlerResolver } from "@agentick/tool-executor-next";
 import { ElicitationHarness } from "@agentick/elicitation-next";
 
@@ -182,7 +182,7 @@ describe("LoopExecutorHarness — no dangling tool_use (#33, ADR 67)", () => {
       sessionId: "s_nd",
       mountId: "nd-mount",
       reconciler: mkEmptyReconciler(),
-      executor,
+      modelExecutor: executor,
       toolExecutor,
       target: executor.target,
       stateApplicator: applicator,

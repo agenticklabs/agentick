@@ -53,7 +53,7 @@
     "ai": "^5.0.0"
   },
   "devDependencies": {
-    "@agentick/executor-next": "workspace:*",
+    "@agentick/model-executor-next": "workspace:*",
     "@agentick/runtime-next": "workspace:*",
     "@agentick/spec-conformance-next": "workspace:*",
     "effect": "^3.21.2",

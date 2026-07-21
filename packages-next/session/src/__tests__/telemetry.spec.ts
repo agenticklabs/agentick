@@ -18,7 +18,7 @@
 import { describe, expect, it } from "vitest";
 import { Layer, ManagedRuntime, Tracer } from "effect";
 
-import { FakeLanguageModelExecutor } from "@agentick/executor-next";
+import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import { ElicitationHarness } from "@agentick/elicitation-next";
 import { InMemoryHandlerResolver, ToolExecutorHarness } from "@agentick/tool-executor-next";
@@ -106,7 +106,7 @@ async function mkSession(telemetryRuntime: ManagedRuntime.ManagedRuntime<never, 
     agent: null,
     reconciler,
     loop,
-    executor,
+    modelExecutor: executor,
     toolExecutor: tools,
     target,
     telemetryRuntime,
@@ -242,7 +242,7 @@ describe("Session telemetry (ADR 77 Stage 4) — the composed execution nests", 
       agent: null,
       reconciler,
       loop,
-      executor,
+      modelExecutor: executor,
       toolExecutor: tools,
       target,
       // no telemetryRuntime

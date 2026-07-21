@@ -54,7 +54,7 @@
   },
   "devDependencies": {
     "@agentick/elicitation-next": "workspace:*",
-    "@agentick/executor-next": "workspace:*",
+    "@agentick/model-executor-next": "workspace:*",
     "@agentick/gateway-next": "workspace:*",
     "@agentick/model-next": "workspace:*",
     "@agentick/reconciler-react-next": "workspace:*",

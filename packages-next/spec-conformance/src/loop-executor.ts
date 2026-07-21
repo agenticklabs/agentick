@@ -198,7 +198,7 @@ export function runLoopExecutorConformance(factory: LoopExecutorConformanceFacto
         sessionId: "s-1",
         reconciler: stubReconciler(tree),
         mountId: "stub-mount",
-        executor: stubExecutor([
+        modelExecutor: stubExecutor([
           {
             specVersion: "2026-05-08",
             output: [{ type: "text", text: "hi" }],
@@ -227,7 +227,7 @@ export function runLoopExecutorConformance(factory: LoopExecutorConformanceFacto
         sessionId: "s-1",
         reconciler: stubReconciler(mkRenderedTree()),
         mountId: "stub-mount",
-        executor: stubExecutor([
+        modelExecutor: stubExecutor([
           {
             specVersion: "2026-05-08",
             output: [{ type: "text", text: "done" }],
@@ -284,7 +284,7 @@ export function runLoopExecutorConformance(factory: LoopExecutorConformanceFacto
         sessionId: "s-1",
         reconciler: stubReconciler(tree),
         mountId: "stub-mount",
-        executor: stubExecutor([firstRun, secondRun]),
+        modelExecutor: stubExecutor([firstRun, secondRun]),
         target: mkTarget(),
         toolExecutor: stubToolExecutor(),
         stateApplicator: applicator,
@@ -337,7 +337,7 @@ export function runLoopExecutorConformance(factory: LoopExecutorConformanceFacto
           ]),
         ),
         mountId: "stub-mount",
-        executor: stubExecutor([looping]),
+        modelExecutor: stubExecutor([looping]),
         target: mkTarget(),
         toolExecutor: stubToolExecutor(),
         stateApplicator: applicator,

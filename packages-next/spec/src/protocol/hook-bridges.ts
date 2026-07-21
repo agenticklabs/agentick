@@ -462,7 +462,7 @@ export interface ToolBridge {
  * @see docs/proposals/v2/blueprint/56-tree-declared-model-per-tick.md
  */
 export interface RegisteredModel {
-  readonly executor: ExecutorProtocol<unknown, unknown, LanguageModelExecutionResult>;
+  readonly modelExecutor: ExecutorProtocol<unknown, unknown, LanguageModelExecutionResult>;
   readonly target: ExecutionTarget;
 }
 

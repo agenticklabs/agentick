@@ -39,7 +39,7 @@ import type { TaskExecutor, TaskStore } from "@agentick/tasks-next";
 import { ResourcesHarness } from "@agentick/resources-next";
 import { LoopExecutorHarness } from "@agentick/loop-executor-next";
 import { isLanguageModelAdapter, type LanguageModelAdapter } from "@agentick/model-next";
-import { LanguageModelExecutor as TheLanguageModelExecutor } from "@agentick/executor-next";
+import { LanguageModelExecutor as TheLanguageModelExecutor } from "@agentick/model-executor-next";
 import {
   SessionHarness,
   InMemorySessionStore,
@@ -175,12 +175,12 @@ declare module "@agentick/runtime-next" {
 
 /**
  * Per-session forwarded `SessionHarness` options. `sessionId`, `agent`,
- * and the wired sub-harness references (`reconciler`, `loop`, `executor`,
+ * and the wired sub-harness references (`reconciler`, `loop`, `modelExecutor`,
  * `toolExecutor`, `target`) are owned by the App and excluded here.
  */
 export type SessionDefaults<P = unknown> = Omit<
   SessionHarnessOptions<P>,
-  "sessionId" | "agent" | "reconciler" | "loop" | "executor" | "toolExecutor" | "target"
+  "sessionId" | "agent" | "reconciler" | "loop" | "modelExecutor" | "toolExecutor" | "target"
 >;
 
 // App-level substrate slots use the framework's `HarnessShell` parent
@@ -218,8 +218,8 @@ export interface AppHarnessOptions<P = unknown> {
    * `LanguageModelExecutor` on the app's substrate, so executor events
    * appear on `app.events(...)` with zero wiring.
    *
-   * Exactly one of `model` / `executor` is required. `model` = what to
-   * call; `executor` = how to execute (BYO engine).
+   * Exactly one of `model` / `modelExecutor` is required. `model` = what
+   * to call; `modelExecutor` = how to execute (BYO engine).
    */
   readonly model?: LanguageModelAdapter;
   /**
@@ -231,14 +231,14 @@ export interface AppHarnessOptions<P = unknown> {
    *     survives only until the last factory producer converts to an
    *     adapter. TODO(#151): drop once anthropic ships adapter-first.
    *
-   * Bare adapters go on `model`, not here. The executor is
+   * Bare adapters go on `model`, not here. The model-executor is
    * self-describing: its `.target` property is read by the app, so the
    * redundant `target` field below is optional.
    */
-  readonly executor?: LanguageModelExecutor | ExecutorFactory;
+  readonly modelExecutor?: LanguageModelExecutor | ExecutorFactory;
   /**
-   * Optional override of the executor's self-described target. When
-   * omitted, `executor.target` is used. Override at this level when a
+   * Optional override of the model-executor's self-described target. When
+   * omitted, `modelExecutor.target` is used. Override at this level when a
    * single shared executor should advertise different capabilities or
    * provider options per app.
    */
@@ -560,7 +560,7 @@ export class AppHarness<P = unknown>
   }
 
   private readonly rootElement: unknown;
-  private readonly executor: LanguageModelExecutor;
+  private readonly modelExecutor: LanguageModelExecutor;
   private readonly target: ExecutionTarget;
 
   // Per-session defaults resolved from the cascade
@@ -769,26 +769,26 @@ export class AppHarness<P = unknown>
     this.rootElement = options.rootElement;
     // Model/executor slots (ADR 52): `model` takes an adapter — the
     // app wraps it in the ONE LanguageModelExecutor on the app's
-    // substrate. `executor` takes a BYO engine (instance or legacy
+    // substrate. `modelExecutor` takes a BYO engine (instance or legacy
     // factory). Exactly one of the two.
-    if (options.model !== undefined && options.executor !== undefined) {
+    if (options.model !== undefined && options.modelExecutor !== undefined) {
       throw new Error(
         "createApp: pass either `model` (a LanguageModelAdapter) or " +
-          "`executor` (a LanguageModelExecutor / factory), not both.",
+          "`modelExecutor` (a LanguageModelExecutor / factory), not both.",
       );
     }
-    if (options.model === undefined && options.executor === undefined) {
+    if (options.model === undefined && options.modelExecutor === undefined) {
       throw new Error(
         'createApp: a model is required — pass `model: openai("gpt-4o")` ' +
-          "(any LanguageModelAdapter), or `executor` for a BYO engine.",
+          "(any LanguageModelAdapter), or `modelExecutor` for a BYO engine.",
       );
     }
-    if (options.executor !== undefined && isLanguageModelAdapter(options.executor)) {
+    if (options.modelExecutor !== undefined && isLanguageModelAdapter(options.modelExecutor)) {
       throw new Error(
-        "createApp: a bare LanguageModelAdapter goes on the `model` slot, not `executor`.",
+        "createApp: a bare LanguageModelAdapter goes on the `model` slot, not `modelExecutor`.",
       );
     }
-    this.executor =
+    this.modelExecutor =
       options.model !== undefined
         ? new TheLanguageModelExecutor(`${appId}:executor`, journal, bus, inbox, {
             adapter: options.model,
@@ -802,16 +802,16 @@ export class AppHarness<P = unknown>
             inheritedInterceptors: this.resolvedInterceptors(),
             interceptorParent: this,
           })
-        : isExecutorFactory(options.executor)
-          ? options.executor({
+        : isExecutorFactory(options.modelExecutor)
+          ? options.modelExecutor({
               scopeId: `${appId}:executor`,
               journal,
               bus,
               inbox,
             })
-          : options.executor!;
-    // Resolve target: caller override > executor.target.
-    this.target = options.target ?? this.executor.target;
+          : options.modelExecutor!;
+    // Resolve target: caller override > modelExecutor.target.
+    this.target = options.target ?? this.modelExecutor.target;
     this.telemetryRuntime =
       options.telemetry !== undefined ? ManagedRuntime.make(options.telemetry) : undefined;
 
@@ -1571,7 +1571,7 @@ export class AppHarness<P = unknown>
       agent: overrides.agent ?? input.rootElement ?? this.rootElement,
       reconciler: this.reconciler,
       loop: this.loop,
-      executor: this.executor,
+      modelExecutor: this.modelExecutor,
       toolExecutor: tools,
       elicitation,
       tasks,

@@ -16,7 +16,7 @@
 import React from "react";
 import { describe, expect, it } from "vitest";
 
-import { FakeLanguageModelExecutor, LanguageModelExecutor } from "@agentick/executor-next";
+import { FakeLanguageModelExecutor, LanguageModelExecutor } from "@agentick/model-executor-next";
 import { scriptedAdapter } from "@agentick/model-next/testing";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type {
@@ -67,7 +67,7 @@ describe("AppHarness substrate slots — instance form (Phase 1 behavior preserv
   it("accepts a pre-built EventBus instance and uses it as-is", async () => {
     const sharedBus = new LocalEventBus();
     const app = await createApp(React.createElement(MinimalAgent), {
-      executor: mkExecutor(),
+      modelExecutor: mkExecutor(),
       target: mkTarget(),
       bus: sharedBus,
     });
@@ -80,7 +80,7 @@ describe("AppHarness substrate slots — instance form (Phase 1 behavior preserv
     const inbox = new LocalInbox();
     const journal = new MemoryJournal();
     const app = await createApp(React.createElement(MinimalAgent), {
-      executor: mkExecutor(),
+      modelExecutor: mkExecutor(),
       target: mkTarget(),
       inbox,
       journal,
@@ -95,7 +95,7 @@ describe("AppHarness substrate slots — factory form (Phase 2)", () => {
   it("calls a factory with the app shell as parent and uses the result", async () => {
     const seenParents: Array<{ id: string; hasMetadata: boolean }> = [];
     const app = await createApp(React.createElement(MinimalAgent), {
-      executor: mkExecutor(),
+      modelExecutor: mkExecutor(),
       target: mkTarget(),
       metadata: { tag: "phase-2-test" },
       bus: (parent) => {
@@ -114,7 +114,7 @@ describe("AppHarness substrate slots — factory form (Phase 2)", () => {
 
   it("LocalEventBus.factory() accepted directly as a slot value", async () => {
     const app = await createApp(React.createElement(MinimalAgent), {
-      executor: mkExecutor(),
+      modelExecutor: mkExecutor(),
       target: mkTarget(),
       bus: LocalEventBus.factory(),
     });
@@ -125,7 +125,7 @@ describe("AppHarness substrate slots — factory form (Phase 2)", () => {
 
   it("LocalEventBus.factory({ parent: undefined }) produces a leaf bus", async () => {
     const app = await createApp(React.createElement(MinimalAgent), {
-      executor: mkExecutor(),
+      modelExecutor: mkExecutor(),
       target: mkTarget(),
       bus: LocalEventBus.factory({ parent: undefined }),
     });
@@ -135,7 +135,7 @@ describe("AppHarness substrate slots — factory form (Phase 2)", () => {
 
   it("MemoryJournal.factory + LocalInbox.factory accepted at slots", async () => {
     const app = await createApp(React.createElement(MinimalAgent), {
-      executor: mkExecutor(),
+      modelExecutor: mkExecutor(),
       target: mkTarget(),
       journal: MemoryJournal.factory({ capacity: 100 }),
       inbox: LocalInbox.factory({ idempotencyTtlMs: 1000 }),
@@ -156,7 +156,7 @@ describe("AppHarness substrate slots — factory form (Phase 2)", () => {
       return bus;
     };
     const app = await createApp(React.createElement(MinimalAgent), {
-      executor: mkExecutor(),
+      modelExecutor: mkExecutor(),
       target: mkTarget(),
       bus: factory,
     });
@@ -169,7 +169,7 @@ describe("AppHarness substrate slots — factory form (Phase 2)", () => {
     let thrown: unknown;
     try {
       await createApp(React.createElement(MinimalAgent), {
-        executor: mkExecutor(),
+        modelExecutor: mkExecutor(),
         target: mkTarget(),
         bus: (() => Promise.resolve(new LocalEventBus())) as unknown as EventBusFactory<unknown>,
       });
@@ -185,7 +185,7 @@ describe("AppHarness substrate slots — explicit parent passing", () => {
   it("factories receive `parent` as a named argument, not via `this`", async () => {
     const captured: Array<unknown> = [];
     const app = await createApp(React.createElement(MinimalAgent), {
-      executor: mkExecutor(),
+      modelExecutor: mkExecutor(),
       target: mkTarget(),
       bus: function (...args: unknown[]) {
         captured.push(args.length);
@@ -206,7 +206,7 @@ describe("AppHarness model slot — LanguageModelAdapter form (ADR 52)", () => {
     const app = await createApp(React.createElement(MinimalAgent), {
       model: adapter,
     });
-    const exec = (app as unknown as { executor: unknown }).executor;
+    const exec = (app as unknown as { modelExecutor: unknown }).modelExecutor;
     expect(exec).toBeInstanceOf(LanguageModelExecutor);
     // Self-described target flows adapter → executor → app.
     expect((app as unknown as { target: ExecutionTarget }).target).toMatchObject({
@@ -235,7 +235,7 @@ describe("AppHarness model/executor slot guards", () => {
     await expect(
       createApp(React.createElement(MinimalAgent), {
         model: scriptedAdapter("guard"),
-        executor: mkExecutor(),
+        modelExecutor: mkExecutor(),
       }),
     ).rejects.toThrow(/not both/);
   });
@@ -249,7 +249,7 @@ describe("AppHarness model/executor slot guards", () => {
   it("rejects a bare adapter on the executor slot", async () => {
     await expect(
       createApp(React.createElement(MinimalAgent), {
-        executor: scriptedAdapter("guard") as unknown as FakeLanguageModelExecutor,
+        modelExecutor: scriptedAdapter("guard") as unknown as FakeLanguageModelExecutor,
       }),
     ).rejects.toThrow(/goes on the `model` slot/);
   });

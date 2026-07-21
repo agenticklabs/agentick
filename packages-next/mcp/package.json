@@ -79,7 +79,7 @@
   "devDependencies": {
     "@agentick/app-next": "workspace:*",
     "@agentick/credentials-next": "workspace:*",
-    "@agentick/executor-next": "workspace:*",
+    "@agentick/model-executor-next": "workspace:*",
     "@agentick/reconciler-next": "workspace:*",
     "@agentick/resources-next": "workspace:*",
     "@agentick/spec-conformance-next": "workspace:*",

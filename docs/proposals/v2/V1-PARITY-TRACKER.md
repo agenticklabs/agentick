@@ -30,7 +30,7 @@ Whether that layer is called `ExecutorOpenAI` today or
 `OpenAIAdapter` tomorrow, the translation logic moves with the
 package when we reshape.
 
-The reshape touches package names + the `@agentick/executor-next`
+The reshape touches package names + the `@agentick/model-executor-next`
 consumer (which gets a `ModelAdapter` slot instead of being itself
 the executor). The translation code is invariant. So fix the gaps
 where they live now.
@@ -287,11 +287,11 @@ reasoning blocks, image source quirks, etc.).
    - README following the executor package convention.
 
 3. **Implement the executor class:**
-   - `class ProviderExecutor extends BaseHarness<"executor"> implements LanguageModelExecutor`
+   - `class ProviderExecutor extends BaseHarness<"model"> implements LanguageModelExecutor`
    - Required methods: `project`, `execute`, `executeStream`,
      `normalize`, `run`, `abort`.
    - `project` should be reusable via shared `defaultProject` from
-     `@agentick/executor-next` unless the provider needs custom logic.
+     `@agentick/model-executor-next` unless the provider needs custom logic.
    - Self-described `target: ExecutionTarget` property with
      `capabilities: { supportsTools, supportsStreaming,
 supportsVision, supportsReasoning, contextWindow,

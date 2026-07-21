@@ -186,7 +186,7 @@ function getGoogleState(accum: StreamAccumulatorView): GoogleStreamState {
 
 /**
  * Construct the Gemini `LanguageModelAdapter`. Pass it wherever an
- * adapter is accepted — the app's `executor:` slot (wrapped in the ONE
+ * adapter is accepted — the app's `modelExecutor:` slot (wrapped in the ONE
  * `LanguageModelExecutor`), `generate({ model: google("gemini-2.5-pro"),
  * ... })`, or a hand-constructed executor.
  *

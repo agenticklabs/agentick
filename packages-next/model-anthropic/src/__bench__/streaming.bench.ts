@@ -27,7 +27,7 @@ import type { RawMessageStreamEvent } from "@anthropic-ai/sdk/resources/messages
 import type { LanguageModelTarget, RenderedTree } from "@agentick/spec-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 
-import { LanguageModelExecutor } from "@agentick/executor-next";
+import { LanguageModelExecutor } from "@agentick/model-executor-next";
 
 import { anthropic } from "../anthropic-adapter.js";
 import {

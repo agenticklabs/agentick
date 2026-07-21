@@ -17,7 +17,7 @@ import type { LanguageModelTarget, RenderedTree } from "@agentick/spec-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type { ChatCompletion } from "openai/resources/chat/completions";
 
-import { LanguageModelExecutor } from "@agentick/executor-next";
+import { LanguageModelExecutor } from "@agentick/model-executor-next";
 
 import { openai } from "../openai-adapter.js";
 import {

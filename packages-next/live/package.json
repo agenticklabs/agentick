@@ -60,7 +60,7 @@
     "effect": "^3.21.2"
   },
   "devDependencies": {
-    "@agentick/executor-next": "workspace:*",
+    "@agentick/model-executor-next": "workspace:*",
     "@agentick/gateway-next": "workspace:*",
     "@agentick/reconciler-next": "workspace:*",
     "@agentick/transport-in-process-next": "workspace:*"

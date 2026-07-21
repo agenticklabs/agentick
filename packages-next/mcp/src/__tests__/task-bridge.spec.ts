@@ -30,7 +30,7 @@ import React from "react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { createApp } from "@agentick/app-next/react";
-import { FakeLanguageModelExecutor } from "@agentick/executor-next";
+import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import { isTaskRefBlock } from "@agentick/spec-next";
 import { drainRejection } from "@agentick/utils-next/testing";
@@ -303,7 +303,7 @@ describe("withMCP — taskSupport:'required' end-to-end", () => {
     teardown.push(() => fake.server.close());
 
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       extensions: [
         withMCP({
           servers: [
@@ -337,7 +337,7 @@ describe("withMCP — taskSupport:'required' end-to-end", () => {
     teardown.push(() => fake.server.close());
 
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       extensions: [
         withMCP({
           servers: [
@@ -377,7 +377,7 @@ describe("withMCP — taskSupport:'required' end-to-end", () => {
     teardown.push(() => fake.server.close());
 
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       extensions: [
         withMCP({
           servers: [
@@ -434,7 +434,7 @@ describe("withMCP — taskSupport:'required' end-to-end", () => {
     teardown.push(() => fake.server.close());
 
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       extensions: [
         withMCP({
           servers: [
@@ -512,7 +512,7 @@ describe("withMCP — taskSupport:'optional' / 'supported' per-call opt-in (#174
     teardown.push(() => fake.server.close());
 
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       extensions: [
         withMCP({
           servers: [{ serverId: "opt", transport: fake.clientTransport, auth: new NoneAuth() }],
@@ -546,7 +546,7 @@ describe("withMCP — taskSupport:'optional' / 'supported' per-call opt-in (#174
     teardown.push(() => fake.server.close());
 
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       extensions: [
         withMCP({
           servers: [

@@ -8,7 +8,7 @@
  *   - `LanguageModelAdapter` — the provider-normalization contract.
  *     Providers (`@agentick/model-openai-next`, `-anthropic`, `-google`,
  *     `-ai-sdk`) implement it; `LanguageModelExecutor` (in
- *     `@agentick/executor-next`) consumes it.
+ *     `@agentick/model-executor-next`) consumes it.
  *   - `StreamAccumulator` + `StreamAccumulatorView` — the canonical
  *     delta fold.
  *   - `DeltaTransform` pipeline + tag routing (`thinkTagTransform`,

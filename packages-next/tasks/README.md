@@ -126,7 +126,7 @@ import { createApp } from "@agentick/app-next";
 import { withTasks } from "@agentick/tasks-next";
 
 const app = await createApp(<Agent />, {
-  executor,
+  modelExecutor,
   extensions: [withTasks()],
 });
 

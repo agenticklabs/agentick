@@ -31,7 +31,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { Chunk, Effect, Stream } from "effect";
 
-import { FakeLanguageModelExecutor } from "@agentick/executor-next";
+import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import { ElicitationHarness, buildElicitSugar } from "@agentick/elicitation-next";
 import { ELICITATION_CHANNEL_FQN } from "@agentick/elicitation-next";
@@ -102,7 +102,7 @@ async function mkSession(opts: { parentSessionId?: string } = {}) {
     agent: null,
     reconciler,
     loop,
-    executor,
+    modelExecutor: executor,
     toolExecutor: tools,
     target,
     ...omitUndefined({ parentSessionId: opts.parentSessionId }),
@@ -260,7 +260,7 @@ async function mkSessionOn(
     agent: null,
     reconciler,
     loop,
-    executor,
+    modelExecutor: executor,
     toolExecutor: tools,
     target,
     ...omitUndefined({ parentSessionId: opts.parentSessionId, tasks }),

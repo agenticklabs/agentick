@@ -143,7 +143,7 @@ function getAISDKState(accum: StreamAccumulatorView): AISDKStreamState {
 
 /**
  * Wrap an AI SDK `LanguageModel` as a `LanguageModelAdapter`. Pass it
- * wherever an adapter is accepted — the app's `executor:` slot,
+ * wherever an adapter is accepted — the app's `modelExecutor:` slot,
  * `generate({ model: aisdk(openai("gpt-4o")), ... })`, or a
  * hand-constructed `LanguageModelExecutor`.
  *

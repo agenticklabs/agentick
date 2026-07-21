@@ -9,7 +9,7 @@
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { FakeLanguageModelExecutor } from "@agentick/executor-next";
+import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import { ElicitationHarness } from "@agentick/elicitation-next";
 import { InMemoryHandlerResolver, ToolExecutorHarness } from "@agentick/tool-executor-next";
@@ -101,7 +101,7 @@ async function mkSession(
     agent: null,
     reconciler,
     loop,
-    executor,
+    modelExecutor: executor,
     toolExecutor: tools,
     target,
     ...omitUndefined({ spawnContext: opts.spawnContext, parentSessionId: opts.parentSessionId }),
@@ -436,7 +436,7 @@ describe("steering — send() during a running execution (ADR 53)", () => {
 
     const handle1 = await session.send({
       messages: [{ role: "user", content: "original ask" }],
-      executor: exec,
+      modelExecutor: exec,
     });
     // Steering: a second send while tick 1 is in flight JOINS.
     const handle2 = await session.send({

@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 import { Layer, Tracer } from "effect";
 
 import { createApp } from "../react.js";
-import { FakeLanguageModelExecutor } from "@agentick/executor-next";
+import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type { ContentBlock } from "@agentick/spec-next";
 
@@ -76,7 +76,7 @@ describe("App telemetry (ADR 78) — spans reach the supplied tracer", () => {
   it("an app-edge operation's Effect.withSpan lands on the telemetry Layer's tracer, with agentick.* attributes", async () => {
     const { layer, spans } = collectingTracer();
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       telemetry: layer,
     });
 
@@ -93,7 +93,7 @@ describe("App telemetry (ADR 78) — spans reach the supplied tracer", () => {
   it("telemetryNamespace whitelabels the attribute prefix (agentick → acme)", async () => {
     const { layer, spans } = collectingTracer();
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       telemetry: layer,
       telemetryNamespace: "acme",
     });
@@ -107,7 +107,7 @@ describe("App telemetry (ADR 78) — spans reach the supplied tracer", () => {
   });
 
   it("no telemetry Layer → no crash, no runtime (behavior-preserving)", async () => {
-    const app = await createApp(React.createElement(Agent), { executor: await mkExecutor() });
+    const app = await createApp(React.createElement(Agent), { modelExecutor: await mkExecutor() });
     await expect(app.closeApp()).resolves.toBeUndefined();
   });
 });

@@ -18,7 +18,7 @@
 import React from "react";
 import { describe, expect, it } from "vitest";
 
-import { FakeLanguageModelExecutor } from "@agentick/executor-next";
+import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
 import { createLocalClusterRegistry, defineLocalCluster } from "@agentick/cluster-next/testing";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type { ContentBlock } from "@agentick/spec-next";
@@ -53,7 +53,7 @@ describe("createApp({ cluster }) — Phase 5c app-level wiring", () => {
   it("the substrate IS cluster-wrapped — cluster membership receives the self-join, and app.closeApp() removes it", async () => {
     const registry = createLocalClusterRegistry();
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       cluster: defineLocalCluster({ nodeId: "node-B", registry }),
     });
 
@@ -71,7 +71,7 @@ describe("createApp({ cluster }) — Phase 5c app-level wiring", () => {
   it("rejects createApp({ cluster, bus: factory }) — substrate factories incompatible with cluster opt", async () => {
     await expect(
       createApp(React.createElement(Agent), {
-        executor: await mkExecutor(),
+        modelExecutor: await mkExecutor(),
         cluster: defineLocalCluster({ nodeId: "node-C" }),
         // Pass a factory (not an instance) — should fail with a clear error.
         bus: LocalEventBus.factory(),
@@ -83,7 +83,7 @@ describe("createApp({ cluster }) — Phase 5c app-level wiring", () => {
     const registry = createLocalClusterRegistry();
     const localBus = new LocalEventBus();
     const app = await createApp(React.createElement(Agent), {
-      executor: await mkExecutor(),
+      modelExecutor: await mkExecutor(),
       cluster: defineLocalCluster({ nodeId: "node-D", registry }),
       bus: localBus,
     });

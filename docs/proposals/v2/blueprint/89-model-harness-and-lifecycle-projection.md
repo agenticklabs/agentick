@@ -1,44 +1,115 @@
-# ADR 89 — The model is a harness; lifecycle is the projected command-hook system
+# ADR 89 — Command-ify the model call; lifecycle is the projected command-hook system
 
-**Status:** PROPOSED 2026-07-21 (for Ryan)
+**Status:** PROPOSED 2026-07-21 · **REVISED 2026-07-21** (premise corrected against
+the shipped code — see "Actual architecture" below)
 **Builds on:** ADR 26 (everything is a harness), ADR 80 (command-lifecycle hooks),
 ADR 83 (one interceptor primitive — guard / transform / **observe**), ADR 55
-(React lifecycle hooks).
+(React lifecycle hooks), ADR 56 (tree-declared model / `RegisteredModel`).
 **Amends:** the reconciler's bespoke `LifecycleStore` + the loop's hand-fed
 `notifyLifecycle` (both retired).
 
+## Correction (what the first draft got wrong)
+
+The first draft asserted "the model is not a harness — `LanguageModelExecutor` is not
+a `BaseHarness`." **That is false in the shipped code.** `LanguageModelExecutor
+extends BaseHarness<"executor">` (family `"language-model"`), it is session-owned
+(`session.executor`), and it is per-send overridable (`input.executor ?? this.executor`)
+and per-tick resolvable (ADR 56 `<Model>` → `RegisteredModel`). The harness identity,
+session scoping, and swap points already exist. The real gap is narrower and this ADR
+is re-scoped around it.
+
 ## TL;DR
 
-Two gaps, one root cause. (1) The **model is not a harness** — it's a procedure
-pipeline (`project → execute → normalize` via `executor.fx`), so the model call is
-a *procedure, not a command*: no `model:generate` hooks, no guard, no journal
-entry, and the adapter combinators (`withRetry`/`withFallback`/`tapModel`) are a
-**bespoke middleware layer reinvented** because there's no harness to `.use()` on.
-(2) The reconciler's **`LifecycleStore` is a hand-curated 7-event subset**, fed by
-~7 hard-coded `loop.notifyLifecycle(...)` calls — a bespoke observation mechanism
-the compiler owns instead of *projecting* the framework's.
+Two gaps, one root cause. (1) The model call is **a `runOperation` Operation, not a
+`this.command(...)`** — the executor IS a harness, but its `execute`/`executeStream`
+never mint an ADR-80 command, so there are no `model:generate` hooks, no `guardGenerate`,
+no journal entry, and `withRetry`/`withFallback`/`tapModel` stay **bespoke combinators**
+instead of `.use()` interceptors. (2) The reconciler's **`LifecycleStore` is a
+hand-curated 7-event subset**, fed by ~7 hard-coded `loop.notifyLifecycle(...)` calls —
+a bespoke observation mechanism the compiler owns instead of *projecting* the framework's.
 
-Both dissolve into one decision: **the model becomes a harness whose `execute` is
-the `model:generate` command; `tick` becomes a command; and React lifecycle hooks
-are the compiler registering ADR-83 interceptors (`observe` / `transform` / `guard`)
-on the constituent command harnesses — the same hooks a user declares
-programmatically.** A `useOn*` hook registers a callback (closing over component
-state via a ref), not a render, so it can observe, reshape, OR veto/defer an
-operation — components become full lifecycle participants. No bespoke lifecycle
-store; any command is observable and interceptable; the model finally gets hooks, a
-guard, interceptors, journaling, and a **swappable backing model** on a
-session-persistent harness.
+Both dissolve into one decision: **command-ify the model call (`execute`/`executeStream`
+→ `model:generate` / `model:generate_stream` commands on the existing executor harness;
+`project`/`normalize` stay pure transforms), optionally wrap `tick` as a command, and
+make React lifecycle hooks the compiler registering ADR-83 interceptors (`observe` /
+`transform` / `guard`) on the constituent command harnesses — the same hooks a user
+declares programmatically.** A `useOn*` hook registers a callback (closing over component
+state via a ref), not a render, so it can observe, reshape, OR veto/defer an operation.
+No bespoke lifecycle store; any command is observable and interceptable; the model call
+gets hooks, a guard, interceptors, and journaling — by *name* (`onBeforeModelGenerate`),
+so they hold even as the per-adapter executor instance is swapped per tick.
+
+## Actual architecture (the composition this ADR must respect)
+
+Ownership is **dependency injection at a composition root**; execution is **orchestrated
+by the loop**. Two different axes — do not conflate them.
+
+**Ownership — the session is the composition root.** It owns every subsystem as a
+sibling and injects them into the loop per execution (`session/harness.ts:593-603,
+1503-1511`):
+
+```
+Session ─── owns: reconciler · executor(model) · toolExecutor · stateApplicator(apply
+            cmds) · models(registry) · loop
+   └─ loop.runExecution({ reconciler, executor, target, toolExecutor, resolveModel,
+                          stateApplicator, … })   ← siblings injected, NOT owned by loop
+```
+
+**Execution — the loop is the orchestrator (owns none of them).** It reads the refs off
+`RunExecutionInput` and drives the tick cycle:
+
+```
+loop.runExecution:
+   reconciler.renderTree ─▶ executor.run(tree, target) ─▶ stateApplicator.applyExecutorResult
+      ─▶ toolExecutor.dispatch(result.toolCalls) ─▶ stateApplicator.applyToolResults ─▶ (repeat)
+```
+
+- **Model executor — fully loop-scoped.** `executor.run` is only ever called inside the
+  loop's tick cycle.
+- **Tool executor — dual-driven.** Inside the loop on `result.toolCalls`, AND directly
+  via `session.dispatch()` (`session/harness.ts:989`) — the host-door that invokes a
+  tool by name *without the model or the loop* (`audience:"user"` tools, procedures).
+  Intentional; means tool execution is NOT fully loop-contained.
+
+**Naming — it's the MODEL-EXECUTOR.** The runner is a sibling of `toolExecutor` and
+should be named symmetrically: `modelExecutor : toolExecutor :: BaseHarness<"model"> :
+BaseHarness<"tool">`. Today it's the ambiguous `session.executor` / `BaseHarness<"executor">`;
+this ADR uses **model-executor** throughout and a surgical rename lands it (`session.executor
+→ session.modelExecutor`, type `"executor" → "model"`; the `LanguageModelExecutor` CLASS
+name stays — the ambiguity was the field/type, and the class rename batches with the
+deferred `XHarness → X` suffix sweep). NOTE the distinct concept: `session.modelExecutor`
+(the runner) ≠ `session.model` (the selection/swap facade, §2) — the runner vs. which LLM
+it runs.
+
+**The "model" is overloaded — three layers, containment `RegisteredModel ⊃ modelExecutor ⊃
+adapter`:**
+
+- **adapter** (`LanguageModelAdapter`) — the provider SDK binding + its default target.
+  The concrete LLM.
+- **model-executor** (`BaseHarness<"model">`, `LanguageModelExecutor` class) — wraps
+  exactly ONE adapter (fixed at construction: `this.adapter = options.adapter`; `target`
+  delegates to `adapter.target`) and provides `project → execute → normalize`. The RUNNER,
+  sibling of `toolExecutor`.
+- **`RegisteredModel` = `{ modelExecutor, target }`** (`hook-bridges.ts:465`) — a run-ready
+  SELECTION: which model-executor (hence which adapter) at which target. What `<Model>`
+  builds and the loop resolves per tick.
+
+So "swap the model" is ambiguous: swap the adapter *inside* an executor, or swap the
+whole `RegisteredModel` *containing* an executor. Because a model swap can swap the
+whole executor, anything that must **persist interceptors across a swap** has to sit
+*above* the `RegisteredModel` — above the executor. Today that stable layer is **the
+session** (it owns `executor` + `models` + per-tick `resolveModel`), which is why this
+ADR puts model-selection concerns on a `session.model` facade rather than inventing a
+new harness (see the Decision + the fork below).
 
 ## Context
 
-- **The model call is a procedure.** `LanguageModelExecutor` (`@agentick/executor-next`)
-  is not a `BaseHarness`; the loop calls `tickExecutor.fx.executeStream(...)` per
-  tick. `generate`/`generateStream` are free functions in `@agentick/model-next`.
-  Nothing wraps the model call in `this.command(...)`, so ADR 80 never mints
-  `onBefore/AfterModelGenerate`.
-- **Consequences of the model escaping ADR 26:**
-  - `withRetry`/`withFallback`/`tapModel` = middleware reinvented per-adapter,
-    because there is no harness to carry `.use()`/interceptors.
+- **The model call is a command-less Operation.** `execute`/`executeStream` on
+  `LanguageModelExecutor` are `runOperation(op, body)` Operations (their `fx` twins),
+  NOT `this.command(...)`. So ADR 80 never mints `onBefore/AfterModelGenerate`.
+- **Consequences of the model call escaping ADR 80 (not ADR 26 — it IS a harness):**
+  - `withRetry`/`withFallback`/`tapModel` = combinators reinvented per-adapter, because
+    the model call carries no command to `.use()` interceptors on.
   - **No `guardGenerate`** — the single most expensive, most-worth-gating op has no
     admission control (cost caps, safety, prompt-injection, mock/replay).
   - **Not journaled** — the audit ledger is missing the model calls.
@@ -50,59 +121,74 @@ session-persistent harness.
   hand-feeds it (coupling the loop to the reconciler), and a future dep-less
   compiler would have to re-implement the same store.
 
-Why it happened: the executor was designed as a **pure transform** before "everything
-is a harness" + "command hooks ARE the lifecycle" crystallized. It is the last major
-subsystem outside the harness model.
+Why it happened: the executor's `execute` was modeled as an Operation (fast path,
+inlined under `run`) before "command hooks ARE the lifecycle" (ADR 80/83) crystallized.
+The model call is the last hot-path op still outside the command-hook system.
 
 ## Decision
 
-### 1. The model is a harness; `execute` is `model:generate`
+### 1. Command-ify the model call on the EXISTING model-executor harness
 
-A `ModelHarness extends BaseHarness<"model">` (session-scoped, one per session).
-Its command is the model call:
+There is **no new `ModelHarness` layer** (the first draft's `BaseHarness<"model">` as a
+NEW layer is dropped — see the fork in §2). The `LanguageModelExecutor` (the
+model-executor, `BaseHarness<"model">` after the rename) is already the session-owned
+harness sibling of `toolExecutor`; the only change is that its model call becomes a
+command instead of an Operation:
 
-- **`model:generate`** and **`model:generate_stream`** — declared commands
-  (`this.command(...)`), so ADR 80 mints `onBefore/AfterModelGenerate[Stream]`. The
-  command body is the model call; the streaming variant is a **streaming procedure**
-  (procedures already emit `stream:chunk` — `onBefore` at start, chunks in the
-  middle, `terminal`/`onAfter` at end).
-- **`project` and `normalize` STAY pure transforms** — they are stateless and do
-  not deserve command machinery. The harness *composes* them around the
-  `execute` command; only the side-effecting model call is the command. (Don't
-  harness-ify the pure parts.)
+- **`model:generate`** and **`model:generate_stream`** — the executor's `execute` /
+  `executeStream` become declared commands (`this.command(...)`) instead of
+  `runOperation` Operations, so ADR 80 mints `onBefore/AfterModelGenerate[Stream]`. The
+  streaming variant is a **streaming procedure** (procedures already emit `stream:chunk`
+  — `onBefore` at start, chunks in the middle, `terminal`/`onAfter` at end).
+- **`project` and `normalize` STAY pure transforms** — stateless, no command machinery.
+  Only the side-effecting model call is the command; `run` composes project → the
+  `execute` command → normalize around it.
+- **Hooks resolve by NAME, so they survive per-tick executor swaps.** The loop resolves
+  a different `RegisteredModel` (hence a different executor instance) per tick; but a
+  hook is registered as `onBeforeModelGenerate` at app/session scope and dispatched by
+  the command *name*, not the instance — so it applies to whichever executor issues the
+  command. This is why command-ifying the per-adapter executor is sufficient for
+  hooks/guard/journal and a stable "model harness" instance is NOT required for them.
 - **What falls out, all standard, nothing bespoke:**
-  - Interceptors: `withRetry`/`withFallback`/`tapModel` collapse into
-    `model.use(...)` (ADR 83 `transform`/`observe`) — retire the bespoke adapter
-    combinators.
-  - **`guardGenerate`**: `model.guard(decide)` — `proceed | veto | replace | defer`
-    on a model call (cost ceiling, safety veto, replay/mock `replace`).
+  - Interceptors: `withRetry`/`withFallback`/`tapModel` collapse into `.use(...)` on the
+    model command (ADR 83 `transform`/`observe`) — retire the bespoke combinators.
+  - **`guardGenerate`**: `.guard(decide)` — `proceed | veto | replace | defer` on a
+    model call (cost ceiling, safety veto, replay/mock `replace`).
   - Journaling: model calls become journaled operations (audit: model, tokens, timing).
-  - Addressability: the model harness is inbox-addressable (cluster: route a
-    generate to a model node).
   - Lifecycle: `useOnModelGenerateStart` = `onBeforeModelGenerate` (§4).
 
-### 2. Swappable backing model on a persistent harness
+### 2. Model selection + swap — a `session.model` facade, NOT a new harness
 
-The harness persists for the **session**; the backing `{ adapter, target }` is
-**swappable** at runtime:
+**The fork.** A model swap can swap the whole executor (a different adapter), so the ONE
+thing command-ifying the executor does *not* give you is **interceptors that persist
+across a `setModel` swap** (a cost-guard registered on executor-A is gone when you swap
+to executor-B). The first draft answered this with a new stable `BaseHarness<"model">`
+above the executor. **Rejected as over-layering:** the session ALREADY owns the stable
+model-selection state (`this.executor` default, the `models` registry, per-tick
+`resolveModel`, the `input.executor ?? this.executor` override). Cross-swap concerns
+belong there, exposed as a thin facade — not a whole new harness sibling.
 
-- **`session.model.setModel(adapter, target?)`** (and `setTarget(target)`) — swaps
-  the backing model. Declared as a command **`model:set`** so it is journaled and
-  hookable (audit model swaps; `onBeforeModelSet` for policy — "this session may not
-  switch to model X").
-- **Hooks / guards / interceptors are registered on the harness, NOT the adapter**,
-  so they **persist across `setModel`**. Register a cost guard + a retry interceptor
-  once; swap `gpt-5` → `claude` → `fable` freely for the whole session; the gating
-  and middleware stay. This is the win the procedure pipeline can't give — today
-  swapping the model means threading a different executor per tick and re-composing
-  any middleware on the adapter.
+- **`session.model`** — a facade over what the session already owns:
+  - `session.model.setModel(model)` / `setTarget(target)` — set the session-default
+    `RegisteredModel` (replaces today's construction-bound `this.executor`). Declared as
+    a session command **`model:set`** so it is journaled + hookable (`onBeforeModelSet`
+    policy — "this session may not switch to model X").
+  - `session.model.use(...)` / `.guard(...)` — **session-scoped** interceptors on the
+    `model:generate` command, registered by name at session scope so they **persist
+    across `setModel`** (the command dispatches to whichever executor is current). This
+    is the persistence win WITHOUT a new harness — it rides the same by-name command
+    dispatch as §1.
 - **Effective-model precedence** (like tool-binding precedence): per-tick
   `<Model model={…}>` (reconciler slice) > per-send `send({ executor, target })`
-  override > the session default set by `setModel`. `setModel` sets the session
-  default; the scoped forms select for their scope. The harness resolves the
-  effective `{ adapter, target }` per `generate`. (Detail to finalize in
-  implementation; the invariant is: harness identity + interceptors persist,
-  model selection is scoped.)
+  override > the session default set by `setModel`. `setModel` sets the session default;
+  the scoped forms select for their scope; the loop resolves the effective
+  `RegisteredModel` per tick as it does today.
+
+> Escape hatch, if cross-swap persistence ever needs its OWN identity (inbox-addressable
+> "route a generate to a model node" in a cluster, a lifecycle FSM for the model layer,
+> per-model-harness journaling distinct from the session): promote the `session.model`
+> facade to a real `BaseHarness` sibling then. Default is the facade; the harness is the
+> documented next rung, not the starting point.
 
 ### 3. `tick` becomes a command
 

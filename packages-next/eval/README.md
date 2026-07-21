@@ -35,7 +35,7 @@ import { defineEval } from "@agentick/eval-next";
 type Overrides = { executor?: ExecutorNext };
 const myApp = (overrides?: Overrides) =>
   createApp(<MyAgent />, {
-    executor: overrides?.executor ?? defaultExecutor,
+    modelExecutor: overrides?.executor ?? defaultExecutor,
     target: { kind: "language-model", provider: "openai", modelId: "gpt-4o" },
   });
 

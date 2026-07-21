@@ -4,7 +4,7 @@
  *
  * Ships `anthropic(model?, options?)`, a factory producing the
  * provider-normalization part consumed by the ONE
- * `LanguageModelExecutor` in `@agentick/executor-next`, against the
+ * `LanguageModelExecutor` in `@agentick/model-executor-next`, against the
  * Anthropic Messages API (`@anthropic-ai/sdk`).
  *
  * @see docs/proposals/v2/blueprint/52-executors-and-model-adapters.md

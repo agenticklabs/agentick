@@ -38,7 +38,7 @@ import type {
   ToolExecutorProtocol,
 } from "@agentick/spec-next";
 import { SPEC_VERSION } from "@agentick/spec-next";
-import { FakeLanguageModelExecutor, type MockScriptedRun } from "@agentick/executor-next";
+import { FakeLanguageModelExecutor, type MockScriptedRun } from "@agentick/model-executor-next";
 import { omitUndefined } from "@agentick/utils-next";
 
 import { LoopExecutorHarness } from "../harness.js";
@@ -215,7 +215,7 @@ async function runChar(cfg: CharConfig): Promise<CharTrace> {
     sessionId: "s_ch",
     mountId: "ch-mount",
     reconciler: mkRecordingReconciler(order),
-    executor,
+    modelExecutor: executor,
     toolExecutor: mkFakeToolExecutor(dispatch),
     target: executor.target,
     stateApplicator: mkRecordingApplicator(order),
@@ -429,7 +429,7 @@ describe("LoopExecutorHarness [characterization] — cancellation", () => {
       sessionId: "s_ab",
       mountId: "ch-mount",
       reconciler: mkRecordingReconciler(order),
-      executor,
+      modelExecutor: executor,
       toolExecutor: mkFakeToolExecutor(async (call) => dispatchOk(call, [])),
       target: executor.target,
       stateApplicator: mkRecordingApplicator(order),
@@ -470,7 +470,7 @@ describe("LoopExecutorHarness [characterization] — awaited lifecycle propagati
         sessionId: "s_aw",
         mountId: "ch-mount",
         reconciler,
-        executor,
+        modelExecutor: executor,
         toolExecutor: mkFakeToolExecutor(async (call) => dispatchOk(call, [])),
         target: executor.target,
         stateApplicator: mkRecordingApplicator([]),

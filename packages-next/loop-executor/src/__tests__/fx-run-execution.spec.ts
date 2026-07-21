@@ -23,7 +23,7 @@ import type {
   ToolExecutorProtocol,
 } from "@agentick/spec-next";
 import { SPEC_VERSION } from "@agentick/spec-next";
-import { FakeLanguageModelExecutor } from "@agentick/executor-next";
+import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
 
 import { LoopExecutorHarness } from "../harness.js";
 import { NoopStateApplicator } from "../noop-state-applicator.js";
@@ -93,7 +93,7 @@ async function makeLoopAndInput(
     sessionId: "s_fx",
     mountId: "fx-mount",
     reconciler: stubReconciler(),
-    executor,
+    modelExecutor: executor,
     toolExecutor: stubToolExecutor(),
     target: executor.target,
     stateApplicator: new NoopStateApplicator(),

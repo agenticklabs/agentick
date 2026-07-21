@@ -35,7 +35,7 @@ model-next:
 ```ts
 // spec — the resolved, run-ready model (both fields already spec types)
 export interface RegisteredModel {
-  readonly executor: ExecutorProtocol<unknown, unknown, LanguageModelExecutionResult>;
+  readonly modelExecutor: ExecutorProtocol<unknown, unknown, LanguageModelExecutionResult>;
   readonly target: ExecutionTarget;
 }
 export interface ModelBridge {
@@ -69,13 +69,13 @@ stays adapter-agnostic; it only threads spec-typed `RegisteredModel`s.
   onto `RunExecutionInput` (session supplies it, closing over the mount's `ModelBridge`)
   — symmetric with `resolveRenderContext`. Resolve `decl.modelRef → RegisteredModel`;
   run **that** `executor`+`target` (merging `decl.parameters` over `target`) for the tick.
-- **Fallback:** no IR model → `input.executor` / `input.target` (today's behavior, untouched). This is the precedence: tick-IR wins, else send/session.
+- **Fallback:** no IR model → `input.modelExecutor` / `input.target` (today's behavior, untouched). This is the precedence: tick-IR wins, else send/session.
 
 ### session
 - Build the `ModelBridge` (a small in-memory registry, reference impl in `reconciler-next` alongside `InMemoryDataBridge`) into the mount bridges; supply `resolveModel` to the loop closing over it. No default registration needed — the fallback covers the un-declared case.
 
 ### Tests
-- `reconciler-react` integration: `useModelRegistration` with a **fake** `RegisteredModel` (Meszaros `fakeExecutor` + a target) → a real loop run resolves the ref and runs the fake executor for the tick, not `input.executor`. Precedence test: IR model beats the send/session executor; no IR model → fallback.
+- `reconciler-react` integration: `useModelRegistration` with a **fake** `RegisteredModel` (Meszaros `fakeExecutor` + a target) → a real loop run resolves the ref and runs the fake executor for the tick, not `input.modelExecutor`. Precedence test: IR model beats the send/session executor; no IR model → fallback.
 
 ## Deferred (explicit follow-up slices — filed off #169)
 

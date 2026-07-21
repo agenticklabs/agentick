@@ -5,7 +5,7 @@
 spectrum — harness vs part), ADR 48 (harness instance vs backing
 resource; BYOK corollary), ADR 51 (invocation model; internal commands),
 the Effect charter direction (Effect internal, Promise external)
-**Touches:** `@agentick/executor-next` (the ONE executor + standalone
+**Touches:** `@agentick/model-executor-next` (the ONE executor + standalone
 helpers), `executor-openai/-google/-anthropic/-ai-sdk-next` (reshaped
 into model-adapter packages), `@agentick/app-next` (`model:` sugar),
 spec (`LanguageModelAdapter` protocol, observation types unchanged)
@@ -292,7 +292,7 @@ optional capabilities on adapters, each with a standalone helper**,
 mirroring the ai-sdk function vocabulary adopters already know:
 
 ```ts
-// standalone helpers in @agentick/executor-next — feature-detected,
+// standalone helpers in @agentick/model-executor-next — feature-detected,
 // substrate-free, same shape as generate/generateStream:
 embed(adapter, input)            // ernesto's EmbeddingService need
 embedMany(adapter, inputs)
