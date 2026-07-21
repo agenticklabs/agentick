@@ -154,6 +154,10 @@ describe("SessionHarness — flush barrier at execution end (ADR 49 A2.2)", () =
       },
       keys: async () => [],
       delete: async () => false,
+      query: async () => [],
+      mutate: async () => {
+        throw new Error("disk full");
+      },
     };
     const { session, tools } = await mkSession({
       sessionId: "s-diverged",

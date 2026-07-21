@@ -33,7 +33,12 @@ import {
   CredentialsWriteFailed,
 } from "@agentick/spec-next";
 import type { StoreCtx } from "@agentick/spec-next";
-import type { CredentialsStore } from "../store.js";
+import type {
+  CredentialEntry,
+  CredentialMutation,
+  CredentialQuery,
+  CredentialsStore,
+} from "../store.js";
 
 export interface EnvCredentialsStoreOptions {
   /**
@@ -135,6 +140,32 @@ class EnvCredentialsStore implements CredentialsStore {
       }
     }
     return out;
+  }
+
+  // ── Store seam. `query({ namespace })` projects the namespace's entries
+  // (enumerate its keys, then read each value). A namespace-less query returns
+  // `[]`: env-var name mangling (the lossy `slug`) makes faithful
+  // `(namespace, key)` recovery from a bare prefix impossible — the same
+  // limitation `keys()` documents. `mutate` sets/deletes (subject to
+  // `{ writable }`).
+  async query(q: CredentialQuery | undefined, ctx: StoreCtx): Promise<readonly CredentialEntry[]> {
+    const namespace = q?.namespace;
+    if (namespace === undefined) return [];
+    const keys = await this.keys(namespace, ctx);
+    const entries: CredentialEntry[] = [];
+    for (const key of keys) {
+      const value = await this.get(namespace, key, ctx);
+      if (value !== undefined) entries.push({ namespace, key, value });
+    }
+    return entries;
+  }
+
+  async mutate(m: CredentialMutation, ctx: StoreCtx): Promise<void> {
+    if ("set" in m) {
+      await this.set(m.set.namespace, m.set.key, m.set.value, ctx);
+    } else {
+      await this.delete(m.delete.namespace, m.delete.key, ctx);
+    }
   }
 }
 

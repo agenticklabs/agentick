@@ -24,7 +24,13 @@
  * @see docs/proposals/v2/data-layer-plan.md §E11
  */
 
-import type { SessionRecord, SessionStore, SessionStoreQuery, StoreCtx } from "@agentick/spec-next";
+import type {
+  CollectionMutation,
+  SessionRecord,
+  SessionStore,
+  SessionStoreQuery,
+  StoreCtx,
+} from "@agentick/spec-next";
 import { MemoryCollection } from "@agentick/store-next";
 import { matchesScope } from "@agentick/utils-next";
 
@@ -100,5 +106,15 @@ export class InMemorySessionStore implements SessionStore {
   prune(before: number, ctx: StoreCtx): Promise<void> {
     // `prunePredicate` is configured above, so the generic's `prune` is present.
     return this.collection.prune!(before, ctx);
+  }
+
+  // ── Store seam — required now `CollectionStore extends Store`. Delegated to
+  // the composed `MemoryCollection`, which owns the seam over its `Map`.
+  query(query: SessionStoreQuery | undefined, ctx: StoreCtx): Promise<readonly SessionRecord[]> {
+    return this.collection.query(query, ctx);
+  }
+
+  mutate(m: CollectionMutation<SessionRecord>, ctx: StoreCtx): Promise<void> {
+    return this.collection.mutate(m, ctx);
   }
 }

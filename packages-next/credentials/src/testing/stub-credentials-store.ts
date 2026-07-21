@@ -20,7 +20,12 @@
 import { CredentialsBackendUnavailable, CredentialsWriteFailed } from "@agentick/spec-next";
 import type { StoreCtx } from "@agentick/spec-next";
 
-import type { CredentialsStore } from "../store.js";
+import type {
+  CredentialEntry,
+  CredentialMutation,
+  CredentialQuery,
+  CredentialsStore,
+} from "../store.js";
 
 export interface StubCredentialsStoreOptions {
   /** `(namespace, key)` → canned value. */
@@ -82,6 +87,36 @@ export function stubCredentialsStore(options: StubCredentialsStoreOptions): Cred
       }
       return out;
     },
+
+    // Store seam. `query({ namespace })` projects the seed's entries for that
+    // namespace (via the custom `keyOf` prefix); a namespace-less query returns
+    // `[]` (the stub can't split its custom composite key back). `mutate`
+    // mirrors `set`/`delete` — throws when read-only.
+    async query(
+      q: CredentialQuery | undefined,
+      _ctx: StoreCtx,
+    ): Promise<readonly CredentialEntry[]> {
+      const namespace = q?.namespace;
+      if (namespace === undefined) return [];
+      const prefix = keyOf(namespace, "");
+      const entries: CredentialEntry[] = [];
+      for (const [k, value] of seed) {
+        if (k.startsWith(prefix)) entries.push({ namespace, key: k.slice(prefix.length), value });
+      }
+      return entries;
+    },
+
+    async mutate(m: CredentialMutation, _ctx: StoreCtx): Promise<void> {
+      if (readOnly) {
+        throw new CredentialsWriteFailed({
+          namespace: "set" in m ? m.set.namespace : m.delete.namespace,
+          key: "set" in m ? m.set.key : m.delete.key,
+          cause: new Error("stubCredentialsStore is read-only"),
+        });
+      }
+      if ("set" in m) seed.set(keyOf(m.set.namespace, m.set.key), m.set.value);
+      else seed.delete(keyOf(m.delete.namespace, m.delete.key));
+    },
   } satisfies CredentialsStore & { backend: string };
 }
 
@@ -103,5 +138,7 @@ export function unavailableCredentialsStore(reason = "stub unavailable"): Creden
     delete: fail,
     has: fail,
     keys: fail,
+    query: fail,
+    mutate: fail,
   };
 }

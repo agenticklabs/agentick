@@ -35,7 +35,7 @@
  * @verifiedBy packages-next/store/src/__tests__/memory-collection.spec.ts
  */
 
-import type { CollectionMutation, CollectionStore, Store, StoreCtx } from "@agentick/spec-next";
+import type { CollectionMutation, CollectionStore, StoreCtx } from "@agentick/spec-next";
 import { createChangeNotifier, type ChangeEvent, type ChangeNotifier } from "@agentick/pubsub-next";
 
 /**
@@ -71,14 +71,11 @@ export interface MemoryCollectionConfig<T, Q, PruneArg = never> {
   readonly prunePredicate?: (item: T, arg: PruneArg) => boolean;
 }
 
-// TODO(store-cut2): collapse get/list/put/delete into query/mutate
-// profile sugar (make CollectionStore formally `extends Store`). Today
-// the two surfaces COEXIST additively — the profile methods for direct callers,
-// the seam for the harness-side View — so no store is forced to
-// reimplement query/mutate before the Cut 2 sweep.
-export class MemoryCollection<T, Q, PruneArg = never>
-  implements CollectionStore<T, Q, PruneArg>, Store<T, Q, CollectionMutation<T>>
-{
+// `CollectionStore` formally `extends Store<T, Q, CollectionMutation<T>>`, so
+// `query`/`mutate` (below) are required members of the same interface as the
+// `get`/`list`/`put`/`delete` sugar — one contract, the sugar delegating to the
+// seam over the same `Map`.
+export class MemoryCollection<T, Q, PruneArg = never> implements CollectionStore<T, Q, PruneArg> {
   readonly backend: string;
   private readonly items = new Map<string, T>();
   private readonly config: MemoryCollectionConfig<T, Q, PruneArg>;

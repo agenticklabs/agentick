@@ -43,6 +43,8 @@ function failingStore(failOnAppend: number): TimelineStore {
       if (appends >= failOnAppend) return Promise.reject(new Error("store append boom"));
       return inner.append(s, entries, ctx);
     },
+    query: (q, ctx) => inner.query(q, ctx),
+    mutate: (m, ctx) => inner.mutate(m, ctx),
   };
 }
 
@@ -200,6 +202,8 @@ describe("timeline.history() — cursored read (#187)", () => {
       append: (sid, e, ctx) => store.append(sid, e, ctx),
       keys: (ctx) => store.keys(ctx),
       delete: (sid, ctx) => store.delete(sid, ctx),
+      query: (q, ctx) => store.query(q, ctx),
+      mutate: (m, ctx) => store.mutate(m, ctx),
     };
     const h = stubTimelineHarness([], { store: bare });
     await h.append(messageEntry("a"));

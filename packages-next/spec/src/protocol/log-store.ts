@@ -1,10 +1,11 @@
 /**
- * LOG archetype — the append-only, ordered, cursored store port. **No nominal
- * `Store` base** (rejected over-taxonomy, data-layer plan §2.1): two structural
- * archetypes (log, collection) share a small set of characteristics (`backend`,
- * an enumerate verb, an optional `prune`, a per-store query, a conformance
- * suite). This file owns the **log** archetype port; its sibling is
- * {@link CollectionStore} (`./store.js`, keyed upsert + query).
+ * LOG archetype — the append-only, ordered, cursored store port. A formal
+ * PROFILE over {@link Store} (data-layer plan §2.1): `LogStore<T> extends
+ * Store<T, LogQuery, LogMutation<T>>`, so the append-only sugar
+ * (`read`/`history`/`append`/`keys`) rides the same `query`/`mutate` seam every
+ * store shares — `query` projects a log window ({@link LogQuery}), `mutate`
+ * appends ({@link LogMutation}). Its sibling profile is {@link CollectionStore}
+ * (`./store.js`, keyed upsert + query).
  *
  * `LogStore<T>` is the **Promise-shaped adopter store** — the durable backing a
  * store-backed *log* harness reads from and appends to (timeline today; any
@@ -49,6 +50,7 @@
  * @see docs/proposals/v2/data-layer-plan.md §2.1, §2.7
  */
 
+import type { Store } from "./store.js";
 import type { StoreCtx } from "./store-ctx.js";
 
 /**
@@ -62,6 +64,35 @@ export interface SeqTagged<T> {
   /** The stored entry, preserved opaquely by the store. */
   readonly entry: T;
 }
+
+/**
+ * The LOG profile's QUERY vocabulary — identifies a log plus an optional cursor
+ * window over it. The seam projection of the archetype's `read`/`history` sugar:
+ * `{ logKey }` alone projects the whole log (a {@link LogStore.read}); adding
+ * `fromSeq` / `limit` projects a cursored window (a {@link LogStore.history}
+ * slice with its `seq` tags dropped — the seam returns bare entries). Its fields
+ * are exactly the `read`/`history` parameters, hoisted into one serializable
+ * description. A `Store.query` of `undefined` identifies no log and projects
+ * nothing (`[]`) — a partitioned log has no "return all" without a `logKey`.
+ */
+export interface LogQuery {
+  /** The log to project (timeline's `logKey` is the `sessionId`). */
+  readonly logKey: string;
+  /** Cursored lower bound — entries with absolute `seq >= fromSeq`. Omit → from the start. */
+  readonly fromSeq?: number;
+  /** Cap on the number of entries projected. Omit → no cap. */
+  readonly limit?: number;
+}
+
+/**
+ * The LOG profile's MUTATION vocabulary — the single append write. {@link
+ * LogStore.append} is the only mutation; the log is otherwise append-only, so
+ * there is deliberately no `replace` / keyed-`delete` arm here. Log lifecycle
+ * (`delete`, `prune`) stays on the profile's own methods, off the seam.
+ */
+export type LogMutation<T> = {
+  readonly append: { readonly logKey: string; readonly entries: readonly T[] };
+};
 
 /**
  * LOG archetype — an **append-only, ordered, cursored** log keyed by a generic
@@ -81,7 +112,7 @@ export interface SeqTagged<T> {
  * network; the bundled in-memory default resolves synchronously inside
  * Promises.
  */
-export interface LogStore<T> {
+export interface LogStore<T> extends Store<T, LogQuery, LogMutation<T>> {
   /**
    * Append entries for a log, in order. **The only write** — the log is
    * otherwise append-only.
@@ -149,7 +180,4 @@ export interface LogStore<T> {
    * Optional: adapters with no erasure requirement omit it.
    */
   prune?(logKey: string, before: { seq: number }, ctx: StoreCtx): Promise<number>;
-
-  /** Self-identifying backend label for observability (e.g. `"memory"`, `"fs"`). */
-  readonly backend: string;
 }

@@ -36,13 +36,58 @@
  * @see #281 — CredentialsHarness substrate
  */
 
-import type { StoreCtx } from "@agentick/spec-next";
+import type { Store, StoreCtx } from "@agentick/spec-next";
+
+/**
+ * The credentials store's record — the `(namespace, key)` coordinate plus its
+ * opaque value. The `T` of the {@link Store} seam a `CredentialsStore` projects.
+ * `value` is `unknown`: the store marshals it (JSON for env / KV, opaque blob
+ * for keychain) and does NOT enforce a schema — that is the calling harness's
+ * job. The value-projecting ergonomic surface (`get<V>`) narrows it per call.
+ */
+export interface CredentialEntry {
+  readonly namespace: string;
+  readonly key: string;
+  readonly value: unknown;
+}
+
+/**
+ * The credentials store's {@link Store} QUERY vocabulary — scope a projection to
+ * one namespace (`{ namespace }`) or, omitting it (`undefined` / `{}`), request
+ * every entry the backend can enumerate. The seam analogue of `keys(namespace)`,
+ * but projecting whole {@link CredentialEntry} records rather than bare keys.
+ */
+export interface CredentialQuery {
+  /** Scope to one namespace. Omit → every entry (backends that can enumerate all). */
+  readonly namespace?: string;
+}
+
+/**
+ * The credentials store's {@link Store} MUTATION vocabulary — a keyed `set`
+ * (upsert the entry) or a keyed `delete`. The seam analogue of the `set` /
+ * `delete` ergonomic methods.
+ */
+export type CredentialMutation =
+  | { readonly set: CredentialEntry }
+  | { readonly delete: { readonly namespace: string; readonly key: string } };
 
 /**
  * Adopter-pluggable credentials backend. The harness scopes every call
  * to a `(namespace, key)` pair — convention is `<harness>:<discriminator>`
  * (e.g. `mcp:server-foo`, `gateway:bearer`, `sandbox:runtime-bar`) — and
  * never lets one harness's namespace leak into another.
+ *
+ * ## A {@link Store} profile — conformant, not an island
+ *
+ * `CredentialsStore extends Store<CredentialEntry, CredentialQuery,
+ * CredentialMutation>`: it keeps its value-projecting ergonomic surface
+ * (`get<V>` / `set<V>` / `has` / `keys` / `delete` / `onChange`) but ALSO
+ * satisfies the universal seam — `query` projects {@link CredentialEntry}
+ * records under a namespace, `mutate` sets/deletes. Every store in the
+ * framework is `Store`; credentials is no exception. The seam is no more
+ * value-exposing than `get` already is: the store is server-resident (credential
+ * material never crosses the wire — see the file header), so projecting entries
+ * with their values is consistent with the existing server-side surface.
  *
  * Values are generic `T` at the call site; backends marshal as needed
  * (JSON-encode for env / KV, opaque blob for keychain, encrypted bytes
@@ -65,7 +110,27 @@ import type { StoreCtx } from "@agentick/spec-next";
  * conforms to the SAME shape. `onChange` stays ctx-less: it is a registration,
  * not a scoped data operation.
  */
-export interface CredentialsStore {
+export interface CredentialsStore extends Store<
+  CredentialEntry,
+  CredentialQuery,
+  CredentialMutation
+> {
+  /**
+   * SEAM READ — project {@link CredentialEntry} records shaped by a
+   * {@link CredentialQuery}. `{ namespace }` scopes to one namespace; an absent
+   * query requests every enumerable entry. The value-projecting analogue of
+   * `keys(namespace)`; `get` remains the single-key sugar. `ctx` — see
+   * {@link StoreCtx}; an identity-aware backend scopes to `ctx.principal`.
+   */
+  query(q: CredentialQuery | undefined, ctx: StoreCtx): Promise<readonly CredentialEntry[]>;
+
+  /**
+   * SEAM WRITE — apply a {@link CredentialMutation}. `{ set }` upserts the entry
+   * (the `set` sugar); `{ delete }` removes it (the `delete` sugar). `ctx` — see
+   * {@link StoreCtx}.
+   */
+  mutate(m: CredentialMutation, ctx: StoreCtx): Promise<void>;
+
   /**
    * Read stored credentials. Resolves `undefined` for absent keys —
    * the harness lifts this to `CredentialsNotFound` only when the

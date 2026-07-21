@@ -40,6 +40,7 @@
 import type { Pool as PgPool } from "pg";
 
 import type {
+  CollectionMutation,
   EventScope,
   StoreCtx,
   TaskRecord,
@@ -313,6 +314,16 @@ class PostgresTaskStore implements TaskStore {
         values: [before, TERMINAL_STATUSES],
       } satisfies SqlQuery);
     await this.run(query);
+  }
+
+  // ── Store seam — required now `CollectionStore extends Store`. `query` is the
+  // SQL WHERE projection ({@link list}); `mutate` is the UPSERT / DELETE arms.
+  query(query: TaskStoreQuery | undefined, ctx: StoreCtx): Promise<readonly TaskRecord[]> {
+    return this.list(query, ctx);
+  }
+
+  mutate(m: CollectionMutation<TaskRecord>, ctx: StoreCtx): Promise<void> {
+    return "put" in m ? this.put(m.put, ctx) : this.delete(m.delete, ctx);
   }
 }
 

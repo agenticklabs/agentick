@@ -35,7 +35,7 @@
  * @verifiedBy packages-next/store/src/__tests__/memory-log.spec.ts
  */
 
-import type { LogStore, SeqTagged, StoreCtx } from "@agentick/spec-next";
+import type { LogMutation, LogQuery, LogStore, SeqTagged, StoreCtx } from "@agentick/spec-next";
 
 /** Per-log record: the live entries plus the `seq` of `entries[0]`. */
 interface LogWindow<T> {
@@ -131,5 +131,28 @@ export class MemoryLog<T> implements LogStore<T> {
     // log lives; only `delete` ends the seq sequence.
     rec.baseSeq += cut;
     return Promise.resolve(cut);
+  }
+
+  // ─────────── Store seam (query / mutate over the log window) ───────────
+
+  /**
+   * The seam READ — a projection of a log window shaped by a {@link LogQuery}.
+   * `{ logKey }` alone projects the whole log; `fromSeq` / `limit` project a
+   * cursored window. Delegates to {@link history} and drops the `seq` tags (the
+   * seam returns bare entries). An `undefined` query identifies no log → `[]`.
+   */
+  async query(q: LogQuery | undefined, ctx: StoreCtx): Promise<readonly T[]> {
+    if (q === undefined) return [];
+    const tagged = await this.history(q.logKey, { fromSeq: q.fromSeq, limit: q.limit }, ctx);
+    return tagged.map((t) => t.entry);
+  }
+
+  /**
+   * The seam WRITE — the single append mutation ({@link LogMutation}). Delegates
+   * to {@link append}, discarding the assigned seqs to satisfy the
+   * `Promise<void>` seam.
+   */
+  async mutate(m: LogMutation<T>, ctx: StoreCtx): Promise<void> {
+    await this.append(m.append.logKey, m.append.entries, ctx);
   }
 }

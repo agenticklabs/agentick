@@ -57,7 +57,14 @@
 import { appendFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import type { SeqTagged, StoreCtx, TimelineEntry, TimelineStore } from "@agentick/timeline-next";
+import type {
+  LogMutation,
+  LogQuery,
+  SeqTagged,
+  StoreCtx,
+  TimelineEntry,
+  TimelineStore,
+} from "@agentick/timeline-next";
 
 export interface FsTimelineStoreOptions {
   /**
@@ -306,6 +313,19 @@ class FsTimelineStore implements TimelineStore {
       await this.writeHwm(sessionId, nextSeq);
       return removed;
     });
+  }
+
+  // ── Store seam — required now `LogStore extends Store`. `query` projects a log
+  // window (JSONL read/slice via {@link history}, `seq` tags dropped); `mutate`
+  // appends. `logKey` is the `sessionId`.
+  async query(q: LogQuery | undefined, ctx: StoreCtx): Promise<readonly TimelineEntry[]> {
+    if (q === undefined) return [];
+    const tagged = await this.history(q.logKey, { fromSeq: q.fromSeq, limit: q.limit }, ctx);
+    return tagged.map((t) => t.entry);
+  }
+
+  async mutate(m: LogMutation<TimelineEntry>, ctx: StoreCtx): Promise<void> {
+    await this.append(m.append.logKey, m.append.entries, ctx);
   }
 }
 

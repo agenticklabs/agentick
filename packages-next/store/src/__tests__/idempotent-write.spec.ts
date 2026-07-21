@@ -43,6 +43,11 @@ function countingCollection(): {
     },
     get: (key, ctx) => inner.get(key, ctx),
     list: (query, ctx) => inner.list(query, ctx),
+    // Seam reads/writes delegate straight to the inner collection — the
+    // decorator under test routes its own `mutate` through `put`/`delete`
+    // (the counted wrappers above), so these are never the counted path.
+    query: (query, ctx) => inner.query(query, ctx),
+    mutate: (m, ctx) => inner.mutate(m, ctx),
   };
   return { store, puts: () => puts, deletes: () => deletes };
 }

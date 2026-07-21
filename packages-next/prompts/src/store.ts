@@ -80,9 +80,9 @@ export class InMemoryPromptStore implements PromptStore {
     await this.collection.delete(name, ctx);
   }
 
-  // TODO(store-cut2): drops out once CollectionStore extends Store
-  // (Cut 2b) — the composed MemoryCollection already implements the seam, so these
-  // two delegates are the whole cost of satisfying `Store` today.
+  // `PromptStore` (a `CollectionStore`) now formally `extends Store`, so
+  // `query`/`mutate` are required members — delegated to the composed
+  // `MemoryCollection`, which owns the seam over its `Map`.
   query(
     q: PromptStoreQuery | undefined,
     ctx: StoreCtx,

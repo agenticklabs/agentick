@@ -1,10 +1,13 @@
 # Store — the foundational data-source seam
 
-**Status: DESIGN — for review. Nothing built.** The convergence pivot: the
-nine store-backed harnesses each hand-roll the same machine. This names the
-foundational pieces so the machine is *composed*, not copied — without
+**Status: BUILT — `Store` is the universal store contract.** The convergence
+pivot: the nine store-backed harnesses each hand-roll the same machine. This
+names the foundational pieces so the machine is *composed*, not copied — without
 collapsing the store itself (Ryan: "it is concerning that we might collapse the
-store").
+store"). As of Convergence Run 1 (2026-07-20), **every** store formally
+`extends Store` — the two archetypes (`CollectionStore`, `LogStore`) and the
+`CredentialsStore` are all `query`/`mutate` profiles over the ONE seam; there is
+no store-level straddle.
 
 ## The one idea
 
@@ -221,12 +224,22 @@ dissolves into `View.onChange`; conformance is the parity guardrail.
 
 ## The convergence cuts (staged, each net-removes + conformance-green)
 
-- **Cut 1 (foundation + proof):** land `Store` seam (spec), `MemoryStore`
-  (the in-memory Store) + `View` (store-next), and migrate
-  **knobs + state** onto them — collapsing their `CollectionProjection` + the
-  hand-rolled `KeyedNotifier`/`ChangeNotifier` into `View`. Measure lines
-  removed; knobs/state conformance + channel parity green. Other 7 harnesses stay
-  on the old surface (Cut 2+).
-- **Cut 2+:** fan out `View` to the remaining harnesses (augmented cases
-  compose view + sidecar); retire `CollectionProjection`; make
-  `CollectionStore`/`LogStore` formal profiles over the seam.
+- **Cut 1 (foundation + proof) — LANDED:** the `Store` seam (spec), `MemoryStore`
+  (the in-memory Store) + `View` (store-next), with **knobs + state** migrated
+  onto them — collapsing their `CollectionProjection` + the hand-rolled
+  `KeyedNotifier`/`ChangeNotifier` into `View`.
+- **Cut 2+ (`View` fan-out) — LANDED:** `View` fanned out to the remaining
+  harnesses (augmented cases compose view + sidecar); `CollectionProjection`
+  retired.
+- **Convergence Run 1 (`Store` universal) — LANDED (2026-07-20):**
+  `CollectionStore` and `LogStore` are now formal profiles that
+  `extends Store<T, Q, M>` (`CollectionStore<T,Q,PruneArg> extends Store<T, Q,
+  CollectionMutation<T>>`; `LogStore<T> extends Store<T, LogQuery,
+  LogMutation<T>>`), and `CredentialsStore extends Store<CredentialEntry,
+  CredentialQuery, CredentialMutation>`. Every concrete store — the in-memory
+  defaults, the generic decorators (`IdempotentCollectionStore`,
+  `JournalProjectedStore`), the Postgres/Fs adapters, and the credentials stores
+  — implements `query`/`mutate`. The archetype split (collection + log) is a
+  deliberate ergonomic distinction, both rooted in the ONE `Store` seam; the
+  profile methods (`get`/`list`/`put`/`delete`, `read`/`append`/`history`/
+  `keys`) stay as sugar. No store-level coexistence remains.

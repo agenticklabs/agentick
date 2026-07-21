@@ -82,9 +82,9 @@ export class InMemorySkillStore implements SkillStore {
     await this.collection.delete(name, ctx);
   }
 
-  // TODO(store-cut2): drops out once CollectionStore extends Store
-  // (Cut 2b) — the composed MemoryCollection already implements the seam, so these
-  // two delegates are the whole cost of satisfying `Store` today.
+  // `SkillStore` (a `CollectionStore`) now formally `extends Store`, so
+  // `query`/`mutate` are required members — delegated to the composed
+  // `MemoryCollection`, which owns the seam over its `Map`.
   query(q: SkillStoreQuery | undefined, ctx: StoreCtx): Promise<readonly Skill[]> {
     return this.collection.query(q, ctx);
   }

@@ -58,7 +58,13 @@
  */
 
 import { Chunk, Effect, Stream } from "effect";
-import type { CollectionStore, EventQuery, ProtocolEvent, StoreCtx } from "@agentick/spec-next";
+import type {
+  CollectionMutation,
+  CollectionStore,
+  EventQuery,
+  ProtocolEvent,
+  StoreCtx,
+} from "@agentick/spec-next";
 
 /**
  * The per-store parameterization for {@link JournalProjectedStore}. Everything
@@ -138,6 +144,17 @@ export class JournalProjectedStore<T, Q, PruneArg = never> implements Collection
   /** No-op — same reason as {@link put}. Reports `false` (nothing removed here). */
   delete(_key: string, _ctx: StoreCtx): Promise<boolean> {
     return Promise.resolve(false);
+  }
+
+  // ── Store seam. `query` IS the fold (delegates to {@link list}); `mutate` is
+  // a no-op, exactly like {@link put}/{@link delete} — an event-sourced store's
+  // writes are the journaled operations themselves, not seam calls.
+  query(query: Q | undefined, ctx: StoreCtx): Promise<readonly T[]> {
+    return this.list(query, ctx);
+  }
+
+  mutate(_m: CollectionMutation<T>, _ctx: StoreCtx): Promise<void> {
+    return Promise.resolve();
   }
 }
 

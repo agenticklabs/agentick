@@ -9,11 +9,11 @@
  *     PROFILE over that seam (keyed CRUD). The log archetype is `EventLog`
  *     (bus + journal specialize it) plus the timeline package's `TimelineStore`.
  *
- * The archetypes are structural profiles, not a nominal inheritance tree
- * (data-layer plan §2.1): they share a small set of characteristics (`backend`,
- * an enumerate verb, an optional `prune`, a per-store query type, a conformance
- * suite). In Cut 1 they do NOT yet formally `extend` {@link Store} — that is a
- * Cut 2 sweep; today `MemoryCollection` implements BOTH additively.
+ * The archetypes are ergonomic profiles rooted in {@link Store} (data-layer
+ * plan §2.1): both formally `extend` the seam and add a small set of
+ * characteristics (an enumerate verb, an optional `prune`, a per-store query
+ * type, a conformance suite). Every store implements `query`/`mutate`; the
+ * profile methods are sugar over that seam.
  *
  * Port home is spec-next (data-layer plan §6-D): the cross-package contract —
  * the harness consumes it, adapter packages implement it, only spec-next is a
@@ -66,12 +66,11 @@ export type CollectionMutation<T> = { readonly put: T } | { readonly delete: str
  * adopter's implementation.
  *
  * `CollectionStore` / `LogStore` are ergonomic PROFILES over this seam (keyed
- * CRUD, append-only cursored). In Cut 1 they do NOT yet formally `extend` it —
- * that is a Cut 2 sweep (it forces every store to implement `query`/`mutate`).
- * Today `MemoryCollection` implements BOTH additively: the `CollectionStore`
- * surface (`get`/`list`/`put`/`delete`) AND this seam (`query`/`mutate`), so
- * the harness-side `View` can target the seam while the profile methods stay
- * for direct callers.
+ * CRUD, append-only cursored) and both formally `extend` it — every store
+ * implements `query`/`mutate`, and the profile methods
+ * (`get`/`list`/`put`/`delete`, `read`/`append`/`history`/`keys`) are sugar
+ * over the seam. The harness-side `View` targets the seam; direct callers reach
+ * for the profile methods.
  *
  * `query` accepts `Q | undefined` to match the entrenched `CollectionStore.list`
  * convention (omitting the query = "return all" / the single-record case) —
@@ -119,8 +118,19 @@ export interface Store<T, Q = void, M = never> {
  * `delete` returns `void | boolean` so both conventions conform: a store that
  * reports whether the key existed (`boolean`, like the timeline stores) and one
  * that treats delete as fire-and-forget (`void`, like the task store).
+ *
+ * A formal PROFILE over {@link Store}: `get`/`list`/`put`/`delete` are ergonomic
+ * sugar over the inherited `query`/`mutate` seam (`list` IS `query`;
+ * `put`/`delete` ARE the two arms of {@link CollectionMutation}). Every
+ * collection store therefore satisfies `Store<T, Q, CollectionMutation<T>>`,
+ * so archetype-agnostic infrastructure (a conformance runner, a wire projector)
+ * can target the seam while day-to-day callers reach for the sugar.
  */
-export interface CollectionStore<T, Q, PruneArg = never> {
+export interface CollectionStore<T, Q, PruneArg = never> extends Store<
+  T,
+  Q,
+  CollectionMutation<T>
+> {
   /**
    * Upsert — a later `put` of the same key replaces the record. `ctx` carries
    * the runtime scope across the Effect→Promise boundary (idempotency key,
@@ -135,6 +145,4 @@ export interface CollectionStore<T, Q, PruneArg = never> {
   delete(key: string, ctx: StoreCtx): Promise<void | boolean>;
   /** Optional GC. The argument shape is store-specific (`PruneArg`). `ctx` — see {@link StoreCtx}. */
   prune?(arg: PruneArg, ctx: StoreCtx): Promise<void>;
-  /** Self-identifying backend label for observability (`"memory"`, `"postgres"`, …). */
-  readonly backend: string;
 }

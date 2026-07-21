@@ -21,6 +21,7 @@
  */
 
 import type {
+  CollectionMutation,
   ResourceDeclarationRecord,
   ResourceStore,
   ResourceStoreQuery,
@@ -83,5 +84,18 @@ export class InMemoryResourceStore implements ResourceStore {
 
   async delete(key: string, ctx: StoreCtx): Promise<void> {
     await this.collection.delete(key, ctx);
+  }
+
+  // ── Store seam — required now `CollectionStore extends Store`. Delegated to
+  // the composed `MemoryCollection`, which owns the seam over its `Map`.
+  query(
+    query: ResourceStoreQuery | undefined,
+    ctx: StoreCtx,
+  ): Promise<readonly ResourceDeclarationRecord[]> {
+    return this.collection.query(query, ctx);
+  }
+
+  mutate(m: CollectionMutation<ResourceDeclarationRecord>, ctx: StoreCtx): Promise<void> {
+    return this.collection.mutate(m, ctx);
   }
 }

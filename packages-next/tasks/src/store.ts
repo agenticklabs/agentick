@@ -23,7 +23,13 @@
  * @see docs/proposals/v2/blueprint/68-persistent-tasks.md
  */
 
-import type { StoreCtx, TaskRecord, TaskStore, TaskStoreQuery } from "@agentick/spec-next";
+import type {
+  CollectionMutation,
+  StoreCtx,
+  TaskRecord,
+  TaskStore,
+  TaskStoreQuery,
+} from "@agentick/spec-next";
 import { MemoryCollection } from "@agentick/store-next";
 import { matchesScope } from "@agentick/utils-next";
 
@@ -83,5 +89,15 @@ export class InMemoryTaskStore implements TaskStore {
   prune(before: number, ctx: StoreCtx): Promise<void> {
     // `prunePredicate` is configured above, so the generic's `prune` is present.
     return this.collection.prune!(before, ctx);
+  }
+
+  // ── Store seam — required now `CollectionStore extends Store`. Delegated to
+  // the composed `MemoryCollection`, which owns the seam over its `Map`.
+  query(query: TaskStoreQuery | undefined, ctx: StoreCtx): Promise<readonly TaskRecord[]> {
+    return this.collection.query(query, ctx);
+  }
+
+  mutate(m: CollectionMutation<TaskRecord>, ctx: StoreCtx): Promise<void> {
+    return this.collection.mutate(m, ctx);
   }
 }

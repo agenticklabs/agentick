@@ -31,7 +31,7 @@
  * @verifiedBy packages-next/store/src/__tests__/idempotent-write.spec.ts
  */
 
-import type { CollectionStore, StoreCtx } from "@agentick/spec-next";
+import type { CollectionMutation, CollectionStore, StoreCtx } from "@agentick/spec-next";
 
 export class IdempotentCollectionStore<T, Q, PruneArg = never> implements CollectionStore<
   T,
@@ -73,6 +73,17 @@ export class IdempotentCollectionStore<T, Q, PruneArg = never> implements Collec
 
   list(query: Q | undefined, ctx: StoreCtx): Promise<readonly T[]> {
     return this.inner.list(query, ctx);
+  }
+
+  // ── Store seam. `query` is a read (never dedups) → straight to the inner
+  // store; `mutate` routes through this decorator's own `put`/`delete` so the
+  // seam write dedups on `ctx.opId` exactly as the sugar does.
+  query(q: Q | undefined, ctx: StoreCtx): Promise<readonly T[]> {
+    return this.inner.query(q, ctx);
+  }
+
+  mutate(m: CollectionMutation<T>, ctx: StoreCtx): Promise<void> {
+    return "put" in m ? this.put(m.put, ctx) : this.delete(m.delete, ctx).then(() => undefined);
   }
 
   /**

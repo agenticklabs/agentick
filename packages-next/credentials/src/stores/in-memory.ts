@@ -27,7 +27,12 @@
 import type { StoreCtx } from "@agentick/spec-next";
 import { MemoryCollection } from "@agentick/store-next";
 
-import type { CredentialsStore } from "../store.js";
+import type {
+  CredentialEntry,
+  CredentialMutation,
+  CredentialQuery,
+  CredentialsStore,
+} from "../store.js";
 
 // ASCII Unit Separator (US, 0x1F) — purpose-built field separator that
 // can't appear in any sensible namespace or key string. Explicit escape
@@ -36,35 +41,24 @@ import type { CredentialsStore } from "../store.js";
 const SEP = "\x1f";
 const compositeKey = (namespace: string, key: string): string => `${namespace}${SEP}${key}`;
 
-/**
- * The record `MemoryCollection` holds: the composite-addressed
- * `(namespace, key)` pair plus its opaque value. `namespace` + `key` are stored
- * as fields (not only encoded in the composite key) so `keys(namespace)`
- * enumeration and `onChange` decoding read them directly rather than splitting
- * the separator-encoded string.
- */
-interface CredentialEntry {
-  readonly namespace: string;
-  readonly key: string;
-  readonly value: unknown;
-}
-
-/** Query shape for `keys(namespace)` — filters the collection to one namespace. */
-interface CredentialQuery {
-  readonly namespace: string;
-}
-
+// `CredentialEntry` (the composite-addressed `(namespace, key)` + opaque value —
+// `namespace`/`key` stored as fields so `keys(namespace)` enumeration and
+// `onChange` decoding read them directly) and `CredentialQuery` are the store's
+// {@link Store} seam types; they live with the `CredentialsStore` port in
+// `../store.js`.
 class InMemoryCredentialsStore implements CredentialsStore {
   readonly backend = "in-memory" as const;
 
   private readonly collection = new MemoryCollection<CredentialEntry, CredentialQuery>({
     backend: "in-memory",
     keyOf: (e) => compositeKey(e.namespace, e.key),
-    // Namespace match — `list(undefined)` (no query) returns every entry; a
-    // `{ namespace }` query filters to that namespace. Matched on the stored
-    // field rather than a composite-key prefix so it can't false-positive on a
-    // namespace that is a string prefix of another.
-    matchQuery: (e, q) => q === undefined || e.namespace === q.namespace,
+    // Namespace match — `list(undefined)` (no query) OR a namespace-less query
+    // (`{}`) returns every entry; a `{ namespace }` query filters to that
+    // namespace. Matched on the stored field rather than a composite-key prefix
+    // so it can't false-positive on a namespace that is a string prefix of
+    // another.
+    matchQuery: (e, q) =>
+      q === undefined || q.namespace === undefined || e.namespace === q.namespace,
   });
 
   // The in-memory collection holds no identity-scoped state, so `ctx` is
@@ -90,6 +84,21 @@ class InMemoryCredentialsStore implements CredentialsStore {
   async keys(namespace: string, ctx: StoreCtx): Promise<readonly string[]> {
     const entries = await this.collection.list({ namespace }, ctx);
     return entries.map((e) => e.key);
+  }
+
+  // ── Store seam — delegates to the composed collection (which owns the seam
+  // over its `Map`). `query` projects entries under a namespace (or all when the
+  // query is omitted); `mutate` sets/deletes.
+  query(q: CredentialQuery | undefined, ctx: StoreCtx): Promise<readonly CredentialEntry[]> {
+    return this.collection.list(q, ctx);
+  }
+
+  mutate(m: CredentialMutation, ctx: StoreCtx): Promise<void> {
+    return "set" in m
+      ? this.collection.put(m.set, ctx)
+      : this.collection
+          .delete(compositeKey(m.delete.namespace, m.delete.key), ctx)
+          .then(() => undefined);
   }
 
   onChange(
