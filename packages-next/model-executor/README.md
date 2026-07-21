@@ -75,6 +75,38 @@ interruption of the provider call (via `withExternalAbort` + the `tryPromise`
 fiber signal), driven by `input.signal` — which the loop wires to
 `loop.abort()` / execution timeout.
 
+## The model call is a command (ADR 89 §1)
+
+The provider call is command-ified: `execute()` is the **`model:generate`**
+command (declared via `this.command`), and `executeStream()` is the
+**`model:generate_stream`** streaming command (declared via
+`this.commandStream`). Declaring them mints the full command machinery on the
+model call:
+
+- **Lifecycle hooks** — `onBefore/AfterModelGenerate` and
+  `onBefore/AfterModelGenerateStream` on the derived `CommandHooks` surface
+  (register via `exec.hook({ onBeforeModelGenerate })` or the `exec.hooks.*`
+  proxy). The `onBefore` half reshapes the `ExecuteInput`; the `onAfter` half
+  reshapes the returned raw.
+- **`guardGenerate`** — a `exec.guard((input, ctx) => …)` verdict gates the
+  model call (`proceed` / `veto` / `replace` / `defer`), composed outermost so
+  it denies before any provider I/O. For the streaming command the veto lands
+  before the first chunk.
+- **Journaling + the phase contract** — `model:command:generate[_stream]`
+  emits `requested` → `before` → `delta*` → `terminal` envelopes (surface
+  `model`) and is idempotency/journal-backed like every other command.
+- **Inbox-addressability** — `model:generate[_stream]` is reachable as an inbox
+  verb; the streaming command's inbox `run` drains to the final raw.
+
+The streaming command exposes the standard three consumption faces
+(`StreamCommand`): `.stream` (the `ExecutorStream` facade), `.fx` (the sink-fold
+twin the loop consumes — so the loop's per-tick model call rides the same
+cascade + hooks + guard), and `.run` (the inbox drain). The remaining verbs —
+`project` / `normalize` / `run` — stay plain `runOperation` operations under the
+`model:*` surface (`model:command:project` / `…:normalize` / `…:run`); `run` is
+the one op a loop tick fires on the non-streaming path (project/generate inline
+beneath it — one span per tick).
+
 ## API
 
 - `LanguageModelExecutor<TRaw, TChunk>` — the harness. Protocol surface
@@ -98,6 +130,13 @@ themselves live in `@agentick/model-next` as executable values
   `runExecutorConformance` against a synthetic scripted adapter.
 - `src/__tests__/base-effect-stream.spec.ts` — streaming pipeline,
   backpressure, abort, transform composition.
+- `src/__tests__/command-hooks.spec.ts` — the model verbs mint
+  `onBefore/AfterModel*` hooks that fire on the direct facades.
+- The `runExecutorConformance` "command-ified model call (ADR 89 §1)"
+  block (in `@agentick/spec-conformance-next`) — asserts `model:generate`
+  mints + fires its hooks, `guardGenerate` vetoes, the streaming command fires
+  `onAfterModelGenerateStream` at the terminal, and no `executor:*` op surface
+  survives. Run against BOTH the real executor and the fake.
 - `src/__tests__/fake-language-model-executor.spec.ts` +
   `conformance.spec.ts` — the scripted double satisfies the same
   protocol.

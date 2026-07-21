@@ -1,15 +1,16 @@
 /**
- * Executor command-lifecycle hooks (ADR 80/83). The model-path verbs
- * (`executor:project`, `executor:execute`, plus `run` / `normalize`) route
- * through `runOperation`, so the `CommandRegistry` augmentation in
+ * Executor command-lifecycle hooks (ADR 80/83/89). The model-path verbs
+ * (`model:project`, `model:generate`, plus `run` / `normalize`) route through
+ * the command cascade / `runOperation`, so the `CommandRegistry` augmentation in
  * `language-model-executor.ts` mints typed `onBefore/After<Verb>` hooks. These
  * tests prove the DIRECT facades fire their hooks:
  *
- *   - `onBeforeExecutorProject` fires when `project()` is called.
- *   - `onBeforeExecutorExecute` fires when `execute()` is called.
+ *   - `onBeforeModelProject` fires when `project()` is called.
+ *   - `onBeforeModelGenerate` fires when `execute()` is called (the model call
+ *     is now the `model:generate` command).
  *
- * The loop's hot path (`fx.run` → `runBody`) inlines project/execute beneath
- * the single `executor:run` op, so those sub-op hooks do NOT re-fire per tick
+ * The loop's hot path (`fx.run` → `runBody`) inlines project/generate beneath
+ * the single `model:run` op, so those sub-op hooks do NOT re-fire per tick
  * (by design) — hence the direct-facade drive here.
  */
 
@@ -84,12 +85,12 @@ const executeInput = (targetInput: LanguageModelInput): ExecuteInput<LanguageMod
 });
 
 describe("LanguageModelExecutor — command-lifecycle hooks (ADR 83)", () => {
-  it("onBeforeExecutorProject fires when project() is called", async () => {
+  it("onBeforeModelProject fires when project() is called", async () => {
     const exec = await makeExecutor();
     let fired = 0;
     let seen: unknown;
     const off = exec.hook({
-      onBeforeExecutorProject: (input) => {
+      onBeforeModelProject: (input) => {
         fired += 1;
         seen = input;
       },
@@ -105,10 +106,10 @@ describe("LanguageModelExecutor — command-lifecycle hooks (ADR 83)", () => {
     await exec.close();
   });
 
-  it("onBeforeExecutorExecute fires when execute() is called", async () => {
+  it("onBeforeModelGenerate fires when execute() is called", async () => {
     const exec = await makeExecutor();
     let fired = 0;
-    const off = exec.hooks.onBeforeExecutorExecute(() => {
+    const off = exec.hooks.onBeforeModelGenerate(() => {
       fired += 1;
     });
 
@@ -121,11 +122,11 @@ describe("LanguageModelExecutor — command-lifecycle hooks (ADR 83)", () => {
     await exec.close();
   });
 
-  it("onAfterExecutorProject sees the projected LanguageModelInput output", async () => {
+  it("onAfterModelProject sees the projected LanguageModelInput output", async () => {
     const exec = await makeExecutor();
     let seenOutput: unknown;
     const off = exec.hook({
-      onAfterExecutorProject: (output) => {
+      onAfterModelProject: (output) => {
         seenOutput = output;
       },
     });

@@ -247,7 +247,7 @@ describe("openai() adapter — streaming", () => {
     const { exec, bus } = await makeExecutor(stub, { stream: true });
 
     const fiber = Effect.runFork(
-      Stream.runCollect(Stream.take(bus.subscribe({ surface: "executor", phase: "delta" }), 4)),
+      Stream.runCollect(Stream.take(bus.subscribe({ surface: "model", phase: "delta" }), 4)),
     );
     await new Promise((r) => setImmediate(r));
 
@@ -487,12 +487,12 @@ describe("openai() adapter — journaled lifecycle", () => {
     const { exec, journal } = await makeExecutor(stub);
     await exec.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
     const chunk = await Effect.runPromise(
-      Stream.runCollect(journal.readByQuery({ surface: "executor" }, "beginning")),
+      Stream.runCollect(journal.readByQuery({ surface: "model" }, "beginning")),
     );
     const events = Array.from(Chunk.toReadonlyArray(chunk));
     const names = new Set(events.map((e) => `${e.name}.${e.phase}`));
-    expect(names.has("executor:command:run.requested")).toBe(true);
-    expect([...names].some((n) => n.startsWith("executor:command:run.terminal"))).toBe(true);
+    expect(names.has("model:command:run.requested")).toBe(true);
+    expect([...names].some((n) => n.startsWith("model:command:run.terminal"))).toBe(true);
   });
 });
 

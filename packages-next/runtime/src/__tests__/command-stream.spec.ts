@@ -25,7 +25,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { Effect, Stream } from "effect";
+import { Effect, Either, Stream } from "effect";
 import { waitFor } from "@agentick/utils-next/testing";
 import { HandlerError } from "@agentick/spec-next";
 import type {
@@ -33,6 +33,7 @@ import type {
   MessageHandlerError,
   OperationOrigin,
   ProtocolEvent,
+  SubstrateError,
 } from "@agentick/spec-next";
 import {
   BaseHarness,
@@ -65,11 +66,23 @@ declare module "../substrate/base-harness.js" {
 }
 
 class StreamTestHarness extends BaseHarness<"model"> {
-  /** Public streaming method (commandStream path — auto opId, sessionId scope). */
+  /** Public streaming face (`.stream` — commandStream path, auto opId, sessionId scope). */
   readonly generate: (
     input: GenInput,
     opts?: { readonly origin?: OperationOrigin },
   ) => AsyncStream<GenChunk, GenResult>;
+
+  /**
+   * The Effect-native sink-fold twin (`.fx`) — the SAME cascade-wrapped op the
+   * `.stream` face drives, composed in the caller's fiber. Phase 1B: this is the
+   * form the loop's model call consumes, so it MUST fire the same boundary hooks
+   * + guard.
+   */
+  readonly generateFx: (
+    input: GenInput,
+    sink: (chunk: GenChunk) => Effect.Effect<void>,
+    opts?: { readonly origin?: OperationOrigin },
+  ) => Effect.Effect<GenResult, SubstrateError, never>;
 
   /** In-fiber execution trace: `chunk:<t>` per sink, plus whatever hooks push. */
   readonly trace: string[] = [];
@@ -87,7 +100,7 @@ class StreamTestHarness extends BaseHarness<"model"> {
   ) {
     super("model", scopeId, journal, bus, inbox, {});
     if (opts.hooks) this.hook(opts.hooks);
-    this.generate = this.commandStream<GenInput, GenChunk, GenResult, never>({
+    const cmd = this.commandStream<GenInput, GenChunk, GenResult, never>({
       name: "model:generate_stream",
       description: "stream tokens, return the concatenation",
       scope: () => ({ sessionId: this.scopeId }),
@@ -110,6 +123,8 @@ class StreamTestHarness extends BaseHarness<"model"> {
           return input.tokens.join("");
         }),
     });
+    this.generate = cmd.stream;
+    this.generateFx = cmd.fx;
   }
 
   /** Declaring a second stream under the SAME verb → duplicate error. */
@@ -240,6 +255,58 @@ describe("commandStream — boundary hooks (before → chunks → after → term
     expect(terminals[0]?.outcome).toBe("succeeded");
     expect((terminals[0]?.payload as { result?: unknown } | undefined)?.result).toBe(result);
     expect(result).toBe("xyz");
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// The `.fx` sink-fold twin fires the SAME cascade (Phase 1B)
+// ────────────────────────────────────────────────────────────────────────────
+
+describe("commandStream — the .fx sink-fold twin (Phase 1B)", () => {
+  it("fx(input, sink) fires the SAME boundary hooks + forwards chunks to the sink", async () => {
+    const { h } = await mkHarness();
+    h.hook({
+      onBeforeModelGenerateStream: (i) => {
+        h.trace.push("before");
+        return i;
+      },
+      onAfterModelGenerateStream: (o) => {
+        h.trace.push("after");
+        return o;
+      },
+    });
+    const forwarded: GenChunk[] = [];
+    // Compose the twin in-fiber (the loop's shape) — no Queue/iterator bridge.
+    const result = await Effect.runPromise(
+      h.generateFx({ tokens: ["a", "b"] }, (c) => Effect.sync(() => forwarded.push(c))),
+    );
+    expect(result).toBe("ab");
+    expect(forwarded).toEqual(["a", "b"]);
+    // The cascade wraps the twin identically to the stream face: before → chunks
+    // → after (the boundary hooks fired, proving the model call gets them).
+    expect(h.trace).toEqual(["before", "chunk:a", "chunk:b", "after"]);
+  });
+
+  it("a guard veto on the harness rejects the fx twin before the body runs", async () => {
+    const { h } = await mkHarness();
+    h.guard(() => ({ kind: "veto", reason: "locked" }));
+    const forwarded: GenChunk[] = [];
+    // The veto lands on the Effect failure channel (guards compose outermost).
+    // `Effect.either` surfaces the raw error un-wrapped (a standalone
+    // `runPromise` would box it in a FiberFailure).
+    const outcome = await Effect.runPromise(
+      Effect.either(
+        h.generateFx({ tokens: ["a", "b"] }, (c) => Effect.sync(() => forwarded.push(c))),
+      ),
+    );
+    expect(Either.isLeft(outcome)).toBe(true);
+    if (Either.isLeft(outcome)) {
+      expect(outcome.left).toBeInstanceOf(OperationOutcomeError);
+      expect((outcome.left as OperationOutcomeError).outcome).toBe("vetoed");
+    }
+    // No chunk reached the sink; the body never ran.
+    expect(forwarded).toEqual([]);
+    expect(h.trace).toEqual([]);
   });
 });
 

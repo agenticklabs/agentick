@@ -185,7 +185,7 @@ describe("BaseLanguageModelExecutor — Effect.Stream pipeline", () => {
 
     let seenAnyDelta = false;
     const subFiber = Effect.runFork(
-      Stream.runForEach(bus.subscribe({ surface: "executor" }), (env) =>
+      Stream.runForEach(bus.subscribe({ surface: "model" }), (env) =>
         Effect.sync(() => {
           if (env.phase === "delta") seenAnyDelta = true;
         }),

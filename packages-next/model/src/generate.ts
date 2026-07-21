@@ -21,7 +21,7 @@
  * `generateStream` mirrors the executor's streaming fold exactly —
  * mapChunk → transform pipeline → synthetic message-start guard →
  * accumulator apply — so the delta vocabulary observed here is
- * identical to what `app.events({ surface: "executor" })` carries.
+ * identical to what `app.events({ surface: "model" })` carries.
  *
  * @see docs/proposals/v2/blueprint/52-executors-and-model-adapters.md
  */

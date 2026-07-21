@@ -372,7 +372,7 @@ export function runExecutorConformance(factory: ExecutorConformanceFactory): voi
 
       const collected: unknown[] = [];
       Effect.runFork(
-        bus.subscribe({ surface: "executor", phase: "delta" }).pipe(
+        bus.subscribe({ surface: "model", phase: "delta" }).pipe(
           Stream.tap((evt) =>
             Effect.sync(() => {
               collected.push(evt);
@@ -430,6 +430,124 @@ export function runExecutorConformance(factory: ExecutorConformanceFactory): voi
         .map((b) => b.text)
         .join("");
       expect(streamText).toBe(runText);
+    });
+  });
+
+  // ============================================================================
+  // ADR 89 §1 — the command-ified model call. `execute` is the `model:generate`
+  // command; `executeStream` the `model:generate_stream` command. Every
+  // conformant executor is a BaseHarness, so the model call rides the ONE
+  // interceptor cascade: the derived `onBefore/AfterModelGenerate[Stream]` hooks
+  // + `.guard` (`guardGenerate`) apply to it, and its lifecycle envelopes carry
+  // `model:*` op names (the pre-1B `executor:*` surface is gone).
+  // ============================================================================
+
+  describe("ExecutorProtocol — command-ified model call (ADR 89 §1)", () => {
+    // The interceptor surface every conformant executor inherits from
+    // BaseHarness. The registry augmentation that types the model verbs lives in
+    // the executor package (not here), so the hook keys are supplied untyped.
+    interface Interceptable {
+      hook(config: Record<string, unknown>): () => void;
+      guard(decide: (input: unknown, ctx: unknown) => unknown): () => void;
+    }
+    const interceptable = (e: LanguageModelExecutor): Interceptable =>
+      e as unknown as Interceptable;
+
+    it("execute() mints model:generate — onBefore sees the input, onAfter the result", async () => {
+      const { executor } = await factory({ harnessId: "ex-cmd-1", scripted: mkScripted("cmd") });
+      let beforeInput: unknown;
+      let afterOutput: unknown;
+      const off = interceptable(executor).hook({
+        onBeforeModelGenerate: (input: unknown) => {
+          beforeInput = input;
+        },
+        onAfterModelGenerate: (output: unknown) => {
+          afterOutput = output;
+        },
+      });
+      const projected = await executor.project({
+        compiled: mkRenderedTree(),
+        target: mkTarget(),
+        tools: [],
+      });
+      await executor.execute({ targetInput: projected, target: mkTarget() });
+      off();
+      // onBefore observed the ExecuteInput (carries `targetInput`); onAfter the raw.
+      expect(beforeInput).toBeDefined();
+      expect((beforeInput as { targetInput?: unknown }).targetInput).toBeDefined();
+      expect(afterOutput).toBeDefined();
+    });
+
+    it("guardGenerate: a veto rejects execute() before the provider runs (project untouched)", async () => {
+      const { executor } = await factory({ harnessId: "ex-cmd-2", scripted: mkScripted() });
+      // Veto ONLY the model call — its input is the ExecuteInput (has
+      // `targetInput`), unlike project/normalize/run — so `project()` still runs.
+      const off = interceptable(executor).guard((input) =>
+        input !== null && typeof input === "object" && "targetInput" in input
+          ? { kind: "veto", reason: "locked" }
+          : undefined,
+      );
+      const projected = await executor.project({
+        compiled: mkRenderedTree(),
+        target: mkTarget(),
+        tools: [],
+      });
+      await expect(
+        executor.execute({ targetInput: projected, target: mkTarget() }),
+      ).rejects.toBeTruthy();
+      off();
+    });
+
+    it("executeStream yields the iterator + fires onAfterModelGenerateStream at the terminal", async () => {
+      const { executor } = await factory({
+        harnessId: "ex-cmd-3",
+        scripted: mkScripted("streamed"),
+      });
+      if (!executor.executeStream) throw new Error("executeStream not implemented");
+      let afterFired = false;
+      const off = interceptable(executor).hook({
+        onAfterModelGenerateStream: (o: unknown) => {
+          afterFired = true;
+          return o;
+        },
+      });
+      const projected = await executor.project({
+        compiled: mkRenderedTree(),
+        target: mkTarget(),
+        tools: [],
+      });
+      const stream = executor.executeStream({ targetInput: projected, target: mkTarget() });
+      expect(typeof stream[Symbol.asyncIterator]).toBe("function");
+      for await (const _ of stream) {
+        void _;
+      }
+      await drainRejection(stream.result);
+      off();
+      // onAfter fired once at the terminal — AFTER the iterator drained.
+      expect(afterFired).toBe(true);
+    });
+
+    it("lifecycle envelopes carry model:* op names — the executor:* surface is gone", async () => {
+      const { executor, bus } = await factory({ harnessId: "ex-cmd-4", scripted: mkScripted() });
+      const names: string[] = [];
+      Effect.runFork(
+        bus.subscribe({ surface: "model" }).pipe(
+          Stream.tap((e) => Effect.sync(() => names.push(e.name))),
+          Stream.runDrain,
+        ),
+      );
+      await new Promise((r) => setImmediate(r));
+      const projected = await executor.project({
+        compiled: mkRenderedTree(),
+        target: mkTarget(),
+        tools: [],
+      });
+      await executor.execute({ targetInput: projected, target: mkTarget() });
+      await new Promise((r) => setTimeout(r, 50));
+      // The model call minted a `model:command:generate` op...
+      expect(names.some((n) => n === "model:command:generate")).toBe(true);
+      // ...and NOTHING carries the pre-1B `executor:*` op surface.
+      expect(names.every((n) => !n.startsWith("executor:"))).toBe(true);
     });
   });
 }

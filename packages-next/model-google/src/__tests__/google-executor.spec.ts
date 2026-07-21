@@ -454,7 +454,7 @@ describe("google() adapter — streaming", () => {
     const { exec, bus } = await makeExecutor(stub, { stream: true });
 
     const fiber = Effect.runFork(
-      Stream.runCollect(Stream.take(bus.subscribe({ surface: "executor", phase: "delta" }), 3)),
+      Stream.runCollect(Stream.take(bus.subscribe({ surface: "model", phase: "delta" }), 3)),
     );
     await new Promise((r) => setImmediate(r));
 
@@ -922,7 +922,7 @@ describe("google() adapter — journaled lifecycle", () => {
     const { exec, journal } = await makeExecutor(stub);
     await exec.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
     const events = await Effect.runPromise(
-      Stream.runCollect(journal.readByQuery({ surface: "executor" }, "beginning")),
+      Stream.runCollect(journal.readByQuery({ surface: "model" }, "beginning")),
     );
     const phases = Array.from(Chunk.toReadonlyArray(events)).map((e) => e.phase);
     expect(phases).toContain("requested");

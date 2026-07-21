@@ -27,12 +27,17 @@
  */
 
 import { Effect } from "effect";
-import { BaseHarness, runHarnessProtocol, ulid } from "@agentick/runtime-next";
+import {
+  BaseHarness,
+  getContext,
+  runHarnessProtocol,
+  type StreamCommand,
+  ulid,
+} from "@agentick/runtime-next";
 import type {
   AbortExecutorInput,
   AdapterDelta,
   EventBus,
-  ExecuteError,
   ExecuteErrorChannel,
   ExecuteInput,
   ExecutionTarget,
@@ -146,6 +151,26 @@ export class FakeLanguageModelExecutor
   private scriptIndex = 0;
   private readonly lifecycle = new ExecutorLifecycle();
 
+  /**
+   * The command-ified provider call (ADR 89 §1) — the fake mirrors the real
+   * {@link import("./language-model-executor.js").LanguageModelExecutor} surface
+   * EXACTLY (a Meszaros fake typed against the executor protocol): `execute`
+   * is the `model:generate` command, `executeStream` the `model:generate_stream`
+   * streaming command. Declaring them mints `onBefore/AfterModelGenerate[Stream]`
+   * + `guardGenerate` + journaling on the model call, so the fake passes the
+   * same conformance as the real executor.
+   */
+  private readonly modelGenerate: (
+    input: ExecuteInput<LanguageModelInput>,
+    opts?: { readonly origin?: import("@agentick/spec-next").OperationOrigin },
+  ) => Promise<unknown>;
+  private readonly modelGenerateStream: StreamCommand<
+    ExecuteInput<LanguageModelInput>,
+    AdapterDelta,
+    unknown,
+    ExecuteErrorChannel
+  >;
+
   constructor(
     scopeId: string,
     journal: OperationJournal,
@@ -160,6 +185,34 @@ export class FakeLanguageModelExecutor
         ? options.scripted
         : [options.scripted as MockScriptedRun]
       : [];
+
+    // Command-ify the provider call (ADR 89 §1), matching the real executor.
+    this.modelGenerate = this.command<
+      ExecuteInput<LanguageModelInput>,
+      unknown,
+      ExecuteErrorChannel
+    >({
+      name: "model:generate",
+      description: "the non-streaming provider call (scripted)",
+      scope: (input) => input.scope ?? {},
+      handler: (input) => this.generateBody(input, null),
+    });
+    this.modelGenerateStream = this.commandStream<
+      ExecuteInput<LanguageModelInput>,
+      AdapterDelta,
+      unknown,
+      ExecuteErrorChannel
+    >({
+      name: "model:generate_stream",
+      description: "the streaming provider call (scripted)",
+      scope: (input) => input.scope ?? {},
+      body: (input, sink) => this.generateBody(input, sink),
+      stream: {
+        // Parity with the real executor: a ProviderAborted completes the
+        // iterator cleanly rather than throwing.
+        isCancellation: (cause) => cause instanceof ProviderAborted,
+      },
+    });
   }
 
   private nextScripted(): MockScriptedRun | undefined {
@@ -176,9 +229,9 @@ export class FakeLanguageModelExecutor
     input: ProjectInput,
   ): Effect.Effect<LanguageModelInput, ProjectionError | SubstrateError, never> {
     const op: Operation<ProjectInput, LanguageModelInput, ProjectionError> = {
-      opId: `executor:project:${ulid()}`,
-      surface: "executor",
-      name: "executor:command:project",
+      opId: `model:project:${ulid()}`,
+      surface: "model",
+      name: "model:command:project",
       scope: input.scope ?? {},
       input,
     };
@@ -196,91 +249,29 @@ export class FakeLanguageModelExecutor
   }
 
   execute(input: ExecuteInput<LanguageModelInput>): Promise<unknown> {
+    // Edge facade over the `model:generate` command.
     const executionId = input.scope?.executionId ?? `exec:${ulid()}`;
-    const op: Operation<ExecuteInput<LanguageModelInput>, unknown> = {
-      opId: `executor:execute:${executionId}`,
-      surface: "executor",
-      name: "executor:command:execute",
-      scope: input.scope ?? { executionId },
-      input,
-    };
-    return runHarnessProtocol(this.runOperation(op, (i) => this.executeBody(i, executionId)));
+    return this.modelGenerate({ ...input, scope: { ...(input.scope ?? {}), executionId } });
   }
 
   executeStream(input: ExecuteInput<LanguageModelInput>): ExecutorStream<unknown> {
-    const next = this.nextScripted();
-    const scriptedResult = next?.result ?? DEFAULT_REPLY;
-    const scriptedDeltas: ReadonlyArray<AdapterDelta> =
-      next?.deltas ?? defaultDeltasFor(scriptedResult);
-
-    // Mirror G6: bus envelopes fire on the streaming path alongside the
-    // iterator queue, so subscribers see the same deltas iterator
-    // consumers do.
+    // Edge facade = the `.stream` (AsyncStream) face of the `model:generate_stream`
+    // command. Boundary hooks + terminal + bus deltas fire exactly as the real
+    // executor's do.
     const executionId = input.scope?.executionId ?? `exec:${ulid()}`;
-    const streamOp: Operation<ExecuteInput<LanguageModelInput>, unknown> = {
-      opId: `executor:executeStream:${executionId}:${ulid()}`,
-      surface: "executor",
-      name: "executor:command:execute",
-      scope: input.scope ?? { executionId },
-      input,
-    };
-    const emitBus = (delta: AdapterDelta): void => {
-      void Effect.runPromise(
-        this.emitDeltaLazy(streamOp, () => delta).pipe(Effect.catchAll(() => Effect.void)),
-      );
-    };
-
-    // Yield scripted deltas through an async iterator backed by a queue.
-    // For the mock, deltas are known up-front; we just enqueue them all.
-    const queue: AdapterDelta[] = [...scriptedDeltas];
-    let aborted = false;
-    let abortReason: unknown = null;
-
-    // A scripted `outcome: "failed"` rejects `.result` — driving the loop's
-    // streaming failure path (`await stream.result` → failed terminal). Mirrors
-    // the `run()` failure scripting. Awaited by the loop, so no dangling reject.
-    const streamResult: Promise<unknown> =
-      next?.outcome === "failed"
-        ? Promise.reject(new ProviderRejected({ cause: "scripted stream failure" }))
-        : Promise.resolve(scriptedResult);
-
-    return {
-      result: aborted ? Promise.reject(abortReason ?? new Error("aborted")) : streamResult,
-      abort(reason) {
-        aborted = true;
-        abortReason = reason ?? "aborted";
-      },
-      [Symbol.asyncIterator]() {
-        let index = 0;
-        return {
-          next: async (): Promise<IteratorResult<AdapterDelta>> => {
-            if (aborted) {
-              return { value: undefined as unknown as AdapterDelta, done: true };
-            }
-            if (index >= queue.length) {
-              return { value: undefined as unknown as AdapterDelta, done: true };
-            }
-            const value = queue[index]!;
-            index += 1;
-            emitBus(value);
-            return { value, done: false };
-          },
-          return: async (): Promise<IteratorResult<AdapterDelta>> => {
-            aborted = true;
-            return { value: undefined as unknown as AdapterDelta, done: true };
-          },
-        };
-      },
-    };
+    return this.modelGenerateStream.stream({
+      ...input,
+      scope: { ...(input.scope ?? {}), executionId },
+    });
   }
 
   private normalizeFx(
     input: NormalizeInput<unknown>,
   ): Effect.Effect<LanguageModelExecutionResult, NormalizeError | SubstrateError, never> {
     const op: Operation<NormalizeInput<unknown>, LanguageModelExecutionResult, NormalizeError> = {
-      opId: `executor:normalize:${ulid()}`,
-      surface: "executor",
-      name: "executor:command:normalize",
+      opId: `model:normalize:${ulid()}`,
+      surface: "model",
+      name: "model:command:normalize",
       scope: input.scope ?? {},
       input,
     };
@@ -329,12 +320,12 @@ export class FakeLanguageModelExecutor
     const tickId = input.scope?.tickId;
     const opId =
       tickId !== undefined
-        ? `executor:run:${executionId}:${tickId}`
-        : `executor:run:${executionId}:${ulid()}`;
+        ? `model:run:${executionId}:${tickId}`
+        : `model:run:${executionId}:${ulid()}`;
     const op: Operation<RunInput, ExecutorTerminal<LanguageModelExecutionResult>, ExecutorError> = {
       opId,
-      surface: "executor",
-      name: "executor:command:run",
+      surface: "model",
+      name: "model:command:run",
       scope: { ...(input.scope ?? {}), executionId },
       input,
     };
@@ -342,38 +333,20 @@ export class FakeLanguageModelExecutor
   }
 
   /**
-   * Sink-fold streaming twin — drives the scripted deltas once, invoking
-   * `sink` per delta, and succeeds with the scripted raw (or fails on a
-   * scripted `outcome: "failed"`, mirroring the facade's `.result` reject).
+   * Sink-fold streaming twin — the `.fx` face of the `model:generate_stream`
+   * command. Composes in the caller's fiber; the command cascade (guard +
+   * `onBefore/AfterModelGenerateStream`) wraps the {@link generateBody} run.
+   * This is the form the loop's per-tick model call consumes.
    */
   private executeStreamFx(
     input: ExecuteInput<LanguageModelInput>,
     sink: (delta: AdapterDelta) => Effect.Effect<void>,
   ): Effect.Effect<unknown, ExecuteErrorChannel | SubstrateError, never> {
-    const next = this.nextScripted();
-    const scriptedResult = next?.result ?? DEFAULT_REPLY;
-    const scriptedDeltas: ReadonlyArray<AdapterDelta> =
-      next?.deltas ?? defaultDeltasFor(scriptedResult);
     const executionId = input.scope?.executionId ?? `exec:${ulid()}`;
-    const streamOp: Operation<ExecuteInput<LanguageModelInput>, unknown> = {
-      opId: `executor:executeStream:${executionId}:${ulid()}`,
-      surface: "executor",
-      name: "executor:command:execute",
-      scope: input.scope ?? { executionId },
-      input,
-    };
-    const failed = next?.outcome === "failed";
-    return Effect.gen(this, function* () {
-      for (const delta of scriptedDeltas) {
-        yield* sink(delta);
-        // Bus parity with the facade — observability subscribers see deltas.
-        yield* this.emitDeltaLazy(streamOp, () => delta).pipe(Effect.catchAll(() => Effect.void));
-      }
-      if (failed) {
-        return yield* Effect.fail(new ProviderRejected({ cause: "scripted stream failure" }));
-      }
-      return scriptedResult as unknown;
-    });
+    return this.modelGenerateStream.fx(
+      { ...input, scope: { ...(input.scope ?? {}), executionId } },
+      sink,
+    );
   }
 
   run(input: RunInput): Promise<ExecutorTerminal<LanguageModelExecutionResult>> {
@@ -400,21 +373,56 @@ export class FakeLanguageModelExecutor
 
   // ──────── internals ────────
 
-  private executeBody(
+  /**
+   * The shared `model:generate[_stream]` command body (ADR 89 §1). Runs INSIDE
+   * the command cascade, so the ambient {@link RuntimeContext} carries this op's
+   * `opId` / `parentOpId` / scope — rebuilt here into the {@link Operation}
+   * shape {@link emitDeltaLazy} needs for bus parity. `sink` is `null` for
+   * `model:generate` (non-streaming — returns the scripted raw) and the real
+   * delta sink for `model:generate_stream` (replays the scripted deltas to the
+   * sink AND the bus). A scripted `outcome: "failed"` fails the run — driving the
+   * loop's streaming/non-streaming failure path.
+   */
+  private generateBody(
     input: ExecuteInput<LanguageModelInput>,
-    executionId: string,
-  ): Effect.Effect<unknown, ExecuteError, never> {
+    sink: ((delta: AdapterDelta) => Effect.Effect<void>) | null,
+  ): Effect.Effect<unknown, ExecuteErrorChannel, never> {
     return Effect.gen(this, function* () {
+      const ctx = yield* getContext;
+      const executionId = input.scope?.executionId ?? ctx.executionId ?? `exec:${ulid()}`;
       if (this.lifecycle.isAborted(executionId)) {
-        return yield* Effect.fail<ExecuteError>(
+        return yield* Effect.fail<ExecuteErrorChannel>(
           new ProviderAborted({ reason: "aborted prior to execute" }),
         );
       }
       this.lifecycle.register({ executionId });
-
       try {
         const next = this.nextScripted();
-        return (next?.result ?? DEFAULT_REPLY) as unknown;
+        const scriptedResult = next?.result ?? DEFAULT_REPLY;
+        if (sink !== null) {
+          const opName = "model:command:generate_stream";
+          const streamOp: Operation<ExecuteInput<LanguageModelInput>, unknown> = {
+            opId: ctx.opId ?? `${opName}:${ulid()}`,
+            surface: "model",
+            name: opName,
+            ...(ctx.parentOpId !== undefined ? { parentOpId: ctx.parentOpId } : {}),
+            scope: input.scope ?? {},
+            input,
+          };
+          const scriptedDeltas: ReadonlyArray<AdapterDelta> =
+            next?.deltas ?? defaultDeltasFor(scriptedResult);
+          for (const delta of scriptedDeltas) {
+            yield* sink(delta);
+            // Bus parity — observability subscribers see the same deltas.
+            yield* this.emitDeltaLazy(streamOp, () => delta).pipe(
+              Effect.catchAll(() => Effect.void),
+            );
+          }
+        }
+        if (next?.outcome === "failed") {
+          return yield* Effect.fail(new ProviderRejected({ cause: "scripted stream failure" }));
+        }
+        return scriptedResult as unknown;
       } finally {
         this.lifecycle.unregister(executionId);
       }

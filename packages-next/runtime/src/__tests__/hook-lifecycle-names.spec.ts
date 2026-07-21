@@ -23,11 +23,13 @@ import { deriveHookNames } from "../index.js";
 const TYPED_VERBS: ReadonlyArray<readonly [op: string, onBefore: string, onAfter: string]> = [
   // ── Execution ──
   ["loop:command:run-execution", "onBeforeLoopRunExecution", "onAfterLoopRunExecution"],
-  // ── Model (executor) ──
-  ["executor:command:project", "onBeforeExecutorProject", "onAfterExecutorProject"],
-  ["executor:command:execute", "onBeforeExecutorExecute", "onAfterExecutorExecute"],
-  ["executor:command:run", "onBeforeExecutorRun", "onAfterExecutorRun"],
-  ["executor:command:normalize", "onBeforeExecutorNormalize", "onAfterExecutorNormalize"],
+  // ── Model (executor) — the provider call is command-ified (ADR 89 §1):
+  //    `generate` / `generate_stream` are `command` / `commandStream` verbs. ──
+  ["model:command:project", "onBeforeModelProject", "onAfterModelProject"],
+  ["model:command:generate", "onBeforeModelGenerate", "onAfterModelGenerate"],
+  ["model:command:generate_stream", "onBeforeModelGenerateStream", "onAfterModelGenerateStream"],
+  ["model:command:normalize", "onBeforeModelNormalize", "onAfterModelNormalize"],
+  ["model:command:run", "onBeforeModelRun", "onAfterModelRun"],
   // ── Compile (reconciler) ──
   ["reconciler:command:render-tree", "onBeforeReconcilerRenderTree", "onAfterReconcilerRenderTree"],
   ["reconciler:command:mount", "onBeforeReconcilerMount", "onAfterReconcilerMount"],

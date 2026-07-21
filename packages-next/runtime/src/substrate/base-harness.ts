@@ -127,6 +127,38 @@ export type { BeforeHook, AfterHook } from "@agentick/spec-next";
 export type { AsyncStream } from "@agentick/spec-next";
 
 /**
+ * The three consumption faces {@link BaseHarness.commandStream} returns for one
+ * declared streaming verb — all driving the SAME cascade-wrapped operation
+ * (guard → onBefore(input) → body → onAfter(R)), differing ONLY in how the
+ * caller consumes the one run:
+ *
+ *   - **`fx`** — the Effect-native **sink-fold twin** (`fx(input, sink) =>
+ *     Effect<R>`). EXACTLY the internal cascade-wrapped body, un-run and without
+ *     the Queue/fork bridge — so an in-fiber caller (the loop's per-tick model
+ *     call) composes it with `yield*` and the model call rides the SAME
+ *     interceptor cascade + boundary hooks + guard. This is why the loop's
+ *     streaming model call gets `onBefore/AfterModelGenerateStream` + guard.
+ *   - **`stream`** — the JS async-iterable edge: `for await` drains the chunks,
+ *     `.result` resolves to `R`. Projects `fx` onto {@link AsyncStream} via
+ *     `runHarnessStream`, threading the streaming-edge policy (`def.stream`).
+ *   - **`run`** — the drain-to-`R` Promise (no-op sink), the shape an
+ *     inbox/remote caller of the declared verb gets. The boundary hooks +
+ *     terminal fire exactly once, identically to the other two faces.
+ */
+export interface StreamCommand<I, Chunk, R, E = never> {
+  readonly stream: (
+    input: I,
+    opts?: { readonly origin?: OperationOrigin },
+  ) => AsyncStream<Chunk, R>;
+  readonly fx: (
+    input: I,
+    sink: (chunk: Chunk) => Effect.Effect<void>,
+    opts?: { readonly origin?: OperationOrigin },
+  ) => Effect.Effect<R, E | SubstrateError, never>;
+  readonly run: (input: I, opts?: { readonly origin?: OperationOrigin }) => Promise<R>;
+}
+
+/**
  * A declared command in a harness's registry (ADR 51): the wire-safe
  * descriptor plus the bound runner that manufactures the Operation and
  * routes it through `runOperation`.
@@ -1753,15 +1785,23 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
    * `onChunk<Verb>` seam over the sink) is Phase 2 — deliberately absent here.
    * 1A endows the boundary hooks + the iterator, nothing per-item.
    *
-   * **Two consumption modes, ONE cascade:**
-   *   - **The stream** — the returned public method yields
-   *     `AsyncStream<Chunk, R>`: `for await` drains the chunks in order and
-   *     `.result` resolves to the body's `R`. Both observe the same single run.
-   *   - **The registry `run`** (inbox-addressable) — a remote/inbox caller of
-   *     the declared verb gets the final `R`, not a stream: the registry `run`
-   *     drives the SAME operation with a no-op sink (chunks dropped) and
-   *     returns the drained `R`. The boundary hooks + terminal fire once,
-   *     identically to the stream path.
+   * **Three consumption faces, ONE cascade** — the returned {@link StreamCommand}
+   * exposes all three; each drives the same single cascade-wrapped run:
+   *   - **`fx`** — the Effect-native **sink-fold twin** (`fx(input, sink) =>
+   *     Effect<R>`). EXACTLY the internal cascade-wrapped body, un-run and
+   *     bridge-free, so an in-fiber caller (the loop's per-tick model call)
+   *     composes it with `yield*` — the model call rides the SAME
+   *     interceptor cascade, so its boundary hooks + guard fire (Phase 1B: this
+   *     is the form the loop consumes; without it the loop's model call would
+   *     get no hooks/guard).
+   *   - **`stream`** — the JS `AsyncStream<Chunk, R>`: `for await` drains the
+   *     chunks in order and `.result` resolves to the body's `R`. Both observe
+   *     the same single run. Projected from `fx` via {@link runHarnessStream},
+   *     threading the caller's `def.stream` streaming-edge policy.
+   *   - **`run`** (inbox-addressable) — a remote/inbox caller of the declared
+   *     verb gets the final `R`, not a stream: `run` drives the SAME operation
+   *     with a no-op sink (chunks dropped) and returns the drained `R`. The
+   *     boundary hooks + terminal fire once, identically to the other faces.
    *
    * **Abort.** `stream.abort(reason)` interrupts the operation fiber (the
    * kill/resume-critical path). Because `runOperation`'s settle step lets
@@ -1793,7 +1833,24 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
       input: I,
       sink: (chunk: Chunk) => Effect.Effect<void>,
     ) => Effect.Effect<R, E, never>;
-  }): (input: I, opts?: { readonly origin?: OperationOrigin }) => AsyncStream<Chunk, R> {
+    /**
+     * Streaming-edge policy for the `.stream` (AsyncStream) face ONLY — the
+     * `.fx` sink-fold twin and the `.run` drain ignore it (they have no
+     * Queue/iterator to police). Threads the {@link runHarnessStream} knobs a
+     * concrete streaming command needs: `queueCapacity` (backpressure depth),
+     * `isCancellation` (which body failures complete the iterator cleanly vs
+     * throw — e.g. `model:generate_stream` maps `ProviderAborted`), and the
+     * `onStart` / `onAbort` edge-bookkeeping hooks. Each hook is ALSO handed the
+     * invocation `input`, so per-call state (the executor's `executionId`) is
+     * reachable — `runHarnessStream`'s own hooks carry only the fiber/reason.
+     */
+    readonly stream?: {
+      readonly queueCapacity?: number;
+      readonly isCancellation?: (cause: unknown) => boolean;
+      readonly onStart?: (fiber: Fiber.RuntimeFiber<R, unknown>, input: I) => void;
+      readonly onAbort?: (reason: string, input: I) => void;
+    };
+  }): StreamCommand<I, Chunk, R, E> {
     const name = def.name;
     if (!name.startsWith(`${this.surface}:`)) {
       throw new CommandDeclarationError({
@@ -1856,17 +1913,40 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
       run: run as RegisteredCommand["run"],
     });
 
-    // The public method = the streaming-edge bridge over the cascade-wrapped
-    // body. `runHarnessStream` owns all the Queue/fork/iterator/`.result`
-    // machinery; here we supply only the sink-fold (the SAME `streamFx`).
-    // TODO(phase-2): thread stream-policy hooks (queueCapacity / isCancellation
-    // / onStart / onAbort) into `def` so a concrete streaming command (model
-    // generate_stream needs `isCancellation: ProviderAborted`) can override
-    // the bridge defaults — deferred with the per-chunk `onChunk<Verb>` seam.
-    return (input, opts) =>
-      runHarnessStream<Chunk, R>((sink) =>
-        streamFx(input, sink, { origin: opts?.origin ?? "host" }),
-      );
+    // The three consumption faces over the ONE cascade-wrapped body
+    // (`streamFx`). `fx` IS that Effect verbatim (the sink-fold the loop
+    // composes in-fiber, so the model call rides the cascade + hooks + guard);
+    // `stream` projects it onto the JS AsyncStream via `runHarnessStream`
+    // (Queue/fork/iterator/`.result`), threading the caller's `def.stream`
+    // streaming-edge policy (Phase 1B resolved the 1A phase-2 TODO — a concrete
+    // streaming command, e.g. `model:generate_stream`, now supplies
+    // `isCancellation: ProviderAborted` + `onStart`/`onAbort` bookkeeping);
+    // `run` drains it to `R` with a no-op sink.
+    return {
+      fx: (input, sink, opts) => streamFx(input, sink, { origin: opts?.origin ?? "host" }),
+      stream: (input, opts) =>
+        runHarnessStream<Chunk, R>(
+          (sink) => streamFx(input, sink, { origin: opts?.origin ?? "host" }),
+          {
+            ...(def.stream?.queueCapacity !== undefined
+              ? { queueCapacity: def.stream.queueCapacity }
+              : {}),
+            ...(def.stream?.isCancellation !== undefined
+              ? { isCancellation: def.stream.isCancellation }
+              : {}),
+            ...(def.stream?.onStart !== undefined
+              ? {
+                  onStart: (fiber: Fiber.RuntimeFiber<R, unknown>) =>
+                    def.stream!.onStart!(fiber, input),
+                }
+              : {}),
+            ...(def.stream?.onAbort !== undefined
+              ? { onAbort: (reason: string) => def.stream!.onAbort!(reason, input) }
+              : {}),
+          },
+        ),
+      run: (input, opts) => runHarnessProtocol(run(input, { origin: opts?.origin ?? "host" })),
+    };
   }
 
   /**

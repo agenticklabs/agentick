@@ -167,7 +167,7 @@ describe("google() adapter run — 100 text deltas (1 subscriber)", () => {
         exec = fixture.exec;
         bus = fixture.bus;
         consumer = Effect.runFork(
-          Stream.runDrain(bus.subscribe({ surface: "executor", phase: "delta" })),
+          Stream.runDrain(bus.subscribe({ surface: "model", phase: "delta" })),
         );
         await new Promise((r) => setImmediate(r));
       }

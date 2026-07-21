@@ -34,7 +34,9 @@ import { Chunk, Effect, Fiber, Stream } from "effect";
 
 import {
   BaseHarness,
+  getContext,
   type Middleware,
+  type StreamCommand,
   runHarnessProtocol,
   runHarnessStream,
   ulid,
@@ -87,34 +89,35 @@ import {
 
 import { ExecutorLifecycle, type ExecutorInFlightEntry } from "./executor-lifecycle.js";
 
-// ADR 80/83 — light up the two model-path verbs. Both already route through
-// `runOperation` via their `*Fx` twins (`projectFx` / the `execute` facade),
-// so typing them here mints `onBefore/AfterExecutorProject` and
-// `onBefore/AfterExecutorExecute` on the derived `CommandHooks` surface.
+// ADR 80/83/89 — light up the model-path verbs on the derived `CommandHooks`
+// surface. The provider call is command-ified (Phase 1B): `generate` /
+// `generate_stream` are declared via `this.command` / `this.commandStream`, so
+// they mint the boundary hooks AND are inbox-addressable; `project` /
+// `normalize` / `run` route through `runOperation` via their `*Fx` twins.
+// Typing each here mints `onBefore/After<Verb>`:
 //
-//   - `executor:project` — compile → `LanguageModelInput` (the
-//     media-reconciliation seam). Generics of the `projectFx` Operation.
-//   - `executor:execute` — the provider call. The `execute` facade builds
-//     `Operation<ExecuteInput<LanguageModelInput>, unknown>` — the raw
-//     provider output is erased (`TRaw`), so `output` is genuinely `unknown`.
+//   - `model:generate`        — the non-streaming provider call (`execute`).
+//     `output` is `unknown` — the raw provider output `TRaw` is erased.
+//   - `model:generate_stream` — the streaming provider call (`executeStream`,
+//     the loop-default path). Its `.fx` sink-fold twin is what the loop's
+//     per-tick model call consumes, so THAT call fires `onBefore/AfterModel-
+//     GenerateStream` + guard. `output` is the erased raw (`unknown`).
+//   - `model:project`         — compile → `LanguageModelInput` (media seam).
+//   - `model:normalize`       — provider output → canonical result.
+//   - `model:run`             — project → [generate] → normalize; the ONE seam
+//     a loop tick fires on the NON-streaming path (project/generate inline
+//     beneath it — one span per tick).
 //
-// These fire on the DIRECT facades (`executor.project(...)` /
-// `executor.execute(...)`). The loop's hot path (`executor.fx.run` →
-// `runBody`) inlines `projectImpl` / `executeBody` under the ONE
-// `executor:command:run` op, so a loop tick does NOT re-fire these sub-op
-// seams (by design — one span per tick).
+// A loop tick's STREAMING path fires `model:generate_stream` (with `project` /
+// `normalize` bracketing it as their own ops); the non-streaming path fires
+// `model:run` (project/generate inline beneath it — no sub-op re-fire).
 declare module "@agentick/runtime-next" {
   interface CommandRegistry {
-    "executor:project": { input: ProjectInput; output: LanguageModelInput };
-    "executor:execute": { input: ExecuteInput<LanguageModelInput>; output: unknown };
-    // The remaining model verbs (ADR 80/83). `run` (the loop's per-tick
-    // entry) and `normalize` (output normalization) each route through
-    // `runOperation` via their `*Fx` twins, so typing them mints
-    // `onBefore/After<Verb>` on `CommandHooks`. Generics are the `runFx` /
-    // `normalizeFx` Operations'. `run` is the ONE seam a loop tick fires
-    // (project/execute inline beneath it — see the note above).
-    "executor:run": { input: RunInput; output: ExecutorTerminal<LanguageModelExecutionResult> };
-    "executor:normalize": {
+    "model:project": { input: ProjectInput; output: LanguageModelInput };
+    "model:generate": { input: ExecuteInput<LanguageModelInput>; output: unknown };
+    "model:generate_stream": { input: ExecuteInput<LanguageModelInput>; output: unknown };
+    "model:run": { input: RunInput; output: ExecutorTerminal<LanguageModelExecutionResult> };
+    "model:normalize": {
       input: NormalizeInput<unknown>;
       output: LanguageModelExecutionResult;
     };
@@ -197,6 +200,25 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
     return this.lifecycle.aborted;
   }
 
+  /**
+   * The command-ified provider call (ADR 89 §1). `model:generate` is the
+   * non-streaming call; `model:generate_stream` the streaming (loop-default)
+   * call. Declaring them via `this.command` / `this.commandStream` mints
+   * `onBefore/AfterModelGenerate[Stream]` + `guardGenerate` + journaling on the
+   * model call. `execute()` / `executeStream()` are their edge facades; the
+   * loop consumes the streaming command's `.fx` sink-fold twin.
+   */
+  private readonly modelGenerate: (
+    input: ExecuteInput<LanguageModelInput>,
+    opts?: { readonly origin?: import("@agentick/spec-next").OperationOrigin },
+  ) => Promise<unknown>;
+  private readonly modelGenerateStream: StreamCommand<
+    ExecuteInput<LanguageModelInput>,
+    AdapterDelta,
+    TRaw,
+    ExecuteErrorChannel
+  >;
+
   constructor(
     scopeId: string,
     journal: OperationJournal,
@@ -209,6 +231,58 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
       interceptorParent: options.interceptorParent,
     });
     this.adapter = options.adapter;
+
+    // Command-ify the provider call (ADR 89 §1). Both commands share the
+    // `generateBody` pipeline; the non-streaming call passes a `null` sink
+    // (deltas still emit to the bus when `streamByDefault`), the streaming call
+    // passes the real sink. `scope` pins `executionId` (set by the facades) so
+    // the op's scope and `generateBody`'s in-flight bookkeeping agree.
+    this.modelGenerate = this.command<
+      ExecuteInput<LanguageModelInput>,
+      unknown,
+      ExecuteErrorChannel
+    >({
+      name: "model:generate",
+      description: "the non-streaming provider call",
+      scope: (input) => input.scope ?? {},
+      handler: (input) => this.generateBody(input, null),
+    });
+    this.modelGenerateStream = this.commandStream<
+      ExecuteInput<LanguageModelInput>,
+      AdapterDelta,
+      TRaw,
+      ExecuteErrorChannel
+    >({
+      name: "model:generate_stream",
+      description: "the streaming provider call (loop-default path)",
+      scope: (input) => input.scope ?? {},
+      body: (input, sink) => this.generateBody(input, sink),
+      // Streaming-edge policy for the `.stream` (AsyncStream) face. The `.fx`
+      // twin the loop consumes ignores these — its cancellation is fiber
+      // interrupt, its bookkeeping the in-fiber `generateBody`.
+      stream: {
+        queueCapacity: STREAM_QUEUE_CAPACITY,
+        // Cancellation completes the iterator cleanly; a real provider failure
+        // throws (#182). `.result` carries the aborted terminal either way.
+        isCancellation: (cause) => cause instanceof ProviderAborted,
+        onStart: (fiber, input) => {
+          const executionId = input.scope?.executionId;
+          if (executionId === undefined) return;
+          const entry = this.inFlight.get(executionId);
+          if (entry) entry.fiber = fiber as Fiber.RuntimeFiber<unknown, unknown>;
+        },
+        onAbort: (reason, input) => {
+          const executionId = input.scope?.executionId;
+          if (executionId === undefined) return;
+          this.aborted.add(executionId);
+          const entry = this.inFlight.get(executionId);
+          if (entry) {
+            entry.abortReason = reason;
+            entry.abort?.abort(reason);
+          }
+        },
+      },
+    });
   }
 
   // ──────────────────────────────────────────────────────────────────
@@ -400,9 +474,9 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
     input: ProjectInput,
   ): Effect.Effect<LanguageModelInput, ProjectionError | SubstrateError, never> {
     const op: Operation<ProjectInput, LanguageModelInput, ProjectionError> = {
-      opId: `executor:project:${ulid()}`,
-      surface: "executor",
-      name: "executor:command:project",
+      opId: `model:project:${ulid()}`,
+      surface: "model",
+      name: "model:command:project",
       scope: input.scope ?? {},
       input,
     };
@@ -420,19 +494,11 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
   }
 
   execute(input: ExecuteInput<LanguageModelInput>): Promise<unknown> {
+    // Edge facade over the `model:generate` command. Pin `executionId` into the
+    // input scope so the command's Operation and `generateBody`'s in-flight
+    // bookkeeping agree.
     const executionId = input.scope?.executionId ?? `exec:${ulid()}`;
-    const op: Operation<ExecuteInput<LanguageModelInput>, unknown> = {
-      opId: `executor:execute:${executionId}:${ulid()}`,
-      surface: "executor",
-      name: "executor:command:execute",
-      scope: input.scope ?? { executionId },
-      input,
-    };
-    return runHarnessProtocol(
-      this.runOperation(op, (i) =>
-        this.executeBody(i, executionId, op as Operation<unknown, unknown>, null),
-      ),
-    );
+    return this.modelGenerate({ ...input, scope: { ...(input.scope ?? {}), executionId } });
   }
 
   executeStream(input: ExecuteInput<LanguageModelInput>): ExecutorStream<TRaw> {
@@ -449,33 +515,15 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
       });
     }
 
-    // Facade = the streaming-edge bridge over the canonical `.fx.executeStream`
-    // twin. All the Queue/fork/Promise machinery lives in `runHarnessStream`;
-    // here we supply only the `build` (the twin) and the executor's policy
-    // hooks. `executionId` is pinned into the input so the twin's Operation
-    // and our inFlight bookkeeping agree.
+    // Edge facade = the `.stream` (AsyncStream) face of the `model:generate_stream`
+    // command. The command owns the Queue/fork/Promise machinery + the
+    // streaming-edge policy (queueCapacity / isCancellation / onStart / onAbort,
+    // declared in the constructor). `executionId` is pinned into the input so
+    // the command's Operation and the in-flight bookkeeping agree.
     const executionId = input.scope?.executionId ?? `exec:${ulid()}`;
-    const scopedInput: ExecuteInput<LanguageModelInput> = {
+    return this.modelGenerateStream.stream({
       ...input,
       scope: { ...(input.scope ?? {}), executionId },
-    };
-    return runHarnessStream<AdapterDelta, TRaw>((sink) => this.executeStreamFx(scopedInput, sink), {
-      queueCapacity: STREAM_QUEUE_CAPACITY,
-      // Cancellation completes the iterator cleanly; a real provider failure
-      // throws (#182). `.result` carries the aborted terminal either way.
-      isCancellation: (cause) => cause instanceof ProviderAborted,
-      onStart: (fiber) => {
-        const entry = this.inFlight.get(executionId);
-        if (entry) entry.fiber = fiber as Fiber.RuntimeFiber<unknown, unknown>;
-      },
-      onAbort: (reason) => {
-        this.aborted.add(executionId);
-        const entry = this.inFlight.get(executionId);
-        if (entry) {
-          entry.abortReason = reason;
-          entry.abort?.abort(reason);
-        }
-      },
     });
   }
 
@@ -489,9 +537,9 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
     input: NormalizeInput<unknown>,
   ): Effect.Effect<LanguageModelExecutionResult, NormalizeError | SubstrateError, never> {
     const op: Operation<NormalizeInput<unknown>, LanguageModelExecutionResult, NormalizeError> = {
-      opId: `executor:normalize:${ulid()}`,
-      surface: "executor",
-      name: "executor:command:normalize",
+      opId: `model:normalize:${ulid()}`,
+      surface: "model",
+      name: "model:command:normalize",
       scope: input.scope ?? {},
       input,
     };
@@ -514,12 +562,12 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
    * derived facade (`runHarnessProtocol` at the boundary). Both drive the
    * SAME Operation — `fx.run` is `run` minus the terminal `runPromise`.
    *
-   * Stage 3: `project` / `normalize` are twinned (the loop's streaming
-   * path composes project → executeStream → normalize in one fiber).
-   * `execute` / `abort` are NOT twinned — the loop never calls them
-   * directly (`run` subsumes `execute` on the non-streaming path; `abort`
-   * is a control-plane sync op), so they remain facade-only until a
-   * consumer needs the Effect twin.
+   * Stage 3 + ADR 89 §1: `project` / `normalize` are twinned (the loop's
+   * streaming path composes project → executeStream → normalize in one fiber).
+   * `executeStream` routes to the `model:generate_stream` command's `.fx`
+   * sink-fold twin — so the loop's per-tick model call rides that command's
+   * cascade (its `onBefore/AfterModelGenerateStream` hooks + guard fire).
+   * `abort` is a control-plane sync op (facade-only).
    */
   get fx(): ExecutorFx<LanguageModelInput, TRaw, LanguageModelExecutionResult> {
     return {
@@ -532,11 +580,14 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
   }
 
   /**
-   * The streaming-edge canonical twin (sink-fold). Drives the provider
-   * once through the SAME `runOperation(streamOp, executeBody(sink))` the
-   * JS facade {@link executeStream} builds — but un-run and without the
-   * Queue/fork/Promise bridge, so it composes in the caller's fiber. The
-   * facade adds only the {@link AsyncStream} projection on top of this.
+   * The streaming-edge canonical twin (sink-fold) — the `.fx` face of the
+   * `model:generate_stream` command. Composes in the caller's fiber (no
+   * Queue/fork/Promise bridge), driving the provider ONCE through the command's
+   * cascade: guard → `onBeforeModelGenerateStream(input)` → `generateBody(sink)`
+   * → `onAfterModelGenerateStream(raw)` → `terminal`. This is what the loop's
+   * per-tick model call consumes — so the model call gets the hooks + guard.
+   * The public {@link executeStream} facade adds the {@link AsyncStream}
+   * projection (the command's `.stream` face) on top of the same command.
    */
   private executeStreamFx(
     input: ExecuteInput<LanguageModelInput>,
@@ -552,15 +603,9 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
       );
     }
     const executionId = input.scope?.executionId ?? `exec:${ulid()}`;
-    const streamOp: Operation<ExecuteInput<LanguageModelInput>, TRaw, ExecuteErrorChannel> = {
-      opId: `executor:execute:${executionId}:${ulid()}`,
-      surface: "executor",
-      name: "executor:command:execute",
-      scope: input.scope ?? { executionId },
-      input,
-    };
-    return this.runOperation(streamOp, (i) =>
-      this.executeBody(i, executionId, streamOp as Operation<unknown, unknown>, sink),
+    return this.modelGenerateStream.fx(
+      { ...input, scope: { ...(input.scope ?? {}), executionId } },
+      sink,
     );
   }
 
@@ -580,12 +625,12 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
     const tickId = input.scope?.tickId;
     const opId =
       tickId !== undefined
-        ? `executor:run:${executionId}:${tickId}`
-        : `executor:run:${executionId}:${ulid()}`;
+        ? `model:run:${executionId}:${tickId}`
+        : `model:run:${executionId}:${ulid()}`;
     const op: Operation<RunInput, ExecutorTerminal<LanguageModelExecutionResult>, ExecutorError> = {
       opId,
-      surface: "executor",
-      name: "executor:command:run",
+      surface: "model",
+      name: "model:command:run",
       scope: { ...(input.scope ?? {}), executionId },
       input,
     };
@@ -605,6 +650,36 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
   // ──────────────────────────────────────────────────────────────────
   // Internals
   // ──────────────────────────────────────────────────────────────────
+
+  /**
+   * The `model:generate[_stream]` command body (ADR 89 §1). Runs INSIDE the
+   * command's `runOperation` cascade, so the ambient {@link RuntimeContext}
+   * already carries this op's `opId` / `parentOpId` / scope. Rebuilds the
+   * {@link Operation} shape {@link executeBody}'s in-flight delta emission needs
+   * from that ambient scope (the command primitive owns the real op and does not
+   * hand it to the handler), then delegates to the shared pipeline. `sink` is
+   * `null` for `model:generate` (non-streaming — deltas still emit to the bus
+   * when `streamByDefault`) and the real delta sink for `model:generate_stream`.
+   */
+  private generateBody(
+    input: ExecuteInput<LanguageModelInput>,
+    sink: ((delta: AdapterDelta) => Effect.Effect<void>) | null,
+  ): Effect.Effect<TRaw, ExecuteErrorChannel, never> {
+    return Effect.gen(this, function* () {
+      const ctx = yield* getContext;
+      const executionId = input.scope?.executionId ?? ctx.executionId ?? `exec:${ulid()}`;
+      const opName = sink !== null ? "model:command:generate_stream" : "model:command:generate";
+      const op: Operation<unknown, unknown> = {
+        opId: ctx.opId ?? `${opName}:${ulid()}`,
+        surface: "model",
+        name: opName,
+        ...(ctx.parentOpId !== undefined ? { parentOpId: ctx.parentOpId } : {}),
+        scope: input.scope ?? {},
+        input,
+      };
+      return yield* this.executeBody(input, executionId, op, sink);
+    });
+  }
 
   private executeBody(
     input: ExecuteInput<LanguageModelInput>,

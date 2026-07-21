@@ -216,7 +216,7 @@ describe("openai() adapter run — 100 text deltas (1 subscriber)", () => {
         exec = fixture.exec;
         bus = fixture.bus;
         consumer = Effect.runFork(
-          Stream.runDrain(bus.subscribe({ surface: "executor", phase: "delta" })),
+          Stream.runDrain(bus.subscribe({ surface: "model", phase: "delta" })),
         );
         // Allow the subscriber fiber to register.
         await new Promise((r) => setImmediate(r));
@@ -251,7 +251,7 @@ describe("openai() adapter run — 100 deltas + 1 sub, batching OFF (Phase B bas
         exec = fixture.exec;
         bus = fixture.bus;
         consumer = Effect.runFork(
-          Stream.runDrain(bus.subscribe({ surface: "executor", phase: "delta" })),
+          Stream.runDrain(bus.subscribe({ surface: "model", phase: "delta" })),
         );
         await new Promise((r) => setImmediate(r));
       }
@@ -283,7 +283,7 @@ describe("openai() adapter run — 100 deltas + 1 sub, batching ON (Phase B defa
         exec = fixture.exec;
         bus = fixture.bus;
         consumer = Effect.runFork(
-          Stream.runDrain(bus.subscribe({ surface: "executor", phase: "delta" })),
+          Stream.runDrain(bus.subscribe({ surface: "model", phase: "delta" })),
         );
         await new Promise((r) => setImmediate(r));
       }

@@ -1725,6 +1725,36 @@ blueprint's design decisions; this is execution-level).
 
 ### 2026-07-21
 
+- **Model-executor command-ification LANDED (model-harness §1, Phase 1B).** The model
+  call is now a real command: `execute → model:generate` (`this.command`),
+  `executeStream → model:generate_stream` (`this.commandStream`), so the per-tick model
+  call finally mints + fires `onBefore/AfterModelGenerate[Stream]` + `guardGenerate` +
+  journal — the actual §1 payoff (streaming itself was already plumbed via the send
+  handle). **`commandStream` extended (1A→1B):** now returns a `StreamCommand<I,Chunk,R,E>`
+  with THREE faces over the ONE cascade-wrapped body — `fx(input,sink)=>Effect<R>` (the
+  cascade-wrapped sink-fold the LOOP consumes in-fiber, so the model call rides the
+  interceptor cascade), `stream(input)=>AsyncStream<Chunk,R>` (public queue form, now
+  threading a `def.stream` streaming-edge policy — resolves the 1A phase-2 TODO), and
+  `run(input)=>Promise<R>` (inbox drain). The loop harness is UNCHANGED (still
+  `fx.executeStream(input,sink)`); the routing moved inside the executor's fx →
+  `modelGenerateStream.fx`. `project`/`normalize`/`run` stay Operations, renamed
+  `executor:* → model:*` (finishes the rename-pass transient — command forces
+  surface=`this.surface`="model"). **Conformance robust** (`spec-conformance/executor.ts`,
+  runs vs BOTH real + fake): model:generate mints/fires onBeforeModelGenerate,
+  guardGenerate vetoes execute() while leaving project() untouched, streaming yields the
+  iterator + fires onAfterModelGenerateStream, envelopes carry model:command:generate, no
+  executor:* op surface survives. **Fakes/stubs current:** FakeLanguageModelExecutor
+  command-ified identically (shared `generateBody`, passes the same conformance);
+  `/testing` scripted-adapter audited (pure adapter, no change); adapter executor specs +
+  benches (openai/google/anthropic) updated to surface="model". **kill/resume HARD GATE
+  green** (8 passed | 4 pg-skipped). Gates: typecheck --force 152/152 0-cached; 830 tests;
+  oxlint 0 errors (2 pre-existing anthropic warnings). Note: the 10 `executor:command:run`
+  literals remaining are generic query-compiler/bench MATCHER fixtures (arbitrary sample
+  namespace, self-consistent w/ paired negative assertions) — NOT stale op names; left
+  deliberately. **NEXT:** Phase 2 (per-chunk `onModelGenerateStreamChunk` observe/
+  transform/combine + flush-on-terminal); then loop/session as `commandStream` (streaming
+  all the way up); compiler-hooks (§4).
+
 - **`commandStream` substrate primitive LANDED (model-harness §1, Phase 1A).** First-class
   STREAMING command in `BaseHarness` (`commandStream<I,Chunk,R,E>`) — the fusion of
   `command`'s registry registration (mints `onBefore/After<Verb>` via ADR 80) +

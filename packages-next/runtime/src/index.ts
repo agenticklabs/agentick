@@ -56,6 +56,7 @@ export {
   type InterceptorKind,
   type Middleware,
   type OperationSignal,
+  type StreamCommand,
   type Unsubscribe,
 } from "./substrate/base-harness.js";
 export {

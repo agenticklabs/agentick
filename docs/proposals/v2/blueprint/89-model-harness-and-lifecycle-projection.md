@@ -26,7 +26,7 @@ never mint an ADR-80 command, so there are no `model:generate` hooks, no `guardG
 no journal entry, and `withRetry`/`withFallback`/`tapModel` stay **bespoke combinators**
 instead of `.use()` interceptors. (2) The reconciler's **`LifecycleStore` is a
 hand-curated 7-event subset**, fed by ~7 hard-coded `loop.notifyLifecycle(...)` calls —
-a bespoke observation mechanism the compiler owns instead of *projecting* the framework's.
+a bespoke observation mechanism the compiler owns instead of _projecting_ the framework's.
 
 Both dissolve into one decision: **command-ify the model call (`execute`/`executeStream`
 → `model:generate` / `model:generate_stream` commands on the existing executor harness;
@@ -36,7 +36,7 @@ make React lifecycle hooks the compiler registering ADR-83 interceptors (`observ
 declares programmatically.** A `useOn*` hook registers a callback (closing over component
 state via a ref), not a render, so it can observe, reshape, OR veto/defer an operation.
 No bespoke lifecycle store; any command is observable and interceptable; the model call
-gets hooks, a guard, interceptors, and journaling — by *name* (`onBeforeModelGenerate`),
+gets hooks, a guard, interceptors, and journaling — by _name_ (`onBeforeModelGenerate`),
 so they hold even as the per-adapter executor instance is swapped per tick.
 
 ## Actual architecture (the composition this ADR must respect)
@@ -68,7 +68,7 @@ loop.runExecution:
   loop's tick cycle.
 - **Tool executor — dual-driven.** Inside the loop on `result.toolCalls`, AND directly
   via `session.dispatch()` (`session/harness.ts:989`) — the host-door that invokes a
-  tool by name *without the model or the loop* (`audience:"user"` tools, procedures).
+  tool by name _without the model or the loop_ (`audience:"user"` tools, procedures).
   Intentional; means tool execution is NOT fully loop-contained.
 
 **Naming — it's the MODEL-EXECUTOR.** The runner is a sibling of `toolExecutor` and
@@ -94,10 +94,10 @@ adapter`:**
   SELECTION: which model-executor (hence which adapter) at which target. What `<Model>`
   builds and the loop resolves per tick.
 
-So "swap the model" is ambiguous: swap the adapter *inside* an executor, or swap the
-whole `RegisteredModel` *containing* an executor. Because a model swap can swap the
+So "swap the model" is ambiguous: swap the adapter _inside_ an executor, or swap the
+whole `RegisteredModel` _containing_ an executor. Because a model swap can swap the
 whole executor, anything that must **persist interceptors across a swap** has to sit
-*above* the `RegisteredModel` — above the executor. Today that stable layer is **the
+_above_ the `RegisteredModel` — above the executor. Today that stable layer is **the
 session** (it owns `executor` + `models` + per-tick `resolveModel`), which is why this
 ADR puts model-selection concerns on a `session.model` facade rather than inventing a
 new harness (see the Decision + the fork below).
@@ -129,6 +129,13 @@ The model call is the last hot-path op still outside the command-hook system.
 
 ### 1. Command-ify the model call on the EXISTING model-executor harness
 
+> **Status: LANDED** (Phase 1B, `feat/v2`) — `execute` → `model:generate`
+> (`this.command`), `executeStream` → `model:generate_stream`
+> (`this.commandStream`, exposing the `.fx` sink-fold twin the loop consumes);
+> `project` / `normalize` / `run` renamed to the `model:*` op surface. Mints
+> `onBefore/AfterModelGenerate[Stream]` + `guardGenerate` + journaling on the
+> model call. Real executor + `FakeLanguageModelExecutor` + conformance current.
+
 There is **no new `ModelHarness` layer** (the first draft's `BaseHarness<"model">` as a
 NEW layer is dropped — see the fork in §2). The `LanguageModelExecutor` (the
 model-executor, `BaseHarness<"model">` after the rename) is already the session-owned
@@ -146,7 +153,7 @@ command instead of an Operation:
 - **Hooks resolve by NAME, so they survive per-tick executor swaps.** The loop resolves
   a different `RegisteredModel` (hence a different executor instance) per tick; but a
   hook is registered as `onBeforeModelGenerate` at app/session scope and dispatched by
-  the command *name*, not the instance — so it applies to whichever executor issues the
+  the command _name_, not the instance — so it applies to whichever executor issues the
   command. This is why command-ifying the per-adapter executor is sufficient for
   hooks/guard/journal and a stable "model harness" instance is NOT required for them.
 - **What falls out, all standard, nothing bespoke:**
@@ -160,7 +167,7 @@ command instead of an Operation:
 ### 2. Model selection + swap — a `session.model` facade, NOT a new harness
 
 **The fork.** A model swap can swap the whole executor (a different adapter), so the ONE
-thing command-ifying the executor does *not* give you is **interceptors that persist
+thing command-ifying the executor does _not_ give you is **interceptors that persist
 across a `setModel` swap** (a cost-guard registered on executor-A is gone when you swap
 to executor-B). The first draft answered this with a new stable `BaseHarness<"model">`
 above the executor. **Rejected as over-layering:** the session ALREADY owns the stable
@@ -203,7 +210,7 @@ kill/resume and tick ordering must survive the wrapping.
 
 There is **no bespoke `LifecycleStore`**. React lifecycle hooks are the compiler
 registering **ADR-83 interceptors** on the constituent command harnesses — the
-*exact* mechanism a user uses programmatically. A `useOn*` hook does NOT register a
+_exact_ mechanism a user uses programmatically. A `useOn*` hook does NOT register a
 render; it registers a **callback** (a function) closing over the component's latest
 state via a ref (as `useOnToolEnd` already does with `ref.current`). The operation
 then invokes that callback, and — because it is a function, not a render — it can be
@@ -228,7 +235,7 @@ not passive observers.
 - **Any command is observable / interceptable** — the hardcoded 7-event list is gone.
   `model:generate`, `tick`, and every future command are uniformly available; the
   framework owns the plumbing (command hooks + the one interceptor primitive), the
-  compiler *projects* it, a dep-less compiler projects the identical source.
+  compiler _projects_ it, a dep-less compiler projects the identical source.
 
 The one discipline (not a limitation): **`observe` is non-blocking** (fire-and-forget —
 schedule the React update, return); **`transform`/`guard` run in the operation's
@@ -240,7 +247,7 @@ Two things the store did that must be preserved:
 
 - **Catch-up.** A component mounting mid-tick must see the current `tick-start`. This
   stays as a **thin cache in the compiler** (the last `tick-start`/`execution-start`,
-  replayed to late-registered observers) — but the *events* come from real hooks, not
+  replayed to late-registered observers) — but the _events_ come from real hooks, not
   a bespoke store.
 - **Unsubscribe.** Registration rides component lifecycle: the interceptor is registered
   when the React hook mounts and unsubscribed on unmount (returns an `Unsubscribe`,
@@ -256,7 +263,7 @@ Two things the store did that must be preserved:
 - **Cost / risk:** this touches the loop's hot path (per-tick `model:generate` +
   `tick` commands), streaming-as-a-command, and **kill/resume** (the tick barrier).
   It is a dedicated foundational pass, not an interleave — guarded by the tick-ordering
-  + kill/resume suite.
+  - kill/resume suite.
 - **Migration:** `LanguageModelExecutor`'s `project`/`normalize` survive as pure
   transforms; `execute`/`executeStream` become the `ModelHarness` command bodies. The
   loop's `input.executor`/`input.target` threading becomes `session.model` +

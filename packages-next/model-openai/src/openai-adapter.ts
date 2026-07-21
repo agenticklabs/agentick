@@ -158,7 +158,7 @@ export interface OpenAIAdapterOptions {
    *
    * The tags get stripped from the cleaned text stream and surfaced
    * as `custom-block-*` `AdapterDelta` events. Adopters subscribe via
-   * `app.events({surface: "executor", phase: "delta"})` or via the
+   * `app.events({surface: "model", phase: "delta"})` or via the
    * session's typed stream handle.
    *
    * Built on the same {@link StreamTagParser} primitive as

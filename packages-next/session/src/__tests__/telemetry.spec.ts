@@ -3,7 +3,7 @@
  *
  * Proves that `session.send`, run on an app-supplied telemetry runtime,
  * produces a NESTED trace tree: the composed loop is ONE Effect fiber, so
- * every downstream span (`executor:command:run`, `reconciler:command:
+ * every downstream span (`model:command:run`, `reconciler:command:
  * render-tree`, `tool:command:dispatch`) nests under the execution span
  * (`loop:command:run-execution`) via FiberRef `parentOpId` auto-threading.
  * Before Stage 3 the loop was ~40 independent `runPromise` roots — every
@@ -145,7 +145,7 @@ describe("Session telemetry (ADR 77 Stage 4) — the composed execution nests", 
     // the streaming path emits project/normalize, the non-streaming path emits
     // run — either way they must nest under the execution.
     const downstream = spans.filter(
-      (s) => s.name.startsWith("executor:command:") || s.name === "reconciler:command:render-tree",
+      (s) => s.name.startsWith("model:command:") || s.name === "reconciler:command:render-tree",
     );
     expect(downstream.length).toBeGreaterThan(0);
 
@@ -192,7 +192,7 @@ describe("Session telemetry (ADR 77 Stage 4) — the composed execution nests", 
     // Downstream spans are opened by the loop BODY — i.e. inside the async
     // middleware's forked continuation. They must STILL nest under the execution.
     const downstream = spans.filter(
-      (s) => s.name.startsWith("executor:command:") || s.name === "reconciler:command:render-tree",
+      (s) => s.name.startsWith("model:command:") || s.name === "reconciler:command:render-tree",
     );
     expect(downstream.length).toBeGreaterThan(0);
     for (const child of downstream) {
