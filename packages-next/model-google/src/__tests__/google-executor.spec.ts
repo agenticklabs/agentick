@@ -18,7 +18,11 @@ import { describe, expect, it } from "vitest";
 import type { LanguageModelTarget, RenderedTree } from "@agentick/spec-next";
 import { jsonSchema } from "@agentick/spec-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
-import type { GenerateContentParameters } from "@google/genai";
+import type {
+  GenerateContentParameters,
+  GenerateContentResponse,
+  GroundingMetadata,
+} from "@google/genai";
 
 import { LanguageModelExecutor } from "@agentick/executor-next";
 
@@ -1015,5 +1019,123 @@ describe("google() adapter — provider tools (Pass D request-half)", () => {
     });
     // OpenAI slice excluded — never leaks into Google's tools array.
     expect(JSON.stringify(tools)).not.toContain("web_search_preview");
+  });
+});
+
+describe("google() adapter — provenance-half (Pass D grounding citations)", () => {
+  it("maps groundingMetadata onto text-block Citation[] (one per support×chunk) with NO executedBy", () => {
+    const adapter = google("gemini-2.5-flash");
+    // Grounding fixture typed against `@google/genai`'s GroundingMetadata — a
+    // wrong-shaped chunk/support FAILS typecheck (HARD RULE).
+    const groundingMetadata: GroundingMetadata = {
+      groundingChunks: [
+        { web: { uri: "https://a.example/x", title: "Source A" } },
+        { web: { uri: "https://b.example/y", title: "Source B" } },
+      ],
+      groundingSupports: [
+        {
+          segment: { partIndex: 0, startIndex: 0, endIndex: 15, text: "The sky is blue" },
+          groundingChunkIndices: [0, 1],
+          confidenceScores: [0.98, 0.5],
+        },
+      ],
+    };
+    const raw = {
+      candidates: [
+        {
+          content: {
+            role: "model",
+            parts: [{ text: "The sky is blue because of Rayleigh scattering." }],
+          },
+          finishReason: "STOP",
+          index: 0,
+          groundingMetadata,
+        },
+      ],
+      modelVersion: "gemini-2.5-flash",
+      usageMetadata: { promptTokenCount: 4, candidatesTokenCount: 3, totalTokenCount: 7 },
+    } as unknown as GenerateContentResponse;
+
+    const result = adapter.normalize(raw);
+    const textBlock = result.output.find((b) => b.type === "text");
+    // Normalized model: each citation references a distinct grounding chunk by
+    // Source id; both referenced Sources ride the block's `sources`.
+    expect(textBlock?.sources).toEqual([
+      { id: "s0", url: "https://a.example/x", title: "Source A" },
+      { id: "s1", url: "https://b.example/y", title: "Source B" },
+    ]);
+    expect(textBlock?.citations).toEqual([
+      {
+        sourceId: "s0",
+        citedText: "The sky is blue",
+        range: { start: 0, end: 15 },
+        confidence: 0.98,
+      },
+      {
+        sourceId: "s1",
+        citedText: "The sky is blue",
+        range: { start: 0, end: 15 },
+        confidence: 0.5,
+      },
+    ]);
+    // Resolution holds: every cited sourceId is present in block.sources.
+    const ids = new Set(textBlock?.sources?.map((s) => s.id));
+    for (const c of textBlock?.citations ?? []) expect(ids.has(c.sourceId)).toBe(true);
+    // Grounding is response METADATA, not a provider tool_result — so no
+    // dispatchable call and no executedBy stamp anywhere in the output.
+    expect(result.toolCalls).toBeUndefined();
+    for (const block of result.output) {
+      expect((block as { executedBy?: unknown }).executedBy).toBeUndefined();
+    }
+  });
+
+  it("interns one Source when a chunk grounds two text blocks (shared turn-stable id)", () => {
+    const adapter = google("gemini-2.5-flash");
+    // The SAME grounding chunk (chunk 0) grounds supports on two different
+    // parts (partIndex 0 and 1) → the per-turn interner mints ONE Source id;
+    // both text blocks reference it via block.sources.
+    const groundingMetadata: GroundingMetadata = {
+      groundingChunks: [{ web: { uri: "https://shared.example/z", title: "Shared" } }],
+      groundingSupports: [
+        {
+          segment: { partIndex: 0, startIndex: 0, endIndex: 5, text: "First" },
+          groundingChunkIndices: [0],
+          confidenceScores: [0.9],
+        },
+        {
+          segment: { partIndex: 1, startIndex: 0, endIndex: 6, text: "Second" },
+          groundingChunkIndices: [0],
+          confidenceScores: [0.8],
+        },
+      ],
+    };
+    const raw = {
+      candidates: [
+        {
+          content: {
+            role: "model",
+            parts: [{ text: "First block." }, { text: "Second block." }],
+          },
+          finishReason: "STOP",
+          index: 0,
+          groundingMetadata,
+        },
+      ],
+      modelVersion: "gemini-2.5-flash",
+      usageMetadata: { promptTokenCount: 4, candidatesTokenCount: 3, totalTokenCount: 7 },
+    } as unknown as GenerateContentResponse;
+
+    const result = adapter.normalize(raw);
+    const textBlocks = result.output.filter((b) => b.type === "text");
+    expect(textBlocks).toHaveLength(2);
+    // Both blocks reference the SAME turn-stable id (one deduped Source).
+    expect(textBlocks[0]?.sources).toEqual([
+      { id: "s0", url: "https://shared.example/z", title: "Shared" },
+    ]);
+    expect(textBlocks[1]?.sources).toEqual([
+      { id: "s0", url: "https://shared.example/z", title: "Shared" },
+    ]);
+    expect(textBlocks[0]?.citations?.[0]?.sourceId).toBe("s0");
+    expect(textBlocks[1]?.citations?.[0]?.sourceId).toBe("s0");
   });
 });

@@ -87,6 +87,16 @@ export interface AssistantMessage {
   readonly role: "assistant";
   readonly content: readonly ContentBlock[];
   readonly model?: string;
+  /**
+   * The turn's full CONSULTED SET — every {@link import("./content-blocks.js").Source}
+   * the model drew on this turn, deduped by {@link
+   * import("./content-blocks.js").Source.id}. The roll-up of every block's
+   * {@link import("./content-blocks.js").BaseContentBlock.sources} plus orphans
+   * (sources consulted but cited in no span, which have no block to live on).
+   * The home for a numbered "Sources" footer / the "what did this turn consult"
+   * surface. Absent when the turn cited nothing.
+   */
+  readonly sources?: readonly import("./content-blocks.js").Source[];
 }
 
 // ============================================================================

@@ -114,15 +114,26 @@ export interface BaseContentBlock {
    */
   readonly providerMetadata?: Record<string, Record<string, unknown>>;
   /**
-   * Source citations annotating this block. Cross-cutting provenance — any
-   * content can be cited, not only text: a web-search answer span, a grounded
-   * claim, a generated image's source, a document reference. Populated by
+   * Source citations annotating this block — the EDGES from spans of this block
+   * to the {@link Source}s in {@link sources}. Cross-cutting provenance: any
+   * content can be cited, not only text (a web-search answer span, a grounded
+   * claim, a generated image's source, a document reference). Populated by
    * adapters from provider citation / grounding data (see {@link Citation}).
-   * Absent when the block carries no citations. Note {@link Citation.range}
-   * (character offsets) is meaningful only for text blocks; a citation on a
-   * non-text block omits it and cites the block as a whole.
+   * Absent when the block carries no citations. {@link Citation.range} (character
+   * offsets) is meaningful only for text blocks; a citation on a non-text block
+   * omits it and cites the block as a whole.
    */
   readonly citations?: readonly Citation[];
+  /**
+   * The {@link Source} entities this block's {@link citations} reference, carried
+   * ON the block so a citation resolves WITHOUT its enclosing message — a block
+   * lifted out of its turn (compaction, a rendered fragment) keeps its citations
+   * resolvable. Deduped, each with a turn-stable {@link Source.id}. The message
+   * aggregates every block's `sources` (plus orphans) into
+   * {@link import("./streaming.js").AssistantMessage.sources}. Absent when the
+   * block cites nothing.
+   */
+  readonly sources?: readonly Source[];
 }
 
 // ============================================================================
@@ -177,44 +188,66 @@ export type MediaSource = UrlSource | Base64Source | FileReferenceSource | S3Sou
 // ============================================================================
 
 /**
- * The source a {@link Citation} references. A flat bag, not a url-vs-document
- * discriminated union: `url` present ⇒ a WEB source (provider `web_search` /
- * grounding), `documentIndex` present ⇒ a DOCUMENT / file source (an index into
- * the request's documents). A client branches on presence. This normalizes the
- * three providers' citation source shapes — OpenAI `url_citation` /
+ * A source the model consulted — a web page or a request document — as an
+ * ENTITY with a stable {@link id} that {@link Citation}s reference. The
+ * normalized form of the three providers' source shapes (OpenAI `url_citation` /
  * `file_citation`, Anthropic `web_search_result_location` /
- * `char`|`page`|`content_block_location`, Google `groundingChunks[].web` —
- * without inventing a taxonomy above what they emit.
+ * `char`|`page`|`content_block_location`, Google `groundingChunks[].web`)
+ * without inventing a taxonomy above what they emit: a flat bag where `url`
+ * present ⇒ a WEB source and `documentIndex` present ⇒ a DOCUMENT / file source
+ * (a client branches on presence).
+ *
+ * Sources are modeled as entities (not embedded per citation) so a numbered
+ * "Sources" footer has stable identity, a source cited by many spans is stored
+ * once, and a source the model consulted but cited in NO span (an orphan) still
+ * has a home on {@link import("./streaming.js").AssistantMessage.sources}. See
+ * {@link BaseContentBlock.sources} (the per-block set citations resolve against)
+ * and `AssistantMessage.sources` (the turn's full consulted set).
  */
-export interface CitationSource {
-  /** The cited web resource. Present ⇒ a web/grounding citation. */
+export interface Source {
+  /**
+   * Identifier STABLE WITHIN THE TURN — the same consulted source carries the
+   * same `id` across every {@link BaseContentBlock.sources} that holds it and on
+   * the message-level aggregate, so {@link Citation.sourceId} references and the
+   * dedupe roll-up line up. Turn-scoped, not global.
+   */
+  readonly id: string;
+  /** The cited web resource. Present ⇒ a web/grounding source. */
   readonly url?: string;
   /** Human-legible source title, when the provider supplies one. */
   readonly title?: string;
   /**
    * Index of the cited document among the request's documents. Present ⇒ a
-   * document/file citation (Anthropic document citations, OpenAI
-   * `file_citation`). Mutually informative with {@link url}, not exclusive —
-   * a provider may supply both.
+   * document/file source (Anthropic document citations, OpenAI `file_citation`).
+   * Mutually informative with {@link url}, not exclusive — a provider may supply
+   * both.
    */
   readonly documentIndex?: number;
 }
 
 /**
- * A normalized reference from a span of the assistant's text to a source that
- * supports it. Adapters map each provider's citation format onto this shape and
- * attach the results to the {@link TextBlock} the citations annotate — web
- * search and grounding responses routinely carry them.
+ * A normalized reference from a span of the assistant's text to a {@link Source}
+ * that supports it — the EDGE in the source/citation model (sources are the
+ * entities, citations the edges). Adapters map each provider's citation format
+ * onto this shape and attach the results to the block the citations annotate
+ * (via {@link BaseContentBlock.citations}); the referenced sources ride the same
+ * block's {@link BaseContentBlock.sources}, so a citation resolves without its
+ * message context.
  *
  * `[V1-REFINED]` of v1's flat `ContentCitation { text, url?, title?, startIndex?,
- * endIndex? }`: v1's `text` conflated the source snippet with the annotated span.
- * Here the two are distinct — {@link range} is the span in the ASSISTANT's text,
- * {@link citedText} is the snippet of the SOURCE — and the source is factored into
- * {@link CitationSource}.
+ * endIndex? }`: v1's `text` conflated the source snippet with the annotated span,
+ * and every citation embedded its own source (no shared identity). Here the two
+ * are distinct — {@link range} is the span in the ASSISTANT's text, {@link
+ * citedText} is the snippet of the SOURCE — and the source is factored out into a
+ * referenced {@link Source} entity.
  */
 export interface Citation {
-  /** The cited source (web url and/or request-document index). */
-  readonly source: CitationSource;
+  /**
+   * The {@link Source.id} this citation references. Resolves against the same
+   * block's {@link BaseContentBlock.sources} (falling back to the message-level
+   * aggregate) — both carry the source under this id.
+   */
+  readonly sourceId: string;
   /**
    * The snippet of the SOURCE that supports the claim (Anthropic `cited_text`,
    * Google `groundingSupports[].segment.text`), when the provider returns it.

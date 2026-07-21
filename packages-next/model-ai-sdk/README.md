@@ -35,12 +35,12 @@ tool dispatch) is a separate ADR 52 follow-up.
 The adapter projects agentick's wire-native parts to AI SDK 5
 `ModelMessage` parts:
 
-| Part | AI SDK part | Sources supported |
-| --- | --- | --- |
-| `image` | `image` | any URL / data URI |
+| Part                         | AI SDK part                 | Sources supported                                                                      |
+| ---------------------------- | --------------------------- | -------------------------------------------------------------------------------------- |
+| `image`                      | `image`                     | any URL / data URI                                                                     |
 | `document`, `audio`, `video` | `file` (data + `mediaType`) | `base64` (raw), `url` / `gcs` / `s3` / `reference` (as a URL the SDK fetches/forwards) |
-| `reasoning` | `reasoning` | signed payload rides `providerOptions` |
-| `tool_use` / `tool_result` | `tool-call` / `tool-result` | — |
+| `reasoning`                  | `reasoning`                 | signed payload rides `providerOptions`                                                 |
+| `tool_use` / `tool_result`   | `tool-call` / `tool-result` | —                                                                                      |
 
 `providerOptions` fold via `mergeProviderOptions`:
 
@@ -84,15 +84,26 @@ provider-defined `Tool` objects. This adapter holds only an opaque
 A correct impl needs a `provider → factory` registry keyed off `pt.provider`.
 See the `TODO(pass-d): REQUEST HALF` trailhead in `toAISDKInput`.
 
-**Provenance-half TODO.** Likewise unimplemented — see the
-`TODO(pass-d): PROVENANCE HALF` trailhead at `normalizeImpl`.
+**Provenance-half: sources DONE, tool-result executedBy NARROWED.** The AI SDK
+exposes provider web sources on `GenerateTextResult.sources` (typed
+`Array<Source>`). These are mapped onto the canonical `Citation[]` on the
+assistant text block — `url`/`title` → `source`. AI SDK sources are
+whole-response refs (no char span), so the citations carry no `range`.
+
+Stamping a `tool_result` with `executedBy: "provider:<key>"` is **narrowed**
+(`TODO(pass-d)` in `normalizeImpl`): the adapter holds an OPAQUE `LanguageModel`
+handle (same reason the request-half is un-mapped) and cannot determine the
+concrete provider key a `ToolExecutor` stamp requires — `"provider:ai-sdk"` is
+not a real execution source. Citations need no provider identity, so they ARE
+mapped; the provider-identity-bearing stamp stays narrowed.
 
 ## Verified by
 
 - `src/__tests__/ai-sdk-executor.spec.ts` — bridge behavior against
   `MockLanguageModelV2` (target derivation, tool-call extraction,
   finish-reason vocabulary, abort, reasoning output + `reasoningTokens`,
-  Pass D provider-tools request-half no-leak invariant).
+  Pass D provider-tools request-half no-leak invariant, Pass D
+  provenance-half provider sources → citations).
 - `src/__tests__/multimodal-projection.spec.ts` — wire-native modality
   projection, request- and message-level `providerOptions` carry.
 - `src/__tests__/conformance.spec.ts` — `runExecutorConformance`

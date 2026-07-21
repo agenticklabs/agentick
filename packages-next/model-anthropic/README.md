@@ -26,15 +26,15 @@ The SDK client is constructed lazily on first use. Env fallbacks:
 
 `anthropic(model?, options?)` → `LanguageModelAdapter<Message, RawMessageStreamEvent>`
 
-| Option | Purpose |
-| --- | --- |
-| `clientOptions` | SDK `ClientOptions` (apiKey, authToken, baseURL, …) |
-| `client` | Inject a pre-built `Anthropic` client |
-| `maxTokens` | Default `max_tokens` (Anthropic requires it; default 4096) |
-| `stream` | Stream every execution |
+| Option           | Purpose                                                                             |
+| ---------------- | ----------------------------------------------------------------------------------- |
+| `clientOptions`  | SDK `ClientOptions` (apiKey, authToken, baseURL, …)                                 |
+| `client`         | Inject a pre-built `Anthropic` client                                               |
+| `maxTokens`      | Default `max_tokens` (Anthropic requires it; default 4096)                          |
+| `stream`         | Stream every execution                                                              |
 | `parseThinkTags` | Inline `<think>…</think>` extraction (niche — native thinking blocks are preferred) |
-| `customBlocks` | Adopter-declared XML tag extraction |
-| `target` | Override the self-described `ExecutionTarget` |
+| `customBlocks`   | Adopter-declared XML tag extraction                                                 |
+| `target`         | Override the self-described `ExecutionTarget`                                       |
 
 ## Anthropic dialect
 
@@ -57,10 +57,10 @@ The adapter projects `image`, `document`, and `reasoning` parts to
 native Messages content blocks (alongside `text` / `tool_use` /
 `tool_result`):
 
-| Part | Projection | Sources supported |
-| --- | --- | --- |
-| `image` | `image` block | base64 / URL (via `imageSourceFromUrl`) |
-| `document` | `document` block | `base64` (inline), `url` (server-side fetch) |
+| Part        | Projection                             | Sources supported                                                        |
+| ----------- | -------------------------------------- | ------------------------------------------------------------------------ |
+| `image`     | `image` block                          | base64 / URL (via `imageSourceFromUrl`)                                  |
+| `document`  | `document` block                       | `base64` (inline), `url` (server-side fetch)                             |
 | `reasoning` | `thinking` / `redacted_thinking` block | signed thinking replayed verbatim; redacted payload round-trips opaquely |
 
 The `reasoning` round-trip is a hard Anthropic requirement (extended
@@ -99,18 +99,29 @@ slice of `input.providerTools` onto the native `tools` array as
 max_uses: 5 }`). Passthrough; other providers' slices are ignored. Function
 tools are unaffected.
 
-**Provenance-half TODO.** Recognizing `server_tool_use` +
-`web_search_tool_result` result blocks and stamping
-`executedBy: "provider:anthropic"` is not yet implemented — see the
-`TODO(pass-d): PROVENANCE HALF` trailhead at the response-mapping site
-(`normalizeImpl` in `anthropic-adapter.ts`).
+**Provenance-half: document citations DONE, web-search NARROWED.** Anthropic
+`TextBlock.citations` (document citations — `char_location` / `page_location` /
+`content_block_location`) are mapped onto the canonical `Citation[]` on the
+annotated text block (`document_index` → `source.documentIndex`, `document_title`
+→ `source.title`, `cited_text` → `citedText`, char/page/block span → `range`).
+
+Web-search provenance — stamping `tool_result` with
+`executedBy: "provider:anthropic"` and mapping `web_search_result_location`
+citations — is **narrowed** (`TODO(pass-d)` in `normalizeImpl`): the installed
+`@anthropic-ai/sdk@0.39.0` does not type `server_tool_use` /
+`web_search_tool_result` blocks or the web-search citation variant, so a typed
+fixture cannot be written against it. Implementing it requires an SDK bump
+(server tools land ~0.5x, a cross-cutting break outside this pass). Per the
+HARD RULE, we map what the SDK types (documents) and narrow-TODO what it can't
+reach rather than fabricate against an untyped shape.
 
 ## Verified by
 
 - `src/__tests__/anthropic-executor.spec.ts` — dialect behavior
   (alternation, thinking blocks, stop-reason mapping, streaming
   vocabulary, tag routing, sampling params from `tree.config` #211,
-  Pass D provider-tools request-half).
+  Pass D provider-tools request-half, Pass D provenance-half document
+  citations).
 - `src/__tests__/multimodal-projection.spec.ts` — wire-native modality
   projection, thinking round-trip, stop-reason `refusal`/`pause_turn`
   (#216), config-declared `topP`/`stopSequences` reaching the wire (#211).

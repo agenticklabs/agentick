@@ -34,14 +34,14 @@ The SDK client is constructed lazily on first use.
 
 `google(model?, options?)` → `LanguageModelAdapter<GenerateContentResponse, GenerateContentResponse>`
 
-| Option | Purpose |
-| --- | --- |
-| `clientOptions` | SDK `GoogleGenAIOptions` (apiKey, vertexai, project, location, …) |
-| `client` | Inject a pre-built `GoogleGenAI` client |
-| `stream` | Stream every execution |
+| Option           | Purpose                                                                           |
+| ---------------- | --------------------------------------------------------------------------------- |
+| `clientOptions`  | SDK `GoogleGenAIOptions` (apiKey, vertexai, project, location, …)                 |
+| `client`         | Inject a pre-built `GoogleGenAI` client                                           |
+| `stream`         | Stream every execution                                                            |
 | `parseThinkTags` | Inline `<think>…</think>` extraction (niche — native `part.thought` is preferred) |
-| `customBlocks` | Adopter-declared XML tag extraction |
-| `target` | Override the self-described `ExecutionTarget` |
+| `customBlocks`   | Adopter-declared XML tag extraction                                               |
+| `target`         | Override the self-described `ExecutionTarget`                                     |
 
 ## Gemini dialect
 
@@ -63,12 +63,12 @@ The SDK client is constructed lazily on first use.
 Gemini is natively multimodal — the adapter projects `image`,
 `document`, `audio`, and `video` parts to Gemini `Part`s:
 
-| Source | Projection |
-| --- | --- |
-| `base64` | `inlineData` (mimeType + data) |
-| `url` | `fileData` (`fileUri` = the URL) |
-| `gcs` | `fileData` (`fileUri` = `gs://bucket/object`) |
-| `reference` | `fileData` (`fileUri` = the file id) |
+| Source      | Projection                                    |
+| ----------- | --------------------------------------------- |
+| `base64`    | `inlineData` (mimeType + data)                |
+| `url`       | `fileData` (`fileUri` = the URL)              |
+| `gcs`       | `fileData` (`fileUri` = `gs://bucket/object`) |
+| `reference` | `fileData` (`fileUri` = the file id)          |
 
 `providerOptions` fold via `mergeProviderOptions`:
 
@@ -117,17 +117,28 @@ grounding tools are keyed objects — `{ googleSearch: {} }`,
 single function-declaration `Tool`; the adapter maps each wire entry to
 `{ [type]: config ?? {} }` verbatim. Other providers' slices are ignored.
 
-**Provenance-half TODO.** Recognizing `groundingMetadata` /
-`codeExecutionResult` result shapes and stamping
-`executedBy: "provider:google"` is not yet implemented — see the
-`TODO(pass-d): PROVENANCE HALF` trailhead at the response-mapping site
-(`normalizeImpl` in `google-adapter.ts`).
+**Provenance-half: grounding citations DONE (metadata, NO executedBy).**
+Google grounding is response METADATA, not a discrete provider tool_result:
+`candidate.groundingMetadata.groundingSupports[]` anchor spans of the assistant
+text to `groundingChunks[].web` sources. Each support is mapped to one
+`Citation` per cited chunk (so each source keeps its own `confidenceScores[i]`)
+and attached to the annotated text block by `segment.partIndex` — `web.uri` →
+`source.url`, `web.title` → `source.title`, `segment.text` → `citedText`,
+`segment` span → `range`, `confidenceScores[i]` → `confidence`.
+
+Because grounding is metadata and NOT a `tool_result`, there is deliberately
+**NO `executedBy` stamp** for it — this is the honest shape of Google
+grounding, not a gap. codeExecution provenance (`executableCode` /
+`codeExecutionResult` parts) — which WOULD be a provider tool result carrying
+`executedBy: "provider:google"` — is out of scope for this grounding-citation
+pass and left as a narrow `TODO(pass-d)` in `normalizeImpl`.
 
 ## Verified by
 
 - `src/__tests__/google-executor.spec.ts` — dialect behavior (schema
   sanitization, thought routing, thoughtSignature carry, block
-  synthesis, stop-reason mapping, Pass D provider-tools request-half).
+  synthesis, stop-reason mapping, Pass D provider-tools request-half,
+  Pass D provenance-half grounding citations + no-executedBy).
 - `src/__tests__/multimodal-projection.spec.ts` — wire-native modality
   projection, `thoughtSignature` round-trip, `CacheHint` no-op +
   `cachedContent` escape hatch (#212).

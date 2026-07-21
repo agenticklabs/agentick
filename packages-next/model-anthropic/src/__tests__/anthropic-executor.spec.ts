@@ -16,7 +16,10 @@ import { describe, expect, it } from "vitest";
 import type { LanguageModelTarget, RenderedTree } from "@agentick/spec-next";
 import { jsonSchema } from "@agentick/spec-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
-import type { MessageCreateParams } from "@anthropic-ai/sdk/resources/messages";
+import type {
+  Message as AnthropicMessage,
+  MessageCreateParams,
+} from "@anthropic-ai/sdk/resources/messages";
 
 import { LanguageModelExecutor } from "@agentick/executor-next";
 
@@ -1008,5 +1011,140 @@ describe("anthropic() adapter — provider tools (Pass D request-half)", () => {
     });
     // OpenAI slice excluded — never leaks into Anthropic's tools array.
     expect(JSON.stringify(tools)).not.toContain("web_search_preview");
+  });
+});
+
+describe("anthropic() adapter — provenance-half (Pass D document citations)", () => {
+  it("maps SDK TextBlock.citations (char_location) onto normalized Citation[] + block.sources", () => {
+    const adapter = anthropic("claude-3-5-sonnet-latest");
+    // Fixture typed against `@anthropic-ai/sdk`'s Message — a wrong-shaped
+    // citation FAILS typecheck (HARD RULE: no untyped `as any` fixtures).
+    const raw: AnthropicMessage = {
+      id: "msg_cite",
+      type: "message",
+      role: "assistant",
+      model: "claude-3-5-sonnet-latest",
+      stop_reason: "end_turn",
+      stop_sequence: null,
+      usage: {
+        input_tokens: 12,
+        output_tokens: 6,
+        cache_read_input_tokens: null,
+        cache_creation_input_tokens: null,
+      },
+      content: [
+        {
+          type: "text",
+          text: "The sky is blue due to Rayleigh scattering.",
+          citations: [
+            {
+              type: "char_location",
+              cited_text: "Rayleigh scattering makes the sky blue",
+              document_index: 2,
+              document_title: "Optics 101",
+              start_char_index: 4,
+              end_char_index: 11,
+            },
+          ],
+        },
+      ],
+    };
+
+    const result = adapter.normalize(raw);
+    const textBlock = result.output.find((b) => b.type === "text");
+    // Normalized model: citation references a Source by id; the referenced
+    // Source rides the block's `sources` (so the citation resolves in isolation).
+    expect(textBlock?.sources).toEqual([{ id: "s0", documentIndex: 2, title: "Optics 101" }]);
+    expect(textBlock?.citations).toEqual([
+      {
+        sourceId: "s0",
+        citedText: "Rayleigh scattering makes the sky blue",
+        range: { start: 4, end: 11 },
+      },
+    ]);
+    // Resolution holds: every cited sourceId is present in block.sources.
+    const ids = new Set(textBlock?.sources?.map((s) => s.id));
+    for (const c of textBlock?.citations ?? []) expect(ids.has(c.sourceId)).toBe(true);
+  });
+
+  it("omits `citations` on text blocks the provider returned with none", () => {
+    const adapter = anthropic("claude-3-5-sonnet-latest");
+    const raw: AnthropicMessage = {
+      id: "msg_plain",
+      type: "message",
+      role: "assistant",
+      model: "claude-3-5-sonnet-latest",
+      stop_reason: "end_turn",
+      stop_sequence: null,
+      usage: {
+        input_tokens: 5,
+        output_tokens: 2,
+        cache_read_input_tokens: null,
+        cache_creation_input_tokens: null,
+      },
+      content: [{ type: "text", text: "No citations here.", citations: null }],
+    };
+    const result = adapter.normalize(raw);
+    const textBlock = result.output.find((b) => b.type === "text");
+    expect(textBlock?.citations).toBeUndefined();
+    expect(textBlock?.sources).toBeUndefined();
+  });
+
+  it("interns one Source across two citing text blocks (same doc → one turn-stable id)", () => {
+    const adapter = anthropic("claude-3-5-sonnet-latest");
+    // Two separate text blocks both cite document_index 2 — the per-turn
+    // interner mints ONE Source with ONE id, shared by both blocks' `sources`.
+    const raw: AnthropicMessage = {
+      id: "msg_dedupe",
+      type: "message",
+      role: "assistant",
+      model: "claude-3-5-sonnet-latest",
+      stop_reason: "end_turn",
+      stop_sequence: null,
+      usage: {
+        input_tokens: 20,
+        output_tokens: 10,
+        cache_read_input_tokens: null,
+        cache_creation_input_tokens: null,
+      },
+      content: [
+        {
+          type: "text",
+          text: "First claim.",
+          citations: [
+            {
+              type: "char_location",
+              cited_text: "supporting snippet A",
+              document_index: 2,
+              document_title: "Optics 101",
+              start_char_index: 0,
+              end_char_index: 5,
+            },
+          ],
+        },
+        {
+          type: "text",
+          text: "Second claim.",
+          citations: [
+            {
+              type: "char_location",
+              cited_text: "supporting snippet B",
+              document_index: 2,
+              document_title: "Optics 101",
+              start_char_index: 0,
+              end_char_index: 6,
+            },
+          ],
+        },
+      ],
+    };
+    const result = adapter.normalize(raw);
+    const textBlocks = result.output.filter((b) => b.type === "text");
+    expect(textBlocks).toHaveLength(2);
+    // Both blocks reference the SAME turn-stable id.
+    expect(textBlocks[0]?.citations?.[0]?.sourceId).toBe("s0");
+    expect(textBlocks[1]?.citations?.[0]?.sourceId).toBe("s0");
+    expect(textBlocks[0]?.sources).toEqual([{ id: "s0", documentIndex: 2, title: "Optics 101" }]);
+    expect(textBlocks[1]?.sources).toEqual([{ id: "s0", documentIndex: 2, title: "Optics 101" }]);
   });
 });

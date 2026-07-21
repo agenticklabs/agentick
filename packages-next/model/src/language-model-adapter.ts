@@ -28,6 +28,7 @@ import type {
   LanguageModelInput,
   LanguageModelStopReason,
   ProjectInput,
+  Source,
   UsageStats,
 } from "@agentick/spec-next";
 import type { DeltaTransform } from "./delta-transform.js";
@@ -240,17 +241,42 @@ export function defaultFinalizeStream(accum: StreamAccumulatorView): readonly Ad
   }
 
   // 4. message summary — always emit (single canonical assistant
-  //    message synthesized from accumulator state).
+  //    message synthesized from accumulator state). Roll the turn's consulted
+  //    SET up from every block's `sources` (deduped by id) onto the message —
+  //    the "Sources" footer surface; block-level `sources` stay for
+  //    self-contained per-block resolution.
+  const content = accum.toContentBlocks();
+  const sources = collectMessageSources(content);
   out.push({
     type: "message",
     message: {
       role: "assistant",
-      content: accum.toContentBlocks(),
+      content,
       ...(accum.modelSeen ? { model: accum.modelSeen } : {}),
+      ...(sources.length > 0 ? { sources } : {}),
     },
     stopReason: accum.stopReason,
     usage: accum.usage,
   });
 
   return out;
+}
+
+/**
+ * Roll the turn's consulted set up from block-level {@link
+ * ContentBlock.sources}: dedupe every block's sources by turn-stable
+ * {@link Source.id} (first occurrence wins). The result is the message-level
+ * aggregate ({@link import("@agentick/spec-next").AssistantMessage.sources}) —
+ * the numbered "Sources" surface. Orphan sources (consulted but cited on no
+ * block) are contributed by adapters directly and are out of scope for this
+ * block roll-up.
+ */
+function collectMessageSources(blocks: readonly ContentBlock[]): readonly Source[] {
+  const byId = new Map<string, Source>();
+  for (const block of blocks) {
+    for (const source of block.sources ?? []) {
+      if (!byId.has(source.id)) byId.set(source.id, source);
+    }
+  }
+  return [...byId.values()];
 }

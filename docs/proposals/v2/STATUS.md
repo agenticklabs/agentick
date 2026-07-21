@@ -1725,6 +1725,33 @@ blueprint's design decisions; this is execution-level).
 
 ### 2026-07-21
 
+- **Citations/sources — PROVENANCE HALF + NORMALIZED MODEL LANDED (Pass D complete).**
+  Supersedes the embedded-`Citation.source` spec foundation below. Final model is
+  NORMALIZED (sources are entities, citations are edges): `Source { id (turn-stable);
+  url?; title?; documentIndex? }`, `Citation { sourceId; citedText?; range?;
+  confidence? }` (embedded `source` GONE), `BaseContentBlock.sources?` (the entities
+  THIS block's citations reference — co-located so a lifted block resolves its own
+  citations), `AssistantMessage.sources?` (the turn's full consulted set — the
+  "Sources" footer surface + the only home for orphans). Decided with Ryan: block
+  level + message aggregate (blocks get lifted out of messages → sourceId must be
+  block-resolvable; message rolls up for the footer + orphans). Shared
+  `createSourceInterner()` in model-next (one-source-one-id per turn, dedupe by
+  url/`doc:<index>`) so all 4 adapters share ONE id scheme, not four; `message.sources`
+  rolled up from block.sources (dedupe by id) at the `language-model-adapter` summary
+  assembly — adapters do BLOCK level only. **Per-provider citations** (each maps its
+  OWN format, SDK-typed fixtures): anthropic document citations (char/page/
+  content_block_location); openai `url_citation` annotations; google grounding
+  (`groundingSupports`×`groundingChunks`, one citation per support×chunk w/
+  confidence); ai-sdk `.sources`. **executedBy provenance NARROWED across all 4**
+  (honest external-constraint deferrals, TODO(pass-d)'d, NOT straddle): anthropic
+  web-search needs SDK >0.39 (server_tool_use untyped); openai needs Responses API
+  (Chat Completions has no provider tool_results); google grounding is METADATA not a
+  tool_result → NO executedBy by design; ai-sdk opaque handle can't name the provider
+  key. Gates: typecheck --force 152/152 0-cached; 865 tests (model+spec+4 adapters+
+  loop; +interner 5, +message-rollup, +per-adapter dedup/resolution); oxlint 0 errors
+  (2 pre-existing warnings). **Follow-on (own passes):** executedBy where the SDK/API
+  allows; provider-tools `<ProviderTool>` component + config seam; ai-sdk request-half.
+
 - **Citations — canonical representation LANDED (spec foundation).** Provider
   web-search/grounding responses routinely carry citations; v2 had NO representation
   (v1 had a flat `ContentMetadata.citations: ContentCitation{text,url?,title?,

@@ -27,6 +27,7 @@ import type {
   RedactedThinkingBlockParam,
   TextBlock as AnthropicTextBlock,
   TextBlockParam,
+  TextCitation,
   ThinkingBlock as AnthropicThinkingBlock,
   ThinkingBlockParam,
   Tool as AnthropicTool,
@@ -40,9 +41,11 @@ import type {
 import {
   buildParameters,
   buildTools,
+  createSourceInterner,
   type CustomBlockDefinition,
   type DeltaTransform,
   type LanguageModelAdapter,
+  type SourceInterner,
   type StreamAccumulatorView,
   StreamTagParser,
   type StreamTagHandler,
@@ -50,6 +53,7 @@ import {
 } from "@agentick/model-next";
 import type {
   AdapterDelta,
+  Citation,
   ContentBlock,
   ExecutionTarget,
   LanguageModelExecutionResult,
@@ -64,6 +68,7 @@ import type {
   ProviderOptions,
   RenderedTree,
   SectionEntry,
+  Source,
   ToolCall,
   UsageStats,
 } from "@agentick/spec-next";
@@ -1182,21 +1187,27 @@ function normalizeImpl(input: NormalizeInput<unknown>): LanguageModelExecutionRe
   if (!isAnthropicMessage(raw)) {
     throw new Error("normalize expected Anthropic Message shape");
   }
-  // ┌─ TODO(pass-d): PROVENANCE HALF — NOT YET IMPLEMENTED ──────────────────────
-  // │ Provider-executed tools (web_search / code_interpreter / server_tool_use /
-  // │ grounding) are ENABLED on the request (see prepareInput) but their RESULTS
-  // │ are not yet provenance-stamped here. This adapter must, in a follow-on pass:
-  // │   1. Recognize Anthropic's provider-executed result blocks
-  // │      (`server_tool_use` + the paired `web_search_tool_result` /
-  // │       `code_execution_tool_result` content blocks on the message).
-  // │   2. Stamp the resulting `tool_result` block `executedBy: "provider:anthropic"`
-  // │      (see ToolExecutor docblock in spec content-blocks.ts) so the client
-  // │      attributes + renders it and knows NOT to act on it.
-  // │   3. Ensure provider-executed tool CALLS are NOT surfaced as dispatchable
-  // │      function `tool_use` — else the loop's executor will try to dispatch a
-  // │      tool with no handler. They are provider-run; their result is inline.
-  // └────────────────────────────────────────────────────────────────────────────
-  const output = anthropicContentToContentBlocks(raw.content);
+  // Provenance-half (Pass D): DOCUMENT citations are mapped in
+  // `anthropicContentToContentBlocks` (text blocks carry `citations` →
+  // canonical `Citation[]` via `anthropicCitationsToCitations`). Function
+  // `tool_use` blocks below are the ONLY dispatchable calls — the installed
+  // `@anthropic-ai/sdk@0.39.0` does not surface provider-executed
+  // `server_tool_use` in its `ContentBlock` union, so no handler-less call can
+  // leak into `toolCalls`.
+  //
+  // TODO(pass-d): web-search provenance is UNREACHABLE against SDK 0.39.0 —
+  //   `web_search_tool_result` / `server_tool_use` blocks and
+  //   `web_search_result_location` citations are absent from the SDK's
+  //   `ContentBlock` / `TextCitation` unions. Stamping `tool_result`
+  //   `executedBy: "provider:anthropic"` + mapping web-search citations requires
+  //   an SDK bump (server tools land ~0.5x, a cross-cutting break outside this
+  //   pass). Narrowed per HARD RULE (type fixtures against the SDK; honest
+  //   partial > confident wrong against an untyped shape).
+  // One interner per normalize (per turn): the same consulted document across
+  // many text blocks / citation spans mints one `Source` with one turn-stable
+  // id, so `Citation.sourceId` resolves and the message-level roll-up dedupes.
+  const interner = createSourceInterner();
+  const output = anthropicContentToContentBlocks(raw.content, interner);
   const toolCalls: ToolCall[] = [];
   for (const block of raw.content) {
     if (block.type === "tool_use") {
@@ -1223,16 +1234,24 @@ function normalizeImpl(input: NormalizeInput<unknown>): LanguageModelExecutionRe
 
 function anthropicContentToContentBlocks(
   content: AnthropicMessage["content"] | undefined,
+  interner: SourceInterner,
 ): ContentBlock[] {
   const output: ContentBlock[] = [];
   if (!content) return output;
   for (const block of content) {
     switch (block.type) {
-      case "text":
-        if ((block as AnthropicTextBlock).text.length > 0) {
-          output.push({ type: "text", text: (block as AnthropicTextBlock).text });
+      case "text": {
+        const tb = block as AnthropicTextBlock;
+        if (tb.text.length > 0) {
+          const { citations, sources } = anthropicCitationsToCitations(tb.citations, interner);
+          output.push({
+            type: "text",
+            text: tb.text,
+            ...(citations.length > 0 ? { citations, sources } : {}),
+          });
         }
         break;
+      }
       case "tool_use": {
         const t = block as AnthropicToolUseBlock;
         output.push({
@@ -1276,6 +1295,60 @@ function anthropicContentToContentBlocks(
     }
   }
   return output;
+}
+
+/**
+ * Pass D provenance-half: map Anthropic's `TextBlock.citations` (document
+ * citations) onto the canonical {@link Citation}. All three SDK-typed
+ * `TextCitation` variants (`char_location` / `page_location` /
+ * `content_block_location`) carry `document_index` + `document_title` +
+ * `cited_text`; only the span axis differs (char / page / block index), which
+ * all fold onto {@link Citation.range}. `document_index` is an index into the
+ * request's documents → {@link Source.documentIndex}.
+ *
+ * Sources are normalized: each citation references a {@link Source} by
+ * {@link Citation.sourceId} (minted / deduped via the turn-scoped `interner`),
+ * and the block's referenced `Source` entities are returned alongside for the
+ * caller to attach as {@link BaseContentBlock.sources}.
+ *
+ * NB (honest scope): the installed `@anthropic-ai/sdk@0.39.0` does NOT type
+ * web-search provenance — `web_search_result_location` citations,
+ * `server_tool_use`, or `web_search_tool_result` blocks are absent from its
+ * `TextCitation` / `ContentBlock` unions. That path is narrow-TODO'd at the
+ * call site rather than fabricated against an untyped shape.
+ */
+function anthropicCitationsToCitations(
+  citations: readonly TextCitation[] | null | undefined,
+  interner: SourceInterner,
+): { citations: Citation[]; sources: Source[] } {
+  if (!citations || citations.length === 0) return { citations: [], sources: [] };
+  const out: Citation[] = [];
+  const blockSources = new Map<string, Source>();
+  for (const c of citations) {
+    const source = interner.intern({
+      documentIndex: c.document_index,
+      ...(c.document_title ? { title: c.document_title } : {}),
+    });
+    blockSources.set(source.id, source);
+    let range: { start: number; end: number } | undefined;
+    switch (c.type) {
+      case "char_location":
+        range = { start: c.start_char_index, end: c.end_char_index };
+        break;
+      case "page_location":
+        range = { start: c.start_page_number, end: c.end_page_number };
+        break;
+      case "content_block_location":
+        range = { start: c.start_block_index, end: c.end_block_index };
+        break;
+    }
+    out.push({
+      sourceId: source.id,
+      ...(c.cited_text ? { citedText: c.cited_text } : {}),
+      ...(range ? { range } : {}),
+    });
+  }
+  return { citations: out, sources: [...blockSources.values()] };
 }
 
 function isAnthropicMessage(v: unknown): v is AnthropicMessage {

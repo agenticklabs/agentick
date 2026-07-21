@@ -33,15 +33,18 @@ import type {
   ChatCompletion,
   ChatCompletionChunk,
   ChatCompletionCreateParams,
+  ChatCompletionMessage,
   ChatCompletionMessageParam,
   ChatCompletionTool,
 } from "openai/resources/chat/completions";
 import type { FunctionDefinition } from "openai/resources/shared";
 
 import {
+  createSourceInterner,
   type CustomBlockDefinition,
   type DeltaTransform,
   type LanguageModelAdapter,
+  type SourceInterner,
   type StreamAccumulatorView,
   StreamTagParser,
   type StreamTagHandler,
@@ -49,6 +52,7 @@ import {
 } from "@agentick/model-next";
 import type {
   AdapterDelta,
+  Citation,
   ContentBlock,
   ExecutionTarget,
   LanguageModelExecutionResult,
@@ -58,6 +62,8 @@ import type {
   LanguageModelTool,
   MediaSource,
   NormalizeInput,
+  Source,
+  TextBlock,
   ToolCall,
 } from "@agentick/spec-next";
 import { mergeProviderOptions, SPEC_VERSION } from "@agentick/spec-next";
@@ -758,20 +764,21 @@ function normalizeImpl(input: NormalizeInput<unknown>): LanguageModelExecutionRe
     throw new Error("ChatCompletion missing choices[0].message");
   }
 
-  // ┌─ TODO(pass-d): PROVENANCE HALF — NOT YET IMPLEMENTED ──────────────────────
-  // │ Provider-executed tools (web_search / code_interpreter / server_tool_use /
-  // │ grounding) are ENABLED on the request (see prepareInput) but their RESULTS
-  // │ are not yet provenance-stamped here. This adapter must, in a follow-on pass:
-  // │   1. Recognize OpenAI's provider-executed result blocks
-  // │      (Responses-API `web_search_call` / `code_interpreter_call` output
-  // │       items; Chat-Completions `message.annotations` url-citation entries).
-  // │   2. Stamp the resulting `tool_result` block `executedBy: "provider:openai"`
-  // │      (see ToolExecutor docblock in spec content-blocks.ts) so the client
-  // │      attributes + renders it and knows NOT to act on it.
-  // │   3. Ensure provider-executed tool CALLS are NOT surfaced as dispatchable
-  // │      function `tool_use` — else the loop's executor will try to dispatch a
-  // │      tool with no handler. They are provider-run; their result is inline.
-  // └────────────────────────────────────────────────────────────────────────────
+  // Provenance-half (Pass D): this adapter targets Chat Completions. On that
+  // surface web-search provenance arrives as `message.annotations`
+  // (`url_citation`) — mapped to `Citation[]` on the assistant text block below.
+  // Chat Completions does NOT surface provider-executed tool RESULTS as discrete
+  // items (that is the Responses API's `web_search_call` / `code_interpreter_call`
+  // output items), and `message.tool_calls` only ever carries `type: "function"`
+  // dispatchable calls (filtered below) — so there is no handler-less provider
+  // call to suppress and no `tool_result` to stamp on this surface.
+  //
+  // TODO(pass-d): `executedBy: "provider:openai"` on a `tool_result` is
+  //   UNREACHABLE from Chat Completions — provider tool results are only exposed
+  //   as typed output items on the Responses API, which this adapter does not
+  //   target (request-half maps onto `params.tools` for Chat Completions).
+  //   Narrowed per HARD RULE — stamped what IS present (citations), TODO the
+  //   part the API surface cannot reach.
   const output: ContentBlock[] = [];
   // Reasoning blocks ride before text — OpenAI-compatible servers
   // (vLLM `reasoning_content`, LM Studio `reasoning`) expose
@@ -796,6 +803,19 @@ function normalizeImpl(input: NormalizeInput<unknown>): LanguageModelExecutionRe
           output.push({ type: "text", text });
         }
       }
+    }
+  }
+
+  // Attach web-search url-citations to the assistant text block. Chat
+  // Completions annotations index into the single assistant message text, so
+  // they hang on the first text block. One interner per normalize (per turn):
+  // a URL cited across many spans mints one `Source` with one turn-stable id.
+  const interner = createSourceInterner();
+  const { citations, sources } = openAIAnnotationsToCitations(message.annotations, interner);
+  if (citations.length > 0) {
+    const ti = output.findIndex((b) => b.type === "text");
+    if (ti >= 0) {
+      output[ti] = { ...(output[ti] as TextBlock), citations, sources };
     }
   }
 
@@ -856,6 +876,36 @@ function normalizeImpl(input: NormalizeInput<unknown>): LanguageModelExecutionRe
     raw,
   };
   return result;
+}
+
+/**
+ * Pass D provenance-half: map Chat Completions `message.annotations`
+ * (`url_citation`, emitted by the web-search tool) onto canonical
+ * {@link Citation}. Each annotation carries `{ url, title, start_index,
+ * end_index }` where the indices are a char span in the assistant message text
+ * → {@link Citation.range}; `url` + `title` form the referenced {@link Source}
+ * (minted / deduped via the turn-scoped `interner`). The block's referenced
+ * `Source` entities are returned alongside for the caller to attach as
+ * {@link BaseContentBlock.sources}.
+ */
+function openAIAnnotationsToCitations(
+  annotations: ChatCompletionMessage["annotations"],
+  interner: SourceInterner,
+): { citations: Citation[]; sources: Source[] } {
+  if (!annotations || annotations.length === 0) return { citations: [], sources: [] };
+  const out: Citation[] = [];
+  const blockSources = new Map<string, Source>();
+  for (const a of annotations) {
+    if (a.type !== "url_citation") continue;
+    const uc = a.url_citation;
+    const source = interner.intern({
+      ...(uc.url ? { url: uc.url } : {}),
+      ...(uc.title ? { title: uc.title } : {}),
+    });
+    blockSources.set(source.id, source);
+    out.push({ sourceId: source.id, range: { start: uc.start_index, end: uc.end_index } });
+  }
+  return { citations: out, sources: [...blockSources.values()] };
 }
 
 function isChatCompletion(v: unknown): v is ChatCompletion {

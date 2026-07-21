@@ -15,6 +15,7 @@ import { describe, expect, it } from "vitest";
 
 import type { LanguageModelTarget, RenderedTree } from "@agentick/spec-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
+import type { ChatCompletion } from "openai/resources/chat/completions";
 
 import { LanguageModelExecutor } from "@agentick/executor-next";
 
@@ -531,5 +532,114 @@ describe("openai() adapter — provider tools (Pass D request-half)", () => {
     expect(JSON.stringify(tools)).not.toContain("web_search_20250305");
     // Function tools present ⇒ tool_choice still auto.
     expect(params.tool_choice).toBe("auto");
+  });
+});
+
+describe("openai() adapter — provenance-half (Pass D web-search citations)", () => {
+  it("maps Chat Completions message.annotations (url_citation) onto the text block's Citation[]", () => {
+    const adapter = openai("gpt-4o");
+    // Fixture typed against `openai`'s ChatCompletion — a wrong-shaped
+    // annotation FAILS typecheck (HARD RULE: no untyped `as any` fixtures).
+    const raw: ChatCompletion = {
+      id: "chatcmpl_cite",
+      object: "chat.completion",
+      created: 0,
+      model: "gpt-4o",
+      choices: [
+        {
+          index: 0,
+          finish_reason: "stop",
+          logprobs: null,
+          message: {
+            role: "assistant",
+            content: "Paris is the capital of France.",
+            refusal: null,
+            annotations: [
+              {
+                type: "url_citation",
+                url_citation: {
+                  url: "https://example.com/france",
+                  title: "France — Overview",
+                  start_index: 0,
+                  end_index: 5,
+                },
+              },
+            ],
+          },
+        },
+      ],
+    };
+
+    const result = adapter.normalize(raw);
+    const textBlock = result.output.find((b) => b.type === "text");
+    // Normalized model: the citation references a Source by id; the referenced
+    // Source rides the block's `sources`.
+    expect(textBlock?.sources).toEqual([
+      { id: "s0", url: "https://example.com/france", title: "France — Overview" },
+    ]);
+    expect(textBlock?.citations).toEqual([
+      {
+        sourceId: "s0",
+        range: { start: 0, end: 5 },
+      },
+    ]);
+    // Resolution holds: every cited sourceId is present in block.sources.
+    const ids = new Set(textBlock?.sources?.map((s) => s.id));
+    for (const c of textBlock?.citations ?? []) expect(ids.has(c.sourceId)).toBe(true);
+    // The web-search annotation does not surface a dispatchable tool call.
+    expect(result.toolCalls).toBeUndefined();
+  });
+
+  it("interns one Source across two url_citation spans (same url → one turn-stable id)", () => {
+    const adapter = openai("gpt-4o");
+    // Two annotations citing the SAME url at different spans → the per-turn
+    // interner mints ONE Source with ONE id; both citations reference it and
+    // block.sources holds it once.
+    const raw: ChatCompletion = {
+      id: "chatcmpl_dedupe",
+      object: "chat.completion",
+      created: 0,
+      model: "gpt-4o",
+      choices: [
+        {
+          index: 0,
+          finish_reason: "stop",
+          logprobs: null,
+          message: {
+            role: "assistant",
+            content: "Paris is the capital. France is in Europe.",
+            refusal: null,
+            annotations: [
+              {
+                type: "url_citation",
+                url_citation: {
+                  url: "https://example.com/france",
+                  title: "France — Overview",
+                  start_index: 0,
+                  end_index: 5,
+                },
+              },
+              {
+                type: "url_citation",
+                url_citation: {
+                  url: "https://example.com/france",
+                  title: "France — Overview",
+                  start_index: 20,
+                  end_index: 26,
+                },
+              },
+            ],
+          },
+        },
+      ],
+    };
+
+    const result = adapter.normalize(raw);
+    const textBlock = result.output.find((b) => b.type === "text");
+    // One deduped Source; two citations both reference it.
+    expect(textBlock?.sources).toEqual([
+      { id: "s0", url: "https://example.com/france", title: "France — Overview" },
+    ]);
+    expect(textBlock?.citations?.map((c) => c.sourceId)).toEqual(["s0", "s0"]);
   });
 });

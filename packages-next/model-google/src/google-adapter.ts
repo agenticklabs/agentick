@@ -28,6 +28,7 @@ import {
   type GenerateContentParameters,
   type GenerateContentResponse,
   type GoogleGenAIOptions,
+  type GroundingMetadata,
   type Part,
   type Tool as GoogleTool,
   type FunctionDeclaration,
@@ -35,6 +36,7 @@ import {
 
 import { ulid } from "@agentick/utils-next";
 import type {
+  Citation,
   ContentBlock,
   ExecutionTarget,
   LanguageModelExecutionResult,
@@ -45,16 +47,20 @@ import type {
   LanguageModelTool,
   MediaSource,
   NormalizeInput,
+  Source,
+  TextBlock,
   ToolCall,
   UsageStats,
 } from "@agentick/spec-next";
 import { mergeProviderOptions, SPEC_VERSION } from "@agentick/spec-next";
 
 import {
+  createSourceInterner,
   type CustomBlockDefinition,
   defaultFinalizeStream,
   type DeltaTransform,
   type LanguageModelAdapter,
+  type SourceInterner,
   type StreamAccumulatorView,
   StreamTagParser,
   type StreamTagHandler,
@@ -855,31 +861,36 @@ function normalizeImpl(input: NormalizeInput<unknown>): LanguageModelExecutionRe
   if (!isGoogleResponse(raw)) {
     throw new Error("normalize expected Google GenerateContentResponse shape");
   }
-  // ┌─ TODO(pass-d): PROVENANCE HALF — NOT YET IMPLEMENTED ──────────────────────
-  // │ Provider-executed tools (web_search / code_interpreter / server_tool_use /
-  // │ grounding) are ENABLED on the request (see prepareInput) but their RESULTS
-  // │ are not yet provenance-stamped here. This adapter must, in a follow-on pass:
-  // │   1. Recognize Google's provider-executed result shapes
-  // │      (`candidate.groundingMetadata` for googleSearch grounding; the
-  // │       `executableCode` / `codeExecutionResult` parts for codeExecution).
-  // │   2. Stamp the resulting `tool_result` block `executedBy: "provider:google"`
-  // │      (see ToolExecutor docblock in spec content-blocks.ts) so the client
-  // │      attributes + renders it and knows NOT to act on it.
-  // │   3. Ensure provider-executed tool CALLS are NOT surfaced as dispatchable
-  // │      function `tool_use` — else the loop's executor will try to dispatch a
-  // │      tool with no handler. They are provider-run; their result is inline.
-  // └────────────────────────────────────────────────────────────────────────────
+  // Provenance-half (Pass D): googleSearch grounding is response METADATA, not a
+  // discrete provider tool_result — `candidate.groundingMetadata` carries
+  // `groundingSupports[]` anchoring spans of the assistant text to
+  // `groundingChunks[].web` sources. It is mapped to `Citation[]` on the annotated
+  // text block below (keyed by `segment.partIndex`). Because grounding is metadata
+  // and NOT a `tool_result`, there is deliberately NO `executedBy` stamp for it —
+  // this is the honest shape of Google grounding, not a gap. Function `tool_use`
+  // (functionCall parts) are the only dispatchable calls; grounding emits none.
+  //
+  // TODO(pass-d): codeExecution provenance (`executableCode` /
+  //   `codeExecutionResult` parts) IS a provider-run tool result that would carry
+  //   `executedBy: "provider:google"`, but it is out of scope for this
+  //   grounding-citation pass and un-mapped here. Narrowed, greppable.
   const candidate = raw.candidates?.[0];
   const output: ContentBlock[] = [];
   const toolCalls: ToolCall[] = [];
+  // part-index → output-block index, so grounding citations (which reference a
+  // `segment.partIndex`) can be attached to the correct text block.
+  const partIndexToOutputIndex = new Map<number, number>();
 
   if (candidate?.content?.parts) {
-    for (const part of candidate.content.parts) {
+    const parts = candidate.content.parts;
+    for (let pi = 0; pi < parts.length; pi++) {
+      const part = parts[pi];
       const isThought = (part as { thought?: boolean }).thought === true;
       if (typeof part.text === "string" && part.text.length > 0) {
         if (isThought) {
           output.push({ type: "reasoning", text: part.text });
         } else {
+          partIndexToOutputIndex.set(pi, output.length);
           output.push({ type: "text", text: part.text });
         }
         continue;
@@ -909,6 +920,12 @@ function normalizeImpl(input: NormalizeInput<unknown>): LanguageModelExecutionRe
     }
   }
 
+  // One interner per normalize (per turn): a grounding chunk (web source) cited
+  // by many supports / across many text blocks mints one `Source` with one
+  // turn-stable id, so the message-level roll-up dedupes it.
+  const interner = createSourceInterner();
+  attachGroundingCitations(output, partIndexToOutputIndex, candidate?.groundingMetadata, interner);
+
   const stopReason = mapFinishReason(candidate?.finishReason);
   const usage = toUsageStats(raw.usageMetadata);
 
@@ -921,6 +938,84 @@ function normalizeImpl(input: NormalizeInput<unknown>): LanguageModelExecutionRe
     raw,
   };
   return result;
+}
+
+/**
+ * Pass D provenance-half: map Google's `candidate.groundingMetadata` onto
+ * canonical {@link Citation}s and attach them to the annotated text blocks.
+ *
+ * Each `groundingSupports[]` entry anchors a `segment` (a span of the assistant
+ * text, byte offsets `startIndex`/`endIndex` within `segment.partIndex`) to one
+ * or more `groundingChunkIndices` into `groundingChunks[]`. We emit one
+ * {@link Citation} per (support × chunk) pair so each cited web source retains
+ * its own `confidenceScores[i]` — the referenced {@link Source} (minted / deduped
+ * via the turn-scoped `interner`) from `chunk.web{uri,title}`, `citedText` from
+ * `segment.text`, `range` from the segment span. Citations are grouped by
+ * `segment.partIndex` (defaulting to the first text block when the provider omits
+ * it) and attached to the corresponding text block alongside that block's deduped
+ * referenced {@link BaseContentBlock.sources}.
+ *
+ * Grounding is METADATA, not a `tool_result` — no `executedBy` stamp (see the
+ * normalizeImpl note). Mutates `output` in place.
+ */
+function attachGroundingCitations(
+  output: ContentBlock[],
+  partIndexToOutputIndex: Map<number, number>,
+  grounding: GroundingMetadata | undefined,
+  interner: SourceInterner,
+): void {
+  if (!grounding) return;
+  const supports = grounding.groundingSupports;
+  if (!supports || supports.length === 0) return;
+  const chunks = grounding.groundingChunks ?? [];
+
+  const firstTextPartIndex =
+    partIndexToOutputIndex.size > 0 ? [...partIndexToOutputIndex.keys()][0] : undefined;
+  const byPartIndex = new Map<number, Citation[]>();
+  // Per-block deduped Source set (keyed by turn-stable id), grouped by partIndex.
+  const sourcesByPartIndex = new Map<number, Map<string, Source>>();
+
+  for (const support of supports) {
+    const segment = support.segment;
+    const chunkIndices = support.groundingChunkIndices ?? [];
+    const confidences = support.confidenceScores ?? [];
+    const partIndex = segment?.partIndex ?? firstTextPartIndex ?? 0;
+    const range =
+      segment?.startIndex != null && segment.endIndex != null
+        ? { start: segment.startIndex, end: segment.endIndex }
+        : undefined;
+
+    for (let i = 0; i < chunkIndices.length; i++) {
+      const web = chunks[chunkIndices[i]]?.web;
+      const source = interner.intern({
+        ...(web?.uri ? { url: web.uri } : {}),
+        ...(web?.title ? { title: web.title } : {}),
+      });
+      let blockSources = sourcesByPartIndex.get(partIndex);
+      if (!blockSources) {
+        blockSources = new Map<string, Source>();
+        sourcesByPartIndex.set(partIndex, blockSources);
+      }
+      blockSources.set(source.id, source);
+      const confidence = confidences[i];
+      const citation: Citation = {
+        sourceId: source.id,
+        ...(segment?.text ? { citedText: segment.text } : {}),
+        ...(range ? { range } : {}),
+        ...(typeof confidence === "number" ? { confidence } : {}),
+      };
+      const bucket = byPartIndex.get(partIndex);
+      if (bucket) bucket.push(citation);
+      else byPartIndex.set(partIndex, [citation]);
+    }
+  }
+
+  for (const [partIndex, citations] of byPartIndex) {
+    const oi = partIndexToOutputIndex.get(partIndex);
+    if (oi === undefined) continue;
+    const sources = [...(sourcesByPartIndex.get(partIndex)?.values() ?? [])];
+    output[oi] = { ...(output[oi] as TextBlock), citations, sources };
+  }
 }
 
 function isGoogleResponse(v: unknown): v is GenerateContentResponse {

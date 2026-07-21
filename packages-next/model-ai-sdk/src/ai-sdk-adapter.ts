@@ -38,9 +38,15 @@ import {
 } from "ai";
 
 import { ulid } from "@agentick/utils-next";
-import type { LanguageModelAdapter, StreamAccumulatorView } from "@agentick/model-next";
+import { createSourceInterner } from "@agentick/model-next";
+import type {
+  LanguageModelAdapter,
+  SourceInterner,
+  StreamAccumulatorView,
+} from "@agentick/model-next";
 import type {
   AdapterDelta,
+  Citation,
   ContentBlock,
   ExecutionTarget,
   LanguageModelExecutionResult,
@@ -50,6 +56,8 @@ import type {
   MediaSource,
   NormalizeInput,
   ProviderOptions,
+  Source,
+  TextBlock,
   ToolCall,
 } from "@agentick/spec-next";
 import { mergeProviderOptions, SPEC_VERSION } from "@agentick/spec-next";
@@ -606,27 +614,59 @@ function toAISDKMessage(m: LanguageModelMessage): ModelMessage[] {
 // AI SDK result → LanguageModelExecutionResult
 // ============================================================================
 
+/**
+ * Pass D provenance-half: map the AI SDK's `GenerateTextResult.sources`
+ * (typed `Array<Source>`) onto canonical {@link Citation}s. AI SDK sources are
+ * whole-response source references — a `url` source carries `{ url, title? }`, a
+ * `document` source carries `{ title, filename? }` (an opaque id, NOT an index
+ * into the request's documents) — so mapped citations reference a
+ * {@link Source} (minted / deduped via the turn-scoped `interner`) without a
+ * `range`. No `confidence` (the AI SDK does not expose per-source scores here).
+ * A `document` source has no `url` / `documentIndex` natural key, so it is
+ * interned as its own distinct entity. The block's referenced `Source` entities
+ * are returned alongside for the caller to attach as {@link
+ * BaseContentBlock.sources}.
+ */
+function aiSDKSourcesToCitations(
+  sources: GenerateTextResult<ToolSet, never>["sources"] | undefined,
+  interner: SourceInterner,
+): { citations: Citation[]; sources: Source[] } {
+  if (!sources || sources.length === 0) return { citations: [], sources: [] };
+  const out: Citation[] = [];
+  const blockSources = new Map<string, Source>();
+  for (const s of sources) {
+    if (s.sourceType === "url") {
+      const source = interner.intern({ url: s.url, ...(s.title ? { title: s.title } : {}) });
+      blockSources.set(source.id, source);
+      out.push({ sourceId: source.id });
+    } else if (s.sourceType === "document") {
+      const source = interner.intern({ ...(s.title ? { title: s.title } : {}) });
+      blockSources.set(source.id, source);
+      out.push({ sourceId: source.id });
+    }
+  }
+  return { citations: out, sources: [...blockSources.values()] };
+}
+
 function normalizeImpl(input: NormalizeInput<unknown>): LanguageModelExecutionResult {
   const raw = input.targetOutput as GenerateTextResult<ToolSet, unknown>;
   if (!raw || typeof raw !== "object") {
     throw new Error("normalize expected an AI SDK GenerateTextResult");
   }
 
-  // ┌─ TODO(pass-d): PROVENANCE HALF — NOT YET IMPLEMENTED ──────────────────────
-  // │ Provider-executed tools (web_search / code_interpreter / server_tool_use /
-  // │ grounding) are ENABLED on the request (see prepareInput) but their RESULTS
-  // │ are not yet provenance-stamped here. This adapter must, in a follow-on pass:
-  // │   1. Recognize the AI SDK's provider-executed result parts
-  // │      (`fullStream` `tool-result` parts whose call was a provider-defined
-  // │       tool; `raw.staticToolResults` / source + `provider-metadata` parts).
-  // │   2. Stamp the resulting `tool_result` block `executedBy: "provider:ai-sdk"`
-  // │      (see ToolExecutor docblock in spec content-blocks.ts) so the client
-  // │      attributes + renders it and knows NOT to act on it.
-  // │   3. Ensure provider-executed tool CALLS are NOT surfaced as dispatchable
-  // │      function `tool_use` — else the loop's executor will try to dispatch a
-  // │      tool with no handler. They are provider-run; their result is inline.
-  // │ NB: the REQUEST half is also un-mapped for this adapter — see toAISDKInput.
-  // └────────────────────────────────────────────────────────────────────────────
+  // Provenance-half (Pass D): the AI SDK surfaces provider web sources on
+  // `raw.sources` (typed `Array<Source>`) — mapped to `Citation[]` on the
+  // assistant text block below. AI SDK sources are whole-response source refs
+  // (url/document, no char span), so the mapped citations carry `source`
+  // (+ optional `title`) but no `range`.
+  //
+  // TODO(pass-d): `executedBy: "provider:<key>"` on a provider-executed
+  //   `tool_result` is UNREACHABLE here. The adapter holds an OPAQUE
+  //   `LanguageModel` handle (see toAISDKInput's request-half TODO) and cannot
+  //   determine the concrete provider key (`provider:openai` vs `provider:google`
+  //   …) that a `ToolExecutor` stamp requires; `"provider:ai-sdk"` is not a real
+  //   execution source. With the request-half already un-mapped, the tool-result
+  //   stamp stays narrowed. Citations (which need no provider identity) ARE mapped.
   const output: ContentBlock[] = [];
   // Reasoning rides before text — v1 parity (adapter.ts:354) and matches
   // the other three adapters (#213). AI SDK 5 surfaces reasoning parts on
@@ -647,6 +687,18 @@ function normalizeImpl(input: NormalizeInput<unknown>): LanguageModelExecutionRe
   }
   if (typeof raw.text === "string" && raw.text.length > 0) {
     output.push({ type: "text", text: raw.text });
+  }
+
+  // Attach provider web sources as whole-block citations on the text block.
+  // One interner per normalize (per turn): a URL surfaced more than once mints
+  // one `Source` with one turn-stable id, so the roll-up dedupes it.
+  const interner = createSourceInterner();
+  const { citations, sources } = aiSDKSourcesToCitations(raw.sources, interner);
+  if (citations.length > 0) {
+    const ti = output.findIndex((b) => b.type === "text");
+    if (ti >= 0) {
+      output[ti] = { ...(output[ti] as TextBlock), citations, sources };
+    }
   }
 
   const toolCalls: ToolCall[] = [];

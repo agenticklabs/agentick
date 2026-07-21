@@ -226,3 +226,86 @@ describe("aisdk() adapter — provider tools (Pass D request-half)", () => {
     expect(JSON.stringify(input)).not.toContain("web_search_preview");
   });
 });
+
+describe("aisdk() adapter — provenance-half (Pass D provider sources)", () => {
+  it("maps GenerateTextResult.sources onto the assistant text block's Citation[]", async () => {
+    // `source` content parts are SDK-typed `LanguageModelV2Content` — a
+    // wrong-shaped source FAILS typecheck. `generateText` folds them into
+    // `result.sources`, which the adapter maps to whole-block citations.
+    const model = new MockLanguageModelV2({
+      provider: "mock-aisdk",
+      modelId: "mock-1",
+      doGenerate: async () => ({
+        content: [
+          { type: "text", text: "Paris is the capital of France." },
+          {
+            type: "source",
+            sourceType: "url",
+            id: "src-1",
+            url: "https://example.com/france",
+            title: "France — Overview",
+          },
+        ],
+        finishReason: "stop",
+        usage: { inputTokens: 3, outputTokens: 4, totalTokens: 7 },
+        warnings: [],
+      }),
+    });
+    const exec = mkExecutor(model);
+    await exec.ready;
+    const terminal = await exec.run({ compiled: mkTree(), target: mkTarget(), tools: [] });
+    if (terminal.outcome !== "succeeded") throw new Error("expected success");
+    const textBlock = terminal.result.output.find((b) => b.type === "text");
+    // Normalized model: the citation references a Source by id (no `range` —
+    // the AI SDK gives no char span); the Source rides the block's `sources`.
+    expect(textBlock?.sources).toEqual([
+      { id: "s0", url: "https://example.com/france", title: "France — Overview" },
+    ]);
+    expect(textBlock?.citations).toEqual([{ sourceId: "s0" }]);
+    // Resolution holds: the cited sourceId is present in block.sources.
+    const ids = new Set(textBlock?.sources?.map((s) => s.id));
+    for (const c of textBlock?.citations ?? []) expect(ids.has(c.sourceId)).toBe(true);
+  });
+
+  it("interns one Source when the same url is surfaced twice (shared turn-stable id)", async () => {
+    // Two url sources with the same url → the per-turn interner mints ONE
+    // Source with ONE id; both citations reference it and block.sources holds
+    // it once.
+    const model = new MockLanguageModelV2({
+      provider: "mock-aisdk",
+      modelId: "mock-1",
+      doGenerate: async () => ({
+        content: [
+          { type: "text", text: "Paris is the capital of France." },
+          {
+            type: "source",
+            sourceType: "url",
+            id: "src-1",
+            url: "https://example.com/france",
+            title: "France — Overview",
+          },
+          {
+            type: "source",
+            sourceType: "url",
+            id: "src-2",
+            url: "https://example.com/france",
+            title: "France — Overview",
+          },
+        ],
+        finishReason: "stop",
+        usage: { inputTokens: 3, outputTokens: 4, totalTokens: 7 },
+        warnings: [],
+      }),
+    });
+    const exec = mkExecutor(model);
+    await exec.ready;
+    const terminal = await exec.run({ compiled: mkTree(), target: mkTarget(), tools: [] });
+    if (terminal.outcome !== "succeeded") throw new Error("expected success");
+    const textBlock = terminal.result.output.find((b) => b.type === "text");
+    // One deduped Source; both citations reference it.
+    expect(textBlock?.sources).toEqual([
+      { id: "s0", url: "https://example.com/france", title: "France — Overview" },
+    ]);
+    expect(textBlock?.citations).toEqual([{ sourceId: "s0" }, { sourceId: "s0" }]);
+  });
+});
