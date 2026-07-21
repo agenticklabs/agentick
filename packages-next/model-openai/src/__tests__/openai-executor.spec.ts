@@ -494,3 +494,42 @@ describe("openai() adapter — journaled lifecycle", () => {
     expect([...names].some((n) => n.startsWith("executor:command:run.terminal"))).toBe(true);
   });
 });
+
+// ============================================================================
+// Pass D — provider-executed tools (request-half)
+// ============================================================================
+
+describe("openai() adapter — provider tools (Pass D request-half)", () => {
+  it("maps the openai provider-tool slice onto params.tools, keeps function tools, drops other providers", () => {
+    const adapter = openai("gpt-4o-mini");
+    const params = adapter.buildParams(
+      {
+        messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+        tools: [{ name: "calc", description: "calculator", inputSchema: { type: "object" } }],
+        providerTools: [
+          {
+            provider: "openai",
+            type: "web_search_preview",
+            name: "web_search_preview",
+            config: { search_context_size: "high" },
+          },
+          // Non-matching provider — must be filtered out.
+          { provider: "anthropic", type: "web_search_20250305", name: "web_search" },
+        ],
+      },
+      mkTarget(),
+    ) as { tools?: unknown[]; tool_choice?: unknown };
+    const tools = params.tools ?? [];
+    // Function tool survives in its native `{ type: "function", function }` shape.
+    expect(tools).toContainEqual({
+      type: "function",
+      function: { name: "calc", description: "calculator", parameters: { type: "object" } },
+    });
+    // OpenAI provider tool mapped to the native `{ type, ...config }` shape.
+    expect(tools).toContainEqual({ type: "web_search_preview", search_context_size: "high" });
+    // Anthropic slice excluded — never leaks into OpenAI's tools array.
+    expect(JSON.stringify(tools)).not.toContain("web_search_20250305");
+    // Function tools present ⇒ tool_choice still auto.
+    expect(params.tool_choice).toBe("auto");
+  });
+});

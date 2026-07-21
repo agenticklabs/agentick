@@ -493,7 +493,14 @@ function toOpenAIParams(
   const messages: ChatCompletionMessageParam[] = [];
   for (const m of input.messages) messages.push(...toOpenAIMessages(m));
 
-  const tools = input.tools && input.tools.length > 0 ? input.tools.map(toOpenAITool) : undefined;
+  const fnTools = input.tools && input.tools.length > 0 ? input.tools.map(toOpenAITool) : [];
+  // Pass D request-half: append this adapter's own provider-EXECUTED tool
+  // slice (`provider === "openai"`) onto the native `tools` array. The
+  // provider slot is passthrough-by-design — `type`/`config` are OpenAI's
+  // own (`{ type: "web_search_preview", ... }`), so map verbatim. Other
+  // providers' slices are ignored here (each adapter owns exactly its key).
+  const providerTools = buildOpenAIProviderTools(input.providerTools);
+  const tools = [...fnTools, ...providerTools];
 
   const params: ChatCompletionCreateParams = {
     // Per-tick `<Model>` override (ADR 56) flows via `target.modelId` and
@@ -510,9 +517,12 @@ function toOpenAIParams(
   if (p?.frequencyPenalty !== undefined) params.frequency_penalty = p.frequencyPenalty;
   if (p?.presencePenalty !== undefined) params.presence_penalty = p.presencePenalty;
   if (p?.stopSequences !== undefined) params.stop = p.stopSequences as string[];
-  if (tools && tools.length > 0) {
+  if (tools.length > 0) {
     params.tools = tools;
-    params.tool_choice = "auto";
+    // `tool_choice: "auto"` governs FUNCTION tools; provider-executed tools
+    // are always available and need no choice hint. Gate it on function
+    // tools so a provider-tools-only request doesn't set a spurious choice.
+    if (fnTools.length > 0) params.tool_choice = "auto";
   }
   if (p?.responseFormat) {
     const rf = p.responseFormat;
@@ -706,6 +716,28 @@ function toOpenAITool(t: LanguageModelTool): ChatCompletionTool {
   return { type: "function", function: fn };
 }
 
+/**
+ * Pass D request-half: map the `provider === "openai"` slice of
+ * `input.providerTools` onto OpenAI's native tools-array shape. A provider
+ * tool is passthrough — the adopter already wrote OpenAI's own `type` string
+ * (`"web_search_preview"`, `"code_interpreter"`, …) and a native `config`
+ * bag, so we emit `{ type, ...config }` verbatim (matching the `{ type, … }`
+ * discriminated shape OpenAI's provider tools use in `params.tools`). No
+ * per-tool knowledge, no schema, no `function` wrapper — that is for
+ * dispatchable function tools only. Other providers' slices are ignored.
+ */
+function buildOpenAIProviderTools(
+  providerTools: LanguageModelInput["providerTools"],
+): ChatCompletionTool[] {
+  if (!providerTools) return [];
+  const out: ChatCompletionTool[] = [];
+  for (const pt of providerTools) {
+    if (pt.provider !== "openai") continue;
+    out.push({ type: pt.type, ...pt.config } as unknown as ChatCompletionTool);
+  }
+  return out;
+}
+
 // ============================================================================
 // IR projection — identical to FakeLanguageModelExecutor (kept local so the
 // adapter does not depend on @agentick/executor-next).
@@ -726,6 +758,20 @@ function normalizeImpl(input: NormalizeInput<unknown>): LanguageModelExecutionRe
     throw new Error("ChatCompletion missing choices[0].message");
   }
 
+  // ┌─ TODO(pass-d): PROVENANCE HALF — NOT YET IMPLEMENTED ──────────────────────
+  // │ Provider-executed tools (web_search / code_interpreter / server_tool_use /
+  // │ grounding) are ENABLED on the request (see prepareInput) but their RESULTS
+  // │ are not yet provenance-stamped here. This adapter must, in a follow-on pass:
+  // │   1. Recognize OpenAI's provider-executed result blocks
+  // │      (Responses-API `web_search_call` / `code_interpreter_call` output
+  // │       items; Chat-Completions `message.annotations` url-citation entries).
+  // │   2. Stamp the resulting `tool_result` block `executedBy: "provider:openai"`
+  // │      (see ToolExecutor docblock in spec content-blocks.ts) so the client
+  // │      attributes + renders it and knows NOT to act on it.
+  // │   3. Ensure provider-executed tool CALLS are NOT surfaced as dispatchable
+  // │      function `tool_use` — else the loop's executor will try to dispatch a
+  // │      tool with no handler. They are provider-run; their result is inline.
+  // └────────────────────────────────────────────────────────────────────────────
   const output: ContentBlock[] = [];
   // Reasoning blocks ride before text — OpenAI-compatible servers
   // (vLLM `reasoning_content`, LM Studio `reasoning`) expose

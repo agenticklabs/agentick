@@ -195,3 +195,34 @@ describe("aisdk() factory", () => {
     expect(adapter.target.capabilities?.contextWindow).toBe(1_000);
   });
 });
+
+// ============================================================================
+// Pass D — provider-executed tools (request-half DELIBERATELY not mapped)
+// ============================================================================
+
+describe("aisdk() adapter — provider tools (Pass D request-half)", () => {
+  it("does NOT forward input.providerTools onto the AI SDK input (no correct passthrough seam)", () => {
+    // The AI SDK constructs provider-executed tools via provider-specific
+    // factories (openai.tools.webSearchPreview(), …) that this opaque-handle
+    // adapter cannot reconstruct from `{ provider, type, config }`. So the
+    // request-half is a deliberate no-op (TODO(pass-d) in toAISDKInput) — a
+    // wrong mapping the SDK would reject at runtime is worse than an honest
+    // gap. This test pins the no-leak invariant: provider tools never appear
+    // in the projected input.
+    const adapter = aisdk(mkMockModel("x"));
+    const input = adapter.buildParams(
+      {
+        messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+        providerTools: [
+          { provider: "openai", type: "web_search_preview", name: "web_search_preview" },
+          { provider: "ai-sdk", type: "web_search_preview", name: "web_search_preview" },
+        ],
+      },
+      adapter.target,
+    ) as { tools?: unknown };
+    // Provider tools are not projected into the AI SDK `ToolSet`.
+    expect(input.tools).toBeUndefined();
+    // And nothing about them leaks into the projected input at all.
+    expect(JSON.stringify(input)).not.toContain("web_search_preview");
+  });
+});

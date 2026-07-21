@@ -426,6 +426,23 @@ function toAISDKInput(input: LanguageModelInput, target: ExecutionTarget): AISDK
   if (p?.stopSequences !== undefined) {
     generation.stopSequences = [...p.stopSequences];
   }
+  // ┌─ TODO(pass-d): REQUEST HALF — DELIBERATELY NOT MAPPED (no correct seam) ────
+  // │ `input.providerTools` is NOT forwarded here — on purpose. Unlike the
+  // │ three native adapters (each maps its own `{type,config}` slice onto a
+  // │ raw provider tools-array entry), the AI SDK does NOT accept raw
+  // │ `{ type: "web_search_preview", ... }` entries in its `ToolSet`.
+  // │ Provider-executed tools are constructed via PROVIDER-SPECIFIC factories
+  // │ (`openai.tools.webSearchPreview(config)`, `anthropic.tools.webSearch_
+  // │ 20250305(config)`, `google.tools.googleSearch(config)`, …) that produce
+  // │ opaque provider-defined `Tool` objects. This adapter holds only an
+  // │ OPAQUE `LanguageModel` handle — it cannot import the matching provider
+  // │ module nor reconstruct the right factory call from `{ provider, type,
+  // │ config }`. Forcing a hand-rolled entry would be a WRONG mapping the SDK
+  // │ rejects at runtime — worse than an honest gap. A correct impl needs a
+  // │ provider→factory registry (adopter- or provider-module-supplied) keyed
+  // │ off `pt.provider`/`pt.type`; that is greenfield and out of this pass.
+  // │ (Function `tools` are likewise not forwarded by this adapter yet.)
+  // └────────────────────────────────────────────────────────────────────────────
   // #176: fold `input.providerOptions` (project-time tree-over-target)
   // over the target's own bag; merged defensively so a direct
   // `buildParams(input, target)` still forwards the escape hatch.
@@ -595,6 +612,21 @@ function normalizeImpl(input: NormalizeInput<unknown>): LanguageModelExecutionRe
     throw new Error("normalize expected an AI SDK GenerateTextResult");
   }
 
+  // ┌─ TODO(pass-d): PROVENANCE HALF — NOT YET IMPLEMENTED ──────────────────────
+  // │ Provider-executed tools (web_search / code_interpreter / server_tool_use /
+  // │ grounding) are ENABLED on the request (see prepareInput) but their RESULTS
+  // │ are not yet provenance-stamped here. This adapter must, in a follow-on pass:
+  // │   1. Recognize the AI SDK's provider-executed result parts
+  // │      (`fullStream` `tool-result` parts whose call was a provider-defined
+  // │       tool; `raw.staticToolResults` / source + `provider-metadata` parts).
+  // │   2. Stamp the resulting `tool_result` block `executedBy: "provider:ai-sdk"`
+  // │      (see ToolExecutor docblock in spec content-blocks.ts) so the client
+  // │      attributes + renders it and knows NOT to act on it.
+  // │   3. Ensure provider-executed tool CALLS are NOT surfaced as dispatchable
+  // │      function `tool_use` — else the loop's executor will try to dispatch a
+  // │      tool with no handler. They are provider-run; their result is inline.
+  // │ NB: the REQUEST half is also un-mapped for this adapter — see toAISDKInput.
+  // └────────────────────────────────────────────────────────────────────────────
   const output: ContentBlock[] = [];
   // Reasoning rides before text — v1 parity (adapter.ts:354) and matches
   // the other three adapters (#213). AI SDK 5 surfaces reasoning parts on

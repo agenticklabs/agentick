@@ -79,11 +79,25 @@ content parts:
 - **Non-base64 audio sources** — only inline base64 is a first-class
   `input_audio` part.
 
+## Provider-executed tools (Pass D)
+
+**Request-half wired.** The adapter maps the `provider === "openai"` slice
+of `input.providerTools` onto the native `tools` array as `{ type, ...config }`
+(passthrough — the adopter writes OpenAI's own type string, e.g.
+`web_search_preview`). Other providers' slices are ignored. Function tools
+and their `tool_choice: "auto"` are unaffected.
+
+**Provenance-half TODO.** Parsing provider-EXECUTED results and stamping
+`executedBy: "provider:openai"` is not yet implemented — see the
+`TODO(pass-d): PROVENANCE HALF` trailhead at the response-mapping site
+(`normalizeImpl` in `openai-adapter.ts`).
+
 ## Verified by
 
 - `src/__tests__/openai-executor.spec.ts` — dialect behavior (message
   conversion, finish_reason mapping, abort, streaming deltas, think
-  tags, custom blocks, `target.modelId` precedence #214).
+  tags, custom blocks, `target.modelId` precedence #214, Pass D
+  provider-tools request-half).
 - `src/__tests__/multimodal-projection.spec.ts` — wire-native modality
   projection, model-override precedence (#214), `reasoningTokens` (#217).
 - `src/__tests__/conformance.spec.ts` — `runExecutorConformance`

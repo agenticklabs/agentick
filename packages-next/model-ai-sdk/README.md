@@ -70,11 +70,29 @@ and `raw.reasoning` / `raw.reasoningText` surface as a `reasoning`
 - **`aisdk(model, { tools })`** registration with the app handler
   resolver.
 
+## Provider-executed tools (Pass D)
+
+**Request-half DELIBERATELY not mapped.** Unlike the three native adapters,
+the AI SDK does not accept raw `{ type, ...config }` entries in its
+`ToolSet` — provider-executed tools are built via provider-specific
+factories (`openai.tools.webSearchPreview(config)`,
+`anthropic.tools.webSearch_20250305(config)`, …) that produce opaque
+provider-defined `Tool` objects. This adapter holds only an opaque
+`LanguageModel` handle and cannot reconstruct the right factory call from
+`{ provider, type, config }`, so it forwards `input.providerTools` NOWHERE
+(a wrong mapping the SDK rejects at runtime is worse than an honest gap).
+A correct impl needs a `provider → factory` registry keyed off `pt.provider`.
+See the `TODO(pass-d): REQUEST HALF` trailhead in `toAISDKInput`.
+
+**Provenance-half TODO.** Likewise unimplemented — see the
+`TODO(pass-d): PROVENANCE HALF` trailhead at `normalizeImpl`.
+
 ## Verified by
 
 - `src/__tests__/ai-sdk-executor.spec.ts` — bridge behavior against
   `MockLanguageModelV2` (target derivation, tool-call extraction,
-  finish-reason vocabulary, abort, reasoning output + `reasoningTokens`).
+  finish-reason vocabulary, abort, reasoning output + `reasoningTokens`,
+  Pass D provider-tools request-half no-leak invariant).
 - `src/__tests__/multimodal-projection.spec.ts` — wire-native modality
   projection, request- and message-level `providerOptions` carry.
 - `src/__tests__/conformance.spec.ts` — `runExecutorConformance`

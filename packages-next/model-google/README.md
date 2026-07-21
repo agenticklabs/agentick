@@ -108,11 +108,26 @@ translates, OpenAI + Google no-op, AI SDK relies on the passthrough.)
   `functionCall` parts; returned `inlineData` (model-generated images)
   is not yet surfaced as a `generated_image` block.
 
+## Provider-executed tools (Pass D)
+
+**Request-half wired.** The adapter maps the `provider === "google"` slice
+of `input.providerTools` onto the native `config.tools` array. Gemini
+grounding tools are keyed objects — `{ googleSearch: {} }`,
+`{ codeExecution: {} }` — each a DISTINCT `Tool` entry riding alongside the
+single function-declaration `Tool`; the adapter maps each wire entry to
+`{ [type]: config ?? {} }` verbatim. Other providers' slices are ignored.
+
+**Provenance-half TODO.** Recognizing `groundingMetadata` /
+`codeExecutionResult` result shapes and stamping
+`executedBy: "provider:google"` is not yet implemented — see the
+`TODO(pass-d): PROVENANCE HALF` trailhead at the response-mapping site
+(`normalizeImpl` in `google-adapter.ts`).
+
 ## Verified by
 
 - `src/__tests__/google-executor.spec.ts` — dialect behavior (schema
   sanitization, thought routing, thoughtSignature carry, block
-  synthesis, stop-reason mapping).
+  synthesis, stop-reason mapping, Pass D provider-tools request-half).
 - `src/__tests__/multimodal-projection.spec.ts` — wire-native modality
   projection, `thoughtSignature` round-trip, `CacheHint` no-op +
   `cachedContent` escape hatch (#212).

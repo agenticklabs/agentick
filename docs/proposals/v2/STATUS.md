@@ -1725,6 +1725,30 @@ blueprint's design decisions; this is execution-level).
 
 ### 2026-07-21
 
+- **Pass D adapters — REQUEST-HALF LANDED (3 of 4; ai-sdk deferred).** Each adapter
+  consumes its own `input.providerTools` slice (filtered by `provider` key) and maps
+  it onto the native request tools array: **openai** `{ type, ...config }` →
+  `params.tools`; **anthropic** `{ type, name, ...config }` (server tools need both
+  versioned type AND name); **google** `{ [type]: config }` as distinct grounding
+  `Tool` entries alongside the single `{ functionDeclarations }`. Each gates on a
+  non-empty filtered slice and maps ONLY its own key — cross-provider leakage is
+  test-asserted; provider tools never enter the function-`tools`/dispatch path.
+  **ai-sdk request-half DEFERRED (correct call):** the AI SDK builds provider tools
+  via provider-specific factories (`openai.tools.webSearchPreview(config)`) that emit
+  opaque `Tool` objects; the adapter holds only an opaque `LanguageModel` handle and
+  can't reconstruct the factory call from `{provider,type,config}` — a hand-rolled
+  entry would be rejected at runtime. Needs a `provider→factory` registry; TODO'd
+  loudly (`ai-sdk-adapter.ts:429`). **LOUD provenance trailheads** (`grep -rn
+  "TODO(pass-d): PROVENANCE HALF"`): 4 uniform box-comment markers at each adapter's
+  `normalizeImpl` (openai:761, anthropic:1185, google:858, ai-sdk:615), each naming
+  that provider's concrete result-block shape — the exact spec for the provenance
+  pass. Gates: typecheck --force 152/152 0-cached; 178 adapter tests (+4 request-half,
+  native-shape + cross-provider-filter asserted); oxlint 0 errors (2 pre-existing
+  warnings). **Provenance-half = NEXT PASS:** `executedBy: "provider:*"` stamping +
+  a canonical CITATION representation (web-search/grounding return citations — common,
+  needs a spec home; Google grounding emits citation METADATA not a discrete
+  tool_result block, so provenance may not be a stamp-on-a-block there).
+
 - **Tool-config parity — Pass D FOUNDATION LANDED (provider-executed tools).**
   Restores v1's `ToolExecutionType.PROVIDER` (provider runs the tool INSIDE the
   model call, result bypasses the executor — OpenAI `web_search`/`code_interpreter`,

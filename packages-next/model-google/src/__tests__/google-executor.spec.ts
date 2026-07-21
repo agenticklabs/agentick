@@ -965,3 +965,55 @@ describe("google() adapter — type sanity", () => {
     expect(_ok.model).toBe("gemini-2.5-flash");
   });
 });
+
+// ============================================================================
+// Pass D — provider-executed tools (request-half)
+// ============================================================================
+
+describe("google() adapter — provider tools (Pass D request-half)", () => {
+  it("maps the google grounding slice onto config.tools alongside function declarations, drops other providers", () => {
+    const adapter = google("gemini-2.5-flash");
+    const params = adapter.buildParams(
+      {
+        messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+        tools: [
+          {
+            name: "calc",
+            description: "calculator",
+            inputSchema: { type: "object", properties: { a: { type: "number" } } },
+          },
+        ],
+        providerTools: [
+          { provider: "google", type: "googleSearch", name: "googleSearch", config: {} },
+          {
+            provider: "google",
+            type: "googleSearchRetrieval",
+            name: "googleSearchRetrieval",
+            config: { dynamicRetrievalConfig: { mode: "MODE_DYNAMIC" } },
+          },
+          // Non-matching provider — must be filtered out.
+          { provider: "openai", type: "web_search_preview", name: "web_search_preview" },
+        ],
+      },
+      mkTarget(),
+    ) as { config?: { tools?: unknown[] } };
+    const tools = params.config?.tools ?? [];
+    // Function declarations ride as their own single `Tool` entry.
+    expect(tools).toContainEqual({
+      functionDeclarations: [
+        {
+          name: "calc",
+          description: "calculator",
+          parameters: { type: "object", properties: { a: { type: "number" } } },
+        },
+      ],
+    });
+    // Grounding tools ride as distinct `{ [type]: config }` `Tool` entries.
+    expect(tools).toContainEqual({ googleSearch: {} });
+    expect(tools).toContainEqual({
+      googleSearchRetrieval: { dynamicRetrievalConfig: { mode: "MODE_DYNAMIC" } },
+    });
+    // OpenAI slice excluded — never leaks into Google's tools array.
+    expect(JSON.stringify(tools)).not.toContain("web_search_preview");
+  });
+});

@@ -90,11 +90,27 @@ generic `data` slot).
   document `source` union is base64 / url / text / content only; not
   expressible until the SDK exposes them.
 
+## Provider-executed tools (Pass D)
+
+**Request-half wired.** The adapter maps the `provider === "anthropic"`
+slice of `input.providerTools` onto the native `tools` array as
+`{ type, name, ...config }` — Anthropic server tools carry BOTH a versioned
+`type` AND a `name` (e.g. `{ type: "web_search_20250305", name: "web_search",
+max_uses: 5 }`). Passthrough; other providers' slices are ignored. Function
+tools are unaffected.
+
+**Provenance-half TODO.** Recognizing `server_tool_use` +
+`web_search_tool_result` result blocks and stamping
+`executedBy: "provider:anthropic"` is not yet implemented — see the
+`TODO(pass-d): PROVENANCE HALF` trailhead at the response-mapping site
+(`normalizeImpl` in `anthropic-adapter.ts`).
+
 ## Verified by
 
 - `src/__tests__/anthropic-executor.spec.ts` — dialect behavior
   (alternation, thinking blocks, stop-reason mapping, streaming
-  vocabulary, tag routing, sampling params from `tree.config` #211).
+  vocabulary, tag routing, sampling params from `tree.config` #211,
+  Pass D provider-tools request-half).
 - `src/__tests__/multimodal-projection.spec.ts` — wire-native modality
   projection, thinking round-trip, stop-reason `refusal`/`pause_turn`
   (#216), config-declared `topP`/`stopSequences` reaching the wire (#211).

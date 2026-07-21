@@ -623,7 +623,15 @@ function toAnthropicParams(
   executorMaxTokens: number | undefined,
 ): MessageCreateParams {
   const { system, messages } = toAnthropicMessages(input.messages);
-  const tools = input.tools && input.tools.length > 0 ? toAnthropicTools(input.tools) : undefined;
+  const fnTools = input.tools && input.tools.length > 0 ? toAnthropicTools(input.tools) : [];
+  // Pass D request-half: append this adapter's own provider-EXECUTED tool
+  // slice (`provider === "anthropic"`) onto the native `tools` array.
+  // Anthropic server tools carry BOTH a versioned `type` AND a `name`
+  // (e.g. `{ type: "web_search_20250305", name: "web_search", max_uses: 5 }`),
+  // so map `{ type, name, ...config }` verbatim — passthrough, no per-tool
+  // knowledge. Other providers' slices are ignored (each adapter owns its key).
+  const providerTools = buildAnthropicProviderTools(input.providerTools);
+  const tools = [...fnTools, ...providerTools];
 
   const params: MessageCreateParams = {
     model: target.modelId ?? defaultModel ?? DEFAULT_MODEL,
@@ -632,7 +640,7 @@ function toAnthropicParams(
   } as MessageCreateParams;
 
   if (system !== undefined) (params as { system?: MessageCreateParams["system"] }).system = system;
-  if (tools !== undefined) params.tools = tools;
+  if (tools.length > 0) params.tools = tools;
   const p = input.parameters;
   if (p?.temperature !== undefined) params.temperature = p.temperature;
   if (p?.topP !== undefined) params.top_p = p.topP;
@@ -858,6 +866,28 @@ function toAnthropicTools(tools: ReadonlyArray<LanguageModelTool>): Array<Anthro
     const overrides = t.providerOptions?.anthropic;
     return overrides ? { ...base, ...overrides } : base;
   });
+}
+
+/**
+ * Pass D request-half: map the `provider === "anthropic"` slice of
+ * `input.providerTools` onto Anthropic's native tools-array shape. Anthropic
+ * server tools are `{ type: <versioned>, name: <framework id>, ...config }`
+ * (e.g. `{ type: "web_search_20250305", name: "web_search", max_uses: 5 }`) —
+ * passthrough, no schema, no per-tool knowledge. The `MessageCreateParams`
+ * `tools` union accepts these server-tool shapes alongside function tools;
+ * cast at the boundary since the projected `type`/`config` are opaque.
+ * Other providers' slices are ignored.
+ */
+function buildAnthropicProviderTools(
+  providerTools: LanguageModelInput["providerTools"],
+): Array<AnthropicTool> {
+  if (!providerTools) return [];
+  const out: Array<AnthropicTool> = [];
+  for (const pt of providerTools) {
+    if (pt.provider !== "anthropic") continue;
+    out.push({ type: pt.type, name: pt.name, ...pt.config } as unknown as AnthropicTool);
+  }
+  return out;
 }
 
 /**
@@ -1152,6 +1182,20 @@ function normalizeImpl(input: NormalizeInput<unknown>): LanguageModelExecutionRe
   if (!isAnthropicMessage(raw)) {
     throw new Error("normalize expected Anthropic Message shape");
   }
+  // ┌─ TODO(pass-d): PROVENANCE HALF — NOT YET IMPLEMENTED ──────────────────────
+  // │ Provider-executed tools (web_search / code_interpreter / server_tool_use /
+  // │ grounding) are ENABLED on the request (see prepareInput) but their RESULTS
+  // │ are not yet provenance-stamped here. This adapter must, in a follow-on pass:
+  // │   1. Recognize Anthropic's provider-executed result blocks
+  // │      (`server_tool_use` + the paired `web_search_tool_result` /
+  // │       `code_execution_tool_result` content blocks on the message).
+  // │   2. Stamp the resulting `tool_result` block `executedBy: "provider:anthropic"`
+  // │      (see ToolExecutor docblock in spec content-blocks.ts) so the client
+  // │      attributes + renders it and knows NOT to act on it.
+  // │   3. Ensure provider-executed tool CALLS are NOT surfaced as dispatchable
+  // │      function `tool_use` — else the loop's executor will try to dispatch a
+  // │      tool with no handler. They are provider-run; their result is inline.
+  // └────────────────────────────────────────────────────────────────────────────
   const output = anthropicContentToContentBlocks(raw.content);
   const toolCalls: ToolCall[] = [];
   for (const block of raw.content) {

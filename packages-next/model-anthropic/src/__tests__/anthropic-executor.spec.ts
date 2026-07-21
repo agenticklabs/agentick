@@ -968,3 +968,45 @@ describe("anthropic() adapter — canonical CacheHint translation (#185)", () =>
     expect(msgs[0]!.content[0]!.cache_control).toEqual({ type: "ephemeral" });
   });
 });
+
+// ============================================================================
+// Pass D — provider-executed tools (request-half)
+// ============================================================================
+
+describe("anthropic() adapter — provider tools (Pass D request-half)", () => {
+  it("maps the anthropic provider-tool slice onto params.tools, keeps function tools, drops other providers", () => {
+    const adapter = anthropic("claude-3-5-sonnet-latest");
+    const params = adapter.buildParams(
+      {
+        messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+        tools: [{ name: "calc", description: "calculator", inputSchema: { type: "object" } }],
+        providerTools: [
+          {
+            provider: "anthropic",
+            type: "web_search_20250305",
+            name: "web_search",
+            config: { max_uses: 5 },
+          },
+          // Non-matching provider — must be filtered out.
+          { provider: "openai", type: "web_search_preview", name: "web_search_preview" },
+        ],
+      },
+      mkTarget(),
+    ) as { tools?: unknown[] };
+    const tools = params.tools ?? [];
+    // Function tool survives with its native `input_schema` shape.
+    expect(tools).toContainEqual({
+      name: "calc",
+      description: "calculator",
+      input_schema: { type: "object" },
+    });
+    // Anthropic server tool mapped to the native `{ type, name, ...config }` shape.
+    expect(tools).toContainEqual({
+      type: "web_search_20250305",
+      name: "web_search",
+      max_uses: 5,
+    });
+    // OpenAI slice excluded — never leaks into Anthropic's tools array.
+    expect(JSON.stringify(tools)).not.toContain("web_search_preview");
+  });
+});

@@ -562,7 +562,16 @@ function toGoogleParams(
   defaultModel: string | undefined,
 ): GenerateContentParameters {
   const { systemInstruction, contents } = toGoogleContents(input.messages);
-  const tools = input.tools && input.tools.length > 0 ? toGoogleTools(input.tools) : undefined;
+  const fnTools = input.tools && input.tools.length > 0 ? toGoogleTools(input.tools) : [];
+  // Pass D request-half: append this adapter's own provider-EXECUTED tool
+  // slice (`provider === "google"`) onto the native `tools` array. Google's
+  // grounding tools are shaped as `{ [key]: config }` (e.g. `{ googleSearch:
+  // {} }`, `{ codeExecution: {} }`) — NOT `{ type }` — and ride as their own
+  // `Tool` entries ALONGSIDE the single function-declaration `Tool`. Map each
+  // to `{ [pt.type]: pt.config ?? {} }` verbatim. Other providers' slices are
+  // ignored (each adapter owns exactly its own key).
+  const providerTools = buildGoogleProviderTools(input.providerTools);
+  const tools = [...fnTools, ...providerTools];
 
   const config: Record<string, unknown> = {};
   const p = input.parameters;
@@ -581,7 +590,7 @@ function toGoogleParams(
   // Silently drop frequencyPenalty / presencePenalty — Gemini has no native support.
 
   if (systemInstruction !== undefined) config.systemInstruction = systemInstruction;
-  if (tools !== undefined) config.tools = tools;
+  if (tools.length > 0) config.tools = tools;
 
   // G5 — adopter escape hatch. `input.providerOptions` (project-time
   // fold of tree over target, #176) wins over the target's own bag;
@@ -816,6 +825,27 @@ function toGoogleTools(tools: ReadonlyArray<LanguageModelTool>): GoogleTool[] {
   return [{ functionDeclarations }];
 }
 
+/**
+ * Pass D request-half: map the `provider === "google"` slice of
+ * `input.providerTools` onto Gemini's native grounding-tool shape. Unlike
+ * function tools (one `Tool` with `functionDeclarations`), Google grounding
+ * tools are keyed objects — `{ googleSearch: {} }`, `{ codeExecution: {} }`,
+ * `{ urlContext: {} }` — each a distinct `Tool` in `config.tools`. Map each
+ * wire entry to `{ [pt.type]: pt.config ?? {} }` verbatim; passthrough, no
+ * per-tool knowledge. Other providers' slices are ignored.
+ */
+function buildGoogleProviderTools(
+  providerTools: LanguageModelInput["providerTools"],
+): GoogleTool[] {
+  if (!providerTools) return [];
+  const out: GoogleTool[] = [];
+  for (const pt of providerTools) {
+    if (pt.provider !== "google") continue;
+    out.push({ [pt.type]: pt.config ?? {} } as unknown as GoogleTool);
+  }
+  return out;
+}
+
 // ============================================================================
 // GenerateContentResponse → LanguageModelExecutionResult
 // ============================================================================
@@ -825,6 +855,20 @@ function normalizeImpl(input: NormalizeInput<unknown>): LanguageModelExecutionRe
   if (!isGoogleResponse(raw)) {
     throw new Error("normalize expected Google GenerateContentResponse shape");
   }
+  // ┌─ TODO(pass-d): PROVENANCE HALF — NOT YET IMPLEMENTED ──────────────────────
+  // │ Provider-executed tools (web_search / code_interpreter / server_tool_use /
+  // │ grounding) are ENABLED on the request (see prepareInput) but their RESULTS
+  // │ are not yet provenance-stamped here. This adapter must, in a follow-on pass:
+  // │   1. Recognize Google's provider-executed result shapes
+  // │      (`candidate.groundingMetadata` for googleSearch grounding; the
+  // │       `executableCode` / `codeExecutionResult` parts for codeExecution).
+  // │   2. Stamp the resulting `tool_result` block `executedBy: "provider:google"`
+  // │      (see ToolExecutor docblock in spec content-blocks.ts) so the client
+  // │      attributes + renders it and knows NOT to act on it.
+  // │   3. Ensure provider-executed tool CALLS are NOT surfaced as dispatchable
+  // │      function `tool_use` — else the loop's executor will try to dispatch a
+  // │      tool with no handler. They are provider-run; their result is inline.
+  // └────────────────────────────────────────────────────────────────────────────
   const candidate = raw.candidates?.[0];
   const output: ContentBlock[] = [];
   const toolCalls: ToolCall[] = [];
