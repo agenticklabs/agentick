@@ -303,6 +303,59 @@ describe("View — cache value ≠ stored record (the fused case)", () => {
   });
 });
 
+describe("View — flush() is the durability barrier", () => {
+  it("awaits a deferred store write (the write is pending until flush resolves)", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    let landed = false;
+    const backing = new Map<string, Cell>();
+    const deferred: Store<Cell, Record<string, never>, CollectionMutation<Cell>> = {
+      backend: "deferred",
+      query: () => Promise.resolve([...backing.values()]),
+      mutate: async (m) => {
+        await gate;
+        if ("put" in m) backing.set(m.put.id, m.put);
+        else backing.delete(m.delete);
+        landed = true;
+      },
+    };
+    const v = View.collection(deferred, (c) => c.id);
+
+    v.write({ id: "a", value: 1 }, stubStoreCtx());
+    expect(v.getSync("a")).toEqual({ id: "a", value: 1 }); // read from cache — no await
+    expect(landed).toBe(false); // durable write still pending
+
+    release();
+    await v.flush();
+    expect(landed).toBe(true); // flush awaited the in-flight write
+    expect(backing.get("a")).toEqual({ id: "a", value: 1 });
+  });
+
+  it("swallows a failing write on the hot path, surfaces it on flush, clears it after", async () => {
+    let fail = true;
+    const failing: Store<Cell, Record<string, never>, CollectionMutation<Cell>> = {
+      backend: "failing",
+      query: () => Promise.resolve([]),
+      mutate: () => (fail ? Promise.reject(new Error("boom")) : Promise.resolve()),
+    };
+    const v = View.collection(failing, (c) => c.id);
+
+    // The write does not throw on the hot path; the cache still reflects it.
+    v.write({ id: "a", value: 1 }, stubStoreCtx());
+    expect(v.getSync("a")).toEqual({ id: "a", value: 1 });
+
+    // The latched failure surfaces on the next flush.
+    await expect(v.flush()).rejects.toThrow(/boom/);
+
+    // Cleared after — a second flush over a now-healthy store is clean.
+    fail = false;
+    v.write({ id: "b", value: 2 }, stubStoreCtx());
+    await expect(v.flush()).resolves.toBeUndefined();
+  });
+});
+
 describe("View — targets the pure seam (no profile methods)", () => {
   it("works over a store that ONLY implements Store (query/mutate)", async () => {
     const backing = new Map<string, Cell>();

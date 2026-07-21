@@ -42,9 +42,20 @@
  *   doing all cache writes before any `fireListeners`.
  *
  * `StoreCtx` threads the runtime scope across the Effect→Promise boundary; the
- * view is Promise-shaped and never reads ambient context. Store writes are
- * fire-and-forget (`void mutate(...).catch(...)`): reads are served from the
- * sync cache, so a durable-write failure must not crash the mutation.
+ * view is Promise-shaped and never reads ambient context. Store writes go
+ * through {@link persist} off the critical path: reads are served from the sync
+ * cache, so a durable-write failure must not crash the mutation.
+ *
+ * ## The durability barrier ({@link flush})
+ *
+ * A store write is fire-and-forget on the hot path, but {@link persist} TRACKS
+ * each in-flight write promise instead of swallowing it. {@link flush} awaits
+ * every pending write and surfaces (then clears) the first latched failure — the
+ * seam a graceful-close / hibernate needs so a durable store (Postgres) has
+ * every write this view made before the process may exit. A no-op for the
+ * in-memory default (writes settle synchronously). The read path is unchanged:
+ * reads never await, writes stay off the critical path — {@link flush} is the
+ * only place a previously-swallowed write error is observed.
  *
  * @see docs/proposals/v2/store.md
  * @verifiedBy packages-next/store/src/__tests__/view.spec.ts
@@ -88,6 +99,10 @@ export class View<TCache, TStore = TCache, Q = void, M = never> {
   private readonly notifier: KeyedNotifier = createKeyedNotifier();
   /** Typed push DELTAS carrying `{ key, value?, prev? }` (the notify seam). */
   private readonly changes: ChangeNotifier<TCache> = createChangeNotifier<TCache>();
+  /** In-flight store writes kicked by {@link persist} — awaited by {@link flush}. */
+  private readonly pending = new Set<Promise<void>>();
+  /** First latched write failure, surfaced (and cleared) by {@link flush}. */
+  private writeError: unknown = undefined;
 
   constructor(private readonly cfg: ViewConfig<TCache, TStore, Q, M>) {}
 
@@ -137,9 +152,7 @@ export class View<TCache, TStore = TCache, Q = void, M = never> {
     const had = this.cache.has(key);
     const prev = this.cache.get(key);
     this.cache.set(key, item);
-    void Promise.resolve(this.cfg.store.mutate(this.cfg.toPut(this.cfg.project(item)), ctx)).catch(
-      () => undefined,
-    );
+    this.persist(this.cfg.toPut(this.cfg.project(item)), ctx);
     this.notifier.notify(key);
     this.changes.emitChange(had ? { key, value: item, prev } : { key, value: item });
   }
@@ -154,7 +167,7 @@ export class View<TCache, TStore = TCache, Q = void, M = never> {
     const had = this.cache.has(key);
     const prev = this.cache.get(key);
     this.cache.delete(key);
-    void Promise.resolve(this.cfg.store.mutate(this.cfg.toDelete(key), ctx)).catch(() => undefined);
+    this.persist(this.cfg.toDelete(key), ctx);
     if (had) {
       this.notifier.notify(key);
       this.changes.emitChange({ key, prev });
@@ -177,18 +190,14 @@ export class View<TCache, TStore = TCache, Q = void, M = never> {
     for (const key of [...this.cache.keys()]) {
       if (!nextKeys.has(key)) {
         this.cache.delete(key);
-        void Promise.resolve(this.cfg.store.mutate(this.cfg.toDelete(key), ctx)).catch(
-          () => undefined,
-        );
+        this.persist(this.cfg.toDelete(key), ctx);
         touched.add(key);
       }
     }
     for (const item of items) {
       const key = this.cfg.keyOf(item);
       this.cache.set(key, item);
-      void Promise.resolve(
-        this.cfg.store.mutate(this.cfg.toPut(this.cfg.project(item)), ctx),
-      ).catch(() => undefined);
+      this.persist(this.cfg.toPut(this.cfg.project(item)), ctx);
       touched.add(key);
     }
     for (const key of touched) this.notifier.notify(key);
@@ -254,5 +263,41 @@ export class View<TCache, TStore = TCache, Q = void, M = never> {
   /** Subscribe to the typed change stream (the push notify seam). */
   onChange(fn: (c: ChangeEvent<TCache>) => void): Unsubscribe {
     return this.changes.onChange(fn);
+  }
+
+  // ─────────── Durability barrier (off-critical-path write tracking) ───────────
+
+  /**
+   * Fire-and-forget the store write off the critical path, but TRACK the promise
+   * so {@link flush} can await it and surface a latched failure. Reads never
+   * await this — the sync cache already reflects the mutation. A failure is
+   * absorbed into `writeError` (first-wins) so an un-awaited write can never
+   * become an unhandled rejection, and so {@link flush} is the single place a
+   * durability failure is observed.
+   */
+  private persist(m: M, ctx: StoreCtx): void {
+    const p = Promise.resolve(this.cfg.store.mutate(m, ctx)).then(
+      () => {
+        this.pending.delete(p);
+      },
+      (err: unknown) => {
+        this.pending.delete(p);
+        this.writeError ??= err;
+      },
+    );
+    this.pending.add(p);
+  }
+
+  /**
+   * Await every in-flight store write, then surface (and clear) the first
+   * latched failure. The graceful-close / hibernate barrier: after `flush()`
+   * resolves without throwing, the durable store has every write this view made.
+   * A no-op for the in-memory default (writes settle synchronously).
+   */
+  async flush(): Promise<void> {
+    await Promise.allSettled([...this.pending]);
+    const err = this.writeError;
+    this.writeError = undefined;
+    if (err !== undefined) throw err;
   }
 }

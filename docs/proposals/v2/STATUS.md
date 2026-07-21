@@ -1723,6 +1723,24 @@ explicit `typescript` + `vitest` devDeps. Both removed:
 Running record of decisions made during execution (separate from the
 blueprint's design decisions; this is execution-level).
 
+### 2026-07-21
+
+- **Phase 4a LANDED: `View.flush()` durability barrier.** View writes are
+  fire-and-forget (reads served from the sync cache; a durable-write failure must
+  not crash the mutation). Added a private `persist(m, ctx)` that routes the store
+  write off the critical path but TRACKS the promise in a `pending` Set and
+  latches the first failure (`writeError ??= err`); `flush()` awaits all pending
+  writes then surfaces + clears the latched error. `seedSync` stays cache-only.
+  Hot path unchanged — the only new surface is `flush()` (the graceful-close /
+  hibernate barrier a durable store needs; a no-op for the in-memory default).
+  `wrapWriteError` seam skipped (harnesses wrap at their own flush delegation).
+  Manifest DROPPED from Phase 4 (Ryan: "too much ceremony") — resume is just
+  "each store hydrates its own scope," no per-store cursor record. Gates:
+  typecheck --force 152/152 0-cached; store 81 passed (view.spec 16→18). **Next
+  (4b):** wire `hydrate()` per harness into construction/resume, seed only when
+  the store is empty (fresh), retire `importSnapshot` as the resume mechanism,
+  wire close→flush; resources re-runs loaders post-hydrate.
+
 ### 2026-07-20
 
 - **Store convergence — COMPLETE (Run 5: resources migrated, credentials closed
