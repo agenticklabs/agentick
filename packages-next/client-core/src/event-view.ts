@@ -28,6 +28,7 @@
 import type { ChannelView, Cursor, EventQuery, SubscriptionScope } from "@agentick/spec-next";
 
 import { eventStream, type EventClient } from "./event-stream.js";
+import { liveStore } from "./live-store.js";
 
 export type { ChannelView } from "@agentick/spec-next";
 export type { EventClient } from "./event-stream.js";
@@ -58,66 +59,25 @@ export function eventView<T, F>(
   query: EventQuery,
   config: EventViewConfig<T, F>,
 ): ChannelView<T, F> {
-  let state: T = config.initial;
-  let closed = false;
-  let status: ChannelView<T, F>["status"] = "loading";
-  const stateListeners = new Set<(state: T) => void>();
-  const frameListeners = new Set<(frame: F) => void>();
-
   const stream = eventStream<F>(client, scope, query, config.fromCursor);
+  // The fan-out core; `close()` tears the stream down. `eventView` returns it
+  // as a plain `ChannelView` — the imperative `set`/`closed` seams are internal
+  // (used only by the fold loop below).
+  const store = liveStore<T, F>(config.initial, () => stream.close());
+
   void (async () => {
     for await (const frame of stream) {
-      if (closed) return;
+      if (store.closed) return;
       let folded: T;
       try {
-        folded = config.reduce(state, frame);
+        folded = config.reduce(store.get(), frame);
       } catch {
         // A malformed frame must not tear down the stream.
         continue;
       }
-      state = folded;
-      status = "live";
-      // Change feed first (the frame), then the state feed (the folded result).
-      for (const l of [...frameListeners]) {
-        try {
-          l(frame);
-        } catch {
-          /* isolate */
-        }
-      }
-      for (const l of [...stateListeners]) {
-        try {
-          l(state);
-        } catch {
-          /* isolate */
-        }
-      }
+      store.set(folded, frame);
     }
   })();
 
-  return {
-    get: (): T => state,
-    subscribe(listener) {
-      stateListeners.add(listener);
-      return () => {
-        stateListeners.delete(listener);
-      };
-    },
-    onChange(listener) {
-      frameListeners.add(listener);
-      return () => {
-        frameListeners.delete(listener);
-      };
-    },
-    get status() {
-      return status;
-    },
-    close(): void {
-      closed = true;
-      status = "closed";
-      stateListeners.clear();
-      frameListeners.clear();
-      stream.close();
-    },
-  };
+  return store;
 }

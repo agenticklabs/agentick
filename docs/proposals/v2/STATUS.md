@@ -1725,6 +1725,30 @@ blueprint's design decisions; this is execution-level).
 
 ### 2026-07-21
 
+- **Client timeline — mutable WINDOW LANDED (`prepend`/`append`).** `timelineView`
+  (the client-side fold of `timeline:command:append` events) gained a mutable
+  window: `prepend(entries)` splices OLDER history at the HEAD (scroll-back — the
+  adopter loads it from `LogStore.history` server-side, no wire read verb), `append`
+  splices optimistic/pending entries at the TAIL. Copy-on-write per mutation (the
+  `useSyncExternalStore` contract fires); empty/all-filtered batch = no-op (same ref).
+  **Minimal splice — NO seq-merge/dedup** (bus `Cursor` ≠ store `seq`, two numbering
+  systems; the ecosystem reconciles app-side): the app owns reconciliation via the
+  `message.metadata.clientId` passthrough (`send({messages:[{metadata:{clientId}}]})`
+  survives onto the folded entry). Extracted **`liveStore<T,F>`**
+  (`@agentick/client-core-next`) — the fan-out core (held state + dual state/frame
+  feed + `useSyncExternalStore` contract + status + fault isolation) with an
+  imperative `set(next, frame?)` seam; `eventView` now sits on it (behavior
+  identical), `timelineView` drives `set` from BOTH the live fold AND `prepend`/
+  `append`. **This is purely CLIENT-SIDE** — the backend `TimelineHarness`
+  (server-side `LogView`, `timeline:command:append`, `history`) needed nothing; the
+  window folds the server's existing event stream. Worked typed example at
+  `example/v2-coding-agent/src/timeline-client-example.ts` (server hydrate → seed →
+  tail → scroll-back → optimistic send → `reconcileByClientId`). The one deferred
+  piece: a wire `timeline/history` read verb for the THIN-client (no adopter server)
+  case — `history` is in-process only today; server-hydrate path works now. Gates:
+  typecheck --force 152/152 0-cached; tests 171 passed (timeline-view.spec +6 cases);
+  oxlint/oxfmt clean.
+
 - **Tool-config parity restoration — Pass A LANDED (confirmation seams).** A full
   v1→v2 tool-config audit found the rewrite dropped 15 fields, 4 of them
   callable→static seam-violations (all in the confirmation-UX cluster). Pass A

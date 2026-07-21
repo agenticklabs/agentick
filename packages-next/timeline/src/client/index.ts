@@ -14,4 +14,9 @@
  * `fromCursor` — no read RPC, no bespoke channel.
  */
 
-export { timelineView, type TimelineClient, type TimelineViewOptions } from "./timeline-view.js";
+export {
+  timelineView,
+  type TimelineClient,
+  type TimelineView,
+  type TimelineViewOptions,
+} from "./timeline-view.js";

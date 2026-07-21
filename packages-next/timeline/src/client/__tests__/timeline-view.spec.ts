@@ -168,4 +168,86 @@ describe("timelineView", () => {
     expect(r1).not.toBe(refs[0]);
     expect(r2).not.toBe(r1);
   });
+
+  it("prepend splices OLDER entries at the HEAD and notifies the STATE feed", async () => {
+    const view = timelineView(fakeClient(pushStream()), "s1", { initial: [entry("live", "now")] });
+
+    let notified = 0;
+    view.subscribe(() => notified++);
+
+    const before = view.get();
+    view.prepend([entry("old1", "a"), entry("old2", "b")]);
+
+    expect(view.get().map((e) => (e as any).message.id)).toEqual(["old1", "old2", "live"]);
+    expect(view.get()).not.toBe(before); // copy-on-write
+    expect(notified).toBe(1);
+  });
+
+  it("append splices entries at the TAIL (optimistic overlay) and notifies", () => {
+    const view = timelineView(fakeClient(pushStream()), "s1", { initial: [entry("live", "now")] });
+
+    let notified = 0;
+    view.subscribe(() => notified++);
+
+    view.append([entry("pending", "optimistic")]);
+
+    expect(view.get().map((e) => (e as any).message.id)).toEqual(["live", "pending"]);
+    expect(notified).toBe(1);
+  });
+
+  it("the live fold still tails + interleaves AFTER a prior prepend/append", async () => {
+    const stream = pushStream();
+    const view = timelineView(fakeClient(stream), "s1", { initial: [entry("seed", "s")] });
+
+    view.prepend([entry("old", "o")]); // HEAD
+    view.append([entry("pending", "p")]); // TAIL (optimistic)
+    expect(view.get().map((e) => (e as any).message.id)).toEqual(["old", "seed", "pending"]);
+
+    // A real server append still folds onto the TAIL, after the optimistic one.
+    stream.emit({ entries: [entry("server", "x")] });
+    await waitFor(() => view.get().length === 4);
+    expect(view.get().map((e) => (e as any).message.id)).toEqual([
+      "old",
+      "seed",
+      "pending",
+      "server",
+    ]);
+  });
+
+  it("empty / all-filtered prepend + append are no-ops (same ref, no notify)", () => {
+    const view = timelineView(fakeClient(pushStream()), "s1", {
+      initial: [entry("seed", "s")],
+      visibility: (e) => e.visibility !== "log",
+    });
+
+    let notified = 0;
+    view.subscribe(() => notified++);
+    const before = view.get();
+
+    view.prepend([]); // empty
+    view.append([]); // empty
+    view.prepend([entry("hidden", "h", "log")]); // all-filtered
+    view.append([entry("hidden2", "h", "log")]); // all-filtered
+
+    expect(view.get()).toBe(before); // same reference throughout
+    expect(notified).toBe(0); // no spurious re-render
+  });
+
+  it("get + subscribe satisfy the useSyncExternalStore contract", () => {
+    const view = timelineView(fakeClient(pushStream()), "s1", { initial: [entry("seed", "s")] });
+
+    // React passes a `() => void`; subscribe returns an unsubscribe; get is the
+    // synchronous snapshot. This is the exact shape useSyncExternalStore drives.
+    const snapshot: () => readonly TimelineEntry[] = view.get;
+    const subscribe: (onStoreChange: () => void) => () => void = view.subscribe;
+
+    let rerenders = 0;
+    const unsub = subscribe(() => rerenders++);
+    view.append([entry("x", "x")]);
+    expect(rerenders).toBe(1);
+    expect(snapshot().length).toBe(2);
+    unsub();
+    view.append([entry("y", "y")]);
+    expect(rerenders).toBe(1); // no delivery after unsubscribe
+  });
 });

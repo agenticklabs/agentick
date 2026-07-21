@@ -248,15 +248,50 @@ const view = timelineView(client, sessionId, {
 
 view.get(); // readonly TimelineEntry[] — synchronous (React getSnapshot)
 view.subscribe(() => rerender()); // useSyncExternalStore(view.subscribe, view.get)
-view.onChange((append) => { … }); // the raw { entries } each fold sees
+view.onChange((append) => { … }); // the raw { entries } each LIVE fold sees
 ```
 
-`timelineView` is a thin façade over the generic `eventView` primitive in
-`@agentick/client-core-next` (fold ANY `EventQuery` on a scope, with an optional
-`fromCursor`); `channelView` is the same machine pinned to a channel's query.
-The `/client` subpath depends only on `client-core` + `spec` — never the
-timeline harness runtime — so it never pulls the server harness into a browser
-bundle.
+### The mutable window — `prepend` / `append`
+
+`timelineView` is not just a fold; it is a **live window** with two imperative
+splices on top of the fold:
+
+```ts
+view.prepend(olderEntries); // scroll-back: splice OLDER history at the HEAD
+view.append([optimisticEntry]); // optimistic/manual: splice at the TAIL
+```
+
+- **`prepend`** is pure window expansion over server-authoritative history — the
+  adopter loads an older page (`LogStore.history` backward) and splices it at the
+  head as the user scrolls up.
+- **`append`** shows a pending message instantly (before the server echoes it) or
+  inserts a manual entry at the tail.
+- The **live fold keeps tailing** the real append stream onto the tail, and
+  interleaves correctly after any prior `prepend`/`append`.
+
+Both are **copy-on-write** (new array ref → the `useSyncExternalStore` contract
+fires) and **no-op on an empty/all-filtered batch** (same ref, no notify).
+`prepend`/`append` notify the STATE feed only; `onChange` stays the LIVE-fold
+change feed.
+
+**Minimal splice — NO seq-merge (locked design).** Live append events carry a
+bus `Cursor`; durable history reads carry the timeline `seq` — two numbering
+systems, so a single-key merge would need a server change. Not worth it: the
+ecosystem (AI-SDK, assistant-ui) reconciles at the app level, and so does an
+agentick adopter. There is **no framework-level dedup**. When an optimistic
+`append` is later echoed by the server (folded in via the live tail), the app
+reconciles by matching `message.metadata.clientId` — the correlation id that
+rides `send({ messages: [{ metadata: { clientId } }] })` straight onto the folded
+entry's `message.metadata`. The framework gives you the live view + the two
+splices; **the app owns the cache and the reconciliation** (the no-client-cache
+bright line, ADR 33). A worked end-to-end recipe lives in
+[`example/v2-coding-agent/src/timeline-client-example.ts`](../../example/v2-coding-agent/src/timeline-client-example.ts).
+
+`timelineView` is an integrated window over the `eventStream` primitive in
+`@agentick/client-core-next`, sharing its fan-out core (`liveStore`) with the
+generic `eventView` fold. The `/client` subpath depends only on `client-core` +
+`spec` — never the timeline harness runtime — so it never pulls the server
+harness into a browser bundle.
 
 ## API sketch
 
