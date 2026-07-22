@@ -291,6 +291,10 @@ export class SessionRuntime {
   resetTick(): void {
     this._currentTick = 0;
   }
+  /** Restore the execution-local tick counter from a snapshot. */
+  setTick(tick: number): void {
+    this._currentTick = tick;
+  }
 
   currentExecutionId(): string | null {
     return this.record().currentExecutionId ?? null;
@@ -338,6 +342,15 @@ export class SessionRuntime {
       cacheCreationTokens: (u.cacheCreationTokens ?? 0) + (delta.cacheCreationTokens ?? 0),
       reasoningTokens: (u.reasoningTokens ?? 0) + (delta.reasoningTokens ?? 0),
     };
+    this.commit({ usage }, { persist: false });
+  }
+
+  /**
+   * SET the aggregate usage from a snapshot (restore). CACHE-ONLY — rides
+   * the next `setStatus` into the store, like {@link addUsage}. Distinct
+   * from `addUsage` (accumulate): restore replaces wholesale.
+   */
+  setUsage(usage: UsageStats): void {
     this.commit({ usage }, { persist: false });
   }
 

@@ -26,7 +26,12 @@ import { LoopExecutorHarness } from "@agentick/loop-executor-next";
 import { CompilerHarness } from "@agentick/compiler-react-next";
 import { MemoryTimelineStore, type TimelineStore } from "@agentick/timeline-next";
 import { stubStoreCtx } from "@agentick/store-next";
-import type { ExecutionTarget, TimelineEntry } from "@agentick/spec-next";
+import type {
+  ExecutionTarget,
+  SessionSnapshot,
+  TimelineEntry,
+  TimelineHarnessSnapshot,
+} from "@agentick/spec-next";
 import { TimelineWriteFailed } from "@agentick/spec-next";
 
 import { SessionHarness } from "../harness.js";
@@ -64,6 +69,11 @@ function entry(id: string): TimelineEntry {
 }
 
 const idOf = (e: TimelineEntry): string => (e as { message: { id: string } }).message.id;
+
+/** Durable persisted log from a snapshot (post-Step-6: under `bridges.timeline`). */
+function persistedOf(snap: SessionSnapshot): readonly TimelineEntry[] {
+  return (snap.bridges.timeline as TimelineHarnessSnapshot | undefined)?.persisted ?? [];
+}
 
 async function mkSession(opts: {
   sessionId: string;
@@ -108,7 +118,7 @@ describe("SessionHarness — open-or-rehydrate (ADR 49 A2.2)", () => {
     });
     await session.mountReady;
 
-    expect(session.snapshot().timeline.map(idOf)).toEqual(["m1", "m2"]);
+    expect(persistedOf(await session.snapshot()).map(idOf)).toEqual(["m1", "m2"]);
     await session.close();
     await tools.close();
   });
@@ -116,7 +126,7 @@ describe("SessionHarness — open-or-rehydrate (ADR 49 A2.2)", () => {
   it("without a store option, constructs empty (no hydration path)", async () => {
     const { session, tools } = await mkSession({ sessionId: "s-fresh" });
     await session.mountReady;
-    expect(session.snapshot().timeline).toEqual([]);
+    expect(persistedOf(await session.snapshot())).toEqual([]);
     await session.close();
     await tools.close();
   });
@@ -174,7 +184,7 @@ describe("SessionHarness — flush barrier at execution end (ADR 49 A2.2)", () =
     );
     expect(exit).toBeInstanceOf(TimelineWriteFailed);
     // Diverged from the durable log — "failed", never a silent "idle".
-    expect(session.snapshot().status).toBe("failed");
+    expect((await session.snapshot()).status).toBe("failed");
     await tools.close();
   });
 });

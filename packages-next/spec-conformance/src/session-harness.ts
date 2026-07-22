@@ -51,9 +51,22 @@ import type {
   RenderedTree,
   SendResult,
   SessionHarnessProtocol,
+  SessionSnapshot,
+  TimelineEntry,
+  TimelineHarnessSnapshot,
   ToolExecutorProtocol,
 } from "@agentick/spec-next";
 import { SessionClosedError } from "@agentick/spec-next";
+
+/**
+ * The durable persisted timeline log from a snapshot. Post-Step-6 (ADR 27)
+ * the timeline lives under the generic `bridges.timeline` fold — a
+ * {@link TimelineHarnessSnapshot} — not a top-level `timeline` array. A
+ * conformant session harness that owns a timeline bridge MUST expose it here.
+ */
+function persistedTimeline(snap: SessionSnapshot): readonly TimelineEntry[] {
+  return (snap.bridges.timeline as TimelineHarnessSnapshot | undefined)?.persisted ?? [];
+}
 
 // ============================================================================
 // Factory contract
@@ -355,7 +368,7 @@ export function runSessionConformance(factory: SessionConformanceFactory): void 
           { role: "user", content: "second" },
         ],
       });
-      const tl = session.snapshot().timeline;
+      const tl = persistedTimeline(await session.snapshot());
       const userMessages = tl.filter((e) => e.kind === "message" && e.message.role === "user");
       expect(userMessages.length).toBeGreaterThanOrEqual(2);
       await session.close();
@@ -372,7 +385,7 @@ export function runSessionConformance(factory: SessionConformanceFactory): void 
         messages: [{ role: "user", content: "x" }],
       });
       await handle.result;
-      const tl = session.snapshot().timeline;
+      const tl = persistedTimeline(await session.snapshot());
       const assistant = tl.find((e) => e.kind === "message" && e.message.role === "assistant");
       expect(assistant).toBeDefined();
       await session.close();
@@ -380,15 +393,18 @@ export function runSessionConformance(factory: SessionConformanceFactory): void 
   });
 
   describe("SessionHarnessProtocol — snapshot", () => {
-    it("returns a snapshot with id + currentTick + timeline", async () => {
+    it("returns a snapshot with id + currentTick + a generic bridges fold", async () => {
       const session = await factory({
         harnessId: "session-conf-snap-1",
         deps: defaultSessionConformanceDeps(),
       });
-      const snap = session.snapshot();
+      const snap = await session.snapshot();
       expect(snap.id).toBeTruthy();
       expect(typeof snap.currentTick).toBe("number");
-      expect(Array.isArray(snap.timeline)).toBe(true);
+      // Step 6 (ADR 27) — every sub-harness state lives in the generic
+      // `bridges` map, feature-detected. No hardcoded top-level timeline/knobs.
+      expect(typeof snap.bridges).toBe("object");
+      expect(Array.isArray(persistedTimeline(snap))).toBe(true);
       expect(snap.specVersion).toMatch(/^\d{4}-\d{2}-\d{2}$/);
       await session.close();
     });
@@ -398,13 +414,39 @@ export function runSessionConformance(factory: SessionConformanceFactory): void 
         harnessId: "session-conf-snap-2",
         deps: defaultSessionConformanceDeps(),
       });
-      const before = session.snapshot();
+      const before = await session.snapshot();
       await (
         await session.send({ messages: [{ role: "user", content: "x" }] })
       ).result;
-      const after = session.snapshot();
-      expect(after.timeline.length).toBeGreaterThan(before.timeline.length);
+      const after = await session.snapshot();
+      expect(persistedTimeline(after).length).toBeGreaterThan(persistedTimeline(before).length);
       await session.close();
+    });
+
+    it("restore fans a snapshot back into a fresh session (generic importSnapshot)", async () => {
+      // Source: run a turn, capture.
+      const src = await factory({
+        harnessId: "session-conf-restore-src",
+        deps: defaultSessionConformanceDeps(undefined, { loop: stubLoop("noted") }),
+      });
+      await (
+        await src.send({ messages: [{ role: "user", content: "remember-XYZZY" }] })
+      ).result;
+      const snap = await src.snapshot();
+      const seen = persistedTimeline(snap).length;
+      expect(seen).toBeGreaterThan(0);
+      await src.close();
+
+      // Destination: a distinct fresh session; restore transplants state.
+      const dest = await factory({
+        harnessId: "session-conf-restore-dest",
+        deps: defaultSessionConformanceDeps(),
+      });
+      await dest.restore({ snapshot: { ...snap, id: "session-conf-restore-dest" } });
+      const restored = persistedTimeline(await dest.snapshot());
+      expect(restored.length).toBe(seen);
+      expect(JSON.stringify(restored)).toContain("remember-XYZZY");
+      await dest.close();
     });
   });
 
@@ -420,7 +462,7 @@ export function runSessionConformance(factory: SessionConformanceFactory): void 
         entry: { role: "user", content },
       });
       expect(res.appendedEntryIds.length).toBe(1);
-      const tl = session.snapshot().timeline;
+      const tl = persistedTimeline(await session.snapshot());
       const marker = tl.find(
         (e) =>
           e.kind === "message" &&
@@ -445,7 +487,7 @@ export function runSessionConformance(factory: SessionConformanceFactory): void 
         },
       });
       expect(res.appendedEntryIds.length).toBe(1);
-      const tl = session.snapshot().timeline;
+      const tl = persistedTimeline(await session.snapshot());
       const found = tl.find(
         (e) =>
           e.kind === "message" &&
@@ -483,7 +525,7 @@ export function runSessionConformance(factory: SessionConformanceFactory): void 
         ],
       });
       expect(res.appendedEntryIds.length).toBe(2);
-      const tl = session.snapshot().timeline;
+      const tl = persistedTimeline(await session.snapshot());
       const toolMessages = tl.filter((e) => e.kind === "message" && e.message.role === "tool");
       expect(toolMessages.length).toBeGreaterThanOrEqual(2);
       await session.close();

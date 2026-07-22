@@ -438,6 +438,8 @@ minted hook names:
 | `applyExecutorResult`      | `session:apply-executor-result` | `onBeforeSessionApplyExecutorResult` / `onAfter…`    |
 | `applyToolResults`         | `session:apply-tool-results`    | `onBeforeSessionApplyToolResults` / `onAfter…`       |
 | `model.setModel/setTarget` | `session:set-model`             | `onBeforeSessionSetModel` / `onAfterSessionSetModel` |
+| `snapshot`                 | `session:snapshot`              | `onBeforeSessionSnapshot` / `onAfterSessionSnapshot` |
+| `restore`                  | `session:restore`               | `onBeforeSessionRestore` / `onAfterSessionRestore`   |
 
 Kebab `-what` segments PascalCase into the hook name (`apply-executor-result` →
 `ApplyExecutorResult`), so every verb yields a clean, dot-accessible hook.
@@ -466,6 +468,61 @@ would require a designed serializable input subset (`messages` + `maxTicks` +
 `stream` — the porcelain the wire's `session/send` already carries), which
 remains future work. `session:dispatch` (name + JSON input) is fully
 serializable and is the natural first wire declaration when that pass lands.
+
+## Snapshot / restore — the generic bridge fold (ADR 27 "Step 6")
+
+`session.snapshot()` and `session.restore(input)` are commands (see the table
+above), so the **persist/restore hook quartet** falls out of the CommandRegistry
+derivation — no bespoke callback slots.
+
+**Generic composition.** Neither method hardcodes `timeline`/`knobs`. They fold
+**every** `SnapshotCapable` bridge generically (feature-detection via the spec
+`isSnapshotCapable` guard — the same pattern as the channel `snapshotProviders()`
+scan). Each bridge's state lands under `SessionSnapshot.bridges[name]`:
+
+```typescript
+const snap = await session.snapshot(); // Promise<SessionSnapshot>
+snap.bridges.timeline; // TimelineHarnessSnapshot ({ persisted, projection, … })
+snap.bridges.knobs; // knob value map
+snap.bridges.state; // K/V state map
+// …plus any installed SnapshotCapable extension bridge — ZERO session change
+
+await session.restore({ snapshot: snap }); // fans importSnapshot() back out
+```
+
+A new SnapshotCapable extension harness (sandbox, subscriptions, …) round-trips
+automatically. The single authoritative payload per bridge avoids the divergence
+a denormalized top-level copy would invite.
+
+**The hooks map to v1 parity.** `onAfterSessionSnapshot` (transform the output)
+is the v1 `onPersist` **augment/redact** seam; `onBeforeSessionSnapshot` vetoes.
+`onBefore/AfterSessionRestore` are the v1 `onRestore` parity.
+
+```typescript
+// Redact before the snapshot leaves the process (v1 onPersist):
+session.hooks.onAfterSessionSnapshot((snap) => ({ ...snap, metadata: redact(snap.metadata) }));
+```
+
+**The migration seam.** A snapshot whose `specVersion` differs from the running
+`SPEC_VERSION` is a schema-evolution event. Supply a typed `migrateSnapshot`
+callback (construction-bound on the session, or `createApp({ migrateSnapshot })`)
+— invoked at the restore version-check decision point to bring the old shape
+forward. With none supplied, a skew throws `SnapshotVersionMismatch` (fail-closed
+— no silent stale apply). Per the seam-over-setting rule this is one callback at
+the decision point, not a version registry; the adopter owns any version dispatch
+inside it.
+
+```typescript
+const app = await createApp(Agent, {
+  model,
+  migrateSnapshot: (snap, { from, to }) => upgrade(snap, from, to),
+});
+```
+
+> Distinct from the ADR-49 open-or-rehydrate path (a durable `TimelineStore`
+> auto-hydrates the persisted log at construction). `snapshot()`/`restore()` are
+> the on-demand full-session capture/transplant — they round-trip knobs, state,
+> and every extension bridge, not just the timeline.
 
 ## Model selection / swap — `session.model` (ADR 89 §2)
 
@@ -641,7 +698,9 @@ their backing.
 - ✅ ToolBridge integration with layered tool registry (#135-#141)
 - ✅ `session.elicit` sugar surface (#272 / ADR 43)
 - ✅ Session execution handle (`send` → `Promise<SessionExecutionHandle>`)
-- ✅ Session snapshot (`snapshot()` → `SessionSnapshot`, persisted log)
+- ✅ Session snapshot/restore (`snapshot()` / `restore()` commands) —
+  generic `SnapshotCapable` bridge fold (ADR 27 "Step 6"), persist/restore
+  hook quartet, and the typed `migrateSnapshot` schema-evolution seam
 - ✅ Open-or-rehydrate resume from an injected `TimelineStore` (ADR 49)
 - ✅ Per-tick `RenderContext` production (`contextInfo` + `activeModel`,
   ADR 55) and model resolution against the `ModelBridge` (ADR 56)
@@ -677,16 +736,18 @@ their backing.
   hop + interception + lineage are tested (T2a); the cross-process child
   elicit bridge is `TODO(ADR-69 T2b)` — see
   [ADR 69](../../docs/proposals/v2/blueprint/69-request-escalation.md).
-- **Snapshot carries the persisted log only.** The (potentially
-  compacted) projection is not yet round-tripped via `SessionSnapshot` —
-  the composed per-harness `SnapshotHarness` is a later step.
+- **Snapshot/restore round-trips the full session.** `SessionSnapshot.bridges`
+  now folds every `SnapshotCapable` bridge — the timeline slice carries BOTH
+  the persisted log AND the (potentially compacted) projection
+  (`TimelineHarnessSnapshot`), plus knobs, state, and any extension bridge.
+  `session.restore()` fans `importSnapshot()` back out generically. Done in
+  recovery pass #1 (was the "Step 6 SnapshotHarness" placeholder).
 - **`SessionStore` coexists with `SessionSnapshot`; the manifest is not
-  built.** This run is additive — the durable `SessionRecord` is written
-  alongside (not instead of) `SessionSnapshot`. The `SessionRecord.stores?`
-  per-store cursor manifest is a documented `TODO(store-phase-4)` placeholder
-  (commented in `spec-next/protocol/session-store.ts`); the Phase-4 manifest
-  sweep populates it at `snapshot()` and consumes it at a net-new
-  `SessionHarness.restore(manifest)`, and subsumes `SessionSnapshot` then.
+  built.** The durable `SessionRecord` is written alongside (not instead of)
+  `SessionSnapshot`. The `SessionRecord.stores?` per-store cursor manifest is a
+  documented `TODO(store-phase-4)` placeholder (commented in
+  `spec-next/protocol/session-store.ts`) — a cross-store restore manifest is a
+  separate future step from the in-process `snapshot()`/`restore()` shipped here.
 - **`setSessionMeta` targets LIVE sessions only.** Editing a closed
   session's record (absent from the live registry) needs a store
   read-modify-write path — `TODO(store-phase-4)`.
@@ -739,9 +800,24 @@ their backing.
   shared gate controller against the settled `TickResult`; both a
   tree-declared and a programmatic gate engage AND hold the loop open to
   `maxTicks` (the load-bearing continue-force proof).
+- `src/__tests__/snapshot-command.spec.tsx` — the `session:snapshot` /
+  `session:restore` commands (recovery pass #1): the hook quartet fires
+  (`onBefore/AfterSessionSnapshot`, `onBefore/AfterSessionRestore`), the
+  after-snapshot hook redacts the output (v1 `onPersist` parity), a
+  before-snapshot hook vetoes; the Step-6 generic fold picks up a FAKE
+  `SnapshotCapable` extension bridge and restores it via `importSnapshot` with
+  zero session change; the `migrateSnapshot` seam runs on a `specVersion` skew
+  (its output is applied) and `SnapshotVersionMismatch` throws when absent; plus
+  the `deriveHookNames` ↔ `Pascal` agreement for `session:command:snapshot` /
+  `:restore`.
 - `src/__tests__/snapshot-restore.spec.tsx` — `InMemoryDataBridge`
   export/import round-trip (the data bridge the session wires into
-  `bridges.data`); not the session `snapshot()` itself.
+  `bridges.data`); a compiler-level bridge fold, complementary to the
+  session-level fold above.
+- `src/testing/kill-resume-acceptance.tsx` — the ADR-49 acceptance suite
+  (hard gate) additionally proves a `snapshot()` → `restore()` round-trip
+  transplants a completed turn into a fresh, storeless session (independent of
+  the durable-store hydration path), JSON-firewall-safe.
 - `src/__tests__/streaming-handle.spec.tsx` — `SessionExecutionHandle`
   streaming iterator (event order, dense monotonic sequence,
   id/sessionId/executionId stamping, streaming vs non-streaming paths,
@@ -753,7 +829,7 @@ their backing.
   layered execution-scoped vs session-scoped tool registry (#139).
 - `src/__tests__/timeline-durability.spec.ts` — open-or-rehydrate
   hydration + the execution-end flush barrier (`TimelineWriteFailed`
-  → `status=failed`); also exercises `session.snapshot().timeline`.
+  → `status=failed`); also exercises `session.snapshot().bridges.timeline.persisted`.
 - `src/__tests__/kill-resume.spec.ts` +
   `src/testing/kill-resume-acceptance.tsx` — the end-to-end
   kill-and-resume acceptance (`runKillResumeAcceptance`) across the

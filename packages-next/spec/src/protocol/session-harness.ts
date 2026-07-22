@@ -391,8 +391,29 @@ export interface ApplyResult {
 // barrel.
 
 /**
- * Read-only snapshot of session state. Returned by `snapshot()`. Used
- * by persistence backends + hibernate/restore (Phase 5).
+ * Read-only snapshot of session state. Returned by `snapshot()`; consumed
+ * by `restore()`. Used by persistence backends + hibernate/restore.
+ *
+ * ## Generic bridge fold (ADR 27 — "Step 6")
+ *
+ * The session identity (`id` / `status` / `currentTick` / `usage` / …)
+ * lives at the top level; **every serializable sub-harness state lives in
+ * `bridges`**, keyed by bridge name. The session does NOT hardcode
+ * `timeline`/`knobs` slots — it folds every {@link SnapshotCapable} bridge
+ * generically (feature-detection via `isSnapshotCapable`), exactly as the
+ * compiler harness folds `CompilerSnapshot.bridges`. A new SnapshotCapable
+ * extension harness (sandbox, subscriptions, …) round-trips with ZERO
+ * session changes.
+ *
+ *   - `bridges.timeline` → {@link TimelineHarnessSnapshot} (`.persisted` is
+ *     the durable log, `.projection` the compacted view)
+ *   - `bridges.knobs`    → the knob value map
+ *   - `bridges.state`    → the K/V state map
+ *   - `bridges.<ext>`    → any installed SnapshotCapable extension
+ *
+ * The single authoritative source per bridge avoids the divergence bug a
+ * denormalized top-level copy would invite (a hook redacting `bridges.x`
+ * but not a top-level `x`).
  */
 export interface SessionSnapshot {
   readonly specVersion: string;
@@ -400,10 +421,51 @@ export interface SessionSnapshot {
   readonly parentSessionId?: string;
   readonly status: BridgeSessionStatus;
   readonly currentTick: number;
-  readonly timeline: readonly TimelineEntry[];
-  readonly knobs: Readonly<Record<string, unknown>>;
+  /**
+   * Per-bridge snapshot payloads, keyed by bridge name. Each value is the
+   * `exportSnapshot()` output of a {@link SnapshotCapable} bridge. Typed
+   * `unknown` because the set of bridges is open (module-augmented per
+   * ADR 27); consumers narrow by name (e.g. `bridges.timeline as
+   * TimelineHarnessSnapshot`).
+   */
+  readonly bridges: Readonly<Record<string, unknown>>;
   readonly usage: UsageStats;
   readonly metadata?: Readonly<Record<string, unknown>>;
+}
+
+/**
+ * Context handed to a {@link SnapshotMigration} — the version skew being
+ * bridged. `from` is the snapshot's stored `specVersion`; `to` is the
+ * running framework's `SPEC_VERSION`.
+ */
+export interface SnapshotMigrationContext {
+  readonly from: string;
+  readonly to: string;
+}
+
+/**
+ * The snapshot-migration seam (recovery pass #1 — schema evolution).
+ *
+ * A typed callback invoked at the restore decision point when a snapshot's
+ * `specVersion` differs from the running `SPEC_VERSION`. It returns a
+ * snapshot in the CURRENT shape. Per the seam-over-setting rule this is a
+ * callback at the decision point, NOT a config subsystem or a version
+ * registry — the adopter owns any version-dispatch logic inside the
+ * callback (chaining old→new internally if they support multiple skews).
+ *
+ * Construction-bound (`SessionHarnessOptions.migrateSnapshot`, threaded
+ * from `AppHarnessOptions`): a given deployment knows how to bring old
+ * snapshots up to its own shape. With none supplied, a version mismatch
+ * throws `SnapshotVersionMismatch` (fail-closed — no silent stale apply).
+ */
+export type SnapshotMigration = (
+  snapshot: SessionSnapshot,
+  ctx: SnapshotMigrationContext,
+) => SessionSnapshot | Promise<SessionSnapshot>;
+
+/** Input to {@link SessionHarnessProtocol.restore}. */
+export interface RestoreSnapshotInput {
+  readonly snapshot: SessionSnapshot;
 }
 
 // ============================================================================
@@ -427,6 +489,7 @@ export {
   SessionError,
   type SessionErrorChannel,
   SessionTimelineError,
+  SnapshotVersionMismatch,
   type StateApplyError,
   type StateApplyErrorChannel,
   TimelineWriteFailed,
@@ -508,9 +571,30 @@ export interface SessionHarnessProtocol<P = unknown> {
   send(input: SendInput<P>): Promise<SessionExecutionHandle>;
 
   /**
-   * Capture the current state as a serializable snapshot.
+   * Capture the current state as a serializable snapshot. Routed through
+   * the `session:snapshot` command, so it mints `onBeforeSessionSnapshot`
+   * (veto/observe) and `onAfterSessionSnapshot` (the v1 `onPersist`
+   * "augment/redact the snapshot" parity — transform the output). Async so
+   * the seam can await; the underlying bridge fold is synchronous.
+   *
+   * @throws {SessionError}
    */
-  snapshot(): SessionSnapshot;
+  snapshot(): Promise<SessionSnapshot>;
+
+  /**
+   * Restore a previously captured {@link SessionSnapshot} into this live
+   * session. Fans `importSnapshot()` out to every matching
+   * {@link SnapshotCapable} bridge generically (ADR 27) and restores the
+   * session accounting (tick + usage). Routed through the `session:restore`
+   * command, minting `onBeforeSessionRestore` / `onAfterSessionRestore`.
+   *
+   * A snapshot whose `specVersion` differs from the framework's is run
+   * through the construction-bound `migrateSnapshot` callback first; with
+   * none supplied a mismatch throws `SnapshotVersionMismatch`.
+   *
+   * @throws {SessionError}
+   */
+  restore(input: RestoreSnapshotInput): Promise<void>;
 
   /**
    * Shut down. Future commands fail with `SessionClosedError`.

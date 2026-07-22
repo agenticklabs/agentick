@@ -45,7 +45,12 @@ import {
   InMemorySessionStore,
   type SessionHarnessOptions,
 } from "@agentick/session-next";
-import type { SessionRecord, SessionStore, SessionStoreQuery } from "@agentick/spec-next";
+import type {
+  SessionRecord,
+  SessionStore,
+  SessionStoreQuery,
+  SnapshotMigration,
+} from "@agentick/spec-next";
 import {
   InMemoryHandlerResolver,
   ToolExecutorHarness,
@@ -425,6 +430,15 @@ export interface AppHarnessOptions<P = unknown> {
    * { narrate } })`. Equivalent convenience for `session.narrate`.
    */
   readonly narrate?: boolean;
+  /**
+   * App-wide snapshot-migration seam (recovery pass #1 — schema evolution).
+   * Threaded into every session's `migrateSnapshot`, invoked by
+   * `session.restore()` when a snapshot's `specVersion` differs from the
+   * running `SPEC_VERSION`. Convenience for `session.migrateSnapshot`; also
+   * settable via `createApp({ session: { migrateSnapshot } })`. See
+   * {@link SnapshotMigration}.
+   */
+  readonly migrateSnapshot?: SnapshotMigration;
 
   /**
    * App-level tool handlers shared across sessions. Resolver keys are
@@ -1980,6 +1994,9 @@ function mergeSessionDefaults<P>(options: AppHarnessOptions<P>): SessionDefaults
   }
   if (fromLong.narrate === undefined && options.narrate !== undefined) {
     merged.narrate = options.narrate;
+  }
+  if (fromLong.migrateSnapshot === undefined && options.migrateSnapshot !== undefined) {
+    merged.migrateSnapshot = options.migrateSnapshot;
   }
   return merged as SessionDefaults<P>;
 }

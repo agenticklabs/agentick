@@ -122,6 +122,26 @@ export interface SnapshotCapable<TSnapshot = unknown> {
   importSnapshot(snapshot: TSnapshot): void | Promise<void>;
 }
 
+/**
+ * Runtime feature-detection for {@link SnapshotCapable}. The composition
+ * root (the session harness's snapshot/restore fold, the compiler
+ * harness's mount snapshot) scans a bridge bag and picks up any slot that
+ * duck-types to the contract — no hardcoded slot names, per ADR 27. A
+ * harness need only expose `exportSnapshot` + `importSnapshot` (declaring
+ * `SnapshotCapable<T>` on its protocol is the typed way; a bare duck-type
+ * like `InMemoryDataBridge` still works).
+ *
+ * Sibling to {@link isChannelSnapshotProvider} in `../data/channels.ts`.
+ */
+export function isSnapshotCapable(x: unknown): x is SnapshotCapable {
+  return (
+    x !== null &&
+    typeof x === "object" &&
+    typeof (x as { exportSnapshot?: unknown }).exportSnapshot === "function" &&
+    typeof (x as { importSnapshot?: unknown }).importSnapshot === "function"
+  );
+}
+
 // ============================================================================
 // Data bridge — the no-Suspense contract
 // ============================================================================

@@ -253,13 +253,39 @@ export class ModelExecutorBuilderMissingError extends SessionError {
 }
 registerAgentickError("ModelExecutorBuilderMissingError", ModelExecutorBuilderMissingError);
 
+/**
+ * `session.restore(snapshot)` was handed a snapshot whose `specVersion`
+ * does not match the running framework's `SPEC_VERSION`, and the session
+ * was constructed WITHOUT a `migrateSnapshot` callback to bring the old
+ * shape forward. The seam is deliberate (ADR 27 / recovery pass #1): a
+ * version-skewed snapshot is a schema-evolution event, and the framework
+ * refuses to silently apply a stale shape. Supply `migrateSnapshot` on the
+ * session (or app) to upgrade the snapshot at the restore decision point.
+ */
+export class SnapshotVersionMismatch extends SessionError {
+  readonly _tag = "SnapshotVersionMismatch" as const;
+  readonly from: string;
+  readonly to: string;
+  constructor(args: { readonly from: string; readonly to: string }) {
+    super(
+      `session.restore: snapshot specVersion "${args.from}" does not match ` +
+        `framework SPEC_VERSION "${args.to}", and no migrateSnapshot callback ` +
+        `was provided. Supply migrateSnapshot to upgrade the snapshot shape.`,
+    );
+    this.from = args.from;
+    this.to = args.to;
+  }
+}
+registerAgentickError("SnapshotVersionMismatch", SnapshotVersionMismatch);
+
 export type SessionErrorChannel =
   | SessionClosedError
   | SessionBusyError
   | SessionTimelineError
   | KnobError
   | ChannelError
-  | ExecutionFailed;
+  | ExecutionFailed
+  | SnapshotVersionMismatch;
 
 // ============================================================================
 // StateApplyError — state-restore failures (composite union)

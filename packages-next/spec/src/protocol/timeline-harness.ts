@@ -117,8 +117,10 @@ export interface CompactResult {
 }
 
 // ============================================================================
-// Snapshot (this harness's slice; SnapshotHarness — Step 6 — composes the
-// session-wide snapshot from per-harness slices like this one)
+// Snapshot (this harness's slice). Step 6 (ADR 27) is BUILT: the session
+// harness's `snapshot()` / `restore()` fold every `SnapshotCapable` bridge
+// generically (feature-detection via `isSnapshotCapable`), landing this slice
+// under `SessionSnapshot.bridges.timeline`. No hardcoded slot names.
 // ============================================================================
 
 export interface TimelineHarnessSnapshot {

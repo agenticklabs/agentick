@@ -67,6 +67,7 @@ import type {
   NotifyTickEndInput,
   Operation,
   OperationJournal,
+  RestoreSnapshotInput,
   SendInput,
   SessionError,
   SessionExecutionHandle,
@@ -102,7 +103,13 @@ import type { ModelSelectionHandle } from "./model-facade.js";
 export interface DefineSessionInput<P = unknown> {
   // ── Required: lifecycle + core verbs ─────────────────────────────────
   readonly send: (input: SendInput<P>) => Promise<SessionExecutionHandle>;
-  readonly snapshot: () => SessionSnapshot;
+  readonly snapshot: () => SessionSnapshot | Promise<SessionSnapshot>;
+  /**
+   * Restore a previously captured snapshot. Optional — omit to get a
+   * façade that rejects `restore()` with "not configured" (a callback
+   * session that captures state but can't take it back).
+   */
+  readonly restore?: (input: RestoreSnapshotInput) => Promise<void>;
   readonly close?: () => Promise<void>;
 
   // ── Required: state applicator (the loop calls these) ────────────────
@@ -255,8 +262,17 @@ class CallbackSessionHarness<P = unknown>
     );
   }
 
-  snapshot(): SessionSnapshot {
+  async snapshot(): Promise<SessionSnapshot> {
     return this.spec.snapshot();
+  }
+
+  restore(input: RestoreSnapshotInput): Promise<void> {
+    if (this.spec.restore) return this.spec.restore(input);
+    return Promise.reject(
+      new ExecutionFailed({
+        cause: new Error("defineSession: restore() not configured"),
+      }) satisfies SessionError,
+    );
   }
 
   async close(): Promise<void> {

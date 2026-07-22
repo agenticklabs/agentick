@@ -105,7 +105,9 @@ describe("run({ history }) — timeline seeding (#187)", () => {
     });
     const session = await app.createSession({ sessionId: "seeded-session" });
     await (session as unknown as { mountReady?: Promise<void> }).mountReady;
-    const timeline = session.snapshot().timeline as unknown as Array<{ message?: { id?: string } }>;
+    const snap = await session.snapshot();
+    const timeline = (snap.bridges.timeline as { persisted: Array<{ message?: { id?: string } }> })
+      .persisted;
     expect(timeline.map((e) => e.message?.id)).toEqual(["h1"]);
     await app.closeApp();
   });

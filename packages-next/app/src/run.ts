@@ -44,9 +44,10 @@ export interface RunOptions<P = unknown> extends CreateAppOptions<P> {
   readonly messages?: ReadonlyArray<SendMessageInput>;
   /**
    * Seed the session's timeline before the run (#187) — the replay /
-   * eval loop: `snapshot().timeline` from a previous session goes in
-   * here verbatim. Implemented as a pre-populated store handed to the
-   * ADR 49 hydration path (no bespoke seeding machinery).
+   * eval loop: a previous session's persisted log
+   * (`snapshot().bridges.timeline.persisted`) goes in here verbatim.
+   * Implemented as a pre-populated store handed to the ADR 49 hydration
+   * path (no bespoke seeding machinery).
    */
   readonly history?: ReadonlyArray<TimelineEntry>;
   /** Component props for the run (SendInput.props). */

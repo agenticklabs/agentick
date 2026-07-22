@@ -26,8 +26,7 @@ function fakeSnapshot(): SessionSnapshot {
     id: "s_test",
     status: "idle",
     currentTick: 0,
-    timeline: [],
-    knobs: {},
+    bridges: { timeline: { persisted: [], projection: [] }, knobs: {} },
     usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
   };
 }
@@ -68,7 +67,7 @@ describe("defineSession — factory shape", () => {
     expect(sendResult.executionId).toBe("e_x");
     expect(seenSend?.messages?.[0]?.content).toBe("hi");
 
-    const snap = session.snapshot();
+    const snap = await session.snapshot();
     expect(snap.id).toBe("s_test");
   });
 });

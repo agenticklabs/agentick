@@ -54,6 +54,7 @@ import type {
   ProtocolEvent,
   RegisteredModel,
   RenderContext,
+  RestoreSnapshotInput,
   SendInput,
   SendMessageInput,
   SendResult,
@@ -62,6 +63,7 @@ import type {
   SessionHarnessProtocol,
   SessionSnapshot,
   SessionStore,
+  SnapshotMigration,
   SessionSubstrateParent,
   SpawnContext,
   SpawnInput,
@@ -79,7 +81,9 @@ import {
   ExecutionFailed,
   HandlerError,
   isChannelSnapshotProvider,
+  isSnapshotCapable,
   SessionClosedError,
+  SnapshotVersionMismatch,
   SPEC_VERSION,
   TimelineWriteFailed,
 } from "@agentick/spec-next";
@@ -131,8 +135,24 @@ declare module "@agentick/runtime-next" {
     // as a session command so a model swap is journaled + hookable
     // (`onBeforeSessionSetModel` — "this session may not switch to model X").
     "session:set-model": { input: SetModelInput; output: void };
+    // Recovery pass #1 — snapshot/restore ARE commands (persist/restore hook
+    // quartet). `session:snapshot` mints `onBeforeSessionSnapshot` (veto) +
+    // `onAfterSessionSnapshot` (the v1 `onPersist` augment/redact parity —
+    // transform the output). `session:restore` mints `onBeforeSessionRestore`
+    // (the v1 `onRestore` seam — migration lives at the decision point) +
+    // `onAfterSessionRestore`. Both journal.
+    "session:snapshot": { input: CaptureSnapshotInput; output: SessionSnapshot };
+    "session:restore": { input: RestoreSnapshotInput; output: void };
   }
 }
+
+/**
+ * Input to the `session:snapshot` command. Empty today — reserved for
+ * future capture options (selective bridge capture, redaction hints). The
+ * `onBeforeSessionSnapshot` hook receives it; the valuable seam is
+ * `onAfterSessionSnapshot` (transform the captured {@link SessionSnapshot}).
+ */
+export type CaptureSnapshotInput = Record<string, never>;
 
 // ============================================================================
 // Construction options
@@ -258,6 +278,16 @@ export interface SessionHarnessOptions<P = unknown> {
    * sentence per call). Cascades from the app-level default.
    */
   readonly narrate?: boolean;
+  /**
+   * Snapshot-migration seam (recovery pass #1 — schema evolution). A typed
+   * callback invoked by {@link SessionHarness.restore} when a snapshot's
+   * `specVersion` differs from the running `SPEC_VERSION`, to bring the old
+   * shape up to current. Construction-bound (threaded from the app) because
+   * a given deployment knows how to migrate old snapshots to its own shape.
+   * With none supplied, a version mismatch throws `SnapshotVersionMismatch`
+   * (fail-closed). See {@link SnapshotMigration}.
+   */
+  readonly migrateSnapshot?: SnapshotMigration;
   /** Optional initial knob values. */
   readonly initialKnobs?: Readonly<Record<string, unknown>>;
   /** Optional initial session-state values (`useSessionState`). */
@@ -463,6 +493,8 @@ export class SessionHarness<P = unknown>
   private readonly defaultStreaming: boolean | undefined;
   /** Model-call narration switch (default `true`). See SessionHarnessOptions.narrate. */
   private readonly narrate: boolean;
+  /** Snapshot-migration seam (recovery pass #1). See {@link SnapshotMigration}. */
+  private readonly migrateSnapshot: SnapshotMigration | undefined;
 
   private _closed = false;
   private _mountReady: Promise<void>;
@@ -663,6 +695,7 @@ export class SessionHarness<P = unknown>
     this.defaultStreaming = options.defaultStreaming;
     // Narration defaults ON — the token-cost off-switch is opt-out.
     this.narrate = options.narrate ?? true;
+    this.migrateSnapshot = options.migrateSnapshot;
     this.mountId = `mount:${options.sessionId}`;
 
     // ADR 89 §4 — the session is the composition root, so IT wires the
@@ -886,20 +919,98 @@ export class SessionHarness<P = unknown>
     return this.modelFacade;
   }
 
-  snapshot(): SessionSnapshot {
-    // Step 5a: snapshot.timeline holds the durable persisted log. The
-    // projection (potentially compacted) is not yet round-tripped via
-    // SessionSnapshot — Step 6 (SnapshotHarness) will compose per-harness
-    // snapshots into the session shape and carry both layers.
+  snapshot(): Promise<SessionSnapshot> {
+    // Recovery pass #1 — `session:snapshot` command. `onBeforeSessionSnapshot`
+    // (veto) + `onAfterSessionSnapshot` (augment/redact the output — the v1
+    // `onPersist` parity) fire around the sync capture.
+    return runHarnessProtocol(
+      this.sessionOp("snapshot", {} as CaptureSnapshotInput, () =>
+        Effect.sync((): SessionSnapshot => this.captureSnapshot()),
+      ),
+    );
+  }
+
+  /**
+   * Step 6 (ADR 27) — the generic per-harness fold. Composes the session
+   * shape from every {@link SnapshotCapable} bridge's `exportSnapshot()`,
+   * feature-detected (no hardcoded slot names), exactly mirroring the
+   * channel {@link snapshotProviders} scan and the compiler's
+   * `captureBridgeSnapshots`. A new SnapshotCapable extension bridge is
+   * picked up automatically — no session change.
+   */
+  private captureSnapshot(): SessionSnapshot {
+    const bridges: Record<string, unknown> = {};
+    for (const [name, bridge] of Object.entries(this.bridges)) {
+      if (isSnapshotCapable(bridge)) bridges[name] = bridge.exportSnapshot();
+    }
     return {
       specVersion: SPEC_VERSION,
       id: this.runtime.id,
       status: this.runtime.status(),
       currentTick: this.runtime.currentTick(),
-      timeline: [...this.bridges.timeline.readPersisted()],
-      knobs: this.bridges.knobs.exportSnapshot(),
+      bridges,
       usage: this.runtime.usage(),
+      ...omitUndefined({ parentSessionId: this.parentSessionId }),
     };
+  }
+
+  restore(input: RestoreSnapshotInput): Promise<void> {
+    // Recovery pass #1 — `session:restore` command. `onBeforeSessionRestore`
+    // + `onAfterSessionRestore` fire around the fan-out; migration runs at
+    // the version-check decision point inside the body.
+    return runHarnessProtocol(
+      this.sessionOp("restore", input, (i) =>
+        Effect.tryPromise({
+          try: () => this.restoreBody(i),
+          catch: (cause): SessionError => coerceSessionError(cause),
+        }),
+      ),
+    );
+  }
+
+  /**
+   * Restore a {@link SessionSnapshot} into this live session (Step 6
+   * symmetric fan-out). Order:
+   *   1. migration seam — if `snapshot.specVersion` ≠ `SPEC_VERSION`, run
+   *      the construction-bound `migrateSnapshot` callback (or throw
+   *      `SnapshotVersionMismatch` when none is set — fail-closed).
+   *   2. bridge fan-out — for every entry in `snapshot.bridges`, if the
+   *      live bridge by that name is {@link SnapshotCapable}, `importSnapshot`
+   *      it. Async-aware (timeline's import is a Promise); awaited together.
+   *   3. accounting — restore the execution-local tick + aggregate usage.
+   */
+  private async restoreBody(input: RestoreSnapshotInput): Promise<void> {
+    if (this._closed) {
+      throw new SessionClosedError({ attemptedCommand: "restore" });
+    }
+    await this._mountReady;
+
+    let snap = input.snapshot;
+    if (snap.specVersion !== SPEC_VERSION) {
+      if (this.migrateSnapshot === undefined) {
+        throw new SnapshotVersionMismatch({ from: snap.specVersion, to: SPEC_VERSION });
+      }
+      snap = await this.migrateSnapshot(snap, { from: snap.specVersion, to: SPEC_VERSION });
+    }
+
+    // Generic fan-out — feature-detected, no hardcoded slot names.
+    const bag = this.bridges as unknown as Record<string, unknown>;
+    const pending: Promise<unknown>[] = [];
+    for (const [name, value] of Object.entries(snap.bridges)) {
+      if (value === undefined) continue;
+      const bridge = bag[name];
+      if (isSnapshotCapable(bridge)) {
+        const result = bridge.importSnapshot(value);
+        if (result instanceof Promise) pending.push(result);
+      }
+    }
+    if (pending.length > 0) await Promise.all(pending);
+
+    // Accounting — restore tick + usage (the session identity the bridge
+    // fold doesn't carry). Status is NOT forced: a restored session resumes
+    // under its own lifecycle, not the snapshot's captured phase.
+    this.runtime.setTick(snap.currentTick);
+    this.runtime.setUsage(snap.usage);
   }
 
   async close(): Promise<void> {
