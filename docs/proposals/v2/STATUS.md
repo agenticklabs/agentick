@@ -1772,7 +1772,19 @@ blueprint's design decisions; this is execution-level).
     @agentick/client-next" exercising timelineView/elicitations/clientToolCalls/knobs/
     fakes. Every hedge the prompt needs = a discovered ergonomics defect. This IS the
     Ernesto-class validation.
-  ☐ B2 = the **CLIENT API CONSISTENCY + DISCOVERY arc** (Ryan 2026-07-22: "the client
+  ☐ B2 UPGRADED (Ryan 2026-07-22: handles feel "made at 4 different times by 4
+    different teams" — historically TRUE, four separate passes, no cross-cutting
+    owner): the deliverable is the STANDARD, not just fixes — (i) a normative
+    ClientHandle contract (the client twin of the Store/View taxonomy); (ii)
+    **runClientHandleConformance** — a shared suite every package's /client handle
+    MUST pass (the spec-conformance enforcement mechanism applied client-side; a
+    future fifth handle cannot diverge); (iii) the four existing handles refactored
+    onto it incl. timelineView → session.timeline (it's a free factory today — not
+    even a sub-handle), loose routeClientTools/confirmClientTools folded onto the
+    clientToolCalls handle as verbs, knobs key→id; (iv) ADR-87 registration stays
+    (already uniform — the incoherence is contract-level, one level up). Design-first:
+    the contract doc goes to Ryan BEFORE any handle moves.
+    = the **CLIENT API CONSISTENCY + DISCOVERY arc** (Ryan 2026-07-22: "the client
     needs some work vis a vis ergonomics and apis" — converges with B1's meta-finding).
     Design-first (Ryan reviews the design), then implement: (a) ONE core handle
     contract across ALL client sub-handles — `list()/get(id)` (current state) +
