@@ -32,6 +32,14 @@ export {
   registeredSessionHandleExtensions,
   type SessionSubHandleFactory,
 } from "./session-handle-extensions.js";
+export {
+  isClientHandle,
+  isEnumerable,
+  isRespondable,
+  type ClientHandle,
+  type Enumerable,
+  type Respondable,
+} from "./handle-contract.js";
 
 // Re-export protocol types adopters need to write extensions, for the
 // "one import" ergonomic. Spec is the canonical source.

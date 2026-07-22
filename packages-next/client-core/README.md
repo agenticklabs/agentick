@@ -356,6 +356,75 @@ declare module "@agentick/spec-next" {
 registerSessionHandleExtension("mine", (client, sessionId) => myView(client, sessionId));
 ```
 
+### The unified handle contract (B2 — `ClientHandle`)
+
+The five sub-handles were built across four separate passes with no cross-cutting
+owner, and it shows. B2 (`docs/proposals/v2/client-handles.md`) defines the one
+contract they all converge to. **Slice 1 (this) ships the contract types + the
+conformance suite only — no handle is refactored yet** (slices 3+); the types are
+the standard the refactors aim at.
+
+**The contract** (`src/handle-contract.ts`, re-exported from the index):
+
+```ts
+// MANDATORY CORE — every handle. Thin on purpose (the store.md lesson).
+interface ClientHandle {
+  subscribe(cb: () => void): Unsubscribe; // THE store contract: fires on change,
+                                          // cb takes NO args, read via list().
+                                          // Zero-adapter useSyncExternalStore.
+  close?(): void;                         // where the handle owns a subscription
+}
+
+// CAPABILITY PROFILES — declared (typed) + feature-detected (isEnumerable/…):
+interface Enumerable<T, Id = string> {    // current STATE, incl. pre-connection
+  list(): readonly T[];
+  get(id: Id): T | undefined;
+}
+interface Respondable<In> {               // correlated reply-by-id
+  respond(id: string, input: In): Promise<void>;
+}
+```
+
+Plus `isClientHandle` / `isEnumerable` / `isRespondable` — the runtime
+feature-detectors (the `isSnapshotCapable` precedent). `Streamable` was
+**removed**: no session-lifetime handle is `AsyncIterable` — *iterate BOUNDED
+things, observe UNBOUNDED things*. These are **plain structural** interfaces:
+no branding, no registration — **satisfying the shape IS conforming, and a
+handle may carry anything else** (contracts are floors, not ceilings). User data
+rides our bags untouched; the only fields the framework ever strips are its own
+reserved security fields, by name.
+
+**The conformance suite** — `runClientHandleConformance` from
+`@agentick/client-core-next/testing` (the client twin of `runStoreConformance`).
+A thin mandatory core + profile cases that run iff declared:
+
+| Group | Cases |
+| --- | --- |
+| **Core (always)** | `subscribe` fires on change; the callback receives **no args**; the returned `Unsubscribe` stops it; `close()` (when present) tears down. |
+| **Enumerable (iff declared)** | `list()` reflects **pre-connection** state (the mid-ask shape — the caller supplies a "seed then connect" closure); `get(id)` + unknown-id → `undefined`. |
+| **Respondable (iff declared)** | `respond` routes by id; an unknown id rejects; double-respond is defined (settles, never hangs). |
+| **Write verbs** | every declared verb hits its wire method with correctly bound addressing (spy transport, `spyClientTransport`). |
+
+It asserts required members **behave** — never exact shape / no-extra-keys. The
+suite is proven against a minimal fake handle in
+`src/__tests__/handle-conformance.spec.ts`.
+
+**AS-IS migration table** (honest assessment against the target contract; slices
+3+ close the gaps — this slice changes none of it):
+
+| Handle | Core `subscribe(cb)` | `close?()` | Enumerable | Respondable | Write verb → wire | Gap to close (slices 3+) |
+| --- | --- | --- | --- | --- | --- | --- |
+| `session.knobs` | ~ has `subscribe((state)=>…)` — passes state, not zero-arg; also carries `onChange` (the dual-feed artifact) | ✓ | ✗ — `get()` returns the whole map, no `list()`/`get(id)`; values only (no descriptors) | n/a | `set` → `knobs/set` ✓ | subscribe → zero-arg; add `list`/`get(id)`; descriptors on wire (#1); `key`→`id` (#13); drop `onChange` |
+| `session.tasks` | ~ same as knobs (state-passing + `onChange`) | ✓ | ✗ — `get()` = whole `TaskStatusMap`, no `list`/`get(id)` (closest to correct) | n/a | `cancel` → `tasks/cancel` ✓ | subscribe → zero-arg; add `list`/`get(id)` |
+| `session.elicitations` | ✗ — `ChannelStream`: `AsyncIterable` + `onChange(frame)`, no `subscribe(cb)` | ✓ | ✗ — live-only (mid-ask client sees nothing) | ~ has `respond(input)` — id is **inside** `input`, not `respond(id, input)` | `respond` → `session/respond_to_elicitation` ✓ | add `subscribe(cb)`; drop `AsyncIterable`; server pending enumeration + `list` (§6.1); `respond(id, input)` shape |
+| `session.clientToolCalls` | ✗ — `ChannelStream` (`AsyncIterable` + `onChange`) | ✓ | ✗ — live-only | ✓ — `respond(correlationId, result)` already matches `respond(id, input)` | `respond` → `session/respond_to_tool_call` ✓ | add `subscribe(cb)`; drop `AsyncIterable`; server pending enumeration + `list`; verb-naming for route/confirm |
+| `session.timeline` | ✗ — not a sub-handle; a free `timelineView(client, id, …)` factory | (view has `close`) | ✗ — no wire history path | n/a | none (local view mutations) | become a registered sub-handle; `session/timeline_history` wire read (#2); Cursor-vs-seq (§6.4) |
+
+Legend: ✓ conforms · ~ partial/shape-mismatch · ✗ absent. None of the handles is
+`Enumerable` today (the live-only defect); every one carries a working write verb
+over the wire; the elicitation/tool-call read surface is still the removed
+`AsyncIterable`/`Streamable` identity.
+
 ### Capabilities + server info
 
 `client.connect()` runs a two-step handshake — `initialize` (protocol version + framework flags + server info) then `_extensions/list` (wire-extension enumeration for feature-gating). Both populate `client.capabilities` and `client.serverInfo`.
@@ -665,6 +734,7 @@ under "Roadmap & known gaps" with an explicit marker.
 | Pre-scoped handle `onLog` / `onProgress` bake the session / app / gateway scope (asserted on `transport.subscribe`); pre-scoped zero-config `channelView` yields a last-frame-wins view | `src/__tests__/handle-subscriptions.spec.ts`                  |
 | `channelView` zero-config default fold (no config → view = latest frame payload, `undefined` before first frame) | `src/__tests__/handle-subscriptions.spec.ts`                  |
 | `createClient({ onStateChange, onCapabilitiesChange })` client-LOCAL observers fire on state / capability changes | `src/__tests__/handle-subscriptions.spec.ts`                  |
+| `ClientHandle` contract + `Enumerable`/`Respondable` profiles + `isClientHandle`/`isEnumerable`/`isRespondable` feature-detection; `runClientHandleConformance` core + profile + write-verb cases (B2 slice 1) | `src/__tests__/handle-conformance.spec.ts`                    |
 
 ## Roadmap & known gaps
 
@@ -674,6 +744,7 @@ under "Roadmap & known gaps" with an explicit marker.
 - **`selector()` not yet implemented in this package** — declared in ADR 33 rev-3; lands alongside the second transport (HTTP, Phase 33.D).
 - **Multi-impl `ClientProtocol` conformance suite** — `runClientConformance(factory)` shape declared in ADR 33; not yet shipped. Any TS impl claiming to be a client should pass this. Deferred until a second impl exists (test mock or Worker-thread proxy).
 - **Cross-runtime verification** — "runs in Node 22+, browsers, Bun, Deno, edge runtimes" — tested only against Node 24 today. Browser smoke via headless / Bun / Deno / edge runtimes deferred to integration-test CI.
+- **Handle-contract convergence (B2 slices 3+)** — the `ClientHandle` contract + `runClientHandleConformance` ship (slice 1), but NO existing handle is refactored onto them yet. The AS-IS migration table above is the honest gap list; slice 2 lands the server prerequisites (pending enumeration, knob descriptors on the wire, `session/timeline_history`), slice 3 converges each handle (one commit per handle, conformance green each), slice 4 re-homes `timelineView` under `session.timeline`, slice 5 adds the React bindings. `runClientHandleConformance` is proven only against the minimal fake handle today.
 
 ## Development plan
 
