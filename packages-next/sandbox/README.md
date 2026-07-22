@@ -28,6 +28,22 @@ this base** and implement `SandboxProvider`, mirroring
 `model-openai-next → model-next` (ADR 59). They are installed
 separately.
 
+## Security boundary
+
+The **provider is the security boundary — nothing above it is.** The
+`SandboxHarness`, its ACL gate, and the four-tool model surface are POLICY
+seams: they decide what the model is offered and which operations prompt for
+approval, but a call that clears them executes with whatever permissions the
+underlying `SandboxProvider` grants. Real isolation comes from OS-native
+confinement in the provider — Landlock / seccomp on Linux, Seatbelt on macOS,
+Restricted Tokens / Job Objects on Windows — never from the ACL patterns or from
+filtering command strings. A **"read-only tools" preset** (exposing only
+`read_file`, or a `bash` allow-list) is a model-tool allowlist, not a sandbox:
+it shapes what the model tends to do, and a determined payload that reaches
+`exec` is bound only by the provider's OS jail. Pick a provider whose isolation
+tier — surfaced honestly, e.g. `sandbox-local-next`'s `isolation` — matches the
+trust you place in the code you run.
+
 ## The model-facing tool surface — four tools + bash
 
 The agent gets exactly four tools; `bash` is the universal escape hatch:

@@ -163,6 +163,20 @@ optional-subpath pattern. This is the exception, not the default: the built-in
 grammar stays in base `compiler`, and only genuinely private element semantics
 warrant a harness-owned contributor.
 
+## Prompt-cache stability
+
+The compiler's output _is_ the model input, so its byte-stability across ticks is
+a prompt-cache concern. A **static tree must compile to byte-identical input on
+every tick**: provider prompt caches key on an exact prefix match, and any drift in
+the cached prefix silently busts the cache (re-billing the full prompt). Keep
+time-varying content — timestamps, counters, live state — out of the stable prefix;
+put it in `<Ephemeral>` or otherwise late positions so the cacheable head stays
+constant. In particular, **do not inject a date or clock into the system prompt**:
+the framework injects none by default, and that default is load-bearing — keep it
+that way. `CacheHint` (#185) is the canonical carrier that marks where the cache
+boundary sits (translated per-adapter, e.g. Anthropic `cache_control`); use it to
+declare the boundary explicitly rather than relying on incidental prefix stability.
+
 ## Patterns
 
 ### Protocol-conforming stub for tests

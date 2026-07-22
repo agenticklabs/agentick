@@ -319,6 +319,18 @@ marks the tool session-allowed so subsequent calls skip the gate; a
 `reply.modifiedArguments` payload is re-validated before the handler runs.
 Timeout surfaces as `ToolConfirmationTimeoutError`.
 
+> **Not a security boundary.** `requiresConfirmation` predicates, `guardDispatch`,
+> and tool exposure/allowlists (`ToolDeclaration.exposure`) are POLICY seams — they
+> shape what the model is offered and when a human approves a call, not what a
+> payload can ultimately do. A call that clears the gate runs its handler with the
+> host process's full permissions; string- or command-level inspection inside a
+> predicate is advisory UX, not containment (a motivated payload that reaches
+> execution executes regardless — pipes, base64, and heredocs defeat textual
+> filtering). The security boundary is OS-level: it lives in the sandbox provider
+> (`@agentick/sandbox-next`), not here. Never rely on string/command filtering for
+> safety — use these seams to shape UX and require approval, and put the actual
+> confinement in the sandbox.
+
 ### Dialog seams — `confirmationMessage` + `confirmationPreview`
 
 Two annotations shape WHAT the confirm dialog shows. They are evaluated **into

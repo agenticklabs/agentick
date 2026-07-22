@@ -1726,6 +1726,59 @@ blueprint's design decisions; this is execution-level).
 
 ### 2026-07-21
 
+- **ROADMAP (2026-07-22, Ryan-approved — the standing task list; work top-down).**
+  **Phase A — finish the approved queue:**
+  ☐ A1 (IN FLIGHT) 4b steer/follow-up — steer = tick-boundary injection into the RUNNING
+    execution (proof: message reaches tick N+1's compiled context); follow-up = true
+    settlement (not agent_end). Critical-inspect on landing.
+  ☐ A2 4c security-defaults pass (gateway/express bindings): loopback-only default,
+    CSRF-in-bootstrap + custom header, Sec-Fetch-Site/Origin rejection, Host allowlist,
+    trust forwarded headers ONLY from loopback proxy, realpath-descendant containment.
+    SHARPENED (opencode post-mortem, 2026-07-22): never permissive CORS (their CVE class
+    — exposed server + CORS * = any website executes shell), no exec-from-URL patterns,
+    no curl-pipe upgrade paths.
+  ☐ A2.5 prefix-stability conformance test (opencode post-mortem): a STATIC tree must
+    compile to byte-identical model input across ticks (prompt-cache invariant we have
+    machinery for — CacheHint — but never assert). + doc rule: time-varying content
+    belongs in <Ephemeral>/late positions, never the cached prefix; no date injection
+    in defaults (we don't — assert it stays that way).
+  ☐ A2.6 (docs-only, launching now) policy-vs-boundary stance in user docs: guards/
+    confirmation/tool-allowlists are POLICY seams, NOT security boundaries — the
+    boundary is the OS-level sandbox provider (Landlock/Seatbelt class). Place in
+    sandbox + tool-executor (confirmation section) + gateway/security docs. Also: B1
+    example states batch-streaming-updates as a pattern (quadratic-markdown lesson).
+  ☐ A3 4d bounded tool-output client projection — never multi-MB to the browser; bounded
+    preview at projection, full content stays durable (two-tier).
+  **Phase B — the VALIDATION PIVOT (outward-facing; generates the next work list from
+  real usage friction — inward work is at diminishing returns):**
+  ☐ B1 4e one-shot prompt artifact — "build a codex-style dashboard on
+    @agentick/client-next" exercising timelineView/elicitations/clientToolCalls/knobs/
+    fakes. Every hedge the prompt needs = a discovered ergonomics defect. This IS the
+    Ernesto-class validation.
+  ☐ B2 fix the friction B1 surfaces (expect: docs gaps, missing sugar, client rough
+    edges). Each finding triaged: fix / file / justify.
+  ☐ B3 Ernesto proper (Ryan's call on timing — gate long met).
+  **Phase C — v2.0-cut checklist (assemble + then walk; items in one place so the cut
+  is a checklist walk, not archaeology):**
+  ☐ C1 XHarness→X class-suffix sweep (LanguageModelExecutor→ModelExecutor,
+    ToolExecutorHarness→ToolExecutor, …) — batched rename, workspace-wide gates.
+  ☐ C2 pnpm 10→11 upgrade + native versioning (drop @changesets/cli; versioning.fixed
+    for the @agentick/* family; evaluate a `next` lane; ledger for main↔feat/v2).
+  ☐ C3 <Skill> RuntimeDeclarations slot decision (MEDIUM rec: dynamic/scoped
+    availability is the real withSkills gap) + <Prompt> = LOW, <Guard> = NO.
+  ☐ C4 devtools package attention (Ryan-flagged).
+  ☐ C5 OpenAI Responses API migration (unlocks provider tool results +
+    executedBy:provider:openai + richer streaming).
+  ☐ C6 ai-sdk provider-tools request-half (provider→factory registry).
+  ☐ C7 Anthropic SDK bump (replace the optimistic local wire types w/ SDK types).
+  ☐ C8 docs/website sweep + New-Package-Checklist refresh for -next packages.
+  ☐ C9 tool:dispatch→tool:execute rename + TODO(adr-80) output type (turnkey, from the
+    ergonomics pass). Also: TODO(task-wake) narrow-the-catch; TODO(spawn-lifecycle)
+    spawn_start/end; session-scoped chunk interceptors (phase-2+).
+  **Standing discipline:** agents build (Opus), I judge critically (diff review, gates
+  re-run, mechanistic root causes), every pass commits against the ZERO-FAILURE
+  workspace bar (4308/0 as of fc97dcf7).
+
 - **WORK QUEUE (2026-07-22, systematic — Ryan: "significant progress today").**
   In flight: PA1–PA3 (bounded registry LRU/idleTimeout + app signal cascade). Then:
   (1) SP4–SP6 spawn hardening (MAX_SPAWN_DEPTH crash vector, parent-abort→child

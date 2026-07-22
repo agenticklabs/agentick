@@ -574,6 +574,23 @@ structural pre-gate and does NOT itself become a hook.
 > folds down live to the session op. See
 > [`docs/proposals/v2/HOOK-LIFECYCLE.md`](../../docs/proposals/v2/HOOK-LIFECYCLE.md).
 
+## Security defaults
+
+The gateway is the deployment root, so its serving posture is a security concern
+distinct from the authz seams above. Two rules for any HTTP-facing deploy: **bind
+loopback (`127.0.0.1`) by default** — expose a public interface only deliberately,
+behind a reviewed auth story (see
+[Authentication & authorization](#authentication--authorization)) — and **never
+configure permissive CORS** (`Access-Control-Allow-Origin: *`): an exposed server
+plus wildcard CORS lets any web page in a user's browser drive the gateway. Never
+accept exec-from-URL or curl-pipe-to-shell patterns in adopter code; a URL is not a
+trust boundary. The `Authorizer` and the `requiredScopes` ceiling gate _who may
+call what_ — they are not a substitute for not being reachable in the first place.
+A full security-defaults pass for the HTTP/transport bindings — loopback default,
+`Sec-Fetch-Site`/`Origin` rejection, `Host` allow-list, and trusting forwarded
+headers only from a loopback proxy — is roadmapped (STATUS A2 §4c); until it lands,
+an adopter serving over the network owns these choices explicitly.
+
 ## Server-initiated notifications — the control-plane bus (ADR 47)
 
 The gateway signals control-plane changes to connected clients over

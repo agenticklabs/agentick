@@ -77,12 +77,12 @@ downgrades). The effective tier is surfaced honestly on the handle as
 confine. **A jail that doesn't confine is worse than none**, so a host with no
 jail primitive reports `"none"` (unconfined) rather than a false claim.
 
-| Strategy   | Platform | Mechanism                                                        | `exec` confinement                                             |
-| ---------- | -------- | ---------------------------------------------------------------- | -------------------------------------------------------------- |
-| `seatbelt` | macOS    | `sandbox-exec -f <SBPL profile>`                                 | Kernel-enforced: reads (deny home/keychains/volumes), writes (workspace+mounts+tmp only), network deny |
-| `bwrap`    | Linux    | `bubblewrap` — `--unshare-all`, ro system binds, private /proc+/dev+tmpfs | Namespace-enforced: only bound paths exist; network off unless `--share-net` |
-| `unshare`  | Linux    | `unshare --mount --pid --fork --user --map-root-user` (+ `--net` on deny) | Namespace isolation (fallback when `bwrap` absent + userns available) |
-| `none`     | any      | bare `bash -c`                                                   | **UNCONFINED** — path-confined fs + proxied egress only; surfaced as `isolation: "none"` |
+| Strategy   | Platform | Mechanism                                                                 | `exec` confinement                                                                                     |
+| ---------- | -------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `seatbelt` | macOS    | `sandbox-exec -f <SBPL profile>`                                          | Kernel-enforced: reads (deny home/keychains/volumes), writes (workspace+mounts+tmp only), network deny |
+| `bwrap`    | Linux    | `bubblewrap` — `--unshare-all`, ro system binds, private /proc+/dev+tmpfs | Namespace-enforced: only bound paths exist; network off unless `--share-net`                           |
+| `unshare`  | Linux    | `unshare --mount --pid --fork --user --map-root-user` (+ `--net` on deny) | Namespace isolation (fallback when `bwrap` absent + userns available)                                  |
+| `none`     | any      | bare `bash -c`                                                            | **UNCONFINED** — path-confined fs + proxied egress only; surfaced as `isolation: "none"`               |
 
 Probe host capability up front with the exported `detectCapabilities()` /
 `selectStrategy(caps, override)`.
@@ -92,12 +92,12 @@ Probe host capability up front with the exported `detectCapabilities()` /
 `SandboxCreateOptions.limits` maps to the jail where the platform supports it;
 unsupported limits are documented here, never silently ignored:
 
-| Limit          | Linux                          | macOS                          | passthrough |
-| -------------- | ------------------------------ | ------------------------------ | ----------- |
-| `wallClockSec` | per-exec timeout (handle)      | per-exec timeout (handle)      | timeout     |
-| `diskMb`       | `DiskMonitor` poll (best-effort) | `DiskMonitor` poll (best-effort) | poll     |
-| `memoryMb`     | cgroup v2 `memory.max`         | **unsupported** (no cgroups)   | unsupported |
-| `cpuPercent`   | cgroup v2 `cpu.max`            | **unsupported** (no cgroups)   | unsupported |
+| Limit          | Linux                            | macOS                            | passthrough |
+| -------------- | -------------------------------- | -------------------------------- | ----------- |
+| `wallClockSec` | per-exec timeout (handle)        | per-exec timeout (handle)        | timeout     |
+| `diskMb`       | `DiskMonitor` poll (best-effort) | `DiskMonitor` poll (best-effort) | poll        |
+| `memoryMb`     | cgroup v2 `memory.max`           | **unsupported** (no cgroups)     | unsupported |
+| `cpuPercent`   | cgroup v2 `cpu.max`              | **unsupported** (no cgroups)     | unsupported |
 
 `memoryMb`/`cpuPercent` require a writable cgroups-v2 hierarchy; where it isn't
 writable the `CgroupManager` degrades to a no-op (`isActive === false`) — the
@@ -113,6 +113,17 @@ could open a direct socket around it (seatbelt/bwrap allow egress once network
 is on). The hard, unbypassable control is the boolean deny; per-domain
 filtering is best-effort. (Carried forward from v1; same coarseness the docker
 provider documents.)
+
+> **This provider is the security boundary; the harness above it is not.** With a
+> real jail (`seatbelt` / `bwrap` / `unshare`) `exec` is kernel- or
+> namespace-confined. With `strategy: "none"` — or `"auto"` on a host with no jail
+> primitive — the spawned command is a plain child process running with **the host
+> user's full permissions**; path-confinement and the egress proxy are the only
+> limits, and both are bypassable by a determined process (see
+> [Network honesty](#network-honesty)). Read `LocalSandbox.isolation` before
+> trusting `exec` to contain code you don't control, and reserve `"none"` for code
+> you already trust. The tool allow-lists and ACL prompts one layer up are policy,
+> not containment — the jail is.
 
 ## Testing double
 
