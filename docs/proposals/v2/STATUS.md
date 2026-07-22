@@ -1800,7 +1800,13 @@ blueprint's design decisions; this is execution-level).
     useKnobs/useElicitations one-liners once the contract is uniform) + convenience
     sugar (session.onElicitation(cb)) ONLY after the contract lands. Friction #4 docs
     fixed (aaccee4c); #10 dangling queue already TODO'd (4b).
-  ☐ B3 Ernesto proper (Ryan's call on timing — gate long met).
+  ☐ B3 **THE BUILD PIVOT (Ryan 2026-07-22: "finish up today's work and get to
+    building")**: after B2 slice 1 (contract+conformance) lands, START BUILDING —
+    Ernesto AND assistant-api on agentick v2. B2 slices 2+ (server prereqs, handle
+    refactors, session.timeline re-home, React bindings) are PULLED by what the real
+    apps hurt on, not pushed from the design doc — every refactor lands with a living
+    consumer. The five principles + the converged contract (list/get/subscribe/verbs,
+    floors-not-ceilings) govern; the apps are the design instrument from here.
   **Phase C — v2.0-cut checklist (assemble + then walk; items in one place so the cut
   is a checklist walk, not archaeology):**
   ☐ C1 XHarness→X class-suffix sweep (LanguageModelExecutor→ModelExecutor,

@@ -69,6 +69,14 @@ replace-fold (trivial). Elicitations/tool-calls = pending-state collection that 
 streams. Timeline = the window (seed/tail/prepend/append/reconcile). No base class
 that pretends these are the same thing.
 
+**PRINCIPLE #5 (Ryan 2026-07-22): contracts are FLOORS, not ceilings.** The framework
+asks for the minimum it needs; the user's application — their UI, their backend, their
+data model — can give more, and everything of theirs rides through untouched.
+Conformance tests that required members BEHAVE, never that nothing else exists;
+interfaces are structural (satisfying the shape IS conforming); metadata bags carry
+user data untouched (the only strips are OUR reserved security fields, by name — the
+executedBy precedent). We take what we need from what the user gives.
+
 ## 3. The contract
 
 ```ts
