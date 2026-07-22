@@ -913,6 +913,16 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
         scope: { ...(input.scope ?? {}), executionId },
         ...omitUndefined({ signal: input.signal }),
       };
+      // TODO(adr-89-phase-next): this NON-STREAMING run path calls
+      // `executeBody` DIRECTLY, bypassing the `model:generate` command —
+      // so onBefore/AfterModelGenerate hooks, guardGenerate, and the
+      // ADR-89 §4 useOnModelGenerateStart/End projection do NOT fire on
+      // non-streaming ticks (the streaming path rides the
+      // `model:generate_stream` command and gets all of them). Per ADR 89
+      // §1 ("run composes project → the execute command → normalize"),
+      // route this through `this.modelGenerate`'s command cascade —
+      // needs the ProviderAborted→canceled-terminal fold carried across
+      // the command boundary. Mirror in FakeLanguageModelExecutor.runBody.
       const raw = yield* this.executeBody(
         executeInput,
         executionId,

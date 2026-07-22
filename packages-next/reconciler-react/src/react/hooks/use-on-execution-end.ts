@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { LifecycleExecutionEnd } from "@agentick/spec-next";
-import { useLifecycleStore } from "../lifecycle-context.js";
+import { useLifecycleDispatch } from "../lifecycle-context.js";
 
 /**
  * `useOnExecutionEnd` — register a callback fired at execution-end.
@@ -9,10 +9,10 @@ import { useLifecycleStore } from "../lifecycle-context.js";
 export function useOnExecutionEnd(
   callback: (event: LifecycleExecutionEnd) => void | Promise<void>,
 ): void {
-  const store = useLifecycleStore();
+  const dispatch = useLifecycleDispatch();
   const ref = useRef(callback);
   ref.current = callback;
   useEffect(() => {
-    return store.register("execution-end", (event) => ref.current(event));
-  }, [store]);
+    return dispatch.register("execution-end", (event) => ref.current(event));
+  }, [dispatch]);
 }

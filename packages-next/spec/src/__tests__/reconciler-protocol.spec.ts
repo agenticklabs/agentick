@@ -17,12 +17,13 @@ import {
 import type {
   DataBridge,
   DataResolveOptions,
+  DispatchLifecycleInput,
   HookBridges,
   LifecycleEvent,
+  LifecycleProjectionTarget,
   LoopBridge,
   MountInput,
   MountResult,
-  NotifyLifecycleInput,
   ReconcileDiagnostic,
   ReconcileError,
   ReconcilerInboxMessage,
@@ -108,7 +109,7 @@ describe("@agentick/spec-next — reconciler protocol", () => {
     });
   });
 
-  describe("rerender / notifyLifecycle / unmount / snapshot / restore", () => {
+  describe("rerender / dispatchLifecycle / unmount / snapshot / restore", () => {
     it("RerenderInput carries new element + optional version", () => {
       const input: RerenderInput = {
         mountId: "m_1",
@@ -118,23 +119,25 @@ describe("@agentick/spec-next — reconciler protocol", () => {
       expect(input.elementVersion).toBe("sha:abc");
     });
 
-    it("NotifyLifecycleInput discriminates on event.kind", () => {
+    it("DispatchLifecycleInput discriminates on event.kind", () => {
       const events: LifecycleEvent[] = [
         { kind: "tick-start", tickId: "t_1", executionId: "e_1" },
         { kind: "tick-end", tickId: "t_1", result: { stopReason: "end" } },
         { kind: "execution-start", executionId: "e_1" },
         { kind: "execution-end", executionId: "e_1", outcome: "succeeded" },
+        { kind: "model-generate-start", stream: true, tickId: "t_1" },
+        { kind: "model-generate-end", stream: true, tickId: "t_1" },
         {
           kind: "error",
           phase: "tick",
           error: { name: "Error", message: "boom" },
         },
       ];
-      const inputs: NotifyLifecycleInput[] = events.map((event) => ({
+      const inputs: DispatchLifecycleInput[] = events.map((event) => ({
         mountId: "m_1",
         event,
       }));
-      expect(inputs).toHaveLength(5);
+      expect(inputs).toHaveLength(7);
       // The discriminator `kind` is `string & {}` on LifecycleCustom,
       // which prevents literal-narrowing across the union. The
       // `isLifecycleTickStart` guard is the canonical way to narrow.
@@ -306,12 +309,23 @@ describe("@agentick/spec-next — reconciler protocol", () => {
         "rerender",
         "renderTree",
         "renderToString",
-        "notifyLifecycle",
         "unmount",
         "snapshot",
         "restore",
       ];
-      expect(required).toHaveLength(8);
+      expect(required).toHaveLength(7);
+    });
+
+    it("lifecycle projection is an OPTIONAL capability, not a protocol method (ADR 89 §4)", () => {
+      // `notifyLifecycle` is retired: `keyof ReconcilerProtocol` must not
+      // admit it (compile-time), and a compiler that projects lifecycle
+      // implements `LifecycleProjectionTarget` separately.
+      type NotAMethod = "notifyLifecycle" extends keyof ReconcilerProtocol ? true : false;
+      expectTypeOf<NotAMethod>().toEqualTypeOf<false>();
+      const projection: LifecycleProjectionTarget = {
+        dispatchLifecycle: async () => undefined,
+      };
+      expectTypeOf(projection.dispatchLifecycle).toBeFunction();
     });
   });
 });

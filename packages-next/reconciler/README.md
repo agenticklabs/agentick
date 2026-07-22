@@ -58,16 +58,15 @@ A callback bundle that satisfies the spec's `ReconcilerProtocol`. Three
 callbacks are **required**; the rest are optional and fall back to defined
 behavior when omitted:
 
-| Callback          | Required | Omitted behavior               |
-| ----------------- | -------- | ------------------------------ |
-| `mount`           | ✅       | —                              |
-| `unmount`         | ✅       | —                              |
-| `renderTree`      | ✅       | —                              |
-| `rerender`        | —        | no-op (resolves)               |
-| `notifyLifecycle` | —        | no-op (resolves)               |
-| `restore`         | —        | no-op (resolves)               |
-| `renderToString`  | —        | **rejects** — "not configured" |
-| `snapshot`        | —        | **rejects** — "not configured" |
+| Callback         | Required | Omitted behavior               |
+| ---------------- | -------- | ------------------------------ |
+| `mount`          | ✅       | —                              |
+| `unmount`        | ✅       | —                              |
+| `renderTree`     | ✅       | —                              |
+| `rerender`       | —        | no-op (resolves)               |
+| `restore`        | —        | no-op (resolves)               |
+| `renderToString` | —        | **rejects** — "not configured" |
+| `snapshot`       | —        | **rejects** — "not configured" |
 
 Every command (`mount` / `renderTree` / `unmount` / `rerender`) runs through
 the shared harness protocol, so it emits `reconciler:command:*` envelopes on
@@ -101,8 +100,13 @@ logic, the envelope/journal wiring is inherited from `BaseHarness`.
   split.
 - **Bridges.** `InMemoryDataBridge` (reference `useData` cache) and
   `InMemoryModelBridge` (reference model bridge).
-- **`LifecycleStore`** — generic per-mount lifecycle handler registry backing
-  `useOnTickStart` / `useOnTickEnd` / `useOnError` etc. in any reconciler.
+- **`LifecycleDispatch`** — the compiler's half of the lifecycle projection
+  (ADR 89 §4): the thin per-mount handler dispatch + the
+  tick-start/execution-start catch-up cache backing `useOnTickStart` /
+  `useOnTickEnd` / `useOnError` etc. in any reconciler. The EVENTS come from
+  the session's command-hook forwarders (via the harness's
+  `dispatchLifecycle`, the optional `LifecycleProjectionTarget` capability) —
+  the retired `ReconcilerProtocol.notifyLifecycle` feed is gone.
 - **`defineReconciler`** — the callback-style `ReconcilerFactory` factory.
 
 ## What does NOT live here
@@ -153,7 +157,7 @@ Full surface — every export, type, and signature — is in the
 - **Host tree** — `HostInstance`, `ElementInstance`, `TextInstance`,
   `HostScope`, `ReconcilerContainer` + their constructors/guards.
 - **Bridges** — `InMemoryDataBridge`, `InMemoryModelBridge`.
-- **`LifecycleStore`** and `LifecycleHandlerKind`.
+- **`LifecycleDispatch`** and `LifecycleHandlerKind`.
 - **`@agentick/reconciler-next/testing`** — `fakeReconciler`, `fakeBridges`,
   `stubLoopBridge`, `stubSessionBridge`, `fakeTimelineHarness`,
   `fakeKnobsHarness`, `mockStateHarness`. Test doubles are typed against the

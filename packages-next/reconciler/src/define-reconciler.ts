@@ -51,7 +51,6 @@ import type {
   MessageInbox,
   MountInput,
   MountResult,
-  NotifyLifecycleInput,
   Operation,
   OperationJournal,
   ReconcilerFactory,
@@ -84,7 +83,6 @@ export interface DefineReconcilerInput {
   // ── Optional: secondary surfaces ─────────────────────────────────────
   readonly rerender?: (input: RerenderInput) => Promise<void>;
   readonly renderToString?: (input: RenderToStringInput) => Promise<RenderToStringResult>;
-  readonly notifyLifecycle?: (input: NotifyLifecycleInput) => Promise<void>;
   readonly snapshot?: (input: SnapshotInput) => Promise<ReconcilerSnapshot>;
   readonly restore?: (input: RestoreInput) => Promise<void>;
 }
@@ -190,11 +188,6 @@ class CallbackReconciler extends BaseHarness<"reconciler"> implements Reconciler
       return Promise.reject(new Error("defineReconciler: renderToString() not configured"));
     }
     return this.spec.renderToString(input);
-  }
-
-  notifyLifecycle(input: NotifyLifecycleInput): Promise<void> {
-    if (!this.spec.notifyLifecycle) return Promise.resolve();
-    return this.spec.notifyLifecycle(input);
   }
 
   unmount(input: UnmountInput): Promise<void> {

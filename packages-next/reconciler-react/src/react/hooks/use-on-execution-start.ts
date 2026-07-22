@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { LifecycleExecutionStart } from "@agentick/spec-next";
-import { useLifecycleStore } from "../lifecycle-context.js";
+import { useLifecycleDispatch } from "../lifecycle-context.js";
 
 /**
  * `useOnExecutionStart` — register a callback fired at execution-start.
@@ -12,10 +12,10 @@ import { useLifecycleStore } from "../lifecycle-context.js";
 export function useOnExecutionStart(
   callback: (event: LifecycleExecutionStart) => void | Promise<void>,
 ): void {
-  const store = useLifecycleStore();
+  const dispatch = useLifecycleDispatch();
   const ref = useRef(callback);
   ref.current = callback;
   useEffect(() => {
-    return store.register("execution-start", (event) => ref.current(event));
-  }, [store]);
+    return dispatch.register("execution-start", (event) => ref.current(event));
+  }, [dispatch]);
 }

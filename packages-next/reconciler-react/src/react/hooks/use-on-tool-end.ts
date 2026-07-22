@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { LifecycleToolEnd } from "@agentick/spec-next";
-import { useLifecycleStore } from "../lifecycle-context.js";
+import { useLifecycleDispatch } from "../lifecycle-context.js";
 
 /**
  * `useOnToolEnd` — register a callback fired when a tool dispatch
@@ -18,10 +18,10 @@ import { useLifecycleStore } from "../lifecycle-context.js";
  * });
  */
 export function useOnToolEnd(callback: (event: LifecycleToolEnd) => void | Promise<void>): void {
-  const store = useLifecycleStore();
+  const dispatch = useLifecycleDispatch();
   const ref = useRef(callback);
   ref.current = callback;
   useEffect(() => {
-    return store.register("tool-end", (event) => ref.current(event));
-  }, [store]);
+    return dispatch.register("tool-end", (event) => ref.current(event));
+  }, [dispatch]);
 }

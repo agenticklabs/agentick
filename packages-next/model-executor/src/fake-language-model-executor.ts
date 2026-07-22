@@ -453,6 +453,12 @@ export class FakeLanguageModelExecutor
       }
 
       // 3. execute
+      // TODO(adr-89-phase-next): like the real executor's runBody, this
+      // non-streaming path bypasses the `model:generate` command (no
+      // hooks / guard / §4 lifecycle projection on non-streaming ticks).
+      // Route through `this.modelGenerate` when the real one does —
+      // minding the scripted-cursor single-advance and the scripted
+      // vetoed/canceled TERMINAL (not command-failure) mapping.
       if (this.lifecycle.isAborted(executionId)) {
         const terminal: ExecutorTerminal<LanguageModelExecutionResult> = {
           outcome: "canceled",

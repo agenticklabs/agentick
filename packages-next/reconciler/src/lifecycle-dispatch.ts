@@ -1,23 +1,33 @@
 /**
- * Per-mount lifecycle handler registry.
+ * Per-mount lifecycle dispatch — the compiler's HALF of the lifecycle
+ * projection (ADR 89 §4).
  *
  * Tracks handlers registered by user-supplied `useOnTickStart` /
  * `useOnTickEnd` / `useOnExecutionStart` / `useOnExecutionEnd` /
- * `useOnError` hooks. The harness's `notifyLifecycle` command
- * dispatches the matching event to every registered handler.
+ * `useOnToolStart` / `useOnToolEnd` / `useOnModelGenerateStart` /
+ * `useOnModelGenerateEnd` / `useOnError` hooks and fans a dispatched
+ * event out to them. The EVENTS come from the real command-hook system:
+ * the SESSION (the composition root) registers forwarders on the
+ * constituent command hooks (`loop:run-execution`, `loop:tick`,
+ * `tool:dispatch`, `model:generate[_stream]`) and routes each projected
+ * event here via the harness's `dispatchLifecycle` (the
+ * `LifecycleProjectionTarget` capability). The compiler owns NO feed of
+ * its own — this class is the thin per-mount dispatch plus the catch-up
+ * cache below, nothing more.
  *
  * **Tick-start catch-up.** Components that mount *during* a tick
- * register their `useOnTickStart` handler AFTER `notifyLifecycle({kind:
- * "tick-start"})` has already fired for that tick. Without
- * intervention they would never see tick-start until the *next* tick.
+ * register their `useOnTickStart` handler AFTER the tick-start event
+ * has already been dispatched for that tick. Without intervention they
+ * would never see tick-start until the *next* tick.
  *
- * The store remembers the current tick-start event (cleared at
+ * The dispatch remembers the current tick-start event (cleared at
  * tick-end). Newly-registered tick-start handlers receive the cached
  * event immediately on registration, so a mid-tick mount catches up.
  *
  * The same pattern applies to `execution-start` for components that
  * mount mid-execution.
  *
+ * @see docs/proposals/v2/blueprint/89-model-harness-and-lifecycle-projection.md §4
  * @see docs/proposals/v2/blueprint/03-reconciler-harness.md
  */
 
@@ -26,6 +36,8 @@ import type {
   LifecycleEvent,
   LifecycleExecutionEnd,
   LifecycleExecutionStart,
+  LifecycleModelGenerateEnd,
+  LifecycleModelGenerateStart,
   LifecycleTickEnd,
   LifecycleTickStart,
   LifecycleToolEnd,
@@ -34,7 +46,7 @@ import type {
 import { createKeyedNotifier, type KeyedNotifier } from "@agentick/pubsub-next";
 
 /**
- * Kinds the store dispatches and that user hooks register against.
+ * Kinds the dispatch routes and that user hooks register against.
  * `tick-start` and `execution-start` are catch-up eligible.
  */
 export type LifecycleHandlerKind =
@@ -44,6 +56,8 @@ export type LifecycleHandlerKind =
   | "execution-end"
   | "tool-start"
   | "tool-end"
+  | "model-generate-start"
+  | "model-generate-end"
   | "error";
 
 /** Map a handler kind to the narrowed event type it receives. */
@@ -59,15 +73,19 @@ type EventForKind<K extends LifecycleHandlerKind> = K extends "tick-start"
           ? LifecycleToolStart
           : K extends "tool-end"
             ? LifecycleToolEnd
-            : K extends "error"
-              ? LifecycleError
-              : never;
+            : K extends "model-generate-start"
+              ? LifecycleModelGenerateStart
+              : K extends "model-generate-end"
+                ? LifecycleModelGenerateEnd
+                : K extends "error"
+                  ? LifecycleError
+                  : never;
 
 type Handler<E extends LifecycleEvent> = (event: E) => void | Promise<void>;
 
 type AnyHandler = Handler<LifecycleEvent>;
 
-export class LifecycleStore {
+export class LifecycleDispatch {
   private readonly handlers: Record<LifecycleHandlerKind, Set<AnyHandler>> = {
     "tick-start": new Set(),
     "tick-end": new Set(),
@@ -75,6 +93,8 @@ export class LifecycleStore {
     "execution-end": new Set(),
     "tool-start": new Set(),
     "tool-end": new Set(),
+    "model-generate-start": new Set(),
+    "model-generate-end": new Set(),
     error: new Set(),
   };
 
@@ -153,22 +173,15 @@ export class LifecycleStore {
   }
 
   /**
-   * Dispatch a lifecycle event. Invokes every registered handler for
-   * `event.kind` and updates catch-up bookkeeping.
-   *
-   * Awaits handlers serially — Phase 3.10+ may add parallel dispatch
-   * with a configurable join policy. For now serial gives deterministic
-   * ordering for tests + matches v1's lifecycle semantics.
-   */
-  /**
    * Invoke ONE handler in isolation. A user-supplied lifecycle observer
    * that throws (or rejects) must never fail the run or float an
-   * unhandled rejection: the loop AWAITS `tick-start` / `tick-end`
-   * dispatch (a propagated throw would abort the tick), and the rest are
-   * fire-and-forget (a propagated throw would float). Catch, log with the
-   * kind for triage, and continue — one bad observer never takes down the
-   * loop or its siblings. Mirrors React's "an effect that throws is
-   * surfaced, not fatal" posture.
+   * unhandled rejection: the tick-start / tick-end forwarders AWAIT
+   * dispatch in the `loop:tick` command cascade (a propagated throw
+   * would abort the tick), and the rest are fire-and-forget (a
+   * propagated throw would float). Catch, log with the kind for triage,
+   * and continue — one bad observer never takes down the loop or its
+   * siblings. Mirrors React's "an effect that throws is surfaced, not
+   * fatal" posture.
    */
   private async invokeSafely(handler: AnyHandler, event: LifecycleEvent): Promise<void> {
     try {
@@ -183,6 +196,14 @@ export class LifecycleStore {
     }
   }
 
+  /**
+   * Dispatch a lifecycle event. Invokes every registered handler for
+   * `event.kind` and updates catch-up bookkeeping.
+   *
+   * Awaits handlers serially — Phase 3.10+ may add parallel dispatch
+   * with a configurable join policy. For now serial gives deterministic
+   * ordering for tests + matches v1's lifecycle semantics.
+   */
   async dispatch(event: LifecycleEvent): Promise<void> {
     switch (event.kind) {
       case "tick-start": {
@@ -223,6 +244,18 @@ export class LifecycleStore {
         for (const h of [...this.handlers["tool-end"]]) await this.invokeSafely(h, event);
         return;
       }
+      case "model-generate-start": {
+        for (const h of [...this.handlers["model-generate-start"]]) {
+          await this.invokeSafely(h, event);
+        }
+        return;
+      }
+      case "model-generate-end": {
+        for (const h of [...this.handlers["model-generate-end"]]) {
+          await this.invokeSafely(h, event);
+        }
+        return;
+      }
       case "error": {
         for (const h of [...this.handlers.error]) await this.invokeSafely(h, event);
         return;
@@ -261,6 +294,8 @@ export class LifecycleStore {
       "execution-end": this.handlers["execution-end"].size,
       "tool-start": this.handlers["tool-start"].size,
       "tool-end": this.handlers["tool-end"].size,
+      "model-generate-start": this.handlers["model-generate-start"].size,
+      "model-generate-end": this.handlers["model-generate-end"].size,
       error: this.handlers.error.size,
     };
   }

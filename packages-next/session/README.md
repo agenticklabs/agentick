@@ -273,7 +273,33 @@ order (mirroring the loop's own resolution):
 The settle-then-decide order is load-bearing: a tick-end effect may update a
 knob a gate checks, so the tree must settle before the predicates read it.
 Gate evaluation lives here, not in the reconciler mount — `useGate` is
-registration-only.
+registration-only. Since ADR 89 §4 the SETTLE itself is a session-registered
+`onAfterLoopTick` forwarder (below), awaited in the `loop:tick` command
+cascade — before the command terminal, hence before this decide.
+
+## The lifecycle projection — the session wires it (ADR 89 §4)
+
+The React `useOn*` hooks are a **projection of the command-hook system** —
+there is no bespoke lifecycle feed. The session, as the composition root,
+registers the forwarders at construction (`src/lifecycle-projection.ts`)
+and unhooks them on `close()`:
+
+- **`loop:run-execution` / `loop:tick` / `tool:dispatch`** — tier-2 hooks on
+  the (app-shared) loop + tool executor, identity-filtered by the payloads'
+  `mountId` / `sessionId` so each session projects only its own mount.
+  tick-start and the tick-end **settle** are AWAITED in-cascade; the rest are
+  fire-and-forget. Tool events use the around form (`onToolDispatch`) so a
+  HARD handler failure projects `tool-end (failed)` + `useOnError`
+  (`phase: "tool"`); a FAILED executor terminal projects `useOnError`
+  (`phase: "model"`).
+- **`model:generate[_stream]`** — tier-4 call-scoped middleware wrapped
+  around each `loop.fx.runExecution` (`withCallMiddleware`), so the
+  projection reaches WHICHEVER executor instance runs a tick, including a
+  per-tick `<Model>`-swapped executor (ADR 56) outside the session's
+  interceptor tree.
+- The target is the compiler's optional `LifecycleProjectionTarget`
+  capability (`dispatchLifecycle`); a reconciler without it gets no
+  projection.
 
 ## `defineSession` — adopter-facing factory
 
@@ -597,7 +623,14 @@ their backing.
   the session default.
 - `src/__tests__/lifecycle-bridge.spec.tsx` — the real loop driving the
   whole `useOn*` hook family + `useContextInfo` yielding a live window
-  and utilization (#206 / ADR 55).
+  and utilization (#206 / ADR 55). Plus the ADR 89 §4 projection suite:
+  per-mount routing (two sessions on ONE shared loop — only the running
+  session's hooks fire; unsubscribe on close), THE BARRIER (a knob
+  mutated by an async `useOnTickEnd` effect is visible to the decide —
+  settle-before-decide), `useOnModelGenerateStart/End` from the real
+  `model:generate_stream` command via tier-4 call middleware, and the
+  error projection (failed executor terminal → `phase: "model"`; hard
+  tool-handler throw → `tool-end` failed + `phase: "tool"`).
 - `src/__tests__/gates-integration.spec.tsx` — the continuation decision
   (ADR 67): a real execution drives `notifyLifecycle`, which evaluates the
   shared gate controller against the settled `TickResult`; both a

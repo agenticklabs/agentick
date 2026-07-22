@@ -11,12 +11,14 @@
  *      produces the same IR fragment shape across renders.
  *   4. **Sectioning.** Section/message intrinsics produce
  *      kind-discriminated context entries.
- *   5. **Lifecycle dispatch.** notifyLifecycle invokes registered
- *      handlers and supports tick-start catch-up.
+ *   5. **Lifecycle projection capability (optional).** When the impl
+ *      exposes `dispatchLifecycle` (ADR 89 §4 `LifecycleProjectionTarget`),
+ *      it routes events per mount and rejects NotMounted for unknown
+ *      mounts.
  *   6. **Snapshot round-trip.** snapshot → JSON → restore preserves
  *      mountId / elementVersion / knobs.
- *   7. **Unmount cleanup.** notifyLifecycle / renderTree after unmount
- *      reject with NotMounted.
+ *   7. **Unmount cleanup.** renderTree after unmount rejects with
+ *      NotMounted.
  *
  * The suite is parametrized by a `factory` that returns a fresh
  * reconciler harness + builders for the test fixtures (element + bridges).
@@ -32,7 +34,7 @@ import type {
   ReconcilerProtocol,
   ReconcilerSnapshot,
 } from "@agentick/spec-next";
-import { NotMounted } from "@agentick/spec-next";
+import { NotMounted, supportsLifecycleProjection } from "@agentick/spec-next";
 
 /**
  * Test-fixture factory shape. The conformance suite is reconciler-
@@ -219,9 +221,10 @@ export function runReconcilerConformance(factory: ReconcilerConformanceFactory):
     });
   });
 
-  describe("ReconcilerProtocol — notifyLifecycle", () => {
-    it("dispatches tick-start / tick-end without throwing", async () => {
+  describe("LifecycleProjectionTarget — optional capability (ADR 89 §4)", () => {
+    it("when exposed, dispatchLifecycle routes tick-start / tick-end without throwing", async () => {
       const reconciler = await factory.createReconciler();
+      if (!supportsLifecycleProjection(reconciler)) return; // capability absent — nothing to conform
       await reconciler.mount({
         mountId: "m_lc",
         sessionId: "s",
@@ -230,14 +233,15 @@ export function runReconcilerConformance(factory: ReconcilerConformanceFactory):
       });
       const ts: LifecycleEvent = { kind: "tick-start", tickId: "t1" };
       const te: LifecycleEvent = { kind: "tick-end", tickId: "t1", result: 0 };
-      await reconciler.notifyLifecycle({ mountId: "m_lc", event: ts });
-      await reconciler.notifyLifecycle({ mountId: "m_lc", event: te });
+      await reconciler.dispatchLifecycle({ mountId: "m_lc", event: ts });
+      await reconciler.dispatchLifecycle({ mountId: "m_lc", event: te });
     });
 
-    it("rejects with NotMounted for an unknown mountId", async () => {
+    it("when exposed, rejects with NotMounted for an unknown mountId", async () => {
       const reconciler = await factory.createReconciler();
+      if (!supportsLifecycleProjection(reconciler)) return; // capability absent — nothing to conform
       await expect(
-        reconciler.notifyLifecycle({
+        reconciler.dispatchLifecycle({
           mountId: "nope",
           event: { kind: "tick-start", tickId: "t1" },
         }),

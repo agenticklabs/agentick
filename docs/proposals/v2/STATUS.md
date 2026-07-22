@@ -1725,6 +1725,34 @@ blueprint's design decisions; this is execution-level).
 
 ### 2026-07-21
 
+- **Lifecycle projection LANDED (model-harness §4) — LifecycleStore RETIRED.** React
+  `useOn*` hooks are now projections of the REAL command lifecycle. New
+  `session/src/lifecycle-projection.ts` (`wireLifecycleProjection`, session constructor =
+  composition root, disposed on close): loop hooks (`onBefore/AfterLoopRunExecution` →
+  execution-start/end fire-and-forget; `onBeforeLoopTick` → tick-start AWAITED;
+  `onAfterLoopTick` → tick-end THE SETTLE, awaited in-cascade — before terminal → before
+  decide, ADR-67 preserved by construction); tool-executor around-middleware
+  (`onToolDispatch` → tool-start/end + narration/presentation, loop-driven only);
+  **model hooks via ADR-76 tier-4 call-scoped middleware** (`withCallMiddleware` around
+  `loop.fx.runExecution`) — solves the per-tick swapped `<Model>` executor (outside the
+  interceptorParent tree; the one-fiber spine threads call middleware to WHICHEVER
+  instance issues `model:generate[_stream]`). Events land via optional capability
+  `LifecycleProjectionTarget.dispatchLifecycle` (feature-detected, NOT a ReconcilerProtocol
+  method). Error source: in-process interceptors (onAfter doesn't fire on failed terminals;
+  executor failure = failed-terminal TickResult as data, tool failure = around-catch) —
+  `useOnError` gets its FIRST real producers. DELETED: `lifecycle-store.ts` (−278; replaced
+  by thin `LifecycleDispatch` — per-mount dispatch + catch-up cache + custom-kind path),
+  loop's 7 notifyLifecycle sites, `ReconcilerProtocol.notifyLifecycle` (spec test asserts
+  the key is GONE). Gates' `notifyTickEnd` seam untouched. NEW: `useOnModelGenerateStart/
+  End` hooks (streaming ticks only — **found a §1 gap:** non-streaming `fx.run` bypasses
+  the `model:generate` command in real+fake executors, `TODO(adr-89-phase-next)` at both
+  sites). Barrier proofs: settle<after<decide w/ macrotask, knob-mutation-seen-by-decide,
+  per-mount routing on a shared loop, unsubscribe-on-close. Gates: typecheck --force
+  152/152 0-cached; 1085 tests incl kill/resume verbatim-green; oxlint/oxfmt clean;
+  unfiltered notifyLifecycle grep = only the ADR-67 session seam + history. **Arc: §1 ✓
+  §3 ✓ §4 ✓ — remaining: §2 session.model facade; fx.run command-gap; Phase-2 chunk hooks;
+  loop/session streaming-up; reconciler→compiler rename.**
+
 - **Tick-as-command LANDED (model-harness §3, `loop:tick`).** The per-tick round is now a
   declared command on the LOOP harness (ADR-89 open question resolved: the loop owns tick
   orchestration; the model-executor owns the single model call). `this.command<TickInput,

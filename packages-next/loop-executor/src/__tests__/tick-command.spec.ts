@@ -9,11 +9,12 @@
  *   - N ticks → N tick commands, IN ORDER (tickIndex 1..N).
  *   - The tick BARRIER: tick k+1's `onBefore` fires only after tick k's
  *     `onAfter` — the next tick starts after this one settles.
- *   - SETTLE is IN the command, DECIDE is OUT: the reconciler tick-end
- *     (settle) fires INSIDE the tick body (before `onAfterLoopTick`), and the
- *     session `notifyTickEnd` (decide) fires AFTER `onAfterLoopTick`, in the
- *     run-execution continuation. This is the ADR-67 order, now expressed
- *     through the command terminal.
+ *   - SETTLE is IN the cascade, DECIDE is OUT (ADR 89 §4): the tick-end
+ *     settle is an ASYNC `onAfterLoopTick` hook (the session's forwarder),
+ *     awaited in the command cascade BEFORE the terminal resolves — so it
+ *     completes before the session `notifyTickEnd` (decide), which runs in
+ *     the run-execution continuation. This is the ADR-67 order, expressed
+ *     entirely through the command hooks + terminal.
  */
 
 import { describe, expect, it } from "vitest";
@@ -43,8 +44,8 @@ function mkSubstrate() {
   return { journal: new MemoryJournal(), bus: new LocalEventBus(), inbox: new LocalInbox() };
 }
 
-/** Reconciler that renders nothing and records every notifyLifecycle kind. */
-function mkRecordingReconciler(order: string[]): ReconcilerProtocol {
+/** Stub reconciler that renders nothing (lifecycle is hook-projected, ADR 89 §4). */
+function mkStubReconciler(): ReconcilerProtocol {
   return {
     fx: {
       use: () => () => {},
@@ -58,9 +59,6 @@ function mkRecordingReconciler(order: string[]): ReconcilerProtocol {
       diagnostics: [],
       iterations: 1,
     }),
-    notifyLifecycle: async (i) => {
-      order.push(`settle:${i.event.kind}`);
-    },
     unmount: async () => undefined,
     snapshot: async () => ({
       specVersion: SPEC_VERSION,
@@ -150,7 +148,13 @@ async function runWithHooks(
       beforeInputs.push(input);
       order.push(`before-tick:${input.tickIndex}`);
     },
-    onAfterLoopTick: (output) => {
+    // The SETTLE emulation (the session's tick-end forwarder, ADR 89 §4):
+    // an ASYNC onAfterLoopTick hook with a real macrotask boundary. Its
+    // in-cascade await is what the settle-before-decide assertion pins —
+    // a fire-and-forget hook would let the DECIDE land first.
+    onAfterLoopTick: async (output) => {
+      await new Promise((r) => setTimeout(r, 0));
+      order.push(`settle:tick-end:${output.tickIndex}`);
       afterOutputs.push(output);
       order.push(`after-tick:${output.tickIndex}`);
     },
@@ -159,7 +163,7 @@ async function runWithHooks(
   const input: RunExecutionInput = {
     sessionId: "tc-s",
     mountId: "tc-mount",
-    reconciler: mkRecordingReconciler(order),
+    reconciler: mkStubReconciler(),
     modelExecutor: executor,
     toolExecutor: mkFakeToolExecutor(),
     target: executor.target,
@@ -212,19 +216,19 @@ describe("loop:tick command (ADR 89 §3)", () => {
     expect(afterIdx(3)).toBeGreaterThan(beforeIdx(3));
   });
 
-  it("SETTLE is IN the command, DECIDE is OUT: tick-end settle < onAfter < decide", async () => {
+  it("SETTLE is IN the cascade, DECIDE is OUT: async onAfter settle < decide (ADR 89 §4)", async () => {
     const { order } = await runWithHooks([ended()], 5);
 
-    const settle = order.indexOf("settle:tick-end");
+    const settle = order.indexOf("settle:tick-end:1");
     const after = order.indexOf("after-tick:1");
     const decide = order.indexOf("decide");
 
-    // The reconciler tick-end (settle) ran INSIDE the tick body — before the
-    // command terminal fired onAfterLoopTick.
+    // The ASYNC settle (macrotask inside the onAfterLoopTick hook) completed
+    // IN the command cascade — before the terminal resolved and therefore
+    // before the DECIDE in the run-execution continuation. Were the hook
+    // fire-and-forget, `decide` would precede `settle`.
     expect(settle).toBeGreaterThanOrEqual(0);
     expect(after).toBeGreaterThan(settle);
-    // The session's continuation decision (decide) ran in the run-execution
-    // continuation — AFTER the tick command's onAfter. Settle IN, decide OUT.
     expect(decide).toBeGreaterThan(after);
   });
 });

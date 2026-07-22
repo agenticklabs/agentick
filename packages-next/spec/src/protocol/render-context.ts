@@ -28,8 +28,8 @@
  * MUST ride render-context: it is resolved by the session, threaded
  * through the loop into `renderTree`, and provided as a React context read
  * *synchronously* during the render. Routing it through the async
- * lifecycle bridge (`notifyLifecycle` → `setState`) races the synchronous
- * render and never reaches the IR. The two channels split by tense:
+ * lifecycle projection (`dispatchLifecycle` → `setState`) races the
+ * synchronous render and never reaches the IR. The two channels split by tense:
  * render-context is forward-looking ("what is true for the render I am
  * about to produce?"); the lifecycle bridge is backward-looking ("what
  * just happened?").

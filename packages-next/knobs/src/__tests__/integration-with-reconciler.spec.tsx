@@ -162,7 +162,7 @@ describe("useKnob — momentary semantics", () => {
       executionId: "e1",
       outcome: "ok",
     };
-    await harness.notifyLifecycle({ mountId: "m_mom", event });
+    await harness.dispatchLifecycle({ mountId: "m_mom", event });
     await flush();
     // The momentary handler fires `void knobs.set(...)`; let the
     // Operation resolve.
@@ -189,7 +189,7 @@ describe("useKnob — momentary semantics", () => {
     await harness.renderTree({ mountId: "m_per", sessionId: "s" });
 
     await knobs.set({ id: "mood", value: "decisive" });
-    await harness.notifyLifecycle({
+    await harness.dispatchLifecycle({
       mountId: "m_per",
       event: { kind: "execution-end", executionId: "e1", outcome: "ok" },
     });

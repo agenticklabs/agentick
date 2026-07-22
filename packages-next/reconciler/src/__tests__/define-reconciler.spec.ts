@@ -81,7 +81,7 @@ describe("defineReconciler — factory shape", () => {
 });
 
 describe("defineReconciler — defaults + envelopes", () => {
-  it("unconfigured snapshot/renderToString reject; rerender/notifyLifecycle/restore no-op", async () => {
+  it("unconfigured snapshot/renderToString reject; rerender/restore no-op", async () => {
     const factory = defineReconciler({
       mount: async () => ({ mountId: "m_1", restoredFromSnapshot: false }),
       unmount: async () => {},
@@ -97,9 +97,6 @@ describe("defineReconciler — defaults + envelopes", () => {
     await expect(r.snapshot({ mountId: "m_1" })).rejects.toBeDefined();
     // No-op defaults resolve without error.
     await expect(r.rerender({ mountId: "m_1", element: null })).resolves.toBeUndefined();
-    await expect(
-      r.notifyLifecycle({ mountId: "m_1", event: { kind: "tick:start" } } as never),
-    ).resolves.toBeUndefined();
     await expect(r.restore({ mountId: "m_1", snapshot: {} as never })).resolves.toBeUndefined();
   });
 

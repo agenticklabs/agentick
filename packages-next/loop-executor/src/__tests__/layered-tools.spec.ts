@@ -98,7 +98,6 @@ function mkReconciler(tools: readonly ToolDeclaration[]): ReconcilerProtocol {
       diagnostics: [],
       iterations: 1,
     }),
-    notifyLifecycle: async () => undefined,
     unmount: async () => undefined,
     snapshot: async () => ({
       specVersion: SPEC_VERSION,
@@ -419,7 +418,6 @@ describe("LoopExecutorHarness — layered tools (#138)", () => {
         diagnostics: [],
         iterations: 1,
       }),
-      notifyLifecycle: async () => undefined,
       unmount: async () => undefined,
       snapshot: async () => ({
         specVersion: SPEC_VERSION,

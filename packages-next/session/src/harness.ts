@@ -16,6 +16,7 @@ import {
   type Middleware,
   runHarnessProtocol,
   ulid,
+  withCallMiddleware,
   SESSION_ESCALATION_MESSAGE_TYPE,
   ESCALATION_TIMEOUT_MS,
   type EscalationEnvelopePayload,
@@ -95,6 +96,7 @@ import type { StateHandle } from "@agentick/state-next";
 import type { TimelineHandle, TimelineHarnessOptions } from "@agentick/timeline-next";
 
 import { buildSessionBridges, type SessionHookBridges } from "./session-bridges.js";
+import { wireLifecycleProjection, type LifecycleProjection } from "./lifecycle-projection.js";
 import { SessionRuntime } from "./session-state.js";
 import { createSessionExecutionHandle, type SessionEmitInput } from "./session-execution-handle.js";
 
@@ -385,6 +387,14 @@ export class SessionHarness<P = unknown>
    * casts to `ToolExecutorProtocol` structurally at the call site.
    */
   readonly toolExecutor: ToolExecutorProtocol;
+  /**
+   * The ADR 89 §4 lifecycle projection: the session-registered
+   * command-hook forwarders (loop + tool executor, tier 2) plus the
+   * per-send `model:generate[_stream]` tier-4 call middleware.
+   * `undefined` when the reconciler exposes no
+   * `LifecycleProjectionTarget` capability. Disposed on {@link close}.
+   */
+  private readonly lifecycleProjection: LifecycleProjection | undefined;
   private readonly target: ExecutionTarget;
   private readonly spawnContext: SpawnContext<P> | undefined;
   private readonly parentSessionId: string | undefined;
@@ -606,6 +616,23 @@ export class SessionHarness<P = unknown>
     this.narrate = options.narrate ?? true;
     this.mountId = `mount:${options.sessionId}`;
 
+    // ADR 89 §4 — the session is the composition root, so IT wires the
+    // lifecycle projection: forwarders on the loop's / tool executor's
+    // command hooks (tier 2, identity-filtered — the loop is app-shared)
+    // route the real command lifecycle into the compiler's per-mount
+    // dispatch, and the `model:generate[_stream]` forwarders ride each
+    // send as tier-4 call middleware (see sendBody) so a per-tick
+    // swapped executor still projects. Absent when the reconciler
+    // doesn't expose the `LifecycleProjectionTarget` capability.
+    // Unsubscribed on close().
+    this.lifecycleProjection = wireLifecycleProjection({
+      sessionId: options.sessionId,
+      mountId: this.mountId,
+      reconciler: this.reconciler,
+      loop: this.loop,
+      toolExecutor: this.toolExecutor,
+    });
+
     // Open-or-rehydrate (ADR 49 §Hydration): when a durable store was
     // injected, load the session's persisted log into the timeline
     // BEFORE first render — the mount's first render must see the
@@ -812,6 +839,9 @@ export class SessionHarness<P = unknown>
     if (this._closed) return;
     this._closed = true;
     this.runtime.setStatus("closed" as never);
+    // ADR 89 §4 — unhook the lifecycle forwarders from the (app-shared)
+    // loop + tool executor before the mount goes away.
+    this.lifecycleProjection?.dispose();
     // Tear down the reconciler mount; ignore errors during shutdown.
     try {
       await this.reconciler.unmount({ mountId: this.mountId });
@@ -1498,71 +1528,83 @@ export class SessionHarness<P = unknown>
       // because the loop is one fiber every downstream span nests under the
       // execution via FiberRef `parentOpId` auto-threading. `undefined`
       // runtime → default → behavior-preserving (no-op tracer).
+      //
+      // ADR 89 §4 — the `model:generate[_stream]` lifecycle forwarders
+      // ride THIS call as tier-4 call-scoped middleware (`withCall
+      // Middleware`): the one-fiber spine threads them into every nested
+      // `runOperation` the send touches, so the projection reaches
+      // WHICHEVER model-executor instance runs a tick — including a
+      // per-tick `<Model>`-swapped executor (ADR 56) the session's
+      // interceptor tree can't reach structurally. Empty list (no
+      // projection target) is a pass-through.
       () =>
         runHarnessProtocol(
-          this.loop.fx.runExecution({
-            executionId,
-            sessionId: this.runtime.id,
-            reconciler: this.reconciler,
-            mountId: this.mountId,
-            modelExecutor: modelExecutorForCall,
-            target: targetForCall,
-            toolExecutor: this.toolExecutor,
-            stateApplicator: {
-              // The `.fx` twins compose in the loop's fiber (Stage 3); the
-              // Promise facades below stay the derived edge. `Effect.asVoid`
-              // drops the session's `ApplyResult` to the loop-facing `void`.
-              fx: {
-                applyExecutorResult: (i) => this.applyExecutorResultFx(i).pipe(Effect.asVoid),
-                applyToolResults: (i) => this.applyToolResultsFx(i).pipe(Effect.asVoid),
-              },
-              applyExecutorResult: (i) => this.applyExecutorResult(i).then(() => undefined),
-              applyToolResults: (i) => this.applyToolResults(i).then(() => undefined),
-              appendEntry: (i) => this.appendEntry(i).then(() => undefined),
-            },
-            notifyTickEnd: (i) => this.notifyLifecycle(i),
-            // ADR 55 — the session is the per-render fact producer. It folds
-            // every RenderContext slot it can supply: the active model's
-            // window (via effectiveModelInfo) into `contextInfo`, and the
-            // active model itself (a projection of the target) into
-            // `activeModel`. Future slots (budget, caller) add a field here.
-            // Today the model is construction-bound (this.target); TODO(trail-
-            // per-tick-model): under #169 it's IR-derived per tick and this
-            // re-resolves per render.
-            resolveRenderContext: () => {
-              const contextWindow = effectiveModelInfo(targetForCall, this.models)?.contextWindow;
-              const rc: RenderContext = {
-                ...(contextWindow !== undefined ? { contextInfo: { contextWindow } } : {}),
-                activeModel: {
-                  provider: targetForCall.provider,
-                  modelId: targetForCall.modelId,
-                  capabilities: targetForCall.capabilities,
+          withCallMiddleware(
+            this.lifecycleProjection?.callMiddleware ?? [],
+            this.loop.fx.runExecution({
+              executionId,
+              sessionId: this.runtime.id,
+              reconciler: this.reconciler,
+              mountId: this.mountId,
+              modelExecutor: modelExecutorForCall,
+              target: targetForCall,
+              toolExecutor: this.toolExecutor,
+              stateApplicator: {
+                // The `.fx` twins compose in the loop's fiber (Stage 3); the
+                // Promise facades below stay the derived edge. `Effect.asVoid`
+                // drops the session's `ApplyResult` to the loop-facing `void`.
+                fx: {
+                  applyExecutorResult: (i) => this.applyExecutorResultFx(i).pipe(Effect.asVoid),
+                  applyToolResults: (i) => this.applyToolResultsFx(i).pipe(Effect.asVoid),
                 },
-              };
-              return rc;
-            },
-            // ADR 56 — resolve tree-declared per-tick model refs against the
-            // mount's ModelBridge. `useModelRegistration` registers models
-            // here at render time; the loop looks up `declarations.model
-            // .modelRef` per tick. No default registration — the loop's
-            // fallback (this.modelExecutor/target via modelExecutorForCall/
-            // targetForCall) covers the undeclared case.
-            resolveModel: (ref) => this.bridges.models.resolve(ref),
-            maxTicks: input.maxTicks ?? this.defaultMaxTicks,
-            // Pass B — the model-narration switch gates `_summary` schema
-            // injection at the projection site. Session default (from the
-            // app-level cascade); the projector defaults ON if unset.
-            narrate: this.narrate,
-            stream: streamForCall,
-            onEvent,
-            // Stage 5 — per-send tool concurrency (default "unbounded" in
-            // the loop) + optional execution timeout, both opt-in.
-            ...omitUndefined({
-              signal: input.signal,
-              toolConcurrency: input.toolConcurrency,
-              timeoutMs: input.timeoutMs,
+                applyExecutorResult: (i) => this.applyExecutorResult(i).then(() => undefined),
+                applyToolResults: (i) => this.applyToolResults(i).then(() => undefined),
+                appendEntry: (i) => this.appendEntry(i).then(() => undefined),
+              },
+              notifyTickEnd: (i) => this.notifyLifecycle(i),
+              // ADR 55 — the session is the per-render fact producer. It folds
+              // every RenderContext slot it can supply: the active model's
+              // window (via effectiveModelInfo) into `contextInfo`, and the
+              // active model itself (a projection of the target) into
+              // `activeModel`. Future slots (budget, caller) add a field here.
+              // Today the model is construction-bound (this.target); TODO(trail-
+              // per-tick-model): under #169 it's IR-derived per tick and this
+              // re-resolves per render.
+              resolveRenderContext: () => {
+                const contextWindow = effectiveModelInfo(targetForCall, this.models)?.contextWindow;
+                const rc: RenderContext = {
+                  ...(contextWindow !== undefined ? { contextInfo: { contextWindow } } : {}),
+                  activeModel: {
+                    provider: targetForCall.provider,
+                    modelId: targetForCall.modelId,
+                    capabilities: targetForCall.capabilities,
+                  },
+                };
+                return rc;
+              },
+              // ADR 56 — resolve tree-declared per-tick model refs against the
+              // mount's ModelBridge. `useModelRegistration` registers models
+              // here at render time; the loop looks up `declarations.model
+              // .modelRef` per tick. No default registration — the loop's
+              // fallback (this.modelExecutor/target via modelExecutorForCall/
+              // targetForCall) covers the undeclared case.
+              resolveModel: (ref) => this.bridges.models.resolve(ref),
+              maxTicks: input.maxTicks ?? this.defaultMaxTicks,
+              // Pass B — the model-narration switch gates `_summary` schema
+              // injection at the projection site. Session default (from the
+              // app-level cascade); the projector defaults ON if unset.
+              narrate: this.narrate,
+              stream: streamForCall,
+              onEvent,
+              // Stage 5 — per-send tool concurrency (default "unbounded" in
+              // the loop) + optional execution timeout, both opt-in.
+              ...omitUndefined({
+                signal: input.signal,
+                toolConcurrency: input.toolConcurrency,
+                timeoutMs: input.timeoutMs,
+              }),
             }),
-          }),
+          ),
           this.telemetryRuntime,
         ),
     );

@@ -49,7 +49,7 @@ describe("useContextInfo", () => {
 
     // usedTokens arrives via the async bridge (tick-end); utilization
     // recomputes against the render-context window.
-    await harness.notifyLifecycle({
+    await harness.dispatchLifecycle({
       mountId: "m_ci",
       event: {
         kind: "tick-end",
@@ -82,7 +82,7 @@ describe("useContextInfo", () => {
     await flush();
     expect(latest).toEqual({ usedTokens: 0 });
 
-    await harness.notifyLifecycle({
+    await harness.dispatchLifecycle({
       mountId: "m_ci2",
       event: {
         kind: "execution-end",

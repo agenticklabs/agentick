@@ -8,7 +8,7 @@ import { useOnTickEnd } from "../react/hooks/use-on-tick-end.js";
 import { useOnExecutionStart } from "../react/hooks/use-on-execution-start.js";
 import { useOnExecutionEnd } from "../react/hooks/use-on-execution-end.js";
 import { useOnError } from "../react/hooks/use-on-error.js";
-import { LifecycleStore } from "@agentick/reconciler-next";
+import { LifecycleDispatch } from "@agentick/reconciler-next";
 import { flush } from "../testing/flush.js";
 
 async function makeHarness() {
@@ -22,9 +22,9 @@ async function makeHarness() {
   return harness;
 }
 
-describe("LifecycleStore — dispatch + catch-up unit tests", () => {
+describe("LifecycleDispatch — dispatch + catch-up unit tests", () => {
   it("dispatch invokes registered handlers for the matching kind", async () => {
-    const store = new LifecycleStore();
+    const store = new LifecycleDispatch();
     const seen: string[] = [];
     store.register("tick-start", () => {
       seen.push("ts");
@@ -39,7 +39,7 @@ describe("LifecycleStore — dispatch + catch-up unit tests", () => {
   });
 
   it("catch-up: handler registered AFTER tick-start fires immediately", async () => {
-    const store = new LifecycleStore();
+    const store = new LifecycleDispatch();
     await store.dispatch({ kind: "tick-start", tickId: "t1" });
     const seen: string[] = [];
     store.register("tick-start", (ev) => {
@@ -50,7 +50,7 @@ describe("LifecycleStore — dispatch + catch-up unit tests", () => {
   });
 
   it("no catch-up after tick-end clears the active tick-start", async () => {
-    const store = new LifecycleStore();
+    const store = new LifecycleDispatch();
     await store.dispatch({ kind: "tick-start", tickId: "t1" });
     await store.dispatch({ kind: "tick-end", tickId: "t1", result: 0 });
     const seen: string[] = [];
@@ -62,7 +62,7 @@ describe("LifecycleStore — dispatch + catch-up unit tests", () => {
   });
 
   it("handler registered BEFORE dispatch is NOT double-fired on catch-up", async () => {
-    const store = new LifecycleStore();
+    const store = new LifecycleDispatch();
     const seen: string[] = [];
     store.register("tick-start", (ev) => {
       seen.push(ev.tickId);
@@ -78,7 +78,7 @@ describe("LifecycleStore — dispatch + catch-up unit tests", () => {
   });
 
   it("execution-start catch-up works the same way", async () => {
-    const store = new LifecycleStore();
+    const store = new LifecycleDispatch();
     await store.dispatch({ kind: "execution-start", executionId: "e1" });
     const seen: string[] = [];
     store.register("execution-start", (ev) => {
@@ -88,7 +88,7 @@ describe("LifecycleStore — dispatch + catch-up unit tests", () => {
   });
 
   it("tick-end / execution-end / error have NO catch-up", async () => {
-    const store = new LifecycleStore();
+    const store = new LifecycleDispatch();
     await store.dispatch({ kind: "tick-end", tickId: "t1", result: 0 });
     await store.dispatch({ kind: "execution-end", executionId: "e1", outcome: "ok" });
     await store.dispatch({
@@ -104,7 +104,7 @@ describe("LifecycleStore — dispatch + catch-up unit tests", () => {
   });
 
   it("clear() drops all state", async () => {
-    const store = new LifecycleStore();
+    const store = new LifecycleDispatch();
     let calls = 0;
     store.register("tick-start", () => {
       calls++;
@@ -120,7 +120,7 @@ describe("LifecycleStore — dispatch + catch-up unit tests", () => {
     // The loop AWAITS tick-start / tick-end dispatch; a propagated throw
     // would abort the tick. A user observer that throws must never do
     // that — it's caught, logged, and siblings still run.
-    const store = new LifecycleStore();
+    const store = new LifecycleDispatch();
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const seen: string[] = [];
     store.register("tick-end", () => {
@@ -138,7 +138,7 @@ describe("LifecycleStore — dispatch + catch-up unit tests", () => {
   });
 
   it("a throwing catch-up handler is isolated (register does not throw/float)", async () => {
-    const store = new LifecycleStore();
+    const store = new LifecycleDispatch();
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     await store.dispatch({ kind: "tick-start", tickId: "t1" });
     // Registering mid-tick triggers catch-up; the handler throws.
@@ -153,7 +153,7 @@ describe("LifecycleStore — dispatch + catch-up unit tests", () => {
   });
 
   it("counts() reports registered handler totals", () => {
-    const store = new LifecycleStore();
+    const store = new LifecycleDispatch();
     store.register("tick-start", () => {});
     store.register("tick-start", () => {});
     store.register("error", () => {});
@@ -164,12 +164,14 @@ describe("LifecycleStore — dispatch + catch-up unit tests", () => {
       "execution-end": 0,
       "tool-start": 0,
       "tool-end": 0,
+      "model-generate-start": 0,
+      "model-generate-end": 0,
       error: 1,
     });
   });
 
   it("custom kinds: registerCustom + dispatch invoke matching handlers", async () => {
-    const store = new LifecycleStore();
+    const store = new LifecycleDispatch();
     const seen: unknown[] = [];
     store.registerCustom("app:demo:phase-x", (ev) => {
       seen.push(ev);
@@ -181,7 +183,7 @@ describe("LifecycleStore — dispatch + catch-up unit tests", () => {
   it("custom kinds: unsubscribe stops further dispatches", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      const store = new LifecycleStore();
+      const store = new LifecycleDispatch();
       const seen: unknown[] = [];
       const off = store.registerCustom("app:demo:phase-x", (ev) => {
         seen.push(ev);
@@ -198,7 +200,7 @@ describe("LifecycleStore — dispatch + catch-up unit tests", () => {
   it("custom kinds: unknown kind with no handler warns once per kind", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      const store = new LifecycleStore();
+      const store = new LifecycleDispatch();
       await store.dispatch({ kind: "app:unknown:event-1" });
       await store.dispatch({ kind: "app:unknown:event-1" });
       await store.dispatch({ kind: "app:unknown:event-2" });
@@ -213,7 +215,7 @@ describe("LifecycleStore — dispatch + catch-up unit tests", () => {
   it("custom kinds: registered handler suppresses the unhandled warning", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      const store = new LifecycleStore();
+      const store = new LifecycleDispatch();
       store.registerCustom("app:handled:kind", () => {});
       await store.dispatch({ kind: "app:handled:kind" });
       expect(warn).not.toHaveBeenCalled();
@@ -224,7 +226,7 @@ describe("LifecycleStore — dispatch + catch-up unit tests", () => {
 });
 
 describe("Lifecycle hooks — integration through ReconcilerHarness", () => {
-  it("useOnTickStart fires when notifyLifecycle dispatches tick-start", async () => {
+  it("useOnTickStart fires when dispatchLifecycle routes tick-start", async () => {
     const harness = await makeHarness();
     const events: string[] = [];
 
@@ -248,11 +250,11 @@ describe("Lifecycle hooks — integration through ReconcilerHarness", () => {
     // commit. Flush to ensure registration completes before dispatch.
     await flush();
 
-    await harness.notifyLifecycle({
+    await harness.dispatchLifecycle({
       mountId: "m_ts",
       event: { kind: "tick-start", tickId: "t1" },
     });
-    await harness.notifyLifecycle({
+    await harness.dispatchLifecycle({
       mountId: "m_ts",
       event: { kind: "tick-end", tickId: "t1", result: { ok: true } },
     });
@@ -282,7 +284,7 @@ describe("Lifecycle hooks — integration through ReconcilerHarness", () => {
 
     // Tick starts. No handlers, nothing fires. The active tick-start
     // is now remembered by the store.
-    await harness.notifyLifecycle({
+    await harness.dispatchLifecycle({
       mountId: "m_late",
       event: { kind: "tick-start", tickId: "t-mid" },
     });
@@ -317,7 +319,7 @@ describe("Lifecycle hooks — integration through ReconcilerHarness", () => {
     });
     await flush();
 
-    await harness.notifyLifecycle({
+    await harness.dispatchLifecycle({
       mountId: "m_once",
       event: { kind: "tick-start", tickId: "t1" },
     });
@@ -357,7 +359,7 @@ describe("Lifecycle hooks — integration through ReconcilerHarness", () => {
       bridges: fakeBridges(),
     });
     await flush();
-    await harness.notifyLifecycle({
+    await harness.dispatchLifecycle({
       mountId: "m_exec",
       event: { kind: "execution-start", executionId: "e1" },
     });
@@ -388,7 +390,7 @@ describe("Lifecycle hooks — integration through ReconcilerHarness", () => {
     });
     await flush();
 
-    await harness.notifyLifecycle({
+    await harness.dispatchLifecycle({
       mountId: "m_err",
       event: {
         kind: "error",
@@ -418,7 +420,7 @@ describe("Lifecycle hooks — integration through ReconcilerHarness", () => {
     });
     await flush();
 
-    await harness.notifyLifecycle({
+    await harness.dispatchLifecycle({
       mountId: "m_eend",
       event: { kind: "execution-end", executionId: "e1", outcome: "succeeded" },
     });
@@ -447,12 +449,12 @@ describe("Lifecycle hooks — integration through ReconcilerHarness", () => {
       });
       await flush();
 
-      await harness.notifyLifecycle({
+      await harness.dispatchLifecycle({
         mountId: "m_custom",
         event: { kind: "app:demo:phase-x", payload: { n: 1 } },
       });
       // Non-matching kind: handler must not fire; harness warns once.
-      await harness.notifyLifecycle({
+      await harness.dispatchLifecycle({
         mountId: "m_custom",
         event: { kind: "app:demo:other-kind" },
       });
@@ -482,7 +484,7 @@ describe("Lifecycle hooks — integration through ReconcilerHarness", () => {
     });
     await flush();
 
-    await harness.notifyLifecycle({
+    await harness.dispatchLifecycle({
       mountId: "m_unmount",
       event: { kind: "tick-start", tickId: "t1" },
     });
@@ -490,7 +492,7 @@ describe("Lifecycle hooks — integration through ReconcilerHarness", () => {
 
     await harness.unmount({ mountId: "m_unmount" });
     await expect(
-      harness.notifyLifecycle({
+      harness.dispatchLifecycle({
         mountId: "m_unmount",
         event: { kind: "tick-start", tickId: "t2" },
       }),

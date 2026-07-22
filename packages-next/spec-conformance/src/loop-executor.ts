@@ -79,7 +79,6 @@ function stubReconciler(tree: RenderedTree): ReconcilerProtocol {
       diagnostics: [],
       iterations: 1,
     }),
-    notifyLifecycle: async () => undefined,
     unmount: async () => undefined,
     snapshot: async () => ({
       specVersion: "2026-05-08",

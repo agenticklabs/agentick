@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { LifecycleCustom } from "@agentick/spec-next";
-import { useLifecycleStore } from "../lifecycle-context.js";
+import { useLifecycleDispatch } from "../lifecycle-context.js";
 
 /**
  * `useOnLifecycleCustom` — register a callback fired when a
@@ -15,10 +15,10 @@ export function useOnLifecycleCustom(
   kind: string,
   callback: (event: LifecycleCustom) => void | Promise<void>,
 ): void {
-  const store = useLifecycleStore();
+  const dispatch = useLifecycleDispatch();
   const ref = useRef(callback);
   ref.current = callback;
   useEffect(() => {
-    return store.registerCustom(kind, (event) => ref.current(event as LifecycleCustom));
-  }, [store, kind]);
+    return dispatch.registerCustom(kind, (event) => ref.current(event as LifecycleCustom));
+  }, [dispatch, kind]);
 }

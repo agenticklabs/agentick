@@ -215,6 +215,19 @@ kill/resume and tick ordering must survive the wrapping.
 
 ### 4. Lifecycle = the compiler projecting the FULL command-hook system (ADR 83)
 
+> **Status — §4 LANDED (feat/v2).** The loop's `notifyLifecycle` feed +
+> `ReconcilerProtocol.notifyLifecycle` are DELETED; the SESSION registers the
+> forwarders (`loop:run-execution` / `loop:tick` / `tool:dispatch` tier-2,
+> identity-filtered; `model:generate[_stream]` as tier-4 call middleware so a
+> per-tick swapped executor still projects). The tick-end SETTLE is an
+> in-cascade `onAfterLoopTick` hook (settle-before-decide preserved, ADR 67);
+> `LifecycleStore` shrank to `LifecycleDispatch` (thin per-mount dispatch +
+> catch-up cache) behind the optional `LifecycleProjectionTarget.dispatchLifecycle`
+> capability. `useOnModelGenerateStart/End` shipped — streaming ticks only until
+> the non-streaming `fx.run` routes through the `model:generate` command
+> (TODO(adr-89-phase-next) in the model executor). Gates' `notifyTickEnd`
+> (session continuation) untouched.
+
 There is **no bespoke `LifecycleStore`**. React lifecycle hooks are the compiler
 registering **ADR-83 interceptors** on the constituent command harnesses — the
 _exact_ mechanism a user uses programmatically. A `useOn*` hook does NOT register a

@@ -10,30 +10,41 @@
  *   3. for each toolCall in terminal.result.toolCalls:
  *        toolExecutor.dispatch(...) → ToolDispatchResult
  *   4. stateApplicator.applyExecutorResult + applyToolResults
- *   5. reconciler.notifyLifecycle (settle the tree + `useOnTickEnd`) THEN
- *      session.notifyTickEnd (the continuation decision) — ADR 67. The
- *      loop builds a typed `TickResult`, settles the tree, then folds the
- *      session's `TickEndForwardDecision` into its two-tier resolution
- *      (stop-force > continue-force > abstain), bounded by maxTicks.
+ *   5. the `loop:tick` command terminal settles (`onAfterLoopTick` runs
+ *      in-cascade — the session's tick-end forwarder settles the tree +
+ *      `useOnTickEnd` there, ADR 89 §4) THEN session.notifyTickEnd (the
+ *      continuation decision) — ADR 67. The loop builds a typed
+ *      `TickResult`, then folds the session's `TickEndForwardDecision`
+ *      into its two-tier resolution (stop-force > continue-force >
+ *      abstain), bounded by maxTicks.
  *   6. loop
  *
  * ## ADR 89 §3 — the tick is a command (`loop:tick`)
  *
- * Steps 1–5 THROUGH SETTLE are the body of a `loop:tick` command declared on
- * THIS harness (constructor `this.command`, reached in-fiber via
- * `this.commandEffect` — see {@link tickBody}). Wrapping the tick round mints
- * `onBeforeLoopTick` / `onAfterLoopTick` and emits phases like every other op.
- * The DECIDE (the continuation decision — notifyTickEnd fold / maxTicks) stays
- * OUT of the command, in the `run-execution` while-continuation: **settle is
- * IN, decide is OUT.** The command's terminal IS the tick barrier the loop
- * awaits — the next tick starts only after this one settles.
+ * Steps 1–4 are the body of a `loop:tick` command declared on THIS harness
+ * (constructor `this.command`, reached in-fiber via `this.commandEffect` —
+ * see {@link tickBody}). Wrapping the tick round mints `onBeforeLoopTick` /
+ * `onAfterLoopTick` and emits phases like every other op. The DECIDE (the
+ * continuation decision — notifyTickEnd fold / maxTicks) stays OUT of the
+ * command, in the `run-execution` while-continuation: **settle is IN (an
+ * in-cascade `onAfterLoopTick` hook), decide is OUT.** The command's
+ * terminal IS the tick barrier the loop awaits — the next tick starts only
+ * after this one settles.
  *
  * ADR-89 open question resolved: `loop:tick` lives on the LOOP harness (the
  * loop OWNS tick orchestration), NOT the model executor (which owns the single
- * model call, `model:generate` in ADR 89 §1). §3 ADDS the command envelope +
- * hooks; `notifyLifecycle` STAYS (§4 rewires the React hooks off it and drops
- * it), so tick-start/end transiently fire both the new command hooks AND the
- * existing notifies.
+ * model call, `model:generate` in ADR 89 §1).
+ *
+ * ## ADR 89 §4 — lifecycle is the projected command-hook system
+ *
+ * The loop feeds NO lifecycle store. The React `useOn*` hooks are a
+ * projection the SESSION wires: forwarders on this harness's
+ * `onBefore/AfterLoopRunExecution` + `onBefore/AfterLoopTick` hooks (and
+ * the tool executor's `tool:dispatch`, the model executor's
+ * `model:generate[_stream]`) route the command lifecycle into the
+ * compiler's per-mount dispatch. The retired `notifyLifecycle` bridge —
+ * the loop hand-feeding the reconciler — is gone; the loop knows nothing
+ * about the compiler's observation layer.
  *
  * ## ADR 77 — the fiber spine
  *
@@ -42,10 +53,9 @@
  * .renderTree(...)`, `executor.fx.run(...)`, `toolExecutor.fx.dispatch
  * (...)`, `stateApplicator.fx.apply*(...)`) — no `runPromise` root between
  * boundaries, so telemetry/interruption propagate through the whole tree.
- * The only Promise boundaries are the bridge NOTIFICATIONS that carry no
- * span (`reconciler.notifyLifecycle`, `session.notifyTickEnd`) — awaited
- * in-fiber via {@link awaitBridge} (a bare `Effect.tryPromise`, NOT a
- * severing `runHarnessProtocol` root) or dispatched fire-and-forget. The
+ * The only Promise boundary is the session's `notifyTickEnd` callback
+ * (no span) — awaited in-fiber via {@link awaitBridge} (a bare
+ * `Effect.tryPromise`, NOT a severing `runHarnessProtocol` root). The
  * genuine external-I/O boundaries (`adapter.execute`, the user tool
  * handler) live INSIDE the executor / tool-executor, not here.
  *
@@ -88,7 +98,6 @@ import {
   ExecutionError,
   HandlerError,
   ProviderRejected,
-  TOOL_NARRATION_FIELD,
   toRegistration,
 } from "@agentick/spec-next";
 
@@ -309,10 +318,10 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
   /**
    * The tick loop as ONE `Effect.gen` fiber (ADR 77). Every downstream
    * harness call composes in-fiber via its `.fx` twin — no `runPromise`
-   * root between boundaries. Bridge notifications (`notifyLifecycle` /
-   * `notifyTickEnd`) carry no span and are awaited via {@link awaitBridge}
-   * (a bare `Effect.tryPromise`, in-fiber, NOT a severing root) or
-   * dispatched fire-and-forget. The imperative control flow (while / break /
+   * root between boundaries. The session's `notifyTickEnd` bridge callback
+   * carries no span and is awaited via {@link awaitBridge}
+   * (a bare `Effect.tryPromise`, in-fiber, NOT a severing root).
+   * The imperative control flow (while / break /
    * accumulate) is unchanged from the Promise original — the characterization
    * suite pins it byte-identical. Any uncaught twin failure folds to
    * `ExecutionError` at the boundary (the two locally-handled failures —
@@ -368,15 +377,11 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         | "executor_failed"
         | "timeout" = "end";
 
-      // Emit execution-start to consumer (typed handle iterator) AND
-      // bridge it to the reconciler hook store (ADR 55) so
-      // useOnExecutionStart fires. Fire-and-forget — a hook throw must
-      // never fail the run (the store isolates per-listener throws).
+      // Emit execution-start to the consumer (typed handle iterator).
+      // The `useOnExecutionStart` lifecycle projection rides the
+      // `loop:run-execution` command's own `onBeforeLoopRunExecution`
+      // hook (ADR 89 §4) — the session's forwarder, not a loop feed.
       input.onEvent?.({ kind: "execution-start", tick: 0 });
-      void input.reconciler.notifyLifecycle({
-        mountId: input.mountId,
-        event: { kind: "execution-start", executionId },
-      });
       const executionStartedAt = Date.now();
 
       // Default continuation policy: continue when the last tick
@@ -551,18 +556,14 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           }
         : { outcome: "succeeded", result: runResult };
 
-      // Emit execution-end + execution summary events. Bridge to the
-      // reconciler hook store (ADR 55) so useOnExecutionEnd fires —
-      // fire-and-forget (a hook throw must not fail the run).
+      // Emit execution-end + execution summary events. The
+      // `useOnExecutionEnd` projection rides `onAfterLoopRunExecution`
+      // (ADR 89 §4) — the session's forwarder, not a loop feed.
       input.onEvent?.({
         kind: "execution-end",
         tick: acc.ticks,
         stopReason,
         ...(wasAborted ? { aborted: true } : {}),
-      });
-      void input.reconciler.notifyLifecycle({
-        mountId: input.mountId,
-        event: { kind: "execution-end", executionId, outcome: terminal.outcome },
       });
       // execution summary
       void executionStartedAt;
@@ -593,29 +594,34 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
   }
 
   /**
-   * The `loop:tick` command body (ADR 89 §3) — ONE tick iteration THROUGH
-   * SETTLE: tick-start bridge → render → per-tick model resolve → execute
-   * (stream | run) → tool dispatch → state apply → build `TickResult` →
-   * SETTLE (reconciler tick-end). Returns the settled {@link TickResult}; the
-   * run-execution continuation accumulates from it and runs the ADR-67 DECIDE
-   * (continuation policy stays OUT of this command — settle is IN, decide is
-   * OUT). On a model-executor failure the body returns EARLY with a failed
-   * `executorTerminal` and NO settle — the continuation maps the outcome to a
-   * stop reason and breaks, byte-identical to the pre-command inline `break`.
+   * The `loop:tick` command body (ADR 89 §3) — ONE tick iteration:
+   * render → per-tick model resolve → execute (stream | run) → tool
+   * dispatch → state apply → build `TickResult`. Returns the
+   * {@link TickResult}; the run-execution continuation accumulates from it
+   * and runs the ADR-67 DECIDE (continuation policy stays OUT of this
+   * command — settle is IN, decide is OUT). The tick-end SETTLE (tree
+   * settle + `useOnTickEnd` effects) is NOT a loop concern anymore
+   * (ADR 89 §4): the session registers it as an in-cascade
+   * `onAfterLoopTick` hook, which runs over the returned `TickResult`
+   * BEFORE the command terminal resolves — so the barrier the old inline
+   * settle provided is preserved by the hook cascade. On a model-executor
+   * failure the body returns EARLY with a failed `executorTerminal` — the
+   * continuation maps the outcome to a stop reason and breaks (the
+   * session's forwarder skips the settle for non-succeeded terminals).
    *
    * Reached via `commandEffect` from {@link runExecutionBody}, so it stays in
    * the run-execution fiber (ADR 77 one-fiber) — `input.signal` (the merged
    * `execSignal`) interruption + `parentOpId` threading are preserved, and the
-   * command terminal IS the tick barrier. `notifyLifecycle` tick-start/tick-end
-   * are UNCHANGED here — §4 rewires them to `onBefore/AfterLoopTick` and drops
-   * them. Any uncaught twin failure rides the command's `E` channel to the
-   * run-execution boundary's `Effect.catchAll` (→ `ExecutionError`), as before.
+   * command terminal IS the tick barrier. Any uncaught twin failure rides the
+   * command's `E` channel to the run-execution boundary's `Effect.catchAll`
+   * (→ `ExecutionError`), as before.
    */
   private tickBody(input: TickInput): Effect.Effect<TickResult, unknown, never> {
     const { executionId, tickId, tickIndex } = input;
     const execSignal = input.signal;
     return Effect.gen(function* () {
-      // Tick-start orchestration event (public stream).
+      // Tick-start orchestration event (public stream). The
+      // `useOnTickStart` projection rides `onBeforeLoopTick` (ADR 89 §4).
       input.onEvent?.({ kind: "tick-start", tick: tickIndex, tickIndex });
 
       // Resolve THIS render's RenderContext envelope (ADR 55) — the
@@ -624,17 +630,6 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
       // The loop is a dumb conduit — it threads the whole envelope into
       // renderTree below with no per-fact knowledge.
       const renderContext = input.resolveRenderContext?.();
-
-      // Lifecycle bridge (#206) — dispatch tick-start to the reconciler
-      // hook store AWAITED, BEFORE render. Without this bridge the
-      // entire useOn* family is inert (no producer). A throw here fails
-      // the run (→ ExecutionError) — pinned by characterization.
-      yield* awaitBridge(() =>
-        input.reconciler.notifyLifecycle({
-          mountId: input.mountId,
-          event: { kind: "tick-start", tickId, executionId },
-        }),
-      );
 
       // 1. Render. The RenderContext envelope rides render-context
       // (ADR 54 / 55) so useContextInfo / useRenderContext read it
@@ -847,36 +842,16 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
       const dispatchOne = (tc: ToolCall): Effect.Effect<LoopToolResult, never, never> =>
         Effect.gen(function* () {
           const startedAt = Date.now();
-          // Eager model self-narration (Pass B) — the model's `_summary`
-          // sentence rides straight off the raw tool input so the
-          // tool-start spinner lights up ("Searching the docs…") the
-          // instant dispatch begins, BEFORE the handler resolves. The
-          // executor strips the same field before validation; here we
-          // only READ it for display. The full precedence-resolved
-          // presentation (folding displaySummary/title — known only
-          // after validation) rides `DispatchResult.presentation`.
-          const narration = extractNarration(tc.input);
+          // The `useOnToolStart` / `useOnToolEnd` projection (incl. the
+          // eager model self-narration read) rides the tool executor's
+          // OWN `tool:dispatch` command hooks (ADR 89 §4) — the
+          // session's forwarder, not a loop feed.
           input.onEvent?.({
             kind: "tool-dispatch-start",
             tick: tickIndex,
             callId: tc.id,
             name: tc.name,
             via: "model",
-          });
-          // Bridge to the reconciler hook store (ADR 55) — lights up
-          // useOnToolStart. Fire-and-forget (a hook throw must not fail
-          // the run).
-          void input.reconciler.notifyLifecycle({
-            mountId: input.mountId,
-            event: {
-              kind: "tool-start",
-              tickId,
-              callId: tc.id,
-              name: tc.name,
-              via: "model",
-              executionId,
-              ...(narration !== undefined ? { narration } : {}),
-            },
           });
           const dispatched = yield* Effect.either(
             input.toolExecutor.fx.dispatch({
@@ -910,23 +885,6 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
               outcome: dispatchSucceeded ? "succeeded" : "failed",
               durationMs,
             });
-            void input.reconciler.notifyLifecycle({
-              mountId: input.mountId,
-              event: {
-                kind: "tool-end",
-                tickId,
-                callId: tc.id,
-                name: tc.name,
-                outcome: dispatchSucceeded ? "succeeded" : "failed",
-                durationMs,
-                executionId,
-                // Pass B — the fully precedence-resolved presentation the
-                // executor computed at dispatch (folds displaySummary/
-                // title, known only post-validation). Reuses the existing
-                // tool-end event; no new channel.
-                ...(ok.presentation !== undefined ? { presentation: ok.presentation } : {}),
-              },
-            });
             input.onEvent?.({
               kind: "tool-dispatch",
               tick: tickIndex,
@@ -953,18 +911,6 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
             name: tc.name,
             outcome: "failed",
             durationMs,
-          });
-          void input.reconciler.notifyLifecycle({
-            mountId: input.mountId,
-            event: {
-              kind: "tool-end",
-              tickId,
-              callId: tc.id,
-              name: tc.name,
-              outcome: "failed",
-              durationMs,
-              executionId,
-            },
           });
           input.onEvent?.({
             kind: "tool-dispatch",
@@ -1031,30 +977,13 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         stopReason: result.stopReason,
       };
 
-      // ADR 67 §"flip the tick-end order" — SETTLE (this is the tail of the
-      // tick command; the DECIDE runs AFTER, in the run-execution
-      // continuation). The reconciler tick-end runs the tree's `useOnTickEnd`
-      // effects and settles the IR so the session's continuation predicates
-      // (run by the DECIDE) read SETTLED state — a tick-end effect may update
-      // a knob a gate checks. AWAITED in-fiber via the bridge.
-      //
-      // Lifecycle bridge (#206) — tick-end carries this tick's usage
-      // (a past fact; becomes "prior usedTokens" for the next render's
-      // utilization) + the settled `TickResult` (ADR 67 — the loop
-      // executor's documented lifecycle payload).
-      yield* awaitBridge(() =>
-        input.reconciler.notifyLifecycle({
-          mountId: input.mountId,
-          event: {
-            kind: "tick-end",
-            tickId,
-            executionId,
-            result: tickResult,
-            ...(result.usage !== undefined ? { metadata: { usage: result.usage } } : {}),
-          },
-        }),
-      );
-
+      // ADR 67 §"flip the tick-end order" — the SETTLE now rides the
+      // command cascade (ADR 89 §4): the session's `onAfterLoopTick`
+      // forwarder dispatches the tick-end lifecycle event (tree settle +
+      // `useOnTickEnd` effects) over this returned `TickResult`, AWAITED
+      // in-cascade BEFORE the command terminal resolves — so the DECIDE
+      // (run in the run-execution continuation, after the terminal) still
+      // reads SETTLED state. Settle IN (the hook), decide OUT.
       return tickResult;
     });
   }
@@ -1066,10 +995,12 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
 
 /**
  * Build a `TickResult` for a tick whose model executor did NOT succeed
- * (failed / canceled / vetoed). No settle ran; `toolResults` is empty and
- * `shouldContinue` false. The run-execution continuation reads
- * `executorTerminal.outcome`, maps it to the stop reason, and breaks —
- * byte-identical to the pre-command inline `break` on a non-success terminal.
+ * (failed / canceled / vetoed). `toolResults` is empty and
+ * `shouldContinue` false; the session's tick-end forwarder skips the
+ * settle for non-succeeded terminals (ADR 89 §4). The run-execution
+ * continuation reads `executorTerminal.outcome`, maps it to the stop
+ * reason, and breaks — byte-identical to the pre-command inline `break`
+ * on a non-success terminal.
  */
 function failedTickResult(
   input: TickInput,
@@ -1087,30 +1018,17 @@ function failedTickResult(
 }
 
 /**
- * Await a bridge NOTIFICATION (`reconciler.notifyLifecycle` /
- * `session.notifyTickEnd`) in-fiber. These carry no span and are bare
- * `async` (no `runHarnessProtocol` root), so `Effect.tryPromise` composes
- * them WITHOUT severing the fiber — the right tool for an external,
- * non-twin promise boundary. A rejection lands on the `E` channel, folding
- * to `ExecutionError` at the loop boundary (the Promise original's "an
- * un-caught awaited throw fails the run"). NOT `Effect.promise` — that
- * turns a reject into a defect that would bypass the boundary's catch.
+ * Await the session's `notifyTickEnd` bridge callback in-fiber. It
+ * carries no span and is bare `async` (no `runHarnessProtocol` root), so
+ * `Effect.tryPromise` composes it WITHOUT severing the fiber — the right
+ * tool for an external, non-twin promise boundary. A rejection lands on
+ * the `E` channel, folding to `ExecutionError` at the loop boundary (the
+ * Promise original's "an un-caught awaited throw fails the run"). NOT
+ * `Effect.promise` — that turns a reject into a defect that would bypass
+ * the boundary's catch.
  */
 function awaitBridge<A>(thunk: () => Promise<A> | A): Effect.Effect<A, unknown, never> {
   return Effect.tryPromise({ try: async () => thunk(), catch: (e: unknown) => e });
-}
-
-/**
- * Read the model's self-narration ({@link TOOL_NARRATION_FIELD}) off a raw
- * tool-call input for the eager tool-start spinner. READ-only — the tool
- * executor is the authority that STRIPS the field before validation; this
- * never mutates the input. Returns `undefined` unless the field is a
- * non-empty string.
- */
-function extractNarration(input: unknown): string | undefined {
-  if (input === null || typeof input !== "object") return undefined;
-  const value = (input as Record<string, unknown>)[TOOL_NARRATION_FIELD];
-  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 /**

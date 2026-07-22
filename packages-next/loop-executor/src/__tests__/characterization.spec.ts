@@ -53,8 +53,13 @@ function mkSubstrate() {
 
 const EMPTY_TREE: RenderedTree = { specVersion: SPEC_VERSION, context: { entries: [] } };
 
-/** Reconciler that renders nothing and records every notifyLifecycle kind. */
-function mkRecordingReconciler(order: string[]): ReconcilerProtocol {
+/**
+ * Stub reconciler that renders nothing. Lifecycle is NOT a reconciler
+ * concern anymore (ADR 89 §4) — the settle rides the loop's own
+ * `onAfterLoopTick` command hook (see {@link runChar}, which emulates the
+ * session's forwarder).
+ */
+function mkStubReconciler(): ReconcilerProtocol {
   return {
     fx: {
       use: () => () => {},
@@ -68,9 +73,6 @@ function mkRecordingReconciler(order: string[]): ReconcilerProtocol {
       diagnostics: [],
       iterations: 1,
     }),
-    notifyLifecycle: async (i) => {
-      order.push(`lifecycle:${i.event.kind}`);
-    },
     unmount: async () => undefined,
     snapshot: async () => ({
       specVersion: SPEC_VERSION,
@@ -211,10 +213,25 @@ async function runChar(cfg: CharConfig): Promise<CharTrace> {
   const events: LoopEvent[] = [];
   const dispatch = cfg.dispatch ?? (async (call): Promise<DispatchResult> => dispatchOk(call));
 
+  // ADR 89 §4 — emulate the SESSION's lifecycle forwarders: the tick-end
+  // SETTLE is an `onAfterLoopTick` hook, AWAITED in the `loop:tick`
+  // command cascade (before the terminal → before the DECIDE). The real
+  // async boundary below is load-bearing: were the hook fire-and-forget,
+  // the DECIDE marker would land first and the settle-before-decide
+  // characterization would fail. Registered only on the real harness
+  // (the differential seam's alternative loops may not expose `.hook`).
+  const hookable = loop as Partial<Pick<LoopExecutorHarness, "hook">>;
+  hookable.hook?.({
+    onAfterLoopTick: async () => {
+      await new Promise((r) => setTimeout(r, 0));
+      order.push("lifecycle:tick-end");
+    },
+  });
+
   const input: RunExecutionInput = {
     sessionId: "s_ch",
     mountId: "ch-mount",
-    reconciler: mkRecordingReconciler(order),
+    reconciler: mkStubReconciler(),
     modelExecutor: executor,
     toolExecutor: mkFakeToolExecutor(dispatch),
     target: executor.target,
@@ -362,7 +379,7 @@ describe("LoopExecutorHarness [characterization] — ADR 67 forward decision", (
     expect(terminal.result!.stopReason).toBe("max_ticks");
   });
 
-  it("SETTLE before DECIDE: reconciler tick-end lifecycle precedes notifyTickEnd (ADR 67)", async () => {
+  it("SETTLE before DECIDE: the in-cascade onAfterLoopTick settle precedes notifyTickEnd (ADR 67 / 89 §4)", async () => {
     const { order } = await runChar({
       ticks: [ended()],
       maxTicks: 5,
@@ -428,7 +445,7 @@ describe("LoopExecutorHarness [characterization] — cancellation", () => {
     const terminal = await loop.runExecution({
       sessionId: "s_ab",
       mountId: "ch-mount",
-      reconciler: mkRecordingReconciler(order),
+      reconciler: mkStubReconciler(),
       modelExecutor: executor,
       toolExecutor: mkFakeToolExecutor(async (call) => dispatchOk(call, [])),
       target: executor.target,
@@ -442,42 +459,63 @@ describe("LoopExecutorHarness [characterization] — cancellation", () => {
 });
 
 // ============================================================================
-// Awaited lifecycle propagation
+// Awaited lifecycle propagation (ADR 89 §4)
 // ============================================================================
 //
-// NOTE: fire-and-forget hook ISOLATION (execution-start/tool-start/tool-end/
-// execution-end throws must not fail the run) lives in the reconciler's
-// LifecycleStore, NOT the loop — the loop `void`-dispatches those. That
-// invariant belongs in an integration test with the real reconciler store.
-// Here we pin only what the LOOP owns: the AWAITED tick-start/tick-end hooks
-// gate the tick, so a throw in one propagates and fails the run.
+// NOTE: fire-and-forget forwarder ISOLATION (execution-start/tool-start/
+// tool-end/execution-end throws must not fail the run) lives in the
+// compiler's per-mount LifecycleDispatch + the session's fire-and-forget
+// forwarders, NOT the loop. Here we pin only what the LOOP owns: the
+// AWAITED `onBeforeLoopTick` / `onAfterLoopTick` hooks run in the
+// `loop:tick` command cascade, so a throw in one propagates and fails the
+// run — the session's tick-start / tick-end (settle) forwarders ride
+// exactly these hooks.
 
 describe("LoopExecutorHarness [characterization] — awaited lifecycle propagation", () => {
-  it("a throw in the AWAITED tick-start hook fails the run (propagates as an error)", async () => {
+  async function mkAwaitedFixture(scope: string) {
     const sub = mkSubstrate();
-    const loop = new LoopExecutorHarness("loop_aw", sub.journal, sub.bus, sub.inbox);
+    const loop = new LoopExecutorHarness(`loop_${scope}`, sub.journal, sub.bus, sub.inbox);
     await loop.ready;
-    const executor = new FakeLanguageModelExecutor("exec_aw", sub.journal, sub.bus, sub.inbox, {
-      scripted: { result: ended() },
-    });
+    const executor = new FakeLanguageModelExecutor(
+      `exec_${scope}`,
+      sub.journal,
+      sub.bus,
+      sub.inbox,
+      { scripted: { result: ended() } },
+    );
     await executor.ready;
-    const reconciler = mkRecordingReconciler([]);
-    reconciler.notifyLifecycle = async (i) => {
-      if (i.event.kind === "tick-start") throw new Error("tick-start boom");
+    const input: RunExecutionInput = {
+      sessionId: `s_${scope}`,
+      mountId: "ch-mount",
+      reconciler: mkStubReconciler(),
+      modelExecutor: executor,
+      toolExecutor: mkFakeToolExecutor(async (call) => dispatchOk(call, [])),
+      target: executor.target,
+      stateApplicator: mkRecordingApplicator([]),
+      executionId: `exec_${scope}`,
+      maxTicks: 3,
     };
-    await expect(
-      loop.runExecution({
-        sessionId: "s_aw",
-        mountId: "ch-mount",
-        reconciler,
-        modelExecutor: executor,
-        toolExecutor: mkFakeToolExecutor(async (call) => dispatchOk(call, [])),
-        target: executor.target,
-        stateApplicator: mkRecordingApplicator([]),
-        executionId: "exec_aw",
-        maxTicks: 3,
-      }),
-    ).rejects.toThrow(Error);
+    return { loop, input };
+  }
+
+  it("a throw in the AWAITED onBeforeLoopTick hook (tick-start forwarder) fails the run", async () => {
+    const { loop, input } = await mkAwaitedFixture("aw_before");
+    loop.hook({
+      onBeforeLoopTick: () => {
+        throw new Error("tick-start boom");
+      },
+    });
+    await expect(loop.runExecution(input)).rejects.toThrow(Error);
+  });
+
+  it("a throw in the AWAITED onAfterLoopTick hook (the settle forwarder) fails the run", async () => {
+    const { loop, input } = await mkAwaitedFixture("aw_after");
+    loop.hook({
+      onAfterLoopTick: () => {
+        throw new Error("settle boom");
+      },
+    });
+    await expect(loop.runExecution(input)).rejects.toThrow(Error);
   });
 });
 

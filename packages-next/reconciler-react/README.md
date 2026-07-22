@@ -165,8 +165,14 @@ author API (no `JSX.IntrinsicElements` augmentation needed).
 | `useToolBridge()`                 | `ToolBridge \| undefined` — handler registration bridge                    |
 | `useModelBridge()`                | `ModelBridge \| undefined` — per-tick model registration (ADR 56)          |
 
-**Lifecycle observers** (ADR 54/55) — register a callback fired when
-the loop/executor bridges the matching event. All accept
+**Lifecycle observers** (ADR 54/55, projected per ADR 89 §4) — register
+a callback fired when the matching event arrives. The events are a
+PROJECTION of the real command-hook system: the SESSION registers
+forwarders on the constituent command hooks (`loop:run-execution`,
+`loop:tick`, `tool:dispatch`, `model:generate[_stream]`) and routes them
+into this harness's per-mount `LifecycleDispatch` via `dispatchLifecycle`
+(the `LifecycleProjectionTarget` capability — the retired
+`notifyLifecycle` protocol feed is gone). All accept
 `(event) => void | Promise<void>` and unregister on unmount:
 
 | Hook                                  | Event                                 | Catch-up?                                  |
@@ -177,6 +183,8 @@ the loop/executor bridges the matching event. All accept
 | `useOnExecutionEnd(cb)`               | `LifecycleExecutionEnd`               | no                                         |
 | `useOnToolStart(cb)`                  | `LifecycleToolStart`                  | no                                         |
 | `useOnToolEnd(cb)`                    | `LifecycleToolEnd`                    | no                                         |
+| `useOnModelGenerateStart(cb)`         | `LifecycleModelGenerateStart`         | no (streaming ticks only, see hook doc)    |
+| `useOnModelGenerateEnd(cb)`           | `LifecycleModelGenerateEnd`           | no (streaming ticks only, see hook doc)    |
 | `useOnError(cb)`                      | `LifecycleError`                      | no                                         |
 | `useOnLifecycleCustom(kind, cb)`      | `LifecycleCustom` (namespaced `kind`) | no                                         |
 | `useOnMount(cb)` / `useOnUnmount(cb)` | React commit boundaries               | n/a                                        |
@@ -263,7 +271,7 @@ below.
 | `reactReconciler(opts?)`                                                    | `ReconcilerFactory` — wires the harness into `createApp` |
 | `createReconciler` / `createHostConfig`                                     | Low-level `react-reconciler` integration                 |
 | `BridgeProvider` / `useBridges` / `BridgeContext`                           | React-context wrappers over `HookBridges`                |
-| `LifecycleProvider` / `useLifecycleStore` / `LifecycleContext`              | wrappers over the lifecycle store                        |
+| `LifecycleProvider` / `useLifecycleDispatch` / `LifecycleContext`           | wrappers over the per-mount lifecycle dispatch           |
 | `enableReactDevTools` / `isReactDevToolsConnected` / `disableReactDevTools` | React DevTools bridge                                    |
 
 ### `/testing` subpath

@@ -9,8 +9,11 @@
  *     contributors that turn a host tree into the spec's RenderedTree IR.
  *   - Bridges: reference `InMemoryDataBridge` + protocol mocks
  *     (`fakeBridges`, `fakeTimelineHarness`, etc.) for tests.
- *   - `LifecycleStore` — generic per-mount lifecycle handler registry
- *     used by `useOnX` hooks in any reconciler.
+ *   - `LifecycleDispatch` — the compiler's half of the lifecycle
+ *     projection (ADR 89 §4): per-mount handler dispatch + the
+ *     tick-start/execution-start catch-up cache used by `useOnX` hooks
+ *     in any reconciler. The events come from the session's
+ *     command-hook forwarders.
  *   - `defineReconciler` — callback-style `ReconcilerProtocol` factory.
  *
  * What does NOT live here:
@@ -113,9 +116,9 @@ export {
 } from "./testing/fake-bridges.js";
 export type { FakeBridgesOptions } from "./testing/fake-bridges.js";
 
-// Lifecycle store — per-mount registry used by useOnX hooks
-export { LifecycleStore } from "./lifecycle-store.js";
-export type { LifecycleHandlerKind } from "./lifecycle-store.js";
+// Lifecycle dispatch — the per-mount projection half used by useOnX hooks
+export { LifecycleDispatch } from "./lifecycle-dispatch.js";
+export type { LifecycleHandlerKind } from "./lifecycle-dispatch.js";
 
 // Callback-style factory
 export { defineReconciler, type DefineReconcilerInput } from "./define-reconciler.js";

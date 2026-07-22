@@ -187,28 +187,31 @@ apply → reconciler `tick-end`); its output is the settled `TickResult`.
   §1.2). It lives on the LOOP harness (the loop owns tick orchestration),
   not the model executor (which owns the single model call).
 
-> The `notifyLifecycle` bridge below STAYS for now — §3 adds the command
-> envelope + hooks; ADR 89 §4 rewires the React `useOn*` hooks onto
-> `onBefore/AfterLoopTick` and drops `notifyLifecycle`.
+### Lifecycle is the projected command-hook system (ADR 89 §4)
 
-### The lifecycle bridge
+**The loop feeds no lifecycle store — `notifyLifecycle` is gone.** The
+React `useOn*` family is a PROJECTION the **session** (the composition
+root) wires: forwarders registered on this harness's command hooks
+route the real command lifecycle into the compiler's per-mount
+dispatch. The loop knows nothing about the compiler's observation
+layer.
 
-The loop is the producer for the reconciler's `useOn*` hook family
-(ADR 54/55). It calls `reconciler.notifyLifecycle` at each boundary:
+| Moment           | Command hook (the source)              | Lights up             | Timing                                       |
+| ---------------- | -------------------------------------- | --------------------- | -------------------------------------------- |
+| execution begins | `onBeforeLoopRunExecution`             | `useOnExecutionStart` | fire-and-forget                              |
+| tick begins      | `onBeforeLoopTick`                     | `useOnTickStart`      | **awaited in-cascade, before render**        |
+| tool dispatched  | `tool:dispatch` around (tool executor) | `useOnToolStart`      | fire-and-forget                              |
+| tool finished    | `tool:dispatch` around (tool executor) | `useOnToolEnd`        | fire-and-forget                              |
+| tick ends        | `onAfterLoopTick`                      | `useOnTickEnd`        | **awaited in-cascade — THE SETTLE (ADR 67)** |
+| execution ends   | `onAfterLoopRunExecution`              | `useOnExecutionEnd`   | fire-and-forget                              |
 
-| Moment           | `LifecycleEvent.kind` | Lights up             | Timing                              |
-| ---------------- | --------------------- | --------------------- | ----------------------------------- |
-| execution begins | `execution-start`     | `useOnExecutionStart` | fire-and-forget                     |
-| tick begins      | `tick-start`          | `useOnTickStart`      | **awaited, before render**          |
-| tool dispatched  | `tool-start`          | `useOnToolStart`      | fire-and-forget                     |
-| tool finished    | `tool-end`            | `useOnToolEnd`        | fire-and-forget                     |
-| tick ends        | `tick-end`            | `useOnTickEnd`        | awaited (carries this tick's usage) |
-| execution ends   | `execution-end`       | `useOnExecutionEnd`   | fire-and-forget                     |
-
-`tick-start` is **awaited before render** — without this bridge the
-entire `useOn*` family is inert (no producer). Hook throws never fail
-the run: the hook store isolates per-listener throws, and fire-and-forget
-events use `void`.
+The tick-end SETTLE runs as an in-cascade `onAfterLoopTick` hook —
+awaited BEFORE the `loop:tick` command terminal resolves, hence before
+the DECIDE (`notifyTickEnd`) in the run-execution continuation. Hook
+throws in fire-and-forget forwarders never fail the run (the compiler's
+dispatch isolates per-listener throws); a throw in the AWAITED
+tick-start / settle forwarders fails the run, as the retired in-body
+bridge did.
 
 The **same** moments flow independently onto the public event stream via
 `input.onEvent` (`LoopEmittedEvent`) — the session stamps these into

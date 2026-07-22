@@ -40,6 +40,7 @@ import type {
   LifecycleEvent,
   LifecycleExecutionEnd,
   LifecycleExecutionStart,
+  LifecycleProjectionTarget,
   LifecycleTickEnd,
   LifecycleTickStart,
   MCPDeclaration,
@@ -282,6 +283,25 @@ export function isLifecycleExecutionEnd(e: LifecycleEvent): e is LifecycleExecut
 }
 export function isLifecycleError(e: LifecycleEvent): e is LifecycleError {
   return e.kind === "error";
+}
+
+// ============================================================================
+// LifecycleProjectionTarget — feature detection (ADR 89 §4)
+// ============================================================================
+
+/**
+ * Returns true when `value` (typically a `ReconcilerProtocol` impl)
+ * exposes the OPTIONAL `LifecycleProjectionTarget` capability — the
+ * per-mount lifecycle dispatch the session's command-hook forwarders
+ * route projected events into. A reconciler without it gets no
+ * lifecycle projection (its trees have no `useOn*` surface).
+ */
+export function supportsLifecycleProjection(value: unknown): value is LifecycleProjectionTarget {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    typeof (value as { dispatchLifecycle?: unknown }).dispatchLifecycle === "function"
+  );
 }
 
 // ============================================================================

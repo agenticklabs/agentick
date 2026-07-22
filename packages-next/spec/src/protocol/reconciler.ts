@@ -259,33 +259,37 @@ export interface RenderToStringResult {
 }
 
 // ============================================================================
-// notifyLifecycle
+// Lifecycle events — the command-hook projection payloads (ADR 89 §4)
 // ============================================================================
 
 /**
- * Lifecycle pass-through events. Carriers of state that user-supplied
- * hooks (`useOnTickStart`, `useOnTickEnd`, `useOnExecutionEnd`,
- * `useOnError`) need to observe.
+ * Lifecycle event payloads that user-supplied hooks (`useOnTickStart`,
+ * `useOnTickEnd`, `useOnExecutionEnd`, `useOnError`, …) observe.
  *
  * **Tagged union, open-ended.** New event kinds can be added without
- * changing the protocol method count. Implementations dispatch on
+ * changing any protocol surface. Implementations dispatch on
  * `event.kind`; unknown kinds are ignored (the harness MAY emit an
  * `info`-severity diagnostic for visibility).
  *
- * Two coupling axes coexist for these events:
+ * **These events are a PROJECTION of the command-hook system (ADR 89
+ * §4).** There is no bespoke lifecycle feed: the SESSION (the
+ * composition root) registers forwarders on the constituent command
+ * hooks (`loop:run-execution`, `loop:tick`, `tool:dispatch`,
+ * `model:generate[_stream]`) and dispatches the matching event into
+ * the compiler's per-mount lifecycle dispatch (a
+ * {@link LifecycleProjectionTarget}). Two projection channels coexist:
  *
- *  - **Direct method-based coupling (this command).** Callers invoke
- *    `notifyLifecycle` synchronously when ordering matters — typically
- *    the session / loop executor calling into the reconciler before
- *    starting the next operation, so hook callbacks finish and React
- *    state settles in time.
- *  - **Bus-based fan-out (parallel channel).** The same lifecycle
- *    moments are independently emitted as `ProtocolEvent` envelopes on
- *    the shared event bus. Subscribers that don't need ordering
- *    (devtools, telemetry, persistence) observe via the bus without
- *    coupling to the reconciler protocol.
+ *  - **In-process** — the session's interceptor forwarders →
+ *    `dispatchLifecycle` (ordering-sensitive; the tick-end settle is
+ *    awaited in the `loop:tick` command cascade, ADR 67).
+ *  - **Bus-based fan-out (parallel channel).** The same command
+ *    lifecycle is independently emitted as `ProtocolEvent` envelopes on
+ *    the shared event bus. Cross-process subscribers (devtools,
+ *    telemetry, persistence) observe via the bus without coupling to
+ *    the reconciler.
  *
- * The two channels are not redundant — they answer different questions.
+ * The two channels are projections of the ONE source — the operation's
+ * command lifecycle.
  */
 export type LifecycleEvent =
   | LifecycleTickStart
@@ -294,6 +298,8 @@ export type LifecycleEvent =
   | LifecycleExecutionEnd
   | LifecycleToolStart
   | LifecycleToolEnd
+  | LifecycleModelGenerateStart
+  | LifecycleModelGenerateEnd
   | LifecycleError
   | LifecycleCustom;
 
@@ -390,6 +396,37 @@ export interface LifecycleToolEnd {
   readonly metadata?: Readonly<Record<string, unknown>>;
 }
 
+/**
+ * A model call STARTED (`model:generate` / `model:generate_stream`
+ * issued the provider call — ADR 89 §1). Projected from
+ * `onBeforeModelGenerate[Stream]` via the session's per-send
+ * call-scoped forwarders, so it fires for WHICHEVER executor instance
+ * runs the tick — including a per-tick `<Model>`-swapped executor
+ * (ADR 56). Lights up `useOnModelGenerateStart`.
+ */
+export interface LifecycleModelGenerateStart {
+  readonly kind: "model-generate-start";
+  /** `true` when the streaming command (`model:generate_stream`) issued the call. */
+  readonly stream: boolean;
+  readonly tickId?: string;
+  readonly executionId?: string;
+  readonly metadata?: Readonly<Record<string, unknown>>;
+}
+
+/**
+ * A model call FINISHED (the command succeeded — a provider failure
+ * surfaces as a `LifecycleError` with `phase: "model"` instead).
+ * Lights up `useOnModelGenerateEnd`.
+ */
+export interface LifecycleModelGenerateEnd {
+  readonly kind: "model-generate-end";
+  /** `true` when the streaming command (`model:generate_stream`) issued the call. */
+  readonly stream: boolean;
+  readonly tickId?: string;
+  readonly executionId?: string;
+  readonly metadata?: Readonly<Record<string, unknown>>;
+}
+
 export interface LifecycleError {
   readonly kind: "error";
   /** Where the error happened — `tick` | `execution` | `tool` | `model` | … */
@@ -415,8 +452,26 @@ export interface LifecycleCustom {
   readonly [key: string]: unknown;
 }
 
-export interface NotifyLifecycleInput extends MountScopedInput {
+export interface DispatchLifecycleInput extends MountScopedInput {
   readonly event: LifecycleEvent;
+}
+
+/**
+ * OPTIONAL capability — a compiler that PROJECTS the command-hook
+ * lifecycle into in-tree hooks (ADR 89 §4). Not part of
+ * {@link ReconcilerProtocol}: a reconciler that has no in-tree lifecycle
+ * surface simply doesn't implement it, and the session's projection
+ * wiring is skipped (feature-detected via
+ * {@link import("../guards/index.js").supportsLifecycleProjection}).
+ *
+ * `dispatchLifecycle` routes one {@link LifecycleEvent} to the mount's
+ * registered handlers (the thin per-mount dispatch + the
+ * tick-start/execution-start catch-up cache). The EVENTS come from the
+ * session's command-hook forwarders — the compiler owns no feed of its
+ * own. Rejects with `NotMounted` for an unknown mount.
+ */
+export interface LifecycleProjectionTarget {
+  dispatchLifecycle(input: DispatchLifecycleInput): Promise<void>;
 }
 
 // ============================================================================
@@ -549,17 +604,10 @@ export interface ReconcilerProtocol extends PromiseView<Omit<ReconcilerFx, "use"
    */
   renderToString(input: RenderToStringInput): Promise<RenderToStringResult>;
 
-  /**
-   * Lifecycle pass-through. Direct method-based coupling for events
-   * that user hooks (`useOnTickStart`, `useOnTickEnd`,
-   * `useOnExecutionEnd`, `useOnError`) need to observe synchronously
-   * before the caller proceeds. See {@link LifecycleEvent} for kinds.
-   *
-   * Lifecycle moments are *also* emitted on the shared event bus for
-   * fan-out observers (devtools, telemetry, persistence). The two
-   * channels coexist by design.
-   */
-  notifyLifecycle(input: NotifyLifecycleInput): Promise<void>;
+  // Lifecycle is NOT a protocol obligation (ADR 89 §4): a compiler that
+  // projects the command-hook lifecycle into in-tree hooks implements
+  // the OPTIONAL {@link LifecycleProjectionTarget} capability; the
+  // session feature-detects it and wires the forwarders.
 
   /**
    * Tear down a mount. Releases hook state and subscription handles.

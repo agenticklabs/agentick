@@ -115,11 +115,11 @@ and has no package of its own to augment from):
 the current IR (the window, the active model) MUST ride render-context —
 the session resolves it, the loop threads it into `renderTree`, and a
 React context provides it **synchronously** during render. Routing it
-through the async lifecycle bridge (`notifyLifecycle` → `setState`)
-races the synchronous render and never reaches the IR. The two channels
-split by tense: render-context is forward-looking ("what is true for the
-render I am about to produce?"); the lifecycle bridge is backward-looking
-("what just happened?").
+through the async lifecycle projection (`dispatchLifecycle` →
+`setState`) races the synchronous render and never reaches the IR. The
+two channels split by tense: render-context is forward-looking ("what is
+true for the render I am about to produce?"); the lifecycle projection is
+backward-looking ("what just happened?").
 
 ### `ProviderOptions` — provider escapes (ADR 26/57)
 
@@ -166,14 +166,18 @@ not hand-roll.**
 ### ADR 54 — lifecycle event union
 
 `LifecycleEvent` (`protocol/reconciler.ts`) is the tagged, open-ended
-union `notifyLifecycle` carries. Kinds: `tick-start`, `tick-end`,
+union the lifecycle projection carries (ADR 89 §4: the SESSION's
+command-hook forwarders dispatch it into the compiler's
+`LifecycleProjectionTarget.dispatchLifecycle` — an OPTIONAL capability,
+not a `ReconcilerProtocol` method). Kinds: `tick-start`, `tick-end`,
 `execution-start`, `execution-end`, **`tool-start`**, **`tool-end`**,
-`error`, and a namespaced `LifecycleCustom` escape hatch. Adding a kind
-does not change the protocol method count; implementations dispatch on
-`event.kind` and ignore unknown kinds. Each event lights up a `useOn*`
-hook (`tool-start` → `useOnToolStart`, `tool-end` → `useOnToolEnd`, …).
-The loop executor is the producer; see
-`@agentick/loop-executor-next`. The same moments also fan out as
+`model-generate-start`, `model-generate-end`, `error`, and a namespaced
+`LifecycleCustom` escape hatch. Adding a kind does not change any
+protocol surface; implementations dispatch on `event.kind` and ignore
+unknown kinds. Each event lights up a `useOn*` hook (`tool-start` →
+`useOnToolStart`, `tool-end` → `useOnToolEnd`, …).
+The SESSION is the composition root that registers the forwarders; see
+`@agentick/session-next`. The same moments also fan out as
 `ProtocolEvent` bus envelopes for ordering-agnostic observers.
 
 ### ADR 56 — tree-declared per-tick model

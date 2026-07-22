@@ -44,13 +44,13 @@ export type {
 } from "./react/devtools-bridge.js";
 
 // Bridge + lifecycle context — React Context wrappers over the bridges
-// and lifecycle store from `@agentick/reconciler-next`.
+// and lifecycle dispatch from `@agentick/reconciler-next`.
 export { BridgeContext, BridgeProvider, useBridges } from "./react/bridge-context.js";
 export type { BridgeProviderProps } from "./react/bridge-context.js";
 export {
   LifecycleContext,
   LifecycleProvider,
-  useLifecycleStore,
+  useLifecycleDispatch,
 } from "./react/lifecycle-context.js";
 export type { LifecycleProviderProps } from "./react/lifecycle-context.js";
 
@@ -65,6 +65,8 @@ export {
   useOnExecutionEnd,
   useOnToolStart,
   useOnToolEnd,
+  useOnModelGenerateStart,
+  useOnModelGenerateEnd,
   useContextInfo,
   useRenderContext,
   useActiveModel,

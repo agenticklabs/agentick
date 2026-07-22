@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { LifecycleTickEnd } from "@agentick/spec-next";
-import { useLifecycleStore } from "../lifecycle-context.js";
+import { useLifecycleDispatch } from "../lifecycle-context.js";
 
 /**
  * `useOnTickEnd` — register a callback fired at tick-end.
@@ -10,10 +10,10 @@ import { useLifecycleStore } from "../lifecycle-context.js";
  * tick-end normally.
  */
 export function useOnTickEnd(callback: (event: LifecycleTickEnd) => void | Promise<void>): void {
-  const store = useLifecycleStore();
+  const dispatch = useLifecycleDispatch();
   const ref = useRef(callback);
   ref.current = callback;
   useEffect(() => {
-    return store.register("tick-end", (event) => ref.current(event));
-  }, [store]);
+    return dispatch.register("tick-end", (event) => ref.current(event));
+  }, [dispatch]);
 }

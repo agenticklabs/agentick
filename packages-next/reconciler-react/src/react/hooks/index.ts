@@ -7,6 +7,8 @@ export { useOnExecutionStart } from "./use-on-execution-start.js";
 export { useOnExecutionEnd } from "./use-on-execution-end.js";
 export { useOnToolStart } from "./use-on-tool-start.js";
 export { useOnToolEnd } from "./use-on-tool-end.js";
+export { useOnModelGenerateStart } from "./use-on-model-generate-start.js";
+export { useOnModelGenerateEnd } from "./use-on-model-generate-end.js";
 export { useContextInfo, type ContextInfo } from "./use-context-info.js";
 export { useRenderContext } from "./use-render-context.js";
 export { useActiveModel, type ActiveModel } from "./use-active-model.js";

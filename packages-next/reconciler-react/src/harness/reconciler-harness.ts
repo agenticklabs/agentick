@@ -24,13 +24,14 @@ import { omitUndefined } from "@agentick/utils-next";
 import { Effect } from "effect";
 import { runHarnessProtocol, ulid } from "@agentick/runtime-next";
 import type {
+  DispatchLifecycleInput,
   EventBus,
   HookBridges,
+  LifecycleProjectionTarget,
   MessageEnvelope,
   MessageHandlerError,
   MountInput,
   MountResult,
-  NotifyLifecycleInput,
   OperationJournal,
   Operation,
   MessageInbox,
@@ -69,7 +70,7 @@ import {
   createContainer,
   createHostScope,
   InMemoryDataBridge,
-  LifecycleStore,
+  LifecycleDispatch,
   type Contributor,
   type DefaultProjection,
   type HostScope,
@@ -125,7 +126,7 @@ interface MountState {
   readonly root: FiberRoot;
   readonly registry: ContributorRegistry;
   readonly rootScope: HostScope;
-  readonly lifecycle: LifecycleStore;
+  readonly lifecycle: LifecycleDispatch;
   /** Current render's RenderContext envelope (ADR 54 / 55) — refreshed
    *  each render from Mount/RenderTree input; provided synchronously via
    *  RenderContextContext. */
@@ -178,7 +179,10 @@ export interface ReconcilerHarnessOptions {
  */
 const DEFAULT_MAX_ITERATIONS = 10;
 
-export class ReconcilerHarness extends BaseHarness<"reconciler"> implements ReconcilerProtocol {
+export class ReconcilerHarness
+  extends BaseHarness<"reconciler">
+  implements ReconcilerProtocol, LifecycleProjectionTarget
+{
   private readonly mounts = new Map<string, MountState>();
   private readonly registry: ContributorRegistry;
   private readonly formatters: ReadonlyMap<string, DefinedFormatter>;
@@ -356,7 +360,17 @@ export class ReconcilerHarness extends BaseHarness<"reconciler"> implements Reco
     );
   }
 
-  async notifyLifecycle(input: NotifyLifecycleInput): Promise<void> {
+  /**
+   * `LifecycleProjectionTarget` (ADR 89 §4) — route ONE projected
+   * lifecycle event to this mount's registered `useOn*` handlers. The
+   * events come from the SESSION's command-hook forwarders
+   * (`loop:run-execution` / `loop:tick` / `tool:dispatch` /
+   * `model:generate[_stream]`); this harness owns no feed of its own.
+   * Handler throws are isolated inside the per-mount dispatch; a
+   * missing mount rejects `NotMounted` (the forwarders only route to
+   * their own live mount).
+   */
+  async dispatchLifecycle(input: DispatchLifecycleInput): Promise<void> {
     const state = this.tryMountState(input.mountId);
     if (!state) throw new NotMounted({ mountId: input.mountId });
     await state.lifecycle.dispatch(input.event);
@@ -489,7 +503,7 @@ export class ReconcilerHarness extends BaseHarness<"reconciler"> implements Reco
       root: null as unknown as FiberRoot,
       registry: this.registry,
       rootScope,
-      lifecycle: new LifecycleStore(),
+      lifecycle: new LifecycleDispatch(),
       renderContext: input.renderContext ?? null,
       renderError: null,
       errorBoundaryFiredInLastRender: false,

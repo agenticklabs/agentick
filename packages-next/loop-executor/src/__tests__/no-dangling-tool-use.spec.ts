@@ -68,7 +68,6 @@ function mkEmptyReconciler(): ReconcilerProtocol {
       diagnostics: [],
       iterations: 1,
     }),
-    notifyLifecycle: async () => undefined,
     unmount: async () => undefined,
     snapshot: async () => ({
       specVersion: SPEC_VERSION,
