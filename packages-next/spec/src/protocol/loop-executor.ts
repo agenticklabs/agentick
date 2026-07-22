@@ -226,44 +226,45 @@ export interface RunExecutionInput {
   /**
    * When true (and `executor.executeStream` exists + the target's
    * `capabilities.supportsStreaming` is not explicitly false), the
-   * loop uses streaming execution and forwards every `AdapterDelta`
-   * through `onEvent` as `ModelStreamEvent`s.
+   * loop uses streaming execution and drains every `AdapterDelta`
+   * through the run-execution sink as `model` {@link LoopExecutionEvent}s.
    *
    * When false (or undefined → falls back to the default), the loop
    * uses the non-streaming `executor.execute` path; only summary-level
-   * events flow to `onEvent`.
+   * events drain to the sink.
    *
    * Default: resolved by the caller (SessionHarness) from the
    * SendInput / CreateSessionInput / AppHarnessOptions cascade.
    */
   readonly stream?: boolean;
-
-  /**
-   * Optional event sink. The loop calls this with PARTIAL
-   * `StreamEvent`s — the consumer (typically the session harness)
-   * stamps the missing context fields (id, sequence, sessionId,
-   * timestamp) and pushes onto the handle's event queue.
-   *
-   * Events emitted via this callback are IN-BAND data flow — direct
-   * call chain from loop → consumer. Bus envelopes (via emitDeltaLazy)
-   * still fire in parallel for observability subscribers (devtools,
-   * telemetry). The two paths are independent.
-   *
-   * When `onEvent` is undefined, the loop simply doesn't pump events
-   * — observability via bus is still available.
-   */
-  readonly onEvent?: (event: LoopEmittedEvent) => void;
 }
 
 /**
- * Events the loop emits through {@link RunExecutionInput.onEvent}.
+ * The chunk face of the `loop:run-execution` streaming command
+ * (`commandStream`, ADR 51 §2 + ADR 77): the event sink drains each
+ * {@link LoopExecutionEvent} as the run produces it. The session passes
+ * `(ev) => Effect.sync(() => …stamp+push…)`; the drain-only facade
+ * ({@link LoopExecutorProtocol.runExecution}) drains with a no-op sink.
+ *
+ * Effect-native (`=> Effect<void>`) so the loop composes it IN-FIBER —
+ * events are pushed on the run's own fiber with no intermediate queue
+ * (backpressure = the caller's sink; in-fiber = synchronous). This is
+ * the ONE event channel — there is no parallel push-callback. Bus
+ * envelopes still fan out to observability subscribers independently.
+ */
+export type LoopExecutionSink = (event: LoopExecutionEvent) => Effect.Effect<void>;
+
+/**
+ * The chunk type of the `loop:run-execution` streaming command — the
+ * events the loop produces as it runs, drained through a
+ * {@link LoopExecutionSink}.
  *
  * The session-side consumer stamps the missing context fields (`id`,
  * `sequence`, `timestamp`, `sessionId`, `executionId`, `spawnPath`)
  * when converting into the public `StreamEvent` shape. The loop owns
  * `tick` since it controls tick boundaries.
  */
-export type LoopEmittedEvent =
+export type LoopExecutionEvent =
   // Model layer — passthrough of the executor's AdapterDelta stream
   | {
       readonly kind: "model";
@@ -417,8 +418,16 @@ export interface TickInput {
   readonly narrate?: boolean;
   /** Concurrency for this tick's tool-call dispatch (default `"unbounded"`). */
   readonly toolConcurrency?: number | "unbounded";
-  /** Partial-`StreamEvent` sink — the loop's out-of-band data flow. */
-  readonly onEvent?: (event: LoopEmittedEvent) => void;
+  /**
+   * The run-execution event sink, threaded down from the enclosing
+   * `loop:run-execution` command (the ONE channel — same
+   * {@link LoopExecutionSink} the run body emits through). The tick body
+   * emits its per-tick events (`tick-start`, `model` deltas, tool-dispatch
+   * lifecycle) through it, IN ORDER, in the run's fiber. Always supplied
+   * (the run body holds a real sink even on the drain-only facade path,
+   * where it is a no-op).
+   */
+  readonly emit: LoopExecutionSink;
 }
 
 export interface TickResult extends TickInfo {
@@ -470,27 +479,32 @@ export {
 /**
  * The loop executor's **canonical** composable surface: the Effect twins
  * of its operations (ADR 77, the dual-typed edge). The session harness
- * reaches `loop.fx.runExecution(...)` to compose an execution into one
- * fiber tree (Stage 3); the plain Promise method on
- * {@link LoopExecutorProtocol} is the derived edge facade
- * ({@link PromiseView} of this), `runHarnessProtocol` at the boundary.
+ * reaches `loop.fx.runExecution(input, sink)` to compose an execution into
+ * one fiber tree (Stage 3) AND drain its events through `sink`; the plain
+ * Promise method on {@link LoopExecutorProtocol} is the drain-only facade
+ * (the `commandStream` `run` face — a no-op sink), `runHarnessProtocol` at
+ * the boundary.
  *
- * Like the executor, `runExecution` is not a registry command — the input
- * carries live object refs (ADR 51 §1.2, in-process only) — so `.fx` is
- * hand-exposed (the `runOperation(op, body)` Effect the harness already
- * builds), not `fxProxy`-derived.
+ * `loop:run-execution` is a STREAMING command (`commandStream`, ADR 51 §2):
+ * its chunks ARE the {@link LoopExecutionEvent}s. `fx` is the `commandStream`
+ * `fx` face (the sink-fold twin) — an in-fiber caller composes it with
+ * `yield*` and receives events through the sink on the SAME fiber. The input
+ * still carries live object refs (ADR 51 §1.2, in-process only), so the verb
+ * is `exposure: "internal"`.
  */
 export interface LoopExecutorFx extends HarnessFx {
   /**
-   * Run one agent execution from start to terminal. The terminal
-   * envelope carries the outcome (succeeded / failed / canceled /
-   * vetoed); the `result` field carries the assembled
-   * `ExecutionRunResult` on success. Substrate/loop failures inhabit
-   * the `E` channel; non-success outcomes ride the success channel as
-   * the terminal.
+   * Run one agent execution from start to terminal, draining each
+   * {@link LoopExecutionEvent} through `sink` in order, in the caller's
+   * fiber (the `commandStream` `fx` sink-fold face). The terminal envelope
+   * carries the outcome (succeeded / failed / canceled / vetoed); the
+   * `result` field carries the assembled `ExecutionRunResult` on success.
+   * Substrate/loop failures inhabit the `E` channel; non-success outcomes
+   * ride the success channel as the terminal.
    */
   runExecution(
     input: RunExecutionInput,
+    sink: LoopExecutionSink,
   ): Effect.Effect<ExecutionTerminal, LoopExecutorError | SubstrateError, never>;
 }
 
@@ -499,19 +513,29 @@ export interface LoopExecutorFx extends HarnessFx {
  * surface (matching the other harness protocols). Implementations
  * wrap their bodies with `runHarnessProtocol(Effect.suspend(...))`.
  *
- * `runExecution` is derived from `PromiseView<LoopExecutorFx>` — the
- * Promise facade of the Effect-canonical twin; the concrete harness
- * exposes the Effect surface as `loop.fx`.
+ * `runExecution` is the drain-only Promise facade — the `commandStream`
+ * `run` face (drives the SAME operation with a no-op sink, returning only
+ * the settled terminal). A caller that wants the events consumes
+ * `loop.fx.runExecution(input, sink)`; the concrete harness exposes the
+ * Effect surface as `loop.fx`.
  *
  * @throws {LoopExecutorError}
  */
-export interface LoopExecutorProtocol extends PromiseView<Omit<LoopExecutorFx, "use">> {
+export interface LoopExecutorProtocol {
   /**
    * The Effect-canonical composable surface (ADR 77) — `fx.runExecution`
    * for in-fiber composition by the session harness. On the protocol so a
    * protocol-typed ref composes without severing the fiber.
    */
   readonly fx: LoopExecutorFx;
+
+  /**
+   * Drain-only Promise facade — run one execution to its terminal,
+   * dropping the event stream (the `commandStream` `run` face, a no-op
+   * sink). A caller that wants the events uses {@link LoopExecutorFx.runExecution}
+   * with a real {@link LoopExecutionSink}.
+   */
+  runExecution(input: RunExecutionInput): Promise<ExecutionTerminal>;
 
   /**
    * Abort the named execution. The in-flight `runExecution` for this

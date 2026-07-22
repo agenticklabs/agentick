@@ -1726,6 +1726,26 @@ blueprint's design decisions; this is execution-level).
 
 ### 2026-07-21
 
+- **Streaming-up LANDED — `loop:run-execution` is a commandStream; onEvent RETIRED.**
+  The loop's execution events are first-class chunks: `commandStream<RunExecutionInput,
+LoopExecutionEvent, ExecutionTerminal>` (renamed `LoopEmittedEvent`→`LoopExecutionEvent`
+  — "Emitted" encoded the retired push mechanism; + `LoopExecutionSink` alias). ONE
+  channel, no straddle: `RunExecutionInput.onEvent` DELETED, `TickInput.onEvent`→`emit`
+  (required), ~11 emit sites → sink; facade = the `.run` drain face;
+  `LoopExecutorProtocol` dropped PromiseView (explicit drain-only facade). Session:
+  `buildOnEvent` kept verbatim, wrapped as `loopSink` passed as fx's 2nd arg — STILL
+  inside the §4+§2 `withCallMiddleware` (tier-4 threads via runOperation, verified).
+  `SessionExecutionHandle` unchanged for users. **Payoff:** `onLoopRunExecutionChunk`
+  minted free (registry `chunk:` field) — new spec proves an observer taps run+tick
+  events even on the drain-only facade; event-ordering characterization now captures
+  VIA the chunk observer, same assertions green. Fakes/conformance/README current
+  (define-loop + stubLoop accept+ignore the sink). Unfiltered onEvent grep: only
+  cluster-bus callbacks, substring matches, the session's private helper, and 4
+  retired-refs doc comments — zero live accesses (typecheck corroborates). Gates:
+  typecheck --force 152/152 0-cached; 1039 tests incl kill/resume green; oxfmt/oxlint 0.
+  send-as-commandStream deliberately NOT pursued (handle already stream+result; seam is
+  sendBody's emit machinery if ever wanted). **NEXT: reconciler→compiler rename.**
+
 - **setModel(adapter) overload LANDED (ergonomic parity w/ construction).**
   `session.model.setModel` now takes `RegisteredModel | LanguageModelAdapter`; both
   normalize to RegisteredModel BEFORE `session:set-model` (veto sees identical input;

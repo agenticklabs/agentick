@@ -179,7 +179,7 @@ function stubLoop(text: string): LoopExecutorProtocol {
     };
   };
   return {
-    fx: { use: () => () => {}, runExecution: (input) => Effect.promise(() => run(input)) },
+    fx: { use: () => () => {}, runExecution: (input, _sink) => Effect.promise(() => run(input)) },
     runExecution: run,
     abort: async () => undefined,
   };

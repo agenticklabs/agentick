@@ -226,6 +226,17 @@ async function runChar(cfg: CharConfig): Promise<CharTrace> {
       await new Promise((r) => setTimeout(r, 0));
       order.push("lifecycle:tick-end");
     },
+    // Streaming-up (ADR 51 §2): `loop:run-execution` is a `commandStream`, so
+    // its events ARE the chunks. Capturing them via the minted
+    // `onLoopRunExecutionChunk` observer (free Phase-2 observability) taps the
+    // SAME sink the run + tick bodies emit through — on the drain-only facade
+    // path too (`observe` fires before the no-op downstream). This replaces the
+    // retired `RunExecutionInput.onEvent` push-callback the trace used to read.
+    onLoopRunExecutionChunk: {
+      observe: (e) => {
+        events.push(e as unknown as LoopEvent);
+      },
+    },
   });
 
   const input: RunExecutionInput = {
@@ -238,7 +249,6 @@ async function runChar(cfg: CharConfig): Promise<CharTrace> {
     stateApplicator: mkRecordingApplicator(order),
     executionId: "exec_ch",
     maxTicks: cfg.maxTicks,
-    onEvent: (e) => events.push(e as unknown as LoopEvent),
     ...omitUndefined({ stream: cfg.stream, signal: cfg.signal }),
     ...(cfg.notifyTickEnd
       ? {

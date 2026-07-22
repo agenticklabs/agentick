@@ -66,10 +66,17 @@ const terminal = await loop.runExecution({
 // terminal.result: ExecutionRunResult (ticks, usage, stopReason, output, toolResults)
 ```
 
-`runExecution` runs through `runOperation`, so the loop's typed
-lifecycle (`loop:command:run-execution`) flows onto the shared bus and
-journal. `abort({ executionId })` terminates an in-flight run with
-`outcome: "canceled"`.
+`loop:run-execution` is a **streaming command** (`commandStream`): its
+chunks ARE the `LoopExecutionEvent`s the run produces. The `loop.runExecution(input)`
+Promise facade above is its drain-only `run` face — it returns the settled
+terminal and drops the events. To consume the events, take the `.fx`
+sink-fold face, `loop.fx.runExecution(input, sink)` (what the session does —
+see [Event stream](#the-event-stream) below). Either way the run flows
+through `runOperation`, so the loop's typed lifecycle
+(`loop:command:run-execution`) — and its `onBefore/AfterLoopRunExecution`
+boundary hooks + the `onLoopRunExecutionChunk` per-chunk interceptor — flow
+onto the shared bus and journal. `abort({ executionId })` terminates an
+in-flight run with `outcome: "canceled"`.
 
 ### `NoopStateApplicator` — no session present
 
@@ -135,9 +142,9 @@ Adopters who want to customize a _single tick step_ should subclass
 | `DefineLoopInput`     | type  | The callback bundle `defineLoop` accepts.                                          |
 
 The protocol contract (`LoopExecutorProtocol`, `RunExecutionInput`,
-`ExecutionTerminal`, `ExecutionRunResult`, `LoopEmittedEvent`,
-`StateApplicator`, `LoopToolResult`) lives in `@agentick/spec-next`
-(`protocol/loop-executor.ts`).
+`ExecutionTerminal`, `ExecutionRunResult`, `LoopExecutionEvent`,
+`LoopExecutionSink`, `StateApplicator`, `LoopToolResult`) lives in
+`@agentick/spec-next` (`protocol/loop-executor.ts`).
 
 ## Patterns
 
@@ -213,13 +220,30 @@ dispatch isolates per-listener throws); a throw in the AWAITED
 tick-start / settle forwarders fails the run, as the retired in-body
 bridge did.
 
-The **same** moments flow independently onto the public event stream via
-`input.onEvent` (`LoopEmittedEvent`) — the session stamps these into
-`StreamEvent`s for the `SessionExecutionHandle` iterator. Two channels,
-different questions: the lifecycle bridge is for in-tree React hooks that
-must settle before the next operation; `onEvent` is the out-of-band data
-stream for the caller. Bus envelopes fan out to observability
-(devtools, telemetry) in parallel with both.
+<a id="the-event-stream"></a>
+
+### The event stream
+
+The **same** moments flow independently onto the public event stream as the
+**chunks of the `loop:run-execution` streaming command** (streaming-up,
+ADR 51 §2). Each chunk is a `LoopExecutionEvent`; the body emits it through a
+`LoopExecutionSink` (`(event) => Effect<void>`) — the run's bookends
+(`execution-start` / `tick-end` / `tick` / `execution-end`) and each
+`loop:tick`'s events (threaded down as `TickInput.emit`, the SAME sink), in
+emission order, on the run's own fiber. This is the ONE event channel — the
+former `RunExecutionInput.onEvent` push-callback is retired.
+
+The session consumes the `.fx` sink-fold face
+(`loop.fx.runExecution(input, sink)`), passing
+`(ev) => Effect.sync(() => …stamp+push…)` — the events land on the
+`SessionExecutionHandle` iterator, in-fiber, with no intermediate queue
+(backpressure = the caller's sink). Because the sink IS the command's chunk
+pipeline, a `hooks.onLoopRunExecutionChunk` observer/transform taps or
+rewrites the stream for free (ADR 80 Phase 2) — even on the drain-only
+facade path. Two channels, different questions: the lifecycle bridge is for
+in-tree React hooks that must settle before the next operation; the event
+sink is the data stream for the caller. Bus envelopes fan out to
+observability (devtools, telemetry) in parallel with both.
 
 ### Streaming vs non-streaming
 
@@ -227,9 +251,9 @@ The loop takes the streaming path when `input.stream` is set **and** the
 tick's executor exposes `executeStream` **and** the target's
 `capabilities.supportsStreaming` is not explicitly `false`. On the
 streaming path the adapter owns symmetric event emission (`message` /
-`content` / `tool-call` / `message-end` deltas forwarded through
-`onEvent`); on the non-streaming path the loop synthesizes those summary
-deltas from the normalized result so subscribers see the same events
+`content` / `tool-call` / `message-end` deltas drained through the
+run-execution sink); on the non-streaming path the loop synthesizes those
+summary deltas from the normalized result so subscribers see the same events
 either way.
 
 ### The fiber spine — `.fx` and the edge-facade (ADR 77)
@@ -300,7 +324,10 @@ render-tree` — with `parentOpId` auto-linked via `FiberRef`. No manual
 - ✅ **Execution timeout** — opt-in `timeoutMs`, structured abort,
   `stopReason: "timeout"`.
 - ✅ Streaming + non-streaming execution paths with symmetric events.
-- ✅ Per-phase `LoopEmittedEvent` stream via `onEvent`.
+- ✅ **Streaming-up (ADR 51 §2)** — `loop:run-execution` is a `commandStream`;
+  its chunks ARE the `LoopExecutionEvent`s, drained through a `LoopExecutionSink`
+  (`.fx` sink-fold for the session, `.run` no-op drain for the facade). The
+  `onLoopRunExecutionChunk` per-chunk interceptor is minted for free.
 - ✅ Lifecycle bridge to the reconciler hook store (ADR 54/55) —
   tick/execution/tool start+end.
 - ✅ Per-tick `RenderContext` threading (`resolveRenderContext`, ADR 55).
@@ -312,9 +339,10 @@ render-tree` — with `parentOpId` auto-linked via `FiberRef`. No manual
 
 ## Roadmap & known gaps
 
-- **Not a declarable command.** `runExecution` carries live object refs
-  (reconciler, executor, tool-executor, `stateApplicator` callbacks,
-  `onEvent`) and is in-process-only by ADR 51 §1.2 doctrine. The
+- **Internal-exposure command.** `loop:run-execution` is declared
+  `exposure: "internal"` — its input carries live object refs (reconciler,
+  executor, tool-executor, `stateApplicator`, the session resolvers + the
+  event sink), so it is never inbox/wire-addressable (ADR 51 §1.2). The
   addressable execution surface is the _session's_, not the loop's — see
   the session harness `TODO(adr-51-session-verbs)`.
 - **Inbox dispatch not wired.** `handleMessage` rejects with

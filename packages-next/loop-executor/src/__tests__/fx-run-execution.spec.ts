@@ -1,14 +1,13 @@
 /**
  * `LoopExecutorHarness.fx.runExecution` — the dual-typed edge on the loop
- * (ADR 77 Stage 2). Like the executor, the loop's `runExecution` is not a
- * registry command (its input carries live object refs, ADR 51 §1.2), so
- * `.fx` hand-exposes the `runOperation(op, body)` Effect the facade already
- * builds — un-run — rather than being `fxProxy`-derived.
+ * (ADR 77 Stage 2). Streaming-up (ADR 51 §2): `loop:run-execution` is a
+ * `commandStream`, so `.fx` is its sink-fold face (`fx(input, sink)`) and the
+ * Promise `runExecution(input)` facade is its `.run` face (drain with a no-op
+ * sink). Both drive the SAME streaming command.
  *
  * Proves the twin composes as an Effect and produces the SAME terminal as
- * the Promise facade. The internal tick body is still Promise-shaped — the
- * `Effect.gen` rewrite is Stage 3 (behind the characterization diff); this
- * is the additive, behavior-neutral seam.
+ * the Promise facade (the event sink is a no-op here — event drainage is
+ * covered by `run-execution-chunk-hook.spec.ts` + the characterization suite).
  */
 
 import { Effect } from "effect";
@@ -105,7 +104,7 @@ async function makeLoopAndInput(
 describe("LoopExecutorHarness — .fx.runExecution dual-typed edge", () => {
   it("fx.runExecution returns a composable Effect (not a Promise)", async () => {
     const { loop, input } = await makeLoopAndInput("e1");
-    const eff = loop.fx.runExecution(input);
+    const eff = loop.fx.runExecution(input, () => Effect.void);
 
     expect(Effect.isEffect(eff)).toBe(true);
     expect(eff).not.toBeInstanceOf(Promise);
@@ -129,7 +128,9 @@ describe("LoopExecutorHarness — .fx.runExecution dual-typed edge", () => {
     const viaFx = await makeLoopAndInput("via-fx");
     const viaPromise = await makeLoopAndInput("via-promise");
 
-    const fromFx = await Effect.runPromise(viaFx.loop.fx.runExecution(viaFx.input));
+    const fromFx = await Effect.runPromise(
+      viaFx.loop.fx.runExecution(viaFx.input, () => Effect.void),
+    );
     const fromPromise = await viaPromise.loop.runExecution(viaPromise.input);
 
     expect(fromFx.outcome).toBe(fromPromise.outcome);

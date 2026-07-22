@@ -68,7 +68,13 @@
 
 import { Effect, Either } from "effect";
 
-import { BaseHarness, type Middleware, runHarnessProtocol, ulid } from "@agentick/runtime-next";
+import {
+  BaseHarness,
+  type Middleware,
+  type StreamCommand,
+  runHarnessProtocol,
+  ulid,
+} from "@agentick/runtime-next";
 import type {
   ContentBlock,
   ExecutionRunResult,
@@ -76,19 +82,18 @@ import type {
   ExecutorTerminal,
   LanguageModelExecutionResult,
   LanguageModelStopReason,
+  LoopExecutionEvent,
   LoopExecutorError,
   LoopExecutorFx,
   LoopExecutorProtocol,
   LoopToolResult,
   MessageEnvelope,
   MessageHandlerError,
-  Operation,
   EventBus,
   MessageInbox,
   OperationJournal,
   RunExecutionInput,
   SpecConfig,
-  SubstrateError,
   TickInput,
   TickResult,
   ToolCall,
@@ -102,11 +107,13 @@ import {
 } from "@agentick/spec-next";
 
 // ADR 80/83 — light up the execution-lifecycle verb. `loop:run-execution`
-// (op `loop:command:run-execution`) already routes through `runOperation`
-// (see `runExecutionFx`), so typing it here mints `onBeforeLoopRunExecution`
-// / `onAfterLoopRunExecution` on the derived `CommandHooks` surface. Input is
-// the execution request; output the settled `ExecutionTerminal` — the exact
-// generics of the `runExecutionFx` Operation below.
+// is a STREAMING command (`this.commandStream`, see the constructor): its
+// chunks ARE the `LoopExecutionEvent`s the run produces. Typing it here mints
+// `onBeforeLoopRunExecution` / `onAfterLoopRunExecution` (boundary hooks) AND
+// — because the entry carries a `chunk` field — the per-chunk
+// `onLoopRunExecutionChunk` interceptor (ADR 80 Phase 2), a free observe/
+// transform tap over the execution event stream. Input is the execution
+// request; output the settled `ExecutionTerminal`; chunk the event union.
 // ADR 89 §3 — the per-tick round is `loop:tick`, a command on the LOOP
 // harness (declared in the constructor via `this.command`, reached in-fiber
 // via `this.commandEffect`). Typing it here mints `onBeforeLoopTick` (over
@@ -116,7 +123,11 @@ import {
 // verb is `exposure: "internal"` (never inbox/wire-addressable).
 declare module "@agentick/runtime-next" {
   interface CommandRegistry {
-    "loop:run-execution": { input: RunExecutionInput; output: ExecutionTerminal };
+    "loop:run-execution": {
+      input: RunExecutionInput;
+      output: ExecutionTerminal;
+      chunk: LoopExecutionEvent;
+    };
     "loop:tick": { input: TickInput; output: TickResult };
   }
 }
@@ -196,6 +207,21 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
   private readonly inFlight = new Map<string, InFlightEntry>();
   private readonly aborted = new Map<string, string | undefined>();
 
+  /**
+   * The `loop:run-execution` STREAMING command (`commandStream`, ADR 51 §2 +
+   * ADR 77). Its chunks ARE the {@link LoopExecutionEvent}s the run produces;
+   * the body emits through the threaded sink. The session consumes the `.fx`
+   * sink-fold face (in-fiber); the drain-only Promise facade
+   * ({@link runExecution}) is the `.run` face (no-op sink). `exposure:
+   * "internal"` — `RunExecutionInput` carries live refs (ADR 51 §1.2).
+   */
+  private readonly runExecutionCmd: StreamCommand<
+    RunExecutionInput,
+    LoopExecutionEvent,
+    ExecutionTerminal,
+    LoopExecutorError
+  >;
+
   constructor(
     scopeId: string,
     journal: OperationJournal,
@@ -232,55 +258,51 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
       }),
       handler: (i) => this.tickBody(i),
     });
+
+    // ADR 51 §2 + ADR 77 — the execution as a STREAMING command. Its chunks
+    // ARE the `LoopExecutionEvent`s; `runExecutionBody` emits through the
+    // threaded `sink` where it used to call `input.onEvent?.(...)`. One
+    // channel — the sink IS the event stream (no parallel push-callback).
+    // Registered like `loop:tick` (`exposure: "internal"` — `RunExecutionInput`
+    // carries live refs, ADR 51 §1.2), reached via the three `commandStream`
+    // faces: the session composes `.fx` (sink-fold, in-fiber), the Promise
+    // facade drains `.run` (no-op sink). The op name `loop:command:run-execution`
+    // + opId `loop:execution:<id>` + scope are preserved byte-identically, so
+    // the boundary hooks (`onBefore/AfterLoopRunExecution`) fire exactly as
+    // before; the `chunk` field additionally mints `onLoopRunExecutionChunk`.
+    this.runExecutionCmd = this.commandStream<
+      RunExecutionInput,
+      LoopExecutionEvent,
+      ExecutionTerminal,
+      LoopExecutorError
+    >({
+      name: "loop:run-execution",
+      exposure: "internal",
+      opId: (i) => `loop:execution:${i.executionId}`,
+      scope: (i) => ({ sessionId: i.sessionId, executionId: i.executionId }),
+      body: (i, sink) => this.runExecutionBody(i, sink),
+    });
   }
 
   // ──────── LoopExecutorProtocol ────────
 
   /**
    * The Effect-canonical `.fx` surface (ADR 77, the dual-typed edge). The
-   * session harness reaches `loop.fx.runExecution(...)` to compose an
-   * execution into one fiber tree (Stage 3); the plain
-   * `loop.runExecution(...)` Promise below is the derived facade
-   * (`runHarnessProtocol` at the boundary). Both drive the SAME Operation
-   * — `fx.runExecution` is `runExecution` minus the terminal `runPromise`.
+   * session harness reaches `loop.fx.runExecution(input, sink)` to compose an
+   * execution into one fiber tree (Stage 3) AND drain its events through
+   * `sink`; the plain `loop.runExecution(...)` Promise below is the drain-only
+   * facade (the `commandStream` `.run` face, no-op sink). Both drive the SAME
+   * streaming command — `.fx` is the sink-fold twin, un-run.
    */
   get fx(): LoopExecutorFx {
     return {
       use: (mw) => this.registerEffectMiddleware(mw),
-      runExecution: (input) => this.runExecutionFx(input),
+      runExecution: (input, sink) => this.runExecutionCmd.fx(input, sink),
     };
-  }
-
-  /**
-   * The composable `runExecution` Effect the harness builds — the
-   * `.fx.runExecution` twin. Constructs the Operation and returns
-   * `runOperation(op, body)` un-run, so an in-process caller stays in one
-   * fiber. {@link runExecution} is the facade.
-   *
-   * ADR 51 classification: NOT a declarable command — the input carries
-   * live object refs (reconciler, executor, toolExecutor, stateApplicator
-   * callbacks, onEvent) and is in-process-only by doctrine (§1.2). The
-   * addressable execution surface is the session's (see session harness
-   * TODO(adr-51-session-verbs)).
-   */
-  private runExecutionFx(
-    input: RunExecutionInput,
-  ): Effect.Effect<ExecutionTerminal, LoopExecutorError | SubstrateError, never> {
-    const op: Operation<RunExecutionInput, ExecutionTerminal, LoopExecutorError> = {
-      opId: `loop:execution:${input.executionId}`,
-      surface: "loop",
-      name: "loop:command:run-execution",
-      scope: {
-        sessionId: input.sessionId,
-        executionId: input.executionId,
-      },
-      input,
-    };
-    return this.runOperation(op, (i) => this.runExecutionBody(i));
   }
 
   runExecution(input: RunExecutionInput): Promise<ExecutionTerminal> {
-    return runHarnessProtocol(this.runExecutionFx(input));
+    return this.runExecutionCmd.run(input);
   }
 
   abort(input: { executionId: string; reason?: string }): Promise<void> {
@@ -328,9 +350,17 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
    * a streaming `.result` reject and a hard tool-dispatch throw — are caught
    * in-body via `Effect.either`, exactly as the Promise version try/caught
    * them). `inFlight`/`aborted` cleanup rides `Effect.ensuring`.
+   *
+   * Streaming-up (ADR 51 §2): the body is the `commandStream` body, emitting
+   * each {@link LoopExecutionEvent} through `sink` (in-fiber, in order) where
+   * it used to call the retired `input.onEvent?.(...)`. The SAME `sink` is
+   * threaded into each `loop:tick` via `TickInput.emit`, so the tick's own
+   * events (`tick-start`, model deltas, tool-dispatch lifecycle) interleave in
+   * emission order on the one channel.
    */
   private runExecutionBody(
     input: RunExecutionInput,
+    sink: (event: LoopExecutionEvent) => Effect.Effect<void>,
   ): Effect.Effect<ExecutionTerminal, LoopExecutorError, never> {
     const executionId = input.executionId;
     return Effect.gen(this, function* () {
@@ -381,7 +411,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
       // The `useOnExecutionStart` lifecycle projection rides the
       // `loop:run-execution` command's own `onBeforeLoopRunExecution`
       // hook (ADR 89 §4) — the session's forwarder, not a loop feed.
-      input.onEvent?.({ kind: "execution-start", tick: 0 });
+      yield* sink({ kind: "execution-start", tick: 0 });
       const executionStartedAt = Date.now();
 
       // Default continuation policy: continue when the last tick
@@ -421,7 +451,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           stream: input.stream,
           narrate: input.narrate,
           toolConcurrency: input.toolConcurrency,
-          onEvent: input.onEvent,
+          emit: sink,
         };
 
         // THE BARRIER (ADR 89 §3). Run the `loop:tick` command IN this fiber
@@ -494,7 +524,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
             : "continue";
         const tickDuration = Date.now() - tickStartedAt;
         const shouldContinue = wantsContinue && acc.ticks < input.maxTicks;
-        input.onEvent?.({
+        yield* sink({
           kind: "tick-end",
           tick: tickIndex,
           tickIndex,
@@ -502,7 +532,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           stopReason: tickStopReason,
           usage: result.usage,
         });
-        input.onEvent?.({
+        yield* sink({
           kind: "tick",
           tick: tickIndex,
           tickIndex,
@@ -559,7 +589,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
       // Emit execution-end + execution summary events. The
       // `useOnExecutionEnd` projection rides `onAfterLoopRunExecution`
       // (ADR 89 §4) — the session's forwarder, not a loop feed.
-      input.onEvent?.({
+      yield* sink({
         kind: "execution-end",
         tick: acc.ticks,
         stopReason,
@@ -622,7 +652,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
     return Effect.gen(function* () {
       // Tick-start orchestration event (public stream). The
       // `useOnTickStart` projection rides `onBeforeLoopTick` (ADR 89 §4).
-      input.onEvent?.({ kind: "tick-start", tick: tickIndex, tickIndex });
+      yield* input.emit({ kind: "tick-start", tick: tickIndex, tickIndex });
 
       // Resolve THIS render's RenderContext envelope (ADR 55) — the
       // session's per-render fact producer (window today via
@@ -747,8 +777,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
               scope: { sessionId: input.sessionId, executionId, tickId },
               signal: execSignal,
             },
-            (delta) =>
-              Effect.sync(() => input.onEvent?.({ kind: "model", tick: tickIndex, delta })),
+            (delta) => input.emit({ kind: "model", tick: tickIndex, delta }),
           ),
         );
         if (Either.isLeft(streamed)) {
@@ -791,10 +820,10 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
       // result so consumers subscribed to `message` / `content` /
       // `tool-call` events see the model's output. The streaming
       // path skips this — the adapter emitted them already.
-      if (!wantsStreaming && input.onEvent) {
+      if (!wantsStreaming) {
         let blockIndex = 0;
         for (const block of result.output) {
-          input.onEvent({
+          yield* input.emit({
             kind: "model",
             tick: tickIndex,
             delta: { type: "content", blockIndex, content: block },
@@ -802,7 +831,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           blockIndex += 1;
         }
         for (const tc of result.toolCalls ?? []) {
-          input.onEvent({
+          yield* input.emit({
             kind: "model",
             tick: tickIndex,
             delta: {
@@ -813,7 +842,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
             },
           });
         }
-        input.onEvent({
+        yield* input.emit({
           kind: "model",
           tick: tickIndex,
           delta: {
@@ -846,7 +875,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           // eager model self-narration read) rides the tool executor's
           // OWN `tool:dispatch` command hooks (ADR 89 §4) — the
           // session's forwarder, not a loop feed.
-          input.onEvent?.({
+          yield* input.emit({
             kind: "tool-dispatch-start",
             tick: tickIndex,
             callId: tc.id,
@@ -877,7 +906,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
             // (soft/domain error). A resolved dispatch is a success unless
             // it flags a soft error; HARD failures reject (caught below).
             const dispatchSucceeded = ok.isError !== true;
-            input.onEvent?.({
+            yield* input.emit({
               kind: "tool-dispatch-end",
               tick: tickIndex,
               callId: tc.id,
@@ -885,7 +914,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
               outcome: dispatchSucceeded ? "succeeded" : "failed",
               durationMs,
             });
-            input.onEvent?.({
+            yield* input.emit({
               kind: "tool-dispatch",
               tick: tickIndex,
               callId: tc.id,
@@ -904,7 +933,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           }
           const err = dispatched.left;
           const durationMs = Date.now() - startedAt;
-          input.onEvent?.({
+          yield* input.emit({
             kind: "tool-dispatch-end",
             tick: tickIndex,
             callId: tc.id,
@@ -912,7 +941,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
             outcome: "failed",
             durationMs,
           });
-          input.onEvent?.({
+          yield* input.emit({
             kind: "tool-dispatch",
             tick: tickIndex,
             callId: tc.id,
