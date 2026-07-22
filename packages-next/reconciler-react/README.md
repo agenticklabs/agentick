@@ -175,19 +175,19 @@ into this harness's per-mount `LifecycleDispatch` via `dispatchLifecycle`
 `notifyLifecycle` protocol feed is gone). All accept
 `(event) => void | Promise<void>` and unregister on unmount:
 
-| Hook                                  | Event                                 | Catch-up?                                  |
-| ------------------------------------- | ------------------------------------- | ------------------------------------------ |
-| `useOnTickStart(cb)`                  | `LifecycleTickStart`                  | **yes** — mid-tick mounts fire immediately |
-| `useOnTickEnd(cb)`                    | `LifecycleTickEnd`                    | no                                         |
-| `useOnExecutionStart(cb)`             | `LifecycleExecutionStart`             | **yes**                                    |
-| `useOnExecutionEnd(cb)`               | `LifecycleExecutionEnd`               | no                                         |
-| `useOnToolStart(cb)`                  | `LifecycleToolStart`                  | no                                         |
-| `useOnToolEnd(cb)`                    | `LifecycleToolEnd`                    | no                                         |
-| `useOnModelGenerateStart(cb)`         | `LifecycleModelGenerateStart`         | no (streaming ticks only, see hook doc)    |
-| `useOnModelGenerateEnd(cb)`           | `LifecycleModelGenerateEnd`           | no (streaming ticks only, see hook doc)    |
-| `useOnError(cb)`                      | `LifecycleError`                      | no                                         |
-| `useOnLifecycleCustom(kind, cb)`      | `LifecycleCustom` (namespaced `kind`) | no                                         |
-| `useOnMount(cb)` / `useOnUnmount(cb)` | React commit boundaries               | n/a                                        |
+| Hook                                  | Event                                 | Catch-up?                                   |
+| ------------------------------------- | ------------------------------------- | ------------------------------------------- |
+| `useOnTickStart(cb)`                  | `LifecycleTickStart`                  | **yes** — mid-tick mounts fire immediately  |
+| `useOnTickEnd(cb)`                    | `LifecycleTickEnd`                    | no                                          |
+| `useOnExecutionStart(cb)`             | `LifecycleExecutionStart`             | **yes**                                     |
+| `useOnExecutionEnd(cb)`               | `LifecycleExecutionEnd`               | no                                          |
+| `useOnToolStart(cb)`                  | `LifecycleToolStart`                  | no                                          |
+| `useOnToolEnd(cb)`                    | `LifecycleToolEnd`                    | no                                          |
+| `useOnModelGenerateStart(cb)`         | `LifecycleModelGenerateStart`         | no (both tick paths; `stream` flag differs) |
+| `useOnModelGenerateEnd(cb)`           | `LifecycleModelGenerateEnd`           | no (both tick paths; `stream` flag differs) |
+| `useOnError(cb)`                      | `LifecycleError`                      | no                                          |
+| `useOnLifecycleCustom(kind, cb)`      | `LifecycleCustom` (namespaced `kind`) | no                                          |
+| `useOnMount(cb)` / `useOnUnmount(cb)` | React commit boundaries               | n/a                                         |
 
 Event shapes (from `@agentick/spec-next`): `LifecycleToolEnd` carries
 `{ name, outcome: "succeeded" | "failed", durationMs, callId, tickId }`;

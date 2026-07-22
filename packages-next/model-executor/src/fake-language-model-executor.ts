@@ -69,8 +69,14 @@ import {
   SPEC_VERSION,
 } from "@agentick/spec-next";
 
+import { omitUndefined } from "@agentick/utils-next";
+
 import { buildMessages, buildParameters, buildTools } from "@agentick/model-next";
-import { ExecutorLifecycle } from "./executor-lifecycle.js";
+import {
+  ExecutorLifecycle,
+  isFoldedTerminal,
+  operationOutcomeToTerminal,
+} from "./executor-lifecycle.js";
 
 // ============================================================================
 // Construction options
@@ -221,6 +227,18 @@ export class FakeLanguageModelExecutor
       this.scriptedSequence[Math.min(this.scriptIndex, this.scriptedSequence.length - 1)];
     this.scriptIndex++;
     return entry;
+  }
+
+  /**
+   * The current scripted entry WITHOUT advancing the cursor — the
+   * `model:generate` command (via `generateBody`) is the single
+   * cursor-advance for a run, so `runBody` peeks to read the run-path
+   * bus deltas + the scripted `vetoed`/`canceled` short-circuit without
+   * double-consuming.
+   */
+  private peekScripted(): MockScriptedRun | undefined {
+    if (this.scriptedSequence.length === 0) return undefined;
+    return this.scriptedSequence[Math.min(this.scriptIndex, this.scriptedSequence.length - 1)];
   }
 
   // ──────── ExecutorProtocol ────────
@@ -433,11 +451,17 @@ export class FakeLanguageModelExecutor
     input: RunInput,
     executionId: string,
     op: Operation<RunInput, ExecutorTerminal<LanguageModelExecutionResult>>,
-  ): Effect.Effect<ExecutorTerminal<LanguageModelExecutionResult>, ExecutorError, never> {
+  ): Effect.Effect<
+    ExecutorTerminal<LanguageModelExecutionResult>,
+    ExecutorError | SubstrateError,
+    never
+  > {
     return Effect.gen(this, function* () {
-      // Snapshot the next scripted run for this invocation. Subsequent
-      // calls advance the sequence cursor in `nextScripted()`.
-      const next = this.nextScripted();
+      // PEEK (don't consume) the scripted entry — the `model:generate`
+      // command is the single cursor-advance for the execute step below;
+      // run needs the entry only for bus-delta observability + the
+      // scripted vetoed/canceled short-circuit.
+      const next = this.peekScripted();
 
       // 1. project
       const projected = yield* projectAsEffect(input);
@@ -452,39 +476,73 @@ export class FakeLanguageModelExecutor
         }
       }
 
-      // 3. execute
-      // TODO(adr-89-phase-next): like the real executor's runBody, this
-      // non-streaming path bypasses the `model:generate` command (no
-      // hooks / guard / §4 lifecycle projection on non-streaming ticks).
-      // Route through `this.modelGenerate` when the real one does —
-      // minding the scripted-cursor single-advance and the scripted
-      // vetoed/canceled TERMINAL (not command-failure) mapping.
+      // 3. Pre-execute abort short-circuit.
       if (this.lifecycle.isAborted(executionId)) {
-        const terminal: ExecutorTerminal<LanguageModelExecutionResult> = {
-          outcome: "canceled",
-          reason: "aborted",
-        };
-        return terminal;
+        return { outcome: "canceled", reason: "aborted" };
       }
-      // Scripted non-success outcome (failure-path driving).
+
+      // 4. Scripted RUN-level non-success terminals. A veto/cancel resolves
+      //    to a terminal WITHOUT a provider call, so consume the entry here
+      //    and short-circuit — the generate command is never reached. (A
+      //    scripted `"failed"` DOES ride the command: `generateBody` surfaces
+      //    it as a ProviderRejected, folded back to a `failed` terminal below.)
       switch (next?.outcome) {
-        case "failed":
-          return { outcome: "failed", error: new ProviderRejected({ cause: "scripted failure" }) };
         case "vetoed":
+          this.nextScripted();
           return { outcome: "vetoed", reason: "scripted veto" };
         case "canceled":
+          this.nextScripted();
           return { outcome: "canceled", reason: "scripted cancel" };
       }
-      const targetOutput = next?.result ?? DEFAULT_REPLY;
-      void projected;
 
-      // 4. normalize (identity for mock)
-      const result: LanguageModelExecutionResult = targetOutput;
-      const terminal: ExecutorTerminal<LanguageModelExecutionResult> = {
-        outcome: "succeeded",
-        result,
+      // 5. execute — route through the `model:generate` COMMAND (ADR 89 §1)
+      //    so a NON-STREAMING run fires `onBefore/AfterModelGenerate` +
+      //    `guardGenerate` (the streaming path rides `model:generate_stream`
+      //    the same way, via `executeStreamFx`). `commandEffect` composes the
+      //    cascade IN THIS FIBER, so `parentOpId` threads + interruption
+      //    propagates. The command consumes the scripted entry.
+      const executeInput: ExecuteInput<LanguageModelInput> = {
+        targetInput: projected,
+        target: input.target,
+        scope: { ...(input.scope ?? {}), executionId },
+        ...omitUndefined({ signal: input.signal }),
       };
-      return terminal;
+      const raw = yield* this.commandEffect<
+        ExecuteInput<LanguageModelInput>,
+        unknown,
+        ExecuteErrorChannel
+      >("model:generate", executeInput).pipe(
+        // A mid-flight provider abort folds to a canceled terminal.
+        Effect.catchTag("ProviderAborted", (e) =>
+          Effect.succeed<ExecutorTerminal<LanguageModelExecutionResult>>({
+            outcome: "canceled",
+            reason: e.reason ?? "aborted",
+          }),
+        ),
+        // Scripted `outcome: "failed"` surfaces from `generateBody` as a
+        // ProviderRejected — the fake maps it to a FAILED terminal (drives
+        // the loop's failure path) rather than rejecting `run()`.
+        Effect.catchTag("ProviderRejected", (e) =>
+          Effect.succeed<ExecutorTerminal<LanguageModelExecutionResult>>({
+            outcome: "failed",
+            error: e,
+          }),
+        ),
+        // A `guardGenerate` veto at the command boundary folds to the
+        // matching executor terminal; deferred / failed-replay re-raise.
+        Effect.catchTag("OperationOutcomeError", (e) => {
+          const terminal = operationOutcomeToTerminal(e);
+          return terminal !== undefined ? Effect.succeed(terminal) : Effect.fail(e);
+        }),
+      );
+
+      // A fold above returned a terminal directly — pass it through.
+      if (isFoldedTerminal(raw)) {
+        return raw;
+      }
+
+      // 6. normalize (identity for the mock).
+      return { outcome: "succeeded", result: raw as LanguageModelExecutionResult };
     });
   }
 }

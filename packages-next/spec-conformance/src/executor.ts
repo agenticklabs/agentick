@@ -527,6 +527,59 @@ export function runExecutorConformance(factory: ExecutorConformanceFactory): voi
       expect(afterFired).toBe(true);
     });
 
+    it("run() (non-streaming) composes through model:generate — onBefore/onAfter fire on a run tick", async () => {
+      // ADR 89 §1: the NON-STREAMING `run` composes project → the
+      // `model:generate` command → normalize, so the command's boundary
+      // hooks fire on a plain `run()` (no `executeStream`), exactly as they
+      // do on the streaming path — this is what the §4 lifecycle projection
+      // (`useOnModelGenerateStart/End`) rides on a non-streaming tick.
+      const { executor } = await factory({
+        harnessId: "ex-cmd-run-1",
+        scripted: mkScripted("run-cmd"),
+      });
+      let beforeInput: unknown;
+      let afterOutput: unknown;
+      const off = interceptable(executor).hook({
+        onBeforeModelGenerate: (input: unknown) => {
+          beforeInput = input;
+        },
+        onAfterModelGenerate: (output: unknown) => {
+          afterOutput = output;
+        },
+      });
+      const terminal = await executor.run({
+        compiled: mkRenderedTree(),
+        target: mkTarget(),
+        tools: [],
+      });
+      off();
+      expect(terminal.outcome).toBe("succeeded");
+      // onBefore observed the ExecuteInput (carries `targetInput`); onAfter the raw.
+      expect((beforeInput as { targetInput?: unknown } | undefined)?.targetInput).toBeDefined();
+      expect(afterOutput).toBeDefined();
+    });
+
+    it("guardGenerate: a veto on a non-streaming run yields a vetoed TERMINAL (provider never runs)", async () => {
+      // A guard vetoes the `model:generate` command; `run` folds the
+      // command-boundary veto into a `vetoed` executor terminal (run's
+      // contract is a terminal, not a rejection) — the loop pattern-matches
+      // the non-success outcome. Vetoing by the ExecuteInput shape leaves
+      // project/normalize untouched.
+      const { executor } = await factory({ harnessId: "ex-cmd-run-2", scripted: mkScripted() });
+      const off = interceptable(executor).guard((input) =>
+        input !== null && typeof input === "object" && "targetInput" in input
+          ? { kind: "veto", reason: "locked" }
+          : undefined,
+      );
+      const terminal = await executor.run({
+        compiled: mkRenderedTree(),
+        target: mkTarget(),
+        tools: [],
+      });
+      off();
+      expect(terminal.outcome).toBe("vetoed");
+    });
+
     it("lifecycle envelopes carry model:* op names — the executor:* surface is gone", async () => {
       const { executor, bus } = await factory({ harnessId: "ex-cmd-4", scripted: mkScripted() });
       const names: string[] = [];

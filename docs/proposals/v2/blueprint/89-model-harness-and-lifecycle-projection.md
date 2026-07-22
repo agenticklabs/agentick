@@ -223,10 +223,14 @@ kill/resume and tick ordering must survive the wrapping.
 > in-cascade `onAfterLoopTick` hook (settle-before-decide preserved, ADR 67);
 > `LifecycleStore` shrank to `LifecycleDispatch` (thin per-mount dispatch +
 > catch-up cache) behind the optional `LifecycleProjectionTarget.dispatchLifecycle`
-> capability. `useOnModelGenerateStart/End` shipped — streaming ticks only until
-> the non-streaming `fx.run` routes through the `model:generate` command
-> (TODO(adr-89-phase-next) in the model executor). Gates' `notifyTickEnd`
-> (session continuation) untouched.
+> capability. `useOnModelGenerateStart/End` shipped and fire on BOTH tick
+> paths: the streaming tick rides `model:generate_stream`, and the
+> non-streaming `fx.run` composes through the `model:generate` command
+> (the §1 gap is closed — `run` in the real + fake executors routes the
+> execute step via `commandEffect("model:generate")`, folding the
+> ProviderAborted→canceled + guard-veto→vetoed terminals across the command
+> boundary; the event's `stream` flag distinguishes the paths). Gates'
+> `notifyTickEnd` (session continuation) untouched.
 
 There is **no bespoke `LifecycleStore`**. React lifecycle hooks are the compiler
 registering **ADR-83 interceptors** on the constituent command harnesses — the

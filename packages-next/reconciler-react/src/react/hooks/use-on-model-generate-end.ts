@@ -10,8 +10,9 @@ import { useLifecycleDispatch } from "../lifecycle-context.js";
  * `onAfterModelGenerate[Stream]` via the session's per-send
  * call-scoped forwarders (ADR 89 §4).
  *
- * NOTE: today only the STREAMING tick path mints the command (see
- * `useOnModelGenerateStart`) — this fires on streaming ticks only.
+ * Fires on BOTH tick paths (streaming `model:generate_stream` and the
+ * non-streaming `fx.run` composing through `model:generate`, ADR 89 §1);
+ * see `useOnModelGenerateStart`.
  *
  * No catch-up.
  *

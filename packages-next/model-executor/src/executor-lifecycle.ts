@@ -22,6 +22,12 @@
 
 import type { Fiber } from "effect";
 
+import type {
+  ExecutorTerminal,
+  LanguageModelExecutionResult,
+  TerminalEvent,
+} from "@agentick/spec-next";
+
 /**
  * Per-execution lifecycle entry. Subclass-specific extensions
  * (e.g. a streaming `Fiber.RuntimeFiber`) attach via the optional
@@ -135,4 +141,59 @@ export class ExecutorLifecycle {
   abortReasonFor(executionId: string): string | undefined {
     return this.inFlight.get(executionId)?.abortReason;
   }
+}
+
+// ============================================================================
+// Run-composition fold helpers (ADR 89 §1)
+// ============================================================================
+
+/**
+ * A non-success executor terminal that the `run` body folds a
+ * command-boundary failure into (a canceled/vetoed/failed short-circuit)
+ * — as opposed to the raw provider output the happy path carries. The
+ * discriminants (`canceled` / `vetoed` / `failed`) never collide with a
+ * `LanguageModelExecutionResult` (which is keyed on `output` / `stopReason`)
+ * or a provider `TRaw`, so this cleanly separates the two.
+ *
+ * @see LanguageModelExecutor.runBody — the non-streaming run composition
+ *   (ADR 89 §1) routes the execute step through the `model:generate`
+ *   command and folds its boundary failures via {@link operationOutcomeToTerminal}.
+ */
+export function isFoldedTerminal(
+  value: unknown,
+): value is ExecutorTerminal<LanguageModelExecutionResult> {
+  if (typeof value !== "object" || value === null || !("outcome" in value)) return false;
+  const outcome = (value as { outcome?: unknown }).outcome;
+  return outcome === "canceled" || outcome === "vetoed" || outcome === "failed";
+}
+
+/**
+ * Fold an `OperationOutcomeError` raised at the `model:generate` command
+ * boundary into an {@link ExecutorTerminal}. A `guardGenerate` veto →
+ * `vetoed`; a replayed `canceled` terminal → `canceled`. Anything else
+ * (a `deferred` verdict, a replayed `failed` terminal) returns `undefined`
+ * so the caller re-raises — `run` has no terminal shape for those and they
+ * belong on the failure channel.
+ *
+ * Typed against the structural `OperationOutcomeError` shape (`{ terminal }`)
+ * that `Effect.catchTag("OperationOutcomeError", …)` narrows to via the
+ * `SubstrateError` union — no runtime import needed.
+ */
+export function operationOutcomeToTerminal(err: {
+  readonly terminal: TerminalEvent;
+}): ExecutorTerminal<LanguageModelExecutionResult> | undefined {
+  const terminal = err.terminal;
+  if (terminal.outcome === "vetoed") {
+    return {
+      outcome: "vetoed",
+      ...(terminal.reason !== undefined ? { reason: terminal.reason } : {}),
+    };
+  }
+  if (terminal.outcome === "canceled") {
+    return {
+      outcome: "canceled",
+      ...(terminal.reason !== undefined ? { reason: terminal.reason } : {}),
+    };
+  }
+  return undefined;
 }

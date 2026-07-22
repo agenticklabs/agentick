@@ -87,7 +87,12 @@ import {
   type LanguageModelAdapter,
 } from "@agentick/model-next";
 
-import { ExecutorLifecycle, type ExecutorInFlightEntry } from "./executor-lifecycle.js";
+import {
+  ExecutorLifecycle,
+  isFoldedTerminal,
+  operationOutcomeToTerminal,
+  type ExecutorInFlightEntry,
+} from "./executor-lifecycle.js";
 
 // ADR 80/83/89 — light up the model-path verbs on the derived `CommandHooks`
 // surface. The provider call is command-ified (Phase 1B): `generate` /
@@ -634,7 +639,7 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
       scope: { ...(input.scope ?? {}), executionId },
       input,
     };
-    return this.runOperation(op, (i) => this.runBody(i, executionId, op));
+    return this.runOperation(op, (i) => this.runBody(i, executionId));
   }
 
   run(input: RunInput): Promise<ExecutorTerminal<LanguageModelExecutionResult>> {
@@ -885,8 +890,11 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
   private runBody(
     input: RunInput,
     executionId: string,
-    op: Operation<RunInput, ExecutorTerminal<LanguageModelExecutionResult>>,
-  ): Effect.Effect<ExecutorTerminal<LanguageModelExecutionResult>, ExecutorError, never> {
+  ): Effect.Effect<
+    ExecutorTerminal<LanguageModelExecutionResult>,
+    ExecutorError | SubstrateError,
+    never
+  > {
     return Effect.gen(this, function* () {
       // Pre-execution abort short-circuit. Mid-stream aborts surface as
       // `ProviderAborted` from `executeBody` and are caught below.
@@ -913,32 +921,39 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
         scope: { ...(input.scope ?? {}), executionId },
         ...omitUndefined({ signal: input.signal }),
       };
-      // TODO(adr-89-phase-next): this NON-STREAMING run path calls
-      // `executeBody` DIRECTLY, bypassing the `model:generate` command —
-      // so onBefore/AfterModelGenerate hooks, guardGenerate, and the
-      // ADR-89 §4 useOnModelGenerateStart/End projection do NOT fire on
-      // non-streaming ticks (the streaming path rides the
-      // `model:generate_stream` command and gets all of them). Per ADR 89
-      // §1 ("run composes project → the execute command → normalize"),
-      // route this through `this.modelGenerate`'s command cascade —
-      // needs the ProviderAborted→canceled-terminal fold carried across
-      // the command boundary. Mirror in FakeLanguageModelExecutor.runBody.
-      const raw = yield* this.executeBody(
-        executeInput,
-        executionId,
-        op as Operation<unknown, unknown>,
-        null,
-      ).pipe(
-        Effect.catchTag("ProviderAborted", (e: ProviderAborted) =>
+      // ADR 89 §1 — the NON-STREAMING run composes project → the
+      // `model:generate` COMMAND → normalize (the streaming path composes
+      // project → `model:generate_stream` → normalize the same way, via
+      // `executeStreamFx`). `commandEffect` runs the command's interceptor
+      // cascade IN THIS FIBER, so `parentOpId` threads onto the generate op
+      // and interruption propagates — and `onBefore/AfterModelGenerate` +
+      // `guardGenerate` + journaling all fire on a non-streaming tick (the
+      // ADR-89 §4 `useOnModelGenerateStart/End` projection rides those).
+      const raw = yield* this.commandEffect<
+        ExecuteInput<LanguageModelInput>,
+        unknown,
+        ExecuteErrorChannel
+      >("model:generate", executeInput).pipe(
+        // A mid-flight provider abort folds to a canceled terminal
+        // (`runOperation` re-raises the body's ORIGINAL ProviderAborted,
+        // identity-preserving, so this catch still narrows it).
+        Effect.catchTag("ProviderAborted", (e) =>
           Effect.succeed<ExecutorTerminal<LanguageModelExecutionResult>>({
             outcome: "canceled",
             reason: e.reason ?? "aborted",
           }),
         ),
+        // A `guardGenerate` veto (or a replayed non-success terminal) at the
+        // command boundary folds to the matching executor terminal; a
+        // `deferred` verdict / `failed` replay re-raise on the failure channel.
+        Effect.catchTag("OperationOutcomeError", (e) => {
+          const terminal = operationOutcomeToTerminal(e);
+          return terminal !== undefined ? Effect.succeed(terminal) : Effect.fail(e);
+        }),
       );
 
-      // ProviderAborted recovery returned a terminal directly — pass through.
-      if (isTerminal(raw)) {
+      // A fold above returned a terminal directly — pass it through.
+      if (isFoldedTerminal(raw)) {
         return raw;
       }
 
@@ -974,15 +989,6 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
 // ============================================================================
 // Helpers
 // ============================================================================
-
-function isTerminal(v: unknown): v is ExecutorTerminal<LanguageModelExecutionResult> {
-  return (
-    typeof v === "object" &&
-    v !== null &&
-    "outcome" in v &&
-    (v as { outcome?: unknown }).outcome === "canceled"
-  );
-}
 
 /**
  * Merge an optional caller signal with the internal controller signal

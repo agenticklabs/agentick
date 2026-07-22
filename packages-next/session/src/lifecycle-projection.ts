@@ -34,10 +34,11 @@
  *    `LifecycleToolStart.tickId` is required.
  *  - `model:generate[_stream]` `onBefore`/`onAfter` →
  *    `model-generate-start` / `model-generate-end` (fire-and-forget).
- *    NOTE: today only the STREAMING tick path mints the command — the
- *    non-streaming `fx.run` bypasses it (TODO(adr-89-phase-next) in the
- *    model executor), so these events fire on streaming ticks only.
- *    These are NOT registered on the session's default executor
+ *    BOTH tick paths mint a command (ADR 89 §1): the streaming tick rides
+ *    `model:generate_stream`, the non-streaming `fx.run` composes through
+ *    `model:generate` — so these fire on either path (the event's `stream`
+ *    flag distinguishes them). These are NOT registered on the session's
+ *    default executor
  *    instance: the loop may run a per-tick `<Model>`-swapped executor
  *    (ADR 56), which is adopter-constructed and outside the session's
  *    interceptor tree. The ONLY seam that reaches whichever executor

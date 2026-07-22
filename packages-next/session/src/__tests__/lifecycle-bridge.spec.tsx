@@ -194,13 +194,16 @@ describe("lifecycle bridge — real loop drives the WHOLE hook family (#206 / AD
     // The scripted tool succeeds (handler registered) — end carries it.
     expect(toolStarts[0]!.name).toBe("echo");
     expect(toolEnds[0]!.outcome).toBe("succeeded");
-    // This run is NON-streaming (supportsStreaming: false), and the
-    // non-streaming `fx.run` does not yet mint the `model:generate`
-    // command (TODO(adr-89-phase-next) in the model executor) — so the
-    // model-generate projection stays silent here. The streaming-path
-    // test below proves it fires.
-    expect(modelStarts).toHaveLength(0);
-    expect(modelEnds).toHaveLength(0);
+    // This run is NON-streaming (supportsStreaming: false). ADR 89 §1
+    // routes the non-streaming `fx.run` THROUGH the `model:generate`
+    // command, so the model-generate projection fires here too — one
+    // start+end per tick (two ticks: the tool_use tick + the reply tick),
+    // all flagged `stream: false`. The streaming-path test below proves
+    // the streaming variant.
+    expect(modelStarts.length).toBeGreaterThan(0);
+    expect(modelEnds.length).toBeGreaterThan(0);
+    expect(modelStarts.every((e) => e.stream === false)).toBe(true);
+    expect(modelEnds.every((e) => e.stream === false)).toBe(true);
     // Happy path — no error bridged.
     expect(errors).toHaveLength(0);
 
@@ -407,8 +410,8 @@ describe("lifecycle projection wiring (ADR 89 §4)", () => {
     // Streaming-capable fake — the loop's default streaming path rides
     // the `model:generate_stream` COMMAND, whose onBefore/After hooks the
     // session's tier-4 forwarders project. (The non-streaming `fx.run`
-    // does not yet mint `model:generate` — TODO(adr-89-phase-next) in the
-    // model executor.)
+    // rides the `model:generate` command symmetrically — see the first
+    // test in this file, which asserts `stream: false`.)
     const executor = new FakeLanguageModelExecutor(
       `exec-stream-${Math.random()}`,
       new MemoryJournal(),

@@ -10,9 +10,10 @@ import { useLifecycleDispatch } from "../lifecycle-context.js";
  * WHICHEVER executor instance runs the tick — including a per-tick
  * `<Model>`-swapped executor (ADR 56).
  *
- * NOTE: today only the STREAMING tick path mints the command — the
- * non-streaming `fx.run` bypasses it (TODO(adr-89-phase-next) in the
- * model executor), so this fires on streaming ticks only.
+ * Fires on BOTH tick paths: the streaming tick rides
+ * `model:generate_stream` and the non-streaming `fx.run` composes through
+ * `model:generate` (ADR 89 §1) — the event's `stream` flag distinguishes
+ * them.
  *
  * No catch-up. Components that mount after the call started observe
  * the next one normally.
