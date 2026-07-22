@@ -76,6 +76,7 @@ export {
   GatewayNotStartedError,
   KnobError,
   ModelExecutorBuilderMissingError,
+  NoModelForExecutionError,
   SessionBusyError,
   SessionClosedError,
   SessionError,

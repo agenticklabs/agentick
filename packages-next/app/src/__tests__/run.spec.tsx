@@ -48,12 +48,27 @@ describe("run() — one-shot execution", () => {
   });
 
   it("construction failure rejects the handle without leaking an unhandled rejection", async () => {
-    // No model and no executor — the app slot guard throws.
+    // A bare adapter on the `modelExecutor` slot trips the app slot guard at
+    // construction. (A model-less app is now LEGAL — the removed "model is
+    // required" guard no longer fires; see the model-less send test below.)
+    await expect(
+      run(React.createElement(MinimalAgent), {
+        modelExecutor: scriptedAdapter("wrong slot") as never,
+        messages: [{ role: "user", content: "hi" }],
+      }),
+    ).rejects.toThrow(/goes on the `model` slot/);
+  });
+
+  it("a model-less run() constructs, but the send fails with NoModelForExecutionError", async () => {
+    // The model requirement is enforced at execution time. A model-less
+    // one-shot run constructs its temporary app + session fine; the single
+    // send resolves no effective model (no default, no per-send override, no
+    // per-tick <Model>) and fails with the typed error naming how to supply one.
     await expect(
       run(React.createElement(MinimalAgent), {
         messages: [{ role: "user", content: "hi" }],
-      }),
-    ).rejects.toThrow(/model is required/);
+      }).result,
+    ).rejects.toMatchObject({ _tag: "NoModelForExecutionError" });
   });
 
   it("runs back-to-back — each invocation owns and tears down its app", async () => {

@@ -85,8 +85,13 @@ export interface SetModelInput {
  * that persist across those swaps.
  */
 export interface ModelSelectionHandle {
-  /** The session-default {@link RegisteredModel} in effect right now. */
-  readonly current: RegisteredModel;
+  /**
+   * The session-default {@link RegisteredModel} in effect right now, or
+   * `undefined` on a model-less session (no `model`/`modelExecutor` at
+   * construction and no `setModel` since). A model-less session is legal — the
+   * model is enforced at execution time, not construction.
+   */
+  readonly current: RegisteredModel | undefined;
   /**
    * Swap the session-default model — the runner AND its target. Replaces
    * the construction-bound default the session holds; takes effect on the
@@ -145,8 +150,8 @@ export interface ModelSelectionHandle {
  * the live default off the session.
  */
 export interface ModelFacadeHost {
-  /** The session-default `RegisteredModel` in effect right now. */
-  readonly getDefault: () => RegisteredModel;
+  /** The session-default `RegisteredModel` in effect right now, or `undefined` (model-less). */
+  readonly getDefault: () => RegisteredModel | undefined;
   /** Run the journaled + hookable `session:set-model` command. */
   readonly applySetModel: (input: SetModelInput) => Promise<void>;
   /**
@@ -202,7 +207,7 @@ export class SessionModelFacade implements ModelSelectionHandle {
     this.host = host;
   }
 
-  get current(): RegisteredModel {
+  get current(): RegisteredModel | undefined {
     return this.host.getDefault();
   }
 

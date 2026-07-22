@@ -62,7 +62,7 @@ async function buildStack(
   await gateway.listen();
   const app = await gateway.createApp({
     rootElement: React.createElement(Agent),
-    options: { executor: makeExec(output), compiler: reactCompiler() } as never,
+    options: { modelExecutor: makeExec(output), compiler: reactCompiler() },
   });
   return { gateway, app };
 }

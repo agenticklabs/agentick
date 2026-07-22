@@ -102,6 +102,7 @@ import type {
 import {
   ExecutionError,
   HandlerError,
+  NoModelForExecutionError,
   ProviderRejected,
   toRegistration,
 } from "@agentick/spec-next";
@@ -220,7 +221,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
     RunExecutionInput,
     LoopExecutionEvent,
     ExecutionTerminal,
-    LoopExecutorError
+    LoopExecutorError | NoModelForExecutionError
   >;
 
   constructor(
@@ -278,7 +279,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
       RunExecutionInput,
       LoopExecutionEvent,
       ExecutionTerminal,
-      LoopExecutorError
+      LoopExecutorError | NoModelForExecutionError
     >({
       name: "loop:run-execution",
       exposure: "internal",
@@ -371,7 +372,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
   private runExecutionBody(
     input: RunExecutionInput,
     sink: (event: LoopExecutionEvent) => Effect.Effect<void>,
-  ): Effect.Effect<ExecutionTerminal, LoopExecutorError, never> {
+  ): Effect.Effect<ExecutionTerminal, LoopExecutorError | NoModelForExecutionError, never> {
     const executionId = input.executionId;
     return Effect.gen(this, function* () {
       // Structured cancellation (Stage 5) — a per-execution controller
@@ -617,8 +618,15 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
       // un-try/caught `await` threw. The two locally-handled failures
       // (streaming `.result`, hard tool throw) are already absorbed in-body.
       Effect.catchAll(
-        (cause): Effect.Effect<never, LoopExecutorError> =>
-          Effect.fail(cause instanceof ExecutionError ? cause : new ExecutionError({ cause })),
+        (cause): Effect.Effect<never, LoopExecutorError | NoModelForExecutionError> =>
+          // `NoModelForExecutionError` (raised at the per-tick model resolution)
+          // and an already-`ExecutionError` cause surface UNWRAPPED; every other
+          // uncaught twin failure folds to `ExecutionError`.
+          Effect.fail(
+            cause instanceof ExecutionError || cause instanceof NoModelForExecutionError
+              ? cause
+              : new ExecutionError({ cause }),
+          ),
       ),
       // inFlight/aborted cleanup on every exit (success, failure, interrupt)
       // — the Promise original's `finally`. Also clears the timeout timer
@@ -707,6 +715,15 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
       const resolvedModel = modelDecl ? input.resolveModel?.(modelDecl.modelRef) : undefined;
       const tickModelExecutor = resolvedModel?.modelExecutor ?? input.modelExecutor;
       const tickTarget = resolvedModel?.target ?? input.target;
+      // Execution-time model enforcement (the ONLY place a missing model is an
+      // error). Model-less apps/sessions are legal — dispatch, snapshot, wire
+      // plumbing all work without one. But a TICK must call a model: with the
+      // full cascade (`per-tick <Model>` > `per-send` > `session default`)
+      // resolved to nothing, THIS execution fails with a typed, unwrapped
+      // `NoModelForExecutionError`. The app + session stay valid.
+      if (tickModelExecutor === undefined || tickTarget === undefined) {
+        return yield* Effect.fail(new NoModelForExecutionError());
+      }
       // `decl.parameters` overlay the compiled tree's generation config
       // for this tick (temperature, maxOutputTokens, …) — the same
       // knobs RenderedTree.config carries and the executor reads via

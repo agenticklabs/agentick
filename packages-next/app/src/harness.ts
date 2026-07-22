@@ -232,8 +232,13 @@ export interface AppHarnessOptions<P = unknown> {
    * `LanguageModelExecutor` on the app's substrate, so executor events
    * appear on `app.events(...)` with zero wiring.
    *
-   * Exactly one of `model` / `modelExecutor` is required. `model` = what
-   * to call; `modelExecutor` = how to execute (BYO engine).
+   * At MOST one of `model` / `modelExecutor` — passing both throws. Passing
+   * NEITHER is legal: a model-less app is fully valid (dispatch,
+   * snapshot/restore, and wire plumbing all work without a model). The model
+   * requirement is enforced at execution time — a `send` whose effective-model
+   * cascade (`per-tick <Model>` > `per-send` > `session default`) is empty
+   * fails with `NoModelForExecutionError`. `model` = what to call;
+   * `modelExecutor` = how to execute (BYO engine).
    */
   readonly model?: LanguageModelAdapter;
   /**
@@ -645,8 +650,16 @@ export class AppHarness<P = unknown>
   }
 
   private readonly rootElement: unknown;
-  private readonly modelExecutor: LanguageModelExecutor;
-  private readonly target: ExecutionTarget;
+  /**
+   * The app-default model-executor, or `undefined` for a model-less app (no
+   * `model` / `modelExecutor` at construction). Model-less apps are legal —
+   * dispatch, snapshot/restore, and all wire plumbing work without a model; the
+   * requirement is enforced at execution time (the loop's per-tick resolution),
+   * not construction. A `send` that resolves no model fails with
+   * `NoModelForExecutionError`.
+   */
+  private readonly modelExecutor: LanguageModelExecutor | undefined;
+  private readonly target: ExecutionTarget | undefined;
   /**
    * Adapter→executor builder threaded into every session (ADR 89 §2 ergonomic
    * parity), so `session.model.setModel(openai("gpt-4o"))` wraps the adapter in
@@ -904,17 +917,14 @@ export class AppHarness<P = unknown>
     // Model/executor slots (ADR 52): `model` takes an adapter — the
     // app wraps it in the ONE LanguageModelExecutor on the app's
     // substrate. `modelExecutor` takes a BYO engine (instance or legacy
-    // factory). Exactly one of the two.
+    // factory). At MOST one of the two — but NEITHER is legal: a model-less
+    // app is fully valid (dispatch, snapshot/restore, wire plumbing all work
+    // without a model). The model requirement is enforced at execution time
+    // (the loop's per-tick resolution → `NoModelForExecutionError`), not here.
     if (options.model !== undefined && options.modelExecutor !== undefined) {
       throw new Error(
         "createApp: pass either `model` (a LanguageModelAdapter) or " +
           "`modelExecutor` (a LanguageModelExecutor / factory), not both.",
-      );
-    }
-    if (options.model === undefined && options.modelExecutor === undefined) {
-      throw new Error(
-        'createApp: a model is required — pass `model: openai("gpt-4o")` ' +
-          "(any LanguageModelAdapter), or `modelExecutor` for a BYO engine.",
       );
     }
     if (options.modelExecutor !== undefined && isLanguageModelAdapter(options.modelExecutor)) {
@@ -936,24 +946,29 @@ export class AppHarness<P = unknown>
             inheritedInterceptors: this.resolvedInterceptors(),
             interceptorParent: this,
           })
-        : isExecutorFactory(options.modelExecutor)
-          ? options.modelExecutor({
-              scopeId: `${appId}:executor`,
-              journal,
-              bus,
-              inbox,
-            })
-          : options.modelExecutor!;
-    // Resolve target: caller override > modelExecutor.target.
-    this.target = options.target ?? this.modelExecutor.target;
+        : options.modelExecutor === undefined
+          ? undefined // model-less app — no default executor
+          : isExecutorFactory(options.modelExecutor)
+            ? options.modelExecutor({
+                scopeId: `${appId}:executor`,
+                journal,
+                bus,
+                inbox,
+              })
+            : options.modelExecutor;
+    // Resolve target: caller override > modelExecutor.target (undefined when
+    // model-less and no explicit target).
+    this.target = options.target ?? this.modelExecutor?.target;
     // ADR 89 §2 — the adapter→executor builder threaded into every session so
     // `session.model.setModel(adapter)` matches construction's `model` sugar.
-    // Injected ONLY when the app was built from a `model` adapter (it owns the
-    // wrap-in-executor path); a BYO-executor app gets no builder and the facade
-    // throws on an adapter overload. Mirrors the construction wrap above:
-    // one executor on the app substrate, target read from the executor.
+    // Injected UNLESS the app supplied a BYO `modelExecutor` (that app opted out
+    // of the adapter-wrapping machinery — the facade throws on an adapter
+    // overload). A model-less app STILL gets the builder, so
+    // `setModel(openai("gpt-4o"))` on a model-less app works. Mirrors the
+    // construction wrap above: one executor on the app substrate, target read
+    // from the executor.
     this.buildModelExecutor =
-      options.model !== undefined
+      options.modelExecutor === undefined
         ? (adapter: LanguageModelAdapter): RegisteredModel => {
             const modelExecutor = new TheLanguageModelExecutor(
               `${appId}:executor:${ulid()}`,

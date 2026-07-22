@@ -64,7 +64,7 @@ describe("session.model.setModel(adapter) — ergonomic-parity overload (ADR 89 
 
     // The runtime twin of construction's `model` sugar — pass a bare adapter.
     await session.model.setModel(scriptedAdapter("from-B", { provider: "prov-b" }));
-    expect(session.model.current.target.provider).toBe("prov-b");
+    expect(session.model.current!.target.provider).toBe("prov-b");
 
     expect(
       (await (await session.send({ messages: [{ role: "user", content: "hi" }] })).result).response,
@@ -101,6 +101,65 @@ describe("session.model.setModel(adapter) — ergonomic-parity overload (ADR 89 
     expect(
       (await (await session.send({ messages: [{ role: "user", content: "hi" }] })).result).response,
     ).toBe("from-B");
+
+    await app.closeApp();
+  });
+});
+
+describe("model-less app (no model / modelExecutor at construction)", () => {
+  it("constructs, and its session's model.current is undefined", async () => {
+    const app = await createApp(React.createElement(MinimalAgent), {});
+    const session = await app.createSession();
+    expect(session.model.current).toBeUndefined();
+    await app.closeApp();
+  });
+
+  it("dispatch and snapshot work model-less (no model needed for either)", async () => {
+    const app = await createApp(React.createElement(MinimalAgent), {});
+    const session = await app.createSession();
+
+    // A user-audience tool reachable via dispatch — no model involved.
+    const dispatched = await session.dispatch("noop-echo", { value: "hi" }).catch((e) => e);
+    // The tool isn't registered here; the point is dispatch does not require a
+    // model (it fails with a tool-resolution error, NOT NoModelForExecutionError).
+    expect((dispatched as { _tag?: string })._tag).not.toBe("NoModelForExecutionError");
+
+    // Snapshot/restore round-trips without a model.
+    const snap = await session.snapshot();
+    expect(snap).toBeDefined();
+
+    await app.closeApp();
+  });
+
+  it("a per-send modelExecutor override runs on an otherwise model-less app", async () => {
+    const app = await createApp(React.createElement(MinimalAgent), {});
+    const session = await app.createSession();
+    const exec = replyExec("from-per-send");
+    await exec.ready;
+
+    const res = await (
+      await session.send({
+        messages: [{ role: "user", content: "hi" }],
+        modelExecutor: exec,
+        target,
+      })
+    ).result;
+    expect(res.response).toBe("from-per-send");
+
+    await app.closeApp();
+  });
+
+  it("setModel(adapter) works on a model-less app (builder IS injected)", async () => {
+    // A model-less app still gets the adapter→executor builder (only a
+    // BYO-executor app opts out), so the ergonomic adapter overload works.
+    const app = await createApp(React.createElement(MinimalAgent), {});
+    const session = await app.createSession();
+
+    await session.model.setModel(scriptedAdapter("from-set", { provider: "prov-set" }));
+    expect(session.model.current!.target.provider).toBe("prov-set");
+
+    const res = await (await session.send({ messages: [{ role: "user", content: "hi" }] })).result;
+    expect(res.response).toBe("from-set");
 
     await app.closeApp();
   });

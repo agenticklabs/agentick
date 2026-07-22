@@ -247,8 +247,14 @@ export interface SessionHarnessOptions<P = unknown> {
    * be injected without changing the session boundary.
    */
   readonly loop: LoopExecutorProtocol;
-  /** Model-executor harness for model invocations. */
-  readonly modelExecutor: ExecutorProtocol<unknown, unknown, LanguageModelExecutionResult>;
+  /**
+   * Model-executor harness for model invocations — the session default.
+   * Optional: a model-less app threads `undefined`. Dispatch, snapshot/restore,
+   * and wire plumbing all work without one; a `send` that resolves no model
+   * (default + per-send + per-tick `<Model>` all empty) fails at execution time
+   * with `NoModelForExecutionError`.
+   */
+  readonly modelExecutor?: ExecutorProtocol<unknown, unknown, LanguageModelExecutionResult>;
   /**
    * Adapter→executor builder, INJECTED by the app (ADR 89 §2 ergonomic
    * parity). The app owns the adapter→executor build + the substrate it needs
@@ -262,8 +268,8 @@ export interface SessionHarnessOptions<P = unknown> {
   readonly buildModelExecutor?: (adapter: LanguageModelAdapter) => RegisteredModel;
   /** Tool executor harness for tool dispatch. */
   readonly toolExecutor: ToolExecutorProtocol;
-  /** Default execution target — overridable per send (later). */
-  readonly target: ExecutionTarget;
+  /** Default execution target — overridable per send (later). Optional (model-less). */
+  readonly target?: ExecutionTarget;
   /** Default per-execution max tick bound. Default: 8. */
   readonly defaultMaxTicks?: number;
   /**
@@ -496,7 +502,7 @@ export class SessionHarness<P = unknown>
    * {@link modelExecutor}: `session.model.setModel` / `setTarget` swap it
    * via the `session:set-model` command (ADR 89 §2).
    */
-  private target: ExecutionTarget;
+  private target: ExecutionTarget | undefined;
   private readonly spawnContext: SpawnContext<P> | undefined;
   private readonly parentSessionId: string | undefined;
   /**
@@ -740,7 +746,10 @@ export class SessionHarness<P = unknown>
     // hookable `session:set-model` command. Its `use`/`guard` interceptors
     // ride the tier-4 seam in `sendBody`, so they persist across swaps.
     this.modelFacade = new SessionModelFacade({
-      getDefault: () => ({ modelExecutor: this.modelExecutor, target: this.target }),
+      getDefault: () =>
+        this.modelExecutor !== undefined && this.target !== undefined
+          ? { modelExecutor: this.modelExecutor, target: this.target }
+          : undefined,
       applySetModel: (input) => this.runSetModel(input),
       // ADR 89 §2 — the app-injected adapter→executor builder, so
       // `session.model.setModel(openai("gpt-4o"))` matches construction sugar.
@@ -1884,9 +1893,13 @@ export class SessionHarness<P = unknown>
     // The capability default is true when both:
     //   - the executor exposes `executeStream`
     //   - target.capabilities.supportsStreaming is not explicitly false
+    // Both slots may be undefined on a model-less session — the loop enforces
+    // the presence of a model at the per-tick resolution point (respecting the
+    // per-tick `<Model>` cascade), so here we only compute a capability default
+    // when a model-executor + target are actually present.
     const capabilityStreamDefault =
-      typeof modelExecutorForCall.executeStream === "function" &&
-      (targetForCall.capabilities?.supportsStreaming ?? true);
+      typeof modelExecutorForCall?.executeStream === "function" &&
+      (targetForCall?.capabilities?.supportsStreaming ?? true);
     const streamForCall = input.stream ?? this.defaultStreaming ?? capabilityStreamDefault;
 
     // Set up the handle + emit chain BEFORE running the loop so the
@@ -2005,6 +2018,11 @@ export class SessionHarness<P = unknown>
                 // per-tick-model): under #169 it's IR-derived per tick and this
                 // re-resolves per render.
                 resolveRenderContext: () => {
+                  // Model-less send: no fallback target to project. The tree may
+                  // still declare a per-tick `<Model>`, but that resolves
+                  // POST-render (chicken-and-egg, see the loop's ADR-56 notes),
+                  // so `activeModel`/`contextInfo` are simply absent this render.
+                  if (targetForCall === undefined) return {};
                   const contextWindow = effectiveModelInfo(
                     targetForCall,
                     this.models,

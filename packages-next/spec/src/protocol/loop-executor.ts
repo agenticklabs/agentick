@@ -34,7 +34,7 @@ import type {
   UsageStats,
 } from "../data/execution-result.js";
 import type { LoopExecutorError } from "../errors/harnesses.js";
-import type { StateApplyErrorChannel } from "../errors/lifecycle.js";
+import type { NoModelForExecutionError, StateApplyErrorChannel } from "../errors/lifecycle.js";
 import type { FormatterRef } from "../data/formatter.js";
 import type { ExecutorProtocol } from "./executor.js";
 import type { RegisteredModel } from "./hook-bridges.js";
@@ -172,9 +172,17 @@ export interface RunExecutionInput {
    */
   readonly resolveModel?: (modelRef: string) => RegisteredModel | undefined;
 
-  /** Model-executor harness for the model run. */
-  readonly modelExecutor: ExecutorProtocol<unknown, unknown, LanguageModelExecutionResult>;
-  readonly target: ExecutionTarget;
+  /**
+   * Model-executor harness for the model run — the session default (or the
+   * per-send override the session already folded in). Optional: a model-less
+   * app/session threads `undefined`, and a tick's IR-declared `<Model>`
+   * (resolved via {@link resolveModel}) can still supply the model. When BOTH
+   * this and the per-tick resolution are absent, the loop fails the execution
+   * with `NoModelForExecutionError`.
+   */
+  readonly modelExecutor?: ExecutorProtocol<unknown, unknown, LanguageModelExecutionResult>;
+  /** Fallback execution target paired with {@link modelExecutor}. Optional (model-less). */
+  readonly target?: ExecutionTarget;
 
   /** Tool executor harness for dispatch of `result.toolCalls`. */
   readonly toolExecutor: ToolExecutorProtocol;
@@ -402,10 +410,14 @@ export interface TickInput {
 
   /** Compiler harness whose `mountId` this tick renders. */
   readonly compiler: CompilerProtocol;
-  /** Fallback model-executor when the tick's IR declares no `<Model>`. */
-  readonly modelExecutor: ExecutorProtocol<unknown, unknown, LanguageModelExecutionResult>;
-  /** Fallback execution target paired with {@link modelExecutor}. */
-  readonly target: ExecutionTarget;
+  /**
+   * Fallback model-executor when the tick's IR declares no `<Model>`.
+   * Optional: absent for a model-less session. When neither this nor the
+   * tick's `<Model>` resolves, the tick fails with `NoModelForExecutionError`.
+   */
+  readonly modelExecutor?: ExecutorProtocol<unknown, unknown, LanguageModelExecutionResult>;
+  /** Fallback execution target paired with {@link modelExecutor}. Optional (model-less). */
+  readonly target?: ExecutionTarget;
   /** Tool executor harness for dispatch of `result.toolCalls`. */
   readonly toolExecutor: ToolExecutorProtocol;
   /** Where the tick writes results back (session `apply*` commands). */
@@ -510,12 +522,19 @@ export interface LoopExecutorFx extends HarnessFx {
    * carries the outcome (succeeded / failed / canceled / vetoed); the
    * `result` field carries the assembled `ExecutionRunResult` on success.
    * Substrate/loop failures inhabit the `E` channel; non-success outcomes
-   * ride the success channel as the terminal.
+   * ride the success channel as the terminal. A model-less execution that
+   * resolves no effective model at the tick boundary fails the `E` channel
+   * with {@link NoModelForExecutionError} (surfaced unwrapped, not folded into
+   * `ExecutionError`).
    */
   runExecution(
     input: RunExecutionInput,
     sink: LoopExecutionSink,
-  ): Effect.Effect<ExecutionTerminal, LoopExecutorError | SubstrateError, never>;
+  ): Effect.Effect<
+    ExecutionTerminal,
+    LoopExecutorError | SubstrateError | NoModelForExecutionError,
+    never
+  >;
 }
 
 /**

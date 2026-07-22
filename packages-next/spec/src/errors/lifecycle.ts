@@ -227,6 +227,35 @@ export class ExecutionFailed extends SessionError {
 registerAgentickError("ExecutionFailed", ExecutionFailed);
 
 /**
+ * An execution reached the model-call boundary with NO model resolved. Model
+ * apps and sessions are fully legal to construct WITHOUT a model — dispatch,
+ * snapshot/restore, and all wire plumbing work model-less. The requirement is
+ * enforced at the ONLY place it matters: execution time. When the loop resolves
+ * the effective model for a tick — the cascade `per-tick <Model>` > `per-send
+ * override` > `session default` — and every tier is empty, THAT execution fails
+ * with this error; the app and session stay valid (a later `send` that supplies
+ * a model succeeds).
+ *
+ * Raised by the loop at the per-tick resolution point and surfaced unwrapped to
+ * the failing `send`/`run` — it is a member of {@link SessionErrorChannel}.
+ */
+export class NoModelForExecutionError extends SessionError {
+  readonly _tag = "NoModelForExecutionError" as const;
+  constructor(args?: { readonly cause?: unknown }) {
+    super(
+      "no model is configured for this execution — the session default, the " +
+        "per-send override, and the rendered tree (`<Model>`) all resolved to " +
+        "none. Supply a model one of these ways: `createApp({ model })` / " +
+        "`createSession({ model })` (or `modelExecutor` for a BYO engine), " +
+        "`session.model.setModel(...)`, a per-send `send({ modelExecutor })`, " +
+        "or a per-tick `<Model>` in the agent tree.",
+      { cause: args?.cause },
+    );
+  }
+}
+registerAgentickError("NoModelForExecutionError", NoModelForExecutionError);
+
+/**
  * `session.model.setModel` received a bare `LanguageModelAdapter`, but the
  * session was constructed WITHOUT a `buildModelExecutor` closure — so it has
  * no way to wrap the adapter in an executor (the adapter→executor build needs
@@ -320,6 +349,7 @@ export type SessionErrorChannel =
   | KnobError
   | ChannelError
   | ExecutionFailed
+  | NoModelForExecutionError
   | SnapshotVersionMismatch;
 
 // ============================================================================

@@ -109,19 +109,23 @@ gateway — see
 
 ### `createApp(rootElement, options)`
 
-**`model` vs `executor` (ADR 52).** `model` is _what to call_ — a bare
+**`model` vs `modelExecutor` (ADR 52).** `model` is _what to call_ — a bare
 `LanguageModelAdapter`; the app wraps it in the ONE
 `LanguageModelExecutor` on its substrate, so executor events land on
-`app.events(...)` with zero wiring. `executor` is _how to execute_ — a
-BYO engine you constructed yourself. **Exactly one is required**, and
-they are mutually exclusive; passing a bare adapter to `executor`
-throws (it belongs on `model`).
+`app.events(...)` with zero wiring. `modelExecutor` is _how to execute_ — a
+BYO engine you constructed yourself. **At most one** — passing both throws,
+and they are mutually exclusive; passing a bare adapter to `modelExecutor`
+throws (it belongs on `model`). Passing **neither** is legal: a model-less
+app is fully valid (dispatch, snapshot/restore, and wire plumbing all work
+without a model). The model requirement is enforced at **execution time** —
+a `send` whose effective-model cascade (`per-tick <Model>` > `per-send
+override` > `session default`) is empty fails with `NoModelForExecutionError`.
 
 | Field                | Type                                                   | Notes                                                                                                                                                                                                                                                         |
 | -------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `model`              | `LanguageModelAdapter`                                 | The model to call — `openai("gpt-4o")`, `aisdk(model)`, `google(...)`, etc. Standard path. Exactly one of `model` / `executor` required.                                                                                                                      |
-| `executor`           | `LanguageModelExecutor` or `ExecutorFactory`           | BYO execution engine. A bare adapter goes on `model`, not here.                                                                                                                                                                                               |
-| `target`             | `ExecutionTarget`                                      | Optional. Defaults to `executor.target`.                                                                                                                                                                                                                      |
+| `model`              | `LanguageModelAdapter`                                 | The model to call — `openai("gpt-4o")`, `aisdk(model)`, `google(...)`, etc. Standard path. At most one of `model` / `modelExecutor`; both omitted → model-less app (send fails at execution time).                                                            |
+| `modelExecutor`      | `LanguageModelExecutor` or `ExecutorFactory`           | BYO execution engine. A bare adapter goes on `model`, not here.                                                                                                                                                                                               |
+| `target`             | `ExecutionTarget`                                      | Optional. Defaults to `modelExecutor.target`.                                                                                                                                                                                                                 |
 | `compiler`           | `CompilerProtocol` or `CompilerFactory`                | Required (omittable via `/react` subpath default).                                                                                                                                                                                                            |
 | `loop`               | `LoopExecutorProtocol` or factory                      | Optional. Defaults to the bundled `LoopExecutorHarness`.                                                                                                                                                                                                      |
 | `cluster`            | `ClusterFactory`                                       | Optional. See "Cluster integration" above.                                                                                                                                                                                                                    |

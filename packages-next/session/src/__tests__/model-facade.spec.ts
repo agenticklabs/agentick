@@ -131,7 +131,7 @@ describe("session.model — selection / swap facade (ADR 89 §2)", () => {
 
     await session.model.setModel({ modelExecutor: b, target });
     // `current` reflects the swap immediately.
-    expect(session.model.current.modelExecutor).toBe(b);
+    expect(session.model.current!.modelExecutor).toBe(b);
 
     expect(await sendText(session)).toBe("from-B");
 
@@ -146,8 +146,8 @@ describe("session.model — selection / swap facade (ADR 89 §2)", () => {
     const cheaper: ExecutionTarget = { ...target, modelId: "mock-mini" };
     await session.model.setTarget(cheaper);
 
-    expect(session.model.current.modelExecutor).toBe(a); // runner unchanged
-    expect(session.model.current.target.modelId).toBe("mock-mini");
+    expect(session.model.current!.modelExecutor).toBe(a); // runner unchanged
+    expect(session.model.current!.target.modelId).toBe("mock-mini");
     // Same executor still answers, now under the swapped target.
     expect(await sendText(session)).toBe("from-A");
 
@@ -175,7 +175,7 @@ describe("session.model — selection / swap facade (ADR 89 §2)", () => {
     ).rejects.toThrow(/blocked/);
 
     // The default was NOT swapped — the next send still uses A.
-    expect(session.model.current.modelExecutor).toBe(a);
+    expect(session.model.current!.modelExecutor).toBe(a);
     expect(await sendText(session)).toBe("from-A");
 
     // A non-blocked swap still goes through.
@@ -264,7 +264,7 @@ describe("session.model — selection / swap facade (ADR 89 §2)", () => {
 
     await session.model.setModel(scriptedAdapter("from-adapter"));
     // `current` reflects the swap immediately — the built executor's own target.
-    expect(session.model.current.target.provider).toBe("scripted");
+    expect(session.model.current!.target.provider).toBe("scripted");
 
     expect(await sendText(session)).toBe("from-adapter");
 
@@ -283,7 +283,7 @@ describe("session.model — selection / swap facade (ADR 89 §2)", () => {
     );
 
     // The default is unchanged — the next send still uses A.
-    expect(session.model.current.modelExecutor).toBe(a);
+    expect(session.model.current!.modelExecutor).toBe(a);
     expect(await sendText(session)).toBe("from-A");
 
     await session.close();
@@ -307,7 +307,7 @@ describe("session.model — selection / swap facade (ADR 89 §2)", () => {
     await expect(session.model.setModel(scriptedAdapter("blocked"))).rejects.toThrow(/scripted/);
 
     // The default was NOT swapped — the next send still uses A.
-    expect(session.model.current.modelExecutor).toBe(a);
+    expect(session.model.current!.modelExecutor).toBe(a);
     expect(await sendText(session)).toBe("from-A");
 
     off();

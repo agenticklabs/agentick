@@ -240,10 +240,15 @@ describe("AppHarness model/executor slot guards", () => {
     ).rejects.toThrow(/not both/);
   });
 
-  it("rejects neither model nor executor", async () => {
-    await expect(createApp(React.createElement(MinimalAgent), {})).rejects.toThrow(
-      /model is required/,
-    );
+  it("allows neither model nor executor — a model-less app is legal", async () => {
+    // The model requirement moved to execution time (the loop's per-tick
+    // resolution → NoModelForExecutionError). Construction with no model
+    // succeeds: dispatch, snapshot/restore, and wire plumbing all work
+    // model-less. Only a send that resolves no effective model fails.
+    const app = await createApp(React.createElement(MinimalAgent), {});
+    expect((app as unknown as { modelExecutor: unknown }).modelExecutor).toBeUndefined();
+    expect((app as unknown as { target: unknown }).target).toBeUndefined();
+    await app.closeApp();
   });
 
   it("rejects a bare adapter on the executor slot", async () => {
