@@ -2,7 +2,7 @@
   "name": "@agentick/pubsub-next",
   "version": "0.0.0",
   "private": true,
-  "description": "Local observer / pub-sub primitives for Agentick v2 — `Notifier`, `KeyedNotifier`, and `LocalPubSub`. Consolidates ~16 hand-rolled fan-out implementations across harnesses, bridges, transports, and reconciler test doubles into one canonical set. Effect.PubSub-backed for the Stream-flavored variant.",
+  "description": "Local observer / pub-sub primitives for Agentick v2 — `Notifier`, `KeyedNotifier`, and `LocalPubSub`. Consolidates ~16 hand-rolled fan-out implementations across harnesses, bridges, transports, and compiler test doubles into one canonical set. Effect.PubSub-backed for the Stream-flavored variant.",
   "keywords": [
     "agentick",
     "fan-out",

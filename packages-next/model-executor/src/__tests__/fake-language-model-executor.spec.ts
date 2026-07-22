@@ -76,7 +76,7 @@ describe("FakeLanguageModelExecutor — project", () => {
     };
     // Tools come through `ProjectInput.tools` — the loop's per-tick
     // compile result. `compiled.declarations.tools` is the IR's
-    // reconciler record but NOT the projection source.
+    // compiler record but NOT the projection source.
     const input = await exec.project({
       compiled: tree,
       target: mkTarget(),

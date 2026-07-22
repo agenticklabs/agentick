@@ -3,7 +3,7 @@
  *
  * Proves that `session.send`, run on an app-supplied telemetry runtime,
  * produces a NESTED trace tree: the composed loop is ONE Effect fiber, so
- * every downstream span (`model:command:run`, `reconciler:command:
+ * every downstream span (`model:command:run`, `compiler:command:
  * render-tree`, `tool:command:dispatch`) nests under the execution span
  * (`loop:command:run-execution`) via FiberRef `parentOpId` auto-threading.
  * Before Stage 3 the loop was ~40 independent `runPromise` roots — every
@@ -23,7 +23,7 @@ import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next
 import { ElicitationHarness } from "@agentick/elicitation-next";
 import { InMemoryHandlerResolver, ToolExecutorHarness } from "@agentick/tool-executor-next";
 import { LoopExecutorHarness } from "@agentick/loop-executor-next";
-import { ReconcilerHarness } from "@agentick/reconciler-react-next";
+import { CompilerHarness } from "@agentick/compiler-react-next";
 import type { ContentBlock, ExecutionTarget } from "@agentick/spec-next";
 
 import { SessionHarness } from "../harness.js";
@@ -79,7 +79,7 @@ async function mkSession(telemetryRuntime: ManagedRuntime.ManagedRuntime<never, 
   const journal = new MemoryJournal();
   const bus = new LocalEventBus();
   const inbox = new LocalInbox();
-  const reconciler = new ReconcilerHarness("tel-r", journal, bus, inbox);
+  const compiler = new CompilerHarness("tel-r", journal, bus, inbox);
   const loop = new LoopExecutorHarness("tel-l", journal, bus, inbox);
   const resolver = new InMemoryHandlerResolver();
   const elicitation = new ElicitationHarness("tel-t:elicitation", journal, bus, inbox);
@@ -99,12 +99,12 @@ async function mkSession(telemetryRuntime: ManagedRuntime.ManagedRuntime<never, 
       },
     ],
   });
-  await Promise.all([reconciler.ready, loop.ready, tools.ready, elicitation.ready, executor.ready]);
+  await Promise.all([compiler.ready, loop.ready, tools.ready, elicitation.ready, executor.ready]);
 
   const session = new SessionHarness(journal, bus, inbox, {
     sessionId: `tel-s-${Math.random()}`,
     agent: null,
-    reconciler,
+    compiler,
     loop,
     modelExecutor: executor,
     toolExecutor: tools,
@@ -129,7 +129,7 @@ describe("Session telemetry (ADR 77 Stage 4) — the composed execution nests", 
     // Spans carry the spine harnesses' namespace ("agentick"). NOTE: the
     // session's own `telemetryNamespace` whitelabels only SESSION-owned spans;
     // `send` emits none (it is not a `runOperation`), and the loop/executor/
-    // reconciler harnesses are constructed by the app with their own
+    // compiler harnesses are constructed by the app with their own
     // namespace. A cross-spine whitelabel needs the namespace read from fiber
     // context (ADR 78 brick #2) — a documented Stage-4 follow-up, orthogonal
     // to the nesting proven here.
@@ -155,7 +155,7 @@ describe("Session telemetry (ADR 77 Stage 4) — the composed execution nests", 
     // execution's). Path-agnostic: the streaming path emits project/normalize,
     // the non-streaming path emits run — either way they nest under the tick.
     const downstream = spans.filter(
-      (s) => s.name.startsWith("model:command:") || s.name === "reconciler:command:render-tree",
+      (s) => s.name.startsWith("model:command:") || s.name === "compiler:command:render-tree",
     );
     expect(downstream.length).toBeGreaterThan(0);
 
@@ -176,7 +176,7 @@ describe("Session telemetry (ADR 77 Stage 4) — the composed execution nests", 
   it("an async `use` middleware ON THE LOOP does NOT break the downstream span tree", async () => {
     // The conclusive spine-level proof for ADR 76 gap #2. A `use` middleware on
     // the loop forks `runExecution`'s body onto the ambient runtime — so the
-    // ENTIRE downstream spine (executor + reconciler, opened INSIDE the forked
+    // ENTIRE downstream spine (executor + compiler, opened INSIDE the forked
     // continuation) runs across the async boundary. If those spans still nest
     // under the execution span, the fiber threaded through the middleware. With
     // the old default-runtime fork, they would detach (or vanish — no tracer).
@@ -214,7 +214,7 @@ describe("Session telemetry (ADR 77 Stage 4) — the composed execution nests", 
     // middleware's forked continuation (twice over). They must STILL nest,
     // under the tick, which nests under the execution.
     const downstream = spans.filter(
-      (s) => s.name.startsWith("model:command:") || s.name === "reconciler:command:render-tree",
+      (s) => s.name.startsWith("model:command:") || s.name === "compiler:command:render-tree",
     );
     expect(downstream.length).toBeGreaterThan(0);
     for (const child of downstream) {
@@ -233,7 +233,7 @@ describe("Session telemetry (ADR 77 Stage 4) — the composed execution nests", 
     const journal = new MemoryJournal();
     const bus = new LocalEventBus();
     const inbox = new LocalInbox();
-    const reconciler = new ReconcilerHarness("tel2-r", journal, bus, inbox);
+    const compiler = new CompilerHarness("tel2-r", journal, bus, inbox);
     const loop = new LoopExecutorHarness("tel2-l", journal, bus, inbox);
     const resolver = new InMemoryHandlerResolver();
     const elicitation = new ElicitationHarness("tel2-t:elicitation", journal, bus, inbox);
@@ -252,17 +252,11 @@ describe("Session telemetry (ADR 77 Stage 4) — the composed execution nests", 
         },
       ],
     });
-    await Promise.all([
-      reconciler.ready,
-      loop.ready,
-      tools.ready,
-      elicitation.ready,
-      executor.ready,
-    ]);
+    await Promise.all([compiler.ready, loop.ready, tools.ready, elicitation.ready, executor.ready]);
     const session = new SessionHarness(journal, bus, inbox, {
       sessionId: `tel2-s-${Math.random()}`,
       agent: null,
-      reconciler,
+      compiler,
       loop,
       modelExecutor: executor,
       toolExecutor: tools,

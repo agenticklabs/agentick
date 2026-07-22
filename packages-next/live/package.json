@@ -62,7 +62,7 @@
   "devDependencies": {
     "@agentick/model-executor-next": "workspace:*",
     "@agentick/gateway-next": "workspace:*",
-    "@agentick/reconciler-next": "workspace:*",
+    "@agentick/compiler-next": "workspace:*",
     "@agentick/transport-in-process-next": "workspace:*"
   }
 }

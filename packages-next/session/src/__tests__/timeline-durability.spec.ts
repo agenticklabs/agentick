@@ -23,7 +23,7 @@ import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next
 import { ElicitationHarness } from "@agentick/elicitation-next";
 import { InMemoryHandlerResolver, ToolExecutorHarness } from "@agentick/tool-executor-next";
 import { LoopExecutorHarness } from "@agentick/loop-executor-next";
-import { ReconcilerHarness } from "@agentick/reconciler-react-next";
+import { CompilerHarness } from "@agentick/compiler-react-next";
 import { MemoryTimelineStore, type TimelineStore } from "@agentick/timeline-next";
 import { stubStoreCtx } from "@agentick/store-next";
 import type { ExecutionTarget, TimelineEntry } from "@agentick/spec-next";
@@ -72,7 +72,7 @@ async function mkSession(opts: {
   const journal = new MemoryJournal();
   const bus = new LocalEventBus();
   const inbox = new LocalInbox();
-  const reconciler = new ReconcilerHarness("dur-r", journal, bus, inbox);
+  const compiler = new CompilerHarness("dur-r", journal, bus, inbox);
   const loop = new LoopExecutorHarness("dur-l", journal, bus, inbox);
   const elicitation = new ElicitationHarness("dur-t:elicitation", journal, bus, inbox);
   const tools = new ToolExecutorHarness("dur-t", journal, bus, inbox, {
@@ -80,12 +80,12 @@ async function mkSession(opts: {
     elicitation,
   });
   const executor = replyExec("ok");
-  await Promise.all([reconciler.ready, loop.ready, tools.ready, elicitation.ready, executor.ready]);
+  await Promise.all([compiler.ready, loop.ready, tools.ready, elicitation.ready, executor.ready]);
 
   const session = new SessionHarness(journal, bus, inbox, {
     sessionId: opts.sessionId,
     agent: null,
-    reconciler,
+    compiler,
     loop,
     modelExecutor: executor,
     toolExecutor: tools,

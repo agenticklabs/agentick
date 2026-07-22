@@ -5,7 +5,7 @@
  * shapes the standard components don't cover.
  */
 
-import { useBridges } from "@agentick/reconciler-react-next";
+import { useBridges } from "@agentick/compiler-react-next";
 
 import type { SubscriptionBridge } from "../bridge.js";
 

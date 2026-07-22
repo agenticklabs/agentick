@@ -5,7 +5,7 @@
  * Renders nothing visible. On mount:
  *   1. Pulls the `SandboxBridge` from `useBridges().sandbox` (must be
  *      installed via `withSandbox()`).
- *   2. Calls `bridge.createHarness(...)` via the reconciler's `useData`
+ *   2. Calls `bridge.createHarness(...)` via the compiler's `useData`
  *      blocking primitive — the bridge constructs the harness using
  *      the app's shared substrate, so events flow into `app.events()`.
  *   3. Provides the harness to descendants via React Context.
@@ -19,7 +19,7 @@
  */
 
 import * as React from "react";
-import { useBridges, useData, useOnUnmount } from "@agentick/reconciler-react-next";
+import { useBridges, useData, useOnUnmount } from "@agentick/compiler-react-next";
 import type { SandboxACL } from "@agentick/spec-next";
 import type { SandboxCreateOptions, SandboxProvider } from "../contract.js";
 

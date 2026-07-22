@@ -4,7 +4,7 @@
  * What this is, in CS terms: an **append-only event log paired with a
  * materialized projection**. The log is sacred — only `append` mutates
  * it, and once mutated it is never destructive. The projection is what
- * consumers (the formatter, the reconciler hook, the UI) actually read,
+ * consumers (the formatter, the compiler hook, the UI) actually read,
  * and it can diverge from the log via compaction or wholesale replacement.
  * Direct prior art: event sourcing + CQRS materialized views (Greg Young,
  * Kafka + ksqlDB); LSM/WAL + compaction; git's object-db vs working-tree

@@ -23,7 +23,7 @@ import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next
 import { ElicitationHarness } from "@agentick/elicitation-next";
 import { InMemoryHandlerResolver, ToolExecutorHarness } from "@agentick/tool-executor-next";
 import { LoopExecutorHarness } from "@agentick/loop-executor-next";
-import { ReconcilerHarness, System, useModelRegistration } from "@agentick/reconciler-react-next";
+import { CompilerHarness, System, useModelRegistration } from "@agentick/compiler-react-next";
 import type { ExecutionTarget, RegisteredModel } from "@agentick/spec-next";
 
 import { SessionHarness } from "../harness.js";
@@ -72,7 +72,7 @@ async function makeRig(agent: React.ReactElement, sessionExecutor: FakeLanguageM
   const journal = new MemoryJournal();
   const bus = new LocalEventBus();
   const inbox = new LocalInbox();
-  const reconciler = new ReconcilerHarness(`mb-r-${Math.random()}`, journal, bus, inbox);
+  const compiler = new CompilerHarness(`mb-r-${Math.random()}`, journal, bus, inbox);
   const loop = new LoopExecutorHarness(`mb-l-${Math.random()}`, journal, bus, inbox);
   const resolver = new InMemoryHandlerResolver();
   const elicitation = new ElicitationHarness(`mb-e-${Math.random()}`, journal, bus, inbox);
@@ -81,7 +81,7 @@ async function makeRig(agent: React.ReactElement, sessionExecutor: FakeLanguageM
     elicitation,
   });
   await Promise.all([
-    reconciler.ready,
+    compiler.ready,
     loop.ready,
     tools.ready,
     elicitation.ready,
@@ -91,7 +91,7 @@ async function makeRig(agent: React.ReactElement, sessionExecutor: FakeLanguageM
   const session = new SessionHarness(journal, bus, inbox, {
     sessionId: `mb-${Math.random()}`,
     agent,
-    reconciler,
+    compiler,
     loop,
     modelExecutor: sessionExecutor,
     toolExecutor: tools,

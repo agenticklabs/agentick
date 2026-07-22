@@ -17,8 +17,8 @@ import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next
 import { ElicitationHarness } from "@agentick/elicitation-next";
 import { InMemoryHandlerResolver, ToolExecutorHarness } from "@agentick/tool-executor-next";
 import { LoopExecutorHarness } from "@agentick/loop-executor-next";
-import { ReconcilerHarness } from "@agentick/reconciler-react-next";
-import { fakeBridges } from "@agentick/reconciler-next";
+import { CompilerHarness } from "@agentick/compiler-react-next";
+import { fakeBridges } from "@agentick/compiler-next";
 import type { ExecutionTarget, StreamEvent } from "@agentick/spec-next";
 
 import { SessionHarness } from "../harness.js";
@@ -34,7 +34,7 @@ async function mkSession(opts: { withDeltas?: boolean } = {}) {
   const journal = new MemoryJournal();
   const bus = new LocalEventBus();
   const inbox = new LocalInbox();
-  const reconciler = new ReconcilerHarness("r", journal, bus, inbox);
+  const compiler = new CompilerHarness("r", journal, bus, inbox);
   const loop = new LoopExecutorHarness("l", journal, bus, inbox);
   const resolver = new InMemoryHandlerResolver();
   const elicitation = new ElicitationHarness("t:elicitation", journal, bus, inbox);
@@ -81,11 +81,11 @@ async function mkSession(opts: { withDeltas?: boolean } = {}) {
       },
     },
   );
-  await Promise.all([reconciler.ready, loop.ready, tools.ready, elicitation.ready, executor.ready]);
+  await Promise.all([compiler.ready, loop.ready, tools.ready, elicitation.ready, executor.ready]);
   const session = new SessionHarness(journal, bus, inbox, {
     sessionId: "s",
     agent: React.createElement("section", null, "ctx"),
-    reconciler,
+    compiler,
     loop,
     modelExecutor: executor,
     toolExecutor: tools,

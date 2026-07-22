@@ -25,7 +25,7 @@ import type {
   ExecutorTerminal,
   LanguageModelExecutionResult,
   LanguageModelExecutor,
-  ReconcilerProtocol,
+  CompilerProtocol,
   RunExecutionInput,
   RunInput,
   ToolExecutorProtocol,
@@ -48,7 +48,7 @@ const okResult: LanguageModelExecutionResult = {
 
 const EMPTY_TREE = { specVersion: SPEC_VERSION, context: { entries: [] } };
 
-function stubReconciler(): ReconcilerProtocol {
+function stubCompiler(): CompilerProtocol {
   return {
     fx: {
       use: () => () => {},
@@ -71,7 +71,7 @@ function stubReconciler(): ReconcilerProtocol {
       subscriptions: [],
     }),
     restore: async () => undefined,
-  } as unknown as ReconcilerProtocol;
+  } as unknown as CompilerProtocol;
 }
 
 function stubToolExecutor(
@@ -84,7 +84,7 @@ function stubToolExecutor(
   return {
     fx: {
       use: () => () => {},
-      replaceReconcilerTools: () => Effect.void,
+      replaceCompilerTools: () => Effect.void,
       compileForTick: () => Effect.succeed([]),
       dispatch: (i: { toolCallId: string; name: string; signal?: AbortSignal }) =>
         Effect.tryPromise({ try: () => dispatch(i), catch: (e) => e }),
@@ -138,7 +138,7 @@ function baseInput(
   return {
     sessionId: "s_c",
     mountId: "c-mount",
-    reconciler: stubReconciler(),
+    compiler: stubCompiler(),
     modelExecutor: executor,
     toolExecutor,
     target: executor.target,

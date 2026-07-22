@@ -24,7 +24,7 @@ import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next
 import type {
   DispatchResult,
   LanguageModelExecutionResult,
-  ReconcilerProtocol,
+  CompilerProtocol,
   RenderedTree,
   RunExecutionInput,
   StateApplicator,
@@ -44,8 +44,8 @@ function mkSubstrate() {
   return { journal: new MemoryJournal(), bus: new LocalEventBus(), inbox: new LocalInbox() };
 }
 
-/** Stub reconciler that renders nothing (lifecycle is hook-projected, ADR 89 §4). */
-function mkStubReconciler(): ReconcilerProtocol {
+/** Stub compiler that renders nothing (lifecycle is hook-projected, ADR 89 §4). */
+function mkStubCompiler(): CompilerProtocol {
   return {
     fx: {
       use: () => () => {},
@@ -94,12 +94,12 @@ function mkFakeToolExecutor(): ToolExecutorProtocol {
   return {
     fx: {
       use: () => () => {},
-      replaceReconcilerTools: () => Effect.void,
+      replaceCompilerTools: () => Effect.void,
       compileForTick: () => Effect.succeed([]),
       dispatch: (i: { name: string; toolCallId: string }) =>
         Effect.succeed(dispatchOk({ name: i.name, toolCallId: i.toolCallId })),
     },
-    replaceReconcilerTools: async () => undefined,
+    replaceCompilerTools: async () => undefined,
     compileForTick: async () => [],
     dispatch: async (i: { name: string; toolCallId: string }) =>
       dispatchOk({ name: i.name, toolCallId: i.toolCallId }),
@@ -163,7 +163,7 @@ async function runWithHooks(
   const input: RunExecutionInput = {
     sessionId: "tc-s",
     mountId: "tc-mount",
-    reconciler: mkStubReconciler(),
+    compiler: mkStubCompiler(),
     modelExecutor: executor,
     toolExecutor: mkFakeToolExecutor(),
     target: executor.target,

@@ -7,7 +7,7 @@
  * different from the framework default.
  *
  * **Most adopters should subclass `SessionHarness`** — the session is
- * deeply integrated with reconciler/executor/loop/tool-executor wiring,
+ * deeply integrated with compiler/executor/loop/tool-executor wiring,
  * and the default impl handles a lot of plumbing. `defineSession` is
  * for the cases where that plumbing is the wrong fit.
  *

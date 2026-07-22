@@ -58,28 +58,28 @@ export type ToolExposure = "model" | "dispatch" | "runtime";
  *                     follows the `level` at which it was installed
  *   7. `client`     — a remote declarative slice a CLIENT owns and
  *                     REPLACES wholesale via `session/set_client_tools`
- *                     (the wire twin of the reconciler's
- *                     `replaceReconcilerTools`). Session-lifetime; the
+ *                     (the wire twin of the compiler's
+ *                     `replaceCompilerTools`). Session-lifetime; the
  *                     framework clears the client slice and reinstalls
  *                     the declared set on every `set_client_tools`. Held
  *                     DISTINCT from `session` so a client's declarative
  *                     replace never clobbers the app's static
  *                     `createSession({ tools })` slice.
- *   8. `reconciler` — contributed by the reconciler from the rendered
- *                     tree (any reconciler — React/JSX, programmatic,
+ *   8. `compiler` — contributed by the compiler from the rendered
+ *                     tree (any compiler — React/JSX, programmatic,
  *                     template-based — producing a valid RenderedTree
  *                     uses this slot); replaced fresh per render, most
  *                     specific
  *
  * Precedence on name collision (low → high): runtime < gateway <
  * \{app, extension\@app\} < \{session, extension\@session\} < execution <
- * client < reconciler.
+ * client < compiler.
  *
- * **Where `client` sits — and why.** `client` and `reconciler` are the
+ * **Where `client` sits — and why.** `client` and `compiler` are the
  * two DECLARATIVE-SLICE-SOURCE scopes: each owns a whole slice its
- * source replaces atomically (`set_client_tools` / `replaceReconcilerTools`),
+ * source replaces atomically (`set_client_tools` / `replaceCompilerTools`),
  * unlike the static per-layer config seams (gateway/app/session/execution).
- * `client` is placed just BELOW `reconciler`: a live client's current
+ * `client` is placed just BELOW `compiler`: a live client's current
  * declaration outranks the static session/execution config seams (it is the
  * more specific, up-to-date remote source), but the in-process rendered tree
  * stays authoritative — a tool the running tree declares wins over a
@@ -105,12 +105,12 @@ export type ToolBinding =
    * declares its FULL set over `session/set_client_tools`; the framework
    * clears this slice (`removeBoundTools({ binding: { scope: "client",
    * sessionId } })`) and reinstalls the declared tools — the wire twin of
-   * `replaceReconcilerTools`. Session-lifetime: reaped on session close.
+   * `replaceCompilerTools`. Session-lifetime: reaped on session close.
    * DISTINCT from `session` (which holds `createSession({ tools })`) so the
    * slice-replace never clobbers app tools.
    */
   | { readonly scope: "client"; readonly sessionId: string }
-  | { readonly scope: "reconciler"; readonly mountId: string };
+  | { readonly scope: "compiler"; readonly mountId: string };
 
 /**
  * Predicate form of {@link ToolAnnotations.requiresConfirmation}. Runs
@@ -669,7 +669,7 @@ export interface RuntimeDeclarations {
    * Merge is a simple concatenation with NO precedence ladder: the
    * projection dedupes by `provider` + resolved `name` (`name ?? type`),
    * last-wins. Unlike `tools` — which resolves collisions across the
-   * layered gateway/app/session/execution/extension/reconciler seams — a
+   * layered gateway/app/session/execution/extension/compiler seams — a
    * provider tool has no layered identity, so the flat merge is honest.
    * TODO(pass-d): introduce a precedence ladder here if provider-tool
    * collisions across declaration layers ever become meaningful.

@@ -3,7 +3,7 @@
  *
  * **Multi-binding storage.** Each registered name can have several
  * registrations live simultaneously — one per layered config seam
- * (gateway, app, session, execution, extension, reconciler, runtime).
+ * (gateway, app, session, execution, extension, compiler, runtime).
  * Per-tick precedence resolution happens in {@link InMemoryToolRegistry.compileForTick}:
  * for a given name, the highest-specificity binding's declaration wins.
  *
@@ -151,7 +151,7 @@ export class InMemoryToolRegistry {
    * Snapshot the registered declarations — **one entry per
    * `(name, binding)` pair**. If the same name is registered under
    * multiple bindings (e.g., once at session scope and once via
-   * the reconciler), `list` returns both.
+   * the compiler), `list` returns both.
    *
    * For the per-tick precedence-resolved set the model should see at
    * a tick, use {@link compileForTick}.
@@ -178,7 +178,7 @@ export class InMemoryToolRegistry {
    * 2. Dedup by `declaration.name`. On collision, the highest-
    *    precedence binding wins. Precedence (low → high):
    *    `runtime < gateway < {app, extension@app} < {session,
-   *    extension@session} < execution < reconciler`.
+   *    extension@session} < execution < compiler`.
    *
    * Iteration order is the insertion order of the *winning*
    * registration's name — i.e., the order in which the first
@@ -204,28 +204,28 @@ export class InMemoryToolRegistry {
   }
 
   /**
-   * Atomically replace the reconciler-bound slice for the given
+   * Atomically replace the compiler-bound slice for the given
    * `mountId`. Removes every existing
-   * `binding.scope === "reconciler" && binding.mountId === mountId`
+   * `binding.scope === "compiler" && binding.mountId === mountId`
    * entry first, then adds the supplied registrations. Other binding
    * slices are untouched.
    *
    * Every supplied registration MUST carry a matching
-   * `{ scope: "reconciler", mountId }` binding; throws otherwise.
+   * `{ scope: "compiler", mountId }` binding; throws otherwise.
    */
-  replaceReconcilerSlice(mountId: string, registrations: readonly ToolRegistration[]): void {
+  replaceCompilerSlice(mountId: string, registrations: readonly ToolRegistration[]): void {
     // 1. Validate every registration up-front so a bad input doesn't
     //    leave the registry half-mutated.
     for (const reg of registrations) {
-      if (reg.binding.scope !== "reconciler" || reg.binding.mountId !== mountId) {
+      if (reg.binding.scope !== "compiler" || reg.binding.mountId !== mountId) {
         throw new Error(
-          `replaceReconcilerSlice: registration "${reg.declaration.name}" has binding ` +
-            `${JSON.stringify(reg.binding)} — expected { scope: "reconciler", mountId: "${mountId}" }`,
+          `replaceCompilerSlice: registration "${reg.declaration.name}" has binding ` +
+            `${JSON.stringify(reg.binding)} — expected { scope: "compiler", mountId: "${mountId}" }`,
         );
       }
     }
     // 2. Remove the existing slice.
-    this.removeWhere((b) => b.scope === "reconciler" && b.mountId === mountId);
+    this.removeWhere((b) => b.scope === "compiler" && b.mountId === mountId);
     // 3. Add the new slice.
     for (const reg of registrations) {
       this.add(reg);
@@ -263,7 +263,7 @@ export class InMemoryToolRegistry {
 /**
  * Numeric precedence rank for a binding. Higher wins on name
  * collision. The ordering implements the layered config story:
- * gateway is the floor; reconciler is the ceiling; extensions take
+ * gateway is the floor; compiler is the ceiling; extensions take
  * the precedence of the level at which they were installed.
  *
  * Exported (constants + function) so adopters reading the code see
@@ -275,13 +275,13 @@ export const PRECEDENCE_RANK = {
   app: 2,
   session: 3,
   execution: 4,
-  // A CLIENT-owned declarative slice — the wire twin of the reconciler
+  // A CLIENT-owned declarative slice — the wire twin of the compiler
   // slice — outranks the static session/execution config seams (a live
   // client's current declaration is the more specific, up-to-date source)
-  // but stays BELOW the in-process rendered tree (`reconciler`), which is
+  // but stays BELOW the in-process rendered tree (`compiler`), which is
   // authoritative. Tunable — see the {@link ToolBinding} docblock.
   client: 5,
-  reconciler: 6,
+  compiler: 6,
 } as const satisfies Record<Exclude<ToolBinding["scope"], "extension">, number>;
 
 export function precedenceOf(binding: ToolBinding): number {
@@ -317,8 +317,8 @@ export function bindingKey(b: ToolBinding): string {
       return `execution:${b.executionId}`;
     case "client":
       return `client:${b.sessionId}`;
-    case "reconciler":
-      return `reconciler:${b.mountId}`;
+    case "compiler":
+      return `compiler:${b.mountId}`;
     case "extension":
       return `extension:${b.extensionName}:${b.level}`;
   }

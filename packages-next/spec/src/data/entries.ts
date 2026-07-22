@@ -19,7 +19,7 @@ import type { FormatterRef, FormatTrace } from "./formatter.js";
 // ============================================================================
 
 /**
- * Cross-provider caching intent. The reconciler MUST NOT reorder context
+ * Cross-provider caching intent. The compiler MUST NOT reorder context
  * for caching; the executor maps this hint to provider mechanics
  * (Anthropic `cache_control`, OpenAI prefix caching, Gemini
  * `cachedContents`).

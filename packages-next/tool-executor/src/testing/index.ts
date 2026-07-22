@@ -30,7 +30,7 @@ import { omitUndefined } from "@agentick/utils-next";
  *
  * `binding` defaults to `{ scope: "runtime" }` — provenance for
  * tests/ad-hoc registrations that aren't bound to a specific
- * gateway/app/session/execution/reconciler scope. Override when a test
+ * gateway/app/session/execution/compiler scope. Override when a test
  * needs to exercise precedence resolution (e.g., pass
  * `binding: { scope: "session", sessionId }` to verify a session-level
  * tool wins over a runtime one).

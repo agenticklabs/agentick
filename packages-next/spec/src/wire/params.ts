@@ -243,7 +243,7 @@ export type SessionRespondToElicitationResult = null;
  * Client → server: DECLARE the client's full client-handled tool set for a
  * session. A client is a declarative tool SOURCE that owns a slice: it sends
  * its ENTIRE set, and the framework REPLACES the client slice wholesale — the
- * wire twin of the reconciler's `replaceReconcilerTools`. This one verb
+ * wire twin of the compiler's `replaceCompilerTools`. This one verb
  * subsumes register (a tool present in the set), unregister (a tool absent
  * from it), and idempotency (the set IS the truth — it's a replace, not an
  * accumulate). Reconnect = re-declare; drift-free by construction.
@@ -508,7 +508,7 @@ export interface WireMethods {
   /**
    * DECLARE a client's full CLIENT-HANDLED tool set into a session (raw
    * JSON-Schema inputs, no handlers) — a whole-slice replace, the wire twin
-   * of the reconciler's `replaceReconcilerTools`. Session-namespace +
+   * of the compiler's `replaceCompilerTools`. Session-namespace +
    * gateway-resident handler, so the row lives here (spec) rather than a
    * harness `declare module` augment — the gateway that owns
    * `sessionWireExtension` is harness-agnostic and can't depend on

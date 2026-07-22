@@ -14,7 +14,7 @@
  *   - has(key) is true iff a fresh value entry exists.
  *
  * Implementations that pass this suite are interchangeable in any
- * reconciler harness — local in-memory, durable KV-backed, or remote
+ * compiler harness — local in-memory, durable KV-backed, or remote
  * proxies all conform to the same observable behavior.
  */
 

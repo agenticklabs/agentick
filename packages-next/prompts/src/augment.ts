@@ -17,7 +17,7 @@ declare module "@agentick/spec-next" {
     /**
      * Present when `withPrompts` is installed; consumers must check
      * before use. Optional per ADR 27 §"Built-ins are bundled, not
-     * privileged" — the reconciler iterates `HookBridges` generically
+     * privileged" — the compiler iterates `HookBridges` generically
      * via feature detection, so absence is a valid state.
      */
     readonly prompts?: Prompts;

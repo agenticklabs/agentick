@@ -40,7 +40,7 @@ import { SPEC_VERSION, GatewayBridgeSlotOccupied, defineWireExtension } from "@a
 import { waitFor } from "@agentick/utils-next/testing";
 import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
-import { ReconcilerHarness } from "@agentick/reconciler-react-next";
+import { CompilerHarness } from "@agentick/compiler-react-next";
 
 import { createGateway } from "../index.js";
 
@@ -79,7 +79,7 @@ function mkAppOptions() {
         },
       },
     ),
-    reconciler: new ReconcilerHarness(
+    compiler: new CompilerHarness(
       `r-${Math.random().toString(36).slice(2)}`,
       sub.journal,
       sub.bus,

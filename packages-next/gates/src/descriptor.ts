@@ -1,5 +1,5 @@
 /**
- * Gates — reconciler-agnostic descriptor types and factory.
+ * Gates — compiler-agnostic descriptor types and factory.
  *
  * A gate is a knob-backed continuation condition that blocks loop
  * completion until it is cleared. Two species, discriminated by the
@@ -23,9 +23,9 @@
  * gates neither verify nor block.
  *
  * The descriptors and `gate()` factory live here because they're pure
- * data — no reconciler dependency. The consumer hook (`useGate`) is
+ * data — no compiler dependency. The consumer hook (`useGate`) is
  * React-specific and lives in `@agentick/gates-next/react`. Other
- * reconcilers (Angular, Vue) would implement their own equivalent
+ * compilers (Angular, Vue) would implement their own equivalent
  * against the same descriptor shapes.
  */
 
@@ -112,7 +112,7 @@ export function isVerifiedGate(opts: GateDescriptor): opts is VerifiedGateDescri
 /**
  * Trivial descriptor factory. Exists so authors can declare gates at
  * module scope (`const verificationGate = gate({ … });`) and pass the
- * descriptor into the reconciler's gate hook (e.g.,
+ * descriptor into the compiler's gate hook (e.g.,
  * `useGate(name, verificationGate)` in React).
  */
 export function gate(opts: GateDescriptor): GateDescriptor {

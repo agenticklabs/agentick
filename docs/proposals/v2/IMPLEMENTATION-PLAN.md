@@ -171,7 +171,7 @@ Per `13-package-graph.md`. Locking the names here for reference:
 NEW:
   @agentick/spec-next                        contract types + protocol interfaces
   @agentick/runtime-next                     app/session/loop/tool harnesses, BaseHarness, MemoryJournal
-  @agentick/reconciler-react-next              JSX reconciler harness implementation
+  @agentick/compiler-react-next              JSX reconciler harness implementation
   @agentick/cluster                     optional distributed wrapper
   @agentick/persistence-memory          OperationJournal: in-memory
   @agentick/persistence-sqlite          OperationJournal: SQLite
@@ -412,7 +412,7 @@ top.
 
 ### Phase 3 — Reconciler harness (Layer 4) (~2–3 weeks)
 
-**Goal:** `ReconcilerHarness` (`@agentick/reconciler-react-next`) works
+**Goal:** `ReconcilerHarness` (`@agentick/compiler-react-next`) works
 end-to-end. Proves the substrate AND lands the most foundational piece
 of agentick.
 
@@ -441,12 +441,12 @@ Spec deliverables (lands first; can happen in parallel with Phase 2 tail):
   □ ReconcilerProtocol in spec/protocol/reconciler.ts
   □ FormatterProtocol in spec/protocol/formatter.ts
 
-Reconciler harness implementation (in @agentick/reconciler-react-next,
+Reconciler harness implementation (in @agentick/compiler-react-next,
 which is Effect-free and depends only on @agentick/spec-next):
-  □ Move v1 jsx-runtime to @agentick/reconciler-react-next
+  □ Move v1 jsx-runtime to @agentick/compiler-react-next
   □ Move v1 reconciler (react-reconciler host config) to
-    @agentick/reconciler-react-next
-  □ Move v1 components + hooks to @agentick/reconciler-react-next
+    @agentick/compiler-react-next
+  □ Move v1 components + hooks to @agentick/compiler-react-next
   □ Implement ReconcilerProtocol commands:
     □ mount, rerender, unmount
     □ renderTree (compile-until-stable; hash equality; returns
@@ -488,7 +488,7 @@ Tests:
 
 **Exit criteria:**
 
-- Reconciler harness ships in `@agentick/reconciler-react-next`
+- Reconciler harness ships in `@agentick/compiler-react-next`
 - Formatter harness ships (built-in markdown/xml)
 - All v1 reconciler + compiler + renderer tests pass against v2
 - Substrate properties (durability, idempotency, observability) prove

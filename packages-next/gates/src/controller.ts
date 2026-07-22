@@ -1,5 +1,5 @@
 /**
- * `GatesController` — the reconciler-agnostic gate-wiring core.
+ * `GatesController` — the compiler-agnostic gate-wiring core.
  *
  * ONE wiring logic, two front-ends. The verification wiring that used
  * to live inside the React `useGate` hook — register the backing knob,
@@ -27,7 +27,7 @@
  * tick. A blocking gate holds the loop open by calling `continueAfterTick`
  * on the injected `loopControl` seam; the session drains that seam and
  * folds the hold into its `TickEndForwardDecision`. There is no per-mount
- * subscription — the reconciler owns no gate wiring.
+ * subscription — the compiler owns no gate wiring.
  *
  * @see ./descriptor.ts (pure descriptor types + `gate()`)
  * @see ./react/use-gate.ts (React front-end)

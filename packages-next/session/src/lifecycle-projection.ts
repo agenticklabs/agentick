@@ -3,8 +3,8 @@
  * composition root, so IT registers the forwarders that project the
  * real command-hook lifecycle into the compiler's per-mount dispatch.
  * There is no bespoke lifecycle feed: the retired
- * `ReconcilerProtocol.notifyLifecycle` (the loop hand-feeding the
- * reconciler) is gone, and every `useOn*` event below is a projection
+ * `CompilerProtocol.notifyLifecycle` (the loop hand-feeding the
+ * compiler) is gone, and every `useOn*` event below is a projection
  * of a declared command's ADR-80 hooks.
  *
  * ## The projection map (command hook → lifecycle event)
@@ -78,7 +78,7 @@ import type {
   LifecycleEvent,
   LifecycleProjectionTarget,
   LoopExecutorProtocol,
-  ReconcilerProtocol,
+  CompilerProtocol,
   RunExecutionInput,
   TickInput,
   TickResult,
@@ -102,23 +102,23 @@ export interface LifecycleProjection {
 export interface WireLifecycleProjectionOptions {
   readonly sessionId: string;
   readonly mountId: string;
-  readonly reconciler: ReconcilerProtocol;
+  readonly compiler: CompilerProtocol;
   readonly loop: LoopExecutorProtocol;
   readonly toolExecutor: ToolExecutorProtocol;
 }
 
 /**
  * Register the session's lifecycle forwarders. Returns `undefined` when
- * the reconciler does not expose the `LifecycleProjectionTarget`
+ * the compiler does not expose the `LifecycleProjectionTarget`
  * capability (a compiler with no in-tree lifecycle surface) — the
  * projection is simply absent.
  */
 export function wireLifecycleProjection(
   opts: WireLifecycleProjectionOptions,
 ): LifecycleProjection | undefined {
-  const { sessionId, mountId, loop, toolExecutor, reconciler } = opts;
-  if (!supportsLifecycleProjection(reconciler)) return undefined;
-  const target: LifecycleProjectionTarget = reconciler;
+  const { sessionId, mountId, loop, toolExecutor, compiler } = opts;
+  if (!supportsLifecycleProjection(compiler)) return undefined;
+  const target: LifecycleProjectionTarget = compiler;
 
   /** Awaited dispatch — a rejection propagates into the command cascade. */
   const settle = (event: LifecycleEvent): Promise<void> =>

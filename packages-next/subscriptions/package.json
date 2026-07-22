@@ -63,8 +63,8 @@
   },
   "dependencies": {
     "@agentick/pubsub-next": "workspace:*",
-    "@agentick/reconciler-next": "workspace:*",
-    "@agentick/reconciler-react-next": "workspace:*",
+    "@agentick/compiler-next": "workspace:*",
+    "@agentick/compiler-react-next": "workspace:*",
     "@agentick/runtime-next": "workspace:*",
     "@agentick/spec-next": "workspace:*"
   },

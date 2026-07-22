@@ -1,5 +1,5 @@
 /**
- * THE integration gate (#206 / ADR 55): the loop → reconciler →
+ * THE integration gate (#206 / ADR 55): the loop → compiler →
  * lifecycle-hook chain, end to end, through a REAL stack. Its absence is
  * why the dead bridge shipped green across five packages — every prior
  * lifecycle test injected at the store/harness boundary by hand. This one
@@ -18,7 +18,7 @@ import { InMemoryHandlerResolver, ToolExecutorHarness } from "@agentick/tool-exe
 import { LoopExecutorHarness } from "@agentick/loop-executor-next";
 import { useKnob } from "@agentick/knobs-next/react";
 import {
-  ReconcilerHarness,
+  CompilerHarness,
   useBridges,
   useContextInfo,
   useOnTickEnd,
@@ -30,8 +30,8 @@ import {
   useOnModelGenerateEnd,
   useOnError,
   type ContextInfo,
-} from "@agentick/reconciler-react-next";
-import { System } from "@agentick/reconciler-react-next";
+} from "@agentick/compiler-react-next";
+import { System } from "@agentick/compiler-react-next";
 import type {
   ExecutionTarget,
   LifecycleError,
@@ -136,7 +136,7 @@ describe("lifecycle bridge — real loop drives the WHOLE hook family (#206 / AD
     const journal = new MemoryJournal();
     const bus = new LocalEventBus();
     const inbox = new LocalInbox();
-    const reconciler = new ReconcilerHarness("lc-r", journal, bus, inbox);
+    const compiler = new CompilerHarness("lc-r", journal, bus, inbox);
     const loop = new LoopExecutorHarness("lc-l", journal, bus, inbox);
     const resolver = new InMemoryHandlerResolver();
     resolver.register("h.echo", async () => [{ type: "text", text: "ok" }]);
@@ -146,18 +146,12 @@ describe("lifecycle bridge — real loop drives the WHOLE hook family (#206 / AD
       elicitation,
     });
     const executor = toolThenReplyExec();
-    await Promise.all([
-      reconciler.ready,
-      loop.ready,
-      tools.ready,
-      elicitation.ready,
-      executor.ready,
-    ]);
+    await Promise.all([compiler.ready, loop.ready, tools.ready, elicitation.ready, executor.ready]);
 
     const session = new SessionHarness(journal, bus, inbox, {
       sessionId: `lc-${Math.random()}`,
       agent: React.createElement(Agent),
-      reconciler,
+      compiler,
       loop,
       modelExecutor: executor,
       toolExecutor: tools,
@@ -232,7 +226,7 @@ interface Stack {
   readonly journal: MemoryJournal;
   readonly bus: LocalEventBus;
   readonly inbox: LocalInbox;
-  readonly reconciler: ReconcilerHarness;
+  readonly compiler: CompilerHarness;
   readonly loop: LoopExecutorHarness;
 }
 
@@ -240,10 +234,10 @@ async function mkStack(scope: string): Promise<Stack> {
   const journal = new MemoryJournal();
   const bus = new LocalEventBus();
   const inbox = new LocalInbox();
-  const reconciler = new ReconcilerHarness(`${scope}-r`, journal, bus, inbox);
+  const compiler = new CompilerHarness(`${scope}-r`, journal, bus, inbox);
   const loop = new LoopExecutorHarness(`${scope}-l`, journal, bus, inbox);
-  await Promise.all([reconciler.ready, loop.ready]);
-  return { journal, bus, inbox, reconciler, loop };
+  await Promise.all([compiler.ready, loop.ready]);
+  return { journal, bus, inbox, compiler, loop };
 }
 
 async function mkSession(
@@ -268,7 +262,7 @@ async function mkSession(
   const session = new SessionHarness(journal, bus, inbox, {
     sessionId,
     agent,
-    reconciler: stack.reconciler,
+    compiler: stack.compiler,
     loop: stack.loop,
     modelExecutor: executor,
     toolExecutor: tools,

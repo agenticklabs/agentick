@@ -3,7 +3,7 @@
 Framework-agnostic bedrock utilities for Agentick v2.
 
 `@agentick/utils-next` is the **lowest** layer of the v2 dependency graph:
-pure functions over plain JavaScript values, no reconciler, no harness,
+pure functions over plain JavaScript values, no compiler, no harness,
 no protocol coupling. Anything in this package can be lifted into any
 runtime — Node, Deno, the browser, the edge — without dragging a single
 agentick concept along.
@@ -82,38 +82,38 @@ Pattern B).
 
 ## API
 
-| Export                    | Kind      | Purpose                                                   |
-| ------------------------- | --------- | --------------------------------------------------------- |
-| `isString`                | predicate | `typeof v === "string"`                                   |
-| `isNumber`                | predicate | `typeof v === "number"`                                   |
-| `isBoolean`               | predicate | `typeof v === "boolean"`                                  |
-| `isNull`                  | predicate | `v === null`                                              |
-| `isUndefined`             | predicate | `v === undefined`                                         |
-| `isDefined<T>`            | predicate | not `null` and not `undefined`                            |
-| `isFunction`              | predicate | `typeof v === "function"`                                 |
-| `isArray`                 | predicate | `Array.isArray(v)`                                        |
-| `isDate`                  | predicate | `v instanceof Date`                                       |
-| `isRegExp`                | predicate | `v instanceof RegExp`                                     |
-| `isMap`                   | predicate | `v instanceof Map`                                        |
-| `isSet`                   | predicate | `v instanceof Set`                                        |
-| `isObject`                | predicate | "everyday" object check (NOT array, NOT null)             |
-| `isPlainObject`           | predicate | POJO only (prototype is `Object.prototype` or `null`)     |
-| `isEqual(a, b)`           | function  | deep structural equality (JSON-shape + `Date` + `RegExp`) |
-| `mergeLayered<T>`         | function  | variadic cascade deep-merge, left → right                 |
-| `foldLayer<T>`            | function  | single-layer fold (advanced composition)                  |
-| `append<T>(arr)`          | strategy  | array append to parent slot                               |
-| `prepend<T>(arr)`         | strategy  | array prepend                                             |
-| `replace<T>(v)`           | strategy  | replace parent slot verbatim (opt out of deep merge)      |
-| `omit()`                  | strategy  | delete the slot from the merged result                    |
-| `isMergeStrategy`         | guard     | true if a value carries a strategy marker                 |
-| `Layer<T>`                | type      | one partial-config layer in a cascade                     |
-| `MergeStrategy<T>`        | type      | symbol-wrapped field strategy                             |
-| `reasonOf(cause)`         | function  | unknown value → single-line reason string                 |
-| `reasonOfCause<E>(cause)` | function  | Effect.Cause → single-line reason string                  |
-| `unwrapExit<A, E>(exit)`  | function  | Exit → value or throw (preserves typed failure identity)  |
+| Export                    | Kind      | Purpose                                                     |
+| ------------------------- | --------- | ----------------------------------------------------------- |
+| `isString`                | predicate | `typeof v === "string"`                                     |
+| `isNumber`                | predicate | `typeof v === "number"`                                     |
+| `isBoolean`               | predicate | `typeof v === "boolean"`                                    |
+| `isNull`                  | predicate | `v === null`                                                |
+| `isUndefined`             | predicate | `v === undefined`                                           |
+| `isDefined<T>`            | predicate | not `null` and not `undefined`                              |
+| `isFunction`              | predicate | `typeof v === "function"`                                   |
+| `isArray`                 | predicate | `Array.isArray(v)`                                          |
+| `isDate`                  | predicate | `v instanceof Date`                                         |
+| `isRegExp`                | predicate | `v instanceof RegExp`                                       |
+| `isMap`                   | predicate | `v instanceof Map`                                          |
+| `isSet`                   | predicate | `v instanceof Set`                                          |
+| `isObject`                | predicate | "everyday" object check (NOT array, NOT null)               |
+| `isPlainObject`           | predicate | POJO only (prototype is `Object.prototype` or `null`)       |
+| `isEqual(a, b)`           | function  | deep structural equality (JSON-shape + `Date` + `RegExp`)   |
+| `mergeLayered<T>`         | function  | variadic cascade deep-merge, left → right                   |
+| `foldLayer<T>`            | function  | single-layer fold (advanced composition)                    |
+| `append<T>(arr)`          | strategy  | array append to parent slot                                 |
+| `prepend<T>(arr)`         | strategy  | array prepend                                               |
+| `replace<T>(v)`           | strategy  | replace parent slot verbatim (opt out of deep merge)        |
+| `omit()`                  | strategy  | delete the slot from the merged result                      |
+| `isMergeStrategy`         | guard     | true if a value carries a strategy marker                   |
+| `Layer<T>`                | type      | one partial-config layer in a cascade                       |
+| `MergeStrategy<T>`        | type      | symbol-wrapped field strategy                               |
+| `reasonOf(cause)`         | function  | unknown value → single-line reason string                   |
+| `reasonOfCause<E>(cause)` | function  | Effect.Cause → single-line reason string                    |
+| `unwrapExit<A, E>(exit)`  | function  | Exit → value or throw (preserves typed failure identity)    |
 | `applyJsonPatch<T>`       | function  | apply RFC 6902 ops (add/replace/remove/test), copy-on-write |
-| `JsonPatchOp`             | type      | one RFC 6902 operation                                     |
-| `JsonPatchError`          | class     | thrown when a patch cannot be applied                     |
+| `JsonPatchOp`             | type      | one RFC 6902 operation                                      |
+| `JsonPatchError`          | class     | thrown when a patch cannot be applied                       |
 
 **`/loaders` subpath:** see [src/loaders/README.md](./src/loaders/README.md) for the loader primitive surface.
 
@@ -162,7 +162,7 @@ site.
 
 - Anything that imports from `@agentick/spec-next`, a harness, or a
   protocol — it's domain code, not a bedrock utility.
-- Anything tied to React, JSX, the reconciler, or any runtime event
+- Anything tied to React, JSX, the compiler, or any runtime event
   loop.
 - `Map`/`Set` deep equality (rare in our codebase, and `effect/Equal`
   handles it for callers who need it).

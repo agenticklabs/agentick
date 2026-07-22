@@ -57,8 +57,8 @@
   "dependencies": {
     "@agentick/client-core-next": "workspace:*",
     "@agentick/pubsub-next": "workspace:*",
-    "@agentick/reconciler-next": "workspace:*",
-    "@agentick/reconciler-react-next": "workspace:*",
+    "@agentick/compiler-next": "workspace:*",
+    "@agentick/compiler-react-next": "workspace:*",
     "@agentick/runtime-next": "workspace:*",
     "@agentick/spec-next": "workspace:*",
     "@agentick/store-next": "workspace:*",

@@ -1726,6 +1726,25 @@ blueprint's design decisions; this is execution-level).
 
 ### 2026-07-21
 
+- **reconciler → compiler RENAME LANDED (#243).** The JSX/tree→IR subsystem's public
+  identity is now "compiler" ("reconciler" was React-fiber jargon leaked into the API).
+  114 git-detected renames: `packages-next/{reconciler→compiler, reconciler-react→
+compiler-react}` (`@agentick/compiler-next`/`compiler-react-next`), spec
+  `protocol/reconciler.ts→compiler.ts`, ALL subsystem identifiers `Reconciler*→Compiler*`
+  (Protocol/Harness/Container/Snapshot/defineCompiler/reactCompiler/
+  replaceCompilerTools/…), `RunExecutionInput.reconciler→compiler`. Data surfaces (locked,
+  no-compat): ToolBinding `scope:"reconciler"→"compiler"` + PRECEDENCE_RANK; EventSurface
+  `"reconciler"→"compiler"`; op-name literals `compiler:command:*` (forced by the
+  `${surface}:` prefix requirement — coupled, unlike the deferred executor case).
+  AVOID-LIST held: `react-reconciler` npm dep + ReactReconciler/FiberRoot + provenance
+  comments intact (12 refs, 0 `react-compiler` corruption). Driver judgment call approved:
+  internal `Reconciler`→`Compiler` in `react/compiler.ts` (ours, not the library).
+  Blueprints keep filenames + got rename notes; all READMEs/website config swept.
+  Gates: pnpm install re-link; typecheck --force 152/152 0-cached; 897 tests incl
+  kill/resume; oxfmt 264 files clean; oxlint 0 errors; unfiltered greps = only blueprint
+  filename refs. **The locked queue is COMPLETE:** stage 3 ✓ narration ✓ ADR 89 §1-§4 ✓
+  chunk hooks ✓ streaming-up ✓ compiler rename ✓.
+
 - **Streaming-up LANDED — `loop:run-execution` is a commandStream; onEvent RETIRED.**
   The loop's execution events are first-class chunks: `commandStream<RunExecutionInput,
 LoopExecutionEvent, ExecutionTerminal>` (renamed `LoopEmittedEvent`→`LoopExecutionEvent`

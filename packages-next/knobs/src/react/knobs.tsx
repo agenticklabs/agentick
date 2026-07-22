@@ -54,9 +54,9 @@ import type {
 } from "@agentick/spec-next";
 import { jsonSchema } from "@agentick/spec-next";
 
-import { useBridges } from "@agentick/reconciler-react-next";
-import { createTool } from "@agentick/reconciler-react-next";
-import { Section } from "@agentick/reconciler-react-next";
+import { useBridges } from "@agentick/compiler-react-next";
+import { createTool } from "@agentick/compiler-react-next";
+import { Section } from "@agentick/compiler-react-next";
 
 const h = React.createElement;
 

@@ -471,11 +471,11 @@ describe("ToolExecutorHarness — inbox dispatch-by-name (declared command)", ()
 void permissiveValidator;
 
 // ============================================================================
-// Slice-2 (#136) — replaceReconcilerTools + compileForTick via the harness
+// Slice-2 (#136) — replaceCompilerTools + compileForTick via the harness
 // ============================================================================
 
-describe("ToolExecutorHarness — replaceReconcilerTools (#136)", () => {
-  function reconcilerReg(name: string, mountId: string): ToolRegistration {
+describe("ToolExecutorHarness — replaceCompilerTools (#136)", () => {
+  function compilerReg(name: string, mountId: string): ToolRegistration {
     return {
       declaration: {
         id: name,
@@ -485,21 +485,21 @@ describe("ToolExecutorHarness — replaceReconcilerTools (#136)", () => {
         exposure: ["model"],
       },
       handlerRef: `h.${name}`,
-      binding: { scope: "reconciler", mountId },
+      binding: { scope: "compiler", mountId },
     };
   }
 
-  it("swaps the reconciler slice atomically per mountId", async () => {
+  it("swaps the compiler slice atomically per mountId", async () => {
     const { harness } = await createTestHarness();
-    await harness.replaceReconcilerTools({
+    await harness.replaceCompilerTools({
       mountId: "m1",
-      registrations: [reconcilerReg("a", "m1"), reconcilerReg("b", "m1")],
+      registrations: [compilerReg("a", "m1"), compilerReg("b", "m1")],
     });
     expect((await harness.list()).map((d) => d.name).sort()).toEqual(["a", "b"]);
 
-    await harness.replaceReconcilerTools({
+    await harness.replaceCompilerTools({
       mountId: "m1",
-      registrations: [reconcilerReg("a", "m1"), reconcilerReg("c", "m1")],
+      registrations: [compilerReg("a", "m1"), compilerReg("c", "m1")],
     });
     expect((await harness.list()).map((d) => d.name).sort()).toEqual(["a", "c"]);
   });
@@ -508,21 +508,21 @@ describe("ToolExecutorHarness — replaceReconcilerTools (#136)", () => {
     const { harness } = await createTestHarness({
       tools: [echoReg("rt-only", ["model"])], // binding: runtime
     });
-    await harness.replaceReconcilerTools({
+    await harness.replaceCompilerTools({
       mountId: "m1",
-      registrations: [reconcilerReg("rendered", "m1")],
+      registrations: [compilerReg("rendered", "m1")],
     });
     const names = (await harness.list()).map((d) => d.name).sort();
     expect(names).toEqual(["rendered", "rt-only"]);
 
-    await harness.replaceReconcilerTools({ mountId: "m1", registrations: [] });
+    await harness.replaceCompilerTools({ mountId: "m1", registrations: [] });
     const after = (await harness.list()).map((d) => d.name).sort();
     expect(after).toEqual(["rt-only"]);
   });
 });
 
 describe("ToolExecutorHarness — compileForTick precedence (#136)", () => {
-  it("reconciler binding wins over runtime on name collision", async () => {
+  it("compiler binding wins over runtime on name collision", async () => {
     const { harness } = await createTestHarness({
       tools: [
         {
@@ -538,25 +538,25 @@ describe("ToolExecutorHarness — compileForTick precedence (#136)", () => {
         },
       ],
     });
-    await harness.replaceReconcilerTools({
+    await harness.replaceCompilerTools({
       mountId: "m1",
       registrations: [
         {
           declaration: {
             id: "foo",
             name: "foo",
-            description: "reconciler version",
+            description: "compiler version",
             inputSchema: jsonSchema({ type: "object" }),
             exposure: ["model"],
           },
-          handlerRef: "h.foo.reconciler",
-          binding: { scope: "reconciler", mountId: "m1" },
+          handlerRef: "h.foo.compiler",
+          binding: { scope: "compiler", mountId: "m1" },
         },
       ],
     });
     const compiled = await harness.compileForTick({ exposure: "model" });
     expect(compiled).toHaveLength(1);
-    expect(compiled[0]!.description).toBe("reconciler version");
+    expect(compiled[0]!.description).toBe("compiler version");
   });
 
   it("filter applies BEFORE precedence (high-rank failing filter doesn't shadow lower-rank passing)", async () => {

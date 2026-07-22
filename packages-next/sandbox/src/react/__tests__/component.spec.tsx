@@ -1,5 +1,5 @@
 /**
- * `<Sandbox>` + `useSandbox()` integration with reconciler-react.
+ * `<Sandbox>` + `useSandbox()` integration with compiler-react.
  *
  * Verifies:
  *   - Mounting `<Sandbox provider={...}>` constructs a harness and
@@ -12,8 +12,8 @@ import React from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
-import { ReconcilerHarness } from "@agentick/reconciler-react-next";
-import { fakeBridges } from "@agentick/reconciler-next";
+import { CompilerHarness } from "@agentick/compiler-react-next";
+import { fakeBridges } from "@agentick/compiler-next";
 import { ElicitationHarness } from "@agentick/elicitation-next";
 import type { HookBridges } from "@agentick/spec-next";
 
@@ -56,12 +56,7 @@ function makeProvider(opts: { onDestroy?: () => void } = {}): SandboxProvider {
 }
 
 async function makeHarness() {
-  const h = new ReconcilerHarness(
-    "h_sb",
-    new MemoryJournal(),
-    new LocalEventBus(),
-    new LocalInbox(),
-  );
+  const h = new CompilerHarness("h_sb", new MemoryJournal(), new LocalEventBus(), new LocalInbox());
   await h.ready;
   return h;
 }

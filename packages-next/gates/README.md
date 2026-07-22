@@ -128,7 +128,7 @@ model's `set_knob` path stays refused by the read-only knob.
 ## How the two front-ends converge (architecture)
 
 ```
-              gate() descriptor  (pure data — no reconciler)
+              gate() descriptor  (pure data — no compiler)
                        │
         ┌──────────────┴───────────────┐
    useGate (React)              session.gates (programmatic)
@@ -138,7 +138,7 @@ model's `set_knob` path stays refused by the read-only knob.
                  (knobs · loop)
 ```
 
-The `GatesController` (in the reconciler-agnostic package root) holds the gate
+The `GatesController` (in the compiler-agnostic package root) holds the gate
 registry and the `handleTickEnd` pass that arms, evaluates, fails closed,
 auto-clears, and drives loop continuation. It takes its collaborators
 **injected**:
@@ -150,10 +150,10 @@ auto-clears, and drives loop continuation. It takes its collaborators
 **Evaluation is driven, not subscribed (ADR 67).** The session's continuation
 decision — `session.notifyLifecycle` — calls `controller.handleTickEnd(result)`
 once per tick with the settled `TickResult` (executed tool results +
-`shouldContinue`), AFTER the reconciler tick-end has settled the tree. A
+`shouldContinue`), AFTER the compiler tick-end has settled the tree. A
 blocking gate calls `continueAfterTick` on the injected loop seam; the session
 drains it and folds the hold into its `TickEndForwardDecision`. There is **no**
-per-mount tick-end subscription and **no** `<GatesRuntime />` — the reconciler
+per-mount tick-end subscription and **no** `<GatesRuntime />` — the compiler
 owns no gate wiring, and programmatic-only gates evaluate identically to
 tree-declared ones (both live in the same session-owned controller). `useGate`
 is therefore **registration-only**: register on mount, unregister on unmount,
@@ -162,7 +162,7 @@ reflect the knob value.
 Gates is **not a harness**: it owns no independent state (a gate's value is a
 knob value), so it gets no `HookBridges` harness slot and is not snapshot-
 captured. The controller rides the existing `BridgeContext` — a
-reconciler-react React context — as a runtime transport property, which is how
+compiler-react React context — as a runtime transport property, which is how
 `session.gates` and every `useGate` resolve the same instance.
 
 ### Layer-aware resolution (app tier — a future layer the seam enables)
@@ -184,7 +184,7 @@ through each session's tick automatically.
 
 ## API
 
-### Root (`@agentick/gates-next`) — reconciler-agnostic
+### Root (`@agentick/gates-next`) — compiler-agnostic
 
 - `gate(descriptor)` — trivial descriptor factory (declare at module scope).
 - `isVerifiedGate(descriptor)`, `GATE_OPTIONS`, `VERIFIED_GATE_OPTIONS`.

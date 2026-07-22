@@ -202,8 +202,8 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
     "session/set_client_tools": async (params, ctx) => {
       const sess = (ctx.session ?? findSession(ctx, params.sessionId)) as SessionWithTools;
       const binding = { scope: "client", sessionId: params.sessionId } as const;
-      // DECLARATIVE whole-slice replace — the wire twin of the reconciler's
-      // `replaceReconcilerTools`. A client is a declarative tool SOURCE that
+      // DECLARATIVE whole-slice replace — the wire twin of the compiler's
+      // `replaceCompilerTools`. A client is a declarative tool SOURCE that
       // owns the `{ scope: "client", sessionId }` slice: it declares its FULL
       // set, and we replace the slice wholesale. This subsumes register (in the
       // set), unregister (absent), and idempotency (it's a replace). The client

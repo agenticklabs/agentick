@@ -63,7 +63,7 @@ import type {
   OperationJournal,
   RegisterToolInput,
   RemoveBoundToolsInput,
-  ReplaceReconcilerToolsInput,
+  ReplaceCompilerToolsInput,
   RespondToToolCallInput,
   SubstrateError,
   ToolDeclaration,
@@ -128,12 +128,12 @@ export interface DefineToolExecutorInput {
   readonly abort?: (input: AbortInput) => Promise<void>;
 
   /**
-   * Optional custom `replaceReconcilerTools` callback. When omitted,
+   * Optional custom `replaceCompilerTools` callback. When omitted,
    * the harness's internal registry handles the atomic swap. Provide
    * together with the storage-set (`list`, `register`, `unregister`)
    * for fully-custom registry storage.
    */
-  readonly replaceReconcilerTools?: (input: ReplaceReconcilerToolsInput) => Promise<void>;
+  readonly replaceCompilerTools?: (input: ReplaceCompilerToolsInput) => Promise<void>;
 
   /**
    * Optional custom `removeBoundTools` callback. When omitted, the
@@ -347,35 +347,35 @@ class CallbackToolExecutor extends BaseHarness<"tool"> implements ToolExecutorPr
   }
 
   /**
-   * The composable `replaceReconcilerTools` Effect — the
-   * `.fx.replaceReconcilerTools` twin (see the harness impl for the
+   * The composable `replaceCompilerTools` Effect — the
+   * `.fx.replaceCompilerTools` twin (see the harness impl for the
    * design). Returns `runOperation(op, body)` un-run so the loop composes
-   * the reconciler-slice swap in-fiber. A binding mismatch (or a rejecting
+   * the compiler-slice swap in-fiber. A binding mismatch (or a rejecting
    * spec override) surfaces as a tagged `ToolValidationError` on the `E`
-   * channel. {@link replaceReconcilerTools} is the facade.
+   * channel. {@link replaceCompilerTools} is the facade.
    */
-  private replaceReconcilerToolsFx(
-    input: ReplaceReconcilerToolsInput,
+  private replaceCompilerToolsFx(
+    input: ReplaceCompilerToolsInput,
   ): Effect.Effect<void, ToolExecutorErrorChannel | SubstrateError, never> {
-    const op: Operation<ReplaceReconcilerToolsInput, void, ToolExecutorErrorChannel> = {
-      opId: input.opId ?? `tool:replace-reconciler:${input.mountId}:${ulid()}`,
+    const op: Operation<ReplaceCompilerToolsInput, void, ToolExecutorErrorChannel> = {
+      opId: input.opId ?? `tool:replace-compiler:${input.mountId}:${ulid()}`,
       surface: "tool",
-      name: "tool:command:replace-reconciler-tools",
+      name: "tool:command:replace-compiler-tools",
       scope: {},
       input,
     };
     return this.runOperation(op, (i) =>
       Effect.tryPromise({
         try: async () => {
-          if (this.spec.replaceReconcilerTools) {
-            await this.spec.replaceReconcilerTools(i);
+          if (this.spec.replaceCompilerTools) {
+            await this.spec.replaceCompilerTools(i);
           } else {
-            this.registry.replaceReconcilerSlice(i.mountId, i.registrations);
+            this.registry.replaceCompilerSlice(i.mountId, i.registrations);
           }
         },
         catch: (cause): ToolExecutorErrorChannel =>
           new ToolValidationError({
-            toolName: `reconciler-slice:${i.mountId}`,
+            toolName: `compiler-slice:${i.mountId}`,
             issues: [{ message: cause instanceof Error ? cause.message : String(cause) }],
             cause,
           }),
@@ -383,8 +383,8 @@ class CallbackToolExecutor extends BaseHarness<"tool"> implements ToolExecutorPr
     );
   }
 
-  replaceReconcilerTools(input: ReplaceReconcilerToolsInput): Promise<void> {
-    return runHarnessProtocol(this.replaceReconcilerToolsFx(input));
+  replaceCompilerTools(input: ReplaceCompilerToolsInput): Promise<void> {
+    return runHarnessProtocol(this.replaceCompilerToolsFx(input));
   }
 
   /**
@@ -424,7 +424,7 @@ class CallbackToolExecutor extends BaseHarness<"tool"> implements ToolExecutorPr
     return {
       use: (mw) => this.registerEffectMiddleware(mw),
       dispatch: (input) => this.dispatchFx(input),
-      replaceReconcilerTools: (input) => this.replaceReconcilerToolsFx(input),
+      replaceCompilerTools: (input) => this.replaceCompilerToolsFx(input),
       compileForTick: (filter) => this.compileForTickFx(filter),
     };
   }

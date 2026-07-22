@@ -241,7 +241,7 @@ describe("@agentick/spec-next — tool executor protocol", () => {
         | "abort"
         | "list"
         | "removeBoundTools"
-        | "replaceReconcilerTools"
+        | "replaceCompilerTools"
         | "compileForTick"
       >();
     });

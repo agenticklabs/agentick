@@ -2,7 +2,7 @@
 
 Pure-function content formatters for Agentick v2. Ships the
 `createFormatter` builder plus markdown / xml / text reference
-formatters. The reconciler harness dispatches by `FormatterRef` to
+formatters. The compiler harness dispatches by `FormatterRef` to
 turn semantic content into wire-ready prompts for the model.
 
 **Spec firewall:** This package depends only on `@agentick/spec-next`. No
@@ -30,7 +30,7 @@ import { xmlFormatter, builtInFormatters } from "@agentick/formatters-next";
 
 const app = await createApp(<Agent />, {
   model: openai("gpt-5"),
-  reconciler: {
+  compiler: {
     formatters: builtInFormatters(),
     defaultFormatterId: xmlFormatter.__identity.id,
   },
@@ -40,7 +40,7 @@ const app = await createApp(<Agent />, {
 To switch formatters inside the JSX tree:
 
 ```tsx
-import { Markdown, XML, PlainText } from "@agentick/reconciler-react-next";
+import { Markdown, XML, PlainText } from "@agentick/compiler-react-next";
 
 <Agent>
   <XML>
@@ -71,7 +71,7 @@ Imported from `@agentick/spec-next`.
 
 ### `createFormatter(spec)`
 
-Decorate a render function with identity metadata so the reconciler's
+Decorate a render function with identity metadata so the compiler's
 registry can dispatch by `FormatterRef`. Per [ADR
 36](../../docs/proposals/v2/blueprint/36-define-vs-create-convention.md):
 formatters need no parent-substrate to construct, so the verb is
@@ -144,8 +144,8 @@ Each handles the full `SemanticType` set defined in
 Returns a `ReadonlyMap<string, DefinedFormatter>` pre-loaded with the
 three reference formatters, keyed by `__identity.id` (`formatter.markdown`,
 `formatter.xml`, `formatter.text`). Pass it into
-`ReconcilerHarnessOptions.formatters` to enable the reference set; the
-reconciler does this by default.
+`CompilerHarnessOptions.formatters` to enable the reference set; the
+compiler does this by default.
 
 ### `refOf(formatter)`
 
@@ -161,8 +161,8 @@ const ref = refOf(markdownFormatter);
 Tree-level IR → final string. The single entry point for "I have a
 `RenderedTree`, give me the formatted output." Used by:
 
-- `ReconcilerHarness.renderToString` (full reactive harness path)
-- `renderTemplate` in `@agentick/reconciler-react-next` (one-shot
+- `CompilerHarness.renderToString` (full reactive harness path)
+- `renderTemplate` in `@agentick/compiler-react-next` (one-shot
   static template path)
 - adopters who hold the IR (e.g., from `compileTemplate` or from a
   `RenderedTree` shipped over the wire) and want the string
@@ -254,6 +254,6 @@ export const anthropicCacheFormatter = createFormatter({
 
 - [`@agentick/spec-next`](../spec) — `Formatter`, `SemanticContentBlock`,
   `FormatterRef`, `SemanticNode` types.
-- [`@agentick/reconciler-react-next`](../reconciler-react) — the reconciler
+- [`@agentick/compiler-react-next`](../compiler-react) — the compiler
   that dispatches formatters during its fold pass.
 - [Blueprint §04 — Formatters](../../docs/proposals/v2/blueprint/04-formatters.md)

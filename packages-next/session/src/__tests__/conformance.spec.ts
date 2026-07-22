@@ -22,14 +22,14 @@ describe("SessionHarness — SessionHarnessProtocol conformance", () => {
     // intentionally minimal substrate (stubs that throw if invoked).
     // SessionHarness, by contrast, needs real journal/bus/inbox. We
     // construct them locally and rely on the suite-supplied
-    // reconciler/loop/executor/toolExecutor stubs.
+    // compiler/loop/executor/toolExecutor stubs.
     const journal = new MemoryJournal();
     const bus = new LocalEventBus();
     const inbox = new LocalInbox();
     const realDeps = defaultSessionConformanceDeps(
       { journal, bus, inbox },
       {
-        reconciler: deps.reconciler,
+        compiler: deps.compiler,
         loop: deps.loop,
         modelExecutor: deps.modelExecutor,
         toolExecutor: deps.toolExecutor,
@@ -41,7 +41,7 @@ describe("SessionHarness — SessionHarnessProtocol conformance", () => {
     const session = new SessionHarness(realDeps.journal, realDeps.bus, realDeps.inbox, {
       sessionId: harnessId,
       agent: realDeps.agent,
-      reconciler: realDeps.reconciler,
+      compiler: realDeps.compiler,
       loop: realDeps.loop,
       modelExecutor: realDeps.modelExecutor,
       toolExecutor: realDeps.toolExecutor,

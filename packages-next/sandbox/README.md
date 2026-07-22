@@ -232,7 +232,7 @@ provider) invokes it, so it works uniformly across every provider.
 | `matchRequest` / `matchDomain`                               | The pure first-match-wins egress matcher (default-deny, `*.domain` wildcards).                                                                          |
 | `SessionACL`, `matchesACLPattern`                            | Per-session learned allow/deny state + the glob / `regex:` pattern matcher.                                                                             |
 | Spec wire types (re-exported)                                | `SandboxExec*`/`SandboxEdit*`/mount inputs, `SandboxPermissions`, `NetworkRule`, `ProxiedRequest` — one import source for providers.                    |
-| `/react` subpath                                             | `<Sandbox>`, `useSandbox()` (render-time), and the `Bash`/`ReadFile`/`WriteFile`/`EditFile` tools (handlers resolve `ctx.sandbox`, ADR 66).              |
+| `/react` subpath                                             | `<Sandbox>`, `useSandbox()` (render-time), and the `Bash`/`ReadFile`/`WriteFile`/`EditFile` tools (handlers resolve `ctx.sandbox`, ADR 66).             |
 | `/testing` subpath                                           | `runSandboxProviderConformance` (#218) + `fakeSandboxProvider`.                                                                                         |
 | `/mcp` subpath (ADR 65)                                      | `sandboxRootsSource` / `bindSandboxRootsToClient` (outbound roots), `sandboxFileResolver` / `fsFileResolver` / `registerFileResolver` (readable files). |
 
@@ -254,7 +254,7 @@ provider) invokes it, so it works uniformly across every provider.
   `src/react/__tests__/tools.spec.ts`.
 - **Pure egress matcher (`matchDomain` wildcards, first-match-wins, default-deny, per-field predicates)** —
   `src/__tests__/net.spec.ts`.
-- **`<Sandbox>` + `useSandbox()` with the real reconciler** —
+- **`<Sandbox>` + `useSandbox()` with the real compiler** —
   `src/react/__tests__/component.spec.tsx`.
 - **Built-in tools resolve the harness from `ctx.sandbox` (ADR 66) —
   primary/sole resolution, absent-guard, multi-sandbox ambiguity** —

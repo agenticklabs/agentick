@@ -1,12 +1,12 @@
 # @agentick/tool-next
 
-Generic, reconciler-agnostic tool authoring for Agentick v2.
+Generic, compiler-agnostic tool authoring for Agentick v2.
 
 ## What it is
 
 `createTool()` is the base tool factory. It takes a spec (`name`, `description`, a Standard-Schema `inputSchema`, a `handler`) and returns a registration **bundle** — `{ declaration, handlerRef, handler, validator }` — that drops directly into any `ToolExecutorHarness` + `HandlerResolver` pair, or into any consumer that accepts the `CreatedTool[]` shorthand (e.g. the MCP server projection).
 
-Zero render-time concerns; no React hooks; no DI plumbing. It depends only on `@agentick/spec-next`. Reconciler-specific variants extend this base in their own packages — e.g. `@agentick/reconciler-react-next` ships its own `createTool` that adds a `use()` hook slot for capturing tree-scoped context (sandbox, MCP refs) during the reconciler's collect walk, rendered as `<Tool>`. This package is what those variants are built on, and what you reach for when you need a tool with no reconciler at all.
+Zero render-time concerns; no React hooks; no DI plumbing. It depends only on `@agentick/spec-next`. Compiler-specific variants extend this base in their own packages — e.g. `@agentick/compiler-react-next` ships its own `createTool` that adds a `use()` hook slot for capturing tree-scoped context (sandbox, MCP refs) during the compiler's collect walk, rendered as `<Tool>`. This package is what those variants are built on, and what you reach for when you need a tool with no compiler at all.
 
 ## Quick start
 
@@ -41,7 +41,7 @@ await spawnStandaloneMcpServer({
 });
 ```
 
-For low-level wiring, register the pieces yourself: `declaration` → `ToolExecutorHarness.register({ registration })`, and `handlerRef` + `handler` + `validator` → the `HandlerResolver`. For a JSX agent, author with the `createTool` from `@agentick/reconciler-react-next` and render `<Tool>` — the adopter `tools:` slots on sessions/apps take `ToolDeclaration[]`, which the reconciler produces from the tree.
+For low-level wiring, register the pieces yourself: `declaration` → `ToolExecutorHarness.register({ registration })`, and `handlerRef` + `handler` + `validator` → the `HandlerResolver`. For a JSX agent, author with the `createTool` from `@agentick/compiler-react-next` and render `<Tool>` — the adopter `tools:` slots on sessions/apps take `ToolDeclaration[]`, which the compiler produces from the tree.
 
 ### Validation
 
@@ -52,12 +52,13 @@ The returned `validator` is what the tool executor runs against dispatched input
 A handler returns one of three **discriminable** shapes (plus the usual `Promise` / `Effect` / `TaskHandle` wrappers), normalized to one internal result at dispatch:
 
 ```ts
-handler: async () => "42";                               // string sugar → [{ type: "text", text: "42" }]
-handler: async () => [{ type: "text", text: "42" }];     // ContentBlock[] — the classic shape
-handler: async () => ({                                  // the opt-in envelope
-  content: "72°F, clear",                                //   display (string sugar accepted here too)
-  structuredContent: { tempF: 72, condition: "clear" },  //   typed machine result (outputSchema-validated)
-  isError: false,                                        //   SOFT/domain error flag (default false)
+handler: async () => "42"; // string sugar → [{ type: "text", text: "42" }]
+handler: async () => [{ type: "text", text: "42" }]; // ContentBlock[] — the classic shape
+handler: async () => ({
+  // the opt-in envelope
+  content: "72°F, clear", //   display (string sugar accepted here too)
+  structuredContent: { tempF: 72, condition: "clear" }, //   typed machine result (outputSchema-validated)
+  isError: false, //   SOFT/domain error flag (default false)
   metadata: { source: "cache" },
 });
 ```
@@ -66,7 +67,7 @@ The three shapes stay type-discriminable (`string` / array / object-with-`conten
 
 **`structuredContent` + `outputSchema` = composition.** When a tool declares `outputSchema`, the executor validates the envelope's `structuredContent` against it (same Standard-Schema acceptance as `inputSchema`; a failure is a typed dispatch error). A typed output shape is what lets the model treat tools as composable building blocks — chain one tool's typed output into another's typed input, or emit code that orchestrates several tools ("tools as an API") — instead of re-parsing prose each hop. It flows to `DispatchResult.structuredContent` and, on the MCP wire, to `CallToolResult.structuredContent`.
 
-**`isError` (soft) vs throw (hard).** `isError: true` is a *domain* error the model reasons about and can retry ("file not found", "rate-limited") — the dispatch still **resolves**. A thrown/rejected handler is a *hard* failure — the dispatch **rejects** with a typed `ToolExecutorError` and never produces a result. `isError` maps to MCP `CallToolResult.isError`.
+**`isError` (soft) vs throw (hard).** `isError: true` is a _domain_ error the model reasons about and can retry ("file not found", "rate-limited") — the dispatch still **resolves**. A thrown/rejected handler is a _hard_ failure — the dispatch **rejects** with a typed `ToolExecutorError` and never produces a result. `isError` maps to MCP `CallToolResult.isError`.
 
 ## Tool handler ctx is transport-portable
 
@@ -83,7 +84,7 @@ handler: async (input, { ctx }) => {
 },
 ```
 
-Substrate primitives every session has (`elicit`/`elicitation`, `tasks`, `resource`) live on `ctx`; extension- or provider-scoped things flow through the JSX `use:` capture of the reconciler variant. Branch on `ctx.transport` only when the handler genuinely needs different behavior per transport (rare). Common code stays portable.
+Substrate primitives every session has (`elicit`/`elicitation`, `tasks`, `resource`) live on `ctx`; extension- or provider-scoped things flow through the JSX `use:` capture of the compiler variant. Branch on `ctx.transport` only when the handler genuinely needs different behavior per transport (rare). Common code stays portable.
 
 ## API
 

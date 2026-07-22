@@ -18,7 +18,7 @@ published independently. The adopter-facing entry point is
 
 One harness sits between everything that emits a tool call and the
 handler that services it. Whether the call comes from the model, from
-host code, from the reconciler's per-tick tool set, or across the inbox
+host code, from the compiler's per-tick tool set, or across the inbox
 from another cluster node, it funnels through the same
 validate → authorize → confirm → invoke → emit pipeline so the lifecycle,
 exposure rules, and event stream live in exactly one place.
@@ -118,7 +118,7 @@ const app = await createApp(<Agent />, { model, tools });
 `defineToolExecutor` returns a `ToolExecutorFactory` (a callable tagged
 with `toolExecutorFactory: true`). `dispatch` is required; `list` /
 `register` / `unregister` / `abort` / `compileForTick` /
-`replaceReconcilerTools` / `removeBoundTools` are optional — when omitted
+`replaceCompilerTools` / `removeBoundTools` are optional — when omitted
 they fall through to a bundled `InMemoryToolRegistry`. The MVP factory
 does **not** replicate the validation pipeline or confirmation flow;
 subclass `ToolExecutorHarness` if you need those.
@@ -211,7 +211,7 @@ this.elicitation })` (see `@agentick/elicitation-next`); identical
 factory + interface to the session-level `session.elicit`.
 
 `use` is the second arg's `use` field — render-time deps captured by the
-reconciler when the tool was declared via `<Tool use={() => ({…})}>`,
+compiler when the tool was declared via `<Tool use={() => ({…})}>`,
 merged over the registration's `useDeps`. `use` is reserved for
 genuinely **tree-positional** context; app-/session-scoped harnesses
 belong on `ctx` (see below).
@@ -490,20 +490,20 @@ mirroring `session/respond_to_elicitation`):
 | `session/set_client_tools`     | `{ sessionId, declarations: ClientToolDeclaration[] }`  | Clears the `{ scope: "client", sessionId }` slice, then folds each declaration into a client-handled `ToolRegistration` and `register`s it. Returns `{ count }`. A whole-slice **replace**. |
 | `session/respond_to_tool_call` | `{ sessionId, correlationId, result: ToolResultInput }` | Calls `respondToToolCall` — lands the result into the request/response registry, resuming the suspended dispatch.                                                                           |
 
-**Declarative slice-replace — the wire twin of `replaceReconcilerTools`.** A
+**Declarative slice-replace — the wire twin of `replaceCompilerTools`.** A
 client is a declarative tool SOURCE that owns a slice, exactly like the
-reconciler. It DECLARES its entire set; the framework replaces the client slice
+compiler. It DECLARES its entire set; the framework replaces the client slice
 wholesale. One verb subsumes register (a tool present in the set), unregister (a
 tool absent from it), and idempotency (the set IS the truth — a replace, not an
 accumulate). Reconnect = re-declare; drift-free by construction.
 
 - **Its own binding — `{ scope: "client", sessionId }`.** The client slice is
   held DISTINCT from `{ scope: "session" }` (which holds the app's
-  `createSession({ tools })`), exactly as the reconciler owns `{ scope:
-"reconciler", mountId }`. So clearing-and-reinstalling the client slice on
+  `createSession({ tools })`), exactly as the compiler owns `{ scope:
+"compiler", mountId }`. So clearing-and-reinstalling the client slice on
   every `set_client_tools` NEVER clobbers app tools. Session-lifetime: the
   session-close cleanup reaps the client slice alongside the session slice.
-- **Precedence.** `client` sits just below `reconciler` and above the static
+- **Precedence.** `client` sits just below `compiler` and above the static
   config seams (runtime / gateway / app / session / execution) — a live client's
   current declaration outranks static session config, but the in-process rendered
   tree stays authoritative. Tunable in `PRECEDENCE_RANK`. See the `ToolBinding`
@@ -691,7 +691,7 @@ them without depending on this runtime package).
 The registry also exports the precedence ladder as data —
 `PRECEDENCE_RANK`, `precedenceOf`, `bindingKey`, `sameBindingKey` — from
 `./registry.js`. Precedence (low → high): `runtime < gateway < app <
-session < execution < reconciler`; an `extension` binding takes the rank
+session < execution < compiler`; an `extension` binding takes the rank
 of the level at which it was installed.
 
 ### Command lifecycle hooks (ADR 80)
@@ -855,7 +855,7 @@ Known gaps / deferred:
 - `@agentick/spec-next` — the protocol definition
   (`protocol/tool-executor.ts`, `data/tool-handler.ts`,
   `data/declarations.ts`).
-- `@agentick/reconciler-react-next` — produces `ToolDeclaration[]` and
+- `@agentick/compiler-react-next` — produces `ToolDeclaration[]` and
   captures `use:` deps at render time; the tool executor consumes them.
 - `@agentick/tasks-next` — the `TaskHandle` primitive and the
   `session_tasks_*` model tools that manage Pattern B refs.

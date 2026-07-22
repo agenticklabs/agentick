@@ -62,8 +62,8 @@ export interface CreateAppOptions<P = unknown> extends Omit<AppHarnessOptions<P>
  * sub-harnesses) are ready to serve commands.
  *
  * @param rootElement Agent root — opaque to the app harness; the bound
- *   reconciler impl interprets it (React.ReactNode for the React
- *   reconciler, the framework's root for others).
+ *   compiler impl interprets it (React.ReactNode for the React
+ *   compiler, the framework's root for others).
  * @param options Executor, target, per-session defaults, and optional
  *   cluster wiring.
  */

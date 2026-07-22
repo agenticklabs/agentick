@@ -2,12 +2,12 @@
 
 **Reference app harness** for Agentick v2 — the outermost runtime
 boundary that owns shared substrate, shared sub-harnesses
-(reconciler, loop, executor, tool-executor), the session registry,
+(compiler, loop, executor, tool-executor), the session registry,
 and the `createApp` ergonomic surface.
 
-Reconciler-agnostic. Adopters writing React agents import from
-`@agentick/app-next/react` (defaults the reconciler to `reactReconciler()`);
-adopters using a custom reconciler import from `@agentick/app-next`
+Compiler-agnostic. Adopters writing React agents import from
+`@agentick/app-next/react` (defaults the compiler to `reactCompiler()`);
+adopters using a custom compiler import from `@agentick/app-next`
 directly and pass their own factory.
 
 **Design:**
@@ -36,16 +36,16 @@ console.log((await handle.result).response);
 await app.closeApp();
 ```
 
-### Custom reconciler
+### Custom compiler
 
 ```typescript
 import { createApp } from "@agentick/app-next";
 import { openai } from "@agentick/model-openai-next";
-import { myReconciler } from "./my-reconciler";
+import { myCompiler } from "./my-compiler";
 
 const app = await createApp(rootElement, {
   model: openai("gpt-4o"),
-  reconciler: myReconciler(),
+  compiler: myCompiler(),
 });
 ```
 
@@ -122,7 +122,7 @@ throws (it belongs on `model`).
 | `model`              | `LanguageModelAdapter`                       | The model to call — `openai("gpt-4o")`, `aisdk(model)`, `google(...)`, etc. Standard path. Exactly one of `model` / `executor` required.                                                                                                                      |
 | `executor`           | `LanguageModelExecutor` or `ExecutorFactory` | BYO execution engine. A bare adapter goes on `model`, not here.                                                                                                                                                                                               |
 | `target`             | `ExecutionTarget`                            | Optional. Defaults to `executor.target`.                                                                                                                                                                                                                      |
-| `reconciler`         | `ReconcilerProtocol` or `ReconcilerFactory`  | Required (omittable via `/react` subpath default).                                                                                                                                                                                                            |
+| `compiler`           | `CompilerProtocol` or `CompilerFactory`      | Required (omittable via `/react` subpath default).                                                                                                                                                                                                            |
 | `loop`               | `LoopExecutorProtocol` or factory            | Optional. Defaults to the bundled `LoopExecutorHarness`.                                                                                                                                                                                                      |
 | `cluster`            | `ClusterFactory`                             | Optional. See "Cluster integration" above.                                                                                                                                                                                                                    |
 | `tools`              | `ToolDeclaration[]`                          | App-scope tool registry. Threads to every session.                                                                                                                                                                                                            |

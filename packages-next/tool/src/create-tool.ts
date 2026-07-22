@@ -1,5 +1,5 @@
 /**
- * `createTool` — generic, reconciler-agnostic tool authoring.
+ * `createTool` — generic, compiler-agnostic tool authoring.
  *
  * Returns a `ToolRegistration` + handler + validator bundle that
  * drops directly into any `HandlerResolver.register(...)` +
@@ -7,10 +7,10 @@
  * concerns; no React hooks; no DI plumbing.
  *
  * Tools that need tree-scoped context (sandbox, MCP connection,
- * provided services) use a reconciler-specific factory layered on
- * top of this one — e.g., `createTool` in `@agentick/reconciler-react-next`
+ * provided services) use a compiler-specific factory layered on
+ * top of this one — e.g., `createTool` in `@agentick/compiler-react-next`
  * adds a `use()` hook slot that captures React-Context-derived deps
- * during the reconciler's collect walk.
+ * during the compiler's collect walk.
  *
  * Depends only on `@agentick/spec-next` — peer of `@agentick/tool-executor-next`,
  * not consumer of it. The authoring layer doesn't pull the runtime.

@@ -62,7 +62,7 @@ export interface PromptArgument {
  *
  * `template` and `render` produce framework-agnostic content via the
  * `unknown` type — concrete adapters (e.g., React via
- * `@agentick/reconciler-react-next`) constrain to `ReactNode` at the
+ * `@agentick/compiler-react-next`) constrain to `ReactNode` at the
  * factory layer. The spec stays framework-neutral.
  */
 export interface PromptDeclaration {

@@ -40,7 +40,7 @@ import type {
 } from "../index.js";
 import { jsonSchema, ProviderTimeout } from "../index.js";
 
-describe("@agentick/spec-next — reconciler-facing types", () => {
+describe("@agentick/spec-next — compiler-facing types", () => {
   describe("ContentBlock", () => {
     it("narrows on the type discriminator", () => {
       const text: TextBlock = { type: "text", text: "hello" };

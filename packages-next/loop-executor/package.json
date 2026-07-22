@@ -1,7 +1,7 @@
 {
   "name": "@agentick/loop-executor-next",
   "version": "0.0.0",
-  "description": "Reference loop executor harness for Agentick v2. Orchestrates one agent execution by composing the reconciler, executor, and tool-executor harnesses through the canonical tick loop.",
+  "description": "Reference loop executor harness for Agentick v2. Orchestrates one agent execution by composing the compiler, executor, and tool-executor harnesses through the canonical tick loop.",
   "keywords": [
     "agent",
     "agentick",

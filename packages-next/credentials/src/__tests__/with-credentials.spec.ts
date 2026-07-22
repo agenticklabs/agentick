@@ -12,7 +12,7 @@
  *
  * Pulling in `@agentick/app-next` + react + executor-next as dev
  * deps just to walk through `createApp` would couple the test to
- * the React reconciler (the only fleshed-out one today) and would
+ * the React compiler (the only fleshed-out one today) and would
  * actually be exercising AppHarness, not withCredentials.
  */
 

@@ -3,7 +3,7 @@
  *
  * Validates the invariants in `docs/proposals/v2/blueprint/05-loop-executor.md`.
  *
- * Factories accept everything the loop needs to run — reconciler harness,
+ * Factories accept everything the loop needs to run — compiler harness,
  * executor harness, tool executor harness, state applicator. Most tests
  * construct minimal stubs internally and only the loop-under-test
  * differs per impl.
@@ -19,7 +19,7 @@ import type {
   ExecutorTerminal,
   LanguageModelExecutionResult,
   LoopExecutorProtocol,
-  ReconcilerProtocol,
+  CompilerProtocol,
   RenderedTree,
   StateApplicator,
   ToolDeclaration,
@@ -64,8 +64,8 @@ function mkTarget(): ExecutionTarget {
   return { kind: "language-model", provider: "stub", modelId: "stub-v1" };
 }
 
-/** Reconciler stub — returns a canned tree on every `renderTree`. */
-function stubReconciler(tree: RenderedTree): ReconcilerProtocol {
+/** Compiler stub — returns a canned tree on every `renderTree`. */
+function stubCompiler(tree: RenderedTree): CompilerProtocol {
   return {
     fx: {
       use: () => () => {},
@@ -137,7 +137,7 @@ function stubToolExecutor(): ToolExecutorProtocol {
     fx: {
       use: () => () => {},
       dispatch: (input) => dispatchFx(input),
-      replaceReconcilerTools: () => Effect.void,
+      replaceCompilerTools: () => Effect.void,
       compileForTick: () => Effect.succeed([]),
     },
     register: async () => undefined,
@@ -146,7 +146,7 @@ function stubToolExecutor(): ToolExecutorProtocol {
     list: async () => [],
     dispatch: (input) => Effect.runPromise(dispatchFx(input)),
     abort: async () => undefined,
-    replaceReconcilerTools: async () => undefined,
+    replaceCompilerTools: async () => undefined,
     removeBoundTools: async () => 0,
     compileForTick: async () => [],
   };
@@ -195,7 +195,7 @@ export function runLoopExecutorConformance(factory: LoopExecutorConformanceFacto
       const terminal = await loop.runExecution({
         executionId: "exec-1",
         sessionId: "s-1",
-        reconciler: stubReconciler(tree),
+        compiler: stubCompiler(tree),
         mountId: "stub-mount",
         modelExecutor: stubExecutor([
           {
@@ -224,7 +224,7 @@ export function runLoopExecutorConformance(factory: LoopExecutorConformanceFacto
       await loop.runExecution({
         executionId: "exec-2",
         sessionId: "s-1",
-        reconciler: stubReconciler(mkRenderedTree()),
+        compiler: stubCompiler(mkRenderedTree()),
         mountId: "stub-mount",
         modelExecutor: stubExecutor([
           {
@@ -281,7 +281,7 @@ export function runLoopExecutorConformance(factory: LoopExecutorConformanceFacto
       const terminal = await loop.runExecution({
         executionId: "exec-tools-1",
         sessionId: "s-1",
-        reconciler: stubReconciler(tree),
+        compiler: stubCompiler(tree),
         mountId: "stub-mount",
         modelExecutor: stubExecutor([firstRun, secondRun]),
         target: mkTarget(),
@@ -323,7 +323,7 @@ export function runLoopExecutorConformance(factory: LoopExecutorConformanceFacto
       const terminal = await loop.runExecution({
         executionId: "exec-max-1",
         sessionId: "s-1",
-        reconciler: stubReconciler(
+        compiler: stubCompiler(
           mkRenderedTree([
             {
               id: "t.calc",

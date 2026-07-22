@@ -43,7 +43,7 @@
     "@agentick/elicitation-next": "workspace:*",
     "@agentick/model-executor-next": "workspace:*",
     "@agentick/gateway-next": "workspace:*",
-    "@agentick/reconciler-next": "workspace:*",
+    "@agentick/compiler-next": "workspace:*",
     "@agentick/runtime-next": "workspace:*",
     "@agentick/spec-conformance-next": "workspace:*",
     "@agentick/tasks-next": "workspace:*",

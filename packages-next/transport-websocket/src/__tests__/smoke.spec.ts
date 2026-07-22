@@ -32,7 +32,7 @@ function makeAppOptions() {
       run: () => Effect.succeed({}) as never,
       abort: () => Effect.succeed(undefined) as never,
     } as never,
-    reconciler: {
+    compiler: {
       mount: () => Effect.succeed({}) as never,
       unmount: () => Effect.succeed(undefined) as never,
       render: () => Effect.succeed({}) as never,

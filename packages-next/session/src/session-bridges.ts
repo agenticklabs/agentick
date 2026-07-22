@@ -1,7 +1,7 @@
 /**
  * `HookBridges` backed by session state.
  *
- * The reconciler harness consumes a bundle of bridges/harnesses at
+ * The compiler harness consumes a bundle of bridges/harnesses at
  * mount time:
  *
  *   - `TimelineHarnessProtocol` — log + projection (full harness per ADR 26)
@@ -18,7 +18,7 @@
  */
 
 import { Effect } from "effect";
-import { InMemoryDataBridge, InMemoryModelBridge } from "@agentick/reconciler-next";
+import { InMemoryDataBridge, InMemoryModelBridge } from "@agentick/compiler-next";
 import { ElicitationHarness, buildElicitSugar } from "@agentick/elicitation-next";
 import { KnobsHarness } from "@agentick/knobs-next";
 import { StateHarness } from "@agentick/state-next";
@@ -299,7 +299,7 @@ export function buildSessionBridges(
   // slot — gates own no independent state (a gate's value IS a knob
   // value). Per ADR 67 the controller is DRIVEN from `session.notifyLifecycle`
   // (which calls `handleTickEnd` with the settled `TickResult`), NOT from
-  // a reconciler-mount tick-end subscription. A held gate calls
+  // a compiler-mount tick-end subscription. A held gate calls
   // `continueAfterTick` on this same loop bridge; the session drains it and
   // folds the hold into the tick-end `TickEndForwardDecision`.
   // `parent` (ADR 34 cascade) is absent today — no app-tier gate layer

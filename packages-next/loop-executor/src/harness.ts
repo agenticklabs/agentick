@@ -5,7 +5,7 @@
  * Inherits `BaseHarness<"loop">` for the full phase contract + FiberRef
  * scope + lazy delta emission. Implements the canonical tick loop:
  *
- *   1. reconciler.renderTree(mountId) → RenderedTree
+ *   1. compiler.renderTree(mountId) → RenderedTree
  *   2. executor.run(tree, target)     → ExecutorTerminal
  *   3. for each toolCall in terminal.result.toolCalls:
  *        toolExecutor.dispatch(...) → ToolDispatchResult
@@ -43,13 +43,13 @@
  * the tool executor's `tool:dispatch`, the model executor's
  * `model:generate[_stream]`) route the command lifecycle into the
  * compiler's per-mount dispatch. The retired `notifyLifecycle` bridge —
- * the loop hand-feeding the reconciler — is gone; the loop knows nothing
+ * the loop hand-feeding the compiler — is gone; the loop knows nothing
  * about the compiler's observation layer.
  *
  * ## ADR 77 — the fiber spine
  *
  * `runExecutionBody` is ONE `Effect.gen` fiber. Every downstream harness
- * call composes in-fiber via its `.fx` twin (`yield* reconciler.fx
+ * call composes in-fiber via its `.fx` twin (`yield* compiler.fx
  * .renderTree(...)`, `executor.fx.run(...)`, `toolExecutor.fx.dispatch
  * (...)`, `stateApplicator.fx.apply*(...)`) — no `runPromise` root between
  * boundaries, so telemetry/interruption propagate through the whole tree.
@@ -243,7 +243,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
     // reached via `this.commandEffect` inside `runExecutionBody` so it runs
     // IN the run-execution fiber (ADR 77 one-fiber — parentOpId auto-threads,
     // kill/resume interruption propagates). `exposure: "internal"`:
-    // `TickInput` carries LIVE refs (reconciler/executor/tool/applicator +
+    // `TickInput` carries LIVE refs (compiler/executor/tool/applicator +
     // the session's resolvers), so the verb is NOT inbox/wire-addressable
     // (ADR 51 §1.2). Deterministic opId keyed by the tick's `tickId`. The
     // returned Promise facade is unused — the loop composes the twin.
@@ -440,7 +440,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           executionId,
           sessionId: input.sessionId,
           mountId: input.mountId,
-          reconciler: input.reconciler,
+          compiler: input.compiler,
           modelExecutor: input.modelExecutor,
           target: input.target,
           toolExecutor: input.toolExecutor,
@@ -459,7 +459,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         // (ADR 77 one-fiber: `parentOpId` auto-threads, kill/resume
         // interruption propagates), so the command terminal IS the tick barrier
         // the sequential `yield*` gave before. The command body runs the tick
-        // THROUGH SETTLE (render → model → tool → apply → reconciler tick-end);
+        // THROUGH SETTLE (render → model → tool → apply → compiler tick-end);
         // `onBeforeLoopTick` fires on entry (over `TickInput`), `onAfterLoopTick`
         // on exit (over the settled `TickResult`). The DECIDE stays OUT (below).
         const tickResult = yield* this.commandEffect<TickInput, TickResult, unknown>(
@@ -601,7 +601,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
       return terminal;
     }).pipe(
       // Any uncaught twin failure (renderTree / project / normalize / run /
-      // replaceReconcilerTools / apply* / a bridge reject) folds to
+      // replaceCompilerTools / apply* / a bridge reject) folds to
       // `ExecutionError` — the boundary the Promise original hit when an
       // un-try/caught `await` threw. The two locally-handled failures
       // (streaming `.result`, hard tool throw) are already absorbed in-body.
@@ -665,7 +665,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
       // (ADR 54 / 55) so useContextInfo / useRenderContext read it
       // SYNCHRONOUSLY during this render — adaptive-compaction components
       // react before the IR freezes. Composed in-fiber via `.fx`.
-      const renderResult = yield* input.reconciler.fx.renderTree({
+      const renderResult = yield* input.compiler.fx.renderTree({
         mountId: input.mountId,
         sessionId: input.sessionId,
         executionId,
@@ -684,7 +684,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
       // TODO(adr-56-slice-1: adapter <Model> sugar) — the adopter face
       // (`<Model model={adapter}>` deriving {modelExecutor,target} from a
       // live model-next adapter, then calling useModelRegistration)
-      // lands in a binding package that deps BOTH reconciler-react +
+      // lands in a binding package that deps BOTH compiler-react +
       // model-next. Until then the ref is registered directly on the
       // ModelBridge. See ADR 56 §Deferred (1).
       // TODO(adr-56-slice-2: force-render activeModel) — reflecting the
@@ -713,26 +713,26 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
 
       // 2. Layered-tools compile (#138).
       //
-      // The reconciler emitted tool declarations in `renderResult.tree
+      // The compiler emitted tool declarations in `renderResult.tree
       // .declarations.tools` (the IR's record of THIS render's
       // contribution). Sync that into the tool executor's registry
-      // as the reconciler-bound slice, then ask the registry for the
+      // as the compiler-bound slice, then ask the registry for the
       // precedence-resolved model-visible set — the unification of
       // every layered seam (gateway/app/session/execution/extension/
-      // reconciler). The projection reads that set, not the IR slot.
+      // compiler). The projection reads that set, not the IR slot.
       // Both compose in-fiber via `.fx`.
-      const reconcilerTools = renderResult.tree.declarations?.tools ?? [];
-      const reconcilerBinding = { scope: "reconciler", mountId: input.mountId } as const;
-      yield* input.toolExecutor.fx.replaceReconcilerTools({
+      const compilerTools = renderResult.tree.declarations?.tools ?? [];
+      const compilerBinding = { scope: "compiler", mountId: input.mountId } as const;
+      yield* input.toolExecutor.fx.replaceCompilerTools({
         mountId: input.mountId,
-        registrations: reconcilerTools.map((d) => toRegistration(d, reconcilerBinding)),
+        registrations: compilerTools.map((d) => toRegistration(d, compilerBinding)),
       });
       const modelTools = yield* input.toolExecutor.fx.compileForTick({ exposure: "model" });
 
       // 2b. Provider-EXECUTED tools (Pass D). Unlike `modelTools`, these
-      //     bypass the tool executor entirely — no `replaceReconcilerTools`,
+      //     bypass the tool executor entirely — no `replaceCompilerTools`,
       //     no `compileForTick`, no precedence fold. The data is already in
-      //     the IR: the reconciler collected any tree-declared provider
+      //     the IR: the compiler collected any tree-declared provider
       //     tools into `declarations.providerTools`, so we thread that slice
       //     straight to the executor's `project` phase. The projection
       //     (`buildProviderTools`) dedupes by provider+name, last-wins.

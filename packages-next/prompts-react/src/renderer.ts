@@ -19,7 +19,7 @@
 
 import type { ContentBlock, MessageEntry, SectionEntry } from "@agentick/spec-next";
 import type { PromptRenderer } from "@agentick/prompts-next";
-import { compileTemplate, type CompileTemplateOptions } from "@agentick/reconciler-react-next";
+import { compileTemplate, type CompileTemplateOptions } from "@agentick/compiler-react-next";
 import type { ReactNode } from "react";
 
 export interface ReactPromptRendererOptions {

@@ -1,7 +1,7 @@
 /**
  * `@agentick/loop-executor-next` — reference loop executor harness.
  *
- * Orchestrates one agent execution by composing the reconciler,
+ * Orchestrates one agent execution by composing the compiler,
  * executor, and tool-executor harnesses through the canonical tick
  * loop.
  *

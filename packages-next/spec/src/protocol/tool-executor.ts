@@ -4,7 +4,7 @@
  *
  * The reference implementation is `@agentick/tool-executor-next` (Phase 4a),
  * which materializes a tool registry from `ToolDeclaration[]` produced
- * by the reconciler harness and invokes handlers resolved via the
+ * by the compiler harness and invokes handlers resolved via the
  * runtime's handler registry (the spec firewall forbids carrying live
  * function references across protocol boundaries).
  *
@@ -81,7 +81,7 @@ export interface ToolCallScopedInput {
  *
  * `via` is observable to middleware so policy can branch on door without
  * looking at headers / private fields. `use` carries values captured at
- * React render time by the reconciler (see `createTool({ use: () => …})`);
+ * React render time by the compiler (see `createTool({ use: () => …})`);
  * the harness simply forwards them to the handler.
  */
 export interface DispatchContext {
@@ -93,7 +93,7 @@ export interface DispatchContext {
   /** Caller-supplied request context (user, requestId, traceparent, …). */
   readonly request?: Readonly<Record<string, unknown>>;
   /**
-   * Render-time deps captured by the reconciler harness when the tool
+   * Render-time deps captured by the compiler harness when the tool
    * was declared via `<Tool use={() => ({…})}>`. Opaque to the harness;
    * passed through to the handler as `deps.use`.
    */
@@ -282,12 +282,12 @@ export interface ToolRegistration {
 /**
  * Wrap a {@link ToolDeclaration} into a {@link ToolRegistration}
  * tagged with the given binding. The canonical adapter every layer
- * (gateway/app/session/execution/reconciler/extension) uses when it
+ * (gateway/app/session/execution/compiler/extension) uses when it
  * turns adopter-supplied declarations into binding-tagged
  * registrations.
  *
  * `handlerRef` falls back to `decl.id` when the declaration doesn't
- * supply one — matches the reconciler's default resolution
+ * supply one — matches the compiler's default resolution
  * (resolver looks up by both `name` and `id` aliases). Callers
  * needing a custom `handlerRef` or `useDeps` build the registration
  * literal directly.
@@ -379,7 +379,7 @@ export interface UnregisterToolInput {
  *     plus the client slice `removeBoundTools({ binding: { scope: "client", sessionId }})`
  *   - `session/set_client_tools` → clears `{ scope: "client", sessionId }`
  *     then reinstalls the declared set (the wire twin of
- *     `replaceReconcilerTools`).
+ *     `replaceCompilerTools`).
  *
  * Equality is by `sameBindingKey` (the identity-defining fields per
  * variant — see {@link ToolBinding}). Other binding slices are
@@ -392,21 +392,21 @@ export interface RemoveBoundToolsInput {
 }
 
 /**
- * Input for {@link ToolExecutorProtocol.replaceReconcilerTools}.
- * Atomically swaps the reconciler-bound slice of the registry for a
+ * Input for {@link ToolExecutorProtocol.replaceCompilerTools}.
+ * Atomically swaps the compiler-bound slice of the registry for a
  * single `mountId`.
  *
  * The loop calls this after each `renderTree()` so the registry's
- * reconciler slice mirrors the just-rendered tree's tool
+ * compiler slice mirrors the just-rendered tree's tool
  * declarations. Registrations passed here MUST carry
- * `binding.scope === "reconciler"` with
+ * `binding.scope === "compiler"` with
  * `binding.mountId === input.mountId`.
  *
- * The "reconciler" slot is reconciler-agnostic — any harness that
+ * The "compiler" slot is compiler-agnostic — any harness that
  * produces a valid `RenderedTree` (React/JSX, programmatic builder,
  * template-based) contributes through this slot.
  */
-export interface ReplaceReconcilerToolsInput {
+export interface ReplaceCompilerToolsInput {
   readonly mountId: string;
   readonly registrations: readonly ToolRegistration[];
   readonly opId?: string;
@@ -631,17 +631,17 @@ export interface ToolExecutorFx extends HarnessFx {
   ): Effect.Effect<DispatchResult, ToolExecutorErrorChannel | SubstrateError, never>;
 
   /**
-   * Atomically replace the reconciler-bound slice of the registry for
-   * `input.mountId` (remove every `binding.scope === "reconciler" &&
+   * Atomically replace the compiler-bound slice of the registry for
+   * `input.mountId` (remove every `binding.scope === "compiler" &&
    * binding.mountId === mountId` row, then add the supplied
    * registrations). The loop calls this after each `renderTree()` so the
-   * reconciler slice mirrors the just-rendered tree — composed in the
+   * compiler slice mirrors the just-rendered tree — composed in the
    * loop's fiber via this twin so the mutation's span nests under the
    * tick. A binding mismatch surfaces as a `ToolValidationError` on the
    * `E` channel (catchable — not a fiber-crashing defect).
    */
-  replaceReconcilerTools(
-    input: ReplaceReconcilerToolsInput,
+  replaceCompilerTools(
+    input: ReplaceCompilerToolsInput,
   ): Effect.Effect<void, ToolExecutorErrorChannel | SubstrateError, never>;
 
   /**
@@ -708,7 +708,7 @@ export interface ToolExecutorProtocol extends PromiseView<Omit<ToolExecutorFx, "
    *
    * Returns one entry per registered name **per binding slice** — i.e.
    * if the same name is registered under multiple bindings (e.g., once
-   * at session scope and once by the reconciler), `list` returns both.
+   * at session scope and once by the compiler), `list` returns both.
    * For the precedence-resolved set the model should see at a given
    * tick, use {@link compileForTick}.
    *
@@ -731,9 +731,9 @@ export interface ToolExecutorProtocol extends PromiseView<Omit<ToolExecutorFx, "
    */
   removeBoundTools(input: RemoveBoundToolsInput): Promise<number>;
 
-  // `replaceReconcilerTools` and `compileForTick` are derived from
+  // `replaceCompilerTools` and `compileForTick` are derived from
   // `PromiseView<Omit<ToolExecutorFx, "use">>` — the Promise facades of the
-  // Effect-canonical twins ({@link ToolExecutorFx.replaceReconcilerTools} /
+  // Effect-canonical twins ({@link ToolExecutorFx.replaceCompilerTools} /
   // {@link ToolExecutorFx.compileForTick}). The concrete harness exposes
   // the Effect surface as `toolExecutor.fx`.
   //
@@ -742,7 +742,7 @@ export interface ToolExecutorProtocol extends PromiseView<Omit<ToolExecutorFx, "
   // (`{ exposure: "model" }` for the model's list), then dedup by
   // `declaration.name` — on collision the most-specific binding wins
   // (`runtime < gateway < {app, extension@app} < {session,
-  // extension@session} < execution < reconciler`). Canonical source for
+  // extension@session} < execution < compiler`). Canonical source for
   // projection — the loop passes the result as `ProjectInput.tools`.
 }
 

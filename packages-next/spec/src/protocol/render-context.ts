@@ -57,7 +57,7 @@ export interface RenderContext {
    * The model the loop is about to call THIS render (ADR 55) — a
    * projection of the active {@link ExecutionTarget}. A seeded
    * framework-core slot (identity + capabilities are spec-resident, no
-   * model-next dep), so `reconciler-react`'s `useActiveModel` reads it
+   * model-next dep), so `compiler-react`'s `useActiveModel` reads it
    * with zero model-layer coupling — the same choice `contextInfo` made
    * for the window. Enables *rendering for the model you'll call*
    * (per-model tool descriptions / formatting / reasoning scaffolds).

@@ -27,7 +27,7 @@ export interface MessageEnvelope<T = unknown> {
    * Recipient address — `{surface}:{scopeId}`.
    *   `loop:execution-abc-123`
    *   `session:user-42`
-   *   `reconciler:mount-xyz`
+   *   `compiler:mount-xyz`
    *   `supervisor:main`
    *
    * Stamped by the inbox at send-time from the `address` argument.

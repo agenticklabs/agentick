@@ -2,7 +2,7 @@
  * `@agentick/formatters-next` — reference content formatters for Agentick v2.
  *
  * Three pure functions that turn `SemanticContentBlock[]` (the
- * reconciler's intermediate IR after the collect walker, with semantic
+ * compiler's intermediate IR after the collect walker, with semantic
  * sidecars on each block) into wire-ready `ContentBlock[]` for the model.
  *
  *   - {@link markdownFormatter} — DEFAULT
@@ -37,8 +37,8 @@ export {
 
 // Tree-level IR → string serialization. The single entry point for
 // "I have a RenderedTree, give me the final formatted string."
-// Both `ReconcilerHarness.renderToString` and
-// `@agentick/reconciler-react-next`'s `renderTemplate` should
+// Both `CompilerHarness.renderToString` and
+// `@agentick/compiler-react-next`'s `renderTemplate` should
 // delegate here.
 export { formatTree } from "./format-tree.js";
 export type { FormatTreeOptions } from "./format-tree.js";
@@ -49,7 +49,7 @@ import { textFormatter as txt } from "./text.js";
 import type { DefinedFormatter } from "./create-formatter.js";
 
 /**
- * Built-in formatter registry. Pass into `ReconcilerHarnessOptions.formatters`
+ * Built-in formatter registry. Pass into `CompilerHarnessOptions.formatters`
  * to enable the reference set; markdown is the default lookup key.
  */
 export function builtInFormatters(): ReadonlyMap<string, DefinedFormatter> {

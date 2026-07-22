@@ -293,7 +293,7 @@ once. Group writes skip read-only members and type-check the group first.
 ## State-sync channel (ADR 73)
 
 Knob state reaches observers two ways. The coarse way is the harness
-snapshot (`exportSnapshot()` → the reconciler's `SnapshotCapable` projection):
+snapshot (`exportSnapshot()` → the compiler's `SnapshotCapable` projection):
 the **whole store, re-sent**. The fine way is the **`knobs-state` channel** — an
 initial `snapshot` frame followed by RFC 6902 **JSON-Patch `delta` frames**, one
 op per knob that changed. A subscriber seeds from the snapshot and applies each
@@ -373,10 +373,10 @@ Extracted per ADR 26 Step 2, modularized per ADR 27. Green.
   add (no prev) / update (with prev) on `set`, `add` on defaulted `register` /
   none for descriptor-only, dispatch rides `applySet`, unsubscribe, and multiple
   projections on one stream (the channel is a third, internal subscriber).
-- `src/__tests__/integration-with-reconciler.spec.tsx` (10 tests) — `useKnob`
+- `src/__tests__/integration-with-compiler.spec.tsx` (10 tests) — `useKnob`
   descriptor registration, momentary reset at execution end, `<Knobs />`
   default rendering + render prop, and reactivity (external `set` re-renders
-  subscribed components) against the real `ReconcilerHarness`.
+  subscribed components) against the real `CompilerHarness`.
 - `src/conformance.ts` — `runKnobsHarnessConformance` exports the protocol
   battery (sync + async surface, stable `list()` reference, per-id vs
   wildcard subscription, `register` value preservation, `dispatch`

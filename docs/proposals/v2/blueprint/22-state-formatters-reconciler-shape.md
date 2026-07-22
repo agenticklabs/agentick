@@ -1,5 +1,7 @@
 # ADR 22 — StateBridge + Formatters
 
+> **Rename note (2026-07-21, #243):** the "reconciler" subsystem referenced below was renamed to **compiler** — `@agentick/reconciler-next` → `@agentick/compiler-next`, `@agentick/reconciler-react-next` → `@agentick/compiler-react-next`, `ReconcilerProtocol` → `CompilerProtocol`, `ReconcilerHarness` → `CompilerHarness`, etc. Original terminology is preserved below as historical record.
+
 **Status:** Accepted — 2026-05-19
 **Modifies:** `04-formatter-harness.md` (rename → `04-formatters.md` with a
 rewrite that aligns to v1's shape).

@@ -25,7 +25,7 @@ This package is:
   `EventEnvelope`, `MessageEnvelope`, content blocks, execution results,
   `LanguageModelMessage`, …).
 - **Protocol interfaces** for harness-to-harness integration
-  (`ReconcilerProtocol`, `ExecutorProtocol`, `LoopExecutorProtocol`,
+  (`CompilerProtocol`, `ExecutorProtocol`, `LoopExecutorProtocol`,
   `SessionHarnessProtocol`, `OperationJournal`, `MessageInbox`, …).
 - **Augmentation seams** — empty-seed interfaces every harness/adapter
   package widens via `declare module` (see below). This is the
@@ -62,7 +62,7 @@ There are **three** such seams. They differ by _what_ they carry:
 
 ### `HookBridges` — runtime implementations (ADR 27)
 
-The empty-seed bundle the runtime hands a reconciler mount via
+The empty-seed bundle the runtime hands a compiler mount via
 `MountInput.bridges`. Hooks (`useTimeline`, `useKnob`, `useData`, …)
 consume it through React context. Spec seeds only the small
 interface-only contracts with no dedicated package (`data`, `loop`,
@@ -80,9 +80,9 @@ declare module "@agentick/spec-next" {
 
 Extension packages (`@agentick/sandbox`, `@agentick/mcp`,
 `@agentick/subscriptions-next`) add optional slots the same way; the
-reconciler threads the bag through unchanged. Snapshot/restore iterates
+compiler threads the bag through unchanged. Snapshot/restore iterates
 `HookBridges` generically and feature-tests each slot for
-`SnapshotCapable` — no harness-specific knowledge in the reconciler.
+`SnapshotCapable` — no harness-specific knowledge in the compiler.
 
 ### `RenderContext` — per-render facts (ADR 55)
 
@@ -156,7 +156,7 @@ The one canonical merge is `mergeProviderOptions(base, patch)` — `patch`
 wins per provider-namespace key, one level deep (two adopters decorating
 under different namespaces never collide; the same namespace's keys
 shallow-merge with the patch on top). Four call sites share it: the
-reconciler folding multiple `<ProviderOptions>` declarations; projection
+compiler folding multiple `<ProviderOptions>` declarations; projection
 folding tree over target (#176, tree/per-render wins); adapters folding
 `input.providerOptions` over `target.providerOptions` defensively. **Do
 not hand-roll.**
@@ -165,11 +165,11 @@ not hand-roll.**
 
 ### ADR 54 — lifecycle event union
 
-`LifecycleEvent` (`protocol/reconciler.ts`) is the tagged, open-ended
+`LifecycleEvent` (`protocol/compiler.ts`) is the tagged, open-ended
 union the lifecycle projection carries (ADR 89 §4: the SESSION's
 command-hook forwarders dispatch it into the compiler's
 `LifecycleProjectionTarget.dispatchLifecycle` — an OPTIONAL capability,
-not a `ReconcilerProtocol` method). Kinds: `tick-start`, `tick-end`,
+not a `CompilerProtocol` method). Kinds: `tick-start`, `tick-end`,
 `execution-start`, `execution-end`, **`tool-start`**, **`tool-end`**,
 `model-generate-start`, `model-generate-end`, `error`, and a namespaced
 `LifecycleCustom` escape hatch. Adding a kind does not change any
@@ -191,7 +191,7 @@ the tool `handlerRef`/handler split exactly:
   call); nearest-scope / last-wins if nested.
 - `RegisteredModel` (`protocol/hook-bridges.ts`) — `{ modelExecutor, target }`.
   The **live**, run-ready model. Both fields are spec types, so the loop
-  and `reconciler-react` thread it _without_ importing `model-next` — the
+  and `compiler-react` thread it _without_ importing `model-next` — the
   firewall holds.
 - `ModelBridge` (`protocol/hook-bridges.ts`) — the live side:
   `register(modelRef, model)` / `unregister` / `resolve(modelRef)`. The
@@ -271,7 +271,7 @@ nominal sugar.
 
 ## The `.fx` dual-typed edge (ADR 77)
 
-Every spine harness (`executor`, `loop`, `tool-executor`, `reconciler`,
+Every spine harness (`executor`, `loop`, `tool-executor`, `compiler`,
 `knobs`, `session`) exposes **two first-class surfaces for the same
 operation** — a Promise edge-facade and an Effect-native `.fx` twin. This is
 the dual-typed edge, and the types that express it live here in spec.
@@ -360,7 +360,7 @@ Queue/fork/iterator machinery lives once in `runHarnessStream`
 - `src/__tests__/types.spec.ts` — structural type assertions on the wire
   shapes.
 - `src/__tests__/guards.spec.ts` — type-guard behavior.
-- `src/__tests__/reconciler-protocol.spec.ts`,
+- `src/__tests__/compiler-protocol.spec.ts`,
   `tool-executor-protocol.spec.ts` — protocol conformance shapes.
 - `src/__tests__/rendered-tree.spec.ts` — `RenderedTree` +
   `mergeProviderOptions` semantics.

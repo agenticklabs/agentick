@@ -1,5 +1,7 @@
 # 03 — Reconciler Harness
 
+> **Rename note (2026-07-21, #243):** the "reconciler" subsystem described below was renamed to **compiler** — `@agentick/reconciler-next` → `@agentick/compiler-next`, `@agentick/reconciler-react-next` → `@agentick/compiler-react-next`, `ReconcilerProtocol` → `CompilerProtocol`, `ReconcilerHarness` → `CompilerHarness`, etc. Original terminology is preserved below as historical record.
+
 **Status:** Synthesized with placeholders · refined 2026-05-08 (renamed)
 `[SOURCE: compiler-harness.md, harness-principle.md, compiled-spec.md]`
 

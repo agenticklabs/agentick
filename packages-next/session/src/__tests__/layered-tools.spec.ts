@@ -27,7 +27,7 @@ import type {
 import { SPEC_VERSION, jsonSchema } from "@agentick/spec-next";
 import { ToolExecutorHarness, InMemoryHandlerResolver } from "@agentick/tool-executor-next";
 import { ElicitationHarness } from "@agentick/elicitation-next";
-import { ReconcilerHarness } from "@agentick/reconciler-react-next";
+import { CompilerHarness } from "@agentick/compiler-react-next";
 import { LoopExecutorHarness } from "@agentick/loop-executor-next";
 
 import { SessionHarness } from "../harness.js";
@@ -98,7 +98,7 @@ async function mkSession(opts: { sessionTools?: readonly ToolRegistration[] }): 
   const journal = new MemoryJournal();
   const bus = new LocalEventBus();
   const inbox = new LocalInbox();
-  const reconciler = new ReconcilerHarness("test-r", journal, bus, inbox);
+  const compiler = new CompilerHarness("test-r", journal, bus, inbox);
   const loop = new LoopExecutorHarness("test-l", journal, bus, inbox);
   const resolver = new InMemoryHandlerResolver();
   // Register handlers for every tool the tests use, so dispatch never
@@ -116,7 +116,7 @@ async function mkSession(opts: { sessionTools?: readonly ToolRegistration[] }): 
   });
   const { executor, captured } = mkRecordingExecutor();
   await Promise.all([
-    reconciler.ready,
+    compiler.ready,
     loop.ready,
     toolExecutor.ready,
     elicitation.ready,
@@ -126,7 +126,7 @@ async function mkSession(opts: { sessionTools?: readonly ToolRegistration[] }): 
   const session = new SessionHarness(journal, bus, inbox, {
     sessionId: `s-${Math.random().toString(36).slice(2)}`,
     agent: null,
-    reconciler,
+    compiler,
     loop,
     modelExecutor: executor,
     toolExecutor,

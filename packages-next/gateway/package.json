@@ -34,7 +34,7 @@
   },
   "devDependencies": {
     "@agentick/model-executor-next": "workspace:*",
-    "@agentick/reconciler-react-next": "workspace:*",
+    "@agentick/compiler-react-next": "workspace:*",
     "@agentick/spec-conformance-next": "workspace:*"
   }
 }

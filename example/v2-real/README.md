@@ -37,7 +37,7 @@ The agent answers `"What's 47 * 23, and tell me a fun fact about that number?"`.
 ```tsx
 // src/agent.tsx
 import { z } from "zod";
-import { System, createTool } from "@agentick/reconciler-react-next";
+import { System, createTool } from "@agentick/compiler-react-next";
 import { Knobs, useKnob } from "@agentick/knobs-next/react";
 
 const Calculator = createTool({

@@ -166,7 +166,7 @@ and promote to live when the JSX re-declares them.
 
 ## Status & roadmap
 
-Scaffolded per ADR 22 (state/formatters/reconciler shape). The bridge, the
+Scaffolded per ADR 22 (state/formatters/compiler shape). The bridge, the
 default in-process cron scheduler, and the three React components are green.
 
 - **Default scheduler is single-process, best-effort.** Two app instances each

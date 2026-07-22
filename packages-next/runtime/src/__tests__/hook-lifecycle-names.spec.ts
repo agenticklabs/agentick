@@ -30,14 +30,14 @@ const TYPED_VERBS: ReadonlyArray<readonly [op: string, onBefore: string, onAfter
   ["model:command:generate_stream", "onBeforeModelGenerateStream", "onAfterModelGenerateStream"],
   ["model:command:normalize", "onBeforeModelNormalize", "onAfterModelNormalize"],
   ["model:command:run", "onBeforeModelRun", "onAfterModelRun"],
-  // ── Compile (reconciler) ──
-  ["reconciler:command:render-tree", "onBeforeReconcilerRenderTree", "onAfterReconcilerRenderTree"],
-  ["reconciler:command:mount", "onBeforeReconcilerMount", "onAfterReconcilerMount"],
-  ["reconciler:command:rerender", "onBeforeReconcilerRerender", "onAfterReconcilerRerender"],
+  // ── Compile (compiler) ──
+  ["compiler:command:render-tree", "onBeforeCompilerRenderTree", "onAfterCompilerRenderTree"],
+  ["compiler:command:mount", "onBeforeCompilerMount", "onAfterCompilerMount"],
+  ["compiler:command:rerender", "onBeforeCompilerRerender", "onAfterCompilerRerender"],
   [
-    "reconciler:command:render-to-string",
-    "onBeforeReconcilerRenderToString",
-    "onAfterReconcilerRenderToString",
+    "compiler:command:render-to-string",
+    "onBeforeCompilerRenderToString",
+    "onAfterCompilerRenderToString",
   ],
   // ── App ──
   ["app:command:create-session", "onBeforeAppCreateSession", "onAfterAppCreateSession"],
@@ -54,9 +54,9 @@ const TYPED_VERBS: ReadonlyArray<readonly [op: string, onBefore: string, onAfter
     "onAfterToolRemoveBoundTools",
   ],
   [
-    "tool:command:replace-reconciler-tools",
-    "onBeforeToolReplaceReconcilerTools",
-    "onAfterToolReplaceReconcilerTools",
+    "tool:command:replace-compiler-tools",
+    "onBeforeToolReplaceCompilerTools",
+    "onAfterToolReplaceCompilerTools",
   ],
   // ── Timeline ──
   ["timeline:command:compact", "onBeforeTimelineCompact", "onAfterTimelineCompact"],
@@ -90,13 +90,13 @@ const TYPED_VERBS: ReadonlyArray<readonly [op: string, onBefore: string, onAfter
  * Verbs NOT augmented (deferred) — the async-seam boundary. Their derived
  * names are pinned so the doc stays honest, but no `CommandRegistry` entry
  * exists (typing them would mint hooks that never fire — see ADR 83
- * §hookability). `reconciler:unmount` is deferred the same way: its teardown
+ * §hookability). `compiler:unmount` is deferred the same way: its teardown
  * does not route through `runOperation`.
  */
 const DEFERRED_VERBS: ReadonlyArray<readonly [op: string, onBefore: string, onAfter: string]> = [
   ["tasks:command:submit", "onBeforeTasksSubmit", "onAfterTasksSubmit"],
   ["tasks:command:settle", "onBeforeTasksSettle", "onAfterTasksSettle"],
-  ["reconciler:command:unmount", "onBeforeReconcilerUnmount", "onAfterReconcilerUnmount"],
+  ["compiler:command:unmount", "onBeforeCompilerUnmount", "onAfterCompilerUnmount"],
 ];
 
 describe("hook lifecycle — name-derivation lock (ADR 83)", () => {

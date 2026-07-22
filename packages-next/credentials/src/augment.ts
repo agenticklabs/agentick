@@ -26,7 +26,7 @@
  * response carries status, never tokens.
  *
  * **NOT `SnapshotCapable`.** The session snapshot/restore machinery
- * (`reconciler-react` iterates `HookBridges` via feature detection
+ * (`compiler-react` iterates `HookBridges` via feature detection
  * for `snapshot()` / `restore()`) intentionally skips this slot —
  * credentials must never enter a serialized session snapshot. Tokens
  * could leak via persisted disk snapshots, debug-export tooling,

@@ -2,7 +2,7 @@
  * Protocol interfaces — contracts between harnesses and substrates.
  *
  * Phase 1c landed: substrate protocols (journal, bus, inbox).
- * Phase 3.1 landed: reconciler protocol + hook bridges.
+ * Phase 3.1 landed: compiler protocol + hook bridges.
  * Phase 4a.1 landed: tool-executor protocol.
  *
  * Future phases will add:
@@ -30,7 +30,7 @@ export * from "./promise-view.js";
 export * from "./async-stream.js";
 export * from "./middleware.js";
 export * from "./channels.js";
-export * from "./reconciler.js";
+export * from "./compiler.js";
 export * from "./hook-bridges.js";
 export * from "./render-context.js";
 export * from "./tool-executor.js";

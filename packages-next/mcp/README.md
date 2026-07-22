@@ -519,11 +519,11 @@ projection all derive from the trusted alias alone.
 
 ### `mcpServerInfo` default projection (ADR 63)
 
-The reconciler surfaces one summary of connected servers into the model's
+The compiler surfaces one summary of connected servers into the model's
 context, keyed by alias: display name/version (untrusted label),
 connection state, and an advertised-capability summary
 (tools/resources/prompts/…). It reads `bridges.mcp` **structurally** (no
-`@agentick/mcp-next` import in the reconciler binding — ADR 27), is lazy +
+`@agentick/mcp-next` import in the compiler binding — ADR 27), is lazy +
 overridable (`<Project projectionKey="mcpServerInfo">`), and
 provenance-tagged `default:mcpServerInfo`. The sync snapshot behind it is
 `McpClientHarness.serverInfo` (`{ serverId, status, implementation,
@@ -680,7 +680,7 @@ reference-server round-trip (until the package is a dev dep).
   resources surfaced under the alias, readable via `session.resources`
   AND the `resource_read` tool; `resources/list_changed` re-surfaces;
   session close unregisters.
-- `@agentick/reconciler-react-next` `default-projections.spec.tsx` — the
+- `@agentick/compiler-react-next` `default-projections.spec.tsx` — the
   `mcpServerInfo` projection surfaces servers keyed by alias
   (provenance `default:mcpServerInfo`, override suppresses), plus the
   adversarial server-info alias-trust differential (self-reported name

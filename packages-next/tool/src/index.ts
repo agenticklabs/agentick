@@ -1,11 +1,11 @@
 /**
- * `@agentick/tool-next` — generic, reconciler-agnostic tool authoring.
+ * `@agentick/tool-next` — generic, compiler-agnostic tool authoring.
  *
  * `createTool(spec)` returns a `{ declaration, handlerRef, handler,
  * validator }` bundle ready to register with any tool executor.
  *
- * Depends only on `@agentick/spec-next`. Reconciler-specific variants
- * (e.g., `@agentick/reconciler-react-next` with a `use()` hook) extend
+ * Depends only on `@agentick/spec-next`. Compiler-specific variants
+ * (e.g., `@agentick/compiler-react-next` with a `use()` hook) extend
  * this factory.
  *
  * @see docs/proposals/v2/blueprint/07-tool-executor.md

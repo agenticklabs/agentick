@@ -14,8 +14,8 @@ import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next
 import { ElicitationHarness } from "@agentick/elicitation-next";
 import { InMemoryHandlerResolver, ToolExecutorHarness } from "@agentick/tool-executor-next";
 import { LoopExecutorHarness } from "@agentick/loop-executor-next";
-import { ReconcilerHarness } from "@agentick/reconciler-react-next";
-import { fakeBridges } from "@agentick/reconciler-next";
+import { CompilerHarness } from "@agentick/compiler-react-next";
+import { fakeBridges } from "@agentick/compiler-next";
 import type {
   ContentBlock,
   ExecutionTarget,
@@ -83,7 +83,7 @@ async function mkSession(
   const journal = new MemoryJournal();
   const bus = new LocalEventBus();
   const inbox = new LocalInbox();
-  const reconciler = new ReconcilerHarness("test-r", journal, bus, inbox);
+  const compiler = new CompilerHarness("test-r", journal, bus, inbox);
   const loop = new LoopExecutorHarness("test-l", journal, bus, inbox);
   const resolver = new InMemoryHandlerResolver();
   resolver.register("h.calc", async () => [{ type: "text", text: "42" }]);
@@ -94,12 +94,12 @@ async function mkSession(
     ...(opts.tools ? { initialTools: opts.tools } : {}),
   });
   const executor = replyExec("ok");
-  await Promise.all([reconciler.ready, loop.ready, tools.ready, elicitation.ready, executor.ready]);
+  await Promise.all([compiler.ready, loop.ready, tools.ready, elicitation.ready, executor.ready]);
 
   const session = new SessionHarness(journal, bus, inbox, {
     sessionId: `s-${Math.random()}`,
     agent: null,
-    reconciler,
+    compiler,
     loop,
     modelExecutor: executor,
     toolExecutor: tools,
@@ -110,7 +110,7 @@ async function mkSession(
   await session.mountReady;
   // Mount a no-op bridges fixture so session sees a known mount.
   void fakeBridges;
-  return { session, tools, reconciler, loop, journal, bus, inbox };
+  return { session, tools, compiler, loop, journal, bus, inbox };
 }
 
 // ---------------------------------------------------------------------------

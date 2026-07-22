@@ -157,7 +157,7 @@ export interface GatewayHarnessOptions extends BaseHarnessOptions {
    * with `binding: { scope: "gateway" }`.
    *
    * The lowest non-`runtime` rung in the precedence ladder — every
-   * app/session/execution/extension/reconciler-scoped tool overrides
+   * app/session/execution/extension/compiler-scoped tool overrides
    * gateway-bound tools on name collision. Use this for absolute
    * baseline tools every agent in the process should reach for
    * (e.g., process-wide health-check or telemetry tools).

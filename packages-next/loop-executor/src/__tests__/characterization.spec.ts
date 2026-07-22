@@ -11,7 +11,7 @@
  *   - provisional continuation (tool_use ∧ pending calls)
  *   - the two-tier forward decision (stop-force > continue-force > abstain)
  *     under the maxTicks hard cap
- *   - the ADR 67 order: SETTLE (reconciler tick-end) BEFORE DECIDE (notifyTickEnd)
+ *   - the ADR 67 order: SETTLE (compiler tick-end) BEFORE DECIDE (notifyTickEnd)
  *   - abort → canceled terminal
  *   - fire-and-forget lifecycle hooks: a throw must not fail the run
  *
@@ -29,7 +29,7 @@ import type {
   ExecutionTerminal,
   LanguageModelExecutionResult,
   LoopExecutorProtocol,
-  ReconcilerProtocol,
+  CompilerProtocol,
   RenderedTree,
   RunExecutionInput,
   StateApplicator,
@@ -54,12 +54,12 @@ function mkSubstrate() {
 const EMPTY_TREE: RenderedTree = { specVersion: SPEC_VERSION, context: { entries: [] } };
 
 /**
- * Stub reconciler that renders nothing. Lifecycle is NOT a reconciler
+ * Stub compiler that renders nothing. Lifecycle is NOT a compiler
  * concern anymore (ADR 89 §4) — the settle rides the loop's own
  * `onAfterLoopTick` command hook (see {@link runChar}, which emulates the
  * session's forwarder).
  */
-function mkStubReconciler(): ReconcilerProtocol {
+function mkStubCompiler(): CompilerProtocol {
   return {
     fx: {
       use: () => () => {},
@@ -128,7 +128,7 @@ function mkFakeToolExecutor(
     // tool-error path), matching the facade's rejection.
     fx: {
       use: () => () => {},
-      replaceReconcilerTools: () => Effect.void,
+      replaceCompilerTools: () => Effect.void,
       compileForTick: () => Effect.succeed([]),
       dispatch: (i: { name: string; toolCallId: string }) =>
         Effect.tryPromise({
@@ -136,7 +136,7 @@ function mkFakeToolExecutor(
           catch: (e) => e,
         }),
     },
-    replaceReconcilerTools: async () => undefined,
+    replaceCompilerTools: async () => undefined,
     compileForTick: async () => [],
     dispatch: async (i: { name: string; toolCallId: string }) =>
       dispatch({ name: i.name, toolCallId: i.toolCallId }),
@@ -242,7 +242,7 @@ async function runChar(cfg: CharConfig): Promise<CharTrace> {
   const input: RunExecutionInput = {
     sessionId: "s_ch",
     mountId: "ch-mount",
-    reconciler: mkStubReconciler(),
+    compiler: mkStubCompiler(),
     modelExecutor: executor,
     toolExecutor: mkFakeToolExecutor(dispatch),
     target: executor.target,
@@ -455,7 +455,7 @@ describe("LoopExecutorHarness [characterization] — cancellation", () => {
     const terminal = await loop.runExecution({
       sessionId: "s_ab",
       mountId: "ch-mount",
-      reconciler: mkStubReconciler(),
+      compiler: mkStubCompiler(),
       modelExecutor: executor,
       toolExecutor: mkFakeToolExecutor(async (call) => dispatchOk(call, [])),
       target: executor.target,
@@ -497,7 +497,7 @@ describe("LoopExecutorHarness [characterization] — awaited lifecycle propagati
     const input: RunExecutionInput = {
       sessionId: `s_${scope}`,
       mountId: "ch-mount",
-      reconciler: mkStubReconciler(),
+      compiler: mkStubCompiler(),
       modelExecutor: executor,
       toolExecutor: mkFakeToolExecutor(async (call) => dispatchOk(call, [])),
       target: executor.target,

@@ -3,7 +3,7 @@
 **LoopExecutorHarness — one agent execution, run tick by tick.**
 
 The orchestration harness that runs a single execution to terminal. It
-composes the four downstream harnesses — reconciler, model-executor,
+composes the four downstream harnesses — compiler, model-executor,
 tool-executor, and the session's state applicator — through the
 canonical tick loop, emitting a per-phase event stream so the whole
 execution is auditable from one subscriber on `surface: "loop"`.
@@ -16,7 +16,7 @@ published independently.
 A `LoopExecutorProtocol` implementation owns the answer to "what
 happens between `session.send()` and the terminal result?" That is:
 
-1. **render** the JSX tree to a `RenderedTree` (reconciler),
+1. **render** the JSX tree to a `RenderedTree` (compiler),
 2. **execute** it against the model (executor),
 3. **dispatch** every `toolCall` the model requested (tool-executor),
 4. **apply** the executor result + tool results back into session state
@@ -29,7 +29,7 @@ happens between `session.send()` and the terminal result?" That is:
 The loop is a _conduit_: it threads a `RenderContext` envelope into each
 render, resolves a per-tick model against the mount's `ModelBridge`, and
 bridges lifecycle moments to both the public event stream and the
-reconciler's hook store — all without knowing what any individual fact
+compiler's hook store — all without knowing what any individual fact
 or model _means_.
 
 ## Quick Start
@@ -54,7 +54,7 @@ const loop = new LoopExecutorHarness(
 const terminal = await loop.runExecution({
   executionId: "exec:1",
   sessionId: "s:1",
-  reconciler, // ReconcilerProtocol
+  compiler, // CompilerProtocol
   mountId, // string
   modelExecutor, // ExecutorProtocol
   target, // ExecutionTarget
@@ -105,7 +105,7 @@ import { defineLoop } from "@agentick/loop-executor-next";
 
 const myLoop = defineLoop({
   async runExecution(input) {
-    const { tree } = await input.reconciler.renderTree({
+    const { tree } = await input.compiler.renderTree({
       mountId: input.mountId,
       sessionId: input.sessionId,
     });
@@ -173,10 +173,10 @@ Each iteration of the tick loop is a **declared command on the loop
 harness** — `loop:tick`, minted in the constructor via `this.command` and
 reached in-fiber via `this.commandEffect` from the `run-execution` body. Its
 body is the tick **through SETTLE** (render → model → tool dispatch → state
-apply → reconciler `tick-end`); its output is the settled `TickResult`.
+apply → compiler `tick-end`); its output is the settled `TickResult`.
 
 - **Settle is IN, decide is OUT.** The tick command body settles the tree
-  (reconciler `tick-end`, running `useOnTickEnd`); the **continuation
+  (compiler `tick-end`, running `useOnTickEnd`); the **continuation
   decision** (`notifyTickEnd` fold / `maxTicks`, ADR 67) stays in the
   `run-execution` while-loop, _after_ the command. So the session's
   predicates read settled state.
@@ -189,7 +189,7 @@ apply → reconciler `tick-end`); its output is the settled `TickResult`.
   reads `tickId` / `tickIndex`) and `onAfterLoopTick` (over the settled
   `TickResult`), alongside the existing `onBefore/AfterLoopRunExecution`.
 - **In-process only.** `TickInput` carries live object refs
-  (reconciler / executor / tool / applicator + the session resolvers), so
+  (compiler / executor / tool / applicator + the session resolvers), so
   the verb is `exposure: "internal"` — never inbox/wire-addressable (ADR 51
   §1.2). It lives on the LOOP harness (the loop owns tick orchestration),
   not the model executor (which owns the single model call).
@@ -260,8 +260,8 @@ either way.
 
 The loop's `runExecutionBody` is **one `Effect.gen` fiber**. Every
 downstream harness call composes in-fiber via its `.fx` twin — `yield*
-reconciler.fx.renderTree(...)`, `executor.fx.{run,project,executeStream,
-normalize}(...)`, `toolExecutor.fx.{replaceReconcilerTools,compileForTick,
+compiler.fx.renderTree(...)`, `executor.fx.{run,project,executeStream,
+normalize}(...)`, `toolExecutor.fx.{replaceCompilerTools,compileForTick,
 dispatch}(...)`, `stateApplicator.fx.apply*(...)` — with no `runPromise`
 root between boundaries.
 
@@ -288,7 +288,7 @@ Because the spine is one fiber, three capabilities fall out:
 - **Nested telemetry.** Run the composed execution on a tracer
   `ManagedRuntime` (the session does this automatically when the app has a
   `telemetry` Layer) and the whole trace nests — `loop:command:run-execution`
-  > `executor:command:*` + `tool:command:dispatch` + `reconciler:command:
+  > `executor:command:*` + `tool:command:dispatch` + `compiler:command:
 render-tree` — with `parentOpId` auto-linked via `FiberRef`. No manual
   > span threading.
 - **Structured cancellation.** `loop.abort()` (→ `session.send(...).abort()`)
@@ -328,7 +328,7 @@ render-tree` — with `parentOpId` auto-linked via `FiberRef`. No manual
   its chunks ARE the `LoopExecutionEvent`s, drained through a `LoopExecutionSink`
   (`.fx` sink-fold for the session, `.run` no-op drain for the facade). The
   `onLoopRunExecutionChunk` per-chunk interceptor is minted for free.
-- ✅ Lifecycle bridge to the reconciler hook store (ADR 54/55) —
+- ✅ Lifecycle bridge to the compiler hook store (ADR 54/55) —
   tick/execution/tool start+end.
 - ✅ Per-tick `RenderContext` threading (`resolveRenderContext`, ADR 55).
 - ✅ Per-tick model resolution against the `ModelBridge`
@@ -340,7 +340,7 @@ render-tree` — with `parentOpId` auto-linked via `FiberRef`. No manual
 ## Roadmap & known gaps
 
 - **Internal-exposure command.** `loop:run-execution` is declared
-  `exposure: "internal"` — its input carries live object refs (reconciler,
+  `exposure: "internal"` — its input carries live object refs (compiler,
   executor, tool-executor, `stateApplicator`, the session resolvers + the
   event sink), so it is never inbox/wire-addressable (ADR 51 §1.2). The
   addressable execution surface is the _session's_, not the loop's — see
@@ -356,7 +356,7 @@ render-tree` — with `parentOpId` auto-linked via `FiberRef`. No manual
   per-tick _execution_ model resolves without that (no chicken-and-egg).
 - **`<Model model={adapter}>` sugar deferred.** The adopter face that
   derives `{modelExecutor, target}` from a live `@agentick/model-next` adapter
-  lands in a binding package depending on both reconciler-react +
+  lands in a binding package depending on both compiler-react +
   model-next — `TODO(adr-56-slice-1)`. Until then, refs register directly
   on the `ModelBridge`.
 - **`ExecutionRunResult.outputs`** (Phase 4f `OutputDeclaration`
@@ -379,7 +379,7 @@ render-tree` — with `parentOpId` auto-linked via `FiberRef`. No manual
   tears down a hanging model call / tool handler), parallel dispatch
   (rendezvous proof of concurrency + call-order results), execution timeout
   (`stopReason: "timeout"`).
-- Cross-harness integration (real reconciler + executor + tool-executor,
+- Cross-harness integration (real compiler + executor + tool-executor,
   lifecycle bridge, per-tick model resolution) lives in
   `@agentick/session-next/__tests__/` (`lifecycle-bridge.spec.tsx`,
   `model-bridge.spec.tsx`) — tests live where their dependencies live

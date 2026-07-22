@@ -80,7 +80,7 @@
     "@agentick/app-next": "workspace:*",
     "@agentick/credentials-next": "workspace:*",
     "@agentick/model-executor-next": "workspace:*",
-    "@agentick/reconciler-next": "workspace:*",
+    "@agentick/compiler-next": "workspace:*",
     "@agentick/resources-next": "workspace:*",
     "@agentick/spec-conformance-next": "workspace:*",
     "@agentick/utils-next": "workspace:*",

@@ -27,7 +27,7 @@ function fakeInput(executionId: string, sessionId = "s_1"): RunExecutionInput {
   return {
     executionId,
     sessionId,
-    reconciler: stub,
+    compiler: stub,
     mountId: "m_1",
     modelExecutor: stub,
     target: { kind: "language-model", provider: "test", modelId: "x" },

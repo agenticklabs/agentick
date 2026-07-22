@@ -3,7 +3,7 @@
  *
  * Verifies the loop's tick contract:
  *   1. Render: pull tools from `RenderedTree.declarations.tools`.
- *   2. Sync: call `toolExecutor.replaceReconcilerTools(mountId, ...)`
+ *   2. Sync: call `toolExecutor.replaceCompilerTools(mountId, ...)`
  *      to mirror the just-rendered slice into the registry.
  *   3. Compile: call `toolExecutor.compileForTick({ exposure: "model" })`
  *      to get the precedence-resolved set.
@@ -31,7 +31,7 @@ import type {
   LanguageModelInput,
   NormalizeInput,
   ProjectInput,
-  ReconcilerProtocol,
+  CompilerProtocol,
   RenderedTree,
   RunInput,
   StateApplicator,
@@ -79,7 +79,7 @@ async function mkToolExecutor(
   return harness;
 }
 
-function mkReconciler(tools: readonly ToolDeclaration[]): ReconcilerProtocol {
+function mkCompiler(tools: readonly ToolDeclaration[]): CompilerProtocol {
   const mkTree = (): RenderedTree => ({
     specVersion: SPEC_VERSION,
     context: { entries: [] },
@@ -200,7 +200,7 @@ function mkRecordingExecutor(): {
 // ============================================================================
 
 describe("LoopExecutorHarness — layered tools (#138)", () => {
-  it("syncs the reconciler-emitted tools into the registry and passes them to run()", async () => {
+  it("syncs the compiler-emitted tools into the registry and passes them to run()", async () => {
     const sub = mkSubstrate();
     const loop = new LoopExecutorHarness("loop_1", sub.journal, sub.bus, sub.inbox);
     await loop.ready;
@@ -216,14 +216,14 @@ describe("LoopExecutorHarness — layered tools (#138)", () => {
       },
     ];
 
-    const reconciler = mkReconciler(tools);
+    const compiler = mkCompiler(tools);
     const toolExecutor = await mkToolExecutor("tools_1", sub);
     const { executor, captured } = mkRecordingExecutor();
 
     await loop.runExecution({
       sessionId: "s_1",
       mountId: "m_test",
-      reconciler,
+      compiler,
       modelExecutor: executor,
       toolExecutor,
       target: executor.target,
@@ -232,13 +232,13 @@ describe("LoopExecutorHarness — layered tools (#138)", () => {
       maxTicks: 1,
     });
 
-    // The loop should have passed the reconciler-emitted tool through
+    // The loop should have passed the compiler-emitted tool through
     // to executor.run via the registry's compile.
     expect(captured.runs).toHaveLength(1);
     expect(captured.runs[0]!.map((t) => t.name)).toEqual(["calc"]);
   });
 
-  it("merges reconciler tools with pre-existing extension-bound tools via precedence", async () => {
+  it("merges compiler tools with pre-existing extension-bound tools via precedence", async () => {
     const sub = mkSubstrate();
     const loop = new LoopExecutorHarness("loop_2", sub.journal, sub.bus, sub.inbox);
     await loop.ready;
@@ -260,8 +260,8 @@ describe("LoopExecutorHarness — layered tools (#138)", () => {
     };
     const toolExecutor = await mkToolExecutor("tools_2", sub, [extensionTool]);
 
-    // Reconciler emits a different tool.
-    const reconciler = mkReconciler([
+    // Compiler emits a different tool.
+    const compiler = mkCompiler([
       {
         id: "t.calc",
         name: "calc",
@@ -276,7 +276,7 @@ describe("LoopExecutorHarness — layered tools (#138)", () => {
     await loop.runExecution({
       sessionId: "s_2",
       mountId: "m_test_2",
-      reconciler,
+      compiler,
       modelExecutor: executor,
       toolExecutor,
       target: executor.target,
@@ -289,7 +289,7 @@ describe("LoopExecutorHarness — layered tools (#138)", () => {
     expect(captured.runs[0]!.map((t) => t.name).sort()).toEqual(["calc", "search"]);
   });
 
-  it("reconciler binding overrides extension binding on name collision", async () => {
+  it("compiler binding overrides extension binding on name collision", async () => {
     const sub = mkSubstrate();
     const loop = new LoopExecutorHarness("loop_3", sub.journal, sub.bus, sub.inbox);
     await loop.ready;
@@ -308,10 +308,10 @@ describe("LoopExecutorHarness — layered tools (#138)", () => {
     };
     const toolExecutor = await mkToolExecutor("tools_3", sub, [extensionTool]);
 
-    const reconciler = mkReconciler([
+    const compiler = mkCompiler([
       {
         id: "t.calc.rendered",
-        name: "calc", // same name — reconciler should win
+        name: "calc", // same name — compiler should win
         description: "rendered calc",
         inputSchema: jsonSchema({ type: "object" }),
         exposure: ["model"],
@@ -323,7 +323,7 @@ describe("LoopExecutorHarness — layered tools (#138)", () => {
     await loop.runExecution({
       sessionId: "s_3",
       mountId: "m_test_3",
-      reconciler,
+      compiler,
       modelExecutor: executor,
       toolExecutor,
       target: executor.target,
@@ -343,7 +343,7 @@ describe("LoopExecutorHarness — layered tools (#138)", () => {
     await loop.ready;
 
     const toolExecutor = await mkToolExecutor("tools_4", sub);
-    const reconciler = mkReconciler([
+    const compiler = mkCompiler([
       {
         id: "t.visible",
         name: "visible",
@@ -366,7 +366,7 @@ describe("LoopExecutorHarness — layered tools (#138)", () => {
     await loop.runExecution({
       sessionId: "s_4",
       mountId: "m_test_4",
-      reconciler,
+      compiler,
       modelExecutor: executor,
       toolExecutor,
       target: executor.target,
@@ -378,14 +378,14 @@ describe("LoopExecutorHarness — layered tools (#138)", () => {
     expect(captured.runs[0]!.map((t) => t.name)).toEqual(["visible"]);
   });
 
-  it("rendering nothing this tick clears the prior reconciler slice via replaceReconcilerTools([])", async () => {
+  it("rendering nothing this tick clears the prior compiler slice via replaceCompilerTools([])", async () => {
     const sub = mkSubstrate();
     const loop = new LoopExecutorHarness("loop_5", sub.journal, sub.bus, sub.inbox);
     await loop.ready;
     const toolExecutor = await mkToolExecutor("tools_5", sub);
 
-    // First tick: reconciler emits a tool, loop syncs it into the
-    // registry. The registry's reconciler slice has one entry.
+    // First tick: compiler emits a tool, loop syncs it into the
+    // registry. The registry's compiler slice has one entry.
     let stage = 0;
     const renderResult = () => {
       const tools: readonly ToolDeclaration[] =
@@ -408,7 +408,7 @@ describe("LoopExecutorHarness — layered tools (#138)", () => {
       };
       return { tree, diagnostics: [], iterations: 1 };
     };
-    const reconciler: ReconcilerProtocol = {
+    const compiler: CompilerProtocol = {
       fx: { use: () => () => {}, renderTree: () => Effect.succeed(renderResult()) },
       mount: async () => ({ mountId: "m_5", restoredFromSnapshot: false }),
       rerender: async () => undefined,
@@ -434,7 +434,7 @@ describe("LoopExecutorHarness — layered tools (#138)", () => {
     await loop.runExecution({
       sessionId: "s_5",
       mountId: "m_5",
-      reconciler,
+      compiler,
       modelExecutor: executor,
       toolExecutor,
       target: executor.target,
@@ -444,12 +444,12 @@ describe("LoopExecutorHarness — layered tools (#138)", () => {
     });
     expect(captured.runs[0]!.map((t) => t.name)).toEqual(["x"]);
 
-    // Tick 2 — same mountId, reconciler now emits nothing.
+    // Tick 2 — same mountId, compiler now emits nothing.
     stage = 1;
     await loop.runExecution({
       sessionId: "s_5",
       mountId: "m_5",
-      reconciler,
+      compiler,
       modelExecutor: executor,
       toolExecutor,
       target: executor.target,

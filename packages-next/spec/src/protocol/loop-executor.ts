@@ -3,10 +3,10 @@
  * agent execution.
  *
  * Sits between the session harness (Phase 4e) and the lower-level
- * reconciler / executor / tool-executor harnesses. Composes their
+ * compiler / executor / tool-executor harnesses. Composes their
  * protocol surfaces into the canonical tick loop:
  *
- *   1. renderTree (reconciler)
+ *   1. renderTree (compiler)
  *   2. executor.run    (executor)
  *   3. for each toolCall: toolExecutor.dispatch  (tool-executor)
  *   4. stateApplicator.apply* (session harness's apply commands)
@@ -38,7 +38,7 @@ import type { StateApplyErrorChannel } from "../errors/lifecycle.js";
 import type { FormatterRef } from "../data/formatter.js";
 import type { ExecutorProtocol } from "./executor.js";
 import type { RegisteredModel } from "./hook-bridges.js";
-import type { ReconcilerProtocol } from "./reconciler.js";
+import type { CompilerProtocol } from "./compiler.js";
 import type { RenderContext } from "./render-context.js";
 import type { ToolExecutorProtocol } from "./tool-executor.js";
 
@@ -132,8 +132,8 @@ export interface RunExecutionInput {
   readonly sessionId: string;
   readonly parentExecutionId?: string;
 
-  /** Reconciler harness whose `mountId` the loop will render each tick. */
-  readonly reconciler: ReconcilerProtocol;
+  /** Compiler harness whose `mountId` the loop will render each tick. */
+  readonly compiler: CompilerProtocol;
   /**
    * Resolve the whole {@link RenderContext} envelope for the CURRENT
    * render (ADR 55) — the session's per-render fact producer. It owns
@@ -372,7 +372,7 @@ export interface TickInfo {
  * as the tick barrier; the DECIDE (continuation policy) stays OUT, in the
  * `run-execution` while-loop.
  *
- * Like {@link RunExecutionInput}, this carries LIVE object refs (reconciler /
+ * Like {@link RunExecutionInput}, this carries LIVE object refs (compiler /
  * modelExecutor / toolExecutor / stateApplicator + the session's per-tick
  * resolvers) and is IN-PROCESS ONLY (ADR 51 §1.2 — never crosses the wire, so
  * the command is `exposure: "internal"`). The hook-relevant identity
@@ -390,8 +390,8 @@ export interface TickInput {
   readonly sessionId: string;
   readonly mountId: string;
 
-  /** Reconciler harness whose `mountId` this tick renders. */
-  readonly reconciler: ReconcilerProtocol;
+  /** Compiler harness whose `mountId` this tick renders. */
+  readonly compiler: CompilerProtocol;
   /** Fallback model-executor when the tick's IR declares no `<Model>`. */
   readonly modelExecutor: ExecutorProtocol<unknown, unknown, LanguageModelExecutionResult>;
   /** Fallback execution target paired with {@link modelExecutor}. */

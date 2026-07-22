@@ -30,7 +30,7 @@ import { describe, expect, it } from "vitest";
 import { createClient } from "@agentick/client-core-next";
 import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
 import { createGateway } from "@agentick/gateway-next";
-import { fakeReconciler } from "@agentick/reconciler-next/testing";
+import { fakeCompiler } from "@agentick/compiler-next/testing";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import { waitFor } from "@agentick/utils-next/testing";
 import type { ContentBlock } from "@agentick/spec-next";
@@ -63,7 +63,7 @@ async function makeStack() {
   const app = await gateway.createApp({
     appId: "tasks-app",
     rootElement: null,
-    options: { modelExecutor: executor, reconciler: fakeReconciler() },
+    options: { modelExecutor: executor, compiler: fakeCompiler() },
   });
   // `session.tasks` is added by the tasks-next module augmentation (loaded above)
   // and constructed unconditionally per session (ADR 26 built-in bridge).

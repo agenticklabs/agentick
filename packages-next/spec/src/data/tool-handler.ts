@@ -386,7 +386,7 @@ export interface McpAuthenticatedUser {
  * The first argument is validated input (`unknown` at the harness
  * boundary — the validator narrows). The second is the per-dispatch
  * dependency bundle: `ctx` (harness-provided) and `use` (render-time
- * deps captured by the reconciler).
+ * deps captured by the compiler).
  *
  * @see docs/proposals/v2/blueprint/70-tool-result-currency.md
  */

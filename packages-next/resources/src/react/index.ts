@@ -1,6 +1,6 @@
 /**
  * `@agentick/resources-next/react` — the React front-end for the
- * resources harness (ADR 62). Depends on `@agentick/reconciler-react-next`'s
+ * resources harness (ADR 62). Depends on `@agentick/compiler-react-next`'s
  * `useBridges` (via `useResourceBridge`) but NOT the other way around —
  * no cycle (ADR 27 per-harness `/react` convention).
  *

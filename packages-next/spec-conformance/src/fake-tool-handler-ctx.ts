@@ -1,7 +1,7 @@
 /**
  * `fakeToolHandlerCtx()` — shared factory for in-test
  * `ToolHandlerCtx` fakes. Replaces ad-hoc fixtures scattered across
- * `tool-next/__tests__`, `reconciler-react-next/__tests__`, etc.
+ * `tool-next/__tests__`, `compiler-react-next/__tests__`, etc.
  *
  * Why centralized: when the canonical `ToolHandlerCtx` shape evolves
  * (new required fields, new sugar slots), one update here propagates

@@ -21,7 +21,7 @@ import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next
 import type {
   LanguageModelExecutionResult,
   LoopExecutionEvent,
-  ReconcilerProtocol,
+  CompilerProtocol,
   RenderedTree,
   RunExecutionInput,
   ToolExecutorProtocol,
@@ -41,7 +41,7 @@ const endResult: LanguageModelExecutionResult = {
   usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
 };
 
-const stubReconciler = (): ReconcilerProtocol =>
+const stubCompiler = (): CompilerProtocol =>
   ({
     fx: {
       use: () => () => {},
@@ -51,13 +51,13 @@ const stubReconciler = (): ReconcilerProtocol =>
     rerender: async () => undefined,
     renderTree: async () => ({ tree: EMPTY_TREE, diagnostics: [], iterations: 1 }),
     unmount: async () => undefined,
-  }) as unknown as ReconcilerProtocol;
+  }) as unknown as CompilerProtocol;
 
 const stubToolExecutor = (): ToolExecutorProtocol =>
   ({
     fx: {
       use: () => () => {},
-      replaceReconcilerTools: () => Effect.void,
+      replaceCompilerTools: () => Effect.void,
       compileForTick: () => Effect.succeed([]),
       dispatch: () => Effect.succeed({ toolCallId: "t", name: "n", content: [], isError: false }),
     },
@@ -79,7 +79,7 @@ async function makeLoopAndInput(
   const input: RunExecutionInput = {
     sessionId: "s_chunk",
     mountId: "chunk-mount",
-    reconciler: stubReconciler(),
+    compiler: stubCompiler(),
     modelExecutor: executor,
     toolExecutor: stubToolExecutor(),
     target: executor.target,

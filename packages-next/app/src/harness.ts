@@ -3,7 +3,7 @@
  *
  * The outermost runtime boundary. Constructs and owns the shared
  * substrate (journal, bus, inbox) and the shared sub-harnesses
- * (reconciler, loop executor) used by every session it spawns. Each
+ * (compiler, loop executor) used by every session it spawns. Each
  * session gets its own `SessionHarness` instance plus its own per-session
  * tool executor scope (so JSX-declared tools don't bleed between
  * sessions) while sharing the language-model executor (provider clients
@@ -59,7 +59,7 @@ import {
   HandlerError,
   isExecutorFactory,
   isLoopExecutorFactory,
-  isReconcilerFactory,
+  isCompilerFactory,
   isToolExecutorFactory,
   toRegistration,
 } from "@agentick/spec-next";
@@ -87,7 +87,7 @@ import type {
   Operation,
   OperationJournal,
   ProtocolEvent,
-  ReconcilerProtocol,
+  CompilerProtocol,
   RegisteredModel,
   RunOnceInput,
   RunOnceResult,
@@ -103,7 +103,7 @@ import type {
   SpawnContext,
   SpawnContextChildInput,
   LoopExecutorFactory,
-  ReconcilerFactory,
+  CompilerFactory,
   ToolExecutorFactory,
   ToolExecutorProtocol,
   Unsubscribe,
@@ -176,14 +176,14 @@ declare module "@agentick/runtime-next" {
 
 /**
  * Per-session forwarded `SessionHarness` options. `sessionId`, `agent`,
- * and the wired sub-harness references (`reconciler`, `loop`, `modelExecutor`,
+ * and the wired sub-harness references (`compiler`, `loop`, `modelExecutor`,
  * `toolExecutor`, `target`) are owned by the App and excluded here.
  */
 export type SessionDefaults<P = unknown> = Omit<
   SessionHarnessOptions<P>,
   | "sessionId"
   | "agent"
-  | "reconciler"
+  | "compiler"
   | "loop"
   | "modelExecutor"
   | "buildModelExecutor"
@@ -212,9 +212,9 @@ export interface AppHarnessOptions<P = unknown> {
   /** Stable app id; defaults to `app:${ulid()}`. */
   readonly appId?: string;
   /**
-   * Root agent element passed to every session's reconciler mount.
-   * Opaque to the app — the reconciler impl owns the type contract.
-   * For React this is a `React.ReactNode`; for an Angular reconciler
+   * Root agent element passed to every session's compiler mount.
+   * Opaque to the app — the compiler impl owns the type contract.
+   * For React this is a `React.ReactNode`; for an Angular compiler
    * it'd be the framework's root component reference.
    */
   readonly rootElement: unknown;
@@ -261,20 +261,20 @@ export interface AppHarnessOptions<P = unknown> {
   // ────────── Sub-harness slots (shared across sessions) ──────────
 
   /**
-   * Reconciler slot. Required — `@agentick/app-next` is reconciler-agnostic
-   * by design and does NOT default to any specific reconciler. Pass:
+   * Compiler slot. Required — `@agentick/app-next` is compiler-agnostic
+   * by design and does NOT default to any specific compiler. Pass:
    *
-   *   - A pre-built `ReconcilerProtocol` instance (e.g., a future
-   *     Angular reconciler).
-   *   - A `ReconcilerFactory` (produced by `defineReconciler(...)` or
-   *     `reactReconciler(...)` etc.). The App calls the factory at
-   *     construction with the shared substrate so reconciler events
+   *   - A pre-built `CompilerProtocol` instance (e.g., a future
+   *     Angular compiler).
+   *   - A `CompilerFactory` (produced by `defineCompiler(...)` or
+   *     `reactCompiler(...)` etc.). The App calls the factory at
+   *     construction with the shared substrate so compiler events
    *     flow through `app.events()`.
    *
    * For the React default, use `createApp` from `@agentick/app-next/react`
-   * which defaults `reconciler: reactReconciler()` automatically.
+   * which defaults `compiler: reactCompiler()` automatically.
    */
-  readonly reconciler: ReconcilerProtocol | ReconcilerFactory;
+  readonly compiler: CompilerProtocol | CompilerFactory;
 
   /**
    * Loop executor slot. Accepts:
@@ -368,7 +368,7 @@ export interface AppHarnessOptions<P = unknown> {
    * Use this when every session of this app should see the same
    * baseline tool. Per-session overrides flow through
    * `CreateSessionInput.tools`. Adopters needing dynamic per-tick
-   * tools should declare via JSX (reconciler scope wins everything).
+   * tools should declare via JSX (compiler scope wins everything).
    *
    * @see ToolBinding in `@agentick/spec-next` for the precedence ladder.
    */
@@ -393,7 +393,7 @@ export interface AppHarnessOptions<P = unknown> {
 
   /**
    * Default `SessionHarness` options forwarded to every session. The
-   * fields wired by the App (`reconciler`, `loop`, `executor`,
+   * fields wired by the App (`compiler`, `loop`, `executor`,
    * `toolExecutor`, `target`, `sessionId`, `agent`) are excluded.
    *
    * Cascade: per-call `createSession` fields > this > convenience
@@ -615,7 +615,7 @@ export class AppHarness<P = unknown>
   private readonly inheritedTools: readonly ToolRegistration[];
 
   // Shared sub-harnesses (one per app, used by every session).
-  private readonly reconciler: ReconcilerProtocol;
+  private readonly compiler: CompilerProtocol;
   private readonly loop: LoopExecutorProtocol;
   private readonly handlerResolver: InMemoryHandlerResolver;
   // Tools contributed by extensions at install time. Appended to
@@ -670,7 +670,7 @@ export class AppHarness<P = unknown>
 
   /**
    * Tool bridge surfaced to each session's HookBridges. Wraps the
-   * shared HandlerResolver so reconciler-side tools (React
+   * shared HandlerResolver so compiler-side tools (React
    * `createTool` with `use()`) can register handlers at render time
    * keyed by `handlerRef`. Constructed in the constructor.
    */
@@ -884,8 +884,8 @@ export class AppHarness<P = unknown>
     // Gateway-propagated tools — pre-tagged, captured verbatim.
     this.inheritedTools = options.inheritedTools ?? [];
 
-    // Reconciler slot — instance or options.
-    this.reconciler = resolveReconciler(options.reconciler, appId, journal, bus, inbox);
+    // Compiler slot — instance or options.
+    this.compiler = resolveCompiler(options.compiler, appId, journal, bus, inbox);
 
     // Loop slot: factory → call with shared substrate; instance → use
     // as-is; undefined → bundled default with shared substrate.
@@ -977,16 +977,16 @@ export class AppHarness<P = unknown>
         self.extensionCloseHandlers.push(handler);
       },
       registerContributor(contributor): Unsubscribe {
-        // The reconciler harness exposes `registerContributor` on
-        // ReconcilerHarness specifically. Duck-type — external
-        // reconciler impls without the method silently drop.
-        const r = self.reconciler as {
+        // The compiler harness exposes `registerContributor` on
+        // CompilerHarness specifically. Duck-type — external
+        // compiler impls without the method silently drop.
+        const r = self.compiler as {
           registerContributor?: (c: unknown) => void;
         };
         if (typeof r.registerContributor === "function") {
           r.registerContributor(contributor);
         }
-        // No unregister surface today; reconciler registry is
+        // No unregister surface today; compiler registry is
         // append-only. Future work if extensions need hot-swap.
         return () => {};
       },
@@ -1128,11 +1128,9 @@ export class AppHarness<P = unknown>
     // defaults implement it; user-supplied instances are expected to
     // already be ready. Probe duck-typed so external impls without a
     // `ready` getter still work.
-    const reconcilerReady = readyOf(this.reconciler);
+    const compilerReady = readyOf(this.compiler);
     const loopReady = readyOf(this.loop);
-    return Promise.all([this.ready, reconcilerReady, loopReady, this.extensionsReady]).then(
-      () => {},
-    );
+    return Promise.all([this.ready, compilerReady, loopReady, this.extensionsReady]).then(() => {});
   }
 
   // ──────── AppHarnessProtocol ────────
@@ -1615,7 +1613,7 @@ export class AppHarness<P = unknown>
       // Agent cascade: spawn-supplied (overrides.agent) > per-call
       // input.rootElement > app's rootElement.
       agent: overrides.agent ?? input.rootElement ?? this.rootElement,
-      reconciler: this.reconciler,
+      compiler: this.compiler,
       loop: this.loop,
       modelExecutor: this.modelExecutor,
       // ADR 89 §2 — adapter→executor builder for `session.model.setModel(adapter)`.
@@ -1633,7 +1631,7 @@ export class AppHarness<P = unknown>
       // the tracer runtime (nested spans).
       // TODO(stage-4: fiber-context-namespace) — this whitelabels only
       // SESSION-owned spans. The spine harnesses (loop/executor/tool/
-      // reconciler) carry their own `telemetryNamespace` (default
+      // compiler) carry their own `telemetryNamespace` (default
       // "agentick") and their constructors don't accept an override, so a
       // WHOLE-SPINE whitelabel needs the namespace read from fiber context
       // (ADR 78 brick #2), not per-harness fields. Nesting is unaffected.
@@ -1705,7 +1703,7 @@ export class AppHarness<P = unknown>
       // Inject self as SpawnContext so the child can spawn grandchildren.
       spawnContext: this,
       // Surface the shared handler resolver as a ToolBridge so
-      // reconciler-side tools register handlers at render time.
+      // compiler-side tools register handlers at render time.
       toolBridge: this.toolBridge,
       // Extension-provided bridges. App-level bridges are merged in
       // at `sessionExtensionBridges` construction (above); session-
@@ -1858,7 +1856,7 @@ export class AppHarness<P = unknown>
     // Tear down shared sub-harnesses last so their inboxes are still
     // alive while sessions detach. `close()` may not exist on
     // user-supplied impls — guard it.
-    await Promise.allSettled([closeOf(this.reconciler), closeOf(this.loop)]);
+    await Promise.allSettled([closeOf(this.compiler), closeOf(this.loop)]);
     // `super.close()` fires substrate-close handlers registered via
     // factories' `parent.onClose(h)`. Safe to run here because
     // `app:command:close-app` is policy-marked `"bus-only"` in the
@@ -1924,38 +1922,38 @@ function mapAppError(cause: unknown): AppError {
 // ─────────────────────────────────────────────────────────────────────
 
 /**
- * `ReconcilerProtocol` instances expose a `mount()` method; factories
- * carry the `reconcilerFactory: true` marker. Duck-type to discriminate.
+ * `CompilerProtocol` instances expose a `mount()` method; factories
+ * carry the `compilerFactory: true` marker. Duck-type to discriminate.
  */
-function isReconcilerInstance(v: unknown): v is ReconcilerProtocol {
+function isCompilerInstance(v: unknown): v is CompilerProtocol {
   return (
     typeof v === "object" && v !== null && typeof (v as { mount?: unknown }).mount === "function"
   );
 }
 
-function resolveReconciler(
-  slot: ReconcilerProtocol | ReconcilerFactory | undefined,
+function resolveCompiler(
+  slot: CompilerProtocol | CompilerFactory | undefined,
   scopeId: string,
   journal: OperationJournal,
   bus: EventBus,
   inbox: MessageInbox,
-): ReconcilerProtocol {
+): CompilerProtocol {
   if (slot === undefined) {
     throw new Error(
-      "createApp: `reconciler` is required. Import createApp from " +
+      "createApp: `compiler` is required. Import createApp from " +
         '"@agentick/app-next/react" for the React default, or pass a ' +
-        "`ReconcilerFactory` (e.g., `reactReconciler()` from " +
-        '"@agentick/reconciler-react-next").',
+        "`CompilerFactory` (e.g., `reactCompiler()` from " +
+        '"@agentick/compiler-react-next").',
     );
   }
-  if (isReconcilerFactory(slot)) {
+  if (isCompilerFactory(slot)) {
     return slot({ scopeId, journal, bus, inbox });
   }
-  if (isReconcilerInstance(slot)) return slot;
+  if (isCompilerInstance(slot)) return slot;
   throw new Error(
-    "createApp: `reconciler` must be a `ReconcilerProtocol` instance " +
-      "or a `ReconcilerFactory` (produced by `defineReconciler(...)` " +
-      "or `reactReconciler(...)` etc.).",
+    "createApp: `compiler` must be a `CompilerProtocol` instance " +
+      "or a `CompilerFactory` (produced by `defineCompiler(...)` " +
+      "or `reactCompiler(...)` etc.).",
   );
 }
 

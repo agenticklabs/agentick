@@ -16,7 +16,7 @@
  */
 
 import * as React from "react";
-import { useBridges, useOnUnmount } from "@agentick/reconciler-react-next";
+import { useBridges, useOnUnmount } from "@agentick/compiler-react-next";
 import type { SubscriptionIntent } from "@agentick/spec-next";
 
 import "../augment.js";

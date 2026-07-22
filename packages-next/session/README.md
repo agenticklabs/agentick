@@ -2,7 +2,7 @@
 
 **SessionHarness — one agent run, one long-lived conversation.**
 
-The integration site where v2's harness surfaces — reconciler, loop
+The integration site where v2's harness surfaces — compiler, loop
 model-executor, tool executor, timeline, knobs, state, elicitation, tasks,
 prompts — wire together for a single conversation. One session per
 human dialog; sessions are created by an app harness and persist
@@ -53,7 +53,7 @@ Each surface is contributed by a bundled harness package
 `-resources-`, `-gates-`, `-elicitation-`) via `declare module
 "@agentick/spec-next"` — no slot is hardcoded in spec. On the reference
 `SessionHarness` each is also reachable as `bridges.<name>` inside the
-reconciler/executor flow; the two views point at the SAME instance.
+compiler/executor flow; the two views point at the SAME instance.
 
 ## `session.elicit` vs. `session.elicitation`
 
@@ -136,7 +136,7 @@ full `Elicit` interface contract.
 
 ```
 SessionHarness
-├── reconciler (per-tick, ephemeral)       — JSX → RenderedTree
+├── compiler (per-tick, ephemeral)       — JSX → RenderedTree
 ├── loopExecutor (per-tick, ephemeral)     — runs ticks until terminal
 ├── toolExecutor (session-scoped)          — dispatch handlers; ctx.elicit, ctx.tasks
 ├── timeline (session-scoped, durable)     — message + section + event log
@@ -154,7 +154,7 @@ Every harness whose lifecycle is bound to a session is constructed
 once per session at create-time and surfaced both:
 
 1. On the `SessionHarnessProtocol` (this object) for adopter code, AND
-2. Via `bridges.<name>` inside reconciler / executor flow.
+2. Via `bridges.<name>` inside compiler / executor flow.
 
 The two views point at the SAME instance. `session.elicitation ===
 bridges.elicitation` always.
@@ -172,8 +172,8 @@ import { SessionHarness } from "@agentick/session-next";
 
 const session = new SessionHarness(journal, bus, inbox, {
   sessionId: "s:1",
-  agent: <MyAgent />, // opaque — forwarded to reconciler.mount({ element })
-  reconciler, // ReconcilerProtocol
+  agent: <MyAgent />, // opaque — forwarded to compiler.mount({ element })
+  compiler, // CompilerProtocol
   loop, // LoopExecutorProtocol
   modelExecutor, // ExecutorProtocol
   toolExecutor, // ToolExecutorProtocol
@@ -255,7 +255,7 @@ usage) and `applyToolResults` (append tool messages) so the _next_
 render sees them via `<Timeline/>`.
 
 **`notifyLifecycle` is the session's continuation decision (ADR 67).** The
-loop calls it once per tick — AFTER the reconciler tick-end has settled the
+loop calls it once per tick — AFTER the compiler tick-end has settled the
 tree — with the settled `TickResult`, and the session folds every
 continuation predicate it owns into ONE `TickEndForwardDecision`, in tier
 order (mirroring the loop's own resolution):
@@ -273,7 +273,7 @@ order (mirroring the loop's own resolution):
 
 The settle-then-decide order is load-bearing: a tick-end effect may update a
 knob a gate checks, so the tree must settle before the predicates read it.
-Gate evaluation lives here, not in the reconciler mount — `useGate` is
+Gate evaluation lives here, not in the compiler mount — `useGate` is
 registration-only. Since ADR 89 §4 the SETTLE itself is a session-registered
 `onAfterLoopTick` forwarder (below), awaited in the `loop:tick` command
 cascade — before the command terminal, hence before this decide.
@@ -299,7 +299,7 @@ and unhooks them on `close()`:
   per-tick `<Model>`-swapped executor (ADR 56) outside the session's
   interceptor tree.
 - The target is the compiler's optional `LifecycleProjectionTarget`
-  capability (`dispatchLifecycle`); a reconciler without it gets no
+  capability (`dispatchLifecycle`); a compiler without it gets no
   projection.
 
 ## `defineSession` — adopter-facing factory
@@ -385,8 +385,8 @@ A single `session.send` produces:
 
 ```
 loop:command:run-execution                 (the execution span — root)
-├─ reconciler:command:render-tree
-├─ tool:command:replace-reconciler-tools
+├─ compiler:command:render-tree
+├─ tool:command:replace-compiler-tools
 ├─ executor:command:project / run / …
 └─ tool:command:dispatch                    (one per parallel tool call)
 ```
@@ -645,7 +645,7 @@ their backing.
 - ✅ Open-or-rehydrate resume from an injected `TimelineStore` (ADR 49)
 - ✅ Per-tick `RenderContext` production (`contextInfo` + `activeModel`,
   ADR 55) and model resolution against the `ModelBridge` (ADR 56)
-- ✅ Lifecycle bridge driving the reconciler `useOn*` hook family (#206)
+- ✅ Lifecycle bridge driving the compiler `useOn*` hook family (#206)
 - ✅ Model registry injection (`models`, #206) + `requiredScopes`
   ceiling (#199)
 - ✅ Durable `SessionStore` (E11) — `InMemorySessionStore` + record

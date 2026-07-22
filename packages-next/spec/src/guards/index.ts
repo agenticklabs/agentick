@@ -290,10 +290,10 @@ export function isLifecycleError(e: LifecycleEvent): e is LifecycleError {
 // ============================================================================
 
 /**
- * Returns true when `value` (typically a `ReconcilerProtocol` impl)
+ * Returns true when `value` (typically a `CompilerProtocol` impl)
  * exposes the OPTIONAL `LifecycleProjectionTarget` capability — the
  * per-mount lifecycle dispatch the session's command-hook forwarders
- * route projected events into. A reconciler without it gets no
+ * route projected events into. A compiler without it gets no
  * lifecycle projection (its trees have no `useOn*` surface).
  */
 export function supportsLifecycleProjection(value: unknown): value is LifecycleProjectionTarget {
@@ -370,8 +370,8 @@ export function isMCPDeclaration(value: unknown): value is MCPDeclaration {
 
 /**
  * True when a `ContentBlock` carries a `semanticNode` sidecar — i.e.,
- * the reconciler's collect walker emitted a structured prose tree that
- * the formatter pass will resolve. Reconciler-internal: nothing
+ * the compiler's collect walker emitted a structured prose tree that
+ * the formatter pass will resolve. Compiler-internal: nothing
  * downstream of the formatter pass should observe a `true` here.
  *
  * @see docs/proposals/v2/blueprint/22-state-formatters-reconciler-shape.md §D5
@@ -383,7 +383,7 @@ export function isSemanticContent(
 }
 
 /**
- * True for a structurally-valid `FormatterRef`. Used by the reconciler's
+ * True for a structurally-valid `FormatterRef`. Used by the compiler's
  * formatter registry when accepting refs from the wire.
  */
 export function isFormatterRef(value: unknown): value is FormatterRef {

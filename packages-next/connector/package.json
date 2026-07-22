@@ -57,7 +57,7 @@
     "@agentick/model-executor-next": "workspace:*",
     "@agentick/gateway-next": "workspace:*",
     "@agentick/model-next": "workspace:*",
-    "@agentick/reconciler-react-next": "workspace:*",
+    "@agentick/compiler-react-next": "workspace:*",
     "@agentick/runtime-next": "workspace:*",
     "react": "^19.0.0"
   }

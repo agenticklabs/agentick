@@ -40,8 +40,8 @@ declare module "@agentick/spec-next" {
      * DECLARE this client's full CLIENT-HANDLED tool set into the session over
      * `session/set_client_tools`. A client is a declarative tool SOURCE that
      * owns a slice: pass the ENTIRE set and the server REPLACES the client
-     * slice wholesale — the wire twin of the reconciler's
-     * `replaceReconcilerTools`. One verb subsumes register (a tool present in
+     * slice wholesale — the wire twin of the compiler's
+     * `replaceCompilerTools`. One verb subsumes register (a tool present in
      * the set), unregister (a tool absent from it), and idempotency (the set IS
      * the truth — a replace, not an accumulate). Reconnect = re-declare;
      * drift-free by construction.

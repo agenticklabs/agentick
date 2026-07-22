@@ -5,7 +5,7 @@
  * connection-lifecycle events as a live `AsyncIterable<ClientEvent>`
  * with surface/phase filtering, a monotonic cursor, clean `close()`,
  * and independent concurrent iterators. Uses a hand-rolled fake
- * transport (no in-process reconciler) so the test isolates the
+ * transport (no in-process compiler) so the test isolates the
  * event-stream plumbing from execution semantics.
  *
  * The emitter is live-only (no replay buffer), so every test starts

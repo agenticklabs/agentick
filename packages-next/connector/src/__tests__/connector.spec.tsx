@@ -15,7 +15,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
-import { reactReconciler } from "@agentick/reconciler-react-next";
+import { reactCompiler } from "@agentick/compiler-react-next";
 import { createGateway } from "@agentick/gateway-next";
 import "@agentick/elicitation-next"; // side-effect: augment session.elicit/.elicitation
 import { SPEC_VERSION, type ContentBlock, type ProtocolEvent } from "@agentick/spec-next";
@@ -62,7 +62,7 @@ async function buildStack(
   await gateway.listen();
   const app = await gateway.createApp({
     rootElement: React.createElement(Agent),
-    options: { executor: makeExec(output), reconciler: reactReconciler() } as never,
+    options: { executor: makeExec(output), compiler: reactCompiler() } as never,
   });
   return { gateway, app };
 }

@@ -3,7 +3,7 @@
  *
  * A {@link Formatter} is a pure function `(SemanticContentBlock[]) →
  * ContentBlock[]`. `createFormatter` decorates the render function with
- * identity metadata (`id`, `format`, `version`) so the reconciler's
+ * identity metadata (`id`, `format`, `version`) so the compiler's
  * formatter registry can dispatch by {@link FormatterRef} and so traces
  * can record which formatter ran.
  *
@@ -74,7 +74,7 @@ export interface CreateFormatterInput extends FormatterIdentity {
 
 /**
  * A `Formatter` function decorated with identity metadata + optional
- * tree-level serialization callbacks. The reconciler reads
+ * tree-level serialization callbacks. The compiler reads
  * `__identity` to build the `FormatterRef` used in
  * `MessageEntry.renderedWith` / `SectionEntry.renderedWith`.
  * `formatTree` reads `frameSection` / `frameMessage` / `blocksToText`

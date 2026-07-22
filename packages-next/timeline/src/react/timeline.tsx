@@ -25,7 +25,7 @@ import React, { useEffect, useMemo, useRef, type ReactNode } from "react";
 import type { JSX } from "react";
 import type { TimelineEntry } from "@agentick/spec-next";
 import { useTimeline } from "./use-timeline.js";
-import { Message, Project } from "@agentick/reconciler-react-next";
+import { Message, Project } from "@agentick/compiler-react-next";
 import { compactEntries, type CompactionStrategy, type TokenBudgetInfo } from "./token-budget.js";
 
 const h = React.createElement;

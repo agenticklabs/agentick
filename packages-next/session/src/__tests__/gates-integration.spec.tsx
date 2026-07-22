@@ -1,6 +1,6 @@
 /**
  * Gates ↔ session integration (cross-harness — lives here per ADR 27
- * because it wires the REAL SessionHarness + reconciler + loop + a
+ * because it wires the REAL SessionHarness + compiler + loop + a
  * tree-declared `useGate`). Proves the two front-ends converge on ONE
  * controller:
  *
@@ -24,7 +24,7 @@ import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next
 import { ElicitationHarness } from "@agentick/elicitation-next";
 import { InMemoryHandlerResolver, ToolExecutorHarness } from "@agentick/tool-executor-next";
 import { LoopExecutorHarness } from "@agentick/loop-executor-next";
-import { ReconcilerHarness, System } from "@agentick/reconciler-react-next";
+import { CompilerHarness, System } from "@agentick/compiler-react-next";
 import { useGate, useGates } from "@agentick/gates-next/react";
 import type { GatesHandle } from "@agentick/gates-next";
 import type { ExecutionTarget } from "@agentick/spec-next";
@@ -83,7 +83,7 @@ describe("gates ↔ session — one controller, two front-ends", () => {
     const journal = new MemoryJournal();
     const bus = new LocalEventBus();
     const inbox = new LocalInbox();
-    const reconciler = new ReconcilerHarness("gi-r", journal, bus, inbox);
+    const compiler = new CompilerHarness("gi-r", journal, bus, inbox);
     const loop = new LoopExecutorHarness("gi-l", journal, bus, inbox);
     const resolver = new InMemoryHandlerResolver();
     const elicitation = new ElicitationHarness("gi:elicitation", journal, bus, inbox);
@@ -92,18 +92,12 @@ describe("gates ↔ session — one controller, two front-ends", () => {
       elicitation,
     });
     const executor = endExec();
-    await Promise.all([
-      reconciler.ready,
-      loop.ready,
-      tools.ready,
-      elicitation.ready,
-      executor.ready,
-    ]);
+    await Promise.all([compiler.ready, loop.ready, tools.ready, elicitation.ready, executor.ready]);
 
     const session = new SessionHarness(journal, bus, inbox, {
       sessionId: `gi-${Math.random()}`,
       agent: React.createElement(Agent),
-      reconciler,
+      compiler,
       loop,
       modelExecutor: executor,
       toolExecutor: tools,

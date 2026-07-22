@@ -79,7 +79,7 @@ export interface FormatInput {
 
 /**
  * Per-node trace of which formatter rendered which part of the tree.
- * Used by devtools and by the reconciler harness's `renderTrace` field.
+ * Used by devtools and by the compiler harness's `renderTrace` field.
  */
 export interface FormatTrace {
   readonly renderer: FormatterRef;

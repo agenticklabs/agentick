@@ -21,7 +21,7 @@ export type EventSurface =
   | "app"
   | "session"
   | "loop"
-  | "reconciler"
+  | "compiler"
   | "formatter"
   | "executor"
   | "tool"

@@ -107,13 +107,13 @@ export interface ProjectInput {
    * for the projected `tools` list. The loop sources this from
    * `ToolExecutorProtocol.compileForTick({ exposure: "model" })` —
    * the precedence-resolved unification of every layered declaration
-   * seam (gateway/app/session/execution/extension/reconciler).
+   * seam (gateway/app/session/execution/extension/compiler).
    *
    * `compiled.declarations.tools` (the IR's record of tools emitted by
-   * the reconciler this tick) is NOT consulted by projection. The loop
-   * syncs the reconciler slice into the tool executor's registry via
-   * `replaceReconcilerTools` and then queries `compileForTick`, so the
-   * resolved list passed here already includes reconciler-emitted
+   * the compiler this tick) is NOT consulted by projection. The loop
+   * syncs the compiler slice into the tool executor's registry via
+   * `replaceCompilerTools` and then queries `compileForTick`, so the
+   * resolved list passed here already includes compiler-emitted
    * tools with correct precedence.
    */
   readonly tools: readonly import("../data/declarations.js").ToolDeclaration[];
@@ -440,7 +440,7 @@ export interface LanguageModelParameters {
 /**
  * Methods every executor implementation MUST provide. All return
  * `Promise<T>` at the public surface (matching the other harness
- * protocols — `ReconcilerProtocol`, `ToolExecutorProtocol` — so the
+ * protocols — `CompilerProtocol`, `ToolExecutorProtocol` — so the
  * loop executor / session harness can compose them ergonomically).
  * Concrete impls wrap their bodies in `Effect.runPromise` via
  * `runHarnessProtocol` so the substrate's FiberRef scope, OTel spans,

@@ -2,18 +2,18 @@
 
 Local observer / pub-sub primitives for Agentick v2.
 
-Consolidates ~16 hand-rolled `Set<() => void>` / `Map<K, Set<listener>>` fan-out implementations across harnesses, bridges, transports, and reconciler test doubles into one canonical set. The factories cover every fan-out shape the v2 framework needs:
+Consolidates ~16 hand-rolled `Set<() => void>` / `Map<K, Set<listener>>` fan-out implementations across harnesses, bridges, transports, and compiler test doubles into one canonical set. The factories cover every fan-out shape the v2 framework needs:
 
-| Primitive                            | Shape                                           | Replaces                                                                                                          |
-| ------------------------------------ | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `createNotifier<T = void>()`         | Single-channel observer                         | Bare `Set<() => void>` (timeline, sandbox, subscriptions, session-state, transport state, client state)           |
-| `createKeyedNotifier<K, T = void>()` | Keyed observer + optional wildcard channel      | `Map<K, Set<listener>> + Set<wildcard>` (knobs, state, skills, reconciler test fakes, lifecycle store, MCP tasks) |
-| `createChangeNotifier<V, K>()`       | The **notify** seam — typed push carrying the delta | Per-mutation value-capture at projection sites (StateDelta, AG-UI steps, timeline events)                    |
-| `createLocalPubSub<T>()`             | Effect.Stream-based fan-out with drain-on-close | Hand-rolled `Set<Queue<T>>` async-iterable fan-out (tasks fan-out is the current consumer)                        |
+| Primitive                            | Shape                                               | Replaces                                                                                                        |
+| ------------------------------------ | --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `createNotifier<T = void>()`         | Single-channel observer                             | Bare `Set<() => void>` (timeline, sandbox, subscriptions, session-state, transport state, client state)         |
+| `createKeyedNotifier<K, T = void>()` | Keyed observer + optional wildcard channel          | `Map<K, Set<listener>> + Set<wildcard>` (knobs, state, skills, compiler test fakes, lifecycle store, MCP tasks) |
+| `createChangeNotifier<V, K>()`       | The **notify** seam — typed push carrying the delta | Per-mutation value-capture at projection sites (StateDelta, AG-UI steps, timeline events)                       |
+| `createLocalPubSub<T>()`             | Effect.Stream-based fan-out with drain-on-close     | Hand-rolled `Set<Queue<T>>` async-iterable fan-out (tasks fan-out is the current consumer)                      |
 
-**Pull vs push.** `createNotifier` / `createKeyedNotifier` are *pull* — "something changed, re-read" (the `useSyncExternalStore` render pattern). `createChangeNotifier` is *push* — it hands the consumer the delta (`{ key, value?, prev? }`) so it can project without re-reading and diffing. It is the read-only *notify* seam of the operation model (ADR 76): observers are fire-and-forget and cannot affect the emitting operation.
+**Pull vs push.** `createNotifier` / `createKeyedNotifier` are _pull_ — "something changed, re-read" (the `useSyncExternalStore` render pattern). `createChangeNotifier` is _push_ — it hands the consumer the delta (`{ key, value?, prev? }`) so it can project without re-reading and diffing. It is the read-only _notify_ seam of the operation model (ADR 76): observers are fire-and-forget and cannot affect the emitting operation.
 
-The package depends only on `effect`. No coupling to harness, spec, or reconciler — pubsub-next sits at the same layer as `@agentick/utils-next` in the dep graph.
+The package depends only on `effect`. No coupling to harness, spec, or compiler — pubsub-next sits at the same layer as `@agentick/utils-next` in the dep graph.
 
 ## Quick start
 
@@ -122,14 +122,14 @@ await bus.close();
 
 ### `createChangeNotifier<V, K = string>(): ChangeNotifier<V, K>`
 
-| Method                 | Description                                                                        |
-| ---------------------- | --------------------------------------------------------------------------------- |
-| `onChange(listener)`   | Subscribe to every change (`ChangeEvent<V, K>`). Read-only, fire-and-forget.       |
-| `emitChange(change)`   | Emit a delta. Producer supplies `key` + `value?` + `prev?`; sync, error-isolated.  |
-| `size`                 | Diagnostic listener count.                                                          |
-| `clear()`              | Drop every listener.                                                                |
+| Method               | Description                                                                       |
+| -------------------- | --------------------------------------------------------------------------------- |
+| `onChange(listener)` | Subscribe to every change (`ChangeEvent<V, K>`). Read-only, fire-and-forget.      |
+| `emitChange(change)` | Emit a delta. Producer supplies `key` + `value?` + `prev?`; sync, error-isolated. |
+| `size`               | Diagnostic listener count.                                                        |
+| `clear()`            | Drop every listener.                                                              |
 
-Also exported: `ChangeEvent<V, K>` (the delta type) and `changeKind(change): "add" | "update" | "remove"` (pure CRUD derivation). Presence convention: a side is *absent* when its property is `undefined` — producers omit the side that doesn't apply.
+Also exported: `ChangeEvent<V, K>` (the delta type) and `changeKind(change): "add" | "update" | "remove"` (pure CRUD derivation). Presence convention: a side is _absent_ when its property is `undefined` — producers omit the side that doesn't apply.
 
 ### `createLocalPubSub<T>(): LocalPubSub<T>`
 
@@ -202,7 +202,7 @@ real testing need: asserting call patterns from collaborators.
 - Layer 1 / Layer 2 / Layer 3 — landed
 - `createChangeNotifier` (the notify seam, ADR 75) — landed; consumers (StateDelta refit, timeline `event` projection) pending
 - Spy doubles for the pull/stream primitives — landed under `/testing`
-- 16 sweep sites migrated across knobs, state, skills, timeline, sandbox, subscriptions, session-state, client, transport-next, mcp, reconciler (in-memory data bridge, lifecycle store, three test bridges)
+- 16 sweep sites migrated across knobs, state, skills, timeline, sandbox, subscriptions, session-state, client, transport-next, mcp, compiler (in-memory data bridge, lifecycle store, three test bridges)
 
 ## Roadmap & known gaps
 

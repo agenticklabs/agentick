@@ -23,12 +23,12 @@ export { runHarnessConformance } from "./harness.js";
 // Slot trichotomy (ADR 42 Slice 4)
 export { runHarnessSlotConformance, type HarnessSlotConformanceOptions } from "./harness-slot.js";
 
-// Reconciler harness (Phase 3.14)
+// Compiler harness (Phase 3.14)
 export {
-  runReconcilerConformance,
-  type ReconcilerConformanceFactory,
+  runCompilerConformance,
+  type CompilerConformanceFactory,
   type ElementInput,
-} from "./reconciler.js";
+} from "./compiler.js";
 
 // Bridge conformance (Phase 3.14). Knobs / state / timeline are
 // harnesses (ADR 26); their conformance suites ship from their

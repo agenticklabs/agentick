@@ -15,7 +15,7 @@
  *   ④ Events       — `emit` (light path) + `emitDelta` (in-flight)
  *
  * Substrate-internal API is Effect-typed end-to-end. Concrete harnesses
- * MAY expose Promise-typed protocol surfaces (e.g., ReconcilerProtocol)
+ * MAY expose Promise-typed protocol surfaces (e.g., CompilerProtocol)
  * by wrapping their command bodies with `Effect.runPromise` at the
  * public method boundary. The FiberRef scope (`RuntimeContextRef`) is
  * established by `runOperation` for the lifetime of the command — any
@@ -2753,7 +2753,7 @@ export type { InboxError };
  * other Effect-typed harness machinery) to a Promise that rejects with
  * the original typed error instead of Effect's `FiberFailure` wrapper.
  *
- * Concrete harness protocol surfaces (e.g. `ReconcilerProtocol`,
+ * Concrete harness protocol surfaces (e.g. `CompilerProtocol`,
  * `ToolExecutorProtocol`) keep Promise-typed return shapes for
  * ergonomic application code. This helper closes the gap: the typed
  * `SubstrateError` / `OperationOutcomeError` / body-`E` value at the

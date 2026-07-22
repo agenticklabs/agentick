@@ -9,7 +9,7 @@
 
 import React from "react";
 import { createGateway } from "@agentick/gateway-next";
-import { reactReconciler } from "@agentick/reconciler-react-next";
+import { reactCompiler } from "@agentick/compiler-react-next";
 import { aisdk } from "@agentick/model-ai-sdk-next";
 import { openai } from "@ai-sdk/openai";
 import type { GatewayHarnessProtocol } from "@agentick/spec-next";
@@ -24,7 +24,7 @@ export interface CodingServer {
 
 /**
  * Stand up the gateway + coding-agent app. `gateway.listen()` is mandatory
- * before `createApp`. The app wires the React reconciler (`reactReconciler()`)
+ * before `createApp`. The app wires the React compiler (`reactCompiler()`)
  * so the JSX `<CodingAgent/>` compiles into model context, and a real OpenAI
  * model so the agent actually codes.
  */
@@ -39,7 +39,7 @@ export async function startCodingServer(workspaceDir: string): Promise<CodingSer
     rootElement: React.createElement(CodingAgent),
     options: {
       model: aisdk(openai("gpt-4o-mini")),
-      reconciler: reactReconciler(),
+      compiler: reactCompiler(),
     },
   });
 

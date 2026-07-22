@@ -38,8 +38,8 @@ export function defaultProject(input: ProjectInput): LanguageModelInput {
   const messages = buildMessages(input.compiled);
   // Tools come from `input.tools` — the loop's per-tick compile result
   // (precedence-resolved across gateway/app/session/execution/extension/
-  // reconciler). The IR's `compiled.declarations.tools` records what
-  // the reconciler emitted but is NOT the canonical source for the
+  // compiler). The IR's `compiled.declarations.tools` records what
+  // the compiler emitted but is NOT the canonical source for the
   // model's visible tool list. See `ProjectInput.tools` for context.
   const tools = buildTools(input.tools, input.narrate);
   // Provider-EXECUTED tools (Pass D). Sourced from `input.providerTools`
@@ -51,7 +51,7 @@ export function defaultProject(input: ProjectInput): LanguageModelInput {
   const parameters = buildParameters(input.compiled);
   // #176: fold `tree.providerOptions` OVER `target.providerOptions`
   // (tree/per-render wins) onto the request-level channel. Previously
-  // orphaned — the reconciler collected `<ProviderOptions>` into
+  // orphaned — the compiler collected `<ProviderOptions>` into
   // `RenderedTree.providerOptions` but nothing threaded it into the
   // executor input; adapters saw only `target.providerOptions`.
   const providerOptions = mergeProviderOptions(
@@ -322,8 +322,8 @@ export function imageUrlFromSource(source: MediaSource, mimeType: string | undef
  *
  * Adopters: prefer the canonical `ProjectInput.tools` source rather
  * than re-reading `compiled.declarations.tools` — the IR slot is the
- * reconciler's record; the canonical source is the loop's compile
- * (which folds gateway/app/session/execution/extension/reconciler
+ * compiler's record; the canonical source is the loop's compile
+ * (which folds gateway/app/session/execution/extension/compiler
  * with correct precedence). Provider-specific executors that need to
  * stay aligned with the canonical fold should call this helper.
  *

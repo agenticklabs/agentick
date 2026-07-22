@@ -16,7 +16,7 @@ import { describe, expect, it } from "vitest";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type {
   LanguageModelExecutionResult,
-  ReconcilerProtocol,
+  CompilerProtocol,
   RenderedTree,
   RunExecutionInput,
   ToolExecutorProtocol,
@@ -36,7 +36,7 @@ const okResult: LanguageModelExecutionResult = {
   usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
 };
 
-const stubReconciler = (): ReconcilerProtocol =>
+const stubCompiler = (): CompilerProtocol =>
   ({
     fx: {
       use: () => () => {},
@@ -59,17 +59,17 @@ const stubReconciler = (): ReconcilerProtocol =>
       subscriptions: [],
     }),
     restore: async () => undefined,
-  }) as unknown as ReconcilerProtocol;
+  }) as unknown as CompilerProtocol;
 
 const stubToolExecutor = (): ToolExecutorProtocol =>
   ({
     fx: {
       use: () => () => {},
-      replaceReconcilerTools: () => Effect.void,
+      replaceCompilerTools: () => Effect.void,
       compileForTick: () => Effect.succeed([]),
       dispatch: () => Effect.succeed({ toolCallId: "t", name: "n", content: [], isError: false }),
     },
-    replaceReconcilerTools: async () => undefined,
+    replaceCompilerTools: async () => undefined,
     compileForTick: async () => [],
     dispatch: async () => ({ toolCallId: "t", name: "n", content: [], isError: false }),
   }) as unknown as ToolExecutorProtocol;
@@ -90,7 +90,7 @@ async function makeLoopAndInput(
   const input: RunExecutionInput = {
     sessionId: "s_fx",
     mountId: "fx-mount",
-    reconciler: stubReconciler(),
+    compiler: stubCompiler(),
     modelExecutor: executor,
     toolExecutor: stubToolExecutor(),
     target: executor.target,

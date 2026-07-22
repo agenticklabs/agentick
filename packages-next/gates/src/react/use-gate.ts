@@ -3,7 +3,7 @@
  *
  * A gate is a knob-backed continuation condition that blocks loop
  * completion until cleared. This hook is a THIN BINDING over the
- * reconciler-agnostic {@link GatesController}: it resolves the in-scope
+ * compiler-agnostic {@link GatesController}: it resolves the in-scope
  * controller (see {@link useGatesController}), registers the descriptor
  * on mount, unregisters on unmount, and reflects the gate's value into a
  * React-flavored `GateState` (with the rendered `<section>` element).
@@ -13,7 +13,7 @@
  * read-only-for-verified knob — lives ENTIRELY in the controller. This
  * hook does NOT re-implement any of it, and (ADR 67) does NOT subscribe a
  * tick-end source: evaluation is DRIVEN by `session.notifyLifecycle`, not
- * a per-mount reconciler subscription. The hook is registration-only. The
+ * a per-mount compiler subscription. The hook is registration-only. The
  * programmatic `session.gates` API registers into the SAME controller, so
  * tree-declared and programmatic gates share one registry and one wiring.
  *
@@ -35,7 +35,7 @@
 
 import React, { useCallback, useEffect } from "react";
 import { useSyncExternalStore } from "react";
-import { useBridges } from "@agentick/reconciler-react-next";
+import { useBridges } from "@agentick/compiler-react-next";
 
 import { type GateDescriptor, type GateValue } from "../descriptor.js";
 import { useGatesController } from "./gates-context.js";

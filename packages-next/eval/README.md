@@ -57,8 +57,8 @@ const result = await calculatorAgent();
 const cheap = await calculatorAgent({ executor: gpt4oMiniExecutor });
 ```
 
-Two imports, reconciler wired automatically via the `/react` subpath
-(adopters on a non-React reconciler import `createApp` from the bare
+Two imports, compiler wired automatically via the `/react` subpath
+(adopters on a non-React compiler import `createApp` from the bare
 `@agentick/app-next` and pass their own factory).
 
 `defineEval` returns a **callable**: `await myEval()` runs with the
@@ -87,17 +87,17 @@ but adopters typically pin a tighter shape (`{ profile: "ci" | "prod" }`,
 
 ### `t` — `EvalContext`
 
-| Method                                     | Purpose                                                                          |
-| ------------------------------------------ | -------------------------------------------------------------------------------- |
-| `t.app`                                    | The `AppHarness` constructed by `definition.app(overrides)`.                     |
-| `t.send(prompt)`                           | Drive the agent. Returns the final response text.                                |
+| Method                                     | Purpose                                                                                      |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| `t.app`                                    | The `AppHarness` constructed by `definition.app(overrides)`.                                 |
+| `t.send(prompt)`                           | Drive the agent. Returns the final response text.                                            |
 | `t.result`                                 | The full last `SendResult` — `output`, `toolResults`, `usage` tokens, `ticks`, `stopReason`. |
-| `t.completed()`                            | Assert the most-recent send reached `stopReason: "end"`.                         |
-| `t.calledTool(name, { input?, isError? })` | Assert a specific tool was called; optionally deep-equal on `input` and outcome. |
-| `t.notCalledTool(name)`                    | Assert a specific tool was NOT called. Critical for safety evals.                |
-| `t.noFailedActions()`                      | Assert every observed tool call's `outcome === "succeeded"`.                     |
-| `t.expect(label, passed, details?)`        | Record a labeled boolean — the generic scoring escape hatch. Gates `passed`.     |
-| `t.score(label, value, details?)`          | Record a numeric score (0..1). Does NOT gate `passed`; aggregated across a matrix. |
+| `t.completed()`                            | Assert the most-recent send reached `stopReason: "end"`.                                     |
+| `t.calledTool(name, { input?, isError? })` | Assert a specific tool was called; optionally deep-equal on `input` and outcome.             |
+| `t.notCalledTool(name)`                    | Assert a specific tool was NOT called. Critical for safety evals.                            |
+| `t.noFailedActions()`                      | Assert every observed tool call's `outcome === "succeeded"`.                                 |
+| `t.expect(label, passed, details?)`        | Record a labeled boolean — the generic scoring escape hatch. Gates `passed`.                 |
+| `t.score(label, value, details?)`          | Record a numeric score (0..1). Does NOT gate `passed`; aggregated across a matrix.           |
 
 Assertions record into `result.assertions[]` rather than throwing.
 Adopters who want fail-fast check `result.passed` and decide whether
@@ -223,14 +223,14 @@ are stochastic — a single run's pass/fail and score value are noise. With
 ```ts
 interface MatrixCell<O> {
   axes: O;
-  trials: EvalResult[];   // all N runs
-  stats: CellStats;       // the distribution
+  trials: EvalResult[]; // all N runs
+  stats: CellStats; // the distribution
 }
 interface CellStats {
   trials: number;
-  passed: number;         // # of trials that passed
-  passRate: number;       // passed / trials = pass@1
-  passAtK?: number;       // unbiased pass@k (Chen et al.), when `k` is set
+  passed: number; // # of trials that passed
+  passRate: number; // passed / trials = pass@1
+  passAtK?: number; // unbiased pass@k (Chen et al.), when `k` is set
   scores: Record<string, { mean; stddev; min; max; n }>;
 }
 ```

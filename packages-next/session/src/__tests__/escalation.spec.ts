@@ -43,7 +43,7 @@ import {
 import type { TasksHarnessProtocol } from "@agentick/spec-next";
 import { InMemoryHandlerResolver, ToolExecutorHarness } from "@agentick/tool-executor-next";
 import { LoopExecutorHarness } from "@agentick/loop-executor-next";
-import { ReconcilerHarness } from "@agentick/reconciler-react-next";
+import { CompilerHarness } from "@agentick/compiler-react-next";
 import { DetachedTaskCannotElicitError } from "@agentick/spec-next";
 import type {
   EscalationHop,
@@ -86,7 +86,7 @@ async function mkSession(opts: { parentSessionId?: string } = {}) {
   const journal = new MemoryJournal();
   const bus = new LocalEventBus();
   const inbox = new LocalInbox();
-  const reconciler = new ReconcilerHarness("test-r", journal, bus, inbox);
+  const compiler = new CompilerHarness("test-r", journal, bus, inbox);
   const loop = new LoopExecutorHarness("test-l", journal, bus, inbox);
   const resolver = new InMemoryHandlerResolver();
   const elicitation = new ElicitationHarness("test-t:elicitation", journal, bus, inbox);
@@ -95,12 +95,12 @@ async function mkSession(opts: { parentSessionId?: string } = {}) {
     elicitation,
   });
   const executor = replyExec();
-  await Promise.all([reconciler.ready, loop.ready, tools.ready, elicitation.ready, executor.ready]);
+  await Promise.all([compiler.ready, loop.ready, tools.ready, elicitation.ready, executor.ready]);
 
   const session = new SessionHarness(journal, bus, inbox, {
     sessionId: `s-${Math.random().toString(36).slice(2)}`,
     agent: null,
-    reconciler,
+    compiler,
     loop,
     modelExecutor: executor,
     toolExecutor: tools,
@@ -240,7 +240,7 @@ async function mkSessionOn(
   } = {},
 ) {
   const { journal, bus, inbox } = shared;
-  const reconciler = new ReconcilerHarness(`${prefix}-r`, journal, bus, inbox);
+  const compiler = new CompilerHarness(`${prefix}-r`, journal, bus, inbox);
   const loop = new LoopExecutorHarness(`${prefix}-l`, journal, bus, inbox);
   const resolver = new InMemoryHandlerResolver();
   const elicitation = new ElicitationHarness(`${prefix}-t:elicitation`, journal, bus, inbox);
@@ -249,7 +249,7 @@ async function mkSessionOn(
     elicitation,
   });
   const executor = replyExec();
-  await Promise.all([reconciler.ready, loop.ready, tools.ready, elicitation.ready, executor.ready]);
+  await Promise.all([compiler.ready, loop.ready, tools.ready, elicitation.ready, executor.ready]);
 
   const sessionId = `${prefix}-${Math.random().toString(36).slice(2)}`;
   const tasks = opts.tasks?.(sessionId);
@@ -258,7 +258,7 @@ async function mkSessionOn(
   const session = new SessionHarness(journal, bus, inbox, {
     sessionId,
     agent: null,
-    reconciler,
+    compiler,
     loop,
     modelExecutor: executor,
     toolExecutor: tools,

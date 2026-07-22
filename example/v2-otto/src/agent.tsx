@@ -21,7 +21,7 @@
 
 import React from "react";
 import { z } from "zod";
-import { System, createTool } from "@agentick/reconciler-react-next";
+import { System, createTool } from "@agentick/compiler-react-next";
 import { Knobs, useKnob } from "@agentick/knobs-next/react";
 import { Timeline } from "@agentick/timeline-next/react";
 import type { ContentBlock } from "@agentick/spec-next";

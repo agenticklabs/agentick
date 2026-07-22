@@ -95,14 +95,13 @@ _references the model can chase_:
 ```tsx
 import { useState } from "react";
 import { Timeline } from "@agentick/timeline-next/react";
-import { Message, useOnExecutionStart } from "@agentick/reconciler-react-next";
+import { Message, useOnExecutionStart } from "@agentick/compiler-react-next";
 
-const edges = (t: string) =>
-  t.length <= 280 ? t : `${t.slice(0, 140)}\n…\n${t.slice(-140)}`;
+const edges = (t: string) => (t.length <= 280 ? t : `${t.slice(0, 140)}\n…\n${t.slice(-140)}`);
 
 // v2 has no <Text> component — content blocks are the currency. Build a
 // ContentBlock[] and pass it via the `content` prop (verified by
-// integration-with-reconciler.spec.tsx "README reference pattern").
+// integration-with-compiler.spec.tsx "README reference pattern").
 export function ReferenceTimeline() {
   // Provenance beats clock math: the framework stamps
   // metadata.executionId on every entry it produces (ADR 53) — "is this
@@ -168,17 +167,17 @@ pattern, now portable because the model registry supplies the window,
 #204):
 
 ```tsx
-import { useContextInfo } from "@agentick/reconciler-react-next";
+import { useContextInfo } from "@agentick/compiler-react-next";
 import { Timeline } from "@agentick/timeline-next/react";
 
 function AdaptiveTimeline() {
-  const { utilization } = useContextInfo();       // 0..1, or undefined until known
+  const { utilization } = useContextInfo(); // 0..1, or undefined until known
   const tight = (utilization ?? 0) > 0.75;
   return (
     <Timeline
       strategy="sliding-window"
       preserveRoles={["system", "user"]}
-      headroom={tight ? 4096 : 8192}               // reserve more as the window fills
+      headroom={tight ? 4096 : 8192} // reserve more as the window fills
     />
   );
 }
@@ -328,7 +327,7 @@ intended default, no memory strategy legislated, §2.7). Certify adapters with
   invariants, turn boundaries + trailing-input fold, compaction.
 - `src/__tests__/harness-store.spec.ts` — write policies, flush barrier,
   failure typing, `turnBoundaries: false`, cursored history.
-- `src/__tests__/integration-with-reconciler.spec.tsx` — `<Timeline/>` →
+- `src/__tests__/integration-with-compiler.spec.tsx` — `<Timeline/>` →
   `context.entries` (the mechanism itself).
 - Session-level: steering/join, send serialization, provenance stamps
   (`@agentick/session-next` extended-surface suite).

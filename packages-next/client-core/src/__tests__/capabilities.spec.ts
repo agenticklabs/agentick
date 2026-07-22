@@ -3,7 +3,7 @@
  *
  * Verifies the client issues `initialize` + `_extensions/list` and
  * populates `client.capabilities` + `client.serverInfo`. Uses a
- * hand-rolled fake transport (no in-process reconciler needed) so the
+ * hand-rolled fake transport (no in-process compiler needed) so the
  * test isolates capability plumbing from execution semantics.
  */
 

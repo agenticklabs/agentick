@@ -19,22 +19,20 @@ runtime-root harness in every deployment tier — embedded library
 Gateway responsibilities:
 
 - **Multi-app hosting** — `createApp(input)` instantiates an
-`AppHarness` that inherits the gateway's substrate by default, or
-takes a per-app substrate factory override.
+  `AppHarness` that inherits the gateway's substrate by default, or
+  takes a per-app substrate factory override.
 - **Substrate inheritance** — apps see the gateway's journal / bus /
-inbox unless they explicitly override.
+  inbox unless they explicitly override.
 - **Lifecycle cascade** — `close()` shuts down every hosted app
-cleanly. `listen()` is REQUIRED before hosting apps: `createApp`
-throws `GatewayNotStartedError` until `listen()` has run, guaranteeing
-the `gateway:start` seam fires before any app mounts (ADR 84 §1).
+  cleanly. `listen()` is REQUIRED before hosting apps: `createApp`
+  throws `GatewayNotStartedError` until `listen()` has run, guaranteeing
+  the `gateway:start` seam fires before any app mounts (ADR 84 §1).
 - **Cross-app observation** — `gateway.events(filter?)` returns an
-`AsyncIterable<ProtocolEvent>` fanned in from every hosted app.
+  `AsyncIterable<ProtocolEvent>` fanned in from every hosted app.
 - **Read-side protocol surface** — `gateway.app(id)`, `gateway.apps()`
-for protocol consumers; `createApp` is on the concrete impl
-(typed input opts in spec would force pulling app-next types into
-spec).
-
-
+  for protocol consumers; `createApp` is on the concrete impl
+  (typed input opts in spec would force pulling app-next types into
+  spec).
 
 ## Quick start
 
@@ -46,7 +44,7 @@ await gateway.listen(); // REQUIRED before createApp — fires the gateway:start
 
 const app = await gateway.createApp(<MyAgent />, {
   appId: "my-app",
-  options: { modelExecutor, reconciler },
+  options: { modelExecutor, compiler },
 });
 
 const session = await app.createSession({});
@@ -54,8 +52,6 @@ const result = await session.send({ messages: [...] }).result;
 
 await gateway.close();
 ```
-
-
 
 ## Cluster integration (Phase 5)
 
@@ -102,8 +98,6 @@ if you need the combination.
 
 ## API surface
 
-
-
 ### `createGateway(options?): Promise<GatewayHarness>`
 
 ```ts
@@ -133,7 +127,10 @@ class GatewayHarness extends BaseHarness<"gateway"> implements GatewayHarnessPro
   app(id: string): AppHarnessProtocol | undefined;
   apps(): readonly AppHarnessProtocol[];
   // Two-door signature, mirroring the top-level createApp(rootElement, options):
-  createApp<P>(rootElement: unknown, input: Omit<CreateGatewayAppInput<P>, "rootElement">): Promise<AppHarnessProtocol<P>>;
+  createApp<P>(
+    rootElement: unknown,
+    input: Omit<CreateGatewayAppInput<P>, "rootElement">,
+  ): Promise<AppHarnessProtocol<P>>;
   createApp<P>(input: CreateGatewayAppInput<P>): Promise<AppHarnessProtocol<P>>;
   events(filter?: EventQuery, options?: SubscribeOptions): AsyncIterable<ProtocolEvent>;
   wireExtensions(): WireExtensionRegistry; // ADR 46 — see below
@@ -175,7 +172,7 @@ await gateway.close(); // → closes transports FIRST, then apps, then substrate
   transports → a clean no-op that just flips ready.
 - **`close()`** runs the hookable `gateway:close` op and closes transports
   **first** in the LIFO teardown (`transports → apps → extensions →
-  substrate`). Transports are the ingress edge: stopping them before apps tear
+substrate`). Transports are the ingress edge: stopping them before apps tear
   down prevents an inbound frame from routing into a half-closed app. Transport
   close failures are best-effort — one failing transport never blocks the rest
   of teardown.
@@ -184,8 +181,6 @@ The concrete transport wrappers (`webSocket` / `http` / `unixSocket` /
 `inProcess`) ship from the `@agentick/transport-*-next` packages; this package
 owns only the fan-out. `spyServerTransport()` (`@agentick/gateway-next/testing`)
 is a call-recording double for asserting the fan-out in tests.
-
-
 
 ## Wire extensions (ADR 46)
 
@@ -250,8 +245,6 @@ const gateway = await createGateway({
 });
 ```
 
-
-
 ### Discovery
 
 The gateway ships a built-in `_extensions/list` wire method that
@@ -265,24 +258,22 @@ const { extensions } = await client.request("_extensions/list", {});
 // -> [{ name: "@my-org/crm", namespace: "crm", methods: [...], notifications: [...] }]
 ```
 
-
-
 ### Constraints
 
 - Namespaces reserved for framework-internal use (`_*`) can't be
-claimed by adopter extensions — the `defineWireExtension`
-validator rejects.
+  claimed by adopter extensions — the `defineWireExtension`
+  validator rejects.
 - Framework-supplied namespaces (`gateway`, `app`, `session`,
-`sub`) are registered by `GatewayHarness` construction. Adopter
-attempts to claim those namespaces fail with
-`WireExtensionDefinitionError` — the registry rejects duplicates
-and framework registration runs FIRST.
+  `sub`) are registered by `GatewayHarness` construction. Adopter
+  attempts to claim those namespaces fail with
+  `WireExtensionDefinitionError` — the registry rejects duplicates
+  and framework registration runs FIRST.
 - Registered namespaces must be unique per gateway. Duplicate
-registration throws `WireExtensionDefinitionError` at construction
-time (not first-request time).
+  registration throws `WireExtensionDefinitionError` at construction
+  time (not first-request time).
 - The registry is sealed once `gateway.ready` resolves — extensions
-cannot be added post-hoc. To layer additional extensions,
-reconstruct the gateway.
+  cannot be added post-hoc. To layer additional extensions,
+  reconstruct the gateway.
 
 See [ADR 46 — Wire extensions](../../docs/proposals/v2/blueprint/46-wire-extensions.md)
 and `[@agentick/spec-next/wire](../spec/src/wire/README.md)` for the
@@ -307,8 +298,6 @@ Harnesses are authz-unaware: there are no in-handler permission checks.
                      handler runs
 ```
 
-
-
 ### 1. Authentication — the `AuthSource`
 
 An `AuthSource` maps a presented credential (bearer token) to an
@@ -331,9 +320,9 @@ const authSource = staticTokenAuthSource({
 Two poles, by design:
 
 - **No** `AuthSource` → local/trusted pole: no principal is stamped; only the
-anonymous-local path the authorizer permits passes.
+  anonymous-local path the authorizer permits passes.
 - `AuthSource` **configured** → **fail-closed**: a missing or invalid credential is
-rejected at ingress, before dispatch ever runs.
+  rejected at ingress, before dispatch ever runs.
 
 The source runs at the transport server via `authenticateIngress` (the ADR 50
 `GatewayInstaller.interceptIngress` seam generalizes where it's wired). Identity
@@ -360,15 +349,15 @@ const gateway = await createGateway({
 ```
 
 - `staticAuthorizer({ grants })` — a server-side table: principal → scope
-patterns. Cover-aware (`session:*` satisfies `session:send`).
+  patterns. Cover-aware (`session:*` satisfies `session:send`).
 - `claimsAuthorizer()` — allow iff the credential's OWN scope claims cover the
-requested scope (OAuth-shaped; grants ride the token, no server table).
+  requested scope (OAuth-shaped; grants ride the token, no server table).
 - `permissiveAuthorizer()` — allow everything. Explicit opt-in for no-auth
-local deployments.
+  local deployments.
 - **Default when unset:** `unconfiguredAuthorizer` **— deny-by-default.** An
-authenticated principal against no policy is DENIED (auth-without-policy is a
-misconfiguration); only the anonymous-local pole passes. You never ship ungated
-by accident.
+  authenticated principal against no policy is DENIED (auth-without-policy is a
+  misconfiguration); only the anonymous-local pole passes. You never ship ungated
+  by accident.
 
 The same-principal rule (ADR 48): a method targeting a session whose owning
 principal differs from the caller's is denied unless a grant explicitly elevates.
@@ -396,15 +385,13 @@ const crmExt = defineWireExtension({
 ```
 
 - `required: false` → **open**: the authorizer policy is skipped. The target
-session's structural `requiredScopes` ceiling still applies — open does not waive
-the resource ceiling. Reserve for methods with no gated dynamic-lane counterpart.
+  session's structural `requiredScopes` ceiling still applies — open does not waive
+  the resource ceiling. Reserve for methods with no gated dynamic-lane counterpart.
 - `scope: "role"` → **additive**: required ON TOP of the verb scope, never in
-place of it. A role can only *tighten*, so a method is never reachable under a
-label different from its verb (§3.3 anti-bypass). `crm/deleteContact` requires
-BOTH `crm:deleteContact` AND `crm:admin`.
+  place of it. A role can only _tighten_, so a method is never reachable under a
+  label different from its verb (§3.3 anti-bypass). `crm/deleteContact` requires
+  BOTH `crm:deleteContact` AND `crm:admin`.
 - **absent** → verb scope, gated (the default; the common case).
-
-
 
 ### The structural ceiling (`requiredScopes`)
 
@@ -524,7 +511,7 @@ deliberately distinct seams:
 
 The `Authorizer` (§2) and the structural ceiling are **coarse, structural, and
 un-waivable** — the security boundary. They answer "may this principal call this
-verb at all," from the credential + scopes, *before* the handler runs. They are
+verb at all," from the credential + scopes, _before_ the handler runs. They are
 deliberately **not hooks** — a security boundary must not be a waivable,
 reorderable userland transform.
 
@@ -568,8 +555,8 @@ gateway.guard((params, ctx) =>
 );
 ```
 
-The two layers compose cleanly: **authz decides *reachability* (structural,
-un-waivable); the hook/guard decides *this specific call* (contextual)** — and
+The two layers compose cleanly: **authz decides _reachability_ (structural,
+un-waivable); the hook/guard decides _this specific call_ (contextual)** — and
 the guard only ever sees calls the authorizer already admitted. A guard can
 `veto`, `replace` (serve a cached result), `defer` (rate-limit → retry-later), or
 observe (audit). This is the whole point of routing wire dispatch through the
@@ -642,11 +629,7 @@ and its end-to-end delivery are proven now. See the e2e coverage below.
 > `sub/subscribe` → subscriber delivery, fan-out to every gateway-scope
 > subscriber). See [ADR 47](../../docs/proposals/v2/blueprint/47-reactive-signals-ride-the-bus.md).
 
-
-
 ## Patterns
-
-
 
 ### Multi-app cross-tenant hosting (single gateway, multi-app)
 
@@ -676,8 +659,6 @@ for await (const ev of gateway.events()) {
 }
 ```
 
-
-
 ### As a `ClientTransport` host
 
 The WebSocket / HTTP / Unix-socket transports mount on a
@@ -698,29 +679,25 @@ socket adapter over it; there is no bespoke per-transport wire logic.
 
 ## Verified by
 
-
-| Concern                                                | Test file                                                    |
-| ------------------------------------------------------ | ------------------------------------------------------------ |
-| Construction + default in-memory substrate             | `src/__tests__/harness.spec.ts`                              |
-| `createApp` with default gateway-substrate inheritance | `src/__tests__/harness.spec.ts`                              |
-| `createApp` with per-app substrate factory override    | `src/__tests__/harness.spec.ts`                              |
-| `apps()` / `app(id)` read-side                         | `src/__tests__/harness.spec.ts`                              |
-| `close()` cascades into app closes                     | `src/__tests__/harness.spec.ts`                              |
-| `createApp` before `listen()` throws `GatewayNotStartedError` | `src/__tests__/harness.spec.ts`                        |
-| `events()` observes app-level events via fan-in        | `src/__tests__/harness.spec.ts`                              |
-| Duplicate `appId` rejection                            | `src/__tests__/harness.spec.ts`                              |
-| `GatewayClosedError` after close                       | `src/__tests__/harness.spec.ts`                              |
-| Wire extension registry — register / resolve / seal    | `src/__tests__/wire-registry.spec.ts`                        |
-| Wire extension dispatch end-to-end                     | `../transport/src/__tests__/wire-extension-dispatch.spec.ts` |
-| Framework wire extensions + namespace-conflict reject  | `src/__tests__/wire-framework-extensions.spec.ts`            |
-| `listen()` fans out to `transport.listen(this)` (host === gateway) | `src/__tests__/server-transports.spec.ts`         |
-| `close()` closes every owned transport (transports-first LIFO) | `src/__tests__/server-transports.spec.ts`             |
-| `listen()` idempotency does not re-fire `transport.listen` | `src/__tests__/server-transports.spec.ts`                |
-| Zero-transport `listen()` no-op fan-out                | `src/__tests__/server-transports.spec.ts`                    |
-| `ServerTransport` conformance (spy double)             | `src/__tests__/server-transports.spec.ts`                    |
-
-
-
+| Concern                                                            | Test file                                                    |
+| ------------------------------------------------------------------ | ------------------------------------------------------------ |
+| Construction + default in-memory substrate                         | `src/__tests__/harness.spec.ts`                              |
+| `createApp` with default gateway-substrate inheritance             | `src/__tests__/harness.spec.ts`                              |
+| `createApp` with per-app substrate factory override                | `src/__tests__/harness.spec.ts`                              |
+| `apps()` / `app(id)` read-side                                     | `src/__tests__/harness.spec.ts`                              |
+| `close()` cascades into app closes                                 | `src/__tests__/harness.spec.ts`                              |
+| `createApp` before `listen()` throws `GatewayNotStartedError`      | `src/__tests__/harness.spec.ts`                              |
+| `events()` observes app-level events via fan-in                    | `src/__tests__/harness.spec.ts`                              |
+| Duplicate `appId` rejection                                        | `src/__tests__/harness.spec.ts`                              |
+| `GatewayClosedError` after close                                   | `src/__tests__/harness.spec.ts`                              |
+| Wire extension registry — register / resolve / seal                | `src/__tests__/wire-registry.spec.ts`                        |
+| Wire extension dispatch end-to-end                                 | `../transport/src/__tests__/wire-extension-dispatch.spec.ts` |
+| Framework wire extensions + namespace-conflict reject              | `src/__tests__/wire-framework-extensions.spec.ts`            |
+| `listen()` fans out to `transport.listen(this)` (host === gateway) | `src/__tests__/server-transports.spec.ts`                    |
+| `close()` closes every owned transport (transports-first LIFO)     | `src/__tests__/server-transports.spec.ts`                    |
+| `listen()` idempotency does not re-fire `transport.listen`         | `src/__tests__/server-transports.spec.ts`                    |
+| Zero-transport `listen()` no-op fan-out                            | `src/__tests__/server-transports.spec.ts`                    |
+| `ServerTransport` conformance (spy double)                         | `src/__tests__/server-transports.spec.ts`                    |
 
 ## Status
 
@@ -736,48 +713,45 @@ See `docs/proposals/v2/STATUS.md`.
 ## Roadmap & known gaps
 
 - **The gateway OWNS the transport fan-out, not the concrete
-transports.** ADR 84 §2 landed `transports?: ServerTransport[]` +
-the `listen()`/`close()` fan-out here (see "Lifecycle &
-transports"). The concrete wrappers (`webSocket` / `http` /
-`unixSocket` / `inProcess`) still ship as separate
-`@agentick/transport-*-next` packages (ADR 31 + ADR 32) — the
-follow-on task. Plugins/auth remain extensions (shape-1 per ADR 32).
+  transports.** ADR 84 §2 landed `transports?: ServerTransport[]` +
+  the `listen()`/`close()` fan-out here (see "Lifecycle &
+  transports"). The concrete wrappers (`webSocket` / `http` /
+  `unixSocket` / `inProcess`) still ship as separate
+  `@agentick/transport-*-next` packages (ADR 31 + ADR 32) — the
+  follow-on task. Plugins/auth remain extensions (shape-1 per ADR 32).
 - **No cluster substrate.** ADR 29 Phase D substrate (Redis Streams /
-Kafka) lands in `@agentick/cluster-next`; this package's
-`GatewayHarness` accepts any `EventBus` impl so cluster mode is
-a substrate swap, not a gateway rewrite.
+  Kafka) lands in `@agentick/cluster-next`; this package's
+  `GatewayHarness` accepts any `EventBus` impl so cluster mode is
+  a substrate swap, not a gateway rewrite.
 - `GatewayHarnessProtocol.createApp` **is on the concrete impl, not
-the protocol** — see comments in the implementation. Typing input
-opts in spec would force pulling `@agentick/app-next` types into
-spec. Concrete impls expose their typed `createApp`; protocol
-consumers can enumerate apps but not construct them.
+  the protocol** — see comments in the implementation. Typing input
+  opts in spec would force pulling `@agentick/app-next` types into
+  spec. Concrete impls expose their typed `createApp`; protocol
+  consumers can enumerate apps but not construct them.
 - `AppHarnessProtocol.id` **/** `SessionHarnessProtocol.id` added in
-Phase 5 follow-up (2026-06-07). Gateway gains a public `id` too
-for cluster routing.
+  Phase 5 follow-up (2026-06-07). Gateway gains a public `id` too
+  for cluster routing.
 - **No** `GatewayExtension` **impls yet.** ADR 32 names the extension
-shape; the spec ships `GatewayExtension` / `GatewayInstaller`
-interfaces. Concrete extensions land per their owning scope
-(auth in ADR 34, mcp-surface in 33.I, transports as their own
-packages).
+  shape; the spec ships `GatewayExtension` / `GatewayInstaller`
+  interfaces. Concrete extensions land per their owning scope
+  (auth in ADR 34, mcp-surface in 33.I, transports as their own
+  packages).
 - **All framework methods dispatch through the wire extension
-registry.** #295 Phase B/C + #303 streaming primitives landed
-the full ADR 46 eat-our-own-dogfood commitment. Only bootstrap
-builtins (`initialize`, `ping`, `_extensions/list`) remain
-hardcoded — they run BEFORE the registry is queryable, which is
-intentional.
+  registry.** #295 Phase B/C + #303 streaming primitives landed
+  the full ADR 46 eat-our-own-dogfood commitment. Only bootstrap
+  builtins (`initialize`, `ping`, `_extensions/list`) remain
+  hardcoded — they run BEFORE the registry is queryable, which is
+  intentional.
 - `bridges()` **on wire-extension context is empty.** No
-framework-supplied extension needs bridges today. Phase F (#298 —
-`mcpControlWireExtension`) is the first consumer; it will resolve
-bridges from the target session's session-extension registry.
+  framework-supplied extension needs bridges today. Phase F (#298 —
+  `mcpControlWireExtension`) is the first consumer; it will resolve
+  bridges from the target session's session-extension registry.
 - `_extensions/list` **is unauthenticated for now.** Discovery is
-intended to be open — clients need it to know what they can
-reach. If future deployments want gated discovery, the wire method
-can grow an auth entry in Phase C.
-
-
+  intended to be open — clients need it to know what they can
+  reach. If future deployments want gated discovery, the wire method
+  can grow an auth entry in Phase C.
 
 ## Development plan
-
 
 | Phase             | What lands                                                                                                               |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------ |
@@ -788,5 +762,3 @@ can grow an auth entry in Phase C.
 | ADR 34            | `@agentick/auth-next` adds a `GatewayExtension` for auth                                                                 |
 | Phase 33.I        | `@agentick/mcp-surface-next` adds a `GatewayExtension` that mounts MCP method namespaces                                 |
 | ADR 29 Phase D    | `@agentick/cluster-next` substrate impl — gateway gets a cluster journal/bus                                             |
-
-

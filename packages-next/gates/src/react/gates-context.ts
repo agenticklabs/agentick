@@ -4,7 +4,7 @@
  *
  * Gates deliberately gets NO `HookBridges` harness slot (it owns no
  * state; a gate's value is a knob value). Per ADR 27 the right vehicle
- * for tree access to the controller is a reconciler-react React context,
+ * for tree access to the controller is a compiler-react React context,
  * NOT a typed `HookBridges` slot. Resolution order in {@link useGatesController}:
  *
  *   1. An explicit `<GatesProvider>` in the tree (advanced/manual wiring).
@@ -26,7 +26,7 @@
 
 import React, { createContext, useContext, useRef, type ReactNode } from "react";
 import type { HookBridges } from "@agentick/spec-next";
-import { useBridges } from "@agentick/reconciler-react-next";
+import { useBridges } from "@agentick/compiler-react-next";
 // Side-effect: register the `HookBridges.knobs` slot so `bridges.knobs`
 // is typed here (gates reads the session's KnobsHarness off the bundle).
 import "@agentick/knobs-next";

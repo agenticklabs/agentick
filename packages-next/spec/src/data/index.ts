@@ -3,7 +3,7 @@
  *
  * Phase 1a–b landed (events, outcomes, operations, inbox, errors,
  * journaling-policy, standard-schema). Phase 1c (this batch) adds the
- * reconciler-facing types needed to unblock Phase 3:
+ * compiler-facing types needed to unblock Phase 3:
  *
  *   - content-blocks.ts   ContentBlock taxonomy (promoted from @agentick/shared)
  *   - semantic.ts         SemanticNode, SemanticMetadata, SemanticContentBlock
@@ -18,7 +18,7 @@
  *   - timeline.ts          TimelineEntry
  *   - knobs.ts             KnobDeclaration, KnobState
  *   - subscriptions.ts     SubscriptionIntent
- *   - reconciler-snapshot.ts ReconcilerSnapshot
+ *   - compiler-snapshot.ts CompilerSnapshot
  *   - session-record.ts    SessionRecord
  *
  * @see docs/proposals/v2/blueprint/02-data-model.md
@@ -45,7 +45,7 @@ export * from "./declarations.js";
 export * from "./rendered-tree.js";
 export * from "./execution-result.js";
 export * from "./execution-target.js";
-export * from "./reconciler-snapshot.js";
+export * from "./compiler-snapshot.js";
 export * from "./tool-handler.js";
 export * from "./tool-result.js";
 export * from "./validator.js";

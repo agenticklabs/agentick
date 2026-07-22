@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest";
 
 import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
-import { ReconcilerHarness, reactReconciler } from "@agentick/reconciler-react-next";
+import { CompilerHarness, reactCompiler } from "@agentick/compiler-react-next";
 import type { ContentBlock, ExecutionTarget, ExecutorFactoryDeps } from "@agentick/spec-next";
 
 import { AppHarness } from "../index.js";
@@ -221,7 +221,7 @@ describe("AppHarness — events()", () => {
     const collected: string[] = [];
 
     // Filter by the dispatch op name — the tool surface also carries
-    // per-tick `replace-reconciler-tools` ops now (slice 4 #138);
+    // per-tick `replace-compiler-tools` ops now (slice 4 #138);
     // those legitimately appear in the stream and would race the
     // count-based cutoff. Subscribing to dispatch-specific names
     // sidesteps that observability layering.
@@ -616,19 +616,19 @@ describe("AppHarness — executor factory slot (FAÇADE.3)", () => {
 });
 
 describe("AppHarness — slot cascade", () => {
-  it("accepts a pre-built reconciler instance via the slot", async () => {
+  it("accepts a pre-built compiler instance via the slot", async () => {
     const executor = mkExecutor();
     await executor.ready;
     const journal = new MemoryJournal();
     const bus = new LocalEventBus();
     const inbox = new LocalInbox();
-    const reconciler = new ReconcilerHarness("custom-recon", journal, bus, inbox);
-    await reconciler.ready;
+    const compiler = new CompilerHarness("custom-recon", journal, bus, inbox);
+    await compiler.ready;
 
     const app = await createApp(React.createElement(MinimalAgent), {
       modelExecutor: executor,
       target: mkTarget(),
-      reconciler,
+      compiler,
       journal,
       bus,
       inbox,
@@ -643,7 +643,7 @@ describe("AppHarness — slot cascade", () => {
         ],
       ]),
     });
-    // Smoke test that the injected reconciler actually runs.
+    // Smoke test that the injected compiler actually runs.
     const { result } = await app.runOnce({
       send: { messages: [{ role: "user", content: "x" }] },
     });
@@ -657,7 +657,7 @@ describe("AppHarness — slot cascade", () => {
     const app = new AppHarness({
       rootElement: React.createElement(MinimalAgent),
       modelExecutor: executor,
-      reconciler: reactReconciler(),
+      compiler: reactCompiler(),
       target: mkTarget(),
       defaultMaxTicks: 999, // shorthand
       session: { defaultMaxTicks: 1 }, // longhand — should win
@@ -689,7 +689,7 @@ describe("AppHarness — slot cascade", () => {
     const app = new AppHarness({
       rootElement: React.createElement(MinimalAgent),
       modelExecutor: executor,
-      reconciler: reactReconciler(),
+      compiler: reactCompiler(),
       target: mkTarget(),
       defaultMaxTicks: 1, // shorthand
       session: { defaultMaxTicks: 1 }, // longhand
@@ -723,7 +723,7 @@ describe("AppHarness — constructor variant", () => {
     const app = new AppHarness({
       rootElement: React.createElement(MinimalAgent),
       modelExecutor: executor,
-      reconciler: reactReconciler(),
+      compiler: reactCompiler(),
       target: mkTarget(),
       toolHandlers: new Map([
         [

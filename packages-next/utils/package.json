@@ -2,7 +2,7 @@
   "name": "@agentick/utils-next",
   "version": "0.0.0",
   "private": true,
-  "description": "Framework-agnostic bedrock utilities for Agentick v2 — type predicates, deep equality, the `mergeLayered` cascade primitive, Effect Cause helpers (`reasonOf` / `reasonOfCause` / `unwrapExit`), and the `drainRejection` test helper. No reconciler, harness, or protocol coupling. The in-process observer primitives (`Notifier` / `KeyedNotifier` / `LocalPubSub`) live in `@agentick/pubsub-next`.",
+  "description": "Framework-agnostic bedrock utilities for Agentick v2 — type predicates, deep equality, the `mergeLayered` cascade primitive, Effect Cause helpers (`reasonOf` / `reasonOfCause` / `unwrapExit`), and the `drainRejection` test helper. No compiler, harness, or protocol coupling. The in-process observer primitives (`Notifier` / `KeyedNotifier` / `LocalPubSub`) live in `@agentick/pubsub-next`.",
   "keywords": [
     "agentick",
     "cause",

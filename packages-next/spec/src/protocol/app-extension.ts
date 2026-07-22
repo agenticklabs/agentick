@@ -41,8 +41,8 @@ import type { OperationJournal } from "./journal.js";
 /**
  * Discriminator for {@link Extension} variants. The framework's
  * built-in hosts ship variants for `"app"` and `"session"`; new harness
- * packages add their own (e.g., a reconciler-side extension surface
- * would add `"reconciler"`).
+ * packages add their own (e.g., a compiler-side extension surface
+ * would add `"compiler"`).
  */
 export type HarnessKind = "gateway" | "app" | "session" | (string & {});
 
@@ -188,18 +188,18 @@ export interface BaseInstaller {
 
 /**
  * AppHarness installer. Exposes additional registration surfaces beyond
- * the base — reconciler contributors (for React-bound extensions), tool
+ * the base — compiler contributors (for React-bound extensions), tool
  * handler pre-registration, bus subscriptions for telemetry/observability.
  */
 export interface AppInstaller extends BaseInstaller {
   readonly kind: "app";
 
   /**
-   * Add a `Contributor` to the reconciler's registry. Reconciler-specific:
-   * the type parameter is whatever shape the active reconciler uses for
-   * host instances (`HostInstance` in `@agentick/reconciler-next`).
+   * Add a `Contributor` to the compiler's registry. Compiler-specific:
+   * the type parameter is whatever shape the active compiler uses for
+   * host instances (`HostInstance` in `@agentick/compiler-next`).
    *
-   * Non-reconciler extensions skip this method.
+   * Non-compiler extensions skip this method.
    */
   registerContributor<TContributor = unknown>(contributor: TContributor): Unsubscribe;
 

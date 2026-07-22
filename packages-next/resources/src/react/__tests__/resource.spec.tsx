@@ -1,9 +1,9 @@
 /**
  * `<Resource>` + the `resources` catalog default projection —
- * integration against the REAL `ReconcilerHarness` + a REAL
+ * integration against the REAL `CompilerHarness` + a REAL
  * `ResourcesHarness` bridge (per the modularity rule: cross-harness
  * tests live where their deps live; resources-next/react depends on
- * reconciler-react).
+ * compiler-react).
  *
  * Verifies:
  *   - rendering `<Resource>` registers a `uri → resolver` binding on the
@@ -21,15 +21,15 @@ import React from "react";
 import { describe, expect, it } from "vitest";
 
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
-import { fakeBridges } from "@agentick/reconciler-next";
-import { Project, ReconcilerHarness } from "@agentick/reconciler-react-next";
+import { fakeBridges } from "@agentick/compiler-next";
+import { Project, CompilerHarness } from "@agentick/compiler-react-next";
 import type { HookBridges } from "@agentick/spec-next";
 
 import { ResourcesHarness } from "../../harness.js";
 import { Resource } from "../resource.js";
 
-async function makeHarness(): Promise<ReconcilerHarness> {
-  const harness = new ReconcilerHarness(
+async function makeHarness(): Promise<CompilerHarness> {
+  const harness = new CompilerHarness(
     `h_resource_${Math.random().toString(36).slice(2)}`,
     new MemoryJournal(),
     new LocalEventBus(),

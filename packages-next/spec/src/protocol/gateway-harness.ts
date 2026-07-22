@@ -77,9 +77,9 @@ export interface CreateAppInput<P = unknown> {
   /** Per-app metadata bag. Surfaces to App-level substrate factories. */
   readonly metadata?: Readonly<Record<string, unknown>>;
   /**
-   * Root agent element passed to every session's reconciler mount.
+   * Root agent element passed to every session's compiler mount.
    * Opaque to spec (avoids a React dep); concrete type contract lives
-   * in `@agentick/app-next`'s reconciler.
+   * in `@agentick/app-next`'s compiler.
    */
   readonly rootElement: unknown;
   /**

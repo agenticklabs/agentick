@@ -20,17 +20,17 @@ import { describe, expect, it, vi } from "vitest";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type { HookBridges, TickResult, SectionEntry } from "@agentick/spec-next";
 
-import { ReconcilerHarness } from "@agentick/reconciler-react-next";
-import { fakeBridges } from "@agentick/reconciler-next";
+import { CompilerHarness } from "@agentick/compiler-react-next";
+import { fakeBridges } from "@agentick/compiler-next";
 import { stubKnobsHarness } from "@agentick/knobs-next/testing";
-import { flush } from "@agentick/reconciler-react-next/testing";
+import { flush } from "@agentick/compiler-react-next/testing";
 import { gate } from "../descriptor.js";
 import { GatesController } from "../controller.js";
 import { spyLoopControl, type SpyLoopControl } from "../testing/index.js";
 import { useGate, type GateState } from "../react/use-gate.js";
 
 async function makeHarness() {
-  const harness = new ReconcilerHarness(
+  const harness = new CompilerHarness(
     "h_gate",
     new MemoryJournal(),
     new LocalEventBus(),

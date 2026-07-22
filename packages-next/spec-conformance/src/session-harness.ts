@@ -3,7 +3,7 @@
  *
  * Validates the invariants in `docs/proposals/v2/blueprint/08-session-harness.md`.
  * Factories receive the *bound* sub-harnesses they should drive — the
- * suite supplies stubs for reconciler / loop executor / executor / tool
+ * suite supplies stubs for compiler / loop executor / executor / tool
  * executor when the impl-under-test doesn't need real ones, and the
  * factory wires its own session against them.
  *
@@ -19,7 +19,7 @@
  *     const session = new SessionHarness(deps.journal, deps.bus, deps.inbox, {
  *       sessionId: harnessId,
  *       agent: deps.agent,
- *       reconciler: deps.reconciler,
+ *       compiler: deps.compiler,
  *       loop: deps.loop,
  *       modelExecutor: deps.modelExecutor,
  *       toolExecutor: deps.toolExecutor,
@@ -47,7 +47,7 @@ import type {
   LoopExecutorProtocol,
   MessageInbox,
   OperationJournal,
-  ReconcilerProtocol,
+  CompilerProtocol,
   RenderedTree,
   SendResult,
   SessionHarnessProtocol,
@@ -68,7 +68,7 @@ export interface SessionConformanceFactoryDeps {
   readonly journal: OperationJournal;
   readonly bus: EventBus;
   readonly inbox: MessageInbox;
-  readonly reconciler: ReconcilerProtocol;
+  readonly compiler: CompilerProtocol;
   readonly loop: LoopExecutorProtocol;
   readonly modelExecutor: ExecutorProtocol<unknown, unknown, LanguageModelExecutionResult>;
   readonly toolExecutor: ToolExecutorProtocol;
@@ -110,7 +110,7 @@ function mkTree(): RenderedTree {
   };
 }
 
-function stubReconciler(): ReconcilerProtocol {
+function stubCompiler(): CompilerProtocol {
   return {
     fx: {
       use: () => () => {},
@@ -224,7 +224,7 @@ function stubToolExecutor(): ToolExecutorProtocol {
     fx: {
       use: () => () => {},
       dispatch: (input) => dispatchFx(input),
-      replaceReconcilerTools: () => Effect.void,
+      replaceCompilerTools: () => Effect.void,
       compileForTick: () => Effect.succeed([]),
     },
     register: async () => undefined,
@@ -233,7 +233,7 @@ function stubToolExecutor(): ToolExecutorProtocol {
     list: async () => [],
     dispatch: (input) => Effect.runPromise(dispatchFx(input)),
     abort: async () => undefined,
-    replaceReconcilerTools: async () => undefined,
+    replaceCompilerTools: async () => undefined,
     removeBoundTools: async () => 0,
     compileForTick: async () => [],
   };
@@ -299,7 +299,7 @@ export function defaultSessionConformanceDeps(
     journal: base.journal,
     bus: base.bus,
     inbox: base.inbox,
-    reconciler: overrides.reconciler ?? stubReconciler(),
+    compiler: overrides.compiler ?? stubCompiler(),
     loop: overrides.loop ?? stubLoop("hi"),
     modelExecutor: overrides.modelExecutor ?? stubExecutor(),
     toolExecutor: overrides.toolExecutor ?? stubToolExecutor(),

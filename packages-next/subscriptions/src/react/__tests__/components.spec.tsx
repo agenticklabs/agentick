@@ -6,15 +6,15 @@ import React from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
-import { ReconcilerHarness } from "@agentick/reconciler-react-next";
-import { fakeBridges } from "@agentick/reconciler-next";
+import { CompilerHarness } from "@agentick/compiler-react-next";
+import { fakeBridges } from "@agentick/compiler-next";
 import type { HookBridges } from "@agentick/spec-next";
 
 import { createSubscriptionBridge } from "../../bridge.js";
 import { Cron, Webhook, EventListener } from "../components.js";
 
 async function makeHarness() {
-  const h = new ReconcilerHarness(
+  const h = new CompilerHarness(
     "h_sub",
     new MemoryJournal(),
     new LocalEventBus(),

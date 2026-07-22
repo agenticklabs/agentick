@@ -1,7 +1,7 @@
 /**
  * `@agentick/gates-next/react` — React front-end for the gate pattern.
  *
- * `useGate` is a REGISTRATION-ONLY binding over the reconciler-agnostic
+ * `useGate` is a REGISTRATION-ONLY binding over the compiler-agnostic
  * {@link GatesController} (ADR 67): it registers the descriptor on mount,
  * unregisters on unmount, and reflects the gate's knob value. It does NOT
  * wire tick-end evaluation — that is driven by `session.notifyLifecycle`.

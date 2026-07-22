@@ -42,7 +42,7 @@ export type Middleware<I = unknown, R = unknown, E = unknown> = (
 /**
  * The base of every harness's `.fx` surface: the Effect-native middleware
  * register (`harness.fx.use`). Each concrete `XFx` (`ExecutorFx`, `LoopExecutorFx`,
- * `KnobsFx`, `ToolExecutorFx`, `ReconcilerFx`) extends this, so `fx.use` is a
+ * `KnobsFx`, `ToolExecutorFx`, `CompilerFx`) extends this, so `fx.use` is a
  * universal member alongside the harness's operation twins. The Promise-facade
  * twin is `harness.use` (the {@link AsyncMiddleware} form).
  */

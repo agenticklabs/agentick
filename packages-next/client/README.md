@@ -20,7 +20,7 @@ for await (const e of session.elicitations()) await e.accept({}); // @agentick/e
 
 // Client-handled tools (stage 2 write side) — @agentick/tool-executor-next/client
 // A client is a declarative tool SOURCE: declare the FULL set; the framework
-// replaces the client slice wholesale (the wire twin of replaceReconcilerTools).
+// replaces the client slice wholesale (the wire twin of replaceCompilerTools).
 await session.setClientTools([{ name, description, inputSchema }]); // JSON-Schema input, no handler
 await session.setClientTools([]); // clear the client slice
 await session.respondToToolCall(correlationId, [{ type: "text", text: "…" }]);
@@ -31,10 +31,10 @@ That's the whole package: three side-effect imports + `export * from
 
 ## Core vs bundle
 
-| Package                       | What                                                                      |
-| ----------------------------- | ------------------------------------------------------------------------- |
-| `@agentick/client-next`       | **This package.** Batteries-included — core + every built-in `/client`.   |
-| `@agentick/client-core-next`  | The lean, harness-agnostic core. Opt in to built-ins per-harness.         |
+| Package                      | What                                                                    |
+| ---------------------------- | ----------------------------------------------------------------------- |
+| `@agentick/client-next`      | **This package.** Batteries-included — core + every built-in `/client`. |
+| `@agentick/client-core-next` | The lean, harness-agnostic core. Opt in to built-ins per-harness.       |
 
 Use **this package** for the default experience (everything works). Drop to
 `@agentick/client-core-next` when you want minimal imports and will add only the

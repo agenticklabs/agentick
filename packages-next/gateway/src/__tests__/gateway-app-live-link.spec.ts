@@ -24,7 +24,7 @@ import type { ContentBlock, ToolDeclaration, ToolHandler } from "@agentick/spec-
 import { SPEC_VERSION, jsonSchema } from "@agentick/spec-next";
 import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
-import { ReconcilerHarness } from "@agentick/reconciler-react-next";
+import { CompilerHarness } from "@agentick/compiler-react-next";
 
 import { createGateway } from "../index.js";
 
@@ -71,7 +71,7 @@ function mkAppOptions(seen: { value?: unknown }) {
         },
       },
     ),
-    reconciler: new ReconcilerHarness(
+    compiler: new CompilerHarness(
       `r-${Math.random().toString(36).slice(2)}`,
       sub.journal,
       sub.bus,

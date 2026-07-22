@@ -2,7 +2,7 @@
  * `@agentick/sandbox-next/react` — React bindings for the sandbox harness.
  *
  * Adopters import from here when they're using the
- * `@agentick/reconciler-react-next` reconciler. The agnostic surface
+ * `@agentick/compiler-react-next` compiler. The agnostic surface
  * (bridge, harness, types) ships from `@agentick/sandbox-next`.
  *
  * @see docs/proposals/v2/blueprint/24-sandbox-as-harness.md

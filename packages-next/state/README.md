@@ -196,10 +196,10 @@ Extracted per ADR 26 Step 3a, modularized per ADR 27. Green.
   `delete` / no-op delete emits nothing, the `existed`-not-`prev!==undefined`
   discriminator (`set(undefined)` then `set(value)` = add→update), and
   unsubscribe / multiple projections on one stream.
-- `src/__tests__/integration-with-reconciler.spec.tsx` (4 tests) —
+- `src/__tests__/integration-with-compiler.spec.tsx` (4 tests) —
   `useSessionState` initial registration, non-overwrite on re-mount,
   persistence across unmount → remount when the bridge is reused, and
-  reactivity to external `set` against the real `ReconcilerHarness`.
+  reactivity to external `set` against the real `CompilerHarness`.
 - `src/conformance.ts` — `runStateHarnessConformance` exports the protocol
   battery for adopter impls.
 

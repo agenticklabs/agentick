@@ -22,7 +22,7 @@ import { describe, expect, it } from "vitest";
 import { createClient } from "@agentick/client-core-next";
 import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
 import { createGateway } from "@agentick/gateway-next";
-import { fakeReconciler } from "@agentick/reconciler-next/testing";
+import { fakeCompiler } from "@agentick/compiler-next/testing";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type { ContentBlock, LiveStream, MediaFrame } from "@agentick/spec-next";
 import { inProcessTransport } from "@agentick/transport-in-process-next";
@@ -66,7 +66,7 @@ async function makeStack() {
     rootElement: null,
     options: {
       modelExecutor: executor,
-      reconciler: fakeReconciler(),
+      compiler: fakeCompiler(),
       extensions: [
         withLive({
           onStream: (s) => {

@@ -17,7 +17,7 @@
     "@agentick/gateway-next": "workspace:*",
     "@agentick/knobs-next": "workspace:*",
     "@agentick/model-ai-sdk-next": "workspace:*",
-    "@agentick/reconciler-react-next": "workspace:*",
+    "@agentick/compiler-react-next": "workspace:*",
     "@agentick/spec-next": "workspace:*",
     "@agentick/timeline-next": "workspace:*",
     "@agentick/transport-in-process-next": "workspace:*",

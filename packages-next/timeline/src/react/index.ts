@@ -2,7 +2,7 @@
  * `@agentick/timeline-next/react` — React bindings for TimelineHarness.
  *
  * Per ADR 27, the React surface for a harness lives in its own /react
- * subpath. Adopters using `@agentick/reconciler-react-next` import the
+ * subpath. Adopters using `@agentick/compiler-react-next` import the
  * hooks and components from here.
  *
  * @see docs/proposals/v2/blueprint/27-modular-built-ins.md

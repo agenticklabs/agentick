@@ -20,7 +20,7 @@
  */
 
 import { z } from "zod";
-import { createTool } from "@agentick/reconciler-react-next";
+import { createTool } from "@agentick/compiler-react-next";
 import type { ContentBlock } from "@agentick/spec-next";
 
 import "../augment.js";

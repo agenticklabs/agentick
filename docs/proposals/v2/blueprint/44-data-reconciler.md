@@ -1,5 +1,7 @@
 # ADR 44 — Data reconciler (functional, non-React agent root)
 
+> **Rename note (2026-07-21, #243):** the reconciler → **compiler** sweep referenced below has now landed — `@agentick/reconciler-next` → `@agentick/compiler-next`, `@agentick/reconciler-react-next` → `@agentick/compiler-react-next`, `ReconcilerProtocol` → `CompilerProtocol`, `defineReconciler` → `defineCompiler`, etc. The future package this ADR proposes would be `@agentick/compiler-data-next`. Original terminology is preserved below as historical record.
+
 **Status:** Draft — 2026-06-29.
 **Touches:** new package `@agentick/reconciler-data-next` (or
 `-pure-next` — name TBD); composes onto existing
@@ -33,8 +35,18 @@ No React, no hooks, no fiber tree, no concurrent rendering — just
 
 ```ts
 import {
-  agent, system, user, tools, timeline,
-  h1, h2, h3, paragraph, list, listItem, code,
+  agent,
+  system,
+  user,
+  tools,
+  timeline,
+  h1,
+  h2,
+  h3,
+  paragraph,
+  list,
+  listItem,
+  code,
 } from "@agentick/reconciler-data-next";
 
 export default agent(({ tick, knobs, props, timeline: tl }) => [
@@ -43,11 +55,11 @@ export default agent(({ tick, knobs, props, timeline: tl }) => [
     paragraph("You are a helpful assistant."),
 
     h1("Available tools"),
-    list(availableTools.map(t => listItem(t.description))),
+    list(availableTools.map((t) => listItem(t.description))),
   ]),
 
   // Declarative timeline — harness owns compaction:
-  timeline({ filter: e => e.role !== "system", compact: { maxTokens: 4000 } }),
+  timeline({ filter: (e) => e.role !== "system", compact: { maxTokens: 4000 } }),
 
   user([paragraph(props.userInput)]),
 
@@ -148,14 +160,14 @@ timeline({ compact: "auto", maxTokens: 4000 })
 
 Both produce the same IR. They differ in what the adopter gives up:
 
-| Concern                       | Declarative                  | Imperative                              |
-|-------------------------------|------------------------------|-----------------------------------------|
-| Compaction policy             | Harness handles it           | Adopter compacts or accepts full include|
-| Compose into messages         | Auto                         | Manual `map(e => message(...))`         |
-| Reorder / interleave / wrap   | Limited                      | Full JS — `slice` / `flatMap` / etc.    |
-| Annotate / branch on content  | No                           | Yes                                     |
-| Journal debuggability         | Compactor decision logged    | Just the IR output                      |
-| Per-entry token budget        | Harness-level                | Adopter implements                      |
+| Concern                      | Declarative               | Imperative                               |
+| ---------------------------- | ------------------------- | ---------------------------------------- |
+| Compaction policy            | Harness handles it        | Adopter compacts or accepts full include |
+| Compose into messages        | Auto                      | Manual `map(e => message(...))`          |
+| Reorder / interleave / wrap  | Limited                   | Full JS — `slice` / `flatMap` / etc.     |
+| Annotate / branch on content | No                        | Yes                                      |
+| Journal debuggability        | Compactor decision logged | Just the IR output                       |
+| Per-entry token budget       | Harness-level             | Adopter implements                       |
 
 The imperative form earns its keep on cases the declarative form
 can't express:
@@ -164,7 +176,7 @@ can't express:
 // Summarize old turns separately + inline them as system context:
 export default agent(({ timeline, props }) => {
   const recent = timeline.entries({ since: timeline.tail(5) });
-  const older  = timeline.entries({ before: timeline.tail(5) });
+  const older = timeline.entries({ before: timeline.tail(5) });
   const summary = props.precomputedSummary;
 
   return [
@@ -174,11 +186,13 @@ export default agent(({ timeline, props }) => {
       h2("Conversation so far"),
       paragraph(summary),
     ]),
-    ...recent.map(e =>
-      message(e.role, [
-        e.role === "assistant" ? h3(`Turn ${e.turn}`) : null,
-        paragraph(e.content),
-      ].filter(Boolean))
+    ...recent.map((e) =>
+      message(
+        e.role,
+        [e.role === "assistant" ? h3(`Turn ${e.turn}`) : null, paragraph(e.content)].filter(
+          Boolean,
+        ),
+      ),
     ),
     tools([echo, search]),
   ];
@@ -193,17 +207,17 @@ proliferating into N adopter-specific options nobody'll remember.
 
 For adopters coming from React, the translation table:
 
-| React                                                        | Data-reconciler equivalent                            |
-|--------------------------------------------------------------|-------------------------------------------------------|
-| `function Agent()` body                                      | `agent((ctx) => ...)` body                            |
-| `useTimeline()`                                              | `ctx.timeline` (frozen snapshot)                      |
-| `useKnob("x")`                                               | `ctx.knobs.x`                                         |
-| `useResolved(key)`                                           | `ctx.props.resolved[key]` (resolved by adopter)       |
-| `<H1>Role</H1>`                                              | `h1("Role")`                                          |
-| `{entries.map(e => <Message ...>...</Message>)}`             | `...entries.map(e => message(...))`                   |
-| `useEffect(...)`                                             | **No equivalent** — side effects via framework lifecycle, never adopter code |
-| `useState(...)`                                              | **No equivalent** — state lives in adopter modules / closures, or in `bridges.state` if persistent |
-| `<Suspense fallback={...}>`                                  | **No equivalent** — adopter resolves async upfront, passes via `props` |
+| React                                            | Data-reconciler equivalent                                                                         |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------------- |
+| `function Agent()` body                          | `agent((ctx) => ...)` body                                                                         |
+| `useTimeline()`                                  | `ctx.timeline` (frozen snapshot)                                                                   |
+| `useKnob("x")`                                   | `ctx.knobs.x`                                                                                      |
+| `useResolved(key)`                               | `ctx.props.resolved[key]` (resolved by adopter)                                                    |
+| `<H1>Role</H1>`                                  | `h1("Role")`                                                                                       |
+| `{entries.map(e => <Message ...>...</Message>)}` | `...entries.map(e => message(...))`                                                                |
+| `useEffect(...)`                                 | **No equivalent** — side effects via framework lifecycle, never adopter code                       |
+| `useState(...)`                                  | **No equivalent** — state lives in adopter modules / closures, or in `bridges.state` if persistent |
+| `<Suspense fallback={...}>`                      | **No equivalent** — adopter resolves async upfront, passes via `props`                             |
 
 What React HAS that data mode drops: per-component state, effects,
 suspense, concurrent rendering. What data mode KEEPS that React
@@ -221,7 +235,7 @@ over-engineered for "resolve some async data before this tick".
 
 In React mode, the reconciler does real work — walking the fiber
 tree, managing per-component state, diffing across ticks, scheduling
-re-renders. There's genuine *reconciliation*.
+re-renders. There's genuine _reconciliation_.
 
 In data mode, the function returns a complete IR every tick. There's
 nothing to reconcile — it's just `(ctx) => fn(ctx)` per tick, handing
@@ -237,55 +251,60 @@ it visible.
 ## Surface inventory (initial draft)
 
 ### `agent(fn)`
+
 Wraps an adopter function in a `ReconcilerInput` for the data-
 reconciler. Single export from the package root.
 
 ### Structural factories (Layer A)
-| Factory       | Produces                                             |
-|---------------|------------------------------------------------------|
-| `system(...)` | system-role message                                  |
-| `user(...)`   | user-role message                                    |
-| `assistant(...)` | assistant-role message                            |
-| `message(role, ...)` | arbitrary-role message                        |
-| `section(opts, ...)` | named region (id, audience, persistence)      |
-| `tools([...])` | tool declarations available to the model            |
-| `timeline(opts)` | declarative timeline expansion                    |
-| `event(opts, ...)` | persisted event                                  |
-| `ephemeral(opts, ...)` | non-persisted current-state context          |
-| `grounding(opts, ...)` | semantic grounding wrapper                   |
+
+| Factory                | Produces                                 |
+| ---------------------- | ---------------------------------------- |
+| `system(...)`          | system-role message                      |
+| `user(...)`            | user-role message                        |
+| `assistant(...)`       | assistant-role message                   |
+| `message(role, ...)`   | arbitrary-role message                   |
+| `section(opts, ...)`   | named region (id, audience, persistence) |
+| `tools([...])`         | tool declarations available to the model |
+| `timeline(opts)`       | declarative timeline expansion           |
+| `event(opts, ...)`     | persisted event                          |
+| `ephemeral(opts, ...)` | non-persisted current-state context      |
+| `grounding(opts, ...)` | semantic grounding wrapper               |
 
 ### Semantic factories (Layer B)
+
 Mirror the existing `packages/core/src/jsx/components/semantic.tsx`
 set, just as plain functions instead of JSX components:
 
-| Factory                          | React equivalent                  |
-|----------------------------------|-----------------------------------|
-| `h1(text)` / `h2(text)` / `h3(text)` | `<H1>` / `<H2>` / `<H3>`     |
-| `header(level, text)`            | `<Header level={n}>`              |
-| `paragraph(text)`                | `<Paragraph>`                     |
-| `list(items, opts?)`             | `<List>`                          |
-| `listItem(text, opts?)`          | `<ListItem>`                      |
-| `table(opts)`                    | `<Table>`                         |
-| `code(text, opts)`               | `<Code>`                          |
-| `json(data)`                     | `<Json>`                          |
-| `text(s)`                        | `<Text>`                          |
+| Factory                              | React equivalent         |
+| ------------------------------------ | ------------------------ |
+| `h1(text)` / `h2(text)` / `h3(text)` | `<H1>` / `<H2>` / `<H3>` |
+| `header(level, text)`                | `<Header level={n}>`     |
+| `paragraph(text)`                    | `<Paragraph>`            |
+| `list(items, opts?)`                 | `<List>`                 |
+| `listItem(text, opts?)`              | `<ListItem>`             |
+| `table(opts)`                        | `<Table>`                |
+| `code(text, opts)`                   | `<Code>`                 |
+| `json(data)`                         | `<Json>`                 |
+| `text(s)`                            | `<Text>`                 |
 
 ### Content-block factories (multimodal)
-| Factory                  | React equivalent           |
-|--------------------------|----------------------------|
-| `image(source)`          | `<Image>`                  |
-| `audio(source)`          | `<Audio>`                  |
-| `video(source)`          | `<Video>`                  |
-| `document(source)`       | `<Document>`               |
+
+| Factory            | React equivalent |
+| ------------------ | ---------------- |
+| `image(source)`    | `<Image>`        |
+| `audio(source)`    | `<Audio>`        |
+| `video(source)`    | `<Video>`        |
+| `document(source)` | `<Document>`     |
 
 ### Live-primitive nodes (declarative reads)
-| Factory                  | What it expands to                            |
-|--------------------------|-----------------------------------------------|
-| `timeline(opts)`         | Messages from `bridges.timeline`              |
-| `knobs(descriptors)`     | The standard knob section + `set_knob` tool   |
-| `mcpTools(opts)`         | Tool decls discovered from a `bridges.mcp` server |
-| `skill(name)`            | Skill content from `bridges.skills`           |
-| `prompt(name, args)`     | Prompt template render from `bridges.prompts` |
+
+| Factory              | What it expands to                                |
+| -------------------- | ------------------------------------------------- |
+| `timeline(opts)`     | Messages from `bridges.timeline`                  |
+| `knobs(descriptors)` | The standard knob section + `set_knob` tool       |
+| `mcpTools(opts)`     | Tool decls discovered from a `bridges.mcp` server |
+| `skill(name)`        | Skill content from `bridges.skills`               |
+| `prompt(name, args)` | Prompt template render from `bridges.prompts`     |
 
 ## Implementation sketch
 
@@ -329,19 +348,19 @@ per live-primitive node type.
 
 ## Trade-offs vs React-reconciler
 
-| Concern                           | Data-reconciler                            | React-reconciler                              |
-|-----------------------------------|--------------------------------------------|-----------------------------------------------|
-| Bundle weight                     | ~few hundred LOC + tests                  | react + react-reconciler + ours               |
-| Runtime cost per tick             | One fn call + tree walk                    | Fiber tree reconcile + commit phase           |
-| State management                  | Adopter-owned (modules, closures, bridges.state) | useState / useReducer / context           |
-| Async data                        | Resolve upfront, pass via props            | Suspense (or external state libs)             |
-| Devtools                          | Standard JS debugger; IR tree inspectable  | React DevTools (mature)                       |
-| Snapshot / replay determinism     | Native                                     | Possible but hooks fight it                   |
-| Test ergonomics                   | Fake ctx, no harness needed                | Need to mount + render + observe              |
-| JSX-as-syntax                     | No (function calls)                        | Yes                                           |
-| Concurrent rendering              | No                                         | Yes (if you want it)                          |
-| Adopter ramp-up                   | Plain JS function — minutes                | React knowledge required                      |
-| Compose sub-agents                | Plain function composition                 | React component composition                   |
+| Concern                       | Data-reconciler                                  | React-reconciler                    |
+| ----------------------------- | ------------------------------------------------ | ----------------------------------- |
+| Bundle weight                 | ~few hundred LOC + tests                         | react + react-reconciler + ours     |
+| Runtime cost per tick         | One fn call + tree walk                          | Fiber tree reconcile + commit phase |
+| State management              | Adopter-owned (modules, closures, bridges.state) | useState / useReducer / context     |
+| Async data                    | Resolve upfront, pass via props                  | Suspense (or external state libs)   |
+| Devtools                      | Standard JS debugger; IR tree inspectable        | React DevTools (mature)             |
+| Snapshot / replay determinism | Native                                           | Possible but hooks fight it         |
+| Test ergonomics               | Fake ctx, no harness needed                      | Need to mount + render + observe    |
+| JSX-as-syntax                 | No (function calls)                              | Yes                                 |
+| Concurrent rendering          | No                                               | Yes (if you want it)                |
+| Adopter ramp-up               | Plain JS function — minutes                      | React knowledge required            |
+| Compose sub-agents            | Plain function composition                       | React component composition         |
 
 For agent context-compilation, the React-side wins are mostly
 features adopters DON'T want in the render path (state, effects,

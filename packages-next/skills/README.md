@@ -48,7 +48,7 @@ interface Skill {
 }
 ```
 
-Skills are first-class data. The harness treats them as opaque content; the agent's prompt design decides what to do with them. Authoring `content` via `renderTemplate` from `@agentick/reconciler-react-next` (JSX → markdown string) is the recommended pattern for richer skill bodies.
+Skills are first-class data. The harness treats them as opaque content; the agent's prompt design decides what to do with them. Authoring `content` via `renderTemplate` from `@agentick/compiler-react-next` (JSX → markdown string) is the recommended pattern for richer skill bodies.
 
 ## API — `SkillsHandle` on `session.skills`
 
@@ -125,7 +125,7 @@ withSkills({ store: new InMemorySkillStore() }); // the bundled default (implici
 
 - **`register` / `update` / `remove`** write through to `store.put` / `store.delete`.
 - **Loaders stay _sources_ that FEED the store** — they are not dissolved into it. `reload()` runs each loader's `load()` and puts the results; `resolve(name)` (lookup-on-miss) asks each loader's `lookup()` then puts the hit.
-- **`get` / `has` / `list` / `search` are synchronous**, served from an eager `View` (a sync read cache the harness keeps in lockstep with the store: write-through on mutation, `hydrate()` on resume). This mirrors the `KnobsHarness`. The view is required, not incidental — the sync `exportSnapshot()` (`SnapshotCapable`, captured synchronously by the reconciler) and the sync read surface are both load-bearing sync callers, so a synchronous materialized view is mandatory. (Credentials, the async counter-example, has _no_ snapshot surface, which is why it needs no view.)
+- **`get` / `has` / `list` / `search` are synchronous**, served from an eager `View` (a sync read cache the harness keeps in lockstep with the store: write-through on mutation, `hydrate()` on resume). This mirrors the `KnobsHarness`. The view is required, not incidental — the sync `exportSnapshot()` (`SnapshotCapable`, captured synchronously by the compiler) and the sync read surface are both load-bearing sync callers, so a synchronous materialized view is mandatory. (Credentials, the async counter-example, has _no_ snapshot surface, which is why it needs no view.)
 - **`exportSnapshot` / `importSnapshot` coexist** with the store today (a Phase-4 manifest sweep makes the store the sole snapshot authority later). A durable adapter (Postgres, a filesystem source) conforms to the same `SkillStore` port.
 
 ## Backend swap
@@ -153,7 +153,7 @@ const harness = await stubSkillsHarness([
 // Use directly in tests; no full session machinery needed.
 ```
 
-Cross-harness integration testing — when verifying that skills interact correctly with the reconciler, session, or other harnesses — uses `runSkillsHarnessConformance` against the real protocol surface.
+Cross-harness integration testing — when verifying that skills interact correctly with the compiler, session, or other harnesses — uses `runSkillsHarnessConformance` against the real protocol surface.
 
 ## Loaders
 
@@ -276,4 +276,4 @@ const skill = await session.skills.require("must_exist");
 
 - [Spec — `SkillsHarnessProtocol`](../spec/src/protocol/skills-harness.ts)
 - [ADR 32 — Extension shape spectrum](../../docs/proposals/v2/blueprint/32-extension-shape-spectrum.md)
-- [`@agentick/reconciler-react-next` `renderTemplate`](../reconciler-react/README.md) — author skill `content` as JSX templates
+- [`@agentick/compiler-react-next` `renderTemplate`](../compiler-react/README.md) — author skill `content` as JSX templates

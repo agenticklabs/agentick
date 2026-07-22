@@ -125,10 +125,10 @@ withPrompts({
 
 The harness is **store-derived and store-persisted** ([data-layer plan §6-C](../../docs/proposals/v2/data-layer-plan.md)). Prompts is the archetype's first **augmented instance**: it is [`@agentick/skills-next`](../skills)'s pure floor **PLUS a non-serializable runtime augmentation**. A `PromptDeclaration` splits along the serialization boundary:
 
-| Slice                       | Fields                                       | Where it lives                                                     |
-| --------------------------- | -------------------------------------------- | ----------------------------------------------------------------- |
-| **Serializable record**     | `name`, `description`, `arguments`, `metadata` | the `PromptStore` (= `CollectionStore<PromptDeclarationRecord, PromptStoreQuery>`) — this is exactly `PromptsSnapshotEntry` |
-| **Runtime augmentation**    | `template`, `render`                         | a parallel harness-local **sidecar** `Map<name, { template, render }>` — NEVER the store |
+| Slice                    | Fields                                         | Where it lives                                                                                                              |
+| ------------------------ | ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| **Serializable record**  | `name`, `description`, `arguments`, `metadata` | the `PromptStore` (= `CollectionStore<PromptDeclarationRecord, PromptStoreQuery>`) — this is exactly `PromptsSnapshotEntry` |
+| **Runtime augmentation** | `template`, `render`                           | a parallel harness-local **sidecar** `Map<name, { template, render }>` — NEVER the store                                    |
 
 ```ts
 import { InMemoryPromptStore } from "@agentick/prompts-next";
@@ -142,7 +142,7 @@ The split **composes** rather than being hand-rolled: an eager `View<PromptDecla
 - **`register` / `update`** write the record through the view (`store.mutate`) **and** re-attach `{ template, render }` to the sidecar. **`remove`** drops both.
 - **`render`/`template` can NEVER reach the store** — the `PromptDeclarationRecord` type makes that a _compile-time_ guarantee, not a discipline. (Contrast tasks' hand-rolled `LiveTask` cache, where the record and the live handles are read together at every site AND the snapshot includes the record slice, so splitting would only distort. Prompts is the opposite: `exportSnapshot` and the store want records _without_ the fns, so the split earns its keep.)
 - **Loaders stay _sources_ that FEED the store + sidecar** — not dissolved into them. `reload()` runs each loader's `load()` and registers the results; `resolve(name)` (lookup-on-miss) asks each loader's `lookup()` then registers the hit. `fromModule`/`fromArray` carry `render` fns (→ sidecar); `fromStaticUrl` is template-only.
-- **`getDeclaration` / `has` / `list` are synchronous**, served from the eager projection (write-through on mutation, `hydrate()` on resume). The projection is required, not incidental — the sync `exportSnapshot()` (`SnapshotCapable`, captured synchronously by the reconciler) and the sync read surface are both load-bearing sync callers, so a synchronous materialized view is mandatory.
+- **`getDeclaration` / `has` / `list` are synchronous**, served from the eager projection (write-through on mutation, `hydrate()` on resume). The projection is required, not incidental — the sync `exportSnapshot()` (`SnapshotCapable`, captured synchronously by the compiler) and the sync read surface are both load-bearing sync callers, so a synchronous materialized view is mandatory.
 - **`exportSnapshot` / `importSnapshot` coexist** with the store today (a Phase-4 manifest sweep makes the store the sole snapshot authority later). `exportSnapshot` materializes the projection records directly — the augmentation is dropped **by construction**, not by per-field stripping. A durable adapter (Postgres, a filesystem source) conforms to the same `PromptStore` port.
 
 ## API — `PromptsHandle` on `session.prompts`

@@ -1,5 +1,5 @@
 /**
- * Per-harness error classes — execution (loop / reconciler / executor /
+ * Per-harness error classes — execution (loop / compiler / executor /
  * timeline) + domain (tool-executor / prompts / skills / knobs / mcp-server).
  *
  * Migrated from POJO `_tag` unions to the `AgentickError` class
@@ -74,7 +74,7 @@ export type LoopExecutorErrorChannel =
   | MaxTicksExceeded;
 
 // ============================================================================
-// ReconcileError — reconciler render + snapshot failures
+// ReconcileError — compiler render + snapshot failures
 // ============================================================================
 
 export abstract class ReconcileError extends AgentickError {}
@@ -83,7 +83,7 @@ export class NotMounted extends ReconcileError {
   readonly _tag = "NotMounted" as const;
   readonly mountId: string;
   constructor(args: { readonly mountId: string; readonly cause?: unknown }) {
-    super(`reconciler not mounted: ${args.mountId}`, { cause: args.cause });
+    super(`compiler not mounted: ${args.mountId}`, { cause: args.cause });
     this.mountId = args.mountId;
   }
 }
@@ -93,7 +93,7 @@ export class AlreadyMounted extends ReconcileError {
   readonly _tag = "AlreadyMounted" as const;
   readonly mountId: string;
   constructor(args: { readonly mountId: string; readonly cause?: unknown }) {
-    super(`reconciler already mounted: ${args.mountId}`, { cause: args.cause });
+    super(`compiler already mounted: ${args.mountId}`, { cause: args.cause });
     this.mountId = args.mountId;
   }
 }

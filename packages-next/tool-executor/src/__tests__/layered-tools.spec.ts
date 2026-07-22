@@ -5,8 +5,8 @@
  *   1. Stores multiple registrations per name, one per binding slice.
  *   2. Resolves name collisions in `compileForTick` via the layered
  *      precedence ladder.
- *   3. Applies `replaceReconcilerSlice` atomically (removes the
- *      reconciler slice for a mountId, leaves other slices untouched).
+ *   3. Applies `replaceCompilerSlice` atomically (removes the
+ *      compiler slice for a mountId, leaves other slices untouched).
  *   4. Honors filter-before-precedence semantics (a high-precedence
  *      registration that fails the filter doesn't shadow a lower-
  *      precedence registration that passes).
@@ -76,7 +76,7 @@ describe("InMemoryToolRegistry — layered tools (#136)", () => {
       const r = new InMemoryToolRegistry();
       r.add(reg("foo", { scope: "runtime" }));
       r.add(reg("foo", { scope: "session", sessionId: "s1" }));
-      r.add(reg("foo", { scope: "reconciler", mountId: "m1" }));
+      r.add(reg("foo", { scope: "compiler", mountId: "m1" }));
       expect(r.totalRegistrations()).toBe(3);
       expect(r.size()).toBe(1); // one distinct name
     });
@@ -84,21 +84,21 @@ describe("InMemoryToolRegistry — layered tools (#136)", () => {
     it("list returns one declaration per (name, binding) pair", () => {
       const r = new InMemoryToolRegistry();
       r.add(reg("foo", { scope: "session", sessionId: "s1" }));
-      r.add(reg("foo", { scope: "reconciler", mountId: "m1" }));
+      r.add(reg("foo", { scope: "compiler", mountId: "m1" }));
       r.add(reg("bar", { scope: "app", appId: "a1" }));
       expect(r.list()).toHaveLength(3);
     });
   });
 
   describe("compileForTick — precedence resolution", () => {
-    it("reconciler binding wins over execution", () => {
+    it("compiler binding wins over execution", () => {
       const r = new InMemoryToolRegistry();
       r.add(reg("foo", { scope: "execution", executionId: "e1" }, { handlerRef: "h.exec" }));
-      r.add(reg("foo", { scope: "reconciler", mountId: "m1" }, { handlerRef: "h.reconciler" }));
+      r.add(reg("foo", { scope: "compiler", mountId: "m1" }, { handlerRef: "h.compiler" }));
       const compiled = r.compileForTick();
       expect(compiled).toHaveLength(1);
       expect(compiled[0]!.name).toBe("foo");
-      expect(r.get("foo")?.handlerRef).toBe("h.reconciler");
+      expect(r.get("foo")?.handlerRef).toBe("h.compiler");
     });
 
     it("execution wins over session", () => {
@@ -219,41 +219,41 @@ describe("InMemoryToolRegistry — layered tools (#136)", () => {
     });
   });
 
-  describe("replaceReconcilerSlice", () => {
-    it("removes prior reconciler entries with same mountId and adds new ones", () => {
+  describe("replaceCompilerSlice", () => {
+    it("removes prior compiler entries with same mountId and adds new ones", () => {
       const r = new InMemoryToolRegistry();
-      r.replaceReconcilerSlice("m1", [
-        reg("foo", { scope: "reconciler", mountId: "m1" }),
-        reg("bar", { scope: "reconciler", mountId: "m1" }),
+      r.replaceCompilerSlice("m1", [
+        reg("foo", { scope: "compiler", mountId: "m1" }),
+        reg("bar", { scope: "compiler", mountId: "m1" }),
       ]);
       expect(r.size()).toBe(2);
 
       // Second replace drops `bar`, keeps `foo`, adds `baz`.
-      r.replaceReconcilerSlice("m1", [
-        reg("foo", { scope: "reconciler", mountId: "m1" }),
-        reg("baz", { scope: "reconciler", mountId: "m1" }),
+      r.replaceCompilerSlice("m1", [
+        reg("foo", { scope: "compiler", mountId: "m1" }),
+        reg("baz", { scope: "compiler", mountId: "m1" }),
       ]);
       expect(r.names()).toEqual(["baz", "foo"]);
     });
 
-    it("does not touch non-reconciler bindings", () => {
+    it("does not touch non-compiler bindings", () => {
       const r = new InMemoryToolRegistry();
       r.add(reg("session-tool", { scope: "session", sessionId: "s1" }));
       r.add(reg("app-tool", { scope: "app", appId: "a1" }));
-      r.replaceReconcilerSlice("m1", [reg("rendered", { scope: "reconciler", mountId: "m1" })]);
+      r.replaceCompilerSlice("m1", [reg("rendered", { scope: "compiler", mountId: "m1" })]);
 
-      // Now replace with empty — only reconciler slice for m1 should clear.
-      r.replaceReconcilerSlice("m1", []);
+      // Now replace with empty — only compiler slice for m1 should clear.
+      r.replaceCompilerSlice("m1", []);
       expect(r.has("session-tool")).toBe(true);
       expect(r.has("app-tool")).toBe(true);
       expect(r.has("rendered")).toBe(false);
     });
 
-    it("does not touch reconciler bindings for OTHER mountIds", () => {
+    it("does not touch compiler bindings for OTHER mountIds", () => {
       const r = new InMemoryToolRegistry();
-      r.replaceReconcilerSlice("m1", [reg("m1-tool", { scope: "reconciler", mountId: "m1" })]);
-      r.replaceReconcilerSlice("m2", [reg("m2-tool", { scope: "reconciler", mountId: "m2" })]);
-      r.replaceReconcilerSlice("m1", []); // clear m1's slice only
+      r.replaceCompilerSlice("m1", [reg("m1-tool", { scope: "compiler", mountId: "m1" })]);
+      r.replaceCompilerSlice("m2", [reg("m2-tool", { scope: "compiler", mountId: "m2" })]);
+      r.replaceCompilerSlice("m1", []); // clear m1's slice only
       expect(r.has("m1-tool")).toBe(false);
       expect(r.has("m2-tool")).toBe(true);
     });
@@ -261,14 +261,14 @@ describe("InMemoryToolRegistry — layered tools (#136)", () => {
     it("rejects registrations whose binding doesn't match the supplied mountId", () => {
       const r = new InMemoryToolRegistry();
       expect(() =>
-        r.replaceReconcilerSlice("m1", [reg("bad", { scope: "reconciler", mountId: "m2" })]),
+        r.replaceCompilerSlice("m1", [reg("bad", { scope: "compiler", mountId: "m2" })]),
       ).toThrowError(/binding/);
     });
 
-    it("rejects registrations whose binding scope isn't 'reconciler'", () => {
+    it("rejects registrations whose binding scope isn't 'compiler'", () => {
       const r = new InMemoryToolRegistry();
       expect(() =>
-        r.replaceReconcilerSlice("m1", [reg("bad", { scope: "session", sessionId: "s1" })]),
+        r.replaceCompilerSlice("m1", [reg("bad", { scope: "session", sessionId: "s1" })]),
       ).toThrowError(/binding/);
     });
   });

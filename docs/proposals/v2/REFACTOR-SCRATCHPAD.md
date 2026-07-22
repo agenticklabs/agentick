@@ -33,7 +33,7 @@ scratchpad gets archived (or rolled into the milestone description).
 ADR 26 made everything a harness but left foundational slots
 (`timeline`, `knobs`, `state`) hardcoded in `@agentick/spec-next`. That
 asymmetry between built-in and optional extensions forced
-`@agentick/reconciler-react-next` to depend on harness packages, which
+`@agentick/compiler-react-next` to depend on harness packages, which
 blocked harness packages from adding `/react` subpaths.
 
 ADR 27 makes built-ins follow the same augmentation pattern as
@@ -214,7 +214,7 @@ per-harness `/testing` subpaths.
    - `@agentick/state-next/react` — `useSessionState`
    - `@agentick/timeline-next/react` — `useTimeline`, `<Timeline>`,
      `token-budget`, `compactEntries`
-     Each /react subpath depends on `@agentick/reconciler-react-next` for
+     Each /react subpath depends on `@agentick/compiler-react-next` for
      `useBridges` + `BridgeContext`. Each `index.ts` does
      `import "../augment.js"` for side-effect loading of the slot.
 
@@ -459,17 +459,17 @@ Tracked. Pick up after FAÇADE.6 lands.
 
 ### 2026-05-27 — Reconciler/reconciler-react split completed
 
-After the initial extraction of `@agentick/reconciler-next` (which only
+After the initial extraction of `@agentick/compiler-next` (which only
 moved `defineReconciler`), audit revealed ~3000 LOC of
-reconciler-agnostic code still trapped in `@agentick/reconciler-react-next`.
+reconciler-agnostic code still trapped in `@agentick/compiler-react-next`.
 Smoking gun: `@agentick/session-next/src/session-bridges.ts` was importing
-`InMemoryDataBridge` from `@agentick/reconciler-react-next` — a
+`InMemoryDataBridge` from `@agentick/compiler-react-next` — a
 reconciler-agnostic Session reaching into a React-named package for a
 generic ref impl.
 
 **This pass: moved the reconciler-agnostic code into its proper home.**
 
-Moved from `@agentick/reconciler-react-next` → `@agentick/reconciler-next`:
+Moved from `@agentick/compiler-react-next` → `@agentick/compiler-next`:
 
 - `collect/` (~1800 LOC: walker + 18 contributors)
 - `host/host-instance.ts` (163 LOC)
@@ -479,7 +479,7 @@ Moved from `@agentick/reconciler-react-next` → `@agentick/reconciler-next`:
 - `bridges/stub-bridges.ts` (375 LOC)
 - `harness/lifecycle-store.ts` → `lifecycle-store.ts` (240 LOC)
 
-Stayed in `@agentick/reconciler-react-next` (truly React-coupled):
+Stayed in `@agentick/compiler-react-next` (truly React-coupled):
 
 - `host/host-config.ts` (the react-reconciler HostConfig)
 - `harness/reconciler-harness.ts` (the React reference impl)
@@ -488,8 +488,8 @@ Stayed in `@agentick/reconciler-react-next` (truly React-coupled):
 Updated consumers in `@agentick/session-next`, `@agentick/gates-next`,
 `@agentick/state-next`, `@agentick/subscriptions-next`, `@agentick/knobs-next`,
 `@agentick/timeline-next`, `@agentick/sandbox`, `example/v2`. All now
-import generic bridges/host/contributors from `@agentick/reconciler-next`,
-React-specific things from `@agentick/reconciler-react-next`.
+import generic bridges/host/contributors from `@agentick/compiler-next`,
+React-specific things from `@agentick/compiler-react-next`.
 
 `@agentick/session-next/package.json` reconciler-react dep moved from
 production `dependencies` to `devDependencies` (used only by tests).
@@ -507,7 +507,7 @@ Cruft removed:
   reconciler-react cleaned up (those that became empty after moves)
 
 Per CLAUDE.md "no backwards compat" — moved symbols are NOT
-re-exported from `@agentick/reconciler-react-next`. Consumers retargeted
+re-exported from `@agentick/compiler-react-next`. Consumers retargeted
 to the canonical package.
 
 **Verification:** workspace typecheck clean across 87 packages.
@@ -521,9 +521,9 @@ failures unchanged.
   ↑
 @agentick/runtime-next          (substrate primitives)
   ↑
-@agentick/reconciler-next       (IR collection + bridges + lifecycle)
+@agentick/compiler-next       (IR collection + bridges + lifecycle)
   ↑
-@agentick/reconciler-react-next (React-specific binding)
+@agentick/compiler-react-next (React-specific binding)
   ↑
 @agentick/session-next, gates, knobs, state, timeline, sandbox, subscriptions
   ↑
@@ -531,7 +531,7 @@ failures unchanged.
 ```
 
 Sessions no longer reach through React to get bridges. Future Angular
-or Vue reconcilers depend on `@agentick/reconciler-next`, not the
+or Vue reconcilers depend on `@agentick/compiler-next`, not the
 React-named package. The dependency graph reflects the architecture.
 
 ### 2026-06-02 — Streaming adapter benchmarks

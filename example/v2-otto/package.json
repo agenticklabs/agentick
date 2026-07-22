@@ -14,7 +14,7 @@
     "@agentick/model-ai-sdk-next": "workspace:*",
     "@agentick/knobs-next": "workspace:*",
     "@agentick/mcp-next": "workspace:*",
-    "@agentick/reconciler-react-next": "workspace:*",
+    "@agentick/compiler-react-next": "workspace:*",
     "@agentick/runtime-next": "workspace:*",
     "@agentick/spec-next": "workspace:*",
     "@agentick/state-next": "workspace:*",

@@ -4,7 +4,7 @@
  * Gates is NOT a harness: it owns no independent state (a gate's value
  * IS a knob value), so — unlike knobs/state/timeline — it does NOT
  * augment `HookBridges` with a `gates` slot and is NOT snapshot-capable.
- * The controller travels to the reconciler tree inside the existing
+ * The controller travels to the compiler tree inside the existing
  * `BridgeContext` (a runtime, non-typed transport property on the
  * session's bridge bundle), never as a typed `HookBridges` harness slot.
  *

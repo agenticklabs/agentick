@@ -6,7 +6,7 @@ End-to-end Agentick v2 example with a **real model** (OpenAI via the AI SDK adap
 
 - **Ergonomic API surface** — `createApp` + `aisdk` + `<Agent />` + `app.send`.
 - **The full layered-tools cascade** — three of the seven layered seams exercised in one example:
-  - Reconciler-emitted tools (JSX `<Calculator.Tool />`)
+  - Compiler-emitted tools (JSX `<Calculator.Tool />`)
   - App-level tools (`createApp({ tools: [...] })`)
   - MCP-discovered tools (in-memory MCP server, `withMCP` extension)
 - **MCP tools without `<MCPTools>`** — discovered tools auto-appear via the layered-tools compile. No JSX ceremony.
@@ -40,7 +40,7 @@ Exact wording + token counts vary by run.
 ```tsx
 // src/agent.tsx
 import { z } from "zod";
-import { System, createTool } from "@agentick/reconciler-react-next";
+import { System, createTool } from "@agentick/compiler-react-next";
 import { Knobs, useKnob } from "@agentick/knobs-next/react";
 
 const Calculator = createTool({
@@ -131,7 +131,7 @@ Each layer accepts the same `tools: ToolDeclaration[]` shape. Layers exercised i
 
 | Layer         | Where                                        | Binding                                |
 | ------------- | -------------------------------------------- | -------------------------------------- |
-| Reconciler    | JSX `<Calculator.Tool />` inside `<Agent />` | `{ scope: "reconciler", mountId }`     |
+| Compiler      | JSX `<Calculator.Tool />` inside `<Agent />` | `{ scope: "compiler", mountId }`       |
 | Extension@app | `withMCP` extension                          | `{ scope: "extension", level: "app" }` |
 | App           | `createApp({ tools: [...] })`                | `{ scope: "app", appId }`              |
 
@@ -143,7 +143,7 @@ Layers not exercised here but available:
 | Session   | `app.createSession({ tools: [...] })` | `{ scope: "session", sessionId }`     |
 | Execution | `session.send({ tools: [...] })`      | `{ scope: "execution", executionId }` |
 
-If two layers declare a tool with the same `name`, the higher-precedence binding wins. The reconciler binding overrides everything — JSX is the override mechanism for any MCP/app/extension tool.
+If two layers declare a tool with the same `name`, the higher-precedence binding wins. The compiler binding overrides everything — JSX is the override mechanism for any MCP/app/extension tool.
 
 ## Switching providers
 

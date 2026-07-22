@@ -2,7 +2,7 @@
  * `SessionHarness` — reference implementation of
  * `SessionHarnessProtocol`.
  *
- * Owns the integration between JSX agent + reconciler + loop executor.
+ * Owns the integration between JSX agent + compiler + loop executor.
  * The user-facing entry point: `session.send({ messages })` runs one
  * agent execution and returns a `SessionExecutionHandle`.
  *
@@ -24,11 +24,7 @@ import {
   type EscalationInterceptor,
   type EscalationOutcome,
 } from "@agentick/runtime-next";
-import type {
-  JournalingPolicy,
-  LoopExecutorProtocol,
-  ReconcilerProtocol,
-} from "@agentick/spec-next";
+import type { JournalingPolicy, LoopExecutorProtocol, CompilerProtocol } from "@agentick/spec-next";
 import type {
   AppendEntryInput,
   ApplyExecutorResultInput,
@@ -156,9 +152,9 @@ export interface SessionHarnessOptions<P = unknown> {
   readonly sessionId: string;
   /**
    * Agent root element. Opaque to the session — forwarded as-is to
-   * `reconciler.mount({ element })`. The concrete reconciler impl owns
+   * `compiler.mount({ element })`. The concrete compiler impl owns
    * the type contract (React, Angular, etc.); the session is
-   * reconciler-agnostic.
+   * compiler-agnostic.
    */
   readonly agent: unknown;
   /** Initial component props (optional). */
@@ -216,11 +212,11 @@ export interface SessionHarnessOptions<P = unknown> {
    */
   readonly metadata?: Readonly<Record<string, unknown>>;
   /**
-   * Reconciler that owns the agent's element tree. Typed as the
-   * protocol — any conformant impl (React reconciler, future Angular
-   * reconciler, etc.) drops in.
+   * Compiler that owns the agent's element tree. Typed as the
+   * protocol — any conformant impl (React compiler, future Angular
+   * compiler, etc.) drops in.
    */
-  readonly reconciler: ReconcilerProtocol;
+  readonly compiler: CompilerProtocol;
   /**
    * Loop executor that orchestrates ticks. Typed as the protocol so
    * alternative orchestrators (cluster-aware, replay-based, etc.) can
@@ -274,8 +270,8 @@ export interface SessionHarnessOptions<P = unknown> {
    */
   readonly extensionBridges?: ReadonlyMap<string, unknown>;
   /**
-   * Optional tool bridge exposed to the reconciler via HookBridges.
-   * When supplied, reconciler-side tools (e.g. React `createTool`
+   * Optional tool bridge exposed to the compiler via HookBridges.
+   * When supplied, compiler-side tools (e.g. React `createTool`
    * with `use()` hook) register handlers at render time. The bridge
    * is typically built by the AppHarness wrapping its shared
    * HandlerResolver.
@@ -349,7 +345,7 @@ export interface SessionHarnessOptions<P = unknown> {
    * The session runs the composed execution (`loop.fx.runExecution`) on
    * it so the whole fiber's `Effect.withSpan` annotations reach the
    * configured tracer — and, because the loop is now one fiber (Stage 3),
-   * every downstream span (executor / tool / reconciler) nests under the
+   * every downstream span (executor / tool / compiler) nests under the
    * execution span via FiberRef `parentOpId` auto-threading. Forwarded by
    * the AppHarness; `undefined` (standalone / test) → the default runtime,
    * behavior-preserving (no-op tracer).
@@ -400,7 +396,7 @@ export class SessionHarness<P = unknown>
   private readonly runtime: SessionRuntime;
   private readonly bridges: SessionHookBridges;
   private readonly mountId: string;
-  private readonly reconciler: ReconcilerProtocol;
+  private readonly compiler: CompilerProtocol;
   private readonly loop: LoopExecutorProtocol;
   /**
    * The session-DEFAULT model-executor. Construction-bound, but MUTABLE:
@@ -426,7 +422,7 @@ export class SessionHarness<P = unknown>
    * The ADR 89 §4 lifecycle projection: the session-registered
    * command-hook forwarders (loop + tool executor, tier 2) plus the
    * per-send `model:generate[_stream]` tier-4 call middleware.
-   * `undefined` when the reconciler exposes no
+   * `undefined` when the compiler exposes no
    * `LifecycleProjectionTarget` capability. Disposed on {@link close}.
    */
   private readonly lifecycleProjection: LifecycleProjection | undefined;
@@ -511,7 +507,7 @@ export class SessionHarness<P = unknown>
    * instead, with the parent's substrate available to factories via
    * the resolution shell as upstream for wrapping.
    *
-   * **Options bag** carries everything else: id, agent, reconciler,
+   * **Options bag** carries everything else: id, agent, compiler,
    * loop, executor, toolExecutor, target, plus the per-session
    * substrate overrides and adopter metadata.
    *
@@ -640,7 +636,7 @@ export class SessionHarness<P = unknown>
       }
     }
 
-    this.reconciler = options.reconciler;
+    this.compiler = options.compiler;
     this.loop = options.loop;
     this.modelExecutor = options.modelExecutor;
     this.toolExecutor = options.toolExecutor;
@@ -675,13 +671,13 @@ export class SessionHarness<P = unknown>
     // route the real command lifecycle into the compiler's per-mount
     // dispatch, and the `model:generate[_stream]` forwarders ride each
     // send as tier-4 call middleware (see sendBody) so a per-tick
-    // swapped executor still projects. Absent when the reconciler
+    // swapped executor still projects. Absent when the compiler
     // doesn't expose the `LifecycleProjectionTarget` capability.
     // Unsubscribed on close().
     this.lifecycleProjection = wireLifecycleProjection({
       sessionId: options.sessionId,
       mountId: this.mountId,
-      reconciler: this.reconciler,
+      compiler: this.compiler,
       loop: this.loop,
       toolExecutor: this.toolExecutor,
     });
@@ -696,13 +692,13 @@ export class SessionHarness<P = unknown>
     const hydrated: Promise<void> =
       options.timeline?.store !== undefined ? this.bridges.timeline.hydrate() : Promise.resolve();
 
-    // Eagerly mount — the reconciler exposes `.ready` for its own
+    // Eagerly mount — the compiler exposes `.ready` for its own
     // inbox registration; our mount is awaited via `_mountReady`. The
     // element type is opaque here — `MountInput.element: unknown` in
-    // the spec — and the bound reconciler impl interprets it.
+    // the spec — and the bound compiler impl interprets it.
     this._mountReady = hydrated
       .then(() =>
-        this.reconciler.mount({
+        this.compiler.mount({
           mountId: this.mountId,
           sessionId: options.sessionId,
           element: options.agent,
@@ -741,7 +737,7 @@ export class SessionHarness<P = unknown>
   }
 
   /**
-   * Resolves once the underlying reconciler mount is complete. Most
+   * Resolves once the underlying compiler mount is complete. Most
    * callers can `await session.ready` (the base inbox ready) and then
    * `await session.mountReady` if they need to be sure the JSX tree
    * has rendered at least once.
@@ -913,9 +909,9 @@ export class SessionHarness<P = unknown>
     // ADR 89 §4 — unhook the lifecycle forwarders from the (app-shared)
     // loop + tool executor before the mount goes away.
     this.lifecycleProjection?.dispose();
-    // Tear down the reconciler mount; ignore errors during shutdown.
+    // Tear down the compiler mount; ignore errors during shutdown.
     try {
-      await this.reconciler.unmount({ mountId: this.mountId });
+      await this.compiler.unmount({ mountId: this.mountId });
     } catch {
       // shutdown — best effort
     }
@@ -1001,7 +997,7 @@ export class SessionHarness<P = unknown>
 
   async notifyLifecycle(input: NotifyTickEndInput): Promise<TickEndForwardDecision> {
     // The session's continuation decision (ADR 67). The loop calls this
-    // AFTER the reconciler tick-end has settled the tree, with the settled
+    // AFTER the compiler tick-end has settled the tree, with the settled
     // `TickResult`. We fold every session-owned continuation predicate
     // into ONE `TickEndForwardDecision`, in tier order (mirroring the
     // loop's own resolution): stop-force > continue-force > abstain. The
@@ -1668,7 +1664,7 @@ export class SessionHarness<P = unknown>
               {
                 executionId,
                 sessionId: this.runtime.id,
-                reconciler: this.reconciler,
+                compiler: this.compiler,
                 mountId: this.mountId,
                 modelExecutor: modelExecutorForCall,
                 target: targetForCall,

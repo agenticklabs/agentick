@@ -17,7 +17,7 @@
  * (live instance) → `SandboxHarness` (wraps one handle + substrate + ACL).
  * The handle is a live, non-serializable object (fds / container id /
  * workspace) consumed only server-side by the harness that wraps it 1:1;
- * `reconciler-react` never touches it (it registers HARNESSES, not handles).
+ * `compiler-react` never touches it (it registers HARNESSES, not handles).
  *
  * Providers (`@agentick/sandbox-local-next`, `sandbox-docker-next`, …) dep
  * THIS base, implement {@link SandboxProvider}, and return a

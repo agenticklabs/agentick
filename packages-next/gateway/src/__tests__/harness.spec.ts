@@ -25,7 +25,7 @@ import {
 import { createGateway } from "../index.js";
 
 /**
- * Minimal stub reconciler + executor + loop for AppHarness construction.
+ * Minimal stub compiler + executor + loop for AppHarness construction.
  * These satisfy the type contract without requiring real React or a real
  * model — enough to instantiate an AppHarness for gateway-level testing.
  */
@@ -47,8 +47,8 @@ function makeAppOptions() {
       run: () => Effect.succeed({}) as never,
       abort: () => Effect.succeed(undefined) as never,
     } as never,
-    // Mock reconciler — minimal viable shape.
-    reconciler: {
+    // Mock compiler — minimal viable shape.
+    compiler: {
       mount: () => Effect.succeed({}) as never,
       unmount: () => Effect.succeed(undefined) as never,
       render: () => Effect.succeed({}) as never,

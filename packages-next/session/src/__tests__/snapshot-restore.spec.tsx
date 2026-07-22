@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
 import React from "react";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
-import { ReconcilerHarness, useData } from "@agentick/reconciler-react-next";
-import { InMemoryDataBridge, fakeBridges, fakeKnobsHarness } from "@agentick/reconciler-next";
+import { CompilerHarness, useData } from "@agentick/compiler-react-next";
+import { InMemoryDataBridge, fakeBridges, fakeKnobsHarness } from "@agentick/compiler-next";
 import { useKnob } from "@agentick/knobs-next/react";
-import { flush } from "@agentick/reconciler-react-next/testing";
-import type { HookBridges, ReconcilerSnapshot } from "@agentick/spec-next";
+import { flush } from "@agentick/compiler-react-next/testing";
+import type { HookBridges, CompilerSnapshot } from "@agentick/spec-next";
 
 async function makeHarness(scope = `snap-${Math.random()}`) {
-  const harness = new ReconcilerHarness(
+  const harness = new CompilerHarness(
     scope,
     new MemoryJournal(),
     new LocalEventBus(),
@@ -95,7 +95,7 @@ describe("KnobsHarness — snapshot/restore unit", () => {
   });
 });
 
-describe("ReconcilerHarness — snapshot/restore through the harness", () => {
+describe("CompilerHarness — snapshot/restore through the harness", () => {
   it("snapshot captures data cache + knob values; restore applies them", async () => {
     const harness = await makeHarness();
     const bridges = fakeBridges({ knobs: { mood: "curious" } });
@@ -122,7 +122,7 @@ describe("ReconcilerHarness — snapshot/restore through the harness", () => {
     expect(snap.elementVersion).toBe("sha:v1");
 
     // Cleanly survives JSON round-trip — the spec firewall.
-    const round: ReconcilerSnapshot = JSON.parse(JSON.stringify(snap));
+    const round: CompilerSnapshot = JSON.parse(JSON.stringify(snap));
     expect(round).toEqual(snap);
   });
 

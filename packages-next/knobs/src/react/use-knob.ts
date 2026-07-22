@@ -34,8 +34,8 @@ import type {
   KnobValueType,
   StandardSchemaV1,
 } from "@agentick/spec-next";
-import { useBridges } from "@agentick/reconciler-react-next";
-import { useOnExecutionEnd } from "@agentick/reconciler-react-next";
+import { useBridges } from "@agentick/compiler-react-next";
+import { useOnExecutionEnd } from "@agentick/compiler-react-next";
 
 export interface UseKnobOptions {
   readonly description?: string;

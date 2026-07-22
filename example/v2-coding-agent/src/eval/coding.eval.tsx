@@ -20,7 +20,7 @@ import * as nodePath from "node:path";
 
 import React from "react";
 import { createApp, run } from "@agentick/app-next/react";
-import { System } from "@agentick/reconciler-react-next";
+import { System } from "@agentick/compiler-react-next";
 import { Timeline } from "@agentick/timeline-next/react";
 import { aisdk } from "@agentick/model-ai-sdk-next";
 import { openai } from "@ai-sdk/openai";

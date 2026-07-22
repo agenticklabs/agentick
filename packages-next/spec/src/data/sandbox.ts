@@ -9,7 +9,7 @@
  * `model-next`. The split test is "is it serialized across the
  * inbox/wire?" (ADR 59).
  *
- * These shapes let any reconciler (React, Angular, Vue) integrate
+ * These shapes let any compiler (React, Angular, Vue) integrate
  * sandboxes via the `SandboxBridge` without depending on v1's component
  * runtime. Provider adapters (`@agentick/sandbox-local-next`,
  * `sandbox-docker-next`, …) dep the base and implement its provider

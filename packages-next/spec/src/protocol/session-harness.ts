@@ -7,15 +7,15 @@
  * `.result: Promise<SendResult>`).
  *
  * Internally the session:
- *   1. Mounts the agent JSX into the reconciler (once, at construction).
- *   2. Provides `HookBridges` to the reconciler backed by session state
+ *   1. Mounts the agent JSX into the compiler (once, at construction).
+ *   2. Provides `HookBridges` to the compiler backed by session state
  *      — `TimelineHarnessProtocol` exposes the session's timeline log +
  *      projection, `KnobsHarnessProtocol` reads/writes knob values,
  *      `StateHarnessProtocol` carries the adopter K/V bag, etc.
  *   3. Delegates `send()` to the loop executor as a single execution.
  *   4. Implements `StateApplicator` — the loop's writes to session state
  *      land here (timeline appends, knob updates, channel publishes).
- *   5. Forwards tick-end lifecycle events to the reconciler so the
+ *   5. Forwards tick-end lifecycle events to the compiler so the
  *      JSX tree's `useOnTickEnd` hooks fire (Phase 4e+ extension).
  *
  * **Minimum 4e surface.** The blueprint specifies a richer protocol
@@ -225,10 +225,10 @@ export interface SendInput<P = unknown> {
    * tool executor's registry for the duration of this execution, and
    * removed when the execution closes.
    *
-   * Sits between session and reconciler in the precedence ladder — an
+   * Sits between session and compiler in the precedence ladder — an
    * execution-level tool overrides a session-level (and gateway/app/
    * extension) tool of the same name but is itself overridden by a
-   * reconciler-emitted tool of the same name in the rendered tree.
+   * compiler-emitted tool of the same name in the rendered tree.
    *
    * @see ToolBinding in `@agentick/spec-next` for the precedence ladder.
    */
@@ -446,7 +446,7 @@ export interface NotifyTickEndInput {
    * (ADR 67). The loop builds it — the executor terminal, this tick's
    * tool results, and the loop's provisional continuation disposition
    * (`shouldContinue`, pre-predicate) — and passes it here AFTER the
-   * reconciler tick-end has settled the tree. The session's continuation
+   * compiler tick-end has settled the tree. The session's continuation
    * predicates (gates, steering) read it to compose the returned
    * {@link TickEndForwardDecision}. Optional only because a headless
    * host may call `notifyLifecycle` without a tick body.
@@ -465,7 +465,7 @@ export type TickEndForwardDecision =
 
 /**
  * Methods every session harness MUST provide. Promise-typed at the
- * public surface (consistent with reconciler / executor / tool-executor
+ * public surface (consistent with compiler / executor / tool-executor
  * / loop-executor protocols). Implementations wrap internal bodies with
  * `runHarnessProtocol(Effect.suspend(...))`.
  *
@@ -533,7 +533,7 @@ export interface SessionHarnessProtocol<P = unknown> {
 
   /**
    * The session's continuation decision (ADR 67). The loop calls this
-   * once per tick — AFTER the reconciler tick-end has settled the tree —
+   * once per tick — AFTER the compiler tick-end has settled the tree —
    * with the settled {@link TickResult}. The session folds its
    * continuation predicates into ONE {@link TickEndForwardDecision}:
    *
@@ -547,7 +547,7 @@ export interface SessionHarnessProtocol<P = unknown> {
    * Precedence mirrors the loop's own resolution: stop-force >
    * continue-force > abstain, all under the `maxTicks` hard cap the loop
    * still enforces. Gate evaluation (arming / satisfied / fail-closed /
-   * read-only) is driven here, not from the reconciler mount.
+   * read-only) is driven here, not from the compiler mount.
    */
   notifyLifecycle(input: NotifyTickEndInput): Promise<TickEndForwardDecision>;
 
@@ -697,7 +697,7 @@ export function isSessionHarnessFactory<P = unknown>(v: unknown): v is SessionHa
 export interface SpawnInput<P = unknown> {
   /**
    * Child agent root. Opaque to the session boundary — forwarded to
-   * the bound reconciler at mount time. Same type contract as
+   * the bound compiler at mount time. Same type contract as
    * `AppHarnessOptions.rootElement`.
    */
   readonly agent: unknown;

@@ -1,5 +1,5 @@
 /**
- * RenderedTree — the canonical IR produced by the reconciler harness and
+ * RenderedTree — the canonical IR produced by the compiler harness and
  * consumed by the loop executor and executor harness.
  *
  * `[V1-REPLACED]` of v1's `CompiledStructure`
@@ -125,7 +125,7 @@ export interface ProviderToolOptions {}
  * same namespace's keys shallow-merge with the patch on top).
  *
  * The single canonical merge for the layered provider-escape channel:
- *   - the reconciler folds multiple `<ProviderOptions>` declarations
+ *   - the compiler folds multiple `<ProviderOptions>` declarations
  *     during tree collection;
  *   - projection folds `RenderedTree.providerOptions` **over**
  *     `ExecutionTarget.providerOptions` into `LanguageModelInput`
@@ -222,7 +222,7 @@ export interface RenderedTreeProvenance {
 // ============================================================================
 
 /**
- * The canonical IR. Produced by the reconciler harness's `renderTree`
+ * The canonical IR. Produced by the compiler harness's `renderTree`
  * command. The same shape carries both execution input (context +
  * declarations) and free-root rendering output (top-level `content` /
  * `text` / `mimeType`).

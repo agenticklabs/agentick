@@ -24,7 +24,7 @@ import type {
   ContentBlock,
   LanguageModelExecutionResult,
   LoopToolResult,
-  ReconcilerProtocol,
+  CompilerProtocol,
   RenderedTree,
   StateApplicator,
   ToolRegistration,
@@ -49,11 +49,11 @@ function mkSubstrate() {
 }
 
 /**
- * A minimal reconciler that emits no tools — the tool under test is
+ * A minimal compiler that emits no tools — the tool under test is
  * pre-registered on the executor via `initialTools`, and dispatch is
  * driven by the scripted model result's `toolCalls`, not by the render.
  */
-function mkEmptyReconciler(): ReconcilerProtocol {
+function mkEmptyCompiler(): CompilerProtocol {
   const tree: RenderedTree = { specVersion: SPEC_VERSION, context: { entries: [] } };
   return {
     fx: {
@@ -180,7 +180,7 @@ describe("LoopExecutorHarness — no dangling tool_use (#33, ADR 67)", () => {
     const terminal = await loop.runExecution({
       sessionId: "s_nd",
       mountId: "nd-mount",
-      reconciler: mkEmptyReconciler(),
+      compiler: mkEmptyCompiler(),
       modelExecutor: executor,
       toolExecutor,
       target: executor.target,

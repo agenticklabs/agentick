@@ -12,14 +12,14 @@
  * The gate's value lives in the session's KnobsHarness — gates have no
  * independent state, no separate harness, no inbox address.
  *
- * This root is reconciler-agnostic — the pure descriptor types +
+ * This root is compiler-agnostic — the pure descriptor types +
  * `gate()` factory, plus the {@link GatesController} wiring core that
  * both front-ends converge on. The React hook lives in the `/react`
  * subpath:
  * ```ts
  * import { useGate } from "@agentick/gates-next/react";
  * ```
- * Non-React reconcilers implement their own gate hook against the same
+ * Non-React compilers implement their own gate hook against the same
  * descriptor shapes + the same controller.
  *
  * `session.gates` / `session.gate(name)` are declared here via module

@@ -4,8 +4,8 @@
  * Demonstrates the canonical user surface plus the v2 layered-tools
  * cascade end-to-end through a real OpenAI model:
  *
- *   - Reconciler-emitted tools — `<Calculator.Tool />` inside the
- *     `<Agent />` JSX. The reconciler binding wins everything on
+ *   - Compiler-emitted tools — `<Calculator.Tool />` inside the
+ *     `<Agent />` JSX. The compiler binding wins everything on
  *     name collision.
  *   - App-level tool — `time_now`. Bound at app construction; every
  *     session this app spawns sees it.

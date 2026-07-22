@@ -45,7 +45,7 @@ import type {
   RemoveBoundToolsInput,
   RespondToToolCallInput,
   Resources,
-  ReplaceReconcilerToolsInput,
+  ReplaceCompilerToolsInput,
   SubstrateError,
   TaskHandle,
   TasksHarnessProtocol,
@@ -108,7 +108,7 @@ declare module "@agentick/runtime-next" {
     "tool:dispatch": { input: DispatchInput; output: DispatchResult };
     // The remaining tool verbs (ADR 80/83). Each routes through `runOperation`
     // (`tool:abort` is a declared command; `register` / `unregister` /
-    // `remove-bound-tools` / `replace-reconciler-tools` build hand-rolled ops),
+    // `remove-bound-tools` / `replace-compiler-tools` build hand-rolled ops),
     // so typing them mints `onBefore/After<Verb>` on `CommandHooks`. Registry
     // mutations resolve to `void` except `remove-bound-tools` (the removed
     // count); generics are the declaration sites'.
@@ -118,7 +118,7 @@ declare module "@agentick/runtime-next" {
     // Output is the COUNT of registrations removed (bulk sweep or the
     // `name`-narrowed targeted remove) — the honest existence signal.
     "tool:remove-bound-tools": { input: RemoveBoundToolsInput; output: number };
-    "tool:replace-reconciler-tools": { input: ReplaceReconcilerToolsInput; output: void };
+    "tool:replace-compiler-tools": { input: ReplaceCompilerToolsInput; output: void };
   }
 }
 
@@ -331,10 +331,10 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
   }
 
   /**
-   * The composable `replaceReconcilerTools` Effect — the
-   * `.fx.replaceReconcilerTools` twin. Returns `runOperation(op, body)`
-   * un-run so the loop composes the reconciler-slice swap in one fiber
-   * (its span nests under the tick). {@link replaceReconcilerTools} is
+   * The composable `replaceCompilerTools` Effect — the
+   * `.fx.replaceCompilerTools` twin. Returns `runOperation(op, body)`
+   * un-run so the loop composes the compiler-slice swap in one fiber
+   * (its span nests under the tick). {@link replaceCompilerTools} is
    * the facade.
    *
    * `Effect.try` (not `.sync`) — binding validation throws on mismatch;
@@ -344,22 +344,22 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
    * (`ToolExecutorErrorChannel`). Valid bindings — every real call —
    * never trigger this.
    */
-  private replaceReconcilerToolsFx(
-    input: ReplaceReconcilerToolsInput,
+  private replaceCompilerToolsFx(
+    input: ReplaceCompilerToolsInput,
   ): Effect.Effect<void, ToolExecutorErrorChannel | SubstrateError, never> {
-    const op: Operation<ReplaceReconcilerToolsInput, void, ToolExecutorErrorChannel> = {
-      opId: input.opId ?? `tool:replace-reconciler:${input.mountId}:${ulid()}`,
+    const op: Operation<ReplaceCompilerToolsInput, void, ToolExecutorErrorChannel> = {
+      opId: input.opId ?? `tool:replace-compiler:${input.mountId}:${ulid()}`,
       surface: "tool",
-      name: "tool:command:replace-reconciler-tools",
+      name: "tool:command:replace-compiler-tools",
       scope: {},
       input,
     };
     return this.runOperation(op, (i) =>
       Effect.try({
-        try: () => this.registry.replaceReconcilerSlice(i.mountId, i.registrations),
+        try: () => this.registry.replaceCompilerSlice(i.mountId, i.registrations),
         catch: (cause): ToolExecutorErrorChannel =>
           new ToolValidationError({
-            toolName: `reconciler-slice:${i.mountId}`,
+            toolName: `compiler-slice:${i.mountId}`,
             issues: [{ message: cause instanceof Error ? cause.message : String(cause) }],
             cause,
           }),
@@ -367,8 +367,8 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
     );
   }
 
-  replaceReconcilerTools(input: ReplaceReconcilerToolsInput): Promise<void> {
-    return runHarnessProtocol(this.replaceReconcilerToolsFx(input));
+  replaceCompilerTools(input: ReplaceCompilerToolsInput): Promise<void> {
+    return runHarnessProtocol(this.replaceCompilerToolsFx(input));
   }
 
   /**
@@ -423,7 +423,7 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
     return {
       use: (mw) => this.registerEffectMiddleware(mw),
       dispatch: (input) => this.dispatchFx(input),
-      replaceReconcilerTools: (input) => this.replaceReconcilerToolsFx(input),
+      replaceCompilerTools: (input) => this.replaceCompilerToolsFx(input),
       compileForTick: (filter) => this.compileForTickFx(filter),
     };
   }

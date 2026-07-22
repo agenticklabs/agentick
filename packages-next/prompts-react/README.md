@@ -2,7 +2,7 @@
 
 React binding for [`@agentick/prompts-next`](../prompts). Lets adopters author prompts as React JSX (`<message>`, `<section>`, `<H1>`, `<List>`, `useData`, …) and have them render to `MessageEntry[]` at invoke time.
 
-> Pre-1.0. Pair this with `@agentick/prompts-next` (core) and `@agentick/reconciler-react-next` (provides `compileTemplate`).
+> Pre-1.0. Pair this with `@agentick/prompts-next` (core) and `@agentick/compiler-react-next` (provides `compileTemplate`).
 
 ## Quick start
 
@@ -58,7 +58,7 @@ Explicit `<message>` JSX **flushes** the buffered system message, so authoring o
 
 ### Why "loose stuff goes to system"
 
-The reconciler IR has only two top-level kinds: `MessageEntry` (role-bearing) and `SectionEntry` (structured context). For a prompt, the natural projection is:
+The compiler IR has only two top-level kinds: `MessageEntry` (role-bearing) and `SectionEntry` (structured context). For a prompt, the natural projection is:
 
 - An explicit `<message>` says "this is a turn." Honor it.
 - Anything else is grounding context the model should see ambient, which maps cleanly to a `system` message.
@@ -159,6 +159,6 @@ The renderer awaits `useData` suspends to completion (it's `compileTemplate` und
 ## See also
 
 - [`@agentick/prompts-next`](../prompts) — core PromptsHarness + `withPrompts`
-- [`@agentick/reconciler-react-next`](../reconciler-react) — provides `compileTemplate` and the JSX runtime
+- [`@agentick/compiler-react-next`](../compiler-react) — provides `compileTemplate` and the JSX runtime
 - [ADR 32 — Extension shape spectrum](../../docs/proposals/v2/blueprint/32-extension-shape-spectrum.md)
 - [ADR 23 — MCP as harness](../../docs/proposals/v2/blueprint/23-mcp-as-harness.md)

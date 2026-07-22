@@ -8,7 +8,7 @@
  */
 
 import React from "react";
-import { System } from "@agentick/reconciler-react-next";
+import { System } from "@agentick/compiler-react-next";
 import { Knobs, useKnob } from "@agentick/knobs-next/react";
 import { Timeline } from "@agentick/timeline-next/react";
 

@@ -13,7 +13,7 @@ import { describe, expect, it } from "vitest";
 import { createClient } from "@agentick/client-core-next";
 import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
 import { createGateway } from "@agentick/gateway-next";
-import { fakeReconciler } from "@agentick/reconciler-next/testing";
+import { fakeCompiler } from "@agentick/compiler-next/testing";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import {
   type ContentBlock,
@@ -47,7 +47,7 @@ async function makeStack(replyText: string) {
   const app = await gateway.createApp({
     appId: "test-app",
     rootElement: null,
-    options: { modelExecutor: executor, reconciler: fakeReconciler() },
+    options: { modelExecutor: executor, compiler: fakeCompiler() },
   });
   const session = await app.createSession({ sessionId: "test-session" });
 

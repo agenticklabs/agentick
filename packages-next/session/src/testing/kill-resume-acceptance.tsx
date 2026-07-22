@@ -3,7 +3,7 @@
  * suite, parameterized over a {@link TimelineStore} backing.
  *
  * This is the end-to-end proof that the framework's resume pipe works
- * against a REAL store adapter: a real {@link SessionHarness} (reconciler
+ * against a REAL store adapter: a real {@link SessionHarness} (compiler
  * + loop + tool-executor + elicitation), a real `send()` that drives the
  * write-behind pump + flush barrier, and a real `hydrate()` on a fresh
  * session opening the SAME durable backing. The only double is the
@@ -46,7 +46,7 @@ import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next
 import { ElicitationHarness } from "@agentick/elicitation-next";
 import { InMemoryHandlerResolver, ToolExecutorHarness } from "@agentick/tool-executor-next";
 import { LoopExecutorHarness } from "@agentick/loop-executor-next";
-import { ReconcilerHarness } from "@agentick/reconciler-react-next";
+import { CompilerHarness } from "@agentick/compiler-react-next";
 import { Timeline } from "@agentick/timeline-next/react";
 import type { TimelineStore } from "@agentick/timeline-next";
 import { stubStoreCtx } from "@agentick/store-next";
@@ -243,7 +243,7 @@ async function mkSession(opts: {
   const journal = new MemoryJournal();
   const bus = new LocalEventBus();
   const inbox = new LocalInbox();
-  const reconciler = new ReconcilerHarness(`kr-r-${Math.random()}`, journal, bus, inbox);
+  const compiler = new CompilerHarness(`kr-r-${Math.random()}`, journal, bus, inbox);
   const loop = new LoopExecutorHarness(`kr-l-${Math.random()}`, journal, bus, inbox);
   const elicitation = new ElicitationHarness(`kr-e-${Math.random()}`, journal, bus, inbox);
   const tools = new ToolExecutorHarness(`kr-t-${Math.random()}`, journal, bus, inbox, {
@@ -251,7 +251,7 @@ async function mkSession(opts: {
     elicitation,
   });
   await Promise.all([
-    reconciler.ready,
+    compiler.ready,
     loop.ready,
     tools.ready,
     elicitation.ready,
@@ -261,7 +261,7 @@ async function mkSession(opts: {
   const session = new SessionHarness(journal, bus, inbox, {
     sessionId: opts.sessionId,
     agent: <ResumeAgent />,
-    reconciler,
+    compiler,
     loop,
     modelExecutor: opts.executor,
     toolExecutor: tools,

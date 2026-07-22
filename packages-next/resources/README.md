@@ -106,11 +106,11 @@ Resources is the definition-library archetype's **richest instance**
 and — crucially — the harness is **store-backed but NOT `SnapshotCapable`**
 (store-backed ≠ snapshot-backed):
 
-| Structure               | Holds                                       | Fed by                                    |
-| ----------------------- | ------------------------------------------- | ----------------------------------------- |
-| **`ResourceStore`**     | serializable `ResourceDeclarationRecord`    | **durable** loaders only                  |
-| **catalog projection**  | declaration slice `snapshot()` reads        | durable (mirrored) + transient (overlaid) |
-| **resolver sidecar**    | the non-serializable `resolver` fn          | both durable + transient                  |
+| Structure              | Holds                                    | Fed by                                    |
+| ---------------------- | ---------------------------------------- | ----------------------------------------- |
+| **`ResourceStore`**    | serializable `ResourceDeclarationRecord` | **durable** loaders only                  |
+| **catalog projection** | declaration slice `snapshot()` reads     | durable (mirrored) + transient (overlaid) |
+| **resolver sidecar**   | the non-serializable `resolver` fn       | both durable + transient                  |
 
 Two **source classes** coexist:
 
@@ -244,17 +244,17 @@ createApp(<Agent />, { model, extensions: [withResources()] });
 One registry, three equal front-ends over `register` (ADR 62) — an
 adopter cannot tell which came first:
 
-| Front-end                       | Where                              |
-| ------------------------------- | ---------------------------------- |
-| `ctx.resource.read(uri)`        | tool handlers (like `ctx.tasks`)   |
-| `session.resources.read(uri)`   | adopter / server-side code         |
-| `<Resource>` (`/react` subpath) | inside a JSX agent tree            |
+| Front-end                       | Where                            |
+| ------------------------------- | -------------------------------- |
+| `ctx.resource.read(uri)`        | tool handlers (like `ctx.tasks`) |
+| `session.resources.read(uri)`   | adopter / server-side code       |
+| `<Resource>` (`/react` subpath) | inside a JSX agent tree          |
 
 ### `<Resource>` (`@agentick/resources-next/react`)
 
 Reads like `<Tool>`: registers a `uri → resolver` binding on mount,
-unregisters on unmount. Depends on `@agentick/reconciler-react-next`'s
-`useBridges` (no cycle — reconciler-react never imports this package).
+unregisters on unmount. Depends on `@agentick/compiler-react-next`'s
+`useBridges` (no cycle — compiler-react never imports this package).
 
 ```tsx
 import { Resource } from "@agentick/resources-next/react";
@@ -277,7 +277,7 @@ Precedence when more than one is given: `resolver` prop > function child >
 
 ### Catalog surfacing (default projection, ADR 63)
 
-`<Resource>` does **not** render a host intrinsic. Instead the reconciler
+`<Resource>` does **not** render a host intrinsic. Instead the compiler
 runs a `resources` **default projection** that folds the registry into a
 compact CATALOG section (uris + names + descriptions — NOT content;
 resources are pulled on demand). It reads `bridges.resources` structurally

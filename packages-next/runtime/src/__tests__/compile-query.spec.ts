@@ -34,7 +34,7 @@ describe("compileQuery — agrees with matchesQuery on every shape", () => {
     mk({}),
     mk({ surface: "tool", phase: "requested", name: "tool:command:dispatch" }),
     mk({ surface: "session", phase: "terminal", name: "session:send", outcome: "succeeded" }),
-    mk({ surface: "reconciler", phase: "before", name: "reconciler:render" }),
+    mk({ surface: "compiler", phase: "before", name: "compiler:render" }),
     mk({
       surface: "executor",
       phase: "delta",

@@ -2,7 +2,7 @@
  * `@agentick/app-next/react` — React-defaulted `createApp` entry point.
  *
  * Thin wrapper over `@agentick/app-next`'s `createApp` that defaults
- * `options.reconciler` to `reactReconciler()` when not supplied.
+ * `options.compiler` to `reactCompiler()` when not supplied.
  * Adopters writing React agents do:
  *
  * ```ts
@@ -13,20 +13,20 @@
  * });
  * ```
  *
- * Zero ceremony, React reconciler wired automatically. Adopters who
- * want to customize the reconciler (custom contributors, devtools opt-in,
- * etc.) pass an explicit `reconciler: reactReconciler({ ... })` to
+ * Zero ceremony, React compiler wired automatically. Adopters who
+ * want to customize the compiler (custom contributors, devtools opt-in,
+ * etc.) pass an explicit `compiler: reactCompiler({ ... })` to
  * override the default.
  *
- * Adopters using a non-React reconciler import directly from
- * `@agentick/app-next` and pass their own reconciler factory; the React-
+ * Adopters using a non-React compiler import directly from
+ * `@agentick/app-next` and pass their own compiler factory; the React-
  * specific wiring stays out of their dependency graph.
  *
  * Everything else from `@agentick/app-next` is re-exported here for
  * single-import convenience.
  */
 
-import { reactReconciler } from "@agentick/reconciler-react-next";
+import { reactCompiler } from "@agentick/compiler-react-next";
 
 import {
   createApp as baseCreateApp,
@@ -38,18 +38,17 @@ import { run as baseRun, type RunHandle, type RunOptions } from "./run.js";
 
 export async function createApp<P = unknown>(
   rootElement: unknown,
-  options: Omit<CreateAppOptions<P>, "reconciler"> &
-    Partial<Pick<CreateAppOptions<P>, "reconciler">>,
+  options: Omit<CreateAppOptions<P>, "compiler"> & Partial<Pick<CreateAppOptions<P>, "compiler">>,
 ): Promise<AppHarness<P>> {
   return baseCreateApp(rootElement, {
-    reconciler: reactReconciler(),
+    compiler: reactCompiler(),
     ...options,
   } as CreateAppOptions<P>);
 }
 
 /**
  * React-defaulted `run()` — one-shot execution with the React
- * reconciler wired automatically. See `@agentick/app-next`'s `run`.
+ * compiler wired automatically. See `@agentick/app-next`'s `run`.
  *
  * ```ts
  * const result = await run(<Agent />, { model: openai("gpt-4o"), messages }).result;
@@ -57,10 +56,10 @@ export async function createApp<P = unknown>(
  */
 export function run<P = unknown>(
   rootElement: unknown,
-  options: Omit<RunOptions<P>, "reconciler"> & Partial<Pick<RunOptions<P>, "reconciler">>,
+  options: Omit<RunOptions<P>, "compiler"> & Partial<Pick<RunOptions<P>, "compiler">>,
 ): RunHandle {
   return baseRun(rootElement, {
-    reconciler: reactReconciler(),
+    compiler: reactCompiler(),
     ...options,
   } as RunOptions<P>);
 }

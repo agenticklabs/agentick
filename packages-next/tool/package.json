@@ -1,7 +1,7 @@
 {
   "name": "@agentick/tool-next",
   "version": "0.0.0",
-  "description": "Generic, reconciler-agnostic tool authoring for Agentick v2. createTool() returns a registration bundle (declaration + handler + validator) that drops into any tool-executor. Reconciler-specific variants (e.g., React tools with use() hook) extend this in their respective packages.",
+  "description": "Generic, compiler-agnostic tool authoring for Agentick v2. createTool() returns a registration bundle (declaration + handler + validator) that drops into any tool-executor. Compiler-specific variants (e.g., React tools with use() hook) extend this in their respective packages.",
   "keywords": [
     "agent",
     "agentick",

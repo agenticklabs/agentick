@@ -2,7 +2,7 @@
  * Canonical wire channel for KnobsHarness state-sync.
  *
  * Model-visible knob state reaches observers two ways. The coarse way is
- * the harness snapshot (`exportSnapshot()` → the reconciler's SnapshotCapable
+ * the harness snapshot (`exportSnapshot()` → the compiler's SnapshotCapable
  * projection): the WHOLE store, re-sent. This channel is the fine way — an
  * initial `snapshot` frame followed by RFC 6902 JSON-Patch `delta` frames,
  * one op per knob that changed. A subscriber seeds from the snapshot and

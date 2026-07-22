@@ -19,7 +19,7 @@
  *
  * ## Minimal splice — NO seq-merge (locked design)
  *
- * The window is a DUMB splice, not a reconciler. Live append events carry a bus
+ * The window is a DUMB splice, not a compiler. Live append events carry a bus
  * `Cursor`; durable history reads carry the timeline `seq` — two numbering
  * systems, so a single-key merge would need a server change. Not worth it: the
  * ecosystem (AI-SDK, assistant-ui) reconciles at the app level, and so does an

@@ -202,7 +202,7 @@ handle its own chunks/normalize.
 
 ### Projection: the IR taxonomy → `LanguageModelMessagePart`
 
-The reconciler's content-block taxonomy projects onto the executor's
+The compiler's content-block taxonomy projects onto the executor's
 wire-safe `LanguageModelMessagePart` set at the executor boundary, via
 `messagePartFromBlock` (part of `defaultProject`). Two classes of block:
 
@@ -258,7 +258,7 @@ one-level-deep shallow merge (two adopters decorating the same block
 under different namespaces never collide). Four call sites share these
 semantics — never hand-roll:
 
-1. the reconciler folds multiple `<ProviderOptions>` declarations during
+1. the compiler folds multiple `<ProviderOptions>` declarations during
    tree collection;
 2. projection folds `RenderedTree.providerOptions` **over**
    `ExecutionTarget.providerOptions` into `LanguageModelInput.providerOptions`

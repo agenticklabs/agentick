@@ -375,7 +375,7 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
    * Load the session's persisted log from the store into the in-memory
    * tiers — the resume path (ADR 49 §Hydration). Called once at session
    * init, before first render and before any append (the session's
-   * constructor chains this ahead of the reconciler mount when a store
+   * constructor chains this ahead of the compiler mount when a store
    * is injected — A2.2). Replaces both tiers with the durable log (the
    * projection reconstructs by re-render / a subsequent compaction).
    */

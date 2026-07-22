@@ -1,7 +1,7 @@
 {
   "name": "@agentick/formatters-next",
   "version": "0.0.0",
-  "description": "Reference formatters for Agentick v2. Pure functions that turn SemanticContentBlock[] into wire-ready ContentBlock[]. Ships markdown / xml / text formatters + the defineFormatter builder. Reconciler plugs these into its formatter registry; markdown is the default.",
+  "description": "Reference formatters for Agentick v2. Pure functions that turn SemanticContentBlock[] into wire-ready ContentBlock[]. Ships markdown / xml / text formatters + the defineFormatter builder. Compiler plugs these into its formatter registry; markdown is the default.",
   "keywords": [
     "agent",
     "agentick",

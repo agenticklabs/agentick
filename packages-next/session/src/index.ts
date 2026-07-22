@@ -1,7 +1,7 @@
 /**
  * `@agentick/session-next` — reference session harness.
  *
- * The integration site that wires JSX agent + reconciler + loop
+ * The integration site that wires JSX agent + compiler + loop
  * executor into the user-facing `session.send({ messages })` surface.
  *
  * @see docs/proposals/v2/blueprint/08-session-harness.md

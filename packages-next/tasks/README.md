@@ -32,10 +32,10 @@ wire payloads are byte-identical to the pre-ADR-68 harness, and the
 bundled in-process executor is behavior-identical for the caller. The
 seam is what unlocks the later tiers without a rewrite:
 
-| Piece          | Bundled default (here)           | Conforms to the same port later                  |
-| -------------- | -------------------------------- | ------------------------------------------------ |
+| Piece          | Bundled default (here)           | Conforms to the same port later                        |
+| -------------- | -------------------------------- | ------------------------------------------------------ |
 | `TaskStore`    | `InMemoryTaskStore` (node-local) | `@agentick/tasks-store-postgres-next` (across-restart) |
-| `TaskExecutor` | `InProcessTaskExecutor` (fiber)  | child-process (isolation) / sandbox / worker     |
+| `TaskExecutor` | `InProcessTaskExecutor` (fiber)  | child-process (isolation) / sandbox / worker           |
 
 - The store/executor **port types** live in `@agentick/spec-next`
   (`TaskRecord`, `TaskStore`, `TaskExecutor`, `TaskTransition`,
@@ -102,20 +102,20 @@ This is the `useTasks` family source in [ADR 85](../../docs/proposals/v2/bluepri
 
 🚧 In active development as part of v2 (`feat/v2`).
 
-| Phase | What                                                                                                                                                                                                                                                                                                                                                                                                                       | Status |
-| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
-| A     | Substrate primitive — harness, registry, progress, cancel, conformance                                                                                                                                                                                                                                                                                                                                                     | ✅     |
-| A.1   | ToolExecutor integration — `ctx.tasks` on every handler, TaskHandle-return detection, Pattern A vs B branching on `taskSupport` annotation (#156)                                                                                                                                                                                                                                                                          | ✅     |
-| A.2   | Model-facing `session_tasks_*` tools — auto-registered `session_tasks_list / get / cancel / await` so the model can manage Pattern B tasks (#157)                                                                                                                                                                                                                                                                          | ✅     |
-| B     | MCP wire codec — `tools/call` task opt-in, `notifications/tasks/status` translation, inbound `tasks/cancel`                                                                                                                                                                                                                                                                                                                | ✅     |
-| 68-A  | Record-as-source-of-truth — `TaskStore` port + `InMemoryTaskStore`, `TaskExecutor` seam + `InProcessTaskExecutor`, `detached` lifetime, `interrupted` on hydration                                                                                                                                                                                                                                                         | ✅     |
-| 68-B  | Child-process executor over IPC (isolation / detached) + executor registry keyed by `.kind`, per-submit selection — conforms to the `TaskExecutor` seam                                                                                                                                                                                                                                                                    | ✅     |
-| 68-pg | `@agentick/tasks-store-postgres-next` durable store — durable records + `interrupted`-on-restart + terminal adoption across app-process restart (cross-restart child reattach-by-pid still deferred)                                                                                                                                                                                                                             | ✅     |
-| 68-ir | `ctx.awaitingInput` — `working → input_required → working` status wrapper (the origin seam for elicitation escalation); worker self-terminates on parent IPC `disconnect` (#120-followup)                                                                                                                                                                                                                                  | ✅     |
-| 69-T1 | Request escalation — task `ctx.elicit` escalates to the connected client via nested `inbox.ask`; `interactive ⊥ detached` guard. Root-session case                                                                                                                                                                                                                                                                          | ✅     |
-| 69-T2a | Multi-agent bubbling — recursive spawn-lineage hop (`session → parentSessionId`), ancestor **interception** (`session.interceptEscalation` — answer / deny / forward), `lineage` provenance (origin task+session → each hop), and the `awaitingInput(Effect)` overload (real fiber interruptibility)                                                                                                                          | ✅     |
-| 69-T2b | Cross-process child elicit bridge — a **forked** task's `ctx.elicit` marshals a serializable intent `{method, args}` over IPC; the parent (`ChildProcessTaskExecutor`) reconstructs the live-schema request via the injected sugar and feeds the SAME `escalate` chain, so interception + lineage apply for free. The live `StandardSchemaV1` never crosses (sugar methods cross; raw `form(liveSchema)` fails loud)         | ✅     |
-| D     | Effect-native internals — `Effect<T,E,never>` work overload + real `Fiber.interrupt` on cancel (#155); events fan out over Effect `Stream` (`LocalPubSub` + `Stream.takeUntil`). **Landed.** The protocol _surface_ stays Promise/`AsyncIterable` by design (Promise-at-the-edge, Effect-internal — as everywhere in v2); exposing `Effect`/`Stream` at the boundary is a whole-framework decision, not a tasks-local gap. | ✅     |
+| Phase  | What                                                                                                                                                                                                                                                                                                                                                                                                                       | Status |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| A      | Substrate primitive — harness, registry, progress, cancel, conformance                                                                                                                                                                                                                                                                                                                                                     | ✅     |
+| A.1    | ToolExecutor integration — `ctx.tasks` on every handler, TaskHandle-return detection, Pattern A vs B branching on `taskSupport` annotation (#156)                                                                                                                                                                                                                                                                          | ✅     |
+| A.2    | Model-facing `session_tasks_*` tools — auto-registered `session_tasks_list / get / cancel / await` so the model can manage Pattern B tasks (#157)                                                                                                                                                                                                                                                                          | ✅     |
+| B      | MCP wire codec — `tools/call` task opt-in, `notifications/tasks/status` translation, inbound `tasks/cancel`                                                                                                                                                                                                                                                                                                                | ✅     |
+| 68-A   | Record-as-source-of-truth — `TaskStore` port + `InMemoryTaskStore`, `TaskExecutor` seam + `InProcessTaskExecutor`, `detached` lifetime, `interrupted` on hydration                                                                                                                                                                                                                                                         | ✅     |
+| 68-B   | Child-process executor over IPC (isolation / detached) + executor registry keyed by `.kind`, per-submit selection — conforms to the `TaskExecutor` seam                                                                                                                                                                                                                                                                    | ✅     |
+| 68-pg  | `@agentick/tasks-store-postgres-next` durable store — durable records + `interrupted`-on-restart + terminal adoption across app-process restart (cross-restart child reattach-by-pid still deferred)                                                                                                                                                                                                                       | ✅     |
+| 68-ir  | `ctx.awaitingInput` — `working → input_required → working` status wrapper (the origin seam for elicitation escalation); worker self-terminates on parent IPC `disconnect` (#120-followup)                                                                                                                                                                                                                                  | ✅     |
+| 69-T1  | Request escalation — task `ctx.elicit` escalates to the connected client via nested `inbox.ask`; `interactive ⊥ detached` guard. Root-session case                                                                                                                                                                                                                                                                         | ✅     |
+| 69-T2a | Multi-agent bubbling — recursive spawn-lineage hop (`session → parentSessionId`), ancestor **interception** (`session.interceptEscalation` — answer / deny / forward), `lineage` provenance (origin task+session → each hop), and the `awaitingInput(Effect)` overload (real fiber interruptibility)                                                                                                                       | ✅     |
+| 69-T2b | Cross-process child elicit bridge — a **forked** task's `ctx.elicit` marshals a serializable intent `{method, args}` over IPC; the parent (`ChildProcessTaskExecutor`) reconstructs the live-schema request via the injected sugar and feeds the SAME `escalate` chain, so interception + lineage apply for free. The live `StandardSchemaV1` never crosses (sugar methods cross; raw `form(liveSchema)` fails loud)       | ✅     |
+| D      | Effect-native internals — `Effect<T,E,never>` work overload + real `Fiber.interrupt` on cancel (#155); events fan out over Effect `Stream` (`LocalPubSub` + `Stream.takeUntil`). **Landed.** The protocol _surface_ stays Promise/`AsyncIterable` by design (Promise-at-the-edge, Effect-internal — as everywhere in v2); exposing `Effect`/`Stream` at the boundary is a whole-framework decision, not a tasks-local gap. | ✅     |
 
 ## Quick start
 
@@ -731,7 +731,7 @@ own self-reported `.kind` (you never write a `Record` whose keys duplicate
 // store + executors are owned by the app for its whole lifetime.
 createApp(RootAgent, {
   model,
-  reconciler,
+  compiler,
   tasks: {
     // store defaults to a node-local InMemoryTaskStore; swap a durable one.
     executors: [
@@ -896,10 +896,10 @@ The session and elicitation harnesses route their verbs through `runOperation`
 (via `sessionOp` / `elicitOp`), so each mints a derived `onBefore…` / `onAfter…`
 command-lifecycle hook. The two natural task hook points are:
 
-| Seam                  | Would-be hooks                                    | "before" = …                          | "after" = …                        |
-| --------------------- | ------------------------------------------------- | ------------------------------------- | ---------------------------------- |
-| `submit` (accept)     | `onBeforeTasksSubmit` / `onAfterTasksSubmit`      | gate / transform / veto a submission  | the accepted `TaskHandle`          |
-| `settle` (complete)   | `onBeforeTasksSettle` / `onAfterTasksSettle`      | inspect the terminal record           | react "after the task COMPLETES"   |
+| Seam                | Would-be hooks                               | "before" = …                         | "after" = …                      |
+| ------------------- | -------------------------------------------- | ------------------------------------ | -------------------------------- |
+| `submit` (accept)   | `onBeforeTasksSubmit` / `onAfterTasksSubmit` | gate / transform / veto a submission | the accepted `TaskHandle`        |
+| `settle` (complete) | `onBeforeTasksSettle` / `onAfterTasksSettle` | inspect the terminal record          | react "after the task COMPLETES" |
 
 The name derivation is locked by a test
 (`src/__tests__/command-hooks.spec.ts`): `deriveHookNames("tasks:command:submit")`
@@ -934,10 +934,10 @@ so both want explicit sign-off):
 1. Make `submit` async (`Promise<TaskHandle<T>>`) — the only way to host async
    before-hooks; breaks the synchronous `handle.taskId` contract.
 2. A synchronous-hook fast-path in `runtime-next` (the `asBefore`/`asAfter` lift
-   + `registerCommandHook`): keep a synchronous hook synchronous, only going
-   async when the hook returns a Promise. Lets `runSyncExit` host sync hooks;
-   async submit hooks still throw loudly. Necessary-but-insufficient — it does
-   not fix the async-inherited-interceptor regression.
+   - `registerCommandHook`): keep a synchronous hook synchronous, only going
+     async when the hook returns a Promise. Lets `runSyncExit` host sync hooks;
+     async submit hooks still throw loudly. Necessary-but-insufficient — it does
+     not fix the async-inherited-interceptor regression.
 3. For `settle`: rework the FSM transition path to compose an Effect (async
    `makeReport` + ttl/cancel callers), OR add a dedicated task-lifecycle event
    seam that fires the terminal hook off the durable record without reordering
@@ -1017,7 +1017,7 @@ completed` status timeline (bus envelopes) with the paused-state
   `tsx`-loaded child, proving the ADR 69 T2b elicit bridge over real IPC:
   at the raw wire, the child marshals ONLY `{method, args}` (never the
   live schema) + resolves on `elicit-response` + flips `input_required →
-  working → completed`, and reconstructs a typed error from a serialized
+working → completed`, and reconstructs a typed error from a serialized
   `elicit-error` (`ElicitationDeclined` round-trips via the error codec);
   integrated through a real `TasksHarness` + the real `buildElicitSugar` +
   a test escalation terminal, the parent reconstructs the LIVE request +
@@ -1063,7 +1063,7 @@ The `session.tasks` CQRS client handle (read view + `cancel` write):
   from the opening `snapshot` frame, and builds the session scope + channel
   query.
 - `src/client/__tests__/tasks-handle.spec.ts` — `tasksHandle`: `cancel(taskId,
-  reason?)` issues the wire-shaped `tasks/cancel` request (reason omitted when
+reason?)` issues the wire-shaped `tasks/cancel` request (reason omitted when
   absent), the read half seeds from a snapshot, the CQRS round-trip (a cancel
   delta re-folds the view; no local hand-patch), and `onChange` fires per frame.
 - `packages-next/transport-in-process/src/__tests__/tasks-cancel-e2e.spec.ts`

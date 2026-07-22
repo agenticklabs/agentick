@@ -3,7 +3,7 @@
  *
  * The app harness owns the **agent definition** (the JSX root element,
  * shared defaults), the **session registry**, and the **shared substrate
- * + shared sub-harnesses** (reconciler, loop executor, language-model
+ * + shared sub-harnesses** (compiler, loop executor, language-model
  * executor). Each session it creates is a `SessionHarnessProtocol`
  * instance bound to the same substrate, with its own scopeId.
  *
@@ -113,7 +113,7 @@ export interface CreateSessionInput<P = unknown> {
    * the tool executor's registry. Participates in the per-tick compile
    * — sits between app and execution in the precedence ladder, so a
    * session-level tool overrides an app-level tool of the same name
-   * but is itself overridden by an execution-level or reconciler-
+   * but is itself overridden by an execution-level or compiler-
    * emitted tool of the same name.
    *
    * @see ToolBinding in `@agentick/spec-next` for the precedence ladder.
@@ -337,7 +337,7 @@ export interface AppHarnessProtocol<P = unknown> {
   events(filter?: EventQuery, options?: SubscribeOptions): AsyncIterable<ProtocolEvent>;
 
   /**
-   * Close every open session, release shared resources (reconciler
+   * Close every open session, release shared resources (compiler
    * mounts, loop-executor in-flight aborts, executor abort signals),
    * and emit `app:lifecycle:closed`. Subsequent calls reject with
    * `AppClosedError`.
