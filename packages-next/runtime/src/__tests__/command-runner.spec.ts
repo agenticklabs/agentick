@@ -22,11 +22,8 @@ import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import type { ChunkInterceptor, Operation, StandardSchemaV1 } from "@agentick/spec-next";
 import { CommandDeclarationError, deriveChunkHookName } from "@agentick/spec-next";
-import {
-  createCommandRunner,
-  type CommandRunner,
-  type OperationRunner,
-} from "../substrate/command-runner.js";
+import { createCommandRunner, type CommandRunner } from "../substrate/command-runner.js";
+import type { RunOperation } from "../substrate/operation-runner.js";
 import type { RuntimeContext } from "../substrate/runtime-context.js";
 
 interface EchoInput {
@@ -46,16 +43,16 @@ const echoSchema: StandardSchemaV1<EchoInput> = {
 };
 
 /**
- * A fake {@link OperationRunner} that captures every manufactured Operation and
+ * A fake {@link RunOperation} that captures every manufactured Operation and
  * runs the body verbatim (no phase contract / journaling / context scope). The
  * captured `ops` list is the assertion surface for the manufacture logic.
  */
 function fakeRunOperation(): {
-  runOperation: OperationRunner;
+  runOperation: RunOperation;
   ops: Operation<unknown, unknown, unknown>[];
 } {
   const ops: Operation<unknown, unknown, unknown>[] = [];
-  const runOperation: OperationRunner = <I, R, E>(
+  const runOperation: RunOperation = <I, R, E>(
     op: Operation<I, R, E>,
     body: (input: I) => Effect.Effect<R, E, never>,
   ) => {

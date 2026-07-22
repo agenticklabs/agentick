@@ -16,7 +16,7 @@
  * touches journal / bus / interceptor-inheritance / identity — those stay fused
  * to the operation-execution layer on {@link BaseHarness} (the named-future
  * `createOperationRunner`, Tier 2). The runner receives a bound
- * {@link OperationRunner} and composes the command layer on top. Each
+ * {@link RunOperation} and composes the command layer on top. Each
  * `createCommandRunner` call yields an isolated instance (its own registry +
  * chunk maps) — the module holds NO shared registries.
  *
@@ -34,7 +34,6 @@ import type {
   CommandExposure,
   CommandInfo,
   EventScope,
-  Operation,
   OperationOrigin,
   StandardSchemaV1,
   SubstrateError,
@@ -44,6 +43,7 @@ import { CommandDeclarationError, deriveChunkHookName } from "@agentick/spec-nex
 import { getContext, type RuntimeContext } from "./runtime-context.js";
 import { ulid } from "./ulid.js";
 import { runHarnessProtocol, runHarnessStream } from "./harness-protocol.js";
+import type { RunOperation } from "./operation-runner.js";
 
 // ============================================================================
 // Public shapes
@@ -84,7 +84,7 @@ export interface StreamCommand<I, Chunk, R, E = never> {
 /**
  * A declared command in a harness's registry (ADR 51): the wire-safe
  * descriptor plus the bound runner that manufactures the Operation and
- * routes it through the injected {@link OperationRunner}.
+ * routes it through the injected {@link RunOperation}.
  */
 export interface RegisteredCommand {
   readonly descriptor: CommandDescriptor;
@@ -173,23 +173,21 @@ export interface StreamCommandDef<I, Chunk, R, E> {
 
 /**
  * The heavy-path operation executor the runner composes the command layer on
- * top of — {@link BaseHarness.runOperation}, bound to its harness instance and
+ * top of — the {@link OperationRunner}'s bound `runOperation` (Tier 2),
  * injected at construction. The runner treats it as an opaque capability: it
  * manufactures the {@link Operation} and hands off; journaling, idempotency,
  * the phase contract, the interceptor cascade, and identity stamping all live
- * behind this function.
+ * behind this function. Re-exported from `operation-runner.ts`.
+ *
+ * @see {@link RunOperation}
  */
-export type OperationRunner = <I, R, E>(
-  op: Operation<I, R, E>,
-  body: (input: I) => Effect.Effect<R, E, never>,
-) => Effect.Effect<R, E | SubstrateError, never>;
 
 /** Construction dependencies for {@link createCommandRunner}. */
 export interface CommandRunnerDeps {
   /** The declaring harness's event surface — the required verb prefix + op-name root. */
   readonly surface: string;
-  /** The bound operation executor (see {@link OperationRunner}). */
-  readonly runOperation: OperationRunner;
+  /** The bound operation executor (see {@link RunOperation}). */
+  readonly runOperation: RunOperation;
 }
 
 /**
@@ -367,7 +365,7 @@ type RunOpts = {
 
 class CommandRunnerImpl implements CommandRunner {
   private readonly surface: string;
-  private readonly runOperation: OperationRunner;
+  private readonly runOperation: RunOperation;
 
   /**
    * The command registry (ADR 51) — canonical name → {@link RegisteredCommand}.
@@ -566,7 +564,7 @@ class CommandRunnerImpl implements CommandRunner {
    * The ONE Operation-manufacture (A2.4 dedup). Given a `body`, returns the
    * `run(input, opts) => Effect` that builds the canonical {@link Operation}
    * (`opId` per the idempotency rule, `surface`, `name`, causality, scope +
-   * origin, input) and routes it through the injected {@link OperationRunner}.
+   * origin, input) and routes it through the injected {@link RunOperation}.
    * `command` passes `def.handler`; `commandStream` passes its sink-threading
    * body — the ONLY delta between the two faces.
    */

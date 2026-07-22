@@ -26,18 +26,12 @@
  * @see docs/proposals/v2/blueprint/01-harness-principle.md
  */
 
-import { Effect, Fiber, FiberRef, Runtime } from "effect";
-import { unwrapExit, omitUndefined, isThenable } from "@agentick/utils-next";
+import { Effect, Fiber } from "effect";
+import { omitUndefined, isThenable } from "@agentick/utils-next";
 import type {
   AfterHook,
   BeforeHook,
-  ChunkHooksOf,
   ChunkInterceptor,
-  ChunkRegistrarsOf,
-  CommandOutcome,
-  HooksOf,
-  Pascal,
-  RegistrarsOf,
   EventBus,
   CommandExposure,
   CommandInfo,
@@ -64,24 +58,20 @@ import type {
   StandardSchemaV1,
   StoreCtx,
   SubstrateError,
-  TerminalEvent,
   Unsubscribe,
 } from "@agentick/spec-next";
 import {
-  AgentickError,
   DEFAULT_JOURNALING_POLICY,
-  deriveHookNames,
   logEventName,
   parseHookKey,
   progressEventName,
   HandlerError,
   InvalidPayload,
   MessageHandlerError,
-  registerAgentickError,
 } from "@agentick/spec-next";
 import { resolveSyncSubstrateSlot } from "./resolve-slot.js";
 import { ulid } from "./ulid.js";
-import { getContext, type RuntimeContext, withContext } from "./runtime-context.js";
+import { getContext, type RuntimeContext } from "./runtime-context.js";
 import { runHarnessProtocol, runHarnessStream } from "./harness-protocol.js";
 import {
   createCommandRunner,
@@ -92,14 +82,13 @@ import {
 import { RequestResponseRegistry, type RequestError } from "./request-response-registry.js";
 import {
   type InterceptorKind,
-  type OperationReplace,
   type OperationSignal,
   interceptorKind,
-  isOperationSignal,
   orderInterceptors,
   signalFromVerdict,
   tagInterceptor,
 } from "./op-signals.js";
+import { createOperationRunner, type OperationRunner } from "./operation-runner.js";
 
 export {
   OperationVeto,
@@ -113,6 +102,19 @@ export {
   type InterceptorKind,
   type OperationSignal,
 } from "./op-signals.js";
+
+// The operation-execution substrate (Tier 2 — the heavy path, terminal
+// machinery, tier-4 call-scoped middleware, and `OperationOutcomeError` whose
+// class home is this package) was extracted to `operation-runner.ts`; re-export
+// here so `@agentick/runtime-next`'s public surface is unchanged — a re-home,
+// not a public-API change.
+export {
+  createOperationRunner,
+  OperationOutcomeError,
+  type OperationRunner,
+  type OperationRunnerDeps,
+  type RunOperation,
+} from "./operation-runner.js";
 
 export type { Unsubscribe } from "@agentick/spec-next";
 
@@ -142,7 +144,6 @@ export {
   type StreamCommand,
   type RegisteredCommand,
   type CommandInvokeOpts,
-  type OperationRunner,
 } from "./command-runner.js";
 
 /**
@@ -159,393 +160,37 @@ export type GuardDecider<I = unknown, R = unknown, E = never> = (
 
 // `Middleware` (Effect-native, `fx.use`) + `HarnessFx` are defined in
 // `@agentick/spec-next` (so the `XFx` protocols can type `fx.use`) and
-// re-exported here. `AsyncMiddleware` (pure-JS, `use`) is defined below —
-// it carries `RuntimeContext`, a runtime concern.
+// re-exported here. `AsyncMiddleware` (pure-JS, `use`) lives in `middleware.ts`
+// — it carries `RuntimeContext`, a runtime concern.
 export type { Middleware, HarnessFx } from "@agentick/spec-next";
 
-/**
- * Pure-JS middleware — the ergonomic `harness.use` form. `next(input)` returns
- * a Promise; `await` it to proceed, or return a value to short-circuit. No
- * Effect knowledge required.
- *
- * The third argument, **`ctx`**, is the operation's {@link RuntimeContext}
- * (sessionId / executionId / tickId / opId / parentOpId / user …), passed
- * EXPLICITLY: an async middleware runs OUTSIDE the fiber (see the caveat
- * below), so it cannot read `getContext` itself — `use`'s lift hands it the
- * snapshot captured at the op boundary. An Effect middleware (`fx.use`) reads
- * the same context natively via `yield* getContext`.
- *
- * ```ts
- * harness.use(async (input, next, ctx) => {
- *   const started = Date.now();
- *   const result = await next(input);
- *   metrics.record(ctx.sessionId, ctx.opId, Date.now() - started);
- *   return result;
- * });
- * ```
- *
- * **Honest caveat — only the middleware's OWN body is off-fiber.** `liftMiddleware`
- * forks each continuation on the AMBIENT runtime (`Effect.runtime()` — the
- * fiber's Context, FiberRefs, and tracer), so everything `next` *wraps* keeps
- * full in-fiber semantics across the `await`: OTel span-nesting, `RuntimeContext`
- * / `parentOpId`, tier-4 `withCallMiddleware`, and interruption (aborting a
- * `send` tears down the inner call — no leaked root). The ONE thing that stays
- * off-fiber is this function's own JS body (the statements around `await next`,
- * driven by the microtask queue) — it can't be fiber-interrupted mid-statement
- * and can't read `getContext`, which is why `ctx` is passed explicitly. For a
- * middleware whose own logic must be in-fiber, use `harness.fx.use` (the
- * Effect-native {@link Middleware}).
- */
-export type AsyncMiddleware<I = unknown, R = unknown> = (
-  input: I,
-  next: (input: I) => Promise<R>,
-  ctx: RuntimeContext,
-) => Promise<R>;
-
-// ============================================================================
-// Command lifecycle hooks (ADR 80) — the typed CommandRegistry → CommandHooks
-// derivation. Co-located with AsyncMiddleware because a hook DESUGARS to an
-// AsyncMiddleware entry (§7 fiber invariant) and carries the RuntimeContext —
-// so, like AsyncMiddleware, it can't live in spec without a wrong-direction dep.
-// ============================================================================
-
-// `BeforeHook<In, Ctx>` / `AfterHook<Out, Ctx>` are now defined in
-// `@agentick/spec-next` (pure, context-parametric) and re-exported above. The
-// server binds `Ctx = RuntimeContext` at each derivation site below.
-
-/**
- * Empty-seed registry (ADR 80 §5) — the single source of truth mapping a
- * command id (`"<who>:<what>"`) to its `{ input; output }`. Each harness
- * package augments it with one line per exposed verb via module augmentation
- * of `@agentick/runtime-next`; {@link CommandHooks} falls out mechanically.
- */
-// eslint-disable-next-line @typescript-eslint/no-empty-object-type
-export interface CommandRegistry {}
-
-/**
- * The bare `on<Command>` full-middleware key half of {@link CommandHooks}
- * (ADR 83 amendment) — the whole `(input, next, ctx) => output` wrapper (wrap /
- * retry / short-circuit / try-finally / shared state across both faces), typed
- * to the command, unlike raw `.use` (untyped, global). before/after are
- * one-sided sugar on top. AsyncMiddleware-valued, so it stays runtime-owned
- * (distinct from the spec-owned {@link HooksOf} before/after halves).
- */
-type CommandAroundHooks = {
-  [K in keyof CommandRegistry as `on${Pascal<K & string>}`]?: AsyncMiddleware<
-    CommandRegistry[K] extends { input: infer I } ? I : never,
-    CommandRegistry[K] extends { output: infer O } ? O : never
-  >;
-};
-
-/**
- * The derived, never-hand-written hook surface (ADR 80 §5): each
- * {@link CommandRegistry} entry mints `onBefore<Pascal>?` (over its input) and
- * `onAfter<Pascal>?` (over its output) via the spec-owned {@link HooksOf}
- * generic (bound to `RuntimeContext`), plus the bare `on<Command>?`
- * full-middleware key ({@link CommandAroundHooks}). The type-level `Pascal` is
- * the exact twin of the runtime {@link deriveHookNames} — they MUST agree (a test).
- */
-export type CommandHooks = HooksOf<CommandRegistry, RuntimeContext> &
-  CommandAroundHooks &
-  ChunkHooksOf<CommandRegistry, RuntimeContext>;
-
-/**
- * The per-verb IMPERATIVE registrar surface — the same `Pascal<K>` derivation as
- * {@link CommandHooks}, valued as `(fn) => Unsubscribe` methods instead of
- * optional properties. Reached via {@link BaseHarness.hooks} (a Proxy over
- * {@link BaseHarness.hook}): `harness.hooks.onBeforeToolDispatch(fn)` registers a
- * hook dynamically and returns its remover. Typed exactly like the declarative
- * form; only augmented verbs are callable keys.
- */
-/**
- * The per-verb IMPERATIVE full-middleware registrar surface (ADR 83 amendment)
- * — the `on<Command>` primitive as `(mw) => Unsubscribe` methods. Mirrors
- * {@link HookRegistrars}'s before/after halves but valued with the whole
- * {@link AsyncMiddleware} typed to the command's input/output. Folded into
- * {@link HookRegistrars} so `harness.hooks.on<Command>(mw)` is typed.
- */
-export type CommandMiddlewares = {
-  [K in keyof CommandRegistry as `on${Pascal<K & string>}`]: (
-    mw: AsyncMiddleware<
-      CommandRegistry[K] extends { input: infer I } ? I : never,
-      CommandRegistry[K] extends { output: infer O } ? O : never
-    >,
-  ) => Unsubscribe;
-};
-
-export type HookRegistrars = RegistrarsOf<CommandRegistry, RuntimeContext> &
-  CommandMiddlewares &
-  ChunkRegistrarsOf<CommandRegistry, RuntimeContext>;
-
-// ============================================================================
-// MiddlewareChain — outer→inner composition
-// ============================================================================
-//
-// NOTE (ADR 83): `HandlerRegistry` + `mergeVerdict` are GONE.
-// The verdict guard collapsed into the universal interceptor seam — a guard is a
-// `guard`-kind `Middleware` that raises an OperationSignal (see op-signals.ts).
-// The verdict-merge PRIORITY (veto > replace > defer, order-independent) is
-// replaced by compose-order: the outermost guard decides first. See STATUS note.
-
-/**
- * Compose an explicit middleware list around a body. First element is
- * outermost. Shared by {@link MiddlewareChain.compose} and (ADR 76)
- * by `BaseHarness.runOperation` when it composes an inherited stack
- * collected across construction-ancestors.
- */
-export function composeMiddleware<I, R, E>(
-  list: readonly Middleware<I, R, E>[],
-  body: (input: I) => Effect.Effect<R, E, never>,
-): (input: I) => Effect.Effect<R, E, never> {
-  return list.reduceRight<(input: I) => Effect.Effect<R, E, never>>(
-    (next, mw) => (input) => mw(input, next),
-    body,
-  );
-}
-
-/**
- * Lift an {@link AsyncMiddleware} (pure JS) into the Effect-native
- * {@link Middleware} the chain composes. The lifted middleware runs the inner
- * `next` on a **forked child fiber of the ambient runtime** so the adopter can
- * `await` its result.
- *
- * **The fork inherits the fiber's world.** We capture `Effect.runtime()` — the
- * ambient Runtime, which bundles the fiber's Context (the current OTel span,
- * services), its FiberRefs (`RuntimeContext`, the tier-4 `CallMiddlewareRef`),
- * AND the tracer — then fork the continuation on THAT runtime
- * (`Runtime.runFork(runtime)`), not the default one. A naive `Effect.runFork`
- * would seed a bare root on the DEFAULT runtime: no tracer, empty FiberRefs, no
- * parent span. Because we fork on the captured runtime instead, **span-nesting,
- * `parentOpId`, and call-scoped (tier-4) middleware all survive the async
- * boundary** — a span opened inside the wrapped ops nests under the op's span.
- *
- * **Interruption IS re-threaded.** `Effect.tryPromise` exposes an `AbortSignal`
- * that fires when the OUTER op fiber is interrupted; we hold each continuation's
- * fiber handle and interrupt it on that signal. So aborting a `send` tears down
- * the in-flight inner model/tool call rather than leaking a detached root.
- *
- * The ONE thing that stays out-of-fiber is the async middleware's OWN body (the
- * JS statements around `await next` — a JS async fn is driven by the microtask
- * queue, not a fiber, and its suspension points aren't externally steppable).
- * That is inherent, and why `ctx` is passed explicitly. A rejection (from
- * `next`, or thrown by the async middleware) surfaces on the `E` channel
- * unchanged.
- *
- * `use()` / `withCallMiddleware` call this automatically for `async` functions;
- * use it explicitly for a promise-returning middleware NOT declared `async`.
- */
-export function liftMiddleware<I = unknown, R = unknown, E = unknown>(
-  mw: AsyncMiddleware<I, R>,
-): Middleware<I, R, E> {
-  return (input, next) =>
-    Effect.gen(function* () {
-      // Capture the ambient context (for the explicit `ctx` arg) AND the whole
-      // ambient runtime — Context (parent span, services) + FiberRefs + tracer —
-      // so forking on it below inherits the fiber's world across the boundary.
-      const ctx = yield* getContext;
-      const runtime = yield* Effect.runtime<never>();
-      const forkOnRuntime = Runtime.runFork(runtime);
-      return yield* Effect.tryPromise({
-        // `signal` fires when the outer op fiber is interrupted. Fork each
-        // continuation so we can interrupt it on abort — a plain `runPromise`
-        // would leave the inner call running detached after an aborted send.
-        try: (signal) => {
-          const nextPromise = (i: I): Promise<R> => {
-            const fiber = forkOnRuntime(next(i) as Effect.Effect<R, never, never>);
-            const onAbort = (): void => {
-              forkOnRuntime(Fiber.interrupt(fiber));
-            };
-            if (signal.aborted) onAbort();
-            else signal.addEventListener("abort", onAbort, { once: true });
-            return Runtime.runPromise(runtime)(Fiber.await(fiber))
-              .then((exit) => unwrapExit(exit) as R)
-              .finally(() => signal.removeEventListener("abort", onAbort));
-          };
-          // Hand the async middleware the captured `ctx` explicitly — it runs
-          // outside the fiber and can't read `getContext` itself.
-          return mw(input, nextPromise, ctx);
-        },
-        catch: (e) => e as E,
-      });
-    });
-}
-
-/**
- * Adapt a {@link BeforeHook} into an {@link AsyncMiddleware}: await the hook,
- * thread its reshaped input (or the original on `void`) into `next`; a `throw`
- * propagates as a veto. Lifted through the SAME `liftMiddleware` path `.use`
- * uses — the ADR 80 §7 fiber invariant.
- */
-const asBefore =
-  <I, R>(hook: BeforeHook<I>): AsyncMiddleware<I, R> =>
-  async (input, next, ctx) =>
-    next(((await hook(input, ctx)) ?? input) as I);
-
-/** Adapt an {@link AfterHook} into an {@link AsyncMiddleware} (symmetric to {@link asBefore}). */
-const asAfter =
-  <I, R>(hook: AfterHook<R>): AsyncMiddleware<I, R> =>
-  async (input, next, ctx) => {
-    const out = await next(input);
-    return ((await hook(out, ctx)) ?? out) as R;
-  };
-
-/**
- * Self-scope an {@link AsyncMiddleware} to a single command on the shared `.use`
- * chain (ADR 83 amendment). The lifted middleware composes on EVERY op; this
- * wrapper compares the op's `ctx.op` (the command suffix `runOperation` stamps)
- * to `command` and delegates to `mw` only on a match, otherwise passes straight
- * through to `next`. This is the per-middleware `ctx` compare that replaced the
- * old keyed `Hooks` map — one chain, one cascade, op-scoping by tag + compare.
- */
-export const scopeToCommand =
-  <I, R>(command: string, mw: AsyncMiddleware<I, R>): AsyncMiddleware<I, R> =>
-  (input, next, ctx) =>
-    ctx.op === command ? mw(input, next, ctx) : next(input);
-
-/**
- * The Effect-native `guard`/`transform`/`observe` middleware for ONE command
- * hook config entry — the shared core of {@link BaseHarness.hook} (own,
- * dynamic) and {@link hooksToMiddlewares} (the declarative session-config fold).
- * `before`/`after` keys desugar via {@link asBefore}/{@link asAfter}; a bare
- * `on<Command>` key IS already an {@link AsyncMiddleware} (used as-is). The
- * result is op-scoped via {@link scopeToCommand}, lifted through the SAME
- * {@link liftMiddleware} fiber path `.use` uses, and tagged `transform`.
- * Returns `undefined` for a non-hook key (defensive).
- */
-function commandHookMiddleware(
-  key: string,
-  fn: unknown,
-): Middleware<unknown, unknown, unknown> | undefined {
-  const parsed = parseHookKey(key);
-  if (parsed === undefined) return undefined;
-  // Chunk interceptors (ADR 80 Phase 2) SINK-WRAP the streaming body; they are
-  // NOT op-scoped middleware, so they never join the interceptor cascade. Skip
-  // them here — the CommandRunner's `registerChunkInterceptor` owns their path.
-  if (parsed.kind === "chunk") return undefined;
-  const wrapped: AsyncMiddleware<unknown, unknown> =
-    parsed.kind === "before"
-      ? asBefore(fn as BeforeHook<unknown>)
-      : parsed.kind === "after"
-        ? asAfter(fn as AfterHook<unknown>)
-        : (fn as AsyncMiddleware<unknown, unknown>);
-  return tagInterceptor(
-    "transform",
-    liftMiddleware(scopeToCommand(parsed.command, wrapped)),
-  ) as Middleware<unknown, unknown, unknown>;
-}
-
-/**
- * Adapt a declarative {@link CommandHooks} config into op-scoped `transform`
- * middlewares (ADR 83 amendment) — the pure function the app/session config
- * fold uses to thread declarative hooks through the SAME `inheritedInterceptors`
- * cascade that carries guards + `.use` middleware. Each entry rides
- * {@link commandHookMiddleware}: before/after desugar, `on<Command>` passes
- * through, all self-scope by `ctx.op`. `[]` for an empty config.
- */
-export function hooksToMiddlewares(config: CommandHooks): Middleware<unknown, unknown, unknown>[] {
-  const out: Middleware<unknown, unknown, unknown>[] = [];
-  for (const [key, fn] of Object.entries(config as Record<string, unknown>)) {
-    if (fn === undefined) continue;
-    const mw = commandHookMiddleware(key, fn);
-    if (mw !== undefined) out.push(mw);
-  }
-  return out;
-}
-
-// The per-chunk interception pipeline (ADR 80 Phase 2) — `ResolvedChunkInterceptor`,
-// `normalizeChunkInterceptor`, `chunkStep`, `runChunkStage`, `buildChunkPipeline` —
-// moved to `command-runner.ts` (A2.4): chunk state is command-scoped, so its
-// machinery lives with the command subsystem.
-
-// ============================================================================
-// Tier 4 — call-scoped (dynamic) middleware (ADR 76)
-// ============================================================================
-
-/**
- * FiberRef carrying the CALL-SCOPED (tier-4) operation middleware — the
- * broadest scope, composed outermost of all. Distinct from the
- * construction-tree scopes (tier 2 `harness.use()` / tier 3 structural
- * inheritance): tier 4 is scoped to a *dynamic call tree*, not the
- * construction tree.
- *
- * **Enabled by the ADR 77 spine.** Before the spine, the operation tree was
- * ~40 independent `runPromise` roots, so a FiberRef could not propagate a
- * middleware list across harness boundaries — tier 4 was impossible. Now the
- * call `session.send → loop → executor → tool` is ONE fiber, so this
- * FiberRef reaches every nested `runOperation` in every harness the call
- * touches — *even across construction-siblings* (the app builds the loop /
- * executor / tool as shared singletons; they are not construction-children
- * of the session, so a session-scoped concern around the model call CANNOT
- * be expressed structurally — only here, dynamically).
- */
-const CallMiddlewareRef = FiberRef.unsafeMake<readonly Middleware<unknown, unknown, unknown>[]>([]);
-
-/** Read the ambient call-scoped middleware list. Substrate-internal. */
-const getCallMiddleware: Effect.Effect<readonly Middleware<unknown, unknown, unknown>[]> =
-  FiberRef.get(CallMiddlewareRef);
-
-/**
- * Scope `middleware` around `effect` for the current dynamic call tree
- * (ADR 76 tier 4). Every nested `runOperation` the effect transitively
- * reaches — in ANY harness, across construction-siblings — composes it
- * **outermost** (broadest scope); when `effect` settles it evaporates.
- * Nested `withCallMiddleware` calls ACCUMULATE (append, so an outer
- * provider stays outermost). Empty list is a pass-through.
- *
- * The Effect-native tier-4 surface (in-fiber): `withCallMiddleware([cap],
- * someEffect)` — e.g., a per-`send` budget cap or a per-request trace attribute
- * that must wrap every op the request touches, then vanish. Takes the
- * Effect-native {@link Middleware}; for a pure-JS async tier-4 middleware wrap
- * it with {@link liftMiddleware}.
- */
-export function withCallMiddleware<A, E, R>(
-  middleware: readonly Middleware<unknown, unknown, unknown>[],
-  effect: Effect.Effect<A, E, R>,
-): Effect.Effect<A, E, R> {
-  if (middleware.length === 0) return effect;
-  return Effect.flatMap(getCallMiddleware, (current) =>
-    Effect.locally(CallMiddlewareRef, [...current, ...middleware])(effect),
-  );
-}
-
-export class MiddlewareChain {
-  private middlewares: Middleware<unknown, unknown, unknown>[] = [];
-
-  use<I, R, E = unknown>(mw: Middleware<I, R, E>): Unsubscribe {
-    this.middlewares.push(mw as Middleware<unknown, unknown, unknown>);
-    return () => this.remove(mw as Middleware<unknown, unknown, unknown>);
-  }
-
-  /**
-   * Remove a middleware by identity (first occurrence). The removal seam
-   * ADR 83 §4 live inheritance uses to cascade an unsubscribe into a
-   * descendant's inherited layer — where the pushing parent didn't hold that
-   * descendant's `use()` closure (a descendant constructed AFTER the
-   * registration pulled the interceptor via the fold). No-op when absent.
-   */
-  remove(mw: Middleware<unknown, unknown, unknown>): void {
-    const idx = this.middlewares.indexOf(mw);
-    if (idx >= 0) this.middlewares.splice(idx, 1);
-  }
-
-  /**
-   * Snapshot the registered middleware in registration order (first =
-   * outermost). ADR 76: used to collect an inherited stack across
-   * construction-ancestors without mutating any chain.
-   */
-  snapshot(): Middleware<unknown, unknown, unknown>[] {
-    return this.middlewares.slice();
-  }
-
-  /**
-   * Compose middlewares around a body. The first registered is outermost.
-   */
-  compose<I, R, E>(
-    body: (input: I) => Effect.Effect<R, E, never>,
-  ): (input: I) => Effect.Effect<R, E, never> {
-    return composeMiddleware(this.middlewares.slice() as Middleware<I, R, E>[], body);
-  }
-}
+// The middleware COMPOSITION primitives (chain, compose, lift, hook-desugaring,
+// tier-4 call-scoped FiberRef) + the typed command-hook derivation were
+// extracted to `middleware.ts`. BaseHarness imports the pieces it uses in its
+// body (it HOLDS `MiddlewareChain` instances and PROPAGATES them per ADR 83 §4,
+// but the primitives live there); the public surface is re-exported below
+// byte-unchanged — a re-home, not a public-API change.
+import {
+  MiddlewareChain,
+  liftMiddleware,
+  commandHookMiddleware,
+  type AsyncMiddleware,
+  type CommandHooks,
+  type HookRegistrars,
+} from "./middleware.js";
+export {
+  MiddlewareChain,
+  composeMiddleware,
+  liftMiddleware,
+  scopeToCommand,
+  hooksToMiddlewares,
+  withCallMiddleware,
+  type AsyncMiddleware,
+  type CommandHooks,
+  type CommandMiddlewares,
+  type CommandRegistry,
+  type HookRegistrars,
+} from "./middleware.js";
 
 // ============================================================================
 // BaseHarness
@@ -1068,14 +713,25 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
   protected readonly inbox: MessageInbox;
 
   /**
+   * The operation-execution substrate (Tier 2) as a per-harness instance —
+   * owns the phase contract, idempotency replay, the interceptor cascade,
+   * identity stamping, journaling/bus routing, and the terminal machinery.
+   * Constructed AFTER substrate resolution (it captures `this.journal` /
+   * `this.bus`) with two injected construction-tree closures (`interceptors`
+   * for the LIVE tier-2/3 snapshot, `spanAttributes` for the overridable OTel
+   * seam). `runOperation` and the light-path emitters delegate onto this.
+   */
+  private readonly operationRunner: OperationRunner;
+
+  /**
    * The command subsystem (ADR 51 + A2.4) as a per-harness instance — owns the
    * registry, the command manufacture, `commands()`, `get(name)`, and the
    * per-command chunk-interceptor lists. Constructed with THIS harness's bound
-   * {@link runOperation}: the injected capability is the ONLY seam between the
-   * command-declaration layer (the runner) and the operation-execution layer
-   * (journal / bus / interceptor inheritance / identity — which stay here). The
-   * public `command` / `commandStream` / `commandEffect` / `commands` methods and
-   * the inbox dispatch path are thin delegations onto this.
+   * {@link runOperation} (the {@link operationRunner}'s heavy path): the injected
+   * capability is the ONLY seam between the command-declaration layer (the
+   * runner) and the operation-execution layer. The public `command` /
+   * `commandStream` / `commandEffect` / `commands` methods and the inbox dispatch
+   * path are thin delegations onto this.
    */
   private readonly commandRunner: CommandRunner;
 
@@ -1088,10 +744,6 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
     options: BaseHarnessOptions<Input> = {},
   ) {
     this.address = `${surface}:${scopeId}`;
-    this.commandRunner = createCommandRunner({
-      surface,
-      runOperation: this.runOperation.bind(this),
-    });
     this.policy = options.policy ?? DEFAULT_JOURNALING_POLICY;
     this.input = options.input;
     this.metadata = Object.freeze({ ...(options.metadata ?? {}) });
@@ -1142,6 +794,27 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
     >(options.inbox, shell, () => defaultInbox, `${surface}.inbox`);
     // Replay buffered close handlers onto this (the now-real harness).
     for (const h of pendingCloseHandlers) this.onClose(h);
+
+    // Operation-execution substrate (Tier 2). Constructed here — after the
+    // journal/bus slots are resolved — with the two construction-tree closures
+    // it cannot own: `interceptors` reads the LIVE tier-2 (`.use`/`.guard`/
+    // `.hook`) + tier-3 (inherited) snapshot per op (ADR 83 §4 live
+    // inheritance is harness state), and `spanAttributes` reaches the harness's
+    // overridable OTel seam. The command runner then binds this runner's
+    // `runOperation` as its sole injected capability.
+    this.operationRunner = createOperationRunner({
+      surface,
+      principal: this.principal,
+      journal: this.journal,
+      bus: this.bus,
+      policy: this.policy,
+      interceptors: () => [...this.inherited.snapshot(), ...this.middleware.snapshot()],
+      spanAttributes: (op) => this.spanAttributes(op),
+    });
+    this.commandRunner = createCommandRunner({
+      surface,
+      runOperation: this.operationRunner.runOperation,
+    });
 
     if (options.autoRegisterInbox !== false) {
       // Register is async — cluster impls may negotiate across nodes.
@@ -1208,134 +881,33 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
   // ──────── ① Commands (heavy path) ────────
 
   /**
-   * Run an operation through the full phase contract:
+   * Run an operation through the full phase contract (idempotency → requested →
+   * before → interceptor cascade → terminal) — a thin delegation onto this
+   * harness's {@link operationRunner} (Tier 2). Kept as a `protected` method so
+   * subclasses invoke `this.runOperation(op, body)` unchanged; the executor,
+   * the phase contract, and the FiberRef context scope all live on the runner.
    *
-   *   idempotency check → requested → before (handlers + middleware) →
-   *   body → terminal
-   *
-   * Succeeds with the operation's result. Failures and non-success
-   * terminals (failed, canceled, vetoed, deferred) flow through the `E`
-   * channel as `OperationOutcomeError` (carrying the typed terminal)
-   * unless the body's own error type is preserved on the failed path.
-   *
-   * The harness establishes the `RuntimeContextRef` FiberRef for the
-   * lifetime of the command — sessionId/executionId/tickId/opId/
-   * parentOpId/correlationId from `op.scope` are visible to any
-   * downstream Effect via `getContext`.
+   * The runner establishes the `RuntimeContextRef` FiberRef for the command's
+   * lifetime — sessionId/executionId/tickId/opId/parentOpId/correlationId from
+   * `op.scope` are visible to any downstream Effect via `getContext` — and
+   * settles non-success terminals (failed, canceled, vetoed, deferred) onto the
+   * `E` channel as `OperationOutcomeError`.
    */
   protected runOperation<I, R, E>(
     op: Operation<I, R, E>,
     body: (input: I) => Effect.Effect<R, E, never>,
   ): Effect.Effect<R, E | SubstrateError, never> {
-    return Effect.gen(this, function* () {
-      // Auto-set parentOpId from the surrounding FiberRef when the caller
-      // didn't supply one. This is what makes nested `runOperation`
-      // calls compose into a causality tree without app code threading
-      // parentOpId by hand.
-      const ambient = yield* getContext;
-      const resolvedOp: Operation<I, R, E> =
-        op.parentOpId === undefined && ambient.opId !== undefined
-          ? { ...op, parentOpId: ambient.opId }
-          : op;
-
-      const scope: EventScope = resolvedOp.scope ?? {};
-      const ctxScope: RuntimeContext = {
-        sessionId: scope.sessionId,
-        executionId: scope.executionId,
-        tickId: scope.tickId,
-        opId: resolvedOp.opId,
-        parentOpId: resolvedOp.parentOpId,
-        correlationId: resolvedOp.correlationId,
-        // ADR 83 amendment — the op's command SUFFIX, the same Pascal key the
-        // old `hookLayer` map keyed on. An `on<Command>` middleware self-scopes
-        // by comparing `ctx.op` to this (see `scopeToCommand`).
-        op: parseHookKey(deriveHookNames(resolvedOp.name)[0])?.command,
-      };
-
-      return yield* withContext(
-        ctxScope,
-        Effect.scoped(
-          Effect.gen(this, function* () {
-            // 1. Idempotency: replay terminal if op already completed.
-            const cached = yield* this.journal.lookupTerminal(resolvedOp.opId);
-            if (cached.some) {
-              return yield* this.replayTerminal<R>(cached.value);
-            }
-
-            // 2. Append `requested`. The blueprint's phase contract
-            //    pins requested as "argument bound" — the envelope's
-            //    payload IS the operation's input so any subscriber
-            //    (eval ledgers, OTel exporters, replay harnesses) sees
-            //    what was invoked without having to reach into the
-            //    operation by opId.
-            yield* this.publish(
-              this.makeEvent(resolvedOp, "requested", scope, { payload: resolvedOp.input }),
-            );
-
-            // 3. Append the `before` marker (observe-only). The verdict GUARD
-            //    is no longer a distinct phase — it collapsed into the ONE
-            //    composed-interceptor seam below (a `guard`-kind interceptor
-            //    raising an OperationSignal). This event is kept verbatim so
-            //    subscribers still see the phase boundary.
-            yield* this.publish(this.makeEvent(resolvedOp, "before", scope));
-
-            // 4. Assemble the ONE interceptor list around the body and compose
-            //    it. Assembly order (outermost → innermost):
-            //      call-scoped (tier 4, FiberRef — broadest)
-            //        → inherited layer (tier 3, LIVE — seeded at construction
-            //          from the parent's `resolvedInterceptors()` snapshot and
-            //          kept live by push-on-register (ADR 83 §4); read locally
-            //          here, no walk; incl. inherited command hooks as
-            //          op-scoped middleware)
-            //          → this harness's own middleware (tier 2, read locally
-            //            per op, incl. guards from `.guard()` AND own command
-            //            hooks from `.hook()` — ADR 83 amendment: hooks are just
-            //            op-scoped `transform` middleware on `.use`, no separate
-            //            hook layer/`forOp` term)
-            //    Then a STABLE guard-outermost sort floats every `guard`-kind
-            //    interceptor ahead of the transforms (deny-before-transform),
-            //    preserving tier order within each kind. Everything reduces to
-            //    a pass-through when nothing is registered. Each hook self-filters
-            //    by `ctx.op` (the command suffix set on the RuntimeContext above).
-            const callMiddleware = yield* getCallMiddleware;
-            const assembled = [
-              ...callMiddleware,
-              ...this.inherited.snapshot(),
-              ...this.middleware.snapshot(),
-            ];
-            const composed = composeMiddleware<I, R, E>(
-              orderInterceptors(assembled) as Middleware<I, R, E>[],
-              body,
-            );
-            // Settle: a raised OperationSignal (from a guard) maps to its
-            // terminal (vetoed/replaced/deferred); a real failure re-raises
-            // ORIGINAL (identity-preserving) after terminal:failed; success
-            // emits terminal:succeeded. `catchAll` sees only the typed-failure
-            // channel — defects/interrupts pass through untouched, exactly as
-            // the prior `tapError` did.
-            return yield* composed(resolvedOp.input).pipe(
-              Effect.tap((value) =>
-                this.publishTerminal(resolvedOp, scope, "succeeded", { result: value }),
-              ),
-              Effect.catchAll((err) =>
-                isOperationSignal(err)
-                  ? this.terminateFromSignal<R>(resolvedOp, scope, err)
-                  : this.publishTerminal(resolvedOp, scope, "failed", {
-                      error: this.normalizeError(err),
-                    }).pipe(Effect.zipRight(Effect.fail(err))),
-              ),
-              this.annotateOperationSpan(resolvedOp),
-            );
-          }),
-        ),
-      );
-    });
+    return this.operationRunner.runOperation(op, body);
   }
 
   /**
    * Span attributes attached to every operation's OTel span. Exporters
    * (subscribed via `@effect/opentelemetry`) see these on the span.
    * Override in concrete harnesses to add domain attributes.
+   *
+   * Kept ON the harness (not absorbed into the {@link operationRunner}) so this
+   * override seam survives the Tier-2 extraction; the runner reaches it via the
+   * injected `spanAttributes` closure and owns the `Effect.withSpan` wrap.
    */
   protected spanAttributes(
     op: Operation<unknown, unknown, unknown>,
@@ -1351,27 +923,6 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
       [`${ns}.execution_id`]: scope.executionId,
       [`${ns}.tick_id`]: scope.tickId,
     };
-  }
-
-  /**
-   * Wrap an Effect in an OTel span using the standard `Effect.withSpan`.
-   *
-   * Effect's `withSpan` enhances failure stack traces with span context
-   * by reconstructing top-level failure values (the outer object the
-   * effect failed with). Inner Error references and tagged-union
-   * fields like `.cause` are preserved as-is — deep-equality, instanceof,
-   * `_tag` matching, and property-based access all work normally. Only
-   * a top-level `=== originalError` identity check on the outer failure
-   * object will see a different reference. Adopters who need such
-   * identity matching should reach for `_tag` or `instanceof` instead.
-   *
-   * @see docs/proposals/v2/blueprint/17-open-questions.md §L5
-   */
-  private annotateOperationSpan<A, E>(
-    op: Operation<unknown, unknown, unknown>,
-  ): (eff: Effect.Effect<A, E, never>) => Effect.Effect<A, E, never> {
-    const attributes = this.spanAttributes(op);
-    return (eff) => eff.pipe(Effect.withSpan(op.name, { attributes }));
   }
 
   // ──────── ⑤ Events (light path) ────────
@@ -1395,7 +946,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
       timestamp: Date.now(),
       surface: this.surface,
     };
-    return this.publish(envelope);
+    return this.operationRunner.publish(envelope);
   }
 
   /**
@@ -1416,7 +967,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
       readonly id?: string;
     },
   ): Effect.Effect<void, JournalError, never> {
-    const decision = this.decideFromShape(key.name, key.phase);
+    const decision = this.operationRunner.decideFromShape(key.name, key.phase);
     if (decision === "drop") return Effect.void;
     if (decision === "always" || decision === "journal") {
       // Journal needs the envelope regardless of subscribers.
@@ -1441,7 +992,9 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
     op: Operation<unknown, unknown, unknown>,
     payload: unknown,
   ): Effect.Effect<void, JournalError, never> {
-    return this.publish(this.makeEvent(op, "delta", op.scope ?? {}, { payload }));
+    return this.operationRunner.publish(
+      this.operationRunner.makeEvent(op, "delta", op.scope ?? {}, { payload }),
+    );
   }
 
   /**
@@ -1455,10 +1008,12 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
     op: Operation<unknown, unknown, unknown>,
     buildPayload: () => unknown,
   ): Effect.Effect<void, JournalError, never> {
-    const decision = this.decideFromShape(op.name, "delta");
+    const decision = this.operationRunner.decideFromShape(op.name, "delta");
     if (decision === "drop") return Effect.void;
     if (decision === "always" || decision === "journal") {
-      return this.publish(this.makeEvent(op, "delta", op.scope ?? {}, { payload: buildPayload() }));
+      return this.operationRunner.publish(
+        this.operationRunner.makeEvent(op, "delta", op.scope ?? {}, { payload: buildPayload() }),
+      );
     }
     if (
       !this.bus.hasSubscriberFor({
@@ -1469,7 +1024,9 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
     ) {
       return Effect.void;
     }
-    return this.publish(this.makeEvent(op, "delta", op.scope ?? {}, { payload: buildPayload() }));
+    return this.operationRunner.publish(
+      this.operationRunner.makeEvent(op, "delta", op.scope ?? {}, { payload: buildPayload() }),
+    );
   }
 
   // ──────── ⑤b Signals (log + progress) — ADR 64 ────────
@@ -2151,237 +1708,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
       }
     }
   }
-
-  // ──────── helpers ────────
-
-  private makeEvent(
-    op: Operation<unknown, unknown, unknown>,
-    phase: EventPhase,
-    scope: EventScope,
-    extra?: { payload?: unknown; outcome?: CommandOutcome; error?: ProtocolEvent["error"] },
-  ): ProtocolEvent {
-    return {
-      id: ulid(),
-      opId: op.opId,
-      parentOpId: op.parentOpId,
-      surface: op.surface ?? this.surface,
-      name: op.name,
-      phase,
-      timestamp: Date.now(),
-      // Stamp the harness's construction-bound principal (ADR 48).
-      // AUTHORITATIVE: a principal-bound harness overrides whatever the
-      // operation carries — an op cannot emit an event claiming a
-      // different principal than its harness (no per-op identity
-      // spoofing, ADR 45). `omitUndefined` keeps the rebuilt scope
-      // clean. Principal-less harnesses pass the op scope through
-      // untouched (zero-cost — the universal hot path is unaffected).
-      scope:
-        this.principal !== undefined
-          ? omitUndefined({ ...scope, principal: this.principal })
-          : scope,
-      payload: extra?.payload,
-      outcome: extra?.outcome,
-      error: extra?.error,
-    } as ProtocolEvent;
-  }
-
-  private terminate<R>(
-    op: Operation<unknown, R, unknown>,
-    scope: EventScope,
-    outcome: CommandOutcome,
-    payload: Record<string, unknown>,
-  ): Effect.Effect<R, OperationOutcomeError | JournalError, never> {
-    return Effect.gen(this, function* () {
-      yield* this.publishTerminal(op, scope, outcome, payload);
-      return yield* this.replayTerminal<R>(this.payloadToTerminal(outcome, payload));
-    });
-  }
-
-  /**
-   * Map a guard-raised {@link OperationSignal} to its terminal
-   * (ADR 83). `veto` → terminal `vetoed` + `OperationOutcomeError`;
-   * `replace` → terminal `replaced` + success(`result`); `defer` → terminal
-   * `deferred` + `OperationOutcomeError`. The interceptor-seam twin of the old
-   * before-phase verdict switch.
-   */
-  private terminateFromSignal<R>(
-    op: Operation<unknown, R, unknown>,
-    scope: EventScope,
-    signal: OperationSignal,
-  ): Effect.Effect<R, OperationOutcomeError | JournalError, never> {
-    switch (signal._signal) {
-      case "veto":
-        return this.terminate<R>(op, scope, "vetoed", { reason: signal.reason });
-      case "replace":
-        return this.terminate<R>(op, scope, "replaced", {
-          result: (signal as OperationReplace<R>).result,
-          reason: signal.reason,
-        });
-      case "defer":
-        return this.terminate<R>(op, scope, "deferred", { retryAfter: signal.retryAfter });
-    }
-  }
-
-  /**
-   * Publish-only terminal — emits the `terminal` envelope but does not
-   * raise OperationOutcomeError. Used on the failure path where the
-   * caller wants to re-raise the original error after journaling.
-   */
-  private publishTerminal(
-    op: Operation<unknown, unknown, unknown>,
-    scope: EventScope,
-    outcome: CommandOutcome,
-    payload: Record<string, unknown>,
-  ): Effect.Effect<void, JournalError, never> {
-    const error = outcome === "failed" ? (payload.error as ProtocolEvent["error"]) : undefined;
-    const envelope = this.makeEvent(op, "terminal", scope, { payload, outcome, error });
-    return this.publish(envelope);
-  }
-
-  private payloadToTerminal(
-    outcome: CommandOutcome,
-    payload: Record<string, unknown>,
-  ): TerminalEvent {
-    switch (outcome) {
-      case "succeeded":
-        return { outcome, result: payload.result };
-      case "failed":
-        return { outcome, error: payload.error };
-      case "canceled":
-        return { outcome, reason: payload.reason as string | undefined };
-      case "vetoed":
-        return { outcome, reason: payload.reason as string | undefined };
-      case "replaced":
-        return {
-          outcome,
-          result: payload.result,
-          reason: payload.reason as string | undefined,
-        };
-      case "deferred":
-        return {
-          outcome,
-          retryAfter: payload.retryAfter as number | undefined,
-        };
-    }
-  }
-
-  private replayTerminal<R>(
-    terminal: TerminalEvent,
-  ): Effect.Effect<R, OperationOutcomeError, never> {
-    switch (terminal.outcome) {
-      case "succeeded":
-        return Effect.succeed(terminal.result as R);
-      case "replaced":
-        return Effect.succeed(terminal.result as R);
-      case "failed":
-        return Effect.fail(new OperationOutcomeError({ outcome: "failed", terminal }));
-      case "canceled":
-        return Effect.fail(new OperationOutcomeError({ outcome: "canceled", terminal }));
-      case "vetoed":
-        return Effect.fail(new OperationOutcomeError({ outcome: "vetoed", terminal }));
-      case "deferred":
-        return Effect.fail(new OperationOutcomeError({ outcome: "deferred", terminal }));
-    }
-  }
-
-  private normalizeError(err: unknown): ProtocolEvent["error"] {
-    if (err && typeof err === "object" && "message" in err) {
-      const e = err as { name?: string; message?: string };
-      return {
-        name: e.name ?? "Error",
-        message: typeof e.message === "string" ? e.message : String(err),
-        data: err,
-      };
-    }
-    return { name: "Error", message: String(err), data: err };
-  }
-
-  /**
-   * Publish to bus + (conditionally) journal per policy.
-   *
-   * Decision order:
-   *   1. `policy.override[exactName]`  drop | bus-only | always
-   *   2. `policy.override[prefix]`     longest-prefix match
-   *   3. `policy.alwaysJournal` / `policy.busOnly` phase rules
-   *   4. Default-deny on unknown phases
-   */
-  private publish(envelope: ProtocolEvent): Effect.Effect<void, JournalError, never> {
-    const decision = this.decide(envelope);
-    if (decision === "drop") return Effect.void;
-    if (decision === "always" || decision === "journal") {
-      return Effect.zipRight(this.bus.append(envelope), this.journal.append(envelope));
-    }
-    return this.bus.append(envelope);
-  }
-
-  private decide(envelope: ProtocolEvent): "always" | "journal" | "bus-only" | "drop" {
-    return this.decideFromShape(envelope.name, envelope.phase);
-  }
-
-  /**
-   * Policy routing keyed by the cheapest-to-compute envelope subset
-   * (name + phase). Lets `emitLazy` / `emitDeltaLazy` decide whether
-   * to construct the envelope at all before paying ULID + timestamp +
-   * payload cost.
-   */
-  private decideFromShape(
-    name: string,
-    phase: EventPhase,
-  ): "always" | "journal" | "bus-only" | "drop" {
-    const override = this.policy.override ? matchOverride(name, this.policy.override) : undefined;
-    if (override === "drop") return "drop";
-    if (override === "always") return "always";
-    if (override === "bus-only") return "bus-only";
-    if (this.policy.alwaysJournal.includes(phase)) return "journal";
-    if (this.policy.busOnly.includes(phase)) return "bus-only";
-    return "bus-only";
-  }
 }
-
-function matchOverride(
-  name: string,
-  table: Readonly<Record<string, "always" | "bus-only" | "drop">>,
-): "always" | "bus-only" | "drop" | undefined {
-  if (name in table) return table[name];
-  let best: { key: string; value: "always" | "bus-only" | "drop" } | undefined;
-  for (const [key, value] of Object.entries(table)) {
-    if (name.startsWith(key) && (!best || key.length > best.key.length)) {
-      best = { key, value };
-    }
-  }
-  return best?.value;
-}
-
-/**
- * Surfaced through the `runOperation` failure channel when an operation
- * terminates with a non-success outcome (failed, canceled, vetoed,
- * deferred). The `terminal` field exposes the typed envelope.
- *
- * On the `failed` path, the substrate publishes the terminal:failed
- * envelope BUT re-raises the body's original typed error rather than
- * wrapping in `OperationOutcomeError`. Veto / canceled / deferred / the
- * replay path for cached failed terminals use this error class so the
- * caller can pattern-match.
- *
- * Subclass of {@link AgentickError} (ADR 41) — `err instanceof
- * AgentickError` narrows to the framework-error root.
- */
-export class OperationOutcomeError extends AgentickError {
-  readonly _tag = "OperationOutcomeError" as const;
-  readonly outcome: CommandOutcome;
-  readonly terminal: TerminalEvent;
-  constructor(args: {
-    readonly outcome: CommandOutcome;
-    readonly terminal: TerminalEvent;
-    readonly cause?: unknown;
-  }) {
-    super(`operation outcome: ${args.outcome}`, { cause: args.cause });
-    this.outcome = args.outcome;
-    this.terminal = args.terminal;
-  }
-}
-
-registerAgentickError("OperationOutcomeError", OperationOutcomeError);
 
 // Re-export InboxError type so concrete harnesses can type-narrow
 // without pulling from @agentick/spec-next directly.
