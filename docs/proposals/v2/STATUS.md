@@ -1739,7 +1739,15 @@ blueprint's design decisions; this is execution-level).
   submission or a session-level policy callback, NOT a config subsystem); small pass on
   tasks-next + loop/session. Agentick can already express unified-exec's whole tool
   surface (Pattern B tasks + sandbox + stdin tool) — the wake is the ONE missing
-  capability. (4) remaining audit ergonomics (tracker); (5) candidates after: OpenAI
+  capability. (3b) **TOOL-RESULT CURRENCY unification (Ryan-confirmed):** widen SERVER
+  handler returns to the ADR-70 currency (`string | ContentBlock[] | envelope{content,
+  structuredContent?, isError?, metadata?}` | TaskHandle) — today only client-relayed
+  results accept it (asymmetry). Normalize ALL results to the canonical envelope at the
+  dispatch boundary (`normalizeToolResult` already exists — move/reuse at the one point),
+  advertise the canonical shape + use it internally. Handler-declarable ≠ executor-stamped:
+  `executedBy`/`durationMs`/presentation stay executor-only (provenance-spoof rule, same
+  as ClientToolAnnotations exclusion). Additive — bare ContentBlock[] stays valid (union
+  member). (4) remaining audit ergonomics (tracker); (5) candidates after: OpenAI
   Responses API, devtools attention, ai-sdk request-half, XHarness→X sweep,
   app-harness flake fix, Ernesto (gate met).
 

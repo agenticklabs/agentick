@@ -55,8 +55,11 @@ import {
   ulid,
   SESSION_ESCALATION_MESSAGE_TYPE,
   ESCALATION_TIMEOUT_MS,
+  SESSION_TASK_WAKE_MESSAGE_TYPE,
+  TASK_WAKE_SOURCE,
   type EscalationEnvelopePayload,
   type EscalationHop,
+  type SessionTaskWakePayload,
 } from "@agentick/runtime-next";
 import { createLocalPubSub, type LocalPubSub } from "@agentick/pubsub-next";
 import { View } from "@agentick/store-next";
@@ -74,6 +77,7 @@ import type {
   MessageInbox,
   OperationJournal,
   ProgressUpdate,
+  SendInput,
   TaskCreationInput,
   TaskElicitFactory,
   TaskEvent,
@@ -90,6 +94,8 @@ import type {
   TaskStore,
   TaskStoreQuery,
   TaskTransition,
+  TaskWakeOutcome,
+  TaskWakePolicy,
   TaskWork,
   TaskWorkContext,
   TasksHarnessProtocol,
@@ -152,6 +158,27 @@ interface LiveTask {
   execution: TaskExecution | undefined;
   /** ttl reaper timer (ADR 68) — set when the record has a `ttl`; cleared on terminal (`settle`). */
   ttlTimer?: ReturnType<typeof setTimeout>;
+  /**
+   * Resolved wake policy (TASK-WAKE seam) — `opts.wake ?? harness.defaultWake`,
+   * held only when truthy (a `wake` FSM was armed). The callable form is run
+   * at {@link fireWake} time (so a consumed wake never invokes it).
+   */
+  wakePolicy?: TaskWakePolicy;
+  /**
+   * Wake FSM:
+   *   `"none"`     — no wake armed (no policy, or `false`).
+   *   `"armed"`    — policy present, not yet fired or consumed. A deferred
+   *                  fire may be scheduled ({@link wakeTimer}).
+   *   `"consumed"` — an in-band read (get/status/result terminal) or a cancel
+   *                  saw the outcome first → the wake will never fire.
+   *   `"fired"`    — the wake was delivered (or suppressed by a `null`-
+   *                  returning callable policy). One-shot; never re-arms.
+   * Exactly-once holds because every transition off `"armed"` is a
+   * single synchronous check-and-set on this field.
+   */
+  wakeState: "none" | "armed" | "consumed" | "fired";
+  /** Deferred-fire handle — a one-turn grace window so a same-turn in-band read can consume. */
+  wakeTimer?: ReturnType<typeof setImmediate>;
 }
 
 interface Deferred<T> {
@@ -218,6 +245,17 @@ export interface TasksHarnessOptions {
    */
   readonly buildElicit?: TaskElicitFactory;
   /**
+   * Session-level default {@link TaskWakePolicy} (TASK-WAKE seam) — applied to
+   * every submit that does NOT pass its own `wake`. `undefined` (default) =
+   * no wake unless a task opts in per-submit. Set it (typically via the app's
+   * `tasks.defaultWake`) to "wake the model on every backgrounded completion
+   * by default" — codex-parity ergonomics — while per-task `wake: false` /
+   * `() => null` still overrides/suppresses. The per-submit `wake` is the
+   * primary seam; this is the overridable default (capability, not opinion —
+   * default OFF because waking is intrusive, flippable app-wide).
+   */
+  readonly defaultWake?: TaskWakePolicy;
+  /**
    * Resolved interceptor snapshot (ADR 76 tier 3 + ADR 83 amendment) — the
    * parent scope's resolved interceptors (guards, `.use` transforms, AND
    * declarative command hooks adapted to op-scoped middleware), folded in at
@@ -280,6 +318,15 @@ export class TasksHarness
    * escalation); `ctx.elicit` then throws on use.
    */
   private readonly buildElicit: TaskElicitFactory | undefined;
+  /** Session-level default wake policy (TASK-WAKE seam). `undefined` = no default. */
+  private readonly defaultWake: TaskWakePolicy | undefined;
+  /**
+   * Set at the TOP of {@link close} (before the cancel cascade) so a terminal
+   * transition driven BY close never schedules/fires a zombie wake. Distinct
+   * from the per-task `wakeState` because a detached task (not cancelled on
+   * close) could still settle after this flag flips.
+   */
+  private closing = false;
 
   /**
    * Resolves once hydration (orphan accounting, ADR 68) has run — chained
@@ -327,6 +374,7 @@ export class TasksHarness
       this.executors.set(executor.kind, executor);
     }
     this.buildElicit = options.buildElicit;
+    this.defaultWake = options.defaultWake;
     // Hydration reads the store AFTER inbox registration. `ready` is a
     // readonly BaseHarness field (can't reassign), so this is a sibling
     // barrier. TODO(#134-followup): fold into `ready` if BaseHarness gains
@@ -452,6 +500,12 @@ export class TasksHarness
         pollInterval: opts.pollInterval,
       }),
     };
+    // Resolve the wake policy (TASK-WAKE seam): per-submit `wake` wins;
+    // omitted → the session-level `defaultWake`. `??` respects an explicit
+    // `wake: false` (which overrides a truthy default → no wake). Arm the FSM
+    // only when the resolved policy is truthy.
+    const wakePolicy = opts.wake ?? this.defaultWake;
+    const wakeArmed = wakePolicy !== undefined && wakePolicy !== false;
     const live: LiveTask = {
       record,
       controller: new AbortController(),
@@ -463,6 +517,8 @@ export class TasksHarness
       }),
       resultDeferred: makeDeferred<unknown>(),
       execution: undefined,
+      wakeState: wakeArmed ? "armed" : "none",
+      ...(wakeArmed ? { wakePolicy } : {}),
     };
     // Cache (LiveTask) + durable-write (projected record) the initial
     // `working` snapshot, then live-emit it BEFORE the executor starts (so
@@ -669,22 +725,123 @@ export class TasksHarness
     const { record, resultDeferred } = live;
     if (record.status === "completed") {
       resultDeferred.resolve(record.result);
+    } else {
+      resultDeferred.reject(
+        this.rejectionOf(
+          record.taskId,
+          record.status as "failed" | "cancelled" | "interrupted",
+          record.failure,
+        ),
+      );
+    }
+    // TASK-WAKE: an unobserved terminal transition schedules exactly one wake.
+    // Deferred one turn (see scheduleWake) so a same-turn in-band read can
+    // still consume it; suppressed if already observed / cancelled / closing.
+    this.scheduleWake(live);
+  }
+
+  // ─────────── task-completion wake (TASK-WAKE seam) ───────────
+
+  /**
+   * In-band observation (consume-on-observe). Called from the in-band read
+   * points — `get`/`status` returning a terminal snapshot, `result(taskId)`
+   * at invocation, and the cancel paths. Flips an ARMED wake to CONSUMED and
+   * cancels any pending deferred fire. A no-op once the wake has fired
+   * (one-shot) or was never armed.
+   *
+   * This single synchronous check-and-set IS the read-side of exactly-once:
+   * whether an observation or the deferred fire runs first, exactly one of
+   * {consumed, fired} results.
+   */
+  private markObserved(live: LiveTask): void {
+    if (live.wakeState !== "armed") return;
+    live.wakeState = "consumed";
+    if (live.wakeTimer !== undefined) {
+      clearImmediate(live.wakeTimer);
+      live.wakeTimer = undefined;
+    }
+  }
+
+  /**
+   * Schedule the deferred wake fire (from `settle`). No-op if the wake was
+   * already consumed (a pre-settle `result`/cancel observation) or the harness
+   * is closing. Otherwise arm a ONE-TURN deferral (`setImmediate`) — the grace
+   * window in which a same-turn synchronous in-band read (a `get`/`status`
+   * right after the terminal transition) can still consume the wake before it
+   * fires. When the turn elapses unobserved, {@link fireWake} runs.
+   */
+  private scheduleWake(live: LiveTask): void {
+    if (live.wakeState !== "armed") return; // consumed pre-settle, or no wake
+    if (this.closing) {
+      live.wakeState = "consumed"; // a close-driven terminal never wakes
       return;
     }
-    resultDeferred.reject(
-      this.rejectionOf(
-        record.taskId,
-        record.status as "failed" | "cancelled" | "interrupted",
-        record.failure,
-      ),
-    );
+    live.wakeTimer = setImmediate(() => {
+      live.wakeTimer = undefined;
+      this.fireWake(live);
+    });
+  }
+
+  /**
+   * Fire the wake (deferred, unobserved path). Guards `wakeState === "armed"`
+   * (a read may have consumed it during the deferral); one-shot → `"fired"`.
+   * Runs the resolved policy against the bounded outcome: `true` → the default
+   * bounded-metadata send; a callable → its shaped `SendInput` (or `null` to
+   * suppress). Delivers via a fire-and-forget `inbox.send` to the owning
+   * session (`session:{sessionId}`), which turns it into a real, journaled
+   * execution. An evicted/closed session has no registered inbox address, so
+   * the send fails `AddressNotFound` and the wake is dropped — the completion
+   * stays observable via the durable task store (the eviction decision).
+   */
+  private fireWake(live: LiveTask): void {
+    if (live.wakeState !== "armed") return;
+    live.wakeState = "fired";
+    const policy = live.wakePolicy;
+    if (policy === undefined) return; // defensive — armed implies a policy
+
+    const sessionId = live.record.scope.sessionId;
+    if (sessionId === undefined) return; // no session to wake (bare harness)
+
+    const outcome = this.wakeOutcome(live.record);
+    // `armed` only ever stores `true` or a function (never `false`); the
+    // `typeof` check narrows the union and treats `true` as the default.
+    const send = typeof policy === "function" ? policy(outcome) : buildDefaultWakeSend(outcome);
+    if (send === null) return; // callable form suppressed this wake
+
+    const payload: SessionTaskWakePayload = { taskId: live.record.taskId, outcome, send };
+    // Fire-and-forget (tell). Swallow AddressNotFound / inbox-closed — a wake
+    // TODO(task-wake): narrow this catch — today it swallows ALL errors, not
+    // just the benign address-gone class; a real delivery bug is invisible.
+    // to an evicted or torn-down session is a benign drop, not an error.
+    void Effect.runPromise(
+      this.inbox.send(`session:${sessionId}`, {
+        type: SESSION_TASK_WAKE_MESSAGE_TYPE,
+        payload,
+      }),
+    ).catch(() => undefined);
+  }
+
+  /** Bounded terminal metadata for a wake — identity + outcome, NEVER raw output. */
+  private wakeOutcome(record: TaskRecord): TaskWakeOutcome {
+    return {
+      taskId: record.taskId,
+      status: record.status,
+      durationMs: record.updatedAt - record.createdAt,
+      ...omitUndefined({ statusMessage: record.statusMessage, failure: record.failure }),
+    };
   }
 
   // ─────────── lookups (served from the projection — the store read-model) ───────────
 
   get(taskId: string): TaskInfo | undefined {
     const live = this.view.getSync(taskId);
-    return live ? this.snapshot(live.record) : undefined;
+    if (!live) return undefined;
+    // In-band observation point (TASK-WAKE): a `get` that returns a TERMINAL
+    // snapshot means the model saw the outcome in-band → consume the wake.
+    // A `get` on a still-`working` task observes no outcome (polling) and
+    // does NOT consume.
+    if (this.isTerminal(live.record.status)) this.markObserved(live);
+    return this.snapshot(live.record);
   }
 
   list(): readonly TaskInfo[] {
@@ -694,7 +851,11 @@ export class TasksHarness
   }
 
   status(taskId: string): TaskStatus | undefined {
-    return this.view.getSync(taskId)?.record.status;
+    const live = this.view.getSync(taskId);
+    if (!live) return undefined;
+    // Same in-band observation semantics as `get` — a terminal read consumes.
+    if (this.isTerminal(live.record.status)) this.markObserved(live);
+    return live.record.status;
   }
 
   async result<T = readonly ContentBlock[]>(taskId: string): Promise<T> {
@@ -702,6 +863,12 @@ export class TasksHarness
     if (!live) {
       throw new UnknownTaskError({ taskId });
     }
+    // In-band observation point (TASK-WAKE): an awaiter (the model via
+    // `session_tasks_await`) is committed to delivering the outcome in-band,
+    // so consume the wake AT INVOCATION — this pre-empts the terminal
+    // transition, so a `result(taskId)` issued while the task is still
+    // `working` suppresses the wake before `settle` can schedule it.
+    this.markObserved(live);
     return (await live.resultDeferred.promise) as T;
   }
 
@@ -727,6 +894,10 @@ export class TasksHarness
    * this returns immediately, exactly as before.
    */
   private async cancelInternal(live: LiveTask, reason: string): Promise<void> {
+    // The canceller (model `session_tasks_cancel`, ttl reaper, or the close
+    // cascade) is already aware of the outcome — consume the wake BEFORE the
+    // terminal transition so a cancelled task never wakes.
+    this.markObserved(live);
     this.applyTransition(live, { status: "cancelled", failure: { kind: "aborted", reason } });
     live.controller.abort(reason);
     if (live.execution !== undefined) {
@@ -750,6 +921,17 @@ export class TasksHarness
   // ─────────── close ───────────
 
   override async close(): Promise<void> {
+    // TASK-WAKE: latch `closing` BEFORE the cancel cascade so a terminal
+    // transition driven by close never schedules a wake, and cancel any
+    // deferred wake already in flight — no zombie sends after close.
+    this.closing = true;
+    for (const live of this.view.listSync()) {
+      if (live.wakeTimer !== undefined) {
+        clearImmediate(live.wakeTimer);
+        live.wakeTimer = undefined;
+      }
+      if (live.wakeState === "armed") live.wakeState = "consumed";
+    }
     // Abort non-detached in-flight tasks BEFORE the inbox teardown so
     // subscribers see the terminal state through the normal failure path.
     // DETACHED tasks are left running + persisted (ADR 68) — the shared
@@ -1109,6 +1291,9 @@ export class TasksHarness
       }),
       resultDeferred,
       execution: undefined,
+      // A wake policy is runtime-local (never persisted) — a hydrated orphan
+      // carries none, so an `interrupted`-on-hydration transition never wakes.
+      wakeState: "none",
     };
     // Cache-only adopt: this record CAME FROM the store (hydration/resume), so
     // re-persisting it would be wrong. `seedSync` sets the cache without a
@@ -1117,6 +1302,33 @@ export class TasksHarness
     this.view.seedSync(live);
     return live;
   }
+}
+
+/**
+ * The default `wake: true` send — a bounded-metadata user-role message that
+ * names the task, its terminal status + duration, and points the model at the
+ * `session_tasks_*` tools to fetch the actual output. **NO raw output.** Role
+ * `"user"` so the send drives a model turn (an `"event"`-role message would
+ * not reach the model); the `source: TASK_WAKE_SOURCE` metadata (stamped
+ * authoritatively by the session too) attributes it as a system-generated
+ * wake rather than a real user turn.
+ */
+function buildDefaultWakeSend(outcome: TaskWakeOutcome): SendInput {
+  const summary =
+    outcome.status === "completed"
+      ? "completed successfully"
+      : outcome.status === "failed"
+        ? `failed${outcome.failure?.reason ? `: ${outcome.failure.reason}` : ""}`
+        : outcome.status;
+  const text =
+    `Background task ${outcome.taskId} ${summary} after ${outcome.durationMs}ms.` +
+    (outcome.statusMessage ? ` ${outcome.statusMessage}` : "") +
+    " Use session_tasks_get or session_tasks_await to retrieve its result if you need it.";
+  const metadata = { source: TASK_WAKE_SOURCE, taskId: outcome.taskId };
+  return {
+    messages: [{ role: "user", content: text, metadata }],
+    metadata,
+  };
 }
 
 // Reason-string helpers (reasonOf / causeValue) live in

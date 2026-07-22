@@ -36,6 +36,7 @@ import {
 import { ElicitationHarness } from "@agentick/elicitation-next";
 import { TasksHarness, InMemoryTaskStore } from "@agentick/tasks-next";
 import type { TaskExecutor, TaskStore } from "@agentick/tasks-next";
+import type { TaskWakePolicy } from "@agentick/spec-next";
 import { ResourcesHarness } from "@agentick/resources-next";
 import { LoopExecutorHarness } from "@agentick/loop-executor-next";
 import { isLanguageModelAdapter, type LanguageModelAdapter } from "@agentick/model-next";
@@ -317,6 +318,14 @@ export interface AppHarnessOptions<P = unknown> {
   readonly tasks?: {
     readonly store?: TaskStore;
     readonly executors?: readonly TaskExecutor[];
+    /**
+     * App-wide default {@link TaskWakePolicy} (TASK-WAKE seam) — applied to
+     * every task submitted without its own `wake`. `undefined` (default) = no
+     * wake unless a task opts in. Set `true` for "wake the model on every
+     * backgrounded task completion" (codex-parity); a callback shapes/
+     * suppresses per-outcome. Per-task `wake` always overrides.
+     */
+    readonly defaultWake?: TaskWakePolicy;
   };
 
   /**
@@ -744,6 +753,13 @@ export class AppHarness<P = unknown>
    * only).
    */
   private readonly taskExecutors: readonly TaskExecutor[];
+  /**
+   * App-wide default {@link TaskWakePolicy} (TASK-WAKE seam), from
+   * `options.tasks.defaultWake`. Injected into every session's `TasksHarness`
+   * as its `defaultWake`; a per-submit `wake` overrides it. `undefined` = no
+   * default wake.
+   */
+  private readonly taskDefaultWake: TaskWakePolicy | undefined;
 
   /**
    * App-scoped durable session registry (E11). Constructed ONCE (from
@@ -1005,6 +1021,7 @@ export class AppHarness<P = unknown>
     // session). Injected into every session's TasksHarness below.
     this.taskStore = options.tasks?.store ?? new InMemoryTaskStore();
     this.taskExecutors = options.tasks?.executors ?? [];
+    this.taskDefaultWake = options.tasks?.defaultWake;
     this.sessionStore = options.sessions?.store ?? new InMemorySessionStore();
 
     // PA1/PA2/PA3 — app-signal cascade + bounded live registry.
@@ -1593,6 +1610,8 @@ export class AppHarness<P = unknown>
       // `{ sessionId }` above.
       store: this.taskStore,
       executors: this.taskExecutors,
+      // TASK-WAKE — app-wide default wake policy (per-submit `wake` overrides).
+      ...(this.taskDefaultWake !== undefined ? { defaultWake: this.taskDefaultWake } : {}),
       // ADR 76/83 — the app's resolved interceptor snapshot incl. the app+session
       // command hooks as op-scoped middleware. Live via `interceptorParent`.
       inheritedInterceptors,

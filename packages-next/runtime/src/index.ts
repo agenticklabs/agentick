@@ -87,6 +87,13 @@ export {
   type EscalationInterceptor,
 } from "./substrate/escalation-protocol.js";
 export {
+  SESSION_TASK_WAKE_MESSAGE_TYPE,
+  TASK_WAKE_SOURCE,
+  type SessionTaskWakeMessageType,
+  type TaskWakeSource,
+  type SessionTaskWakePayload,
+} from "./substrate/task-wake-protocol.js";
+export {
   RequestResponseRegistry,
   type RegisterOptions,
   type RegisteredRequest,

@@ -19,10 +19,13 @@ import {
   withCallMiddleware,
   SESSION_ESCALATION_MESSAGE_TYPE,
   ESCALATION_TIMEOUT_MS,
+  SESSION_TASK_WAKE_MESSAGE_TYPE,
+  TASK_WAKE_SOURCE,
   type EscalationEnvelopePayload,
   type EscalationHop,
   type EscalationInterceptor,
   type EscalationOutcome,
+  type SessionTaskWakePayload,
 } from "@agentick/runtime-next";
 import type { JournalingPolicy, LoopExecutorProtocol, CompilerProtocol } from "@agentick/spec-next";
 import type {
@@ -1577,9 +1580,57 @@ export class SessionHarness<P = unknown>
     if (msg.type === SESSION_ESCALATION_MESSAGE_TYPE) {
       return this.handleEscalation(msg as MessageEnvelope<EscalationEnvelopePayload>);
     }
+    // TASK-WAKE — a backgrounded task completed UNOBSERVED and synthesizes a
+    // follow-up send into this session (its owning session). Fire-and-forget
+    // (tell): the tasks harness `send`s this, does not `ask`.
+    if (msg.type === SESSION_TASK_WAKE_MESSAGE_TYPE) {
+      return this.handleTaskWake(msg as MessageEnvelope<SessionTaskWakePayload>);
+    }
     return Effect.fail(
       new HandlerError({ cause: new Error("session inbox dispatch not yet wired (Phase 4e+)") }),
     );
+  }
+
+  /**
+   * Turn a task-completion wake into a real execution (TASK-WAKE seam). The
+   * wake rides the NORMAL send path — `session.send(...)` — so it is journaled,
+   * hooked, and streamed like any turn; nothing bespoke. Queue-vs-run is
+   * `send`'s own concern: if an execution is already running, `send` STEERS
+   * (appends the wake message to the in-flight turn — no collision); if idle,
+   * it starts a fresh execution.
+   *
+   * Provenance is stamped AUTHORITATIVELY here — `source: "task-wake"` +
+   * `taskId` on both the execution-level `metadata` and every wake message's
+   * `metadata` — regardless of whether a callable wake policy set it, so
+   * timelines/clients always attribute the synthesized turn correctly.
+   *
+   * Fire-and-forget: we `await send(...)` only to the point the handle is
+   * created (queued/started), NOT `.result` — the model reacts on its own
+   * timeline. A send failure (e.g. the session is mid-close) surfaces via the
+   * inbox tell-error path, not back to the task.
+   */
+  private handleTaskWake(
+    msg: MessageEnvelope<SessionTaskWakePayload>,
+  ): Effect.Effect<unknown, MessageHandlerError, never> {
+    return Effect.tryPromise<unknown, MessageHandlerError>({
+      try: async () => {
+        const payload = msg.payload;
+        if (payload === undefined) return undefined;
+        const { taskId, send } = payload;
+        const provenance = { source: TASK_WAKE_SOURCE, taskId };
+        const stamped: SendInput<P> = {
+          ...(send as SendInput<P>),
+          metadata: { ...send.metadata, ...provenance },
+          messages: (send.messages ?? []).map((m) => ({
+            ...m,
+            metadata: { ...m.metadata, ...provenance },
+          })),
+        };
+        await this.send(stamped);
+        return undefined;
+      },
+      catch: (cause): MessageHandlerError => new HandlerError({ cause }),
+    });
   }
 
   /**

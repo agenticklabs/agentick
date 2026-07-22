@@ -103,6 +103,26 @@ plain forward/resolve (T1 parity). The escalation envelope carries a `lineage`
 path (origin task + session → each forwarding hop, principal-stamped best-
 effort per ADR 51) the interceptor can inspect.
 
+### Task-completion wake (the TASK-WAKE seam)
+
+`handleMessage` also handles a second inbox message — a **task-completion
+wake** (`session:task-wake`). When a backgrounded (Pattern B) task finishes
+while **nothing is observing it**, its `TasksHarness` fires a fire-and-forget
+`inbox.send` here carrying bounded completion metadata (task id, terminal
+status, duration — **never raw output**) plus a `SendInput`. The session turns
+it into a real turn via the **normal `session.send` path** — journaled, hooked,
+streamed — so a wake that arrives while an execution is running STEERS into it
+(no colliding second execution) and an idle session runs a fresh one.
+
+Provenance is stamped authoritatively here: `metadata.source === "task-wake"`
+plus `taskId` on both the execution and every wake message, so timelines and
+clients attribute the synthesized turn to a task completion rather than a real
+user turn. Consume-on-observe dedup + the wake policy itself live in
+`@agentick/tasks-next` (per-task `wake` / app-wide `tasks.defaultWake`); the
+session only owns the receive-and-send half. Verified by
+`__tests__/task-wake.spec.ts` (real journaled wake execution + provenance,
+observed → no wake, steering during a running execution).
+
 ```ts
 // 90% case — sugar
 const name = await session.elicit.text("Your name?");

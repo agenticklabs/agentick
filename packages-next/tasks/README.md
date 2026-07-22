@@ -113,6 +113,7 @@ This is the `useTasks` family source in [ADR 85](../../docs/proposals/v2/bluepri
 | 68-pg  | `@agentick/tasks-store-postgres-next` durable store — durable records + `interrupted`-on-restart + terminal adoption across app-process restart (cross-restart child reattach-by-pid still deferred)                                                                                                                                                                                                                       | ✅     |
 | 68-ir  | `ctx.awaitingInput` — `working → input_required → working` status wrapper (the origin seam for elicitation escalation); worker self-terminates on parent IPC `disconnect` (#120-followup)                                                                                                                                                                                                                                  | ✅     |
 | 69-T1  | Request escalation — task `ctx.elicit` escalates to the connected client via nested `inbox.ask`; `interactive ⊥ detached` guard. Root-session case                                                                                                                                                                                                                                                                         | ✅     |
+| WAKE   | Task-completion wake — an unobserved terminal transition synthesizes exactly one follow-up `session.send` (bounded metadata, no raw output) via `inbox.send` to `session:{sessionId}`; consume-on-observe dedup (get/status/result/cancel); per-task `wake` + session `defaultWake`                                                                                                                                          | ✅     |
 | 69-T2a | Multi-agent bubbling — recursive spawn-lineage hop (`session → parentSessionId`), ancestor **interception** (`session.interceptEscalation` — answer / deny / forward), `lineage` provenance (origin task+session → each hop), and the `awaitingInput(Effect)` overload (real fiber interruptibility)                                                                                                                       | ✅     |
 | 69-T2b | Cross-process child elicit bridge — a **forked** task's `ctx.elicit` marshals a serializable intent `{method, args}` over IPC; the parent (`ChildProcessTaskExecutor`) reconstructs the live-schema request via the injected sugar and feeds the SAME `escalate` chain, so interception + lineage apply for free. The live `StandardSchemaV1` never crosses (sugar methods cross; raw `form(liveSchema)` fails loud)       | ✅     |
 | D      | Effect-native internals — `Effect<T,E,never>` work overload + real `Fiber.interrupt` on cancel (#155); events fan out over Effect `Stream` (`LocalPubSub` + `Stream.takeUntil`). **Landed.** The protocol _surface_ stays Promise/`AsyncIterable` by design (Promise-at-the-edge, Effect-internal — as everywhere in v2); exposing `Effect`/`Stream` at the boundary is a whole-framework decision, not a tasks-local gap. | ✅     |
@@ -218,6 +219,61 @@ const refBlocks = await session.dispatch("deploy_branch", input, {
 The `_kind: "session_task_ref"` discriminator matches the `session_*`
 namespace used by the model tools — `session_tasks_get`,
 `session_tasks_cancel`, etc. consume the `taskId` from this ref.
+
+### Task-completion wake (the TASK-WAKE seam)
+
+Pattern B lets the model move on. But if a backgrounded task finishes
+while **nothing is observing it** — the model already responded and the
+session went idle — the completion would sit silently in the store until
+the next turn. The **wake** seam closes that gap: an unobserved terminal
+transition synthesizes **exactly one** follow-up `session.send` into the
+owning session (a real, journaled execution), nudging the model to react.
+
+Opt in per-task with `wake` on `submit`, or app-wide with
+`tasks.defaultWake`:
+
+```ts
+// per task — the default bounded-metadata wake
+ctx.tasks.submit(work, { wake: true });
+
+// shape or suppress it (a typed callback at the decision point)
+ctx.tasks.submit(work, {
+  wake: (outcome) =>
+    outcome.status === "failed"
+      ? { messages: [{ role: "user", content: `heads-up: ${outcome.taskId} failed` }] }
+      : null, // return null to suppress
+});
+```
+
+- **Bounded metadata, never raw output.** The wake carries the task id,
+  terminal status, and duration — NOT the result blocks. The model
+  fetches the actual output via `session_tasks_get` / `session_tasks_await`
+  if it needs it. `wake: true` synthesizes a default user-role message;
+  provenance (`metadata.source === "task-wake"` + `taskId`) is stamped so
+  timelines/clients attribute it as a system wake, not a real user turn.
+- **Consume-on-observe (exactly-once).** The wake is **consumed** — never
+  fires — if the completion is seen in-band first: the model called
+  `session_tasks_await` (a `result(taskId)` read) or `session_tasks_get` /
+  `status(taskId)` and saw the terminal state, or the task was cancelled.
+  Exactly-once holds between the in-band and out-of-band paths. The wake
+  is deferred one event-loop turn so a same-turn in-band read wins the
+  race; a read that runs after the wake has fired does not un-fire it.
+- **Steering-safe.** The wake rides the normal `session.send` path, so a
+  completion while an execution is running STEERS into that execution
+  (no colliding second execution); an idle session runs a fresh one.
+- **Close / eviction.** A closing harness cancels pending wakes (no zombie
+  sends). A wake to an evicted/closed session has no inbox address and is
+  dropped — the completion stays observable via the durable store. The
+  wake policy is **runtime-local**: it is not persisted and does not
+  survive hydration (rehydrate-then-wake was rejected as LRU-thrashing;
+  the durable store already makes the outcome observable).
+
+Verified by `src/__tests__/task-wake.spec.ts` (fire / bounded metadata /
+observed-first via result+get+status / cancel-consumes / race both
+orderings / callable shape+suppress / default policy + override / close /
+eviction-drop) and `@agentick/session-next`'s
+`src/__tests__/task-wake.spec.ts` (real journaled wake execution +
+provenance, observed → no wake, steering during a running execution).
 
 ## Model-facing tools
 
@@ -363,6 +419,7 @@ submit<T = readonly ContentBlock[]>(
     input?: unknown; // audit / replay; payload a by-ref executor resolves work with
     handlerRef?: string; // by-ref work for an out-of-process executor
     executorKind?: string; // ADR 68 Build B — which registered executor runs this (default "in-process")
+    wake?: boolean | ((outcome: TaskWakeOutcome) => SendInput | null); // TASK-WAKE — see "Task-completion wake"
   },
 ): TaskHandle<T>
 ```

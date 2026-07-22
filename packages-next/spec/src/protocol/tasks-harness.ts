@@ -28,6 +28,7 @@ import type { Effect } from "effect";
 import type { ContentBlock } from "../data/content-blocks.js";
 import type { EventScope } from "../data/events.js";
 import type { Elicit } from "./elicit-api.js";
+import type { SendInput } from "./session-harness.js";
 
 // ============================================================================
 // FSM
@@ -233,6 +234,63 @@ export interface TaskWorkContext {
   readonly elicit: Elicit;
 }
 
+// ============================================================================
+// Task-completion wake (TASK-WAKE seam)
+// ============================================================================
+
+/**
+ * Bounded completion metadata handed to a {@link TaskWakePolicy} callback
+ * and carried on the synthesized wake send. **Deliberately bounded** — it
+ * carries the task's identity + terminal outcome, NEVER the raw result
+ * blocks. A wake nudges the model to react ("your background task finished");
+ * the model retrieves the actual output on its own via `session_tasks_get` /
+ * `session_tasks_await` if it needs it. Dumping the raw output into the wake
+ * would defeat the point (it would be an uncontrolled context injection) and
+ * is not offered.
+ */
+export interface TaskWakeOutcome {
+  readonly taskId: string;
+  /** Terminal state — `completed` | `failed` | `interrupted` (never `working` / `input_required`). */
+  readonly status: TaskStatus;
+  /** Wall-clock ms from `createdAt` to the terminal transition. */
+  readonly durationMs: number;
+  /** Human-readable summary, if the task set one. */
+  readonly statusMessage?: string;
+  /** Structured failure detail (present when `status === "failed"`). */
+  readonly failure?: TaskFailure;
+}
+
+/**
+ * Per-task wake policy (TASK-WAKE seam) — the seam-over-setting knob for
+ * "wake the session when this backgrounded task finishes while nothing is
+ * observing it." A backgrounded (Pattern B) task that reaches a terminal
+ * state UNOBSERVED synthesizes **exactly one** follow-up send into its owning
+ * session (a real, journaled execution), waking the model to react.
+ *
+ *   - `true`  — the framework synthesizes a default bounded-metadata wake
+ *               (a user-role message naming the task, its terminal status,
+ *               and duration; NO raw output).
+ *   - a callback `(outcome) => SendInput | null` — the adopter SHAPES the
+ *               wake (custom message / props / maxTicks / model override) or
+ *               SUPPRESSES it entirely by returning `null`. The callback runs
+ *               ONLY when the completion is actually going to wake (unobserved
+ *               + not during harness close), i.e. it is never invoked for a
+ *               wake that was consumed by an in-band read.
+ *   - `false` / omitted — no wake (today's behavior).
+ *
+ * **Consume-on-observe.** The wake is CONSUMED (never fires) if the completion
+ * is seen in-band first — the model called `session_tasks_await` (a
+ * `result(taskId)` read) or `session_tasks_get` / `status(taskId)` and saw the
+ * terminal state, or the task was explicitly cancelled. Exactly-once holds
+ * between the in-band and out-of-band paths.
+ *
+ * **Runtime-local.** A wake policy is process-local runtime state; it is NOT
+ * persisted on the {@link TaskRecord} and does NOT survive snapshot/hydration.
+ * A detached task that outlives its process and is later rehydrated does not
+ * wake — its completion remains observable via the durable task store.
+ */
+export type TaskWakePolicy = boolean | ((outcome: TaskWakeOutcome) => SendInput | null);
+
 export interface TaskCreationInput {
   /** TTL (ms) from creation. Omitted = no expiry. */
   readonly ttl?: number;
@@ -282,6 +340,14 @@ export interface TaskCreationInput {
    * scope — each session's tasks reach their own client.
    */
   readonly scope?: EventScope;
+  /**
+   * Task-completion wake policy (TASK-WAKE seam). When set (and not consumed
+   * by an in-band read), an unobserved terminal transition synthesizes
+   * exactly one follow-up send into the task's owning session. See
+   * {@link TaskWakePolicy}. Omitted → the harness's `defaultWake` (if any),
+   * else no wake.
+   */
+  readonly wake?: TaskWakePolicy;
 }
 
 // ============================================================================

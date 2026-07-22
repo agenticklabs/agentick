@@ -11,7 +11,12 @@
 
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import { omitUndefined } from "@agentick/utils-next";
-import type { TaskElicitFactory, TaskExecutor, TaskStore } from "@agentick/spec-next";
+import type {
+  TaskElicitFactory,
+  TaskExecutor,
+  TaskStore,
+  TaskWakePolicy,
+} from "@agentick/spec-next";
 
 import { TasksHarness } from "../harness.js";
 
@@ -38,6 +43,11 @@ export interface FakeTasksOptions {
    * bundled bare harness whose `ctx.elicit` throws "not configured".
    */
   readonly buildElicit?: TaskElicitFactory;
+  /**
+   * Session-level default {@link TaskWakePolicy} (TASK-WAKE seam). Applied to
+   * every submit that omits its own `wake`; a per-submit `wake` overrides.
+   */
+  readonly defaultWake?: TaskWakePolicy;
 }
 
 export async function fakeTasks(options: FakeTasksOptions = {}): Promise<FakeTasksBundle> {
@@ -54,6 +64,7 @@ export async function fakeTasks(options: FakeTasksOptions = {}): Promise<FakeTas
       executors: options.executors,
       store: options.store,
       buildElicit: options.buildElicit,
+      defaultWake: options.defaultWake,
     }),
   );
   await harness.ready;
