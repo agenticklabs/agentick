@@ -40,6 +40,7 @@ import type { TaskWakePolicy } from "@agentick/spec-next";
 import { ResourcesHarness } from "@agentick/resources-next";
 import { LoopExecutorHarness } from "@agentick/loop-executor-next";
 import { isLanguageModelAdapter, type LanguageModelAdapter } from "@agentick/model-next";
+import { buildTelemetryInterceptors, normalizeTelemetry } from "./telemetry-defaults.js";
 import { LanguageModelExecutor as TheLanguageModelExecutor } from "@agentick/model-executor-next";
 import {
   SessionHarness,
@@ -102,7 +103,7 @@ import type {
   ServiceRegistry,
   SessionExtension,
   SessionInstaller,
-  TelemetryLayer,
+  TelemetrySetting,
   ToolRegistration,
   Validator,
   SessionHarnessProtocol,
@@ -546,15 +547,35 @@ export interface AppHarnessOptions<P = unknown> {
   readonly metadata?: Readonly<Record<string, unknown>>;
 
   /**
-   * Telemetry `Layer` (Effect) — the adopter's OTel/observability backend
-   * (e.g. `@effect/opentelemetry`'s `NodeSdk`). Built into an app-scoped
-   * `ManagedRuntime` once at construction; app-edge operations run on it so
-   * `Effect.withSpan` annotations reach the configured tracer (ADR 78). BYO —
-   * the framework bundles no OTel dependency.
+   * Logical app name — the agent-identity dimension of telemetry (rung 1).
+   * When telemetry enrichment is on, it is stamped as `<ns>.app_name` on every
+   * span AND becomes the default `functionId` (a single-purpose app gets
+   * meaningful function-level traces with zero per-send config; multi-function
+   * apps override per send via `SendInput.telemetry.functionId`). Optional and
+   * otherwise inert — no behavior depends on it beyond telemetry.
+   */
+  readonly name?: string;
+
+  /**
+   * Telemetry switch (ADR 78, telemetry rung 1) — STRICTLY OPT-IN. Accepts:
+   *
+   *   - `true` — turn on the framework's enrichment defaults (polished span
+   *     attrs — model/tool/tick/session/app.name — plus token usage + cost on
+   *     model-generate terminals). The one switch.
+   *   - a `Layer` (Effect) — the adopter's OTel/observability backend (e.g.
+   *     `@effect/opentelemetry`'s `NodeSdk`), built into an app-scoped
+   *     `ManagedRuntime` so `Effect.withSpan` spans EXPORT. Also turns
+   *     enrichment on (you opted in). BYO — the framework bundles no OTel dep.
+   *   - a `{ serviceName?, attributes?, layer? }` object — enrichment on, plus
+   *     a service name / static attributes / optional exporter Layer.
+   *
+   * Omitted / `false` → OFF: no runtime, no enrichment interceptors, zero
+   * overhead. See "Observability" in `@agentick/runtime-next`'s README for the
+   * full model + exporter recipe.
    *
    * @see docs/proposals/v2/blueprint/78-telemetry-via-runtime-substrate.md
    */
-  readonly telemetry?: TelemetryLayer;
+  readonly telemetry?: TelemetrySetting;
 
   /**
    * Span-attribute namespace — the prefix on every `<ns>.op_id` / `<ns>.surface`
@@ -796,6 +817,21 @@ export class AppHarness<P = unknown>
   private readonly telemetryRuntime: ManagedRuntime.ManagedRuntime<never, never> | undefined;
 
   /**
+   * Telemetry enrichment interceptors (rung 1) — built ONCE from
+   * `options.telemetry` when the switch is on (`buildTelemetryInterceptors`),
+   * forwarded to every session so they ride the tier-4 `withCallMiddleware`
+   * send seam (the ONE path reaching model/tool/tick ops uniformly, incl. a BYO
+   * or per-tick-swapped executor). `[]` when telemetry is off → zero overhead.
+   */
+  private readonly telemetryMiddleware: readonly import("@agentick/spec-next").Middleware<
+    unknown,
+    unknown,
+    unknown
+  >[];
+  /** Logical app name (telemetry agent-identity dimension). See {@link AppHarnessOptions.name}. */
+  private readonly appName: string | undefined;
+
+  /**
    * Tool bridge surfaced to each session's HookBridges. Wraps the
    * shared HandlerResolver so compiler-side tools (React
    * `createTool` with `use()`) can register handlers at render time
@@ -987,8 +1023,24 @@ export class AppHarness<P = unknown>
             return { modelExecutor, target: modelExecutor.target };
           }
         : undefined;
+    // Telemetry switch (rung 1) — STRICTLY OPT-IN. Normalize the three forms
+    // (`true` | Layer | `{ serviceName?, attributes?, layer? }`) into: an
+    // exporter runtime (built ONCE from the Layer, when present) and the
+    // enrichment interceptor list (built when the switch is truthy). `false` /
+    // omitted → neither (zero overhead). A raw Layer counts as opt-in, so it
+    // gets enrichment too; the config object's `layer` is the exporter for the
+    // `{…}` form.
+    this.appName = options.name;
+    const telemetry = normalizeTelemetry(options.telemetry);
     this.telemetryRuntime =
-      options.telemetry !== undefined ? ManagedRuntime.make(options.telemetry) : undefined;
+      telemetry.layer !== undefined ? ManagedRuntime.make(telemetry.layer) : undefined;
+    this.telemetryMiddleware = telemetry.enabled
+      ? buildTelemetryInterceptors(this.telemetryNamespace, {
+          ...(this.appName !== undefined ? { appName: this.appName } : {}),
+          ...(telemetry.serviceName !== undefined ? { serviceName: telemetry.serviceName } : {}),
+          ...(telemetry.attributes !== undefined ? { attributes: telemetry.attributes } : {}),
+        })
+      : [];
 
     // Cascade: longhand (`options.session.*`) wins over shorthand
     // (`options.defaultMaxTicks` / `options.initialProps` /
@@ -1803,6 +1855,9 @@ export class AppHarness<P = unknown>
       // (ADR 78 brick #2), not per-harness fields. Nesting is unaffected.
       telemetryNamespace: this.telemetryNamespace,
       ...(this.telemetryRuntime !== undefined ? { telemetryRuntime: this.telemetryRuntime } : {}),
+      // Telemetry rung 1 — the app's enrichment interceptors ride every send's
+      // tier-4 seam (reaching model/tool/tick ops uniformly). `[]` when off.
+      telemetryMiddleware: this.telemetryMiddleware,
       // ADR 76/83 — the ONE resolved interceptor snapshot: `app.use(...)` /
       // `app.guard(...)` AND the app+session command hooks (as op-scoped
       // middleware) wrap every session op, folded in at construction. The

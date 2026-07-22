@@ -65,6 +65,9 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
         // 4b — steer/follow-up delivery. A JSON-clean string enum threads
         // straight through; the session owns the semantics.
         ...(params.delivery !== undefined ? { delivery: params.delivery } : {}),
+        // Telemetry rung 2 — per-call functionId + metadata. JSON-clean bag,
+        // threaded straight through; the session stamps it on every span.
+        ...(params.telemetry !== undefined ? { telemetry: params.telemetry } : {}),
       });
 
       // Register cancellation seam — `notifications/cancelled` from

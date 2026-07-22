@@ -26,6 +26,140 @@ Phase 2 of the v2 implementation plan — see
 
 ---
 
+## Observability / Telemetry
+
+Every operation already runs inside an OTel span (`runOperation` wraps each
+command body in `Effect.withSpan`). Telemetry here is **enrichment** of those
+spans — never a parallel subsystem. It is a **span ladder** with one switch on
+top and surgical seams underneath, all riding the ONE interceptor cascade
+(ADR 83). **Strictly opt-in** — nothing is auto-on.
+
+### The one switch (quickstart)
+
+```ts
+const app = await createApp(<Agent />, { name: "triage-bot", telemetry: true });
+```
+
+That is all. With the switch on you get, on every span the run touches:
+
+- `agentick.app.name` — your app `name` (agent-identity dimension).
+- `agentick.function.id` — **defaults to the app `name`**, so a single-purpose
+  app has function-level traces with zero extra config; override per send with
+  `session.send({ telemetry: { functionId } })` for a multi-function app.
+- model / tool / tick / session identity — `gen_ai.request.model`,
+  `gen_ai.system`, `agentick.tool.name`, `agentick.tick.index`,
+  `agentick.session_id` (and `execution_id` / `tick_id`, from the substrate).
+- **token usage + cost** on model-generate terminals —
+  `gen_ai.usage.input_tokens` / `gen_ai.usage.output_tokens`,
+  `gen_ai.response.finish_reason`, and `agentick.usage.cost_usd` (estimated via
+  `@agentick/model-next`'s pricing; absent for un-priced models — never a
+  fabricated zero).
+
+`telemetry` also accepts a Layer (`telemetry: NodeSdk.layer(...)` — enrichment
+on **and** export wired) or `{ serviceName?, attributes?, layer? }`.
+
+_Verified by `packages-next/app/src/__tests__/telemetry.spec.ts`._
+
+### Attribute-key naming rule
+
+- Keys are **dot-separated, never colon** — colons live only in span/op NAMES
+  (the command vocabulary, e.g. `model:command:generate`).
+- Where the **OTel GenAI semantic conventions** define a key, we use it
+  **verbatim** (`gen_ai.request.model`, `gen_ai.system`,
+  `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`,
+  `gen_ai.response.finish_reason`; `service.name` is the standard resource
+  key). Vendor LLM dashboards auto-recognize these — that is the payoff, so
+  they are **never whitelabeled**.
+- Framework-specific keys live under **`${telemetryNamespace}.*`** (default
+  `agentick.*`) — one knob (`createApp({ telemetryNamespace: "acme" })`)
+  renames the whole spine's framework attributes; the `gen_ai.*` standards stay
+  put.
+- Adopter ad-hoc keys are yours — we don't police them; the dot + namespace
+  convention above is the **recommendation**, not a gate.
+
+### The full coverage map (all six seams)
+
+```ts
+import {
+  annotateOperationSpan, // per-moment: inside any command body / interceptor
+  spanAttributes,        // per-op-type: attrs from the op input
+  spanMiddleware,        // named child span (or annotate current)
+} from "@agentick/runtime-next";
+
+// 1. PER-CALL — known at send time. Rides the tier-4 send seam.
+session.send({ telemetry: { functionId: "summarize", metadata: { requestId } } });
+
+// 2. PER-MOMENT — computed mid-execution, inside a body/interceptor (in-fiber).
+const handler = (input, { ctx }) =>
+  Effect.gen(function* () {
+    const hit = yield* lookup(input);
+    yield* annotateOperationSpan({ "acme.cache_hit": hit }); // this span, now
+    return hit;
+  });
+
+// 3. PER-OP-TYPE — static per command kind, from the op input. A decorated hook.
+harness.fx.use(spanAttributes((input) => ({ "gen_ai.request.model": input.target.modelId })));
+
+// 4. NAMED CHILD SPAN — carve a sub-operation out of a body's work.
+harness.fx.use(spanMiddleware("acme.retrieval", (input) => ({ "acme.query": input.q })));
+
+// 5. CONSTRUCTION-TIME — harness-wide (runner deps) + app-wide static attrs.
+createApp(<Agent />, { telemetry: { attributes: { "deploy.region": "us-east" } } });
+//   …and per harness, via OperationRunnerDeps.spanAttributes (the ADR-78 seam).
+
+// 6. RUNTIME LEASE — turn dynamic tracing on, then off.
+const stop = harness.fx.use(spanMiddleware(undefined, () => ({ "acme.debug": true })));
+stop(); // lease released — annotation stops
+```
+
+### Three altitudes — pick by _when you know the value_
+
+| Altitude    | Seam                                    | Known…                    |
+| ----------- | --------------------------------------- | ------------------------- |
+| per-call    | `send({ telemetry: { metadata } })`     | at send time              |
+| per-op-type | `spanAttributes(fn)` via a decorated hook | at registration, from input |
+| per-moment  | `annotateOperationSpan(attrs)` in a body | mid-execution, computed   |
+
+### Two ease guarantees
+
+- **No registration ceremony.** Every seam is a plain function call where you
+  already are — a value on `send`, a `yield*` in a body, a `.use(...)` on a
+  harness. No provider tree, no decorators, no config file.
+- **No framework change, ever.** The attribute bag is an open
+  `Record<string, unknown>` at every seam. A new dimension is a new key — never
+  a spec edit, never a release.
+
+### Zero overhead when off
+
+With `telemetry` omitted/`false`: **no interceptors are registered**, the
+tier-4 send seam short-circuits to a pass-through, and no runtime is built. The
+switch is the only thing that composes the enrichment.
+_Verified by `packages-next/app/src/__tests__/telemetry.spec.ts` ("switch OFF")
+and `packages-next/session/src/__tests__/telemetry.spec.ts` ("telemetry OFF")._
+
+### Exporting spans (the recipe — your vendor, your choice)
+
+The framework bundles **no** OTel dependency. Enrichment annotates spans; where
+they GO is your Effect tracing layer. Wire an exporter with
+`@effect/opentelemetry` and hand the app its Layer:
+
+```ts
+import { NodeSdk } from "@effect/opentelemetry";
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
+
+const telemetry = NodeSdk.layer(() => ({
+  resource: { serviceName: "triage-bot" },
+  spanProcessor: new BatchSpanProcessor(new OTLPTraceExporter()),
+}));
+
+const app = await createApp(<Agent />, { name: "triage-bot", telemetry });
+```
+
+The rung-3 helpers (`annotateOperationSpan`, `spanAttributes`, `spanMiddleware`)
+are _verified by `packages-next/runtime/src/__tests__/span-helpers.spec.ts`._
+
+---
+
 ## RuntimeContext — scope identity that propagates through Effect fibers
 
 `RuntimeContext` is the ambient state a handler, middleware, or

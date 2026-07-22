@@ -1784,8 +1784,17 @@ blueprint's design decisions; this is execution-level).
   ☐ C3 <Skill> RuntimeDeclarations slot decision (MEDIUM rec: dynamic/scoped
     availability is the real withSkills gap) + <Prompt> = LOW, <Guard> = NO.
   ☐ C4 devtools package attention (Ryan-flagged).
-  ☐ C5 OpenAI Responses API migration (unlocks provider tool results +
-    executedBy:provider:openai + richer streaming).
+  ☐ C5 OpenAI Responses API — SEPARATE adapter, NOT a migration (Ryan-decided
+    2026-07-22): `openai()` = Chat Completions default (the compat lingua franca —
+    vLLM/Groq/Together speak it; 90%+ of users stay on the stable path),
+    `openai.chat()` = explicit alias, `openai.responses()` = the Responses adapter.
+    Two definition objects via defineLanguageModelAdapter sharing client/auth but
+    with SEPARATE pure transforms — no mode-flag straddle through one pipeline.
+    Responses unlocks: executedBy:provider:openai (typed web_search_call/
+    code_interpreter_call items — the discrete tool-result blocks Chat Completions
+    lacks), full provider-tool results, semantic streaming events, reasoning items.
+    Deliberate non-use: previous_response_id server-side state (our timeline is the
+    source of truth). Not urgent — note, don't build.
   ☐ C6 ai-sdk provider-tools request-half (provider→factory registry).
   ☐ C7 Anthropic SDK bump (replace the optimistic local wire types w/ SDK types).
   ☐ C8 docs/website sweep + New-Package-Checklist refresh for -next packages.

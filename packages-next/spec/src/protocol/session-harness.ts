@@ -267,6 +267,36 @@ export interface SendInput<P = unknown> {
    * modes behave identically on an idle session (fresh execution).
    */
   readonly delivery?: SendDelivery;
+  /**
+   * Per-call telemetry identity (telemetry rung 2 — the "functionId" move).
+   * When telemetry enrichment is on (`createApp({ telemetry })`), these stamp
+   * onto EVERY span this send touches — ticks, model calls, tool dispatches —
+   * via the tier-4 call-scoped middleware seam. Use it to attribute one send to
+   * a named logical function and to carry per-call metadata known at send time.
+   *
+   *   - `functionId` — a logical name for THIS call (e.g. `"summarize"`,
+   *     `"triage"`). **Defaults to the app's `name`** (`createApp({ name })`)
+   *     when unset — so a single-purpose app gets meaningful function-level
+   *     traces with zero telemetry config; set it per-send for a multi-function
+   *     app. Stamped as `<ns>.function.id` (`<ns>` = the telemetry namespace,
+   *     default `agentick`).
+   *   - `metadata` — arbitrary per-call attributes, stamped as
+   *     `<ns>.metadata.<key>`. An open bag — no framework change to add a key.
+   *
+   * A no-op when telemetry enrichment is off (no interceptor is registered).
+   * See "Observability" in `@agentick/runtime-next`'s README for the full model.
+   */
+  readonly telemetry?: SendTelemetry;
+}
+
+/**
+ * Per-call telemetry identity for {@link SendInput.telemetry} (rung 2). The
+ * `functionId` is Vercel-AI's `functionId` move — a logical name attributed to
+ * every span in the send; `metadata` is an open per-call attribute bag.
+ */
+export interface SendTelemetry {
+  readonly functionId?: string;
+  readonly metadata?: Readonly<Record<string, unknown>>;
 }
 
 /**

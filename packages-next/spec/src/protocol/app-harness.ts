@@ -196,6 +196,48 @@ export interface SessionFilter {
  */
 export type TelemetryLayer = Layer.Layer<never, never, never>;
 
+/**
+ * Config form of the `telemetry` switch (telemetry rung 1). Turns on the
+ * framework's enrichment defaults AND (optionally) carries the tracer Layer.
+ * All fields optional — `{}` is "enrichment on, wire your own exporter".
+ */
+export interface TelemetryOptions {
+  /**
+   * Logical service name, stamped as `<ns>.service_name` on every span. An
+   * OTel resource-level identity, surfaced here so it rides the enrichment
+   * without the adopter hand-building a resource.
+   */
+  readonly serviceName?: string;
+  /**
+   * Static attributes stamped on every span (construction-time seam). An open
+   * bag — a new dimension is a new key, never a framework change. Merged under
+   * the framework's own enrichment (deployment tags: region, tenant, build).
+   */
+  readonly attributes?: Readonly<Record<string, unknown>>;
+  /**
+   * The tracer runtime Layer (exporter wiring) — the same value the bare
+   * {@link TelemetryLayer} form accepts. Supply it to actually EXPORT spans
+   * (e.g. `@effect/opentelemetry`'s `NodeSdk` layer); omit to enrich spans on
+   * the default (no-op) tracer while wiring the exporter globally elsewhere.
+   */
+  readonly layer?: TelemetryLayer;
+}
+
+/**
+ * The `createApp({ telemetry })` switch (telemetry rung 1) — STRICTLY OPT-IN
+ * (no ambient auto-on). Three forms, all turning enrichment ON:
+ *
+ *   - `true` — enrichment on; no exporter (spans annotate the no-op tracer
+ *     unless one is wired globally). The zero-config single-switch.
+ *   - a {@link TelemetryLayer} — enrichment on + this tracer Layer (the
+ *     original form; `telemetry: NodeSdk.layer(...)`).
+ *   - a {@link TelemetryOptions} — enrichment on + `serviceName` / `attributes`
+ *     / optional `layer`.
+ *
+ * `false` / omitted → OFF: no runtime, no interceptors, zero overhead.
+ */
+export type TelemetrySetting = TelemetryLayer | boolean | TelemetryOptions;
+
 // Persistence: currently expressed via the existing
 // `AppHarnessOptions.journal` slot — supply a durable
 // `OperationJournal` impl (e.g., `SqlitePersistenceJournal` once

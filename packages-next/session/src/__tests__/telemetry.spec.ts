@@ -19,7 +19,7 @@ import { describe, expect, it } from "vitest";
 import { Layer, ManagedRuntime, Tracer } from "effect";
 
 import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
-import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
+import { LocalEventBus, LocalInbox, MemoryJournal, spanAttributes } from "@agentick/runtime-next";
 import { ElicitationHarness } from "@agentick/elicitation-next";
 import { InMemoryHandlerResolver, ToolExecutorHarness } from "@agentick/tool-executor-next";
 import { LoopExecutorHarness } from "@agentick/loop-executor-next";
@@ -75,7 +75,14 @@ function collectingTracer() {
   return { layer: layer as Layer.Layer<never, never, never>, spans };
 }
 
-async function mkSession(telemetryRuntime: ManagedRuntime.ManagedRuntime<never, never>) {
+async function mkSession(
+  telemetryRuntime: ManagedRuntime.ManagedRuntime<never, never>,
+  telemetryMiddleware?: readonly import("@agentick/runtime-next").Middleware<
+    unknown,
+    unknown,
+    unknown
+  >[],
+) {
   const journal = new MemoryJournal();
   const bus = new LocalEventBus();
   const inbox = new LocalInbox();
@@ -111,6 +118,7 @@ async function mkSession(telemetryRuntime: ManagedRuntime.ManagedRuntime<never, 
     target,
     telemetryRuntime,
     telemetryNamespace: "acme",
+    ...(telemetryMiddleware !== undefined ? { telemetryMiddleware } : {}),
   });
   await session.ready;
   await session.mountReady;
@@ -284,5 +292,59 @@ describe("Session telemetry (ADR 77 Stage 4) — the composed execution nests", 
 
     await session.close();
     await tools.close();
+  });
+});
+
+describe("Session telemetry rung 2 — per-call SendInput.telemetry", () => {
+  it("functionId + metadata land on EVERY span the send touches (via the tier-4 seam)", async () => {
+    const { layer, spans } = collectingTracer();
+    const runtime = ManagedRuntime.make(layer);
+    // Rung 1 must be ON for rung 2 to register (the session gates the per-call
+    // stamp on enrichment being enabled). A single no-op enrichment interceptor
+    // is enough to flip `telemetryEnabled`.
+    const rung1 = [spanAttributes(() => ({ "acme.rung1": true }))];
+    const { session, tools } = await mkSession(runtime, rung1);
+
+    const handle = await session.send({
+      messages: [{ role: "user", content: "hi" }],
+      telemetry: { functionId: "summarize", metadata: { requestId: "r-1" } },
+    });
+    await handle.result;
+
+    // Every op the send touched (execution, tick, model, compiler) carries the
+    // per-call identity — the tier-4 seam threads it through the one fiber.
+    const sendSpans = spans.filter(
+      (s) => s.name.startsWith("loop:command:") || s.name.startsWith("model:command:"),
+    );
+    expect(sendSpans.length).toBeGreaterThan(0);
+    for (const s of sendSpans) {
+      expect(s.attributes.get("acme.function.id")).toBe("summarize");
+      expect(s.attributes.get("acme.metadata.requestId")).toBe("r-1");
+    }
+
+    await session.close();
+    await tools.close();
+    await runtime.dispose();
+  });
+
+  it("telemetry OFF (no enrichment) → a stray telemetry field registers NOTHING", async () => {
+    const { layer, spans } = collectingTracer();
+    const runtime = ManagedRuntime.make(layer);
+    // No telemetryMiddleware → enrichment off.
+    const { session, tools } = await mkSession(runtime);
+
+    const handle = await session.send({
+      messages: [{ role: "user", content: "hi" }],
+      telemetry: { functionId: "should-not-appear" },
+    });
+    await handle.result;
+
+    for (const s of spans) {
+      expect(s.attributes.get("acme.function.id")).toBeUndefined();
+    }
+
+    await session.close();
+    await tools.close();
+    await runtime.dispose();
   });
 });

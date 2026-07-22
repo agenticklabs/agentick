@@ -15,6 +15,7 @@ import {
   BaseHarness,
   type Middleware,
   runHarnessProtocol,
+  spanAttributes,
   ulid,
   withCallMiddleware,
   SESSION_ESCALATION_MESSAGE_TYPE,
@@ -61,6 +62,7 @@ import type {
   SendInput,
   SendMessageInput,
   SendResult,
+  SendTelemetry,
   SessionError,
   SessionExecutionHandle,
   SessionHarnessProtocol,
@@ -423,6 +425,16 @@ export interface SessionHarnessOptions<P = unknown> {
    */
   readonly telemetryRuntime?: ManagedRuntime.ManagedRuntime<never, never>;
   /**
+   * Telemetry enrichment interceptors (rung 1) built by the AppHarness from
+   * `createApp({ telemetry })`. Forwarded here so the session folds them into
+   * the tier-4 `withCallMiddleware` seam around every send — the ONE path that
+   * reaches every op the send touches (ticks, model calls, tool dispatches),
+   * across construction-siblings and per-tick-swapped executors alike. Omit /
+   * `[]` when telemetry is off (zero overhead). See "Observability" in
+   * `@agentick/runtime-next`'s README.
+   */
+  readonly telemetryMiddleware?: readonly Middleware<unknown, unknown, unknown>[];
+  /**
    * Whitelabel namespace for telemetry attribute keys (`<ns>.op_id`, …).
    * Forwarded from the app so session/execution spans carry the same
    * prefix as app-edge spans. Defaults to `"agentick"` (BaseHarness).
@@ -539,6 +551,23 @@ export class SessionHarness<P = unknown>
    * tracer, behavior-preserving). See {@link SessionHarnessOptions.telemetryRuntime}.
    */
   private readonly telemetryRuntime: ManagedRuntime.ManagedRuntime<never, never> | undefined;
+  /**
+   * Telemetry enrichment interceptors (rung 1), forwarded by the AppHarness
+   * when `createApp({ telemetry })` is on. Composed onto the tier-4
+   * `withCallMiddleware` seam around every send (see {@link sendBody}) so they
+   * reach every op the send touches — ticks, model calls, tool dispatches —
+   * INCLUDING a BYO / per-tick-swapped executor the app's construction tree
+   * can't reach structurally. Empty (`[]`) when telemetry is off → the tier-4
+   * seam short-circuits to a pass-through (zero overhead). See "Observability"
+   * in `@agentick/runtime-next`'s README.
+   */
+  private readonly telemetryMiddleware: readonly Middleware<unknown, unknown, unknown>[];
+  /**
+   * Whether telemetry enrichment is on (mirrors {@link telemetryMiddleware}
+   * non-empty). Gates the rung-2 per-call `SendInput.telemetry` stamp so a
+   * stray `telemetry` field on an un-instrumented app registers NO interceptor.
+   */
+  private readonly telemetryEnabled: boolean;
   /**
    * Single-slot escalation interceptor (ADR 69 T2a). `undefined` =
    * forward/resolve as T1 did (parity); set via `interceptEscalation`.
@@ -786,6 +815,8 @@ export class SessionHarness<P = unknown>
     // Default 10 — v1 `MAX_SPAWN_DEPTH`.
     this.maxSpawnDepth = options.maxSpawnDepth ?? 10;
     this.telemetryRuntime = options.telemetryRuntime;
+    this.telemetryMiddleware = options.telemetryMiddleware ?? [];
+    this.telemetryEnabled = this.telemetryMiddleware.length > 0;
     this.defaultMaxTicks = options.defaultMaxTicks ?? 8;
     this.requiredScopes = options.requiredScopes;
     this.models = options.models;
@@ -1862,6 +1893,30 @@ export class SessionHarness<P = unknown>
     this.target = input.target;
   }
 
+  /**
+   * Build the rung-2 per-call telemetry interceptor from `SendInput.telemetry`
+   * (functionId + metadata). Composition over rung 3: it is a single
+   * {@link spanAttributes} instance stamping `<ns>.function_id` +
+   * `<ns>.metadata.<key>` on every op the send touches. Returns `[]` — no
+   * interceptor — when telemetry enrichment is off OR the field is absent OR it
+   * carries no stampable value, so an un-instrumented send pays nothing.
+   * `functionId`'s app-name DEFAULT is supplied by rung 1 (the app enrichment);
+   * this stamp, composed innermost, OVERRIDES it when a per-call id is given.
+   */
+  private buildSendTelemetryMiddleware(
+    telemetry: SendTelemetry | undefined,
+  ): readonly Middleware<unknown, unknown, unknown>[] {
+    if (!this.telemetryEnabled || telemetry === undefined) return [];
+    const ns = this.telemetryNamespace;
+    const attrs: Record<string, unknown> = {};
+    if (telemetry.functionId !== undefined) attrs[`${ns}.function.id`] = telemetry.functionId;
+    for (const [k, v] of Object.entries(telemetry.metadata ?? {})) {
+      attrs[`${ns}.metadata.${k}`] = v;
+    }
+    if (Object.keys(attrs).length === 0) return [];
+    return [spanAttributes(() => attrs)];
+  }
+
   private async sendBody(input: SendInput<P>): Promise<SessionExecutionHandle> {
     if (this._closed) {
       throw new SessionClosedError({ attemptedCommand: "send" });
@@ -2087,6 +2142,15 @@ export class SessionHarness<P = unknown>
             [
               ...(this.lifecycleProjection?.callMiddleware ?? []),
               ...this.modelFacade.callMiddleware(),
+              // Telemetry rung 1 — the app-level enrichment (span attrs +
+              // usage/cost), empty when telemetry is off. Composed over the
+              // same one-fiber seam so it reaches every op the send touches.
+              ...this.telemetryMiddleware,
+              // Telemetry rung 2 — per-call `SendInput.telemetry` (functionId +
+              // metadata), stamped INNERMOST so it overrides rung 1's app-name
+              // functionId default. Only when enrichment is on (else a stray
+              // `telemetry` field registers nothing — zero overhead).
+              ...this.buildSendTelemetryMiddleware(input.telemetry),
             ],
             this.loop.fx.runExecution(
               {

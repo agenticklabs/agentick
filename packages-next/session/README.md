@@ -373,6 +373,18 @@ eagerly on the supplied substrate when omitted; there is no
 
 ## Telemetry — nested traces (ADR 77 / 78)
 
+> **The full observability model — the one-switch `createApp({ telemetry })`,
+> attribute-key naming, per-call `SendInput.telemetry` (functionId + metadata),
+> usage/cost, and all six enrichment seams — lives in one place: see
+> "Observability" in `@agentick/runtime-next`'s README.** This section covers
+> only the session-specific nesting mechanics.
+>
+> **Per-call identity (rung 2):** `session.send({ telemetry: { functionId,
+> metadata } })` stamps every span the send touches (ticks, model calls, tool
+> dispatches) via the tier-4 seam; `functionId` defaults to the app `name`.
+> Active only when app-level enrichment is on. Verified in
+> `__tests__/telemetry.spec.ts` ("rung 2").
+
 Because the session runs the execution as ONE Effect fiber (the ADR 77 spine —
 `send → loop → executor → tool`), running it on a tracer runtime yields a
 **nested** span tree for free, with `parentOpId` auto-linked via FiberRef. No

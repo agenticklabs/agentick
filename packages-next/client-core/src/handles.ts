@@ -216,6 +216,8 @@ function createSessionExecutionHandle<P>(
       target: input.target,
       // 4b — steer/follow-up delivery rides the send params (JSON enum).
       delivery: input.delivery,
+      // Telemetry rung 2 — per-call functionId + metadata (JSON-clean bag).
+      telemetry: input.telemetry,
       _meta: { progressToken },
     })
     .then((res) => {

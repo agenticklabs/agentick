@@ -324,7 +324,7 @@ class OperationRunnerImpl implements OperationRunner {
                       error: this.normalizeError(err),
                     }).pipe(Effect.zipRight(Effect.fail(err))),
               ),
-              this.annotateOperationSpan(resolvedOp),
+              this.withOperationSpan(resolvedOp),
             );
           }),
         ),
@@ -346,7 +346,7 @@ class OperationRunnerImpl implements OperationRunner {
    *
    * @see docs/proposals/v2/blueprint/17-open-questions.md §L5
    */
-  private annotateOperationSpan<A, E>(
+  private withOperationSpan<A, E>(
     op: Operation<unknown, unknown, unknown>,
   ): (eff: Effect.Effect<A, E, never>) => Effect.Effect<A, E, never> {
     const attributes = this.spanAttributesFn(op);

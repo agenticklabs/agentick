@@ -16,7 +16,12 @@ import type { ExecutionResult } from "../data/execution-result.js";
 import type { ExecutionTarget } from "../data/execution-target.js";
 import type { SessionEntry, SessionFilter } from "../protocol/app-harness.js";
 import type { Cursor } from "../protocol/event-log.js";
-import type { SendDelivery, SendMessageInput, SendResult } from "../protocol/session-harness.js";
+import type {
+  SendDelivery,
+  SendMessageInput,
+  SendResult,
+  SendTelemetry,
+} from "../protocol/session-harness.js";
 import type { RequestMeta } from "./json-rpc.js";
 import type { SubscriptionScope } from "./scope.js";
 
@@ -147,6 +152,12 @@ export interface SessionSendParams extends WireRequestParams {
    * wire trivially. See {@link SendInput.delivery} for full semantics.
    */
   readonly delivery?: SendDelivery;
+  /**
+   * Per-call telemetry identity (rung 2). JSON-clean (`functionId` string +
+   * `metadata` bag) so it crosses the wire trivially. See
+   * {@link SendInput.telemetry} for semantics (incl. the app-name default).
+   */
+  readonly telemetry?: SendTelemetry;
 }
 
 /**
