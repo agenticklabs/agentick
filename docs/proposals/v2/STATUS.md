@@ -1747,7 +1747,23 @@ structuredContent?, isError?, metadata?}` | TaskHandle) — today only client-re
   advertise the canonical shape + use it internally. Handler-declarable ≠ executor-stamped:
   `executedBy`/`durationMs`/presentation stay executor-only (provenance-spoof rule, same
   as ClientToolAnnotations exclusion). Additive — bare ContentBlock[] stays valid (union
-  member). (4) remaining audit ergonomics (tracker); (5) candidates after: OpenAI
+  member). (4) remaining audit ergonomics (tracker — IN FLIGHT); **(4b–4e, Ryan-approved from the
+  Pi-post analysis 2026-07-22):** (4b) **steer/follow-up semantics** — first-class
+  mid-execution steering: steer = injected after the current turn's tool calls BEFORE the
+  next model call within the SAME run (the injection point exists structurally now —
+  `loop:tick` command boundary / a queue drained at tick start); follow-up = waits for
+  settlement (weigh promoting `whenQuiescent()` to a true session-quiesced signal — a
+  queued follow-up is a separate execution today); (4c) **security-defaults pass** for
+  the server bindings (gateway/express): loopback-only bind default, CSRF-in-bootstrap +
+  custom-header requirement, `Sec-Fetch-Site`/Origin rejection, Host allowlisting, trust
+  forwarded headers ONLY when the immediate proxy is loopback, realpath-descendant (not
+  string-prefix) root containment — documented defaults, not adopter homework; (4d)
+  **bounded tool-output client projection** — never push multi-MB tool results to the
+  browser; bounded preview at the client projection, full content stays in the durable
+  store (two-tier already supports it); (4e) **one-shot prompt artifact** — "build a
+  codex-style dashboard on @agentick/client-next" exercising timelineView/elicitations/
+  clientToolCalls/knobs/fakes — the Ernesto-class demo AND a continuous ergonomics audit.
+  (5) candidates after: OpenAI
   Responses API, devtools attention, ai-sdk request-half, XHarness→X sweep,
   app-harness flake fix, Ernesto (gate met).
 

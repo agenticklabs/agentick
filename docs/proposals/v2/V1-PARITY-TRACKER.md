@@ -542,11 +542,11 @@ command hooks (`blueprint/05-loop-executor.md` maps each hook).
 | ---- | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ------------------------------------------------------------------ |
 | RUN1 | `transformCompiled(compiled, tools) => compiled`                  | **Present** (term rename COMInput→RenderedTree). `onBeforeModelRun`/`onBeforeModelProject` transform-form `BeforeHook` reshaping `ProjectInput.compiled` + `ExecuteInput.tools`; `model-executor` command-ifies `model:run`/`project`/`generate` + `.use()` around-chain; tool-visibility at `replaceCompilerTools`/`compileForTick`                                                                                                                                                                                                    | none      | none — register via `createApp({ hooks })` or `app.use()`          |
 | RUN2 | `executeToolCall(call, tool, next)`                               | **Present, near-identical.** Tool-executor around-middleware `toolExecutor.fx.use((input, next) => …)` (proven in `tool-executor/src/__tests__/middleware-and-hooks.spec.ts`) + declarative `onBefore/AfterToolDispatch` + `.guardDispatch` veto. Both `via:"model"` and `via:"dispatch"` route through it                                                                                                                                                                                                                              | none      | none                                                               |
-| RUN3 | `onSessionInit(session)` — once per session                       | **Present** (no named registrar). Session mounts agent once at construction → `onBeforeCompilerMount`/`onAfterCompilerMount` fire once; extension harnesses run constructor at wiring, register teardown via `parent.onClose(h)`                                                                                                                                                                                                                                                                                                        | ergonomic | optional `onInit` sugar over `onAfterCompilerMount`                |
+| RUN3 | `onSessionInit(session)` — once per session                       | **[justified-skip] (ergonomic pass).** Capability already present host-side (`onBeforeCompilerMount`/`onAfterCompilerMount` command hooks via `createApp({ hooks })`) and in-tree for the common case (`useOnMount` on the agent root fires once per session, since the root mounts once at construction). The *distinct* `useOnInit` sugar RUN3 asks for — a session-scoped in-tree twin firing once per `harness.mount()` regardless of component remounts — needs a NEW `mount` lifecycle-kind projected through spec (`LifecycleEvent`/`LifecycleMount`) + `LifecycleDispatch` (`LifecycleHandlerKind` + switch + `EventForKind`) + a compiler self-projection forwarder off `onAfterCompilerMount` (distinct from `session/src/lifecycle-projection.ts`, which forwards loop/tool/model hooks only). That is a lifecycle-projection design slice, not ergonomic sugar; the expedient shortcut (deduped `execution-start`) is semantically wrong (init ≠ first-execution). Deferred as its own slice. | justified-skip | lifecycle-projection slice: add a `mount` kind + compiler self-projection, then a `useOnInit` twin |
 | RUN4 | `onPersist(session, snapshot) => snapshot` — augment the snapshot | **[x] CLOSED (recovery pass #1).** `session.snapshot()` is now the `session:snapshot` command (async), minting `onAfterSessionSnapshot` — the transform-form after-hook IS the v1 `onPersist` augment/redact seam. Step 6 built: `snapshot()` folds every `SnapshotCapable` bridge generically via `isSnapshotCapable` feature-detection (mirrors the channel `snapshotProviders()` scan); `SessionSnapshot.bridges` replaces the hardcoded `timeline`/`knobs`. Proven with a fake extension bridge picked up with zero session change. | closed    | —                                                                  |
 | RUN5 | `onRestore(session, snapshot)` — restore runner state             | **[x] CLOSED (recovery pass #1).** New `session.restore(input)` = the `session:restore` command, minting `onBefore/AfterSessionRestore`. Generic `importSnapshot()` fan-out over `snapshot.bridges` (feature-detected) + tick/usage accounting restore. Migration seam runs at the version-check decision point.                                                                                                                                                                                                                        | closed    | —                                                                  |
 | RUN6 | `onDestroy(session)` — clean up                                   | **Present, improved.** `session.close()` tears down mount + closes every bridge; `BaseHarness.onClose(handler)` gives per-harness cleanup in **LIFO with error isolation** — strictly richer than v1's single hook                                                                                                                                                                                                                                                                                                                      | none      | none                                                               |
-| RUN7 | `SpawnOptions.runner` inheritance (child inherits parent runner)  | **Present, reshaped.** Runner object gone; loop/model/tool executors are app-shared substrate inherited structurally by `createChildSession`; `app.use()`/`hooks` propagate to children by construction. Per-spawn executor override moves onto the child's first `send` (`SendInput.modelExecutor`/`target`)                                                                                                                                                                                                                           | ergonomic | optional: add `modelExecutor?`/`target?` to `SpawnInput` (see SP1) |
+| RUN7 | `SpawnOptions.runner` inheritance (child inherits parent runner)  | **[justified-skip] (ergonomic pass).** The reshaped capability is present — loop/model/tool executors are app-shared substrate inherited structurally by `createChildSession`; `app.use()`/`hooks` propagate to children by construction. A per-spawn model override is ALSO already reachable via `SpawnInput.send.modelExecutor`/`target` (the immediate-send form). The only residue is promoting that to a top-level `SpawnInput.modelExecutor`/`target` sugar — but that is entangled with the unresolved SP3 decision (does a child inherit the parent's *live* swapped model, or app defaults?) and the capability-loss items SP1/PA11, all threading the same 4 choke points (`SpawnInput` → `session.spawn` childInput → `SpawnContextChildInput` → `app.createChildSession`/`createSessionBody`). Needs that inheritance-semantics decision first. | justified-skip | resolve SP3 (child live-model inheritance), then thread `modelExecutor?`/`target?` per SP1/PA11 |
 
 **Note:** RUN4/RUN5 and PA4–PA7 are the **same persist/restore cluster**
 viewed from two angles — RUN4/5 = arbitrary harness snapshot
@@ -566,12 +566,19 @@ v2: `packages-next/gates/`, guard as the four-verdict interceptor
 | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
 | `gate()` + `useGate` + `GateState`                     | **PARITY++** — `gates-next` adds programmatic `session.gates` register/list, host `override()` with audit, ADR-34 parent-layer cascade                           | —         |
 | `LatchGateDescriptor` / `VerifiedGateDescriptor`       | **PARITY++** — identical shape; v2 `satisfied` throw is **fail-closed** (engages gate) vs v1 fail-open                                                           | —         |
-| Tick arbitration: explicit `stop()` beats `continue()` | **PARITY (verify).** Gate calls `continueAfterTick`; stop-beats-continue now lives in session's `TickEndForwardDecision`, not co-located with the gate           | ergonomic |
+| Tick arbitration: explicit `stop()` beats `continue()` | **[x] CLOSED (ergonomic pass).** Invariant lives in session `harness.ts` `notifyLifecycle` (drains `stop` before `continue`); now covered by the GG1 test below                                       | closed    |
 | `createGuard(fn) => Middleware` (boolean allow/deny)   | **PARITY++** — collapsed into the one interceptor primitive (`kind:"guard"`); `HandlerVerdict = proceed\|veto\|defer\|replace` (v1 boolean is the strict subset) | —         |
 
-Only residue (GG1, ergonomic): confirm a session test asserts a budget
-`stopAfterTick` overrides a gate `continueAfterTick` in the same tick;
-add it if absent (the invariant moved packages).
+- **GG1 — [x] CLOSED (ergonomic pass).** The invariant was untested after
+  it moved from the gate package into the session's `TickEndForwardDecision`
+  resolution (`session/src/harness.ts:1253-1260` — `stop` is checked and
+  returned before `continue`). Added a session-level integration test
+  (`session/src/__tests__/gates-integration.spec.tsx`, "stop-beats-continue"):
+  a never-satisfied gate forces `continueAfterTick` (which the sibling test
+  proves would hold the loop to `maxTicks: 3`) while trusted tree code calls
+  `useLoopControl().stopAfterTick(...)` from `useOnTickEnd` in the same tick.
+  Asserts the gate engaged (`value === "active"` → a live continue was
+  genuinely issued) yet the run halts after tick 1 — stop wins.
 
 ---
 
@@ -587,18 +594,40 @@ projected `useOn*` React hooks + per-harness `.use`/`.fx.use`.
 | Tool hook `"run"` + `.fx.use` rewrite                                                | **PARITY** — `tool:dispatch` command → `onBefore/AfterToolDispatch` + `.use`/`.fx.use`                                                                                                                                                 | —         |
 | Component hooks `onMount/onUnmount/onStart/onTickStart/onTickEnd/onComplete/onError` | **PARITY++** — projected `useOnMount`/`useOnExecutionStart`/`useOnTickStart/End`/`useOnExecutionEnd`/`useOnError` + new `useOnToolStart/End`, `useOnModelGenerateStart/End`. v2 wires `onError` (v1 had a binding but **no producer**) | —         |
 | `useContinuation(cb)`                                                                | **PARITY** — `useLoopControl(): { continueAfterTick, stopAfterTick }`                                                                                                                                                                  | —         |
-| `Agentick.use(key, ...mw)` global glob-keyed middleware (`'*'`, `'tool:*'`)          | **PARITY (reshaped).** Global singleton gone; replaced by per-harness `.use`/`.fx.use` + `app.use/guard/hook` + `createApp({ hooks })` across ADR-76 tiers. Superset (v1 was global-only)                                              | ergonomic |
+| `Agentick.use(key, ...mw)` global glob-keyed middleware (`'*'`, `'tool:*'`)          | **[justified-skip] (ergonomic pass) — already at parity/superset.** No action: the global singleton is intentionally removed (ADR 23/83); per-harness `.use`/`.fx.use` + `app.use/guard/hook` + `createApp({ hooks })` across ADR-76 tiers is a strict superset (v1 was global-only). Nothing to build.                                              | justified-skip |
 | `Model/Tool/BaseHookRegistry` (three disjoint vocabularies)                          | **JUSTIFIED-DROP** — exactly what ADR 80 collapses into `CommandRegistry`→`CommandHooks` derivation                                                                                                                                    | —         |
 
 Residue (all ergonomic):
 
-- **HM1** — `useAfterCompile((compiled, ctx) => …; ctx.requestRecompile())`
-  in-tree hook has no React twin. Capability exists host-side
-  (`onAfterCompilerRenderTree` + `compiler:rerender`); the in-tree form
-  is missing. Recovery: add a `useAfterCompile` hook wrapping them.
-- **HM2** — ADR-80 mandated `tool:dispatch`→`tool:execute` command
-  rename is unlanded (registry still emits `tool:dispatch`). Land it or
-  strike the mandate from ADR 80.
+- **HM1 — [justified-skip] (ergonomic pass).** The host-side capability
+  exists (`onAfterCompilerRenderTree` command hook fires with
+  `RenderTreeResult` = `{ tree: RenderedTree, diagnostics, iterations }`).
+  But the in-tree `useAfterCompile` twin is NOT ergonomic sugar: (a) it
+  needs a new `after-compile` lifecycle kind projected through spec
+  (`LifecycleEvent`) + `LifecycleDispatch` + a compiler self-projection
+  forwarder (same infra RUN3 needs); AND (b) the v1 signature's
+  `ctx.requestRecompile()` has **no v2 home** — there is no `requestRecompile`
+  on any bridge (grep-confirmed zero hits in `packages-next`). Wiring it
+  correctly means adding a recompile capability that feeds the existing
+  render-until-stable loop (`renderTreeBody`, `DEFAULT_MAX_ITERATIONS = 10`)
+  under recursion guards — dispatching a fresh `renderTree` instead would
+  diverge from v1 semantics and risk infinite recompile. That is a
+  compiler-recompile design slice, deferred. // TODO(compiler-recompile):
+  design `requestRecompile` as a render-loop signal, then add `useAfterCompile`.
+- **HM2 — [justified-skip] (ergonomic pass).** The `tool:dispatch`→`tool:execute`
+  rename is a coordinated cross-package sweep, not a one-liner: 2 live command
+  registration sites (`tool-executor` `harness.ts` + `define-tool-executor.ts`),
+  the `CommandRegistry` key, the `hook-lifecycle-names` regression table, and
+  every consumer of the derived `onBefore/AfterToolDispatch` / `onToolDispatch`
+  keys (app hooks, session `lifecycle-projection` around-hook, runtime + gateway
+  live-link tests, ~20-25 code files + ~30 doc/README mentions, 60 files total).
+  It is also coupled to the adjacent unresolved `onAfterToolDispatch` output-type
+  `TODO(adr-80)` (`ContentBlock[]` vs `DispatchResult`) that ADR 80 ties to the
+  same slice. The derivation mechanism is already proven (a passing regression
+  test asserts `tool:command:execute` → `onBefore/AfterToolExecute`), so it is
+  turnkey — but as its own focused slice, exceeding a "small and clearly right"
+  ergonomic quick-win. The ADR 80 mandate is left standing (striking it is itself
+  a decision not made unilaterally here).
 
 ---
 
@@ -619,7 +648,7 @@ but hardening trails it.
 | SP5 | Child event forwarding w/ `spawnPath` tagging + `spawn_start`/`spawn_end` lifecycle events                  | **[x] CLOSED (recovery pass #3).** `spawnPath` (ancestor lineage, root-first; `length` = depth) threaded from `spawn()` → `SpawnContextChildInput` → `createChildSession` → `SessionHarnessOptions`. Stamped on THREE surfaces: the child's `SessionRecord.spawnPath` (identity / sessions-list attribution), the loop `run-execution` + `tick` `EventScope` (bus/journal envelopes — sub-agent work attribution), and the per-execution handle stream (`StreamEventBase.spawnPath`). NOTE: v1's manual child→parent event forwarding is obsolete — v2 sessions share one bus, so tagging (not forwarding) is the mechanism. `spawn_start`/`spawn_end` lifecycle events NOT reintroduced (session graph + `parentSessionId` + `spawnPath` capture the spawn DAG; no separate lifecycle-event need surfaced). // TODO(spawn-lifecycle): revisit dedicated `spawn_start`/`spawn_end` envelopes if a consumer needs spawn-boundary timing beyond the session record. | closed                        | —                                                                                                        |
 | SP6 | Parent-abort → child teardown propagation                                                                   | **[x] CLOSED (recovery pass #3).** The parent's construction signal is fanned into each child at spawn (reuses PA1 `mergeAbortSignals`-into-execution plumbing) — a parent abort tears down the child's in-flight work. The parent tracks its children and disposes them on close (`onClose`) AND on construction-signal abort, via the new `SpawnContext.disposeChildSession` (registry removal + `session.close()`). Abort-driven disposal awaits child quiescence (`SessionHarness.whenQuiescent`) so closing never unmounts the compiler mid-tick. Children dispose their own children transitively → whole sub-tree collapses.                                                                                                                                                                                                                                                                                                                               | closed                        | —                                                                                                        |
 | —   | `SpawnOptions.maxTicks`/`metadata`                                                                          | **Present** on `SpawnInput` (+ new `initialProps`/`initialKnobs`, net gain)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | —                             | none                                                                                                     |
-| —   | `SpawnOptions.label`                                                                                        | Dropped, folds into `metadata`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | ergonomic                     | optional typed slot if UI needs it                                                                       |
+| —   | `SpawnOptions.label`                                                                                        | **[justified-skip] (ergonomic pass) — obsolete as a distinct slot.** A free-form label folds cleanly into the existing `SpawnInput.metadata` (`metadata.label`); no consumer requires a typed `label` field. Add a typed slot only if a UI later needs schema-level guarantees — YAGNI until then.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | justified-skip                | add a typed `label` slot IFF a UI needs it (currently `metadata.label`)                                  |
 
 ---
 
@@ -629,7 +658,7 @@ but hardening trails it.
 | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
 | `session.dispatch(name, input)`                      | **Present, superset** — `session/harness.ts:1073` → `toolExecutor.dispatch`; spec adds `DispatchOptions.task: "auto"\|"ref"\|"inline"`            | —                  |
 | Resolve by name, then alias                          | **Present** — `tool-executor/src/registry.ts` `aliasToName` index, name-first then alias (comment cites v1 parity)                                | —                  |
-| `audience:"user"` (dispatch-only, hidden from model) | **Present, renamed** `[V1-REPLACED]` → `ToolExposure = "model"\|"dispatch"\|"runtime"` (v1 `"user"`→`"dispatch"`, `"all"`→`["model","dispatch"]`) | ergonomic (rename) |
+| `audience:"user"` (dispatch-only, hidden from model) | **[justified-skip] (ergonomic pass) — already present, renamed.** No action: `[V1-REPLACED]` → `ToolExposure = "model"\|"dispatch"\|"runtime"` (v1 `"user"`→`"dispatch"`, `"all"`→`["model","dispatch"]`). The capability is intact; the rename is intentional and already landed. Adopters relearn one name. | justified-skip (rename) |
 | Audience filtering                                   | **Present** — `tool/src/transforms/filter.ts` `onlyExposingTo(audience)`                                                                          | —                  |
 | Tool `aliases`                                       | **Present** — `tool/src/create-tool.ts` threads `aliases` → `ToolDeclaration.aliases`                                                             | —                  |
 
@@ -650,7 +679,7 @@ per-provider role mapping). One untracked minor:
 
 | #   | v1 surface                                                              | v2 status                                                                                                                                  | severity  | recovery pass                                                                       |
 | --- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | --------- | ----------------------------------------------------------------------------------- |
-| AD1 | Adapter `onMount`/`onUnmount` (JSX `<Model>` component lifecycle hooks) | **LOST on the adapter.** v2 `LanguageModelAdapter` has no `onMount`/`onUnmount`; a model-as-JSX concern, not a translation-capability loss | ergonomic | fold into the model-as-JSX component surface if/when it lands; else document as cut |
+| AD1 | Adapter `onMount`/`onUnmount` (JSX `<Model>` component lifecycle hooks) | **[justified-skip] (ergonomic pass) — depends on an unlanded surface.** The `<Model model={adapter}>` JSX sugar is explicitly deferred (ADR 56 "slice 1"; `use-model-registration.ts` returns the `<model-declaration>` intrinsic but the adapter-as-component wrapper is unbuilt). There is no adapter JSX lifecycle surface to attach `onMount`/`onUnmount` to, and it is not a translation-capability loss. Fold in if/when `<Model>` lands; otherwise it is a documented cut. | justified-skip | fold into `<Model>` when ADR-56 slice 1 lands; else document as cut |
 
 ---
 
@@ -670,7 +699,7 @@ chat-UX cluster.
 | SW5 | Client chat-UX: `MessageLog`, `ChatSession`, `MessageSteering` (`packages/client/src/`)                                                       | **LOST / reshaped** — `blueprint/58-connectors.md`/`CUT-GAP-AUDIT`: client-next is low-level RPC; steering moved server-side (`session:channel` + verbs)                                                                             | capability-loss              | rebuild as app/TUI-layer primitives over `client-core-next` views (wire-client backlog)                                                            |
 | SW6 | Client chat-UX: **`LineEditor`, `AttachmentManager`, `chat-transforms`** (`timelineToMessages`/`extractToolCalls`)                            | **LOST — WEAKEST-TRACKED.** Appear in **no** v2 doc found; `client-core-next` is RPC/handles/views, `client-extensions-next` is only cache/offline/retry/telemetry. **Silent-drop risk before v2.0 cut**                             | capability-loss              | **enumerate explicitly in the wire-client/TUI backlog issue now**, before they drift-to-drop unrecorded (LineEditor = workstream C terminal tools) |
 | SW7 | `ToolConfirmations` client class (`packages/client`)                                                                                          | **Reshaped (retired)** — confirmations flow as `session:channel:elicitation` envelopes via the elicitation harness                                                                                                                   | capability-loss (seam moved) | connector/UI subscribes to elicitation channel + routes replies to the harness address                                                             |
-| SW8 | `serveStatic` (`gateway/src/serve-static.ts`) / `loggingPlugin`                                                                               | **DEFERRED / reshaped** — GF1 → `gateway-http-sse`; logging subsumed by gateway-extensions (#254) + `client-extensions-next/telemetry`                                                                                               | ergonomic                    | fold into HTTP transport / confirm a server logging gateway-extension post-#254                                                                    |
+| SW8 | `serveStatic` (`gateway/src/serve-static.ts`) / `loggingPlugin`                                                                               | **[justified-skip] (ergonomic pass) — already tracked elsewhere.** No action here: reshaped + filed as `V1-GATEWAY-PARITY-TRACKER` GF1 → the planned `@agentick/gateway-http-sse` transport; server logging is subsumed by gateway-extensions (#254) + `client-extensions-next/telemetry`. Belongs to the gateway-transport slice, not this ergonomic pass. | justified-skip (tracked GF1) | fold into `gateway-http-sse`; confirm a server logging gateway-extension post-#254                                                                    |
 
 **Present (no loss), verified this sweep:** Secrets→`credentials-next`
 (drop-in for v1 `@agentick/secrets`); Channels→`spec-next/channels.ts` +
@@ -804,3 +833,34 @@ twin, HM2 `tool:execute` rename, GG1 stop-beats-continue test.
   2 SP4, 3 SP5, 2 SP6). All gates green (typecheck 152/152 force; app/session/
   spec-conformance verbatim; the 2 documented app-harness 30s flakes verified
   pre-existing on stash; oxfmt + oxlint clean).
+- 2026-07-22: **ergonomic pass — all ~12 ERGONOMIC-severity rows closed out.**
+  Every ergonomic row now ends CLOSED or JUSTIFIED-SKIP (no stragglers).
+  **Implemented (1):** GG1 + the Surface-3 "stop-beats-continue" row — the
+  ADR-67 tick-end arbitration invariant (session `harness.ts` drains `stop`
+  before `continue`) was untested after it moved out of the gate package;
+  added a session integration test in `gates-integration.spec.tsx`
+  (never-satisfied gate forces `continueAfterTick` while tree code forces
+  `stopAfterTick` in the same tick → run halts after tick 1; gate `active`
+  confirms a live continue was overridden). **Justified-skip (9), with the
+  right design named inline:** RUN3 `useOnInit` + HM1 `useAfterCompile` — both
+  need a NEW lifecycle-kind projection (spec `LifecycleEvent` + compiler
+  `LifecycleDispatch` + a compiler self-projection forwarder), and HM1 also a
+  `requestRecompile` capability that has no v2 home (must feed the
+  render-until-stable loop under recursion guards) — lifecycle/recompile design
+  slices, not sugar; the host-side capabilities already exist. RUN7 — per-spawn
+  model override already reachable via `SpawnInput.send.modelExecutor`; the
+  top-level sugar is entangled with the unresolved SP3 inheritance decision +
+  SP1/PA11. HM2 `tool:dispatch`→`tool:execute` — a coordinated ~20-25-file
+  cross-package rename sweep coupled to the `onAfterToolDispatch` output-type
+  `TODO(adr-80)`; derivation is proven (regression test green) but it is its own
+  slice; ADR-80 mandate left standing. `Agentick.use` global middleware — already
+  parity/superset (global singleton intentionally removed, ADR 23/83). SP `label`
+  — folds into `SpawnInput.metadata`; no consumer needs a typed slot (YAGNI).
+  Dispatch `audience:"user"` — already present, renamed to `ToolExposure`. AD1
+  adapter `onMount`/`onUnmount` — depends on the deferred `<Model>` JSX surface
+  (ADR-56 slice 1); no adapter lifecycle surface exists yet. SW8
+  `serveStatic`/`loggingPlugin` — already tracked as gateway GF1 (→
+  `gateway-http-sse`), a transport slice. Files touched: 1 test
+  (`session/src/__tests__/gates-integration.spec.tsx`, +2 imports +1 `it`) + this
+  tracker. Gates: `pnpm typecheck --force` clean; full `npx vitest run
+  packages-next` (workspace-wide); oxfmt + oxlint on touched files.

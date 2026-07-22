@@ -24,7 +24,12 @@ import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next
 import { ElicitationHarness } from "@agentick/elicitation-next";
 import { InMemoryHandlerResolver, ToolExecutorHarness } from "@agentick/tool-executor-next";
 import { LoopExecutorHarness } from "@agentick/loop-executor-next";
-import { CompilerHarness, System } from "@agentick/compiler-react-next";
+import {
+  CompilerHarness,
+  System,
+  useLoopControl,
+  useOnTickEnd,
+} from "@agentick/compiler-react-next";
 import { useGate, useGates } from "@agentick/gates-next/react";
 import type { GatesHandle } from "@agentick/gates-next";
 import type { ExecutionTarget } from "@agentick/spec-next";
@@ -140,6 +145,73 @@ describe("gates ↔ session — one controller, two front-ends", () => {
     expect(session.gate("prog-latch")?.value).toBe("active");
     expect(result.ticks).toBe(3);
     expect(result.stopReason).toBe("max_ticks");
+
+    await session.close();
+    await tools.close();
+  });
+
+  // GG1 (V1-PARITY-TRACKER, Surface 3) — the ADR-67 tick-end arbitration
+  // invariant moved out of the gate package into the session's
+  // `TickEndForwardDecision` resolution (`harness.ts` drains `stop` BEFORE
+  // `continue`). This asserts the invariant at its new home: when a gate
+  // forces `continueAfterTick` AND trusted tree code forces `stopAfterTick`
+  // in the SAME tick, the explicit stop wins. Without the stop the
+  // never-satisfied gate holds the loop open to `maxTicks` (proven by the
+  // sibling test above); with it the run halts after tick 1.
+  it("stop-beats-continue: a tree stopAfterTick overrides a gate's continueAfterTick in the same tick", async () => {
+    function Agent() {
+      const loop = useLoopControl();
+      // Never-satisfied verified gate → engages every tick and forces
+      // continueAfterTick (would otherwise run to maxTicks: 3).
+      useGate("hold-open", {
+        description: "Never satisfied",
+        instructions: "GATE: hold the loop open.",
+        satisfied: () => false,
+      });
+      // Trusted tree code forces a stop at the same tick-end the gate holds.
+      useOnTickEnd(() => {
+        loop.stopAfterTick("tree-stop");
+      });
+      return React.createElement(System, null, "hi");
+    }
+
+    const journal = new MemoryJournal();
+    const bus = new LocalEventBus();
+    const inbox = new LocalInbox();
+    const compiler = new CompilerHarness("gi-sbc-r", journal, bus, inbox);
+    const loop = new LoopExecutorHarness("gi-sbc-l", journal, bus, inbox);
+    const resolver = new InMemoryHandlerResolver();
+    const elicitation = new ElicitationHarness("gi-sbc:elicitation", journal, bus, inbox);
+    const tools = new ToolExecutorHarness("gi-sbc-t", journal, bus, inbox, {
+      handlerResolver: resolver,
+      elicitation,
+    });
+    const executor = endExec();
+    await Promise.all([compiler.ready, loop.ready, tools.ready, elicitation.ready, executor.ready]);
+
+    const session = new SessionHarness(journal, bus, inbox, {
+      sessionId: `gi-sbc-${Math.random()}`,
+      agent: React.createElement(Agent),
+      compiler,
+      loop,
+      modelExecutor: executor,
+      toolExecutor: tools,
+      target,
+    });
+    await session.ready;
+    await session.mountReady;
+
+    const handle = await session.send({
+      messages: [{ role: "user", content: "hi" }],
+      maxTicks: 3,
+    });
+    const result = await handle.result;
+
+    // The gate DID engage → it genuinely issued continueAfterTick this tick,
+    // so the stop overrode a live continue (not merely a quiet loop).
+    expect(session.gate("hold-open")?.value).toBe("active");
+    // Stop wins: one tick, not the gate's maxTicks: 3.
+    expect(result.ticks).toBe(1);
 
     await session.close();
     await tools.close();
