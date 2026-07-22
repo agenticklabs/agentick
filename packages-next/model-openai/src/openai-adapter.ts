@@ -41,6 +41,7 @@ import type { FunctionDefinition } from "openai/resources/shared";
 
 import {
   createSourceInterner,
+  defineLanguageModelAdapter,
   type CustomBlockDefinition,
   type DeltaTransform,
   type LanguageModelAdapter,
@@ -54,6 +55,7 @@ import type {
   AdapterDelta,
   Citation,
   ContentBlock,
+  ExecuteInput,
   ExecutionTarget,
   LanguageModelExecutionResult,
   LanguageModelInput,
@@ -252,30 +254,36 @@ export function openai(
   let clientMemo: OpenAI | undefined = options.client;
   const client = (): OpenAI => (clientMemo ??= new OpenAI(buildClientOptions(options)));
 
-  return {
+  return defineLanguageModelAdapter<
+    ChatCompletion,
+    ChatCompletionChunk,
+    ChatCompletionCreateParams
+  >({
     provider: "openai",
     target,
     streamByDefault: options.stream ?? false,
     ...(customBlocks !== undefined ? { customBlocks } : {}),
 
-    buildParams(input: LanguageModelInput, target: ExecutionTarget): ChatCompletionCreateParams {
-      return toOpenAIParams(input, target, defaultModel);
+    prepareRequest(input: ExecuteInput<LanguageModelInput>): ChatCompletionCreateParams {
+      return toOpenAIParams(input.targetInput, input.target, defaultModel);
     },
 
-    call(params: unknown, signal: AbortSignal | undefined): Promise<ChatCompletion> {
+    send(
+      request: ChatCompletionCreateParams,
+      signal: AbortSignal | undefined,
+    ): Promise<ChatCompletion> {
       return client().chat.completions.create(
-        { ...(params as ChatCompletionCreateParams), stream: false },
+        { ...request, stream: false },
         { signal },
       ) as unknown as Promise<ChatCompletion>;
     },
 
     openStream(
-      params: unknown,
+      request: ChatCompletionCreateParams,
       signal: AbortSignal | undefined,
     ): Promise<AsyncIterable<ChatCompletionChunk>> {
-      const cp = params as ChatCompletionCreateParams;
       return client().chat.completions.create(
-        { ...cp, stream: true, stream_options: { include_usage: true } },
+        { ...request, stream: true, stream_options: { include_usage: true } },
         { signal },
       ) as unknown as Promise<AsyncIterable<ChatCompletionChunk>>;
     },
@@ -420,7 +428,7 @@ export function openai(
       } as ChatCompletion;
       return next;
     },
-  };
+  });
 }
 
 /**

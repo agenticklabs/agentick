@@ -23,6 +23,18 @@
  * accumulator apply — so the delta vocabulary observed here is
  * identical to what `app.events({ surface: "model" })` carries.
  *
+ * **No provider-request hooks here (by design).** These helpers call the
+ * adapter's `prepareRequest` → `send` / `openStream` DIRECTLY — no harness,
+ * no command system. The `onBefore/AfterModelProviderRequest` boundary
+ * hooks and the `onModelProviderRequestChunk` raw-chunk interceptor are
+ * minted by the executor's nested `model:provider-request` command and
+ * therefore fire ONLY on the executor path (`LanguageModelExecutor` →
+ * `session.send` / the loop). Wiring them here would require dragging in
+ * the command system, defeating the whole point of a zero-Effect
+ * standalone helper. Adopters who need last-mile request interception use
+ * the executor, or compose an adapter with {@link tapModel} for a
+ * non-interceptor observability tap.
+ *
  * @see docs/proposals/v2/blueprint/52-executors-and-model-adapters.md
  */
 
@@ -87,8 +99,8 @@ export async function generate<TRaw, TChunk>(
   options: GenerateOptions<TRaw, TChunk>,
 ): Promise<LanguageModelExecutionResult> {
   const adapter = options.model;
-  const params = adapter.buildParams(toInput(options), adapter.target);
-  let raw: TRaw = await adapter.call(params, options.signal);
+  const request = adapter.prepareRequest({ targetInput: toInput(options), target: adapter.target });
+  let raw: TRaw = await adapter.send(request, options.signal);
   if (adapter.postProcessForNormalize) raw = adapter.postProcessForNormalize(raw);
   return adapter.normalize(raw);
 }
@@ -115,8 +127,16 @@ export function generateStream<TRaw, TChunk>(
 
   async function* run(): AsyncGenerator<AdapterDelta, void, undefined> {
     try {
-      const params = adapter.buildParams(toInput(options), adapter.target);
-      const iter = await adapter.openStream(params, options.signal);
+      if (!adapter.openStream) {
+        throw new Error(
+          `adapter '${adapter.provider}' does not support streaming — use generate() instead`,
+        );
+      }
+      const request = adapter.prepareRequest({
+        targetInput: toInput(options),
+        target: adapter.target,
+      });
+      const iter = await adapter.openStream(request, options.signal);
 
       const accum = new StreamAccumulator();
       const transforms: DeltaTransform[] = [...(adapter.adapterTransforms?.() ?? [])];

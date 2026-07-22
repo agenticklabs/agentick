@@ -1737,6 +1737,23 @@ blueprint's design decisions; this is execution-level).
     SHARPENED (opencode post-mortem, 2026-07-22): never permissive CORS (their CVE class
     — exposed server + CORS * = any website executes shell), no exec-from-URL patterns,
     no curl-pipe upgrade paths.
+  ☐ A2.4 (Ryan-approved 2026-07-22, REVISED to instance form) **`createCommandRunner`**:
+    a standalone deployable INSTANCE owning the whole command subsystem — the registry
+    Map, `command()`/`commandStream()`/`commandEffect()` manufacture (deduping the
+    command↔commandStream op-manufacture copy), `commands()` wire-safe listing,
+    `get(name)` for dispatchMessage, AND the Phase-2 per-command chunk-interceptor
+    lists (command-scoped state lives with the commands). **`runOperation` stays an
+    INJECTED capability** (`createCommandRunner({ surface, runOperation })`) — NOT
+    absorbed (it drags journal/bus/interceptor-inheritance/tier-4/idempotency with
+    it; absorbing = "BaseHarness minus channels", defeats standalone-ness). BaseHarness
+    constructs one at creation w/ its bound runOperation and delegates; typed hook
+    MINTING stays module-level, runtime registrars delegate into the runner. Tier 2
+    (named future, not now): `createOperationRunner` packaging journal+bus+interceptors
+    as its own instance — the full depless/ADR-44 substrate. ACs (Ryan): design + impl
+    presented for REVIEW before commit; full workspace stays at ZERO failures
+    (behavior-preserving); new fake-runOperation unit tests on the declaration logic.
+    Signature-preserving; own commit. LAUNCH AFTER the provider-hooks pass lands
+    (same-tree discipline).
   ☐ A2.5 prefix-stability conformance test (opencode post-mortem): a STATIC tree must
     compile to byte-identical model input across ticks (prompt-cache invariant we have
     machinery for — CacheHint — but never assert). + doc rule: time-varying content

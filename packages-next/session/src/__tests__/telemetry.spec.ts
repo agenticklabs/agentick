@@ -159,12 +159,17 @@ describe("Session telemetry (ADR 77 Stage 4) — the composed execution nests", 
     );
     expect(downstream.length).toBeGreaterThan(0);
 
-    // The NEST: every downstream span's causality parent is the TICK (our
-    // `parent_op_id` tree), the tick's is the execution, and Effect's own span
-    // tree agrees (real parent). Before Stage 3 every one of these was an
-    // orphan runPromise root; §3 threads them under the tick, no detachment.
+    // The NEST: every downstream span nests within the TICK'S SUBTREE (our
+    // `parent_op_id` tree) — a direct child of the tick, or a child of another
+    // downstream op (e.g. `model:command:provider-request` under
+    // `model:command:generate[_stream]`, ADR 52 amendment 2026-07-22) — the
+    // tick's parent is the execution, and Effect's own span tree agrees (real
+    // parent). Before Stage 3 every one of these was an orphan runPromise root;
+    // §3 threads them under the tick, no detachment.
+    const downstreamOpIds = new Set(downstream.map((s) => s.attributes.get(`${ns}.op_id`)));
     for (const child of downstream) {
-      expect(child.attributes.get(`${ns}.parent_op_id`)).toBe(tickOpId);
+      const parentOpId = child.attributes.get(`${ns}.parent_op_id`);
+      expect(parentOpId === tickOpId || downstreamOpIds.has(parentOpId)).toBe(true);
       expect(child.parent).toBeDefined();
     }
 
@@ -217,8 +222,15 @@ describe("Session telemetry (ADR 77 Stage 4) — the composed execution nests", 
       (s) => s.name.startsWith("model:command:") || s.name === "compiler:command:render-tree",
     );
     expect(downstream.length).toBeGreaterThan(0);
+    const downstreamOpIds = new Set(downstream.map((s) => s.attributes.get(`${ns}.op_id`)));
     for (const child of downstream) {
-      expect(child.attributes.get(`${ns}.parent_op_id`)).toBe(tickOpId); // causal tree
+      const parentOpId = child.attributes.get(`${ns}.parent_op_id`);
+      // Each downstream op nests within the TICK'S SUBTREE — either a direct
+      // child of the tick, or a child of another downstream op (e.g.
+      // `model:command:provider-request` nests under `model:command:generate[_stream]`,
+      // ADR 52 amendment 2026-07-22). The causal tree held across the async
+      // middleware's forked continuation either way.
+      expect(parentOpId === tickOpId || downstreamOpIds.has(parentOpId)).toBe(true);
       expect(child.parent).toBeDefined(); // Effect's real span parent — nesting held
     }
 

@@ -21,6 +21,7 @@ import { describe, expect, it } from "vitest";
 
 import type {
   AdapterDelta,
+  ExecuteInput,
   ExecutionTarget,
   LanguageModelExecutionResult,
   LanguageModelInput,
@@ -54,15 +55,18 @@ function stubAdapter(
     },
     streamByDefault: true,
 
-    buildParams(_input: LanguageModelInput, _target: ExecutionTarget): unknown {
+    prepareRequest(_input: ExecuteInput<LanguageModelInput>): unknown {
       return {};
     },
 
-    call(_params: unknown, _signal: AbortSignal | undefined): Promise<StubRaw> {
+    send(_request: unknown, _signal: AbortSignal | undefined): Promise<StubRaw> {
       return Promise.resolve({ text: chunks.map((c) => c.text).join(""), model: "stub-v1" });
     },
 
-    async *openStream(_params: unknown, signal: AbortSignal | undefined): AsyncIterable<StubChunk> {
+    async *openStream(
+      _request: unknown,
+      signal: AbortSignal | undefined,
+    ): AsyncIterable<StubChunk> {
       for (const c of chunks) {
         if (signal?.aborted) throw new Error("aborted");
         if (delayMs > 0) {

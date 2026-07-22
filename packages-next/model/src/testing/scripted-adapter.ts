@@ -3,15 +3,21 @@
  * double (Meszaros stub tier). Replaces the per-spec locals that had
  * accumulated in app-next / model-next tests.
  *
- * Round trip: `buildParams` is identity (and records the input);
- * `call` returns the scripted text; `openStream` yields the scripted
+ * Round trip: `prepareRequest` is identity (and records the input);
+ * `send` returns the scripted text; `openStream` yields the scripted
  * chunks; `normalize` produces one text block. Optional failure
- * scripting covers retry/failover tests.
+ * scripting covers retry/failover tests. Built through the blessed
+ * {@link defineLanguageModelAdapter} factory — the same composition point
+ * the shipped adapters use.
  */
 
 import type { AdapterDelta, ExecutionTarget } from "@agentick/spec-next";
 
-import type { LanguageModelAdapter, StreamAccumulatorView } from "../language-model-adapter.js";
+import {
+  defineLanguageModelAdapter,
+  type LanguageModelAdapter,
+  type StreamAccumulatorView,
+} from "../language-model-adapter.js";
 import { thinkTagTransform } from "../tag-transforms.js";
 
 export interface ScriptedAdapterOptions {
@@ -35,9 +41,9 @@ export interface ScriptedAdapterOptions {
 }
 
 export interface ScriptedAdapter extends LanguageModelAdapter<{ text: string }, string> {
-  /** Total call/openStream attempts (including scripted failures). */
+  /** Total send/openStream attempts (including scripted failures). */
   calls(): number;
-  /** The last `LanguageModelInput` buildParams received. */
+  /** The last projected `LanguageModelInput` prepareRequest received. */
   seenParams(): unknown;
 }
 
@@ -58,23 +64,24 @@ export function scriptedAdapter(
   let attempts = 0;
   let seen: unknown;
 
-  return {
+  const base = defineLanguageModelAdapter<{ text: string }, string, unknown>({
     provider,
     target,
-    calls: () => attempts,
-    seenParams: () => seen,
-    buildParams: (input) => {
-      seen = input;
-      return input;
+    prepareRequest: (input) => {
+      // Record the projected `LanguageModelInput` (seenParams' historical
+      // contract) and use it as the identity "native request" — the scripted
+      // `send`/`openStream` ignore the request, so identity is sufficient.
+      seen = input.targetInput;
+      return input.targetInput;
     },
-    call: async () => {
+    send: async () => {
       if (attempts++ < failures) throw cause();
       return { text };
     },
     openStream: async function* (): AsyncIterable<string> {
       if (attempts++ < failures) throw cause();
       yield* chunks;
-    } as unknown as LanguageModelAdapter<{ text: string }, string>["openStream"],
+    } as unknown as NonNullable<LanguageModelAdapter<{ text: string }, string>["openStream"]>,
     mapChunk: (chunk, accum: StreamAccumulatorView): readonly AdapterDelta[] => [
       ...(accum.textByBlock.has(0)
         ? []
@@ -89,5 +96,9 @@ export function scriptedAdapter(
       usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
     }),
     ...(options.thinkTags ? { adapterTransforms: () => [thinkTagTransform()] } : {}),
-  };
+  });
+
+  // Spread the frozen factory result into a fresh object carrying the
+  // test-double introspection methods (`calls` / `seenParams`).
+  return { ...base, calls: () => attempts, seenParams: () => seen };
 }

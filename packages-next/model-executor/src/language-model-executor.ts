@@ -30,7 +30,7 @@
 
 import { omitUndefined } from "@agentick/utils-next";
 
-import { Chunk, Effect, Fiber, Stream } from "effect";
+import { Chunk, Effect, Fiber, FiberRef, Stream } from "effect";
 
 import {
   BaseHarness,
@@ -92,6 +92,7 @@ import {
   isFoldedTerminal,
   operationOutcomeToTerminal,
   type ExecutorInFlightEntry,
+  type ProviderRequestCall,
 } from "./executor-lifecycle.js";
 
 // ADR 80/83/89 — light up the model-path verbs on the derived `CommandHooks`
@@ -129,6 +130,18 @@ declare module "@agentick/runtime-next" {
       output: unknown;
       chunk: AdapterDelta;
     };
+    // The nested provider-SDK call (ADR 52 amendment 2026-07-22). Declared
+    // ONCE, invoked inside `generateBody` between `prepareRequest` and the
+    // SDK call, nested beneath `model:generate[_stream]` (so `parentOpId`
+    // threads: generate → provider-request). `input` is the provider-NATIVE
+    // request (erased to `unknown` — the concrete `TRequest` lives on the
+    // adapter), so `onBeforeModelProviderRequest` transforms the exact wire
+    // params last-mile; `output` is the raw provider response `TRaw` (erased),
+    // so `onAfterModelProviderRequest` sees the raw response; `chunk` is the
+    // RAW provider chunk `TChunk` PRE-`mapChunk` (erased), so the minted
+    // `onModelProviderRequestChunk` interceptor observes/transforms the raw
+    // provider stream before canonical-delta normalization.
+    "model:provider-request": { input: unknown; output: unknown; chunk: unknown };
     "model:run": { input: RunInput; output: ExecutorTerminal<LanguageModelExecutionResult> };
     "model:normalize": {
       input: NormalizeInput<unknown>;
@@ -150,6 +163,20 @@ declare module "@agentick/runtime-next" {
  * causing memory growth.
  */
 const STREAM_QUEUE_CAPACITY = 64;
+
+/**
+ * The per-call context for the nested `model:provider-request` command
+ * (ADR 52 amendment 2026-07-22). `generateBody` sets it with
+ * `FiberRef.locally` immediately around the in-fiber
+ * `modelProviderRequest.fx(...)` call; the command body reads it via
+ * {@link readProviderCall}. FiberRef (not command `input`) because the
+ * value is non-serializable (an abort signal, an Effect-returning sink, a
+ * live Operation) and the command's `input` is reserved for the
+ * serializable native request the `onBefore` hook transforms. Fiber-scoped,
+ * so concurrent executions never cross-contaminate. Module-shared across
+ * instances is safe for the same reason. See {@link ProviderRequestCall}.
+ */
+const ProviderCallRef = FiberRef.unsafeMake<ProviderRequestCall | undefined>(undefined);
 
 // InFlightEntry shape lives in `executor-lifecycle.ts` as
 // `ExecutorInFlightEntry`. Re-aliased here for backward-compatibility
@@ -229,8 +256,21 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
     ExecuteInput<LanguageModelInput>,
     AdapterDelta,
     TRaw,
-    ExecuteErrorChannel
+    ExecuteErrorChannel | SubstrateError
   >;
+
+  /**
+   * The nested provider-SDK call (ADR 52 amendment 2026-07-22). `input` is
+   * the provider-NATIVE request `prepareRequest` produced (typed `unknown` —
+   * the concrete `TRequest` is the adapter's private business); the command's
+   * OWN chunk sink emits RAW `TChunk`s (so `onModelProviderRequestChunk`
+   * observes the provider stream PRE-`mapChunk`); the return is the raw
+   * provider response `TRaw` (so `onAfterModelProviderRequest` sees the raw
+   * response). Invoked ONLY in-fiber from {@link generateBody} via `.fx`
+   * (never `.stream`/inbox — `exposure: "internal"`), so its `parentOpId`
+   * auto-threads to the enclosing `model:generate[_stream]` op.
+   */
+  private readonly modelProviderRequest: StreamCommand<unknown, TChunk, TRaw, ExecuteErrorChannel>;
 
   constructor(
     scopeId: string,
@@ -253,7 +293,7 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
     this.modelGenerate = this.command<
       ExecuteInput<LanguageModelInput>,
       unknown,
-      ExecuteErrorChannel
+      ExecuteErrorChannel | SubstrateError
     >({
       name: "model:generate",
       description: "the non-streaming provider call",
@@ -264,7 +304,7 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
       ExecuteInput<LanguageModelInput>,
       AdapterDelta,
       TRaw,
-      ExecuteErrorChannel
+      ExecuteErrorChannel | SubstrateError
     >({
       name: "model:generate_stream",
       description: "the streaming provider call (loop-default path)",
@@ -296,6 +336,22 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
         },
       },
     });
+
+    // The nested provider-SDK call (ADR 52 amendment). One declaration, one
+    // interceptor path — the boundary hooks (`onBefore/AfterModelProviderRequest`)
+    // + the raw chunk hook (`onModelProviderRequestChunk`) all fall out of this
+    // `commandStream`. Internal exposure: it is a composition step, reached only
+    // in-fiber from `generateBody`, never over the inbox/wire. The body reads its
+    // non-serializable per-call context ({@link ProviderRequestCall}) from
+    // {@link ProviderCallRef}. No `stream` policy — provider-request is consumed
+    // only via `.fx` (its abort rides fiber interrupt + the outer
+    // `model:generate_stream` stream policy, not a `.stream` bridge of its own).
+    this.modelProviderRequest = this.commandStream<unknown, TChunk, TRaw, ExecuteErrorChannel>({
+      name: "model:provider-request",
+      description: "the provider SDK call over the prepared native request",
+      exposure: "internal",
+      body: (request, rawSink) => this.providerRequestBody(request, rawSink),
+    });
   }
 
   // ──────────────────────────────────────────────────────────────────
@@ -303,19 +359,50 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
   // adapter; these thin privates keep every pipeline call site stable.
   // ──────────────────────────────────────────────────────────────────
 
-  private buildParams(input: LanguageModelInput, target: ExecutionTarget): unknown {
-    return this.adapter.buildParams(input, target);
+  private prepareRequest(input: ExecuteInput<LanguageModelInput>): unknown {
+    return this.adapter.prepareRequest(input);
   }
 
-  private callProvider(params: unknown, signal: AbortSignal | undefined): Promise<TRaw> {
-    return this.adapter.call(params, signal);
+  private send(request: unknown, signal: AbortSignal | undefined): Promise<TRaw> {
+    return this.adapter.send(request, signal);
   }
 
   private openStream(
-    params: unknown,
+    request: unknown,
     signal: AbortSignal | undefined,
   ): AsyncIterable<TChunk> | Promise<AsyncIterable<TChunk>> {
-    return this.adapter.openStream(params, signal);
+    if (this.adapter.openStream === undefined) {
+      throw new StreamFailed({
+        cause: new Error(
+          `adapter '${this.adapter.provider}' declares no openStream — cannot stream`,
+        ),
+      });
+    }
+    return this.adapter.openStream(request, signal);
+  }
+
+  /**
+   * Read the {@link ProviderRequestCall} seeded on {@link ProviderCallRef} by
+   * {@link generateBody}. `model:provider-request` is an internal command
+   * reached ONLY in-fiber from `generateBody`, so the ref is always set; a
+   * missing ref means someone invoked the internal verb out of band — fail
+   * with a typed error rather than dereferencing `undefined`.
+   */
+  private readProviderCall(): Effect.Effect<ProviderRequestCall, ExecuteErrorChannel> {
+    return FiberRef.get(ProviderCallRef).pipe(
+      Effect.flatMap((call) =>
+        call === undefined
+          ? Effect.fail<ExecuteErrorChannel>(
+              new StreamFailed({
+                cause: new Error(
+                  "model:provider-request invoked without a ProviderRequestCall context " +
+                    "(internal command — reachable only in-fiber from generateBody)",
+                ),
+              }),
+            )
+          : Effect.succeed(call),
+      ),
+    );
   }
 
   private mapChunk(chunk: TChunk, accum: StreamAccumulator): readonly AdapterDelta[] {
@@ -665,22 +752,27 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
   // ──────────────────────────────────────────────────────────────────
 
   /**
-   * The `model:generate[_stream]` command body (ADR 89 §1). Runs INSIDE the
-   * command's `runOperation` cascade, so the ambient {@link RuntimeContext}
-   * already carries this op's `opId` / `parentOpId` / scope. Rebuilds the
-   * {@link Operation} shape {@link executeBody}'s in-flight delta emission needs
-   * from that ambient scope (the command primitive owns the real op and does not
-   * hand it to the handler), then delegates to the shared pipeline. `sink` is
-   * `null` for `model:generate` (non-streaming — deltas still emit to the bus
-   * when `streamByDefault`) and the real delta sink for `model:generate_stream`.
+   * The `model:generate[_stream]` command body (ADR 89 §1) — now THIN
+   * (ADR 52 amendment 2026-07-22). Runs INSIDE the command's `runOperation`
+   * cascade, so the ambient {@link RuntimeContext} carries this op's
+   * `opId` / `parentOpId` / scope. It (1) rebuilds the {@link Operation} shape
+   * the in-flight delta emission needs from that ambient scope, (2) runs the
+   * PURE `prepareRequest` to produce the provider-native request, then (3)
+   * invokes the nested `model:provider-request` command in-fiber, seeding the
+   * non-serializable per-call context ({@link ProviderRequestCall}) on
+   * {@link ProviderCallRef} for exactly that call. `parentOpId` auto-threads
+   * (generate → provider-request); `onBeforeModelProviderRequest` transforms
+   * the native `request` last-mile before it reaches the SDK. `sink` is `null`
+   * for `model:generate` (non-streaming — deltas still emit to the bus when
+   * `streamByDefault`) and the real AdapterDelta sink for
+   * `model:generate_stream`.
    */
   private generateBody(
     input: ExecuteInput<LanguageModelInput>,
     sink: ((delta: AdapterDelta) => Effect.Effect<void>) | null,
-  ): Effect.Effect<TRaw, ExecuteErrorChannel, never> {
+  ): Effect.Effect<TRaw, ExecuteErrorChannel | SubstrateError, never> {
     return Effect.gen(this, function* () {
       const ctx = yield* getContext;
-      const executionId = input.scope?.executionId ?? ctx.executionId ?? `exec:${ulid()}`;
       const opName = sink !== null ? "model:command:generate_stream" : "model:command:generate";
       const op: Operation<unknown, unknown> = {
         opId: ctx.opId ?? `${opName}:${ulid()}`,
@@ -690,17 +782,45 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
         scope: input.scope ?? {},
         input,
       };
-      return yield* this.executeBody(input, executionId, op, sink);
+      // (2) prepareRequest — pure, provider-native. This is the value the
+      // `onBeforeModelProviderRequest` hook transforms last-mile.
+      const request = this.prepareRequest(input);
+      // (3) Invoke the nested provider-request command in-fiber. Its OWN sink
+      // (raw TChunk) is a no-op here — the raw chunk hook wraps it; the
+      // AdapterDelta flow rides `call.deltaSink`/the bus inside the body. The
+      // per-call context is scoped to exactly this fx run via `FiberRef.locally`.
+      const call: ProviderRequestCall = { execInput: input, deltaSink: sink, op };
+      return yield* this.modelProviderRequest
+        .fx(request, () => Effect.void)
+        .pipe(Effect.locally(ProviderCallRef, call));
     });
   }
 
-  private executeBody(
-    input: ExecuteInput<LanguageModelInput>,
-    executionId: string,
-    op: Operation<unknown, unknown>,
-    sink: ((delta: AdapterDelta) => Effect.Effect<void>) | null,
+  /**
+   * The `model:provider-request` command body (ADR 52 amendment 2026-07-22) —
+   * the actual SDK round trip, wrapped in its own operation so the boundary
+   * hooks fire on the wire call: `request` arrives already
+   * `onBeforeModelProviderRequest`-transformed; the returned `TRaw` is what
+   * `onAfterModelProviderRequest` sees. `rawSink` is the command's OWN sink
+   * carrying RAW provider chunks (`TChunk`) PRE-`mapChunk` — the
+   * `onModelProviderRequestChunk` interceptor wraps it. The AdapterDelta
+   * pipeline (mapChunk → transforms → accum → bus + the outer op's
+   * `deltaSink`) rides the SAME stream pass and is unchanged from the pre-split
+   * `executeBody`. Its non-serializable per-call context comes from
+   * {@link ProviderCallRef} (seeded by {@link generateBody}).
+   */
+  private providerRequestBody(
+    request: unknown,
+    rawSink: (chunk: TChunk) => Effect.Effect<void>,
   ): Effect.Effect<TRaw, ExecuteErrorChannel, never> {
     return Effect.gen(this, function* () {
+      const ctx = yield* getContext;
+      const call = yield* this.readProviderCall();
+      const input = call.execInput;
+      const sink = call.deltaSink;
+      const op = call.op;
+      const executionId = input.scope?.executionId ?? ctx.executionId ?? `exec:${ulid()}`;
+
       if (this.aborted.has(executionId)) {
         return yield* Effect.fail<ExecuteErrorChannel>(
           new ProviderAborted({ reason: "aborted prior to execute" }),
@@ -715,7 +835,6 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
       this.inFlight.set(executionId, entry);
 
       try {
-        const params = this.buildParams(input.targetInput, input.target);
         // Force streaming when called from executeStream (sink non-null);
         // execute() opts in via streamByDefault. Target capabilities can
         // veto streaming for execute() but not for executeStream() — the
@@ -730,8 +849,7 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
           // Non-streaming: Effect.tryPromise's `signal` arg auto-aborts
           // on fiber interrupt; merge with caller's external signal.
           return yield* Effect.tryPromise<TRaw, ExecuteErrorChannel>({
-            try: (fiberSignal) =>
-              this.callProvider(params, mergeSignals(input.signal, fiberSignal)),
+            try: (fiberSignal) => this.send(request, mergeSignals(input.signal, fiberSignal)),
             catch: (cause): ExecuteErrorChannel => this.mapProviderError(cause),
           }).pipe(
             // The external controller (abort() API) feeds the SDK via
@@ -742,7 +860,8 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
         }
 
         // Streaming path — Effect.Stream owns the entire pipeline:
-        //   openStream → mapChunk → transforms → accum + bus + sink
+        //   openStream → rawSink (raw chunk hook) → mapChunk → transforms
+        //             → accum + bus + deltaSink
         // All side-effects run inside the fiber's scope; interrupting
         // the fiber tears down the iterator, the bus tap, and the
         // bounded queue together.
@@ -763,7 +882,7 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
               const merged = mergeSignals(externalSignal, fiberSignal);
               // External controller too — abort() API path.
               const finalSignal = mergeSignals(controller.signal, merged);
-              const iter = await this.openStream(params, finalSignal);
+              const iter = await this.openStream(request, finalSignal);
               return iter;
             },
             catch: (cause): ExecuteErrorChannel => this.mapProviderError(cause),
@@ -775,6 +894,12 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
             ),
           ),
         ).pipe(
+          // RAW provider chunk → the command's own sink (PRE-mapChunk). The
+          // `onModelProviderRequestChunk` interceptor wraps `rawSink`, so it
+          // observes/transforms the provider stream before canonical-delta
+          // normalization. Zero-overhead when no chunk hook is registered
+          // (the wrap is the identity no-op sink from generateBody).
+          Stream.tap((chunk: TChunk) => rawSink(chunk)),
           Stream.mapConcat((chunk: TChunk) => this.mapChunk(chunk, accum)),
           Stream.mapConcat((delta: AdapterDelta) => pipeline.process(delta)),
         );

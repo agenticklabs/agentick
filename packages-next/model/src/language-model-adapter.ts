@@ -23,6 +23,7 @@ import type {
   AdapterDelta,
   ContentBlock,
   ExecuteErrorChannel,
+  ExecuteInput,
   ExecutionTarget,
   LanguageModelExecutionResult,
   LanguageModelInput,
@@ -89,7 +90,7 @@ export interface StreamAccumulatorView {
  * is zero-Effect — an author can write and unit-test an adapter with
  * `generate()` alone — but the shared conformance runs through the executor.
  */
-export interface LanguageModelAdapter<TRaw = unknown, TChunk = unknown> {
+export interface LanguageModelAdapter<TRaw = unknown, TChunk = unknown, TRequest = unknown> {
   /** Observability identity — "openai", "google", "ai-sdk", ... */
   readonly provider: string;
   /**
@@ -107,7 +108,8 @@ export interface LanguageModelAdapter<TRaw = unknown, TChunk = unknown> {
   /**
    * Whether the streaming codepath exists at all (AI SDK's
    * `streamText` is a separate surface from `generateText`).
-   * Default: true.
+   * Default: true. {@link defineLanguageModelAdapter} derives it from
+   * `openStream` presence when omitted.
    */
   readonly supportsStreaming?: boolean;
   /**
@@ -118,13 +120,27 @@ export interface LanguageModelAdapter<TRaw = unknown, TChunk = unknown> {
 
   // ── Required — the round trip ──
 
-  /** Canonical `LanguageModelInput` → provider request shape. Pure. */
-  buildParams(input: LanguageModelInput, target: ExecutionTarget): unknown;
-  /** Non-streaming provider call. */
-  call(params: unknown, signal: AbortSignal | undefined): Promise<TRaw>;
-  /** Streaming provider call — the provider SDK's chunk iterable (Promise-wrapped OK). */
-  openStream(
-    params: unknown,
+  /**
+   * Canonical projected input → **provider-native request** (the
+   * SDK-shaped params object). Pure. Split out from the SDK call (ADR 52
+   * amendment 2026-07-22) so the executor can wrap the native request in
+   * the `model:provider-request` command: the last-mile
+   * `onBeforeModelProviderRequest` hook transforms the value THIS returns
+   * before it reaches {@link send} / {@link openStream}. Takes the full
+   * {@link ExecuteInput} (not just `LanguageModelInput` + `target`) so
+   * request assembly can read scope-derived fields uniformly.
+   */
+  prepareRequest(input: ExecuteInput<LanguageModelInput>): TRequest;
+  /** Non-streaming provider call over the prepared native request. */
+  send(request: TRequest, signal: AbortSignal | undefined): Promise<TRaw>;
+  /**
+   * Streaming provider call over the prepared native request — the
+   * provider SDK's chunk iterable (Promise-wrapped OK). Optional: an
+   * adapter that omits it declares `supportsStreaming: false` (the
+   * executor's streaming path fails fast with a typed error).
+   */
+  openStream?(
+    request: TRequest,
     signal: AbortSignal | undefined,
   ): AsyncIterable<TChunk> | Promise<AsyncIterable<TChunk>>;
   /** Provider chunk → canonical deltas. Sync; may stash in `accum.providerExtra`. */
@@ -153,6 +169,51 @@ export interface LanguageModelAdapter<TRaw = unknown, TChunk = unknown> {
 }
 
 /**
+ * The provider-specific parts an adapter author supplies to
+ * {@link defineLanguageModelAdapter} — structurally the
+ * {@link LanguageModelAdapter} contract itself. The factory is the
+ * blessed constructor: it fills the `supportsStreaming` default (derived
+ * from `openStream` presence) and freezes the result. There is NO
+ * separate hook/interceptor seam here — interception lives exclusively on
+ * the executor's command system (`model:generate` + the nested
+ * `model:provider-request`). The definition is SHAPE, not hooks.
+ */
+export type LanguageModelAdapterDefinition<
+  TRaw = unknown,
+  TChunk = unknown,
+  TRequest = unknown,
+> = LanguageModelAdapter<TRaw, TChunk, TRequest>;
+
+/**
+ * The blessed constructor for a {@link LanguageModelAdapter} (ADR 52
+ * amendment 2026-07-22) — the single composition point every shipped
+ * provider adapter (`openai`, `anthropic`, `google`, `aisdk`) is built
+ * on. It takes the provider-specific pure parts (`prepareRequest` /
+ * `send` / `openStream` / `mapChunk` / `reconstructRaw` / `normalize` +
+ * quirks) and returns the adapter object the executor consumes,
+ * normalizing two things:
+ *
+ *   - `supportsStreaming` defaults to whether `openStream` was supplied
+ *     (an adapter with no streaming surface declares it by omission), and
+ *   - the returned object is frozen (adapters are immutable parts).
+ *
+ * The factory deliberately owns NO pipeline and NO hooks: the mapChunk
+ * fold → reconstruct → normalize pipeline is the executor's, and the ONE
+ * interceptor path is the command system. This is why a hand-written
+ * object that satisfies {@link LanguageModelAdapter} directly (a BYO
+ * adapter) works identically through the executor — the factory is sugar
+ * over the contract, not a privileged path.
+ */
+export function defineLanguageModelAdapter<TRaw = unknown, TChunk = unknown, TRequest = unknown>(
+  definition: LanguageModelAdapterDefinition<TRaw, TChunk, TRequest>,
+): LanguageModelAdapter<TRaw, TChunk, TRequest> {
+  return Object.freeze({
+    ...definition,
+    supportsStreaming: definition.supportsStreaming ?? definition.openStream !== undefined,
+  });
+}
+
+/**
  * Structural guard — used by app-level slots that accept
  * `LanguageModelExecutor | ExecutorFactory | LanguageModelAdapter`
  * (an adapter has the round trip but no `run`/`execute` protocol
@@ -162,9 +223,9 @@ export function isLanguageModelAdapter(value: unknown): value is LanguageModelAd
   if (typeof value !== "object" || value === null) return false;
   const v = value as Record<string, unknown>;
   return (
-    typeof v["buildParams"] === "function" &&
+    typeof v["prepareRequest"] === "function" &&
     typeof v["normalize"] === "function" &&
-    typeof v["call"] === "function" &&
+    typeof v["send"] === "function" &&
     typeof v["provider"] === "string" &&
     typeof v["execute"] !== "function" &&
     typeof v["run"] !== "function"

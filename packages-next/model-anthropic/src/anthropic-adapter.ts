@@ -42,6 +42,7 @@ import {
   buildParameters,
   buildTools,
   createSourceInterner,
+  defineLanguageModelAdapter,
   type CustomBlockDefinition,
   type DeltaTransform,
   type LanguageModelAdapter,
@@ -55,6 +56,7 @@ import type {
   AdapterDelta,
   Citation,
   ContentBlock,
+  ExecuteInput,
   ExecutionTarget,
   LanguageModelExecutionResult,
   LanguageModelInput,
@@ -239,7 +241,7 @@ export function anthropic(
   let clientMemo: Anthropic | undefined = options.client;
   const client = (): Anthropic => (clientMemo ??= new Anthropic(buildClientOptions(options)));
 
-  return {
+  return defineLanguageModelAdapter<AnthropicMessage, RawMessageStreamEvent, MessageCreateParams>({
     provider: "anthropic",
     target,
     streamByDefault: options.stream ?? false,
@@ -249,25 +251,27 @@ export function anthropic(
       return anthropicProjectImpl(input);
     },
 
-    buildParams(input: LanguageModelInput, target: ExecutionTarget): MessageCreateParams {
-      return toAnthropicParams(input, target, defaultModel, defaultMaxTokens);
+    prepareRequest(input: ExecuteInput<LanguageModelInput>): MessageCreateParams {
+      return toAnthropicParams(input.targetInput, input.target, defaultModel, defaultMaxTokens);
     },
 
-    call(params: unknown, signal: AbortSignal | undefined): Promise<AnthropicMessage> {
+    send(request: MessageCreateParams, signal: AbortSignal | undefined): Promise<AnthropicMessage> {
       return client().messages.create(
-        { ...(params as MessageCreateParams), stream: false } as MessageCreateParamsNonStreaming,
+        { ...request, stream: false } as MessageCreateParamsNonStreaming,
         { signal },
       ) as unknown as Promise<AnthropicMessage>;
     },
 
     openStream(
-      params: unknown,
+      request: MessageCreateParams,
       signal: AbortSignal | undefined,
     ): Promise<AsyncIterable<RawMessageStreamEvent>> {
-      const cp = params as MessageCreateParams;
-      return client().messages.create({ ...cp, stream: true } as MessageCreateParamsStreaming, {
-        signal,
-      }) as unknown as Promise<AsyncIterable<RawMessageStreamEvent>>;
+      return client().messages.create(
+        { ...request, stream: true } as MessageCreateParamsStreaming,
+        {
+          signal,
+        },
+      ) as unknown as Promise<AsyncIterable<RawMessageStreamEvent>>;
     },
 
     /**
@@ -539,7 +543,7 @@ export function anthropic(
       }
       return { ...raw, content: newContent } as AnthropicMessage;
     },
-  };
+  });
 }
 
 /**

@@ -979,8 +979,8 @@ describe("anthropic() adapter — canonical CacheHint translation (#185)", () =>
 describe("anthropic() adapter — provider tools (Pass D request-half)", () => {
   it("maps the anthropic provider-tool slice onto params.tools, keeps function tools, drops other providers", () => {
     const adapter = anthropic("claude-3-5-sonnet-latest");
-    const params = adapter.buildParams(
-      {
+    const params = adapter.prepareRequest({
+      targetInput: {
         messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
         tools: [{ name: "calc", description: "calculator", inputSchema: { type: "object" } }],
         providerTools: [
@@ -994,8 +994,8 @@ describe("anthropic() adapter — provider tools (Pass D request-half)", () => {
           { provider: "openai", type: "web_search_preview", name: "web_search_preview" },
         ],
       },
-      mkTarget(),
-    ) as { tools?: unknown[] };
+      target: mkTarget(),
+    }) as { tools?: unknown[] };
     const tools = params.tools ?? [];
     // Function tool survives with its native `input_schema` shape.
     expect(tools).toContainEqual({

@@ -22,8 +22,10 @@
 
 export {
   defaultFinalizeStream,
+  defineLanguageModelAdapter,
   isLanguageModelAdapter,
   type LanguageModelAdapter,
+  type LanguageModelAdapterDefinition,
   type StreamAccumulatorView,
 } from "./language-model-adapter.js";
 export { StreamAccumulator, type AccumToolCall } from "./stream-accumulator.js";

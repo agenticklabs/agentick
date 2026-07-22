@@ -41,10 +41,10 @@ function stubAdapter(): LanguageModelAdapter<StubRaw, never> {
     provider: "stub",
     target: TARGET,
     streamByDefault: false,
-    buildParams(): unknown {
+    prepareRequest(): unknown {
       return {};
     },
-    call(): Promise<StubRaw> {
+    send(): Promise<StubRaw> {
       return Promise.resolve({ text: "ok" });
     },
     async *openStream(): AsyncIterable<never> {},

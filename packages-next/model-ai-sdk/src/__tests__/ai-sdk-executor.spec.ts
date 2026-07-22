@@ -210,16 +210,16 @@ describe("aisdk() adapter — provider tools (Pass D request-half)", () => {
     // gap. This test pins the no-leak invariant: provider tools never appear
     // in the projected input.
     const adapter = aisdk(mkMockModel("x"));
-    const input = adapter.buildParams(
-      {
+    const input = adapter.prepareRequest({
+      targetInput: {
         messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
         providerTools: [
           { provider: "openai", type: "web_search_preview", name: "web_search_preview" },
           { provider: "ai-sdk", type: "web_search_preview", name: "web_search_preview" },
         ],
       },
-      adapter.target,
-    ) as { tools?: unknown };
+      target: adapter.target,
+    }) as { tools?: unknown };
     // Provider tools are not projected into the AI SDK `ToolSet`.
     expect(input.tools).toBeUndefined();
     // And nothing about them leaks into the projected input at all.

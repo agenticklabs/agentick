@@ -977,8 +977,8 @@ describe("google() adapter — type sanity", () => {
 describe("google() adapter — provider tools (Pass D request-half)", () => {
   it("maps the google grounding slice onto config.tools alongside function declarations, drops other providers", () => {
     const adapter = google("gemini-2.5-flash");
-    const params = adapter.buildParams(
-      {
+    const params = adapter.prepareRequest({
+      targetInput: {
         messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
         tools: [
           {
@@ -999,8 +999,8 @@ describe("google() adapter — provider tools (Pass D request-half)", () => {
           { provider: "openai", type: "web_search_preview", name: "web_search_preview" },
         ],
       },
-      mkTarget(),
-    ) as { config?: { tools?: unknown[] } };
+      target: mkTarget(),
+    }) as { config?: { tools?: unknown[] } };
     const tools = params.config?.tools ?? [];
     // Function declarations ride as their own single `Tool` entry.
     expect(tools).toContainEqual({

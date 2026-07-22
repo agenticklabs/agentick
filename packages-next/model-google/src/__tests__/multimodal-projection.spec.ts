@@ -31,8 +31,8 @@ describe("google() adapter — ADR 57 multimodal projection", () => {
   const adapter = google("gemini-2.0-flash");
 
   it("projects a document (base64) to an inlineData part — v1 parity (google.ts:454)", () => {
-    const params = adapter.buildParams(
-      userInput([
+    const params = adapter.prepareRequest({
+      targetInput: userInput([
         {
           type: "document",
           source: { type: "base64", data: "JVBERi0=", mimeType: "application/pdf" },
@@ -40,54 +40,54 @@ describe("google() adapter — ADR 57 multimodal projection", () => {
         },
       ]),
       target,
-    );
+    });
     expect(firstUserParts(params)).toContainEqual({
       inlineData: { mimeType: "application/pdf", data: "JVBERi0=" },
     });
   });
 
   it("projects a document (url) to a fileData part", () => {
-    const params = adapter.buildParams(
-      userInput([
+    const params = adapter.prepareRequest({
+      targetInput: userInput([
         {
           type: "document",
           source: { type: "url", url: "https://x/doc.pdf", mimeType: "application/pdf" },
         },
       ]),
       target,
-    );
+    });
     expect(firstUserParts(params)).toContainEqual({
       fileData: { mimeType: "application/pdf", fileUri: "https://x/doc.pdf" },
     });
   });
 
   it("projects audio + video to inline/file parts", () => {
-    const audio = adapter.buildParams(
-      userInput([
+    const audio = adapter.prepareRequest({
+      targetInput: userInput([
         { type: "audio", source: { type: "base64", data: "SUQz", mimeType: "audio/mpeg" } },
       ]),
       target,
-    );
+    });
     expect(firstUserParts(audio)).toContainEqual({
       inlineData: { mimeType: "audio/mpeg", data: "SUQz" },
     });
-    const video = adapter.buildParams(
-      userInput([
+    const video = adapter.prepareRequest({
+      targetInput: userInput([
         {
           type: "video",
           source: { type: "gcs", bucket: "b", object: "clip.mp4", mimeType: "video/mp4" },
         },
       ]),
       target,
-    );
+    });
     expect(firstUserParts(video)).toContainEqual({
       fileData: { mimeType: "video/mp4", fileUri: "gs://b/clip.mp4" },
     });
   });
 
   it("round-trips thoughtSignature from the INPUT part's providerOptions.google", () => {
-    const params = adapter.buildParams(
-      {
+    const params = adapter.prepareRequest({
+      targetInput: {
         messages: [
           {
             role: "assistant",
@@ -104,7 +104,7 @@ describe("google() adapter — ADR 57 multimodal projection", () => {
         ],
       } as unknown as LanguageModelInput,
       target,
-    );
+    });
     const contents = (params as { contents: Array<{ role: string; parts: unknown[] }> }).contents;
     const parts = contents.find((c) => c.role === "model")?.parts ?? [];
     const fnCall = parts.find((p) => (p as { functionCall?: unknown }).functionCall) as {
@@ -114,13 +114,13 @@ describe("google() adapter — ADR 57 multimodal projection", () => {
   });
 
   it("#176 — a request-level providerOptions.google reaches the config", () => {
-    const params = adapter.buildParams(
-      {
+    const params = adapter.prepareRequest({
+      targetInput: {
         messages: [],
         providerOptions: { google: { seed: 11 } },
       } as unknown as LanguageModelInput,
       target,
-    );
+    });
     expect((params as { config?: { seed?: number } }).config?.seed).toBe(11);
   });
 
@@ -129,8 +129,8 @@ describe("google() adapter — ADR 57 multimodal projection", () => {
     // explicit (requires a pre-created CachedContent RESOURCE NAME the
     // hint cannot supply). So the inline hint must NOT crash and must NOT
     // fabricate a `cachedContent` — the system text still folds through.
-    const params = adapter.buildParams(
-      {
+    const params = adapter.prepareRequest({
+      targetInput: {
         messages: [
           {
             role: "system",
@@ -141,7 +141,7 @@ describe("google() adapter — ADR 57 multimodal projection", () => {
         ],
       } as unknown as LanguageModelInput,
       target,
-    );
+    });
     const config = (params as { config?: { systemInstruction?: unknown; cachedContent?: unknown } })
       .config;
     // The hint text survives into systemInstruction…
@@ -151,13 +151,13 @@ describe("google() adapter — ADR 57 multimodal projection", () => {
   });
 
   it("#212 — explicit caching is reachable via the providerOptions.google.cachedContent escape hatch", () => {
-    const params = adapter.buildParams(
-      {
+    const params = adapter.prepareRequest({
+      targetInput: {
         messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
         providerOptions: { google: { cachedContent: "cachedContents/abc123" } },
       } as unknown as LanguageModelInput,
       target,
-    );
+    });
     expect((params as { config?: { cachedContent?: string } }).config?.cachedContent).toBe(
       "cachedContents/abc123",
     );

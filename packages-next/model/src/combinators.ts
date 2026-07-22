@@ -27,6 +27,7 @@
 import type {
   AdapterDelta,
   ExecuteErrorChannel,
+  ExecuteInput,
   LanguageModelExecutionResult,
   LanguageModelInput,
   ExecutionTarget,
@@ -88,10 +89,13 @@ const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
  */
 async function openThroughFirstChunk<TRaw, TChunk>(
   adapter: LanguageModelAdapter<TRaw, TChunk>,
-  params: unknown,
+  request: unknown,
   signal: AbortSignal | undefined,
 ): Promise<AsyncIterable<TChunk>> {
-  const iter = await adapter.openStream(params, signal);
+  if (!adapter.openStream) {
+    throw new Error(`adapter '${adapter.provider}' does not support streaming (no openStream)`);
+  }
+  const iter = await adapter.openStream(request, signal);
   const it = iter[Symbol.asyncIterator]();
   const first = await it.next(); // failures to START surface here
   return (async function* reassemble(): AsyncIterable<TChunk> {
@@ -135,11 +139,19 @@ export function withRetry<TRaw, TChunk>(
 
   return {
     ...adapter,
-    call: (params, signal) => attempt(() => adapter.call(params, signal), signal),
-    openStream: (params, signal) =>
-      attempt(() => openThroughFirstChunk(adapter, params, signal), signal),
+    send: (request, signal) => attempt(() => adapter.send(request, signal), signal),
+    ...(adapter.openStream !== undefined
+      ? {
+          openStream: (request: TRequestOf<typeof adapter>, signal: AbortSignal | undefined) =>
+            attempt(() => openThroughFirstChunk(adapter, request, signal), signal),
+        }
+      : {}),
   };
 }
+
+/** The `TRequest` an adapter's `send`/`openStream` consume. */
+type TRequestOf<A> =
+  A extends LanguageModelAdapter<infer _R, infer _C, infer TReq> ? TReq : unknown;
 
 // ============================================================================
 // withFallback
@@ -199,21 +211,26 @@ export function withFallback(
     ...(first.streamByDefault !== undefined ? { streamByDefault: first.streamByDefault } : {}),
     ...(first.customBlocks !== undefined ? { customBlocks: first.customBlocks } : {}),
 
-    // Params are provider-specific — defer building to the serving
-    // adapter inside call/openStream. buildParams is identity-stash.
-    buildParams: (input: LanguageModelInput): unknown => input,
+    // Native requests are provider-specific — defer building to the
+    // serving adapter inside send/openStream. The composite's
+    // prepareRequest is an identity-stash of the canonical ExecuteInput;
+    // each inner adapter runs its OWN prepareRequest on it.
+    prepareRequest: (input: ExecuteInput<LanguageModelInput>): unknown => input,
 
-    call: (params, signal) =>
+    send: (request, signal) =>
       tryChain<FallbackRaw>(signal, async (a) => {
-        const raw = await a.call(a.buildParams(params as LanguageModelInput, a.target), signal);
+        const raw = await a.send(
+          a.prepareRequest(request as ExecuteInput<LanguageModelInput>),
+          signal,
+        );
         return { adapter: a, raw };
       }),
 
-    openStream: (params, signal) =>
+    openStream: (request, signal) =>
       tryChain<AsyncIterable<FallbackChunk>>(signal, async (a) => {
         const iter = await openThroughFirstChunk(
           a,
-          a.buildParams(params as LanguageModelInput, a.target),
+          a.prepareRequest(request as ExecuteInput<LanguageModelInput>),
           signal,
         );
         return (async function* tag(): AsyncIterable<FallbackChunk> {
@@ -283,14 +300,18 @@ export function tapModel<TRaw, TChunk>(
   };
   return {
     ...adapter,
-    call: (params, signal) => {
-      safe(() => tap.onCall?.(params, adapter.target));
-      return adapter.call(params, signal);
+    send: (request, signal) => {
+      safe(() => tap.onCall?.(request, adapter.target));
+      return adapter.send(request, signal);
     },
-    openStream: (params, signal) => {
-      safe(() => tap.onCall?.(params, adapter.target));
-      return adapter.openStream(params, signal);
-    },
+    ...(adapter.openStream !== undefined
+      ? {
+          openStream: (request: TRequestOf<typeof adapter>, signal: AbortSignal | undefined) => {
+            safe(() => tap.onCall?.(request, adapter.target));
+            return adapter.openStream!(request, signal);
+          },
+        }
+      : {}),
     mapChunk: (chunk, accum) => {
       const deltas = adapter.mapChunk(chunk, accum);
       if (tap.onDelta) for (const d of deltas) safe(() => tap.onDelta!(d));

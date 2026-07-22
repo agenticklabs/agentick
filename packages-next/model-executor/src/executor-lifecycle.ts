@@ -20,13 +20,49 @@
  * before running" (add to the aborted set; the next execute sees it).
  */
 
-import type { Fiber } from "effect";
+import type { Effect, Fiber } from "effect";
 
 import type {
+  AdapterDelta,
+  ExecuteInput,
   ExecutorTerminal,
   LanguageModelExecutionResult,
+  LanguageModelInput,
+  Operation,
   TerminalEvent,
 } from "@agentick/spec-next";
+
+/**
+ * Per-call context threaded into the nested `model:provider-request`
+ * command body (ADR 52 amendment 2026-07-22) via a `FiberRef` — the
+ * non-serializable half of the invocation the command's serializable
+ * `input` (the native request) cannot carry.
+ *
+ * The `model:provider-request` command's `input` IS the provider-native
+ * request (so `onBeforeModelProviderRequest` transforms exactly that), and
+ * its own sink emits RAW provider chunks (so `onModelProviderRequestChunk`
+ * observes them pre-`mapChunk`). Everything else the SDK-interaction body
+ * needs — the caller's abort signal, the AdapterDelta sink the outer
+ * `model:generate[_stream]` op drains, and the Operation delta events are
+ * attributed to — rides HERE, set by `generateBody` with `FiberRef.locally`
+ * immediately around the in-fiber `modelProviderRequest.fx(...)` call.
+ */
+export interface ProviderRequestCall {
+  /** The originating execute input — carries `signal`, `target`, `scope`. */
+  readonly execInput: ExecuteInput<LanguageModelInput>;
+  /**
+   * The AdapterDelta sink of the outer `model:generate_stream` op (the
+   * loop's per-tick sink, or the iterator queue's) — `null` on the
+   * non-streaming `model:generate` path (deltas still emit to the bus).
+   */
+  readonly deltaSink: ((delta: AdapterDelta) => Effect.Effect<void>) | null;
+  /**
+   * The outer `model:generate[_stream]` Operation — the identity every
+   * in-flight AdapterDelta bus event is attributed to, so delta
+   * observability is byte-identical to the pre-split pipeline.
+   */
+  readonly op: Operation<unknown, unknown>;
+}
 
 /**
  * Per-execution lifecycle entry. Subclass-specific extensions

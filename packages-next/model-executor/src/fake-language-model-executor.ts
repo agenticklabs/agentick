@@ -26,7 +26,7 @@
  * harness shape stays identical.
  */
 
-import { Effect } from "effect";
+import { Effect, FiberRef } from "effect";
 import {
   BaseHarness,
   getContext,
@@ -76,7 +76,33 @@ import {
   ExecutorLifecycle,
   isFoldedTerminal,
   operationOutcomeToTerminal,
+  type ProviderRequestCall,
 } from "./executor-lifecycle.js";
+
+/**
+ * The fake's twin of the real executor's `ProviderCallRef` — the per-call
+ * context for its nested `model:provider-request` command (ADR 52 amendment
+ * 2026-07-22). Same mechanism, so conformance for the nested op (parentOpId
+ * threading, journal, abort) runs against the fake identically. Fiber-scoped;
+ * module-shared is safe. The fake has no provider SDK, so its "raw chunk"
+ * currency is the scripted {@link AdapterDelta} itself (no separate raw layer).
+ */
+const FakeProviderCallRef = FiberRef.unsafeMake<ProviderRequestCall | undefined>(undefined);
+
+/** Read the per-call provider-request context; fail if invoked out of band. */
+function readFakeProviderCall(): Effect.Effect<ProviderRequestCall, ExecuteErrorChannel> {
+  return FiberRef.get(FakeProviderCallRef).pipe(
+    Effect.flatMap((call) =>
+      call === undefined
+        ? Effect.fail<ExecuteErrorChannel>(
+            new ProviderRejected({
+              cause: new Error("model:provider-request invoked without a ProviderRequestCall"),
+            }),
+          )
+        : Effect.succeed(call),
+    ),
+  );
+}
 
 // ============================================================================
 // Construction options
@@ -174,6 +200,20 @@ export class FakeLanguageModelExecutor
     ExecuteInput<LanguageModelInput>,
     AdapterDelta,
     unknown,
+    ExecuteErrorChannel | SubstrateError
+  >;
+
+  /**
+   * The nested provider-SDK call (ADR 52 amendment 2026-07-22) — the fake
+   * mints it so the `model:provider-request` conformance (boundary hooks,
+   * raw chunk hook, parentOpId threading, journal, abort) runs against the
+   * fake exactly as against the real executor. Chunk = the scripted
+   * {@link AdapterDelta} (the fake has no separate raw provider chunk layer).
+   */
+  private readonly modelProviderRequest: StreamCommand<
+    unknown,
+    AdapterDelta,
+    unknown,
     ExecuteErrorChannel
   >;
 
@@ -196,7 +236,7 @@ export class FakeLanguageModelExecutor
     this.modelGenerate = this.command<
       ExecuteInput<LanguageModelInput>,
       unknown,
-      ExecuteErrorChannel
+      ExecuteErrorChannel | SubstrateError
     >({
       name: "model:generate",
       description: "the non-streaming provider call (scripted)",
@@ -207,7 +247,7 @@ export class FakeLanguageModelExecutor
       ExecuteInput<LanguageModelInput>,
       AdapterDelta,
       unknown,
-      ExecuteErrorChannel
+      ExecuteErrorChannel | SubstrateError
     >({
       name: "model:generate_stream",
       description: "the streaming provider call (scripted)",
@@ -218,6 +258,18 @@ export class FakeLanguageModelExecutor
         // iterator cleanly rather than throwing.
         isCancellation: (cause) => cause instanceof ProviderAborted,
       },
+    });
+    // The nested provider-request command — parity with the real executor.
+    this.modelProviderRequest = this.commandStream<
+      unknown,
+      AdapterDelta,
+      unknown,
+      ExecuteErrorChannel
+    >({
+      name: "model:provider-request",
+      description: "the provider call (scripted)",
+      exposure: "internal",
+      body: (request, rawSink) => this.providerRequestBody(request, rawSink),
     });
   }
 
@@ -404,9 +456,46 @@ export class FakeLanguageModelExecutor
   private generateBody(
     input: ExecuteInput<LanguageModelInput>,
     sink: ((delta: AdapterDelta) => Effect.Effect<void>) | null,
+  ): Effect.Effect<unknown, ExecuteErrorChannel | SubstrateError, never> {
+    return Effect.gen(this, function* () {
+      const ctx = yield* getContext;
+      const opName = sink !== null ? "model:command:generate_stream" : "model:command:generate";
+      const op: Operation<unknown, unknown> = {
+        opId: ctx.opId ?? `${opName}:${ulid()}`,
+        surface: "model",
+        name: opName,
+        ...(ctx.parentOpId !== undefined ? { parentOpId: ctx.parentOpId } : {}),
+        scope: input.scope ?? {},
+        input,
+      };
+      // The fake's "native request" is the projected input — it has no SDK
+      // params. Invoke the nested provider-request command in-fiber (parentOpId
+      // auto-threads), seeding the per-call context on the FiberRef.
+      const call: ProviderRequestCall = { execInput: input, deltaSink: sink, op };
+      return yield* this.modelProviderRequest
+        .fx(input.targetInput, () => Effect.void)
+        .pipe(Effect.locally(FakeProviderCallRef, call));
+    });
+  }
+
+  /**
+   * The fake's `model:provider-request` body — replays the scripted deltas.
+   * Mirrors the real executor's split: `rawSink` is the command's own chunk
+   * sink (`onModelProviderRequestChunk` wraps it); `call.deltaSink` is the
+   * outer `model:generate_stream` AdapterDelta sink; `call.op` is the identity
+   * bus deltas are attributed to. Advancing the scripted cursor here keeps the
+   * generate command the single cursor-advance per run.
+   */
+  private providerRequestBody(
+    _request: unknown,
+    rawSink: (chunk: AdapterDelta) => Effect.Effect<void>,
   ): Effect.Effect<unknown, ExecuteErrorChannel, never> {
     return Effect.gen(this, function* () {
       const ctx = yield* getContext;
+      const call = yield* readFakeProviderCall();
+      const input = call.execInput;
+      const sink = call.deltaSink;
+      const op = call.op;
       const executionId = input.scope?.executionId ?? ctx.executionId ?? `exec:${ulid()}`;
       if (this.lifecycle.isAborted(executionId)) {
         return yield* Effect.fail<ExecuteErrorChannel>(
@@ -418,23 +507,14 @@ export class FakeLanguageModelExecutor
         const next = this.nextScripted();
         const scriptedResult = next?.result ?? DEFAULT_REPLY;
         if (sink !== null) {
-          const opName = "model:command:generate_stream";
-          const streamOp: Operation<ExecuteInput<LanguageModelInput>, unknown> = {
-            opId: ctx.opId ?? `${opName}:${ulid()}`,
-            surface: "model",
-            name: opName,
-            ...(ctx.parentOpId !== undefined ? { parentOpId: ctx.parentOpId } : {}),
-            scope: input.scope ?? {},
-            input,
-          };
           const scriptedDeltas: ReadonlyArray<AdapterDelta> =
             next?.deltas ?? defaultDeltasFor(scriptedResult);
           for (const delta of scriptedDeltas) {
+            // Raw chunk hook path (fake's chunk currency = the AdapterDelta).
+            yield* rawSink(delta);
             yield* sink(delta);
             // Bus parity — observability subscribers see the same deltas.
-            yield* this.emitDeltaLazy(streamOp, () => delta).pipe(
-              Effect.catchAll(() => Effect.void),
-            );
+            yield* this.emitDeltaLazy(op, () => delta).pipe(Effect.catchAll(() => Effect.void));
           }
         }
         if (next?.outcome === "failed") {

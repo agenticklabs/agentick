@@ -32,8 +32,8 @@ describe("openai() adapter — ADR 57 multimodal projection", () => {
   const adapter = openai("gpt-4o-mini");
 
   it("projects a document (base64) to a `file` part — v1 parity (openai.ts:565)", () => {
-    const params = adapter.buildParams(
-      userInput([
+    const params = adapter.prepareRequest({
+      targetInput: userInput([
         {
           type: "document",
           source: { type: "base64", data: "JVBERi0=", mimeType: "application/pdf" },
@@ -41,7 +41,7 @@ describe("openai() adapter — ADR 57 multimodal projection", () => {
         },
       ]),
       target,
-    );
+    });
     const parts = userContent(params);
     expect(parts).toContainEqual({
       type: "file",
@@ -53,20 +53,22 @@ describe("openai() adapter — ADR 57 multimodal projection", () => {
   });
 
   it("projects a document (Files API reference) to a `file` part by file_id", () => {
-    const params = adapter.buildParams(
-      userInput([{ type: "document", source: { type: "reference", fileId: "file-123" } }]),
+    const params = adapter.prepareRequest({
+      targetInput: userInput([
+        { type: "document", source: { type: "reference", fileId: "file-123" } },
+      ]),
       target,
-    );
+    });
     expect(userContent(params)).toContainEqual({ type: "file", file: { file_id: "file-123" } });
   });
 
   it("projects audio (base64) to an `input_audio` part", () => {
-    const params = adapter.buildParams(
-      userInput([
+    const params = adapter.prepareRequest({
+      targetInput: userInput([
         { type: "audio", source: { type: "base64", data: "SUQz", mimeType: "audio/mpeg" } },
       ]),
       target,
-    );
+    });
     expect(userContent(params)).toContainEqual({
       type: "input_audio",
       input_audio: { data: "SUQz", format: "mp3" },
@@ -74,30 +76,36 @@ describe("openai() adapter — ADR 57 multimodal projection", () => {
   });
 
   it("#176 — a request-level providerOptions.openai reaches the request body", () => {
-    const params = adapter.buildParams(
-      {
+    const params = adapter.prepareRequest({
+      targetInput: {
         messages: [],
         providerOptions: { openai: { seed: 7, store: true } },
       } as unknown as LanguageModelInput,
       target,
-    );
+    });
     expect((params as { seed?: number }).seed).toBe(7);
     expect((params as { store?: boolean }).store).toBe(true);
   });
 
   it("#214 — target.modelId (per-tick <Model> override, ADR 56) wins over the construction-time default", () => {
-    const params = adapter.buildParams(userInput([{ type: "text", text: "hi" }]), {
-      ...target,
-      modelId: "gpt-4o",
+    const params = adapter.prepareRequest({
+      targetInput: userInput([{ type: "text", text: "hi" }]),
+      target: {
+        ...target,
+        modelId: "gpt-4o",
+      },
     });
     expect((params as { model: string }).model).toBe("gpt-4o");
   });
 
   it("#214 — falls back to the construction-time default when the target names no model", () => {
-    const params = adapter.buildParams(userInput([{ type: "text", text: "hi" }]), {
-      kind: "language-model",
-      provider: "openai",
-    } as ExecutionTarget);
+    const params = adapter.prepareRequest({
+      targetInput: userInput([{ type: "text", text: "hi" }]),
+      target: {
+        kind: "language-model",
+        provider: "openai",
+      } as ExecutionTarget,
+    });
     // adapter was constructed with openai("gpt-4o-mini").
     expect((params as { model: string }).model).toBe("gpt-4o-mini");
   });
@@ -129,10 +137,10 @@ describe("openai() adapter — ADR 57 multimodal projection", () => {
 
   it("a generated_image is NOT a base64 text bomb — projects to image_url data URI", () => {
     const bigData = "A".repeat(2048);
-    const params = adapter.buildParams(
-      userInput([{ type: "image", imageUrl: `data:image/png;base64,${bigData}` }]),
+    const params = adapter.prepareRequest({
+      targetInput: userInput([{ type: "image", imageUrl: `data:image/png;base64,${bigData}` }]),
       target,
-    );
+    });
     const parts = userContent(params);
     // The canonical projection maps generated_image → image; at the wire
     // it is an image_url part, never a text part carrying raw base64.

@@ -38,6 +38,7 @@ import { ulid } from "@agentick/utils-next";
 import type {
   Citation,
   ContentBlock,
+  ExecuteInput,
   ExecutionTarget,
   LanguageModelExecutionResult,
   LanguageModelInput,
@@ -58,6 +59,7 @@ import {
   createSourceInterner,
   type CustomBlockDefinition,
   defaultFinalizeStream,
+  defineLanguageModelAdapter,
   type DeltaTransform,
   type LanguageModelAdapter,
   type SourceInterner,
@@ -218,32 +220,39 @@ export function google(
   let clientMemo: GoogleGenAI | undefined = options.client;
   const client = (): GoogleGenAI => (clientMemo ??= new GoogleGenAI(buildClientOptions(options)));
 
-  return {
+  return defineLanguageModelAdapter<
+    GenerateContentResponse,
+    GenerateContentResponse,
+    GenerateContentParameters
+  >({
     provider: "google",
     target,
     streamByDefault: options.stream ?? false,
     ...(customBlocks !== undefined ? { customBlocks } : {}),
 
-    buildParams(input: LanguageModelInput, target: ExecutionTarget): GenerateContentParameters {
-      return toGoogleParams(input, target, defaultModel);
+    prepareRequest(input: ExecuteInput<LanguageModelInput>): GenerateContentParameters {
+      return toGoogleParams(input.targetInput, input.target, defaultModel);
     },
 
-    call(params: unknown, _signal: AbortSignal | undefined): Promise<GenerateContentResponse> {
+    send(
+      request: GenerateContentParameters,
+      _signal: AbortSignal | undefined,
+    ): Promise<GenerateContentResponse> {
       // Google SDK doesn't accept an abort signal on the call directly;
       // aborts surface as the stream iterator throwing. We rely on the
       // executor's in-flight tracking + the user-supplied AbortController.
-      return client().models.generateContent(params as GenerateContentParameters);
+      return client().models.generateContent(request);
     },
 
     openStream(
-      params: unknown,
+      request: GenerateContentParameters,
       _signal: AbortSignal | undefined,
     ): Promise<AsyncIterable<GenerateContentResponse>> {
       // SDK doesn't accept signal here; the iterator throws when the
       // bridged abort fires.
-      return client().models.generateContentStream(
-        params as GenerateContentParameters,
-      ) as unknown as Promise<AsyncIterable<GenerateContentResponse>>;
+      return client().models.generateContentStream(request) as unknown as Promise<
+        AsyncIterable<GenerateContentResponse>
+      >;
     },
 
     /**
@@ -491,7 +500,7 @@ export function google(
         ],
       } as GenerateContentResponse;
     },
-  };
+  });
 }
 
 /**

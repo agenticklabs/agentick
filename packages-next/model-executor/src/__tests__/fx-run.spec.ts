@@ -17,7 +17,7 @@ import { describe, expect, it } from "vitest";
 
 import type {
   AdapterDelta,
-  ExecutionTarget,
+  ExecuteInput,
   LanguageModelExecutionResult,
   LanguageModelInput,
   NormalizeInput,
@@ -39,10 +39,10 @@ function stubAdapter(): LanguageModelAdapter<StubRaw, never> {
     provider: "stub",
     target: { kind: "language-model", provider: "stub", modelId: "stub-v1" },
     streamByDefault: false,
-    buildParams(_input: LanguageModelInput, _target: ExecutionTarget): unknown {
+    prepareRequest(_input: ExecuteInput<LanguageModelInput>): unknown {
       return {};
     },
-    call(): Promise<StubRaw> {
+    send(): Promise<StubRaw> {
       return Promise.resolve({ text: "ok" });
     },
     // Required by the adapter contract; unused — `run` takes the

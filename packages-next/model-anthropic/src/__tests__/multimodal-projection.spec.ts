@@ -42,8 +42,8 @@ describe("anthropic() adapter — ADR 57 multimodal projection", () => {
   const adapter = anthropic("claude-sonnet-4");
 
   it("projects a document (base64) to a native document block — v1 parity (anthropic.ts:537)", () => {
-    const params = adapter.buildParams(
-      {
+    const params = adapter.prepareRequest({
+      targetInput: {
         messages: [
           {
             role: "user",
@@ -58,7 +58,7 @@ describe("anthropic() adapter — ADR 57 multimodal projection", () => {
         ],
       },
       target,
-    );
+    });
     expect(userContent(params)).toContainEqual({
       type: "document",
       source: { type: "base64", media_type: "application/pdf", data: "JVBERi0=" },
@@ -66,13 +66,13 @@ describe("anthropic() adapter — ADR 57 multimodal projection", () => {
   });
 
   it("#176 — a request-level providerOptions.anthropic reaches the request body", () => {
-    const params = adapter.buildParams(
-      {
+    const params = adapter.prepareRequest({
+      targetInput: {
         messages: [],
         providerOptions: { anthropic: { top_k: 5 } },
       } as unknown as LanguageModelInput,
       target,
-    );
+    });
     expect((params as { top_k?: number }).top_k).toBe(5);
   });
 
@@ -102,10 +102,10 @@ describe("anthropic() adapter — ADR 57 multimodal projection", () => {
     expect(part.type).toBe("reasoning");
 
     // 3. buildParams emits a `thinking` wire block replaying the signature.
-    const params = adapter.buildParams(
-      { messages: [{ role: "assistant", content: [part] }] },
+    const params = adapter.prepareRequest({
+      targetInput: { messages: [{ role: "assistant", content: [part] }] },
       target,
-    );
+    });
     expect(assistantContent(params)).toContainEqual({
       type: "thinking",
       thinking: "reasoning...",
@@ -152,7 +152,7 @@ describe("anthropic() adapter — ADR 57 multimodal projection", () => {
     // (the per-section cache_control preservation), so it is present here.
     if (!adapter.project) throw new Error("expected anthropic() to override project");
     const projected = adapter.project({ compiled, target, tools: [] } as ProjectInput);
-    const params = adapter.buildParams(projected, target);
+    const params = adapter.prepareRequest({ targetInput: projected, target });
     expect((params as { top_p?: number }).top_p).toBe(0.8);
     expect((params as { stop_sequences?: string[] }).stop_sequences).toEqual(["STOP"]);
   });
@@ -173,10 +173,10 @@ describe("anthropic() adapter — ADR 57 multimodal projection", () => {
     expect(reasoning.providerMetadata?.anthropic?.redactedData).toBe("opaque-blob");
 
     const part = messagePartFromBlock(reasoning as never) as LanguageModelMessagePart;
-    const params = adapter.buildParams(
-      { messages: [{ role: "assistant", content: [part] }] },
+    const params = adapter.prepareRequest({
+      targetInput: { messages: [{ role: "assistant", content: [part] }] },
       target,
-    );
+    });
     expect(assistantContent(params)).toContainEqual({
       type: "redacted_thinking",
       data: "opaque-blob",

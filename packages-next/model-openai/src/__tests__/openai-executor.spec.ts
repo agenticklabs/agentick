@@ -503,8 +503,8 @@ describe("openai() adapter — journaled lifecycle", () => {
 describe("openai() adapter — provider tools (Pass D request-half)", () => {
   it("maps the openai provider-tool slice onto params.tools, keeps function tools, drops other providers", () => {
     const adapter = openai("gpt-4o-mini");
-    const params = adapter.buildParams(
-      {
+    const params = adapter.prepareRequest({
+      targetInput: {
         messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
         tools: [{ name: "calc", description: "calculator", inputSchema: { type: "object" } }],
         providerTools: [
@@ -518,8 +518,8 @@ describe("openai() adapter — provider tools (Pass D request-half)", () => {
           { provider: "anthropic", type: "web_search_20250305", name: "web_search" },
         ],
       },
-      mkTarget(),
-    ) as { tools?: unknown[]; tool_choice?: unknown };
+      target: mkTarget(),
+    }) as { tools?: unknown[]; tool_choice?: unknown };
     const tools = params.tools ?? [];
     // Function tool survives in its native `{ type: "function", function }` shape.
     expect(tools).toContainEqual({

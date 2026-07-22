@@ -85,8 +85,8 @@ function adapterFor(
     provider: "adapter-conformance",
     target: DEFAULT_TARGET,
     streamByDefault: true,
-    buildParams: () => ({}),
-    call: () => Promise.resolve(effective),
+    prepareRequest: () => ({}),
+    send: () => Promise.resolve(effective),
     openStream: async function* (): AsyncIterable<SyntheticChunk> {
       for (const chunk of chunksForScripted(effective)) yield chunk;
     },

@@ -16,6 +16,7 @@ import { describe, expect, it } from "vitest";
 
 import type {
   AdapterDelta,
+  ExecuteInput,
   ExecutionTarget,
   LanguageModelExecutionResult,
   LanguageModelInput,
@@ -39,10 +40,10 @@ function streamingAdapter(chunks: readonly StubChunk[]): LanguageModelAdapter<St
     provider: "stub",
     target: { kind: "language-model", provider: "stub", modelId: "stub-v1" },
     streamByDefault: true,
-    buildParams(_input: LanguageModelInput, _target: ExecutionTarget): unknown {
+    prepareRequest(_input: ExecuteInput<LanguageModelInput>): unknown {
       return {};
     },
-    call(): Promise<StubRaw> {
+    send(): Promise<StubRaw> {
       return Promise.resolve({ text: chunks.map((c) => c.text).join("") });
     },
     async *openStream(): AsyncIterable<StubChunk> {

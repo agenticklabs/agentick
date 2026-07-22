@@ -38,7 +38,7 @@ import {
 } from "ai";
 
 import { ulid } from "@agentick/utils-next";
-import { createSourceInterner } from "@agentick/model-next";
+import { createSourceInterner, defineLanguageModelAdapter } from "@agentick/model-next";
 import type {
   LanguageModelAdapter,
   SourceInterner,
@@ -48,6 +48,7 @@ import type {
   AdapterDelta,
   Citation,
   ContentBlock,
+  ExecuteInput,
   ExecutionTarget,
   LanguageModelExecutionResult,
   LanguageModelInput,
@@ -162,34 +163,35 @@ export function aisdk(
 ): LanguageModelAdapter<unknown, AISDKStreamPart> {
   const target: ExecutionTarget = options.target ?? deriveTarget(model);
 
-  return {
+  return defineLanguageModelAdapter<unknown, AISDKStreamPart, AISDKProjectedInput>({
     provider: "ai-sdk",
     target,
 
-    buildParams(input: LanguageModelInput, target: ExecutionTarget): AISDKProjectedInput {
-      return toAISDKInput(input, target);
+    prepareRequest(input: ExecuteInput<LanguageModelInput>): AISDKProjectedInput {
+      return toAISDKInput(input.targetInput, input.target);
     },
 
-    async call(params: unknown, signal: AbortSignal | undefined): Promise<unknown> {
-      const aiSdk = params as AISDKProjectedInput;
+    async send(request: AISDKProjectedInput, signal: AbortSignal | undefined): Promise<unknown> {
       return generateText({
         model: model,
-        messages: aiSdk.messages,
-        ...omitUndefined({ tools: aiSdk.tools }),
-        ...aiSdk.generation,
-        ...omitUndefined({ providerOptions: aiSdk.providerOptions, abortSignal: signal }),
+        messages: request.messages,
+        ...omitUndefined({ tools: request.tools }),
+        ...request.generation,
+        ...omitUndefined({ providerOptions: request.providerOptions, abortSignal: signal }),
       }) as unknown as Promise<unknown>;
     },
 
-    openStream(params: unknown, signal: AbortSignal | undefined): AsyncIterable<AISDKStreamPart> {
-      const aiSdk = params as AISDKProjectedInput;
+    openStream(
+      request: AISDKProjectedInput,
+      signal: AbortSignal | undefined,
+    ): AsyncIterable<AISDKStreamPart> {
       const stream = streamText({
         model: model,
-        messages: aiSdk.messages,
-        ...omitUndefined({ tools: aiSdk.tools }),
-        ...aiSdk.generation,
-        ...(aiSdk.providerOptions !== undefined
-          ? { providerOptions: aiSdk.providerOptions as never }
+        messages: request.messages,
+        ...omitUndefined({ tools: request.tools }),
+        ...request.generation,
+        ...(request.providerOptions !== undefined
+          ? { providerOptions: request.providerOptions as never }
           : {}),
         abortSignal: signal,
       });
@@ -412,7 +414,7 @@ export function aisdk(
     normalize(raw: unknown): LanguageModelExecutionResult {
       return normalizeImpl({ targetOutput: raw, target });
     },
-  };
+  });
 }
 
 // ============================================================================

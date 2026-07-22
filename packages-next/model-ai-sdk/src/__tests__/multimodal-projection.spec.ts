@@ -22,7 +22,7 @@ function mkAdapter() {
   return aisdk(new MockLanguageModelV2({ modelId: "mock-1" }));
 }
 
-function userContent(params: ReturnType<ReturnType<typeof aisdk>["buildParams"]>): unknown[] {
+function userContent(params: ReturnType<ReturnType<typeof aisdk>["prepareRequest"]>): unknown[] {
   const messages = (params as { messages: Array<{ role: string; content: unknown }> }).messages;
   const user = messages.find((m) => m.role === "user");
   return Array.isArray(user?.content) ? (user!.content as unknown[]) : [];
@@ -31,8 +31,8 @@ function userContent(params: ReturnType<ReturnType<typeof aisdk>["buildParams"]>
 describe("aisdk() adapter — ADR 57 multimodal projection", () => {
   it("projects document / audio / video to AI SDK `file` parts", () => {
     const adapter = mkAdapter();
-    const params = adapter.buildParams(
-      {
+    const params = adapter.prepareRequest({
+      targetInput: {
         messages: [
           {
             role: "user",
@@ -52,7 +52,7 @@ describe("aisdk() adapter — ADR 57 multimodal projection", () => {
         ],
       },
       target,
-    );
+    });
     const parts = userContent(params);
     expect(parts).toContainEqual({
       type: "file",
@@ -68,13 +68,13 @@ describe("aisdk() adapter — ADR 57 multimodal projection", () => {
 
   it("#176 — a request-level providerOptions reaches the projected input", () => {
     const adapter = mkAdapter();
-    const params = adapter.buildParams(
-      {
+    const params = adapter.prepareRequest({
+      targetInput: {
         messages: [],
         providerOptions: { openai: { reasoningEffort: "high" } },
       } as unknown as LanguageModelInput,
       target,
-    );
+    });
     expect((params as { providerOptions?: unknown }).providerOptions).toEqual({
       openai: { reasoningEffort: "high" },
     });
@@ -82,8 +82,8 @@ describe("aisdk() adapter — ADR 57 multimodal projection", () => {
 
   it("#173 — message-level providerOptions carries onto the projected ModelMessage (AI SDK 1:1)", () => {
     const adapter = mkAdapter();
-    const params = adapter.buildParams(
-      {
+    const params = adapter.prepareRequest({
+      targetInput: {
         messages: [
           {
             role: "user",
@@ -93,7 +93,7 @@ describe("aisdk() adapter — ADR 57 multimodal projection", () => {
         ],
       } as unknown as LanguageModelInput,
       target,
-    );
+    });
     const messages = (params as { messages: Array<{ role: string; providerOptions?: unknown }> })
       .messages;
     const user = messages.find((m) => m.role === "user");
