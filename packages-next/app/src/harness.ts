@@ -88,6 +88,7 @@ import type {
   OperationJournal,
   ProtocolEvent,
   ReconcilerProtocol,
+  RegisteredModel,
   RunOnceInput,
   RunOnceResult,
   SendInput,
@@ -180,7 +181,14 @@ declare module "@agentick/runtime-next" {
  */
 export type SessionDefaults<P = unknown> = Omit<
   SessionHarnessOptions<P>,
-  "sessionId" | "agent" | "reconciler" | "loop" | "modelExecutor" | "toolExecutor" | "target"
+  | "sessionId"
+  | "agent"
+  | "reconciler"
+  | "loop"
+  | "modelExecutor"
+  | "buildModelExecutor"
+  | "toolExecutor"
+  | "target"
 >;
 
 // App-level substrate slots use the framework's `HarnessShell` parent
@@ -562,6 +570,18 @@ export class AppHarness<P = unknown>
   private readonly rootElement: unknown;
   private readonly modelExecutor: LanguageModelExecutor;
   private readonly target: ExecutionTarget;
+  /**
+   * Adapter→executor builder threaded into every session (ADR 89 §2 ergonomic
+   * parity), so `session.model.setModel(openai("gpt-4o"))` wraps the adapter in
+   * the ONE `LanguageModelExecutor` on the app substrate — the runtime twin of
+   * the construction-time `model` slot. `undefined` for a BYO-executor app
+   * (constructed with `modelExecutor`, not `model`): that app opted out of the
+   * app's adapter-wrapping machinery, so a runtime adapter swap has no builder
+   * and the facade throws `ModelExecutorBuilderMissingError`.
+   */
+  private readonly buildModelExecutor:
+    | ((adapter: LanguageModelAdapter) => RegisteredModel)
+    | undefined;
 
   // Per-session defaults resolved from the cascade
   // (session-longhand > shorthand > built-in).
@@ -812,6 +832,32 @@ export class AppHarness<P = unknown>
           : options.modelExecutor!;
     // Resolve target: caller override > modelExecutor.target.
     this.target = options.target ?? this.modelExecutor.target;
+    // ADR 89 §2 — the adapter→executor builder threaded into every session so
+    // `session.model.setModel(adapter)` matches construction's `model` sugar.
+    // Injected ONLY when the app was built from a `model` adapter (it owns the
+    // wrap-in-executor path); a BYO-executor app gets no builder and the facade
+    // throws on an adapter overload. Mirrors the construction wrap above:
+    // one executor on the app substrate, target read from the executor.
+    this.buildModelExecutor =
+      options.model !== undefined
+        ? (adapter: LanguageModelAdapter): RegisteredModel => {
+            const modelExecutor = new TheLanguageModelExecutor(
+              `${appId}:executor:${ulid()}`,
+              this.journal,
+              this.bus,
+              this.inbox,
+              {
+                adapter,
+                // Live app-resolved interceptor snapshot at swap time + a LIVE
+                // parent link, exactly like the construction-time executor —
+                // so app/gateway hooks reach the swapped-in executor too.
+                inheritedInterceptors: this.resolvedInterceptors(),
+                interceptorParent: this,
+              },
+            );
+            return { modelExecutor, target: modelExecutor.target };
+          }
+        : undefined;
     this.telemetryRuntime =
       options.telemetry !== undefined ? ManagedRuntime.make(options.telemetry) : undefined;
 
@@ -1572,6 +1618,11 @@ export class AppHarness<P = unknown>
       reconciler: this.reconciler,
       loop: this.loop,
       modelExecutor: this.modelExecutor,
+      // ADR 89 §2 — adapter→executor builder for `session.model.setModel(adapter)`.
+      // Present only for adapter-constructed apps (undefined → BYO-executor).
+      ...(this.buildModelExecutor !== undefined
+        ? { buildModelExecutor: this.buildModelExecutor }
+        : {}),
       toolExecutor: tools,
       elicitation,
       tasks,

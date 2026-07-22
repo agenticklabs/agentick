@@ -19,15 +19,16 @@
 
 import { describe, expect, it } from "vitest";
 
-import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
+import { FakeLanguageModelExecutor, LanguageModelExecutor } from "@agentick/model-executor-next";
+import { scriptedAdapter } from "@agentick/model-next/testing";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import { ElicitationHarness } from "@agentick/elicitation-next";
 import { InMemoryHandlerResolver, ToolExecutorHarness } from "@agentick/tool-executor-next";
 import { LoopExecutorHarness } from "@agentick/loop-executor-next";
 import { ReconcilerHarness } from "@agentick/reconciler-react-next";
-import type { ExecutionTarget } from "@agentick/spec-next";
+import { ModelExecutorBuilderMissingError, type ExecutionTarget } from "@agentick/spec-next";
 
-import { SessionHarness } from "../harness.js";
+import { SessionHarness, type SessionHarnessOptions } from "../harness.js";
 
 const target: ExecutionTarget = {
   kind: "language-model",
@@ -56,7 +57,10 @@ const replyExec = (text: string) =>
   );
 
 /** Build a session whose default model-executor is `executor`. */
-async function mkSession(executor: FakeLanguageModelExecutor) {
+async function mkSession(
+  executor: FakeLanguageModelExecutor,
+  buildModelExecutor?: SessionHarnessOptions["buildModelExecutor"],
+) {
   const journal = new MemoryJournal();
   const bus = new LocalEventBus();
   const inbox = new LocalInbox();
@@ -78,10 +82,29 @@ async function mkSession(executor: FakeLanguageModelExecutor) {
     modelExecutor: executor,
     toolExecutor: tools,
     target,
+    ...(buildModelExecutor !== undefined ? { buildModelExecutor } : {}),
   });
   await session.ready;
   await session.mountReady;
   return { session, tools };
+}
+
+/**
+ * The adapter→executor builder the APP injects (mirrored here). Wraps a bare
+ * `LanguageModelAdapter` in the REAL `LanguageModelExecutor` on a fresh
+ * substrate — the same shape `AppHarness.createSessionBody` threads down.
+ */
+function mkBuilder(): SessionHarnessOptions["buildModelExecutor"] {
+  return (adapter) => {
+    const modelExecutor = new LanguageModelExecutor(
+      `built-exec-${Math.random()}`,
+      new MemoryJournal(),
+      new LocalEventBus(),
+      new LocalInbox(),
+      { adapter },
+    );
+    return { modelExecutor, target: modelExecutor.target };
+  };
 }
 
 /** Run one send and return the joined text of the response. */
@@ -225,6 +248,67 @@ describe("session.model — selection / swap facade (ADR 89 §2)", () => {
     // Lift the guard: the swapped executor now answers.
     vetoing = false;
     expect(await sendText(session, { stream: false })).toBe("from-B");
+
+    off();
+    await session.close();
+    await tools.close();
+  });
+
+  it("setModel(adapter) swaps the default — the next send uses the built executor", async () => {
+    const a = replyExec("from-A");
+    // Builder injected → the adapter overload wraps `scriptedAdapter` in a real
+    // executor. Ergonomic parity with `createApp({ model: openai(...) })`.
+    const { session, tools } = await mkSession(a, mkBuilder());
+
+    expect(await sendText(session)).toBe("from-A");
+
+    await session.model.setModel(scriptedAdapter("from-adapter"));
+    // `current` reflects the swap immediately — the built executor's own target.
+    expect(session.model.current.target.provider).toBe("scripted");
+
+    expect(await sendText(session)).toBe("from-adapter");
+
+    await session.close();
+    await tools.close();
+  });
+
+  it("setModel(adapter) with NO injected builder throws ModelExecutorBuilderMissingError", async () => {
+    const a = replyExec("from-A");
+    // No builder → BYO-executor session. The adapter overload has nothing to
+    // build with and must throw the typed error (a RegisteredModel still works).
+    const { session, tools } = await mkSession(a);
+
+    await expect(session.model.setModel(scriptedAdapter("nope"))).rejects.toBeInstanceOf(
+      ModelExecutorBuilderMissingError,
+    );
+
+    // The default is unchanged — the next send still uses A.
+    expect(session.model.current.modelExecutor).toBe(a);
+    expect(await sendText(session)).toBe("from-A");
+
+    await session.close();
+    await tools.close();
+  });
+
+  it("onBeforeSessionSetModel vetoes the adapter form identically (normalized before the command)", async () => {
+    const a = replyExec("from-A");
+    const { session, tools } = await mkSession(a, mkBuilder());
+
+    // Policy keyed on the NORMALIZED target — proof the adapter was wrapped to a
+    // RegisteredModel BEFORE the command, so the veto path sees identical input.
+    const off = session.hook({
+      onBeforeSessionSetModel: (input) => {
+        if (input.target.provider === "scripted") {
+          throw new Error("policy: switching to a `scripted` provider is not allowed");
+        }
+      },
+    });
+
+    await expect(session.model.setModel(scriptedAdapter("blocked"))).rejects.toThrow(/scripted/);
+
+    // The default was NOT swapped — the next send still uses A.
+    expect(session.model.current.modelExecutor).toBe(a);
+    expect(await sendText(session)).toBe("from-A");
 
     off();
     await session.close();

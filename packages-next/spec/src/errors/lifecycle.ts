@@ -226,6 +226,33 @@ export class ExecutionFailed extends SessionError {
 }
 registerAgentickError("ExecutionFailed", ExecutionFailed);
 
+/**
+ * `session.model.setModel` received a bare `LanguageModelAdapter`, but the
+ * session was constructed WITHOUT a `buildModelExecutor` closure — so it has
+ * no way to wrap the adapter in an executor (the adapter→executor build needs
+ * the app's substrate, which the adapter-agnostic session never imports). This
+ * is the BYO-executor path: an app that supplied its own `modelExecutor`
+ * (rather than a `model` adapter) injects no builder, so a runtime adapter swap
+ * has nothing to build with. Pass a `RegisteredModel` (`{ modelExecutor,
+ * target }`) instead.
+ *
+ * Thrown synchronously by the facade BEFORE the `session:set-model` command —
+ * it never reaches the command's Effect channel, so it is not a member of
+ * {@link SessionErrorChannel}.
+ */
+export class ModelExecutorBuilderMissingError extends SessionError {
+  readonly _tag = "ModelExecutorBuilderMissingError" as const;
+  constructor(args?: { readonly cause?: unknown }) {
+    super(
+      "session.model.setModel: a LanguageModelAdapter was passed, but this " +
+        "session has no injected model-executor builder (BYO-executor app). " +
+        "Pass a RegisteredModel ({ modelExecutor, target }) instead.",
+      { cause: args?.cause },
+    );
+  }
+}
+registerAgentickError("ModelExecutorBuilderMissingError", ModelExecutorBuilderMissingError);
+
 export type SessionErrorChannel =
   | SessionClosedError
   | SessionBusyError

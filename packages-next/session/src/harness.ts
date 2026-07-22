@@ -56,6 +56,7 @@ import type {
   OperationJournal,
   OperationJournalFactory,
   ProtocolEvent,
+  RegisteredModel,
   RenderContext,
   SendInput,
   SendMessageInput,
@@ -89,7 +90,12 @@ import {
 import { mergeLayered, omitUndefined } from "@agentick/utils-next";
 import { buildSessionElicit } from "@agentick/elicitation-next";
 import { withScope } from "@agentick/tool-executor-next";
-import { effectiveModelInfo, mergeUsageStats, type ModelRegistry } from "@agentick/model-next";
+import {
+  effectiveModelInfo,
+  mergeUsageStats,
+  type LanguageModelAdapter,
+  type ModelRegistry,
+} from "@agentick/model-next";
 import type { KnobsHandle } from "@agentick/knobs-next";
 import type { GateHandle, GatesHandle } from "@agentick/gates-next";
 import type { StateHandle } from "@agentick/state-next";
@@ -223,6 +229,17 @@ export interface SessionHarnessOptions<P = unknown> {
   readonly loop: LoopExecutorProtocol;
   /** Model-executor harness for model invocations. */
   readonly modelExecutor: ExecutorProtocol<unknown, unknown, LanguageModelExecutionResult>;
+  /**
+   * Adapter→executor builder, INJECTED by the app (ADR 89 §2 ergonomic
+   * parity). The app owns the adapter→executor build + the substrate it needs
+   * (see `AppHarness.createSessionBody`), so it passes this closure down; the
+   * `session.model` facade calls it to normalize the `setModel(adapter)`
+   * overload into a `RegisteredModel`. Omitted for a BYO-executor app (one that
+   * supplied its own `modelExecutor` rather than a `model` adapter) — the
+   * adapter overload then throws `ModelExecutorBuilderMissingError`. Keeps the
+   * session adapter-agnostic: it never imports executor-construction machinery.
+   */
+  readonly buildModelExecutor?: (adapter: LanguageModelAdapter) => RegisteredModel;
   /** Tool executor harness for tool dispatch. */
   readonly toolExecutor: ToolExecutorProtocol;
   /** Default execution target — overridable per send (later). */
@@ -636,6 +653,10 @@ export class SessionHarness<P = unknown>
     this.modelFacade = new SessionModelFacade({
       getDefault: () => ({ modelExecutor: this.modelExecutor, target: this.target }),
       applySetModel: (input) => this.runSetModel(input),
+      // ADR 89 §2 — the app-injected adapter→executor builder, so
+      // `session.model.setModel(openai("gpt-4o"))` matches construction sugar.
+      // Absent for a BYO-executor app; the facade throws on an adapter then.
+      ...omitUndefined({ buildModelExecutor: options.buildModelExecutor }),
     });
     this.spawnContext = options.spawnContext;
     this.parentSessionId = options.parentSessionId;

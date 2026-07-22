@@ -75,6 +75,7 @@ export {
   GatewayLifecycleError,
   GatewayNotStartedError,
   KnobError,
+  ModelExecutorBuilderMissingError,
   SessionBusyError,
   SessionClosedError,
   SessionError,

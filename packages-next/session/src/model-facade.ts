@@ -49,12 +49,14 @@ import {
   type RuntimeContext,
   type Unsubscribe,
 } from "@agentick/runtime-next";
-import type {
-  ExecutionTarget,
-  ExecutorProtocol,
-  HandlerVerdict,
-  LanguageModelExecutionResult,
-  RegisteredModel,
+import { isLanguageModelAdapter, type LanguageModelAdapter } from "@agentick/model-next";
+import {
+  ModelExecutorBuilderMissingError,
+  type ExecutionTarget,
+  type ExecutorProtocol,
+  type HandlerVerdict,
+  type LanguageModelExecutionResult,
+  type RegisteredModel,
 } from "@agentick/spec-next";
 
 // The concrete model-executor slot type the session default holds — the
@@ -90,8 +92,22 @@ export interface ModelSelectionHandle {
    * the construction-bound default the session holds; takes effect on the
    * NEXT send (never mid-execution). Journaled + hookable via the
    * `session:set-model` command (`onBeforeSessionSetModel` may veto).
+   *
+   * Accepts either overload form — the ergonomic parity with construction
+   * (`createApp({ model: openai("gpt-4o") })`):
+   *
+   *   - A {@link RegisteredModel} (`{ modelExecutor, target }`) — BYO
+   *     executor, used as-is.
+   *   - A `LanguageModelAdapter` (`openai("gpt-4o")`, `anthropic(...)`, …) —
+   *     wrapped in an executor for you by the session's injected
+   *     `buildModelExecutor`. Throws {@link ModelExecutorBuilderMissingError}
+   *     when the session was constructed without a builder (a BYO-executor
+   *     app); pass a `RegisteredModel` there instead.
+   *
+   * Both forms normalize to a `RegisteredModel` BEFORE the `session:set-model`
+   * command, so the veto path (`onBeforeSessionSetModel`) sees identical input.
    */
-  setModel(model: RegisteredModel): Promise<void>;
+  setModel(model: RegisteredModel | LanguageModelAdapter): Promise<void>;
   /**
    * Swap ONLY the session-default target (keep the current runner) — e.g.
    * switch modelId to a cheaper model on the same adapter. Journaled +
@@ -133,6 +149,17 @@ export interface ModelFacadeHost {
   readonly getDefault: () => RegisteredModel;
   /** Run the journaled + hookable `session:set-model` command. */
   readonly applySetModel: (input: SetModelInput) => Promise<void>;
+  /**
+   * Adapter→executor builder INJECTED by the app (which owns the
+   * adapter→executor build + the substrate it needs — see
+   * `AppHarness.createSessionBody`). The facade calls it to normalize the
+   * `setModel(adapter)` overload into a {@link RegisteredModel} before the
+   * command. `undefined` for a BYO-executor app (no `model` adapter at
+   * construction) — the adapter overload then throws
+   * {@link ModelExecutorBuilderMissingError}. Keeps the session
+   * adapter-agnostic: it never imports executor-construction machinery.
+   */
+  readonly buildModelExecutor?: (adapter: LanguageModelAdapter) => RegisteredModel;
 }
 
 // ── op-scoping ──────────────────────────────────────────────────────
@@ -179,8 +206,32 @@ export class SessionModelFacade implements ModelSelectionHandle {
     return this.host.getDefault();
   }
 
-  setModel(model: RegisteredModel): Promise<void> {
-    return this.host.applySetModel({ modelExecutor: model.modelExecutor, target: model.target });
+  // `async` so a bad-adapter throw (no injected builder) surfaces as a REJECTED
+  // promise, uniform with the RegisteredModel path — never a synchronous throw.
+  async setModel(model: RegisteredModel | LanguageModelAdapter): Promise<void> {
+    // Normalize BOTH overload forms to a RegisteredModel BEFORE the command,
+    // so the veto path (`onBeforeSessionSetModel`) sees identical input. A bare
+    // adapter is wrapped via the app-injected builder; a RegisteredModel is
+    // used as-is. `isLanguageModelAdapter` is the canonical guard (shared with
+    // the app's construction slot) — a RegisteredModel has no `buildParams`
+    // and its `modelExecutor` carries `run`/`execute`, so it never matches.
+    const registered = isLanguageModelAdapter(model) ? this.buildFromAdapter(model) : model;
+    await this.host.applySetModel({
+      modelExecutor: registered.modelExecutor,
+      target: registered.target,
+    });
+  }
+
+  /**
+   * Wrap a bare `LanguageModelAdapter` in a `RegisteredModel` via the
+   * app-injected {@link ModelFacadeHost.buildModelExecutor}. Throws
+   * {@link ModelExecutorBuilderMissingError} when no builder was injected (a
+   * BYO-executor app) — the session itself never constructs executors.
+   */
+  private buildFromAdapter(adapter: LanguageModelAdapter): RegisteredModel {
+    const build = this.host.buildModelExecutor;
+    if (build === undefined) throw new ModelExecutorBuilderMissingError();
+    return build(adapter);
   }
 
   setTarget(target: ExecutionTarget): Promise<void> {

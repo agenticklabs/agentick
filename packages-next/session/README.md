@@ -494,6 +494,33 @@ session.hook({
 });
 ```
 
+### `setModel` accepts an adapter too — parity with construction
+
+`setModel` takes **either** overload form, mirroring construction's
+`createApp({ model: openai("gpt-4o") })` sugar:
+
+- a `RegisteredModel` (`{ modelExecutor, target }`) — BYO executor, used as-is;
+- a bare `LanguageModelAdapter` (`openai("gpt-4o")`, `anthropic(...)`, …) —
+  wrapped in an executor **for you**.
+
+```typescript
+// Ergonomic parity — pass the same adapter sugar you'd pass at construction.
+await session.model.setModel(openai("gpt-4o"));
+```
+
+The session stays **adapter-agnostic**: it never imports
+executor-construction machinery. The app owns the adapter→executor build (the
+same `LanguageModelExecutor`-on-the-app-substrate path the construction-time
+`model` slot uses) and injects it as a `buildModelExecutor` closure. Both
+overload forms normalize to a `RegisteredModel` **before** the
+`session:set-model` command, so `onBeforeSessionSetModel` (the veto path) sees
+identical input regardless of which form the caller passed.
+
+A **BYO-executor app** — one constructed with `modelExecutor` rather than a
+`model` adapter — opted out of the app's adapter-wrapping machinery, so it
+injects no builder; passing an adapter to `setModel` then throws
+`ModelExecutorBuilderMissingError`. Pass a `RegisteredModel` there instead.
+
 ### Interceptors that PERSIST across a `setModel` swap — the payoff
 
 A model swap can swap the whole executor (a different adapter), so an
@@ -686,7 +713,13 @@ their backing.
   vetoes a swap (default unchanged); a `session.model.use` transform AND a
   `session.model.guard` veto, registered once, still apply to the model call
   across a `setModel` executor swap; per-send `modelExecutor` override beats
-  the swapped default (precedence).
+  the swapped default (precedence). Plus the adapter-overload parity:
+  `setModel(adapter)` swaps the default via the injected `buildModelExecutor`
+  (next send uses the built executor); the adapter form with NO injected
+  builder throws `ModelExecutorBuilderMissingError`; and
+  `onBeforeSessionSetModel` vetoes the adapter form identically (normalized to
+  a `RegisteredModel` before the command). End-to-end through `createApp` in
+  `@agentick/app-next`'s `set-model.spec.tsx`.
 - `src/__tests__/define-session.spec.ts` — `defineSession` factory wiring.
 - `src/__tests__/model-bridge.spec.tsx` — tree-declared per-tick model,
   real loop resolving the `ModelBridge` (ADR 56); tick-IR precedence over

@@ -1726,6 +1726,19 @@ blueprint's design decisions; this is execution-level).
 
 ### 2026-07-21
 
+- **setModel(adapter) overload LANDED (ergonomic parity w/ construction).**
+  `session.model.setModel` now takes `RegisteredModel | LanguageModelAdapter`; both
+  normalize to RegisteredModel BEFORE `session:set-model` (veto sees identical input;
+  method now async). Injected-builder design: `SessionHarnessOptions.buildModelExecutor?`
+  — the APP wires the closure (same LanguageModelExecutor-on-app-substrate path as
+  construction, live resolvedInterceptors + interceptorParent); session stays
+  adapter-agnostic. BYO-executor apps (no builder) → typed
+  `ModelExecutorBuilderMissingError` (SessionError family, thrown pre-command). +5 tests
+  (3 facade, 2 e2e via createApp). Gates: typecheck --force 152/152 0-cached; touched
+  tests green; oxfmt/oxlint clean. **KNOWN FLAKE (pre-existing, verified on clean HEAD
+  by stash):** `app-harness.spec.tsx` "filters by surface" + "invokes an ExecutorFactory"
+  — 30s timeouts under load, fail with AND without this change; fix separately.
+
 - **Phase-2 chunk hooks LANDED (commandStream per-chunk interception).** The v1-style
   chunk capability on the streaming-command primitive: `ChunkInterceptor` = `{observe}`
   (tap) | `ChunkTransform {onChunk(chunk,emit,ctx), onFlush?(emit,ctx)}` (map/drop/fan-out/
