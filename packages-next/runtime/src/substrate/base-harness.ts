@@ -26,21 +26,10 @@
  * @see docs/proposals/v2/blueprint/01-harness-principle.md
  */
 
-import {
-  Cause,
-  Effect,
-  Exit,
-  Fiber,
-  FiberRef,
-  ManagedRuntime,
-  Option,
-  Queue,
-  Runtime,
-} from "effect";
+import { Effect, Fiber, FiberRef, Runtime } from "effect";
 import { unwrapExit, omitUndefined, isThenable } from "@agentick/utils-next";
 import type {
   AfterHook,
-  AsyncStream,
   BeforeHook,
   ChunkHooksOf,
   ChunkInterceptor,
@@ -50,7 +39,6 @@ import type {
   Pascal,
   RegistrarsOf,
   EventBus,
-  CommandDescriptor,
   CommandExposure,
   CommandInfo,
   EventBusFactory,
@@ -81,9 +69,7 @@ import type {
 } from "@agentick/spec-next";
 import {
   AgentickError,
-  CommandDeclarationError,
   DEFAULT_JOURNALING_POLICY,
-  deriveChunkHookName,
   deriveHookNames,
   logEventName,
   parseHookKey,
@@ -96,6 +82,13 @@ import {
 import { resolveSyncSubstrateSlot } from "./resolve-slot.js";
 import { ulid } from "./ulid.js";
 import { getContext, type RuntimeContext, withContext } from "./runtime-context.js";
+import { runHarnessProtocol, runHarnessStream } from "./harness-protocol.js";
+import {
+  createCommandRunner,
+  type CommandRunner,
+  type RegisteredCommand,
+  type StreamCommand,
+} from "./command-runner.js";
 import { RequestResponseRegistry, type RequestError } from "./request-response-registry.js";
 import {
   type InterceptorKind,
@@ -135,54 +128,22 @@ export type { ChunkInterceptor, ChunkObserver, ChunkTransform } from "@agentick/
 // surface it, so re-home it onto the runtime package's public API (ADR 77).
 export type { AsyncStream } from "@agentick/spec-next";
 
-/**
- * The three consumption faces {@link BaseHarness.commandStream} returns for one
- * declared streaming verb — all driving the SAME cascade-wrapped operation
- * (guard → onBefore(input) → body → onAfter(R)), differing ONLY in how the
- * caller consumes the one run:
- *
- *   - **`fx`** — the Effect-native **sink-fold twin** (`fx(input, sink) =>
- *     Effect<R>`). EXACTLY the internal cascade-wrapped body, un-run and without
- *     the Queue/fork bridge — so an in-fiber caller (the loop's per-tick model
- *     call) composes it with `yield*` and the model call rides the SAME
- *     interceptor cascade + boundary hooks + guard. This is why the loop's
- *     streaming model call gets `onBefore/AfterModelGenerateStream` + guard.
- *   - **`stream`** — the JS async-iterable edge: `for await` drains the chunks,
- *     `.result` resolves to `R`. Projects `fx` onto {@link AsyncStream} via
- *     `runHarnessStream`, threading the streaming-edge policy (`def.stream`).
- *   - **`run`** — the drain-to-`R` Promise (no-op sink), the shape an
- *     inbox/remote caller of the declared verb gets. The boundary hooks +
- *     terminal fire exactly once, identically to the other two faces.
- */
-export interface StreamCommand<I, Chunk, R, E = never> {
-  readonly stream: (
-    input: I,
-    opts?: { readonly origin?: OperationOrigin },
-  ) => AsyncStream<Chunk, R>;
-  readonly fx: (
-    input: I,
-    sink: (chunk: Chunk) => Effect.Effect<void>,
-    opts?: { readonly origin?: OperationOrigin },
-  ) => Effect.Effect<R, E | SubstrateError, never>;
-  readonly run: (input: I, opts?: { readonly origin?: OperationOrigin }) => Promise<R>;
-}
-
-/**
- * A declared command in a harness's registry (ADR 51): the wire-safe
- * descriptor plus the bound runner that manufactures the Operation and
- * routes it through `runOperation`.
- */
-interface RegisteredCommand {
-  readonly descriptor: CommandDescriptor;
-  readonly run: (
-    input: unknown,
-    opts: {
-      readonly origin: OperationOrigin;
-      readonly parentOpId?: string;
-      readonly correlationId?: string;
-    },
-  ) => Effect.Effect<unknown, unknown, never>;
-}
+// The Effect→JS protocol bridges + the command subsystem were extracted (A2.4)
+// to `harness-protocol.ts` / `command-runner.ts`; re-export here so the package's
+// public surface (`@agentick/runtime-next`) is unchanged — a re-home, not a
+// public-API change.
+export { runHarnessProtocol, runHarnessStream } from "./harness-protocol.js";
+export {
+  createCommandRunner,
+  type CommandRunner,
+  type CommandRunnerDeps,
+  type CommandDef,
+  type StreamCommandDef,
+  type StreamCommand,
+  type RegisteredCommand,
+  type CommandInvokeOpts,
+  type OperationRunner,
+} from "./command-runner.js";
 
 /**
  * Effect-native guard decider (ADR 83). The Effect twin of the
@@ -459,7 +420,7 @@ function commandHookMiddleware(
   if (parsed === undefined) return undefined;
   // Chunk interceptors (ADR 80 Phase 2) SINK-WRAP the streaming body; they are
   // NOT op-scoped middleware, so they never join the interceptor cascade. Skip
-  // them here — {@link BaseHarness.registerChunkInterceptor} owns their path.
+  // them here — the CommandRunner's `registerChunkInterceptor` owns their path.
   if (parsed.kind === "chunk") return undefined;
   const wrapped: AsyncMiddleware<unknown, unknown> =
     parsed.kind === "before"
@@ -491,125 +452,10 @@ export function hooksToMiddlewares(config: CommandHooks): Middleware<unknown, un
   return out;
 }
 
-// ============================================================================
-// Per-chunk interception pipeline (ADR 80 Phase 2)
-// ============================================================================
-//
-// A chunk interceptor SINK-WRAPS a streaming command's sink: it runs BETWEEN
-// the body's emit and the downstream sink (the bounded queue for `.stream`, the
-// caller's sink for `.fx`, the no-op sink for `.run`). Multiple interceptors
-// compose into a pipeline `body → i0 → i1 → … → downstream`. Because the wrap
-// is on the SINK, all three consumption faces see transformed chunks — the loop
-// (via `.fx`) and the iterator (via `.stream`) alike.
-
-/**
- * The normalized (kind-tagged) internal form of a {@link ChunkInterceptor}, with
- * `Ctx` bound to {@link RuntimeContext}. The public union is shape-discriminated
- * (`observe` vs `onChunk`); {@link normalizeChunkInterceptor} tags it once at
- * registration so the hot per-chunk path is a cheap discriminant check.
- */
-type ResolvedChunkInterceptor<Chunk> =
-  | {
-      readonly kind: "observe";
-      readonly observe: (chunk: Chunk, ctx: RuntimeContext) => void | Promise<void>;
-    }
-  | {
-      readonly kind: "transform";
-      readonly onChunk: (
-        chunk: Chunk,
-        emit: (chunk: Chunk) => void,
-        ctx: RuntimeContext,
-      ) => void | Promise<void>;
-      readonly onFlush?: (
-        emit: (chunk: Chunk) => void,
-        ctx: RuntimeContext,
-      ) => void | Promise<void>;
-    };
-
-/** Tag a {@link ChunkInterceptor} by shape into a {@link ResolvedChunkInterceptor}. */
-function normalizeChunkInterceptor<Chunk>(
-  interceptor: ChunkInterceptor<Chunk, RuntimeContext>,
-): ResolvedChunkInterceptor<Chunk> {
-  if ("observe" in interceptor) {
-    return { kind: "observe", observe: interceptor.observe };
-  }
-  return {
-    kind: "transform",
-    onChunk: interceptor.onChunk,
-    ...(interceptor.onFlush !== undefined ? { onFlush: interceptor.onFlush } : {}),
-  };
-}
-
-/** Lift a hook callback's `void | Promise<void>` result onto the Effect channel. */
-function chunkStep(result: void | Promise<void>): Effect.Effect<void> {
-  return isThenable(result) ? Effect.promise(() => result as Promise<void>) : Effect.void;
-}
-
-/**
- * Run ONE interceptor stage for a chunk, feeding its output to `downstream`. An
- * `observe` stage taps (awaited, in order) then forwards the chunk UNCHANGED; a
- * `transform` stage buffers its `emit`ted chunks (zero → drop/coalesce, one →
- * map, many → fan-out) then forwards each downstream.
- */
-function runChunkStage<Chunk>(
-  stage: ResolvedChunkInterceptor<Chunk>,
-  chunk: Chunk,
-  downstream: (chunk: Chunk) => Effect.Effect<void>,
-  ctx: RuntimeContext,
-): Effect.Effect<void> {
-  return Effect.gen(function* () {
-    if (stage.kind === "observe") {
-      yield* chunkStep(stage.observe(chunk, ctx));
-      yield* downstream(chunk);
-      return;
-    }
-    const buffer: Chunk[] = [];
-    yield* chunkStep(stage.onChunk(chunk, (c) => buffer.push(c), ctx));
-    for (const c of buffer) yield* downstream(c);
-  });
-}
-
-/**
- * Compose a chunk-interceptor list into a wrapped `sink` + a terminal `flush`
- * (ADR 80 Phase 2). The body emits into `sink` (stage 0), which cascades through
- * each stage to `realSink`. `flush` — run ONCE at the terminal boundary, after
- * the body's last emit and BEFORE `onAfter` — walks the stages in order,
- * releasing each transform's buffered tail into the NEXT stage's entry sink
- * (so a downstream combiner still coalesces the upstream's flushed remainder).
- * This is the flush-on-terminal contract; it is reached only on clean
- * completion (an interrupted body never returns, so `flush` never runs → no
- * bogus tail on abort).
- */
-function buildChunkPipeline<Chunk>(
-  interceptors: readonly ResolvedChunkInterceptor<Chunk>[],
-  realSink: (chunk: Chunk) => Effect.Effect<void>,
-  ctx: RuntimeContext,
-): {
-  readonly sink: (chunk: Chunk) => Effect.Effect<void>;
-  readonly flush: () => Effect.Effect<void>;
-} {
-  const n = interceptors.length;
-  // sinks[i] is the ENTRY sink for stage i; sinks[n] is the real downstream sink.
-  const sinks: ((chunk: Chunk) => Effect.Effect<void>)[] = new Array(n + 1);
-  sinks[n] = realSink;
-  for (let i = n - 1; i >= 0; i--) {
-    const stage = interceptors[i]!;
-    const downstream = sinks[i + 1]!;
-    sinks[i] = (chunk) => runChunkStage(stage, chunk, downstream, ctx);
-  }
-  const flush = (): Effect.Effect<void> =>
-    Effect.gen(function* () {
-      for (let i = 0; i < n; i++) {
-        const stage = interceptors[i]!;
-        if (stage.kind !== "transform" || stage.onFlush === undefined) continue;
-        const buffer: Chunk[] = [];
-        yield* chunkStep(stage.onFlush((c) => buffer.push(c), ctx));
-        const downstream = sinks[i + 1]!;
-        for (const c of buffer) yield* downstream(c);
-      }
-    });
-  return { sink: sinks[0] ?? realSink, flush };
-}
+// The per-chunk interception pipeline (ADR 80 Phase 2) — `ResolvedChunkInterceptor`,
+// `normalizeChunkInterceptor`, `chunkStep`, `runChunkStage`, `buildChunkPipeline` —
+// moved to `command-runner.ts` (A2.4): chunk state is command-scoped, so its
+// machinery lives with the command subsystem.
 
 // ============================================================================
 // Tier 4 — call-scoped (dynamic) middleware (ADR 76)
@@ -1127,61 +973,21 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
   }
 
   /**
-   * Per-command chunk interceptors (ADR 80 Phase 2), keyed by the minted hook
-   * name (`on<Verb>Chunk`, via {@link deriveChunkHookName}). SINK-WRAPPING, not
-   * op-scoped middleware — so they live here, NOT on `this.middleware`. Read
-   * live per streaming run by {@link commandStream}: when a verb's list is empty
-   * (the common case) the sink is not wrapped at all (zero overhead).
-   *
-   * TODO(phase-2+): these are harness-LOCAL (they do not inherit down the
-   * construction tree the way `.use`/`.guard`/`.hook` middleware does, and a
-   * declarative session-config `{ hooks: { onXChunk } }` is NOT folded through
-   * `hooksToMiddlewares`). Session-scoped chunk interceptors (register on the
-   * session, reach the shared executor) are a follow-up — see the task note.
-   */
-  private readonly chunkInterceptors = new Map<string, ResolvedChunkInterceptor<unknown>[]>();
-
-  /**
    * Dispatch ONE hook-config entry to its registration path (ADR 80 Phase 2):
-   * an `on<Verb>Chunk` key routes to {@link registerChunkInterceptor} (the
-   * sink-wrapping path); every other key routes to {@link registerCommandHook}
+   * an `on<Verb>Chunk` key routes to the {@link CommandRunner}'s
+   * `registerChunkInterceptor` (the sink-wrapping path, since chunk state is
+   * command-scoped); every other key routes to {@link registerCommandHook}
    * (the op-scoped middleware cascade). The single funnel behind {@link hook}
    * and the {@link hooks} proxy.
    */
   private registerHookEntry(key: string, fn: unknown): Unsubscribe {
     if (parseHookKey(key)?.kind === "chunk") {
-      return this.registerChunkInterceptor(key, fn as ChunkInterceptor<unknown, RuntimeContext>);
+      return this.commandRunner.registerChunkInterceptor(
+        key,
+        fn as ChunkInterceptor<unknown, RuntimeContext>,
+      );
     }
     return this.registerCommandHook(key, fn);
-  }
-
-  /**
-   * Register a per-chunk interceptor (ADR 80 Phase 2) under its minted hook name
-   * (`on<Verb>Chunk`). Normalizes the shape-discriminated {@link ChunkInterceptor}
-   * to its kind-tagged internal form once, appends it to the verb's list (order =
-   * pipeline order), and returns an {@link Unsubscribe} that removes exactly that
-   * interceptor by identity. No-op teardown after the first call.
-   */
-  private registerChunkInterceptor(
-    key: string,
-    interceptor: ChunkInterceptor<unknown, RuntimeContext>,
-  ): Unsubscribe {
-    const resolved = normalizeChunkInterceptor(interceptor);
-    let list = this.chunkInterceptors.get(key);
-    if (list === undefined) {
-      list = [];
-      this.chunkInterceptors.set(key, list);
-    }
-    list.push(resolved);
-    let live = true;
-    return () => {
-      if (!live) return;
-      live = false;
-      const current = this.chunkInterceptors.get(key);
-      if (current === undefined) return;
-      const idx = current.indexOf(resolved);
-      if (idx >= 0) current.splice(idx, 1);
-    };
   }
 
   /**
@@ -1261,6 +1067,18 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
   protected readonly bus: EventBus;
   protected readonly inbox: MessageInbox;
 
+  /**
+   * The command subsystem (ADR 51 + A2.4) as a per-harness instance — owns the
+   * registry, the command manufacture, `commands()`, `get(name)`, and the
+   * per-command chunk-interceptor lists. Constructed with THIS harness's bound
+   * {@link runOperation}: the injected capability is the ONLY seam between the
+   * command-declaration layer (the runner) and the operation-execution layer
+   * (journal / bus / interceptor inheritance / identity — which stay here). The
+   * public `command` / `commandStream` / `commandEffect` / `commands` methods and
+   * the inbox dispatch path are thin delegations onto this.
+   */
+  private readonly commandRunner: CommandRunner;
+
   constructor(
     protected readonly surface: Surface,
     protected readonly scopeId: string,
@@ -1270,6 +1088,10 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
     options: BaseHarnessOptions<Input> = {},
   ) {
     this.address = `${surface}:${scopeId}`;
+    this.commandRunner = createCommandRunner({
+      surface,
+      runOperation: this.runOperation.bind(this),
+    });
     this.policy = options.policy ?? DEFAULT_JOURNALING_POLICY;
     this.input = options.input;
     this.metadata = Object.freeze({ ...(options.metadata ?? {}) });
@@ -1818,15 +1640,13 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
     };
   }
 
-  // ──────── command registry (ADR 51) ────────
-
-  /**
-   * Declared commands, keyed by canonical verb. Built dynamically by
-   * {@link command} — the declaration IS the registration; no parallel
-   * table to maintain. Consulted by {@link dispatchMessage} after
-   * custom handlers, before the `handleMessage` fallthrough.
-   */
-  private readonly commandRegistry = new Map<string, RegisteredCommand>();
+  // ──────── command registry (ADR 51) — delegated to CommandRunner (A2.4) ────────
+  //
+  // The registry Map, command manufacture, `commands()` listing, inbox lookup,
+  // and the per-command chunk-interceptor lists all live on `this.commandRunner`
+  // (constructed with this harness's bound `runOperation`). The methods below are
+  // thin, signature-preserving delegations — the protected surface subclasses see
+  // is unchanged.
 
   /**
    * Declare a command — the single declaration site for a harness verb
@@ -1884,46 +1704,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
     readonly opId?: (input: I) => string;
     readonly handler: (input: I) => Effect.Effect<R, E, never>;
   }): (input: I, opts?: { readonly origin?: OperationOrigin }) => Promise<R> {
-    const name = def.name;
-    if (!name.startsWith(`${this.surface}:`)) {
-      throw new CommandDeclarationError({
-        command: name,
-        reason: `verb prefix must match the declaring surface "${this.surface}"`,
-      });
-    }
-    if (this.commandRegistry.has(name)) {
-      throw new CommandDeclarationError({ command: name, reason: "duplicate declaration" });
-    }
-    const opName = `${this.surface}:command:${name.slice(this.surface.length + 1)}`;
-    const run = (
-      input: I,
-      opts: {
-        readonly origin: OperationOrigin;
-        readonly parentOpId?: string;
-        readonly correlationId?: string;
-      },
-    ): Effect.Effect<R, E | SubstrateError, never> =>
-      this.runOperation<I, R, E>(
-        {
-          opId: def.opId?.(input) ?? `${name}:${ulid()}`,
-          surface: this.surface,
-          name: opName,
-          ...omitUndefined({ parentOpId: opts.parentOpId, correlationId: opts.correlationId }),
-          scope: omitUndefined({ ...(def.scope?.(input) ?? {}), origin: opts.origin }),
-          input,
-        },
-        def.handler,
-      );
-    this.commandRegistry.set(name, {
-      descriptor: {
-        name,
-        exposure: def.exposure ?? "addressable",
-        ...omitUndefined({ input: def.input as StandardSchemaV1 | undefined }),
-        ...omitUndefined({ description: def.description }),
-      },
-      run: run as RegisteredCommand["run"],
-    });
-    return (input, opts) => runHarnessProtocol(run(input, { origin: opts?.origin ?? "host" }));
+    return this.commandRunner.command<I, R, E>(def);
   }
 
   /**
@@ -1940,15 +1721,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
     input: I,
     opts?: { readonly origin?: OperationOrigin },
   ): Effect.Effect<R, E | SubstrateError, never> {
-    const reg = this.commandRegistry.get(name);
-    if (reg === undefined) {
-      throw new CommandDeclarationError({ command: name, reason: "not declared on this harness" });
-    }
-    return reg.run(input, { origin: opts?.origin ?? "host" }) as Effect.Effect<
-      R,
-      E | SubstrateError,
-      never
-    >;
+    return this.commandRunner.commandEffect<I, R, E>(name, input, opts);
   }
 
   /**
@@ -1958,9 +1731,10 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
    *
    *   1. **Registry registration** — identical to {@link command} (same
    *      surface-prefix check, same duplicate check, same
-   *      `opName = "${surface}:command:${verb}"`, same `commandRegistry.set`).
-   *      This is what mints the boundary hooks `onBefore<Verb>` /
-   *      `onAfter<Verb>` (ADR 80) and makes the verb inbox-addressable.
+   *      `opName = "${surface}:command:${verb}"`, same registry set on the
+   *      shared {@link CommandRunner}). This is what mints the boundary hooks
+   *      `onBefore<Verb>` / `onAfter<Verb>` (ADR 80) and makes the verb
+   *      inbox-addressable.
    *   2. **Interceptor cascade** — the body runs INSIDE {@link runOperation}
    *      exactly as a normal command's does. The ONE composed interceptor list
    *      (guard → onBefore(input) → body → onAfter(R)) fires at the stream's
@@ -2064,137 +1838,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
       readonly onAbort?: (reason: string, input: I) => void;
     };
   }): StreamCommand<I, Chunk, R, E> {
-    const name = def.name;
-    if (!name.startsWith(`${this.surface}:`)) {
-      throw new CommandDeclarationError({
-        command: name,
-        reason: `verb prefix must match the declaring surface "${this.surface}"`,
-      });
-    }
-    if (this.commandRegistry.has(name)) {
-      throw new CommandDeclarationError({ command: name, reason: "duplicate declaration" });
-    }
-    const opName = `${this.surface}:command:${name.slice(this.surface.length + 1)}`;
-
-    // Per-chunk interception (ADR 80 Phase 2). Declaration-time interceptors are
-    // normalized once here; dynamic ones (`hooks.on<Verb>Chunk(...)`) are read
-    // LIVE per run from `this.chunkInterceptors` under the minted hook name. The
-    // effective list per run is `[...declared, ...dynamic]` (declared closest to
-    // the body). When BOTH are empty the sink is not wrapped at all.
-    const chunkHookName = deriveChunkHookName(opName);
-    const declaredChunk = (def.chunk ?? []).map(normalizeChunkInterceptor);
-    const chunkInterceptorsFor = this.chunkInterceptors;
-
-    // Wrap the body's sink with the effective chunk pipeline, flushing any
-    // buffered tail BEFORE returning `R` (hence before the `onAfter` boundary
-    // hook, which wraps the whole body). Zero-overhead when no interceptor is
-    // registered: the raw sink is threaded straight through, no `getContext`, no
-    // flush. On abort the body is interrupted before `flush` — no bogus tail.
-    const runBodyWithChunks = (
-      i: I,
-      sink: (chunk: Chunk) => Effect.Effect<void>,
-    ): Effect.Effect<R, E, never> => {
-      const dynamic = chunkInterceptorsFor.get(chunkHookName) as
-        | ResolvedChunkInterceptor<Chunk>[]
-        | undefined;
-      const hasDynamic = dynamic !== undefined && dynamic.length > 0;
-      if (declaredChunk.length === 0 && !hasDynamic) {
-        return def.body(i, sink); // zero-overhead — no sink wrap
-      }
-      const list = hasDynamic ? [...declaredChunk, ...dynamic!] : declaredChunk;
-      return Effect.gen(function* () {
-        const ctx = yield* getContext;
-        const { sink: wrapped, flush } = buildChunkPipeline<Chunk>(list, sink, ctx);
-        const result = yield* def.body(i, wrapped);
-        yield* flush();
-        return result;
-      });
-    };
-
-    // The cascade-wrapped, sink-folding body. ONE Effect reused by BOTH
-    // consumption modes — the streaming facade (sink tees to the bridge queue)
-    // and the registry `run` (no-op sink). Manufacturing the Operation +
-    // routing it through `runOperation` is IDENTICAL to `command`; the only
-    // delta is the body threads a (chunk-pipeline-wrapped) `sink`. This is the
-    // fusion: no second interceptor path exists.
-    const streamFx = (
-      input: I,
-      sink: (chunk: Chunk) => Effect.Effect<void>,
-      opts: {
-        readonly origin: OperationOrigin;
-        readonly parentOpId?: string;
-        readonly correlationId?: string;
-      },
-    ): Effect.Effect<R, E | SubstrateError, never> =>
-      this.runOperation<I, R, E>(
-        {
-          opId: def.opId?.(input) ?? `${name}:${ulid()}`,
-          surface: this.surface,
-          name: opName,
-          ...omitUndefined({ parentOpId: opts.parentOpId, correlationId: opts.correlationId }),
-          scope: omitUndefined({ ...(def.scope?.(input) ?? {}), origin: opts.origin }),
-          input,
-        },
-        (i) => runBodyWithChunks(i, sink),
-      );
-
-    // The inbox-addressable registry `run`: drive the SAME operation to
-    // completion with a no-op sink and return the drained `R`. A remote/inbox
-    // `generate` gets the final message, not a stream — but the boundary hooks
-    // + terminal fire exactly once, identically to the stream path.
-    const run = (
-      input: I,
-      opts: {
-        readonly origin: OperationOrigin;
-        readonly parentOpId?: string;
-        readonly correlationId?: string;
-      },
-    ): Effect.Effect<R, E | SubstrateError, never> => streamFx(input, () => Effect.void, opts);
-
-    this.commandRegistry.set(name, {
-      descriptor: {
-        name,
-        exposure: def.exposure ?? "addressable",
-        ...omitUndefined({ input: def.input as StandardSchemaV1 | undefined }),
-        ...omitUndefined({ description: def.description }),
-      },
-      run: run as RegisteredCommand["run"],
-    });
-
-    // The three consumption faces over the ONE cascade-wrapped body
-    // (`streamFx`). `fx` IS that Effect verbatim (the sink-fold the loop
-    // composes in-fiber, so the model call rides the cascade + hooks + guard);
-    // `stream` projects it onto the JS AsyncStream via `runHarnessStream`
-    // (Queue/fork/iterator/`.result`), threading the caller's `def.stream`
-    // streaming-edge policy (Phase 1B resolved the 1A phase-2 TODO — a concrete
-    // streaming command, e.g. `model:generate_stream`, now supplies
-    // `isCancellation: ProviderAborted` + `onStart`/`onAbort` bookkeeping);
-    // `run` drains it to `R` with a no-op sink.
-    return {
-      fx: (input, sink, opts) => streamFx(input, sink, { origin: opts?.origin ?? "host" }),
-      stream: (input, opts) =>
-        runHarnessStream<Chunk, R>(
-          (sink) => streamFx(input, sink, { origin: opts?.origin ?? "host" }),
-          {
-            ...(def.stream?.queueCapacity !== undefined
-              ? { queueCapacity: def.stream.queueCapacity }
-              : {}),
-            ...(def.stream?.isCancellation !== undefined
-              ? { isCancellation: def.stream.isCancellation }
-              : {}),
-            ...(def.stream?.onStart !== undefined
-              ? {
-                  onStart: (fiber: Fiber.RuntimeFiber<R, unknown>) =>
-                    def.stream!.onStart!(fiber, input),
-                }
-              : {}),
-            ...(def.stream?.onAbort !== undefined
-              ? { onAbort: (reason: string) => def.stream!.onAbort!(reason, input) }
-              : {}),
-          },
-        ),
-      run: (input, opts) => runHarnessProtocol(run(input, { origin: opts?.origin ?? "host" })),
-    };
+    return this.commandRunner.commandStream<I, Chunk, R, E>(def);
   }
 
   /**
@@ -2242,12 +1886,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
    * declare-and-discover surface `commands/list` composes over.
    */
   commands(): readonly CommandInfo[] {
-    return Array.from(this.commandRegistry.values(), ({ descriptor: d }) => ({
-      name: d.name,
-      exposure: d.exposure,
-      hasInput: d.input !== undefined,
-      ...omitUndefined({ description: d.description }),
-    }));
+    return this.commandRunner.commands();
   }
 
   /**
@@ -2324,7 +1963,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
     // runOperation path the public method uses. Replaces per-harness
     // `handleMessage` switch boilerplate; existing switches keep
     // working via the fallthrough below and migrate opportunistically.
-    const registered = this.commandRegistry.get(msg.type);
+    const registered = this.commandRunner.get(msg.type);
     if (registered !== undefined && registered.descriptor.exposure !== "internal") {
       return this.invokeRegisteredCommand(registered, msg);
     }
@@ -2747,143 +2386,3 @@ registerAgentickError("OperationOutcomeError", OperationOutcomeError);
 // Re-export InboxError type so concrete harnesses can type-narrow
 // without pulling from @agentick/spec-next directly.
 export type { InboxError };
-
-/**
- * Bridge an `Effect` running through `BaseHarness.runOperation` (or any
- * other Effect-typed harness machinery) to a Promise that rejects with
- * the original typed error instead of Effect's `FiberFailure` wrapper.
- *
- * Concrete harness protocol surfaces (e.g. `CompilerProtocol`,
- * `ToolExecutorProtocol`) keep Promise-typed return shapes for
- * ergonomic application code. This helper closes the gap: the typed
- * `SubstrateError` / `OperationOutcomeError` / body-`E` value at the
- * head of the failure cause becomes the Promise's rejection reason.
- *
- * Defects (interrupts, unhandled throws) reject with a normal `Error`
- * carrying `Cause.pretty(cause)`.
- */
-/**
- * Run an operation-bearing Effect to a Promise, normalizing the Exit.
- *
- * Optionally runs on a caller-provided `ManagedRuntime` (ADR 78) instead of
- * the default runtime — this is how the app-/node-scoped telemetry runtime
- * gets its tracer onto the substrate's `Effect.withSpan` annotations. When
- * `runtime` is omitted the behavior is identical to before (default runtime),
- * so every existing call site is unaffected.
- */
-export async function runHarnessProtocol<R>(
-  eff: Effect.Effect<R, unknown, never>,
-  runtime?: ManagedRuntime.ManagedRuntime<never, never>,
-): Promise<R> {
-  const exit = await (runtime ? runtime.runPromiseExit(eff) : Effect.runPromiseExit(eff));
-  return unwrapExit(exit) as R;
-}
-
-/**
- * Bridge a streaming operation's Effect-canonical form to the JS
- * {@link AsyncStream} facade — the streaming sibling of
- * {@link runHarnessProtocol}, and the singular concept behind EVERY
- * streaming edge (ADR 77).
- *
- * The canonical form is a **sink-fold**: `build(sink)` returns the Effect
- * that drives the work once, invoking `sink(item)` per emitted item and
- * succeeding with the final `Result`. In-process Effect callers compose
- * that Effect directly (one fiber, no bridge). This helper adds the
- * JS-shaped projection on top: it runs the Effect on a daemon fiber, tees
- * items into a bounded queue (real backpressure — a lagging iterator
- * consumer pauses the upstream via `Queue.offer`), and exposes both an
- * `AsyncIterable<Item>` and a `result` Promise reading the same fiber's
- * outcome. All the Queue/fork/Promise machinery lives HERE, once — a new
- * streaming edge supplies only its `build` and a couple of policy hooks.
- *
- * `result` and iteration observe ONE run. The iterator throws a real
- * provider failure (matching async-iterable ecosystem semantics) but
- * completes cleanly on cancellation — `options.isCancellation`
- * distinguishes the two (interrupts always complete cleanly). `abort`
- * interrupts the fiber; `onAbort` runs first for edge-specific bookkeeping.
- * `onStart` hands the running fiber to the edge (e.g. to register it for
- * an out-of-band `abort(id)` path). `runtime` threads a telemetry
- * `ManagedRuntime` the same way `runHarnessProtocol` does.
- */
-export function runHarnessStream<Item, Result>(
-  build: (sink: (item: Item) => Effect.Effect<void>) => Effect.Effect<Result, unknown, never>,
-  options?: {
-    readonly queueCapacity?: number;
-    readonly isCancellation?: (cause: unknown) => boolean;
-    readonly onStart?: (fiber: Fiber.RuntimeFiber<Result, unknown>) => void;
-    readonly onAbort?: (reason: string) => void;
-    readonly runtime?: ManagedRuntime.ManagedRuntime<never, never>;
-  },
-): AsyncStream<Item, Result> {
-  const capacity = options?.queueCapacity ?? 16;
-  const isCancellation = options?.isCancellation ?? ((): boolean => false);
-  const run = <A>(eff: Effect.Effect<A, never, never>): Promise<A> =>
-    options?.runtime ? options.runtime.runPromise(eff) : Effect.runPromise(eff);
-
-  type QItem = Option.Option<Item>;
-  type QF = { queue: Queue.Queue<QItem>; fiber: Fiber.RuntimeFiber<Result, unknown> };
-
-  // Setup runs once; the daemon fiber outlives it so the iterator and
-  // `result` can both observe the same outcome. `None` terminates the
-  // queue whatever the fiber's exit (success / failure / interrupt).
-  const program = Effect.gen(function* () {
-    const queue = yield* Queue.bounded<QItem>(capacity);
-    const sink = (item: Item): Effect.Effect<void> =>
-      Queue.offer(queue, Option.some(item)).pipe(Effect.asVoid);
-    const runEffect = build(sink).pipe(Effect.ensuring(Queue.offer(queue, Option.none<Item>())));
-    const fiber = yield* Effect.forkDaemon(runEffect);
-    return { queue, fiber } satisfies QF;
-  });
-
-  let resolveQF!: (v: QF) => void;
-  let rejectQF!: (e: unknown) => void;
-  const ready = new Promise<QF>((res, rej) => {
-    resolveQF = res;
-    rejectQF = rej;
-  });
-  void run(program).then((qf) => {
-    resolveQF(qf);
-    options?.onStart?.(qf.fiber);
-  }, rejectQF);
-
-  const result: Promise<Result> = ready.then(({ fiber }) =>
-    run(Fiber.await(fiber)).then((exit) => unwrapExit(exit) as Result),
-  );
-  // The caller may never await `.result`; don't let Node flag it.
-  result.catch(() => {});
-
-  return {
-    result,
-    abort: (reason) => {
-      options?.onAbort?.(reason ?? "aborted");
-      void ready.then(({ fiber }) => run(Fiber.interrupt(fiber)));
-    },
-    [Symbol.asyncIterator](): AsyncIterator<Item> {
-      return {
-        next: async (): Promise<IteratorResult<Item>> => {
-          const { queue, fiber } = await ready;
-          const item = await run(Queue.take(queue)).catch(() => Option.none<Item>());
-          if (Option.isNone(item)) {
-            const exit = await run(Fiber.await(fiber));
-            if (Exit.isFailure(exit) && !Cause.isInterruptedOnly(exit.cause)) {
-              const cause = Cause.squash(exit.cause);
-              if (!isCancellation(cause)) throw cause;
-            }
-            return { value: undefined as unknown as Item, done: true };
-          }
-          return { value: item.value, done: false };
-        },
-        return: async (): Promise<IteratorResult<Item>> => {
-          try {
-            const { fiber, queue } = await ready;
-            await run(Fiber.interrupt(fiber));
-            await run(Queue.shutdown(queue));
-          } catch {
-            // ignore — caller is closing iteration
-          }
-          return { value: undefined as unknown as Item, done: true };
-        },
-      };
-    },
-  };
-}
