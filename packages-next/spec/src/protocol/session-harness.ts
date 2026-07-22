@@ -247,7 +247,33 @@ export interface SendInput<P = unknown> {
    * outcome (`stopReason: "timeout"`).
    */
   readonly timeoutMs?: number;
+  /**
+   * Delivery semantics for a send that RACES an in-flight execution
+   * (ADR 53 §5 / queue-item 4b). Default `"steer"`.
+   *
+   *   - `"steer"` — inject into the CURRENTLY RUNNING execution. The
+   *     messages are enqueued onto a per-execution steer queue and
+   *     drained at the next tick boundary — after the tick's tool
+   *     results apply, before the next render — so the model sees them
+   *     on the NEXT tick of the SAME execution (no new execution, no
+   *     settle wait; the call returns the in-flight handle). With NO
+   *     execution running, degrades to a normal fresh send.
+   *   - `"followUp"` — wait for the session to FULLY quiesce (the
+   *     in-flight execution AND its durability barrier complete and the
+   *     session returns to idle), THEN run as a NEW execution. With no
+   *     execution running, identical to a normal send.
+   *
+   * The distinction only matters while an execution is in flight; both
+   * modes behave identically on an idle session (fresh execution).
+   */
+  readonly delivery?: SendDelivery;
 }
+
+/**
+ * Delivery mode for {@link SendInput.delivery} (queue-item 4b). See that
+ * field for the full semantics. `"steer"` is the default.
+ */
+export type SendDelivery = "steer" | "followUp";
 
 /**
  * Input shape for a message added to the timeline. The session

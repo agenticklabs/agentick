@@ -591,6 +591,30 @@ export class SessionHarness<P = unknown>
   private _executionUsage: import("@agentick/spec-next").UsageStats | undefined;
   /** Input entries the running execution has observed (ADR 53 live check). */
   private _inputEntriesSeen = 0;
+  /**
+   * Per-execution STEER queue (queue-item 4b). A `send({ delivery: "steer" })`
+   * that joins an in-flight execution pushes its messages here instead of
+   * appending them to the timeline immediately; the loop drains them at the
+   * next tick boundary (in {@link notifyLifecycle}) — after the tick's tool
+   * results apply, before the next render — so a steer NEVER lands between an
+   * assistant `tool_use` and its `tool_result` (which the immediate-append
+   * path could do when the steer raced a mid-tick model call). Logically
+   * scoped to the current execution: populated only while one runs, and
+   * drained / flushed at every tick boundary + at settle.
+   */
+  private _steerQueue: SendMessageInput[] = [];
+  /**
+   * FULL-quiesce signal (queue-item 4b — the "settled ≠ agent_end" fix).
+   * Resolves in the current send's result `.finally` — AFTER the ADR-49
+   * durability barrier (endTurn + flush) AND after the reservation clears and
+   * the status returns to idle — NOT at the loop terminal (which fires
+   * earlier, inside `_currentExecution`). `whenQuiescent()` and a
+   * `delivery: "followUp"` send await this, so a follow-up never fires in the
+   * terminal window before the session is truly idle, nor between a run's
+   * internal continuations (retry / compaction all live within one loop run).
+   * Initialized resolved (idle sessions quiesce immediately).
+   */
+  private _settled: Promise<void> = Promise.resolve();
 
   /**
    * Construct a SessionHarness.
@@ -940,14 +964,29 @@ export class SessionHarness<P = unknown>
   }
 
   /**
-   * Resolve once this session's in-flight execution (if any) has settled —
-   * regardless of outcome. Used by SP6 child disposal so a parent-abort
-   * teardown closes the child only AFTER its aborting loop has drained its
-   * tick-end lifecycle (closing mid-tick would unmount the compiler out from
-   * under the loop → `NotMounted`). A no-op when idle.
+   * Resolve once this session has FULLY quiesced — the in-flight execution
+   * (if any) has settled AND its post-terminal durability barrier (endTurn +
+   * flush) has run AND the reservation has cleared / status returned to idle.
+   * Used by SP6 child disposal so a parent-abort teardown closes the child
+   * only AFTER its aborting loop has drained its tick-end lifecycle (closing
+   * mid-tick would unmount the compiler out from under the loop →
+   * `NotMounted`), and by `delivery: "followUp"` sends to wait for the true
+   * idle point before starting a fresh execution.
+   *
+   * Promoted in queue-item 4b from "await the loop terminal" to "await the
+   * result `.finally`" (the {@link _settled} signal): the loop terminal
+   * (`_currentExecution`) resolves BEFORE endTurn/flush + reservation clear,
+   * so awaiting it alone leaves a window where a follow-up would fire against
+   * a still-reserved session — the "settled ≠ agent_end" subtlety. The
+   * `while` loop reconverges to idle if a fresh execution began while we
+   * awaited (stacked follow-ups serialize to true idle). A no-op when idle
+   * (`_settled` starts resolved).
    */
   async whenQuiescent(): Promise<void> {
-    await (this._currentExecution ?? Promise.resolve()).catch(() => undefined);
+    await this._settled.catch(() => undefined);
+    while (this.hasInFlightExecution) {
+      await this._settled.catch(() => undefined);
+    }
   }
 
   // ──────── SessionHarnessProtocol ────────
@@ -1250,6 +1289,16 @@ export class SessionHarness<P = unknown>
     // 51): only trusted tree code ever emits `stop` — gates only ever
     // `continue` — so a drained `stop` is legitimately a tier-1 halt.
     const loopReq = this.bridges.loop.drainLoopRequests();
+
+    // (b') Drain the per-execution STEER queue (queue-item 4b). Steers
+    // enqueued during THIS tick (by a concurrent `send({ delivery: "steer" })`)
+    // are appended to the timeline NOW — after the tick's tool results applied
+    // (loop `tickBody` step 4) and BEFORE the next render — so the next tick's
+    // compile sees them positioned AFTER this tick's assistant output +
+    // tool_results, preserving `tool_use`/`tool_result` adjacency. This bumps
+    // `inputEntryCount`, so the (c) steering predicate below fires and holds
+    // the loop open for another tick to answer the steer.
+    await this.drainSteerQueue();
 
     // (c) Steering (ADR 53) — new input appended since this execution's
     // last-observed count means the next render has new user input →
@@ -1817,29 +1866,51 @@ export class SessionHarness<P = unknown>
     if (this._closed) {
       throw new SessionClosedError({ attemptedCommand: "send" });
     }
-    // JOIN semantics (ADR 53 §5): a send() while an execution is
-    // running is STEERING — append the messages (visible next tick via
-    // the continuation predicate + <Timeline/>) and return the
-    // in-flight handle. The reservation check is SYNCHRONOUS (before
-    // any await) so concurrent fresh sends cannot both pass it; a
-    // terminal-window send (loop settled, cleanup pending) is NOT
-    // joinable — it waits out the old execution and runs fresh.
-    while (this._handleReservation !== null) {
-      if (!this._loopDone) {
-        const reservation = this._handleReservation;
-        const handle = await reservation.promise;
-        // Re-check: the loop may have settled while we awaited the
-        // reservation — a dead handle must not be joined.
+    // Delivery mode (queue-item 4b). Default `"steer"` = today's ADR 53 §5
+    // join behavior; `"followUp"` = wait for the session to fully quiesce,
+    // then run a fresh execution (never joins the in-flight turn).
+    const delivery = input.delivery ?? "steer";
+
+    if (delivery === "followUp") {
+      // FOLLOW-UP: block until the session is truly idle (the in-flight
+      // execution AND its durability barrier + reservation clear — the
+      // promoted `whenQuiescent`, which reconverges through stacked
+      // executions), then fall through to the fresh-execution path below.
+      // With no execution running this returns immediately — identical to a
+      // normal send. `whenQuiescent` leaves the reservation null, so the STEER
+      // join guard below is skipped synchronously (no interleaving window).
+      await this.whenQuiescent();
+    } else {
+      // STEER / JOIN semantics (ADR 53 §5): a send() while an execution is
+      // running STEERS the in-flight turn — enqueue the messages onto the
+      // per-execution steer queue (drained at the next tick boundary in
+      // `notifyLifecycle`, so the model sees them next tick via the
+      // continuation predicate + <Timeline/>) and return the in-flight
+      // handle. The reservation check is SYNCHRONOUS (before any await) so
+      // concurrent fresh sends cannot both pass it; a terminal-window send
+      // (loop settled, cleanup pending) is NOT joinable — it waits out the
+      // old execution and runs fresh (degrading to a normal send, exactly
+      // like a steer with no execution running).
+      while (this._handleReservation !== null) {
         if (!this._loopDone) {
-          for (const m of input.messages ?? []) await this.appendInputMessage(m);
-          return handle;
+          const reservation = this._handleReservation;
+          const handle = await reservation.promise;
+          // Re-check: the loop may have settled while we awaited the
+          // reservation — a dead handle must not be joined.
+          if (!this._loopDone) {
+            // ENQUEUE (not append): the steer lands at the next tick boundary,
+            // after this tick's tool results, before the next render — the
+            // adjacency-safe injection point (queue-item 4b).
+            for (const m of input.messages ?? []) this._steerQueue.push(m);
+            return handle;
+          }
         }
+        // Terminal window: wait for the previous execution's cleanup
+        // (.finally clears the reservation), then run fresh.
+        await (this._currentExecution ?? Promise.resolve()).catch(() => {});
+        await Promise.resolve(); // let .finally clear the reservation
+        if (this._handleReservation === null) break;
       }
-      // Terminal window: wait for the previous execution's cleanup
-      // (.finally clears the reservation), then run fresh.
-      await (this._currentExecution ?? Promise.resolve()).catch(() => {});
-      await Promise.resolve(); // let .finally clear the reservation
-      if (this._handleReservation === null) break;
     }
 
     // SYNCHRONOUS reservation — no await between here and the guard
@@ -1859,6 +1930,24 @@ export class SessionHarness<P = unknown>
       reject: reserveReject,
     };
     this._loopDone = false;
+
+    // FULL-quiesce deferred (queue-item 4b). Created SYNCHRONOUSLY with the
+    // reservation so `hasInFlightExecution` and `_settled` flip together
+    // (no window where the session looks busy but `_settled` is still the
+    // prior resolved promise). Resolved in the result `.finally` below, after
+    // endTurn/flush + reservation clear — the true idle point a follow-up
+    // waits for.
+    let settledResolve!: () => void;
+    this._settled = new Promise<void>((r) => {
+      settledResolve = r;
+    });
+    // Undrained-steer disposition (queue-item 4b). A steer enqueued in the
+    // terminal window (after the final tick-boundary drain, before `_loopDone`
+    // latches) is never drained by the loop. Captured at settle: on a NORMAL
+    // end it is re-dispatched as a fresh follow-up send (lossless — the caller
+    // was told the join succeeded); on abort/cancel/error/close it is dropped
+    // (see the settle handlers).
+    let redispatchSteers: SendMessageInput[] | null = null;
 
     await this._mountReady;
 
@@ -1919,6 +2008,21 @@ export class SessionHarness<P = unknown>
       this._handleReservation = null;
       this.runtime.setCurrentExecutionId(null);
       this.runtime.setStatus(durabilityFailed ? "failed" : "idle");
+      // 4b — the session is now truly idle. Release quiescence waiters
+      // (`whenQuiescent` / follow-up sends) AFTER the reservation clears.
+      settledResolve();
+      // 4b — re-dispatch any undrained steers as a fresh follow-up turn.
+      // Deferred to a microtask so the reservation is observably clear
+      // before the new send runs (it would otherwise re-enter the join
+      // guard against the dying handle). Dropped if the session is closing.
+      if (redispatchSteers !== null && !this._closed) {
+        const msgs = redispatchSteers;
+        redispatchSteers = null;
+        queueMicrotask(() => {
+          if (this._closed) return;
+          void this.send({ messages: msgs, delivery: "followUp" }).catch(() => undefined);
+        });
+      }
     });
     resultPromise.catch(() => {
       // Prevent unhandled rejections — handle has its own .result.
@@ -2092,6 +2196,19 @@ export class SessionHarness<P = unknown>
     // when the loop terminates. Iterator closes after the result event.
     void runPromise.then(
       async (terminal) => {
+        // 4b — the loop has terminated, so no more tick-boundary drains will
+        // run: whatever remains in the steer queue is UNDRAINED. On a normal
+        // end (`succeeded` — also covers executor_failed / max_ticks, which
+        // still complete a real turn) re-dispatch it as a fresh follow-up
+        // (lossless; the joining caller was told delivery succeeded). On
+        // cancel / abort / timeout (`outcome !== "succeeded"`) DROP it — an
+        // explicit stop voids the steer's premise; resurrecting it as a new
+        // turn would contradict the abort.
+        if (this._steerQueue.length > 0) {
+          const undrained = this._steerQueue;
+          this._steerQueue = [];
+          if (terminal.outcome === "succeeded") redispatchSteers = undrained;
+        }
         // ADR 49 flush barrier — execution end. Invariant: any process
         // that subsequently loads the store sees every completed
         // execution. A buffered store-write failure is a durability
@@ -2120,6 +2237,9 @@ export class SessionHarness<P = unknown>
           await this.bridges.timeline.flush();
         } catch (err) {
           durabilityFailed = true;
+          // 4b — the session diverged from its durable log and lands "failed".
+          // Do NOT re-dispatch undrained steers into a failed session.
+          redispatchSteers = null;
           resultDeferred.reject(err);
           close();
           return;
@@ -2149,6 +2269,10 @@ export class SessionHarness<P = unknown>
         close();
       },
       async (err) => {
+        // 4b — the execution errored: drop any undrained steers (there is no
+        // successful turn they could have steered, and the caller's `.result`
+        // rejects). No re-dispatch.
+        this._steerQueue = [];
         // The execution error wins as the rejection reason; the barrier
         // still runs so a completed-but-unflushed prefix lands in the
         // store (best-effort — a flush failure here latches "failed"
@@ -2312,6 +2436,21 @@ export class SessionHarness<P = unknown>
       content: input.entry.content,
     });
     return { appendedEntryIds: [id] };
+  }
+
+  /**
+   * Drain the per-execution steer queue (queue-item 4b) — append every
+   * queued steer message to the timeline, in enqueue order, via the same
+   * {@link appendInputMessage} path a fresh send uses (so string/blocks +
+   * metadata normalize identically). Swaps the buffer out FIRST so a steer
+   * that arrives while we await the appends lands in the next drain, not this
+   * one. A no-op when the queue is empty (the hot per-tick path).
+   */
+  private async drainSteerQueue(): Promise<void> {
+    if (this._steerQueue.length === 0) return;
+    const pending = this._steerQueue;
+    this._steerQueue = [];
+    for (const m of pending) await this.appendInputMessage(m);
   }
 
   /**

@@ -516,3 +516,239 @@ describe("send concurrency guards (review findings on ADR 53 join)", () => {
     await session.close();
   });
 });
+
+// ---------------------------------------------------------------------------
+// STEER vs FOLLOW-UP delivery semantics (queue-item 4b)
+// ---------------------------------------------------------------------------
+
+/**
+ * A scripted executor whose FIRST generation is held on a gate, so a
+ * concurrent `send()` can land mid-execution. Captures the per-generation
+ * model INPUT (streaming: `targetInput`; non-streaming: `compiled`) as JSON
+ * so a test can assert what the model saw on each tick.
+ */
+function gatedExec(
+  replies: readonly string[],
+  opts: { readonly firstOutcome?: "failed" | "vetoed" | "canceled" } = {},
+): {
+  readonly exec: FakeLanguageModelExecutor;
+  release: () => void;
+  runCalls: () => number;
+  readonly seen: string[];
+} {
+  const exec = new FakeLanguageModelExecutor(
+    `exec-gate-${Math.random()}`,
+    new MemoryJournal(),
+    new LocalEventBus(),
+    new LocalInbox(),
+    {
+      scripted: replies.map((text, i) => ({
+        result: {
+          specVersion: "2026-05-08",
+          output: [{ type: "text", text }],
+          stopReason: "end",
+          usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+        },
+        // Model an in-flight generation that ends non-successfully (an
+        // interrupted / aborted tick) — so the loop breaks WITHOUT running the
+        // tick-boundary drain, leaving the steer undrained.
+        ...(i === 0 && opts.firstOutcome !== undefined ? { outcome: opts.firstOutcome } : {}),
+      })),
+    },
+  );
+  let releaseFn!: () => void;
+  const gate = new Promise<void>((r) => {
+    releaseFn = r;
+  });
+  let calls = 0;
+  const seen: string[] = [];
+  const capture = (i: unknown): void => {
+    const x = i as { targetInput?: unknown; compiled?: { context?: { entries?: unknown } } };
+    seen.push(JSON.stringify(x.targetInput ?? x.compiled?.context?.entries ?? x.compiled ?? null));
+  };
+  const baseFx = exec.fx;
+  const patchedFx: ExecutorFx<LanguageModelInput, unknown, LanguageModelExecutionResult> = {
+    ...baseFx,
+    run: (i) => {
+      calls += 1;
+      capture(i);
+      const inner = baseFx.run(i);
+      return calls === 1
+        ? Effect.zipRight(
+            Effect.promise(() => gate),
+            inner,
+          )
+        : inner;
+    },
+    executeStream: (i, sink) => {
+      calls += 1;
+      capture(i);
+      const inner = baseFx.executeStream(i, sink);
+      return calls === 1
+        ? Effect.zipRight(
+            Effect.promise(() => gate),
+            inner,
+          )
+        : inner;
+    },
+  };
+  Object.defineProperty(exec, "fx", { configurable: true, get: () => patchedFx });
+  return { exec, release: () => releaseFn(), runCalls: () => calls, seen };
+}
+
+const userTextsOf = (session: SessionHarnessProtocol): string[] =>
+  session.timeline
+    .read()
+    .entries.filter((e) => e.kind === "message" && e.message.role === "user")
+    .flatMap((e) => (e.kind === "message" ? e.message.content : []))
+    .filter((b): b is { type: "text"; text: string } => b.type === "text")
+    .map((b) => b.text);
+
+const boundaryCount = (session: SessionHarnessProtocol): number =>
+  session.timeline.readPersisted().filter((e) => e.kind === "boundary").length;
+
+describe("delivery: steer vs followUp (queue-item 4b)", () => {
+  it("steer (default) lands in the NEXT tick's compiled context — same execution", async () => {
+    const { session, tools } = await mkSession();
+    const { exec, release, runCalls, seen } = gatedExec(["first answer", "steered answer"]);
+    await exec.ready;
+
+    const h1 = await session.send({
+      messages: [{ role: "user", content: "original ask" }],
+      modelExecutor: exec,
+    });
+    // Steer while generation 1 is gated — default delivery.
+    const h2 = await session.send({
+      messages: [{ role: "user", content: "STEER-MARKER" }],
+    });
+    expect(h2).toBe(h1); // joined the in-flight handle
+
+    release();
+    const result = await h1.result;
+
+    // The loop continued for a second tick to answer the steer.
+    expect(runCalls()).toBe(2);
+    expect(result.response).toContain("steered answer");
+
+    // COMPILED-CONTEXT PROOF: generation 1 did NOT see the steer; the NEXT
+    // tick's compiled model input DID — i.e. the steer was injected between
+    // ticks, not before tick 1.
+    expect(seen[0]).not.toContain("STEER-MARKER");
+    expect(seen[1]).toContain("STEER-MARKER");
+
+    // Not a new execution — exactly one turn boundary.
+    expect(boundaryCount(session)).toBe(1);
+
+    // Positional proof: the steer user message lands AFTER the first
+    // assistant output (drained at the tick boundary, not before tick 1).
+    const entries = session.timeline.read().entries.filter((e) => e.kind === "message");
+    const steerIdx = entries.findIndex(
+      (e) =>
+        e.kind === "message" &&
+        e.message.content.some((b) => b.type === "text" && b.text === "STEER-MARKER"),
+    );
+    const firstAnswerIdx = entries.findIndex(
+      (e) =>
+        e.kind === "message" &&
+        e.message.content.some((b) => b.type === "text" && b.text === "first answer"),
+    );
+    expect(firstAnswerIdx).toBeGreaterThanOrEqual(0);
+    expect(steerIdx).toBeGreaterThan(firstAnswerIdx);
+
+    await session.close();
+    await tools.close();
+  });
+
+  it("steer with NO running execution degrades to a normal fresh send", async () => {
+    const { session } = await mkSession();
+    const h = await session.send({
+      messages: [{ role: "user", content: "hello there" }],
+      delivery: "steer",
+    });
+    const result = await h.result;
+    expect(result.response).toBe("ok"); // the session-default replyExec("ok")
+    expect(boundaryCount(session)).toBe(1);
+    expect(userTextsOf(session)).toContain("hello there");
+    await session.close();
+  });
+
+  it("followUp waits for full settlement, then runs a FRESH execution (never joins)", async () => {
+    const { session } = await mkSession();
+    const { exec, release } = gatedExec(["first answer"]);
+    await exec.ready;
+
+    const hA = await session.send({
+      messages: [{ role: "user", content: "A-ASK" }],
+      modelExecutor: exec,
+    });
+
+    // followUp send while A is gated — must NOT join A.
+    const hBPromise = session.send({
+      messages: [{ role: "user", content: "B-FOLLOWUP" }],
+      delivery: "followUp",
+    });
+
+    // Give the follow-up a chance to (wrongly) join or start early. It must
+    // still be blocked on A's quiescence — A has not settled.
+    let bResolvedEarly = false;
+    void hBPromise.then(() => {
+      bResolvedEarly = true;
+    });
+    await new Promise((r) => setTimeout(r, 25));
+    expect(bResolvedEarly).toBe(false); // still waiting for A to settle
+    expect(boundaryCount(session)).toBe(0); // A hasn't produced its boundary yet
+
+    release();
+    const rA = await hA.result;
+    expect(rA.response).toContain("first answer");
+
+    const hB = await hBPromise;
+    expect(hB).not.toBe(hA); // fresh execution, not a join
+    const rB = await hB.result;
+    expect(rB.response).toBe("ok"); // ran on the session default executor
+
+    // Two distinct executions settled: two boundary records.
+    expect(boundaryCount(session)).toBe(2);
+    expect(userTextsOf(session)).toEqual(expect.arrayContaining(["A-ASK", "B-FOLLOWUP"]));
+
+    await session.close();
+  });
+
+  it("aborting an execution with an UNDRAINED steer DROPS the steer (no resurrection)", async () => {
+    const { session } = await mkSession();
+    // Generation 1 ends CANCELED (an interrupted / aborted in-flight tick):
+    // the loop breaks on the non-success terminal WITHOUT running the
+    // tick-boundary drain, so the steer stays undrained through settle.
+    const { exec, release } = gatedExec(["first answer", "unused"], { firstOutcome: "canceled" });
+    await exec.ready;
+
+    const hA = await session.send({
+      messages: [{ role: "user", content: "A-ASK" }],
+      modelExecutor: exec,
+      stream: false, // run-path — clean scripted-canceled short-circuit
+    });
+    // Steer while generation 1 is gated — enqueued, NOT yet drained.
+    const hSteer = await session.send({
+      messages: [{ role: "user", content: "DROP-ME" }],
+      delivery: "steer",
+    });
+    expect(hSteer).toBe(hA);
+
+    // Signal an explicit stop, then let the canceled generation unwind.
+    await hA.abort("user stop");
+    release();
+    await hA.result.catch(() => undefined); // canceled — swallow
+
+    // Let the settle path + any (mis)scheduled re-dispatch microtask run.
+    await new Promise((r) => setTimeout(r, 40));
+
+    // Documented decision: a canceled/aborted execution voids the steer's
+    // premise, so the undrained steer is DROPPED — never appended, never
+    // resurrected as a fresh turn.
+    expect(userTextsOf(session)).not.toContain("DROP-ME");
+    // Only the one (canceled) turn — no fresh execution spawned.
+    expect(boundaryCount(session)).toBe(1);
+
+    await session.close();
+  });
+});

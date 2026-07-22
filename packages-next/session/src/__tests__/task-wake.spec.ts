@@ -226,18 +226,20 @@ describe("TASK-WAKE integration — unobserved completion wakes via the real sen
     });
     await taskHandle.result;
 
-    // Wait until the wake has actually STEERED into the running execution — its
-    // message lands on the timeline WHILE the tool is still gated.
-    await waitFor(
-      () => wakeEntries(session.timeline.read().entries, taskHandle.taskId).length >= 1,
-      { description: "wake steered into the running execution" },
-    );
-    // No-collision proof: still exactly one in-flight execution, no boundary
-    // recorded yet — the wake folded into the running execution.
+    // The wake STEERS into the running execution: it is enqueued onto the
+    // per-execution steer queue NOW and drained at the next TICK BOUNDARY
+    // (after the blocking tool's result applies, before the next render — the
+    // adjacency-safe injection point, queue-item 4b). So while the tool is
+    // still gated the wake is NOT yet on the timeline (the queue hasn't
+    // drained), and no colliding second execution has started.
+    await waitForStable(() => session.timeline.read().entries.length, { stableMs: 60 });
+    expect(wakeEntries(session.timeline.read().entries, taskHandle.taskId)).toHaveLength(0);
     expect(session.hasInFlightExecution).toBe(true);
     expect(boundaryCount(session)).toBe(0);
 
-    // Release the tool; the single execution drains to exactly one boundary.
+    // Release the tool; tick 1's tool result applies, the steer queue drains
+    // at the boundary, and the SAME execution continues to answer the wake,
+    // draining to exactly one boundary (no colliding second execution).
     releaseTool();
     await handle.result;
     await waitForStable(() => session.timeline.readPersisted().length, { stableMs: 60 });

@@ -16,7 +16,7 @@ import type { ExecutionResult } from "../data/execution-result.js";
 import type { ExecutionTarget } from "../data/execution-target.js";
 import type { SessionEntry, SessionFilter } from "../protocol/app-harness.js";
 import type { Cursor } from "../protocol/event-log.js";
-import type { SendMessageInput, SendResult } from "../protocol/session-harness.js";
+import type { SendDelivery, SendMessageInput, SendResult } from "../protocol/session-harness.js";
 import type { RequestMeta } from "./json-rpc.js";
 import type { SubscriptionScope } from "./scope.js";
 
@@ -139,6 +139,14 @@ export interface SessionSendParams extends WireRequestParams {
   readonly maxTicks?: number;
   readonly stream?: boolean;
   readonly target?: ExecutionTarget;
+  /**
+   * Delivery semantics for a send that races an in-flight execution
+   * (queue-item 4b). `"steer"` (default) injects into the running turn
+   * at the next tick boundary; `"followUp"` waits for the session to
+   * quiesce then runs a fresh turn. JSON-clean string enum — crosses the
+   * wire trivially. See {@link SendInput.delivery} for full semantics.
+   */
+  readonly delivery?: SendDelivery;
 }
 
 /**

@@ -62,6 +62,9 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
         maxTicks: params.maxTicks,
         stream: params.stream,
         target: params.target,
+        // 4b — steer/follow-up delivery. A JSON-clean string enum threads
+        // straight through; the session owns the semantics.
+        ...(params.delivery !== undefined ? { delivery: params.delivery } : {}),
       });
 
       // Register cancellation seam — `notifications/cancelled` from
