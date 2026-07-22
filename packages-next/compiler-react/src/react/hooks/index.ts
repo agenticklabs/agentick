@@ -9,6 +9,18 @@ export { useOnToolStart } from "./use-on-tool-start.js";
 export { useOnToolEnd } from "./use-on-tool-end.js";
 export { useOnModelGenerateStart } from "./use-on-model-generate-start.js";
 export { useOnModelGenerateEnd } from "./use-on-model-generate-end.js";
+// Tree-side IN-PATH interceptors (ADR 89 §4) — components as full
+// lifecycle PARTICIPANTS (guard / transform), not just observers.
+export {
+  useCommandInterceptor,
+  type GuardDecision,
+  type GuardFn,
+  type InterceptorInput,
+  type InterceptorOutput,
+} from "./use-command-interceptor.js";
+export { useGuardToolDispatch } from "./use-guard-tool-dispatch.js";
+export { useTransformToolDispatch } from "./use-transform-tool-dispatch.js";
+export { useTransformModelInput } from "./use-transform-model-input.js";
 export { useContextInfo, type ContextInfo } from "./use-context-info.js";
 export { useRenderContext } from "./use-render-context.js";
 export { useActiveModel, type ActiveModel } from "./use-active-model.js";

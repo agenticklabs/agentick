@@ -53,6 +53,14 @@ export {
   useLifecycleDispatch,
 } from "./react/lifecycle-context.js";
 export type { LifecycleProviderProps } from "./react/lifecycle-context.js";
+// Interceptor context — the PULL half of the ADR 89 §4 projection (the
+// per-mount registry the tree-side guard/transform hooks land in).
+export {
+  InterceptorContext,
+  InterceptorProvider,
+  useCommandInterceptorRegistry,
+} from "./react/interceptor-context.js";
+export type { InterceptorProviderProps } from "./react/interceptor-context.js";
 
 // React hooks
 export {
@@ -77,8 +85,19 @@ export {
   useToolBridge,
   useModelBridge,
   useModelRegistration,
+  // Tree-side IN-PATH interceptors (ADR 89 §4)
+  useCommandInterceptor,
+  useGuardToolDispatch,
+  useTransformToolDispatch,
+  useTransformModelInput,
 } from "./react/hooks/index.js";
 export type { ContextInfo } from "./react/hooks/index.js";
+export type {
+  GuardDecision,
+  GuardFn,
+  InterceptorInput,
+  InterceptorOutput,
+} from "./react/hooks/index.js";
 
 // React-flavored createTool (extends @agentick/tool-next with use() hook)
 export { createTool } from "./react/create-tool.js";
@@ -99,6 +118,8 @@ export type { ProjectProps } from "./react/components/index.js";
 export { ProviderTool } from "./react/components/index.js";
 export type { ProviderToolProps } from "./react/components/index.js";
 export { System, User, Assistant, Paragraph, H1, H2, H3 } from "./react/components/index.js";
+export { ToolGate } from "./react/components/index.js";
+export type { ToolGateProps } from "./react/components/index.js";
 
 // Layer C — Harness
 export { CompilerHarness } from "./harness/compiler-harness.js";

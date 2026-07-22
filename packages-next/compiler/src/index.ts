@@ -161,6 +161,7 @@ export type { FakeBridgesOptions } from "./testing/fake-bridges.js";
 // Lifecycle dispatch — the per-mount projection half used by useOnX hooks
 export { LifecycleDispatch } from "./lifecycle-dispatch.js";
 export type { LifecycleHandlerKind } from "./lifecycle-dispatch.js";
+export { CommandInterceptorRegistry } from "./command-interceptor-registry.js";
 
 // Callback-style factory
 export { defineCompiler, type DefineCompilerInput } from "./define-compiler.js";

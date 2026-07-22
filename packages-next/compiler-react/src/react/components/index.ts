@@ -16,6 +16,11 @@ export type { ProviderToolProps } from "./provider-tool.js";
 // Semantic role + block wrappers — short aliases over the intrinsics.
 export { System, User, Assistant, Paragraph, H1, H2, H3 } from "./semantic.js";
 
+// Tree-side guard example — a component that gates the model's tool calls
+// behind a confirmation flow (ADR 89 §4).
+export { ToolGate } from "./tool-gate.js";
+export type { ToolGateProps } from "./tool-gate.js";
+
 // Note: <Knobs>, <Timeline>, and token-budget moved to per-harness
 // /react subpaths per ADR 27. Adopters import:
 //   <Knobs> + useKnobsContext       from "@agentick/knobs-next/react"

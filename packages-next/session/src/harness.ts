@@ -13,6 +13,9 @@ import { Effect, Fiber, ManagedRuntime, Stream } from "effect";
 
 import {
   BaseHarness,
+  composeMiddleware,
+  getContext,
+  orderInterceptors,
   type Middleware,
   runHarnessProtocol,
   spanAttributes,
@@ -78,6 +81,7 @@ import type {
   TickResult,
   TimelineEntry,
   ToolExecutorProtocol,
+  TreeInterceptionSource,
   Unsubscribe,
 } from "@agentick/spec-next";
 import {
@@ -87,6 +91,7 @@ import {
   HandlerError,
   isChannelSnapshotProvider,
   isSnapshotCapable,
+  supportsTreeInterception,
   SessionClosedError,
   SnapshotVersionMismatch,
   SpawnDepthExceededError,
@@ -510,6 +515,21 @@ export class SessionHarness<P = unknown>
    */
   private readonly lifecycleProjection: LifecycleProjection | undefined;
   /**
+   * The ADR 89 §4 TREE-SIDE interceptor forwarder — one tier-4 middleware,
+   * added to every send's `withCallMiddleware` list, that at each operation
+   * pulls this mount's in-tree `guard`/`transform` interceptors (by `ctx.op`)
+   * from the compiler's {@link TreeInterceptionSource}, orders them
+   * guards-outermost, and composes them around the op body. So a tree
+   * `useGuardToolDispatch` veto / `useTransformModelInput` injection runs
+   * IN-PATH on the model's tool + generate calls. `undefined` when the
+   * compiler exposes no `TreeInterceptionSource` capability. It rides the
+   * SAME one-fiber tier-4 spine the §2 model facade + §4 lifecycle model
+   * forwarders use, so it reaches WHICHEVER executor a per-tick `<Model>`
+   * swap resolves; per-mount isolation is automatic (it closes over THIS
+   * mount's id and pulls only THIS mount's registry).
+   */
+  private readonly treeInterceptorForwarder: Middleware<unknown, unknown, unknown> | undefined;
+  /**
    * The session-DEFAULT execution target. MUTABLE for the same reason as
    * {@link modelExecutor}: `session.model.setModel` / `setTarget` swap it
    * via the `session:set-model` command (ADR 89 §2).
@@ -843,6 +863,14 @@ export class SessionHarness<P = unknown>
       loop: this.loop,
       toolExecutor: this.toolExecutor,
     });
+
+    // ADR 89 §4 (tree-side) — the in-path interceptor forwarder. Built once
+    // (a stable tier-4 middleware); its per-op PULL from the compiler reflects
+    // live tree mount/unmount, so no re-wire per render. Absent when the
+    // compiler exposes no `TreeInterceptionSource` capability.
+    this.treeInterceptorForwarder = supportsTreeInterception(this.compiler)
+      ? buildTreeInterceptorForwarder(this.compiler, this.mountId)
+      : undefined;
 
     // SP6 — spawned-child teardown. A child is a parent-owned resource with
     // no independent lifecycle, so it is disposed when the parent ends:
@@ -2142,6 +2170,12 @@ export class SessionHarness<P = unknown>
             [
               ...(this.lifecycleProjection?.callMiddleware ?? []),
               ...this.modelFacade.callMiddleware(),
+              // ADR 89 §4 (tree-side) — the in-path interceptor forwarder:
+              // ONE tier-4 middleware that pulls this mount's tree
+              // guards/transforms per op (`ctx.op`) and composes them around
+              // the body, so a `<ToolGate>` veto / `useTransformModelInput`
+              // injection runs on the model's real tool + generate calls.
+              ...(this.treeInterceptorForwarder ? [this.treeInterceptorForwarder] : []),
               // Telemetry rung 1 — the app-level enrichment (span attrs +
               // usage/cost), empty when telemetry is off. Composed over the
               // same one-fiber seam so it reaches every op the send touches.
@@ -2589,4 +2623,31 @@ function coerceSessionError(cause: unknown): SessionError {
     return cause as SessionError;
   }
   return new ExecutionFailed({ cause });
+}
+
+/**
+ * Build the ADR 89 §4 tree-side interceptor forwarder — ONE stable tier-4
+ * middleware that, at each operation, PULLS this mount's in-tree
+ * `guard`/`transform` interceptors (keyed by the ambient op tag `ctx.op`)
+ * from the compiler's {@link TreeInterceptionSource}, orders them
+ * guards-outermost ({@link orderInterceptors}), and composes them around the
+ * op body ({@link composeMiddleware}). Empty pull → straight to `next`
+ * (zero overhead for ops the tree doesn't intercept). The PULL-per-op is
+ * what makes a mid-execution mount/unmount safe: an unmounted mount yields
+ * `[]`, so a torn-down component's interceptor simply stops firing.
+ */
+function buildTreeInterceptorForwarder(
+  source: TreeInterceptionSource,
+  mountId: string,
+): Middleware<unknown, unknown, unknown> {
+  return (input, next) =>
+    Effect.gen(function* () {
+      const ctx = yield* getContext;
+      const command = ctx.op;
+      if (command === undefined) return yield* next(input);
+      const collected = source.collectTreeInterceptors({ mountId, command });
+      if (collected.length === 0) return yield* next(input);
+      const composed = composeMiddleware(orderInterceptors(collected), next);
+      return yield* composed(input);
+    });
 }

@@ -56,7 +56,7 @@
  * @see docs/proposals/v2/blueprint/21-reconciler-implementation.md
  */
 
-import type { HarnessFx } from "./middleware.js";
+import type { HarnessFx, Middleware } from "./middleware.js";
 import type { Effect } from "effect";
 import type { FormatterRef, RenderedTree, ToolPresentation } from "../data/index.js";
 import type { SubstrateError } from "../data/errors.js";
@@ -472,6 +472,49 @@ export interface DispatchLifecycleInput extends MountScopedInput {
  */
 export interface LifecycleProjectionTarget {
   dispatchLifecycle(input: DispatchLifecycleInput): Promise<void>;
+}
+
+// ============================================================================
+// TreeInterceptionSource — the tree's IN-PATH interceptors (ADR 89 §4)
+// ============================================================================
+
+/**
+ * The query the session's tree-interceptor forwarder issues per operation
+ * to pull a mount's currently-registered in-path interceptors.
+ *
+ * `command` is the ambient op tag (`ctx.op`) — the PascalCase suffix
+ * `runOperation` stamps, e.g. `"ToolDispatch"` for `tool:dispatch`,
+ * `"ModelGenerate"` for `model:generate`. The tree hooks register under
+ * the SAME tag (derived from the `CommandRegistry` key via
+ * `deriveHookNames`), so the forwarder collects by exact match.
+ */
+export interface CollectTreeInterceptorsInput {
+  readonly mountId: string;
+  /** The ambient op tag (`ctx.op`) — PascalCase command suffix. */
+  readonly command: string;
+}
+
+/**
+ * OPTIONAL capability — a compiler whose tree can register REAL,
+ * IN-PATH interceptors (ADR 83 `guard` / `transform`) on the framework's
+ * commands (ADR 89 §4, the tree-side other half of the observe-only
+ * lifecycle projection). Not part of {@link CompilerProtocol}: a compiler
+ * with no in-tree interceptor surface simply doesn't implement it, and the
+ * session's forwarder is skipped (feature-detected via
+ * {@link import("../guards/index.js").supportsTreeInterception}).
+ *
+ * `collectTreeInterceptors` returns the {@link Middleware} list a mount's
+ * tree currently registers for `command`, in registration order (the
+ * session ORDERS guards-outermost + composes them around the op). Unlike
+ * {@link LifecycleProjectionTarget.dispatchLifecycle}, this is a PULL — the
+ * session's per-send tier-4 forwarder queries the mount at each operation,
+ * so a mid-execution mount/unmount is reflected on the next op with no
+ * stale registration.
+ */
+export interface TreeInterceptionSource {
+  collectTreeInterceptors(
+    input: CollectTreeInterceptorsInput,
+  ): readonly Middleware<unknown, unknown, unknown>[];
 }
 
 // ============================================================================

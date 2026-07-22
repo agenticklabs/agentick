@@ -1800,6 +1800,14 @@ blueprint's design decisions; this is execution-level).
     useKnobs/useElicitations one-liners once the contract is uniform) + convenience
     sugar (session.onElicitation(cb)) ONLY after the contract lands. Friction #4 docs
     fixed (aaccee4c); #10 dangling queue already TODO'd (4b).
+  ☐ B2.x **KNOWN GAP — tree-side transform/guard hooks (the unfinished half of ADR-89
+    §4)**: the React useOn* hooks are OBSERVE-only projections (real command lifecycle,
+    catch-up, unsubscribe — all landed). NOT built: components as full participants —
+    `useGuardToolDispatch` (veto/defer a tool call from render state — the <ToolGate>
+    confirm-dialog case), `useTransformModelInput`, and arbitrary-command registrars
+    from the tree. Mechanism proven (callbacks-via-ref + awaited-in-cascade, §4
+    validated it for the settle); the React registrars were never written. PULLED by
+    Ernesto/assistant-api when a component needs to intercept, not just see.
   ☐ B3 **THE BUILD PIVOT (Ryan 2026-07-22: "finish up today's work and get to
     building")**: after B2 slice 1 (contract+conformance) lands, START BUILDING —
     Ernesto AND assistant-api on agentick v2. B2 slices 2+ (server prereqs, handle
@@ -1816,6 +1824,27 @@ blueprint's design decisions; this is execution-level).
   ☐ C3 <Skill> RuntimeDeclarations slot decision (MEDIUM rec: dynamic/scoped
     availability is the real withSkills gap) + <Prompt> = LOW, <Guard> = NO.
   ☐ C4 devtools package attention (Ryan-flagged).
+  ☐ C4.5 **GATEWAY EMBEDDING (Ryan 2026-07-22, from the Hono-MCP pattern):** mount the
+    gateway INTO existing server frameworks (Hono/Koa/Express/NestJS) instead of only
+    owning the port via listen(): a `gateway.handler()` / handleRequest-style surface —
+    ideally the web-standard fetch shape (Request => Response | ReadableStream for SSE)
+    so ONE handler mounts everywhere (`app.all("/agentick", (c) => gw.handler(c.req.raw))`)
+    and adopters use their framework's middleware ecosystem (auth, logging, rate limits).
+    Less standalone, more embeddable. NOTE: the A2 security policy applies MORE, not
+    less, when embedded (forwarded-header trust, Host/Origin — the adopter's framework
+    sits in front; document the trust handoff). Likely shape: a `fetchTransport()` /
+    handler-mode on transport-http sharing resolveWebSecurity + dispatchRequest — the
+    funnel already exists; this is a new entry door, not a new pipeline.
+    **IDENTITY SEAM (designed w/ Ryan 2026-07-22):** `gateway.handler({ identity:
+    async (req) => Identity | Response })` — the host app's EXISTING auth runs in
+    front; the callback hands us the RESULT (never tokens): { principal → ADR-48
+    stamping, user → RuntimeContextUser (credentialKey/structural identity just
+    work), scopes → the authorizer }. Three existing destinations, one injection
+    point, zero new identity machinery. Returning a Response = their rejection
+    shape. Streams bind identity at connect; req-res re-resolves per request. Our
+    CSRF/Host checks stay ON by default in embedded mode; explicit
+    `security: "host-managed"` opt-out w/ the trust handoff documented (silent
+    relaxation = the opencode CVE class).
   ☐ C5 OpenAI Responses API — SEPARATE adapter, NOT a migration (Ryan-decided
     2026-07-22): `openai()` = Chat Completions default (the compat lingua franca —
     vLLM/Groq/Together speak it; 90%+ of users stay on the stable path),

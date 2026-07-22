@@ -24,10 +24,13 @@ import { omitUndefined } from "@agentick/utils-next";
 import { Effect } from "effect";
 import { runHarnessProtocol, ulid } from "@agentick/runtime-next";
 import type {
+  CollectTreeInterceptorsInput,
   DispatchLifecycleInput,
   EventBus,
   HookBridges,
   LifecycleProjectionTarget,
+  Middleware,
+  TreeInterceptionSource,
   MessageEnvelope,
   MessageHandlerError,
   MountInput,
@@ -65,6 +68,7 @@ import { BaseHarness } from "@agentick/runtime-next";
 import {
   builtInToolsProjection,
   collect,
+  CommandInterceptorRegistry,
   ContributorRegistry,
   createBuiltInRegistry,
   createContainer,
@@ -84,6 +88,7 @@ import {
 import { createCompiler, type FiberRoot, type Compiler } from "../react/compiler.js";
 import { BridgeContext } from "../react/bridge-context.js";
 import { LifecycleContext } from "../react/lifecycle-context.js";
+import { InterceptorContext } from "../react/interceptor-context.js";
 import { RenderContextContext } from "../react/render-context-context.js";
 import {
   builtInFormatters,
@@ -127,6 +132,13 @@ interface MountState {
   readonly registry: ContributorRegistry;
   readonly rootScope: HostScope;
   readonly lifecycle: LifecycleDispatch;
+  /**
+   * Per-mount registry of the tree's IN-PATH interceptors (ADR 89 §4) —
+   * the `useGuardToolDispatch` / `useTransform*` / `useCommandInterceptor`
+   * hooks land tagged `Middleware`s here, keyed by op tag. The session's
+   * per-send forwarder pulls it via `collectTreeInterceptors`.
+   */
+  readonly commandInterceptors: CommandInterceptorRegistry;
   /** Current render's RenderContext envelope (ADR 54 / 55) — refreshed
    *  each render from Mount/RenderTree input; provided synchronously via
    *  RenderContextContext. */
@@ -179,9 +191,12 @@ export interface CompilerHarnessOptions {
  */
 const DEFAULT_MAX_ITERATIONS = 10;
 
+/** Shared frozen empty for `collectTreeInterceptors` on an absent mount. */
+const EMPTY_INTERCEPTORS: readonly Middleware<unknown, unknown, unknown>[] = Object.freeze([]);
+
 export class CompilerHarness
   extends BaseHarness<"compiler">
-  implements CompilerProtocol, LifecycleProjectionTarget
+  implements CompilerProtocol, LifecycleProjectionTarget, TreeInterceptionSource
 {
   private readonly mounts = new Map<string, MountState>();
   private readonly registry: ContributorRegistry;
@@ -376,10 +391,28 @@ export class CompilerHarness
     await state.lifecycle.dispatch(input.event);
   }
 
+  /**
+   * `TreeInterceptionSource` (ADR 89 §4) — return the in-path interceptors
+   * (`guard` / `transform`) this mount's tree currently registers for
+   * `command` (an op tag, `ctx.op`). The SESSION's per-send forwarder pulls
+   * this at every operation, orders the result guards-outermost, and
+   * composes it around the op body. A PULL, not a push: an unmounted mount
+   * (torn down mid-execution) yields `[]`, so a stale registration never
+   * fires — the unmount-safety contract, for free.
+   */
+  collectTreeInterceptors(
+    input: CollectTreeInterceptorsInput,
+  ): readonly Middleware<unknown, unknown, unknown>[] {
+    const state = this.tryMountState(input.mountId);
+    if (!state) return EMPTY_INTERCEPTORS;
+    return state.commandInterceptors.collect(input.command);
+  }
+
   async unmount(input: UnmountInput): Promise<void> {
     const state = this.mounts.get(input.mountId);
     if (!state) return;
     state.lifecycle.clear();
+    state.commandInterceptors.clear();
     state.container.children.length = 0;
     this.mounts.delete(input.mountId);
     this.suspenseWarnedMounts.delete(input.mountId);
@@ -502,6 +535,7 @@ export class CompilerHarness
       registry: this.registry,
       rootScope,
       lifecycle: new LifecycleDispatch(),
+      commandInterceptors: new CommandInterceptorRegistry(),
       renderContext: input.renderContext ?? null,
       renderError: null,
       errorBoundaryFiredInLastRender: false,
@@ -838,9 +872,13 @@ export class CompilerHarness
         LifecycleContext.Provider,
         { value: state.lifecycle },
         React.createElement(
-          RenderContextContext.Provider,
-          { value: state.renderContext },
-          state.element,
+          InterceptorContext.Provider,
+          { value: state.commandInterceptors },
+          React.createElement(
+            RenderContextContext.Provider,
+            { value: state.renderContext },
+            state.element,
+          ),
         ),
       ),
     );

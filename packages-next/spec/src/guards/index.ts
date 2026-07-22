@@ -41,6 +41,7 @@ import type {
   LifecycleExecutionEnd,
   LifecycleExecutionStart,
   LifecycleProjectionTarget,
+  TreeInterceptionSource,
   LifecycleTickEnd,
   LifecycleTickStart,
   MCPDeclaration,
@@ -301,6 +302,27 @@ export function supportsLifecycleProjection(value: unknown): value is LifecycleP
     value !== null &&
     typeof value === "object" &&
     typeof (value as { dispatchLifecycle?: unknown }).dispatchLifecycle === "function"
+  );
+}
+
+// ============================================================================
+// TreeInterceptionSource — feature detection (ADR 89 §4)
+// ============================================================================
+
+/**
+ * Returns true when `value` (typically a `CompilerProtocol` impl) exposes
+ * the OPTIONAL {@link TreeInterceptionSource} capability — the pull the
+ * session's tree-interceptor forwarder issues to run a mount's in-tree
+ * `guard`/`transform` interceptors in the operation's critical path. A
+ * compiler without it gets no tree-side interception (its trees have no
+ * `useGuardToolDispatch` / `useTransform*` / `useCommandInterceptor`
+ * effect).
+ */
+export function supportsTreeInterception(value: unknown): value is TreeInterceptionSource {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    typeof (value as { collectTreeInterceptors?: unknown }).collectTreeInterceptors === "function"
   );
 }
 

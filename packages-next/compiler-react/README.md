@@ -152,6 +152,7 @@ author API (no `JSX.IntrinsicElements` augmentation needed).
 | `<Paragraph>` `<H1>` `<H2>` `<H3>`                 | Block-level semantic wrappers                                                          |
 | `<FormatScope>` `<Markdown>` `<XML>` `<PlainText>` | Per-subtree formatter framing                                                          |
 | `<Project projectionKey>`                          | Override a harness's surfacing projection (ADR 63); suppresses that key's default fold |
+| `<ToolGate tool? confirm>`                         | Gate the model's tool calls behind a confirm flow (ADR 89 §4) — the `useGuardToolDispatch` confirm-dialog example |
 
 ### Hooks
 
@@ -192,6 +193,65 @@ into this harness's per-mount `LifecycleDispatch` via `dispatchLifecycle`
 Event shapes (from `@agentick/spec-next`): `LifecycleToolEnd` carries
 `{ name, outcome: "succeeded" | "failed", durationMs, callId, tickId }`;
 `LifecycleError` carries `{ phase, error: { name, message, data? } }`.
+
+**Lifecycle _participants_ — in-path `guard` / `transform`** (ADR 89 §4)
+— the other half of the projection: where the observers above only
+_watch_, these register REAL interceptors on the framework's commands, so
+a component can **veto / defer / replace** an operation or **reshape** its
+input. A hook builds a tagged `Middleware` (closing over the latest render
+via a ref) and lands it in the mount's per-mount `CommandInterceptorRegistry`
+(the `TreeInterceptionSource` capability); the SESSION's per-send tier-4
+forwarder pulls it by `ctx.op` and composes it around the real op — so it
+reaches WHICHEVER executor a per-tick `<Model>` swap resolves, with
+per-mount isolation and unsubscribe-on-unmount for free.
+
+| Hook                                                | Kind        | Registers on                                  |
+| --------------------------------------------------- | ----------- | --------------------------------------------- |
+| `useGuardToolDispatch(decide)`                      | `guard`     | `tool:dispatch`                               |
+| `useTransformToolDispatch(fn)`                      | `transform` | `tool:dispatch`                               |
+| `useTransformModelInput(fn)`                        | `transform` | `model:generate` + `model:generate_stream`    |
+| `useCommandInterceptor(name, kind, fn)`             | any         | ANY command (registry-typed; `string` escape) |
+
+`useCommandInterceptor` is the primitive; the named hooks are one-line
+typed aliases. At an adopter's app (harness augmentations loaded) the
+generic is typed off `CommandRegistry` — a package that adds a new command
+is AUTOMATICALLY tree-hookable with full types, zero new React code. The
+guard verdict is the string-sugared `HandlerVerdict`:
+`"proceed" | "veto" | "defer" | { replace }` (or the full object form).
+
+> **⚠️ THE DISCIPLINE — `transform`/`guard` run IN the operation's
+> critical path.** They are **awaited** before (guard) / around
+> (transform) the op body — NOT the fire-and-forget posture of the
+> observers above. Decide **promptly** from captured render state, or
+> **defer cleanly** — they cannot hang the op. Route a human in via
+> `"defer"` (→ `deferred` terminal, caller retries) or by `await`-ing a
+> bounded elicitation (the `<ToolGate>` pattern). Pure side-effects
+> (spinners, logging) are NOT this — use the `useOn*` observers, which
+> project the same commands' hooks and never sit in the path.
+
+```tsx
+// <ToolGate> — defer a destructive tool call to a human via elicitation.
+function DangerGate() {
+  const { elicitation } = useBridges();
+  return (
+    <ToolGate
+      tool={(call) => call.name.startsWith("delete_")}
+      confirm={async (call) => {
+        const res = await elicitation.elicit({
+          mode: "url",
+          message: `Allow ${call.name}?`,
+          url: "https://app.example/confirm",
+          elicitationId: `gate-${call.toolCallId}`,
+        });
+        return res.outcome === "accepted"; // accepted → proceed; else → veto
+      }}
+    />
+  );
+}
+
+// Or the raw guard — veto from render state, no dialog:
+useGuardToolDispatch((call) => (call.name === "delete_all" && !unlocked ? "veto" : "proceed"));
+```
 
 **Render-context readers** (ADR 55) — synchronous per-render facts the
 tree reads _while producing the IR_ (not async observations):
@@ -561,6 +621,9 @@ and per-tick-model hooks (ADR 56) have landed.
 Claims above are exercised by tests in `src/__tests__/`:
 
 - Lifecycle hooks + catch-up semantics — `lifecycle.spec.tsx`
+- Tree-side `guard`/`transform` registration + unmount + per-mount isolation —
+  `tree-interceptors.spec.tsx` (end-to-end veto / defer→elicitation / transform-reaches-projected-input
+  in `@agentick/session-next`'s `tree-interceptors.spec.tsx`)
 - `useContextInfo` window/usedTokens/utilization merge — `use-context-info.spec.tsx`
 - `useActiveModel` / render-context threading — `render-context.spec.tsx`
 - `useModelRegistration` IR + bridge wiring — `model-registration.spec.tsx`
