@@ -51,6 +51,36 @@ export interface ToolCallRequestPayload {
 export type ToolCallResponse = ToolResultInput;
 
 /**
+ * One outstanding CLIENT-HANDLED tool call awaiting a response, as it appears
+ * in the channel's opening SNAPSHOT frame (§6.1 — the Design-B watch-list).
+ * Carries the fields a subscriber lifts off a LIVE relay delta
+ * (`metadata.correlationId` / `.replyTo`, the wire `payload`), so a client
+ * seeding from the snapshot reconstructs a pending call identical to a live
+ * one. Only `requiresResponse` relays are pending (they register a
+ * `request()`); fire-and-forget notifies have no pending state to enumerate.
+ */
+export interface PendingToolCall {
+  readonly correlationId: string;
+  readonly replyTo: string;
+  readonly payload: unknown;
+}
+
+/**
+ * Opening frame of the `tool_call` request channel (§6.1 / the K8s watch-list
+ * model, twin of the elicitation snapshot frame). A fresh subscriber receives
+ * this FIRST — every client-handled call currently awaiting a response —
+ * before any live delta, so a client that connects mid-call renders the
+ * outstanding call instead of only calls relayed after it joined (the
+ * live-only defect fix). Discriminated by `kind: "snapshot"`; carries no
+ * top-level `toolCallId`/`name`, so today's per-call client fold (which keys
+ * on those) skips it untouched (additive wire shape; slice-3 consumes it).
+ */
+export interface ToolCallSnapshotFrame {
+  readonly kind: "snapshot";
+  readonly requests: readonly PendingToolCall[];
+}
+
+/**
  * Wire JSON-Schema projection of {@link ToolCallRequestPayload} — the
  * introspectable contract stage-2/3 client routers render against.
  * Permissive on `input` (per-tool shape lives in the tool's own

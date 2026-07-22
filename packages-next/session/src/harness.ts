@@ -1604,15 +1604,23 @@ export class SessionHarness<P = unknown>
   }
 
   /**
-   * Build (once) the `channel → ChannelSnapshotProvider` index by scanning
-   * every bridge value for one passing {@link isChannelSnapshotProvider}.
+   * Build (once) the `channel → ChannelSnapshotProvider` index by scanning the
+   * session's owned harnesses for one passing {@link isChannelSnapshotProvider}.
    * No hardcoded slot list — any harness that conforms is discovered
    * generically (mirrors the SnapshotCapable feature-detection pattern).
+   *
+   * The candidate set is every bridge value PLUS `this.toolExecutor`: the tool
+   * executor is a session-owned harness held OUTSIDE `bridges` (the `tools`
+   * bridge slot is a render-time handler-resolver adapter, not the executor),
+   * yet it OWNS the `tool_call` request channel and provides its pending-call
+   * snapshot (§6.1). Feature-detection still keeps the scan slot-agnostic — the
+   * executor is just another candidate, discovered by shape.
    */
   private snapshotProviders(): Map<string, ChannelSnapshotProvider> {
     if (this._snapshotProviders === null) {
       const map = new Map<string, ChannelSnapshotProvider>();
-      for (const value of Object.values(this.bridges)) {
+      const candidates: readonly unknown[] = [...Object.values(this.bridges), this.toolExecutor];
+      for (const value of candidates) {
         if (isChannelSnapshotProvider(value)) map.set(value.snapshotChannel, value);
       }
       this._snapshotProviders = map;

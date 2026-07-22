@@ -74,7 +74,12 @@ describe("knobsStateView", () => {
     const stream = pushStream();
     const view = knobsStateView(fakeClient(stream), "s1");
 
-    stream.emit({ kind: "snapshot", version: 1, values: { temperature: 0.7, verbosity: "low" } });
+    stream.emit({
+      kind: "snapshot",
+      version: 1,
+      values: { temperature: 0.7, verbosity: "low" },
+      descriptors: [],
+    });
     await waitFor(() => Object.keys(view.get()).length > 0);
     expect(view.get()).toEqual({ temperature: 0.7, verbosity: "low" });
 

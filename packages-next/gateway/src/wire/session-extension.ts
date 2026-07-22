@@ -19,6 +19,8 @@ import {
   toClientToolRegistration,
   type ProtocolEvent,
   type SessionHarnessProtocol,
+  type SessionTimelineHistoryEntry,
+  type TimelineEntry,
   type ToolExecutorProtocol,
   type WireExtension,
 } from "@agentick/spec-next";
@@ -33,6 +35,23 @@ import { omitUndefined } from "@agentick/utils-next";
  */
 type SessionWithTools = SessionHarnessProtocol & {
   readonly toolExecutor: ToolExecutorProtocol;
+};
+
+/**
+ * Structural view of the session's timeline seam. As with `toolExecutor` /
+ * `elicitation`, the gateway does NOT depend on `@agentick/timeline-next` — it
+ * narrows the session to the `timeline.history` member (augmented onto the
+ * session by the timeline package) at the call site. `history` is the
+ * `LogStore` cursored read; it may reject if the injected `TimelineStore` omits
+ * the optional method (the rejection surfaces to the client as a wire error).
+ */
+type SessionWithTimeline = SessionHarnessProtocol & {
+  readonly timeline: {
+    history(options?: {
+      readonly fromSeq?: number;
+      readonly limit?: number;
+    }): Promise<readonly { readonly seq: number; readonly entry: TimelineEntry }[]>;
+  };
 };
 
 function findSession(
@@ -239,6 +258,36 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
         result: params.result,
       });
       return null;
+    },
+    "session/timeline_history": async (params, ctx) => {
+      const sess = (ctx.session ?? findSession(ctx, params.sessionId)) as SessionWithTimeline;
+      // Cursored, bounded read over `TimelineStore.history` (§6.3). The harness
+      // flushes its write-behind buffer before reading, so the page reflects
+      // every completed append.
+      const tagged = await sess.timeline.history({
+        ...(params.fromSeq !== undefined ? { fromSeq: params.fromSeq } : {}),
+        ...(params.limit !== undefined ? { limit: params.limit } : {}),
+      });
+      // Map each seq-tagged entry onto the wire row. `cursor` is co-located with
+      // `seq` ONLY where the server carries both (§6.4) — the bundled
+      // MemoryTimelineStore does not, so it is omitted here (honest gap, not a
+      // unification). A store that persists a bus cursor would populate it.
+      const entries: SessionTimelineHistoryEntry[] = tagged.map((t) => ({
+        seq: t.seq,
+        entry: t.entry,
+      }));
+      // A FULL page (length === requested limit) MAY have more — hand back the
+      // next cursor (`lastSeq + 1`, a valid `seq >= fromSeq` lower bound even
+      // when seqs are sparse). A short/uncapped page reached the tail.
+      const lastSeq = entries.length > 0 ? entries[entries.length - 1]!.seq : undefined;
+      const nextFromSeq =
+        params.limit !== undefined && entries.length === params.limit && lastSeq !== undefined
+          ? lastSeq + 1
+          : undefined;
+      return {
+        entries,
+        ...(nextFromSeq !== undefined ? { nextFromSeq } : {}),
+      };
     },
   },
 });

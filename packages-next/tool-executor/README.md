@@ -593,6 +593,30 @@ It is byte-for-byte the inbox route `ElicitationHarness.respond` uses: send a
 the `this.request(TOOL_CALL_CHANNEL, …)` the client-handled dispatch is suspended
 on. Idempotent — an unknown / already-resolved `correlationId` is a silent no-op.
 
+**Snapshot-first: connect mid-call, still answer it (§6.1).** `tool_call` is a
+snapshot-first channel — the executor is a `ChannelSnapshotProvider`. A client
+that opens the channel _while a `requiresResponse` call is already suspended_
+gets it in frame one, so a reconnecting client can still answer a call relayed
+before it joined (previously: the call hung until timeout).
+
+```ts
+// A model tick relays a client tool; the client is offline. Then it connects:
+const sub = client.transport.subscribe(
+  { kind: "session", id: sessionId },
+  { surface: "session", name: { exact: TOOL_CALL_CHANNEL_FQN } },
+);
+const { envelope } = (await sub[Symbol.asyncIterator]().next()).value;
+// envelope.payload = { kind: "snapshot", requests: [{ correlationId, replyTo, payload }] }
+for (const call of envelope.payload.requests) {
+  await client.session(sessionId).respondToToolCall(call.correlationId, await run(call.payload));
+}
+```
+
+The opening frame is a `ToolCallSnapshotFrame` mirroring the live relay delta;
+fire-and-forget notifies register nothing, so they never appear (there is
+nothing to answer). It carries no top-level `toolCallId`/`name`, so today's
+per-call fold skips it; live relays follow on the same stream.
+
 **Client side.** `@agentick/tool-executor-next/client` contributes the client-tool
 write verbs to the client `SessionHandle` (bundled into `@agentick/client-next`):
 
@@ -822,6 +846,11 @@ fixture behaviors into concrete handlers.
 - `../spec/src/__tests__/client-tool-declaration.spec.ts` —
   `toClientToolRegistration` (JSON-Schema wrap round-trips, `handlerRef`
   omission, client binding, annotation/alias passthrough).
+- `src/__tests__/pending-snapshot.spec.ts` — snapshot-first (§6.1): the executor
+  is a `ChannelSnapshotProvider` for `tool_call`; a mid-call
+  `channelSnapshotPayload()` carries the suspended `requiresResponse` call
+  mirroring the live relay; fire-and-forget leaves nothing pending; an answered
+  call drops from the frame. (4 tests)
 - `src/__tests__/confirmation.spec.ts` — the confirmation gate
   (approve / deny / always / modifiedArguments / timeout).
 - `src/__tests__/confirmation-seams.spec.ts` — the restored v1 seams:

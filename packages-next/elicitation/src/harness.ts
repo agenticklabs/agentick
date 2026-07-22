@@ -37,6 +37,7 @@ import { BaseHarness, runHarnessProtocol, ulid, type Middleware } from "@agentic
 import { reasonOf, omitUndefined } from "@agentick/utils-next";
 import type { RequestError } from "@agentick/runtime-next";
 import type {
+  ChannelSnapshotProvider,
   ElicitationFailure,
   ElicitationHarnessProtocol,
   ElicitationRequest,
@@ -55,7 +56,7 @@ import type {
 } from "@agentick/spec-next";
 import { HandlerError, toJsonSchema } from "@agentick/spec-next";
 
-import { ELICITATION_CHANNEL } from "./channel.js";
+import { ELICITATION_CHANNEL, type ElicitationSnapshotFrame } from "./channel.js";
 import type { ElicitRequestInboxPayload } from "./inbox-protocol.js";
 
 // ============================================================================
@@ -139,7 +140,7 @@ export interface ElicitationHarnessOptions {
 
 export class ElicitationHarness
   extends BaseHarness<"elicitation">
-  implements ElicitationHarnessProtocol
+  implements ElicitationHarnessProtocol, ChannelSnapshotProvider
 {
   private readonly defaultTimeoutMs: number;
   private readonly parentScope: import("@agentick/spec-next").EventScope | undefined;
@@ -404,6 +405,36 @@ export class ElicitationHarness
   override async close(): Promise<void> {
     this.requests.cancelAll("harness_closed");
     await super.close();
+  }
+
+  // ─────────── channel snapshot (§6.1 — pending-ask enumeration) ───────────
+
+  /**
+   * The channel this harness snapshots — {@link ChannelSnapshotProvider}. The
+   * session scans its bridges for this and, on `sub/subscribe`, prepends
+   * {@link channelSnapshotPayload} as the opening frame a fresh
+   * `session:channel:elicitation` subscriber receives before any live delta.
+   */
+  readonly snapshotChannel = ELICITATION_CHANNEL;
+
+  /**
+   * {@link ChannelSnapshotProvider} — every ask currently awaiting a response
+   * as the channel's opening frame (§6.1, the live-only defect fix). Projects
+   * `BaseHarness.pendingRequests(ELICITATION_CHANNEL)` — the in-flight
+   * `request()`s the registry already holds — into a discriminated
+   * `kind: "snapshot"` frame. An observation: reads pending state, publishes
+   * nothing. Includes tool-confirmation asks (they ride this same channel via
+   * `elicit()`), which is correct — a mid-confirmation subscriber sees them.
+   */
+  channelSnapshotPayload(): ElicitationSnapshotFrame {
+    return {
+      kind: "snapshot",
+      requests: this.pendingRequests(ELICITATION_CHANNEL).map((p) => ({
+        correlationId: p.correlationId,
+        replyTo: p.replyTo,
+        payload: p.payload,
+      })),
+    };
   }
 
   // ─────────── diagnostics + inbox ───────────

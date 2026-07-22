@@ -44,8 +44,10 @@ export {
   TOOL_CALL_CHANNEL,
   TOOL_CALL_CHANNEL_FQN,
   TOOL_CALL_REQUEST_SCHEMA,
+  type PendingToolCall,
   type ToolCallRequestPayload,
   type ToolCallResponse,
+  type ToolCallSnapshotFrame,
 } from "./tool-call-schema.js";
 
 // Types

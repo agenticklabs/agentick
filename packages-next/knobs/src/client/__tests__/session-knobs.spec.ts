@@ -91,7 +91,7 @@ describe("session.knobs (ADR 87 registrant)", () => {
     // Non-optional slot, no client-core wiring: importing the subpath registered it.
     expect(session.knobs).toBeDefined();
 
-    stream.emit({ kind: "snapshot", version: 1, values: { temperature: 0.7 } });
+    stream.emit({ kind: "snapshot", version: 1, values: { temperature: 0.7 }, descriptors: [] });
     await waitFor(() => Object.keys(session.knobs.get()).length > 0);
     expect(session.knobs.get()).toEqual({ temperature: 0.7 });
   });

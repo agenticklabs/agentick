@@ -98,7 +98,7 @@ describe("knobsHandle", () => {
     const handle = knobsHandle(fakeCommandClient(stream, captured), "s1");
 
     // Snapshot seeds the read half.
-    stream.emit({ kind: "snapshot", version: 1, values: { temperature: 0.7 } });
+    stream.emit({ kind: "snapshot", version: 1, values: { temperature: 0.7 }, descriptors: [] });
     await waitFor(() => Object.keys(handle.get()).length > 0);
     expect(handle.get()).toEqual({ temperature: 0.7 });
 
@@ -125,7 +125,7 @@ describe("knobsHandle", () => {
       notified += 1;
     });
 
-    stream.emit({ kind: "snapshot", version: 1, values: { temperature: 0.7 } });
+    stream.emit({ kind: "snapshot", version: 1, values: { temperature: 0.7 }, descriptors: [] });
     await waitFor(() => notified > 0);
     expect(notified).toBeGreaterThan(0);
   });

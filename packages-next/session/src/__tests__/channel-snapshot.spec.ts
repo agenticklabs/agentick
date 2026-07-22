@@ -13,16 +13,31 @@
 
 import { describe, expect, it } from "vitest";
 
+import { waitFor } from "@agentick/utils-next/testing";
 import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
-import { ElicitationHarness } from "@agentick/elicitation-next";
+import { ElicitationHarness, type ElicitationSnapshotFrame } from "@agentick/elicitation-next";
 import { InMemoryHandlerResolver, ToolExecutorHarness } from "@agentick/tool-executor-next";
+import type { ToolCallSnapshotFrame } from "@agentick/tool-executor-next";
 import { LoopExecutorHarness } from "@agentick/loop-executor-next";
 import { CompilerHarness } from "@agentick/compiler-react-next";
 import { KnobsHarness } from "@agentick/knobs-next";
-import type { ContentBlock, ExecutionTarget } from "@agentick/spec-next";
+import { jsonSchema } from "@agentick/spec-next";
+import type { ContentBlock, ExecutionTarget, StandardSchemaV1 } from "@agentick/spec-next";
 
 import { SessionHarness } from "../harness.js";
+
+function lenientObject(): StandardSchemaV1<unknown, Record<string, unknown>> {
+  return jsonSchema<Record<string, unknown>>(
+    { type: "object", additionalProperties: true },
+    {
+      validator: (raw) =>
+        raw !== null && typeof raw === "object"
+          ? { value: raw as Record<string, unknown> }
+          : { issues: [{ message: "expected an object" }] },
+    },
+  );
+}
 
 const target: ExecutionTarget = {
   kind: "language-model",
@@ -98,6 +113,50 @@ describe("session.channelSnapshot (slice 2 — channel opens with a snapshot)", 
 
     const env = await session.channelSnapshot("no-such-channel");
     expect(env).toBeUndefined();
+
+    await session.close();
+    await tools.close();
+  });
+
+  // ─── Request channels are snapshot-first too (§6.1 — the live-only fix) ───
+
+  it("MID-ASK: opens the elicitation channel with the pending ask", async () => {
+    const { session, tools } = await mkSession();
+
+    // Raise an ask on the session's elicitation harness but do NOT await it.
+    void session.elicitation.elicit({ message: "pick a fruit", schema: lenientObject() });
+    const elic = session.elicitation as unknown as ElicitationHarness;
+    await waitFor(() => elic.pendingCount() === 1);
+
+    // The session discovers the elicitation harness as a channel provider and
+    // renders its pending asks into the opening frame — a mid-ask subscriber
+    // sees the outstanding prompt in frame one (previously: nothing).
+    const env = await session.channelSnapshot("elicitation");
+    expect(env).toBeDefined();
+    expect(env!.name).toBe("session:channel:elicitation");
+    expect(env!.scope.sessionId).toBe(session.id);
+    const frame = env!.payload as ElicitationSnapshotFrame;
+    expect(frame.kind).toBe("snapshot");
+    expect(frame.requests).toHaveLength(1);
+    expect((frame.requests[0]!.payload as { message: string }).message).toBe("pick a fruit");
+
+    await session.close();
+    await tools.close();
+  });
+
+  it("discovers the tool executor as the tool_call channel provider (empty when idle)", async () => {
+    const { session, tools } = await mkSession();
+
+    // The tool executor is held OUTSIDE `bridges` (as `session.toolExecutor`)
+    // yet is discovered by the provider scan — an unowned channel used to
+    // resolve `undefined`; now it opens with an empty pending-call frame.
+    const env = await session.channelSnapshot("tool_call");
+    expect(env).toBeDefined();
+    expect(env!.name).toBe("session:channel:tool_call");
+    expect(env!.payload).toEqual({
+      kind: "snapshot",
+      requests: [],
+    } satisfies ToolCallSnapshotFrame);
 
     await session.close();
     await tools.close();

@@ -35,10 +35,20 @@ export type RequestError =
       readonly reason?: unknown;
     };
 
-export interface RegisterOptions {
+export interface RegisterOptions<TSnapshot = unknown> {
   readonly correlationId: string;
   readonly timeoutMs?: number;
   readonly signal?: AbortSignal;
+  /**
+   * Projectable pending-state snapshot for this request (§6.1, the Design-B
+   * watch-list). Retained ALONGSIDE the pending Deferred for exactly as long as
+   * the request is in flight, then evicted atomically with it (same
+   * `Effect.ensuring` that removes the Deferred). A channel-snapshot provider
+   * reads it back via {@link RequestResponseRegistry.pending} to seed a fresh
+   * subscriber with the asks already outstanding. Omit for requests that are
+   * not projected (the map stays empty; `pending()` skips them).
+   */
+  readonly snapshot?: TSnapshot;
 }
 
 export interface RegisteredRequest<TResp> {
@@ -55,8 +65,15 @@ export interface RegisteredRequest<TResp> {
 /**
  * Pure bookkeeping. No bus, no inbox. Owners wire transport around it.
  */
-export class RequestResponseRegistry<TResp = unknown> {
+export class RequestResponseRegistry<TResp = unknown, TSnapshot = unknown> {
   private readonly pending = new Map<string, Deferred.Deferred<TResp, RequestError>>();
+  /**
+   * Projectable pending-state, keyed by correlationId (§6.1). Populated only
+   * for requests registered WITH a `snapshot`; an entry lives exactly as long
+   * as its Deferred (evicted in the same `Effect.ensuring`). Insertion order is
+   * preserved, so {@link pendingSnapshots} enumerates asks oldest-first.
+   */
+  private readonly snapshots = new Map<string, TSnapshot>();
 
   /**
    * Register a pending request. Returns a Promise that resolves when
@@ -72,10 +89,11 @@ export class RequestResponseRegistry<TResp = unknown> {
    * — no manual `clearTimeout` / `removeEventListener` bookkeeping.
    * The registry map entry is removed atomically via `Effect.ensuring`.
    */
-  register(opts: RegisterOptions): RegisteredRequest<TResp> {
-    const { correlationId, timeoutMs, signal } = opts;
+  register(opts: RegisterOptions<TSnapshot>): RegisteredRequest<TResp> {
+    const { correlationId, timeoutMs, signal, snapshot } = opts;
     const deferred = Effect.runSync(Deferred.make<TResp, RequestError>());
     this.pending.set(correlationId, deferred);
+    if (snapshot !== undefined) this.snapshots.set(correlationId, snapshot);
 
     // Chain races via Effect.raceFirst — settles on first to either
     // succeed OR fail. `Effect.raceAll` settles only on first SUCCESS
@@ -118,7 +136,14 @@ export class RequestResponseRegistry<TResp = unknown> {
       }
     }
 
-    program = program.pipe(Effect.ensuring(Effect.sync(() => this.pending.delete(correlationId))));
+    program = program.pipe(
+      Effect.ensuring(
+        Effect.sync(() => {
+          this.pending.delete(correlationId);
+          this.snapshots.delete(correlationId);
+        }),
+      ),
+    );
 
     const promise = Effect.runPromiseExit(program).then((exit) => unwrapExit(exit));
 
@@ -176,6 +201,18 @@ export class RequestResponseRegistry<TResp = unknown> {
   /** Diagnostic only. */
   has(correlationId: string): boolean {
     return this.pending.has(correlationId);
+  }
+
+  /**
+   * Enumerate the projectable snapshots of every in-flight request registered
+   * WITH a `snapshot` (§6.1 — the read-side projection). Oldest-first
+   * (insertion order). This is the pending-state a channel-snapshot provider
+   * folds into the opening frame a mid-ask subscriber receives; the registry
+   * already holds the truth, this merely reads it out. Requests registered
+   * without a snapshot are absent. The returned array is a fresh copy.
+   */
+  pendingSnapshots(): readonly TSnapshot[] {
+    return [...this.snapshots.values()];
   }
 }
 

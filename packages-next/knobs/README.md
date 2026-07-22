@@ -326,6 +326,29 @@ for await (const frame of framesFromBus /* KnobsStateFrame */) {
 }
 ```
 
+### Descriptors on the wire (friction #1)
+
+The `snapshot` frame carries **descriptors, not just values** — each knob's id,
+current value, AND its declared metadata (label, type, bounds, options, group,
+`readOnly`, …). That is enough to render a _real_ control with zero extra
+round-trips:
+
+```ts
+// A number knob declared with bounds becomes a slider — straight off the frame:
+const { descriptors } = harness.stateSnapshotFrame();
+for (const d of descriptors) {
+  if (d.valueType === "number")
+    ui.slider({ id: d.id, value: d.value, min: d.min, max: d.max, step: d.step, label: d.description });
+}
+```
+
+Descriptors are `WireKnobDescriptor` = the server's `KnobDescriptor` minus the
+two fields that cannot cross a transport (`validate` fn, `schema`) — no invented
+fields, just what the app declared. `values` stays on the frame unchanged, so a
+values-only fold is untouched (additive). The descriptor-aware client `list()`
+that _returns_ these (rather than bare values) is the B2 slice-3 handle refactor;
+this slice puts them on the wire.
+
 Frames carry a monotonic `version`; a gap signals a dropped delta → re-seed via
 `stateSnapshotFrame()`. Emission is fire-and-forget and **bus-only** (unjournaled).
 The **client-side apply** lands as the [`/client` subpath](#agentickknobs-nextclient):
@@ -369,6 +392,10 @@ Extracted per ADR 26 Step 2, modularized per ADR 27. Green.
   `stateSnapshotFrame()` reads without advancing the version, RFC 6901 id
   escaping round-trips, and the **money test** — a snapshot seed plus applied
   deltas reconstruct `exportSnapshot()`.
+- `src/__tests__/descriptors-wire.spec.ts` (3 tests) — descriptors on the wire
+  (friction #1): the `snapshot` frame carries the declared metadata (id + value +
+  fields), STRIPS the non-serializable `validate`/`schema`, and the
+  `channelSnapshotPayload()` provider path returns the descriptor-carrying frame.
 - `src/__tests__/change-stream.spec.ts` (5 tests) — the `onChange` notify seam:
   add (no prev) / update (with prev) on `set`, `add` on defaulted `register` /
   none for descriptor-only, dispatch rides `applySet`, unsubscribe, and multiple

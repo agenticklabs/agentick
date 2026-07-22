@@ -16,6 +16,7 @@ import type { ExecutionResult } from "../data/execution-result.js";
 import type { ExecutionTarget } from "../data/execution-target.js";
 import type { SessionEntry, SessionFilter } from "../protocol/app-harness.js";
 import type { Cursor } from "../protocol/event-log.js";
+import type { TimelineEntry } from "../protocol/session-harness.js";
 import type {
   SendDelivery,
   SendMessageInput,
@@ -324,6 +325,61 @@ export interface SessionRespondToToolCallParams extends WireRequestParams {
 export type SessionRespondToToolCallResult = null;
 
 // ============================================================================
+// session/timeline_history — cursored read over TimelineStore.history (§6.3)
+// ============================================================================
+
+/**
+ * Client → server: read a CURSORED, BOUNDED page of a session's durable
+ * timeline log (friction #2). The wire read RPC over `TimelineStore.history`
+ * (the `LogStore` cursored read) — side-effect-free, req-res. The gateway
+ * routes it to the session timeline's `history({ fromSeq, limit })`, which
+ * flushes the write-behind buffer first so the page reflects every completed
+ * append.
+ *
+ * `fromSeq` is the cursor lower bound — entries with absolute `seq >= fromSeq`
+ * (omit → from the log's start). `limit` caps the page (omit → the store's
+ * own cap / no cap). Page forward by passing the previous result's
+ * {@link SessionTimelineHistoryResult.nextFromSeq}. `session.timeline.prepend`
+ * builds its lazy `loadOlder()` on this.
+ */
+export interface SessionTimelineHistoryParams extends WireRequestParams {
+  readonly sessionId: string;
+  /** Cursored lower bound — entries with absolute `seq >= fromSeq`. Omit → from the start. */
+  readonly fromSeq?: number;
+  /** Cap on entries returned in this page. Omit → no cap (the store's default). */
+  readonly limit?: number;
+}
+
+/**
+ * One entry of a timeline-history page — the store's seq-tagged entry, plus
+ * the OPTIONAL co-located bus cursor (friction #3, §6.4). `seq` is the
+ * `LogStore` ordering identity (strictly increasing, never reused, stable
+ * across prune). `cursor` is the event-BUS position, returned ALONGSIDE `seq`
+ * ONLY where the server co-locates the two — the honest Cursor-vs-seq
+ * mitigation, NOT a unification (they remain distinct concepts). The bundled
+ * `MemoryTimelineStore` does not co-locate a bus cursor, so `cursor` is absent
+ * there; a store that persists both populates it.
+ */
+export interface SessionTimelineHistoryEntry {
+  readonly seq: number;
+  readonly entry: TimelineEntry;
+  readonly cursor?: Cursor;
+}
+
+/**
+ * A cursored page of timeline history. `entries` are seq-ordered. `nextFromSeq`
+ * is the cursor to pass as the next `fromSeq` to continue paging; it is present
+ * IFF the page was capped by `limit` (so there may be more) and absent when the
+ * page reached the log's tail. Because `seq` is strictly-increasing but may be
+ * sparse (a `BIGSERIAL` gap), `nextFromSeq` is `lastSeq + 1` — a valid lower
+ * bound the next `seq >= fromSeq` query resolves correctly.
+ */
+export interface SessionTimelineHistoryResult {
+  readonly entries: readonly SessionTimelineHistoryEntry[];
+  readonly nextFromSeq?: number;
+}
+
+// ============================================================================
 // subscribe / unsubscribe — persistent (non-execution-bound) subscriptions
 // ============================================================================
 
@@ -542,6 +598,18 @@ export interface WireMethods {
   "session/respond_to_tool_call": {
     params: SessionRespondToToolCallParams;
     result: SessionRespondToToolCallResult;
+  };
+  /**
+   * Read a cursored, bounded page of a session's durable timeline log (§6.3 —
+   * the deferred wire read over `TimelineStore.history`). Session-namespace +
+   * gateway-resident handler, so the row lives here (spec) rather than a
+   * `@agentick/timeline-next` `declare module` augment — the gateway that owns
+   * `sessionWireExtension` is harness-agnostic and can't depend on the timeline
+   * package to see an augment. Same rationale as `session/set_client_tools`.
+   */
+  "session/timeline_history": {
+    params: SessionTimelineHistoryParams;
+    result: SessionTimelineHistoryResult;
   };
 
   /**

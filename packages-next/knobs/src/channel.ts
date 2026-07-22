@@ -24,7 +24,7 @@
  */
 
 import type { JsonPatchOp } from "@agentick/utils-next";
-import type { KnobPrimitive } from "@agentick/spec-next";
+import type { KnobDescriptor, KnobPrimitive } from "@agentick/spec-next";
 
 /** Channel name as passed to the fan-out helper. */
 export const KNOBS_STATE_CHANNEL = "knobs-state" as const;
@@ -35,14 +35,43 @@ export const KNOBS_STATE_CHANNEL_FQN = "session:channel:knobs-state" as const;
 export type KnobsStateChannelName = typeof KNOBS_STATE_CHANNEL;
 
 /**
+ * Wire-safe projection of a {@link KnobDescriptor} (friction #1). Every field
+ * of the server's own descriptor EXCEPT the two that cannot cross a transport:
+ * `validate` (a function) and `schema` (a live `StandardSchemaV1`) — the same
+ * fields `KnobRegistration` documents cross-process bridges drop. No invented
+ * fields: `id`, `value`, and the declared metadata (`label` via `description`,
+ * `valueType`, `options`, `min`/`max`/`step`, `group`, `readOnly`, … — whatever
+ * the app declared) ride through verbatim (floors, not ceilings).
+ */
+export type WireKnobDescriptor = Omit<KnobDescriptor, "validate" | "schema">;
+
+/**
+ * Strip the non-serializable fields off a live {@link KnobDescriptor} for the
+ * wire. Everything else — declared or not — passes untouched.
+ */
+export function toWireDescriptor(descriptor: KnobDescriptor): WireKnobDescriptor {
+  const { validate: _validate, schema: _schema, ...wire } = descriptor;
+  return wire;
+}
+
+/**
  * Full-store frame — the seed a fresh subscriber applies before any delta,
  * and the frame emitted when the store is replaced wholesale (snapshot
- * restore). `values` maps knob id → current value.
+ * restore).
+ *
+ * `values` maps knob id → current value (unchanged — the existing values-only
+ * client fold reads this). `descriptors` (friction #1) carries the full
+ * {@link WireKnobDescriptor} per knob — id, value, and declared metadata
+ * (label/type/bounds/options/…) — so a descriptor-aware client renders labels,
+ * ranges, and enums WITHOUT a second round-trip. Additive: a values-only
+ * consumer ignores `descriptors`; the descriptor-aware handle (slice 3) reads
+ * it and `list()` returns descriptors+values, not bare values.
  */
 export interface KnobsStateSnapshotFrame {
   readonly kind: "snapshot";
   readonly version: number;
   readonly values: Readonly<Record<string, KnobPrimitive>>;
+  readonly descriptors: readonly WireKnobDescriptor[];
 }
 
 /**

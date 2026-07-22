@@ -142,6 +142,34 @@ Transports / devtools / MCP hosts subscribe to the channel, render the
 prompt, and reply via `harness.respond({ correlationId, outcome,
 value?, reason? })`.
 
+## Snapshot-first: connect late, still see the pending ask (§6.1)
+
+The channel is **snapshot-first** (the K8s watch-list model — the harness is a
+`ChannelSnapshotProvider`). A subscriber that opens the channel _while a prompt
+is already outstanding_ receives that ask in **frame one** — no more missing the
+question just because you connected after it was asked.
+
+```typescript
+// Server: an ask goes out, no one is watching yet.
+void session.elicitation.elicit({ message: "Deploy to prod?", schema });
+
+// Client connects LATE — and still gets the pending ask in the opening frame:
+const sub = client.transport.subscribe(
+  { kind: "session", id: sessionId },
+  { surface: "session", name: { exact: ELICITATION_CHANNEL_FQN } },
+);
+const { envelope } = (await sub[Symbol.asyncIterator]().next()).value;
+// envelope.payload = { kind: "snapshot", requests: [{ correlationId, replyTo, payload }] }
+for (const ask of envelope.payload.requests) render(ask); // the "Deploy to prod?" prompt
+```
+
+The opening frame is an `ElicitationSnapshotFrame`
+(`{ kind: "snapshot", requests: [...] }`) whose entries mirror a live request
+delta (`correlationId` / `replyTo` / wire `payload`) — a seeded subscriber ends
+up in the same state as one that watched the ask go by live. It carries **no**
+`metadata.requestType`, so a request-only fold skips it; live deltas follow on
+the same stream.
+
 ## Command hooks — `elicit` is hookable (ADR 80 / 83)
 
 The elicit round-trip routes through `BaseHarness.runOperation` (via the private
@@ -545,6 +573,11 @@ elicitationId, ... })`. `accepted` outcome signals user consent
   on the published wire envelope); `onAfter` transforms the terminal result;
   a `throw` in `onBefore` vetoes (no request published, `elicit()` rejects).
   (5 tests)
+- `src/__tests__/pending-snapshot.spec.ts` — snapshot-first (§6.1): the harness
+  is a `ChannelSnapshotProvider` for `elicitation`; a mid-ask
+  `channelSnapshotPayload()` carries the pending ask mirroring the live delta
+  (correlationId / replyTo / payload); multiple asks enumerate oldest-first; a
+  resolved ask drops from the frame. (4 tests)
 
 @see [`docs/proposals/v2/blueprint/26-harness-api-shape.md`](../../docs/proposals/v2/blueprint/26-harness-api-shape.md)
 @see [`docs/proposals/v2/blueprint/27-modular-built-ins.md`](../../docs/proposals/v2/blueprint/27-modular-built-ins.md)

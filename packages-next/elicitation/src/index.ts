@@ -34,6 +34,8 @@ export {
   ELICITATION_CHANNEL,
   ELICITATION_CHANNEL_FQN,
   type ElicitationChannelName,
+  type ElicitationSnapshotFrame,
+  type PendingElicitation,
 } from "./channel.js";
 export {
   ELICIT_REQUEST_MESSAGE_TYPE,

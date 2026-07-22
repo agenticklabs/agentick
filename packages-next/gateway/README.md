@@ -666,7 +666,9 @@ keep the full bytes.
 **Honest truncation.** A bounded block carries a machine-readable marker under
 `block.metadata.bounded` (`{ truncated: true, originalBytes, retainedBytes,
 reason, hint }`) plus a human suffix on the preview, both naming the durable
-store as where the full content survives (a future `timeline_history` read).
+store as where the full content survives — fetchable via the `session/timeline_history`
+wire read (the cursored page over `TimelineStore.history`; handler in
+`sessionWireExtension`).
 
 ## Server-initiated notifications — the control-plane bus (ADR 47)
 

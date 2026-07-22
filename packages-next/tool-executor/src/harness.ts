@@ -29,6 +29,7 @@ import { BaseHarness, type GuardDecider, type Unsubscribe } from "@agentick/runt
 import type {
   AbortInput,
   ChannelPublisher,
+  ChannelSnapshotProvider,
   ContentBlock,
   DispatchInput,
   DispatchResult,
@@ -81,7 +82,11 @@ import {
   TOOL_CONFIRMATION_REPLY_SCHEMA,
   type ToolConfirmationReply,
 } from "./confirmation-schema.js";
-import { TOOL_CALL_CHANNEL, type ToolCallRequestPayload } from "./tool-call-schema.js";
+import {
+  TOOL_CALL_CHANNEL,
+  type ToolCallRequestPayload,
+  type ToolCallSnapshotFrame,
+} from "./tool-call-schema.js";
 import { InMemoryToolRegistry, sameBindingKey } from "./registry.js";
 import { fromStandardSchema } from "./validator.js";
 import type {
@@ -127,7 +132,10 @@ interface InFlightEntry {
   readonly toolName: string;
 }
 
-export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExecutorProtocol {
+export class ToolExecutorHarness
+  extends BaseHarness<"tool">
+  implements ToolExecutorProtocol, ChannelSnapshotProvider
+{
   private readonly registry = new InMemoryToolRegistry();
   private readonly handlerResolver: HandlerResolver;
   private readonly inFlight = new Map<string, InFlightEntry>();
@@ -538,6 +546,36 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
         cause: new Error(`tool inbox: unknown message type "${msg.type}"`),
       }),
     );
+  }
+
+  // ──────────── channel snapshot (§6.1 — pending client-call enumeration) ────────────
+
+  /**
+   * The channel this harness snapshots — {@link ChannelSnapshotProvider}. The
+   * session scans its bridges for this and, on `sub/subscribe`, prepends
+   * {@link channelSnapshotPayload} as the opening frame a fresh
+   * `session:channel:tool_call` subscriber receives before any live delta.
+   */
+  readonly snapshotChannel = TOOL_CALL_CHANNEL;
+
+  /**
+   * {@link ChannelSnapshotProvider} — every client-handled tool call currently
+   * awaiting a response as the channel's opening frame (§6.1, the live-only
+   * defect fix). Projects `BaseHarness.pendingRequests(TOOL_CALL_CHANNEL)` —
+   * the suspended `requiresResponse` relays the registry already holds — into a
+   * discriminated `kind: "snapshot"` frame. Fire-and-forget notifies register
+   * no `request()`, so they are (correctly) absent — there is nothing pending
+   * to enumerate. An observation: reads pending state, publishes nothing.
+   */
+  channelSnapshotPayload(): ToolCallSnapshotFrame {
+    return {
+      kind: "snapshot",
+      requests: this.pendingRequests(TOOL_CALL_CHANNEL).map((p) => ({
+        correlationId: p.correlationId,
+        replyTo: p.replyTo,
+        payload: p.payload,
+      })),
+    };
   }
 
   // ──────────────────────── internals ────────────────────────

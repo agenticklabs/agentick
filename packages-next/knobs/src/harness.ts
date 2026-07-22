@@ -77,8 +77,10 @@ import {
   KNOBS_STATE_CHANNEL,
   KNOBS_STATE_CHANNEL_FQN,
   knobPointer,
+  toWireDescriptor,
   type KnobsStateFrame,
   type KnobsStateSnapshotFrame,
+  type WireKnobDescriptor,
 } from "./channel.js";
 import { createKnobStore, type KnobEntry, type KnobStoreQuery } from "./store.js";
 
@@ -342,6 +344,7 @@ export class KnobsHarness
       kind: "snapshot",
       version: ++this.stateVersion,
       values: { ...values },
+      descriptors: this.wireDescriptors(),
     });
   }
 
@@ -393,7 +396,23 @@ export class KnobsHarness
    * advance it — this is an observation, not a new frame).
    */
   stateSnapshotFrame(): KnobsStateSnapshotFrame {
-    return { kind: "snapshot", version: this.stateVersion, values: this.exportSnapshot() };
+    return {
+      kind: "snapshot",
+      version: this.stateVersion,
+      values: this.exportSnapshot(),
+      descriptors: this.wireDescriptors(),
+    };
+  }
+
+  /**
+   * The current descriptor set projected for the wire (friction #1) — every
+   * knob's full {@link WireKnobDescriptor} (id, value, declared metadata), the
+   * non-serializable `validate`/`schema` stripped. Derived from `list()` (the
+   * layer-resolved descriptors+values the model sees), so it reflects the
+   * parent-layer cascade identically.
+   */
+  private wireDescriptors(): readonly WireKnobDescriptor[] {
+    return this.list().map(toWireDescriptor);
   }
 
   private emitStateDelta(ops: readonly JsonPatchOp[]): void {

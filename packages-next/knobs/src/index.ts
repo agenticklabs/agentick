@@ -20,10 +20,12 @@ export {
   KNOBS_STATE_CHANNEL,
   KNOBS_STATE_CHANNEL_FQN,
   knobPointer,
+  toWireDescriptor,
   type KnobsStateChannelName,
   type KnobsStateFrame,
   type KnobsStateSnapshotFrame,
   type KnobsStateDeltaFrame,
+  type WireKnobDescriptor,
 } from "./channel.js";
 export { createKnobStore, type KnobEntry, type KnobStoreQuery } from "./store.js";
 export { withKnobs, type WithKnobsOptions } from "./extension.js";

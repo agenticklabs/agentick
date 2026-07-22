@@ -304,6 +304,34 @@ generic `eventView` fold. The `/client` subpath depends only on `client-core` +
 `spec` — never the timeline harness runtime — so it never pulls the server
 harness into a browser bundle.
 
+### The data source for `prepend`: `session/timeline_history` (§6.3)
+
+Where does the older page `prepend` splices come from? The **`session/timeline_history`**
+wire read — a cursored, bounded page over `TimelineStore.history`. Page the
+durable log in chunks and splice each into the window:
+
+```ts
+// Page the durable log over the wire; feed each page to the scroll-back window.
+let fromSeq: number | undefined; // undefined ⇒ start from the log's head
+do {
+  const page = await client.request("session/timeline_history", {
+    sessionId,
+    limit: 50,
+    ...(fromSeq !== undefined ? { fromSeq } : {}),
+  });
+  view.prepend(page.entries.map((e) => e.entry)); // splice this page
+  fromSeq = page.nextFromSeq; // undefined ⇒ reached the tail, stop
+} while (fromSeq !== undefined);
+```
+
+Each row is `{ seq, entry, cursor? }`: `seq` is the frozen `LogStore` ordering
+identity; `cursor` is the event-bus position returned **alongside** `seq` only
+where the server co-locates the two (§6.4 — the honest Cursor-vs-seq gap, not a
+unification; the bundled `MemoryTimelineStore` co-locates none, so it is
+absent). `nextFromSeq` is the next page's `fromSeq` — present on a full page,
+absent at the tail. The read flushes the write-behind buffer first, so a page
+reflects every completed append.
+
 ## API sketch
 
 ```ts
@@ -346,6 +374,11 @@ intended default, no memory strategy legislated, §2.7). Certify adapters with
 - `src/client/__tests__/timeline-view.spec.ts` — the client fold: `initial`
   seeding, `fromCursor` threading (no double-count), visibility filtering,
   copy-on-write refs, and the `timeline:command:append` requested-phase query.
+- `../gateway/src/wire/__tests__/session-timeline-history.spec.ts` — the
+  `session/timeline_history` wire read (§6.3): full read seq-tagged; `limit`
+  bounds a page + hands back `nextFromSeq`; forward paging reconstructs the whole
+  ordered log; the tail page carries no cursor; the cursor-alongside-seq shape
+  (§6.4 — `seq` present, `cursor` absent for the memory store). (4 tests)
 
 ## Roadmap & known gaps
 

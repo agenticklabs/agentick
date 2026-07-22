@@ -197,6 +197,36 @@ export {
 } from "./middleware.js";
 
 // ============================================================================
+// Pending-request projection (§6.1)
+// ============================================================================
+
+/**
+ * The projectable pending-state of ONE in-flight {@link BaseHarness.request}
+ * (§6.1, the Design-B watch-list). Carries exactly what a channel-snapshot
+ * provider needs to re-present an outstanding ask to a mid-ask subscriber —
+ * the correlation key, the reply address, the channel it rode, and the wire
+ * payload — mirroring, field for field, what a LIVE request delta exposes
+ * (`envelope.metadata.correlationId` / `.replyTo`, `envelope.payload`). A
+ * subscriber that seeds from these frames is in the same state as one that
+ * observed the live delta.
+ *
+ * A FLOOR, not a ceiling: `payload` is opaque (`unknown`) — a harness's own
+ * request payload rides through untouched. `pendingRequests` returns these;
+ * per-harness snapshot providers (`ElicitationHarness`, `ToolExecutorHarness`)
+ * fold them into their channel's opening frame.
+ */
+export interface PendingRequestSnapshot {
+  /** Correlation key (the value on the live request envelope's `metadata.correlationId`). */
+  readonly correlationId: string;
+  /** Inbox address a response routes back to (the live envelope's `metadata.replyTo`). */
+  readonly replyTo: string;
+  /** Bare channel name the request was published on (`session:channel:<channel>`). */
+  readonly channel: string;
+  /** The wire request payload (opaque; the live envelope's `payload`). */
+  readonly payload: unknown;
+}
+
+// ============================================================================
 // BaseHarness
 // ============================================================================
 
@@ -365,7 +395,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
    * inbox messages routed automatically by `dispatchMessage` before
    * the subclass's `handleMessage` is consulted.
    */
-  protected readonly requests = new RequestResponseRegistry<unknown>();
+  protected readonly requests = new RequestResponseRegistry<unknown, PendingRequestSnapshot>();
 
   /**
    * Span-attribute namespace (ADR 78). The prefix on every `spanAttributes`
@@ -1571,8 +1601,14 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
   ): Effect.Effect<TResp, RequestError, never> {
     const correlationId = `req:${ulid()}`;
     const replyTo = this.address;
+    // Register WITH a projectable snapshot (§6.1). Retained for the request's
+    // lifetime, evicted with the Deferred; `pendingRequests(channel)` reads it
+    // back so a channel-snapshot provider can seed a mid-ask subscriber. The
+    // fields mirror the live request delta below (correlationId/replyTo in
+    // metadata, payload as the body) so a seeded subscriber matches a live one.
     const registered = this.requests.register({
       correlationId,
+      snapshot: { correlationId, replyTo, channel, payload },
       ...omitUndefined({ timeoutMs: opts.timeoutMs, signal: opts.signal }),
     });
     // Scope on the published envelope. Subscribers filter on
@@ -1648,6 +1684,21 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
       },
     } as ProtocolEvent;
     return this.bus.append(envelope).pipe(Effect.catchAll(() => Effect.void));
+  }
+
+  /**
+   * Enumerate the projectable pending state of this harness's in-flight
+   * {@link request}s (§6.1) — the read-side seam a channel-snapshot provider
+   * folds into its opening frame so a mid-ask subscriber receives the asks
+   * already outstanding (the live-only defect's fix). A `channel` narrows to
+   * requests published on `session:channel:<channel>` — a harness that
+   * publishes on exactly one channel (elicitation, tool-call) gets its whole
+   * set; the filter is a correctness belt for a harness that ever spans more
+   * than one. Oldest-first. The registry already holds this; this projects it.
+   */
+  protected pendingRequests(channel?: string): readonly PendingRequestSnapshot[] {
+    const all = this.requests.pendingSnapshots();
+    return channel === undefined ? all : all.filter((p) => p.channel === channel);
   }
 
   // ──────── lifecycle ────────
