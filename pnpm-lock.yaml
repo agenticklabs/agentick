@@ -443,6 +443,9 @@ importers:
         specifier: ^3.21.2
         version: 3.21.2
     devDependencies:
+      '@agentick/compiler-next':
+        specifier: workspace:*
+        version: link:../compiler
       '@agentick/compiler-react-next':
         specifier: workspace:*
         version: link:../compiler-react

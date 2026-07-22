@@ -1,7 +1,7 @@
 {
   "name": "@agentick/app-next",
   "version": "0.0.0",
-  "description": "Reference app harness for Agentick v2. Outermost runtime boundary \u2014 owns shared substrate, shared sub-harnesses (compiler, loop, executor), the session registry, and the createApp ergonomic surface. Compiler-agnostic \u2014 adopters writing React agents import from `@agentick/app-next/react` for the React default.",
+  "description": "Reference app harness for Agentick v2. Outermost runtime boundary — owns shared substrate, shared sub-harnesses (compiler, loop, executor), the session registry, and the createApp ergonomic surface. Compiler-agnostic — adopters writing React agents import from `@agentick/app-next/react` for the React default.",
   "keywords": [
     "agent",
     "agentick",
@@ -70,9 +70,10 @@
     "effect": "^3.21.2"
   },
   "devDependencies": {
-    "@agentick/model-executor-next": "workspace:*",
-    "@agentick/knobs-next": "workspace:*",
+    "@agentick/compiler-next": "workspace:*",
     "@agentick/compiler-react-next": "workspace:*",
+    "@agentick/knobs-next": "workspace:*",
+    "@agentick/model-executor-next": "workspace:*",
     "@types/react": "^19.2.5",
     "react": "^19.2.4"
   },

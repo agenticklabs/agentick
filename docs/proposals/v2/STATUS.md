@@ -1772,8 +1772,22 @@ blueprint's design decisions; this is execution-level).
     @agentick/client-next" exercising timelineView/elicitations/clientToolCalls/knobs/
     fakes. Every hedge the prompt needs = a discovered ergonomics defect. This IS the
     Ernesto-class validation.
-  ☐ B2 fix the friction B1 surfaces (expect: docs gaps, missing sugar, client rough
-    edges). Each finding triaged: fix / file / justify.
+  ☐ B2 = the **CLIENT API CONSISTENCY + DISCOVERY arc** (Ryan 2026-07-22: "the client
+    needs some work vis a vis ergonomics and apis" — converges with B1's meta-finding).
+    Design-first (Ryan reviews the design), then implement: (a) ONE core handle
+    contract across ALL client sub-handles — `list()/get(id)` (current state) +
+    `onChange()` + async-iterability-as-sugar + domain write verbs — unifying the
+    collection-shaped (tasks/knobs) and request-stream-shaped (elicitations/
+    clientToolCalls) handles. KEY INSIGHT: a pending elicitation/tool-call is STATE
+    keyed by correlationId, not just an event — live-only streams violate
+    enumeration-is-foundational; a client connecting mid-ask must see it. Needs
+    server-side pending-request enumeration/snapshot-first (friction #9). (b) fold in
+    friction #1 (KnobDescriptor[] on the wire — labels/types/bounds, not just values),
+    #2 (first-party session/timeline_history + lazy prepend), #13 (client knobs
+    key→id), (c) decide #6 (first-party @agentick/client react bindings — useTimeline/
+    useKnobs/useElicitations one-liners once the contract is uniform) + convenience
+    sugar (session.onElicitation(cb)) ONLY after the contract lands. Friction #4 docs
+    fixed (aaccee4c); #10 dangling queue already TODO'd (4b).
   ☐ B3 Ernesto proper (Ryan's call on timing — gate long met).
   **Phase C — v2.0-cut checklist (assemble + then walk; items in one place so the cut
   is a checklist walk, not archaeology):**

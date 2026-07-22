@@ -177,6 +177,18 @@ that way. `CacheHint` (#185) is the canonical carrier that marks where the cache
 boundary sits (translated per-adapter, e.g. Anthropic `cache_control`); use it to
 declare the boundary explicitly rather than relying on incidental prefix stability.
 
+This invariant is enforced end-to-end against the real React compiler + the
+canonical projection + a real loop run — a static tree renders to a
+byte-identical `RenderedTree` and byte-identical model input across N renders,
+and a loop run produces a prefix-append-only compiled prefix (later ticks only
+append). Verified by `packages-next/app/src/__tests__/prefix-stability.spec.tsx`
+(the ADR-27 modularity rule places this cross-harness test where its
+dependencies live, not in this dependency-light base). One documented
+non-defect the suite pins: `hostId`-derived auto element ids differ across
+separate mounts (per-process counter), but they never enter the model
+projection — the model-facing bytes stay mount-independent, which is what keeps
+a provider cache warm across processes.
+
 ## Patterns
 
 ### Protocol-conforming stub for tests
