@@ -74,18 +74,29 @@ that pretends these are the same thing.
 ```ts
 // MANDATORY CORE — every handle, no exceptions. Thin on purpose (store.md lesson).
 interface ClientHandle {
-  onChange(cb: (…) => void): Unsubscribe;   // the one uniform observation verb
+  subscribe(cb: () => void): Unsubscribe;   // THE store contract (Ryan 2026-07-22):
+                                             // fires on change, cb takes NO args,
+                                             // read current via list(). Makes every
+                                             // framework binding zero-adapter
+                                             // (useSyncExternalStore(h.subscribe, h.list)).
   close?(): void;                            // where the handle owns a subscription
 }
+// NOTE: client-core's existing ChannelView carries BOTH subscribe (state feed) AND
+// onChange (frame feed) — a 4-teams artifact; the arc consolidates onto `subscribe`
+// (the frame feed survives only as an internal/advanced tap where truly needed).
 
 // CAPABILITY PROFILES — declared (typed) + feature-detected (conformance):
 interface Enumerable<T, Id = string> {       // current STATE, not just events
   list(): readonly T[];
   get(id: Id): T | undefined;
 }
-interface Streamable<T> {                    // iterate-as-sugar over the same feed
-  [Symbol.asyncIterator](): AsyncIterator<T>;
-}
+// Streamable REMOVED from the contract (Ryan review 2026-07-22): a handle is
+// nouns+verbs, not also a stream you drink from — the dual identity was the
+// 4-teams smell in one line, and `for await` over an UNBOUNDED feed is a
+// coroutine with unowned lifecycle (one exception kills all future asks).
+// PRINCIPLE: iterate BOUNDED things (run.events() — a run ends); observe
+// UNBOUNDED things (onChange). Async iteration survives ONLY on finite
+// streams; no session-lifetime handle is iterable.
 interface Respondable<In> {                  // correlated reply-by-id
   respond(id: string, input: In): Promise<void>;
 }
@@ -205,6 +216,20 @@ contract lands (no straddle).
    pre-1.0, no compat).
 5. React bindings + sugar (`session.onElicitation` style wrappers only if still
    wanted once `useElicitations` exists).
+
+## 8b. The CONFIG TAXONOMY (added after Ryan's truncateToolResults reaction)
+
+The createApp/createGateway/createSession options surfaces have the same disease the
+handles had: one locally-reasonable key accreted per pass (name, telemetry, signal,
+sessions, truncateToolResults, …), no cross-cutting owner, no taxonomy — reads
+undesigned because it is. DELIVERABLE (part of the north-star design, reviewed by
+Ryan as one page): the full options surface laid out top-down — what groups
+(egress/client policy? observability? lifecycle/limits?), what stays flat (the
+withX flat-options convention governs adopter-extension types, not necessarily the
+root config), which keys are seams vs sugar-over-a-seam. Every existing key gets a
+designed home or moves to it (pre-1.0 — relocation is free). The three review
+principles apply: keys readable without docs; operator-vs-app defaults;
+seam-vs-projection placement.
 
 ## 9. Open questions for Ryan
 
