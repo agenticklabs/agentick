@@ -42,6 +42,9 @@ import type {
   AfterHook,
   AsyncStream,
   BeforeHook,
+  ChunkHooksOf,
+  ChunkInterceptor,
+  ChunkRegistrarsOf,
   CommandOutcome,
   HooksOf,
   Pascal,
@@ -80,6 +83,7 @@ import {
   AgentickError,
   CommandDeclarationError,
   DEFAULT_JOURNALING_POLICY,
+  deriveChunkHookName,
   deriveHookNames,
   logEventName,
   parseHookKey,
@@ -122,8 +126,11 @@ export type { Unsubscribe } from "@agentick/spec-next";
 // Re-export the pure hook-derivation pieces moved to `@agentick/spec-next`
 // (ADR 80) so downstream `@agentick/runtime-next` imports keep resolving —
 // the move is a re-home, not a public-surface change.
-export { deriveHookNames } from "@agentick/spec-next";
+export { deriveHookNames, deriveChunkHookName } from "@agentick/spec-next";
 export type { BeforeHook, AfterHook } from "@agentick/spec-next";
+// Per-chunk interception (ADR 80 Phase 2) — the sink-wrapping interceptor shapes
+// a streaming command's `on<Verb>Chunk` hook / `def.chunk` option accepts.
+export type { ChunkInterceptor, ChunkObserver, ChunkTransform } from "@agentick/spec-next";
 // The streaming-edge facade type — `commandStream` and `runHarnessStream` both
 // surface it, so re-home it onto the runtime package's public API (ADR 77).
 export type { AsyncStream } from "@agentick/spec-next";
@@ -277,7 +284,9 @@ type CommandAroundHooks = {
  * full-middleware key ({@link CommandAroundHooks}). The type-level `Pascal` is
  * the exact twin of the runtime {@link deriveHookNames} — they MUST agree (a test).
  */
-export type CommandHooks = HooksOf<CommandRegistry, RuntimeContext> & CommandAroundHooks;
+export type CommandHooks = HooksOf<CommandRegistry, RuntimeContext> &
+  CommandAroundHooks &
+  ChunkHooksOf<CommandRegistry, RuntimeContext>;
 
 /**
  * The per-verb IMPERATIVE registrar surface — the same `Pascal<K>` derivation as
@@ -303,7 +312,9 @@ export type CommandMiddlewares = {
   ) => Unsubscribe;
 };
 
-export type HookRegistrars = RegistrarsOf<CommandRegistry, RuntimeContext> & CommandMiddlewares;
+export type HookRegistrars = RegistrarsOf<CommandRegistry, RuntimeContext> &
+  CommandMiddlewares &
+  ChunkRegistrarsOf<CommandRegistry, RuntimeContext>;
 
 // ============================================================================
 // MiddlewareChain — outer→inner composition
@@ -446,6 +457,10 @@ function commandHookMiddleware(
 ): Middleware<unknown, unknown, unknown> | undefined {
   const parsed = parseHookKey(key);
   if (parsed === undefined) return undefined;
+  // Chunk interceptors (ADR 80 Phase 2) SINK-WRAP the streaming body; they are
+  // NOT op-scoped middleware, so they never join the interceptor cascade. Skip
+  // them here — {@link BaseHarness.registerChunkInterceptor} owns their path.
+  if (parsed.kind === "chunk") return undefined;
   const wrapped: AsyncMiddleware<unknown, unknown> =
     parsed.kind === "before"
       ? asBefore(fn as BeforeHook<unknown>)
@@ -474,6 +489,126 @@ export function hooksToMiddlewares(config: CommandHooks): Middleware<unknown, un
     if (mw !== undefined) out.push(mw);
   }
   return out;
+}
+
+// ============================================================================
+// Per-chunk interception pipeline (ADR 80 Phase 2)
+// ============================================================================
+//
+// A chunk interceptor SINK-WRAPS a streaming command's sink: it runs BETWEEN
+// the body's emit and the downstream sink (the bounded queue for `.stream`, the
+// caller's sink for `.fx`, the no-op sink for `.run`). Multiple interceptors
+// compose into a pipeline `body → i0 → i1 → … → downstream`. Because the wrap
+// is on the SINK, all three consumption faces see transformed chunks — the loop
+// (via `.fx`) and the iterator (via `.stream`) alike.
+
+/**
+ * The normalized (kind-tagged) internal form of a {@link ChunkInterceptor}, with
+ * `Ctx` bound to {@link RuntimeContext}. The public union is shape-discriminated
+ * (`observe` vs `onChunk`); {@link normalizeChunkInterceptor} tags it once at
+ * registration so the hot per-chunk path is a cheap discriminant check.
+ */
+type ResolvedChunkInterceptor<Chunk> =
+  | {
+      readonly kind: "observe";
+      readonly observe: (chunk: Chunk, ctx: RuntimeContext) => void | Promise<void>;
+    }
+  | {
+      readonly kind: "transform";
+      readonly onChunk: (
+        chunk: Chunk,
+        emit: (chunk: Chunk) => void,
+        ctx: RuntimeContext,
+      ) => void | Promise<void>;
+      readonly onFlush?: (
+        emit: (chunk: Chunk) => void,
+        ctx: RuntimeContext,
+      ) => void | Promise<void>;
+    };
+
+/** Tag a {@link ChunkInterceptor} by shape into a {@link ResolvedChunkInterceptor}. */
+function normalizeChunkInterceptor<Chunk>(
+  interceptor: ChunkInterceptor<Chunk, RuntimeContext>,
+): ResolvedChunkInterceptor<Chunk> {
+  if ("observe" in interceptor) {
+    return { kind: "observe", observe: interceptor.observe };
+  }
+  return {
+    kind: "transform",
+    onChunk: interceptor.onChunk,
+    ...(interceptor.onFlush !== undefined ? { onFlush: interceptor.onFlush } : {}),
+  };
+}
+
+/** Lift a hook callback's `void | Promise<void>` result onto the Effect channel. */
+function chunkStep(result: void | Promise<void>): Effect.Effect<void> {
+  return isThenable(result) ? Effect.promise(() => result as Promise<void>) : Effect.void;
+}
+
+/**
+ * Run ONE interceptor stage for a chunk, feeding its output to `downstream`. An
+ * `observe` stage taps (awaited, in order) then forwards the chunk UNCHANGED; a
+ * `transform` stage buffers its `emit`ted chunks (zero → drop/coalesce, one →
+ * map, many → fan-out) then forwards each downstream.
+ */
+function runChunkStage<Chunk>(
+  stage: ResolvedChunkInterceptor<Chunk>,
+  chunk: Chunk,
+  downstream: (chunk: Chunk) => Effect.Effect<void>,
+  ctx: RuntimeContext,
+): Effect.Effect<void> {
+  return Effect.gen(function* () {
+    if (stage.kind === "observe") {
+      yield* chunkStep(stage.observe(chunk, ctx));
+      yield* downstream(chunk);
+      return;
+    }
+    const buffer: Chunk[] = [];
+    yield* chunkStep(stage.onChunk(chunk, (c) => buffer.push(c), ctx));
+    for (const c of buffer) yield* downstream(c);
+  });
+}
+
+/**
+ * Compose a chunk-interceptor list into a wrapped `sink` + a terminal `flush`
+ * (ADR 80 Phase 2). The body emits into `sink` (stage 0), which cascades through
+ * each stage to `realSink`. `flush` — run ONCE at the terminal boundary, after
+ * the body's last emit and BEFORE `onAfter` — walks the stages in order,
+ * releasing each transform's buffered tail into the NEXT stage's entry sink
+ * (so a downstream combiner still coalesces the upstream's flushed remainder).
+ * This is the flush-on-terminal contract; it is reached only on clean
+ * completion (an interrupted body never returns, so `flush` never runs → no
+ * bogus tail on abort).
+ */
+function buildChunkPipeline<Chunk>(
+  interceptors: readonly ResolvedChunkInterceptor<Chunk>[],
+  realSink: (chunk: Chunk) => Effect.Effect<void>,
+  ctx: RuntimeContext,
+): {
+  readonly sink: (chunk: Chunk) => Effect.Effect<void>;
+  readonly flush: () => Effect.Effect<void>;
+} {
+  const n = interceptors.length;
+  // sinks[i] is the ENTRY sink for stage i; sinks[n] is the real downstream sink.
+  const sinks: ((chunk: Chunk) => Effect.Effect<void>)[] = new Array(n + 1);
+  sinks[n] = realSink;
+  for (let i = n - 1; i >= 0; i--) {
+    const stage = interceptors[i]!;
+    const downstream = sinks[i + 1]!;
+    sinks[i] = (chunk) => runChunkStage(stage, chunk, downstream, ctx);
+  }
+  const flush = (): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      for (let i = 0; i < n; i++) {
+        const stage = interceptors[i]!;
+        if (stage.kind !== "transform" || stage.onFlush === undefined) continue;
+        const buffer: Chunk[] = [];
+        yield* chunkStep(stage.onFlush((c) => buffer.push(c), ctx));
+        const downstream = sinks[i + 1]!;
+        for (const c of buffer) yield* downstream(c);
+      }
+    });
+  return { sink: sinks[0] ?? realSink, flush };
 }
 
 // ============================================================================
@@ -992,6 +1127,64 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
   }
 
   /**
+   * Per-command chunk interceptors (ADR 80 Phase 2), keyed by the minted hook
+   * name (`on<Verb>Chunk`, via {@link deriveChunkHookName}). SINK-WRAPPING, not
+   * op-scoped middleware — so they live here, NOT on `this.middleware`. Read
+   * live per streaming run by {@link commandStream}: when a verb's list is empty
+   * (the common case) the sink is not wrapped at all (zero overhead).
+   *
+   * TODO(phase-2+): these are harness-LOCAL (they do not inherit down the
+   * construction tree the way `.use`/`.guard`/`.hook` middleware does, and a
+   * declarative session-config `{ hooks: { onXChunk } }` is NOT folded through
+   * `hooksToMiddlewares`). Session-scoped chunk interceptors (register on the
+   * session, reach the shared executor) are a follow-up — see the task note.
+   */
+  private readonly chunkInterceptors = new Map<string, ResolvedChunkInterceptor<unknown>[]>();
+
+  /**
+   * Dispatch ONE hook-config entry to its registration path (ADR 80 Phase 2):
+   * an `on<Verb>Chunk` key routes to {@link registerChunkInterceptor} (the
+   * sink-wrapping path); every other key routes to {@link registerCommandHook}
+   * (the op-scoped middleware cascade). The single funnel behind {@link hook}
+   * and the {@link hooks} proxy.
+   */
+  private registerHookEntry(key: string, fn: unknown): Unsubscribe {
+    if (parseHookKey(key)?.kind === "chunk") {
+      return this.registerChunkInterceptor(key, fn as ChunkInterceptor<unknown, RuntimeContext>);
+    }
+    return this.registerCommandHook(key, fn);
+  }
+
+  /**
+   * Register a per-chunk interceptor (ADR 80 Phase 2) under its minted hook name
+   * (`on<Verb>Chunk`). Normalizes the shape-discriminated {@link ChunkInterceptor}
+   * to its kind-tagged internal form once, appends it to the verb's list (order =
+   * pipeline order), and returns an {@link Unsubscribe} that removes exactly that
+   * interceptor by identity. No-op teardown after the first call.
+   */
+  private registerChunkInterceptor(
+    key: string,
+    interceptor: ChunkInterceptor<unknown, RuntimeContext>,
+  ): Unsubscribe {
+    const resolved = normalizeChunkInterceptor(interceptor);
+    let list = this.chunkInterceptors.get(key);
+    if (list === undefined) {
+      list = [];
+      this.chunkInterceptors.set(key, list);
+    }
+    list.push(resolved);
+    let live = true;
+    return () => {
+      if (!live) return;
+      live = false;
+      const current = this.chunkInterceptors.get(key);
+      if (current === undefined) return;
+      const idx = current.indexOf(resolved);
+      if (idx >= 0) current.splice(idx, 1);
+    };
+  }
+
+  /**
    * Register command lifecycle hooks IMPERATIVELY (ADR 83) — the runtime twin of
    * the declarative `{ hooks }` construction config, taking the SAME
    * {@link CommandHooks} object. Each entry registers as an op-scoped
@@ -1012,7 +1205,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
     const unsubs: Unsubscribe[] = [];
     for (const [key, fn] of Object.entries(config as Record<string, unknown>)) {
       if (fn === undefined) continue;
-      unsubs.push(this.registerCommandHook(key, fn));
+      unsubs.push(this.registerHookEntry(key, fn));
     }
     if (unsubs.length === 0) return () => {};
     let live = true;
@@ -1025,16 +1218,18 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
 
   /**
    * Per-verb imperative registrars (ADR 83) — a typed Proxy over
-   * {@link registerCommandHook}. Uniformly covers the before/after sugar
-   * (`harness.hooks.onBeforeToolDispatch(fn)`) AND the full-middleware
-   * `on<Command>` primitive (`harness.hooks.onToolDispatch(mw)`), each returning
-   * its {@link Unsubscribe}. Only augmented verbs are callable keys
-   * ({@link HookRegistrars}); an unknown name is an inert no-op.
+   * {@link registerHookEntry}. Uniformly covers the before/after sugar
+   * (`harness.hooks.onBeforeToolDispatch(fn)`), the full-middleware `on<Command>`
+   * primitive (`harness.hooks.onToolDispatch(mw)`), AND the per-chunk interceptor
+   * (`harness.hooks.onModelGenerateStreamChunk(interceptor)`, ADR 80 Phase 2 —
+   * routed to the sink-wrapping path), each returning its {@link Unsubscribe}.
+   * Only augmented verbs are callable keys ({@link HookRegistrars}); an unknown
+   * name is an inert no-op.
    */
   get hooks(): HookRegistrars {
     return (this._hookRegistrars ??= new Proxy({} as HookRegistrars, {
       get: (_target, name) =>
-        typeof name === "string" ? (fn: unknown) => this.registerCommandHook(name, fn) : undefined,
+        typeof name === "string" ? (fn: unknown) => this.registerHookEntry(name, fn) : undefined,
     }));
   }
   private _hookRegistrars?: HookRegistrars;
@@ -1783,9 +1978,17 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
    * onBefore-transformed; the returned `R` is onAfter-transformed. Chunks flow
    * out the sink concurrently and are NOT intercepted here.
    *
-   * **Boundary hooks ONLY (Phase 1A).** Per-chunk interception (an
-   * `onChunk<Verb>` seam over the sink) is Phase 2 — deliberately absent here.
-   * 1A endows the boundary hooks + the iterator, nothing per-item.
+   * **Per-chunk interception (ADR 80 Phase 2).** Beyond the boundary hooks, a
+   * streaming command mints an `on<Verb>Chunk` registrar (via
+   * {@link deriveChunkHookName}, e.g. `onModelGenerateStreamChunk`) and accepts a
+   * `def.chunk` list — both take {@link ChunkInterceptor}s that SINK-WRAP the
+   * body's sink. An `observe` interceptor taps each chunk in order; a `transform`
+   * maps/coalesces (its `onChunk(chunk, emit)` may emit zero/one/many) with an
+   * optional `onFlush(emit)` released at the terminal boundary (after the body's
+   * last emit, BEFORE `onAfter` — the flush-on-terminal contract). Because the
+   * wrap is on the SINK, ALL THREE faces (`stream`, `fx`, `run`) see transformed
+   * chunks. When no interceptor is registered the sink is not wrapped at all
+   * (zero overhead). An aborted body never reaches `flush` (no bogus tail).
    *
    * **Three consumption faces, ONE cascade** — the returned {@link StreamCommand}
    * exposes all three; each drives the same single cascade-wrapped run:
@@ -1836,6 +2039,14 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
       sink: (chunk: Chunk) => Effect.Effect<void>,
     ) => Effect.Effect<R, E, never>;
     /**
+     * Declaration-time per-chunk interceptors (ADR 80 Phase 2) — the programmatic
+     * twin of the minted `hooks.on<Verb>Chunk(...)` registrar. SINK-WRAP the
+     * body's sink in list order; composed OUTERMOST of any dynamically-registered
+     * interceptors (declared first = closest to the body). Each is an `observe`
+     * tap or a buffering/coalescing `transform` (with optional flush-on-terminal).
+     */
+    readonly chunk?: readonly ChunkInterceptor<Chunk, RuntimeContext>[];
+    /**
      * Streaming-edge policy for the `.stream` (AsyncStream) face ONLY — the
      * `.fx` sink-fold twin and the `.run` drain ignore it (they have no
      * Queue/iterator to police). Threads the {@link runHarnessStream} knobs a
@@ -1865,12 +2076,47 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
     }
     const opName = `${this.surface}:command:${name.slice(this.surface.length + 1)}`;
 
+    // Per-chunk interception (ADR 80 Phase 2). Declaration-time interceptors are
+    // normalized once here; dynamic ones (`hooks.on<Verb>Chunk(...)`) are read
+    // LIVE per run from `this.chunkInterceptors` under the minted hook name. The
+    // effective list per run is `[...declared, ...dynamic]` (declared closest to
+    // the body). When BOTH are empty the sink is not wrapped at all.
+    const chunkHookName = deriveChunkHookName(opName);
+    const declaredChunk = (def.chunk ?? []).map(normalizeChunkInterceptor);
+    const chunkInterceptorsFor = this.chunkInterceptors;
+
+    // Wrap the body's sink with the effective chunk pipeline, flushing any
+    // buffered tail BEFORE returning `R` (hence before the `onAfter` boundary
+    // hook, which wraps the whole body). Zero-overhead when no interceptor is
+    // registered: the raw sink is threaded straight through, no `getContext`, no
+    // flush. On abort the body is interrupted before `flush` — no bogus tail.
+    const runBodyWithChunks = (
+      i: I,
+      sink: (chunk: Chunk) => Effect.Effect<void>,
+    ): Effect.Effect<R, E, never> => {
+      const dynamic = chunkInterceptorsFor.get(chunkHookName) as
+        | ResolvedChunkInterceptor<Chunk>[]
+        | undefined;
+      const hasDynamic = dynamic !== undefined && dynamic.length > 0;
+      if (declaredChunk.length === 0 && !hasDynamic) {
+        return def.body(i, sink); // zero-overhead — no sink wrap
+      }
+      const list = hasDynamic ? [...declaredChunk, ...dynamic!] : declaredChunk;
+      return Effect.gen(function* () {
+        const ctx = yield* getContext;
+        const { sink: wrapped, flush } = buildChunkPipeline<Chunk>(list, sink, ctx);
+        const result = yield* def.body(i, wrapped);
+        yield* flush();
+        return result;
+      });
+    };
+
     // The cascade-wrapped, sink-folding body. ONE Effect reused by BOTH
     // consumption modes — the streaming facade (sink tees to the bridge queue)
     // and the registry `run` (no-op sink). Manufacturing the Operation +
     // routing it through `runOperation` is IDENTICAL to `command`; the only
-    // delta is the body threads a `sink`. This is the fusion: no second
-    // interceptor path exists.
+    // delta is the body threads a (chunk-pipeline-wrapped) `sink`. This is the
+    // fusion: no second interceptor path exists.
     const streamFx = (
       input: I,
       sink: (chunk: Chunk) => Effect.Effect<void>,
@@ -1889,7 +2135,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
           scope: omitUndefined({ ...(def.scope?.(input) ?? {}), origin: opts.origin }),
           input,
         },
-        (i) => def.body(i, sink),
+        (i) => runBodyWithChunks(i, sink),
       );
 
     // The inbox-addressable registry `run`: drive the SAME operation to

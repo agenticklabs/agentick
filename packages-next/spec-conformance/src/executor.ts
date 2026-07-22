@@ -527,6 +527,36 @@ export function runExecutorConformance(factory: ExecutorConformanceFactory): voi
       expect(afterFired).toBe(true);
     });
 
+    it("onModelGenerateStreamChunk taps each streamed chunk (ADR 80 Phase 2 sink-wrap)", async () => {
+      const { executor } = await factory({
+        harnessId: "ex-cmd-chunk",
+        scripted: mkScripted("chunked"),
+      });
+      if (!executor.executeStream) throw new Error("executeStream not implemented");
+      const seen: unknown[] = [];
+      const off = interceptable(executor).hook({
+        onModelGenerateStreamChunk: {
+          observe: (chunk: unknown) => {
+            seen.push(chunk);
+          },
+        },
+      });
+      const projected = await executor.project({
+        compiled: mkRenderedTree(),
+        target: mkTarget(),
+        tools: [],
+      });
+      const stream = executor.executeStream({ targetInput: projected, target: mkTarget() });
+      const drained: unknown[] = [];
+      for await (const d of stream) drained.push(d);
+      await drainRejection(stream.result);
+      off();
+      // The interceptor SINK-WRAPS the stream: it tapped exactly the chunks the
+      // iterator drained, in the same order.
+      expect(seen).toEqual(drained);
+      expect(seen.length).toBeGreaterThan(0);
+    });
+
     it("run() (non-streaming) composes through model:generate — onBefore/onAfter fire on a run tick", async () => {
       // ADR 89 §1: the NON-STREAMING `run` composes project → the
       // `model:generate` command → normalize, so the command's boundary

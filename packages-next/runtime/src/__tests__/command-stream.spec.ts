@@ -1,6 +1,6 @@
 /**
  * `BaseHarness.commandStream` — the STREAMING command substrate primitive
- * (Phase 1A of the model-harness command-ification).
+ * (Phase 1A/1B boundary hooks + Phase 2 per-chunk interception).
  *
  * `commandStream` fuses three things `command` and `runHarnessStream` each
  * half-provide:
@@ -14,11 +14,14 @@
  *      to a sink and returns the final `R`; the cascade fires at the stream's
  *      START (guard/onBefore) and TERMINAL (onAfter over R).
  *
- * Phase 1A endows BOUNDARY hooks + the iterator ONLY — per-chunk interception
- * is Phase 2 (deliberately absent). These tests are the conformance for the
- * primitive: hook minting, boundary firing + ordering, guard-vetoes-before-
+ * Phase 1A/1B endow BOUNDARY hooks + the iterator + the `fx` sink-fold twin;
+ * Phase 2 adds PER-CHUNK interception (sink-wrapping observe/transform +
+ * flush-on-terminal). These tests are the conformance for the primitive: hook
+ * minting (boundary + chunk), boundary firing + ordering, guard-vetoes-before-
  * any-chunk, the async-iterator contract, abort/kill mid-stream, the registry
- * `run` drain path, transform-over-input/output, and zero-overhead.
+ * `run` drain path, transform-over-input/output, zero-overhead, and — for
+ * Phase 2 — chunk observe/transform/combine, flush-on-terminal, abort-drops-tail,
+ * and chunk zero-overhead.
  *
  * Mirrors `command-registry.spec.ts` / `command-hooks.spec.ts` — the minting +
  * firing patterns for the non-streaming twin.
@@ -37,9 +40,11 @@ import type {
 } from "@agentick/spec-next";
 import {
   BaseHarness,
+  deriveChunkHookName,
   deriveHookNames,
   OperationOutcomeError,
   type AsyncStream,
+  type ChunkInterceptor,
   type CommandHooks,
 } from "../substrate/base-harness.js";
 import { LocalEventBus } from "../substrate/local-event-bus.js";
@@ -61,7 +66,9 @@ type GenResult = string;
 
 declare module "../substrate/base-harness.js" {
   interface CommandRegistry {
-    "model:generate_stream": { input: GenInput; output: GenResult };
+    // `chunk: GenChunk` mints the per-chunk `onModelGenerateStreamChunk`
+    // interceptor (ADR 80 Phase 2) alongside the boundary hooks.
+    "model:generate_stream": { input: GenInput; output: GenResult; chunk: GenChunk };
   }
 }
 
@@ -96,7 +103,11 @@ class StreamTestHarness extends BaseHarness<"model"> {
     journal: MemoryJournal,
     bus: LocalEventBus,
     inbox: LocalInbox,
-    opts: { readonly hooks?: CommandHooks } = {},
+    opts: {
+      readonly hooks?: CommandHooks;
+      /** Declaration-time chunk interceptors (the `def.chunk` path, ADR 80 Phase 2). */
+      readonly chunk?: readonly ChunkInterceptor<GenChunk>[];
+    } = {},
   ) {
     super("model", scopeId, journal, bus, inbox, {});
     if (opts.hooks) this.hook(opts.hooks);
@@ -104,6 +115,7 @@ class StreamTestHarness extends BaseHarness<"model"> {
       name: "model:generate_stream",
       description: "stream tokens, return the concatenation",
       scope: () => ({ sessionId: this.scopeId }),
+      ...(opts.chunk ? { chunk: opts.chunk } : {}),
       body: (input, sink) =>
         Effect.gen(this, function* () {
           for (const t of input.tokens) {
@@ -151,13 +163,18 @@ class StreamTestHarness extends BaseHarness<"model"> {
 }
 
 async function mkHarness(
-  opts: { readonly hooks?: CommandHooks; readonly scopeId?: string } = {},
+  opts: {
+    readonly hooks?: CommandHooks;
+    readonly scopeId?: string;
+    readonly chunk?: readonly ChunkInterceptor<GenChunk>[];
+  } = {},
 ): Promise<{ h: StreamTestHarness; bus: LocalEventBus; inbox: LocalInbox }> {
   const journal = new MemoryJournal();
   const bus = new LocalEventBus({ batch: {} });
   const inbox = new LocalInbox();
   const h = new StreamTestHarness(opts.scopeId ?? "m1", journal, bus, inbox, {
     ...(opts.hooks ? { hooks: opts.hooks } : {}),
+    ...(opts.chunk ? { chunk: opts.chunk } : {}),
   });
   await h.ready;
   return { h, bus, inbox };
@@ -177,6 +194,32 @@ async function drain<C, R>(stream: AsyncStream<C, R>): Promise<C[]> {
   const chunks: C[] = [];
   for await (const c of stream) chunks.push(c);
   return chunks;
+}
+
+/**
+ * A stateful N→1 coalescing transform (Phase 2 fixture): buffers chunks, emits a
+ * joined pair every two, and flushes any odd tail at the terminal boundary via
+ * `onFlush`. Fresh buffer per call. `onFlushCalled` (when provided) flips true
+ * the instant `onFlush` runs — the abort test asserts it STAYS false.
+ */
+function combinePairs(onFlushCalled?: () => void): ChunkInterceptor<GenChunk> {
+  let buf: string[] = [];
+  return {
+    onChunk: (c, emit) => {
+      buf.push(c);
+      if (buf.length === 2) {
+        emit(buf.join(""));
+        buf = [];
+      }
+    },
+    onFlush: (emit) => {
+      onFlushCalled?.();
+      if (buf.length > 0) {
+        emit(buf.join(""));
+        buf = [];
+      }
+    },
+  };
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -510,5 +553,204 @@ describe("commandStream — declaration (registry registration identical to comm
         description: "stream tokens, return the concatenation",
       },
     ]);
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// Per-chunk interception (ADR 80 Phase 2) — sink-wrapping observe / transform,
+// combine + flush-on-terminal, zero-overhead, abort-drops-tail.
+// ────────────────────────────────────────────────────────────────────────────
+
+describe("commandStream — chunk hook minting (ADR 80 Phase 2)", () => {
+  it("mints onModelGenerateStreamChunk (deriveChunkHookName lock)", () => {
+    // The runtime derivation twin: the streaming verb mints the `on<Pascal>Chunk`
+    // registrar — the same Pascal the type-level `ChunkHooksOf` uses.
+    expect(deriveChunkHookName("model:command:generate_stream")).toBe("onModelGenerateStreamChunk");
+  });
+
+  it("the minted chunk registrar exists on hooks and returns an Unsubscribe", async () => {
+    const { h } = await mkHarness();
+    expect(typeof h.hooks.onModelGenerateStreamChunk).toBe("function");
+    const off = h.hooks.onModelGenerateStreamChunk({ observe: () => {} });
+    expect(typeof off).toBe("function");
+    off();
+  });
+});
+
+describe("commandStream — observe taps (Phase 2)", () => {
+  it("observe sees every chunk in order without altering the iterator's stream", async () => {
+    const { h } = await mkHarness();
+    const seen: GenChunk[] = [];
+    h.hooks.onModelGenerateStreamChunk({
+      observe: (c) => {
+        seen.push(c);
+      },
+    });
+    const stream = h.generate({ tokens: ["a", "b", "c"] });
+    const chunks = await drain(stream);
+    expect(await stream.result).toBe("abc");
+    // The iterator saw the chunks UNCHANGED; observe tapped them in the same order.
+    expect(chunks).toEqual(["a", "b", "c"]);
+    expect(seen).toEqual(["a", "b", "c"]);
+  });
+
+  it("observe taps the fx sink's chunks too (the loop's sink routes through the pipeline)", async () => {
+    const { h } = await mkHarness();
+    const seen: GenChunk[] = [];
+    h.hooks.onModelGenerateStreamChunk({
+      observe: (c) => {
+        seen.push(c);
+      },
+    });
+    const forwarded: GenChunk[] = [];
+    const result = await Effect.runPromise(
+      h.generateFx({ tokens: ["x", "y"] }, (c) => Effect.sync(() => forwarded.push(c))),
+    );
+    expect(result).toBe("xy");
+    expect(forwarded).toEqual(["x", "y"]);
+    expect(seen).toEqual(["x", "y"]);
+  });
+});
+
+describe("commandStream — transform maps chunks (Phase 2)", () => {
+  const upper: ChunkInterceptor<GenChunk> = { onChunk: (c, emit) => emit(c.toUpperCase()) };
+
+  it("a 1:1 transform maps every chunk the ITERATOR sees (R — the body's return — intact)", async () => {
+    const { h } = await mkHarness({ chunk: [upper] });
+    const stream = h.generate({ tokens: ["a", "b"] });
+    const chunks = await drain(stream);
+    expect(chunks).toEqual(["A", "B"]);
+    // The transform maps the SINK, not the body's return value.
+    expect(await stream.result).toBe("ab");
+  });
+
+  it("the SAME transform maps the fx sink's chunks (both faces route through it)", async () => {
+    const { h } = await mkHarness({ chunk: [upper] });
+    const forwarded: GenChunk[] = [];
+    const result = await Effect.runPromise(
+      h.generateFx({ tokens: ["a", "b"] }, (c) => Effect.sync(() => forwarded.push(c))),
+    );
+    expect(forwarded).toEqual(["A", "B"]);
+    expect(result).toBe("ab");
+  });
+
+  it("a dropping transform (emits nothing) yields zero chunks; R stays intact", async () => {
+    const { h } = await mkHarness();
+    h.hooks.onModelGenerateStreamChunk({ onChunk: () => {} });
+    const stream = h.generate({ tokens: ["a", "b", "c"] });
+    expect(await drain(stream)).toEqual([]);
+    expect(await stream.result).toBe("abc");
+  });
+
+  it("def.chunk runs CLOSEST to the body; a dynamic interceptor wraps OUTSIDE it", async () => {
+    // Pipeline order = [...declared, ...dynamic]: body → declared(upper) → dynamic(append !) → sink.
+    const { h } = await mkHarness({ chunk: [upper] });
+    h.hooks.onModelGenerateStreamChunk({ onChunk: (c, emit) => emit(`${c}!`) });
+    const chunks = await drain(h.generate({ tokens: ["a"] }));
+    expect(chunks).toEqual(["A!"]);
+  });
+});
+
+describe("commandStream — combining transform + flush-on-terminal (Phase 2)", () => {
+  it("N→1 coalesce: the buffered tail is flushed at the terminal (not lost)", async () => {
+    const { h } = await mkHarness({ chunk: [combinePairs()] });
+    const stream = h.generate({ tokens: ["a", "b", "c"] });
+    const chunks = await drain(stream);
+    // "a"+"b" coalesced to "ab" mid-stream; the odd "c" buffered, then flushed.
+    expect(chunks).toEqual(["ab", "c"]);
+    expect(await stream.result).toBe("abc");
+  });
+
+  it("flush precedes onAfter — the fx sink already holds the flushed tail when onAfter fires", async () => {
+    const forwarded: GenChunk[] = [];
+    let sinkAtAfter: GenChunk[] = [];
+    const { h } = await mkHarness({
+      chunk: [combinePairs()],
+      hooks: {
+        onAfterModelGenerateStream: (o) => {
+          sinkAtAfter = [...forwarded];
+          return o;
+        },
+      },
+    });
+    const result = await Effect.runPromise(
+      h.generateFx({ tokens: ["a", "b", "c"] }, (c) => Effect.sync(() => forwarded.push(c))),
+    );
+    expect(result).toBe("abc");
+    expect(forwarded).toEqual(["ab", "c"]);
+    // The flush emitted "c" into the sink BEFORE onAfter fired — flush-on-terminal
+    // strictly precedes the boundary hook.
+    expect(sinkAtAfter).toEqual(["ab", "c"]);
+  });
+});
+
+describe("commandStream — abort with a buffering transform (no flush on abort)", () => {
+  it("aborting mid-stream drops the buffered tail — onFlush never runs, no bogus chunk", async () => {
+    let flushCalled = false;
+    let afterFired = false;
+    const { h } = await mkHarness({
+      chunk: [combinePairs(() => (flushCalled = true))],
+      hooks: {
+        onAfterModelGenerateStream: (o) => {
+          afterFired = true;
+          return o;
+        },
+      },
+    });
+    const stream = h.generate({ tokens: ["a", "b", "c"], hang: true });
+    const it = stream[Symbol.asyncIterator]();
+    // "a"+"b" coalesce → "ab"; "c" buffers; then the body parks on Effect.never.
+    expect(await it.next()).toEqual({ value: "ab", done: false });
+    await waitFor(() => h.reachedHang);
+
+    stream.abort("cancel");
+    await waitFor(() => h.interrupted);
+    await expect(stream.result).rejects.toBeTruthy();
+
+    // The buffered "c" was NEVER released: onFlush not reached (interrupt precedes
+    // it), onAfter not fired — no bogus tail on abort.
+    expect(flushCalled).toBe(false);
+    expect(afterFired).toBe(false);
+  });
+});
+
+describe("commandStream — chunk zero-overhead (Phase 2)", () => {
+  it("with no chunk interceptor registered the sink is not wrapped (raw chunks)", async () => {
+    const { h } = await mkHarness();
+    const stream = h.generate({ tokens: ["1", "2", "3"] });
+    expect(await drain(stream)).toEqual(["1", "2", "3"]);
+    expect(await stream.result).toBe("123");
+  });
+
+  it("unregistering the last chunk interceptor restores the raw sink (wrap removed)", async () => {
+    const { h } = await mkHarness();
+    const off = h.hooks.onModelGenerateStreamChunk({ onChunk: () => {} }); // drops everything
+    expect(await drain(h.generate({ tokens: ["a", "b"] }))).toEqual([]);
+    off();
+    // After unsubscribe the effective list is empty → the fast path (no wrap) —
+    // chunks flow unchanged again.
+    expect(await drain(h.generate({ tokens: ["a", "b"] }))).toEqual(["a", "b"]);
+  });
+});
+
+describe("commandStream — chunk interceptors on the registry run (drained)", () => {
+  it("the no-op-sink run still traverses the interceptors (they run even though dropped)", async () => {
+    const seen: GenChunk[] = [];
+    const { h, inbox } = await mkHarness();
+    h.hooks.onModelGenerateStreamChunk({
+      observe: (c) => {
+        seen.push(c);
+      },
+    });
+    const result = await Effect.runPromise(
+      inbox.ask<GenInput, GenResult>("model:m1", {
+        type: "model:generate_stream",
+        payload: { tokens: ["r", "u", "n"] },
+      }),
+    );
+    expect(result).toBe("run");
+    // Chunks traversed the interceptor even though the no-op sink dropped them.
+    expect(seen).toEqual(["r", "u", "n"]);
+    await h.close();
   });
 });

@@ -321,8 +321,9 @@ machinery lives here ONCE; each streaming edge supplies only its sink-fold
 
 `command({ name, handler })` declares a NON-streaming verb: registry
 registration (mints the boundary hooks + inbox addressability) + `runOperation`
-+ the `runHarnessProtocol` Promise facade. The public method returns
-`Promise<R>`.
+
+- the `runHarnessProtocol` Promise facade. The public method returns
+  `Promise<R>`.
 
 `commandStream({ name, body })` is its **streaming twin** (ADR 77) — it fuses
 the same registry registration + the same `runOperation` cascade with
@@ -342,9 +343,42 @@ Two consumption modes over ONE cascade:
 
 `stream.abort(reason)` interrupts the operation fiber (the kill/resume path):
 an aborted run publishes NO `terminal:succeeded` and fires NO `onAfter` with a
-bogus value — `.result` rejects with the interrupted cause. **Boundary hooks
-only** (Phase 1A) — a per-chunk `onChunk<Verb>` seam over the sink is Phase 2.
+bogus value — `.result` rejects with the interrupted cause.
 Pinned by `src/__tests__/command-stream.spec.ts`.
+
+### Per-chunk interception — `on<Verb>Chunk` (ADR 80 Phase 2)
+
+Beyond the boundary hooks, a streaming command mints an `on<Verb>Chunk`
+registrar (`deriveChunkHookName` — e.g. `onModelGenerateStreamChunk`) and
+accepts a `def.chunk` list. Both take **chunk interceptors** that **sink-wrap**
+the body's sink — they run BETWEEN the body's `emit` and the downstream sink, so
+BOTH consumption faces (`stream`'s iterator AND `fx`'s in-fiber sink — the loop's
+per-tick model call) see the TRANSFORMED chunks, and the registry `run` still
+traverses them (drained through a no-op sink). Two kinds:
+
+- **`observe`** — `{ observe(chunk, ctx) }`. A tap; sees each chunk in order,
+  cannot alter or drop it. For metrics, logging, progress.
+- **`transform`** — `{ onChunk(chunk, emit, ctx), onFlush?(emit, ctx) }`. A
+  stateful map: `emit` zero times to BUFFER/coalesce, once for a 1:1 map, or many
+  for fan-out. A `transform` that throws covers stop-on-bad-content (there is NO
+  separate per-chunk guard).
+
+**Flush-on-terminal.** `onFlush` runs ONCE at the terminal boundary — after the
+body's last emit, BEFORE the `onAfter` boundary hook — releasing any buffered
+tail so an N→1 coalescer loses nothing. It is reached only on CLEAN completion:
+an aborted/interrupted body never returns, so `flush` never runs (no bogus tail
+on abort).
+
+Interceptors compose in registration order into a pipeline `body → i0 → i1 → …
+→ sink` (`def.chunk` entries first — closest to the body). **Zero overhead when
+none is registered**: the sink is not wrapped at all (no `getContext`, no flush)
+— unregistering the last interceptor restores the raw sink. Registered
+harness-locally (they do NOT inherit down the construction tree, and a
+declarative session-config `{ hooks: { onXChunk } }` is not folded through
+`hooksToMiddlewares` — session-scoped chunk interceptors are a follow-up).
+Pinned by `src/__tests__/command-stream.spec.ts`; exercised end-to-end on
+`model:generate_stream` by `@agentick/model-executor-next` and the executor
+conformance suite.
 
 ## Operation middleware — three tiers (ADR 76 / 83)
 
@@ -426,16 +460,16 @@ inline inference for both).
 > **Honest caveat — only the middleware's OWN body is off-fiber; the wrapped
 > ops are fully in-fiber.** `liftMiddleware` forks each `use` continuation on the
 > **ambient runtime** (`Effect.runtime()` — the fiber's Context, FiberRefs, and
-> tracer), not the default one. So everything the middleware *wraps* keeps full
+> tracer), not the default one. So everything the middleware _wraps_ keeps full
 > in-fiber semantics across the `await` boundary: **OTel span-nesting** (a span
 > opened in the wrapped ops nests under the op span), **`RuntimeContext` /
 > `parentOpId`**, **tier-4 `withCallMiddleware`** (a nested op reached through the
 > middleware still sees call-scoped middleware), and **interruption** (aborting a
 > `send` tears down the in-flight inner model/tool call — no detached-root leak).
-> The ONE thing that stays off-fiber is the middleware's *own* JS body — the
+> The ONE thing that stays off-fiber is the middleware's _own_ JS body — the
 > statements around `await next` run on the microtask queue, not a fiber, so they
 > can't be fiber-interrupted mid-statement and can't read `getContext` (that's
-> *why* `ctx` is passed explicitly). For a middleware whose *own logic* must be
+> _why_ `ctx` is passed explicitly). For a middleware whose _own logic_ must be
 > in-fiber, use `fx.use`. **`use` = ergonomic, wrapped work fully in-fiber;
 > `fx.use` = the middleware body itself is in-fiber too.** Each of these is
 > pinned by a test (`base-harness.spec` → "async middleware fiber propagation").
@@ -448,7 +482,7 @@ Reach for `use` (async) by default — the work it wraps is fully in-fiber
 of thumb: **wrapping ops → `use` is enough; the middleware itself does
 fiber-level work → `fx.use`.**
 
-| Use case                                          | Surface  | Why                                                              |
+| Use case                                          | Surface  | Why                                                             |
 | ------------------------------------------------- | -------- | --------------------------------------------------------------- |
 | Timing / metrics / structured logging             | `use`    | Reads `ctx` (sessionId, opId, traceparent)                      |
 | Auth / quota guard (short-circuit before `next`)  | `use`    | Return a value without calling `next` — op never runs           |
@@ -541,20 +575,18 @@ of it (`InterceptorKind = "guard" | "transform" | "observe"`, tagged via
 verdict subsystem (`HandlerRegistry` / `mergeVerdict` / `runInheritedBefore`) is
 **deleted**.
 
-| Kind        | Intent                                         | Surface                                            |
-| ----------- | ---------------------------------------------- | -------------------------------------------------- |
-| `guard`     | Admission control before the body              | `harness.guard(decide)` sugar / `guardEffect`      |
-| `transform` | Reshape input/output                           | plain `harness.use` / `fx.use`; **hooks** are sugar |
-| `observe`   | Pure side-effect (metrics, logging)            | `harness.use` that just reads + returns `next(...)` |
+| Kind        | Intent                              | Surface                                             |
+| ----------- | ----------------------------------- | --------------------------------------------------- |
+| `guard`     | Admission control before the body   | `harness.guard(decide)` sugar / `guardEffect`       |
+| `transform` | Reshape input/output                | plain `harness.use` / `fx.use`; **hooks** are sugar |
+| `observe`   | Pure side-effect (metrics, logging) | `harness.use` that just reads + returns `next(...)` |
 
 **`guard` — admission control.** A guard decides `proceed | veto | replace |
 defer` before the body. The ergonomic surface is `harness.guard(decide)` where
 `decide` returns a `HandlerVerdict` (or `void` ≡ proceed), sync or Promise:
 
 ```ts
-harness.guard((input, ctx) =>
-  input.locked ? { kind: "veto", reason: "locked" } : undefined,
-);
+harness.guard((input, ctx) => (input.locked ? { kind: "veto", reason: "locked" } : undefined));
 ```
 
 `HandlerVerdict` (from `@agentick/spec-next`) is discriminated by `kind`:
@@ -567,7 +599,7 @@ non-`proceed` verdict is desugared (`signalFromVerdict`) into a typed
 matching terminal. **Terminal semantics are byte-identical** to the old verdict
 switch — `terminateFromSignal` delegates to the same `terminate()` path (`vetoed`
 / `deferred` fail with `OperationOutcomeError`; `replaced` succeeds with the
-result). Only the *trigger* changed: a caught signal instead of a separate phase.
+result). Only the _trigger_ changed: a caught signal instead of a separate phase.
 
 Guards compose **outermost** (the guard-outermost sort above), so a retry /
 transform middleware cannot swallow a raised veto. `harness.listInterceptors(op)`
@@ -586,7 +618,7 @@ unchanged.
 
 > **`guard : operation :: gate : loop`.** The `guard` seam is op admission. It is
 > NOT the `gate` package (`@agentick/gates-next` / `SessionHarness.gate(name) =>
-> GateHandle`), which is **loop continuation** — a different concept at a
+GateHandle`), which is **loop continuation** — a different concept at a
 > different scope. The distinction is load-bearing: a `guard(decide)` method on
 > `BaseHarness` collided (TS2416) with `SessionHarness.gate(name)`, which forced
 > the naming. The tool-executor's `guardDispatch` (was `onBeforeDispatch`) follows

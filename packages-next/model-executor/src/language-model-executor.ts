@@ -120,7 +120,15 @@ declare module "@agentick/runtime-next" {
   interface CommandRegistry {
     "model:project": { input: ProjectInput; output: LanguageModelInput };
     "model:generate": { input: ExecuteInput<LanguageModelInput>; output: unknown };
-    "model:generate_stream": { input: ExecuteInput<LanguageModelInput>; output: unknown };
+    // `chunk: AdapterDelta` mints the per-chunk `onModelGenerateStreamChunk`
+    // interceptor (ADR 80 Phase 2) — sink-wrapping observe/transform over the
+    // streamed deltas — alongside the `onBefore/AfterModelGenerateStream`
+    // boundary hooks.
+    "model:generate_stream": {
+      input: ExecuteInput<LanguageModelInput>;
+      output: unknown;
+      chunk: AdapterDelta;
+    };
     "model:run": { input: RunInput; output: ExecutorTerminal<LanguageModelExecutionResult> };
     "model:normalize": {
       input: NormalizeInput<unknown>;

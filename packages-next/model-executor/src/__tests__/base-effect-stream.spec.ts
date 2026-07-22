@@ -375,3 +375,52 @@ describe("executeStream iterator failure contract (#182, Option A)", () => {
     expect(thrown).toBeUndefined();
   });
 });
+
+// ============================================================================
+// Per-chunk interception (ADR 80 Phase 2) — the `onModelGenerateStreamChunk`
+// sink-wrapping interceptor, end-to-end on the real `model:generate_stream`
+// command (over AdapterDelta chunks).
+// ============================================================================
+
+describe("LanguageModelExecutor — per-chunk interceptor (ADR 80 Phase 2)", () => {
+  it("onModelGenerateStreamChunk observes EVERY AdapterDelta the iterator sees, in order", async () => {
+    const chunks: StubChunk[] = [{ text: "Hello ", model: "stub-v1" }, { text: "world" }];
+    const { exec } = await makeStub(chunks);
+    const seen: string[] = [];
+    const off = exec.hooks.onModelGenerateStreamChunk({
+      observe: (d) => {
+        seen.push(d.type);
+      },
+    });
+    const input = await exec.project(mkInput());
+    const stream = exec.executeStream({ targetInput: input, target: mkInput().target });
+    const deltas: AdapterDelta[] = [];
+    for await (const d of stream) deltas.push(d);
+    await stream.result;
+    off();
+    // The observer sink-wraps the stream → it tapped exactly the deltas the
+    // iterator drained, in the same order.
+    expect(seen).toEqual(deltas.map((d) => d.type));
+    expect(seen.length).toBeGreaterThan(0);
+  });
+
+  it("a transform maps the streamed content-delta text the iterator sees (uppercased)", async () => {
+    const chunks: StubChunk[] = [{ text: "hi", model: "stub-v1" }];
+    const { exec } = await makeStub(chunks);
+    const off = exec.hooks.onModelGenerateStreamChunk({
+      onChunk: (d, emit) =>
+        emit(d.type === "content-delta" ? { ...d, delta: d.delta.toUpperCase() } : d),
+    });
+    const input = await exec.project(mkInput());
+    const stream = exec.executeStream({ targetInput: input, target: mkInput().target });
+    const deltas: AdapterDelta[] = [];
+    for await (const d of stream) deltas.push(d);
+    await stream.result;
+    off();
+    const contentDeltas = deltas.filter(
+      (d): d is Extract<AdapterDelta, { type: "content-delta" }> => d.type === "content-delta",
+    );
+    expect(contentDeltas.length).toBeGreaterThan(0);
+    expect(contentDeltas.map((d) => d.delta).join("")).toBe("HI");
+  });
+});

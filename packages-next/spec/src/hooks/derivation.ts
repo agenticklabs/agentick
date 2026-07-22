@@ -62,6 +62,63 @@ export type AfterHook<Out, Ctx = unknown> = (
 ) => Out | void | Promise<Out | void>;
 
 // ============================================================================
+// Per-chunk interception (ADR 80 Phase 2) — streaming commands only
+// ============================================================================
+//
+// A streaming command (`commandStream`) emits `Chunk`s to a sink between the
+// body and the consumption edge. A chunk interceptor SINK-WRAPS that sink —
+// it runs BETWEEN the body's emit and the bounded queue, so the iterator (and
+// the loop's `fx` sink) sees the TRANSFORMED chunks. Boundary hooks
+// (`onBefore`/`onAfter`) bracket the WHOLE run; chunk interceptors intercept
+// each item. Two kinds only:
+//
+//   - **observe** — a tap. Sees each chunk in order, cannot alter or drop it.
+//   - **transform** — a stateful map. `onChunk(chunk, emit)` may `emit` zero
+//     (buffer/coalesce), one (1:1 map), or many (fan-out) chunks. The optional
+//     `onFlush(emit)` runs ONCE at the terminal boundary (after the body's last
+//     emit, BEFORE `onAfter`) to release any buffered tail — the
+//     flush-on-terminal contract that makes N→1 coalescing lossless. Flush runs
+//     only on CLEAN completion; an aborted run never flushes (no bogus tail).
+//
+// There is deliberately NO per-chunk guard: a `transform` that raises covers
+// stop-on-bad-content.
+
+/**
+ * A chunk **observer** (ADR 80 Phase 2) — a non-altering tap over a streaming
+ * command's items. Runs in order between each body emit and the downstream
+ * sink; its return value is ignored (the original chunk always proceeds
+ * unchanged). Use for metrics, logging, progress. To alter/drop/coalesce, use a
+ * {@link ChunkTransform}.
+ */
+export type ChunkObserver<Chunk, Ctx = unknown> = (chunk: Chunk, ctx: Ctx) => void | Promise<void>;
+
+/**
+ * A chunk **transform** (ADR 80 Phase 2) — a stateful map over a streaming
+ * command's items. `onChunk` receives each chunk plus an `emit` callback; call
+ * `emit` zero times to BUFFER (coalesce), once for a 1:1 map, or many for
+ * fan-out. `onFlush` (optional) fires ONCE at the terminal boundary — after the
+ * body's final emit, BEFORE the command's `onAfter` boundary hook — to release
+ * any buffered tail. This is the **flush-on-terminal** contract: an N→1
+ * combining transform emits its remainder here so no tail is lost. `onFlush`
+ * runs only on CLEAN completion; an aborted/interrupted run never reaches it.
+ */
+export interface ChunkTransform<Chunk, Ctx = unknown> {
+  readonly onChunk: (chunk: Chunk, emit: (chunk: Chunk) => void, ctx: Ctx) => void | Promise<void>;
+  readonly onFlush?: (emit: (chunk: Chunk) => void, ctx: Ctx) => void | Promise<void>;
+}
+
+/**
+ * A per-chunk interceptor (ADR 80 Phase 2) — the discriminated union a
+ * streaming command's `on<Verb>Chunk` hook (and its `def.chunk` option) accepts.
+ * Shape-discriminated: an `{ observe }` object is a {@link ChunkObserver} tap; an
+ * `{ onChunk }` object is a {@link ChunkTransform} map. Multiple interceptors
+ * compose in registration order into a pipeline (`body → i0 → i1 → … → sink`).
+ */
+export type ChunkInterceptor<Chunk, Ctx = unknown> =
+  | { readonly observe: ChunkObserver<Chunk, Ctx> }
+  | ChunkTransform<Chunk, Ctx>;
+
+// ============================================================================
 // Generic mapped types over ANY `{ input; output }` registry
 // ============================================================================
 
@@ -99,6 +156,32 @@ export type RegistrarsOf<Reg, Ctx> = {
   ) => Unsubscribe;
 };
 
+/**
+ * The derived DECLARATIVE chunk-hook surface (ADR 80 Phase 2) — mints
+ * `on<Pascal>Chunk?` ONLY for registry entries that carry a `chunk` field (i.e.
+ * streaming commands declared via `commandStream`). A non-streaming `{ input;
+ * output }` entry mints no chunk key, so the surface stays exact: only streams
+ * accept per-chunk interceptors. Folded into the server's `CommandHooks`.
+ */
+export type ChunkHooksOf<Reg, Ctx> = {
+  [K in keyof Reg as Reg[K] extends { chunk: unknown }
+    ? `on${Pascal<K & string>}Chunk`
+    : never]?: ChunkInterceptor<Reg[K] extends { chunk: infer C } ? C : never, Ctx>;
+};
+
+/**
+ * The derived IMPERATIVE chunk registrar surface — the `(interceptor) =>
+ * Unsubscribe` twin of {@link ChunkHooksOf}, reached via the `hooks` Proxy
+ * (`harness.hooks.onModelGenerateStreamChunk(interceptor)`). Only streaming
+ * commands (entries with `chunk`) mint a callable key. Folded into the server's
+ * `HookRegistrars`.
+ */
+export type ChunkRegistrarsOf<Reg, Ctx> = {
+  [K in keyof Reg as Reg[K] extends { chunk: unknown } ? `on${Pascal<K & string>}Chunk` : never]: (
+    interceptor: ChunkInterceptor<Reg[K] extends { chunk: infer C } ? C : never, Ctx>,
+  ) => Unsubscribe;
+};
+
 // ============================================================================
 // Runtime name derivation (the exact twins of the type-level `Pascal`)
 // ============================================================================
@@ -112,27 +195,55 @@ export type RegistrarsOf<Reg, Ctx> = {
  * "onAfterToolDispatch"]`, the names `HooksOf` mints for `"tool:dispatch"`.
  */
 export function deriveHookNames(opName: string): [string, string] {
-  const pascal = opName
-    .replace(":command:", ":")
-    .split(/[-:/_]/)
-    .map((seg) => (seg === "" ? seg : seg.charAt(0).toUpperCase() + seg.slice(1)))
-    .join("");
+  const pascal = pascalOfOpName(opName);
   return [`onBefore${pascal}`, `onAfter${pascal}`];
 }
 
 /**
- * Parse a hook key (`onBefore<Pascal>` / `onAfter<Pascal>` / bare
- * `on<Pascal>`) into its `{ kind, command }`. Recognizes `onBefore` / `onAfter`
- * (one-sided sugar) and the bare `on<Suffix>` (full-middleware `on<Command>`,
+ * Resolve a streaming command's op name to its per-chunk hook name (ADR 80
+ * Phase 2): `on<Pascal>Chunk`. The runtime twin of the type-level
+ * `on${Pascal<K>}Chunk` {@link ChunkHooksOf} mints — they MUST agree, so
+ * `deriveChunkHookName("model:command:generate_stream")` ===
+ * `"onModelGenerateStreamChunk"`. `commandStream` reads THIS name to look up the
+ * chunk interceptors the `hooks.on<Pascal>Chunk(...)` registrar stored.
+ */
+export function deriveChunkHookName(opName: string): string {
+  return `on${pascalOfOpName(opName)}Chunk`;
+}
+
+/**
+ * Strip the `:command:` infix to the canonical `"<who>:<what>"`, then PascalCase
+ * (splitting on `:`, `/`, `-`, `_`). The shared core of {@link deriveHookNames}
+ * and {@link deriveChunkHookName} — the exact runtime twin of the type-level
+ * `Pascal`.
+ */
+function pascalOfOpName(opName: string): string {
+  return opName
+    .replace(":command:", ":")
+    .split(/[-:/_]/)
+    .map((seg) => (seg === "" ? seg : seg.charAt(0).toUpperCase() + seg.slice(1)))
+    .join("");
+}
+
+/**
+ * Parse a hook key (`onBefore<Pascal>` / `onAfter<Pascal>` / `on<Pascal>Chunk` /
+ * bare `on<Pascal>`) into its `{ kind, command }`. Recognizes `onBefore` /
+ * `onAfter` (one-sided sugar), the `on<Suffix>Chunk` per-chunk interceptor
+ * (ADR 80 Phase 2), and the bare `on<Suffix>` (full-middleware `on<Command>`,
  * ADR 83 amendment). Returns `undefined` for a non-hook key (defensive).
  */
 export function parseHookKey(
   key: string,
-): { kind: "before" | "after" | "around"; command: string } | undefined {
+): { kind: "before" | "after" | "around" | "chunk"; command: string } | undefined {
   // ORDER MATTERS: the `onBefore` / `onAfter` prefixes are tested FIRST so they
-  // don't get swallowed by the bare `on<Suffix>` (around) case below.
+  // don't get swallowed by the bare `on<Suffix>` (around) case below; the
+  // `Chunk` SUFFIX is tested before the around case so `on<Verb>Chunk` routes to
+  // the sink-wrapping chunk path, not to op middleware.
   if (key.startsWith("onBefore")) return { kind: "before", command: key.slice("onBefore".length) };
   if (key.startsWith("onAfter")) return { kind: "after", command: key.slice("onAfter".length) };
+  if (key.startsWith("on") && key.endsWith("Chunk") && key.length > "onChunk".length) {
+    return { kind: "chunk", command: key.slice("on".length, -"Chunk".length) };
+  }
   // Bare `on<Suffix>` (ADR 83 amendment) — the full-middleware `on<Command>`
   // registrar. `fn` is already an AsyncMiddleware; no before/after adaptation.
   if (key.startsWith("on")) return { kind: "around", command: key.slice("on".length) };
