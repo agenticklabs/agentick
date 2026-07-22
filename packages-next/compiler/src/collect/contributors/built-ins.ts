@@ -13,6 +13,7 @@ import { sectionContributor } from "./section.js";
 import { messageContributor } from "./message.js";
 import { projectContributor } from "./project.js";
 import { toolContributor } from "./tool.js";
+import { providerToolContributor } from "./provider-tool.js";
 import { resourceContributor } from "./resource.js";
 import { outputContributor } from "./output.js";
 import { mcpContributor } from "./mcp.js";
@@ -50,6 +51,7 @@ export function createBuiltInRegistry(): ContributorRegistry {
   r.register(messageContributor);
   r.register(projectContributor);
   r.register(toolContributor);
+  r.register(providerToolContributor);
   r.register(resourceContributor);
   r.register(outputContributor);
   r.register(mcpContributor);

@@ -14,6 +14,9 @@
  * `RenderedTree.declarations.model`. Orthogonal concerns, different IR
  * slots.
  *
+ * Props derive from {@link ModelDeclaration}; guarded by the
+ * {@link _conformance} assertion.
+ *
  * @see docs/proposals/v2/blueprint/56-tree-declared-model-per-tick.md
  */
 
@@ -22,11 +25,15 @@ import type { ElementInstance } from "../../host/host-instance.js";
 import type { CollectContext, Contributor } from "../contributor.js";
 import type { IRFragment } from "../fragments.js";
 import { omitUndefined } from "@agentick/utils-next";
+import type { Exhausted, UnhandledSpecKeys } from "./spec-conformance.js";
 
-interface ModelDeclarationProps {
-  readonly modelRef?: string;
-  readonly parameters?: Readonly<Record<string, unknown>>;
-}
+/** `<model-declaration>` props, derived from {@link ModelDeclaration}. */
+export type ModelDeclarationProps = ModelDeclaration;
+
+type ModelDeclarationForwarded = "modelRef" | "parameters";
+type _conformance = Exhausted<
+  UnhandledSpecKeys<ModelDeclaration, ModelDeclarationForwarded, never>
+>;
 
 export const modelDeclarationContributor: Contributor = {
   type: "model-declaration",
@@ -46,8 +53,8 @@ export const modelDeclarationContributor: Contributor = {
     }
 
     const model: ModelDeclaration = {
+      ...(omitUndefined({ ...props }) as Partial<ModelDeclaration>),
       modelRef: props.modelRef,
-      ...omitUndefined({ parameters: props.parameters }),
     };
 
     return [{ kind: "model-declaration", model }];

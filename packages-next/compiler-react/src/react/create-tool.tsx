@@ -30,6 +30,7 @@ import * as React from "react";
 
 import { createTool as baseCreateTool, type CreatedTool } from "@agentick/tool-next";
 import type {
+  ProviderToolOptions,
   StandardSchemaV1,
   ToolAnnotations,
   ToolExposure,
@@ -62,7 +63,17 @@ export interface ReactToolSpec<
    */
   readonly outputSchema?: StandardSchemaV1;
   readonly exposure?: readonly ToolExposure[];
+  /**
+   * Alternate dispatch names. `session.dispatch(alias, input)` resolves to
+   * this tool. Threaded onto `ToolDeclaration.aliases`.
+   */
+  readonly aliases?: readonly string[];
   readonly annotations?: ToolAnnotations;
+  /**
+   * Per-tool provider-specific options (OpenAI `strict`, Anthropic per-tool
+   * `cache_control`, …). Threaded onto `ToolDeclaration.providerOptions`.
+   */
+  readonly providerOptions?: ProviderToolOptions;
   readonly metadata?: Readonly<Record<string, unknown>>;
   readonly handlerRef?: string;
   /**
@@ -117,7 +128,9 @@ export function createTool<
     ...(spec.inputSchema !== undefined ? { inputSchema: spec.inputSchema } : {}),
     ...(spec.outputSchema !== undefined ? { outputSchema: spec.outputSchema } : {}),
     ...(spec.exposure !== undefined ? { exposure: spec.exposure } : {}),
+    ...(spec.aliases !== undefined ? { aliases: spec.aliases } : {}),
     ...(spec.annotations !== undefined ? { annotations: spec.annotations } : {}),
+    ...(spec.providerOptions !== undefined ? { providerOptions: spec.providerOptions } : {}),
     ...(spec.metadata !== undefined ? { metadata: spec.metadata } : {}),
     ...(spec.handlerRef !== undefined ? { handlerRef: spec.handlerRef } : {}),
     handler: (input, { ctx }) => {
@@ -153,9 +166,13 @@ export function createTool<
         ? { outputSchema: base.declaration.outputSchema }
         : {}),
       exposure: base.declaration.exposure,
+      ...(base.declaration.aliases !== undefined ? { aliases: base.declaration.aliases } : {}),
       handlerRef: base.handlerRef,
       ...(base.declaration.annotations !== undefined
         ? { annotations: base.declaration.annotations }
+        : {}),
+      ...(base.declaration.providerOptions !== undefined
+        ? { providerOptions: base.declaration.providerOptions }
         : {}),
       ...(base.declaration.metadata !== undefined ? { metadata: base.declaration.metadata } : {}),
     });

@@ -22,6 +22,7 @@ import type {
   ModelDeclaration,
   OutputDeclaration,
   ProviderOptions,
+  ProviderToolDeclaration,
   RenderedTree,
   ResourceDeclaration,
   SemanticContentBlock,
@@ -369,6 +370,9 @@ function foldFragments(
   const resources: ResourceDeclaration[] = [];
   const outputs: OutputDeclaration[] = [];
   const mcps: MCPDeclaration[] = [];
+  // Pass D: provider-EXECUTED tools. Concatenated in walk order; the
+  // executor's `project` phase dedupes by provider + resolved name.
+  const providerTools: ProviderToolDeclaration[] = [];
   // ADR 56: single tree-declared model per tick. Last-wins in walk order
   // (depth-first pre-order) → nearest-scope / last-wins when a tree nests
   // several `<model-declaration>`s.
@@ -407,6 +411,9 @@ function foldFragments(
         // A tool SOURCE (registration), not a surfacing op. Surfaced by
         // the `tools` projection (default, or a `<Tools>` override).
         toolSources.push(frag.tool);
+        break;
+      case "provider-tool-declaration":
+        providerTools.push(frag.providerTool);
         break;
       case "model-declaration":
         model = frag.model;
@@ -478,13 +485,19 @@ function foldFragments(
     specVersion: SPEC_VERSION,
     ...(features.length > 0 ? { features } : {}),
     context: { entries },
-    ...(tools.length || resources.length || outputs.length || mcps.length || model
+    ...(tools.length ||
+    resources.length ||
+    outputs.length ||
+    mcps.length ||
+    providerTools.length ||
+    model
       ? {
           declarations: {
             ...(tools.length ? { tools } : {}),
             ...(resources.length ? { resources } : {}),
             ...(outputs.length ? { outputs } : {}),
             ...(mcps.length ? { mcp: mcps } : {}),
+            ...(providerTools.length ? { providerTools } : {}),
             ...(model ? { model } : {}),
           },
         }

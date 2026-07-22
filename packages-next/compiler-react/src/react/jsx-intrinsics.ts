@@ -52,10 +52,13 @@
 
 import type {
   ContentBlock,
+  MCPTransport,
   MediaSource,
   ProviderOptions,
   ProviderToolOptions,
+  ResponseFormat,
   SessionMessageRole,
+  ToolAnnotations,
   ToolExposure,
 } from "@agentick/spec-next";
 
@@ -115,10 +118,31 @@ declare module "react" {
         readonly inputSchema?: Record<string, unknown>;
         readonly outputSchema?: Record<string, unknown>;
         readonly exposure?: readonly ToolExposure[];
+        /** Alternate dispatch names — `ToolDeclaration.aliases`. */
+        readonly aliases?: readonly string[];
         readonly handlerRef?: string;
+        readonly annotations?: ToolAnnotations;
         readonly providerOptions?: ProviderToolOptions;
         readonly metadata?: Record<string, unknown>;
         readonly children?: ReactChildren;
+        readonly key?: ReactKey;
+      };
+
+      /**
+       * Provider-EXECUTED tool (Pass D) — OpenAI `web_search`, Anthropic
+       * `server_tool_use`, Google grounding. Compiles to
+       * `RenderedTree.declarations.providerTools`; bypasses the tool
+       * executor entirely. Adopters use the `<ProviderTool>` wrapper.
+       */
+      "provider-tool": {
+        /** Routing key — which adapter owns this tool (`"openai"`, …). */
+        readonly provider: string;
+        /** Provider-native tool type, verbatim (`"web_search_preview"`, …). */
+        readonly type: string;
+        /** Stable id + model-facing name; defaults to `type`. */
+        readonly name?: string;
+        /** Provider-native config, passed through verbatim. */
+        readonly config?: Record<string, unknown>;
         readonly key?: ReactKey;
       };
 
@@ -127,10 +151,16 @@ declare module "react" {
        * `RenderedTree.config` + `RenderedTree.providerOptions`.
        */
       model: {
+        /** Model selection — `by-id`. Mutually exclusive with `ref`. */
         readonly id?: string;
+        /** Model selection — `by-ref` (registry ref). */
+        readonly ref?: string;
+        readonly responseFormat?: ResponseFormat;
         readonly temperature?: number;
         readonly maxOutputTokens?: number;
         readonly topP?: number;
+        readonly frequencyPenalty?: number;
+        readonly presencePenalty?: number;
         readonly stopSequences?: readonly string[];
         readonly providerOptions?: ProviderOptions;
         readonly metadata?: Record<string, unknown>;
@@ -156,8 +186,11 @@ declare module "react" {
        */
       resource: {
         readonly id?: string;
-        readonly uri: string;
+        readonly uri?: string;
+        readonly name?: string;
+        readonly description?: string;
         readonly mimeType?: string;
+        readonly handlerRef?: string;
         readonly metadata?: Record<string, unknown>;
         readonly children?: ReactChildren;
         readonly key?: ReactKey;
@@ -176,7 +209,8 @@ declare module "react" {
       mcp: {
         readonly id?: string;
         readonly serverName: string;
-        readonly transport: "stdio" | "websocket" | "sse" | (string & {});
+        /** Spec `MCPTransport` — `stdio` | `http` | `sse` | `streamable-http`. */
+        readonly transport: MCPTransport;
         readonly config?: Record<string, unknown>;
         readonly exposes?: readonly ("tools" | "resources" | "prompts")[];
         readonly metadata?: Record<string, unknown>;
@@ -187,7 +221,10 @@ declare module "react" {
 
       /** Reasoning content block (thinking / chain-of-thought). */
       reasoning: {
+        readonly id?: string;
         readonly text?: string;
+        readonly signature?: string;
+        readonly isRedacted?: boolean;
         readonly children?: ReactChildren;
         readonly key?: ReactKey;
       };
@@ -205,32 +242,42 @@ declare module "react" {
       // `code-block`) would let us declare them here cleanly — flagged as
       // a separate design discussion.
 
-      /** JSON data block. */
+      /** JSON data block. `data` takes JSON-shaped values; children fold
+       *  into a stringified `text` fallback. */
       json: {
-        readonly data: unknown;
+        readonly id?: string;
+        readonly data?: unknown;
+        readonly text?: string;
         readonly metadata?: Record<string, unknown>;
-        readonly key?: ReactKey;
-      };
-
-      /** XML data block — distinct from formatter-scope `<XML>`. */
-      "xml-block": {
-        readonly tag?: string;
-        readonly attributes?: Record<string, string>;
         readonly children?: ReactChildren;
         readonly key?: ReactKey;
       };
 
-      /** CSV data block. */
-      csv: {
-        readonly data: string | readonly (readonly string[])[];
-        readonly headers?: readonly string[];
+      /** XML data block — distinct from formatter-scope `<XML>`. Text folds
+       *  from children when the `text` prop is absent. */
+      "xml-block": {
+        readonly id?: string;
+        readonly text?: string;
+        readonly children?: ReactChildren;
         readonly key?: ReactKey;
       };
 
-      /** Custom content block — adopter-defined kind. */
+      /** CSV data block. Text folds from children when `text` is absent. */
+      csv: {
+        readonly id?: string;
+        readonly text?: string;
+        readonly headers?: readonly string[];
+        readonly children?: ReactChildren;
+        readonly key?: ReactKey;
+      };
+
+      /** Custom content block — application-defined inline tag. */
       custom: {
-        readonly kind: string;
-        readonly data?: unknown;
+        readonly id?: string;
+        readonly tag: string;
+        readonly content?: string;
+        readonly attrs?: Record<string, string>;
+        readonly selfClosing?: boolean;
         readonly children?: ReactChildren;
         readonly key?: ReactKey;
       };
@@ -254,7 +301,10 @@ declare module "react" {
 
       /** Document attachment. */
       document: {
+        readonly id?: string;
         readonly source: MediaSource;
+        readonly title?: string;
+        readonly mimeType?: string;
         readonly metadata?: Record<string, unknown>;
         readonly key?: ReactKey;
       };
@@ -262,29 +312,36 @@ declare module "react" {
       // ────────── Event blocks (snake_case per contributor names) ──────────
 
       user_action: {
+        readonly id?: string;
         readonly action: string;
         readonly actor?: string;
         readonly target?: string;
+        readonly details?: Record<string, unknown>;
+        readonly text?: string;
         readonly metadata?: Record<string, unknown>;
         readonly children?: ReactChildren;
         readonly key?: ReactKey;
       };
 
       system_event: {
+        readonly id?: string;
         readonly event: string;
         readonly source?: string;
-        readonly severity?: "info" | "warning" | "error";
+        readonly data?: Record<string, unknown>;
+        readonly text?: string;
         readonly metadata?: Record<string, unknown>;
         readonly children?: ReactChildren;
         readonly key?: ReactKey;
       };
 
       state_change: {
+        readonly id?: string;
         readonly entity: string;
         readonly field?: string;
         readonly from: unknown;
         readonly to: unknown;
         readonly trigger?: string;
+        readonly text?: string;
         readonly metadata?: Record<string, unknown>;
         readonly children?: ReactChildren;
         readonly key?: ReactKey;

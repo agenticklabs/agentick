@@ -20,6 +20,7 @@
 
 import type {
   ContentBlock,
+  ProviderToolOptions,
   StandardSchemaV1,
   ToolAnnotations,
   ToolDeclaration,
@@ -177,6 +178,13 @@ export interface ToolSpec<TInput = unknown> {
    * Threaded onto {@link ToolDeclaration.aliases}.
    */
   readonly aliases?: readonly string[];
+  /**
+   * Per-tool provider-specific options threaded onto
+   * {@link ToolDeclaration.providerOptions}. Adapters merge into the
+   * provider's tool shape (OpenAI `strict`, Anthropic per-tool
+   * `cache_control`, …). Typed via the augmentable `ProviderToolOptions`.
+   */
+  readonly providerOptions?: ProviderToolOptions;
   /** Arbitrary metadata attached to the declaration. */
   readonly metadata?: Readonly<Record<string, unknown>>;
   /**
@@ -291,6 +299,7 @@ export function createTool<TInput = unknown>(spec: ToolSpec<TInput>): CreatedToo
         aliases: spec.aliases,
         annotations,
         metadata: spec.metadata,
+        providerOptions: spec.providerOptions,
       }),
     };
     return { declaration };
@@ -307,7 +316,12 @@ export function createTool<TInput = unknown>(spec: ToolSpec<TInput>): CreatedToo
     ...omitUndefined({ outputSchema: spec.outputSchema }),
     exposure: spec.exposure ?? ["model"],
     handlerRef,
-    ...omitUndefined({ aliases: spec.aliases, annotations, metadata: spec.metadata }),
+    ...omitUndefined({
+      aliases: spec.aliases,
+      annotations,
+      metadata: spec.metadata,
+      providerOptions: spec.providerOptions,
+    }),
   };
 
   const handler: ToolHandler = (input, { ctx }) => {

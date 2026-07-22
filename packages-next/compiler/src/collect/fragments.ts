@@ -17,6 +17,7 @@ import type {
   ModelDeclaration,
   OutputDeclaration,
   ProviderOptions,
+  ProviderToolDeclaration,
   ResourceDeclaration,
   SemanticNode,
   SpecConfig,
@@ -38,6 +39,15 @@ export type IRFragment =
       readonly result: import("./projection.js").ProjectionResult;
     }
   | { readonly kind: "tool-declaration"; readonly tool: ToolDeclaration }
+  /**
+   * A PROVIDER-EXECUTED tool request (Pass D). Unlike `tool-declaration`
+   * (a dispatchable source the `tools` projection surfaces), this bypasses
+   * the tool executor entirely — the collector folds it straight onto
+   * `RenderedTree.declarations.providerTools`, which the loop threads to
+   * the executor's `project` phase. Emitted by the `<provider-tool>`
+   * contributor.
+   */
+  | { readonly kind: "provider-tool-declaration"; readonly providerTool: ProviderToolDeclaration }
   | { readonly kind: "model-declaration"; readonly model: ModelDeclaration }
   | { readonly kind: "resource-declaration"; readonly resource: ResourceDeclaration }
   | { readonly kind: "output-declaration"; readonly output: OutputDeclaration }

@@ -24,6 +24,21 @@ import type { ElementInstance, HostInstance } from "../../host/host-instance.js"
 import { isTextInstance } from "../../host/host-instance.js";
 import type { CollectContext, Contributor } from "../contributor.js";
 import type { IRFragment } from "../fragments.js";
+import type { Exhausted, UnhandledSpecKeys } from "./spec-conformance.js";
+
+// ── Spec conformance ────────────────────────────────────────────────────
+// Semantic HTML elements have NO spec declaration type — their props are
+// raw HTML attributes (`href`, `src`, level synthesized from the tag),
+// mapped into the OPEN `SemanticNode.props` record by each `propsMapper`.
+// So there is no props-derivation partition; instead the assertion guards
+// the OUTPUT shape: every `SemanticNode` field is compiler-supplied
+// (`semantic` from options, `children` collected, `props` from the mapper,
+// `text` on leaves, `rendererRef` reserved). A new `SemanticNode` field
+// fails `tsc` here until `makeSemanticContributor` handles it.
+type SemanticNodeSupplied = "text" | "semantic" | "props" | "children" | "rendererRef";
+type _semanticNodeConformance = Exhausted<
+  UnhandledSpecKeys<SemanticNode, never, SemanticNodeSupplied>
+>;
 
 // ============================================================================
 // Factory

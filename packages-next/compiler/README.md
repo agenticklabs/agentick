@@ -85,7 +85,8 @@ logic, the envelope/journal wiring is inherited from `BaseHarness`.
   contributors.** `collect(input): CollectResult` walks a host tree and turns
   it into the spec's `RenderedTree` IR via the `Contributor` protocol and a
   `ContributorRegistry`. Built-ins (`createBuiltInRegistry`) cover `<Section>`,
-  `<Message>`, `<Tool>`, `<Resource>`, `<Output>`, `<MCP>`, `<Model>`,
+  `<Message>`, `<Tool>`, `<provider-tool>`, `<Resource>`, `<Output>`, `<MCP>`,
+  `<Model>` (`<model>` selection + `<model-declaration>`),
   `<project>`, every content block (text, image, audio, video, document, code,
   json, xml, csv, html, reasoning), event roles (user-action, system-event,
   state-change), custom blocks, and content passthrough.
@@ -118,6 +119,49 @@ logic, the envelope/journal wiring is inherited from `BaseHarness`.
   `@agentick/compiler-react-next`.
 - The `timeline` default projection — needs a live timeline; supplied by the
   compiler binding.
+
+## Contributor ownership — both sides derive from spec
+
+The vocabulary grammar (`<Tool>`, `<Section>`, `<Message>`, every content
+block, `<MCP>`, `<Model>`, `<provider-tool>`, …) lives HERE as contributors,
+NOT in the harness packages. The rule:
+
+- **Contributors live in base `compiler`.** One `Contributor` per host type,
+  in `collect/contributors/`. `createBuiltInRegistry()` registers them all.
+- **Both the contributor AND the producing package derive their prop/config
+  shapes from the SAME spec type.** The contributor's `XProps` is
+  `Omit<SpecType, "compiler-supplied fields"> & { documented optionality
+deltas }`; the producing package (a compiler-react JSX wrapper, an intrinsic
+  augmentation, a `createTool` config) mirrors those field names. Spec is the
+  single sync point — a spec change breaks both sides at compile time. No
+  hand-maintained field lists that silently rot (the failure that dropped
+  `ToolDeclaration.aliases` + `providerOptions` for two passes).
+- **`contribute` spread-forwards.** The declaration is built by spreading the
+  authored props (`...omitUndefined({ ...props })`) and then overriding only
+  the compiler-supplied fields (`id` defaults, folded `description`/`text`,
+  constant discriminants). New spec fields flow through the spread by default.
+- **A type-level conformance assertion is the drift gate.** Each contributor
+  partitions its spec type's keys into `Forwarded | Supplied` and instantiates
+  `Exhausted<UnhandledSpecKeys<Spec, Forwarded, Supplied>>`
+  (`collect/contributors/spec-conformance.ts`). A new spec field that is in
+  neither partition — or a stale key removed from the spec — fails `tsc` at the
+  contributor until it is triaged. Block contributors compose the shared
+  frozen `BaseBlockKey` roster so a new `BaseContentBlock` field trips every
+  block at once. Three contributors carry a documented no-partition exception:
+  `content-passthrough` (its prop IS `ContentBlock[]`), `project` (emits a
+  compiler-internal `projection-override`, no spec type), and `semantic-html`
+  (raw HTML attributes → the open `SemanticNode.props`; the assertion guards
+  the `SemanticNode` OUTPUT instead).
+
+### `ContributorRegistry` — the escape hatch
+
+The compiler NEVER depends on a harness package (the bright line). When a
+harness element needs harness-PRIVATE semantics that the base grammar can't
+express, that harness registers its own `Contributor` via the injectable
+`ContributorRegistry` (`registry.override(...)` / `register(...)`) — the ADR 27
+optional-subpath pattern. This is the exception, not the default: the built-in
+grammar stays in base `compiler`, and only genuinely private element semantics
+warrant a harness-owned contributor.
 
 ## Patterns
 

@@ -67,19 +67,45 @@ export type {
   ProjectionSources,
 } from "./collect/projection.js";
 export { createBuiltInRegistry } from "./collect/contributors/built-ins.js";
+// Contributor conformance helper (contributors + producing packages derive
+// from spec; this is the compile-time drift gate — see README §Contributor
+// ownership).
+export type {
+  Exhausted,
+  UnhandledSpecKeys,
+  BaseBlockKey,
+} from "./collect/contributors/spec-conformance.js";
 export { sectionContributor } from "./collect/contributors/section.js";
+export type { SectionProps } from "./collect/contributors/section.js";
 export { messageContributor } from "./collect/contributors/message.js";
+export type { MessageProps } from "./collect/contributors/message.js";
 export { projectContributor } from "./collect/contributors/project.js";
+export type { ProjectProps } from "./collect/contributors/project.js";
 export { toolContributor } from "./collect/contributors/tool.js";
+export type { ToolProps } from "./collect/contributors/tool.js";
+export { providerToolContributor } from "./collect/contributors/provider-tool.js";
+export type { ProviderToolProps } from "./collect/contributors/provider-tool.js";
 export { resourceContributor } from "./collect/contributors/resource.js";
+export type { ResourceProps } from "./collect/contributors/resource.js";
 export { outputContributor } from "./collect/contributors/output.js";
+export type { OutputProps } from "./collect/contributors/output.js";
 export { mcpContributor } from "./collect/contributors/mcp.js";
+export type { MCPProps } from "./collect/contributors/mcp.js";
 export { modelContributor } from "./collect/contributors/model.js";
+export type { ModelProps } from "./collect/contributors/model.js";
+export { modelDeclarationContributor } from "./collect/contributors/model-declaration.js";
+export type { ModelDeclarationProps } from "./collect/contributors/model-declaration.js";
 export {
   imageContributor,
   documentContributor,
   audioContributor,
   videoContributor,
+} from "./collect/contributors/media.js";
+export type {
+  ImageProps,
+  DocumentProps,
+  AudioProps,
+  VideoProps,
 } from "./collect/contributors/media.js";
 export {
   textBlockContributor,
@@ -90,13 +116,29 @@ export {
   htmlContributor,
   reasoningContributor,
 } from "./collect/contributors/textual-blocks.js";
+export type {
+  TextBlockProps,
+  CodeProps,
+  JsonProps,
+  XmlBlockProps,
+  CsvProps,
+  HtmlProps,
+  ReasoningProps,
+} from "./collect/contributors/textual-blocks.js";
 export {
   userActionContributor,
   systemEventContributor,
   stateChangeContributor,
 } from "./collect/contributors/event-blocks.js";
+export type {
+  UserActionProps,
+  SystemEventProps,
+  StateChangeProps,
+} from "./collect/contributors/event-blocks.js";
 export { customBlockContributor } from "./collect/contributors/custom-block.js";
+export type { CustomProps } from "./collect/contributors/custom-block.js";
 export { contentPassthroughContributor } from "./collect/contributors/content-passthrough.js";
+export type { ContentProps } from "./collect/contributors/content-passthrough.js";
 
 // Bridges — reference (production) impl
 export { InMemoryDataBridge } from "./bridges/in-memory-data-bridge.js";

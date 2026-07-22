@@ -10,11 +10,15 @@
  * `<json>` takes a `data` prop directly (JSON-shaped values). Its
  * children fold into a stringified pretty-print fallback when no
  * `data` prop is given — useful for visualizing pre-stringified JSON.
+ *
+ * Props derive from each spec block type (minus the `type` discriminant);
+ * every authored field — including the shared {@link BaseBlockKey} fields
+ * — forwards by spread. The per-block {@link Exhausted} assertions fail
+ * `tsc` if a new spec field is added without being partitioned.
  */
 
 import type {
   CodeBlock,
-  CodeLanguage,
   CsvBlock,
   HtmlBlock,
   JsonBlock,
@@ -26,11 +30,7 @@ import type { ElementInstance } from "../../host/host-instance.js";
 import type { CollectContext, Contributor } from "../contributor.js";
 import type { IRFragment } from "../fragments.js";
 import { omitUndefined } from "@agentick/utils-next";
-
-interface TextBlockProps {
-  readonly text?: string;
-  readonly id?: string;
-}
+import type { BaseBlockKey, Exhausted, UnhandledSpecKeys } from "./spec-conformance.js";
 
 /**
  * `<text>` content-block — explicit text fragment. Useful when authors
@@ -41,25 +41,27 @@ interface TextBlockProps {
  * the walker's text-instance handling — this contributor is for the
  * explicit `<text>...</text>` form.
  */
+export type TextBlockProps = Omit<TextBlock, "type">;
+type _textConformance = Exhausted<UnhandledSpecKeys<TextBlock, BaseBlockKey, "type" | "text">>;
+
 export const textBlockContributor: Contributor = {
   type: "text",
   contribute(instance: ElementInstance, ctx: CollectContext): readonly IRFragment[] {
     const props = instance.props as unknown as TextBlockProps;
     const text = props.text ?? ctx.collectText(instance);
     const block: TextBlock = {
+      ...(omitUndefined({ ...props }) as Partial<TextBlock>),
       type: "text",
       text,
-      ...omitUndefined({ id: props.id }),
     };
     return [{ kind: "content-block", block }];
   },
 };
 
-interface CodeProps {
-  readonly text?: string;
-  readonly language: CodeLanguage;
-  readonly id?: string;
-}
+export type CodeProps = Omit<CodeBlock, "type">;
+type _codeConformance = Exhausted<
+  UnhandledSpecKeys<CodeBlock, BaseBlockKey | "language", "type" | "text">
+>;
 
 export const codeContributor: Contributor = {
   type: "code",
@@ -79,20 +81,19 @@ export const codeContributor: Contributor = {
     }
     const text = props.text ?? ctx.collectText(instance);
     const block: CodeBlock = {
+      ...(omitUndefined({ ...props }) as Partial<CodeBlock>),
       type: "code",
       text,
       language: props.language,
-      ...omitUndefined({ id: props.id }),
     };
     return [{ kind: "content-block", block }];
   },
 };
 
-interface JsonProps {
-  readonly data?: unknown;
-  readonly text?: string;
-  readonly id?: string;
-}
+export type JsonProps = Omit<JsonBlock, "type">;
+type _jsonConformance = Exhausted<
+  UnhandledSpecKeys<JsonBlock, BaseBlockKey | "data", "type" | "text">
+>;
 
 export const jsonContributor: Contributor = {
   type: "json",
@@ -100,23 +101,20 @@ export const jsonContributor: Contributor = {
     const props = instance.props as unknown as JsonProps;
     const childText = ctx.collectText(instance);
     const block: JsonBlock = {
+      ...(omitUndefined({ ...props }) as Partial<JsonBlock>),
       type: "json",
-      ...omitUndefined({ data: props.data }),
       ...(props.text !== undefined
         ? { text: props.text }
         : childText.length > 0
           ? { text: childText }
           : {}),
-      ...omitUndefined({ id: props.id }),
     };
     return [{ kind: "content-block", block }];
   },
 };
 
-interface XmlBlockProps {
-  readonly text?: string;
-  readonly id?: string;
-}
+export type XmlBlockProps = Omit<XmlBlock, "type">;
+type _xmlConformance = Exhausted<UnhandledSpecKeys<XmlBlock, BaseBlockKey, "type" | "text">>;
 
 export const xmlBlockContributor: Contributor = {
   type: "xml-block",
@@ -124,19 +122,18 @@ export const xmlBlockContributor: Contributor = {
     const props = instance.props as unknown as XmlBlockProps;
     const text = props.text ?? ctx.collectText(instance);
     const block: XmlBlock = {
+      ...(omitUndefined({ ...props }) as Partial<XmlBlock>),
       type: "xml",
       text,
-      ...omitUndefined({ id: props.id }),
     };
     return [{ kind: "content-block", block }];
   },
 };
 
-interface CsvProps {
-  readonly text?: string;
-  readonly headers?: readonly string[];
-  readonly id?: string;
-}
+export type CsvProps = Omit<CsvBlock, "type">;
+type _csvConformance = Exhausted<
+  UnhandledSpecKeys<CsvBlock, BaseBlockKey | "headers", "type" | "text">
+>;
 
 export const csvContributor: Contributor = {
   type: "csv",
@@ -144,18 +141,16 @@ export const csvContributor: Contributor = {
     const props = instance.props as unknown as CsvProps;
     const text = props.text ?? ctx.collectText(instance);
     const block: CsvBlock = {
+      ...(omitUndefined({ ...props }) as Partial<CsvBlock>),
       type: "csv",
       text,
-      ...omitUndefined({ headers: props.headers, id: props.id }),
     };
     return [{ kind: "content-block", block }];
   },
 };
 
-interface HtmlProps {
-  readonly text?: string;
-  readonly id?: string;
-}
+export type HtmlProps = Omit<HtmlBlock, "type">;
+type _htmlConformance = Exhausted<UnhandledSpecKeys<HtmlBlock, BaseBlockKey, "type" | "text">>;
 
 export const htmlContributor: Contributor = {
   type: "html",
@@ -163,20 +158,18 @@ export const htmlContributor: Contributor = {
     const props = instance.props as unknown as HtmlProps;
     const text = props.text ?? ctx.collectText(instance);
     const block: HtmlBlock = {
+      ...(omitUndefined({ ...props }) as Partial<HtmlBlock>),
       type: "html",
       text,
-      ...omitUndefined({ id: props.id }),
     };
     return [{ kind: "content-block", block }];
   },
 };
 
-interface ReasoningProps {
-  readonly text?: string;
-  readonly signature?: string;
-  readonly isRedacted?: boolean;
-  readonly id?: string;
-}
+export type ReasoningProps = Omit<ReasoningBlock, "type">;
+type _reasoningConformance = Exhausted<
+  UnhandledSpecKeys<ReasoningBlock, BaseBlockKey | "signature" | "isRedacted", "type" | "text">
+>;
 
 export const reasoningContributor: Contributor = {
   type: "reasoning",
@@ -184,9 +177,9 @@ export const reasoningContributor: Contributor = {
     const props = instance.props as unknown as ReasoningProps;
     const text = props.text ?? ctx.collectText(instance);
     const block: ReasoningBlock = {
+      ...(omitUndefined({ ...props }) as Partial<ReasoningBlock>),
       type: "reasoning",
       text,
-      ...omitUndefined({ signature: props.signature, isRedacted: props.isRedacted, id: props.id }),
     };
     return [{ kind: "content-block", block }];
   },

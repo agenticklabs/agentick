@@ -26,7 +26,15 @@ import type { ElementInstance } from "../../host/host-instance.js";
 import type { CollectContext, Contributor } from "../contributor.js";
 import type { IRFragment } from "../fragments.js";
 
-interface ProjectProps {
+/**
+ * `<project>` props. NO spec-derivation partition here (a deliberate
+ * exception to the contributor ownership convention): this contributor
+ * emits a COMPILER-INTERNAL `projection-override` IR fragment (ADR 63),
+ * not one of the spec's `RuntimeDeclarations` / `ContextEntry` types. Its
+ * only prop — `projectionKey` — is a compiler surfacing key with no spec
+ * type to derive from, so there is nothing to `Omit`/partition.
+ */
+export interface ProjectProps {
   /**
    * Surfacing key this node overrides. Named `projectionKey` (not `key`)
    * because React reserves the `key` prop.

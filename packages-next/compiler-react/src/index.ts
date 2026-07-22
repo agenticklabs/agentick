@@ -96,6 +96,8 @@ export { Section } from "./react/components/index.js";
 export type { SectionProps } from "./react/components/index.js";
 export { Project } from "./react/components/index.js";
 export type { ProjectProps } from "./react/components/index.js";
+export { ProviderTool } from "./react/components/index.js";
+export type { ProviderToolProps } from "./react/components/index.js";
 export { System, User, Assistant, Paragraph, H1, H2, H3 } from "./react/components/index.js";
 
 // Layer C — Harness

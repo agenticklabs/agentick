@@ -1726,6 +1726,27 @@ blueprint's design decisions; this is execution-level).
 
 ### 2026-07-21
 
+- **Contributor derivation pass LANDED (all 16, no stragglers).** Every contributor now
+  derives props from its spec type (`Omit<Spec,supplied> & deltas`), spread-forwards all
+  fields, and carries a type-level conformance assertion
+  (`Exhausted<UnhandledSpecKeys<Spec,Forwarded,Supplied>>`, shared helper
+  `spec-conformance.ts` — a new spec field fails tsc at the contributor until triaged;
+  teeth verified via deliberate TS2344). THREE drift classes found+fixed: tool dropped
+  `aliases`+`providerOptions` (4 surfaces fixed: contributor, jsx-intrinsics,
+  ReactToolSpec/<Tool>, base createTool); model dropped `topP`/`frequencyPenalty`/
+  `presencePenalty`/`stopSequences`; jsx-intrinsics heavy drift (custom/csv/xml-block/
+  mcp-websocket/system_event-severity + missing fields) — all aligned, grep-proved no
+  consumer breakage. NEW `provider-tool` contributor + `<ProviderTool>` component →
+  `declarations.providerTools` (closes the Pass D sugar TODO; loop already reads the
+  slot). 3 justified local interfaces remain (content passthrough, project, semantic-html
+  — documented). Ownership convention in compiler README (both sides derive from spec;
+  ContributorRegistry escape hatch; compiler never depends on a harness).
+  **Recommendation table for Ryan (report-only):** `<Skill>` = MEDIUM (dynamic/scoped
+  availability is a real withSkills gap — skills appearing with a mounted subtree);
+  `<Prompt>` = LOW (no tree position; bundling only); `<Guard>` = NO (category error —
+  guards intercept operations, not positioned content). Gates: typecheck --force 152/152
+  0-cached; 932 tests; oxlint 0 errors (1 pre-existing warning).
+
 - **executedBy provenance — Anthropic optimistic + MCP stamping LANDED.** PASS A:
   local wire-shape interfaces (docblocked "replace on SDK bump" — SDK 0.39 doesn't type
   server tools) structurally detect `server_tool_use`/`web_search_tool_result`;

@@ -31,7 +31,15 @@ import type { ElementInstance } from "../../host/host-instance.js";
 import type { CollectContext, Contributor } from "../contributor.js";
 import type { IRFragment } from "../fragments.js";
 
-interface ContentProps {
+/**
+ * `<content>` props. NO spec-derivation partition here (the deliberate
+ * exception to the contributor ownership convention): the sole prop `blocks`
+ * IS the spec type `readonly ContentBlock[]`, re-emitted VERBATIM with no
+ * field mapping. There is no per-block declaration to `Omit`/partition — a
+ * `ContentBlock` union change already flows through this prop's element type,
+ * so a hand-written `UnhandledSpecKeys` assertion would have nothing to guard.
+ */
+export interface ContentProps {
   readonly blocks?: readonly ContentBlock[];
 }
 

@@ -5,6 +5,12 @@
  * `CustomContentBlock` produced by `StreamTagParser` when the model's
  * text output contains application-defined inline tags. Authors can
  * also emit them directly as JSX.
+ *
+ * Props derive from {@link CustomContentBlock} (minus `type`); `content`
+ * folds from children and `attrs` defaults to `{}` (both re-typed
+ * OPTIONAL). Every other field — `tag`, `selfClosing`, and the shared
+ * {@link BaseBlockKey} fields — forwards by spread, guarded by the
+ * {@link _conformance} assertion.
  */
 
 import type { CustomContentBlock } from "@agentick/spec-next";
@@ -12,14 +18,23 @@ import type { ElementInstance } from "../../host/host-instance.js";
 import type { CollectContext, Contributor } from "../contributor.js";
 import type { IRFragment } from "../fragments.js";
 import { omitUndefined } from "@agentick/utils-next";
+import type { BaseBlockKey, Exhausted, UnhandledSpecKeys } from "./spec-conformance.js";
 
-interface CustomProps {
-  readonly tag: string;
+/**
+ * `<custom>` props, derived from {@link CustomContentBlock}. Deltas:
+ * `content` re-typed OPTIONAL (folded from children when absent) and
+ * `attrs` re-typed OPTIONAL (defaulted to `{}`).
+ */
+export type CustomProps = Omit<CustomContentBlock, "type" | "content" | "attrs"> & {
   readonly content?: string;
   readonly attrs?: Record<string, string>;
-  readonly selfClosing?: boolean;
-  readonly id?: string;
-}
+};
+
+type CustomForwarded = BaseBlockKey | "tag" | "selfClosing";
+type CustomSupplied = "type" | "content" | "attrs";
+type _conformance = Exhausted<
+  UnhandledSpecKeys<CustomContentBlock, CustomForwarded, CustomSupplied>
+>;
 
 export const customBlockContributor: Contributor = {
   type: "custom",
@@ -39,11 +54,11 @@ export const customBlockContributor: Contributor = {
     }
     const content = props.content ?? ctx.collectText(instance);
     const block: CustomContentBlock = {
+      ...(omitUndefined({ ...props }) as Partial<CustomContentBlock>),
       type: "custom",
       tag: props.tag,
       content,
       attrs: props.attrs ?? {},
-      ...omitUndefined({ selfClosing: props.selfClosing, id: props.id }),
     };
     return [{ kind: "content-block", block }];
   },

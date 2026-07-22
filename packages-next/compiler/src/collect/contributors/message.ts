@@ -13,27 +13,41 @@
  *
  * The non-empty guard on the prop is intentional: `<message content={[]}>
  * fallback</message>` still folds the children, matching v1.
+ *
+ * Props derive from {@link MessageEntry}; `role`/`id` forward, the rest
+ * are compiler-supplied (see the {@link _conformance} partition below).
  */
 
-import type { ContentBlock, MessageEntry, MessageMetadata, MessageRole } from "@agentick/spec-next";
+import type { ContentBlock, MessageEntry, MessageMetadata } from "@agentick/spec-next";
 import type { ElementInstance } from "../../host/host-instance.js";
 import type { CollectContext, Contributor } from "../contributor.js";
 import type { IRFragment } from "../fragments.js";
 import { omitUndefined } from "@agentick/utils-next";
+import type { Exhausted, UnhandledSpecKeys } from "./spec-conformance.js";
 
-interface MessageProps {
-  readonly id?: string;
-  readonly role: MessageRole;
-  /**
-   * Pre-built content blocks. When supplied and non-empty, takes
-   * precedence over children — useful when re-emitting persisted
-   * timeline messages via `<Message {...entry.message} />`.
-   */
+/**
+ * `<message>` props, derived from {@link MessageEntry}. Deltas: `kind`
+ * is the compiler-set constant discriminant (omitted); `content` is
+ * re-typed OPTIONAL (folded from children when absent);
+ * `cache`/`providerMetadata` are {@link MessageMetadata} fields folded
+ * into `metadata` (they are NOT `MessageEntry` keys).
+ */
+export type MessageProps = Omit<
+  MessageEntry,
+  "kind" | "content" | "renderedWith" | "renderTrace"
+> & {
+  /** Pre-built content blocks; takes precedence over children when non-empty. */
   readonly content?: readonly ContentBlock[];
   readonly cache?: MessageMetadata["cache"];
   readonly providerMetadata?: MessageMetadata["providerMetadata"];
-  readonly metadata?: Record<string, unknown>;
-}
+};
+
+type MessageForwarded = "role" | "id";
+/** `kind` = constant; `content`/`renderedWith` computed; `renderTrace` is
+ *  formatter-populated (never tree-authored); `metadata` is assembled from
+ *  the `cache`/`providerMetadata`/`metadata` props. */
+type MessageSupplied = "kind" | "content" | "renderedWith" | "renderTrace" | "metadata";
+type _conformance = Exhausted<UnhandledSpecKeys<MessageEntry, MessageForwarded, MessageSupplied>>;
 
 export const messageContributor: Contributor = {
   type: "message",

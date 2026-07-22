@@ -5,30 +5,25 @@
  * block-type discriminator. They fold into the enclosing section /
  * message's `content[]` via `foldContentBlocks` — never appear as
  * top-level context entries.
+ *
+ * Props derive from each spec block type (minus the `type` discriminant);
+ * every authored field — including the shared {@link BaseBlockKey} fields
+ * (`id`, `metadata`, `providerMetadata`, `citations`, …) — forwards by
+ * spread. The per-block {@link Exhausted} assertions fail `tsc` if a new
+ * spec field is added without being partitioned.
  */
 
-import type {
-  AudioBlock,
-  AudioMimeType,
-  DocumentBlock,
-  DocumentMimeType,
-  ImageBlock,
-  ImageMimeType,
-  MediaSource,
-  VideoBlock,
-  VideoMimeType,
-} from "@agentick/spec-next";
+import type { AudioBlock, DocumentBlock, ImageBlock, VideoBlock } from "@agentick/spec-next";
 import type { ElementInstance } from "../../host/host-instance.js";
 import type { CollectContext, Contributor } from "../contributor.js";
 import type { IRFragment } from "../fragments.js";
 import { omitUndefined } from "@agentick/utils-next";
+import type { BaseBlockKey, Exhausted, UnhandledSpecKeys } from "./spec-conformance.js";
 
-interface ImageProps {
-  readonly source: MediaSource;
-  readonly mimeType?: ImageMimeType;
-  readonly altText?: string;
-  readonly id?: string;
-}
+export type ImageProps = Omit<ImageBlock, "type">;
+type _imageConformance = Exhausted<
+  UnhandledSpecKeys<ImageBlock, BaseBlockKey | "source" | "altText", "type">
+>;
 
 export const imageContributor: Contributor = {
   type: "image",
@@ -36,20 +31,18 @@ export const imageContributor: Contributor = {
     const props = instance.props as unknown as ImageProps;
     if (!props.source) return missingProp("image", "source");
     const block: ImageBlock = {
+      ...(omitUndefined({ ...props }) as Partial<ImageBlock>),
       type: "image",
       source: props.source,
-      ...omitUndefined({ mimeType: props.mimeType, altText: props.altText, id: props.id }),
     };
     return [{ kind: "content-block", block }];
   },
 };
 
-interface DocumentProps {
-  readonly source: MediaSource;
-  readonly mimeType?: DocumentMimeType;
-  readonly title?: string;
-  readonly id?: string;
-}
+export type DocumentProps = Omit<DocumentBlock, "type">;
+type _documentConformance = Exhausted<
+  UnhandledSpecKeys<DocumentBlock, BaseBlockKey | "source" | "title", "type">
+>;
 
 export const documentContributor: Contributor = {
   type: "document",
@@ -57,20 +50,18 @@ export const documentContributor: Contributor = {
     const props = instance.props as unknown as DocumentProps;
     if (!props.source) return missingProp("document", "source");
     const block: DocumentBlock = {
+      ...(omitUndefined({ ...props }) as Partial<DocumentBlock>),
       type: "document",
       source: props.source,
-      ...omitUndefined({ mimeType: props.mimeType, title: props.title, id: props.id }),
     };
     return [{ kind: "content-block", block }];
   },
 };
 
-interface AudioProps {
-  readonly source: MediaSource;
-  readonly mimeType?: AudioMimeType;
-  readonly transcript?: string;
-  readonly id?: string;
-}
+export type AudioProps = Omit<AudioBlock, "type">;
+type _audioConformance = Exhausted<
+  UnhandledSpecKeys<AudioBlock, BaseBlockKey | "source" | "transcript", "type">
+>;
 
 export const audioContributor: Contributor = {
   type: "audio",
@@ -78,20 +69,18 @@ export const audioContributor: Contributor = {
     const props = instance.props as unknown as AudioProps;
     if (!props.source) return missingProp("audio", "source");
     const block: AudioBlock = {
+      ...(omitUndefined({ ...props }) as Partial<AudioBlock>),
       type: "audio",
       source: props.source,
-      ...omitUndefined({ mimeType: props.mimeType, transcript: props.transcript, id: props.id }),
     };
     return [{ kind: "content-block", block }];
   },
 };
 
-interface VideoProps {
-  readonly source: MediaSource;
-  readonly mimeType?: VideoMimeType;
-  readonly transcript?: string;
-  readonly id?: string;
-}
+export type VideoProps = Omit<VideoBlock, "type">;
+type _videoConformance = Exhausted<
+  UnhandledSpecKeys<VideoBlock, BaseBlockKey | "source" | "transcript", "type">
+>;
 
 export const videoContributor: Contributor = {
   type: "video",
@@ -99,9 +88,9 @@ export const videoContributor: Contributor = {
     const props = instance.props as unknown as VideoProps;
     if (!props.source) return missingProp("video", "source");
     const block: VideoBlock = {
+      ...(omitUndefined({ ...props }) as Partial<VideoBlock>),
       type: "video",
       source: props.source,
-      ...omitUndefined({ mimeType: props.mimeType, transcript: props.transcript, id: props.id }),
     };
     return [{ kind: "content-block", block }];
   },

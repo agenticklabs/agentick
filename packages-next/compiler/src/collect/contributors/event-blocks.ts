@@ -5,6 +5,13 @@
  * Valid inside `<message role="event">` per v1 grammar. Each carries
  * semantic fields plus optional `text` derived from JSX children (the
  * human-readable formatted representation).
+ *
+ * Props derive from each spec block type (minus the `type` discriminant);
+ * every authored field — including the shared {@link BaseBlockKey} fields
+ * — forwards by spread. `text` folds from children (overriding an authored
+ * `text` prop only when children produce content). The per-block
+ * {@link Exhausted} assertions fail `tsc` if a new spec field lands
+ * unpartitioned.
  */
 
 import type { StateChangeBlock, SystemEventBlock, UserActionBlock } from "@agentick/spec-next";
@@ -12,14 +19,16 @@ import type { ElementInstance } from "../../host/host-instance.js";
 import type { CollectContext, Contributor } from "../contributor.js";
 import type { IRFragment } from "../fragments.js";
 import { omitUndefined } from "@agentick/utils-next";
+import type { BaseBlockKey, Exhausted, UnhandledSpecKeys } from "./spec-conformance.js";
 
-interface UserActionProps {
-  readonly action: string;
-  readonly actor?: string;
-  readonly target?: string;
-  readonly details?: Record<string, unknown>;
-  readonly id?: string;
-}
+export type UserActionProps = Omit<UserActionBlock, "type">;
+type _userActionConformance = Exhausted<
+  UnhandledSpecKeys<
+    UserActionBlock,
+    BaseBlockKey | "action" | "actor" | "target" | "details",
+    "type" | "text"
+  >
+>;
 
 export const userActionContributor: Contributor = {
   type: "user_action",
@@ -39,22 +48,19 @@ export const userActionContributor: Contributor = {
     }
     const childText = ctx.collectText(instance);
     const block: UserActionBlock = {
+      ...(omitUndefined({ ...props }) as Partial<UserActionBlock>),
       type: "user_action",
       action: props.action,
-      ...omitUndefined({ actor: props.actor, target: props.target, details: props.details }),
       ...(childText.length > 0 ? { text: childText } : {}),
-      ...omitUndefined({ id: props.id }),
     };
     return [{ kind: "content-block", block }];
   },
 };
 
-interface SystemEventProps {
-  readonly event: string;
-  readonly source?: string;
-  readonly data?: Record<string, unknown>;
-  readonly id?: string;
-}
+export type SystemEventProps = Omit<SystemEventBlock, "type">;
+type _systemEventConformance = Exhausted<
+  UnhandledSpecKeys<SystemEventBlock, BaseBlockKey | "event" | "source" | "data", "type" | "text">
+>;
 
 export const systemEventContributor: Contributor = {
   type: "system_event",
@@ -74,24 +80,23 @@ export const systemEventContributor: Contributor = {
     }
     const childText = ctx.collectText(instance);
     const block: SystemEventBlock = {
+      ...(omitUndefined({ ...props }) as Partial<SystemEventBlock>),
       type: "system_event",
       event: props.event,
-      ...omitUndefined({ source: props.source, data: props.data }),
       ...(childText.length > 0 ? { text: childText } : {}),
-      ...omitUndefined({ id: props.id }),
     };
     return [{ kind: "content-block", block }];
   },
 };
 
-interface StateChangeProps {
-  readonly entity: string;
-  readonly field?: string;
-  readonly from: unknown;
-  readonly to: unknown;
-  readonly trigger?: string;
-  readonly id?: string;
-}
+export type StateChangeProps = Omit<StateChangeBlock, "type">;
+type _stateChangeConformance = Exhausted<
+  UnhandledSpecKeys<
+    StateChangeBlock,
+    BaseBlockKey | "entity" | "field" | "from" | "to" | "trigger",
+    "type" | "text"
+  >
+>;
 
 export const stateChangeContributor: Contributor = {
   type: "state_change",
@@ -111,13 +116,12 @@ export const stateChangeContributor: Contributor = {
     }
     const childText = ctx.collectText(instance);
     const block: StateChangeBlock = {
+      ...(omitUndefined({ ...props }) as Partial<StateChangeBlock>),
       type: "state_change",
       entity: props.entity,
       from: props.from,
       to: props.to,
-      ...omitUndefined({ field: props.field, trigger: props.trigger }),
       ...(childText.length > 0 ? { text: childText } : {}),
-      ...omitUndefined({ id: props.id }),
     };
     return [{ kind: "content-block", block }];
   },

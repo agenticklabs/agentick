@@ -3,22 +3,31 @@
  *
  * Produces an `MCPDeclaration`. MCP server config flows into the
  * declaration; resolution + materialization happens runtime-side.
+ *
+ * Props derive from {@link MCPDeclaration}; fields forward by spread,
+ * guarded by the {@link _conformance} assertion.
  */
 
-import type { MCPDeclaration, MCPTransport } from "@agentick/spec-next";
+import type { MCPDeclaration } from "@agentick/spec-next";
 import type { ElementInstance } from "../../host/host-instance.js";
 import type { CollectContext, Contributor } from "../contributor.js";
 import type { IRFragment } from "../fragments.js";
 import { omitUndefined } from "@agentick/utils-next";
+import type { Exhausted, UnhandledSpecKeys } from "./spec-conformance.js";
 
-interface MCPProps {
+/**
+ * `<mcp>` props, derived from {@link MCPDeclaration}. Deltas: `id`
+ * re-typed OPTIONAL (defaulted from {@link CollectContext.stableId}) and
+ * `config` re-typed OPTIONAL (defaulted to `{}`).
+ */
+export type MCPProps = Omit<MCPDeclaration, "id" | "config"> & {
   readonly id?: string;
-  readonly serverName: string;
-  readonly transport: MCPTransport;
-  readonly config: Record<string, unknown>;
-  readonly exposes?: readonly ("tools" | "resources" | "prompts")[];
-  readonly metadata?: Record<string, unknown>;
-}
+  readonly config?: Record<string, unknown>;
+};
+
+type MCPForwarded = "serverName" | "transport" | "exposes" | "metadata";
+type MCPSupplied = "id" | "config";
+type _conformance = Exhausted<UnhandledSpecKeys<MCPDeclaration, MCPForwarded, MCPSupplied>>;
 
 export const mcpContributor: Contributor = {
   type: "mcp",
@@ -37,11 +46,11 @@ export const mcpContributor: Contributor = {
       ];
     }
     const mcp: MCPDeclaration = {
+      ...(omitUndefined({ ...props }) as Partial<MCPDeclaration>),
       id: props.id ?? ctx.stableId("mcp", instance),
       serverName: props.serverName,
       transport: props.transport,
       config: props.config ?? {},
-      ...omitUndefined({ exposes: props.exposes, metadata: props.metadata }),
     };
     return [{ kind: "mcp-declaration", mcp }];
   },
