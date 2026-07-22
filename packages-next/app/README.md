@@ -131,6 +131,8 @@ throws (it belongs on `model`).
 | `bus`                | `EventBus` or factory                        | Optional substrate override.                                                                                                                                                                                                                                  |
 | `inbox`              | `MessageInbox` or factory                    | Optional substrate override.                                                                                                                                                                                                                                  |
 | `journal`            | `OperationJournal` or factory                | Optional substrate override.                                                                                                                                                                                                                                  |
+| `signal`             | `AbortSignal`                                | App-wide cascade (PA1). Firing it aborts every active session's in-flight execution and refuses new work — `closeApp()` in abort shape. See "App-wide `signal`" below.                                                                                        |
+| `sessions`           | `{ store?, maxActive?, idleTimeout? }`       | Durable session store + the bounded-registry knobs (PA2/PA3). See "Bounded live registry" below.                                                                                                                                                              |
 | `metadata`           | `Record<string, unknown>`                    | Adopter-defined bag carried on the harness instance.                                                                                                                                                                                                          |
 | `telemetry`          | `TelemetryLayer`                             | Optional Effect `Layer` (e.g. `@effect/opentelemetry`'s `NodeSdk`). Built into an app-scoped `ManagedRuntime` at construction; app-edge operations run on it so `Effect.withSpan` annotations reach the tracer (ADR 78). BYO — no OTel dependency is bundled. |
 | `telemetryNamespace` | `string`                                     | Span-attribute prefix on every `<ns>.op_id` / `<ns>.surface` attribute. Defaults to `"agentick"`; set it to whitelabel your deployment's traces.                                                                                                              |
@@ -190,6 +192,82 @@ App-owned descriptive slots (`title` / `description` / `metadata`) are the app's
 to populate — seed them at `createSession({ title, description })` or set them
 later via `app.setSessionMeta(id, { title?, description?, metadata? })`. The
 framework STORES them and is blind to their semantics.
+
+### Bounded live registry — `sessions.maxActive` / `sessions.idleTimeout` (PA2/PA3)
+
+The live registry (`getSession`) is otherwise an unbounded `Map` — a memory
+leak in long-lived deployments that open sessions and never close them. Two
+knobs cap it by **paging out** idle sessions:
+
+```ts
+const app = await createApp(<Agent />, {
+  model: openai("gpt-4o"),
+  sessions: {
+    store: pgSessionStore, // durable resume index (E11)
+    maxActive: 500, // soft LRU cap on LIVE sessions
+    idleTimeout: 30 * 60_000, // page out after 30 min idle
+  },
+});
+```
+
+- **`maxActive`** — a **soft** LRU cap. When a `createSession` pushes the live
+  count over it, the **least-recently-active evictable** session is paged out.
+  Soft because an in-flight session is never evicted, so a burst of concurrent
+  work may exceed the cap transiently; the bound is restored at the next create
+  or idle sweep.
+- **`idleTimeout`** — ms of inactivity after which a background sweep pages a
+  session out. The sweep runs on an `unref`'d timer, so a **quiet** long-lived
+  app still releases memory (no traffic required to fire it).
+
+**Activity** = any operation scoped to the session (send, dispatch, snapshot, a
+repeat `createSession` open, …), tracked off the shared bus. _Caveat:_ a session
+constructed with its OWN bus factory (`createSession({ bus: LocalEventBus.factory() })`,
+a multi-tenant-isolation lever) does not publish to the app bus and so is not
+activity-tracked this way — pair per-session-bus isolation with explicit
+`session.close()` rather than idle eviction.
+
+**Eviction is paging, NOT deletion.** An evicted session's live harness is torn
+down (compiler mount + bridges freed) but its durable `SessionRecord` + timeline
+store survive. The next `createSession(sameId)` transparently reconstructs and
+rehydrates it via the ADR-49 open-or-rehydrate path — so eviction is invisible
+to correctness. Two consequences to know:
+
+- Rehydrated state is only as complete as the durable backing. Configure a
+  durable **timeline store** (`session: { timeline: { store } }`) if you need a
+  paged-out session's conversation to survive; without one, reopen starts fresh.
+- A `getSession(id)` handle captured _before_ an eviction is stale (points at the
+  now-closed instance). Re-fetch via `createSession(id)` / `getSession(id)` after
+  the eviction window — the E11 "live routing handle may be dropped" contract.
+
+The app-level `onSessionClose` handler does **not** fire on eviction (paging is
+not a lifecycle end); the session's own bridge/extension close handlers do.
+Ephemeral `runOnce` sessions are never LRU/idle-evicted — they self-dispose.
+
+### App-wide `signal` (PA1)
+
+`createApp({ signal })` fans a single `AbortSignal` into every session. It is
+`closeApp()` in **abort shape** — a cascading cancel rather than a teardown (it
+does not dispose the substrate):
+
+```ts
+const controller = new AbortController();
+const app = await createApp(<Agent />, { model, signal: controller.signal });
+// … later, on shutdown / deadline / client disconnect:
+controller.abort();
+```
+
+When the signal fires:
+
+- every active session's **in-flight execution aborts** — each session merges the
+  app signal into its per-send execution signal, so the loop tears the work down
+  immediately (reusing the existing per-send abort plumbing, no bespoke engine);
+- **new work is refused** — `createSession` / `runOnce` throw `AppClosedError`
+  (admission treats an aborted app like a closed one), and a `send()` on an
+  already-created session resolves an `aborted` result (`stopReason: "aborted"`,
+  0 ticks) without a model call.
+
+A per-session `createSession({ signal })` overrides the app signal for that
+session (the caller owns that session's cancel).
 
 ### `app.closeApp()` / `app.close()`
 
@@ -336,6 +414,16 @@ counterpart (see [ADR 38](../../docs/proposals/v2/blueprint/38-cluster-lifecycle
 - `src/__tests__/hooks-cascade.spec.tsx` — `createApp({ hooks })` fires
   on dispatch, `createSession({ hooks })` composes app-outer, `onAfter*`
   transforms flow through, no-hooks is behavior-preserving.
+- `src/__tests__/session-eviction.spec.tsx` (PA2/PA3) — `maxActive`
+  evicts the least-recently-active session (LRU order proven via a send
+  that refreshes an older session), `idleTimeout` pages out a quiet
+  session on the background sweep, an evicted session reopens with its
+  timeline rehydrated from the durable store, and an in-flight execution
+  is never evicted (soft cap restored once it settles).
+- `src/__tests__/app-signal.spec.tsx` (PA1) — an aborted app signal
+  refuses new work at the app edge, is fanned into every session (a
+  post-abort `send` on any resolves `aborted`, 0 ticks), and tears down
+  an in-flight execution mid-flight.
 
 ## Known gaps
 

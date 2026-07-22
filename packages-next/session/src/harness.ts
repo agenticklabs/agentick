@@ -87,7 +87,7 @@ import {
   SPEC_VERSION,
   TimelineWriteFailed,
 } from "@agentick/spec-next";
-import { mergeLayered, omitUndefined } from "@agentick/utils-next";
+import { mergeAbortSignals, mergeLayered, omitUndefined } from "@agentick/utils-next";
 import { buildSessionElicit } from "@agentick/elicitation-next";
 import { withScope } from "@agentick/tool-executor-next";
 import {
@@ -288,6 +288,19 @@ export interface SessionHarnessOptions<P = unknown> {
    * (fail-closed). See {@link SnapshotMigration}.
    */
   readonly migrateSnapshot?: SnapshotMigration;
+  /**
+   * Construction-bound abort signal (PA1 — the app-signal cascade + the
+   * per-session `CreateSessionInput.signal`). Merged with each call's
+   * `SendInput.signal` into the execution signal threaded to the loop:
+   *   - firing it mid-run aborts the in-flight execution (the loop honors
+   *     the merged signal on its cancellation edges);
+   *   - a subsequent `send()` sees the already-aborted signal and resolves
+   *     an `aborted` result WITHOUT a model call (the loop stops at the
+   *     tick-top abort check) — i.e. new work is refused.
+   * Threaded by the App from `AppHarnessOptions.signal`. `undefined` when
+   * no signal is wired.
+   */
+  readonly signal?: AbortSignal;
   /** Optional initial knob values. */
   readonly initialKnobs?: Readonly<Record<string, unknown>>;
   /** Optional initial session-state values (`useSessionState`). */
@@ -495,6 +508,15 @@ export class SessionHarness<P = unknown>
   private readonly narrate: boolean;
   /** Snapshot-migration seam (recovery pass #1). See {@link SnapshotMigration}. */
   private readonly migrateSnapshot: SnapshotMigration | undefined;
+  /**
+   * Construction-bound abort signal (PA1 — app-signal cascade). Merged
+   * into every send's execution signal, so an abort tears down in-flight
+   * work and makes subsequent sends resolve `aborted` without a model
+   * call. Threaded by the App from `AppHarnessOptions.signal`; also the
+   * home of the per-session `CreateSessionInput.signal`. `undefined` when
+   * no signal is wired. See {@link SessionHarnessOptions.signal}.
+   */
+  private readonly constructionSignal: AbortSignal | undefined;
 
   private _closed = false;
   private _mountReady: Promise<void>;
@@ -696,6 +718,7 @@ export class SessionHarness<P = unknown>
     // Narration defaults ON — the token-cost off-switch is opt-out.
     this.narrate = options.narrate ?? true;
     this.migrateSnapshot = options.migrateSnapshot;
+    this.constructionSignal = options.signal;
     this.mountId = `mount:${options.sessionId}`;
 
     // ADR 89 §4 — the session is the composition root, so IT wires the
@@ -829,6 +852,19 @@ export class SessionHarness<P = unknown>
    */
   get resources(): import("@agentick/spec-next").Resources {
     return this.bridges.resources;
+  }
+
+  /**
+   * `true` while an execution is reserved or in flight — from the moment
+   * `send()` takes its synchronous reservation until the result settles
+   * and the `.finally` clears it. The App's registry eviction reads this
+   * as the in-flight guard: a session with active work is NEVER evicted
+   * (PA2/PA3). Widest-safe window — OR of the synchronous reservation
+   * (set before the first `await` in `sendBody`) and the persisted
+   * in-flight execution id (cleared in the same `.finally`).
+   */
+  get hasInFlightExecution(): boolean {
+    return this._handleReservation !== null || this.runtime.currentExecutionId() !== null;
   }
 
   // ──────── SessionHarnessProtocol ────────
@@ -1832,7 +1868,13 @@ export class SessionHarness<P = unknown>
                 // Stage 5 — per-send tool concurrency (default "unbounded" in
                 // the loop) + optional execution timeout, both opt-in.
                 ...omitUndefined({
-                  signal: input.signal,
+                  // PA1 — the app-signal cascade. Merge the construction
+                  // signal (app / per-session) with this call's signal into
+                  // the ONE live execution signal the loop honors. An
+                  // already-aborted merge means the loop stops at its tick-top
+                  // abort check (no model call); a mid-run abort tears down
+                  // the in-flight execution.
+                  signal: mergeAbortSignals(this.constructionSignal, input.signal),
                   toolConcurrency: input.toolConcurrency,
                   timeoutMs: input.timeoutMs,
                 }),

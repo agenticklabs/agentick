@@ -333,9 +333,37 @@ export interface AppHarnessOptions<P = unknown> {
    *     durable store (`@agentick/session-store-postgres-next`, same port) for
    *     survival across app restart — the store's reason to exist as the resume
    *     index.
+   *
+   * **Bounded live registry (PA2/PA3).** The live `sessionId → SessionHarness`
+   * map is otherwise unbounded — a memory leak in long-lived deployments that
+   * open sessions and never close them. `maxActive` / `idleTimeout` cap it by
+   * PAGING OUT idle sessions:
+   *
+   *   - `maxActive` — soft LRU cap on LIVE sessions. When a `createSession`
+   *     pushes the live count over the cap, the least-recently-active
+   *     evictable session is paged out. The cap is SOFT: an in-flight
+   *     session is never evicted, so a burst of concurrent work may exceed
+   *     it transiently; the bound is restored at the next create / idle sweep.
+   *   - `idleTimeout` — ms of inactivity (no send / dispatch / session op)
+   *     after which a session is paged out by a background sweep. Requires no
+   *     traffic to fire (an unref'd timer runs the sweep), so a quiet-but-
+   *     long-lived app still releases memory.
+   *
+   * **Eviction is paging, NOT deletion.** An evicted session's live harness is
+   * torn down (compiler mount + bridges freed) but its durable `SessionRecord`
+   * + timeline store survive. The next `createSession(sameId)` transparently
+   * reconstructs and rehydrates it via the ADR-49 open-or-rehydrate path — so
+   * eviction is invisible to correctness, only to a stale `getSession` handle
+   * held across the eviction. Activity = any operation scoped to the session
+   * (send, dispatch, snapshot, …). Ephemeral (`runOnce`) sessions are never
+   * LRU/idle-evicted (they self-dispose).
    */
   readonly sessions?: {
     readonly store?: SessionStore;
+    /** Soft LRU cap on live sessions; over-cap creates page out the LRU evictable session. */
+    readonly maxActive?: number;
+    /** Idle-eviction threshold in ms; a background sweep pages out sessions idle this long. */
+    readonly idleTimeout?: number;
   };
 
   // ────────── Per-session defaults (constructed per createSession) ──────────
@@ -469,6 +497,24 @@ export interface AppHarnessOptions<P = unknown> {
   readonly bus?: EventBus | EventBusFactory<HarnessShell>;
   readonly inbox?: MessageInbox | MessageInboxFactory<HarnessShell>;
 
+  /**
+   * App-wide abort signal (PA1). A single `AbortSignal` fanned into every
+   * session the app creates (as the session's construction signal). Firing
+   * it:
+   *   - aborts every active session's in-flight execution — each session's
+   *     loop run holds the live merged signal, so the abort tears the work
+   *     down immediately (not at the next tick boundary);
+   *   - refuses new work — `createSession` / `runOnce` throw `AppClosedError`
+   *     once the signal is aborted (admission treats an aborted app like a
+   *     closed one), and a `send()` on an already-created session resolves an
+   *     `aborted` result without a model call.
+   *
+   * This is `closeApp()` in abort shape: a cascading cancel rather than a
+   * teardown. It does NOT dispose the substrate — call `closeApp()` for that.
+   * Reuses the existing per-send / per-session signal plumbing (no bespoke
+   * cancellation engine).
+   */
+  readonly signal?: AbortSignal;
   /**
    * Adopter-defined metadata bag carried on the App harness instance
    * and exposed to substrate factories via `parent.metadata`. Framework
@@ -641,6 +687,31 @@ export class AppHarness<P = unknown>
 
   private readonly registry = new Map<string, InternalSessionEntry<P>>();
   private _closed = false;
+
+  /**
+   * App-wide abort signal (PA1). Fanned into every session as its
+   * construction signal; also gates new-work admission (`assertOpen`).
+   * `undefined` when no signal was supplied.
+   */
+  private readonly appSignal: AbortSignal | undefined;
+  /**
+   * Soft LRU cap on live sessions (PA2). `undefined` → unbounded (legacy
+   * behavior). See {@link AppHarnessOptions.sessions}.
+   */
+  private readonly maxActive: number | undefined;
+  /** Idle-eviction threshold in ms (PA3). `undefined` → no idle sweep. */
+  private readonly idleTimeout: number | undefined;
+  /**
+   * Background idle-sweep handle (PA3). Present only when `idleTimeout` is
+   * set; unref'd so it never keeps the process alive; cleared in `closeApp`.
+   */
+  private idleSweepTimer: ReturnType<typeof setInterval> | undefined;
+  /**
+   * Activity subscription teardown (PA2/PA3). Present only when eviction is
+   * configured — the app subscribes to `requested`-phase envelopes and
+   * refreshes `lastActiveAt` for the scoped session. Torn down in `closeApp`.
+   */
+  private activityUnsub: Unsubscribe | undefined;
 
   /**
    * App/gateway-scoped {@link TaskStore} (ADR 68). Constructed ONCE (from
@@ -922,6 +993,33 @@ export class AppHarness<P = unknown>
     this.taskStore = options.tasks?.store ?? new InMemoryTaskStore();
     this.taskExecutors = options.tasks?.executors ?? [];
     this.sessionStore = options.sessions?.store ?? new InMemorySessionStore();
+
+    // PA1/PA2/PA3 — app-signal cascade + bounded live registry.
+    this.appSignal = options.signal;
+    this.maxActive = options.sessions?.maxActive;
+    this.idleTimeout = options.sessions?.idleTimeout;
+    // Activity tracking + idle sweep are wired ONLY when eviction is
+    // configured — zero overhead for the unbounded default. Activity =
+    // any `requested`-phase envelope scoped to a live session (send /
+    // dispatch / snapshot / …), refreshing its `lastActiveAt` for LRU +
+    // idle ordering. The session emits on the app-shared bus by default;
+    // a session with its OWN bus factory won't be tracked this way (a
+    // multi-tenant-isolation combo — documented in the README).
+    if (this.maxActive !== undefined || this.idleTimeout !== undefined) {
+      this.activityUnsub = forkBusSubscription(bus, { phase: "requested" }, (event) => {
+        const sid = event.scope.sessionId;
+        if (sid !== undefined) this.touchActivity(sid);
+      });
+    }
+    if (this.idleTimeout !== undefined) {
+      const idle = this.idleTimeout;
+      this.idleSweepTimer = setInterval(() => {
+        void this.sweepIdle(idle);
+      }, idle);
+      // Never hold the event loop open for the sweep (Node-only API; guard
+      // for non-Node runtimes without `unref`).
+      this.idleSweepTimer.unref?.();
+    }
 
     this.handlerResolver = new InMemoryHandlerResolver();
     if (options.toolHandlers) {
@@ -1408,6 +1506,8 @@ export class AppHarness<P = unknown>
     // hydrates via `session.timeline` options.
     const existing = this.registry.get(sessionId);
     if (existing !== undefined) {
+      // A repeat open is activity — keep it warm against LRU / idle eviction.
+      this.touchActivity(sessionId);
       return existing.session as SessionHarnessProtocol<P>;
     }
 
@@ -1660,6 +1760,11 @@ export class AppHarness<P = unknown>
       inheritedInterceptors,
       interceptorParent: this,
       defaultMaxTicks: input.maxTicks ?? this.sessionDefaults.defaultMaxTicks ?? 8,
+      // PA1 — fan the app-wide signal into the session as its construction
+      // signal. Per-session `CreateSessionInput.signal` overrides it (a
+      // caller who wires their own signal owns that session's cancel). The
+      // session merges this with each `SendInput.signal` on every send.
+      ...omitUndefined({ signal: input.signal ?? this.appSignal }),
       ...(input.requiredScopes !== undefined ? { requiredScopes: input.requiredScopes } : {}),
       ...(this.models !== undefined ? { models: this.models } : {}),
       // Streaming cascade: per-session input.streaming > app-level
@@ -1783,6 +1888,9 @@ export class AppHarness<P = unknown>
       ...omitUndefined({ parentSessionId: overrides.parentSessionId }),
     };
     this.registry.set(sessionId, entry);
+    // PA2 — enforce the LRU cap AFTER registering the newcomer. Ephemeral
+    // (`runOnce`) sessions are self-disposing and exempt (see `enforceMaxActive`).
+    if (!ephemeral) await this.enforceMaxActive(sessionId);
     return session;
   }
 
@@ -1860,6 +1968,17 @@ export class AppHarness<P = unknown>
 
     this._closed = true;
 
+    // PA2/PA3 — stop the idle sweep + activity subscription before draining
+    // the registry (no sweep races the teardown; no dangling bus fiber).
+    if (this.idleSweepTimer !== undefined) {
+      clearInterval(this.idleSweepTimer);
+      this.idleSweepTimer = undefined;
+    }
+    if (this.activityUnsub !== undefined) {
+      this.activityUnsub();
+      this.activityUnsub = undefined;
+    }
+
     // Close every registered session. Order isn't load-bearing — each
     // session unmounts independently.
     const sessionIds = Array.from(this.registry.keys());
@@ -1880,7 +1999,24 @@ export class AppHarness<P = unknown>
     await super.close();
   }
 
-  private async disposeSession(sessionId: string): Promise<void> {
+  /**
+   * Tear down a live session and drop it from the live registry.
+   *
+   * `reason: "close"` (default) is a genuine session end — `closeApp`,
+   * `runOnce` auto-dispose, or explicit teardown — and fires the app-level
+   * `onSessionClose` handlers ("session ended" analytics / cleanup).
+   *
+   * `reason: "evict"` (PA2/PA3) is transparent PAGING: the live harness is
+   * closed to free memory, but the durable `SessionRecord` + timeline store
+   * survive and the app-level `onSessionClose` handlers do NOT fire — the
+   * session is not ending, only paging out until its next open reconstructs
+   * it. The session's OWN close handlers (bridge / extension teardown) run
+   * either way, since `session.close()` is called both times.
+   */
+  private async disposeSession(
+    sessionId: string,
+    reason: "close" | "evict" = "close",
+  ): Promise<void> {
     const entry = this.registry.get(sessionId);
     if (!entry) return;
     this.registry.delete(sessionId);
@@ -1894,6 +2030,9 @@ export class AppHarness<P = unknown>
     } catch {
       // best effort
     }
+    // Eviction is paging, not a lifecycle end — suppress the app-level
+    // "session closed" notification (PA2/PA3). A genuine close fires it.
+    if (reason === "evict") return;
     // Fire onSessionClose handlers (informational, return value
     // ignored). Errors swallowed — handlers don't block teardown.
     for (const h of this.sessionCloseHandlers) {
@@ -1910,8 +2049,63 @@ export class AppHarness<P = unknown>
     if (entry) entry.lastActiveAt = Date.now();
   }
 
+  /**
+   * Can this live session be paged out? Evictable = a durable, quiescent
+   * session: NOT ephemeral (`runOnce` sessions self-dispose and carry no
+   * durable record) and NOT in-flight (never interrupt active work — the
+   * hard eviction invariant). The `hasInFlightExecution` read is the
+   * session's own synchronous truth (reservation ∪ persisted execution id).
+   */
+  private isEvictable(entry: InternalSessionEntry<P>): boolean {
+    return !entry.ephemeral && !entry.session.hasInFlightExecution;
+  }
+
+  /**
+   * PA2 — enforce the soft LRU `maxActive` cap. Counts durable live sessions
+   * (ephemeral excluded — they don't consume the cap) and, while over the cap,
+   * pages out the least-recently-active EVICTABLE session other than the
+   * just-created `keepId`. Soft: if every over-cap session is in-flight, the
+   * live count stays above the cap until work settles (safety over bound).
+   */
+  private async enforceMaxActive(keepId: string): Promise<void> {
+    const cap = this.maxActive;
+    if (cap === undefined) return;
+    // Guard against unbounded churn: at most one eviction is needed per
+    // create, but loop defensively in case the cap was lowered at runtime
+    // (not currently possible) or prior in-flight sessions since settled.
+    for (;;) {
+      const durable = [...this.registry.values()].filter((e) => !e.ephemeral);
+      if (durable.length <= cap) return;
+      const victim = durable
+        .filter((e) => e.id !== keepId && this.isEvictable(e))
+        .sort((a, b) => (a.lastActiveAt ?? a.createdAt) - (b.lastActiveAt ?? b.createdAt))[0];
+      if (victim === undefined) return; // nothing evictable — soft cap holds
+      await this.disposeSession(victim.id, "evict");
+    }
+  }
+
+  /**
+   * PA3 — the idle sweep. Pages out every EVICTABLE session whose last
+   * activity is older than `idleMs`. Runs on the unref'd background timer, so
+   * a quiet app still releases memory. Best-effort: a mid-sweep failure on one
+   * session does not block the rest.
+   */
+  private async sweepIdle(idleMs: number): Promise<void> {
+    if (this._closed) return;
+    const cutoff = Date.now() - idleMs;
+    const stale = [...this.registry.values()].filter(
+      (e) => this.isEvictable(e) && (e.lastActiveAt ?? e.createdAt) <= cutoff,
+    );
+    for (const entry of stale) {
+      await this.disposeSession(entry.id, "evict");
+    }
+  }
+
   private assertOpen(): void {
-    if (this._closed) throw new AppClosedError() as AppError;
+    // PA1 — an aborted app signal refuses new work, exactly like a closed
+    // app ("closeApp in abort shape"). In-flight executions are torn down
+    // separately by the cascaded per-session signal.
+    if (this._closed || this.appSignal?.aborted) throw new AppClosedError() as AppError;
   }
 }
 

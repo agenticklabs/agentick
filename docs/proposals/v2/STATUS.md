@@ -1726,6 +1726,23 @@ blueprint's design decisions; this is execution-level).
 
 ### 2026-07-21
 
+- **WORK QUEUE (2026-07-22, systematic — Ryan: "significant progress today").**
+  In flight: PA1–PA3 (bounded registry LRU/idleTimeout + app signal cascade). Then:
+  (1) SP4–SP6 spawn hardening (MAX_SPAWN_DEPTH crash vector, parent-abort→child
+  teardown, spawnPath plumbing); (2) SW6 chat-UX backlog filing (LineEditor/
+  AttachmentManager/chat-transforms — file the issue, don't build); (3) **TASK-WAKE
+  SEAM (new, from unified-exec/codex analysis):** task-completion → session wake — a
+  backgrounded task finishing while unobserved synthesizes exactly ONE follow-up send
+  (bounded metadata, no raw output) into the session; consume-on-observe dedup (a
+  completion seen directly by a tool result CONSUMES the wake — exactly-once between
+  in-band + out-of-band paths); shape it per seam-over-setting (a wake option on task
+  submission or a session-level policy callback, NOT a config subsystem); small pass on
+  tasks-next + loop/session. Agentick can already express unified-exec's whole tool
+  surface (Pattern B tasks + sandbox + stdin tool) — the wake is the ONE missing
+  capability. (4) remaining audit ergonomics (tracker); (5) candidates after: OpenAI
+  Responses API, devtools attention, ai-sdk request-half, XHarness→X sweep,
+  app-harness flake fix, Ernesto (gate met).
+
 - **Contributor derivation pass LANDED (all 16, no stragglers).** Every contributor now
   derives props from its spec type (`Omit<Spec,supplied> & deltas`), spread-forwards all
   fields, and carries a type-level conformance assertion

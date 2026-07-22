@@ -105,6 +105,7 @@ import {
   ProviderRejected,
   toRegistration,
 } from "@agentick/spec-next";
+import { mergeAbortSignals } from "@agentick/utils-next";
 
 // ADR 80/83 — light up the execution-lifecycle verb. `loop:run-execution`
 // is a STREAMING command (`this.commandStream`, see the constructor): its
@@ -1069,18 +1070,6 @@ function awaitBridge<A>(thunk: () => Promise<A> | A): Effect.Effect<A, unknown, 
  * tool handler. Same pattern as the executor's `mergeSignals` (kept
  * local to avoid a runtime dep on the executor package for one helper).
  */
-function mergeAbortSignals(external: AbortSignal | undefined, internal: AbortSignal): AbortSignal {
-  if (external === undefined) return internal;
-  if (external.aborted) return external;
-  if (internal.aborted) return internal;
-  const ctrl = new AbortController();
-  const onExternal = (): void => ctrl.abort(external.reason);
-  const onInternal = (): void => ctrl.abort(internal.reason);
-  external.addEventListener("abort", onExternal, { once: true });
-  internal.addEventListener("abort", onInternal, { once: true });
-  return ctrl.signal;
-}
-
 function accumulateUsage(acc: MutableUsage, add?: UsageStats): void {
   if (!add) return;
   acc.inputTokens += add.inputTokens ?? 0;
