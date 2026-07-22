@@ -232,6 +232,18 @@ phase). `timelineView` subscribes to exactly those envelopes (via
 `timelineEventQuery()` in `@agentick/spec-next`) and folds their entries onto a
 growing `readonly TimelineEntry[]`.
 
+> **Tool results can be truncated on the wire (ROADMAP A3).** A tool can return
+> a multi-megabyte result; the durable log and the model-facing projection ALWAYS
+> keep the full bytes. When enabled, the gateway truncates oversized `tool_result`
+> content on every client-facing frame — including these append envelopes —
+> before it reaches the browser. A folded entry whose tool output was truncated
+> carries `block.metadata.bounded` (`{ truncated: true, originalBytes, … }`); the
+> full content survives in the store (a future `timeline_history` read). This is
+> an OPT-IN gateway-configured policy (`createGateway({ truncateToolResults })`),
+> **OFF by default** — see the gateway README. It is orthogonal to `compact()`:
+> compaction rewrites the model-visible projection; this truncates only the
+> client copy.
+
 ```ts
 import { timelineView } from "@agentick/timeline-next/client";
 

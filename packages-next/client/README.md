@@ -29,6 +29,23 @@ await session.respondToToolCall(correlationId, [{ type: "text", text: "…" }]);
 That's the whole package: three side-effect imports + `export * from
 "@agentick/client-core-next"`. It carries no logic of its own.
 
+## Tool results may be truncated on the wire (ROADMAP A3)
+
+Content a client receives — folded timeline entries (`session.timeline` /
+`timelineView`), `session.send` results, and progress/subscription
+notifications — **can be truncated at the gateway** so a multi-megabyte tool
+result never floods the browser. This is **opt-in and OFF by default** (output
+shaping is app-UX policy, not a framework default — unlike security defaults,
+which protect the operator and ship on); a deployment turns it on with
+`createGateway({ truncateToolResults: true })` (see the gateway README). Only
+oversized _tool output_ is affected (a `tool_result` block's inline text/data
+over the threshold); ordinary messages and small results pass through untouched.
+A truncated block carries `block.metadata.bounded` (`{ truncated: true,
+originalBytes, retainedBytes, reason, hint }`) — check it when rendering to show
+a "truncated — N bytes" affordance. The full content is never lost: it lives in
+the durable timeline store server-side (reachable via a future
+`timeline_history` read).
+
 ## Core vs bundle
 
 | Package                      | What                                                                    |

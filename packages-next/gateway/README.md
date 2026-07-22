@@ -111,6 +111,7 @@ interface CreateGatewayOptions {
   wireExtensions?: readonly WireExtension[]; // ADR 46 — see below
   transports?: readonly ServerTransport[]; // ADR 84 — see "Lifecycle & transports"
   authorizer?: Authorizer; // authz policy — see "Authentication & authorization"
+  truncateToolResults?: boolean | { maxBytes?: number; truncate?: (block, ctx) => ContentBlock }; // OPT-IN — see below
   metadata?: Readonly<Record<string, unknown>>;
 }
 ```
@@ -609,6 +610,64 @@ Each is overridable (`allowedOrigins`, `allowedHosts`, `trustProxy`, `csrf`,
 `host`) but ships safe. See the transport package READMEs for the option
 surface.
 
+## Truncating tool results sent to clients (ROADMAP A3)
+
+A tool can return a multi-megabyte result — a whole file read, a verbose
+command dump, an inline base64 image. That full payload MUST reach the model
+(it may need it) and MUST land in the durable timeline store (the source of
+truth), but need NOT be shoved verbatim down the wire to a browser.
+
+The gateway is the client projection boundary, so it owns the bounding policy.
+`createGateway({ truncateToolResults })` configures ONE policy that the wire
+dispatch boundary (`dispatchRequest` in `@agentick/transport-next`) applies to
+**every** client-facing frame — RPC results (`session/send`, `session/dispatch`)
+AND every notification (progress + subscription). Configured once, inherited by
+every attached transport, so there is no path that bounds while another leaks.
+
+**Opt-in — OFF by default.** This is a deliberate split from the framework's
+security defaults. Security defaults protect the **operator** — that is the
+framework's duty, so they ship default-ON. Truncating tool output is an app-UX
+**policy**: how large a payload a given app's transcript should carry is the app
+developer's domain, not the framework's. So the framework ships the capability
+**off**, with a good overridable default the adopter opts into. When off, the
+wire boundary does zero projection work (frames pass through by reference — zero
+overhead, the twin of the `telemetry` switch's off-path).
+
+```ts
+// The switch (the `createApp({ telemetry })` twin — boolean | options):
+type TruncateToolResultsSetting =
+  | boolean
+  | { maxBytes?: number; truncate?: (block, ctx) => ContentBlock };
+
+// OFF (default) — nothing sent to clients is truncated.
+await createGateway();
+
+// ON at the 32 KiB per-block default.
+await createGateway({ truncateToolResults: true });
+
+// ON, raised ceiling for a data-heavy deployment.
+await createGateway({ truncateToolResults: { maxBytes: 256 * 1024 } });
+
+// ON, domain override — keep the first rows of a CSV, delegate everything else.
+await createGateway({
+  truncateToolResults: {
+    truncate: (block, ctx) =>
+      block.type === "csv" ? headOnly(block) : ctx.bound(block), // ctx.bound = the default
+  },
+});
+```
+
+**Capability, not opinion.** Once enabled, the whole thing is a typed seam an
+adopter raises, lowers, or replaces. **Never the model path, never the store.**
+Truncation happens ONLY on the copy heading to a client — the projector never
+mutates its input, so the durable log and the model-facing timeline projection
+keep the full bytes.
+
+**Honest truncation.** A bounded block carries a machine-readable marker under
+`block.metadata.bounded` (`{ truncated: true, originalBytes, retainedBytes,
+reason, hint }`) plus a human suffix on the preview, both naming the durable
+store as where the full content survives (a future `timeline_history` read).
+
 ## Server-initiated notifications — the control-plane bus (ADR 47)
 
 The gateway signals control-plane changes to connected clients over
@@ -733,6 +792,8 @@ socket adapter over it; there is no bespoke per-transport wire logic.
 | `listen()` idempotency does not re-fire `transport.listen`         | `src/__tests__/server-transports.spec.ts`                    |
 | Zero-transport `listen()` no-op fan-out                            | `src/__tests__/server-transports.spec.ts`                    |
 | `ServerTransport` conformance (spy double)                         | `src/__tests__/server-transports.spec.ts`                    |
+| Client tool-output bounding (block bounder + marker + seam)        | `../spec/src/__tests__/tool-output-bound.spec.ts`            |
+| Bounding at the wire funnel — result + notifications, no straddle  | `../transport/src/__tests__/client-projection.spec.ts`       |
 
 ## Status
 

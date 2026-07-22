@@ -69,6 +69,7 @@ import {
   GatewayClosedError,
   GatewayLifecycleError,
   GatewayNotStartedError,
+  resolveTruncateToolResults,
   toRegistration,
 } from "@agentick/spec-next";
 import { createWireExtensionRegistry } from "./wire-registry.js";
@@ -149,6 +150,28 @@ export interface GatewayHarnessOptions extends BaseHarnessOptions {
    * `staticAuthorizer({ grants })`, `permissiveAuthorizer()`.
    */
   readonly authorizer?: import("@agentick/spec-next").Authorizer;
+  /**
+   * Truncate oversized tool results in the copy sent to CLIENTS over the
+   * wire (ROADMAP A3) — STRICTLY OPT-IN. When enabled, bounds oversized
+   * tool-result content on every client-facing frame (RPC results +
+   * progress/subscription notifications) at the wire dispatch boundary. The
+   * model and the durable store ALWAYS receive the full content — only the
+   * client copy is truncated.
+   *
+   * OFF by default (omitted / `false`): the wire boundary skips the
+   * projection entirely (zero overhead). Output shaping is app-UX POLICY —
+   * payload size in a transcript is the app developer's call — so the
+   * framework ships the capability off, unlike SECURITY defaults which
+   * protect the operator and ship on. Enable (the `createApp({ telemetry })`
+   * twin — `boolean | options` shape):
+   *   - `true` — on at the 32 KiB
+   *     {@link import("@agentick/spec-next").DEFAULT_MAX_TOOL_RESULT_BYTES}
+   *     default;
+   *   - `{ maxBytes }` — on, tuned ceiling;
+   *   - `{ truncate }` — on, replacing the per-block bounder (its `ctx.bound`
+   *     still delegates to the default).
+   */
+  readonly truncateToolResults?: import("@agentick/spec-next").TruncateToolResultsSetting;
   /** Stable gateway id; defaults to `gateway:${ulid()}`. */
   readonly gatewayId?: string;
   /**
@@ -228,6 +251,10 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
   /** ADR 51 §4 — read by the wire dispatch choke point (every method,
    *  both lanes) and by commands/list's visibility filter. */
   readonly authorizer!: import("@agentick/spec-next").Authorizer;
+  /** ROADMAP A3 — client tool-output projection, read by the wire dispatch
+   *  boundary (`dispatchRequest`). `undefined` = OFF (opt-in; the boundary
+   *  then skips projection — zero overhead). */
+  readonly clientProjection?: import("@agentick/spec-next").ToolOutputBounder;
   private gatewayClosed = false;
   /** Idempotency latch for {@link listen} — a second `listen()` is a no-op. */
   private gatewayStarted = false;
@@ -318,6 +345,12 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
         policy,
       },
     );
+
+    // ROADMAP A3 — resolve the opt-in `truncateToolResults` switch once into
+    // the internal `clientProjection` bounder. OFF (undefined) unless the
+    // adopter opts in; the wire dispatch boundary reads `this.clientProjection`
+    // and skips projection when undefined.
+    this.clientProjection = resolveTruncateToolResults(options.truncateToolResults);
 
     // Pre-tag gateway-level tools once at construction. Every
     // `createApp` call threads this same array through to the new

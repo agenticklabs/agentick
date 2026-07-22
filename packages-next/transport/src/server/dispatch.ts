@@ -42,6 +42,8 @@ import {
 } from "@agentick/spec-next";
 import { omitUndefined } from "@agentick/utils-next";
 
+import { projectClientNotification, projectClientResult } from "./client-projection.js";
+
 /**
  * A `DispatchHost` is anything that satisfies `GatewayHarnessProtocol`.
  * The wire dispatcher calls into the gateway's methods; per-connection
@@ -76,6 +78,28 @@ export async function dispatchRequest(
   /** Ingress identity established at connection/request time (ADR 34/51). */
   identity?: IngressIdentity,
 ): Promise<JsonRpcResponse> {
+  // ROADMAP A3 — client tool-output projection, STRICTLY OPT-IN. The gateway
+  // configures ONE policy; every transport attached to it inherits it here
+  // (no straddle). Bounding is OFF unless the adopter opted in
+  // (`createGateway({ clientProjection })`) — an absent policy (the default,
+  // and every bare stub host) means `bounder === undefined`, and this
+  // boundary does ZERO projection work: the sink is used as-is and the
+  // RPC result flows through untouched (the telemetry off-path twin). When
+  // ON, this is the single boundary: wrapping the sink covers all
+  // notification paths (progress / subscription / ctx.publish), and
+  // projecting the extension result below covers the RPC-result paths. The
+  // model path and the durable store are BELOW this boundary and stay full.
+  const bounder = host.clientProjection;
+  const projectedSink: DispatchSink = bounder
+    ? {
+        ...sink,
+        sendNotification: (n) =>
+          sink.sendNotification({
+            method: n.method,
+            params: projectClientNotification(n.method, n.params, bounder),
+          }),
+      }
+    : sink;
   try {
     // Bootstrap methods dispatched directly — must resolve BEFORE the
     // extension registry (initialize runs before the registry is
@@ -125,7 +149,7 @@ export async function dispatchRequest(
           resolution.extension,
           req.id,
           req.params,
-          sink,
+          projectedSink,
           identity,
         );
         try {
@@ -137,7 +161,14 @@ export async function dispatchRequest(
           const result = await host.runWireDispatch(req.method as WireMethod, req.params, () =>
             resolution.handler(req.params, ctx),
           );
-          return success(req.id, result);
+          // ROADMAP A3 — when opted in, bound oversized tool output on the
+          // RPC-result paths (session/send, session/dispatch); no-op for
+          // every other method. OFF (bounder undefined) → the result flows
+          // through by reference, zero projection work.
+          return success(
+            req.id,
+            bounder ? projectClientResult(req.method, result, bounder) : result,
+          );
         } finally {
           // Streaming handlers may have registered a cancel callback
           // via `ctx.transport.registerCancel(...)`; clear it now

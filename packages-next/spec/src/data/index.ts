@@ -48,6 +48,7 @@ export * from "./execution-target.js";
 export * from "./compiler-snapshot.js";
 export * from "./tool-handler.js";
 export * from "./tool-result.js";
+export * from "./tool-output-bound.js";
 export * from "./validator.js";
 export * from "./sandbox.js";
 export * from "./mcp.js";

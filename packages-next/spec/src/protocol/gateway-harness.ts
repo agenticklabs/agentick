@@ -164,6 +164,25 @@ export interface GatewayHarnessProtocol {
   readonly authorizer?: import("../wire/authorizer.js").Authorizer;
 
   /**
+   * Client tool-output projection policy (ROADMAP A3) — STRICTLY OPT-IN.
+   * When present, the wire dispatch boundary (`dispatchRequest` in
+   * `@agentick/transport-next`) bounds oversized tool-result content on
+   * EVERY client-facing frame (RPC results + progress/subscription
+   * notifications) — never the model path, never the durable store.
+   * Configured once on the gateway (via
+   * {@link import("../data/tool-output-bound.js").resolveTruncateToolResults}
+   * from the user-facing `truncateToolResults` setting), so all attached
+   * transports inherit one policy (no straddle).
+   *
+   * Absent (`undefined`) is the DEFAULT and means OFF: the dispatcher does
+   * ZERO projection work — the result and notifications flow through
+   * untouched (zero overhead). A bare stub host that omits it is off too.
+   * Bounding is app-UX policy the adopter opts into, not a framework default
+   * (unlike security defaults, which protect the operator and ship on).
+   */
+  readonly clientProjection?: import("../data/tool-output-bound.js").ToolOutputBounder;
+
+  /**
    * The **fine contextual** authorization layer (ADR 84 §5). Wraps
    * {@link authorizer}.authorize in the hookable `authorizer:authorize` op,
    * so `onBeforeAuthorizerAuthorize` can augment the {@link AuthorizeInput}
