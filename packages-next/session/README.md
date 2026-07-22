@@ -609,6 +609,31 @@ const offGuard = session.model.guard((input, ctx) =>
 default. `setModel` changes only the DEFAULT; the loop resolves the effective
 `RegisteredModel` per tick exactly as before.
 
+## Spawn hardening — depth, lineage, teardown (SP4–SP6)
+
+`session.spawn(input)` creates a child session bound to the same app (it needs a
+`SpawnContext`, injected by the app). The hardening is threaded on
+`SessionHarnessOptions` and enforced by the harness:
+
+- **Depth ceiling (SP4).** `maxSpawnDepth` (from `createApp({ sessions:
+{ maxSpawnDepth } })`, default 10 — v1 `MAX_SPAWN_DEPTH` parity) is stamped on
+  every session. `spawn()` throws the typed `SpawnDepthExceededError` when the
+  parent's lineage is already at the ceiling — fail-closed against runaway
+  self-spawn. Depth is `spawnPath.length`; there is no separate depth counter.
+- **Lineage (SP5).** A child's `spawnPath` is `[...parent.spawnPath,
+parentId]` — the ancestor chain, root-first. It is stamped on the child's
+  `SessionRecord.spawnPath`, threaded into the loop's `run-execution` / `tick`
+  `EventScope` (bus/journal envelope attribution), and stamped on every
+  `StreamEvent` the child's execution handle emits. With `parentSessionId`, the
+  records reconstruct the spawn DAG.
+- **Teardown (SP6).** The parent's construction signal is fanned into each child
+  at spawn, so a parent abort tears down the child's in-flight work (merged into
+  the child's execution signal, PA1 plumbing). The parent tracks its children
+  (`_children`) and disposes them on close (`onClose`) AND on construction-signal
+  abort, via `SpawnContext.disposeChildSession`. Abort-driven disposal awaits
+  `whenQuiescent()` first, so closing never unmounts the compiler mid-tick.
+  Children collapse their own sub-trees transitively.
+
 ## API
 
 Full surface in the [typedoc]. The package root exports the thin set an
@@ -826,7 +851,13 @@ their backing.
 - `src/__tests__/extended-surface.spec.ts`,
   `layered-tools.spec.ts` — host-side `dispatch` (incl.
   `ToolPermissionError`), timeline handle append/`trailingInput`,
-  layered execution-scoped vs session-scoped tool registry (#139).
+  layered execution-scoped vs session-scoped tool registry (#139),
+  plus `spawn()` routing through a `SpawnContext`.
+- Spawn hardening (SP4–SP6) is verified cross-harness (spawn needs a real
+  app-provided `SpawnContext`) in `@agentick/app-next`
+  `src/__tests__/spawn-hardening.spec.tsx` — the depth ceiling +
+  `SpawnDepthExceededError`, `spawnPath` on record / loop `EventScope` /
+  handle stream, and parent close/abort → child disposal.
 - `src/__tests__/timeline-durability.spec.ts` — open-or-rehydrate
   hydration + the execution-end flush barrier (`TimelineWriteFailed`
   → `status=failed`); also exercises `session.snapshot().bridges.timeline.persisted`.

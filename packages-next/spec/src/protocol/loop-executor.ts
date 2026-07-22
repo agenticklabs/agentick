@@ -131,6 +131,14 @@ export interface RunExecutionInput {
   readonly executionId: string;
   readonly sessionId: string;
   readonly parentExecutionId?: string;
+  /**
+   * Spawn lineage of the session running this execution (SP5) — ancestor
+   * session ids, root-first, empty/absent for a root session. Stamped onto
+   * the execution's `EventScope` (via the command scope factory) so every
+   * tick / model / tool envelope emitted under this execution is
+   * attributable to the sub-agent that produced it.
+   */
+  readonly spawnPath?: readonly string[];
 
   /** Compiler harness whose `mountId` the loop will render each tick. */
   readonly compiler: CompilerProtocol;
@@ -389,6 +397,8 @@ export interface TickInput {
   readonly executionId: string;
   readonly sessionId: string;
   readonly mountId: string;
+  /** Spawn lineage of the session (SP5) — forwarded onto the tick's `EventScope`. */
+  readonly spawnPath?: readonly string[];
 
   /** Compiler harness whose `mountId` this tick renders. */
   readonly compiler: CompilerProtocol;

@@ -34,12 +34,19 @@ type DistributiveOmit<T, K extends string | number | symbol> = T extends unknown
   : never;
 type EmitInput = DistributiveOmit<
   StreamEvent,
-  "id" | "sequence" | "timestamp" | "sessionId" | "executionId"
+  "id" | "sequence" | "timestamp" | "sessionId" | "executionId" | "spawnPath"
 >;
 
 export interface SessionExecutionHandleArgs {
   readonly sessionId: string;
   readonly executionId: string;
+  /**
+   * Spawn lineage (SP5) — ancestor session ids, root-first. When present
+   * (this is a spawned child) it is stamped on every emitted `StreamEvent`
+   * so a caller consuming the child's handle stream can attribute the
+   * sub-agent's events. Absent / omitted for a root session.
+   */
+  readonly spawnPath?: readonly string[];
   readonly resultPromise: Promise<SendResult>;
   readonly abort: (reason?: string) => Promise<void>;
 }
@@ -59,7 +66,7 @@ export interface CreatedHandle {
 }
 
 export function createSessionExecutionHandle(args: SessionExecutionHandleArgs): CreatedHandle {
-  const { sessionId, executionId, resultPromise, abort } = args;
+  const { sessionId, executionId, spawnPath, resultPromise, abort } = args;
 
   let status: "running" | "completed" | "error" | "aborted" = "running";
   resultPromise.then(
@@ -90,6 +97,7 @@ export function createSessionExecutionHandle(args: SessionExecutionHandleArgs): 
       timestamp: new Date().toISOString(),
       sessionId,
       executionId,
+      ...(spawnPath !== undefined && spawnPath.length > 0 ? { spawnPath } : {}),
     } as StreamEvent;
     const r = resolvers.shift();
     if (r) r({ value: full, done: false });

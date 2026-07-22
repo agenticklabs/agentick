@@ -321,12 +321,14 @@ describe("SessionHarness — spawn", () => {
     // Wire a stub SpawnContext directly.
     let receivedInput: SpawnContextChildInput | undefined;
     const ctx: SpawnContext = {
+      disposeChildSession: async () => undefined,
       createChildSession: async (input) => {
         receivedInput = input;
         // Return a minimal stub satisfying SessionHarnessProtocol
         // shape. The parent's spawn() returns the child as-is — it
         // doesn't call any methods.
         return {
+          id: input.sessionId ?? "child-stub",
           send: async () => ({}) as never,
           timeline: () => [],
           snapshot: () => ({}) as never,

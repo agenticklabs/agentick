@@ -117,26 +117,26 @@ BYO engine you constructed yourself. **Exactly one is required**, and
 they are mutually exclusive; passing a bare adapter to `executor`
 throws (it belongs on `model`).
 
-| Field                | Type                                         | Notes                                                                                                                                                                                                                                                         |
-| -------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `model`              | `LanguageModelAdapter`                       | The model to call — `openai("gpt-4o")`, `aisdk(model)`, `google(...)`, etc. Standard path. Exactly one of `model` / `executor` required.                                                                                                                      |
-| `executor`           | `LanguageModelExecutor` or `ExecutorFactory` | BYO execution engine. A bare adapter goes on `model`, not here.                                                                                                                                                                                               |
-| `target`             | `ExecutionTarget`                            | Optional. Defaults to `executor.target`.                                                                                                                                                                                                                      |
-| `compiler`           | `CompilerProtocol` or `CompilerFactory`      | Required (omittable via `/react` subpath default).                                                                                                                                                                                                            |
-| `loop`               | `LoopExecutorProtocol` or factory            | Optional. Defaults to the bundled `LoopExecutorHarness`.                                                                                                                                                                                                      |
-| `cluster`            | `ClusterFactory`                             | Optional. See "Cluster integration" above.                                                                                                                                                                                                                    |
-| `tools`              | `ToolDeclaration[]`                          | App-scope tool registry. Threads to every session.                                                                                                                                                                                                            |
-| `hooks`              | `CommandHooks`                               | App-scope command-lifecycle hooks (`onBefore*` / `onAfter*`, ADR 80). Folded once at construction; every session composes its own onto these (ADR 82). See the "Hooks" pattern below.                                                                         |
-| `extensions`         | `Extension[]`                                | App + session extensions. Composed at construction.                                                                                                                                                                                                           |
-| `bus`                | `EventBus` or factory                        | Optional substrate override.                                                                                                                                                                                                                                  |
-| `inbox`              | `MessageInbox` or factory                    | Optional substrate override.                                                                                                                                                                                                                                  |
-| `journal`            | `OperationJournal` or factory                | Optional substrate override.                                                                                                                                                                                                                                  |
-| `signal`             | `AbortSignal`                                | App-wide cascade (PA1). Firing it aborts every active session's in-flight execution and refuses new work — `closeApp()` in abort shape. See "App-wide `signal`" below.                                                                                        |
-| `sessions`           | `{ store?, maxActive?, idleTimeout? }`       | Durable session store + the bounded-registry knobs (PA2/PA3). See "Bounded live registry" below.                                                                                                                                                              |
-| `metadata`           | `Record<string, unknown>`                    | Adopter-defined bag carried on the harness instance.                                                                                                                                                                                                          |
-| `telemetry`          | `TelemetryLayer`                             | Optional Effect `Layer` (e.g. `@effect/opentelemetry`'s `NodeSdk`). Built into an app-scoped `ManagedRuntime` at construction; app-edge operations run on it so `Effect.withSpan` annotations reach the tracer (ADR 78). BYO — no OTel dependency is bundled. |
-| `telemetryNamespace` | `string`                                     | Span-attribute prefix on every `<ns>.op_id` / `<ns>.surface` attribute. Defaults to `"agentick"`; set it to whitelabel your deployment's traces.                                                                                                              |
-| `appId`              | `string`                                     | Defaults to `app:${ulid()}`.                                                                                                                                                                                                                                  |
+| Field                | Type                                                   | Notes                                                                                                                                                                                                                                                         |
+| -------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `model`              | `LanguageModelAdapter`                                 | The model to call — `openai("gpt-4o")`, `aisdk(model)`, `google(...)`, etc. Standard path. Exactly one of `model` / `executor` required.                                                                                                                      |
+| `executor`           | `LanguageModelExecutor` or `ExecutorFactory`           | BYO execution engine. A bare adapter goes on `model`, not here.                                                                                                                                                                                               |
+| `target`             | `ExecutionTarget`                                      | Optional. Defaults to `executor.target`.                                                                                                                                                                                                                      |
+| `compiler`           | `CompilerProtocol` or `CompilerFactory`                | Required (omittable via `/react` subpath default).                                                                                                                                                                                                            |
+| `loop`               | `LoopExecutorProtocol` or factory                      | Optional. Defaults to the bundled `LoopExecutorHarness`.                                                                                                                                                                                                      |
+| `cluster`            | `ClusterFactory`                                       | Optional. See "Cluster integration" above.                                                                                                                                                                                                                    |
+| `tools`              | `ToolDeclaration[]`                                    | App-scope tool registry. Threads to every session.                                                                                                                                                                                                            |
+| `hooks`              | `CommandHooks`                                         | App-scope command-lifecycle hooks (`onBefore*` / `onAfter*`, ADR 80). Folded once at construction; every session composes its own onto these (ADR 82). See the "Hooks" pattern below.                                                                         |
+| `extensions`         | `Extension[]`                                          | App + session extensions. Composed at construction.                                                                                                                                                                                                           |
+| `bus`                | `EventBus` or factory                                  | Optional substrate override.                                                                                                                                                                                                                                  |
+| `inbox`              | `MessageInbox` or factory                              | Optional substrate override.                                                                                                                                                                                                                                  |
+| `journal`            | `OperationJournal` or factory                          | Optional substrate override.                                                                                                                                                                                                                                  |
+| `signal`             | `AbortSignal`                                          | App-wide cascade (PA1). Firing it aborts every active session's in-flight execution and refuses new work — `closeApp()` in abort shape. See "App-wide `signal`" below.                                                                                        |
+| `sessions`           | `{ store?, maxActive?, idleTimeout?, maxSpawnDepth? }` | Durable session store + the bounded-registry knobs (PA2/PA3) + the spawn depth ceiling (SP4). See "Bounded live registry" and "Spawn hardening" below.                                                                                                        |
+| `metadata`           | `Record<string, unknown>`                              | Adopter-defined bag carried on the harness instance.                                                                                                                                                                                                          |
+| `telemetry`          | `TelemetryLayer`                                       | Optional Effect `Layer` (e.g. `@effect/opentelemetry`'s `NodeSdk`). Built into an app-scoped `ManagedRuntime` at construction; app-edge operations run on it so `Effect.withSpan` annotations reach the tracer (ADR 78). BYO — no OTel dependency is bundled. |
+| `telemetryNamespace` | `string`                                               | Span-attribute prefix on every `<ns>.op_id` / `<ns>.surface` attribute. Defaults to `"agentick"`; set it to whitelabel your deployment's traces.                                                                                                              |
+| `appId`              | `string`                                               | Defaults to `app:${ulid()}`.                                                                                                                                                                                                                                  |
 
 Returns `Promise<AppHarness>` after substrate readiness signals. Not
 exhaustive — see [typedoc](https://agentick.dev) / `AppHarnessOptions`
@@ -268,6 +268,36 @@ When the signal fires:
 
 A per-session `createSession({ signal })` overrides the app signal for that
 session (the caller owns that session's cancel).
+
+### Spawn hardening — depth ceiling, lineage, teardown (SP4–SP6)
+
+`session.spawn(...)` creates a **child session** bound to the same app. Three
+guarantees keep a sub-agent tree safe and observable:
+
+```ts
+const app = await createApp(<Agent />, {
+  model,
+  sessions: { maxSpawnDepth: 10 }, // default 10 — the recursion bound
+});
+```
+
+- **Depth ceiling (SP4).** A session whose spawn lineage is already
+  `maxSpawnDepth` deep cannot spawn further — `spawn()` throws the typed
+  `SpawnDepthExceededError` (`{ depth, maxDepth }`), failing closed so an agent
+  that recursively spawns itself crashes with a clear error instead of blowing
+  the stack. Depth is simply `spawnPath.length`.
+- **Lineage / attribution (SP5).** A child carries a `spawnPath` — the ancestor
+  session ids, root-first (`[root, …, parent]`); its length is the depth. It is
+  stamped on the child's `SessionRecord.spawnPath` (so a sessions-list attributes
+  a sub-agent to its whole chain), on the loop's `run-execution`/`tick`
+  `EventScope` (so bus/journal envelopes attribute sub-agent work), and on the
+  child's per-execution handle stream. Combined with `parentSessionId`, the
+  session records reconstruct the whole spawn DAG.
+- **Teardown cascade (SP6).** The parent's construction signal is fanned into
+  each child, so a **parent abort tears down the child's in-flight work**
+  (the same merge-into-execution plumbing as the app signal). A **parent close
+  or abort disposes its children** — removed from the live registry and closed —
+  so no sub-session leaks; children dispose their own children transitively.
 
 ### `app.closeApp()` / `app.close()`
 
@@ -424,6 +454,12 @@ counterpart (see [ADR 38](../../docs/proposals/v2/blueprint/38-cluster-lifecycle
   refuses new work at the app edge, is fanned into every session (a
   post-abort `send` on any resolves `aborted`, 0 ticks), and tears down
   an in-flight execution mid-flight.
+- `src/__tests__/spawn-hardening.spec.tsx` (SP4–SP6) — `maxSpawnDepth`
+  fails a too-deep spawn with `SpawnDepthExceededError` (configured cap +
+  the default-10 chain), a child's `spawnPath` lineage lands on its
+  `SessionRecord`, its loop `EventScope`, and its handle stream, and a
+  parent close / abort disposes its spawned children (no registry leak;
+  abort mid-child-execution tears the child down without a compiler race).
 
 ## Known gaps
 

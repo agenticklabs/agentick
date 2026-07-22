@@ -256,6 +256,9 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         sessionId: i.sessionId,
         executionId: i.executionId,
         tickId: i.tickId,
+        // SP5 — sub-agent attribution: every tick envelope carries the
+        // session's spawn lineage when it is a spawned child.
+        ...(i.spawnPath !== undefined ? { spawnPath: i.spawnPath } : {}),
       }),
       handler: (i) => this.tickBody(i),
     });
@@ -280,7 +283,13 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
       name: "loop:run-execution",
       exposure: "internal",
       opId: (i) => `loop:execution:${i.executionId}`,
-      scope: (i) => ({ sessionId: i.sessionId, executionId: i.executionId }),
+      scope: (i) => ({
+        sessionId: i.sessionId,
+        executionId: i.executionId,
+        // SP5 — every execution envelope from a spawned child carries its
+        // spawn lineage so sub-agent work is attributable on the bus/journal.
+        ...(i.spawnPath !== undefined ? { spawnPath: i.spawnPath } : {}),
+      }),
       body: (i, sink) => this.runExecutionBody(i, sink),
     });
   }
@@ -441,6 +450,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           executionId,
           sessionId: input.sessionId,
           mountId: input.mountId,
+          ...(input.spawnPath !== undefined ? { spawnPath: input.spawnPath } : {}),
           compiler: input.compiler,
           modelExecutor: input.modelExecutor,
           target: input.target,

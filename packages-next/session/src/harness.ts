@@ -84,6 +84,7 @@ import {
   isSnapshotCapable,
   SessionClosedError,
   SnapshotVersionMismatch,
+  SpawnDepthExceededError,
   SPEC_VERSION,
   TimelineWriteFailed,
 } from "@agentick/spec-next";
@@ -301,6 +302,24 @@ export interface SessionHarnessOptions<P = unknown> {
    * no signal is wired.
    */
   readonly signal?: AbortSignal;
+  /**
+   * Spawn lineage (SP5) — ancestor session ids, root-first
+   * (`[root, …, parent]`). Empty / absent for a root session; its length is
+   * this session's spawn depth. Set by the App's `createChildSession` when
+   * this session is itself a spawned child. Stamped onto the
+   * `SessionRecord`, the loop's execution/tick `EventScope`, and the
+   * per-execution handle stream so sub-agent work is attributable.
+   */
+  readonly spawnPath?: readonly string[];
+  /**
+   * Spawn depth ceiling (SP4) — the maximum `spawnPath.length` a session
+   * may have and still spawn a child. A session already AT this depth
+   * throws {@link SpawnDepthExceededError} from `spawn()` (fail-closed —
+   * prevents unbounded self-spawn recursion). App-uniform: the App stamps
+   * the same value on every session it constructs. Defaults to 10 (v1
+   * `MAX_SPAWN_DEPTH` parity). See `AppHarnessOptions.sessions.maxSpawnDepth`.
+   */
+  readonly maxSpawnDepth?: number;
   /** Optional initial knob values. */
   readonly initialKnobs?: Readonly<Record<string, unknown>>;
   /** Optional initial session-state values (`useSessionState`). */
@@ -478,6 +497,20 @@ export class SessionHarness<P = unknown>
   private readonly spawnContext: SpawnContext<P> | undefined;
   private readonly parentSessionId: string | undefined;
   /**
+   * Spawn lineage (SP5) — ancestor session ids, root-first. `[]` for a root
+   * session; `length` is this session's spawn depth (the SP4 bound reads it).
+   * A child's lineage is `[...this.spawnPath, this.runtime.id]`.
+   */
+  private readonly spawnPath: readonly string[];
+  /** Spawn depth ceiling (SP4). Default 10 (v1 `MAX_SPAWN_DEPTH`). */
+  private readonly maxSpawnDepth: number;
+  /**
+   * Ids of the children THIS session spawned (SP6). Disposed on parent
+   * close / construction-signal abort — a spawned child is a parent-owned
+   * resource with no independent lifecycle.
+   */
+  private readonly _children = new Set<string>();
+  /**
    * Durable session registry (E11), captured identity (`createdAt` / `appId` /
    * `agentId`), and the app-owned descriptive slots (`title` / `description` /
    * `metadata`) all live on {@link SessionRuntime} now — folded into the
@@ -626,6 +659,9 @@ export class SessionHarness<P = unknown>
         appId: options.appId,
         agentId: options.agentId,
         parentSessionId: options.parentSessionId,
+        // SP5 — persist the full lineage on the record (omit for a root).
+        spawnPath:
+          options.spawnPath && options.spawnPath.length > 0 ? options.spawnPath : undefined,
         title: options.title,
         description: options.description,
         // The adopter's session metadata bag doubles as the record's open
@@ -710,6 +746,9 @@ export class SessionHarness<P = unknown>
     });
     this.spawnContext = options.spawnContext;
     this.parentSessionId = options.parentSessionId;
+    this.spawnPath = options.spawnPath ?? [];
+    // Default 10 — v1 `MAX_SPAWN_DEPTH`.
+    this.maxSpawnDepth = options.maxSpawnDepth ?? 10;
     this.telemetryRuntime = options.telemetryRuntime;
     this.defaultMaxTicks = options.defaultMaxTicks ?? 8;
     this.requiredScopes = options.requiredScopes;
@@ -737,6 +776,27 @@ export class SessionHarness<P = unknown>
       loop: this.loop,
       toolExecutor: this.toolExecutor,
     });
+
+    // SP6 — spawned-child teardown. A child is a parent-owned resource with
+    // no independent lifecycle, so it is disposed when the parent ends:
+    //   - parent close  → `onClose` fires `disposeChildren` (LIFO with the
+    //     rest of the session's teardown);
+    //   - parent abort  → the construction signal firing disposes children
+    //     too, so an aborted (but not yet closed) parent leaves no live
+    //     sub-sessions in the registry. The child's in-flight WORK is already
+    //     torn down independently: its construction signal IS the parent's
+    //     (fanned in at spawn), merged into the child's execution signal.
+    // The abort listener is `once` (abort fires at most once) and is removed
+    // on close so it never outlives the session on a shared app signal.
+    this.onClose(() => this.disposeChildren());
+    if (this.constructionSignal !== undefined) {
+      const sig = this.constructionSignal;
+      const onAbort = (): void => {
+        void this.disposeChildren();
+      };
+      sig.addEventListener("abort", onAbort, { once: true });
+      this.onClose(() => sig.removeEventListener("abort", onAbort));
+    }
 
     // Open-or-rehydrate (ADR 49 §Hydration): when a durable store was
     // injected, load the session's persisted log into the timeline
@@ -865,6 +925,17 @@ export class SessionHarness<P = unknown>
    */
   get hasInFlightExecution(): boolean {
     return this._handleReservation !== null || this.runtime.currentExecutionId() !== null;
+  }
+
+  /**
+   * Resolve once this session's in-flight execution (if any) has settled —
+   * regardless of outcome. Used by SP6 child disposal so a parent-abort
+   * teardown closes the child only AFTER its aborting loop has drained its
+   * tick-end lifecycle (closing mid-tick would unmount the compiler out from
+   * under the loop → `NotMounted`). A no-op when idle.
+   */
+  async whenQuiescent(): Promise<void> {
+    await (this._currentExecution ?? Promise.resolve()).catch(() => undefined);
   }
 
   // ──────── SessionHarnessProtocol ────────
@@ -1199,22 +1270,62 @@ export class SessionHarness<P = unknown>
         ),
       }) satisfies SessionError;
     }
+    // SP4 — fail closed at the depth ceiling. A session whose lineage is
+    // already `maxSpawnDepth` deep cannot spawn a deeper child; this is the
+    // guard against an agent recursively spawning itself into a stack blow-up.
+    if (this.spawnPath.length >= this.maxSpawnDepth) {
+      throw new SpawnDepthExceededError({
+        depth: this.spawnPath.length,
+        maxDepth: this.maxSpawnDepth,
+      }) satisfies SessionError;
+    }
     const childInput = {
       parentSessionId: this.runtime.id,
       agent: input.agent,
+      // SP5 — extend the lineage: the child's ancestry is ours plus our id.
+      spawnPath: [...this.spawnPath, this.runtime.id],
       ...omitUndefined({
         sessionId: input.sessionId,
         metadata: input.metadata,
         initialProps: input.initialProps,
         initialKnobs: input.initialKnobs,
         maxTicks: input.maxTicks,
+        // SP6 — fan our construction signal into the child so a parent abort
+        // tears down the child's in-flight work (PA1 merge-into-execution).
+        signal: this.constructionSignal,
       }),
     };
     const child = await this.spawnContext.createChildSession(childInput);
+    // SP6 — track the child so parent close / abort disposes it (see the
+    // teardown wired in the constructor). Idempotent on the child id.
+    this._children.add(child.id);
     if (input.send !== undefined) {
       return child.send(input.send);
     }
     return child;
+  }
+
+  /**
+   * SP6 — dispose every child this session spawned, routing through the
+   * app's `SpawnContext.disposeChildSession` (registry removal +
+   * `session.close()`) so nothing leaks. Best-effort and idempotent: the set
+   * is drained first (so a re-entrant close is a no-op), unknown ids are a
+   * no-op on the app side, and a failure disposing one child does not block
+   * the rest. Children dispose their OWN children transitively, so the whole
+   * sub-tree collapses.
+   */
+  private async disposeChildren(): Promise<void> {
+    if (this._children.size === 0 || this.spawnContext === undefined) return;
+    const ids = [...this._children];
+    this._children.clear();
+    const ctx = this.spawnContext;
+    await Promise.all(
+      ids.map((id) =>
+        Promise.resolve(ctx.disposeChildSession(id)).catch(() => {
+          // best effort — an already-disposed / unknown child is fine
+        }),
+      ),
+    );
   }
 
   async dispatch(
@@ -1752,6 +1863,8 @@ export class SessionHarness<P = unknown>
     const { handle, emit, close } = createSessionExecutionHandle({
       sessionId: this.runtime.id,
       executionId,
+      // SP5 — the caller's handle stream carries the lineage too.
+      ...(this.spawnPath.length > 0 ? { spawnPath: this.spawnPath } : {}),
       resultPromise,
       abort: async (reason) => {
         await this.loop.abort({ executionId, ...(reason !== undefined ? { reason } : {}) });
@@ -1811,6 +1924,9 @@ export class SessionHarness<P = unknown>
               {
                 executionId,
                 sessionId: this.runtime.id,
+                // SP5 — stamp the spawn lineage on the execution scope so every
+                // tick / model / tool envelope is attributable to this sub-agent.
+                ...(this.spawnPath.length > 0 ? { spawnPath: this.spawnPath } : {}),
                 compiler: this.compiler,
                 mountId: this.mountId,
                 modelExecutor: modelExecutorForCall,

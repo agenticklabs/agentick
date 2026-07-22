@@ -82,6 +82,8 @@ export {
   type SessionErrorChannel,
   SessionNotFoundError,
   SessionTimelineError,
+  SnapshotVersionMismatch,
+  SpawnDepthExceededError,
   type StateApplyError,
   type StateApplyErrorChannel,
   TimelineWriteFailed,

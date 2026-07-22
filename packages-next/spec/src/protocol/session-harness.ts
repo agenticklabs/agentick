@@ -490,6 +490,7 @@ export {
   type SessionErrorChannel,
   SessionTimelineError,
   SnapshotVersionMismatch,
+  SpawnDepthExceededError,
   type StateApplyError,
   type StateApplyErrorChannel,
   TimelineWriteFailed,
@@ -655,8 +656,17 @@ export interface SessionHarnessProtocol<P = unknown> {
    * `[V1-INHERITED]` — collapses v1's `spawn(component, input?, opts?)`
    * into a single options object.
    *
+   * **Lineage + teardown (SP4–SP6).** The child inherits the parent's
+   * spawn `spawnPath` (extended with the parent's own id) — carried on the
+   * child's `SessionRecord`, its execution-scope envelopes, and its handle
+   * stream so sub-agent work is attributable. The parent's construction
+   * signal fans into the child (parent abort → child in-flight teardown),
+   * and a parent close/abort disposes the child (no leaked sub-sessions).
+   *
    * @throws {SessionError} — `SessionClosedError` if the parent is
-   *   shutting down; impl-specific failures otherwise.
+   *   shutting down; `SpawnDepthExceededError` if the parent's spawn depth
+   *   is already at the `sessions.maxSpawnDepth` ceiling (fail-closed, SP4);
+   *   impl-specific failures otherwise.
    */
   spawn(input: SpawnInput<P>): Promise<SessionExecutionHandle | SessionHarnessProtocol<P>>;
 
@@ -904,6 +914,14 @@ export interface SpawnContext<P = unknown> {
    * mountReady) and ready for `send`.
    */
   createChildSession(input: SpawnContextChildInput<P>): Promise<SessionHarnessProtocol<P>>;
+  /**
+   * Tear down a spawned child (SP6). Invoked by the parent when the parent
+   * itself closes or its construction signal aborts — the child is a
+   * parent-owned resource with no independent lifecycle, so it is disposed
+   * (removed from the live registry + `session.close()`) rather than left
+   * to leak. Idempotent; unknown / already-disposed ids are a no-op.
+   */
+  disposeChildSession(sessionId: string): Promise<void>;
 }
 
 export interface SpawnContextChildInput<P = unknown> {
@@ -914,6 +932,19 @@ export interface SpawnContextChildInput<P = unknown> {
   readonly initialProps?: P;
   readonly initialKnobs?: Readonly<Record<string, unknown>>;
   readonly maxTicks?: number;
+  /**
+   * The child's spawn lineage (SP5) — the parent's own `spawnPath`
+   * extended with the parent's session id, root-first. Its length is the
+   * child's spawn depth. Stamped onto the child's `SessionRecord`,
+   * execution-scope envelopes, and handle stream.
+   */
+  readonly spawnPath?: readonly string[];
+  /**
+   * The parent's construction signal (SP6). Fanned into the child as its
+   * construction signal so a parent abort tears down the child's in-flight
+   * work through the same merge-into-execution-signal plumbing (PA1).
+   */
+  readonly signal?: AbortSignal;
 }
 
 // Convenience re-exports for ergonomic imports.

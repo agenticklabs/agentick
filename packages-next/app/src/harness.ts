@@ -364,6 +364,14 @@ export interface AppHarnessOptions<P = unknown> {
     readonly maxActive?: number;
     /** Idle-eviction threshold in ms; a background sweep pages out sessions idle this long. */
     readonly idleTimeout?: number;
+    /**
+     * Spawn depth ceiling (SP4). The maximum `spawnPath.length` a session may
+     * have and still `spawn()` a child — a session already at this depth
+     * throws `SpawnDepthExceededError` (fail-closed), bounding recursive
+     * self-spawn. Stamped uniformly onto every session the app constructs.
+     * Defaults to 10 (v1 `MAX_SPAWN_DEPTH` parity).
+     */
+    readonly maxSpawnDepth?: number;
   };
 
   // ────────── Per-session defaults (constructed per createSession) ──────────
@@ -702,6 +710,11 @@ export class AppHarness<P = unknown>
   /** Idle-eviction threshold in ms (PA3). `undefined` → no idle sweep. */
   private readonly idleTimeout: number | undefined;
   /**
+   * Spawn depth ceiling (SP4), stamped onto every session. Default 10 (v1
+   * `MAX_SPAWN_DEPTH`). See {@link AppHarnessOptions.sessions}.
+   */
+  private readonly maxSpawnDepth: number;
+  /**
    * Background idle-sweep handle (PA3). Present only when `idleTimeout` is
    * set; unref'd so it never keeps the process alive; cleared in `closeApp`.
    */
@@ -998,6 +1011,7 @@ export class AppHarness<P = unknown>
     this.appSignal = options.signal;
     this.maxActive = options.sessions?.maxActive;
     this.idleTimeout = options.sessions?.idleTimeout;
+    this.maxSpawnDepth = options.sessions?.maxSpawnDepth ?? 10;
     // Activity tracking + idle sweep are wired ONLY when eviction is
     // configured — zero overhead for the unbounded default. Activity =
     // any `requested`-phase envelope scoped to a live session (send /
@@ -1477,6 +1491,10 @@ export class AppHarness<P = unknown>
     overrides: {
       readonly agent?: unknown;
       readonly parentSessionId?: string;
+      /** SP5 — the child's spawn lineage, forwarded onto the session. */
+      readonly spawnPath?: readonly string[];
+      /** SP6 — the parent's construction signal, fanned into the child. */
+      readonly signal?: AbortSignal;
     } = {},
   ): Promise<SessionHarnessProtocol<P>> {
     this.assertOpen();
@@ -1764,7 +1782,14 @@ export class AppHarness<P = unknown>
       // signal. Per-session `CreateSessionInput.signal` overrides it (a
       // caller who wires their own signal owns that session's cancel). The
       // session merges this with each `SendInput.signal` on every send.
-      ...omitUndefined({ signal: input.signal ?? this.appSignal }),
+      // SP6 — a spawned child's `overrides.signal` (its parent's construction
+      // signal) takes precedence, so a parent abort cascades into the child.
+      ...omitUndefined({ signal: overrides.signal ?? input.signal ?? this.appSignal }),
+      // SP4/SP5 — spawn lineage + depth ceiling. `spawnPath` is set only for a
+      // spawned child (via `createChildSession`); `maxSpawnDepth` is stamped
+      // app-uniformly on every session so the SP4 guard reads a consistent cap.
+      ...omitUndefined({ spawnPath: overrides.spawnPath }),
+      maxSpawnDepth: this.maxSpawnDepth,
       ...(input.requiredScopes !== undefined ? { requiredScopes: input.requiredScopes } : {}),
       ...(this.models !== undefined ? { models: this.models } : {}),
       // Streaming cascade: per-session input.streaming > app-level
@@ -1912,7 +1937,33 @@ export class AppHarness<P = unknown>
     return this.createSessionBody(createInput, /* ephemeral */ false, {
       agent: input.agent,
       parentSessionId: input.parentSessionId,
+      // SP5/SP6 — forward the child's lineage + the parent's construction
+      // signal so the session stamps envelopes and cascades teardown.
+      ...omitUndefined({ spawnPath: input.spawnPath, signal: input.signal }),
     });
+  }
+
+  /**
+   * `SpawnContext.disposeChildSession` (SP6) — tear down a spawned child on
+   * behalf of its parent. Routes through the same registry-aware
+   * `disposeSession("close")` a genuine session end uses, so the child is
+   * removed from the live registry, its harness is closed, and the app-level
+   * `onSessionClose` fires. Idempotent — an unknown / already-disposed id is a
+   * no-op (`disposeSession` early-returns on a registry miss).
+   */
+  async disposeChildSession(sessionId: string): Promise<void> {
+    // A parent-abort cascade can fire WHILE the child's execution is still
+    // draining (the same signal is tearing that execution down). Wait for the
+    // child to go quiescent before closing — closing mid-tick would unmount
+    // the child's compiler out from under its loop (→ `NotMounted`). The
+    // construction-signal merge guarantees the execution is already aborting,
+    // so this settles promptly.
+    const entry = this.registry.get(sessionId);
+    const session = entry?.session as { whenQuiescent?: () => Promise<void> } | undefined;
+    if (session?.whenQuiescent !== undefined) {
+      await session.whenQuiescent().catch(() => undefined);
+    }
+    await this.disposeSession(sessionId, "close");
   }
 
   private async runOnceBody(input: RunOnceInput<P>): Promise<RunOnceResult> {
@@ -2019,6 +2070,12 @@ export class AppHarness<P = unknown>
   ): Promise<void> {
     const entry = this.registry.get(sessionId);
     if (!entry) return;
+    // TOCTOU re-guard (eviction only): the sweep/LRU selected this victim
+    // BEFORE awaiting prior disposals — a send may have landed since. No
+    // await sits between this check and the registry delete, so the guard
+    // is atomic in single-threaded JS: an in-flight session is never
+    // evicted mid-send.
+    if (reason === "evict" && !this.isEvictable(entry)) return;
     this.registry.delete(sessionId);
     try {
       await entry.session.close();

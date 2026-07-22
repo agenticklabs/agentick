@@ -76,6 +76,13 @@ export interface SessionRecord {
   readonly status: SessionStatus;
   /** Spawn ancestry (1 agent : 1 session) — the parent's id forms the session tree. */
   readonly parentSessionId?: string;
+  /**
+   * Full spawn lineage (SP5) — ancestor session ids, root-first
+   * (`[root, …, parent]`); its length is the session's spawn depth. Absent
+   * for a root session. Lets a sessions-list attribute a sub-agent to its
+   * whole ancestor chain, not just its immediate `parentSessionId`.
+   */
+  readonly spawnPath?: readonly string[];
   /** Owning app id — the primary `list` scope dimension. */
   readonly appId?: string;
   /**

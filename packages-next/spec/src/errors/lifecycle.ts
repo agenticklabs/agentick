@@ -254,6 +254,41 @@ export class ModelExecutorBuilderMissingError extends SessionError {
 registerAgentickError("ModelExecutorBuilderMissingError", ModelExecutorBuilderMissingError);
 
 /**
+ * `session.spawn(...)` was refused because the parent's spawn lineage is
+ * already at the configured depth ceiling (`createApp({ sessions: {
+ * maxSpawnDepth } })`, default 10 — v1 `MAX_SPAWN_DEPTH` parity). A session
+ * whose `spawnPath.length` has reached `maxDepth` cannot spawn a deeper
+ * child; the bound fails CLOSED, so an agent that recursively spawns itself
+ * crashes with a typed error instead of exhausting the stack (SP4).
+ *
+ * Thrown synchronously by `spawn()` BEFORE the child is constructed — like
+ * {@link ModelExecutorBuilderMissingError}, it never reaches an Effect
+ * command channel, so it is NOT a member of {@link SessionErrorChannel}.
+ */
+export class SpawnDepthExceededError extends SessionError {
+  readonly _tag = "SpawnDepthExceededError" as const;
+  /** The parent's current spawn depth (`spawnPath.length`) — equals `maxDepth`. */
+  readonly depth: number;
+  /** The configured ceiling (`sessions.maxSpawnDepth`). */
+  readonly maxDepth: number;
+  constructor(args: {
+    readonly depth: number;
+    readonly maxDepth: number;
+    readonly cause?: unknown;
+  }) {
+    super(
+      `session.spawn: maximum spawn depth (${args.maxDepth}) reached — a session at ` +
+        `depth ${args.depth} cannot spawn a deeper child. Raise it via ` +
+        `createApp({ sessions: { maxSpawnDepth } }).`,
+      { cause: args.cause },
+    );
+    this.depth = args.depth;
+    this.maxDepth = args.maxDepth;
+  }
+}
+registerAgentickError("SpawnDepthExceededError", SpawnDepthExceededError);
+
+/**
  * `session.restore(snapshot)` was handed a snapshot whose `specVersion`
  * does not match the running framework's `SPEC_VERSION`, and the session
  * was constructed WITHOUT a `migrateSnapshot` callback to bring the old
