@@ -1334,6 +1334,9 @@ importers:
       '@agentick/sandbox-next':
         specifier: workspace:*
         version: link:../sandbox
+      '@agentick/utils-next':
+        specifier: workspace:*
+        version: link:../utils
 
   packages-next/session:
     dependencies:

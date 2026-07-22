@@ -42,6 +42,11 @@
       "types": "./src/loaders/node/index.ts",
       "import": "./src/loaders/node/index.ts",
       "default": "./src/loaders/node/index.ts"
+    },
+    "./path/node": {
+      "types": "./src/path/node.ts",
+      "import": "./src/path/node.ts",
+      "default": "./src/path/node.ts"
     }
   },
   "publishConfig": {
@@ -65,6 +70,11 @@
         "types": "./dist/loaders/node/index.d.ts",
         "import": "./dist/loaders/node/index.js",
         "default": "./dist/loaders/node/index.js"
+      },
+      "./path/node": {
+        "types": "./dist/path/node.d.ts",
+        "import": "./dist/path/node.js",
+        "default": "./dist/path/node.js"
       }
     }
   },

@@ -7,9 +7,9 @@
  * v2 spec (`SandboxEscapeError`, `readOnly` mounts).
  */
 
-import { realpath } from "node:fs/promises";
 import { resolve, isAbsolute } from "node:path";
 import { SandboxEscapeError } from "@agentick/sandbox-next";
+import { isPathWithin, realpathAllowingMissing } from "@agentick/utils-next/path/node";
 import type { ResolvedMount } from "./workspace.js";
 
 /** Environment variables that must never be inherited (loader hijacks). */
@@ -47,31 +47,16 @@ export async function resolveSafePath(
   const realWorkspace = workspacePath;
   const absolute = isAbsolute(inputPath) ? inputPath : resolve(realWorkspace, inputPath);
 
-  let resolved: string;
-  try {
-    resolved = await realpath(absolute);
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-      if (mode === "write") {
-        // Target (or parent dirs) don't exist yet — walk up to the
-        // closest existing ancestor, then re-attach the missing suffix.
-        resolved = await resolveNonExistentPath(absolute, inputPath);
-      } else {
-        // Reads of a missing file: normalize and bounds-check by path
-        // manipulation (catches traversal even when the target is absent).
-        resolved = resolve(absolute);
-        if (isWithin(resolved, realWorkspace) || inAnyMount(resolved, mounts)) return resolved;
-        throw new SandboxEscapeError({ kind: "path-traversal", target: inputPath });
-      }
-    } else {
-      throw err;
-    }
-  }
+  // Follow symlinks before the containment check. A missing target (its
+  // leaf, or parent dirs on a create) is bounded by the deepest existing
+  // ancestor's realpath — see `realpathAllowingMissing` — so a symlink
+  // escape in the real prefix is still caught even when the leaf is absent.
+  const resolved = await realpathAllowingMissing(absolute);
 
-  if (isWithin(resolved, realWorkspace)) return resolved;
+  if (isPathWithin(resolved, realWorkspace)) return resolved;
 
   for (const mount of mounts) {
-    if (resolved === mount.hostPath || resolved.startsWith(mount.hostPath + "/")) {
+    if (isPathWithin(resolved, mount.hostPath)) {
       if (mode === "write" && mount.readOnly) {
         throw new SandboxEscapeError({
           kind: "mount-escape",
@@ -84,40 +69,6 @@ export async function resolveSafePath(
   }
 
   throw new SandboxEscapeError({ kind: "path-traversal", target: inputPath });
-}
-
-function isWithin(resolved: string, root: string): boolean {
-  return resolved === root || resolved.startsWith(root + "/");
-}
-
-function inAnyMount(resolved: string, mounts: readonly ResolvedMount[]): boolean {
-  return mounts.some((m) => resolved === m.hostPath || resolved.startsWith(m.hostPath + "/"));
-}
-
-/**
- * Walk up to the closest existing ancestor (realpath-resolved), then
- * re-append the not-yet-existing suffix. Used for write-mode targets
- * whose parent directories may not exist yet.
- */
-async function resolveNonExistentPath(absolute: string, inputPath: string): Promise<string> {
-  let ancestor = absolute;
-  let suffix = "";
-  while (ancestor !== "/" && ancestor !== ".") {
-    const parent = resolve(ancestor, "..");
-    suffix = ancestor.slice(parent.length) + suffix;
-    ancestor = parent;
-    try {
-      const resolvedAncestor = await realpath(ancestor);
-      return resolvedAncestor + suffix;
-    } catch {
-      // keep walking up
-    }
-  }
-  throw new SandboxEscapeError({
-    kind: "path-traversal",
-    target: inputPath,
-    detail: "no accessible ancestor",
-  });
 }
 
 /** Strip loader-hijack env vars from a record before spawning. */

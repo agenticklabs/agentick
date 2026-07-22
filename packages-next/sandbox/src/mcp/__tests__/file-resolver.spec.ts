@@ -11,7 +11,7 @@
  * @verifiedBy this file — sandboxFileResolver + fsFileResolver + registerFileResolver.
  */
 
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -127,5 +127,36 @@ describe("fsFileResolver (ADR 65 — no-sandbox read path)", () => {
     const escaping = pathToFileUri(join(root, "..", "etc-passwd"));
     const resolver = fsFileResolver(root);
     await expect(resolver(escaping)).rejects.toThrow(/escapes root/);
+  });
+
+  it("rejects a symlink INSIDE root that points outside (realpath containment)", async () => {
+    const root = await tmpRoot();
+    const outside = await tmpRoot();
+    await writeFile(join(outside, "passwd"), "top secret");
+    // `<root>/link → <outside>`; reading `<root>/link/passwd` is lexically
+    // under root but realpaths to `<outside>/passwd`. A string-prefix
+    // check would let it through — realpath containment must reject it.
+    await symlink(outside, join(root, "link"));
+    const resolver = fsFileResolver(root);
+    const escaping = pathToFileUri(join(root, "link", "passwd"));
+    await expect(resolver(escaping)).rejects.toThrow(/escapes root/);
+  });
+
+  it("allows a legitimate symlink that stays inside root", async () => {
+    const root = await tmpRoot();
+    await mkdir(join(root, "real"));
+    await writeFile(join(root, "real", "note.md"), "# inside");
+    await symlink(join(root, "real"), join(root, "alias"));
+    const resolver = fsFileResolver(root);
+    const uri = pathToFileUri(join(root, "alias", "note.md"));
+    const contents = (await resolver(uri)) as readonly TextResourceContents[];
+    expect(contents[0]).toEqual({ uri, mimeType: "text/markdown", text: "# inside" });
+  });
+
+  it("surfaces ENOENT (not an escape) for a missing file within root", async () => {
+    const root = await tmpRoot();
+    const resolver = fsFileResolver(root);
+    const uri = pathToFileUri(join(root, "absent.txt"));
+    await expect(resolver(uri)).rejects.toThrow(/ENOENT/);
   });
 });

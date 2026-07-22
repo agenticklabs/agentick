@@ -20,6 +20,7 @@
     "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
   },
   "dependencies": {
-    "@agentick/sandbox-next": "workspace:*"
+    "@agentick/sandbox-next": "workspace:*",
+    "@agentick/utils-next": "workspace:*"
   }
 }

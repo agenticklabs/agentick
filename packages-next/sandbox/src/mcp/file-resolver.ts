@@ -22,8 +22,9 @@
  * @see docs/proposals/v2/blueprint/62-resources-harness.md
  */
 
-import { readFile } from "node:fs/promises";
-import { resolve, sep } from "node:path";
+import { readFile, realpath } from "node:fs/promises";
+import { resolve } from "node:path";
+import { realpathWithin } from "@agentick/utils-next/path/node";
 import type {
   ResourceContents,
   Resources,
@@ -65,29 +66,39 @@ export function sandboxFileResolver(sandbox: SandboxHarness): TemplateResolver {
 /**
  * A `TemplateResolver` that reads files off the local filesystem — the
  * no-sandbox read path. Rooted at `rootDir`: a decoded path that escapes
- * the root (via `..` or an absolute elsewhere) is rejected, so a
- * `file://` template can't be walked outside its declared boundary.
+ * the root is rejected, so a `file://` template can't be walked outside
+ * its declared boundary.
+ *
+ * Containment is realpath-descendant, not string-prefix: the requested
+ * path is `realpath`-resolved (symlinks followed) before the boundary
+ * check, so a symlink INSIDE the root that points outside
+ * (`<root>/link → /etc`, then `<root>/link/passwd`) is rejected rather
+ * than silently sailing through a `startsWith(root)` test. The root is
+ * realpath'd once and memoized (also collapses macOS `/var → /private/var`
+ * so the two sides of the check share a canonical form). A path whose
+ * leaf doesn't exist yet is still bounded by its deepest existing
+ * ancestor's realpath (see {@link realpathWithin}); a missing file that
+ * IS within root surfaces the natural `ENOENT` from `readFile`, not an
+ * escape error.
  *
  * Text mimes read as UTF-8 {@link TextResourceContents}; everything else
  * reads losslessly as a base64 {@link BlobResourceContents}.
  */
 export function fsFileResolver(rootDir: string): TemplateResolver {
-  const root = resolve(rootDir);
+  let rootRealpath: Promise<string> | undefined;
+  const realRoot = (): Promise<string> => (rootRealpath ??= realpath(resolve(rootDir)));
   return async (uri: string): Promise<readonly ResourceContents[]> => {
     const requested = fileUriFromPath(uri);
-    const abs = resolve(requested);
-    // Containment: the resolved path must be the root itself or nested
-    // beneath it. `sep`-suffix guards against a sibling prefix match
-    // (`/data-other` vs `/data`).
-    if (abs !== root && !abs.startsWith(root + sep)) {
+    const resolved = await realpathWithin(requested, await realRoot());
+    if (resolved === null) {
       throw new Error(`fsFileResolver: path escapes root: ${requested}`);
     }
-    const mimeType = guessMimeType(abs);
+    const mimeType = guessMimeType(requested);
     if (isTextMime(mimeType)) {
-      const text = await readFile(abs, "utf8");
+      const text = await readFile(resolved, "utf8");
       return [{ uri, mimeType, text }];
     }
-    const buffer = await readFile(abs);
+    const buffer = await readFile(resolved);
     return [{ uri, mimeType, blob: buffer.toString("base64") }];
   };
 }
