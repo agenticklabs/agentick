@@ -166,6 +166,15 @@ command instead of an Operation:
 
 ### 2. Model selection + swap — a `session.model` facade, NOT a new harness
 
+> **Status: LANDED** (feat/v2) — `session.model` facade in
+> `@agentick/session-next` (`model-facade.ts`): `setModel` / `setTarget`
+> swap the session default via the journaled + hookable `session:set-model`
+> command (`onBeforeSessionSetModel` policy veto); `use` / `guard` register
+> session-scoped interceptors on `model:generate[_stream]` that ride the
+> tier-4 call-middleware seam (`sendBody`) so they PERSIST across `setModel`
+> swaps. Precedence unchanged (`input.modelExecutor ?? this.modelExecutor`).
+> Verified by `session/src/__tests__/model-facade.spec.ts`.
+
 **The fork.** A model swap can swap the whole executor (a different adapter), so the ONE
 thing command-ifying the executor does _not_ give you is **interceptors that persist
 across a `setModel` swap** (a cost-guard registered on executor-A is gone when you swap

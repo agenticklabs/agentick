@@ -9,6 +9,15 @@
 
 export { SessionHarness, type SessionHarnessOptions } from "./harness.js";
 export { SessionRuntime } from "./session-state.js";
+// ADR 89 §2 — the `session.model` selection / swap facade. The facade
+// impl + its handle type ship here; the `SessionHarnessProtocol.model`
+// slot is module-augmented onto spec by `./model-facade.js` (loaded via
+// the harness import graph).
+export {
+  SessionModelFacade,
+  type ModelSelectionHandle,
+  type SetModelInput,
+} from "./model-facade.js";
 export { defineSession, type DefineSessionInput } from "./define-session.js";
 // E11 — the durable session registry / resume index. The `SessionStore` port +
 // record + query live in spec-next; the bundled in-memory default + its

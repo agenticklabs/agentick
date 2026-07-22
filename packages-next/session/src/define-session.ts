@@ -88,10 +88,12 @@ import { ResourcesHarness } from "@agentick/resources-next";
 import type {
   Elicit,
   ElicitationHarnessProtocol,
+  RegisteredModel,
   Resources,
   TasksHarnessProtocol,
 } from "@agentick/spec-next";
 import { ExecutionFailed, HandlerError } from "@agentick/spec-next";
+import type { ModelSelectionHandle } from "./model-facade.js";
 
 // ============================================================================
 // Public API
@@ -134,6 +136,14 @@ export interface DefineSessionInput<P = unknown> {
   readonly knobs?: KnobsHandle;
   readonly gates?: GatesHandle;
   readonly state?: StateHandle;
+  /**
+   * Model selection / swap facade for the augmented
+   * `SessionHarnessProtocol.model` slot (ADR 89 §2). Omit to get a no-op
+   * stub whose `setModel` / `setTarget` reject and whose `current` throws
+   * "not configured" — a callback session owns no model default. Supply a
+   * real {@link ModelSelectionHandle} to expose model swap/interception.
+   */
+  readonly model?: ModelSelectionHandle;
   /**
    * Pre-constructed elicitation harness for the
    * `SessionHarnessProtocol.elicitation` slot. Omit to let the
@@ -184,6 +194,7 @@ class CallbackSessionHarness<P = unknown>
   readonly knobs: KnobsHandle;
   readonly gates: GatesHandle;
   readonly state: StateHandle;
+  readonly model: ModelSelectionHandle;
   readonly elicitation: ElicitationHarnessProtocol;
   readonly elicit: Elicit;
   readonly tasks: TasksHarnessProtocol;
@@ -203,6 +214,7 @@ class CallbackSessionHarness<P = unknown>
     this.knobs = spec.knobs ?? noopKnobsHandle();
     this.gates = spec.gates ?? noopGatesHandle();
     this.state = spec.state ?? noopStateHandle();
+    this.model = spec.model ?? noopModelHandle();
     // Adopter-provided elicitation overrides; otherwise spin up a
     // fresh harness on the same substrate so the SessionHarnessProtocol
     // slot is honored without forcing test callers to thread one in.
@@ -387,6 +399,21 @@ function noopGatesHandle(): GatesHandle {
     get: () => undefined,
     list: () => [],
     clear: () => {},
+  };
+}
+
+function noopModelHandle(): ModelSelectionHandle {
+  const message =
+    "defineSession: `model` not configured — supply a ModelSelectionHandle via `model`.";
+  const unsubscribe = () => {};
+  return {
+    get current(): RegisteredModel {
+      throw new Error(message);
+    },
+    setModel: () => Promise.reject(new Error(message)),
+    setTarget: () => Promise.reject(new Error(message)),
+    use: () => unsubscribe,
+    guard: () => unsubscribe,
   };
 }
 

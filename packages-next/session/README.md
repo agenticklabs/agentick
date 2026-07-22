@@ -37,6 +37,7 @@ session.tasks         // Tasks — long-running work registry
 session.resources     // Resources — resource read-projection (ADR 62)
 session.gates         // GatesHandle — unified gate registry
 session.gate("write") // GateHandle | undefined — per-gate handle
+session.model         // ModelSelectionHandle — model selection / swap facade (ADR 89 §2)
 
 // Elicitation — ask the user for typed input.
 session.elicitation   // ElicitationHarnessProtocol — raw substrate
@@ -430,12 +431,13 @@ The four public session verbs route through `runOperation` (via the private
 full phase contract (`requested` → `before` → terminal). The verbs and their
 minted hook names:
 
-| Verb                  | CommandRegistry key             | Hooks                                             |
-| --------------------- | ------------------------------- | ------------------------------------------------- |
-| `send`                | `session:send`                  | `onBeforeSessionSend` / `onAfterSessionSend`      |
-| `appendEntry`         | `session:append`                | `onBeforeSessionAppend` / `onAfterSessionAppend`  |
-| `applyExecutorResult` | `session:apply-executor-result` | `onBeforeSessionApplyExecutorResult` / `onAfter…` |
-| `applyToolResults`    | `session:apply-tool-results`    | `onBeforeSessionApplyToolResults` / `onAfter…`    |
+| Verb                       | CommandRegistry key             | Hooks                                                |
+| -------------------------- | ------------------------------- | ---------------------------------------------------- |
+| `send`                     | `session:send`                  | `onBeforeSessionSend` / `onAfterSessionSend`         |
+| `appendEntry`              | `session:append`                | `onBeforeSessionAppend` / `onAfterSessionAppend`     |
+| `applyExecutorResult`      | `session:apply-executor-result` | `onBeforeSessionApplyExecutorResult` / `onAfter…`    |
+| `applyToolResults`         | `session:apply-tool-results`    | `onBeforeSessionApplyToolResults` / `onAfter…`       |
+| `model.setModel/setTarget` | `session:set-model`             | `onBeforeSessionSetModel` / `onAfterSessionSetModel` |
 
 Kebab `-what` segments PascalCase into the hook name (`apply-executor-result` →
 `ApplyExecutorResult`), so every verb yields a clean, dot-accessible hook.
@@ -464,6 +466,64 @@ would require a designed serializable input subset (`messages` + `maxTicks` +
 `stream` — the porcelain the wire's `session/send` already carries), which
 remains future work. `session:dispatch` (name + JSON input) is fully
 serializable and is the natural first wire declaration when that pass lands.
+
+## Model selection / swap — `session.model` (ADR 89 §2)
+
+`session.model` is a **facade**, not a harness. The session already owns the
+stable model-selection state — the construction-bound default `RegisteredModel`
+(`this.modelExecutor` + `this.target`), the per-tick `resolveModel`, and the
+`input.modelExecutor ?? this.modelExecutor` override — so cross-swap concerns
+live here as a thin projection, not a new harness sibling. (The escape hatch —
+promote to a real `BaseHarness` if the model layer ever needs its own identity /
+inbox-addressability / lifecycle FSM — is documented in ADR 89 §2.)
+
+```typescript
+session.model.current; // the session-default RegisteredModel in effect now
+
+// Swap the session default — the runner AND its target. Journaled + hookable
+// via the `session:set-model` command; effective on the NEXT send (never
+// mid-execution). setTarget swaps ONLY the target (keeps the current runner).
+await session.model.setModel({ modelExecutor: gpt4o, target: gpt4oTarget });
+await session.model.setTarget({ ...target, modelId: "gpt-4o-mini" });
+
+// Policy — veto a swap (onBeforeSessionSetModel throws → the command aborts):
+session.hook({
+  onBeforeSessionSetModel: (input) => {
+    if (denylist.has(input.target.modelId)) throw new Error("model not allowed");
+  },
+});
+```
+
+### Interceptors that PERSIST across a `setModel` swap — the payoff
+
+A model swap can swap the whole executor (a different adapter), so an
+interceptor registered on executor-A evaporates once you swap to executor-B.
+`session.model.use` / `.guard` solve this **without a new harness**: they
+register interceptors op-scoped to the `model:generate[_stream]` commands (ADR
+89 §1), riding the **tier-4 call-middleware seam** (the same seam the §4
+lifecycle projection uses), not any executor instance. The ADR-77 one-fiber
+spine threads them to whichever executor issues a send's model calls — including
+a per-tick `<Model>`-swapped executor (ADR 56) — so, registered once, they hold
+across every subsequent swap.
+
+```typescript
+// A cost/redaction transform on the model call — survives setModel swaps.
+const offUse = session.model.use(async (input, next) => {
+  meter.record(input);
+  return next(input);
+});
+
+// A guard on the model call — admission control (proceed | veto | replace |
+// defer). Survives setModel swaps; composes OUTERMOST (deny-before-transform).
+const offGuard = session.model.guard((input, ctx) =>
+  overBudget(ctx) ? { kind: "veto", reason: "cost ceiling" } : undefined,
+);
+```
+
+**Effective-model precedence (unchanged).** Per-tick `<Model model={…}>`
+(`resolveModel`) > per-send `send({ modelExecutor, target })` > the session
+default. `setModel` changes only the DEFAULT; the loop resolves the effective
+`RegisteredModel` per tick exactly as before.
 
 ## API
 
@@ -563,6 +623,9 @@ their backing.
   ceiling (#199)
 - ✅ Durable `SessionStore` (E11) — `InMemorySessionStore` + record
   population at construction / status / execution boundary / close
+- ✅ `session.model` selection / swap facade (ADR 89 §2) — `setModel` /
+  `setTarget` via the journaled + hookable `session:set-model` command;
+  `use` / `guard` interceptors on the model call that persist across swaps
 - ⏳ `session.prompts` — depends on whether withPrompts is mounted (ADR 42 audit)
 
 ## Roadmap & known gaps
@@ -617,6 +680,13 @@ their backing.
   `onBeforeSessionAppend` on `appendEntry`, `onAfterSessionSend` sees the
   `SessionExecutionHandle`; plus the `deriveHookNames` ↔ `Pascal` agreement
   for `session:command:send` / `:append`.
+- `src/__tests__/model-facade.spec.ts` — the `session.model` facade (ADR 89
+  §2): `setModel` swaps the session default (the next send uses the new
+  executor); `setTarget` swaps only the target; `onBeforeSessionSetModel`
+  vetoes a swap (default unchanged); a `session.model.use` transform AND a
+  `session.model.guard` veto, registered once, still apply to the model call
+  across a `setModel` executor swap; per-send `modelExecutor` override beats
+  the swapped default (precedence).
 - `src/__tests__/define-session.spec.ts` — `defineSession` factory wiring.
 - `src/__tests__/model-bridge.spec.tsx` — tree-declared per-tick model,
   real loop resolving the `ModelBridge` (ADR 56); tick-IR precedence over

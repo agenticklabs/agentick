@@ -97,6 +97,11 @@ import type { TimelineHandle, TimelineHarnessOptions } from "@agentick/timeline-
 
 import { buildSessionBridges, type SessionHookBridges } from "./session-bridges.js";
 import { wireLifecycleProjection, type LifecycleProjection } from "./lifecycle-projection.js";
+import {
+  SessionModelFacade,
+  type ModelSelectionHandle,
+  type SetModelInput,
+} from "./model-facade.js";
 import { SessionRuntime } from "./session-state.js";
 import { createSessionExecutionHandle, type SessionEmitInput } from "./session-execution-handle.js";
 
@@ -120,6 +125,10 @@ declare module "@agentick/runtime-next" {
     "session:append": { input: AppendEntryInput; output: ApplyResult };
     "session:apply-executor-result": { input: ApplyExecutorResultInput; output: ApplyResult };
     "session:apply-tool-results": { input: ApplyToolResultsInput; output: ApplyResult };
+    // ADR 89 §2 — the `session.model.setModel` / `setTarget` swap. Declared
+    // as a session command so a model swap is journaled + hookable
+    // (`onBeforeSessionSetModel` — "this session may not switch to model X").
+    "session:set-model": { input: SetModelInput; output: void };
   }
 }
 
@@ -376,7 +385,16 @@ export class SessionHarness<P = unknown>
   private readonly mountId: string;
   private readonly reconciler: ReconcilerProtocol;
   private readonly loop: LoopExecutorProtocol;
-  private readonly modelExecutor: SessionHarnessOptions<P>["modelExecutor"];
+  /**
+   * The session-DEFAULT model-executor. Construction-bound, but MUTABLE:
+   * `session.model.setModel(...)` (ADR 89 §2) swaps it via the
+   * `session:set-model` command. A per-send `input.modelExecutor` still
+   * overrides it, and a per-tick `<Model>` (`resolveModel`) still overrides
+   * that — `setModel` changes only this default, effective on the NEXT send.
+   */
+  private modelExecutor: SessionHarnessOptions<P>["modelExecutor"];
+  /** The session model selection / swap facade (ADR 89 §2). */
+  private readonly modelFacade: SessionModelFacade;
   /**
    * Per-session tool executor. PUBLIC (not the `private` sibling of `loop` /
    * `modelExecutor`) because it is the seam the gateway wire routes
@@ -395,7 +413,12 @@ export class SessionHarness<P = unknown>
    * `LifecycleProjectionTarget` capability. Disposed on {@link close}.
    */
   private readonly lifecycleProjection: LifecycleProjection | undefined;
-  private readonly target: ExecutionTarget;
+  /**
+   * The session-DEFAULT execution target. MUTABLE for the same reason as
+   * {@link modelExecutor}: `session.model.setModel` / `setTarget` swap it
+   * via the `session:set-model` command (ADR 89 §2).
+   */
+  private target: ExecutionTarget;
   private readonly spawnContext: SpawnContext<P> | undefined;
   private readonly parentSessionId: string | undefined;
   /**
@@ -605,6 +628,15 @@ export class SessionHarness<P = unknown>
     this.modelExecutor = options.modelExecutor;
     this.toolExecutor = options.toolExecutor;
     this.target = options.target;
+    // ADR 89 §2 — the `session.model` facade over the session-default
+    // model. `getDefault` reads the live default (so `current` reflects a
+    // prior swap); `applySetModel` routes the swap through the journaled +
+    // hookable `session:set-model` command. Its `use`/`guard` interceptors
+    // ride the tier-4 seam in `sendBody`, so they persist across swaps.
+    this.modelFacade = new SessionModelFacade({
+      getDefault: () => ({ modelExecutor: this.modelExecutor, target: this.target }),
+      applySetModel: (input) => this.runSetModel(input),
+    });
     this.spawnContext = options.spawnContext;
     this.parentSessionId = options.parentSessionId;
     this.telemetryRuntime = options.telemetryRuntime;
@@ -817,6 +849,24 @@ export class SessionHarness<P = unknown>
    */
   get state(): StateHandle {
     return this.bridges.state;
+  }
+
+  /**
+   * The session's model selection / swap facade (ADR 89 §2) — NOT a
+   * harness, a thin projection of the session-default model the session
+   * already owns.
+   *
+   *   - `session.model.setModel(model)` / `setTarget(target)` — swap the
+   *     session-default `RegisteredModel` (journaled + hookable via the
+   *     `session:set-model` command). Effective on the NEXT send.
+   *   - `session.model.use(...)` / `.guard(...)` — session-scoped
+   *     interceptors on the `model:generate[_stream]` commands that
+   *     PERSIST across `setModel` swaps (they ride the tier-4 call
+   *     middleware seam threaded in {@link sendBody}, not any executor
+   *     instance).
+   */
+  get model(): ModelSelectionHandle {
+    return this.modelFacade;
   }
 
   snapshot(): SessionSnapshot {
@@ -1394,6 +1444,40 @@ export class SessionHarness<P = unknown>
     return this.runOperation(op, body);
   }
 
+  /**
+   * Run the `session:set-model` command (ADR 89 §2) — the journaled +
+   * hookable swap of the session-default model. Routes through
+   * {@link sessionOp} exactly like `send` / `append`, so
+   * `onBeforeSessionSetModel` (policy veto) + journaling fire around it.
+   * The body is a pure sync mutation of {@link modelExecutor} /
+   * {@link target}; a closed session rejects with `SessionClosedError`
+   * (via `Effect.suspend` so the guard is a rejection, not a sync throw).
+   */
+  private runSetModel(input: SetModelInput): Promise<void> {
+    return runHarnessProtocol(
+      this.sessionOp("set-model", input, (i) =>
+        Effect.suspend((): Effect.Effect<void, SessionError, never> => {
+          if (this._closed) {
+            return Effect.fail(new SessionClosedError({ attemptedCommand: "set-model" }));
+          }
+          this.applySetModelBody(i);
+          return Effect.void;
+        }),
+      ),
+    );
+  }
+
+  /**
+   * Apply a `session:set-model` swap to the session default (ADR 89 §2).
+   * `setModel` supplies `modelExecutor` + `target`; `setTarget` supplies
+   * only `target` (keep the current runner). Effective on the next send —
+   * `sendBody` reads `input.modelExecutor ?? this.modelExecutor` fresh.
+   */
+  private applySetModelBody(input: SetModelInput): void {
+    if (input.modelExecutor !== undefined) this.modelExecutor = input.modelExecutor;
+    this.target = input.target;
+  }
+
   private async sendBody(input: SendInput<P>): Promise<SessionExecutionHandle> {
     if (this._closed) {
       throw new SessionClosedError({ attemptedCommand: "send" });
@@ -1540,7 +1624,16 @@ export class SessionHarness<P = unknown>
       () =>
         runHarnessProtocol(
           withCallMiddleware(
-            this.lifecycleProjection?.callMiddleware ?? [],
+            // ADR 89 §2 + §4 — two tier-4 seams ride each send: the §4
+            // `model:generate[_stream]` lifecycle forwarders (observe) AND
+            // the §2 `session.model` interceptors (use/guard). Both reach
+            // WHICHEVER executor runs a tick (per-tick `<Model>` swap OR a
+            // `setModel` swap) via the one-fiber spine — the §2 interceptors
+            // live on the facade, so they persist across `setModel`.
+            [
+              ...(this.lifecycleProjection?.callMiddleware ?? []),
+              ...this.modelFacade.callMiddleware(),
+            ],
             this.loop.fx.runExecution({
               executionId,
               sessionId: this.runtime.id,

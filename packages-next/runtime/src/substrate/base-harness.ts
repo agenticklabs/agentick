@@ -111,6 +111,8 @@ export {
   isOperationSignal,
   interceptorKind,
   orderInterceptors,
+  signalFromVerdict,
+  tagInterceptor,
   type InterceptorKind,
   type OperationSignal,
 } from "./op-signals.js";

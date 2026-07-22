@@ -40,6 +40,8 @@ export {
   runHarnessProtocol,
   runHarnessStream,
   scopeToCommand,
+  signalFromVerdict,
+  tagInterceptor,
   withCallMiddleware,
   type AsyncMiddleware,
   type AsyncStream,
