@@ -1808,6 +1808,13 @@ blueprint's design decisions; this is execution-level).
     from the tree. Mechanism proven (callbacks-via-ref + awaited-in-cascade, §4
     validated it for the settle); the React registrars were never written. PULLED by
     Ernesto/assistant-api when a component needs to intercept, not just see.
+  ☐ B2 BUILD-OUT ORDER (Ryan-weighted 2026-07-22): slice 2 server truths (IN FLIGHT)
+    → slice 3 THE CLIENT HANDLES (headline: 4 handles onto the contract + .route/
+    .confirm folded + session.timeline re-home) → slice 4 CLIENT MIDDLEWARE (promoted:
+    client.use()/per-handle use() + frame tap, consolidate embryonic client-core
+    machinery) → slice 5 EMBEDDED GATEWAY (promoted from C4.5: gateway.handler w/
+    identity seam) → React one-liners ride when trivial. migrateSnapshot config move =
+    a two-line rider, not a headline (Ryan: "don't care a lot right now").
   ☐ B3 **THE BUILD PIVOT (Ryan 2026-07-22: "finish up today's work and get to
     building")**: after B2 slice 1 (contract+conformance) lands, START BUILDING —
     Ernesto AND assistant-api on agentick v2. B2 slices 2+ (server prereqs, handle
