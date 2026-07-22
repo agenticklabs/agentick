@@ -435,3 +435,297 @@ work happens — does NOT block the parity fixes.
   `packages/executor-{openai,anthropic,google}/src/__bench__/streaming.bench.ts`;
   numbers in REFACTOR-SCRATCHPAD §2026-06-02. 313/313 tests across
   five executor packages + spec + spec-conformance.
+
+---
+
+# 2026-07-22 — Full-surface parity audit (beyond adapters)
+
+**Precedent.** The tool-config parity audit (2026-05) found the v2
+rewrite had silently dropped 15 tool-config fields, 4 of them
+callable→static **seam violations** — all since restored. That audit
+had never been run over the _other_ v2 surfaces. This section is that
+sweep: **App/session construction · ExecutionRunner · Guards/Gates ·
+Hooks/Middleware · Spawn/sub-agents · Dispatch/audience/aliases ·
+Adapter capabilities · orphaned v1 exports.** Read-only; no production
+code touched.
+
+**Method.** Field-by-field read of v1 (`packages/core`, `shared`,
+`gateway`, `client`, `kernel`) against v2 (`packages-next/`). Every
+"LOST" claim was steel-manned by grepping v2 thoroughly first (v2
+renamed heavily: reconciler→compiler, executor→model-executor,
+runner→loop+interceptors, audience→exposure).
+
+**Severity order:** seam-violation > capability-loss > ergonomic.
+A deliberate architectural replacement (runner→interceptors,
+audience→exposure) is **not** a loss when the capability survives —
+only genuine gaps where v2 cannot express the v1 behavior are flagged.
+
+## Headline
+
+- **Seam-violations: 0.** Every v1 callback that survived stayed a
+  dynamic seam (`onBeforeSend`→`onBeforeSessionSend` command hook,
+  `onToolConfirmation`→elicitation gate+`guard`, `createGuard`→four-verdict
+  interceptor). Nothing degraded callback→static config. The 2026-05
+  seam-violation class did **not** recur on these surfaces.
+- **Capability-loss: ~22** (of which ~15 are genuinely silent — no ADR/
+  STATUS/blueprint justification found). Concentrated in three clusters:
+  **session persist/restore hooks**, **session-registry lifecycle
+  (eviction)**, and **spawn/sub-agent hardening**.
+- **Ergonomic: ~12** — clean renames adopters must relearn, plus a few
+  in-tree React hook forms not yet re-exposed.
+- Guards/Gates and Hooks/Middleware came back **at parity or superset** —
+  zero gaps. Dispatch/audience/aliases **clean** (already restored).
+  Adapter surface **unchanged** since 2026-06-02 (G10/G13/G14 remain the
+  open adapter gaps).
+
+Status legend as above: `[ ]` open, `[x]` closed, `[deferred]`
+intentional, `[tracked]` already filed elsewhere.
+
+---
+
+## Surface 1 — App / Session construction options
+
+v1: `packages/core/src/app/types.ts` (`AppOptions`, `SessionOptions`,
+`SpawnOptions`). v2: `packages-next/app/src/harness.ts`
+(`AppHarnessOptions`), `packages-next/session/src/harness.ts`
+(`SessionHarnessOptions`), `packages-next/spec/src/protocol/{app-harness,session-harness}.ts`.
+
+### Silently LOST (no justification found) — capability-loss
+
+| #    | v1 surface                                                                                                      | v2 status                                                                                                                                                             | severity               | recovery pass                                                                                         |
+| ---- | --------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- | ----------------------------------------------------------------------------------------------------- |
+| PA1  | `AppOptions.signal?: AbortSignal` — app-wide cascade ("all sessions respect this")                              | **LOST.** Per-session (`CreateSessionInput.signal`) + per-send exist; no app-wide slot. `closeApp()` is teardown, not a cascading abort                               | capability-loss        | add `AppHarnessOptions.signal` fanned into every session/send                                         |
+| PA2  | `AppOptions.sessions.maxActive?: number` — LRU cap on in-memory sessions                                        | **LOST.** `registry` is a plain `Map` (`app/harness.ts` ~L628) with no eviction → **unbounded memory in long-lived deployments**                                      | capability-loss        | active-session LRU eviction; evicted sessions rehydrate via open-or-rehydrate                         |
+| PA3  | `AppOptions.sessions.idleTimeout?: number` — idle eviction                                                      | **LOST.** No idle-eviction path                                                                                                                                       | capability-loss        | pair with PA2; idle-evict to store, rehydrate on next `getSession`                                    |
+| PA4  | `AppOptions.onBeforePersist?: (session, snapshot) => false\|snapshot\|void`                                     | **LOST.** E11 store writes are off-critical-path `void store.put(...).catch()` (`session/harness.ts` ~L718); no before-persist veto/modify seam                       | capability-loss        | persist interceptor on `SessionStore` writes / journaling-policy hook                                 |
+| PA5  | `AppOptions.onAfterPersist?: (sessionId, snapshot) => void`                                                     | **LOST.** No after-persist hook                                                                                                                                       | capability-loss        | same seam (after phase)                                                                               |
+| PA6  | `AppOptions.onBeforeRestore?: (sessionId, snapshot) => false\|snapshot\|void` — **includes snapshot migration** | **LOST.** Open-or-rehydrate (ADR 49) auto-loads timeline; no restore hook, **no snapshot-migration seam** → regression for schema evolution                           | capability-loss        | restore/migration hook at the store-read/hydrate boundary                                             |
+| PA7  | `AppOptions.onAfterRestore?: (session, snapshot) => void`                                                       | **LOST.** No after-restore hook                                                                                                                                       | capability-loss        | same seam (after phase)                                                                               |
+| PA8  | `AppOptions.sessionResolver?: (msg) => string\|null` — routes `app.receive()` inbound → sessionId               | **LOST.** No `sessionResolver`/`app.receive` in v2; routing implicitly a gateway concern but nothing documents the migration                                          | capability-loss        | resolver seam on the app inbox consumer, or document gateway routing as replacement                   |
+| PA9  | `AppOptions.resolve?: ResolveConfig` — Layer-2 async preload keyed for `useResolved`                            | **LOST as options slot.** `useResolved` cache still referenced (`blueprint/08-session-harness.md`) but no `resolve` config; arbitrary resolve-key preload has no home | capability-loss        | `resolve`/preload slot feeding the `useResolved` cache, or document Class-B reconstruct-from-timeline |
+| PA10 | `AppOptions.maxTimelineEntries?: number` — auto-trim oldest each tick                                           | **LOST as a config knob.** Closest is `timeline.compact(strategy)` (user-driven, not an automatic bound)                                                              | capability-loss (mild) | wire a `timeline.maxEntries` trim policy or document `compact` as replacement                         |
+| PA11 | `SpawnOptions.model?: EngineModel` — per-child model override                                                   | **LOST.** `SpawnInput` carries no `model`/`modelExecutor`; child inherits app model. Per-send `modelExecutor` exists but not at spawn-time                            | capability-loss (mild) | add `model?`/`modelExecutor?` to `SpawnInput` (see SP1)                                               |
+
+### Partial / acknowledged
+
+| #    | v1 surface                                                                             | v2 status                                                                                                                                                                                                              | severity                  | recovery pass                                                                                                                             |
+| ---- | -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| PA12 | `runner.transformCompiled(COMInput, tools)` — mutate compiled context pre-model        | **Partial.** Nearest is `onBeforeModelRun`/`onBeforeModelProject` command hooks (reshape `ProjectInput.compiled` + `ExecuteInput.tools`) + tool-visibility filtering at `compileForTick`. No single 1:1 seam; see RUN1 | capability-loss (partial) | audit real `transformCompiled` use-cases; add a per-tick compiled-transform hook to `LoopExecutorProtocol` or a compiler contributor pass |
+| PA13 | `SessionOptions.recording?: RecordingMode` + `TickSnapshot`/`getRecording` time-travel | **Deferred (acknowledged, not silent).** `blueprint/09-app-harness.md` lists it "carried from v1; still TBD". No v2 home; `OperationJournal` is the closest primitive                                                  | capability-loss           | decide recording taxonomy; rebuild time-travel on `OperationJournal` replay, or formally cut                                              |
+
+### Present — renamed / reshaped (no loss)
+
+| v1 surface                                                                            | v2 home                                                                                                                                                         |
+| ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `onEvent`/`onTickStart`/`onTickEnd`/`onComplete`/`onError` (LifecycleCallbacks)       | `app.events(filter)` async-iterable bus + `onAfterSessionSend` command hook                                                                                     |
+| `model` / `tools` / `maxTicks`                                                        | `AppHarnessOptions.model` (adapter) + `modelExecutor` twin / `tools: ToolDeclaration[]` / `defaultMaxTicks`                                                     |
+| `mcpServers`                                                                          | `extensions: [withMCP(...)]` (optional extension, ADR 23/27)                                                                                                    |
+| `runner`                                                                              | decomposed → `loop` (`LoopExecutorProtocol`/`defineLoop`) + interceptors (`use`/`guard`) + command hooks + tool-executor (`blueprint/09` L253 "runner removed") |
+| `sessions.store` / `inbox`                                                            | `AppHarnessOptions.sessions.store: SessionStore` / `inbox: MessageInbox` substrate slot (verify durable write+FIFO-pending+markDone survive)                    |
+| `onSessionCreate` / `onSessionClose`                                                  | `AppHarnessProtocol.onSessionCreate/onSessionClose(handler)` (create can veto)                                                                                  |
+| `onBeforeSend` / `onAfterSend`                                                        | `onBeforeSessionSend` / `onAfterSessionSend` command hooks                                                                                                      |
+| `onToolConfirmation`                                                                  | `ElicitationHarness` confirmation gate + tool-dispatch `guard` (callback→seam, **not** callback→static; verify a programmatic auto-approve path via `guard`)    |
+| `sessionId`/`parentSessionId`/`metadata`/`tools`/`maxTicks`/`signal` (SessionOptions) | `CreateSessionInput.*` (idempotent open-or-rehydrate)                                                                                                           |
+| `skillRegistry`                                                                       | `@agentick/skills-next` (`withSkills`) via `extensions`                                                                                                         |
+| `devTools?: boolean`                                                                  | **justified-drop** — bus always-on; DevTools observes via `events()`                                                                                            |
+| `inheritDefaults?: boolean`                                                           | **justified-drop** — no global `Agentick` singleton in v2 (ADR 23/83); nothing to inherit                                                                       |
+
+---
+
+## Surface 2 — ExecutionRunner hooks
+
+v1: `ExecutionRunner` (call sites in `packages/core/src/app/session.ts`).
+v2: replaced by app-shared loop/model/tool executors + interceptors +
+command hooks (`blueprint/05-loop-executor.md` maps each hook).
+
+| #    | v1 hook                                                           | v2 seam                                                                                                                                                                                                                                                                                                                                                                                                            | severity                  | recovery pass                                                                                                                                                           |
+| ---- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| RUN1 | `transformCompiled(compiled, tools) => compiled`                  | **Present** (term rename COMInput→RenderedTree). `onBeforeModelRun`/`onBeforeModelProject` transform-form `BeforeHook` reshaping `ProjectInput.compiled` + `ExecuteInput.tools`; `model-executor` command-ifies `model:run`/`project`/`generate` + `.use()` around-chain; tool-visibility at `replaceCompilerTools`/`compileForTick`                                                                               | none                      | none — register via `createApp({ hooks })` or `app.use()`                                                                                                               |
+| RUN2 | `executeToolCall(call, tool, next)`                               | **Present, near-identical.** Tool-executor around-middleware `toolExecutor.fx.use((input, next) => …)` (proven in `tool-executor/src/__tests__/middleware-and-hooks.spec.ts`) + declarative `onBefore/AfterToolDispatch` + `.guardDispatch` veto. Both `via:"model"` and `via:"dispatch"` route through it                                                                                                         | none                      | none                                                                                                                                                                    |
+| RUN3 | `onSessionInit(session)` — once per session                       | **Present** (no named registrar). Session mounts agent once at construction → `onBeforeCompilerMount`/`onAfterCompilerMount` fire once; extension harnesses run constructor at wiring, register teardown via `parent.onClose(h)`                                                                                                                                                                                   | ergonomic                 | optional `onInit` sugar over `onAfterCompilerMount`                                                                                                                     |
+| RUN4 | `onPersist(session, snapshot) => snapshot` — augment the snapshot | **Partial gap.** `SnapshotCapable.exportSnapshot()` contract exists + generic feature-detect scan already wired for channels — BUT `SessionHarness.snapshot()` (`session/harness.ts` ~L889) still **hardcodes** `timeline+knobs+usage` and does NOT iterate `SnapshotCapable` bridges (in-code comment defers to "Step 6 SnapshotHarness"). Arbitrary extension harness cannot contribute to `SessionSnapshot` yet | capability-loss (partial) | build SnapshotHarness / make `session.snapshot()` fold every `SnapshotCapable` bridge via `exportSnapshot()`, mirroring the existing channel `snapshotProviders()` scan |
+| RUN5 | `onRestore(session, snapshot)` — restore runner state             | **Partial gap (symmetric).** `SnapshotCapable.importSnapshot()` + `CompilerProtocol.restore()`/`MountInput.snapshot` exist; knobs re-seed on construction. Generic restore of arbitrary bridge state is the same unbuilt Step 6 — `SessionSnapshot` only round-trips timeline/knobs                                                                                                                                | capability-loss (partial) | same pass as RUN4 — generic `importSnapshot()` fan-out at session restore                                                                                               |
+| RUN6 | `onDestroy(session)` — clean up                                   | **Present, improved.** `session.close()` tears down mount + closes every bridge; `BaseHarness.onClose(handler)` gives per-harness cleanup in **LIFO with error isolation** — strictly richer than v1's single hook                                                                                                                                                                                                 | none                      | none                                                                                                                                                                    |
+| RUN7 | `SpawnOptions.runner` inheritance (child inherits parent runner)  | **Present, reshaped.** Runner object gone; loop/model/tool executors are app-shared substrate inherited structurally by `createChildSession`; `app.use()`/`hooks` propagate to children by construction. Per-spawn executor override moves onto the child's first `send` (`SendInput.modelExecutor`/`target`)                                                                                                      | ergonomic                 | optional: add `modelExecutor?`/`target?` to `SpawnInput` (see SP1)                                                                                                      |
+
+**Note:** RUN4/RUN5 and PA4–PA7 are the **same persist/restore cluster**
+viewed from two angles — RUN4/5 = arbitrary harness snapshot
+composition (unbuilt Step 6 SnapshotHarness, code-acknowledged);
+PA4–PA7 = the app-level before/after/migration _hooks_ around store
+writes (silently absent). Recover together.
+
+---
+
+## Surface 3 — Guards / Gates _(clean — parity or superset)_
+
+v1: `packages/core/src/hooks/gate.ts`, `packages/kernel/src/guard.ts`.
+v2: `packages-next/gates/`, guard as the four-verdict interceptor
+(ADR 83, `packages-next/spec/src/data/outcomes.ts`, `runtime/src/substrate/op-signals.ts`).
+
+| v1 surface                                             | v2 status                                                                                                                                                        | severity  |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| `gate()` + `useGate` + `GateState`                     | **PARITY++** — `gates-next` adds programmatic `session.gates` register/list, host `override()` with audit, ADR-34 parent-layer cascade                           | —         |
+| `LatchGateDescriptor` / `VerifiedGateDescriptor`       | **PARITY++** — identical shape; v2 `satisfied` throw is **fail-closed** (engages gate) vs v1 fail-open                                                           | —         |
+| Tick arbitration: explicit `stop()` beats `continue()` | **PARITY (verify).** Gate calls `continueAfterTick`; stop-beats-continue now lives in session's `TickEndForwardDecision`, not co-located with the gate           | ergonomic |
+| `createGuard(fn) => Middleware` (boolean allow/deny)   | **PARITY++** — collapsed into the one interceptor primitive (`kind:"guard"`); `HandlerVerdict = proceed\|veto\|defer\|replace` (v1 boolean is the strict subset) | —         |
+
+Only residue (GG1, ergonomic): confirm a session test asserts a budget
+`stopAfterTick` overrides a gate `continueAfterTick` in the same tick;
+add it if absent (the invariant moved packages).
+
+---
+
+## Surface 4 — Hooks / Middleware _(clean — parity or superset)_
+
+v1: `model-hooks.ts`, `tool-hooks.ts`, `component-hooks.ts`,
+`lifecycle.ts`, `Agentick.use()`. v2: command hooks (ADR 80/82/83) +
+projected `useOn*` React hooks + per-harness `.use`/`.fx.use`.
+
+| v1 surface                                                                           | v2 status                                                                                                                                                                                                                              | severity  |
+| ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| Model hooks `fromEngineState`/`generate`/`stream`/`toEngineState`                    | **PARITY** — `model:project`/`model:generate`/`model:generate_stream` commands → `onBefore/AfterModel*` hooks                                                                                                                          | —         |
+| Tool hook `"run"` + `.fx.use` rewrite                                                | **PARITY** — `tool:dispatch` command → `onBefore/AfterToolDispatch` + `.use`/`.fx.use`                                                                                                                                                 | —         |
+| Component hooks `onMount/onUnmount/onStart/onTickStart/onTickEnd/onComplete/onError` | **PARITY++** — projected `useOnMount`/`useOnExecutionStart`/`useOnTickStart/End`/`useOnExecutionEnd`/`useOnError` + new `useOnToolStart/End`, `useOnModelGenerateStart/End`. v2 wires `onError` (v1 had a binding but **no producer**) | —         |
+| `useContinuation(cb)`                                                                | **PARITY** — `useLoopControl(): { continueAfterTick, stopAfterTick }`                                                                                                                                                                  | —         |
+| `Agentick.use(key, ...mw)` global glob-keyed middleware (`'*'`, `'tool:*'`)          | **PARITY (reshaped).** Global singleton gone; replaced by per-harness `.use`/`.fx.use` + `app.use/guard/hook` + `createApp({ hooks })` across ADR-76 tiers. Superset (v1 was global-only)                                              | ergonomic |
+| `Model/Tool/BaseHookRegistry` (three disjoint vocabularies)                          | **JUSTIFIED-DROP** — exactly what ADR 80 collapses into `CommandRegistry`→`CommandHooks` derivation                                                                                                                                    | —         |
+
+Residue (all ergonomic):
+
+- **HM1** — `useAfterCompile((compiled, ctx) => …; ctx.requestRecompile())`
+  in-tree hook has no React twin. Capability exists host-side
+  (`onAfterCompilerRenderTree` + `compiler:rerender`); the in-tree form
+  is missing. Recovery: add a `useAfterCompile` hook wrapping them.
+- **HM2** — ADR-80 mandated `tool:dispatch`→`tool:execute` command
+  rename is unlanded (registry still emits `tool:dispatch`). Land it or
+  strike the mandate from ADR 80.
+
+---
+
+## Surface 5 — Spawn / sub-agents
+
+v1: `session.spawn(component, input?, options?)` + `SpawnOptions` +
+`MAX_SPAWN_DEPTH`. v2: `spawn(input: SpawnInput)` (spec
+`session-harness.ts:577`, tagged `[V1-INHERITED]`; 1 agent : 1 session
+per `data-layer-plan.md`). The method survives (justified reshaping),
+but hardening trails it.
+
+| #   | v1 surface                                                                                                  | v2 status                                                                                                                                                                                                                                                              | severity                      | recovery pass                                                                                            |
+| --- | ----------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- | -------------------------------------------------------------------------------------------------------- |
+| SP1 | `SpawnOptions.model` — per-child model override                                                             | **LOST** at spawn-time (dup of PA11). Only oblique via `send.modelExecutor`/`send.target` on the immediate-send form, or post-hoc `session.model.setModel`                                                                                                             | capability-loss (recoverable) | thread `modelExecutor?`/`target?` through `SpawnInput` → `SpawnContextChildInput` → `createChildSession` |
+| SP2 | `SpawnOptions.runner` — per-child runner override                                                           | **LOST as per-spawn override.** `LoopExecutorProtocol` is app-shared; no `loop`/`runner` field on `SpawnInput` (primitive swap justified; the per-child override is silently gone)                                                                                     | capability-loss               | decide if per-child loop override is in scope; if yes add `loop?` to `SpawnInput`                        |
+| SP3 | **Parent-inheritance semantics** — v1 child inherits parent's _live_ model/runner/maxTicks via `??` cascade | **Divergent.** v2 child gets **app defaults**, not the parent's live/swapped model. A parent that `setModel`'d does NOT pass it to its child                                                                                                                           | capability-loss (subtle)      | document explicitly; decide whether child inherits parent's live model executor                          |
+| SP4 | `MAX_SPAWN_DEPTH = 10` recursion guard + `_spawnDepth`                                                      | **LOST.** No depth cap anywhere in v2 → **unbounded spawn recursion** (crash vector)                                                                                                                                                                                   | capability-loss               | reintroduce a depth cap threaded through the `createChildSession` chain                                  |
+| SP5 | Child event forwarding w/ `spawnPath` tagging + `spawn_start`/`spawn_end` lifecycle events                  | **Partial.** `spawnPath?: readonly string[]` field survives in spec (`data/events.ts`, `data/streaming.ts`), but active forwarding/tagging logic is **absent** and `spawn_start`/`spawn_end` types do not exist (grep empty). Nested sub-agent observability not wired | capability-loss               | implement child→parent event forwarding tagging `spawnPath`; decide on spawn lifecycle events            |
+| SP6 | Parent-abort → child teardown propagation                                                                   | **LOST (likely).** v2 escalation bubbles **up** (`ask` → `parentSessionId`); no downward parent-`AbortSignal` → child teardown found                                                                                                                                   | capability-loss               | propagate parent abort signal into spawned child sessions                                                |
+| —   | `SpawnOptions.maxTicks`/`metadata`                                                                          | **Present** on `SpawnInput` (+ new `initialProps`/`initialKnobs`, net gain)                                                                                                                                                                                            | —                             | none                                                                                                     |
+| —   | `SpawnOptions.label`                                                                                        | Dropped, folds into `metadata`                                                                                                                                                                                                                                         | ergonomic                     | optional typed slot if UI needs it                                                                       |
+
+---
+
+## Surface 6 — Dispatch / audience / aliases _(clean — already restored)_
+
+| v1 surface                                           | v2 status                                                                                                                                         | severity           |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| `session.dispatch(name, input)`                      | **Present, superset** — `session/harness.ts:1073` → `toolExecutor.dispatch`; spec adds `DispatchOptions.task: "auto"\|"ref"\|"inline"`            | —                  |
+| Resolve by name, then alias                          | **Present** — `tool-executor/src/registry.ts` `aliasToName` index, name-first then alias (comment cites v1 parity)                                | —                  |
+| `audience:"user"` (dispatch-only, hidden from model) | **Present, renamed** `[V1-REPLACED]` → `ToolExposure = "model"\|"dispatch"\|"runtime"` (v1 `"user"`→`"dispatch"`, `"all"`→`["model","dispatch"]`) | ergonomic (rename) |
+| Audience filtering                                   | **Present** — `tool/src/transforms/filter.ts` `onlyExposingTo(audience)`                                                                          | —                  |
+| Tool `aliases`                                       | **Present** — `tool/src/create-tool.ts` threads `aliases` → `ToolDeclaration.aliases`                                                             | —                  |
+
+---
+
+## Surface 7 — Adapter capabilities _(unchanged since 2026-06-02)_
+
+v1 `createAdapter` (`packages/core/src/model/adapter.ts`) round-trips
+cleanly onto v2 `LanguageModelAdapter`
+(`packages-next/model/src/language-model-adapter.ts`, ADR 52):
+`prepareInput`→`buildParams`, `execute`→`call`,
+`executeStream`→`openStream`, `mapChunk`/`reconstructRaw`/
+`extractMetadata`/`customBlocks`/`adapterTransform`→`adapterTransforms`
+all present. No drift. Open adapter gaps stay **G10** (embed / no
+`EmbeddingExecutorProtocol`), **G13** (user-facing `deltaTransform` — v2
+has only `adapterTransforms`), **G14** (`messageTransformation`
+per-provider role mapping). One untracked minor:
+
+| #   | v1 surface                                                              | v2 status                                                                                                                                  | severity  | recovery pass                                                                       |
+| --- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | --------- | ----------------------------------------------------------------------------------- |
+| AD1 | Adapter `onMount`/`onUnmount` (JSX `<Model>` component lifecycle hooks) | **LOST on the adapter.** v2 `LanguageModelAdapter` has no `onMount`/`onUnmount`; a model-as-JSX concern, not a translation-capability loss | ergonomic | fold into the model-as-JSX component surface if/when it lands; else document as cut |
+
+---
+
+## Surface 8 — Orphaned v1 exports (catch-all sweep)
+
+v1 `core`/`shared`/`gateway`/`client` index exports vs any v2 home.
+**No seam-violations, no surprise orphans** — every gap has a
+documented v2 decision. The one genuinely-untracked risk is the client
+chat-UX cluster.
+
+| #   | v1 concept                                                                                                                                    | v2 status                                                                                                                                                                                                                            | severity                     | recovery pass                                                                                                                                      |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| SW1 | Agentick DevTools event stream — `DevToolsEvent` union, `devToolsEmitter`, `DEVTOOLS_CHANNEL` (`shared/devtools.ts`) + `packages/devtools` UI | **LOST / [tracked]** — zero v2 hits; filed STATUS workstream (C), `V1-GATEWAY-PARITY-TRACKER` GD1–GD2, `CUT-GAP-AUDIT` #158. (React DevTools _bridge_ survives at `compiler-react/src/react/devtools-bridge.ts` — different concept) | capability-loss              | port event union+emitter as `@agentick/observability-next` (or fold into pubsub channels + eval); wire `@agentick/client-devtools` (#158)          |
+| SW2 | Embeddings — `EmbedInput`/`EmbedResult` (`shared/embeddings.ts`) + OpenAI `embed()`                                                           | **LOST / [tracked]** — G10 / #153                                                                                                                                                                                                    | capability-loss              | land `EmbeddingExecutorProtocol` (see G10)                                                                                                         |
+| SW3 | Gateway config system — `FileConfig`/`ConfigStore`/`bindConfig`/`loadConfig`/`interpolateConfig` (`gateway/src/config*.ts`)                   | **DEFERRED (deliberate)** — `V1-GATEWAY-PARITY-TRACKER` GC1/GC2: "adopters bring their own config layer unless a structural need appears"                                                                                            | capability-loss              | decide GC1: config-store gateway-extension vs adopter-owned                                                                                        |
+| SW4 | `openaiCompatPlugin` (`gateway/src/plugins/openai-compat.ts`)                                                                                 | **DEFERRED (reshape) / [tracked]** — GP2 → planned `@agentick/gateway-openai-compat` after #254                                                                                                                                      | capability-loss              | build `gateway-openai-compat` gateway-extension                                                                                                    |
+| SW5 | Client chat-UX: `MessageLog`, `ChatSession`, `MessageSteering` (`packages/client/src/`)                                                       | **LOST / reshaped** — `blueprint/58-connectors.md`/`CUT-GAP-AUDIT`: client-next is low-level RPC; steering moved server-side (`session:channel` + verbs)                                                                             | capability-loss              | rebuild as app/TUI-layer primitives over `client-core-next` views (wire-client backlog)                                                            |
+| SW6 | Client chat-UX: **`LineEditor`, `AttachmentManager`, `chat-transforms`** (`timelineToMessages`/`extractToolCalls`)                            | **LOST — WEAKEST-TRACKED.** Appear in **no** v2 doc found; `client-core-next` is RPC/handles/views, `client-extensions-next` is only cache/offline/retry/telemetry. **Silent-drop risk before v2.0 cut**                             | capability-loss              | **enumerate explicitly in the wire-client/TUI backlog issue now**, before they drift-to-drop unrecorded (LineEditor = workstream C terminal tools) |
+| SW7 | `ToolConfirmations` client class (`packages/client`)                                                                                          | **Reshaped (retired)** — confirmations flow as `session:channel:elicitation` envelopes via the elicitation harness                                                                                                                   | capability-loss (seam moved) | connector/UI subscribes to elicitation channel + routes replies to the harness address                                                             |
+| SW8 | `serveStatic` (`gateway/src/serve-static.ts`) / `loggingPlugin`                                                                               | **DEFERRED / reshaped** — GF1 → `gateway-http-sse`; logging subsumed by gateway-extensions (#254) + `client-extensions-next/telemetry`                                                                                               | ergonomic                    | fold into HTTP transport / confirm a server logging gateway-extension post-#254                                                                    |
+
+**Present (no loss), verified this sweep:** Secrets→`credentials-next`
+(drop-in for v1 `@agentick/secrets`); Channels→`spec-next/channels.ts` +
+`pubsub`/`subscriptions`/`client-core`; Compaction/token-budget/
+`TokenEstimator`/`useContextInfo`→`compiler-react` projections + `model-next/model-info`;
+COM types→compiler IR (ADR 49); Formatters→`formatters-next` (ADR 22);
+persistence/snapshot/stores→`session`+`store`+`timeline-fs`+`timeline-postgres`
+(ADR 49); all `use*` hooks, `gate`/`knob`, transports, `split-message`,
+ulid/uuid, model-catalog, MCP server plugin → present.
+
+---
+
+## Consolidated recovery ranking (top 5, most valuable first)
+
+1. **Persist/restore hook quartet + snapshot-migration seam + SnapshotHarness**
+   (PA4–PA7 + RUN4/RUN5). The single highest-value cluster: no
+   before/after-persist or before/after-restore hooks, **no
+   snapshot-migration seam** (a real regression for schema evolution),
+   and `session.snapshot()` still hardcodes timeline+knobs instead of
+   folding every `SnapshotCapable` bridge (code-acknowledged "Step 6").
+   The contract + generic-scan pattern already exist (proven for
+   channels) — wiring is the gap. Fixes two surfaces at once.
+
+2. **Session-registry eviction pair** (PA2 `maxActive` + PA3
+   `idleTimeout`). The app `registry` is an unbounded `Map` → a memory
+   leak in any long-lived deployment. Clear correctness/ops bug;
+   evicted sessions already rehydrate via open-or-rehydrate, so the
+   recovery is bounded.
+
+3. **Spawn hardening** (SP4 `MAX_SPAWN_DEPTH` + SP6 parent-abort→child
+   teardown + SP5 `spawnPath` event forwarding). Unbounded spawn
+   recursion is a crash vector; missing abort propagation leaks child
+   sessions on parent teardown; the `spawnPath` field survives but its
+   plumbing doesn't, so nested sub-agent observability is dark. Safety-
+   critical for any sub-agent tree.
+
+4. **App-level `signal` cascade** (PA1). A single `AbortSignal` that
+   fans into every session/send — cheap to add, and the only way to
+   express "abort the whole app" short of `closeApp()` teardown.
+
+5. **File the client chat-UX cluster before the v2.0 cut** (SW6, also
+   SW5). `LineEditor`/`AttachmentManager`/`chat-transforms` appear in
+   **no** v2 doc — the one genuinely-untracked drift-to-drop risk in the
+   whole audit. Cheap (a backlog issue), time-sensitive (must land
+   before the cut records the surface as intentionally empty).
+
+Runner-ups: PA9 `resolve` preload, SP1/PA11 per-spawn model override,
+PA8 `sessionResolver`, PA13 recording/time-travel, HM1 `useAfterCompile`
+twin, HM2 `tool:execute` rename, GG1 stop-beats-continue test.
+
+## Update log
+
+- 2026-07-22: full-surface parity audit (this section). Eight surfaces
+  swept App/Session · Runner · Guards/Gates · Hooks · Spawn · Dispatch ·
+  Adapter · orphan-exports. **0 seam-violations** (the 2026-05 class did
+  not recur), ~22 capability-loss (~15 silently lost), ~12 ergonomic.
+  Highest-value cluster: session persist/restore hooks + SnapshotHarness
+  wiring. Read-only; no production code changed.
