@@ -1725,6 +1725,31 @@ blueprint's design decisions; this is execution-level).
 
 ### 2026-07-21
 
+- **Tick-as-command LANDED (model-harness §3, `loop:tick`).** The per-tick round is now a
+  declared command on the LOOP harness (ADR-89 open question resolved: the loop owns tick
+  orchestration; the model-executor owns the single model call). `this.command<TickInput,
+  TickResult>({ name: "loop:tick", exposure: "internal" })` — mints `onBeforeLoopTick`
+  (over TickInput: tickId/tickIndex identity first, then the live refs
+  reconciler/modelExecutor/toolExecutor/… exactly as RunExecutionInput carries them;
+  in-process only, never wire-addressable) and `onAfterLoopTick` (over the settled
+  TickResult). **Settle IN / decide OUT:** the command body = render → model → tool →
+  apply → SETTLE (reconciler tick-end); the DECIDE (notifyTickEnd fold, stop-force >
+  continue-force > abstain, maxTicks) stays in the run-execution while-continuation AFTER
+  onAfterLoopTick — ADR-67 order proven by the new "settle < onAfter < decide" test. **The
+  tick barrier IS the command terminal** (`yield* commandEffect("loop:tick", …)` in the
+  run-execution fiber — ADR-77 one-fiber, parentOpId auto-threads, interruption
+  propagates). Model-call failures return a `failedTickResult` (no settle) with
+  byte-identical outcome→stopReason mapping. `notifyLifecycle` deliberately LEFT in place
+  (tick-start/end transiently fire both the command hooks AND the notifies) — §4 collapses
+  it. Telemetry delta (legitimate): a loop `.use` middleware now wraps run-execution AND
+  tick (`wrapped: 2`) — the tick is a real op now. Gates: typecheck --force 152/152
+  0-cached; 679 tests (loop 58, session 103 incl kill/resume HARD GATE green 8|4pg-skip,
+  runtime 301, reconciler-react 217); +tick-command.spec (3: N-ticks-N-commands+payloads,
+  barrier, settle-in/decide-out); oxlint/oxfmt clean. **§4 now unblocked with NO straddle:**
+  every lifecycle event (execution/tick/tool/model/error) is command-backed — project the
+  React useOn* hooks onto the command-hook system and DELETE LifecycleStore + the
+  notifyLifecycle feeds.
+
 - **Model-executor command-ification LANDED (model-harness §1, Phase 1B).** The model
   call is now a real command: `execute → model:generate` (`this.command`),
   `executeStream → model:generate_stream` (`this.commandStream`), so the per-tick model

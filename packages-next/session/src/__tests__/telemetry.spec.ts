@@ -141,19 +141,30 @@ describe("Session telemetry (ADR 77 Stage 4) — the composed execution nests", 
     const execOpId = execSpan!.attributes.get(`${ns}.op_id`);
     expect(execOpId).toMatch(/^loop:execution:/);
 
-    // Downstream spans were emitted IN the execution's fiber. Path-agnostic:
-    // the streaming path emits project/normalize, the non-streaming path emits
-    // run — either way they must nest under the execution.
+    // ADR 89 §3 — the tick is now its own operation (`loop:command:tick`)
+    // nested under the execution: the span tree is execution → tick →
+    // downstream. The tick span's causality parent is the execution.
+    const tickSpan = spans.find((s) => s.name === "loop:command:tick");
+    expect(tickSpan).toBeDefined();
+    const tickOpId = tickSpan!.attributes.get(`${ns}.op_id`);
+    expect(tickOpId).toMatch(/^loop:tick:/);
+    expect(tickSpan!.attributes.get(`${ns}.parent_op_id`)).toBe(execOpId);
+    expect(tickSpan!.parent).toBeDefined();
+
+    // Downstream spans were emitted IN the tick's fiber (which nests in the
+    // execution's). Path-agnostic: the streaming path emits project/normalize,
+    // the non-streaming path emits run — either way they nest under the tick.
     const downstream = spans.filter(
       (s) => s.name.startsWith("model:command:") || s.name === "reconciler:command:render-tree",
     );
     expect(downstream.length).toBeGreaterThan(0);
 
-    // The NEST: every downstream span's causality parent is the execution
-    // (our `parent_op_id` tree), and Effect's own span tree agrees (real
-    // parent). Before Stage 3 every one of these was an orphan runPromise root.
+    // The NEST: every downstream span's causality parent is the TICK (our
+    // `parent_op_id` tree), the tick's is the execution, and Effect's own span
+    // tree agrees (real parent). Before Stage 3 every one of these was an
+    // orphan runPromise root; §3 threads them under the tick, no detachment.
     for (const child of downstream) {
-      expect(child.attributes.get(`${ns}.parent_op_id`)).toBe(execOpId);
+      expect(child.attributes.get(`${ns}.parent_op_id`)).toBe(tickOpId);
       expect(child.parent).toBeDefined();
     }
 
@@ -182,21 +193,32 @@ describe("Session telemetry (ADR 77 Stage 4) — the composed execution nests", 
     const handle = await session.send({ messages: [{ role: "user", content: "hi" }] });
     await handle.result;
 
-    expect(wrapped).toBe(1); // the async middleware actually ran on the spine
+    // ADR 89 §3 — a loop `.use` interceptor wraps EVERY loop-surface op, and
+    // the tick is now one: `run-execution` (1) + `loop:tick` (1 tick) = 2. Each
+    // wrap forks the body onto the ambient runtime — the whole spine crosses
+    // the async boundary and must still nest.
+    expect(wrapped).toBe(2); // the async middleware ran on both loop ops
 
     const ns = "agentick";
     const execSpan = spans.find((s) => s.name === "loop:command:run-execution");
     expect(execSpan).toBeDefined();
     const execOpId = execSpan!.attributes.get(`${ns}.op_id`);
 
-    // Downstream spans are opened by the loop BODY — i.e. inside the async
-    // middleware's forked continuation. They must STILL nest under the execution.
+    // The tick op nests under the execution (execution → tick → downstream).
+    const tickSpan = spans.find((s) => s.name === "loop:command:tick");
+    expect(tickSpan).toBeDefined();
+    const tickOpId = tickSpan!.attributes.get(`${ns}.op_id`);
+    expect(tickSpan!.attributes.get(`${ns}.parent_op_id`)).toBe(execOpId);
+
+    // Downstream spans are opened by the TICK body — i.e. inside the async
+    // middleware's forked continuation (twice over). They must STILL nest,
+    // under the tick, which nests under the execution.
     const downstream = spans.filter(
       (s) => s.name.startsWith("model:command:") || s.name === "reconciler:command:render-tree",
     );
     expect(downstream.length).toBeGreaterThan(0);
     for (const child of downstream) {
-      expect(child.attributes.get(`${ns}.parent_op_id`)).toBe(execOpId); // causal tree
+      expect(child.attributes.get(`${ns}.parent_op_id`)).toBe(tickOpId); // causal tree
       expect(child.parent).toBeDefined(); // Effect's real span parent — nesting held
     }
 

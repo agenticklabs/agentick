@@ -1,0 +1,230 @@
+/**
+ * `loop:tick` command (ADR 89 §3) — the per-tick round is a declared command
+ * on the loop harness, minting `onBeforeLoopTick` / `onAfterLoopTick`.
+ *
+ * Pins the §3 contract the rewrite must hold:
+ *   - `onBeforeLoopTick` fires per tick, over the `TickInput` (reads
+ *     `tickIndex` / `tickId`); `onAfterLoopTick` fires per tick over the
+ *     settled `TickResult`.
+ *   - N ticks → N tick commands, IN ORDER (tickIndex 1..N).
+ *   - The tick BARRIER: tick k+1's `onBefore` fires only after tick k's
+ *     `onAfter` — the next tick starts after this one settles.
+ *   - SETTLE is IN the command, DECIDE is OUT: the reconciler tick-end
+ *     (settle) fires INSIDE the tick body (before `onAfterLoopTick`), and the
+ *     session `notifyTickEnd` (decide) fires AFTER `onAfterLoopTick`, in the
+ *     run-execution continuation. This is the ADR-67 order, now expressed
+ *     through the command terminal.
+ */
+
+import { describe, expect, it } from "vitest";
+import { Effect } from "effect";
+
+import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
+import type {
+  DispatchResult,
+  LanguageModelExecutionResult,
+  ReconcilerProtocol,
+  RenderedTree,
+  RunExecutionInput,
+  StateApplicator,
+  TickInput,
+  TickResult,
+  ToolCall,
+  ToolExecutorProtocol,
+} from "@agentick/spec-next";
+import { SPEC_VERSION } from "@agentick/spec-next";
+import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
+
+import { LoopExecutorHarness } from "../harness.js";
+
+const EMPTY_TREE: RenderedTree = { specVersion: SPEC_VERSION, context: { entries: [] } };
+
+function mkSubstrate() {
+  return { journal: new MemoryJournal(), bus: new LocalEventBus(), inbox: new LocalInbox() };
+}
+
+/** Reconciler that renders nothing and records every notifyLifecycle kind. */
+function mkRecordingReconciler(order: string[]): ReconcilerProtocol {
+  return {
+    fx: {
+      use: () => () => {},
+      renderTree: () => Effect.succeed({ tree: EMPTY_TREE, diagnostics: [], iterations: 1 }),
+    },
+    mount: async () => ({ mountId: "tc-mount", restoredFromSnapshot: false }),
+    rerender: async () => undefined,
+    renderTree: async () => ({ tree: EMPTY_TREE, diagnostics: [], iterations: 1 }),
+    renderToString: async () => ({
+      payload: { text: "", mimeType: "text/plain" },
+      diagnostics: [],
+      iterations: 1,
+    }),
+    notifyLifecycle: async (i) => {
+      order.push(`settle:${i.event.kind}`);
+    },
+    unmount: async () => undefined,
+    snapshot: async () => ({
+      specVersion: SPEC_VERSION,
+      mountId: "tc-mount",
+      dataCache: [],
+      bridges: {},
+      subscriptions: [],
+    }),
+    restore: async () => undefined,
+  };
+}
+
+const noopApplicator: StateApplicator = {
+  fx: {
+    applyExecutorResult: () => Effect.void,
+    applyToolResults: () => Effect.void,
+  },
+  applyExecutorResult: async () => undefined,
+  applyToolResults: async () => undefined,
+  appendEntry: async () => undefined,
+};
+
+function dispatchOk(call: { name: string; toolCallId: string }): DispatchResult {
+  return {
+    toolCallId: call.toolCallId,
+    name: call.name,
+    content: [{ type: "text", text: "ok" }],
+    durationMs: 1,
+  };
+}
+
+function mkFakeToolExecutor(): ToolExecutorProtocol {
+  return {
+    fx: {
+      use: () => () => {},
+      replaceReconcilerTools: () => Effect.void,
+      compileForTick: () => Effect.succeed([]),
+      dispatch: (i: { name: string; toolCallId: string }) =>
+        Effect.succeed(dispatchOk({ name: i.name, toolCallId: i.toolCallId })),
+    },
+    replaceReconcilerTools: async () => undefined,
+    compileForTick: async () => [],
+    dispatch: async (i: { name: string; toolCallId: string }) =>
+      dispatchOk({ name: i.name, toolCallId: i.toolCallId }),
+  } as unknown as ToolExecutorProtocol;
+}
+
+const toolUse = (id: string): LanguageModelExecutionResult => ({
+  specVersion: SPEC_VERSION,
+  output: [{ type: "text", text: "calling" }],
+  stopReason: "tool_use",
+  usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+  toolCalls: [{ id, name: "t", input: {} } as ToolCall],
+});
+const ended = (): LanguageModelExecutionResult => ({
+  specVersion: SPEC_VERSION,
+  output: [{ type: "text", text: "done" }],
+  stopReason: "end",
+  usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+});
+
+interface Ran {
+  readonly loop: LoopExecutorHarness;
+  readonly order: string[];
+  readonly beforeInputs: TickInput[];
+  readonly afterOutputs: TickResult[];
+}
+
+async function runWithHooks(
+  ticks: readonly LanguageModelExecutionResult[],
+  maxTicks: number,
+): Promise<Ran> {
+  const sub = mkSubstrate();
+  const loop = new LoopExecutorHarness("tc-loop", sub.journal, sub.bus, sub.inbox);
+  await loop.ready;
+  const executor = new FakeLanguageModelExecutor("tc-exec", sub.journal, sub.bus, sub.inbox, {
+    scripted: ticks.map((result) => ({ result })),
+  });
+  await executor.ready;
+
+  const order: string[] = [];
+  const beforeInputs: TickInput[] = [];
+  const afterOutputs: TickResult[] = [];
+
+  loop.hook({
+    onBeforeLoopTick: (input) => {
+      beforeInputs.push(input);
+      order.push(`before-tick:${input.tickIndex}`);
+    },
+    onAfterLoopTick: (output) => {
+      afterOutputs.push(output);
+      order.push(`after-tick:${output.tickIndex}`);
+    },
+  });
+
+  const input: RunExecutionInput = {
+    sessionId: "tc-s",
+    mountId: "tc-mount",
+    reconciler: mkRecordingReconciler(order),
+    modelExecutor: executor,
+    toolExecutor: mkFakeToolExecutor(),
+    target: executor.target,
+    stateApplicator: noopApplicator,
+    executionId: "tc-exec",
+    maxTicks,
+    notifyTickEnd: async () => {
+      order.push("decide");
+      return undefined;
+    },
+  };
+
+  await loop.runExecution(input);
+  return { loop, order, beforeInputs, afterOutputs };
+}
+
+describe("loop:tick command (ADR 89 §3)", () => {
+  it("N ticks → N tick commands, onBefore/onAfter fire per tick in order", async () => {
+    const { beforeInputs, afterOutputs } = await runWithHooks(
+      [toolUse("c1"), toolUse("c2"), ended()],
+      5,
+    );
+
+    // 3 ticks → 3 tick commands.
+    expect(beforeInputs.map((i) => i.tickIndex)).toEqual([1, 2, 3]);
+    expect(afterOutputs.map((o) => o.tickIndex)).toEqual([1, 2, 3]);
+
+    // onBefore reads the tick identity off TickInput.
+    expect(beforeInputs[0]!.tickId).toMatch(/^tick-/);
+    expect(beforeInputs[0]!.executionId).toBe("tc-exec");
+
+    // onAfter receives the settled TickResult (executor terminal + toolResults).
+    expect(afterOutputs[0]!.executorTerminal.outcome).toBe("succeeded");
+    expect(afterOutputs[0]!.toolResults.length).toBe(1); // c1 dispatched
+    expect(afterOutputs[2]!.toolResults.length).toBe(0); // ended tick, no tools
+    expect(afterOutputs[2]!.stopReason).toBe("end");
+  });
+
+  it("the tick BARRIER holds: tick k+1's onBefore only after tick k's onAfter", async () => {
+    const { order } = await runWithHooks([toolUse("c1"), toolUse("c2"), ended()], 5);
+
+    const beforeIdx = (n: number) => order.indexOf(`before-tick:${n}`);
+    const afterIdx = (n: number) => order.indexOf(`after-tick:${n}`);
+
+    // Each tick's onAfter precedes the next tick's onBefore — the barrier.
+    expect(afterIdx(1)).toBeGreaterThan(beforeIdx(1));
+    expect(beforeIdx(2)).toBeGreaterThan(afterIdx(1));
+    expect(afterIdx(2)).toBeGreaterThan(beforeIdx(2));
+    expect(beforeIdx(3)).toBeGreaterThan(afterIdx(2));
+    expect(afterIdx(3)).toBeGreaterThan(beforeIdx(3));
+  });
+
+  it("SETTLE is IN the command, DECIDE is OUT: tick-end settle < onAfter < decide", async () => {
+    const { order } = await runWithHooks([ended()], 5);
+
+    const settle = order.indexOf("settle:tick-end");
+    const after = order.indexOf("after-tick:1");
+    const decide = order.indexOf("decide");
+
+    // The reconciler tick-end (settle) ran INSIDE the tick body — before the
+    // command terminal fired onAfterLoopTick.
+    expect(settle).toBeGreaterThanOrEqual(0);
+    expect(after).toBeGreaterThan(settle);
+    // The session's continuation decision (decide) ran in the run-execution
+    // continuation — AFTER the tick command's onAfter. Settle IN, decide OUT.
+    expect(decide).toBeGreaterThan(after);
+  });
+});

@@ -160,6 +160,37 @@ model it is about to call_ and _within the window it has left_:
   (temperature, maxOutputTokens, …) for the tick. Absent, or an
   unresolvable ref, falls back to `input.modelExecutor` / `input.target`.
 
+### The tick round is a command (`loop:tick`, ADR 89 §3)
+
+Each iteration of the tick loop is a **declared command on the loop
+harness** — `loop:tick`, minted in the constructor via `this.command` and
+reached in-fiber via `this.commandEffect` from the `run-execution` body. Its
+body is the tick **through SETTLE** (render → model → tool dispatch → state
+apply → reconciler `tick-end`); its output is the settled `TickResult`.
+
+- **Settle is IN, decide is OUT.** The tick command body settles the tree
+  (reconciler `tick-end`, running `useOnTickEnd`); the **continuation
+  decision** (`notifyTickEnd` fold / `maxTicks`, ADR 67) stays in the
+  `run-execution` while-loop, _after_ the command. So the session's
+  predicates read settled state.
+- **The command terminal IS the tick barrier.** The loop awaits
+  `commandEffect("loop:tick", …)`; the next tick starts only after this one
+  settles. Because the command runs in the `run-execution` fiber (ADR 77
+  one-fiber — `parentOpId` auto-threads), kill/resume interruption
+  propagates and tick ordering holds.
+- **Hooks.** The command mints `onBeforeLoopTick` (over the `TickInput` —
+  reads `tickId` / `tickIndex`) and `onAfterLoopTick` (over the settled
+  `TickResult`), alongside the existing `onBefore/AfterLoopRunExecution`.
+- **In-process only.** `TickInput` carries live object refs
+  (reconciler / executor / tool / applicator + the session resolvers), so
+  the verb is `exposure: "internal"` — never inbox/wire-addressable (ADR 51
+  §1.2). It lives on the LOOP harness (the loop owns tick orchestration),
+  not the model executor (which owns the single model call).
+
+> The `notifyLifecycle` bridge below STAYS for now — §3 adds the command
+> envelope + hooks; ADR 89 §4 rewires the React `useOn*` hooks onto
+> `onBefore/AfterLoopTick` and drops `notifyLifecycle`.
+
 ### The lifecycle bridge
 
 The loop is the producer for the reconciler's `useOn*` hook family

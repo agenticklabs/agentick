@@ -17,6 +17,24 @@
  *      (stop-force > continue-force > abstain), bounded by maxTicks.
  *   6. loop
  *
+ * ## ADR 89 §3 — the tick is a command (`loop:tick`)
+ *
+ * Steps 1–5 THROUGH SETTLE are the body of a `loop:tick` command declared on
+ * THIS harness (constructor `this.command`, reached in-fiber via
+ * `this.commandEffect` — see {@link tickBody}). Wrapping the tick round mints
+ * `onBeforeLoopTick` / `onAfterLoopTick` and emits phases like every other op.
+ * The DECIDE (the continuation decision — notifyTickEnd fold / maxTicks) stays
+ * OUT of the command, in the `run-execution` while-continuation: **settle is
+ * IN, decide is OUT.** The command's terminal IS the tick barrier the loop
+ * awaits — the next tick starts only after this one settles.
+ *
+ * ADR-89 open question resolved: `loop:tick` lives on the LOOP harness (the
+ * loop OWNS tick orchestration), NOT the model executor (which owns the single
+ * model call, `model:generate` in ADR 89 §1). §3 ADDS the command envelope +
+ * hooks; `notifyLifecycle` STAYS (§4 rewires the React hooks off it and drops
+ * it), so tick-start/end transiently fire both the new command hooks AND the
+ * existing notifies.
+ *
  * ## ADR 77 — the fiber spine
  *
  * `runExecutionBody` is ONE `Effect.gen` fiber. Every downstream harness
@@ -61,6 +79,7 @@ import type {
   RunExecutionInput,
   SpecConfig,
   SubstrateError,
+  TickInput,
   TickResult,
   ToolCall,
   UsageStats,
@@ -79,9 +98,17 @@ import {
 // / `onAfterLoopRunExecution` on the derived `CommandHooks` surface. Input is
 // the execution request; output the settled `ExecutionTerminal` — the exact
 // generics of the `runExecutionFx` Operation below.
+// ADR 89 §3 — the per-tick round is `loop:tick`, a command on the LOOP
+// harness (declared in the constructor via `this.command`, reached in-fiber
+// via `this.commandEffect`). Typing it here mints `onBeforeLoopTick` (over
+// `TickInput`) / `onAfterLoopTick` (over the settled `TickResult`). Input is
+// the per-tick context (identity + live refs); output the settled tick
+// outcome. Like `run-execution`, `TickInput` carries live object refs so the
+// verb is `exposure: "internal"` (never inbox/wire-addressable).
 declare module "@agentick/runtime-next" {
   interface CommandRegistry {
     "loop:run-execution": { input: RunExecutionInput; output: ExecutionTerminal };
+    "loop:tick": { input: TickInput; output: TickResult };
   }
 }
 
@@ -170,6 +197,31 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
     super("loop", scopeId, journal, bus, inbox, {
       inheritedInterceptors: options.inheritedInterceptors,
       interceptorParent: options.interceptorParent,
+    });
+
+    // ADR 89 §3 — the per-tick round as a declared command. ONE tick
+    // iteration THROUGH SETTLE (render → model → tool → apply → tick-end);
+    // its terminal IS the tick barrier the run-execution loop awaits. The
+    // DECIDE (continuation policy) stays OUT, in the run-execution
+    // while-loop. Declared here (like `run-execution`) so it mints
+    // `onBeforeLoopTick`/`onAfterLoopTick` and emits phases like every op;
+    // reached via `this.commandEffect` inside `runExecutionBody` so it runs
+    // IN the run-execution fiber (ADR 77 one-fiber — parentOpId auto-threads,
+    // kill/resume interruption propagates). `exposure: "internal"`:
+    // `TickInput` carries LIVE refs (reconciler/executor/tool/applicator +
+    // the session's resolvers), so the verb is NOT inbox/wire-addressable
+    // (ADR 51 §1.2). Deterministic opId keyed by the tick's `tickId`. The
+    // returned Promise facade is unused — the loop composes the twin.
+    this.command<TickInput, TickResult, unknown>({
+      name: "loop:tick",
+      exposure: "internal",
+      opId: (i) => `loop:tick:${i.tickId}`,
+      scope: (i) => ({
+        sessionId: i.sessionId,
+        executionId: i.executionId,
+        tickId: i.tickId,
+      }),
+      handler: (i) => this.tickBody(i),
     });
   }
 
@@ -342,174 +394,50 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         const tickIndex = acc.ticks;
         const tickStartedAt = Date.now();
 
-        // Tick-start orchestration event (public stream).
-        input.onEvent?.({ kind: "tick-start", tick: tickIndex, tickIndex });
+        // Assemble the per-tick command input — the per-tick identity
+        // (`tickId`/`tickIndex`, the hook's clean first fields) plus the LIVE
+        // refs, the session resolvers, and the MERGED `execSignal`. In-process
+        // only (`loop:tick` is `exposure: "internal"`); the refs never cross
+        // the wire, so this is NOT a wire-serializable command input.
+        const tickInput: TickInput = {
+          tickId,
+          tickIndex,
+          executionId,
+          sessionId: input.sessionId,
+          mountId: input.mountId,
+          reconciler: input.reconciler,
+          modelExecutor: input.modelExecutor,
+          target: input.target,
+          toolExecutor: input.toolExecutor,
+          stateApplicator: input.stateApplicator,
+          signal: execSignal,
+          resolveRenderContext: input.resolveRenderContext,
+          resolveModel: input.resolveModel,
+          stream: input.stream,
+          narrate: input.narrate,
+          toolConcurrency: input.toolConcurrency,
+          onEvent: input.onEvent,
+        };
 
-        // Resolve THIS render's RenderContext envelope (ADR 55) — the
-        // session's per-render fact producer (window today via
-        // effectiveModelInfo; future: active model, budget, principal).
-        // The loop is a dumb conduit — it threads the whole envelope into
-        // renderTree below with no per-fact knowledge.
-        const renderContext = input.resolveRenderContext?.();
-
-        // Lifecycle bridge (#206) — dispatch tick-start to the reconciler
-        // hook store AWAITED, BEFORE render. Without this bridge the
-        // entire useOn* family is inert (no producer). A throw here fails
-        // the run (→ ExecutionError) — pinned by characterization.
-        yield* awaitBridge(() =>
-          input.reconciler.notifyLifecycle({
-            mountId: input.mountId,
-            event: { kind: "tick-start", tickId, executionId },
-          }),
+        // THE BARRIER (ADR 89 §3). Run the `loop:tick` command IN this fiber
+        // and await its terminal. `commandEffect` composes the tick op in-fiber
+        // (ADR 77 one-fiber: `parentOpId` auto-threads, kill/resume
+        // interruption propagates), so the command terminal IS the tick barrier
+        // the sequential `yield*` gave before. The command body runs the tick
+        // THROUGH SETTLE (render → model → tool → apply → reconciler tick-end);
+        // `onBeforeLoopTick` fires on entry (over `TickInput`), `onAfterLoopTick`
+        // on exit (over the settled `TickResult`). The DECIDE stays OUT (below).
+        const tickResult = yield* this.commandEffect<TickInput, TickResult, unknown>(
+          "loop:tick",
+          tickInput,
         );
 
-        // 1. Render. The RenderContext envelope rides render-context
-        // (ADR 54 / 55) so useContextInfo / useRenderContext read it
-        // SYNCHRONOUSLY during this render — adaptive-compaction components
-        // react before the IR freezes. Composed in-fiber via `.fx`.
-        const renderResult = yield* input.reconciler.fx.renderTree({
-          mountId: input.mountId,
-          sessionId: input.sessionId,
-          executionId,
-          ...(renderContext !== undefined ? { renderContext } : {}),
-        });
-
-        // ADR 56 — tree-declared per-tick model. If THIS render's IR
-        // declared a model, resolve its ref (via the session-supplied
-        // `resolveModel`, closing over the mount's ModelBridge) to the
-        // run-ready RegisteredModel and run THAT model-executor + target for
-        // this tick INSTEAD of input.modelExecutor/input.target. Absent, or a
-        // ref that doesn't resolve, falls back to input.modelExecutor/target —
-        // today's behavior, untouched. This IS the precedence: tick-IR >
-        // send > session.
-        //
-        // TODO(adr-56-slice-1: adapter <Model> sugar) — the adopter face
-        // (`<Model model={adapter}>` deriving {modelExecutor,target} from a
-        // live model-next adapter, then calling useModelRegistration)
-        // lands in a binding package that deps BOTH reconciler-react +
-        // model-next. Until then the ref is registered directly on the
-        // ModelBridge. See ADR 56 §Deferred (1).
-        // TODO(adr-56-slice-2: force-render activeModel) — reflecting the
-        // IR-declared model back into the render-context `activeModel`
-        // (ADR 55) needs render → resolve → re-render convergence. This
-        // per-tick EXECUTION model resolves post-render (no chicken-and-
-        // egg), so it is orthogonal to that slice. See ADR 56 §Deferred (2).
-        const modelDecl = renderResult.tree.declarations?.model;
-        const resolvedModel = modelDecl ? input.resolveModel?.(modelDecl.modelRef) : undefined;
-        const tickModelExecutor = resolvedModel?.modelExecutor ?? input.modelExecutor;
-        const tickTarget = resolvedModel?.target ?? input.target;
-        // `decl.parameters` overlay the compiled tree's generation config
-        // for this tick (temperature, maxOutputTokens, …) — the same
-        // knobs RenderedTree.config carries and the executor reads via
-        // buildParameters. Merge IR params over the render's config.
-        const tickCompiled =
-          modelDecl?.parameters !== undefined
-            ? {
-                ...renderResult.tree,
-                config: {
-                  ...renderResult.tree.config,
-                  ...modelDecl.parameters,
-                } as SpecConfig,
-              }
-            : renderResult.tree;
-
-        // 2. Layered-tools compile (#138).
-        //
-        // The reconciler emitted tool declarations in `renderResult.tree
-        // .declarations.tools` (the IR's record of THIS render's
-        // contribution). Sync that into the tool executor's registry
-        // as the reconciler-bound slice, then ask the registry for the
-        // precedence-resolved model-visible set — the unification of
-        // every layered seam (gateway/app/session/execution/extension/
-        // reconciler). The projection reads that set, not the IR slot.
-        // Both compose in-fiber via `.fx`.
-        const reconcilerTools = renderResult.tree.declarations?.tools ?? [];
-        const reconcilerBinding = { scope: "reconciler", mountId: input.mountId } as const;
-        yield* input.toolExecutor.fx.replaceReconcilerTools({
-          mountId: input.mountId,
-          registrations: reconcilerTools.map((d) => toRegistration(d, reconcilerBinding)),
-        });
-        const modelTools = yield* input.toolExecutor.fx.compileForTick({ exposure: "model" });
-
-        // 2b. Provider-EXECUTED tools (Pass D). Unlike `modelTools`, these
-        //     bypass the tool executor entirely — no `replaceReconcilerTools`,
-        //     no `compileForTick`, no precedence fold. The data is already in
-        //     the IR: the reconciler collected any tree-declared provider
-        //     tools into `declarations.providerTools`, so we thread that slice
-        //     straight to the executor's `project` phase. The projection
-        //     (`buildProviderTools`) dedupes by provider+name, last-wins.
-        //     TODO(pass-d): thread config-level provider tools
-        //     (createApp/createSession `{ providerTools }`) once that config
-        //     seam exists — this run threads ONLY the compiled-tree source, so
-        //     a provider tool contributes iff a rendered tree declares it.
-        const providerTools = tickCompiled.declarations?.providerTools ?? [];
-
-        // 3. Execute. Streaming path (executeStream) when the caller
-        //    requested streaming AND the executor supports it AND the
-        //    target's capabilities don't explicitly disable it.
-        const wantsStreaming =
-          (input.stream ?? false) &&
-          typeof tickModelExecutor.executeStream === "function" &&
-          (tickTarget.capabilities?.supportsStreaming ?? true);
-
-        let executorTerminal: ExecutorTerminal<LanguageModelExecutionResult>;
-
-        if (wantsStreaming) {
-          // Streaming path — project → executeStream(sink) → normalize,
-          // all in ONE fiber (the sink-fold twin; no queue). The sink
-          // forwards each AdapterDelta (including the symmetric summary
-          // events) as a `model` event — NO loop-side synthesis on this
-          // path (adapter already owns symmetric event emission).
-          const projected = yield* tickModelExecutor.fx.project({
-            compiled: tickCompiled,
-            target: tickTarget,
-            scope: { sessionId: input.sessionId, executionId, tickId },
-            tools: modelTools,
-            ...(providerTools.length > 0 ? { providerTools } : {}),
-            ...(input.narrate !== undefined ? { narrate: input.narrate } : {}),
-          });
-          // #182 Option A: a provider failure lands on the twin's E
-          // channel; `Effect.either` catches it exactly where the Promise
-          // version caught the `.result` rejection → a failed terminal.
-          const streamed = yield* Effect.either(
-            tickModelExecutor.fx.executeStream(
-              {
-                targetInput: projected,
-                target: tickTarget,
-                scope: { sessionId: input.sessionId, executionId, tickId },
-                signal: execSignal,
-              },
-              (delta) =>
-                Effect.sync(() => input.onEvent?.({ kind: "model", tick: tickIndex, delta })),
-            ),
-          );
-          if (Either.isLeft(streamed)) {
-            executorTerminal = {
-              outcome: "failed",
-              error: new ProviderRejected({ cause: streamed.left }),
-            };
-            stopReason = "executor_failed";
-            break;
-          }
-          const normalized = yield* tickModelExecutor.fx.normalize({
-            targetOutput: streamed.right,
-            target: tickTarget,
-            scope: { sessionId: input.sessionId, executionId, tickId },
-          });
-          executorTerminal = { outcome: "succeeded", result: normalized };
-        } else {
-          // Non-streaming path: classic project → execute → normalize via run.
-          executorTerminal = yield* tickModelExecutor.fx.run({
-            compiled: tickCompiled,
-            target: tickTarget,
-            scope: { sessionId: input.sessionId, executionId, tickId },
-            tools: modelTools,
-            signal: execSignal,
-            ...(providerTools.length > 0 ? { providerTools } : {}),
-            ...(input.narrate !== undefined ? { narrate: input.narrate } : {}),
-          });
-        }
-
+        // A model-executor failure returned a failed terminal WITHOUT settling
+        // (the pre-command inline `break` before the tick-end bridge). Map the
+        // outcome to the stop reason and break — the exact mapping the inline
+        // code used (streaming `failed` and the general non-success terminal
+        // both land `executor_failed`).
+        const executorTerminal = tickResult.executorTerminal;
         if (executorTerminal.outcome !== "succeeded") {
           stopReason =
             executorTerminal.outcome === "canceled"
@@ -520,280 +448,18 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           break;
         }
 
+        // Accumulate this tick's contribution from the settled `TickResult`
+        // (the tick command body no longer mutates the run's accumulator).
         const result = executorTerminal.result;
         accumulateUsage(acc.usage, result.usage);
         acc.output.push(...result.output);
-
-        // Non-streaming path: synthesize summary model events from the
-        // result so consumers subscribed to `message` / `content` /
-        // `tool-call` events see the model's output. The streaming
-        // path skips this — the adapter emitted them already.
-        if (!wantsStreaming && input.onEvent) {
-          let blockIndex = 0;
-          for (const block of result.output) {
-            input.onEvent({
-              kind: "model",
-              tick: tickIndex,
-              delta: { type: "content", blockIndex, content: block },
-            });
-            blockIndex += 1;
-          }
-          for (const tc of result.toolCalls ?? []) {
-            input.onEvent({
-              kind: "model",
-              tick: tickIndex,
-              delta: {
-                type: "tool-call",
-                callId: tc.id,
-                name: tc.name,
-                input: tc.input as Readonly<Record<string, unknown>>,
-              },
-            });
-          }
-          input.onEvent({
-            kind: "model",
-            tick: tickIndex,
-            delta: {
-              type: "message-end",
-              stopReason: result.stopReason,
-              usage: result.usage ?? zeroUsage(),
-            },
-          });
-        }
-
-        // 3. Tool dispatch — every entry in result.toolCalls is a request
-        // for Agentick to invoke (provider-side tools come back as
-        // tool_result blocks in result.output and don't appear here). Each
-        // dispatch composes in-fiber via `.fx`; a HARD throw lands on the
-        // twin's E channel and `Effect.either` catches it into a failed
-        // tool result (the run survives).
-        //
-        // Stage 5 — a tick's tool calls dispatch CONCURRENTLY
-        // (`input.toolConcurrency`, default "unbounded"). `Effect.all`
-        // preserves call-order in the results array regardless of
-        // concurrency (so persistence + the model's next-tick view are
-        // deterministic); only the per-tool lifecycle EVENTS interleave.
-        // Abort / timeout tears down every in-flight tool fiber — each
-        // carries `execSignal`, and `Effect.all` propagates interruption.
-        const toolCalls: readonly ToolCall[] = result.toolCalls ?? [];
-        const dispatchOne = (tc: ToolCall): Effect.Effect<LoopToolResult, never, never> =>
-          Effect.gen(function* () {
-            const startedAt = Date.now();
-            // Eager model self-narration (Pass B) — the model's `_summary`
-            // sentence rides straight off the raw tool input so the
-            // tool-start spinner lights up ("Searching the docs…") the
-            // instant dispatch begins, BEFORE the handler resolves. The
-            // executor strips the same field before validation; here we
-            // only READ it for display. The full precedence-resolved
-            // presentation (folding displaySummary/title — known only
-            // after validation) rides `DispatchResult.presentation`.
-            const narration = extractNarration(tc.input);
-            input.onEvent?.({
-              kind: "tool-dispatch-start",
-              tick: tickIndex,
-              callId: tc.id,
-              name: tc.name,
-              via: "model",
-            });
-            // Bridge to the reconciler hook store (ADR 55) — lights up
-            // useOnToolStart. Fire-and-forget (a hook throw must not fail
-            // the run).
-            void input.reconciler.notifyLifecycle({
-              mountId: input.mountId,
-              event: {
-                kind: "tool-start",
-                tickId,
-                callId: tc.id,
-                name: tc.name,
-                via: "model",
-                executionId,
-                ...(narration !== undefined ? { narration } : {}),
-              },
-            });
-            const dispatched = yield* Effect.either(
-              input.toolExecutor.fx.dispatch({
-                toolCallId: tc.id,
-                name: tc.name,
-                input: tc.input,
-                context: {
-                  via: "model",
-                  sessionId: input.sessionId,
-                  executionId,
-                  tickId,
-                },
-                // Structured cancellation (Stage 5) — an in-flight tool
-                // handler tears down when abort()/timeout fires (the tool
-                // executor honors `DispatchInput.signal`).
-                signal: execSignal,
-              }),
-            );
-            if (Either.isRight(dispatched)) {
-              const ok = dispatched.right;
-              const durationMs = ok.durationMs ?? Date.now() - startedAt;
-              // ADR 70 — `DispatchResult.succeeded` retired for `isError`
-              // (soft/domain error). A resolved dispatch is a success unless
-              // it flags a soft error; HARD failures reject (caught below).
-              const dispatchSucceeded = ok.isError !== true;
-              input.onEvent?.({
-                kind: "tool-dispatch-end",
-                tick: tickIndex,
-                callId: tc.id,
-                name: tc.name,
-                outcome: dispatchSucceeded ? "succeeded" : "failed",
-                durationMs,
-              });
-              void input.reconciler.notifyLifecycle({
-                mountId: input.mountId,
-                event: {
-                  kind: "tool-end",
-                  tickId,
-                  callId: tc.id,
-                  name: tc.name,
-                  outcome: dispatchSucceeded ? "succeeded" : "failed",
-                  durationMs,
-                  executionId,
-                  // Pass B — the fully precedence-resolved presentation the
-                  // executor computed at dispatch (folds displaySummary/
-                  // title, known only post-validation). Reuses the existing
-                  // tool-end event; no new channel.
-                  ...(ok.presentation !== undefined ? { presentation: ok.presentation } : {}),
-                },
-              });
-              input.onEvent?.({
-                kind: "tool-dispatch",
-                tick: tickIndex,
-                callId: tc.id,
-                name: tc.name,
-                content: ok.content,
-                succeeded: dispatchSucceeded,
-                durationMs,
-              });
-              return {
-                toolCallId: tc.id,
-                toolName: tc.name,
-                succeeded: dispatchSucceeded,
-                content: ok.content,
-                durationMs,
-              };
-            }
-            const err = dispatched.left;
-            const durationMs = Date.now() - startedAt;
-            input.onEvent?.({
-              kind: "tool-dispatch-end",
-              tick: tickIndex,
-              callId: tc.id,
-              name: tc.name,
-              outcome: "failed",
-              durationMs,
-            });
-            void input.reconciler.notifyLifecycle({
-              mountId: input.mountId,
-              event: {
-                kind: "tool-end",
-                tickId,
-                callId: tc.id,
-                name: tc.name,
-                outcome: "failed",
-                durationMs,
-                executionId,
-              },
-            });
-            input.onEvent?.({
-              kind: "tool-dispatch",
-              tick: tickIndex,
-              callId: tc.id,
-              name: tc.name,
-              content: [],
-              succeeded: false,
-              durationMs,
-              isError: true,
-            });
-            return {
-              toolCallId: tc.id,
-              toolName: tc.name,
-              succeeded: false,
-              content: [],
-              durationMs,
-              error: err,
-            };
-          });
-
-        const dispatchedResults =
-          toolCalls.length > 0
-            ? yield* Effect.all(toolCalls.map(dispatchOne), {
-                concurrency: input.toolConcurrency ?? "unbounded",
-              })
-            : [];
-        const tickToolResults: LoopToolResult[] = [...dispatchedResults];
-        acc.toolResults.push(...tickToolResults);
-
-        // 4. State application — the session harness's apply commands,
-        // composed in-fiber via `.fx`. NoopStateApplicator records nothing;
-        // the real session harness writes timeline entries here so the next
-        // render sees them.
-        yield* input.stateApplicator.fx.applyExecutorResult({
-          sessionId: input.sessionId,
-          executionId,
-          tickId,
-          result,
-        });
-        if (tickToolResults.length > 0) {
-          yield* input.stateApplicator.fx.applyToolResults({
-            sessionId: input.sessionId,
-            executionId,
-            tickId,
-            results: tickToolResults,
-          });
-        }
-
+        acc.toolResults.push(...tickResult.toolResults);
         acc.lastStopReason = result.stopReason;
 
-        // 5. Continuation decision (ADR 67). The loop no longer owns a
-        // scattered set of continuation authorities — it builds ONE
-        // typed `TickResult`, lets the tree settle, then asks the session
-        // for a single `TickEndForwardDecision` and folds it into its
-        // (unchanged) two-tier resolution under the `maxTicks` hard cap.
-        //
-        // `provisionalContinue` is the loop's INTRINSIC default disposition
-        // (tool_use with pending calls → keep ticking), computed BEFORE the
-        // session's predicates run. It rides the `TickResult` as
-        // `shouldContinue` so a gate/steering predicate can read "would the
-        // loop otherwise stop?" and hold it open.
-        const provisionalContinue = result.stopReason === "tool_use" && tickToolResults.length > 0;
-        const tickResult: TickResult = {
-          executionId,
-          sessionId: input.sessionId,
-          tickId,
-          tickIndex,
-          executorTerminal,
-          toolResults: tickToolResults,
-          shouldContinue: provisionalContinue,
-          stopReason: result.stopReason,
-        };
-
-        // ADR 67 §"flip the tick-end order" — SETTLE FIRST. The reconciler
-        // tick-end runs the tree's `useOnTickEnd` effects and settles the
-        // IR so the session's continuation predicates read SETTLED state
-        // (a tick-end effect may update a knob a gate checks). This
-        // deliberately precedes the session decision below. AWAITED
-        // in-fiber via the bridge.
-        //
-        // Lifecycle bridge (#206) — tick-end carries this tick's usage
-        // (a past fact; becomes "prior usedTokens" for the next render's
-        // utilization) + the settled `TickResult` (ADR 67 — the loop
-        // executor's documented lifecycle payload).
-        yield* awaitBridge(() =>
-          input.reconciler.notifyLifecycle({
-            mountId: input.mountId,
-            event: {
-              kind: "tick-end",
-              tickId,
-              executionId,
-              result: tickResult,
-              ...(result.usage !== undefined ? { metadata: { usage: result.usage } } : {}),
-            },
-          }),
-        );
+        // `provisionalContinue` is the loop's INTRINSIC disposition (tool_use
+        // with pending calls → keep ticking), computed inside the tick body and
+        // surfaced as `tickResult.shouldContinue`; the DECIDE reads it below.
+        const provisionalContinue = tickResult.shouldContinue;
 
         // ADR 67 §"flip the tick-end order" — THEN DECIDE. The session
         // folds its continuation predicates (gates + steering + tree stop)
@@ -925,11 +591,500 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
       ),
     );
   }
+
+  /**
+   * The `loop:tick` command body (ADR 89 §3) — ONE tick iteration THROUGH
+   * SETTLE: tick-start bridge → render → per-tick model resolve → execute
+   * (stream | run) → tool dispatch → state apply → build `TickResult` →
+   * SETTLE (reconciler tick-end). Returns the settled {@link TickResult}; the
+   * run-execution continuation accumulates from it and runs the ADR-67 DECIDE
+   * (continuation policy stays OUT of this command — settle is IN, decide is
+   * OUT). On a model-executor failure the body returns EARLY with a failed
+   * `executorTerminal` and NO settle — the continuation maps the outcome to a
+   * stop reason and breaks, byte-identical to the pre-command inline `break`.
+   *
+   * Reached via `commandEffect` from {@link runExecutionBody}, so it stays in
+   * the run-execution fiber (ADR 77 one-fiber) — `input.signal` (the merged
+   * `execSignal`) interruption + `parentOpId` threading are preserved, and the
+   * command terminal IS the tick barrier. `notifyLifecycle` tick-start/tick-end
+   * are UNCHANGED here — §4 rewires them to `onBefore/AfterLoopTick` and drops
+   * them. Any uncaught twin failure rides the command's `E` channel to the
+   * run-execution boundary's `Effect.catchAll` (→ `ExecutionError`), as before.
+   */
+  private tickBody(input: TickInput): Effect.Effect<TickResult, unknown, never> {
+    const { executionId, tickId, tickIndex } = input;
+    const execSignal = input.signal;
+    return Effect.gen(function* () {
+      // Tick-start orchestration event (public stream).
+      input.onEvent?.({ kind: "tick-start", tick: tickIndex, tickIndex });
+
+      // Resolve THIS render's RenderContext envelope (ADR 55) — the
+      // session's per-render fact producer (window today via
+      // effectiveModelInfo; future: active model, budget, principal).
+      // The loop is a dumb conduit — it threads the whole envelope into
+      // renderTree below with no per-fact knowledge.
+      const renderContext = input.resolveRenderContext?.();
+
+      // Lifecycle bridge (#206) — dispatch tick-start to the reconciler
+      // hook store AWAITED, BEFORE render. Without this bridge the
+      // entire useOn* family is inert (no producer). A throw here fails
+      // the run (→ ExecutionError) — pinned by characterization.
+      yield* awaitBridge(() =>
+        input.reconciler.notifyLifecycle({
+          mountId: input.mountId,
+          event: { kind: "tick-start", tickId, executionId },
+        }),
+      );
+
+      // 1. Render. The RenderContext envelope rides render-context
+      // (ADR 54 / 55) so useContextInfo / useRenderContext read it
+      // SYNCHRONOUSLY during this render — adaptive-compaction components
+      // react before the IR freezes. Composed in-fiber via `.fx`.
+      const renderResult = yield* input.reconciler.fx.renderTree({
+        mountId: input.mountId,
+        sessionId: input.sessionId,
+        executionId,
+        ...(renderContext !== undefined ? { renderContext } : {}),
+      });
+
+      // ADR 56 — tree-declared per-tick model. If THIS render's IR
+      // declared a model, resolve its ref (via the session-supplied
+      // `resolveModel`, closing over the mount's ModelBridge) to the
+      // run-ready RegisteredModel and run THAT model-executor + target for
+      // this tick INSTEAD of input.modelExecutor/input.target. Absent, or a
+      // ref that doesn't resolve, falls back to input.modelExecutor/target —
+      // today's behavior, untouched. This IS the precedence: tick-IR >
+      // send > session.
+      //
+      // TODO(adr-56-slice-1: adapter <Model> sugar) — the adopter face
+      // (`<Model model={adapter}>` deriving {modelExecutor,target} from a
+      // live model-next adapter, then calling useModelRegistration)
+      // lands in a binding package that deps BOTH reconciler-react +
+      // model-next. Until then the ref is registered directly on the
+      // ModelBridge. See ADR 56 §Deferred (1).
+      // TODO(adr-56-slice-2: force-render activeModel) — reflecting the
+      // IR-declared model back into the render-context `activeModel`
+      // (ADR 55) needs render → resolve → re-render convergence. This
+      // per-tick EXECUTION model resolves post-render (no chicken-and-
+      // egg), so it is orthogonal to that slice. See ADR 56 §Deferred (2).
+      const modelDecl = renderResult.tree.declarations?.model;
+      const resolvedModel = modelDecl ? input.resolveModel?.(modelDecl.modelRef) : undefined;
+      const tickModelExecutor = resolvedModel?.modelExecutor ?? input.modelExecutor;
+      const tickTarget = resolvedModel?.target ?? input.target;
+      // `decl.parameters` overlay the compiled tree's generation config
+      // for this tick (temperature, maxOutputTokens, …) — the same
+      // knobs RenderedTree.config carries and the executor reads via
+      // buildParameters. Merge IR params over the render's config.
+      const tickCompiled =
+        modelDecl?.parameters !== undefined
+          ? {
+              ...renderResult.tree,
+              config: {
+                ...renderResult.tree.config,
+                ...modelDecl.parameters,
+              } as SpecConfig,
+            }
+          : renderResult.tree;
+
+      // 2. Layered-tools compile (#138).
+      //
+      // The reconciler emitted tool declarations in `renderResult.tree
+      // .declarations.tools` (the IR's record of THIS render's
+      // contribution). Sync that into the tool executor's registry
+      // as the reconciler-bound slice, then ask the registry for the
+      // precedence-resolved model-visible set — the unification of
+      // every layered seam (gateway/app/session/execution/extension/
+      // reconciler). The projection reads that set, not the IR slot.
+      // Both compose in-fiber via `.fx`.
+      const reconcilerTools = renderResult.tree.declarations?.tools ?? [];
+      const reconcilerBinding = { scope: "reconciler", mountId: input.mountId } as const;
+      yield* input.toolExecutor.fx.replaceReconcilerTools({
+        mountId: input.mountId,
+        registrations: reconcilerTools.map((d) => toRegistration(d, reconcilerBinding)),
+      });
+      const modelTools = yield* input.toolExecutor.fx.compileForTick({ exposure: "model" });
+
+      // 2b. Provider-EXECUTED tools (Pass D). Unlike `modelTools`, these
+      //     bypass the tool executor entirely — no `replaceReconcilerTools`,
+      //     no `compileForTick`, no precedence fold. The data is already in
+      //     the IR: the reconciler collected any tree-declared provider
+      //     tools into `declarations.providerTools`, so we thread that slice
+      //     straight to the executor's `project` phase. The projection
+      //     (`buildProviderTools`) dedupes by provider+name, last-wins.
+      //     TODO(pass-d): thread config-level provider tools
+      //     (createApp/createSession `{ providerTools }`) once that config
+      //     seam exists — this run threads ONLY the compiled-tree source, so
+      //     a provider tool contributes iff a rendered tree declares it.
+      const providerTools = tickCompiled.declarations?.providerTools ?? [];
+
+      // 3. Execute. Streaming path (executeStream) when the caller
+      //    requested streaming AND the executor supports it AND the
+      //    target's capabilities don't explicitly disable it.
+      const wantsStreaming =
+        (input.stream ?? false) &&
+        typeof tickModelExecutor.executeStream === "function" &&
+        (tickTarget.capabilities?.supportsStreaming ?? true);
+
+      let executorTerminal: ExecutorTerminal<LanguageModelExecutionResult>;
+
+      if (wantsStreaming) {
+        // Streaming path — project → executeStream(sink) → normalize,
+        // all in ONE fiber (the sink-fold twin; no queue). The sink
+        // forwards each AdapterDelta (including the symmetric summary
+        // events) as a `model` event — NO loop-side synthesis on this
+        // path (adapter already owns symmetric event emission).
+        const projected = yield* tickModelExecutor.fx.project({
+          compiled: tickCompiled,
+          target: tickTarget,
+          scope: { sessionId: input.sessionId, executionId, tickId },
+          tools: modelTools,
+          ...(providerTools.length > 0 ? { providerTools } : {}),
+          ...(input.narrate !== undefined ? { narrate: input.narrate } : {}),
+        });
+        // #182 Option A: a provider failure lands on the twin's E
+        // channel; `Effect.either` catches it exactly where the Promise
+        // version caught the `.result` rejection → a failed terminal.
+        const streamed = yield* Effect.either(
+          tickModelExecutor.fx.executeStream(
+            {
+              targetInput: projected,
+              target: tickTarget,
+              scope: { sessionId: input.sessionId, executionId, tickId },
+              signal: execSignal,
+            },
+            (delta) =>
+              Effect.sync(() => input.onEvent?.({ kind: "model", tick: tickIndex, delta })),
+          ),
+        );
+        if (Either.isLeft(streamed)) {
+          // Model failure — return a failed terminal WITHOUT settling. The
+          // continuation maps `failed` → `executor_failed` and breaks (the
+          // pre-command inline `break` before the tick-end bridge).
+          return failedTickResult(input, {
+            outcome: "failed",
+            error: new ProviderRejected({ cause: streamed.left }),
+          });
+        }
+        const normalized = yield* tickModelExecutor.fx.normalize({
+          targetOutput: streamed.right,
+          target: tickTarget,
+          scope: { sessionId: input.sessionId, executionId, tickId },
+        });
+        executorTerminal = { outcome: "succeeded", result: normalized };
+      } else {
+        // Non-streaming path: classic project → execute → normalize via run.
+        executorTerminal = yield* tickModelExecutor.fx.run({
+          compiled: tickCompiled,
+          target: tickTarget,
+          scope: { sessionId: input.sessionId, executionId, tickId },
+          tools: modelTools,
+          signal: execSignal,
+          ...(providerTools.length > 0 ? { providerTools } : {}),
+          ...(input.narrate !== undefined ? { narrate: input.narrate } : {}),
+        });
+      }
+
+      if (executorTerminal.outcome !== "succeeded") {
+        // Non-success terminal (canceled/vetoed/failed) — no settle; the
+        // continuation maps the outcome to the stop reason and breaks.
+        return failedTickResult(input, executorTerminal);
+      }
+
+      const result = executorTerminal.result;
+
+      // Non-streaming path: synthesize summary model events from the
+      // result so consumers subscribed to `message` / `content` /
+      // `tool-call` events see the model's output. The streaming
+      // path skips this — the adapter emitted them already.
+      if (!wantsStreaming && input.onEvent) {
+        let blockIndex = 0;
+        for (const block of result.output) {
+          input.onEvent({
+            kind: "model",
+            tick: tickIndex,
+            delta: { type: "content", blockIndex, content: block },
+          });
+          blockIndex += 1;
+        }
+        for (const tc of result.toolCalls ?? []) {
+          input.onEvent({
+            kind: "model",
+            tick: tickIndex,
+            delta: {
+              type: "tool-call",
+              callId: tc.id,
+              name: tc.name,
+              input: tc.input as Readonly<Record<string, unknown>>,
+            },
+          });
+        }
+        input.onEvent({
+          kind: "model",
+          tick: tickIndex,
+          delta: {
+            type: "message-end",
+            stopReason: result.stopReason,
+            usage: result.usage ?? zeroUsage(),
+          },
+        });
+      }
+
+      // 3. Tool dispatch — every entry in result.toolCalls is a request
+      // for Agentick to invoke (provider-side tools come back as
+      // tool_result blocks in result.output and don't appear here). Each
+      // dispatch composes in-fiber via `.fx`; a HARD throw lands on the
+      // twin's E channel and `Effect.either` catches it into a failed
+      // tool result (the run survives).
+      //
+      // Stage 5 — a tick's tool calls dispatch CONCURRENTLY
+      // (`input.toolConcurrency`, default "unbounded"). `Effect.all`
+      // preserves call-order in the results array regardless of
+      // concurrency (so persistence + the model's next-tick view are
+      // deterministic); only the per-tool lifecycle EVENTS interleave.
+      // Abort / timeout tears down every in-flight tool fiber — each
+      // carries `execSignal`, and `Effect.all` propagates interruption.
+      const toolCalls: readonly ToolCall[] = result.toolCalls ?? [];
+      const dispatchOne = (tc: ToolCall): Effect.Effect<LoopToolResult, never, never> =>
+        Effect.gen(function* () {
+          const startedAt = Date.now();
+          // Eager model self-narration (Pass B) — the model's `_summary`
+          // sentence rides straight off the raw tool input so the
+          // tool-start spinner lights up ("Searching the docs…") the
+          // instant dispatch begins, BEFORE the handler resolves. The
+          // executor strips the same field before validation; here we
+          // only READ it for display. The full precedence-resolved
+          // presentation (folding displaySummary/title — known only
+          // after validation) rides `DispatchResult.presentation`.
+          const narration = extractNarration(tc.input);
+          input.onEvent?.({
+            kind: "tool-dispatch-start",
+            tick: tickIndex,
+            callId: tc.id,
+            name: tc.name,
+            via: "model",
+          });
+          // Bridge to the reconciler hook store (ADR 55) — lights up
+          // useOnToolStart. Fire-and-forget (a hook throw must not fail
+          // the run).
+          void input.reconciler.notifyLifecycle({
+            mountId: input.mountId,
+            event: {
+              kind: "tool-start",
+              tickId,
+              callId: tc.id,
+              name: tc.name,
+              via: "model",
+              executionId,
+              ...(narration !== undefined ? { narration } : {}),
+            },
+          });
+          const dispatched = yield* Effect.either(
+            input.toolExecutor.fx.dispatch({
+              toolCallId: tc.id,
+              name: tc.name,
+              input: tc.input,
+              context: {
+                via: "model",
+                sessionId: input.sessionId,
+                executionId,
+                tickId,
+              },
+              // Structured cancellation (Stage 5) — an in-flight tool
+              // handler tears down when abort()/timeout fires (the tool
+              // executor honors `DispatchInput.signal`).
+              signal: execSignal,
+            }),
+          );
+          if (Either.isRight(dispatched)) {
+            const ok = dispatched.right;
+            const durationMs = ok.durationMs ?? Date.now() - startedAt;
+            // ADR 70 — `DispatchResult.succeeded` retired for `isError`
+            // (soft/domain error). A resolved dispatch is a success unless
+            // it flags a soft error; HARD failures reject (caught below).
+            const dispatchSucceeded = ok.isError !== true;
+            input.onEvent?.({
+              kind: "tool-dispatch-end",
+              tick: tickIndex,
+              callId: tc.id,
+              name: tc.name,
+              outcome: dispatchSucceeded ? "succeeded" : "failed",
+              durationMs,
+            });
+            void input.reconciler.notifyLifecycle({
+              mountId: input.mountId,
+              event: {
+                kind: "tool-end",
+                tickId,
+                callId: tc.id,
+                name: tc.name,
+                outcome: dispatchSucceeded ? "succeeded" : "failed",
+                durationMs,
+                executionId,
+                // Pass B — the fully precedence-resolved presentation the
+                // executor computed at dispatch (folds displaySummary/
+                // title, known only post-validation). Reuses the existing
+                // tool-end event; no new channel.
+                ...(ok.presentation !== undefined ? { presentation: ok.presentation } : {}),
+              },
+            });
+            input.onEvent?.({
+              kind: "tool-dispatch",
+              tick: tickIndex,
+              callId: tc.id,
+              name: tc.name,
+              content: ok.content,
+              succeeded: dispatchSucceeded,
+              durationMs,
+            });
+            return {
+              toolCallId: tc.id,
+              toolName: tc.name,
+              succeeded: dispatchSucceeded,
+              content: ok.content,
+              durationMs,
+            };
+          }
+          const err = dispatched.left;
+          const durationMs = Date.now() - startedAt;
+          input.onEvent?.({
+            kind: "tool-dispatch-end",
+            tick: tickIndex,
+            callId: tc.id,
+            name: tc.name,
+            outcome: "failed",
+            durationMs,
+          });
+          void input.reconciler.notifyLifecycle({
+            mountId: input.mountId,
+            event: {
+              kind: "tool-end",
+              tickId,
+              callId: tc.id,
+              name: tc.name,
+              outcome: "failed",
+              durationMs,
+              executionId,
+            },
+          });
+          input.onEvent?.({
+            kind: "tool-dispatch",
+            tick: tickIndex,
+            callId: tc.id,
+            name: tc.name,
+            content: [],
+            succeeded: false,
+            durationMs,
+            isError: true,
+          });
+          return {
+            toolCallId: tc.id,
+            toolName: tc.name,
+            succeeded: false,
+            content: [],
+            durationMs,
+            error: err,
+          };
+        });
+
+      const dispatchedResults =
+        toolCalls.length > 0
+          ? yield* Effect.all(toolCalls.map(dispatchOne), {
+              concurrency: input.toolConcurrency ?? "unbounded",
+            })
+          : [];
+      const tickToolResults: LoopToolResult[] = [...dispatchedResults];
+
+      // 4. State application — the session harness's apply commands,
+      // composed in-fiber via `.fx`. NoopStateApplicator records nothing;
+      // the real session harness writes timeline entries here so the next
+      // render sees them.
+      yield* input.stateApplicator.fx.applyExecutorResult({
+        sessionId: input.sessionId,
+        executionId,
+        tickId,
+        result,
+      });
+      if (tickToolResults.length > 0) {
+        yield* input.stateApplicator.fx.applyToolResults({
+          sessionId: input.sessionId,
+          executionId,
+          tickId,
+          results: tickToolResults,
+        });
+      }
+
+      // 5. Build the typed `TickResult` (ADR 67). `provisionalContinue` is
+      // the loop's INTRINSIC default disposition (tool_use with pending
+      // calls → keep ticking), computed BEFORE the session's predicates run
+      // (in the DECIDE, OUTSIDE this command). It rides the `TickResult` as
+      // `shouldContinue` so a gate/steering predicate can read "would the
+      // loop otherwise stop?" and hold it open.
+      const provisionalContinue = result.stopReason === "tool_use" && tickToolResults.length > 0;
+      const tickResult: TickResult = {
+        executionId,
+        sessionId: input.sessionId,
+        tickId,
+        tickIndex,
+        executorTerminal,
+        toolResults: tickToolResults,
+        shouldContinue: provisionalContinue,
+        stopReason: result.stopReason,
+      };
+
+      // ADR 67 §"flip the tick-end order" — SETTLE (this is the tail of the
+      // tick command; the DECIDE runs AFTER, in the run-execution
+      // continuation). The reconciler tick-end runs the tree's `useOnTickEnd`
+      // effects and settles the IR so the session's continuation predicates
+      // (run by the DECIDE) read SETTLED state — a tick-end effect may update
+      // a knob a gate checks. AWAITED in-fiber via the bridge.
+      //
+      // Lifecycle bridge (#206) — tick-end carries this tick's usage
+      // (a past fact; becomes "prior usedTokens" for the next render's
+      // utilization) + the settled `TickResult` (ADR 67 — the loop
+      // executor's documented lifecycle payload).
+      yield* awaitBridge(() =>
+        input.reconciler.notifyLifecycle({
+          mountId: input.mountId,
+          event: {
+            kind: "tick-end",
+            tickId,
+            executionId,
+            result: tickResult,
+            ...(result.usage !== undefined ? { metadata: { usage: result.usage } } : {}),
+          },
+        }),
+      );
+
+      return tickResult;
+    });
+  }
 }
 
 // ============================================================================
 // helpers
 // ============================================================================
+
+/**
+ * Build a `TickResult` for a tick whose model executor did NOT succeed
+ * (failed / canceled / vetoed). No settle ran; `toolResults` is empty and
+ * `shouldContinue` false. The run-execution continuation reads
+ * `executorTerminal.outcome`, maps it to the stop reason, and breaks —
+ * byte-identical to the pre-command inline `break` on a non-success terminal.
+ */
+function failedTickResult(
+  input: TickInput,
+  executorTerminal: ExecutorTerminal<LanguageModelExecutionResult>,
+): TickResult {
+  return {
+    executionId: input.executionId,
+    sessionId: input.sessionId,
+    tickId: input.tickId,
+    tickIndex: input.tickIndex,
+    executorTerminal,
+    toolResults: [],
+    shouldContinue: false,
+  };
+}
 
 /**
  * Await a bridge NOTIFICATION (`reconciler.notifyLifecycle` /

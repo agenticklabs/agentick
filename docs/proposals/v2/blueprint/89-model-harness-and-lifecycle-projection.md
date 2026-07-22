@@ -199,6 +199,13 @@ belong there, exposed as a thin facade — not a whole new harness sibling.
 
 ### 3. `tick` becomes a command
 
+> **Status — §3 LANDED (feat/v2).** `loop:tick` is a declared command on the LOOP
+> harness (the loop owns tick orchestration; the model executor owns the single
+> model call). Body = the tick THROUGH SETTLE; the DECIDE (continuation) stays in
+> the run-execution while-loop (settle IN, decide OUT). Mints `onBeforeLoopTick` /
+> `onAfterLoopTick`. Command terminal = the tick barrier (kill/resume + tick-order
+> suites green). `notifyLifecycle` LEFT in place — §4 retires it.
+
 The per-tick model round is wrapped as a command (`loop:tick` or on the model/loop
 harness) so it mints `onBefore/AfterTick` and emits phases like every other op.
 **The tick barrier is preserved via the operation terminal**: the loop `await`s the

@@ -364,6 +364,63 @@ export interface TickInfo {
   readonly tickIndex: number;
 }
 
+/**
+ * Input to the `loop:tick` command (ADR 89 §3) — ONE iteration of the tick
+ * loop, through SETTLE (render → model → tool → state → tick-end). The loop's
+ * `run-execution` body invokes this command per tick and awaits its terminal
+ * as the tick barrier; the DECIDE (continuation policy) stays OUT, in the
+ * `run-execution` while-loop.
+ *
+ * Like {@link RunExecutionInput}, this carries LIVE object refs (reconciler /
+ * modelExecutor / toolExecutor / stateApplicator + the session's per-tick
+ * resolvers) and is IN-PROCESS ONLY (ADR 51 §1.2 — never crosses the wire, so
+ * the command is `exposure: "internal"`). The hook-relevant identity
+ * (`tickId`, `tickIndex`) leads; the refs below are plumbing a hook ignores.
+ * `onBeforeLoopTick` receives this input; `onAfterLoopTick` receives the
+ * settled {@link TickResult}.
+ */
+export interface TickInput {
+  /** Stable id for this tick (`tick-<ulid>`) — the hook's clean identity. */
+  readonly tickId: string;
+  /** 1-based index of this tick within the execution. */
+  readonly tickIndex: number;
+
+  readonly executionId: string;
+  readonly sessionId: string;
+  readonly mountId: string;
+
+  /** Reconciler harness whose `mountId` this tick renders. */
+  readonly reconciler: ReconcilerProtocol;
+  /** Fallback model-executor when the tick's IR declares no `<Model>`. */
+  readonly modelExecutor: ExecutorProtocol<unknown, unknown, LanguageModelExecutionResult>;
+  /** Fallback execution target paired with {@link modelExecutor}. */
+  readonly target: ExecutionTarget;
+  /** Tool executor harness for dispatch of `result.toolCalls`. */
+  readonly toolExecutor: ToolExecutorProtocol;
+  /** Where the tick writes results back (session `apply*` commands). */
+  readonly stateApplicator: StateApplicator;
+
+  /** Per-render fact producer (ADR 55) — called BEFORE render. */
+  readonly resolveRenderContext?: () => RenderContext | undefined;
+  /** Resolve a tree-declared model ref to its {@link RegisteredModel} (ADR 56). */
+  readonly resolveModel?: (modelRef: string) => RegisteredModel | undefined;
+
+  /**
+   * The per-execution MERGED abort signal (caller `input.signal` ∪ the
+   * per-execution controller) threaded to every in-flight edge (executor
+   * model call + tool dispatch), so a mid-tick abort tears the work down now.
+   */
+  readonly signal?: AbortSignal;
+  /** Whether to take the streaming path when the executor supports it. */
+  readonly stream?: boolean;
+  /** Model-narration switch (default `true`) threaded into `project` / `run`. */
+  readonly narrate?: boolean;
+  /** Concurrency for this tick's tool-call dispatch (default `"unbounded"`). */
+  readonly toolConcurrency?: number | "unbounded";
+  /** Partial-`StreamEvent` sink — the loop's out-of-band data flow. */
+  readonly onEvent?: (event: LoopEmittedEvent) => void;
+}
+
 export interface TickResult extends TickInfo {
   /** The executor's terminal for this tick. */
   readonly executorTerminal: ExecutorTerminal<LanguageModelExecutionResult>;
