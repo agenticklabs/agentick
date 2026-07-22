@@ -1726,6 +1726,25 @@ blueprint's design decisions; this is execution-level).
 
 ### 2026-07-21
 
+- **executedBy provenance — Anthropic optimistic + MCP stamping LANDED.** PASS A:
+  local wire-shape interfaces (docblocked "replace on SDK bump" — SDK 0.39 doesn't type
+  server tools) structurally detect `server_tool_use`/`web_search_tool_result`;
+  results surface as ToolResultBlocks stamped `provider:anthropic` w/ interned
+  Sources/citations; the request-half NEVER reaches `toolCalls` (structural exclusion —
+  the extractor matches `"tool_use"` exactly; tested). Fixture exception documented
+  (typed vs OUR wire interfaces). openai (Responses-API TODO stays)/google (metadata by
+  design)/ai-sdk untouched. PASS B: `ToolAnnotations.executedBy?` (declaration-level
+  provenance seam); `mcpDeclaration` stamps `mcp:<serverId>`; the server SUCCESS site
+  reads `annotations?.executedBy ?? "agentick"`. SPOOF-PROOF ×2: excluded from
+  `ClientToolAnnotations` + `toClientToolRegistration` strips a smuggled value at the
+  wire fold (raw JSON bypasses TS excess-property checks); client path stays hardcoded
+  `"client"`. **My correction over the agent:** the confirmation-DENIAL site reverted to
+  hardcoded `"agentick"` — a denial is produced by the gate, the tool never ran;
+  `mcp:<serverId>` would claim an execution that never happened. +16 tests. Gates:
+  typecheck --force 152/152 0-cached; 1151 tests; oxlint 0 errors (2 pre-existing).
+  executedBy state: agentick ✓ client ✓ provider:anthropic ✓(optimistic) mcp:<serverId> ✓;
+  provider:openai needs Responses API; google = never (by design); ai-sdk = can't name.
+
 - **reconciler → compiler RENAME LANDED (#243).** The JSX/tree→IR subsystem's public
   identity is now "compiler" ("reconciler" was React-fiber jargon leaked into the API).
   114 git-detected renames: `packages-next/{reconciler→compiler, reconciler-react→

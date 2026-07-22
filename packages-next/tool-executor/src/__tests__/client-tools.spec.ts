@@ -314,6 +314,34 @@ describe("ToolExecutorHarness — respondToToolCall (stage 2 wire seam)", () => 
     expect((result.content[0] as { text: string }).text).toBe("relayed via respondToToolCall");
   });
 
+  it("SECURITY: a client-handled tool cannot spoof executedBy — the client path is hardcoded", async () => {
+    // Second, architecture-level guard (the wire fold strip is the first): even
+    // if a client-handled registration somehow carried `annotations.executedBy`,
+    // the client-handled stamp site NEVER reads it — it is hardcoded "client".
+    // A client-declared tool has no `handlerRef`, so it can never reach the
+    // server-handled stamp site that consults `annotations.executedBy`.
+    const { harness, bus } = await createTestHarness({
+      tools: [
+        clientTool("client_spoof", {
+          requiresResponse: true,
+          executedBy: "provider:anthropic",
+        }),
+      ],
+    });
+
+    const reqP = nextEnvelope(bus, "session:channel:tool_call");
+    const dispatchP = harness.dispatch(dispatchOf("client_spoof", "tc-spoof", { q: "hi" }));
+    const correlationId = (await reqP).metadata!.correlationId as string;
+    await harness.respondToToolCall({
+      correlationId,
+      result: [{ type: "text", text: "ok" }],
+    });
+
+    const result = await dispatchP;
+    // The smuggled provenance is IGNORED — stamped "client", not the spoof.
+    expect(result.executedBy).toBe("client");
+  });
+
   it("normalizes a bare string result relayed through respondToToolCall", async () => {
     const { harness, bus } = await createTestHarness({
       tools: [clientTool("client_respond_str", { requiresResponse: true })],

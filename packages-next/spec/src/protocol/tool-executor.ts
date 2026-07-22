@@ -43,6 +43,7 @@ import type { HarnessFx } from "./middleware.js";
 import type { Effect } from "effect";
 import type { ContentBlock } from "../data/content-blocks.js";
 import type {
+  ClientToolAnnotations,
   ClientToolDeclaration,
   ToolBinding,
   ToolDeclaration,
@@ -344,10 +345,31 @@ export function toClientToolRegistration(
     inputSchema: jsonSchema(declaration.inputSchema),
     exposure: ["model"],
     ...(declaration.aliases !== undefined ? { aliases: declaration.aliases } : {}),
-    ...(declaration.annotations !== undefined ? { annotations: declaration.annotations } : {}),
+    ...(declaration.annotations !== undefined
+      ? { annotations: stripServerOnlyAnnotations(declaration.annotations) }
+      : {}),
     // NO handlerRef — client-handled.
   };
   return { declaration: decl, binding };
+}
+
+/**
+ * Strip server-authoritative annotation fields a wire client must never set.
+ *
+ * `executedBy` (execution provenance) is absent from {@link ClientToolAnnotations}
+ * by design (see its docblock), so a well-typed client cannot set it. But a raw
+ * JSON payload can smuggle it as an excess property that survives the spread —
+ * TypeScript's excess-property check does not run on values parsed off the wire.
+ * Dropping it HERE, at the single wire fold, makes the guarantee runtime-true:
+ * a client can never seed provenance onto its registration. Defense-in-depth —
+ * the executor also refuses to READ `executedBy` on the client-handled path.
+ */
+function stripServerOnlyAnnotations(ann: ClientToolAnnotations): ClientToolAnnotations {
+  if (!("executedBy" in ann)) return ann;
+  const { executedBy: _executedBy, ...rest } = ann as ClientToolAnnotations & {
+    executedBy?: unknown;
+  };
+  return rest;
 }
 
 /**

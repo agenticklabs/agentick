@@ -99,21 +99,34 @@ slice of `input.providerTools` onto the native `tools` array as
 max_uses: 5 }`). Passthrough; other providers' slices are ignored. Function
 tools are unaffected.
 
-**Provenance-half: document citations DONE, web-search NARROWED.** Anthropic
+**Provenance-half: document citations + web search DONE.** Anthropic
 `TextBlock.citations` (document citations — `char_location` / `page_location` /
 `content_block_location`) are mapped onto the canonical `Citation[]` on the
 annotated text block (`document_index` → `source.documentIndex`, `document_title`
 → `source.title`, `cited_text` → `citedText`, char/page/block span → `range`).
 
-Web-search provenance — stamping `tool_result` with
-`executedBy: "provider:anthropic"` and mapping `web_search_result_location`
-citations — is **narrowed** (`TODO(pass-d)` in `normalizeImpl`): the installed
-`@anthropic-ai/sdk@0.39.0` does not type `server_tool_use` /
-`web_search_tool_result` blocks or the web-search citation variant, so a typed
-fixture cannot be written against it. Implementing it requires an SDK bump
-(server tools land ~0.5x, a cross-cutting break outside this pass). Per the
-HARD RULE, we map what the SDK types (documents) and narrow-TODO what it can't
-reach rather than fabricate against an untyped shape.
+Web-search provenance is stamped **optimistically** (Pass A). The pinned
+`@anthropic-ai/sdk@0.39.0` still does not type `server_tool_use` /
+`web_search_tool_result` blocks or the `web_search_result_location` citation
+variant, but the wire delivers them (published Anthropic docs). The adapter
+carries LOCAL wire interfaces (`Anthropic*Wire`, exported from
+`anthropic-adapter.ts` and docblocked _"local until SDK types land — replace on
+SDK bump"_), detects the blocks STRUCTURALLY in `normalizeImpl`, and:
+
+- surfaces each `web_search_tool_result` as a canonical `tool_result` block
+  stamped `executedBy: "provider:anthropic"` (the error variant folds to
+  `isError`), with each hit interned as a URL-keyed `Source` + whole-block
+  citation;
+- EXCLUDES the `server_tool_use` request-half from `toolCalls` (it is never a
+  dispatchable function call — the exclusion is structural: its `type` string
+  is not `"tool_use"`), so the framework's tool executor never re-runs it;
+- maps `web_search_result_location` citations onto text blocks by URL,
+  consistent with the document-citation path.
+
+Because the SDK cannot type these shapes, the fixtures for this path are typed
+against the adapter's local wire interfaces — a documented exception to the
+SDK-typed-fixture rule (see the test-file header). Replace the local shapes with
+the SDK's own types once the server-tools bump lands.
 
 ## Verified by
 
@@ -122,6 +135,10 @@ reach rather than fabricate against an untyped shape.
   vocabulary, tag routing, sampling params from `tree.config` #211,
   Pass D provider-tools request-half, Pass D provenance-half document
   citations).
+- `src/__tests__/provider-web-search.spec.ts` — Pass A optimistic
+  provider-executed web search: `tool_result` stamped
+  `executedBy: "provider:anthropic"`, `server_tool_use` excluded from
+  `toolCalls`, URL-interned sources, `web_search_result_location` citations.
 - `src/__tests__/multimodal-projection.spec.ts` — wire-native modality
   projection, thinking round-trip, stop-reason `refusal`/`pause_turn`
   (#216), config-declared `topP`/`stopSequences` reaching the wire (#211).

@@ -108,6 +108,39 @@ describe("ToolExecutorHarness — dispatch happy path", () => {
     expect(seen).toEqual([{ input: { a: 1 }, useDeps: { sandbox: "s1" } }]);
   });
 
+  it("stamps executedBy from declaration annotations (MCP provenance seam)", async () => {
+    // A server-handled tool whose declaration carries `annotations.executedBy`
+    // (as `mcpDeclaration` does with `mcp:<serverId>`) surfaces that provenance
+    // on the result — the stamp site reads `annotations.executedBy ?? "agentick"`.
+    const reg: ToolRegistration = {
+      declaration: {
+        id: "search",
+        name: "search",
+        description: "mcp search",
+        inputSchema: jsonSchema({ type: "object" }),
+        exposure: ["model", "dispatch"],
+        annotations: { executedBy: "mcp:linear" },
+      },
+      handlerRef: "h.search",
+      binding: { scope: "runtime" },
+    };
+    const { harness } = await createTestHarness({
+      tools: [reg],
+      handlers: [{ handlerRef: "h.search", handler: async () => [{ type: "text", text: "hit" }] }],
+    });
+    const result = await harness.dispatch(dispatchOf("search", "dispatch", {}));
+    expect(result.executedBy).toBe("mcp:linear");
+  });
+
+  it("defaults executedBy to agentick when the declaration carries no provenance", async () => {
+    const { harness } = await createTestHarness({
+      tools: [echoReg()],
+      handlers: [{ handlerRef: "h.echo", handler: async () => [{ type: "text", text: "ok" }] }],
+    });
+    const result = await harness.dispatch(dispatchOf("echo", "dispatch", {}));
+    expect(result.executedBy).toBe("agentick");
+  });
+
   it("preserves toolCallId across the round-trip", async () => {
     const { harness } = await createTestHarness({
       tools: [echoReg()],

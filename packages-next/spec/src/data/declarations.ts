@@ -7,7 +7,7 @@
  * @see docs/proposals/v2/blueprint/07-tool-executor.md
  */
 
-import type { ContentBlock } from "./content-blocks.js";
+import type { ContentBlock, ToolExecutor } from "./content-blocks.js";
 import type { CacheHint } from "./entries.js";
 import type { ProviderToolOptions } from "./rendered-tree.js";
 import type { StandardSchemaV1 } from "./standard-schema.js";
@@ -263,6 +263,26 @@ export interface ToolAnnotations {
   readonly cache?: CacheHint;
   readonly providerMetadata?: Record<string, Record<string, unknown>>;
   /**
+   * DECLARATION-level execution provenance — WHO the tool executor routes this
+   * tool to, stamped onto the resulting {@link import("./content-blocks.js").ToolResultBlock.executedBy}.
+   * A serializable {@link ToolExecutor} string ("agentick" | "client" |
+   * "provider:<key>" | "mcp:<server>"). When a server-handled dispatch
+   * resolves, the executor stamps `annotations.executedBy ?? "agentick"` on the
+   * result, so a harness that routes elsewhere (e.g. the MCP harness →
+   * `"mcp:<serverId>"`) declares it ONCE here rather than at every stamp site.
+   *
+   * SECURITY — server-authoritative, NEVER wire-settable. This field is
+   * deliberately ABSENT from {@link ClientToolAnnotations}: a client declaring
+   * its own `executedBy` would SPOOF provenance (claim its tool ran on a
+   * provider / MCP server). Two independent guards enforce this: (1) the
+   * executor only READS `executedBy` on the SERVER-handled path, which
+   * client-declared tools (no `handlerRef`) never reach — they are stamped a
+   * hardcoded `"client"`; and (2) {@link import("../protocol/tool-executor.js").toClientToolRegistration}
+   * strips it at the wire fold as defense-in-depth. Populated only by
+   * in-process harnesses (see `mcpDeclaration`), never from the wire.
+   */
+  readonly executedBy?: ToolExecutor;
+  /**
    * Long-running task semantics — `2025-11-25` core / draft extension
    * (`io.modelcontextprotocol/tasks`).
    *
@@ -358,6 +378,14 @@ export interface ToolDeclaration {
  * the static form of the corresponding annotation, so a
  * {@link ClientToolDeclaration} folds into a {@link ToolDeclaration} without
  * a cast.
+ *
+ * SECURITY — {@link ToolAnnotations.executedBy} is DELIBERATELY OMITTED here.
+ * `executedBy` is server-authoritative execution provenance; letting a client
+ * declare it would let a client SPOOF where its tool ran (claim `"mcp:<server>"`
+ * or `"provider:<key>"`). Its absence from this wire slice means a
+ * well-typed client cannot set it, and {@link import("../protocol/tool-executor.js").toClientToolRegistration}
+ * strips it at the wire fold even if a raw payload smuggles it as an excess
+ * property. See {@link ToolAnnotations.executedBy}.
  */
 export interface ClientToolAnnotations {
   readonly intent?: "render" | "action" | "compute";

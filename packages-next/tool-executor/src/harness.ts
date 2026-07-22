@@ -899,6 +899,10 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
                   : `Tool "${input.name}" denied by user.`,
               },
             ],
+            // A DENIAL is produced by the agentick confirmation gate — the
+            // tool never ran, so declaration provenance (`mcp:<serverId>`)
+            // would claim an execution that never happened. `executedBy`
+            // means "who ran the tool"; on a denial that is the framework.
             executedBy: "agentick",
             durationMs: 0,
           };
@@ -1287,7 +1291,12 @@ export class ToolExecutorHarness extends BaseHarness<"tool"> implements ToolExec
             ? { structuredContent: normalized.structuredContent }
             : {}),
           ...(normalized.metadata !== undefined ? { metadata: normalized.metadata } : {}),
-          executedBy: "agentick",
+          // Provenance rides the declaration: an MCP-routed tool stamps
+          // `mcp:<serverId>` (see `mcpDeclaration`), everything else
+          // server-handled defaults to `agentick`. `executedBy` is
+          // server-authoritative — a wire client cannot set it (absent from
+          // `ClientToolAnnotations`, stripped at `toClientToolRegistration`).
+          executedBy: reg.declaration.annotations?.executedBy ?? "agentick",
           durationMs: Date.now() - started,
           presentation,
         };

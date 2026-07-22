@@ -70,6 +70,7 @@ import type {
   SectionEntry,
   Source,
   ToolCall,
+  ToolResultBlock,
   UsageStats,
 } from "@agentick/spec-next";
 import { mergeProviderOptions, SPEC_VERSION } from "@agentick/spec-next";
@@ -1179,6 +1180,132 @@ function anthropicImageUrlFromSource(source: MediaSource, mimeType: string | und
 }
 
 // ============================================================================
+// Local wire shapes — provider-executed server tools (web search)
+// ============================================================================
+
+/**
+ * Provenance stamp for Anthropic provider-EXECUTED tools (server tools run
+ * INSIDE the model call — web search, etc.). See {@link ToolExecutor}.
+ */
+const PROVIDER_ANTHROPIC = "provider:anthropic";
+
+/**
+ * LOCAL wire interfaces for Anthropic's provider-executed server-tool content
+ * blocks. The pinned `@anthropic-ai/sdk@0.39.0` does NOT type
+ * `server_tool_use` / `web_search_tool_result` blocks nor the
+ * `web_search_result_location` citation variant, yet the wire delivers them
+ * (see Anthropic's published web-search tool API). These interfaces mirror
+ * that published shape so {@link normalizeImpl} can detect the blocks
+ * structurally and stamp provenance.
+ *
+ * **LOCAL UNTIL SDK TYPES LAND — replace with the SDK's own types on the bump
+ * that ships server tools (~0.5x).** They are exported for fixtures only (the
+ * SDK cannot type these shapes, so tests type their canned messages against
+ * these interfaces); they are not part of the adapter's supported surface.
+ */
+export interface AnthropicServerToolUseBlockWire {
+  readonly type: "server_tool_use";
+  readonly id: string;
+  /** The provider tool's name, e.g. `"web_search"`. */
+  readonly name: string;
+  readonly input?: Record<string, unknown>;
+}
+
+/** One web-search hit inside a {@link AnthropicWebSearchToolResultBlockWire}. */
+export interface AnthropicWebSearchResultWire {
+  readonly type: "web_search_result";
+  readonly url: string;
+  readonly title?: string;
+  /** Opaque content the provider round-trips; not projected to canonical blocks. */
+  readonly encrypted_content?: string;
+  readonly page_age?: string | null;
+}
+
+/** The error variant of a {@link AnthropicWebSearchToolResultBlockWire}. */
+export interface AnthropicWebSearchToolResultErrorWire {
+  readonly type: "web_search_tool_result_error";
+  readonly error_code: string;
+}
+
+/**
+ * The provider-executed web-search RESULT block. `tool_use_id` correlates back
+ * to the {@link AnthropicServerToolUseBlockWire} that requested it; `content`
+ * is either the hit list (success) or a single error object.
+ */
+export interface AnthropicWebSearchToolResultBlockWire {
+  readonly type: "web_search_tool_result";
+  readonly tool_use_id: string;
+  readonly content: readonly AnthropicWebSearchResultWire[] | AnthropicWebSearchToolResultErrorWire;
+}
+
+/**
+ * The `web_search_result_location` citation variant that annotates text
+ * blocks in a web-search turn. Absent from the SDK's `TextCitation` union;
+ * carries a `url` (web source) instead of a `document_index`.
+ */
+export interface AnthropicWebSearchResultLocationCitationWire {
+  readonly type: "web_search_result_location";
+  readonly url: string;
+  readonly title?: string;
+  readonly cited_text?: string;
+  readonly encrypted_index?: string;
+}
+
+/**
+ * Map a provider-executed `web_search_tool_result` block onto a canonical
+ * {@link ToolResultBlock} stamped `executedBy: "provider:anthropic"`. Each hit
+ * interns a {@link Source} by URL (turn-scoped dedupe, consistent with the
+ * document-citation path) and becomes a text block carrying that source + a
+ * whole-block citation. The block-level `sources` roll-up carries the deduped
+ * set so the message-level aggregate ({@link import("@agentick/spec-next").AssistantMessage.sources})
+ * picks it up. The error variant folds to an `isError` result.
+ */
+function anthropicWebSearchResultBlock(
+  block: AnthropicWebSearchToolResultBlockWire,
+  toolName: string,
+  interner: SourceInterner,
+): ToolResultBlock {
+  const content = block.content;
+  // `Array.isArray` does not narrow a `readonly T[]` union member away, so
+  // discriminate explicitly and cast the error branch.
+  if (!Array.isArray(content)) {
+    const err = content as AnthropicWebSearchToolResultErrorWire;
+    return {
+      type: "tool_result",
+      toolUseId: block.tool_use_id,
+      name: toolName,
+      isError: true,
+      content: [{ type: "text", text: `web search error: ${err.error_code}` }],
+      executedBy: PROVIDER_ANTHROPIC,
+    };
+  }
+  const inner: ContentBlock[] = [];
+  const blockSources = new Map<string, Source>();
+  for (const hit of content) {
+    const source = interner.intern({
+      url: hit.url,
+      ...(hit.title ? { title: hit.title } : {}),
+    });
+    blockSources.set(source.id, source);
+    inner.push({
+      type: "text",
+      text: hit.title ?? hit.url,
+      sources: [source],
+      citations: [{ sourceId: source.id }],
+    });
+  }
+  const sources = [...blockSources.values()];
+  return {
+    type: "tool_result",
+    toolUseId: block.tool_use_id,
+    name: toolName,
+    content: inner,
+    executedBy: PROVIDER_ANTHROPIC,
+    ...(sources.length > 0 ? { sources } : {}),
+  };
+}
+
+// ============================================================================
 // Anthropic Message → LanguageModelExecutionResult
 // ============================================================================
 
@@ -1189,23 +1316,28 @@ function normalizeImpl(input: NormalizeInput<unknown>): LanguageModelExecutionRe
   }
   // Provenance-half (Pass D): DOCUMENT citations are mapped in
   // `anthropicContentToContentBlocks` (text blocks carry `citations` →
-  // canonical `Citation[]` via `anthropicCitationsToCitations`). Function
-  // `tool_use` blocks below are the ONLY dispatchable calls — the installed
-  // `@anthropic-ai/sdk@0.39.0` does not surface provider-executed
-  // `server_tool_use` in its `ContentBlock` union, so no handler-less call can
-  // leak into `toolCalls`.
+  // canonical `Citation[]` via `anthropicCitationsToCitations`).
   //
-  // TODO(pass-d): web-search provenance is UNREACHABLE against SDK 0.39.0 —
-  //   `web_search_tool_result` / `server_tool_use` blocks and
-  //   `web_search_result_location` citations are absent from the SDK's
-  //   `ContentBlock` / `TextCitation` unions. Stamping `tool_result`
-  //   `executedBy: "provider:anthropic"` + mapping web-search citations requires
-  //   an SDK bump (server tools land ~0.5x, a cross-cutting break outside this
-  //   pass). Narrowed per HARD RULE (type fixtures against the SDK; honest
-  //   partial > confident wrong against an untyped shape).
-  // One interner per normalize (per turn): the same consulted document across
-  // many text blocks / citation spans mints one `Source` with one turn-stable
-  // id, so `Citation.sourceId` resolves and the message-level roll-up dedupes.
+  // Provider-executed web search (Pass A, optimistic): the pinned
+  // `@anthropic-ai/sdk@0.39.0` still does NOT type `server_tool_use` /
+  // `web_search_tool_result` blocks or the `web_search_result_location`
+  // citation variant, but the wire delivers them (published Anthropic docs).
+  // `anthropicContentToContentBlocks` now detects them STRUCTURALLY against the
+  // local wire interfaces above and surfaces the search result as a
+  // `tool_result` block stamped `executedBy: "provider:anthropic"` — replace
+  // the local shapes with the SDK's own types once the server-tools bump lands.
+  //
+  // toolCalls EXCLUSION: the loop below extracts DISPATCHABLE function calls
+  // and matches `block.type === "tool_use"` EXACTLY. A `server_tool_use` block
+  // (type string `"server_tool_use"`) never satisfies that predicate, so the
+  // provider-executed request-half can never leak into `toolCalls` and be
+  // re-dispatched by the framework's tool executor. Proven in
+  // `provider-web-search.spec.ts`.
+  //
+  // One interner per normalize (per turn): the same consulted document / web
+  // page across many text blocks / citation spans mints one `Source` with one
+  // turn-stable id, so `Citation.sourceId` resolves and the message-level
+  // roll-up dedupes.
   const interner = createSourceInterner();
   const output = anthropicContentToContentBlocks(raw.content, interner);
   const toolCalls: ToolCall[] = [];
@@ -1238,7 +1370,29 @@ function anthropicContentToContentBlocks(
 ): ContentBlock[] {
   const output: ContentBlock[] = [];
   if (!content) return output;
+  // Correlate provider-executed server-tool requests to their results:
+  // `server_tool_use` (the request half) precedes its `web_search_tool_result`
+  // in the same content array, so a single forward pass suffices. Keyed by the
+  // server-tool `id` → its `name` (e.g. `"web_search"`) for the result's
+  // `ToolResultBlock.name`.
+  const serverToolNames = new Map<string, string>();
   for (const block of content) {
+    // Provider-executed server tools (web search) — wire-only shapes the pinned
+    // SDK does not type. Detect STRUCTURALLY, BEFORE the SDK-typed switch.
+    const wireType = (block as { type: string }).type;
+    if (wireType === "server_tool_use") {
+      // The REQUEST half. NOT a canonical block and NOT a dispatchable
+      // `tool_use` — record its name for the result, then drop it.
+      const stu = block as unknown as AnthropicServerToolUseBlockWire;
+      serverToolNames.set(stu.id, stu.name);
+      continue;
+    }
+    if (wireType === "web_search_tool_result") {
+      const wstr = block as unknown as AnthropicWebSearchToolResultBlockWire;
+      const toolName = serverToolNames.get(wstr.tool_use_id) ?? "web_search";
+      output.push(anthropicWebSearchResultBlock(wstr, toolName, interner));
+      continue;
+    }
     switch (block.type) {
       case "text": {
         const tb = block as AnthropicTextBlock;
@@ -1311,11 +1465,13 @@ function anthropicContentToContentBlocks(
  * and the block's referenced `Source` entities are returned alongside for the
  * caller to attach as {@link BaseContentBlock.sources}.
  *
- * NB (honest scope): the installed `@anthropic-ai/sdk@0.39.0` does NOT type
- * web-search provenance — `web_search_result_location` citations,
- * `server_tool_use`, or `web_search_tool_result` blocks are absent from its
- * `TextCitation` / `ContentBlock` unions. That path is narrow-TODO'd at the
- * call site rather than fabricated against an untyped shape.
+ * Web-search provenance (Pass A, optimistic): the pinned
+ * `@anthropic-ai/sdk@0.39.0` still does NOT type the `web_search_result_location`
+ * citation variant (nor the `server_tool_use` / `web_search_tool_result`
+ * blocks), but the wire delivers it. It is detected STRUCTURALLY here and
+ * interned by URL (a WEB source), consistent with the document-citation path
+ * (interned by `documentIndex`). Replace with the SDK's own `TextCitation`
+ * member once the server-tools bump lands.
  */
 function anthropicCitationsToCitations(
   citations: readonly TextCitation[] | null | undefined,
@@ -1325,6 +1481,20 @@ function anthropicCitationsToCitations(
   const out: Citation[] = [];
   const blockSources = new Map<string, Source>();
   for (const c of citations) {
+    // Web-search citation (wire-only variant) — intern by URL, not documentIndex.
+    if ((c as { type: string }).type === "web_search_result_location") {
+      const wc = c as unknown as AnthropicWebSearchResultLocationCitationWire;
+      const webSource = interner.intern({
+        url: wc.url,
+        ...(wc.title ? { title: wc.title } : {}),
+      });
+      blockSources.set(webSource.id, webSource);
+      out.push({
+        sourceId: webSource.id,
+        ...(wc.cited_text ? { citedText: wc.cited_text } : {}),
+      });
+      continue;
+    }
     const source = interner.intern({
       documentIndex: c.document_index,
       ...(c.document_title ? { title: c.document_title } : {}),

@@ -162,6 +162,14 @@ withMCP({
 });
 ```
 
+**Execution provenance.** Every discovered tool's declaration is stamped
+`annotations.executedBy: "mcp:<serverId>"` (`mcpDeclaration`), so its
+`ToolResultBlock.executedBy` is attributed to the MCP server rather than the
+framework's default `"agentick"`. This is a server-side, in-process stamp; the
+field is absent from `ClientToolAnnotations` and stripped at the wire fold, so
+no remote client can spoof MCP provenance. See `ToolAnnotations.executedBy` and
+the tool-executor README.
+
 ## Server quickstart
 
 ```ts

@@ -74,4 +74,21 @@ describe("toClientToolRegistration", () => {
     expect("aliases" in reg.declaration).toBe(false);
     expect("annotations" in reg.declaration).toBe(false);
   });
+
+  it("SECURITY: strips a smuggled `executedBy` so a client cannot spoof provenance", () => {
+    // `executedBy` is absent from ClientToolAnnotations, but a raw wire payload
+    // can smuggle it as an excess property. Simulate that malicious JSON via a
+    // cast and confirm the wire fold drops it — a client can never seed
+    // provenance onto its registration.
+    const smuggled = decl({
+      annotations: {
+        title: "Legit",
+        executedBy: "provider:anthropic",
+      } as ClientToolDeclaration["annotations"],
+    });
+    const reg = toClientToolRegistration(smuggled, { scope: "session", sessionId: "s1" });
+    expect(reg.declaration.annotations?.title).toBe("Legit");
+    expect("executedBy" in (reg.declaration.annotations ?? {})).toBe(false);
+    expect(reg.declaration.annotations?.executedBy).toBeUndefined();
+  });
 });

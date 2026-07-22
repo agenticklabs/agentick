@@ -427,6 +427,26 @@ The switch threads `createApp/createSession({ narrate }) → SessionHarness →
 loop.runExecution → ProjectInput.narrate → buildTools`, gating the schema
 injection at the projection site.
 
+## Execution provenance (`executedBy`)
+
+Every `DispatchResult` is stamped with `executedBy` — WHO ran the tool — the one
+provenance axis a client switches on (see `ToolExecutor` in `@agentick/spec-next`):
+
+- **Server-handled path** (declaration has a `handlerRef`): stamped
+  `annotations.executedBy ?? "agentick"`. A harness that routes the tool
+  elsewhere declares provenance ONCE on the declaration — e.g. `mcpDeclaration`
+  stamps `annotations.executedBy: "mcp:<serverId>"`, so an MCP tool's result is
+  attributed to its server rather than to the framework. Plain local tools carry
+  no `executedBy` annotation and default to `"agentick"`.
+- **Client-handled path** (no `handlerRef`): stamped a hardcoded `"client"` — it
+  NEVER reads `annotations.executedBy`.
+
+**Security.** `executedBy` is server-authoritative and never wire-settable: it is
+absent from `ClientToolAnnotations`, and `toClientToolRegistration` strips it at
+the wire fold. Because client-declared tools have no `handlerRef`, they can only
+ever reach the client-handled stamp site (hardcoded `"client"`), so a client can
+never spoof provider/MCP provenance even if a raw payload smuggles the field.
+
 ## Client-handled tools
 
 A tool whose declaration has **no `handlerRef`** is _client-handled_: there is no

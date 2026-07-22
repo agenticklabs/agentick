@@ -349,8 +349,20 @@ export function mcpDeclaration(
   // override). MCP tools narrate by default like any other tool; only an
   // explicit `false` stamps `annotations.narrate: false` so the projector
   // skips injecting `_summary` — `undefined` leaves the default (ON) intact.
-  const annotations: Readonly<Record<string, unknown>> | undefined =
+  const withNarrate: Readonly<Record<string, unknown>> | undefined =
     narrate === false ? { ...(withTask ?? {}), narrate: false } : withTask;
+  // Execution provenance (declaration-level): every MCP-discovered tool is
+  // dispatched THROUGH the MCP harness to `serverId`, so its server-handled
+  // result must carry `executedBy: "mcp:<serverId>"` rather than the default
+  // `"agentick"`. Stamped ONCE here on the declaration — the tool executor
+  // reads `annotations.executedBy ?? "agentick"` at the stamp site. This is a
+  // server-side, in-process stamp; `executedBy` is absent from
+  // `ClientToolAnnotations`, so no wire client can spoof it (see
+  // `ToolAnnotations.executedBy`).
+  const annotations: Readonly<Record<string, unknown>> = {
+    ...(withNarrate ?? {}),
+    executedBy: `mcp:${serverId}`,
+  };
   return {
     id: localName,
     name: localName,
@@ -359,9 +371,7 @@ export function mcpDeclaration(
     ...(outputSchema !== undefined ? { outputSchema } : {}),
     exposure: ["model", "dispatch"],
     handlerRef: mcpHandlerRef(sessionId, serverId, tool.name),
-    ...(annotations !== undefined
-      ? { annotations: annotations as ToolDeclaration["annotations"] }
-      : {}),
+    annotations: annotations as ToolDeclaration["annotations"],
   };
 }
 
