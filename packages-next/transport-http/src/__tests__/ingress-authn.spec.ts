@@ -58,6 +58,10 @@ const factory: IngressAuthnFactory = {
     const server = httpServer({
       httpServer: node,
       gateway,
+      // Isolate the ingress-AUTHN axis under test: the raw-fetch helpers here
+      // POST without running the CSRF bootstrap handshake. CSRF is orthogonal
+      // to bearer authn and has dedicated coverage in `web-security.spec.ts`.
+      csrf: false,
       ...(opts.authSource ? { authSource: opts.authSource } : {}),
     });
     await new Promise<void>((r) => node.listen(0, "127.0.0.1", () => r()));

@@ -18,6 +18,7 @@
 
 import { createServer, type Server as NodeHttpServer } from "node:http";
 import type { GatewayHarnessProtocol, ServerTransport } from "@agentick/spec-next";
+import { DEFAULT_BIND_HOST } from "@agentick/transport-next";
 import { httpServer, type HttpServerHandle, type HttpServerOptions } from "./server.js";
 
 /** Port-owning config — the wrapper creates and binds the Node server. */
@@ -26,7 +27,11 @@ export interface HttpServerTransportPortConfig extends Omit<
   "gateway" | "httpServer"
 > {
   readonly port: number;
-  /** Bind address for the created server. Default: all interfaces. */
+  /**
+   * Bind address for the created server. Default: `127.0.0.1` (loopback only)
+   * — the security boundary (STATUS A2 §4c). Widen to a public interface
+   * (`0.0.0.0` / a specific NIC) deliberately, behind a reviewed auth story.
+   */
   readonly host?: string;
 }
 
@@ -60,10 +65,11 @@ export function httpServerTransport(config: HttpServerTransportConfig): ServerTr
       const server = createServer();
       ownedServer = server;
       handle = httpServer({ ...rest, httpServer: server, gateway: host });
+      const listenHost = bindHost ?? DEFAULT_BIND_HOST;
       await new Promise<void>((resolve, reject) => {
         const onError = (err: Error): void => reject(err);
         server.once("error", onError);
-        server.listen(port, bindHost, () => {
+        server.listen(port, listenHost, () => {
           server.removeListener("error", onError);
           resolve();
         });

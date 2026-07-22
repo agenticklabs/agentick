@@ -139,6 +139,14 @@ export function myTransport(opts: { ... }): ClientTransport {
   - `sendNotification(notification)` — emit a notification frame to the client
   - `registerSubscription(subId, unsubscribe)` / `unregisterSubscription(subId)`
   - `registerInFlight(id, abort)` / `unregisterInFlight(id)` for `notifications/cancelled` routing
+- `resolveWebSecurity(options?)` — the shared HTTP-facing web-security policy
+  (STATUS A2 §4c). Single-sources the safe-by-default posture every
+  network-facing server edge enforces: `checkAccess` (Host allow-list +
+  cross-site `Origin`/`Sec-Fetch-Site` rejection), `checkCsrf` (per-process
+  token on mutations), `corsHeadersFor` (allowlisted origin echoed exactly —
+  never `*`), `effectivePeer` (forwarded-header trust only from a loopback
+  peer). `isLoopbackAddress`, `CSRF_HEADER`, and `DEFAULT_BIND_HOST` are the
+  companion exports. See the "Web security defaults" pattern below.
 
 ## Patterns
 
@@ -197,6 +205,45 @@ degenerate single-interceptor form. The multi-interceptor
 `GatewayInstaller.interceptIngress` chain and the `platform` (federated
 connector) credential are later slices.
 
+### Web security defaults (STATUS A2 §4c)
+
+Ingress authn answers _who_ is calling; web security answers _whether the
+caller should be able to reach us at all_ — the browser-drive-by / DNS-rebinding
+threat model for an exposed loopback server (the opencode CVE class: an exposed
+server plus a permissive origin lets any web page drive a shell). One shared
+policy backs both HTTP and WebSocket server edges so the posture is uniform:
+
+```ts
+import { resolveWebSecurity } from "@agentick/transport-next";
+
+const security = resolveWebSecurity(options); // options: WebSecurityOptions (flat)
+
+const access = security.checkAccess(req); // host allow-list + cross-site gate
+if (!access.ok) reject(access.status); // 403
+
+if (security.csrfEnabled) issue(CSRF_HEADER, security.csrfToken); // bootstrap
+const csrf = security.checkCsrf(req); // mutation token gate (HTTP only)
+if (!csrf.ok) reject(csrf.status);
+```
+
+Defaults, all overridable (`allowedOrigins`, `allowedHosts`, `trustProxy`,
+`csrf`) but closed when omitted:
+
+- **Cross-site rejection** — `Sec-Fetch-Site: cross-site` or a foreign `Origin`
+  is rejected; a request with neither (a non-browser caller) is admitted.
+- **Host allow-list** — loopback names + configured hosts only.
+- **Forwarded-header trust** — `X-Forwarded-Host`/`-Proto` honored ONLY when
+  `trustProxy` is set AND the immediate peer is loopback (the proxy pattern);
+  a direct non-loopback peer cannot spoof past the host check.
+- **CSRF token** — per-process random token, issued on the bootstrap handshake
+  and required in `x-agentick-csrf` on mutations (HTTP; a WS upgrade is not
+  classic-CSRF-vulnerable, so it relies on the unforgeable `Origin`).
+- **Non-permissive CORS** — `corsHeadersFor` echoes an allowlisted origin
+  exactly; there is no wildcard code path.
+
+Port-owning transports bind `DEFAULT_BIND_HOST` (`127.0.0.1`) unless a `host`
+is given — loopback is the security boundary, widened only by explicit opt-in.
+
 ## Verified by
 
 | Concern                                                                                         | Test file                                                                                       |
@@ -208,6 +255,7 @@ connector) credential are later slices.
 | `staticTokenAuthSource` credential-kind switch + platform rejection + prototype-key bypass       | `src/__tests__/wire-lane-e2e.spec.ts`                                                           |
 | `MultiplexedStream` backpressure — drop-oldest / drop-newest / close-on-overflow / capacity guard | `src/__tests__/multiplexed-stream-backpressure.spec.ts`                                        |
 | Full-jitter reconnect backoff bounds                                                             | `src/__tests__/backoff-jitter.spec.ts`                                                          |
+| Web-security policy (STATUS A2 §4c) — host allow-list, cross-site rejection, CSRF token, forwarded-header trust (incl. non-loopback-peer spoof deny), never-`*` CORS — allow + deny for each default and each override | `src/__tests__/web-security.spec.ts`                                                            |
 | WireExtension registry dispatch, bootstrap short-circuit, `_extensions/list`, `ctx.publish` declared-notification guard | `src/__tests__/wire-extension-dispatch.spec.ts`                              |
 
 `runTransportConformance(name, factory)` in

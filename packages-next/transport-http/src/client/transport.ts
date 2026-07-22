@@ -19,6 +19,7 @@
 import type { ClientTransport, JsonRpcFrame, TransportCapabilities } from "@agentick/spec-next";
 import {
   BaseClientTransport,
+  CSRF_HEADER,
   DEFAULT_RECONNECT_POLICY,
   type ReconnectPolicy,
 } from "@agentick/transport-next";
@@ -69,6 +70,13 @@ class HttpTransport extends BaseClientTransport {
 
   private sessionId: string | null = null;
   private notificationAbort: AbortController | null = null;
+  /**
+   * Per-process CSRF token issued by the server on the bootstrap handshake
+   * (the GET notification-stream open, STATUS A2 §4c). Echoed in the custom
+   * {@link CSRF_HEADER} on every mutation (POST / DELETE). `null` until the
+   * stream opens or the server does not require CSRF.
+   */
+  private csrfToken: string | null = null;
 
   constructor(options: HttpTransportOptions) {
     super();
@@ -124,6 +132,8 @@ class HttpTransport extends BaseClientTransport {
 
     const newSessionId = response.headers.get(SESSION_ID_HEADER);
     if (newSessionId && !this.sessionId) this.sessionId = newSessionId;
+    const token = response.headers.get(CSRF_HEADER);
+    if (token) this.csrfToken = token;
 
     const contentType = response.headers.get("content-type") ?? "";
     if (contentType.includes("text/event-stream")) {
@@ -176,6 +186,11 @@ class HttpTransport extends BaseClientTransport {
       };
     }
 
+    // Capture the CSRF token from the bootstrap handshake so mutations can
+    // echo it. Absent header = the server does not require CSRF.
+    const token = response.headers.get(CSRF_HEADER);
+    if (token) this.csrfToken = token;
+
     // Drain in background — termination triggers reconnect machinery.
     void this.drainNotifications(response.body, abort.signal);
   }
@@ -207,6 +222,7 @@ class HttpTransport extends BaseClientTransport {
   private headersWithSession(): Record<string, string> {
     const h: Record<string, string> = { ...this.baseHeaders };
     if (this.sessionId) h[SESSION_ID_HEADER] = this.sessionId;
+    if (this.csrfToken) h[CSRF_HEADER] = this.csrfToken;
     return h;
   }
 }

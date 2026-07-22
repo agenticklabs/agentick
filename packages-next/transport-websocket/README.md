@@ -120,9 +120,15 @@ interface WebSocketServerOptions {
   httpServer: http.Server;
   gateway: GatewayHarnessProtocol; // DispatchHost
   path?: string;
-  allowedOrigins?: readonly string[] | "*";
   /** WS-level ping/pong interval. Default 30_000 ms. */
   heartbeatIntervalMs?: number;
+  // ── Security defaults (STATUS A2 §4c) — safe when omitted, each overridable.
+  /** Cross-origin allow-list. Omitted → same-origin only. NEVER `"*"`. */
+  allowedOrigins?: readonly string[];
+  /** Extra `Host` values beyond loopback + allowedOrigins' hosts. */
+  allowedHosts?: readonly string[];
+  /** Trust `X-Forwarded-Host`/`-Proto` — only from a loopback peer. Default false. */
+  trustProxy?: boolean;
   /** Ingress authentication (ADR 61). Runs ONCE per connection at
    *  upgrade; rejection destroys the socket with 401. Omitted = every
    *  connection is anonymous (the local pole). */
@@ -142,7 +148,7 @@ type WebSocketServerTransportPortConfig = Omit<
   "gateway" | "httpServer"
 > & {
   port: number;
-  host?: string; // bind address; default all interfaces
+  host?: string; // bind address; DEFAULT 127.0.0.1 (loopback only — the security boundary)
 };
 // Or attach to an adopter-owned server:
 type WebSocketServerTransportConfig =
@@ -279,6 +285,7 @@ Phase 33.C of the v2 implementation plan — see
 - ✓ Frame multiplexing — N concurrent RPCs verified (`smoke.spec.ts`)
 - ✓ Reconnect machinery — server-bounce → reconnect transition, explicit-close suppression, disabled-reconnect → straight to closed (`reconnect.spec.ts`)
 - ✓ Origin validation — disallowed Origin → 403; allowed → accept; no Origin → accept (`security.spec.ts`)
+- ✓ Security defaults (STATUS A2 §4c) — safe default (no `allowedOrigins`) rejects a cross-origin upgrade, accepts same-origin; `Host` allow-list rejects a spoofed non-loopback Host; loopback bind default; loopback-only forwarded-header trust (`security.spec.ts` + policy matrix in `@agentick/transport-next`)
 - ✓ `notifications/cancelled` from client (frame emit on AbortSignal) + server-side ConnectionContext routing (`cancellation.spec.ts`)
 - ✓ Custom `WebSocket` constructor override (e.g., `ws` library) (`custom-ws-ctor.spec.ts`)
 - ✓ Spec-validator integration at the wire boundary (`wire-conformance.spec.ts`)
@@ -321,6 +328,7 @@ discipline: a `✓` claim has a test or it doesn't ship with the `✓`.
 | Wire conformance (envelope roundtrips, validator integration, batches) | `src/__tests__/wire-conformance.spec.ts` |
 | Subprotocol enforcement (`agentick-rpc-v1`-only)                       | `src/__tests__/security.spec.ts`         |
 | Origin validation (`allowedOrigins`)                                   | `src/__tests__/security.spec.ts`         |
+| Security defaults — safe cross-origin deny / same-origin allow / Host allow-list (STATUS A2 §4c) | `src/__tests__/security.spec.ts`         |
 | `notifications/cancelled` client emit + server handle                  | `src/__tests__/cancellation.spec.ts`     |
 | Custom WebSocket constructor (`ws` library)                            | `src/__tests__/custom-ws-ctor.spec.ts`   |
 | Ingress authn (ADR 61) — per-connection bearer auth, fail-closed 401, prototype-key guard, once-per-socket, local pole when no `authSource` | `src/__tests__/ingress-authn.spec.ts` (`runIngressAuthnConformance`) |

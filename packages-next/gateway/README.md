@@ -586,10 +586,28 @@ plus wildcard CORS lets any web page in a user's browser drive the gateway. Neve
 accept exec-from-URL or curl-pipe-to-shell patterns in adopter code; a URL is not a
 trust boundary. The `Authorizer` and the `requiredScopes` ceiling gate _who may
 call what_ — they are not a substitute for not being reachable in the first place.
-A full security-defaults pass for the HTTP/transport bindings — loopback default,
-`Sec-Fetch-Site`/`Origin` rejection, `Host` allow-list, and trusting forwarded
-headers only from a loopback proxy — is roadmapped (STATUS A2 §4c); until it lands,
-an adopter serving over the network owns these choices explicitly.
+These defaults are **enforced at the HTTP-facing transport bindings**
+(`@agentick/transport-http-next`, `@agentick/transport-websocket-next`) via a
+shared, single-sourced policy in `@agentick/transport-next`
+(`resolveWebSecurity`). The unconfigured posture ships closed (STATUS A2 §4c):
+
+- **Loopback bind default** — a port-owning transport binds `127.0.0.1`;
+  widening to a public interface is an explicit `host` opt-in (the boundary).
+- **Cross-site rejection** — `Sec-Fetch-Site: cross-site` and a foreign
+  `Origin` are rejected; a request carrying neither (a non-browser caller) is
+  admitted. Cross-origin requires an explicit `allowedOrigins` allow-list.
+- **Non-permissive CORS** — an allowlisted origin is echoed exactly; there is
+  no code path that emits `Access-Control-Allow-Origin: *`.
+- **CSRF token** — a per-process token issued on the bootstrap handshake (the
+  GET notification stream) and required in the `x-agentick-csrf` header on
+  every mutation (the framework client handshakes it transparently).
+- **Host allow-list** — loopback names + explicitly configured hosts only
+  (DNS-rebinding defense); forwarded `Host`/`Proto` headers are trusted ONLY
+  when `trustProxy` is set AND the immediate peer is loopback.
+
+Each is overridable (`allowedOrigins`, `allowedHosts`, `trustProxy`, `csrf`,
+`host`) but ships safe. See the transport package READMEs for the option
+surface.
 
 ## Server-initiated notifications — the control-plane bus (ADR 47)
 

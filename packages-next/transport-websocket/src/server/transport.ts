@@ -18,6 +18,7 @@
 
 import { createServer, type Server as NodeHttpServer } from "node:http";
 import type { GatewayHarnessProtocol, ServerTransport } from "@agentick/spec-next";
+import { DEFAULT_BIND_HOST } from "@agentick/transport-next";
 import {
   websocketServer,
   type WebSocketServerHandle,
@@ -30,7 +31,11 @@ export interface WebSocketServerTransportPortConfig extends Omit<
   "gateway" | "httpServer"
 > {
   readonly port: number;
-  /** Bind address for the created server. Default: all interfaces. */
+  /**
+   * Bind address for the created server. Default: `127.0.0.1` (loopback only)
+   * — the security boundary (STATUS A2 §4c). Widen to a public interface
+   * (`0.0.0.0` / a specific NIC) deliberately, behind a reviewed auth story.
+   */
   readonly host?: string;
 }
 
@@ -68,10 +73,11 @@ export function webSocketServerTransport(config: WebSocketServerTransportConfig)
       const server = createServer();
       ownedServer = server;
       wsHandle = websocketServer({ ...rest, httpServer: server, gateway: host, transportId: id });
+      const listenHost = bindHost ?? DEFAULT_BIND_HOST;
       await new Promise<void>((resolve, reject) => {
         const onError = (err: Error): void => reject(err);
         server.once("error", onError);
-        server.listen(port, bindHost, () => {
+        server.listen(port, listenHost, () => {
           server.removeListener("error", onError);
           resolve();
         });

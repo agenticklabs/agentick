@@ -40,16 +40,18 @@ import {
 import {
   authenticateIngress,
   BaseConnectionContext,
+  CSRF_HEADER,
   dispatchRequest,
+  resolveWebSecurity,
   type DispatchHost,
+  type WebSecurityOptions,
 } from "@agentick/transport-next";
 import { encodeSseFrame } from "../shared/sse.js";
 
-export interface HttpServerOptions {
+export interface HttpServerOptions extends WebSecurityOptions {
   readonly httpServer: HttpServerNode;
   readonly gateway: DispatchHost;
   readonly path?: string;
-  readonly allowedOrigins?: readonly string[] | "*";
   /** Idle ping interval on the persistent GET stream (ms). Default 30s. */
   readonly heartbeatIntervalMs?: number;
   /**
@@ -71,8 +73,8 @@ const SESSION_ID_HEADER = "mcp-session-id";
 
 export function httpServer(options: HttpServerOptions): HttpServerHandle {
   const path = options.path ?? "/";
-  const allowed = options.allowedOrigins;
   const heartbeatMs = options.heartbeatIntervalMs ?? 30_000;
+  const security = resolveWebSecurity(options);
 
   // Per-session connection state, keyed by session id.
   const sessions = new Map<string, SessionConnection>();
@@ -93,19 +95,36 @@ export function httpServer(options: HttpServerOptions): HttpServerHandle {
       return;
     }
 
-    const origin = req.headers.origin;
-    if (allowed && allowed !== "*" && typeof origin === "string" && !allowed.includes(origin)) {
-      res.statusCode = 403;
+    // ── Security defaults (STATUS A2 §4c). Host allow-list + cross-site
+    // rejection run first (fail closed BEFORE the CSRF token is issued, so a
+    // rejected cross-site caller never learns the token). CORS headers are
+    // emitted only for an explicitly-allowlisted cross-origin — never `*`.
+    const access = security.checkAccess(req);
+    if (!access.ok) {
+      res.statusCode = access.status ?? 403;
       res.end();
       return;
     }
-    if (allowed === "*" && typeof origin === "string") {
-      res.setHeader("Access-Control-Allow-Origin", origin);
-      res.setHeader("Access-Control-Allow-Headers", "Content-Type, Mcp-Session-Id, Authorization");
-      res.setHeader("Access-Control-Allow-Methods", "POST, GET, DELETE, OPTIONS");
-    }
+
+    const origin = typeof req.headers.origin === "string" ? req.headers.origin : undefined;
+    const cors = security.corsHeadersFor(origin, req);
+    if (cors) for (const [k, v] of Object.entries(cors)) res.setHeader(k, v);
+
+    // Issue the per-process CSRF token on every admitted response — the GET
+    // notification-stream open is the client's bootstrap handshake; it reads
+    // this header and echoes it on mutations.
+    if (security.csrfEnabled) res.setHeader(CSRF_HEADER, security.csrfToken);
+
     if (req.method === "OPTIONS") {
       res.statusCode = 204;
+      res.end();
+      return;
+    }
+
+    // CSRF gate on mutations (POST / DELETE). GET (read + issuance) is exempt.
+    const csrf = security.checkCsrf(req);
+    if (!csrf.ok) {
+      res.statusCode = csrf.status ?? 403;
       res.end();
       return;
     }

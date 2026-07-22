@@ -115,8 +115,16 @@ interface HttpServerOptions {
   httpServer: http.Server;
   gateway: GatewayHarnessProtocol;
   path?: string;
-  allowedOrigins?: readonly string[] | "*";
   heartbeatIntervalMs?: number;
+  // ── Security defaults (STATUS A2 §4c) — safe when omitted, each overridable.
+  /** Cross-origin allow-list. Omitted → same-origin only. NEVER `"*"`. */
+  allowedOrigins?: readonly string[];
+  /** Extra `Host` values beyond loopback + allowedOrigins' hosts. */
+  allowedHosts?: readonly string[];
+  /** Trust `X-Forwarded-Host`/`-Proto` — only from a loopback peer. Default false. */
+  trustProxy?: boolean;
+  /** Require the `x-agentick-csrf` token on mutations. Default true. */
+  csrf?: boolean;
   /**
    * Ingress authentication (ADR 61). HTTP is stateless, so this runs
    * PER REQUEST — each POST authenticates from its own
@@ -129,6 +137,15 @@ interface HttpServerOptions {
 }
 ```
 
+> **Security defaults.** The unconfigured server ships closed (STATUS A2 §4c),
+> enforcing a shared `@agentick/transport-next` policy: cross-site `Origin` /
+> `Sec-Fetch-Site` rejection, a `Host` allow-list (loopback + configured only —
+> DNS-rebinding defense), non-permissive CORS (an allowlisted origin echoed
+> exactly, never `*`), and a per-process CSRF token issued on the GET bootstrap
+> handshake and required in the `x-agentick-csrf` header on every mutation. The
+> framework client handshakes the token transparently; a raw non-browser caller
+> either performs the GET-then-echo handshake or sets `csrf: false`.
+
 ### `httpServerTransport(config): ServerTransport`
 
 ```ts
@@ -138,7 +155,7 @@ type HttpServerTransportPortConfig = Omit<
   "gateway" | "httpServer"
 > & {
   port: number;
-  host?: string; // bind address; default all interfaces
+  host?: string; // bind address; DEFAULT 127.0.0.1 (loopback only — the security boundary)
 };
 // Or mount on an adopter-owned server:
 type HttpServerTransportConfig =
@@ -202,6 +219,7 @@ under "Roadmap & known gaps" with an explicit marker.
 | SSE codec — `encodeSseFrame` + `parseSseFrames`                                                                                                        | covered via the conformance suite's streaming-response path                                                      |
 | Per-request ingress authn — valid/invalid/missing bearer, prototype-key guard, no cross-request identity bleed (two POSTs, one session)                | `src/__tests__/ingress-authn.spec.ts` (`runIngressAuthnConformance`)                                             |
 | `httpServerTransport` — `ServerTransport` conformance + real gateway-owned bind (`gateway.listen()` creates + binds the node server, ping round-trips; `gateway.close()` frees the port) | `src/__tests__/server-transport.spec.ts` (`runServerTransportConformance`)                                       |
+| Security defaults (STATUS A2 §4c) — CSRF bootstrap handshake + missing/invalid-token deny, cross-site `Origin`/`Sec-Fetch-Site` deny, `Host` allow-list deny, non-permissive CORS (allowlisted origin echoed, never `*`), loopback bind default; overrides (`csrf:false`, `allowedOrigins`, `allowedHosts`) | `src/__tests__/security.spec.ts` + policy matrix in `@agentick/transport-next` `src/__tests__/web-security.spec.ts` |
 
 ## Roadmap & known gaps
 
@@ -213,7 +231,8 @@ under "Roadmap & known gaps" with an explicit marker.
 - ✓ SSE codec with W3C `data:` field handling (multi-line `data:` support, `\r\n\r\n` and `\n\n` separators)
 - ✓ Exponential backoff with full jitter reconnect (shared with WS via `BaseClientTransport`)
 - ✓ Cursor-aware resubscribe on reconnect (shared with WS via `BaseClientTransport`)
-- ✓ CORS via `allowedOrigins`; OPTIONS preflight handler
+- ✓ Non-permissive CORS via `allowedOrigins` (allowlisted origin echoed exactly, never `*`); OPTIONS preflight handler
+- ✓ Security defaults (STATUS A2 §4c): loopback bind default, cross-site `Origin`/`Sec-Fetch-Site` rejection, `Host` allow-list, loopback-only forwarded-header trust, per-process CSRF token (bootstrap handshake + `x-agentick-csrf` on mutations) — each overridable
 - ✓ `notifications/cancelled` client emit + server-side routing into per-session abort callbacks
 
 **Claimed but not yet under test (✗):**

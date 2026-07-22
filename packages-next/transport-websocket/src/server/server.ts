@@ -16,11 +16,16 @@ import { ErrorCode, type IngressIdentity, type JsonRpcFrame } from "@agentick/sp
 import {
   authenticateIngress,
   BaseConnectionContext,
+  resolveWebSecurity,
   type DispatchHost,
+  type WebSecurityOptions,
 } from "@agentick/transport-next";
 import { AGENTICK_SUBPROTOCOL, decodeFrame, encodeFrame } from "../shared/codec.js";
 
-export interface WebSocketServerOptions {
+// A WS upgrade is not classic-CSRF-vulnerable (the browser sends an
+// unforgeable Origin), so the origin/host gate is the defense — `csrf` (a
+// request-header token on HTTP mutations) is meaningless here and omitted.
+export interface WebSocketServerOptions extends Omit<WebSecurityOptions, "csrf"> {
   readonly httpServer: HttpServer;
   readonly gateway: DispatchHost;
   /**
@@ -31,7 +36,6 @@ export interface WebSocketServerOptions {
    */
   readonly transportId?: string;
   readonly path?: string;
-  readonly allowedOrigins?: readonly string[] | "*";
   /** Idle ping interval in ms. WS-level ping/pong, not application ping. */
   readonly heartbeatIntervalMs?: number;
   /**
@@ -65,7 +69,7 @@ export function websocketServer(options: WebSocketServerOptions): WebSocketServe
   });
 
   const path = options.path ?? "/";
-  const allowed = options.allowedOrigins;
+  const security = resolveWebSecurity(options);
 
   const upgradeHandler = (
     req: import("node:http").IncomingMessage,
@@ -77,9 +81,13 @@ export function websocketServer(options: WebSocketServerOptions): WebSocketServe
       socket.destroy();
       return;
     }
-    const origin = req.headers.origin;
-    if (allowed && allowed !== "*" && origin && !allowed.includes(origin)) {
-      socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+    // Security defaults (STATUS A2 §4c): host allow-list + cross-site
+    // rejection at upgrade. A WS upgrade is not classic-CSRF-vulnerable (the
+    // browser sends an unforgeable Origin), so the Origin/Host gate is the
+    // defense — no CSRF token on the persistent connection.
+    const access = security.checkAccess(req);
+    if (!access.ok) {
+      socket.write(`HTTP/1.1 ${access.status ?? 403} Forbidden\r\n\r\n`);
       socket.destroy();
       return;
     }

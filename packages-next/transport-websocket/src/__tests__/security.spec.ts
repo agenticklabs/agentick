@@ -134,3 +134,68 @@ describe("WebSocket transport — origin validation", () => {
     ws.close();
   });
 });
+
+// STATUS A2 §4c — the DEFAULT posture (no allowedOrigins configured) must
+// reject a cross-origin browser upgrade. Previously an unconfigured server
+// accepted any Origin; now the safe default is same-origin only.
+describe("WebSocket transport — safe default (no allowedOrigins)", () => {
+  let gateway: Awaited<ReturnType<typeof createGateway>>;
+  let server: ReturnType<typeof websocketServer>;
+  let httpServer: ReturnType<typeof createServer>;
+  let port = 0;
+
+  beforeEach(async () => {
+    gateway = await createGateway();
+    httpServer = createServer();
+    server = websocketServer({ httpServer, gateway }); // no allowedOrigins
+    await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", () => resolve()));
+    port = (httpServer.address() as AddressInfo).port;
+  });
+
+  afterEach(async () => {
+    await server.close();
+    await new Promise<void>((resolve, reject) =>
+      httpServer.close((err) => (err ? reject(err) : resolve())),
+    );
+    await gateway.close();
+  });
+
+  it("DENY a cross-origin upgrade (drive-by page) with 403", async () => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}`, ["agentick-rpc-v1"], {
+      origin: "https://evil.example.com",
+    });
+    const result = await new Promise<"rejected" | "opened">((resolve) => {
+      ws.on("open", () => resolve("opened"));
+      ws.on("error", () => resolve("rejected"));
+      ws.on("unexpected-response", () => resolve("rejected"));
+    });
+    expect(result).toBe("rejected");
+    ws.close();
+  });
+
+  it("ALLOW a same-origin upgrade (Origin authority === Host)", async () => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}`, ["agentick-rpc-v1"], {
+      origin: `http://127.0.0.1:${port}`,
+    });
+    const result = await new Promise<"opened" | "rejected">((resolve) => {
+      ws.on("open", () => resolve("opened"));
+      ws.on("error", () => resolve("rejected"));
+      ws.on("unexpected-response", () => resolve("rejected"));
+    });
+    expect(result).toBe("opened");
+    ws.close();
+  });
+
+  it("DENY a spoofed non-loopback Host (DNS-rebinding) with 403", async () => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}`, ["agentick-rpc-v1"], {
+      headers: { host: "evil.example.com" },
+    });
+    const result = await new Promise<"rejected" | "opened">((resolve) => {
+      ws.on("open", () => resolve("opened"));
+      ws.on("error", () => resolve("rejected"));
+      ws.on("unexpected-response", () => resolve("rejected"));
+    });
+    expect(result).toBe("rejected");
+    ws.close();
+  });
+});
