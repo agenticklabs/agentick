@@ -134,8 +134,9 @@ export interface SessionHandle
   rebind(auth: unknown): Promise<void>;
   close(): Promise<void>;
 
-  // Elicitation (`elicitations()` / `respondToElicitation()`) is contributed as
-  // a per-harness sub-handle by `@agentick/elicitation-next/client` via
+  // Elicitation (the `elicitations` property — an `ElicitationsHandle`, read via
+  // `for await`/`.onChange`, reply via `.respond(...)`) is contributed as a
+  // per-harness sub-handle by `@agentick/elicitation-next/client` via
   // {@link SessionHandleExtensions} (ADR 87) — client-core stays harness-agnostic.
 }
 

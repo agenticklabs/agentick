@@ -16,7 +16,7 @@ const session = client.session(id);
 session.tasks.get(); // ChannelView<Record<taskId, TaskInfo>>  — @agentick/tasks-next/client
 session.knobs.get(); // ChannelView<KnobsState>                — @agentick/knobs-next/client
 await session.knobs.set("temperature", 0.7);
-for await (const e of session.elicitations()) await e.accept({}); // @agentick/elicitation-next/client
+for await (const e of session.elicitations) await e.accept({}); // property — @agentick/elicitation-next/client
 
 // Client-handled tools (stage 2 write side) — @agentick/tool-executor-next/client
 // A client is a declarative tool SOURCE: declare the FULL set; the framework
@@ -65,6 +65,6 @@ public `agentick/client` metapackage entry until the v2 cut.
 ## Verified by
 
 - `src/__tests__/bundle.spec.ts` — importing the bundle registers every built-in
-  slot; a session handle self-assembles `.tasks` / `.knobs` / `.elicitations()`
-  / `.respondToElicitation()` / `.setClientTools()` / `.respondToToolCall()`
+  slot; a session handle self-assembles `.tasks` / `.knobs` / `.elicitations`
+  / `.setClientTools()` / `.respondToToolCall()`
   with no per-harness imports.

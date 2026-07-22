@@ -1,16 +1,17 @@
 /**
  * ADR 87 — contribute the elicitation surface to the client `SessionHandle`.
  *
- * Importing `@agentick/elicitation-next/client` both TYPES the slots
- * (`declare module`) and REGISTERS the runtime factories, so
- * `client.session(id).elicitations()` / `.respondToElicitation(...)`
- * self-assemble — the client twin of the server's `bridges.elicitation`.
+ * Importing `@agentick/elicitation-next/client` both TYPES the slot
+ * (`declare module`) and REGISTERS the runtime factory, so the
+ * `client.session(id).elicitations` PROPERTY (an `ElicitationsHandle`)
+ * self-assembles — the client twin of the server's `bridges.elicitation`.
  *
- * These two members used to be hardcoded on `SessionHandle` in client-core;
- * relocating them here keeps client-core harness-agnostic (same bundled-not-
- * privileged law as tasks/knobs). The public API is unchanged — a registrant
- * slot may be a method (the getter yields the function), so call sites keep
- * `session.elicitations(opts?)` / `session.respondToElicitation(input)`.
+ * This member used to be hardcoded on `SessionHandle` in client-core;
+ * relocating it here keeps client-core harness-agnostic (same bundled-not-
+ * privileged law as tasks/knobs). Read the handle via
+ * `for await (const e of session.elicitations)` or
+ * `session.elicitations.onChange(...)`; reply via `session.elicitations.respond(...)`
+ * (or per-item `e.accept`/`e.decline`/`e.cancel`).
  */
 
 import { registerSessionHandleExtension } from "@agentick/client-core-next";

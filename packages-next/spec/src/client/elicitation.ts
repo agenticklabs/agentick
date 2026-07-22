@@ -3,10 +3,12 @@
  *
  * The server publishes elicitation prompts on
  * `session:channel:elicitation`. The client receives them as
- * `ClientElicitation` values via `SessionHandle.elicitations()` and
- * replies by calling `SessionHandle.respondToElicitation(...)` (which
- * routes through the new `session/respond_to_elicitation` wire method
- * to the server's `bridges.elicitation.respond()`).
+ * `ClientElicitation` values via the `SessionHandle.elicitations`
+ * property (an `ElicitationsHandle`) and replies via
+ * `session.elicitations.respond({ correlationId, outcome, value })` — or
+ * per-item `e.accept(value)` / `e.decline()` / `e.cancel()` — which
+ * routes through the `session/respond_to_elicitation` wire method to the
+ * server's `bridges.elicitation.respond()`.
  *
  * This is the canonical client path for every "ask the user X" step
  * the framework supports — tool confirmation, MCP elicitation,
@@ -89,8 +91,8 @@ export interface ClientElicitation<TValue = unknown> {
 /**
  * Convenience wrapper around a {@link ClientElicitation}. Adds typed
  * `.accept`/`.decline`/`.cancel` shortcuts that route through the
- * session's `respondToElicitation` — eliminates the boilerplate of
- * threading `correlationId` from one expression into another.
+ * shared `session/respond_to_elicitation` reply path — eliminates the
+ * boilerplate of threading `correlationId` from one expression into another.
  */
 export interface ClientElicitationHandle<TValue = unknown> extends ClientElicitation<TValue> {
   /** Send `{ outcome: "accepted", value }`. */

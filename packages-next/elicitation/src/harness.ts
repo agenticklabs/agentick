@@ -108,7 +108,7 @@ export interface ElicitationHarnessOptions {
   readonly defaultTimeoutMs?: number;
   /**
    * Scope stamped on every published elicitation request envelope.
-   * Session-scoped client subscriptions (`client.session(id).elicitations()`)
+   * Session-scoped client subscriptions (`client.session(id).elicitations`)
    * filter on `scope.sessionId`, so per-session elicitation harnesses
    * MUST pass `{ sessionId }` here — otherwise the gateway's
    * subscription router silently drops the envelope. Construction

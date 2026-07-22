@@ -7,8 +7,11 @@
  * elicitation harness runtime, so it stays out of a browser bundle. Mirrors the
  * tasks/knobs `/client` convention.
  *
- * Importing this subpath contributes `client.session(id).elicitations()` and
- * `.respondToElicitation(...)` to the client `SessionHandle` (ADR 87).
+ * Importing this subpath contributes the `client.session(id).elicitations`
+ * property (an `ElicitationsHandle` — read via `for await`/`.onChange`, reply
+ * via `.respond(...)`) to the client `SessionHandle` (ADR 87). It also exports
+ * the `respondToElicitation` free function — the by-`correlationId` reply escape
+ * hatch for code not holding the handle.
  */
 
 export {

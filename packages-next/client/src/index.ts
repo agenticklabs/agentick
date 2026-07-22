@@ -12,7 +12,7 @@
  * const session = client.session(id);
  * session.tasks.get();                       // @agentick/tasks-next/client
  * await session.knobs.set("temperature", 1); // @agentick/knobs-next/client
- * for await (const e of session.elicitations()) await e.accept({}); // elicitation
+ * for await (const e of session.elicitations) await e.accept({}); // elicitation (a property)
  * ```
  *
  * This is the client twin of how the public `agentick` metapackage bundles the

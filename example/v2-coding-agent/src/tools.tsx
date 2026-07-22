@@ -7,7 +7,7 @@
  *
  *   - `write_file` gates the destructive write behind `ctx.elicit.confirm(...)`
  *     — an ElicitationHarness round-trip that surfaces to the client as
- *     `session.elicitations()`.
+ *     the `session.elicitations` property.
  *   - `run_shell` runs the command as a `ctx.tasks.submit(...)` TASK — the
  *     status FSM surfaces to the client as `session.tasks`.
  *   - every tool emits `ctx.log(...)` — surfaces to the client as `onLog`.
@@ -182,7 +182,7 @@ export const Grep = createTool({
 //
 // The confirm() is an ElicitationHarness round-trip: it publishes a request
 // on `session:channel:elicitation`, which the CLIENT consumes via
-// `session.elicitations()` and answers with `.accept(true)` / `.decline()`.
+// the `session.elicitations` property and answers with `.accept(true)` / `.decline()`.
 // The handler blocks until the client replies — a human-in-the-loop gate for
 // a destructive op, driven entirely from the far side of the wire.
 // ─────────────────────────────────────────────────────────────────────
