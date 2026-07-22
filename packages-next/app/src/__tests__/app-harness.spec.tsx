@@ -252,7 +252,10 @@ describe("AppHarness — events()", () => {
     const app = await mkApp({ shareSubstrate: true });
     const seen = new Set<string>();
     let count = 0;
-    const iter = app.events({ surface: "executor" });
+    // The model executor emits under the "model" surface (the model:generate
+    // command namespace, since 6f9b0c17). "executor" is no longer a live
+    // surface — filtering it would match nothing and hang.
+    const iter = app.events({ surface: "model" });
     const collect = (async () => {
       for await (const ev of iter) {
         seen.add(ev.surface);
@@ -267,7 +270,7 @@ describe("AppHarness — events()", () => {
     });
     await collect;
 
-    expect(seen).toEqual(new Set(["executor"]));
+    expect(seen).toEqual(new Set(["model"]));
     await app.closeApp();
   });
 
@@ -597,10 +600,12 @@ describe("AppHarness — executor factory slot (FAÇADE.3)", () => {
 
     // Sanity check: events flow through because the executor shares
     // the bus with the app — no explicit shareSubstrate flag needed.
+    // The executor emits under the "model" surface (model:generate
+    // command namespace, since 6f9b0c17), not the legacy "executor" one.
     const seen = new Set<string>();
     const collect = (async () => {
       let i = 0;
-      for await (const ev of app.events({ surface: "executor" })) {
+      for await (const ev of app.events({ surface: "model" })) {
         seen.add(ev.surface);
         if (++i >= 2) break;
       }
@@ -610,7 +615,7 @@ describe("AppHarness — executor factory slot (FAÇADE.3)", () => {
       send: { messages: [{ role: "user", content: "x" }] },
     });
     await collect;
-    expect(seen).toEqual(new Set(["executor"]));
+    expect(seen).toEqual(new Set(["model"]));
     await app.closeApp();
   });
 });

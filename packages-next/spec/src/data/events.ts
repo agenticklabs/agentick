@@ -23,7 +23,7 @@ export type EventSurface =
   | "loop"
   | "compiler"
   | "formatter"
-  | "executor"
+  | "model"
   | "tool"
   | "sandbox"
   | "mcp"
