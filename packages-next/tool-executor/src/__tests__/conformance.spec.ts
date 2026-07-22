@@ -69,6 +69,23 @@ function makeHandlerForBehavior(fixture: FixtureToolSpec): {
           },
         },
       };
+    // ADR 70 currency forms — the SAME payload via three distinct return
+    // shapes. The executor normalizes all three at the one dispatch boundary.
+    case "currency-string": {
+      const text = fixture.behavior.text;
+      return { handler: async () => text, validator: permissiveValidator };
+    }
+    case "currency-envelope": {
+      const text = fixture.behavior.text;
+      return { handler: async () => ({ content: text }), validator: permissiveValidator };
+    }
+    case "currency-blocks": {
+      const text = fixture.behavior.text;
+      return {
+        handler: async () => [{ type: "text", text } satisfies ContentBlock],
+        validator: permissiveValidator,
+      };
+    }
   }
 }
 

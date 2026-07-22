@@ -61,7 +61,13 @@ export interface FixtureToolSpec {
     | { readonly kind: "echo" } // returns [{ type: "text", text: JSON.stringify(input) }]
     | { readonly kind: "throw"; readonly message: string }
     | { readonly kind: "slow"; readonly ms: number; readonly text: string }
-    | { readonly kind: "deny-validation" }; // produces structured ToolValidationError when input.bad
+    | { readonly kind: "deny-validation" } // produces structured ToolValidationError when input.bad
+    // ADR 70 result-currency forms — the substrate MUST resolve each to a
+    // handler returning the SAME logical payload via a DIFFERENT currency
+    // shape, so the suite can assert all three normalize identically:
+    | { readonly kind: "currency-string"; readonly text: string } // handler returns the bare string
+    | { readonly kind: "currency-envelope"; readonly text: string } // handler returns { content: text }
+    | { readonly kind: "currency-blocks"; readonly text: string }; // handler returns [{ type: "text", text }]
 }
 
 export interface ToolExecutorConformanceFactory {
@@ -159,6 +165,52 @@ function slowTool(name = "slow"): FixtureToolSpec {
   };
 }
 
+/**
+ * The three ADR 70 result-currency forms, each carrying the SAME logical
+ * payload. Registered together, they let the suite prove the currency is
+ * genuinely unifying: a bare string, a `{ content }` envelope, and a
+ * `ContentBlock[]` all normalize to ONE identical canonical
+ * `DispatchResult.content` at the dispatch boundary.
+ */
+function currencyStringTool(name: string, text: string): FixtureToolSpec {
+  return {
+    declaration: {
+      id: name,
+      name,
+      description: "Returns a bare string (currency sugar).",
+      inputSchema: jsonSchema({ type: "object" }),
+      exposure: ["dispatch"],
+    },
+    behavior: { kind: "currency-string", text },
+  };
+}
+
+function currencyEnvelopeTool(name: string, text: string): FixtureToolSpec {
+  return {
+    declaration: {
+      id: name,
+      name,
+      description: "Returns a { content } envelope.",
+      inputSchema: jsonSchema({ type: "object" }),
+      exposure: ["dispatch"],
+    },
+    behavior: { kind: "currency-envelope", text },
+  };
+}
+
+function currencyBlocksTool(name: string, text: string): FixtureToolSpec {
+  return {
+    declaration: {
+      id: name,
+      name,
+      description: "Returns a ContentBlock[] (today's shape).",
+      inputSchema: jsonSchema({ type: "object" }),
+      exposure: ["dispatch"],
+    },
+    behavior: { kind: "currency-blocks", text },
+  };
+}
+
 function dispatchOf(
   name: string,
   via: "model" | "dispatch",
@@ -251,6 +303,41 @@ export function runToolExecutorConformance(factory: ToolExecutorConformanceFacto
       const result = await exec.dispatch(dispatchOf("echo", "dispatch", { hello: "world" }));
       const round = JSON.parse(JSON.stringify(result));
       expect(round).toEqual(result);
+    });
+  });
+
+  describe("ToolExecutorProtocol — result currency (ADR 70)", () => {
+    it("string, envelope, and ContentBlock[] returns normalize to ONE identical canonical result", async () => {
+      // The unifying claim: three handlers returning the SAME payload via the
+      // three currency shapes MUST produce byte-identical canonical content at
+      // the single dispatch normalize boundary. This is the whole point of the
+      // currency — one internal result regardless of the handler's return form.
+      const TEXT = "identical-canonical-payload";
+      const exec = await factory.createExecutor([
+        currencyStringTool("cur.str", TEXT),
+        currencyEnvelopeTool("cur.env", TEXT),
+        currencyBlocksTool("cur.arr", TEXT),
+      ]);
+
+      const s = await exec.dispatch(dispatchOf("cur.str", "dispatch", {}));
+      const e = await exec.dispatch(dispatchOf("cur.env", "dispatch", {}));
+      const a = await exec.dispatch(dispatchOf("cur.arr", "dispatch", {}));
+
+      const canonical = [{ type: "text", text: TEXT }];
+      expect(s.content).toEqual(canonical);
+      expect(e.content).toEqual(canonical);
+      expect(a.content).toEqual(canonical);
+
+      // Identical to each other — the string and envelope forms match the
+      // bare ContentBlock[] form exactly (content parity across the currency).
+      expect(s.content).toEqual(a.content);
+      expect(e.content).toEqual(a.content);
+
+      // A plain payload injects no divergent envelope fields on any form.
+      for (const r of [s, e, a]) {
+        expect(r.structuredContent).toBeUndefined();
+        expect(r.isError ?? false).toBe(false);
+      }
     });
   });
 

@@ -69,6 +69,8 @@ The three shapes stay type-discriminable (`string` / array / object-with-`conten
 
 **`isError` (soft) vs throw (hard).** `isError: true` is a _domain_ error the model reasons about and can retry ("file not found", "rate-limited") — the dispatch still **resolves**. A thrown/rejected handler is a _hard_ failure — the dispatch **rejects** with a typed `ToolExecutorError` and never produces a result. `isError` maps to MCP `CallToolResult.isError`.
 
+**Provenance is executor-stamped, never handler-declarable.** The envelope carries `content` / `structuredContent` / `isError` / `metadata` and nothing else. Execution provenance — `DispatchResult.executedBy`, `durationMs`, and the resolved `presentation` — is stamped by the executor and is **not** a field on the envelope: a handler cannot set or spoof it (the same rule as the `ClientToolAnnotations.executedBy` exclusion). A handler that widens through `ToolResultInput` to tack `executedBy` onto its return has those extra keys ignored at the normalize boundary. _Verified by_ `tool-executor/src/__tests__/tool-result-currency.spec.ts` ("provenance is executor-stamped, never handler-declarable").
+
 ## Tool handler ctx is transport-portable
 
 Per ADR 43, every `ToolHandler` receives a `ToolHandlerCtx` with a `transport: "in-process" | "mcp"` discriminator. **The same handler runs unchanged whether dispatched by an in-process Agentick session OR by an MCP server projecting your `ToolDeclaration` onto the wire.**

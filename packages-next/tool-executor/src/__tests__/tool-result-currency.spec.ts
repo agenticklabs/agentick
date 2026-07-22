@@ -176,6 +176,62 @@ describe("ADR 70 — structuredContent × outputSchema validation", () => {
   });
 });
 
+describe("ADR 70 — provenance is executor-stamped, never handler-declarable", () => {
+  it("an envelope smuggling executedBy/durationMs has them IGNORED — the executor stamps its own", async () => {
+    // HARD RULE (same spoof rule as the ClientToolAnnotations executedBy
+    // exclusion, commit b4c21596): handler-declarable ≠ executor-stamped.
+    // `executedBy` / `durationMs` are EXECUTOR-only observability — the
+    // `ToolResultEnvelope` type does not declare them (they'd be excess-
+    // property errors on a literal), and `normalizeToolResult` reads ONLY
+    // content / structuredContent / isError / metadata. A handler that widens
+    // through `ToolResultInput` to tack them on cannot poison the result: the
+    // extras never reach `DispatchResult`.
+    const SMUGGLED_DURATION = 999_999;
+    const { harness } = await createTestHarness({
+      tools: [reg("spoof")],
+      handlers: [
+        {
+          handlerRef: "h.spoof",
+          handler: async () =>
+            ({
+              content: "ok",
+              executedBy: "evil-client",
+              durationMs: SMUGGLED_DURATION,
+            }) as unknown as ToolResultInput,
+        },
+      ],
+    });
+    const result = await harness.dispatch(dispatchOf("spoof"));
+
+    // Executor-authoritative provenance — the smuggled values are gone.
+    expect(result.executedBy).toBe("agentick");
+    expect(result.durationMs).not.toBe(SMUGGLED_DURATION);
+    // The real duration is a genuine measurement (small + non-negative).
+    expect(result.durationMs).toBeGreaterThanOrEqual(0);
+    expect(result.durationMs).toBeLessThan(SMUGGLED_DURATION);
+    // Content still normalizes; the spoof keys never leaked onto the result.
+    expect(result.content).toEqual([{ type: "text", text: "ok" }]);
+  });
+
+  it("smuggling executedBy inside envelope.metadata cannot forge the top-level provenance", async () => {
+    // `metadata` legitimately threads through to `DispatchResult.metadata`, but
+    // it is a SEPARATE field — a nested `metadata.executedBy` never becomes the
+    // authoritative top-level `DispatchResult.executedBy`.
+    const { harness } = await createTestHarness({
+      tools: [reg("meta-spoof")],
+      handlers: [
+        {
+          handlerRef: "h.meta-spoof",
+          handler: async () => ({ content: "ok", metadata: { executedBy: "evil-client" } }),
+        },
+      ],
+    });
+    const result = await harness.dispatch(dispatchOf("meta-spoof"));
+    expect(result.executedBy).toBe("agentick");
+    expect(result.metadata).toEqual({ executedBy: "evil-client" });
+  });
+});
+
 describe("ADR 70 — inference sharpness (anti-plain-object)", () => {
   it("wrong-shape return is a TS error; string/array/envelope are valid", () => {
     // @ts-expect-error — a plain object without `content` is NOT a valid
