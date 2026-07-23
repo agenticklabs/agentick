@@ -62,7 +62,7 @@
     "@agentick/spec-next": "workspace:*",
     "@agentick/tool-next": "workspace:*",
     "@agentick/utils-next": "workspace:*",
-    "effect": "^3.21.2",
+    "effect": "^3.22.0",
     "react": "^19.2.4",
     "react-reconciler": "^0.33.0"
   },

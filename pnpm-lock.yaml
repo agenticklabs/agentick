@@ -440,8 +440,8 @@ importers:
         specifier: workspace:*
         version: link:../utils
       effect:
-        specifier: ^3.21.2
-        version: 3.21.2
+        specifier: ^3.22.0
+        version: 3.22.0
     devDependencies:
       '@agentick/compiler-next':
         specifier: workspace:*
@@ -508,8 +508,8 @@ importers:
         specifier: workspace:*
         version: link:../utils
       effect:
-        specifier: ^3.21.2
-        version: 3.21.2
+        specifier: ^3.22.0
+        version: 3.22.0
     devDependencies:
       '@agentick/spec-conformance-next':
         specifier: workspace:*
@@ -583,8 +583,8 @@ importers:
         specifier: workspace:*
         version: link:../utils
       effect:
-        specifier: ^3.21.2
-        version: 3.21.2
+        specifier: ^3.22.0
+        version: 3.22.0
     devDependencies:
       '@agentick/runtime-next':
         specifier: workspace:*
@@ -670,8 +670,8 @@ importers:
         specifier: workspace:*
         version: link:../utils
       effect:
-        specifier: ^3.21.2
-        version: 3.21.2
+        specifier: ^3.22.0
+        version: 3.22.0
 
   packages-next/compiler-react:
     dependencies:
@@ -694,8 +694,8 @@ importers:
         specifier: workspace:*
         version: link:../utils
       effect:
-        specifier: ^3.21.2
-        version: 3.21.2
+        specifier: ^3.22.0
+        version: 3.22.0
       react:
         specifier: ^19.2.4
         version: 19.2.4
@@ -765,8 +765,8 @@ importers:
         specifier: workspace:*
         version: link:../utils
       effect:
-        specifier: ^3.21.2
-        version: 3.21.2
+        specifier: ^3.22.0
+        version: 3.22.0
     devDependencies:
       '@agentick/spec-conformance-next':
         specifier: workspace:*
@@ -787,8 +787,8 @@ importers:
         specifier: workspace:*
         version: link:../utils
       effect:
-        specifier: ^3.21.2
-        version: 3.21.2
+        specifier: ^3.22.0
+        version: 3.22.0
     devDependencies:
       '@agentick/spec-conformance-next':
         specifier: workspace:*
@@ -877,8 +877,8 @@ importers:
         specifier: workspace:*
         version: link:../utils
       effect:
-        specifier: ^3.21.2
-        version: 3.21.2
+        specifier: ^3.22.0
+        version: 3.22.0
     devDependencies:
       '@agentick/compiler-react-next':
         specifier: workspace:*
@@ -920,8 +920,8 @@ importers:
         specifier: workspace:*
         version: link:../utils
       effect:
-        specifier: ^3.21.2
-        version: 3.21.2
+        specifier: ^3.22.0
+        version: 3.22.0
       react:
         specifier: ^19.0.0
         version: 19.2.4
@@ -948,8 +948,8 @@ importers:
         specifier: workspace:*
         version: link:../utils
       effect:
-        specifier: ^3.21.2
-        version: 3.21.2
+        specifier: ^3.22.0
+        version: 3.22.0
     devDependencies:
       '@agentick/compiler-next':
         specifier: workspace:*
@@ -976,8 +976,8 @@ importers:
         specifier: workspace:*
         version: link:../utils
       effect:
-        specifier: ^3.21.2
-        version: 3.21.2
+        specifier: ^3.22.0
+        version: 3.22.0
     devDependencies:
       '@agentick/elicitation-next':
         specifier: workspace:*
@@ -1025,8 +1025,8 @@ importers:
         specifier: ^1.29.0
         version: 1.29.0(zod@4.3.6)
       effect:
-        specifier: ^3.21.2
-        version: 3.21.2
+        specifier: ^3.22.0
+        version: 3.22.0
     devDependencies:
       '@agentick/app-next':
         specifier: workspace:*
@@ -1087,8 +1087,8 @@ importers:
         specifier: workspace:*
         version: link:../spec-conformance
       effect:
-        specifier: ^3.21.2
-        version: 3.21.2
+        specifier: ^3.22.0
+        version: 3.22.0
       msw:
         specifier: ^2.0.0
         version: 2.14.6(@types/node@25.0.9)(typescript@5.9.3)
@@ -1118,8 +1118,8 @@ importers:
         specifier: workspace:*
         version: link:../spec-conformance
       effect:
-        specifier: ^3.21.2
-        version: 3.21.2
+        specifier: ^3.22.0
+        version: 3.22.0
 
   packages-next/model-executor:
     dependencies:
@@ -1133,8 +1133,8 @@ importers:
         specifier: workspace:*
         version: link:../spec
       effect:
-        specifier: ^3.21.2
-        version: 3.21.2
+        specifier: ^3.22.0
+        version: 3.22.0
     devDependencies:
       '@agentick/spec-conformance-next':
         specifier: workspace:*
@@ -1168,8 +1168,8 @@ importers:
         specifier: workspace:*
         version: link:../spec-conformance
       effect:
-        specifier: ^3.21.2
-        version: 3.21.2
+        specifier: ^3.22.0
+        version: 3.22.0
 
   packages-next/model-openai:
     dependencies:
@@ -1196,8 +1196,8 @@ importers:
         specifier: workspace:*
         version: link:../spec-conformance
       effect:
-        specifier: ^3.21.2
-        version: 3.21.2
+        specifier: ^3.22.0
+        version: 3.22.0
 
   packages-next/prompts:
     dependencies:
@@ -1217,8 +1217,8 @@ importers:
         specifier: workspace:*
         version: link:../utils
       effect:
-        specifier: ^3.21.2
-        version: 3.21.2
+        specifier: ^3.22.0
+        version: 3.22.0
 
   packages-next/prompts-react:
     dependencies:
@@ -1248,8 +1248,8 @@ importers:
         specifier: workspace:*
         version: link:../utils
       effect:
-        specifier: ^3.21.2
-        version: 3.21.2
+        specifier: ^3.22.0
+        version: 3.22.0
 
   packages-next/resources:
     dependencies:
@@ -1272,8 +1272,8 @@ importers:
         specifier: workspace:*
         version: link:../utils
       effect:
-        specifier: ^3.21.2
-        version: 3.21.2
+        specifier: ^3.22.0
+        version: 3.22.0
       react:
         specifier: ^19.0.0
         version: 19.2.4
@@ -1294,8 +1294,8 @@ importers:
         specifier: workspace:*
         version: link:../utils
       effect:
-        specifier: ^3.21.2
-        version: 3.21.2
+        specifier: ^3.22.0
+        version: 3.22.0
     devDependencies:
       '@agentick/spec-conformance-next':
         specifier: workspace:*
@@ -1334,8 +1334,8 @@ importers:
         specifier: workspace:*
         version: link:../utils
       effect:
-        specifier: ^3.21.2
-        version: 3.21.2
+        specifier: ^3.22.0
+        version: 3.22.0
       react:
         specifier: ^19.0.0
         version: 19.2.4
@@ -1426,8 +1426,8 @@ importers:
         specifier: workspace:*
         version: link:../utils
       effect:
-        specifier: ^3.21.2
-        version: 3.21.2
+        specifier: ^3.22.0
+        version: 3.22.0
       react:
         specifier: ^19.2.4
         version: 19.2.4
@@ -1478,8 +1478,8 @@ importers:
         specifier: workspace:*
         version: link:../utils
       effect:
-        specifier: ^3.21.2
-        version: 3.21.2
+        specifier: ^3.22.0
+        version: 3.22.0
     devDependencies:
       '@agentick/spec-conformance-next':
         specifier: workspace:*
@@ -1488,8 +1488,8 @@ importers:
   packages-next/spec:
     dependencies:
       effect:
-        specifier: ^3.21.2
-        version: 3.21.2
+        specifier: ^3.22.0
+        version: 3.22.0
 
   packages-next/spec-conformance:
     dependencies:
@@ -1500,8 +1500,8 @@ importers:
         specifier: workspace:*
         version: link:../utils
       effect:
-        specifier: ^3.21.2
-        version: 3.21.2
+        specifier: ^3.22.0
+        version: 3.22.0
       vitest:
         specifier: ^4.0.0
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@25.0.9)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.4)
@@ -1527,8 +1527,8 @@ importers:
         specifier: workspace:*
         version: link:../store
       effect:
-        specifier: ^3.21.2
-        version: 3.21.2
+        specifier: ^3.22.0
+        version: 3.22.0
       react:
         specifier: ^19.0.0
         version: 19.2.4
@@ -1549,8 +1549,8 @@ importers:
         specifier: workspace:*
         version: link:../spec
       effect:
-        specifier: ^3.21.2
-        version: 3.21.2
+        specifier: ^3.22.0
+        version: 3.22.0
     devDependencies:
       '@agentick/runtime-next':
         specifier: workspace:*
@@ -1602,8 +1602,8 @@ importers:
         specifier: workspace:*
         version: link:../utils
       effect:
-        specifier: ^3.21.2
-        version: 3.21.2
+        specifier: ^3.22.0
+        version: 3.22.0
     devDependencies:
       '@agentick/elicitation-next':
         specifier: workspace:*
@@ -1655,8 +1655,8 @@ importers:
         specifier: workspace:*
         version: link:../utils
       effect:
-        specifier: ^3.21.2
-        version: 3.21.2
+        specifier: ^3.22.0
+        version: 3.22.0
       react:
         specifier: ^19.0.0
         version: 19.2.4
@@ -1731,8 +1731,8 @@ importers:
         specifier: workspace:*
         version: link:../utils
       effect:
-        specifier: ^3.21.2
-        version: 3.21.2
+        specifier: ^3.22.0
+        version: 3.22.0
     devDependencies:
       '@agentick/spec-conformance-next':
         specifier: workspace:*
@@ -1785,8 +1785,8 @@ importers:
         specifier: workspace:*
         version: link:../utils
       effect:
-        specifier: ^3.21.2
-        version: 3.21.2
+        specifier: ^3.22.0
+        version: 3.22.0
       typescript:
         specifier: ^5.7.3
         version: 5.9.3
@@ -1837,8 +1837,8 @@ importers:
         specifier: workspace:*
         version: link:../utils
       effect:
-        specifier: ^3.21.2
-        version: 3.21.2
+        specifier: ^3.22.0
+        version: 3.22.0
       typescript:
         specifier: ^5.7.3
         version: 5.9.3
@@ -1865,8 +1865,8 @@ importers:
         specifier: workspace:*
         version: link:../spec-conformance
       effect:
-        specifier: ^3.21.2
-        version: 3.21.2
+        specifier: ^3.22.0
+        version: 3.22.0
       typescript:
         specifier: ^5.7.3
         version: 5.9.3
@@ -1908,8 +1908,8 @@ importers:
         specifier: ^8.5.13
         version: 8.18.1
       effect:
-        specifier: ^3.21.2
-        version: 3.21.2
+        specifier: ^3.22.0
+        version: 3.22.0
       typescript:
         specifier: ^5.7.3
         version: 5.9.3
@@ -1920,8 +1920,8 @@ importers:
   packages-next/utils:
     dependencies:
       effect:
-        specifier: ^3.21.2
-        version: 3.21.2
+        specifier: ^3.22.0
+        version: 3.22.0
 
   packages/adapters/ai-sdk:
     dependencies:
@@ -5801,8 +5801,8 @@ packages:
   ee-first@1.1.1:
     resolution: {integrity: sha512-WMwm9LhRUo+WUaRN+vRuETqG89IgZphVSNkdFgeb6sS/E4OrDIN7t48CAewSHXc6C8lefD8KKfr5vY61brQlow==}
 
-  effect@3.21.2:
-    resolution: {integrity: sha512-rXd2FGDM8KdjSIrc+mqEELo7ScW7xTVxEf1iInmPSpIde9/nyGuFM710cjTo7/EreGXiUX2MOonPpprbz2XHCg==}
+  effect@3.22.0:
+    resolution: {integrity: sha512-jhYFe0zTlIRqYFrKTS+6luhmS/Tm0f+JLo0K9KUxvtFab1SUGEszQi2ehOP6QzAZvy831lDmTwwzvVDZSPNz3g==}
 
   electron-to-chromium@1.5.278:
     resolution: {integrity: sha512-dQ0tM1svDRQOwxnXxm+twlGTjr9Upvt8UFWAgmLsxEzFQxhbti4VwxmMjsDxVC51Zo84swW7FVCXEV+VAkhuPw==}
@@ -12115,7 +12115,7 @@ snapshots:
 
   ee-first@1.1.1: {}
 
-  effect@3.21.2:
+  effect@3.22.0:
     dependencies:
       '@standard-schema/spec': 1.1.0
       fast-check: 3.23.2

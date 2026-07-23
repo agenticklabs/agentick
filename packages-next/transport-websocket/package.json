@@ -58,7 +58,7 @@
     "@agentick/spec-conformance-next": "workspace:*",
     "@agentick/utils-next": "workspace:*",
     "@types/ws": "^8.5.13",
-    "effect": "^3.21.2",
+    "effect": "^3.22.0",
     "typescript": "^5.7.3",
     "vitest": "^4.0.18"
   }

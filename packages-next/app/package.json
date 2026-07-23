@@ -67,7 +67,7 @@
     "@agentick/timeline-next": "workspace:*",
     "@agentick/tool-executor-next": "workspace:*",
     "@agentick/utils-next": "workspace:*",
-    "effect": "^3.21.2"
+    "effect": "^3.22.0"
   },
   "devDependencies": {
     "@agentick/compiler-next": "workspace:*",

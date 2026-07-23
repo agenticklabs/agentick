@@ -74,7 +74,7 @@
     "@agentick/tool-next": "workspace:*",
     "@agentick/utils-next": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "effect": "^3.21.2"
+    "effect": "^3.22.0"
   },
   "devDependencies": {
     "@agentick/app-next": "workspace:*",

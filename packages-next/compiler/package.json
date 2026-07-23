@@ -59,6 +59,6 @@
     "@agentick/runtime-next": "workspace:*",
     "@agentick/spec-next": "workspace:*",
     "@agentick/utils-next": "workspace:*",
-    "effect": "^3.21.2"
+    "effect": "^3.22.0"
   }
 }

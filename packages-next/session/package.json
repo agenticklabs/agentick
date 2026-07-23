@@ -70,7 +70,7 @@
     "@agentick/tasks-next": "workspace:*",
     "@agentick/timeline-next": "workspace:*",
     "@agentick/utils-next": "workspace:*",
-    "effect": "^3.21.2",
+    "effect": "^3.22.0",
     "react": "^19.2.4"
   },
   "devDependencies": {
