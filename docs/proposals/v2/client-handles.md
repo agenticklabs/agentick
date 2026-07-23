@@ -54,6 +54,36 @@ gets whatever they want," fully typed end-to-end. Handle verbs backed by (1)/(2)
 Promises; the read VIEWS (`list`/`onChange`/iterate) are folds over (3), snapshot-first
 so `list()` is truthful.
 
+**CHANNELS' PLACE (Ryan 2026-07-22 — restored after agent revert):** a channel is
+PLUMBING, not API — a named subscription topic (wire primitive 3). The request
+channels' "bi-directionality" DECOMPOSES into the CQRS split: subscription
+(server→client asks/deltas/snapshots) + wire COMMAND (client→server reply). The reply
+never rides the channel; `channel.request/onRequest` stays substrate-local, never
+client-wired. The HANDLE reunites the halves (`list`/`subscribe` folds the topic;
+`e.accept()` fires the command). Public read-side taxonomy is two levels: wire topics
+(plumbing) → handles (API).
+
+**CHANNELVIEW'S LANDING + THE KIT (Ryan peer-review 2026-07-22, restored):**
+ChannelView is the PROTO-HANDLE — the read-half built early. It lands at the
+EXTENSION-AUTHOR tier as the handle-construction KIT, converging on ONE factory:
+`createHandle({ topic, initial, reduce, items, id, item?, verbs })` — the fold
+(ex-ChannelView) + Enumerable projection + the ITEM CONSTRUCTOR (data + bound verbs,
+ONE constructor for snapshot-sourced AND delta-sourced items — the accept() fix) +
+verbs (wire builders + local `update` mutations; timeline's seed/prepend/append/clear/
+loadOlder are verbs over `update`/wire). Old ChannelView = the degenerate config
+(blob state, no items, no verbs). All five handles become INSTANTIATIONS. Public
+`channelView`/`eventView` die; the dual subscribe/onChange feed dies (frames are
+`reduce`'s input, invisible). This is the slice-4 consolidation spec, pending Ryan's
+sign-off. **OPEN QUESTION #8 — `status`:** ChannelView carried loading/live/closed;
+the contract dropped it. Lean: connection state lives at CLIENT level (`client.status`
+— one connection, one truth); handles stay liveness-dumb. DECIDE, don't drift.
+
+**ITEM HANDLES (Ryan 2026-07-22, restored):** for request-shaped Enumerables,
+`list()` yields ITEM HANDLES — data + bound verbs (elicitation: accept/decline/cancel;
+tool-call: respond) — constructed identically from snapshot frames and live deltas.
+Canonical proof: connect mid-ask → `list()[0].accept()` round-trips. `respond(id, …)`
+stays the by-id escape hatch.
+
 **Interceptors vs projections (principle, Ryan-review 2026-07-22):** interceptors
 transform the TRUTH (one canonical result — model, store, and client all see it);
 projections transform a VIEW (one audience's copy at the egress boundary). Anything
