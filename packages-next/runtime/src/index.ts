@@ -90,6 +90,18 @@ export {
   type RuntimeContext,
   type RuntimeContextUser,
 } from "./substrate/runtime-context.js";
+export {
+  deriveObservability,
+  composeProviders,
+  NOOP_SPAN,
+  OFF_TRACE,
+  NOOP_METRICS,
+  type MetricSink,
+  type TelemetryProvider,
+  type TelemetryRuntime,
+  type DeriveObservabilityDeps,
+} from "./substrate/observability.js";
+export { deriveOps, type DeriveOpsDeps, type RunOperationFn } from "./substrate/ops.js";
 export { matchesQuery, compileQuery, type CompiledMatcher } from "./substrate/query.js";
 export { resolveSyncSubstrateSlot } from "./substrate/resolve-slot.js";
 export { ulid } from "./substrate/ulid.js";

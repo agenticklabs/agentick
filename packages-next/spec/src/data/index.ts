@@ -34,6 +34,8 @@ export * from "./standard-schema.js";
 
 export * from "./content-blocks.js";
 export * from "./signals.js";
+export * from "./observability.js";
+export * from "./ops.js";
 export * from "./channels.js";
 export * from "./timeline.js";
 export * from "./streaming.js";

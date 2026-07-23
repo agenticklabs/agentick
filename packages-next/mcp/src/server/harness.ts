@@ -18,7 +18,13 @@
  */
 
 import { Effect } from "effect";
-import { BaseHarness, ulid, type Unsubscribe } from "@agentick/runtime-next";
+import {
+  BaseHarness,
+  deriveObservability,
+  deriveOps,
+  ulid,
+  type Unsubscribe,
+} from "@agentick/runtime-next";
 import type {
   EventBus,
   EventScope,
@@ -570,14 +576,29 @@ export class McpServerHarness
         emit: () => {
           /* no-op for MCP-server ctx — sessions own channel emit */
         },
-        // ADR 64 — universal signal slots. Each emits ONE discrete bus
-        // event scoped to THIS connection; `installLogProjection` /
-        // `installProgressProjection` (above) subscribe and forward to
-        // the wire. Fire-and-forget — launched via `Effect.runFork`,
-        // never awaited, never throws into the handler.
-        log: (level, data, logger): void => {
-          void Effect.runFork(this.emitLog(connectionScope, level, data, logger));
-        },
+        // ADR 64/78 — the Observability facet. `log` emits ONE discrete
+        // bus event scoped to THIS connection; `installLogProjection`
+        // (above) forwards it to the wire (`notifications/message`).
+        // `trace`/`metrics` (spread from `observability` below) go to the
+        // server's telemetry PROVIDER, NOT the wire — off-path no-ops here
+        // until a server-side provider is wired (they never touch the bus,
+        // so nothing leaks onto the MCP wire). Fire-and-forget for `log`:
+        // launched via `Effect.runFork`, never awaited, never throws.
+        ...deriveObservability({
+          log: (level, data, logger) => {
+            void Effect.runFork(this.emitLog(connectionScope, level, data, logger));
+          },
+          namespace: this.telemetryNamespace,
+        }),
+        // ADR 19/83 — the Ops facet (`ctx.run` / `ctx.runner`). The MCP
+        // request ctx is assembled OFF-fiber (no enclosing op runtime), so
+        // ad-hoc ops run as ROOT ops on this server harness's runner — still
+        // journaled + interceptor-folded, just not parented under a caller op.
+        ...deriveOps({
+          surface: "mcp",
+          scope: connectionScope,
+          runOperation: this.runOperation.bind(this),
+        }),
         progress: (token, p): void => {
           void Effect.runFork(
             this.emitProgress(connectionScope, {

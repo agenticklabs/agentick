@@ -16,6 +16,8 @@ import type {
   Elicit,
   ElicitationHarnessProtocol,
   McpRequestExtras,
+  Metrics,
+  Span,
   TasksHarnessProtocol,
   ToolHandlerCtx,
 } from "@agentick/spec-next";
@@ -37,7 +39,44 @@ export interface FakeToolHandlerCtxOverrides {
   readonly emit?: ToolHandlerCtx["emit"];
   readonly log?: ToolHandlerCtx["log"];
   readonly progress?: ToolHandlerCtx["progress"];
+  readonly trace?: ToolHandlerCtx["trace"];
+  readonly metrics?: ToolHandlerCtx["metrics"];
+  readonly run?: ToolHandlerCtx["run"];
+  readonly runner?: ToolHandlerCtx["runner"];
 }
+
+/** No-op {@link Span} for the off-path fake `trace`. */
+const NOOP_FAKE_SPAN: Span = {
+  setAttribute: () => {},
+  setAttributes: () => {},
+  addEvent: () => {},
+  recordException: () => {},
+};
+
+/** No-op {@link Metrics} default for the fake ctx (override to spy). */
+const NOOP_FAKE_METRICS: Metrics = {
+  count: () => {},
+  record: () => {},
+  gauge: () => {},
+};
+
+/**
+ * Fake {@link Ops.run} — runs `fn` and resolves with its value, skipping the
+ * journal/interceptor pipeline (a test double, not the real substrate).
+ */
+const fakeRun = (<T>(
+  name: string,
+  optsOrFn: unknown,
+  maybeFn?: () => T | Promise<T>,
+): Promise<T> => {
+  const fn = (typeof optsOrFn === "function" ? optsOrFn : maybeFn) as () => T | Promise<T>;
+  return Promise.resolve(fn());
+}) as ToolHandlerCtx["run"];
+
+/** Fake {@link OperationRunnerView} — runs the body directly, no journaling. */
+const fakeRunner: ToolHandlerCtx["runner"] = {
+  runOperation: (op, body) => body(op.input) as never,
+};
 
 /**
  * Build a fake `ToolHandlerCtx` for test code. Defaults to a minimal
@@ -60,6 +99,12 @@ export function fakeToolHandlerCtx(overrides: FakeToolHandlerCtxOverrides = {}):
     // ADR 64 — universal signal slots; no-op defaults (override to spy).
     log: overrides.log ?? (() => {}),
     progress: overrides.progress ?? (() => {}),
+    // ADR 78 — Observability facet's telemetry half; off-path no-ops.
+    trace: overrides.trace ?? ((_name, fn) => Promise.resolve(fn(NOOP_FAKE_SPAN))),
+    metrics: overrides.metrics ?? NOOP_FAKE_METRICS,
+    // ADR 19/83 — Ops facet; fake run/runner execute without journaling.
+    run: overrides.run ?? fakeRun,
+    runner: overrides.runner ?? fakeRunner,
     task: overrides.task ?? "auto",
     transport,
     ...(overrides.sessionId !== undefined ? { sessionId: overrides.sessionId } : {}),

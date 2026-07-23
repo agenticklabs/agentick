@@ -24,8 +24,20 @@ import { omitUndefined } from "@agentick/utils-next";
 import { buildSessionElicit } from "@agentick/elicitation-next";
 
 import { Cause, Effect, Exit, Option } from "effect";
-import { getContext, runHarnessProtocol, ulid } from "@agentick/runtime-next";
-import { BaseHarness, type GuardDecider, type Unsubscribe } from "@agentick/runtime-next";
+import {
+  deriveObservability,
+  deriveOps,
+  getContext,
+  runHarnessProtocol,
+  ulid,
+} from "@agentick/runtime-next";
+import {
+  BaseHarness,
+  type GuardDecider,
+  type TelemetryProvider,
+  type TelemetryRuntime,
+  type Unsubscribe,
+} from "@agentick/runtime-next";
 import type {
   AbortInput,
   ChannelPublisher,
@@ -155,6 +167,14 @@ export class ToolExecutorHarness
    * inspects it.
    */
   private readonly ctxExtensions: Readonly<Record<string, unknown>>;
+  /**
+   * Telemetry provider for the `ctx.trace` / `ctx.metrics` half of the
+   * {@link ToolHandlerCtx} observability facet (ADR 78). `undefined` ⇒
+   * telemetry off ⇒ `deriveObservability` returns the shared
+   * passthrough/no-op singletons (zero per-op allocation). The AppHarness
+   * threads a provider here when `telemetry` is on.
+   */
+  private readonly telemetryProvider: TelemetryProvider | undefined;
 
   /**
    * Cancel an in-flight dispatch (ADR 51 / ADR 66). A declared command —
@@ -186,6 +206,7 @@ export class ToolExecutorHarness
     this.tasks = options.tasks;
     this.resources = options.resources;
     this.ctxExtensions = options.ctxExtensions ?? {};
+    this.telemetryProvider = options.telemetryProvider;
 
     // `abort` as a declared command (ADR 51). Canonical verb `tool:abort`
     // (the inbox message type); the derived Operation name is
@@ -747,6 +768,43 @@ export class ToolExecutorHarness
         executionId: input.context.executionId,
         tickId: input.context.tickId,
       });
+      // Capture the operation runtime IN-FIBER (inside the dispatch op body,
+      // so it carries the op span + the ambient RuntimeContext.opId). Shared
+      // by the Observability facet's `trace` (child spans nest under the op
+      // span, ADR-77) and the Ops facet's `run`/`runner` (ad-hoc ops parent +
+      // auto-link under this dispatch). One capture, both facets.
+      const capturedRuntime = yield* Effect.runtime<never>();
+      // Observability facet (ADR 64/78). `log` keeps its existing scope-bound
+      // bus-emit behavior (fire-and-forget); `trace`/`metrics` come from the
+      // telemetry provider when one is wired, else from the shared off-path
+      // singletons (zero per-op allocation). Default metric labels are strictly
+      // low-cardinality (tool name + op suffix); the high-cardinality work-path
+      // ids ride the span + log, never a label.
+      const telemetry: TelemetryRuntime | undefined =
+        this.telemetryProvider !== undefined
+          ? {
+              runtime: capturedRuntime,
+              ...omitUndefined({ meter: this.telemetryProvider.meter }),
+            }
+          : undefined;
+      const observability = deriveObservability({
+        log: (level, data, logger) => {
+          void Effect.runFork(this.emitLog(dispatchScope, level, data, logger));
+        },
+        namespace: this.telemetryNamespace,
+        defaultLabels: { tool: input.name, op: "ToolDispatch" },
+        ...omitUndefined({ telemetry }),
+      });
+      // Ops facet (ADR 19/83) — `ctx.run` mints ad-hoc operations through THIS
+      // harness's runOperation (journal + interceptor fold), parented under
+      // the dispatch op via the captured runtime; `ctx.runner` is the run-only
+      // escape hatch.
+      const ops = deriveOps({
+        surface: "tool",
+        scope: dispatchScope,
+        runOperation: this.runOperation.bind(this),
+        runtime: capturedRuntime,
+      });
       const ctx: ToolHandlerCtx = {
         // ADR 66 — opaque, harness-agnostic extension slots (e.g.
         // `ctx.sandbox`). Spread FIRST so the hardcoded universal fields
@@ -814,16 +872,22 @@ export class ToolExecutorHarness
             );
           }
         },
-        // ADR 64 — universal `log` / `progress` signals. Each emits ONE
-        // discrete bus event (`tool:signal:log` / `tool:signal:progress`,
-        // phase `terminal`, bus-only) scoped to this dispatch. Projections
-        // subscribe (MCP server → notifications/message + progress; the
-        // agentick client → subscribe / progress stream). Fire-and-forget:
-        // launched with `Effect.runFork`, never awaited, never throws into
-        // the handler.
-        log: (level, data, logger): void => {
-          void Effect.runFork(this.emitLog(dispatchScope, level, data, logger));
-        },
+        // ADR 64/78 — the Observability facet's `log` + `trace` + `metrics`.
+        // `log` emits ONE discrete bus event (`tool:signal:log`, phase
+        // `terminal`, bus-only) scoped to this dispatch; projections
+        // subscribe (MCP → notifications/message; agentick client →
+        // subscribe/onLog). `trace`/`metrics` are the telemetry half
+        // (no-ops off). See `observability` above.
+        log: observability.log,
+        trace: observability.trace,
+        metrics: observability.metrics,
+        // ADR 19/83 — the Ops facet ladder rungs 3+4.
+        run: ops.run,
+        runner: ops.runner,
+        // ADR 64 — `progress` signal. Emits ONE discrete bus event
+        // (`tool:signal:progress`, phase `terminal`, bus-only) scoped to
+        // this dispatch. Fire-and-forget: launched with `Effect.runFork`,
+        // never awaited, never throws into the handler.
         progress: (token, p): void => {
           void Effect.runFork(
             this.emitProgress(dispatchScope, {

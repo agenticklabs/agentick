@@ -16,8 +16,10 @@ import type { Effect } from "effect";
 
 import type { Elicit } from "../protocol/elicit-api.js";
 import type { ContentBlock } from "./content-blocks.js";
+import type { Observability } from "./observability.js";
+import type { Ops } from "./ops.js";
 import type { ToolResultInput } from "./tool-result.js";
-import type { LogLevel, ProgressToken } from "./signals.js";
+import type { ProgressToken } from "./signals.js";
 
 // ============================================================================
 // Channel emit seed
@@ -96,7 +98,7 @@ export interface ToolHandlerCtxExtensions {}
  *
  * @see docs/proposals/v2/blueprint/66-tool-dependency-resolution.md
  */
-export interface ToolHandlerCtx extends ToolHandlerCtxExtensions {
+export interface ToolHandlerCtx extends ToolHandlerCtxExtensions, Observability, Ops {
   // ── Universal — every transport populates these ───────────────────
   readonly toolCallId: string;
   readonly sessionId?: string;
@@ -106,22 +108,11 @@ export interface ToolHandlerCtx extends ToolHandlerCtxExtensions {
   setState(key: string, value: unknown): void;
   emit(seed: HandlerChannelSeed): void;
 
-  /**
-   * Emit a structured `log` signal — an out-of-band diagnostic
-   * (ADR 64). ALWAYS present on every transport: emitting a bus event
-   * is always possible; whether a wire projects it is the subscriber's
-   * concern (the MCP-server projection forwards to
-   * `notifications/message` filtered by the client's `logging/setLevel`;
-   * the agentick client receives via `subscribe` / `onLog`).
-   *
-   * Fire-and-forget — NEVER a control path. A dropped or failed
-   * projection never blocks the handler; the call returns immediately
-   * and never throws. This is diagnostics plumbing, not model-visible
-   * content (use the handler's return value / `emit` for content).
-   *
-   * @see docs/proposals/v2/blueprint/64-runtime-signal-family.md
-   */
-  log(level: LogLevel, data: unknown, logger?: string): void;
+  // NOTE: `log` + `trace` + `metrics` are inherited from the
+  // {@link Observability} facet (ADR 64/78); `run` + `runner` from the
+  // {@link Ops} facet (the ad-hoc-operation ladder). `log` behavior is
+  // unchanged (bus event, projections forward); `trace`/`metrics` are the
+  // telemetry surface (no-ops off); `run` mints a journaled operation.
 
   /**
    * Emit a structured `progress` signal — out-of-band liveness for

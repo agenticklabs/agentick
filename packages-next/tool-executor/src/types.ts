@@ -24,7 +24,7 @@ import type {
   ToolRegistration,
   Validator,
 } from "@agentick/spec-next";
-import type { BaseHarness, Middleware } from "@agentick/runtime-next";
+import type { BaseHarness, Middleware, TelemetryProvider } from "@agentick/runtime-next";
 
 // Re-export the moved types so existing import paths keep working.
 export type {
@@ -165,6 +165,15 @@ export interface ToolExecutorHarnessOptions {
    * @see docs/proposals/v2/blueprint/66-tool-dependency-resolution.md
    */
   readonly ctxExtensions?: Readonly<Record<string, unknown>>;
+
+  /**
+   * Telemetry provider for the observability facet's `ctx.trace` /
+   * `ctx.metrics` half (ADR 78). Threaded by the AppHarness when its
+   * `telemetry` switch is on; `undefined` ⇒ telemetry off ⇒ the shared
+   * off-path singletons (zero per-op allocation). `ctx.log` is unaffected
+   * (always live, ADR 64).
+   */
+  readonly telemetryProvider?: TelemetryProvider;
 
   /**
    * Resolved interceptor snapshot (ADR 76 tier 3 + ADR 83 amendment) — the

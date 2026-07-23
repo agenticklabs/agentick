@@ -114,11 +114,11 @@ stop(); // lease released — annotation stops
 
 ### Three altitudes — pick by _when you know the value_
 
-| Altitude    | Seam                                    | Known…                    |
-| ----------- | --------------------------------------- | ------------------------- |
-| per-call    | `send({ telemetry: { metadata } })`     | at send time              |
+| Altitude    | Seam                                      | Known…                      |
+| ----------- | ----------------------------------------- | --------------------------- |
+| per-call    | `send({ telemetry: { metadata } })`       | at send time                |
 | per-op-type | `spanAttributes(fn)` via a decorated hook | at registration, from input |
-| per-moment  | `annotateOperationSpan(attrs)` in a body | mid-execution, computed   |
+| per-moment  | `annotateOperationSpan(attrs)` in a body  | mid-execution, computed     |
 
 ### Two ease guarantees
 
@@ -157,6 +157,98 @@ const app = await createApp(<Agent />, { name: "triage-bot", telemetry });
 
 The rung-3 helpers (`annotateOperationSpan`, `spanAttributes`, `spanMiddleware`)
 are _verified by `packages-next/runtime/src/__tests__/span-helpers.spec.ts`._
+
+### The `ctx` facets — `log`/`trace`/`metrics` + the `run`/`runner` ladder (ADR 64/78/19)
+
+The span ladder above is how the FRAMEWORK enriches operation spans. The
+**observability facet** is how a HANDLER reaches the same diagnostic surface —
+one flat contract (`ctx.log`, `ctx.trace`, `ctx.metrics`) landed identically on
+every ctx-shaped surface (`ToolHandlerCtx` in-process, the MCP request ctx, the
+runtime interceptor ctx). `deriveObservability(deps)` is the ONE derivation; the
+few ctx assemblers call it, so there is one implementation behind N call sites.
+
+```ts
+handler: async (input, { ctx }) => {
+  ctx.metrics.count("dispatch", 1, { tool: "search" }); // counter.add
+  const rows = await ctx.trace("retrieval", async (span) => {
+    span.setAttribute("query.length", input.q.length);
+    return db.search(input.q); // nested under the operation span
+  });
+  ctx.log("info", { found: rows.length });
+  return rows;
+};
+```
+
+**The ladder — climb by how much the system should know about the work.** The
+old bright-line ("`trace` is not an operation, full stop") is really a ladder of
+four rungs; pick the rung that matches how much structure the work deserves:
+
+| Rung         | Call                      | Gives you                                                                                                                                         | When to climb                                                                               |
+| ------------ | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| 1 · count it | `ctx.metrics.count(name)` | a tally                                                                                                                                           | you only need "how many / how much"                                                         |
+| 2 · see it   | `ctx.trace(name, fn)`     | a span (timing/attribution) — **no** journal/hooks/guards                                                                                         | you want a sub-span inside a handler's own work (a retrieval, a parse)                      |
+| 3 · run it   | `ctx.run(name, fn)`       | a real **operation**: journal envelope + the inherited interceptor fold (guards + hooks) + outcome taxonomy + a parented span — minted **inline** | the step deserves a durable record + guard/hook reach, but isn't worth a registered command |
+| 4 · name it  | a registered command      | typed input/output, typed `onBefore/After<Command>` hooks, inbox addressability, wire-grantability                                                | the verb is part of the system's contract                                                   |
+
+`ctx.run(name, fn)` is the deliberate rung between an untyped annotation and a
+registered command. It runs `fn` through the ambient harness's `runOperation` —
+so it is journaled (`<surface>:run:<name>`, requested → terminal), guard-vetoable,
+and hook-observable (ad-hoc names reach guards/hooks via the **string-keyed
+generic tier** — an `onBefore<Surface>Run<Name>` hook on the harness sees it,
+since the name isn't in the typed `CommandRegistry`). Its span parents under the
+enclosing op via the **same ADR-77 FiberRef mechanism** `ctx.trace` uses — one
+parenting path for `trace` spans, `run` spans, and command spans alike.
+
+```ts
+const rows = await ctx.run("retrieval", () => db.search(q)); // journaled op
+const out = await ctx.run("charge", { input: { amount } }, () => pay(amount)); // + input journaled
+```
+
+**Journaled ≠ memoized.** `ctx.run` writes a durable _observational_ record —
+name, timing, input, outcome — NOT a resumable checkpoint. Adopters from
+Restate / Inngest will assume `run` memoizes (skip + replay a completed step on
+retry): **it does not.** Re-invoking re-runs `fn`. Durable kill/resume rides the
+store protocols (ADR 49), not this. The journal shape doesn't preclude a future
+replay story; none is built.
+
+**The escape hatch (ADR-42 dichotomy).** `ctx.run`'s options are frozen-small by
+design — `{ input?, metadata?, spanAttributes?, signal? }`, envelope data only,
+never behavior. If `ctx.run` took the full command suite it would collapse rung 4
+into rung 3; the deliberate GAP (no registry, no typed hooks, no addressability)
+is what makes the ladder work. **`ctx.run`'s options will not grow — if you need
+more, you want `ctx.runner` or a command.** `ctx.runner` is the ambient runner as
+a **run-only view**: `ctx.runner.runOperation(op, body)` is the primitive
+undiluted (tier-4 call-scoped middleware included). It exposes only
+`runOperation` — never the runner's lifecycle or `makeEvent`/`publish`, so
+handler code can't tear down or reconfigure the harness.
+
+`ctx.trace` remains span-only, zero-journal — unchanged. The two facets are
+separate interfaces (`Observability` = `log`/`trace`/`metrics`; `Ops` =
+`run`/`runner`) so neither over-claims.
+
+- **`log`** is ADR 64, unchanged and **always live** (independent of the
+  telemetry switch): one bus event that projections forward (MCP →
+  `notifications/message`; agentick client → `subscribe`/`onLog`).
+- **`trace` / `metrics`** are the telemetry half. **Off is free** — passthrough
+  `trace` + no-op `metrics` from process-global frozen singletons (`OFF_TRACE` /
+  `NOOP_METRICS`), zero per-op allocation. **On** builds lazily on first property
+  touch and rides the app's telemetry runtime.
+- **Metrics labels are low-cardinality only** — the framework's defaults are
+  bounded (tool name, op suffix); high-cardinality identity (`sessionId` /
+  `executionId`) rides spans + logs, never a default metric label. Overridable
+  (capability, not opinion), but safe by construction.
+- **The provider seam** (`TelemetryProvider = { tracer?, meter? }`) bundles the
+  Effect tracer Layer (spans) + a `MetricSink` (metrics). `composeProviders(...)`
+  fans one emission out to several sinks (a track-API meter + an OTel meter side
+  by side). Test with `spyTelemetryProvider()` from
+  `@agentick/runtime-next/testing` — it records spans + metrics for assertion.
+
+_Verified by `packages-next/runtime/src/__tests__/observability.spec.ts`
+(off-path identity, live span parenting, metric fan-out),
+`packages-next/tool-executor/src/__tests__/ctx-run.spec.ts` (ad-hoc op journaled +
+parented + hook-observed + guard-vetoed + run-only runner), and the cross-surface
+`runObservabilityCtxConformance` / `runOpsCtxConformance` suites in
+`@agentick/spec-conformance-next`._
 
 ---
 

@@ -14,6 +14,12 @@ export { runAgentickErrorConformance, type AgentickErrorConformanceFactory } fro
 // Unified ToolHandlerCtx test fixture (ADR 43)
 export { fakeToolHandlerCtx, type FakeToolHandlerCtxOverrides } from "./fake-tool-handler-ctx.js";
 
+// Observability facet (ADR 64/78) — cross-surface ctx conformance
+export { runObservabilityCtxConformance, type ObservabilityCtxFactory } from "./observability.js";
+
+// Ops facet (ADR 19/83) — `ctx.run` + `ctx.runner` cross-surface conformance
+export { runOpsCtxConformance, type OpsCtxFactory } from "./ops.js";
+
 // Substrate protocols (Phase 2)
 export { runJournalConformance } from "./journal.js";
 export { runEventBusConformance } from "./event-bus.js";

@@ -199,6 +199,16 @@ function fakeCtx(): McpRequestContext {
     emit: () => {},
     log: () => {},
     progress: () => {},
+    trace: (_n, fn) =>
+      Promise.resolve(
+        fn({ setAttribute() {}, setAttributes() {}, addEvent() {}, recordException() {} }),
+      ),
+    metrics: { count() {}, record() {}, gauge() {} },
+    run: (<T>(_name: string, optsOrFn: unknown, maybeFn?: () => T | Promise<T>) =>
+      Promise.resolve(
+        (typeof optsOrFn === "function" ? optsOrFn : maybeFn)!(),
+      )) as McpRequestContext["run"],
+    runner: { runOperation: (op, body) => body(op.input) as never },
     mcp: {
       serverId: "srv:test",
       connectionId: "conn:test",

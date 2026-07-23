@@ -10,3 +10,9 @@
  */
 
 export { stubInbox, type StubInboxCall, type StubInboxOptions } from "./stub-inbox.js";
+export {
+  spyTelemetryProvider,
+  type SpyTelemetryProvider,
+  type RecordedMetric,
+  type RecordedSpan,
+} from "./spy-telemetry-provider.js";
