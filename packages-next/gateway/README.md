@@ -186,11 +186,33 @@ is a call-recording double for asserting the fan-out in tests.
 **Embedding in an existing HTTP framework** (Hono, Nitro, Next.js route
 handlers, Bun/Deno — you own the routes, your auth already ran):
 `fetchServerTransport()` from `@agentick/transport-http-next/fetch` is the
-transport for that deployment mode — it yields a web-standard
-`(req: Request) => Promise<Response>` handler to mount in your route table,
-plus the `ServerTransport` you register here so `listen()`/`close()` govern it
-like every other edge. Full example (identity seam, fail-closed defaults):
-`@agentick/transport-http-next` README §`fetchServerTransport`.
+transport for that deployment mode — a web-standard handler for your route
+table, plus the `ServerTransport` you register here so `listen()`/`close()`
+govern it like every other edge:
+
+```ts
+import { fetchServerTransport } from "@agentick/transport-http-next/fetch";
+
+const { transport, handler } = fetchServerTransport({
+  identity: async (req) => {
+    const user = await myAuth(req); // YOUR auth — hand us the result, never tokens
+    if (!user) return new Response(null, { status: 401 }); // short-circuits verbatim
+    return { principal: user.id, user: { tenantId: user.tenantId }, scopes: user.scopes };
+  },
+});
+
+app.all("/agentick/*", (c) => handler(c.req.raw)); // Hono — mount at setup time
+
+const gateway = await createGateway({ transports: [transport] });
+await gateway.listen(); // binds the door; close() sweeps its open streams
+```
+
+Embedding into an existing **Node** server (Express, Nest, Fastify — anything
+with an `http.Server`) doesn't need the fetch door at all: the websocket and
+http transports both take `{ httpServer }` instead of `{ port }` and attach to
+YOUR server (never closing it). Full fetch example (identity seam, fail-closed
+defaults, 503 semantics): `@agentick/transport-http-next` README
+§`fetchServerTransport`.
 
 ## Wire extensions (ADR 46)
 
@@ -822,10 +844,11 @@ See `docs/proposals/v2/STATUS.md`.
 - **The gateway OWNS the transport fan-out, not the concrete
   transports.** ADR 84 §2 landed `transports?: ServerTransport[]` +
   the `listen()`/`close()` fan-out here (see "Lifecycle &
-  transports"). The concrete wrappers (`webSocket` / `http` /
-  `unixSocket` / `inProcess`) still ship as separate
-  `@agentick/transport-*-next` packages (ADR 31 + ADR 32) — the
-  follow-on task. Plugins/auth remain extensions (shape-1 per ADR 32).
+  transports"). All five concrete wrappers ship from their
+  `@agentick/transport-*-next` packages: `webSocketServerTransport` /
+  `httpServerTransport` / `unixSocketServerTransport` /
+  `inProcessServerTransport` / `fetchServerTransport` (the embedded
+  door). Plugins/auth remain extensions (shape-1 per ADR 32).
 - **No cluster substrate.** ADR 29 Phase D substrate (Redis Streams /
   Kafka) lands in `@agentick/cluster-next`; this package's
   `GatewayHarness` accepts any `EventBus` impl so cluster mode is
