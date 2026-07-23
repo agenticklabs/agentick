@@ -30,6 +30,11 @@ await session.billing.approve({ orderId: "o_1" });   // ✓ typed from the row
 await session.billing.aprove({ orderId: "o_1" });    // ✗ compile error
 ```
 
+> Verified by `packages-next/client/src/__tests__/wire-proxy-middleware-e2e.spec.ts`
+> (zero-client-code round-trip) and
+> `packages-next/spec/src/__tests__/wire-proxy.type.spec.ts` (the typed-from-the-row
+> + typo-is-a-compile-error IntelliSense contract).
+
 - Method names map `session.<ns>.<method>` ⇔ `"<ns>/<method>"`.
 - `sessionId` is bound for you (the handle carries addressing).
 - Params are **params-objects** everywhere — one shape, autocomplete does the
@@ -58,6 +63,10 @@ modelOnly.subscribe(cb);
 modelOnly.close();
 // One wire subscription per topic — all views fold off the same fan-out.
 ```
+
+> Verified by `packages-next/timeline/src/client/__tests__/timeline-fanout.spec.ts`
+> (two views, ONE wire subscription; independent close; handle-close closes all) and
+> the primitive `packages-next/client-core/src/__tests__/view-source.spec.ts`.
 
 Local view operations (not wire) live on views — and thus on the handle too:
 
@@ -95,6 +104,10 @@ await ask?.accept({ approved: true });     // = the derived respond method, part
 3. **Client middleware applies universally** — `client.use(...)` (slice 4)
    wraps every derived method: auth headers, logging, retry, optimistic
    brackets — written once, covering verticals that don't exist yet.
+   (Verified by the middleware-universality cases in
+   `packages-next/client/src/__tests__/wire-proxy-middleware-e2e.spec.ts` —
+   one `client.use` observed on `knobs/set` AND the zero-code `testns/doThing`,
+   plus namespace-scoped `session.knobs.use`.)
 4. **The table is an IDL** — a Python/Swift/Go client can be *generated* from
    the same rows; the wire table is the protocol schema, not just TS types.
 5. **Docs generation** — the API reference renders from the table; it cannot

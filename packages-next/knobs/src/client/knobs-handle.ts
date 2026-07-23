@@ -30,7 +30,12 @@
  */
 
 import { channelView, type ClientHandle, type Enumerable } from "@agentick/client-core-next";
-import type { KnobPrimitive, SubscriptionScope, Unsubscribe } from "@agentick/spec-next";
+import type {
+  ClientMiddleware,
+  KnobPrimitive,
+  SubscriptionScope,
+  Unsubscribe,
+} from "@agentick/spec-next";
 import { applyJsonPatch } from "@agentick/utils-next";
 
 import { KNOBS_STATE_CHANNEL, type KnobsStateFrame, type WireKnobDescriptor } from "../channel.js";
@@ -52,6 +57,13 @@ export interface KnobsHandle extends ClientHandle, Enumerable<WireKnobDescriptor
    * as a `knobs-state` delta (CQRS — no local hand-patch).
    */
   set(id: string, value: KnobPrimitive): Promise<void>;
+  /**
+   * Register a {@link ClientMiddleware} scoped to THIS handle's wire namespace
+   * (`knobs/*`) — sugar over `client.use(...)` that fires only for the knobs
+   * verbs (B2 slice 4 §7). Returns an {@link Unsubscribe}. An inert no-op when
+   * the handle was minted off a bare-transport double (no `client.use`).
+   */
+  use(middleware: ClientMiddleware): Unsubscribe;
   /** Tear down the underlying `knobs-state` subscription. */
   close(): void;
 }
@@ -111,8 +123,18 @@ export function knobsHandle(client: KnobsCommandClient, sessionId: string): Knob
     close: () => view.close(),
     set: async (id, value) => {
       // Fire-and-observe: the effect returns as a channel delta and re-folds the
-      // view (CQRS). Do not patch `view` here.
+      // view (CQRS). Do not patch `view` here. Routes through `transport.request`,
+      // which — on a real client — funnels the write through the middleware chain
+      // (B2 slice 4), so `client.use(...)` observes `knobs/set`.
       await client.transport.request("knobs/set", { sessionId, id, value });
+    },
+    // Per-handle middleware: scope a client middleware to the `knobs/*` namespace.
+    // Sugar over `client.use` (§7) — inert if the double has no `use`.
+    use: (middleware: ClientMiddleware): Unsubscribe => {
+      if (!client.use) return () => {};
+      return client.use((params, next, ctx) =>
+        ctx.method.startsWith("knobs/") ? middleware(params, next, ctx) : next(params),
+      );
     },
   };
 }

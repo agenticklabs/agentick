@@ -18,9 +18,11 @@
 import { channelView } from "@agentick/client-core-next";
 import type {
   ChannelView,
+  ClientMiddleware,
   ClientTransport,
   KnobPrimitive,
   SubscriptionScope,
+  Unsubscribe,
 } from "@agentick/spec-next";
 import { applyJsonPatch } from "@agentick/utils-next";
 
@@ -45,6 +47,13 @@ export interface KnobsClient {
  */
 export interface KnobsCommandClient {
   readonly transport: Pick<ClientTransport, "subscribe" | "request">;
+  /**
+   * Register a client {@link ClientMiddleware} (B2 slice 4 §7). Present when the
+   * handle is minted off a real client (`session.knobs`), so `session.knobs.use`
+   * can scope a middleware to the `knobs/*` namespace; absent for bare-transport
+   * test doubles, where per-handle `use` is an inert no-op.
+   */
+  readonly use?: (middleware: ClientMiddleware) => Unsubscribe;
 }
 
 /**

@@ -27,7 +27,7 @@ import {
 } from "@agentick/spec-next";
 
 import { createClient } from "../client.js";
-import { commandForMethod } from "../hook-registry.js";
+import { commandForMethod } from "../hook-keys.js";
 
 type Handler = <M extends WireMethod>(method: M, params: WireParams<M>) => Promise<WireResult<M>>;
 

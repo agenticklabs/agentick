@@ -23,6 +23,7 @@ import type { SubscriptionStream } from "./transport.js";
 import type { Unsubscribe } from "../protocol/inbox.js";
 import type { OnSignalOptions, ReceivedLog, ReceivedProgress } from "./signals.js";
 import type { ChannelView, ChannelViewConfig } from "./channel.js";
+import type { SessionWireNamespaces } from "./wire-proxy.js";
 
 // ============================================================================
 // Scoped subscriptions — the runtime-signal / channel-view subscriptions
@@ -111,14 +112,17 @@ export interface AppHandle extends ResourceHandle, HandleSubscriptions {
 export interface SessionHandleExtensions {}
 
 /**
- * Client-side session handle. `send()` returns a `ClientSessionExecutionHandle`
- * — same shape as the server-side `SessionExecutionHandle` (AsyncIterable +
- * `.result` + `abort()`), guaranteeing in-process and remote calls have
- * identical types. Carries the generic subscription surface ({@link
- * HandleSubscriptions}) plus per-harness sub-handles ({@link SessionHandleExtensions}).
+ * The hand-written CORE of the client session handle — the members that are NOT
+ * derived from wire rows and NOT per-harness sub-handles. `send()` returns a
+ * `ClientSessionExecutionHandle` (same shape as the server-side
+ * `SessionExecutionHandle`: AsyncIterable + `.result` + `abort()`), so in-process
+ * and remote calls have identical types.
+ *
+ * The full {@link SessionHandle} intersects this base with the per-harness
+ * sub-handles ({@link SessionHandleExtensions}) AND the wire-derived namespace
+ * surface ({@link SessionWireNamespaces}).
  */
-export interface SessionHandle
-  extends ResourceHandle, HandleSubscriptions, SessionHandleExtensions {
+export interface SessionHandleBase extends ResourceHandle, HandleSubscriptions {
   send<P = unknown>(input: SendInput<P>): ClientSessionExecutionHandle;
   dispatch(tool: string, input: unknown): Promise<readonly ContentBlock[]>;
   abort(reason?: string): Promise<void>;
@@ -135,10 +139,30 @@ export interface SessionHandle
   close(): Promise<void>;
 
   // Elicitation (the `elicitations` property — an `ElicitationsHandle`, read via
-  // `for await`/`.onChange`, reply via `.respond(...)`) is contributed as a
-  // per-harness sub-handle by `@agentick/elicitation-next/client` via
+  // `list()`/`subscribe()`, reply via `.respond(...)` / item verbs) is contributed
+  // as a per-harness sub-handle by `@agentick/elicitation-next/client` via
   // {@link SessionHandleExtensions} (ADR 87) — client-core stays harness-agnostic.
 }
+
+/**
+ * Client-side session handle = **WIRE PROXY + VIEW FACTORY** (B2 slice 4):
+ *
+ *   - {@link SessionHandleBase} — the hand-written core (`send`, `dispatch`, …).
+ *   - {@link SessionHandleExtensions} — per-harness rich sub-handles
+ *     (`session.knobs`, `session.timeline`, …), contributed via ADR-87
+ *     augmentation. These WIN over the wire-derived surface for their namespace.
+ *   - {@link SessionWireNamespaces} — the wire-DERIVED namespace methods
+ *     (`session.billing.approve(…)`), for every session-scoped `WireMethods` row
+ *     whose namespace does NOT already have a rich sub-handle. Zero client code:
+ *     declare the row + the gateway handler and the typed client method falls out.
+ *
+ * A `type` (not an `interface`) because it intersects a mapped type; augmentation
+ * happens on `SessionHandleExtensions` / `WireMethods`, never on `SessionHandle`
+ * directly, so nothing depends on it being an interface.
+ */
+export type SessionHandle = SessionHandleBase &
+  SessionHandleExtensions &
+  Omit<SessionWireNamespaces, keyof SessionHandleBase | keyof SessionHandleExtensions>;
 
 /**
  * Identical shape to server-side `SessionExecutionHandle`. Re-exported

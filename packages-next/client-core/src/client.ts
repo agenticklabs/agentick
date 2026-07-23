@@ -31,6 +31,9 @@ import type {
   InitializeResult,
   ClientHookContext,
   ClientHooks,
+  ClientMiddleware,
+  ClientMiddlewareContext,
+  ClientMiddlewareNext,
   ClientRegistrars,
   OnSignalOptions,
   ReceivedLog,
@@ -43,14 +46,14 @@ import type {
   WireParams,
   WireResult,
 } from "@agentick/spec-next";
-import { EMPTY_CLIENT_CAPABILITIES, ErrorCode } from "@agentick/spec-next";
+import { EMPTY_CLIENT_CAPABILITIES, ErrorCode, parseHookKey } from "@agentick/spec-next";
 import { onLog as onLogSignal, onProgress as onProgressSignal } from "./signals.js";
 import { channelView as channelViewFn } from "./channel-view.js";
 import { createLocalPubSub, createNotifier, type LocalPubSub } from "@agentick/pubsub-next";
 import { Deferred, Effect, Stream } from "effect";
 import { buildClientCapabilities } from "./capabilities.js";
 import { ClientHandlerRegistry } from "./handler-registry.js";
-import { ClientHookRegistry, commandForMethod } from "./hook-registry.js";
+import { commandForMethod } from "./hook-keys.js";
 import { makeAppHandle, makeGatewayHandle, makeSessionHandle } from "./handles.js";
 import { composeRequest } from "./pipeline.js";
 
@@ -106,14 +109,14 @@ class AgentickClient implements ClientProtocol {
 
   private readonly extensions: readonly ClientExtension[];
   private readonly handlerRegistry = new ClientHandlerRegistry();
-  /**
-   * Dynamically-registered client wire hooks (ADR 83). Read LIVE per
-   * request — a hook added AFTER construction takes effect on the next
-   * request without rebuilding the pipeline. Empty by default; the
-   * request path fast-paths straight to `composedRequest` when so.
-   */
-  private readonly hookRegistry = new ClientHookRegistry();
   private _hookRegistrars?: ClientRegistrars;
+  /**
+   * Client-scoped {@link ClientMiddleware} chain (B2 slice 4 §7) — the ONE
+   * interception seam. Read LIVE per request; a middleware added after
+   * construction takes effect on the next request. Empty by default, so
+   * `request()` fast-paths straight past it.
+   */
+  private readonly middlewares: ClientMiddleware[] = [];
   private readonly clientBus: LocalEventBus;
   /**
    * Dedicated client-event emitter. Deliberately DECOUPLED from
@@ -419,60 +422,91 @@ class AgentickClient implements ClientProtocol {
     params: WireParams<M>,
     signal?: AbortSignal,
   ): Promise<WireResult<M>> {
-    // Fast-path: no wire hooks registered → straight to the composed
-    // extension pipeline, zero per-request hook overhead.
-    if (this.hookRegistry.isEmpty()) {
+    // Fast-path: nothing registered on the ONE interception seam → straight to
+    // the extension pipeline + transport, zero per-request overhead.
+    if (this.middlewares.length === 0) {
       return this.composedRequest({ method, params, signal } as never) as Promise<WireResult<M>>;
     }
-    return this.dispatchWithHooks(method, params, signal);
-  }
-
-  /**
-   * The hooked request path (ADR 83). Wraps the extension pipeline
-   * OUTERMOST: `onBefore<Method>` hooks transform `params` (or throw to
-   * abort) before extension middleware sees them; `onAfter<Method>`
-   * hooks transform the `result` after the pipeline resolves. Both are
-   * method-scoped via the shared command derivation.
-   */
-  private async dispatchWithHooks<M extends WireMethod>(
-    method: M,
-    params: WireParams<M>,
-    signal?: AbortSignal,
-  ): Promise<WireResult<M>> {
-    const command = commandForMethod(method);
-    const ctx: ClientHookContext = { method, signal };
-
-    let nextParams: WireParams<M> = params;
-    for (const hook of this.hookRegistry.beforeHooks(command)) {
-      // A throw aborts the request (no verdict DSL); a returned value
-      // transforms the params, `undefined` passes them through.
-      const reshaped = await hook(nextParams, ctx);
-      if (reshaped !== undefined) nextParams = reshaped as WireParams<M>;
-    }
-
-    let result = (await this.composedRequest({
+    // The ONE interception seam (B2 slice 4 §7). `client.use(...)` and the
+    // before/after `client.hook(...)` sugar BOTH live here — one chain, no second
+    // path. Compose them AROUND the extension pipeline; first registered is
+    // outermost. `ctx` names the method + the bound sessionId (lifted from params)
+    // so a handle-scoped middleware can filter on its namespace.
+    const sessionId = readSessionId(params);
+    const ctx: ClientMiddlewareContext = {
       method,
-      params: nextParams,
-      signal,
-    } as never)) as WireResult<M>;
-
-    for (const hook of this.hookRegistry.afterHooks(command)) {
-      const reshaped = await hook(result, ctx);
-      if (reshaped !== undefined) result = reshaped as WireResult<M>;
-    }
-    return result;
+      ...(sessionId !== undefined ? { sessionId } : {}),
+      ...(signal !== undefined ? { signal } : {}),
+    };
+    const terminal: ClientMiddlewareNext = (p) =>
+      this.composedRequest({ method, params: p, signal } as never) as Promise<unknown>;
+    const chain = this.middlewares.reduceRight<ClientMiddlewareNext>(
+      (next, mw) => (p) => mw(p, next, ctx),
+      terminal,
+    );
+    return chain(params) as Promise<WireResult<M>>;
   }
 
   /**
-   * Register client hooks declaratively (ADR 83) — the runtime twin of
-   * the server's `harness.hook()`. Returns an {@link Unsubscribe}
-   * removing every hook in the config.
+   * Register a {@link ClientMiddleware} at client scope (B2 slice 4 §7). It
+   * wraps EVERY derived wire method — `session.knobs.set`,
+   * `session.billing.approve`, and every namespace that doesn't exist yet.
+   * Returns an {@link Unsubscribe} that removes it (leased).
+   */
+  use(middleware: ClientMiddleware): Unsubscribe {
+    this.middlewares.push(middleware);
+    let live = true;
+    return () => {
+      if (!live) return;
+      live = false;
+      const i = this.middlewares.indexOf(middleware);
+      if (i >= 0) this.middlewares.splice(i, 1);
+    };
+  }
+
+  /**
+   * Adapt one before/after wire hook (ADR 83) into an around
+   * {@link ClientMiddleware} on the single seam, method-SCOPED via the shared
+   * command derivation. A before-hook transforms params (or throws to abort)
+   * on the way out; an after-hook transforms the result on the way back. This
+   * is why `client.hook` / `client.hooks` need no second registry — they ARE
+   * `client.use` with a command guard and a before/after adapter.
+   */
+  private registerHookMiddleware(
+    kind: "before" | "after",
+    command: string,
+    fn: (value: unknown, ctx: ClientHookContext) => unknown,
+  ): Unsubscribe {
+    const middleware: ClientMiddleware = async (params, next, ctx) => {
+      if (commandForMethod(ctx.method) !== command) return next(params);
+      const hookCtx: ClientHookContext =
+        ctx.signal !== undefined
+          ? { method: ctx.method as WireMethod, signal: ctx.signal }
+          : { method: ctx.method as WireMethod };
+      if (kind === "before") {
+        // A throw aborts the request; a returned value reshapes params.
+        const reshaped = await fn(params, hookCtx);
+        return next(reshaped !== undefined ? reshaped : params);
+      }
+      const result = await next(params);
+      const reshaped = await fn(result, hookCtx);
+      return reshaped !== undefined ? reshaped : result;
+    };
+    return this.use(middleware);
+  }
+
+  /**
+   * Register client hooks declaratively (ADR 83) — method-scoped before/after
+   * sugar over the single {@link use} seam. Returns an {@link Unsubscribe}
+   * removing every hook in the config. `around`-kind keys are inert (the around
+   * shape IS `client.use`).
    */
   hook(config: ClientHooks): Unsubscribe {
     const unsubs: Unsubscribe[] = [];
     for (const [key, fn] of Object.entries(config as Record<string, unknown>)) {
       if (fn === undefined) continue;
-      unsubs.push(this.hookRegistry.register(key, fn));
+      const off = this.registerHookKey(key, fn);
+      if (off) unsubs.push(off);
     }
     if (unsubs.length === 0) return () => {};
     let live = true;
@@ -483,17 +517,30 @@ class AgentickClient implements ClientProtocol {
     };
   }
 
+  /** Parse a hook key (`onBeforeSessionSend`) and register it on the seam. */
+  private registerHookKey(key: string, fn: unknown): Unsubscribe | undefined {
+    const parsed = parseHookKey(key);
+    if (parsed === undefined || (parsed.kind !== "before" && parsed.kind !== "after")) {
+      return undefined;
+    }
+    return this.registerHookMiddleware(
+      parsed.kind,
+      parsed.command,
+      fn as (value: unknown, ctx: ClientHookContext) => unknown,
+    );
+  }
+
   /**
-   * Per-method imperative registrars (ADR 83) — a typed Proxy over
-   * single-hook registration, mirroring the server's `harness.hooks`.
-   * `client.hooks.onBeforeSessionSend(fn)` registers a hook and returns
-   * its {@link Unsubscribe}.
+   * Per-method imperative registrars (ADR 83) — a typed Proxy over single-hook
+   * registration, mirroring the server's `harness.hooks`.
+   * `client.hooks.onBeforeSessionSend(fn)` registers a before/after hook on the
+   * single {@link use} seam and returns its {@link Unsubscribe}.
    */
   get hooks(): ClientRegistrars {
     return (this._hookRegistrars ??= new Proxy({} as ClientRegistrars, {
       get: (_target, name) =>
         typeof name === "string"
-          ? (fn: unknown) => this.hookRegistry.register(name, fn)
+          ? (fn: unknown) => this.registerHookKey(name, fn) ?? (() => {})
           : undefined,
     }));
   }
@@ -627,6 +674,15 @@ function matchesFilter(event: ClientEvent, filter?: ClientEventFilter): boolean 
 /** True when `needle` equals `spec` or is contained in the `spec` array. */
 function includesValue<T>(spec: T | readonly T[], needle: T): boolean {
   return Array.isArray(spec) ? spec.includes(needle) : spec === needle;
+}
+
+/** Lift the bound `sessionId` off request params for the middleware ctx, if present. */
+function readSessionId(params: unknown): string | undefined {
+  if (params !== null && typeof params === "object" && "sessionId" in params) {
+    const id = (params as { sessionId?: unknown }).sessionId;
+    if (typeof id === "string") return id;
+  }
+  return undefined;
 }
 
 /** True when the ClientState value is the failed-object variant. */

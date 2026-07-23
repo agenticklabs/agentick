@@ -15,6 +15,7 @@ import type {
   ChannelViewConfig,
   ClientProtocol,
   ClientSessionExecutionHandle,
+  ClientTransport,
   ContentBlock,
   CreateSessionInput,
   EventQuery,
@@ -26,10 +27,11 @@ import type {
   SessionEntry,
   SessionFilter,
   SessionHandle,
-  SessionHandleExtensions,
+  SessionHandleBase,
   StreamEvent,
   SubscriptionScope,
   SubscriptionStream,
+  WireMethod,
 } from "@agentick/spec-next";
 import type { Cursor } from "@agentick/spec-next";
 import { onLog as onLogFn, onProgress as onProgressFn } from "./signals.js";
@@ -39,6 +41,9 @@ import { applySessionHandleExtensions } from "./session-handle-extensions.js";
 interface InternalClient {
   readonly id: string;
   request: ClientProtocol["request"];
+  /** Present on a real client (B2 slice 4 §7); absent on bare test doubles, where
+   *  per-handle `use` degrades to an inert no-op. */
+  use?: ClientProtocol["use"];
   readonly transport: ClientProtocol["transport"];
 }
 
@@ -129,12 +134,13 @@ export function makeAppHandle(client: InternalClient, appId: string): AppHandle 
 }
 
 export function makeSessionHandle(client: InternalClient, sessionId: string): SessionHandle {
-  // Typed against the BASE (minus the augmented sub-handles) so the literal is
-  // fully checked; the registered sub-handles are attached as getters below and
-  // asserted at return. In client-core `SessionHandleExtensions` is empty, so this
-  // is just `SessionHandle`; in a harness package's compilation it drops that
-  // package's slot (added by the getter), keeping the slot NON-optional (ADR 87).
-  const handle: Omit<SessionHandle, keyof SessionHandleExtensions> = {
+  // Typed against the hand-written BASE ({@link SessionHandleBase}) so the literal
+  // is fully checked. The registered sub-handles (`session.knobs`, …) are attached
+  // as getters below (ADR 87); the wire-DERIVED namespace methods
+  // (`session.billing.approve`, …) are synthesized by the Proxy wrapper at return.
+  // The full `SessionHandle` (base ∧ sub-handles ∧ wire namespaces) is reached by
+  // CASTING the Proxy — never by widening.
+  const handle: SessionHandleBase = {
     ...scopedSubscriptions(client, { kind: "session", id: sessionId }),
     id: sessionId,
     send<P = unknown>(input: SendInput<P>): ClientSessionExecutionHandle {
@@ -180,8 +186,109 @@ export function makeSessionHandle(client: InternalClient, sessionId: string): Se
   };
   // ADR 87 — spread registered per-harness sub-handles (session.tasks, .knobs, …)
   // as lazy getters. Client-core stays agnostic; harness /client packages register.
-  applySessionHandleExtensions(handle, client as unknown as ClientProtocol, sessionId);
-  return handle as SessionHandle;
+  // The factories receive a client whose `transport.request` funnels through the
+  // client MIDDLEWARE chain (B2 slice 4 §7), so a sub-handle's write verbs
+  // (`knobs.set`, `elicitations.respond`, …) are covered by `client.use(...)`
+  // WITHOUT each handle rewiring its transport — the derived-from-wire rule made
+  // universal. `transport.subscribe`/`progress` pass through untouched (a fold's
+  // input is a stream, not a call — it gets a frame tap, not middleware).
+  const handleClient = withMiddlewareTransport(client);
+  applySessionHandleExtensions(handle, handleClient, sessionId);
+  // B2 slice 4 — WIRE PROXY: wrap so an unregistered namespace access
+  // (`session.billing`) synthesizes a namespace whose methods issue
+  // `client.request("billing/<method>", { sessionId, ...params })`. Registered
+  // sub-handles and base members are served from `handle` untouched; only
+  // unknown namespaces fall through to synthesis. Cast to the mapped
+  // `SessionHandle` — the runtime is a superset, the type is the guard.
+  return wrapSessionWireProxy(handle, client, sessionId);
+}
+
+/**
+ * A view of the client whose `transport.request` funnels through the client's
+ * middleware chain (`client.request`), while every other transport member
+ * (`subscribe`, `progress`, `state`, …) and every other client member (`use`,
+ * `request`, …) pass through untouched. Handed to ADR-87 sub-handle factories so
+ * their write verbs pick up `client.use(...)` for free.
+ */
+function withMiddlewareTransport(client: InternalClient): ClientProtocol {
+  const middlewareTransport = new Proxy(client.transport, {
+    get(target, prop, receiver) {
+      if (prop === "request") {
+        return (method: WireMethod, params: unknown, signal?: AbortSignal) =>
+          client.request(method, params as never, signal);
+      }
+      const value = Reflect.get(target, prop, receiver);
+      return typeof value === "function"
+        ? (value as (...a: unknown[]) => unknown).bind(target)
+        : value;
+    },
+  }) as ClientTransport;
+
+  return new Proxy(client as unknown as ClientProtocol, {
+    get(target, prop, receiver) {
+      if (prop === "transport") return middlewareTransport;
+      const value = Reflect.get(target, prop, receiver);
+      return typeof value === "function"
+        ? (value as (...a: unknown[]) => unknown).bind(target)
+        : value;
+    },
+  });
+}
+
+/**
+ * Wrap the base session handle so property access on an UNREGISTERED wire
+ * namespace (`session.billing`) returns a synthesized namespace proxy. Base
+ * members and ADR-87 sub-handle getters (already `in handle`) are served
+ * untouched; symbols and `then` never synthesize (so the handle is not a
+ * thenable and structured-clone / inspection don't trip the trap). Namespace
+ * proxies are memoized so `session.billing === session.billing`.
+ */
+function wrapSessionWireProxy(
+  base: SessionHandleBase,
+  client: InternalClient,
+  sessionId: string,
+): SessionHandle {
+  const nsCache = new Map<string, unknown>();
+  const proxy = new Proxy(base as object, {
+    get(target, prop, receiver) {
+      if (typeof prop !== "string") return Reflect.get(target, prop, receiver);
+      if (prop in target) return Reflect.get(target, prop, receiver);
+      if (prop === "then") return undefined; // never a thenable
+      let ns = nsCache.get(prop);
+      if (ns === undefined) {
+        ns = makeWireNamespace(client, sessionId, prop);
+        nsCache.set(prop, ns);
+      }
+      return ns;
+    },
+  });
+  // The runtime Proxy is a structural superset of every session-scoped wire
+  // namespace; the mapped `SessionHandle` type is what constrains callers.
+  return proxy as unknown as SessionHandle;
+}
+
+/**
+ * Synthesize a namespace object for `namespace` whose every accessed method
+ * `m` issues `client.request("<namespace>/<m>", { sessionId, ...params })`. No
+ * per-method knowledge is needed — a typo can't compile (the mapped type is the
+ * guard), and an unknown-at-runtime method is rejected by the server. Method
+ * functions are memoized.
+ */
+function makeWireNamespace(client: InternalClient, sessionId: string, namespace: string): unknown {
+  const methodCache = new Map<string, (params?: Record<string, unknown>) => Promise<unknown>>();
+  return new Proxy(Object.create(null) as object, {
+    get(_target, prop) {
+      if (typeof prop !== "string" || prop === "then") return undefined;
+      let fn = methodCache.get(prop);
+      if (fn === undefined) {
+        const method = `${namespace}/${prop}` as WireMethod;
+        fn = (params?: Record<string, unknown>) =>
+          client.request(method, { sessionId, ...(params ?? {}) } as never);
+        methodCache.set(prop, fn);
+      }
+      return fn;
+    },
+  });
 }
 
 // ============================================================================

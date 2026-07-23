@@ -39,7 +39,12 @@
  * @verifiedBy packages-next/timeline/src/client/__tests__/timeline-handle.conformance.spec.ts
  */
 
-import { type ClientHandle, type Enumerable } from "@agentick/client-core-next";
+import {
+  filteredView,
+  type ClientHandle,
+  type Enumerable,
+  type FilteredView,
+} from "@agentick/client-core-next";
 import type {
   ClientTransport,
   SessionTimelineHistoryResult,
@@ -56,6 +61,15 @@ import { timelineView, type TimelineViewOptions } from "./timeline-view.js";
  */
 export interface TimelineCommandClient {
   readonly transport: Pick<ClientTransport, "subscribe" | "request">;
+}
+
+/** Options for a minted timeline view (B2 slice 4) — `filter` only this slice. */
+export interface TimelineViewOpts {
+  /**
+   * Keep predicate applied to the shared window — e.g.
+   * `(e) => e.visibility === "model"`. Omit → mirror the full window.
+   */
+  readonly filter?: (entry: TimelineEntry) => boolean;
 }
 
 /** The page `loadOlder` spliced, plus whether the log head has been reached. */
@@ -90,7 +104,14 @@ export interface TimelineHandle extends ClientHandle, Enumerable<TimelineEntry> 
    * resolves `{ entries, done }`. A no-op once `done`.
    */
   loadOlder(limit?: number): Promise<LoadOlderResult>;
-  /** Tear down the underlying timeline subscription. */
+  /**
+   * Mint an ADDITIONAL concurrent view over the SAME window (B2 slice 4) — a
+   * filtered projection sharing this handle's ONE wire subscription (no second
+   * `subscribe`). The minted view closes independently; closing the handle closes
+   * it too. Opts: `filter` only this slice (window ops stay on the handle).
+   */
+  view(opts?: TimelineViewOpts): FilteredView<TimelineEntry>;
+  /** Tear down the underlying timeline subscription (and every minted view). */
   close(): void;
 }
 
@@ -113,12 +134,40 @@ export function timelineHandle(
   let fromSeq: number | undefined;
   let done = false;
 
+  // Minted views (B2 slice 4). Each is a filtered projection over the SAME
+  // window (the ONE subscription); tracked so `close()` tears them all down.
+  const minted = new Set<FilteredView<TimelineEntry>>();
+  // The default view exposed to `filteredView` as the shared source: the handle's
+  // own `list()` + zero-arg `subscribe` (both read `view`, the single stream).
+  const source = {
+    list: () => view.get(),
+    subscribe: (cb: () => void): Unsubscribe => view.subscribe(() => cb()),
+  };
+
   return {
     list: () => view.get(),
     get: (id) => view.get().find((e) => idOf(e) === id),
     // The store contract: fire on change, hand the callback NO arguments.
     subscribe: (cb: () => void): Unsubscribe => view.subscribe(() => cb()),
-    close: () => view.close(),
+    view: (opts) => {
+      const projection = filteredView(source, opts ?? {}, idOf);
+      // Wrap `close` so the handle stops tracking a view that closes itself.
+      const tracked: FilteredView<TimelineEntry> = {
+        list: projection.list,
+        get: projection.get,
+        subscribe: projection.subscribe,
+        close: () => {
+          projection.close();
+          minted.delete(tracked);
+        },
+      };
+      minted.add(tracked);
+      return tracked;
+    },
+    close: () => {
+      for (const v of [...minted]) v.close();
+      view.close();
+    },
     seed: (entries) => {
       view.clear();
       view.append(entries);

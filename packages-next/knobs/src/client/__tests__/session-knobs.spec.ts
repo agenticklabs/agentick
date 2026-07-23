@@ -62,24 +62,31 @@ function pushStream(): SubscriptionStream & { emit(frame: KnobsStateFrame): void
   };
 }
 
-/** Minimal InternalClient: id + a subscribe stream + a `request` recorder. */
+/**
+ * Minimal InternalClient — a faithful double: the top-level `request` delegates
+ * to `transport.request` (the recorder), exactly as a real client's request
+ * pipeline bottoms out at the transport. `session.knobs.set` therefore records on
+ * `captured` whether it travels the direct or the middleware-wrapped path.
+ */
 function fakeInternalClient(
   stream: SubscriptionStream,
   captured: { method?: WireMethod; params?: unknown } = {},
 ) {
+  const transport = {
+    subscribe(_scope: SubscriptionScope, _query?: EventQuery): SubscriptionStream {
+      return stream;
+    },
+    async request<M extends WireMethod>(method: M, params: WireParams<M>): Promise<unknown> {
+      captured.method = method;
+      captured.params = params;
+      return null;
+    },
+  };
   return {
     id: "c1",
-    request: (async () => null) as never,
-    transport: {
-      subscribe(_scope: SubscriptionScope, _query?: EventQuery): SubscriptionStream {
-        return stream;
-      },
-      async request<M extends WireMethod>(method: M, params: WireParams<M>): Promise<unknown> {
-        captured.method = method;
-        captured.params = params;
-        return null;
-      },
-    } as never,
+    request: (async (method: WireMethod, params: unknown) =>
+      transport.request(method, params as WireParams<WireMethod>)) as never,
+    transport: transport as never,
   };
 }
 

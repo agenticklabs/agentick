@@ -21,6 +21,7 @@ import type { ChannelView, ChannelViewConfig } from "./channel.js";
 import type { ClientEvent, ClientEventFilter } from "./events.js";
 import type { ClientNamespaces } from "./extension.js";
 import type { ClientHooks, ClientRegistrars } from "./hooks.js";
+import type { ClientMiddleware } from "./middleware.js";
 import type {
   AppHandle,
   ClientSessionExecutionHandle,
@@ -177,6 +178,25 @@ export interface ClientProtocol {
     params: WireParams<M>,
     signal?: AbortSignal,
   ): Promise<WireResult<M>>;
+
+  // ── client middleware (B2 slice 4 §7) — the ONE interception seam ──────
+
+  /**
+   * Register a {@link ClientMiddleware} at CLIENT scope — it wraps EVERY
+   * derived wire method (commands + read RPCs), including verticals that don't
+   * exist yet. The AROUND seam: the middleware receives `params`, a `next` to
+   * continue the chain, and a `ctx` naming the `method` + bound `sessionId`.
+   * Registration order is outer→inner (first registered is outermost). Returns
+   * an {@link Unsubscribe} that removes it (leased, like the server's hooks).
+   *
+   * Auth/header injection, logging, retry, optimistic-UI bracketing, telemetry
+   * propagation, capture/replay — written once, covering `session.knobs.set`,
+   * `session.billing.approve`, and every future namespace uniformly.
+   *
+   * Per-HANDLE scoping (`session.knobs.use(mw)`) is sugar: the sub-handle wraps
+   * `mw` to fire only for its own namespace, then registers it here.
+   */
+  use(middleware: ClientMiddleware): Unsubscribe;
 
   // ── client hooks (ADR 83) ──────────────────────────────────────────────
 

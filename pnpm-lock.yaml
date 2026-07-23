@@ -483,6 +483,9 @@ importers:
         specifier: workspace:*
         version: link:../tool-executor
     devDependencies:
+      '@agentick/transport-in-process-next':
+        specifier: workspace:*
+        version: link:../transport-in-process
       typescript:
         specifier: ^5.7.3
         version: 5.9.3
