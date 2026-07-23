@@ -73,13 +73,25 @@ declare module "@agentick/spec-next" {
 await session.billing.approve({ orderId }); // ✓ via ADR-87 registration
 ```
 
-## 2. React (an appendix — each is ONE line over the contract)
+## 2. React (an appendix — ONE line over the contract)
+
+RESOLVED (2026-07-23): the handle IS the store, so the binding is ONE generic
+hook — per-handle aliases (`useTimeline`/`useKnobs`/…) would each be the same
+line with the item type already inferred from the handle, so they don't exist
+(`useHandle(session.timeline)` IS the timeline hook). Sharper than drawn: the
+original ○ lines asked for three hooks; the contract made them one.
 
 ```tsx
-const entries = useTimeline(session); // useSyncExternalStore(t.subscribe, t.list)  ○
-const pending = useElicitations(session); // ○
-const knobs = useKnobs(session); // ○
+import { useHandle, useView } from "@agentick/client-react-next";
+const entries = useHandle(session.timeline); // useSyncExternalStore(t.subscribe, t.list, t.list)  ✓
+const pending = useHandle(session.elicitations); // ✓ readonly item-handles (accept/decline live on each)
+const knobs = useHandle(session.knobs); // ✓ inferred readonly WireKnobDescriptor[]
+const modelOnly = useView(session.timeline, { filter: (e) => e.visibility === "model" }); // ✓ minted view, closed on unmount
 ```
+
+Verified by `packages-next/client-react/src/__tests__/use-handle.spec.tsx` +
+`use-view.spec.tsx` + `integration-with-handle.spec.tsx` (real tasksHandle;
+referential-stability render-count proof).
 
 ## 3. The config taxonomy (§8b — the options surfaces as ONE intentional page)
 
@@ -128,15 +140,20 @@ app.all("/agentick/*", (c) => handler(c.req.raw));
 // streams (SSE): identity binds at connect; req-res re-resolves per request
 ```
 
-**EMBEDDED mode ✓ (B2 slice 5, 2026-07-22).** Shipped as a free function, not a
-`gateway.handler()` method: `transport-http` sits ABOVE `gateway` in the dep graph
-(its tests build a real gateway), so a method would invert that into a build cycle.
-The achieved shape binds the gateway by argument — everything else is exactly as drawn:
-`const handler = httpFetchHandler(gateway, { identity })` from
-`@agentick/transport-http-next/fetch`; `identity: (req) => Identity | Response`
-(Response short-circuits); `security: "host-managed"` opt-out; fail-closed default.
-Verified by `packages-next/transport-http/src/__tests__/embedded-fetch-handler.spec.ts`
-(8 proofs) + README §"the embedded gateway".
+**EMBEDDED mode ✓ (B2 slice 5, 2026-07-22).** Shipped as the FIFTH `ServerTransport`
+(not a `gateway.handler()` method — `transport-http` sits ABOVE `gateway` in the dep
+graph, so a method would invert that into a build cycle; a transport is owned by
+injection, which is the established seam). The door participates in the gateway
+lifecycle: `gateway.listen()` binds it, `gateway.close()` sweeps every open SSE
+connection. Achieved shape (`@agentick/transport-http-next/fetch`):
+`const { transport, handler } = fetchServerTransport({ identity })` — mount `handler` in
+your framework at setup time, then `createGateway({ transports: [transport] })` +
+`await gateway.listen()`. `identity: (req) => Identity | Response` (Response
+short-circuits); `security: "host-managed"` opt-out; fail-closed default; pre-listen /
+post-close requests get an honest `503`. Verified by
+`packages-next/transport-http/src/__tests__/embedded-fetch-handler.spec.ts` (10 proofs)
++ `ServerTransport` conformance in `server-transport.spec.ts` + README §"the embedded
+gateway".
 
 **The grouping rule (so this never rots):** a key earns a GROUP when it's one of ≥3
 siblings sharing an axis (lifecycle, operator-security, egress-policy); otherwise it

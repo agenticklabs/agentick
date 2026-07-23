@@ -56,6 +56,7 @@
     "../packages-next/skills",
     "../packages-next/prompts",
     "../packages-next/prompts-react",
+    "../packages-next/client-react",
     "../packages-next/elicitation",
     "../packages-next/resources",
     "../packages-next/mcp",

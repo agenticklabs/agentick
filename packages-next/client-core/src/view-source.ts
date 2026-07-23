@@ -62,12 +62,22 @@ export function filteredView<T>(
   idOf?: (item: T) => string | undefined,
 ): FilteredView<T> {
   const { filter } = opts;
-  const project = (): readonly T[] => (filter ? source.list().filter(filter) : source.list());
   const listeners = new Set<() => void>();
   let closed = false;
 
+  // Memoized projection: the store contract requires `list()` to be
+  // referentially STABLE between changes (a fresh array per call render-loops a
+  // `useSyncExternalStore` consumer — the same guarantee every bundled handle
+  // makes). Recompute lazily and cache; invalidate on the next source change.
+  let cache: readonly T[] | undefined;
+  const project = (): readonly T[] => {
+    if (cache === undefined) cache = filter ? source.list().filter(filter) : source.list();
+    return cache;
+  };
+
   // ONE listener on the shared source, fanned out to this view's listeners.
   let sourceUnsub: Unsubscribe | undefined = source.subscribe(() => {
+    cache = undefined; // invalidate — the next `list()` re-projects a new ref
     for (const l of [...listeners]) {
       try {
         l();

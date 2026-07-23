@@ -96,6 +96,29 @@ describe("filteredView — fan-out primitive", () => {
     expect(v2.list()).toHaveLength(1);
   });
 
+  it("list() is referentially STABLE between changes (the useSyncExternalStore contract)", () => {
+    const source = fakeSource();
+    const view = filteredView(source, { filter: (i) => i.kind === "a" }, idOf);
+    source.set([
+      { id: "1", kind: "a" },
+      { id: "2", kind: "b" },
+    ]);
+
+    const first = view.list();
+    // Same ref across repeated reads with no intervening change — otherwise a
+    // React consumer render-loops (a fresh filtered array per call is the bug).
+    expect(view.list()).toBe(first);
+    expect(view.list()).toBe(first);
+
+    // A source change re-projects to a NEW ref (the change is observable)...
+    source.set([{ id: "3", kind: "a" }]);
+    const second = view.list();
+    expect(second).not.toBe(first);
+    expect(second.map(idOf)).toEqual(["3"]);
+    // ...and that new ref is then itself stable until the next change.
+    expect(view.list()).toBe(second);
+  });
+
   it("no view opens its own upstream subscription — the source is the single owner", () => {
     const source = fakeSource();
     filteredView(source, {}, idOf);

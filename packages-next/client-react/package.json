@@ -1,0 +1,55 @@
+{
+  "name": "@agentick/client-react-next",
+  "version": "0.0.0",
+  "private": true,
+  "description": "React binding for the agentick wire client. `useHandle(handle)` + `useView(handle, opts)` — thin `useSyncExternalStore` veneers over the framework-agnostic ClientHandle / FilteredView store contract. The BROWSER binding for the wire client (not the server-side JSX surface — that is @agentick/compiler-react-next).",
+  "keywords": [
+    "agent",
+    "agentick",
+    "ai",
+    "client",
+    "react",
+    "hooks",
+    "useSyncExternalStore"
+  ],
+  "license": "MIT",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages-next/client-react"
+  },
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
+  },
+  "dependencies": {
+    "@agentick/client-core-next": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": ">=18.0.0"
+  },
+  "devDependencies": {
+    "@agentick/spec-next": "workspace:*",
+    "@agentick/tasks-next": "workspace:*",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/react": "^19.2.5",
+    "@types/react-dom": "^19.2.3",
+    "happy-dom": "^17.6.3",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
+  }
+}
