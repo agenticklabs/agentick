@@ -183,6 +183,15 @@ The concrete transport wrappers (`webSocket` / `http` / `unixSocket` /
 owns only the fan-out. `spyServerTransport()` (`@agentick/gateway-next/testing`)
 is a call-recording double for asserting the fan-out in tests.
 
+**Embedding in an existing HTTP framework** (Hono, Nitro, Next.js route
+handlers, Bun/Deno — you own the routes, your auth already ran):
+`fetchServerTransport()` from `@agentick/transport-http-next/fetch` is the
+transport for that deployment mode — it yields a web-standard
+`(req: Request) => Promise<Response>` handler to mount in your route table,
+plus the `ServerTransport` you register here so `listen()`/`close()` govern it
+like every other edge. Full example (identity seam, fail-closed defaults):
+`@agentick/transport-http-next` README §`fetchServerTransport`.
+
 ## Wire extensions (ADR 46)
 
 The gateway can host **wire extensions** — extensible JSON-RPC
