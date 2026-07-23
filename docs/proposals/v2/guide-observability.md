@@ -76,18 +76,76 @@ const Search = createTool({
 > (off-path identity, live span parenting, metric fan-out) and the cross-surface
 > `runObservabilityCtxConformance` suite.
 
+### The `log` surface — levels, child bindings, correlation
+
+`ctx.log` is a **callable object**. The verbatim call form is
+`ctx.log(level, data, logger?)`; every RFC-5424 severity is also a method, and
+`ctx.log.with(fields)` binds context. Every form emits **one** bus event — the
+level methods and `.with` are sugar over the same single emission, so a
+projection (MCP `notifications/message`, the agentick client, an OTel-log
+bridge) always sees exactly one event per call.
+
+```ts
+ctx.log.info({ userId, action: "retry" }); // level method
+ctx.log("warning", "disk almost full"); // verbatim call form (identical)
+ctx.log.warn("disk almost full"); // `warn` alias → emits "warning"
+
+// `.with` binds fields into every emission — pino child binding.
+const rlog = ctx.log.with({ requestId });
+rlog.info({ step: "parse" }); // → { requestId, step: "parse" }
+rlog.error({ step: "parse", err }); // → { requestId, step: "parse", err }
+rlog.with({ attempt: 2 }).warning("slow"); // → { requestId, attempt: 2, msg: "slow" }
+```
+
+**Levels — RFC 5424 syslog severities**, least→most severe. Reach for the
+everyday four; the rest map an external scale (a syslog feed, an incident pager)
+onto ours with no translation:
+
+| Method                                             | RFC-5424 level | Reach for it when…                               |
+| -------------------------------------------------- | -------------- | ------------------------------------------------ |
+| `ctx.log.debug(data)`                              | debug          | fine-grained developer diagnostics               |
+| **`ctx.log.info(data)`**                           | info           | normal operational events _(everyday)_           |
+| `ctx.log.notice(data)`                             | notice         | normal but significant                           |
+| **`ctx.log.warning(data)`** / `ctx.log.warn(data)` | warning        | a concern that didn't stop the work _(everyday)_ |
+| **`ctx.log.error(data)`**                          | error          | the operation failed _(everyday)_                |
+| `ctx.log.critical(data)`                           | critical       | a failure threatening the subsystem              |
+| `ctx.log.alert(data)`                              | alert          | act immediately                                  |
+| `ctx.log.emergency(data)`                          | emergency      | the system is unusable                           |
+
+> **`warn` vs `warning`.** The RFC-5424 level is `warning`; `warn` is an alias so
+> `console.warn`/pino muscle memory works, but it emits the canonical `"warning"`
+> on the wire — there is ONE severity vocabulary, and `log("warn", …)` (the
+> call-string form) does not typecheck. Because the framework's `LogLevel` IS the
+> MCP `logging/setLevel` enum, the MCP projection forwards each level **verbatim**
+> — no mapping table to drift.
+>
+> **`.with` merge rules.** A per-call object overrides bound fields on key
+> collision; chained `.with` merges (later wins). When the call data is a
+> primitive/array, bound fields wrap it as `{ …bound, msg: data }` (pino's `msg`).
+> With no bound fields the data passes through verbatim.
+
+Fire-and-forget: `ctx.log` never throws, never a control path, and (unlike
+`trace`/`metrics`) is **always live** — emitting a bus event is always possible;
+the telemetry switch does not gate it.
+
+> Verified by the `runObservabilityCtxConformance` Log-surface assertions and
+> `packages-next/runtime/src/__tests__/observability.spec.ts` (call form + level
+> sugar + `.with` merge), with the MCP wire path (level methods → RFC-5424
+> notifications, `setLevel("warning")` filtering, per-connection isolation) in
+> `packages-next/mcp/src/server/__tests__/projection-completions-logging.spec.ts`.
+
 ## 3. The ladder — climb by how much the system should know about the work
 
 The four verbs are not alternatives; they are **rungs**. Pick the one that
 matches how much structure the work deserves.
 
-| Rung | Call | You get | Climb when… |
-| ---- | ---- | ------- | ----------- |
-| 1 · count it | `ctx.metrics.count(name)` | a tally | you only need "how many / how much" |
-| 2 · see it | `ctx.trace(name, fn)` | a span (timing/attribution) — **no** journal, hooks, guards | you want a sub-span inside a handler's own work |
-| 3 · run it | `ctx.run(name, fn)` | a real **operation**: journal envelope + the inherited interceptor fold (guards + hooks) + outcome + a parented span — minted **inline** | the step deserves a durable record + guard/hook reach, but isn't worth a registered command |
-| 3.5 · reach for the primitive | `ctx.runner.runOperation(op, body)` | the operation runner undiluted (tier-4 middleware, full `Operation` shape) | `ctx.run`'s options are too small |
-| 4 · name it | a registered command | typed input/output, typed `onBefore/After<Command>` hooks, inbox addressability, wire-grantability | the verb is part of the system's contract |
+| Rung                          | Call                                | You get                                                                                                                                  | Climb when…                                                                                 |
+| ----------------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| 1 · count it                  | `ctx.metrics.count(name)`           | a tally                                                                                                                                  | you only need "how many / how much"                                                         |
+| 2 · see it                    | `ctx.trace(name, fn)`               | a span (timing/attribution) — **no** journal, hooks, guards                                                                              | you want a sub-span inside a handler's own work                                             |
+| 3 · run it                    | `ctx.run(name, fn)`                 | a real **operation**: journal envelope + the inherited interceptor fold (guards + hooks) + outcome + a parented span — minted **inline** | the step deserves a durable record + guard/hook reach, but isn't worth a registered command |
+| 3.5 · reach for the primitive | `ctx.runner.runOperation(op, body)` | the operation runner undiluted (tier-4 middleware, full `Operation` shape)                                                               | `ctx.run`'s options are too small                                                           |
+| 4 · name it                   | a registered command                | typed input/output, typed `onBefore/After<Command>` hooks, inbox addressability, wire-grantability                                       | the verb is part of the system's contract                                                   |
 
 **Rung 3 — `ctx.run` mints an operation inline:**
 
@@ -95,9 +153,7 @@ matches how much structure the work deserves.
 handler: async ({ orderId }, { ctx }) => {
   // A real operation: journaled as `tool:run:charge`, guard-vetoable,
   // hook-observable, its span parented under the dispatch op.
-  const receipt = await ctx.run("charge", { input: { orderId } }, () =>
-    payments.charge(orderId),
-  );
+  const receipt = await ctx.run("charge", { input: { orderId } }, () => payments.charge(orderId));
   return [{ type: "text", text: receipt.id }];
 };
 ```
@@ -145,11 +201,11 @@ registry, no typed hooks, no addressability — is what makes the ladder work.
 
 Three verbs, mapping to the three OTel instrument kinds:
 
-| Verb | OTel mapping | Semantics | Use for |
-| ---- | ------------ | --------- | ------- |
-| `ctx.metrics.count(name, n?, labels?)` | `counter.add` | monotonic, summed | event tallies (dispatches, errors, cache misses) |
-| `ctx.metrics.record(name, value, labels?)` | `histogram.record` | distribution (buckets/quantiles) | latencies, sizes, token counts |
-| `ctx.metrics.gauge(name, value, labels?)` | last-value (async gauge) | most-recent reading, **not** a sum or delta | point-in-time levels (queue depth, active sessions) |
+| Verb                                       | OTel mapping             | Semantics                                   | Use for                                             |
+| ------------------------------------------ | ------------------------ | ------------------------------------------- | --------------------------------------------------- |
+| `ctx.metrics.count(name, n?, labels?)`     | `counter.add`            | monotonic, summed                           | event tallies (dispatches, errors, cache misses)    |
+| `ctx.metrics.record(name, value, labels?)` | `histogram.record`       | distribution (buckets/quantiles)            | latencies, sizes, token counts                      |
+| `ctx.metrics.gauge(name, value, labels?)`  | last-value (async gauge) | most-recent reading, **not** a sum or delta | point-in-time levels (queue depth, active sessions) |
 
 **Names.** Your metric names are used **verbatim** — no forced prefix. Only
 metrics the FRAMEWORK itself emits live under `${telemetryNamespace}.*` (default
@@ -288,13 +344,13 @@ export) — the `layer` is never overridden.
 
 ### Env precedence (`otlpSink` auto-fill)
 
-| Field | Option | Env var | Precedence |
-| ----- | ------ | ------- | ---------- |
-| endpoint | `otlpSink({ endpoint })` | `OTEL_EXPORTER_OTLP_ENDPOINT` | explicit option wins |
-| headers | `otlpSink({ headers })` | `OTEL_EXPORTER_OTLP_HEADERS` | per-key merge; explicit key wins, env-only kept |
-| protocol | `otlpSink({ protocol })` | `OTEL_EXPORTER_OTLP_PROTOCOL` | explicit option wins; unknown env → `http/protobuf` |
-| serviceName | `createTelemetry({ serviceName })` | `OTEL_SERVICE_NAME` | explicit option wins |
-| attributes | `createTelemetry({ attributes })` | `OTEL_RESOURCE_ATTRIBUTES` | per-key; explicit key wins |
+| Field       | Option                             | Env var                       | Precedence                                          |
+| ----------- | ---------------------------------- | ----------------------------- | --------------------------------------------------- |
+| endpoint    | `otlpSink({ endpoint })`           | `OTEL_EXPORTER_OTLP_ENDPOINT` | explicit option wins                                |
+| headers     | `otlpSink({ headers })`            | `OTEL_EXPORTER_OTLP_HEADERS`  | per-key merge; explicit key wins, env-only kept     |
+| protocol    | `otlpSink({ protocol })`           | `OTEL_EXPORTER_OTLP_PROTOCOL` | explicit option wins; unknown env → `http/protobuf` |
+| serviceName | `createTelemetry({ serviceName })` | `OTEL_SERVICE_NAME`           | explicit option wins                                |
+| attributes  | `createTelemetry({ attributes })`  | `OTEL_RESOURCE_ATTRIBUTES`    | per-key; explicit key wins                          |
 
 ## 7. Testing your instrumentation
 
@@ -318,9 +374,7 @@ await rt.runPromise(
       telemetry: { runtime, meter: spy.meter },
     });
     ctx.metrics.count("thing.happened", 1, { op: "X" });
-    yield* Effect.promise(() =>
-      ctx.trace("my.substep", (span) => span.setAttribute("k", "v")),
-    );
+    yield* Effect.promise(() => ctx.trace("my.substep", (span) => span.setAttribute("k", "v")));
   }).pipe(Effect.withSpan("enclosing.op")),
 );
 
@@ -368,25 +422,66 @@ expect(await spy.collectMetrics()).toContainEqual(
 forward (MCP → `notifications/message`; the agentick client → `subscribe`/`onLog`).
 `trace` and `metrics` go to the telemetry **provider** (the OTel tracer/meter),
 never the bus. They join up by IDENTITY: logs and spans carry the work-path
-coordinates (`sessionId`/`executionId`/`tickId`) and, in a wired backend, the
-active trace/span id, so a log line and its span land on the same trace in your
-backend. Metrics stay low-cardinality and are queried by their bounded labels,
-then pivoted to the matching spans by time + service. (Stamping the active
-trace/span id onto the log envelope is a small follow-up — not yet built.)
+coordinates (`sessionId`/`executionId`/`tickId`) and the **active trace/span
+id**, so a log line and its span land on the same trace in your backend. Metrics
+stay low-cardinality and are queried by their bounded labels, then pivoted to the
+matching spans by time + service.
+
+**The trace-id join is real.** Every `ctx.log` event carries `traceId`/`spanId`
+when a span is in scope. The id is captured **synchronously at the log call**
+(before the fire-and-forget fork that appends the bus event — the fork loses the
+ambient fiber, so the id must ride the event, not be read after). A `ctx.log`
+fired inside a `ctx.trace(name, fn)` callback carries **that child span's** id;
+a log elsewhere in the handler carries the enclosing operation span's id. When
+telemetry is off there is no span, so no ids are stamped — the correlation read
+is skipped entirely.
+
+> Verified by `packages-next/runtime/src/__tests__/observability.spec.ts`
+> ("stamps the op span on logs outside trace and the child span on logs inside
+> it").
+
+## 8a. The same `ctx` in hooks, guards, and middleware
+
+The observability + ops facets are **not** tool-handler-only. A `harness.use`
+middleware, a `harness.guard`, and a command hook all receive the SAME flat
+`ctx` — `ctx.log` / `ctx.trace` / `ctx.metrics` / `ctx.run` / `ctx.runner` —
+beside the operation's `RuntimeContext` (`ctx.sessionId`, `ctx.op`, …):
+
+```ts
+harness.use(async (input, next, ctx) => {
+  ctx.metrics.count("op.started", 1, { op: ctx.op ?? "?" });
+  const out = await ctx.trace("guarded-work", () => next(input)); // child span under the op
+  ctx.log.info({ op: ctx.op, sessionId: ctx.sessionId });
+  return out;
+});
+```
+
+The `RuntimeContext` stays pure data; the facets are attached at the interceptor
+boundary from a per-op value the operation runner builds (lazy getters — nothing
+derives unless the middleware touches it; off-telemetry `trace`/`metrics` are the
+shared no-op singletons). `ctx.log` / `ctx.trace` / `ctx.run` / `ctx.runner` work
+on every harness; `ctx.metrics` export needs the harness's telemetry provider
+threaded (wired for the tool executor + session today).
+
+> Verified by `packages-next/runtime/src/__tests__/interceptor-ctx-facets.spec.ts`
+> (flat facets on the middleware ctx; a hook's `ctx.trace` child parents under the
+> op span; `ctx.metrics` fan-out; `ctx.run` from a middleware).
 
 ## 9. Where each piece lives
 
-| Piece | Package | Symbol |
-| ----- | ------- | ------ |
-| The facet types | `@agentick/spec-next` | `Observability`, `Ops`, `Span`, `Metrics`, `RunOptions` |
-| The switch + sink types | `@agentick/spec-next` | `TelemetrySetting`, `TelemetryOptions`, `TelemetrySink` |
-| The derivations | `@agentick/runtime-next` | `deriveObservability`, `deriveOps` |
-| The provider seam | `@agentick/runtime-next` | `TelemetryProvider`, `MetricSink` |
-| Testing doubles | `@agentick/runtime-next/testing` | `spyTelemetryProvider`, `spyTelemetrySink` |
-| Conformance | `@agentick/spec-conformance-next` | `runObservabilityCtxConformance`, `runOpsCtxConformance` |
-| The one switch | `@agentick/app-next` | `createApp({ telemetry })` |
-| Sink merge factory | `@agentick/app-next` | `createTelemetry(options, ...sinks)` |
-| OTLP exporter sink | `@agentick/telemetry-otlp-next` | `otlpSink(options?)` |
+| Piece                   | Package                           | Symbol                                                   |
+| ----------------------- | --------------------------------- | -------------------------------------------------------- |
+| The facet types         | `@agentick/spec-next`             | `Observability`, `Ops`, `Span`, `Metrics`, `RunOptions`  |
+| The log surface         | `@agentick/spec-next`             | `Log` (callable object), `LogLevel`, `createLog`         |
+| The interceptor ctx     | `@agentick/runtime-next`          | `InterceptorCtx` (RuntimeContext + Observability + Ops)  |
+| The switch + sink types | `@agentick/spec-next`             | `TelemetrySetting`, `TelemetryOptions`, `TelemetrySink`  |
+| The derivations         | `@agentick/runtime-next`          | `deriveObservability`, `deriveOps`                       |
+| The provider seam       | `@agentick/runtime-next`          | `TelemetryProvider`, `MetricSink`                        |
+| Testing doubles         | `@agentick/runtime-next/testing`  | `spyTelemetryProvider`, `spyTelemetrySink`               |
+| Conformance             | `@agentick/spec-conformance-next` | `runObservabilityCtxConformance`, `runOpsCtxConformance` |
+| The one switch          | `@agentick/app-next`              | `createApp({ telemetry })`                               |
+| Sink merge factory      | `@agentick/app-next`              | `createTelemetry(options, ...sinks)`                     |
+| OTLP exporter sink      | `@agentick/telemetry-otlp-next`   | `otlpSink(options?)`                                     |
 
 > The runtime README's "The `ctx` facets" section is the substrate-level
 > companion to this guide.

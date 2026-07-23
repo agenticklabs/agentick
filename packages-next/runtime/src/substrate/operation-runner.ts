@@ -70,7 +70,7 @@
  * @see docs/proposals/v2/STATUS.md — ROADMAP Tier 2 (createOperationRunner)
  */
 
-import { Effect } from "effect";
+import { Effect, type Runtime } from "effect";
 import { omitUndefined } from "@agentick/utils-next";
 import type {
   CommandOutcome,
@@ -94,7 +94,12 @@ import {
 } from "@agentick/spec-next";
 import { getContext, type RuntimeContext, withContext } from "./runtime-context.js";
 import { ulid } from "./ulid.js";
-import { composeMiddleware, getCallMiddleware } from "./middleware.js";
+import {
+  composeMiddleware,
+  getCallMiddleware,
+  InterceptorCtxRef,
+  type InterceptorCtx,
+} from "./middleware.js";
 import {
   isOperationSignal,
   orderInterceptors,
@@ -195,6 +200,21 @@ export interface OperationRunnerDeps {
   readonly spanAttributes: (
     op: Operation<unknown, unknown, unknown>,
   ) => Readonly<Record<string, unknown>>;
+  /**
+   * Build the facet-decorated {@link InterceptorCtx} handed to this op's
+   * interceptor cascade (ADR 64/78/19/83) — the harness owns it because the
+   * facets need harness-level deps (`emitLog`, the telemetry provider, the
+   * bound `runOperation`). The runner captures the op runtime IN-FIBER (inside
+   * the op span) and calls this so `ctx.trace` / `ctx.run` parent under the op;
+   * it then stashes the result on {@link InterceptorCtxRef} for the cascade.
+   * Absent ⇒ interceptors get the detached off-path ctx (bare runners in
+   * tests). Only invoked when the op actually has interceptors.
+   */
+  readonly buildInterceptorCtx?: (
+    ctxScope: RuntimeContext,
+    scope: EventScope,
+    runtime: Runtime.Runtime<never>,
+  ) => InterceptorCtx;
 }
 
 /**
@@ -221,6 +241,11 @@ class OperationRunnerImpl implements OperationRunner {
   private readonly spanAttributesFn: (
     op: Operation<unknown, unknown, unknown>,
   ) => Readonly<Record<string, unknown>>;
+  private readonly buildInterceptorCtx?: (
+    ctxScope: RuntimeContext,
+    scope: EventScope,
+    runtime: Runtime.Runtime<never>,
+  ) => InterceptorCtx;
 
   constructor(deps: OperationRunnerDeps) {
     this.surface = deps.surface;
@@ -230,6 +255,7 @@ class OperationRunnerImpl implements OperationRunner {
     this.policy = deps.policy;
     this.interceptors = deps.interceptors;
     this.spanAttributesFn = deps.spanAttributes;
+    this.buildInterceptorCtx = deps.buildInterceptorCtx;
   }
 
   // ──────── the heavy path ────────
@@ -313,7 +339,7 @@ class OperationRunnerImpl implements OperationRunner {
             // emits terminal:succeeded. `catchAll` sees only the typed-failure
             // channel — defects/interrupts pass through untouched, exactly as
             // the prior `tapError` did.
-            return yield* composed(resolvedOp.input).pipe(
+            const core = composed(resolvedOp.input).pipe(
               Effect.tap((value) =>
                 this.publishTerminal(resolvedOp, scope, "succeeded", { result: value }),
               ),
@@ -324,8 +350,25 @@ class OperationRunnerImpl implements OperationRunner {
                       error: this.normalizeError(err),
                     }).pipe(Effect.zipRight(Effect.fail(err))),
               ),
-              this.withOperationSpan(resolvedOp),
             );
+            // Land the facet-bearing InterceptorCtx (ADR 64/78/19/83) for the
+            // cascade — ONLY when the op actually has interceptors AND a builder
+            // is wired (bare runners skip it → detached off-path ctx). Capture
+            // the op runtime IN-FIBER, inside the op span opened by
+            // `withOperationSpan` below, so `ctx.trace` child spans + `ctx.run`
+            // ops parent under this op.
+            const withCtx =
+              this.buildInterceptorCtx !== undefined && assembled.length > 0
+                ? Effect.gen(this, function* () {
+                    const runtime = yield* Effect.runtime<never>();
+                    const ictx = this.buildInterceptorCtx!(ctxScope, scope, runtime);
+                    return yield* Effect.locally(
+                      InterceptorCtxRef,
+                      ictx as InterceptorCtx | undefined,
+                    )(core);
+                  })
+                : core;
+            return yield* withCtx.pipe(this.withOperationSpan(resolvedOp));
           }),
         ),
       );

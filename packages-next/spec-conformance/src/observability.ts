@@ -49,6 +49,30 @@ export function runObservabilityCtxConformance(
       expect(typeof ctx.metrics.gauge).toBe("function");
     });
 
+    it("log is the callable Log: all eight RFC-5424 levels + the warn alias + .with", async () => {
+      const ctx = await factory();
+      // All eight RFC-5424 severities are first-class methods.
+      for (const level of [
+        "debug",
+        "info",
+        "notice",
+        "warning",
+        "error",
+        "critical",
+        "alert",
+        "emergency",
+      ] as const) {
+        expect(typeof ctx.log[level]).toBe("function");
+      }
+      // `warn` is the JS-ecosystem alias for `warning`.
+      expect(typeof ctx.log.warn).toBe("function");
+      // `.with` returns a fresh, chainable, still-callable Log.
+      const child = ctx.log.with({ reqId: "r1" });
+      expect(typeof child).toBe("function");
+      expect(typeof child.info).toBe("function");
+      expect(typeof child.with).toBe("function");
+    });
+
     it("trace runs the callback, resolves with its value, and exposes an annotatable span", async () => {
       const ctx = await factory();
       let annotated = false;
@@ -77,6 +101,10 @@ export function runObservabilityCtxConformance(
       expect(() => {
         ctx.log("info", { msg: "hi" });
         ctx.log("error", { msg: "bad" }, "my.logger");
+        // Level sugar + alias + child binding must be fire-and-forget too.
+        ctx.log.info({ msg: "hi" });
+        ctx.log.warn("string data");
+        ctx.log.with({ reqId: "r1" }).error({ code: "x" }, "my.logger");
         ctx.metrics.count("c");
         ctx.metrics.count("c", 3, { op: "X" });
         ctx.metrics.record("r", 1.5, { outcome: "ok" });

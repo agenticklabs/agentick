@@ -29,6 +29,7 @@
 import { describe, expect, it } from "vitest";
 import type { McpAuthenticatedUser, McpRequestContext } from "@agentick/spec-next";
 import {
+  createLog,
   McpServerAuthRejected,
   McpServerAuthzDenied,
   McpServerClosed,
@@ -75,7 +76,7 @@ function ctx(overrides: CtxOverrides = {}): McpRequestContext {
     signal: overrides.signal ?? new AbortController().signal,
     setState: () => {},
     emit: () => {},
-    log: () => {},
+    log: createLog(() => {}),
     progress: () => {},
     trace: (_n, fn) =>
       Promise.resolve(

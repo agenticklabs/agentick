@@ -57,14 +57,23 @@ export type ProgressToken = string | number;
  * Payload of a `log` signal event. Rides the bus event envelope's
  * `payload` field under the canonical `<surface>:signal:log` name.
  *
- * - `level`  — syslog severity; projections apply their own threshold.
- * - `data`   — arbitrary JSON-serializable diagnostic payload.
- * - `logger` — optional logical channel name (the MCP wire `logger`).
+ * - `level`   — syslog severity; projections apply their own threshold.
+ * - `data`    — arbitrary JSON-serializable diagnostic payload.
+ * - `logger`  — optional logical channel name (the MCP wire `logger`).
+ * - `traceId` — active trace id when a span was in scope at emission
+ *   (ADR 64/78 correlation). The join between a bus-log and its
+ *   provider-trace: a subscriber (or an OTel-log bridge) reads these to
+ *   land the log line on the same trace as its span. Absent when telemetry
+ *   is off or no span was active. Wire projections that don't carry trace
+ *   context (MCP `notifications/message`) simply ignore these fields.
+ * - `spanId`  — active span id, paired with `traceId`.
  */
 export interface LogEventPayload {
   readonly level: LogLevel;
   readonly data: unknown;
   readonly logger?: string;
+  readonly traceId?: string;
+  readonly spanId?: string;
 }
 
 /**

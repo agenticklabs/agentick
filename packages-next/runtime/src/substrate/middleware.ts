@@ -30,13 +30,76 @@ import type {
   ChunkRegistrarsOf,
   HooksOf,
   Middleware,
+  Observability,
+  OperationRunnerView,
+  Ops,
   Pascal,
   RegistrarsOf,
   Unsubscribe,
 } from "@agentick/spec-next";
-import { parseHookKey } from "@agentick/spec-next";
+import { createLog, parseHookKey } from "@agentick/spec-next";
 import { getContext, type RuntimeContext } from "./runtime-context.js";
+import { NOOP_METRICS, OFF_TRACE } from "./observability.js";
 import { tagInterceptor } from "./op-signals.js";
+
+// ============================================================================
+// InterceptorCtx — the facet-bearing ctx handed to every interceptor
+// ============================================================================
+
+/**
+ * The ctx an {@link AsyncMiddleware} (a `.use` middleware, a `.guard`, or a
+ * desugared command hook) receives as its third argument (ADR 64/78/19/83).
+ * The operation's {@link RuntimeContext} (sessionId / opId / user …) LANDED
+ * FLAT with the {@link Observability} facet (`ctx.log` / `ctx.trace` /
+ * `ctx.metrics`) and the {@link Ops} facet (`ctx.run` / `ctx.runner`) — the
+ * SAME surface a tool handler's `ctx` carries, so a gateway/app hook or guard
+ * reaches diagnostics + the operation ladder with identical spelling.
+ *
+ * The facets are attached at the {@link liftMiddleware} boundary from a
+ * per-op-built value the operation runner stashes on {@link InterceptorCtxRef}
+ * (RuntimeContext itself stays pure DATA — no stored closures, per ADR 45).
+ */
+export type InterceptorCtx = RuntimeContext & Observability & Ops;
+
+/**
+ * FiberRef carrying the facet-decorated {@link InterceptorCtx} the operation
+ * runner builds for an op's interceptor cascade (once per op, only when
+ * interceptors are present). {@link liftMiddleware} reads it to hand each
+ * middleware the facet-bearing ctx; `undefined` (no runner decorated the
+ * scope — an isolated unit test) falls back to {@link detachedInterceptorCtx}.
+ * Process-global by design, exactly like {@link CallMiddlewareRef} /
+ * `RuntimeContextRef`.
+ */
+export const InterceptorCtxRef = FiberRef.unsafeMake<InterceptorCtx | undefined>(undefined);
+
+/** Detached `run` — throws: the operation ladder is unreachable without a runner. */
+const detachedRun = (): never => {
+  throw new Error("ctx.run is unavailable: middleware ran outside an operation runner");
+};
+
+/** Detached `runner` — same contract as {@link detachedRun}. */
+const DETACHED_RUNNER: OperationRunnerView = {
+  runOperation: () => {
+    throw new Error("ctx.runner is unavailable: middleware ran outside an operation runner");
+  },
+};
+
+/**
+ * Off-path {@link InterceptorCtx} for a middleware that runs with no
+ * runner-decorated scope (isolated unit tests). `log` is a no-op callable,
+ * `trace`/`metrics` are the shared off singletons, `run`/`runner` throw — so
+ * the TYPE stays honest and misuse fails loudly rather than silently.
+ */
+function detachedInterceptorCtx(rc: RuntimeContext): InterceptorCtx {
+  return {
+    ...rc,
+    log: createLog(() => {}),
+    trace: OFF_TRACE,
+    metrics: NOOP_METRICS,
+    run: detachedRun as Ops["run"],
+    runner: DETACHED_RUNNER,
+  };
+}
 
 // ============================================================================
 // AsyncMiddleware — the pure-JS `harness.use` form
@@ -47,18 +110,21 @@ import { tagInterceptor } from "./op-signals.js";
  * a Promise; `await` it to proceed, or return a value to short-circuit. No
  * Effect knowledge required.
  *
- * The third argument, **`ctx`**, is the operation's {@link RuntimeContext}
- * (sessionId / executionId / tickId / opId / parentOpId / user …), passed
- * EXPLICITLY: an async middleware runs OUTSIDE the fiber (see the caveat
- * below), so it cannot read `getContext` itself — `use`'s lift hands it the
- * snapshot captured at the op boundary. An Effect middleware (`fx.use`) reads
- * the same context natively via `yield* getContext`.
+ * The third argument, **`ctx`**, is the operation's {@link InterceptorCtx} —
+ * the {@link RuntimeContext} (sessionId / executionId / tickId / opId /
+ * parentOpId / user …) LANDED FLAT with the {@link Observability} facet
+ * (`ctx.log` / `ctx.trace` / `ctx.metrics`) and the {@link Ops} facet
+ * (`ctx.run` / `ctx.runner`). Passed EXPLICITLY: an async middleware runs
+ * OUTSIDE the fiber (see the caveat below), so it cannot read `getContext`
+ * itself — `use`'s lift hands it the facet-decorated snapshot built at the op
+ * boundary. An Effect middleware (`fx.use`) reads the same context natively via
+ * `yield* getContext` (and the facets via {@link InterceptorCtxRef}).
  *
  * ```ts
  * harness.use(async (input, next, ctx) => {
- *   const started = Date.now();
- *   const result = await next(input);
- *   metrics.record(ctx.sessionId, ctx.opId, Date.now() - started);
+ *   ctx.metrics.count("op.started", 1);
+ *   const result = await ctx.trace("guarded-work", () => next(input));
+ *   ctx.log.info({ op: ctx.op, sessionId: ctx.sessionId });
  *   return result;
  * });
  * ```
@@ -78,7 +144,7 @@ import { tagInterceptor } from "./op-signals.js";
 export type AsyncMiddleware<I = unknown, R = unknown> = (
   input: I,
   next: (input: I) => Promise<R>,
-  ctx: RuntimeContext,
+  ctx: InterceptorCtx,
 ) => Promise<R>;
 
 // ============================================================================
@@ -124,9 +190,9 @@ type CommandAroundHooks = {
  * full-middleware key ({@link CommandAroundHooks}). The type-level `Pascal` is
  * the exact twin of the runtime `deriveHookNames` — they MUST agree (a test).
  */
-export type CommandHooks = HooksOf<CommandRegistry, RuntimeContext> &
+export type CommandHooks = HooksOf<CommandRegistry, InterceptorCtx> &
   CommandAroundHooks &
-  ChunkHooksOf<CommandRegistry, RuntimeContext>;
+  ChunkHooksOf<CommandRegistry, InterceptorCtx>;
 
 /**
  * The per-verb IMPERATIVE full-middleware registrar surface (ADR 83 amendment)
@@ -151,9 +217,9 @@ export type CommandMiddlewares = {
  * a hook dynamically and returns its remover. Only augmented verbs are callable
  * keys.
  */
-export type HookRegistrars = RegistrarsOf<CommandRegistry, RuntimeContext> &
+export type HookRegistrars = RegistrarsOf<CommandRegistry, InterceptorCtx> &
   CommandMiddlewares &
-  ChunkRegistrarsOf<CommandRegistry, RuntimeContext>;
+  ChunkRegistrarsOf<CommandRegistry, InterceptorCtx>;
 
 // ============================================================================
 // Composition + lifting
@@ -316,10 +382,15 @@ export function liftMiddleware<I = unknown, R = unknown, E = unknown>(
 ): Middleware<I, R, E> {
   return (input, next) =>
     Effect.gen(function* () {
-      // Capture the ambient context (for the explicit `ctx` arg) AND the whole
-      // ambient runtime — Context (parent span, services) + FiberRefs + tracer —
-      // so forking on it below inherits the fiber's world across the boundary.
-      const ctx = yield* getContext;
+      // The explicit `ctx` arg: the facet-decorated InterceptorCtx the runner
+      // built for this op (log/trace/metrics/run/runner landed flat on the
+      // RuntimeContext). Absent only when a middleware runs outside a runner
+      // (isolated unit test) — the detached off-path ctx keeps the type honest.
+      const decorated = yield* FiberRef.get(InterceptorCtxRef);
+      const ctx: InterceptorCtx = decorated ?? detachedInterceptorCtx(yield* getContext);
+      // Capture the whole ambient runtime — Context (parent span, services) +
+      // FiberRefs + tracer — so forking on it below inherits the fiber's world
+      // across the boundary.
       const runtime = yield* Effect.runtime<never>();
       const forkOnRuntime = Runtime.runFork(runtime);
       return yield* Effect.tryPromise({

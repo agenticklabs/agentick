@@ -163,9 +163,11 @@ are _verified by `packages-next/runtime/src/__tests__/span-helpers.spec.ts`._
 The span ladder above is how the FRAMEWORK enriches operation spans. The
 **observability facet** is how a HANDLER reaches the same diagnostic surface —
 one flat contract (`ctx.log`, `ctx.trace`, `ctx.metrics`) landed identically on
-every ctx-shaped surface (`ToolHandlerCtx` in-process, the MCP request ctx, the
-runtime interceptor ctx). `deriveObservability(deps)` is the ONE derivation; the
-few ctx assemblers call it, so there is one implementation behind N call sites.
+every ctx-shaped surface (`ToolHandlerCtx` in-process, the MCP request ctx, and
+the runtime **interceptor ctx** — a `harness.use` middleware / `harness.guard` /
+command hook receives the SAME facets, as `InterceptorCtx = RuntimeContext &
+Observability & Ops`). `deriveObservability(deps)` is the ONE derivation; the few
+ctx assemblers call it, so there is one implementation behind N call sites.
 
 ```ts
 handler: async (input, { ctx }) => {
@@ -174,10 +176,19 @@ handler: async (input, { ctx }) => {
     span.setAttribute("query.length", input.q.length);
     return db.search(input.q); // nested under the operation span
   });
-  ctx.log("info", { found: rows.length });
+  ctx.log.info({ found: rows.length }); // level method; ctx.log("info", …) is identical
   return rows;
 };
 ```
+
+**`ctx.log` is a callable object** (a `Log`): the verbatim call form
+`ctx.log(level, data, logger?)` PLUS all eight RFC-5424 level methods
+(`debug`/`info`/`notice`/`warning`/`error`/`critical`/`alert`/`emergency`, with
+`warn` an alias for `warning`) PLUS `ctx.log.with(fields)` for pino-style child
+binding — every form emitting ONE bus event. It is always live (independent of the
+telemetry switch) and stamps the active `traceId`/`spanId` onto each event (the
+log↔span correlation join), captured synchronously before the fire-and-forget
+fork. See `guide-observability.md` §2 for the levels table + `.with` rules.
 
 **The ladder — climb by how much the system should know about the work.** The
 old bright-line ("`trace` is not an operation, full stop") is really a ladder of

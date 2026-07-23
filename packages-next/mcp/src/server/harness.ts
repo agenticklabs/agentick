@@ -585,8 +585,8 @@ export class McpServerHarness
         // so nothing leaks onto the MCP wire). Fire-and-forget for `log`:
         // launched via `Effect.runFork`, never awaited, never throws.
         ...deriveObservability({
-          log: (level, data, logger) => {
-            void Effect.runFork(this.emitLog(connectionScope, level, data, logger));
+          log: (level, data, logger, trace) => {
+            void Effect.runFork(this.emitLog(connectionScope, level, data, logger, trace));
           },
           namespace: this.telemetryNamespace,
         }),

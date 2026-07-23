@@ -34,7 +34,6 @@ import {
 import {
   BaseHarness,
   type GuardDecider,
-  type TelemetryProvider,
   type TelemetryRuntime,
   type Unsubscribe,
 } from "@agentick/runtime-next";
@@ -168,17 +167,6 @@ export class ToolExecutorHarness
    */
   private readonly ctxExtensions: Readonly<Record<string, unknown>>;
   /**
-   * Telemetry provider for the `ctx.trace` / `ctx.metrics` half of the
-   * {@link ToolHandlerCtx} observability facet (ADR 78). `undefined` ⇒
-   * telemetry off ⇒ `deriveObservability` returns the shared
-   * passthrough/no-op singletons (zero per-op allocation). The AppHarness
-   * threads a provider here when `telemetry` is on.
-   */
-  private readonly telemetryProvider: TelemetryProvider | undefined;
-  /** Ambient metric labels seeded under `{ tool, op }`. See the option docs. */
-  private readonly defaultMetricLabels: import("@agentick/spec-next").MetricLabels | undefined;
-
-  /**
    * Cancel an in-flight dispatch (ADR 51 / ADR 66). A declared command —
    * so the same verb is reachable in-process (this method), over the
    * inbox (a `tool:abort` message auto-routes here via
@@ -199,6 +187,13 @@ export class ToolExecutorHarness
     super("tool", scopeId, journal, bus, inbox, {
       inheritedInterceptors: options.inheritedInterceptors,
       interceptorParent: options.interceptorParent,
+      // ADR 64/78 — the resolved telemetry provider + ambient labels are now
+      // BaseHarness slots (they light `ctx.metrics` on the interceptor ctx too,
+      // not just the tool-handler ctx). One source of truth; the dispatch path
+      // reads them back via the inherited `this.telemetryProvider` /
+      // `this.defaultMetricLabels`.
+      ...omitUndefined({ telemetryProvider: options.telemetryProvider }),
+      ...omitUndefined({ defaultMetricLabels: options.defaultMetricLabels }),
     });
     this.handlerResolver = options.handlerResolver;
     this.defaultTimeoutMs = options.defaultTimeoutMs;
@@ -208,8 +203,6 @@ export class ToolExecutorHarness
     this.tasks = options.tasks;
     this.resources = options.resources;
     this.ctxExtensions = options.ctxExtensions ?? {};
-    this.telemetryProvider = options.telemetryProvider;
-    this.defaultMetricLabels = options.defaultMetricLabels;
 
     // `abort` as a declared command (ADR 51). Canonical verb `tool:abort`
     // (the inbox message type); the derived Operation name is
@@ -791,8 +784,8 @@ export class ToolExecutorHarness
             }
           : undefined;
       const observability = deriveObservability({
-        log: (level, data, logger) => {
-          void Effect.runFork(this.emitLog(dispatchScope, level, data, logger));
+        log: (level, data, logger, trace) => {
+          void Effect.runFork(this.emitLog(dispatchScope, level, data, logger, trace));
         },
         namespace: this.telemetryNamespace,
         // App-identity ambient label (if any) seeded UNDER the per-dispatch

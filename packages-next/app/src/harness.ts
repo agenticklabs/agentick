@@ -46,7 +46,6 @@ import {
   type NormalizedTelemetry,
 } from "./telemetry-defaults.js";
 import { buildTelemetryExport } from "./telemetry-wiring.js";
-import type { TelemetryProvider } from "@agentick/runtime-next";
 import { LanguageModelExecutor as TheLanguageModelExecutor } from "@agentick/model-executor-next";
 import {
   SessionHarness,
@@ -832,13 +831,13 @@ export class AppHarness<P = unknown>
    * release `shutdown()`s it. `undefined` when no metric export is wired.
    */
   private telemetryReleaseMeter: (() => Promise<void>) | undefined;
-  /**
-   * The telemetry provider threaded to each session's tool executor (ADR 64/78).
-   * Presence flips `ctx.trace` / `ctx.metrics` ON in tool handlers; its `meter`
-   * drives `ctx.metrics.*` export. `undefined` when telemetry is OFF (zero
-   * overhead). Set async in {@link initTelemetryExport} (before `appReady`).
-   */
-  private telemetryProvider: TelemetryProvider | undefined;
+  // NOTE: `telemetryProvider` (ADR 64/78) is now the inherited mutable
+  // BaseHarness slot — presence flips `ctx.trace` / `ctx.metrics` ON in tool
+  // handlers AND on this app's own interceptor ctx; its `meter` drives
+  // `ctx.metrics.*` export. The app resolves it async in
+  // {@link initTelemetryExport} (before `appReady`) and assigns the inherited
+  // field, so a single source feeds both the tool-executor threading and
+  // `BaseHarness.buildInterceptorCtx`. `undefined` when telemetry is OFF.
   /**
    * Resolves when the async telemetry export build (autodiscovery + runtime +
    * meter) completes. Awaited by {@link appReady}, so no session sees a
@@ -1938,6 +1937,17 @@ export class AppHarness<P = unknown>
       // (ADR 78 brick #2), not per-harness fields. Nesting is unaffected.
       telemetryNamespace: this.telemetryNamespace,
       ...(this.telemetryRuntime !== undefined ? { telemetryRuntime: this.telemetryRuntime } : {}),
+      // ADR 64/78 — the resolved provider's `meter` lights `ctx.metrics` on the
+      // session's interceptor ctx (a session/app hook or guard reaching
+      // metrics). App-identity ambient label keeps multi-app sinks distinct.
+      // TODO(observability-runtime-ctx): thread the same provider into the
+      // loop/model/compiler sub-harnesses so THEIR interceptor ctx metrics are
+      // live too (log/trace/run/runner already are). Mechanism is complete —
+      // this is the remaining meter wiring.
+      ...omitUndefined({ telemetryProvider: this.telemetryProvider }),
+      ...omitUndefined({
+        defaultMetricLabels: this.appName !== undefined ? { app: this.appName } : undefined,
+      }),
       // Telemetry rung 1 — the app's enrichment interceptors ride every send's
       // tier-4 seam (reaching model/tool/tick ops uniformly). `[]` when off.
       telemetryMiddleware: this.telemetryMiddleware,

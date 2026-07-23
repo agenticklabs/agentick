@@ -106,6 +106,38 @@ const logHandlerResolver: ToolHandlerResolver = (ref) => {
   };
 };
 
+function allLevelsToolDeclaration(): ToolDeclaration {
+  return {
+    id: "emit_all",
+    name: "emit_all",
+    description: "emits one log per RFC-5424 severity via the level methods",
+    inputSchema: logToolSchema,
+    exposure: ["model"],
+    handlerRef: "handler:emit_all",
+  };
+}
+
+/**
+ * Fires one log per RFC-5424 severity using the callable {@link Log} LEVEL
+ * METHODS (`ctx.log.debug` … `ctx.log.critical`). Proves two things end to end:
+ * the level-method sugar reaches the wire, and the MCP projection forwards each
+ * level VERBATIM — the framework's `LogLevel` vocabulary IS the MCP wire enum,
+ * so the mapping is identity (no translation table to drift).
+ */
+const allLevelsHandlerResolver: ToolHandlerResolver = (ref) => {
+  if (ref !== "handler:emit_all") return null;
+  return async (_input, ctx) => {
+    ctx.log.debug({ lvl: "debug" });
+    ctx.log.info({ lvl: "info" });
+    ctx.log.notice({ lvl: "notice" });
+    ctx.log.warning({ lvl: "warning" });
+    ctx.log.error({ lvl: "error" });
+    ctx.log.critical({ lvl: "critical" });
+    const content: ContentBlock[] = [{ type: "text", text: "done" }];
+    return { kind: "inline", content };
+  };
+};
+
 // ════════════════════════ completion ════════════════════════
 
 describe("completion projection — capability", () => {
@@ -274,6 +306,72 @@ describe("logging projection — ctx.log round-trip + level filter", () => {
       { level: "info", logger: "test-logger", data: { msg: "info-line" } },
     ]);
     await cleanup();
+  });
+
+  it("setLoggingLevel('warning') filters notice/info/debug, passes warning+ (RFC-5424 identity)", async () => {
+    const { client, cleanup } = await makeConnectedClient({
+      name: "log-warning",
+      tools: { registry: [allLevelsToolDeclaration()], resolveHandler: allLevelsHandlerResolver },
+    });
+    const received: string[] = [];
+    client.setNotificationHandler(LoggingMessageNotificationSchema, async (n) => {
+      received.push(n.params.level);
+    });
+
+    await client.setLoggingLevel("warning");
+    await client.callTool({ name: "emit_all", arguments: {} });
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Only warning and MORE severe pass; the level methods' RFC-5424 severities
+    // reach the wire unmapped.
+    expect(received.sort()).toEqual(["critical", "error", "warning"]);
+    await cleanup();
+  });
+
+  it("log level is per-connection: one client's setLevel('warning') does not affect another", async () => {
+    // Two connections into ONE server harness — the isolation unit.
+    const transportA = inMemoryServerTransport();
+    const transportB = inMemoryServerTransport();
+    const harness = new McpServerHarness(
+      `srv:${ulid()}`,
+      new MemoryJournal({ capacity: 1024 }),
+      new LocalEventBus(),
+      new LocalInbox(),
+      {
+        name: "log-iso",
+        transports: [transportA, transportB],
+        serverInfo: { name: "test", version: "0.0.0" },
+        tools: { registry: [allLevelsToolDeclaration()], resolveHandler: allLevelsHandlerResolver },
+      },
+    );
+    await harness.ready;
+    await harness.start();
+    const clientA = new McpClient({ name: "A", version: "0.0.0" }, { capabilities: {} });
+    const clientB = new McpClient({ name: "B", version: "0.0.0" }, { capabilities: {} });
+    await clientA.connect(await transportA.connect());
+    await clientB.connect(await transportB.connect());
+    const recvA: string[] = [];
+    const recvB: string[] = [];
+    clientA.setNotificationHandler(LoggingMessageNotificationSchema, async (n) => {
+      recvA.push(n.params.level);
+    });
+    clientB.setNotificationHandler(LoggingMessageNotificationSchema, async (n) => {
+      recvB.push(n.params.level);
+    });
+
+    // A restricts to warning; B stays at the server default (debug — everything).
+    await clientA.setLoggingLevel("warning");
+    await clientA.callTool({ name: "emit_all", arguments: {} });
+    await clientB.callTool({ name: "emit_all", arguments: {} });
+    await new Promise((r) => setTimeout(r, 20));
+
+    // Each connection saw ONLY its own emit, filtered by ITS OWN level — no
+    // cross-contamination of level state or of the scoped notifications.
+    expect(recvA.sort()).toEqual(["critical", "error", "warning"]);
+    expect(recvB.sort()).toEqual(["critical", "debug", "error", "info", "notice", "warning"]);
+    await clientA.close();
+    await clientB.close();
+    await harness.close();
   });
 
   it("logging opt-out installs no projection — ctx.log still emits, but no notifications fire", async () => {

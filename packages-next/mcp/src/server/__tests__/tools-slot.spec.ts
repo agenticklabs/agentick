@@ -20,6 +20,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  createLog,
   jsonSchema,
   McpServerConfigInvalid,
   type McpRequestContext,
@@ -197,7 +198,7 @@ function fakeCtx(): McpRequestContext {
     transport: "mcp",
     setState: () => {},
     emit: () => {},
-    log: () => {},
+    log: createLog(() => {}),
     progress: () => {},
     trace: (_n, fn) =>
       Promise.resolve(

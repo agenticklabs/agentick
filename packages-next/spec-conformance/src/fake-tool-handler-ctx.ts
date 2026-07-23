@@ -12,6 +12,7 @@
  * @see docs/proposals/v2/blueprint/43-unified-tool-handler-ctx.md
  */
 
+import { createLog } from "@agentick/spec-next";
 import type {
   Elicit,
   ElicitationHarnessProtocol,
@@ -97,7 +98,9 @@ export function fakeToolHandlerCtx(overrides: FakeToolHandlerCtxOverrides = {}):
     setState: overrides.setState ?? (() => {}),
     emit: overrides.emit ?? (() => {}),
     // ADR 64 — universal signal slots; no-op defaults (override to spy).
-    log: overrides.log ?? (() => {}),
+    // `log` is the callable {@link Log} (level methods + `.with`); the default
+    // wraps a no-op emit.
+    log: overrides.log ?? createLog(() => {}),
     progress: overrides.progress ?? (() => {}),
     // ADR 78 — Observability facet's telemetry half; off-path no-ops.
     trace: overrides.trace ?? ((_name, fn) => Promise.resolve(fn(NOOP_FAKE_SPAN))),

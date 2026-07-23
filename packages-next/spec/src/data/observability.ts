@@ -30,12 +30,13 @@
  * ## Absorbed `log` (ADR 64)
  *
  * `log` used to be declared inline on {@link ToolHandlerCtx}; it is now a
- * member of THIS facet and reaches ToolHandlerCtx via `extends`. Behavior
- * is unchanged — it emits one bus event (`<surface>:signal:log`) that
- * projections forward (MCP → `notifications/message`; the agentick client
- * → `subscribe`/`onLog`). Unlike `trace`/`metrics`, `log` is ALWAYS live
- * (independent of the telemetry switch) because emitting a bus event is
- * always possible.
+ * member of THIS facet (a callable {@link Log} — see its docblock for the
+ * RFC-5424 level methods and `.with` child binding) and reaches
+ * ToolHandlerCtx via `extends`. Every form emits ONE bus event
+ * (`<surface>:signal:log`) that projections forward (MCP →
+ * `notifications/message`; the agentick client → `subscribe`/`onLog`).
+ * Unlike `trace`/`metrics`, `log` is ALWAYS live (independent of the
+ * telemetry switch) because emitting a bus event is always possible.
  *
  * TODO(store-ctx): when a `StoreCtx` surface is introduced, this facet is
  * its first field — data-layer reads/writes want the same log/trace/
@@ -125,6 +126,122 @@ export interface Metrics {
 }
 
 // ============================================================================
+// Log — the callable-object diagnostic surface (ADR 64)
+// ============================================================================
+
+/**
+ * A structured `log` signal emitter — a CALLABLE OBJECT (ADR 64). Every form
+ * below collapses to the SAME single bus emission (`<surface>:signal:log`,
+ * one event per call); the level methods and `.with` are pure sugar over that
+ * one primitive, so projections (MCP `notifications/message`, the agentick
+ * client, an OTel-log bridge) still see exactly one event per call.
+ *
+ * ## Levels — RFC 5424 syslog severities
+ *
+ * All eight {@link LogLevel} severities are first-class methods, so
+ * `log.warning(x)` and `log("warning", x)` are identical. The everyday four
+ * are `debug` / `info` / `warning` / `error`; `notice` / `critical` / `alert`
+ * / `emergency` are there for code that maps an external severity scale (a
+ * syslog feed, an incident pager) onto ours without translation.
+ *
+ * `warn` is a documented ALIAS for `warning` — JS-ecosystem muscle memory
+ * (`console.warn`, pino, winston) reaches for `warn`, so the method exists,
+ * but it emits the canonical RFC-5424 `"warning"` level on the wire (one
+ * severity vocabulary, no `"warn"` string ever crosses a boundary). The
+ * call-string form is strict: `log("warning", …)` is the spelling;
+ * `log("warn", …)` does not typecheck.
+ *
+ * ## `.with(fields)` — child binding (pino-canonical)
+ *
+ * `log.with({ reqId })` returns a NEW `Log` that merges `{ reqId }` into every
+ * emission's `data`. Chainable — `log.with(a).with(b)` binds both, later wins
+ * on key collision; a per-call object overrides bound fields on collision
+ * (`log.with({ a: 1 }).info({ a: 2 })` emits `{ a: 2 }`). When the call data is
+ * NOT a plain object (a string, number, array), bound fields wrap it as
+ * `{ …bound, msg: data }` (pino's `msg` convention). With NO bound fields the
+ * data passes through verbatim — the zero-break path every existing call site
+ * takes.
+ *
+ * @see docs/proposals/v2/blueprint/64-runtime-signal-family.md
+ * @see https://www.rfc-editor.org/rfc/rfc5424#section-6.2.1 (syslog severities)
+ */
+export interface Log {
+  /**
+   * The verbatim call form — `log(level, data, logger?)`. The zero-break
+   * signature every existing call site already uses. Fire-and-forget: returns
+   * immediately, never throws, never a control path.
+   */
+  (level: LogLevel, data: unknown, logger?: string): void;
+  /** `debug` — fine-grained developer diagnostics. */
+  debug(data: unknown, logger?: string): void;
+  /** `info` — normal operational events (one of the everyday four). */
+  info(data: unknown, logger?: string): void;
+  /** `notice` — normal but significant; more than info, less than warning. */
+  notice(data: unknown, logger?: string): void;
+  /** `warning` — a concern that did not stop the work (one of the everyday four). */
+  warning(data: unknown, logger?: string): void;
+  /** Alias for {@link Log.warning} (`console.warn` / pino muscle memory); emits `"warning"`. */
+  warn(data: unknown, logger?: string): void;
+  /** `error` — the operation failed (one of the everyday four). */
+  error(data: unknown, logger?: string): void;
+  /** `critical` — a failure that threatens the surrounding subsystem. */
+  critical(data: unknown, logger?: string): void;
+  /** `alert` — action must be taken immediately. */
+  alert(data: unknown, logger?: string): void;
+  /** `emergency` — the system is unusable. */
+  emergency(data: unknown, logger?: string): void;
+  /**
+   * Bind `fields` into every subsequent emission's payload (pino child
+   * binding). Returns a NEW `Log`; chainable — see the interface docblock for
+   * the merge rules.
+   */
+  with(fields: Readonly<Record<string, unknown>>): Log;
+}
+
+/** The raw single-emission primitive a {@link Log} wraps — one bus event per call. */
+export type LogEmit = (level: LogLevel, data: unknown, logger?: string) => void;
+
+/**
+ * Merge a {@link Log}'s bound fields into one call's `data`. Plain object →
+ * shallow spread with the call winning on collision; primitive/array →
+ * `{ …bound, msg: data }` (pino's `msg`); `undefined` data → just the bound
+ * fields. Pure — the single place the `.with` merge semantics live.
+ */
+function mergeBoundFields(bound: Readonly<Record<string, unknown>>, data: unknown): unknown {
+  if (data === undefined) return { ...bound };
+  if (data !== null && typeof data === "object" && !Array.isArray(data)) {
+    return { ...bound, ...(data as Record<string, unknown>) };
+  }
+  return { ...bound, msg: data };
+}
+
+/**
+ * Build a {@link Log} callable object around a raw {@link LogEmit}. The single
+ * constructor for the log surface — used by the runtime's `deriveObservability`
+ * (wrapping a trace-aware bus emitter) and by test doubles (wrapping a no-op or
+ * recorder). Pure: the eight level methods + `warn` alias forward to `emit`
+ * with the level fixed; `.with` re-invokes `createLog` with merged bindings.
+ * `bound` (when present) is applied to every emission via {@link mergeBoundFields}.
+ */
+export function createLog(emit: LogEmit, bound?: Readonly<Record<string, unknown>>): Log {
+  const call: LogEmit = (level, data, logger) =>
+    emit(level, bound === undefined ? data : mergeBoundFields(bound, data), logger);
+  const log = ((level: LogLevel, data: unknown, logger?: string) =>
+    call(level, data, logger)) as Log;
+  log.debug = (data, logger) => call("debug", data, logger);
+  log.info = (data, logger) => call("info", data, logger);
+  log.notice = (data, logger) => call("notice", data, logger);
+  log.warning = (data, logger) => call("warning", data, logger);
+  log.warn = (data, logger) => call("warning", data, logger);
+  log.error = (data, logger) => call("error", data, logger);
+  log.critical = (data, logger) => call("critical", data, logger);
+  log.alert = (data, logger) => call("alert", data, logger);
+  log.emergency = (data, logger) => call("emergency", data, logger);
+  log.with = (fields) => createLog(emit, bound === undefined ? fields : { ...bound, ...fields });
+  return log;
+}
+
+// ============================================================================
 // The facet
 // ============================================================================
 
@@ -135,18 +252,20 @@ export interface Metrics {
  */
 export interface Observability {
   /**
-   * Emit a structured `log` signal — an out-of-band diagnostic (ADR 64).
+   * The structured `log` signal surface — a callable {@link Log} (ADR 64).
    * ALWAYS present and ALWAYS live (independent of the telemetry switch):
    * emitting a bus event is always possible; whether a wire projects it is
-   * the subscriber's concern. Fire-and-forget — NEVER a control path;
-   * returns immediately, never throws. Not model-visible content (use the
-   * handler's return value for that). The active trace/span id is stamped
-   * onto the emitted event when a span is in scope, so logs correlate to
-   * their span in the backend.
+   * the subscriber's concern. `ctx.log(level, data)` is the verbatim call
+   * form; `ctx.log.info(data)` / `ctx.log.warning(data)` are level sugar;
+   * `ctx.log.with({ reqId })` binds fields — all collapse to ONE bus event
+   * per call. Fire-and-forget — NEVER a control path; returns immediately,
+   * never throws. Not model-visible content (use the handler's return value
+   * for that). The active trace/span id is stamped onto the emitted event
+   * when a span is in scope, so logs correlate to their span in the backend.
    *
    * @see docs/proposals/v2/blueprint/64-runtime-signal-family.md
    */
-  log(level: LogLevel, data: unknown, logger?: string): void;
+  readonly log: Log;
 
   /**
    * Open a named child span around `fn`, nested under the current

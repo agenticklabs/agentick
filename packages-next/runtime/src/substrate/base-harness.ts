@@ -26,7 +26,7 @@
  * @see docs/proposals/v2/blueprint/01-harness-principle.md
  */
 
-import { Effect, Fiber } from "effect";
+import { Effect, Fiber, type Runtime } from "effect";
 import { omitUndefined, isThenable } from "@agentick/utils-next";
 import type {
   AfterHook,
@@ -46,6 +46,8 @@ import type {
   JournalingPolicy,
   LogLevel,
   Middleware,
+  Observability,
+  Ops,
   ProgressEventPayload,
   MessageEnvelope,
   MessageInbox,
@@ -89,6 +91,13 @@ import {
   tagInterceptor,
 } from "./op-signals.js";
 import { createOperationRunner, type OperationRunner } from "./operation-runner.js";
+import {
+  deriveObservability,
+  type LogTraceContext,
+  type TelemetryProvider,
+  type TelemetryRuntime,
+} from "./observability.js";
+import { deriveOps } from "./ops.js";
 
 export {
   OperationVeto,
@@ -177,6 +186,7 @@ import {
   type AsyncMiddleware,
   type CommandHooks,
   type HookRegistrars,
+  type InterceptorCtx,
 } from "./middleware.js";
 export {
   MiddlewareChain,
@@ -324,6 +334,20 @@ export interface BaseHarnessOptions<I = unknown> {
    */
   readonly telemetryNamespace?: string;
   /**
+   * The resolved telemetry provider (ADR 64/78) — the meter behind
+   * `ctx.metrics` on this harness's interceptor ctx (its `tracer` half rides
+   * the ambient Effect runtime already, so `ctx.trace` needs no threading).
+   * Undefined ⇒ metrics take the shared no-op singleton. Threaded from the app
+   * so a hook/guard on this harness reaches live metrics.
+   */
+  readonly telemetryProvider?: TelemetryProvider;
+  /**
+   * Low-cardinality default metric labels (ADR 78) merged under every
+   * `ctx.metrics.*` this harness's interceptor ctx emits (e.g. `{ app }`).
+   * The op suffix is added automatically.
+   */
+  readonly defaultMetricLabels?: Readonly<Record<string, string>>;
+  /**
    * The parent scope's resolved interceptor snapshot (ADR 76 tier 3 + ADR 83
    * amendment), folded in at construction. Guards, `.use` transforms, AND
    * declarative command hooks (adapted to op-scoped middleware via
@@ -405,6 +429,19 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
    * Capability + overridable default — never a hardcode.
    */
   protected readonly telemetryNamespace: string;
+  /**
+   * The resolved telemetry provider (ADR 64/78) — see
+   * {@link BaseHarnessOptions.telemetryProvider}. Its `meter` lights
+   * `ctx.metrics` on the interceptor ctx; undefined ⇒ off-path no-op.
+   *
+   * NOT readonly: most harnesses receive it at construction and never touch it
+   * again, but the app resolves its `telemetry` switch AFTER construction (the
+   * exporter Layer is built lazily), so it assigns this inherited slot late.
+   * `buildInterceptorCtx` reads it per op, so a late assignment is honored.
+   */
+  protected telemetryProvider: TelemetryProvider | undefined;
+  /** Low-cardinality default metric labels (ADR 78) — see {@link BaseHarnessOptions.defaultMetricLabels}. */
+  protected readonly defaultMetricLabels: Readonly<Record<string, string>> | undefined;
   /**
    * The parent scope's inherited interceptor layer (ADR 76 tier 3 + ADR 83 §4)
    * as a LIVE holder — no longer a frozen array. Seeded at construction from the
@@ -783,6 +820,8 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
     this.metadata = Object.freeze({ ...(options.metadata ?? {}) });
     this.principal = options.principal;
     this.telemetryNamespace = options.telemetryNamespace ?? "agentick";
+    this.telemetryProvider = options.telemetryProvider;
+    this.defaultMetricLabels = options.defaultMetricLabels;
     // ADR 83 §4 — LIVE interceptor inheritance. Pull-seed the inherited layer
     // from the parent's construction-time snapshot, THEN register as a live
     // child of the parent. Both are synchronous here, so no interceptor can be
@@ -844,6 +883,8 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
       policy: this.policy,
       interceptors: () => [...this.inherited.snapshot(), ...this.middleware.snapshot()],
       spanAttributes: (op) => this.spanAttributes(op),
+      buildInterceptorCtx: (ctxScope, scope, runtime) =>
+        this.buildInterceptorCtx(ctxScope, scope, runtime),
     });
     this.commandRunner = createCommandRunner({
       surface,
@@ -1095,17 +1136,84 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
    *
    * @see docs/proposals/v2/blueprint/64-runtime-signal-family.md
    */
+  /**
+   * Build the facet-decorated {@link InterceptorCtx} the operation runner hands
+   * this harness's interceptor cascade (ADR 64/78/19/83) — the
+   * {@link OperationRunnerDeps.buildInterceptorCtx} closure. Owned here because
+   * the facets need harness-level deps: `emitLog` (the trace-aware bus emit
+   * behind `ctx.log`), the resolved {@link TelemetryProvider} meter (behind
+   * `ctx.metrics`), and the bound `runOperation` (behind `ctx.run` /
+   * `ctx.runner`). `trace` needs no provider — it rides the captured `runtime`'s
+   * ambient tracer.
+   *
+   * Every facet is a LAZY GETTER: nothing derives unless a middleware/hook/guard
+   * actually touches it. When telemetry is off, `metrics`/`trace` collapse to
+   * the shared off-path singletons (referential identity, zero build);
+   * `run`/`runner` route through the same journaled `runOperation` a tool
+   * handler's ctx uses. `ctxScope` stays PURE DATA (ADR 45) — the facet
+   * closures live only on THIS decorated object, never in the RuntimeContext.
+   */
+  private buildInterceptorCtx(
+    ctxScope: RuntimeContext,
+    scope: EventScope,
+    runtime: Runtime.Runtime<never>,
+  ): InterceptorCtx {
+    const telemetry: TelemetryRuntime | undefined =
+      this.telemetryProvider !== undefined
+        ? { runtime, ...omitUndefined({ meter: this.telemetryProvider.meter }) }
+        : undefined;
+    let obsMemo: Observability | undefined;
+    const obs = (): Observability =>
+      (obsMemo ??= deriveObservability({
+        log: (level, data, logger, trace) => {
+          void Effect.runFork(this.emitLog(scope, level, data, logger, trace));
+        },
+        namespace: this.telemetryNamespace,
+        // Low-cardinality default labels: app identity (if any) + the op suffix.
+        defaultLabels: omitUndefined({ ...this.defaultMetricLabels, op: ctxScope.op }),
+        ...omitUndefined({ telemetry }),
+      }));
+    let opsMemo: Ops | undefined;
+    const ops = (): Ops =>
+      (opsMemo ??= deriveOps({
+        surface: this.surface,
+        scope,
+        runOperation: this.operationRunner.runOperation,
+        runtime,
+      }));
+    return {
+      ...ctxScope,
+      get log() {
+        return obs().log;
+      },
+      get trace() {
+        return obs().trace;
+      },
+      get metrics() {
+        return obs().metrics;
+      },
+      get run() {
+        return ops().run;
+      },
+      get runner() {
+        return ops().runner;
+      },
+    };
+  }
+
   protected emitLog(
     scope: EventScope,
     level: LogLevel,
     data: unknown,
     logger?: string,
+    trace?: LogTraceContext,
   ): Effect.Effect<void, JournalError, never> {
-    return this.emitSignal(
-      logEventName(this.surface),
-      scope,
-      logger !== undefined ? { level, data, logger } : { level, data },
-    );
+    return this.emitSignal(logEventName(this.surface), scope, {
+      level,
+      data,
+      ...(logger !== undefined ? { logger } : {}),
+      ...(trace !== undefined ? { traceId: trace.traceId, spanId: trace.spanId } : {}),
+    });
   }
 
   /**

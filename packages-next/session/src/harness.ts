@@ -30,6 +30,7 @@ import {
   type EscalationInterceptor,
   type EscalationOutcome,
   type SessionTaskWakePayload,
+  type TelemetryProvider,
 } from "@agentick/runtime-next";
 import type { JournalingPolicy, LoopExecutorProtocol, CompilerProtocol } from "@agentick/spec-next";
 import type {
@@ -446,6 +447,16 @@ export interface SessionHarnessOptions<P = unknown> {
    */
   readonly telemetryNamespace?: string;
   /**
+   * Resolved telemetry provider (ADR 64/78) — its `meter` lights `ctx.metrics`
+   * on this session's interceptor ctx (a session/app hook or guard reaching
+   * metrics). Forwarded from the app; undefined ⇒ off-path no-op. (`ctx.trace`
+   * / `ctx.log` / `ctx.run` need no provider — they ride the ambient runtime +
+   * this harness's own emit/runOperation.)
+   */
+  readonly telemetryProvider?: TelemetryProvider;
+  /** Low-cardinality default metric labels (ADR 78) — e.g. `{ app }`. Forwarded from the app. */
+  readonly defaultMetricLabels?: Readonly<Record<string, string>>;
+  /**
    * Resolved interceptor snapshot (ADR 76 tier 3 + ADR 83 amendment —
    * structural interception inheritance as a construction-fold). The app's
    * resolved interceptors PLUS the session's declarative `createSession({ hooks
@@ -708,6 +719,8 @@ export class SessionHarness<P = unknown>
         bus: options.bus,
         inbox: options.inbox,
         telemetryNamespace: options.telemetryNamespace,
+        telemetryProvider: options.telemetryProvider,
+        defaultMetricLabels: options.defaultMetricLabels,
         // ADR 76 tier 3 + ADR 83 amendment — the app's resolved interceptor
         // snapshot (incl. the app+session command hooks as op-scoped
         // middleware), folded in at construction so `app.use(...)` /
