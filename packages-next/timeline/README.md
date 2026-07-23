@@ -244,13 +244,53 @@ growing `readonly TimelineEntry[]`.
 > compaction rewrites the model-visible projection; this truncates only the
 > client copy.
 
+`session.timeline` is a `ClientHandle` — `list()`/`get(id)`/`subscribe(cb)` plus
+the window verbs (`seed`/`prepend`/`append`/`clear`) and a lazy `loadOlder()`.
+Importing the subpath registers it (ADR 87); the free `timelineView` factory
+stays exported as its implementation.
+
+**The scroll-back loop — 6 lines.** `loadOlder()` reads a cursored page of
+durable history over `session/timeline_history` and splices it at the head:
+
+```ts
+import "@agentick/timeline-next/client"; // side-effect: types + registers the slot
+
+const t = client.session(id).timeline;
+t.subscribe(() => render(t.list())); // re-render on any change
+onScrollTop(async () => {
+  const { done } = await t.loadOlder(50); // page older history in at the HEAD
+  if (done) detachScrollHandler(); // reached the log's tail
+});
+```
+
+**Posture B — feed YOUR store — 3 lines.** The handle is a typed subscription
+into your own message model; our window is optional, your shape is the truth:
+
+```ts
+t.subscribe(() => myStore.ingest(t.list().map(toMyMessage)));
+```
+
+Both postures are first-class (§5b): **A** — the handle IS your state (bind a UI
+straight to `list()`/`subscribe()`); **B** — the handle FEEDS your state (above).
+Nothing fights an adopter whose cache isn't ours (the no-client-cache bright
+line). `metadata` passthrough carries your join keys (`clientId` generalized).
+
+The handle passes `runClientHandleConformance` (core + Enumerable + the
+`loadOlder` read verb). The seed/window verbs stay LOCAL view mutations —
+`seed(entries)` replaces the window (server-hydrated history), `clear()` empties
+it, `prepend`/`append` splice at head/tail — no wire round-trip, no visual
+distinction from the wire-backed `loadOlder` (Q2 RESOLVED).
+
+### The headless factory — `timelineView`
+
+For the composition case, call the factory directly; the handle is built on it:
+
 ```ts
 import { timelineView } from "@agentick/timeline-next/client";
 
 // `initial` seeds the fold with server-hydrated history (the AI-SDK
-// `initialMessages` pattern — e.g. loaded server-side from LogStore.history);
-// `fromCursor` resumes the live tail from AFTER that seed so appends are not
-// double-counted. Omit both → empty accumulator, tailing live from now.
+// `initialMessages` pattern); `fromCursor` resumes the live tail from AFTER that
+// seed so appends are not double-counted. Omit both → empty, tailing live now.
 const view = timelineView(client, sessionId, {
   initial: serverHydratedEntries,
   fromCursor: lastSeenCursor,
@@ -262,7 +302,7 @@ view.subscribe(() => rerender()); // useSyncExternalStore(view.subscribe, view.g
 view.onChange((append) => { … }); // the raw { entries } each LIVE fold sees
 ```
 
-### The mutable window — `prepend` / `append`
+### The mutable window — `prepend` / `append` / `clear`
 
 `timelineView` is not just a fold; it is a **live window** with two imperative
 splices on top of the fold:
@@ -304,11 +344,12 @@ generic `eventView` fold. The `/client` subpath depends only on `client-core` +
 `spec` — never the timeline harness runtime — so it never pulls the server
 harness into a browser bundle.
 
-### The data source for `prepend`: `session/timeline_history` (§6.3)
+### The data source for scroll-back: `session/timeline_history` (§6.3)
 
-Where does the older page `prepend` splices come from? The **`session/timeline_history`**
-wire read — a cursored, bounded page over `TimelineStore.history`. Page the
-durable log in chunks and splice each into the window:
+`session.timeline.loadOlder()` wraps the **`session/timeline_history`** wire read
+— a cursored, bounded page over `TimelineStore.history` — tracking its own
+`nextFromSeq` cursor across calls and prepending each page. On the raw factory,
+drive it yourself:
 
 ```ts
 // Page the durable log over the wire; feed each page to the scroll-back window.
@@ -323,6 +364,11 @@ do {
   fromSeq = page.nextFromSeq; // undefined ⇒ reached the tail, stop
 } while (fromSeq !== undefined);
 ```
+
+Because history is `seq`-cursored while the live tail is bus-`Cursor`-ordered
+(§6.4 — the honest Cursor-vs-seq gap, NOT unified), `loadOlder` pages forward
+from the log start and prepends; an app doing true infinite-scroll-up reconciles
+final ordering itself (it holds the `message.metadata.clientId`).
 
 Each row is `{ seq, entry, cursor? }`: `seq` is the frozen `LogStore` ordering
 identity; `cursor` is the event-bus position returned **alongside** `seq` only

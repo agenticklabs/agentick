@@ -298,41 +298,44 @@ Importing this subpath contributes the elicitation surface to the client
 `bridges.elicitation`). It keeps client-core harness-agnostic (same
 bundled-not-privileged law as tasks/knobs).
 
-`session.elicitations` is the third CQRS sub-handle shape: it converges onto the
-generic `channelStream` (`@agentick/client-core-next`) — the ground-floor frame
-stream — rather than a bespoke stream type. Because inbound requests are an
-open-ended feed (not a folded snapshot), the READ surface is the raw
-`ChannelStream<ClientElicitationHandle>` (iterate with `for await`, or wire a
-callback with `.onChange`), and the WRITE command is `.respond(input)` on the
-same handle. Same read/write split as `session.knobs` (view + `set`) and
-`session.tasks` (view + `cancel`) — the read surface differs (stream vs. fold)
-only because elicitations don't materialize into a keyed store.
+`session.elicitations` is a `ClientHandle`: `list()`/`get(id)`/`subscribe(cb)`
+over the PENDING asks, `respond(id, body)` to answer. `list()` yields ITEM
+HANDLES — each an ask's data PLUS its bound verbs `.accept`/`.decline`/`.cancel`.
+
+**Connect late, see the ask — 5 lines.** `list()` is snapshot-first: a client
+that connects mid-ask gets the outstanding prompt (friction #9), and the item's
+verb round-trips exactly like a live one:
 
 ```ts
 import "@agentick/elicitation-next/client"; // side-effect: types + registers the slot
 
-// `session.elicitations` is a PROPERTY (a ChannelStream), not a method.
-// Iterate inbound requests; each handle has typed .accept / .decline / .cancel.
-for await (const e of client.session(id).elicitations) {
-  if (e.mode === "form") await e.accept({ name: "Ada" });
-  else await e.decline("not now");
-}
+const asks = client.session(id).elicitations;
+asks.subscribe(() => {
+  for (const e of asks.list()) showDialog(e); // ← includes the pending ask
+});
+// a dialog button:  await e.accept({ name: "Ada" });   // (or e.decline(reason) / e.cancel())
+```
 
-// Or wire a callback (subscription under the hood — mirrors onLog/onProgress):
-const stop = client.session(id).elicitations.onChange((e) => e.accept({ name: "Ada" }));
+- **The contract.** `list(): readonly ClientElicitationHandle[]` /
+  `get(correlationId): ClientElicitationHandle | undefined` (Enumerable —
+  reflects PRE-connection pending state); `subscribe(cb: () => void)` fires on
+  change, `cb` takes NO arguments; `respond(correlationId, body)` (Respondable —
+  the by-id escape hatch for code not holding an item; rejects an unknown/
+  already-answered id); `close()`. Answering — by item verb or by id — drops the
+  ask from `list()`. Passes `runClientHandleConformance` (core + Enumerable +
+  Respondable + the mid-ask listed-item round-trip).
+- **No `AsyncIterable`** (client-handles §3 — observe unbounded, iterate
+  bounded). The read surface is `list()` + `subscribe`, never `for await`.
+- **`elicitationsHandle(client, sessionId, fromCursor?)`** is exported as the
+  free factory the slot registers — call it directly for the headless case.
 
-// Or reply directly by correlationId via the handle's write command:
-await client.session(id).elicitations.respond({
-  correlationId,
+```ts
+// reply directly by correlationId (the escape hatch — no item handle needed):
+await client.session(id).elicitations.respond(correlationId, {
   outcome: "accepted",
   value: { name: "Ada" },
 });
 ```
-
-`elicitationStream(client, sessionId, fromCursor?)` is also exported as a free
-function (rung 2 of the escape-hatch ladder) returning the same
-`ElicitationsHandle` (`ChannelStream<ClientElicitationHandle> & { respond }`) for
-code that wants it without the `session.` sugar.
 
 ## API
 

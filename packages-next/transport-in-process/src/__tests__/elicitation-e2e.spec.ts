@@ -26,6 +26,8 @@ import { describe, expect, it } from "vitest";
 
 // ADR 87 — contributes `session.elicitations` / `.elicitations.respond()`.
 import "@agentick/elicitation-next/client";
+import { respondToElicitation, type ElicitationsHandle } from "@agentick/elicitation-next/client";
+import type { ClientElicitationHandle } from "@agentick/spec-next";
 import { createClient } from "@agentick/client-core-next";
 import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
 import { createGateway } from "@agentick/gateway-next";
@@ -122,15 +124,31 @@ async function makeStack(replyText = "ok") {
 const SUBSCRIBE_BARRIER_MS = 20;
 const settle = (): Promise<void> => new Promise((r) => setTimeout(r, SUBSCRIBE_BARRIER_MS));
 
+/**
+ * Resolve with the first PENDING ask the handle surfaces. Subscribing opens the
+ * fold; `list()` reflects the snapshot + live deltas (the ClientHandle read
+ * surface — no `for await`, no `AsyncIterable`).
+ */
+function nextAsk(asks: ElicitationsHandle): Promise<ClientElicitationHandle<unknown>> {
+  return new Promise((resolve) => {
+    const off = asks.subscribe(() => {
+      const e = asks.list()[0];
+      if (e) {
+        off();
+        resolve(e);
+      }
+    });
+  });
+}
+
 describe("elicitation end-to-end — client ↔ gateway ↔ session", () => {
   it("accept: server elicit() resolves with the value the client sent", async () => {
     const { client, session, sessionId, cleanup } = await makeStack();
 
     // Start the client subscription FIRST so the bus subscriber is
     // live before the server publishes the request envelope.
-    const stream = client.session(sessionId).elicitations;
-    const iterator = stream[Symbol.asyncIterator]();
-    const firstP = iterator.next();
+    const asks = client.session(sessionId).elicitations;
+    const firstP = nextAsk(asks);
     await settle();
 
     // Kick off the server-side elicit. The harness publishes the
@@ -145,9 +163,7 @@ describe("elicitation end-to-end — client ↔ gateway ↔ session", () => {
       { timeoutMs: 5_000 },
     );
 
-    const next = await firstP;
-    expect(next.done).toBeFalsy();
-    const elic = next.value!;
+    const elic = await firstP;
     expect(elic.message).toBe("Approve calling delete_file?");
     expect(elic.hints?.kind).toBe("tool_confirmation");
     expect(elic.metadata).toEqual({ toolName: "delete_file" });
@@ -165,19 +181,22 @@ describe("elicitation end-to-end — client ↔ gateway ↔ session", () => {
       expect(result.value).toEqual({ approved: true });
     }
 
-    await stream.close();
+    asks.close();
     await cleanup();
   });
 
-  it("onElicit: callback sugar receives the request and accepts (subscription under the hood)", async () => {
+  it("subscribe: callback sugar sees the pending ask and accepts (store contract)", async () => {
     const { client, session, sessionId, cleanup } = await makeStack();
 
     // Register the callback FIRST so its subscription is live before the
-    // server publishes — mirrors onLog/onProgress; no manual stream plumbing.
+    // server publishes. subscribe() fires on change; read via list().
     let seen: string | undefined;
-    const stop = client.session(sessionId).elicitations.onChange((e) => {
-      seen = e.message;
-      void e.accept({ approved: true });
+    const asks = client.session(sessionId).elicitations;
+    const stop = asks.subscribe(() => {
+      for (const e of asks.list()) {
+        seen = e.message;
+        void e.accept({ approved: true });
+      }
     });
     await settle();
 
@@ -197,9 +216,8 @@ describe("elicitation end-to-end — client ↔ gateway ↔ session", () => {
   it("decline: server elicit() resolves with { outcome: 'declined', reason }", async () => {
     const { client, session, sessionId, cleanup } = await makeStack();
 
-    const stream = client.session(sessionId).elicitations;
-    const iterator = stream[Symbol.asyncIterator]();
-    const firstP = iterator.next();
+    const asks = client.session(sessionId).elicitations;
+    const firstP = nextAsk(asks);
     await settle();
 
     const elicP = session.elicitation.elicit(
@@ -211,8 +229,7 @@ describe("elicitation end-to-end — client ↔ gateway ↔ session", () => {
       { timeoutMs: 5_000 },
     );
 
-    const next = await firstP;
-    const elic = next.value!;
+    const elic = await firstP;
     await elic.decline("user clicked Deny");
 
     const result = await elicP;
@@ -221,16 +238,15 @@ describe("elicitation end-to-end — client ↔ gateway ↔ session", () => {
       expect(result.reason).toBe("user clicked Deny");
     }
 
-    await stream.close();
+    asks.close();
     await cleanup();
   });
 
   it("cancel: server elicit() resolves with { outcome: 'cancelled', reason }", async () => {
     const { client, session, sessionId, cleanup } = await makeStack();
 
-    const stream = client.session(sessionId).elicitations;
-    const iterator = stream[Symbol.asyncIterator]();
-    const firstP = iterator.next();
+    const asks = client.session(sessionId).elicitations;
+    const firstP = nextAsk(asks);
     await settle();
 
     const elicP = session.elicitation.elicit(
@@ -238,8 +254,7 @@ describe("elicitation end-to-end — client ↔ gateway ↔ session", () => {
       { timeoutMs: 5_000 },
     );
 
-    const next = await firstP;
-    const elic = next.value!;
+    const elic = await firstP;
     await elic.cancel("modal dismissed");
 
     const result = await elicP;
@@ -248,16 +263,15 @@ describe("elicitation end-to-end — client ↔ gateway ↔ session", () => {
       expect(result.reason).toBe("modal dismissed");
     }
 
-    await stream.close();
+    asks.close();
     await cleanup();
   });
 
   it("schema violation: invalid accepted value surfaces as failed/schema_violation", async () => {
     const { client, session, sessionId, cleanup } = await makeStack();
 
-    const stream = client.session(sessionId).elicitations;
-    const iterator = stream[Symbol.asyncIterator]();
-    const firstP = iterator.next();
+    const asks = client.session(sessionId).elicitations;
+    const firstP = nextAsk(asks);
     await settle();
 
     const elicP = session.elicitation.elicit(
@@ -265,11 +279,10 @@ describe("elicitation end-to-end — client ↔ gateway ↔ session", () => {
       { timeoutMs: 5_000 },
     );
 
-    const next = await firstP;
-    const elic = next.value!;
-    // Client sends a malformed accept — `approved` is missing.
-    await client.session(sessionId).elicitations.respond({
-      correlationId: elic.correlationId,
+    const elic = await firstP;
+    // Client sends a malformed accept — `approved` is missing. The ask is
+    // pending, so the by-id handle command routes it.
+    await asks.respond(elic.correlationId, {
       outcome: "accepted",
       value: { unrelated: true },
     });
@@ -282,14 +295,17 @@ describe("elicitation end-to-end — client ↔ gateway ↔ session", () => {
       expect(result.failure.issues!.length).toBeGreaterThan(0);
     }
 
-    await stream.close();
+    asks.close();
     await cleanup();
   });
 
-  it("unknown correlationId: respondToElicitation is a silent no-op", async () => {
+  it("unknown correlationId: respondToElicitation (the free-fn escape hatch) is a silent no-op", async () => {
     const { client, sessionId, cleanup } = await makeStack();
+    // The unguarded raw-wire reply — the server is idempotent for unknown /
+    // already-resolved correlationIds (the handle-level respond, by contrast,
+    // rejects an id it never saw pending).
     await expect(
-      client.session(sessionId).elicitations.respond({
+      respondToElicitation(client, sessionId, {
         correlationId: "req:does-not-exist",
         outcome: "declined",
       }),
@@ -300,27 +316,33 @@ describe("elicitation end-to-end — client ↔ gateway ↔ session", () => {
   it("concurrent elicitations: client receives both, responses route by correlationId", async () => {
     const { client, session, sessionId, cleanup } = await makeStack();
 
-    const stream = client.session(sessionId).elicitations;
-    const iterator = stream[Symbol.asyncIterator]();
+    const asks = client.session(sessionId).elicitations;
+    // Both pending asks land in list(); pick each out by message.
+    const byMessage = (m: string): Promise<ClientElicitationHandle<unknown>> =>
+      new Promise((resolve) => {
+        const off = asks.subscribe(() => {
+          const e = asks.list().find((x) => x.message === m);
+          if (e) {
+            off();
+            resolve(e);
+          }
+        });
+      });
 
-    const firstP = iterator.next();
+    const firstP = byMessage("First prompt");
     await settle();
     const elic1P = session.elicitation.elicit(
       { message: "First prompt", schema: APPROVAL_SCHEMA },
       { timeoutMs: 5_000 },
     );
+    const elic1 = await firstP;
 
-    const elic1Frame = await firstP;
-    const elic1 = elic1Frame.value!;
-
-    const secondP = iterator.next();
+    const secondP = byMessage("Second prompt");
     const elic2P = session.elicitation.elicit(
       { message: "Second prompt", schema: APPROVAL_SCHEMA },
       { timeoutMs: 5_000 },
     );
-
-    const elic2Frame = await secondP;
-    const elic2 = elic2Frame.value!;
+    const elic2 = await secondP;
 
     expect(elic1.correlationId).not.toBe(elic2.correlationId);
     expect(elic1.message).toBe("First prompt");
@@ -336,7 +358,7 @@ describe("elicitation end-to-end — client ↔ gateway ↔ session", () => {
     if (r1.outcome === "accepted") expect(r1.value).toEqual({ approved: true });
     if (r2.outcome === "accepted") expect(r2.value).toEqual({ approved: false });
 
-    await stream.close();
+    asks.close();
     await cleanup();
   });
 });

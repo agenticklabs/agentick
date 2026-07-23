@@ -13,7 +13,7 @@
 import "../wire-augment.js";
 
 export { taskStatusView, type TaskStatusClient, type TaskStatusMap } from "./task-status-view.js";
-export { tasksHandle, type TasksHandleView, type TasksCommandClient } from "./tasks-handle.js";
+export { tasksHandle, type TasksHandle, type TasksCommandClient } from "./tasks-handle.js";
 
 // Side-effect: contribute `session.tasks` to the client SessionHandle (ADR 87).
 import "./register.js";

@@ -1,12 +1,13 @@
 /**
- * `knobsHandle` — the client-side knobs resource handle (read + write).
+ * `knobsHandle` — the client-side knobs resource handle on the `ClientHandle`
+ * contract.
  *
- * Read half: reuses the `pushStream` fake (from `knobs-state-view.spec.ts`)
- * to seed a snapshot and fold deltas, proving `get`/`subscribe` still work.
- * Write half: `set(key, value)` issues `transport.request("knobs/set", ...)`
- * with the wire-shaped params. And the CQRS round-trip: after `set`, emitting
- * a matching `knobs-state` delta re-folds the view — the handle never
- * hand-patches its own read state.
+ * Read half: `list()` returns DESCRIPTORS+values seeded from the snapshot frame
+ * (friction #1), `get(id)` looks one up, deltas re-fold the values doc.
+ * Write half: `set(id, value)` issues `transport.request("knobs/set", ...)` with
+ * the wire-shaped `{ sessionId, id, value }` params (friction #13). And the CQRS
+ * round-trip: after `set`, emitting a matching `knobs-state` delta re-folds the
+ * view — the handle never hand-patches its own read state.
  */
 
 import { describe, expect, it } from "vitest";
@@ -82,51 +83,85 @@ function fakeCommandClient(
 }
 
 describe("knobsHandle", () => {
-  it("set() issues transport.request('knobs/set', { sessionId, key, value })", async () => {
+  it("set() issues transport.request('knobs/set', { sessionId, id, value })", async () => {
     const captured: { method?: WireMethod; params?: unknown } = {};
     const handle = knobsHandle(fakeCommandClient(pushStream(), captured), "s1");
 
     await handle.set("temperature", 0.9);
 
     expect(captured.method).toBe("knobs/set");
-    expect(captured.params).toEqual({ sessionId: "s1", key: "temperature", value: 0.9 });
+    expect(captured.params).toEqual({ sessionId: "s1", id: "temperature", value: 0.9 });
   });
 
-  it("read half: snapshot seeds get(), then a delta re-folds the view (CQRS round-trip)", async () => {
+  it("list() returns DESCRIPTORS+values from the snapshot; get(id) looks one up", async () => {
+    const stream = pushStream();
+    const handle = knobsHandle(fakeCommandClient(stream), "s1");
+
+    stream.emit({
+      kind: "snapshot",
+      version: 1,
+      values: { temperature: 0.7 },
+      descriptors: [
+        { id: "temperature", value: 0.7, valueType: "number", min: 0, max: 1, description: "Temp" },
+      ],
+    });
+    await waitFor(() => handle.list().length > 0);
+
+    // Descriptors, not bare values (friction #1) — declared metadata rides through.
+    expect(handle.list()).toMatchObject([
+      { id: "temperature", value: 0.7, min: 0, max: 1, description: "Temp" },
+    ]);
+    expect(handle.get("temperature")).toMatchObject({ id: "temperature", value: 0.7, max: 1 });
+    expect(handle.get("nope")).toBeUndefined();
+  });
+
+  it("read half: snapshot seeds, a delta re-folds the value (CQRS round-trip)", async () => {
     const captured: { method?: WireMethod; params?: unknown } = {};
     const stream = pushStream();
     const handle = knobsHandle(fakeCommandClient(stream, captured), "s1");
 
-    // Snapshot seeds the read half.
-    stream.emit({ kind: "snapshot", version: 1, values: { temperature: 0.7 }, descriptors: [] });
-    await waitFor(() => Object.keys(handle.get()).length > 0);
-    expect(handle.get()).toEqual({ temperature: 0.7 });
+    stream.emit({
+      kind: "snapshot",
+      version: 1,
+      values: { temperature: 0.7 },
+      descriptors: [{ id: "temperature", value: 0.7, valueType: "number" }],
+    });
+    await waitFor(() => handle.list().length > 0);
+    expect(handle.get("temperature")?.value).toBe(0.7);
 
     // Write command — no local hand-patch, so the view is still 0.7 here.
     await handle.set("temperature", 0.9);
-    expect(handle.get()).toEqual({ temperature: 0.7 });
+    expect(handle.get("temperature")?.value).toBe(0.7);
 
-    // The write's effect returns as a channel delta and re-folds the view.
+    // The write's effect returns as a channel delta and re-folds the view; the
+    // descriptor metadata (valueType) survives across the values patch.
     stream.emit({
       kind: "delta",
       version: 2,
       ops: [{ op: "replace", path: "/temperature", value: 0.9 }],
     });
-    await waitFor(() => handle.get().temperature === 0.9);
-    expect(handle.get()).toEqual({ temperature: 0.9 });
+    await waitFor(() => handle.get("temperature")?.value === 0.9);
+    expect(handle.get("temperature")).toMatchObject({
+      id: "temperature",
+      value: 0.9,
+      valueType: "number",
+    });
   });
 
-  it("subscribe() notifies on channel updates", async () => {
+  it("subscribe(cb) notifies on channel updates; cb receives NO arguments", async () => {
     const stream = pushStream();
     const handle = knobsHandle(fakeCommandClient(stream), "s1");
 
     let notified = 0;
-    handle.subscribe(() => {
+    let argCount = -1;
+    handle.subscribe((...args: unknown[]) => {
       notified += 1;
+      argCount = args.length;
     });
 
     stream.emit({ kind: "snapshot", version: 1, values: { temperature: 0.7 }, descriptors: [] });
     await waitFor(() => notified > 0);
     expect(notified).toBeGreaterThan(0);
+    expect(argCount).toBe(0);
   });
 });

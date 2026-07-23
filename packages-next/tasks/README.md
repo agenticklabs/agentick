@@ -53,34 +53,40 @@ not published independently.
 
 ## Client — `tasksHandle` (`@agentick/tasks-next/client`)
 
-The far side of the tasks resource: a read + write handle a frontend uses.
-Mirrors `knobsHandle` — the CQRS shape shared by every client sub-handle: a READ
-view (`taskStatusView` over the generic `@agentick/client-core-next`
-`channelView`, NOT the tasks harness, so it stays out of the server bundle) PLUS
-the domain WRITE command `cancel(taskId, reason?)`.
+`session.tasks` is a `ClientHandle` — `list()`/`get(taskId)`/`subscribe(cb)` +
+`cancel(taskId, reason?)`. It reads over the generic `@agentick/client-core-next`
+`channelView` (NOT the tasks harness), so it stays out of the server bundle.
 
-```ts
-import { tasksHandle } from "@agentick/tasks-next/client";
-
-const tasks = tasksHandle(client, sessionId); // ChannelView<Record<taskId, TaskInfo>> & { cancel }
-tasks.get(); // the folded map, latest status per task
-const off = tasks.subscribe((state) => render(state)); // STATE feed (useSyncExternalStore)
-tasks.onChange((frame) => flash(frame)); // CHANGE feed — the TaskInfo that changed
-tasks.status; // "loading" | "live" | "closed"
-await tasks.cancel("task-7", "superseded"); // WRITE — lands back as a `cancelled` delta
-tasks.close();
-```
-
-**Install-to-appear ([ADR 87](../../docs/proposals/v2/blueprint/87-client-sub-handles.md)).**
-Importing this subpath also registers the handle as a self-assembling slot on the
-client `SessionHandle`, so you rarely call `tasksHandle` by hand:
+**Render a live task list — 4 lines.** `list()` reflects the opening snapshot,
+so a client connecting mid-run sees the running tasks, not just ones that start
+after it joins:
 
 ```ts
 import "@agentick/tasks-next/client"; // side-effect: types + registers the slot
 
-client.session(id).tasks.get(); // ChannelView<Record<taskId, TaskInfo>>
-await client.session(id).tasks.cancel("task-7"); // the write command
+const tasks = client.session(id).tasks;
+tasks.subscribe(() => render(tasks.list())); // ← re-render on any transition
+const done = tasks.list().filter((t) => t.status === "completed");
 ```
+
+**Cancel by id.** Fire-and-observe: `cancel` issues `tasks/cancel` and resolves
+on gateway accept (no local hand-patch); the `cancelled` transition returns as a
+`task-status` delta that re-folds the view:
+
+```ts
+await tasks.cancel("task-7", "superseded");
+```
+
+- **The contract.** `list(): readonly TaskInfo[]` and
+  `get(taskId): TaskInfo | undefined` (Enumerable); `subscribe(cb: () => void)`
+  fires on change, `cb` takes NO arguments (read via `list()`); `close()`;
+  `cancel(taskId, reason?)`. Passes `runClientHandleConformance` (core +
+  Enumerable + the `cancel` write verb).
+- **`tasksHandle(client, sessionId)`** → `TasksHandle` is the free factory the
+  slot registers; call it directly for the headless/composition case.
+- **`taskStatusView(client, sessionId)`** → `ChannelView<TaskStatusMap>` remains
+  as the lower-level `Record<taskId, TaskInfo>` fold for consumers that want the
+  raw map.
 
 `client.session(id).tasks` is the CLIENT handle (a status fold + `cancel`); the
 server-side `session.tasks` (`TasksHarness`, the authority, with `.submit(...)`
@@ -1109,7 +1115,7 @@ working → completed`, and reconstructs a typed error from a serialized
   PRODUCED `input_required` projecting onto the wire (`tasks/get`
   reports the paused state a task entered via `ctx.awaitingInput`).
 
-The `session.tasks` CQRS client handle (read view + `cancel` write):
+The `session.tasks` `ClientHandle` (Enumerable read + `cancel` write):
 
 - `src/__tests__/wire.spec.ts` — the `tasksWireExtension` (`tasks/cancel`)
   handler: session resolution across the gateway's apps, `taskId` / `reason`
@@ -1121,8 +1127,11 @@ The `session.tasks` CQRS client handle (read view + `cancel` write):
   query.
 - `src/client/__tests__/tasks-handle.spec.ts` — `tasksHandle`: `cancel(taskId,
 reason?)` issues the wire-shaped `tasks/cancel` request (reason omitted when
-  absent), the read half seeds from a snapshot, the CQRS round-trip (a cancel
-  delta re-folds the view; no local hand-patch), and `onChange` fires per frame.
+  absent), `list()`/`get(id)` seed from a snapshot, the CQRS round-trip (a cancel
+  delta re-folds the view; no local hand-patch), and `subscribe(cb)` fires with
+  NO arguments per frame.
+- `src/client/__tests__/tasks-handle.conformance.spec.ts` — `tasksHandle` passes
+  `runClientHandleConformance` (core + Enumerable + the `cancel` write verb).
 - `packages-next/transport-in-process/src/__tests__/tasks-cancel-e2e.spec.ts`
   (sibling package) — the full client ↔ gateway ↔ session round-trip through the
   REAL `GatewayHarness` + `inProcessTransport`: `client.session(id).tasks.cancel`

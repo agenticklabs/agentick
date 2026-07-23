@@ -38,6 +38,7 @@
     "@agentick/elicitation-next": "workspace:*",
     "@agentick/knobs-next": "workspace:*",
     "@agentick/tasks-next": "workspace:*",
+    "@agentick/timeline-next": "workspace:*",
     "@agentick/tool-executor-next": "workspace:*"
   },
   "devDependencies": {

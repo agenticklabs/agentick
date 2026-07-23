@@ -4,11 +4,10 @@
  * Verifies the client/server contract introduced for "client speaks
  * elicitation":
  *
- *   1. `session.elicitations.respond(...)` routes through the new
- *      `session/respond_to_elicitation` wire method.
- *   2. `session.elicitations` returns an AsyncIterable of parsed
- *      `ClientElicitationHandle` values — verified by feeding a stub
- *      handler that fakes a subscription event.
+ *   1. `respondToElicitation(...)` (the raw-wire escape hatch) routes through
+ *      the `session/respond_to_elicitation` wire method.
+ *   2. `session.elicitations` is a `ClientHandle` — `list()`/`get(id)`/
+ *      `subscribe(cb)` + `respond(id, body)` — with NO `AsyncIterable`.
  *
  * The dispatcher's real routing is exercised against a stub
  * SessionHarnessProtocol with an `elicitation` slot (the slot is
@@ -19,6 +18,7 @@
 import "@agentick/elicitation-next";
 // ADR 87 — contributes `session.elicitations` / `.elicitations.respond()`.
 import "@agentick/elicitation-next/client";
+import { respondToElicitation } from "@agentick/elicitation-next/client";
 
 import { createClient } from "@agentick/client-core-next";
 import type {
@@ -50,7 +50,7 @@ describe("client elicitation surface — wire method", () => {
     const client = await createClient({ transport: inProcessTransport({ handler }) });
     await client.connect();
 
-    await client.session("sess-1").elicitations.respond({
+    await respondToElicitation(client, "sess-1", {
       correlationId: "req:abc",
       outcome: "accepted",
       value: { approved: true },
@@ -82,14 +82,12 @@ describe("client elicitation surface — wire method", () => {
     };
     const client = await createClient({ transport: inProcessTransport({ handler }) });
     await client.connect();
-    const sess = client.session("sess-2");
-
-    await sess.elicitations.respond({
+    await respondToElicitation(client, "sess-2", {
       correlationId: "req:1",
       outcome: "declined",
       reason: "user clicked Deny",
     });
-    await sess.elicitations.respond({
+    await respondToElicitation(client, "sess-2", {
       correlationId: "req:2",
       outcome: "cancelled",
       reason: "modal dismissed",
@@ -106,13 +104,11 @@ describe("client elicitation surface — wire method", () => {
 });
 
 describe("client elicitation surface — type checks", () => {
-  it("ClientElicitationHandle.accept/decline/cancel route through respondToElicitation", async () => {
-    // The structural test — verify the SessionHandle has the new
-    // methods and that the handle's typed convenience methods are
-    // callable. The actual subscription-driven flow is exercised by
-    // the gateway integration test once it's wired (the in-process
-    // stub handler doesn't push subscription events without the
-    // GatewayHarness adapter).
+  it("the elicitations handle exposes the ClientHandle contract (list/get/subscribe + respond)", async () => {
+    // The structural test — verify the SessionHandle slot is a ClientHandle
+    // (no AsyncIterable). The subscription-driven flow is exercised by the
+    // gateway integration test (the in-process stub handler doesn't push
+    // subscription events without the GatewayHarness adapter).
     const handler = async (req: JsonRpcRequest): Promise<JsonRpcResponse> => {
       if (req.method === "session/respond_to_elicitation") {
         return { jsonrpc: "2.0", id: req.id, result: null };
@@ -127,17 +123,20 @@ describe("client elicitation surface — type checks", () => {
     await client.connect();
     const sess = client.session("sess-3");
 
-    // The resource handle: read surface + write command, on one object.
-    expect(typeof sess.elicitations.respond).toBe("function"); // write command
-    expect(typeof sess.elicitations.onChange).toBe("function"); // read feed (ChannelStream)
-    expect(typeof sess.elicitations[Symbol.asyncIterator]).toBe("function");
+    // The resource handle on the ClientHandle contract: Enumerable read surface
+    // + Respondable write + the store-contract subscribe — NO AsyncIterable.
+    expect(typeof sess.elicitations.list).toBe("function"); // Enumerable read
+    expect(typeof sess.elicitations.get).toBe("function"); // by-id read
+    expect(typeof sess.elicitations.subscribe).toBe("function"); // store contract
+    expect(typeof sess.elicitations.respond).toBe("function"); // Respondable write
+    expect(
+      (sess.elicitations as unknown as Record<symbol, unknown>)[Symbol.asyncIterator],
+    ).toBeUndefined(); // no handle is iterable
 
-    // Surface-level response shape matches the wire — we use the
-    // long-form here because the in-process stub doesn't push
-    // subscription events to exercise the handle's convenience
-    // methods organically.
+    // The raw-wire escape hatch issues the reply (no pending ask needed —
+    // the in-process stub doesn't push subscription events).
     await expect(
-      sess.elicitations.respond({
+      respondToElicitation(client, "sess-3", {
         correlationId: "req:any",
         outcome: "accepted",
         value: { approved: true } satisfies Record<string, unknown>,

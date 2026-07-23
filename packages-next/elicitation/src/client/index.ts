@@ -8,15 +8,18 @@
  * tasks/knobs `/client` convention.
  *
  * Importing this subpath contributes the `client.session(id).elicitations`
- * property (an `ElicitationsHandle` — read via `for await`/`.onChange`, reply
- * via `.respond(...)`) to the client `SessionHandle` (ADR 87). It also exports
- * the `respondToElicitation` free function — the by-`correlationId` reply escape
- * hatch for code not holding the handle.
+ * property (an `ElicitationsHandle` — `list()`/`get(id)` the pending asks,
+ * `subscribe(cb)`, reply via `.respond(id, body)` or a listed item's
+ * `.accept`/`.decline`/`.cancel`) to the client `SessionHandle` (ADR 87). It
+ * also exports the `respondToElicitation` free function — the by-`correlationId`
+ * reply escape hatch for code not holding the handle.
  */
 
 export {
-  elicitationStream,
+  elicitationsHandle,
   respondToElicitation,
+  type ElicitationClient,
+  type ElicitationReplyBody,
   type ElicitationReplyInput,
   type ElicitationsHandle,
 } from "./elicitations.js";

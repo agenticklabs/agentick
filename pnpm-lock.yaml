@@ -476,6 +476,9 @@ importers:
       '@agentick/tasks-next':
         specifier: workspace:*
         version: link:../tasks
+      '@agentick/timeline-next':
+        specifier: workspace:*
+        version: link:../timeline
       '@agentick/tool-executor-next':
         specifier: workspace:*
         version: link:../tool-executor

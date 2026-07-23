@@ -19,7 +19,7 @@ import type { CommandInfo } from "@agentick/spec-next";
 declare module "@agentick/spec-next" {
   interface WireMethods {
     "knobs/set": {
-      params: { sessionId: string; key: string; value: unknown };
+      params: { sessionId: string; id: string; value: unknown };
       result: unknown;
     };
     "knobs/commands": {

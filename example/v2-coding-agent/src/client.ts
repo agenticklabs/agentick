@@ -50,28 +50,37 @@ export async function runCodingSession(
     console.log(`   · log[${e.level}] ${JSON.stringify(e.data)}`);
   });
 
-  // ── 2. session.knobs — STATE feed (subscribe) + a client-driven write ────
-  // We want the whole knob store to display → `subscribe` hands you the folded
-  // STATE. Then FLIP a knob — fire-and-observe: the write returns as a channel
-  // delta that re-folds the view (CQRS) and the agent re-renders.
-  session.knobs.subscribe((knobs) => console.log(`   · knobs ${JSON.stringify(knobs)}`));
+  // ── 2. session.knobs — the store contract (subscribe) + a client write ───
+  // The ClientHandle contract: `subscribe(cb)` fires on change (cb takes NO
+  // args); read the current descriptors+values via `list()`. Then FLIP a knob —
+  // fire-and-observe: the write returns as a channel delta that re-folds the
+  // view (CQRS) and the agent re-renders.
+  session.knobs.subscribe(() =>
+    console.log(`   · knobs ${JSON.stringify(session.knobs.list().map((k) => [k.id, k.value]))}`),
+  );
   await session.knobs.set("explainSteps", true);
 
-  // ── 3. session.tasks — CHANGE feed (onChange): the task that transitioned ─
-  // `onChange` hands you the FRAME — the one task that changed — not the whole
-  // map, so no dedup bookkeeping. (For the full list, use `.subscribe(map =>…)`.)
-  session.tasks.onChange((frame) => {
-    if ("kind" in frame) return; // skip the opening snapshot; deltas are TaskInfo
-    console.log(`   · task[${frame.status}] ${frame.statusMessage ?? frame.taskId}`);
+  // ── 3. session.tasks — the store contract: re-read list() on change ──────
+  // `subscribe(cb)` fires on every transition; `list()` is the current task set
+  // (Enumerable — includes tasks pending before we connected).
+  session.tasks.subscribe(() => {
+    for (const t of session.tasks.list()) {
+      console.log(`   · task[${t.status}] ${t.statusMessage ?? t.taskId}`);
+    }
   });
 
-  // ── 4. session.elicitations.onChange — approve write_file, human-in-the-loop ──────────
-  // write_file calls ctx.elicit.confirm(...) server-side; the request arrives
-  // here. `.onChange` runs the callback per request (stream handled under the
-  // hood) — mirrors onLog/onProgress. We auto-approve; a real UI would prompt.
-  const stopElicit = session.elicitations.onChange((e) => {
-    console.log(`   · elicit "${e.message}" → approve`);
-    void e.accept(true);
+  // ── 4. session.elicitations — approve write_file, human-in-the-loop ───────
+  // write_file calls ctx.elicit.confirm(...) server-side; the request lands in
+  // `list()` (snapshot-first — a mid-ask connect sees it). `subscribe` fires on
+  // change; we approve each pending ask once. Answering drops it from list().
+  const approved = new Set<string>();
+  const stopElicit = session.elicitations.subscribe(() => {
+    for (const e of session.elicitations.list()) {
+      if (approved.has(e.correlationId)) continue;
+      approved.add(e.correlationId);
+      console.log(`   · elicit "${e.message}" → approve`);
+      void e.accept(true);
+    }
   });
 
   // ── 5. Send the coding request and STREAM the run ────────────────────────

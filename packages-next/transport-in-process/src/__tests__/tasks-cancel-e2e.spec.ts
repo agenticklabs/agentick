@@ -126,8 +126,8 @@ describe("tasks/cancel end-to-end — client ↔ gateway ↔ session", () => {
 
     // Client side: the cancelled transition returns as a task-status delta and
     // re-folds the view (CQRS — no local hand-patch).
-    await waitFor(() => tasks.get()[handle.taskId]?.status === "cancelled");
-    expect(tasks.get()[handle.taskId]?.status).toBe("cancelled");
+    await waitFor(() => tasks.get(handle.taskId)?.status === "cancelled");
+    expect(tasks.get(handle.taskId)?.status).toBe("cancelled");
 
     tasks.close();
     await cleanup();

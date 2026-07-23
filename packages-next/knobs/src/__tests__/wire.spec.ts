@@ -57,7 +57,7 @@ describe("knobs/set — write command (slice 4)", () => {
     const calls: KnobsSetInput[] = [];
     const ctx = stubCtx(stubGateway(stubSession(calls)));
 
-    const result = await set({ sessionId: SESSION_ID, key: "temperature", value: 0.9 }, ctx);
+    const result = await set({ sessionId: SESSION_ID, id: "temperature", value: 0.9 }, ctx);
 
     expect(calls).toEqual([{ id: "temperature", value: 0.9 }]);
     // Handle returns void; the wire row returns null (state flows via channel).
@@ -68,7 +68,7 @@ describe("knobs/set — write command (slice 4)", () => {
     const calls: KnobsSetInput[] = [];
     const ctx = stubCtx(stubGateway(stubSession(calls)));
 
-    await set({ sessionId: SESSION_ID, key: "verbosity", value: "high" }, ctx);
+    await set({ sessionId: SESSION_ID, id: "verbosity", value: "high" }, ctx);
 
     expect(calls[0]).toEqual({ id: "verbosity", value: "high" });
     expect(calls[0]).not.toHaveProperty("key");
@@ -78,7 +78,7 @@ describe("knobs/set — write command (slice 4)", () => {
     const ctx = stubCtx(stubGateway(undefined));
 
     await expect(
-      set({ sessionId: "no-such", key: "temperature", value: 0.9 }, ctx),
+      set({ sessionId: "no-such", id: "temperature", value: 0.9 }, ctx),
     ).rejects.toBeInstanceOf(AppNotFoundError);
   });
 });

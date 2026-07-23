@@ -22,8 +22,8 @@
  * @verifiedBy packages-next/tool-executor/src/__tests__/client-tool-confirm.spec.ts
  */
 
-import type { ClientProtocol, Unsubscribe } from "@agentick/spec-next";
-import { elicitationStream } from "@agentick/elicitation-next/client";
+import type { Unsubscribe } from "@agentick/spec-next";
+import { elicitationsHandle, type ElicitationClient } from "@agentick/elicitation-next/client";
 
 import { TOOL_CONFIRMATION_KIND } from "../confirmation-schema.js";
 
@@ -58,22 +58,30 @@ export type ConfirmPolicy =
  * {@link Unsubscribe} that stops the policy AND closes its subscription.
  */
 export function confirmClientTools(
-  client: ClientProtocol,
+  client: ElicitationClient,
   sessionId: string,
   policy: ConfirmPolicy,
 ): Unsubscribe {
-  const stream = elicitationStream(client, sessionId);
-  const unsub = stream.onChange((elic) => {
-    if (elic.hints?.kind !== TOOL_CONFIRMATION_KIND) return;
-    void (async () => {
-      const approved = await evaluate(policy, toRequest(elic));
-      if (approved) await elic.accept({ approved: true });
-      else await elic.decline();
-    })();
+  const elicitations = elicitationsHandle(client, sessionId);
+  // `subscribe` fires on every pending-set change and we re-scan `list()`; a
+  // seen-set makes each confirmation act exactly once (the store contract has no
+  // per-item delta feed — read via list()).
+  const acted = new Set<string>();
+  const unsub = elicitations.subscribe(() => {
+    for (const elic of elicitations.list()) {
+      if (elic.hints?.kind !== TOOL_CONFIRMATION_KIND) continue;
+      if (acted.has(elic.correlationId)) continue;
+      acted.add(elic.correlationId);
+      void (async () => {
+        const approved = await evaluate(policy, toRequest(elic));
+        if (approved) await elic.accept({ approved: true });
+        else await elic.decline();
+      })();
+    }
   });
   return () => {
     unsub();
-    stream.close();
+    elicitations.close();
   };
 }
 

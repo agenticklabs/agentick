@@ -11,7 +11,13 @@
  *
  * The client timeline is `fold(session event stream)`, seeded with
  * server-hydrated `initial` (LogStore.history) and tailing live via
- * `fromCursor` — no read RPC, no bespoke channel.
+ * `fromCursor`. `session.timeline` (the sub-handle) adds a cursored durable
+ * read over `session/timeline_history` for lazy scroll-back.
+ *
+ * Importing this subpath contributes the `client.session(id).timeline` property
+ * (a `TimelineHandle`) to the client `SessionHandle` (ADR 87). The free
+ * `timelineView` factory remains exported as the handle's implementation, for
+ * the headless/composition case.
  */
 
 export {
@@ -20,3 +26,12 @@ export {
   type TimelineView,
   type TimelineViewOptions,
 } from "./timeline-view.js";
+export {
+  timelineHandle,
+  type TimelineHandle,
+  type TimelineCommandClient,
+  type LoadOlderResult,
+} from "./timeline-handle.js";
+
+// Side-effect: contribute `session.timeline` to the client SessionHandle (ADR 87).
+import "./register.js";

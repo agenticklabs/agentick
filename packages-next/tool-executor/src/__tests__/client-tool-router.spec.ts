@@ -1,9 +1,9 @@
 /**
- * Client-side tool-call ROUTER (stage 3).
+ * `session.clientToolCalls.route(...)` — the client-side tool-call ROUTER (stage
+ * 3), now a verb on the `ClientToolCallsHandle` (B2 slice 3).
  *
- * A stub `ClientProtocol` pushes `session:channel:tool_call` frames through a
- * controllable subscription and records outbound `client.request(...)` calls —
- * the same transport-stub shape the client-core `channelStream` test uses.
+ * A stub transport pushes `session:channel:tool_call` frames through a
+ * controllable subscription and records outbound `transport.request(...)` calls.
  * Verifies:
  *
  *   1. A correlated relay → the matching handler runs → `session/respond_to_tool_call`
@@ -11,13 +11,13 @@
  *   2. An unknown tool → the default onUnknown error result is relayed.
  *   3. A handler THROW → an error result is relayed (call never left hanging).
  *   4. A fire-and-forget relay (NO correlationId) → the handler still runs, but
- *      NO respond is sent.
+ *      NO respond is sent — and it never enters `list()`.
  *   5. A custom `opts.onUnknown` overrides the default.
+ *   6. `route`'s Unsubscribe stops routing; `handle.close()` closes the stream.
  */
 
 import { describe, expect, it } from "vitest";
 import type {
-  ClientProtocol,
   Cursor,
   EventFrame,
   ProtocolEvent,
@@ -28,7 +28,7 @@ import type {
 import { waitFor } from "@agentick/utils-next/testing";
 
 import { TOOL_CALL_CHANNEL_FQN } from "../tool-call-schema.js";
-import { routeClientTools } from "../client/client-tool-calls.js";
+import { clientToolCallsHandle, type ClientToolCallsClient } from "../client/client-tool-calls.js";
 
 interface PushStream extends SubscriptionStream {
   emit(payload: unknown, correlationId?: string): void;
@@ -86,21 +86,21 @@ interface RequestRecord {
 }
 
 function stubClient(stream: SubscriptionStream): {
-  client: ClientProtocol;
+  client: ClientToolCallsClient;
   seen: RequestRecord[];
 } {
   const seen: RequestRecord[] = [];
-  const client = {
+  const client: ClientToolCallsClient = {
     transport: {
       subscribe(): SubscriptionStream {
         return stream;
       },
-    },
-    request<M extends WireMethod>(method: M, params: WireParams<M>): Promise<unknown> {
-      seen.push({ method, params });
-      return Promise.resolve(null);
-    },
-  } as unknown as ClientProtocol;
+      request<M extends WireMethod>(method: M, params: WireParams<M>): Promise<unknown> {
+        seen.push({ method, params });
+        return Promise.resolve(null);
+      },
+    } as ClientToolCallsClient["transport"],
+  };
   return { client, seen };
 }
 
@@ -108,13 +108,14 @@ function toolCall(name: string, input: unknown, toolCallId = "tc-1"): unknown {
   return { toolCallId, name, input };
 }
 
-describe("routeClientTools — correlated relays", () => {
+describe("clientToolCalls.route — correlated relays", () => {
   it("runs the matching handler and relays its result via session/respond_to_tool_call", async () => {
     const stream = pushStream();
     const { client, seen } = stubClient(stream);
     const seenInput: unknown[] = [];
 
-    const unsub = routeClientTools(client, "s1", {
+    const handle = clientToolCallsHandle(client, "s1");
+    const unsub = handle.route({
       get_weather: (input, ctx) => {
         seenInput.push({ input, ctx });
         return [{ type: "text", text: "sunny" }];
@@ -134,27 +135,32 @@ describe("routeClientTools — correlated relays", () => {
       { input: { city: "SF" }, ctx: { toolCallId: "tc-1", name: "get_weather" } },
     ]);
 
+    // Routing's Unsubscribe stops dispatch; the handle owns the subscription.
     unsub();
+    expect(stream.isClosed).toBe(false);
+    handle.close();
     expect(stream.isClosed).toBe(true);
   });
 
   it("an unknown tool relays the default error result", async () => {
     const stream = pushStream();
     const { client, seen } = stubClient(stream);
-    const unsub = routeClientTools(client, "s1", {});
+    const handle = clientToolCallsHandle(client, "s1");
+    handle.route({});
 
     stream.emit(toolCall("mystery", {}), "corr:2");
     await waitFor(() => seen.length === 1);
 
     const params = seen[0]!.params as { result: { content: string; isError: boolean } };
     expect(params.result).toEqual({ content: 'no client handler for "mystery"', isError: true });
-    unsub();
+    handle.close();
   });
 
   it("a handler THROW relays an error result — the call is never left hanging", async () => {
     const stream = pushStream();
     const { client, seen } = stubClient(stream);
-    const unsub = routeClientTools(client, "s1", {
+    const handle = clientToolCallsHandle(client, "s1");
+    handle.route({
       boom: () => {
         throw new Error("kaboom");
       },
@@ -165,35 +171,32 @@ describe("routeClientTools — correlated relays", () => {
 
     const params = seen[0]!.params as { result: { content: string; isError: boolean } };
     expect(params.result).toEqual({ content: "kaboom", isError: true });
-    unsub();
+    handle.close();
   });
 
   it("a custom opts.onUnknown overrides the default", async () => {
     const stream = pushStream();
     const { client, seen } = stubClient(stream);
-    const unsub = routeClientTools(
-      client,
-      "s1",
-      {},
-      { onUnknown: (_input, ctx) => `handled ${ctx.name} by fallback` },
-    );
+    const handle = clientToolCallsHandle(client, "s1");
+    handle.route({}, { onUnknown: (_input, ctx) => `handled ${ctx.name} by fallback` });
 
     stream.emit(toolCall("whatever", {}), "corr:4");
     await waitFor(() => seen.length === 1);
 
     const params = seen[0]!.params as { result: unknown };
     expect(params.result).toBe("handled whatever by fallback");
-    unsub();
+    handle.close();
   });
 });
 
-describe("routeClientTools — fire-and-forget relays", () => {
-  it("dispatches the handler but sends NO respond when there is no correlationId", async () => {
+describe("clientToolCalls.route — fire-and-forget relays", () => {
+  it("dispatches the handler but sends NO respond, and never enters list()", async () => {
     const stream = pushStream();
     const { client, seen } = stubClient(stream);
     let ran = 0;
 
-    const unsub = routeClientTools(client, "s1", {
+    const handle = clientToolCallsHandle(client, "s1");
+    handle.route({
       notify_ui: () => {
         ran++;
         return [{ type: "text", text: "rendered" }];
@@ -207,6 +210,7 @@ describe("routeClientTools — fire-and-forget relays", () => {
     // Give any erroneous respond a chance to land, then assert none did.
     await Promise.resolve();
     expect(seen).toHaveLength(0);
-    unsub();
+    expect(handle.list()).toHaveLength(0); // fire-and-forget is not pending
+    handle.close();
   });
 });

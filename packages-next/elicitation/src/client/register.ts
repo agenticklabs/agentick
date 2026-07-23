@@ -16,22 +16,23 @@
 
 import { registerSessionHandleExtension } from "@agentick/client-core-next";
 
-import { elicitationStream, type ElicitationsHandle } from "./elicitations.js";
+import { elicitationsHandle, type ElicitationsHandle } from "./elicitations.js";
 
 declare module "@agentick/spec-next" {
   interface SessionHandleExtensions {
     /**
-     * The elicitation resource handle — read surface + write command, the CQRS
-     * shape shared by `session.knobs` (view + `set`) and `session.tasks`. Read
-     * via `session.elicitations.onChange((e) => e.accept(value))` or
-     * `for await (const e of session.elicitations)`; write by `correlationId`
-     * via `session.elicitations.respond(input)`. Each yielded
-     * {@link ClientElicitationHandle} carries typed `.accept`/`.decline`/`.cancel`.
+     * The elicitation resource handle on the `ClientHandle` contract:
+     * `list()`/`get(id)` over the PENDING asks (Enumerable — a client connecting
+     * mid-ask sees the outstanding prompt), the zero-arg `subscribe(cb)` store
+     * contract, and `respond(correlationId, body)` (Respondable by-id).
+     * `list()` yields item handles, each carrying typed
+     * `.accept`/`.decline`/`.cancel`:
+     * `session.elicitations.subscribe(() => { for (const e of session.elicitations.list()) showDialog(e); })`.
      */
     readonly elicitations: ElicitationsHandle;
   }
 }
 
 registerSessionHandleExtension("elicitations", (client, sessionId) =>
-  elicitationStream(client, sessionId),
+  elicitationsHandle(client, sessionId),
 );

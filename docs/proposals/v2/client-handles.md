@@ -63,7 +63,19 @@ client-wired. The HANDLE reunites the halves (`list`/`subscribe` folds the topic
 `e.accept()` fires the command). Public read-side taxonomy is two levels: wire topics
 (plumbing) → handles (API).
 
-**CHANNELVIEW'S LANDING + THE KIT (Ryan peer-review 2026-07-22, restored):**
+**SLICE-4 SPEC v2 (Ryan 2026-07-22 — supersedes the createHandle kit draft below):
+handle = WIRE PROXY + VIEW FACTORY.** No hand-written "verbs" (the word dies):
+the handle's methods are DERIVED from the server's WireMethods rows via a mapped
+type (`session.knobs.set` ⇔ `"knobs/set"`; only server-typed methods EXIST on the
+client type — a typo is a compile error, not a 404; runtime fns still come from
+ADR-87 registration, the mapped type is the guard). Read side: the handle MINTS
+views — `list()/subscribe()` = the memoized default view; `.view(opts)` creates
+additional concurrent views (own filter/reduce/window — ChannelView's real
+contribution surfaced); LOCAL mutations (timeline seed/prepend/append/clear) live
+on the VIEW, not mixed with wire methods. Item handles unchanged (the view's
+projection binds accept = the derived respond method partially applied).
+
+**CHANNELVIEW'S LANDING + THE KIT (superseded draft, kept for lineage):**
 ChannelView is the PROTO-HANDLE — the read-half built early. It lands at the
 EXTENSION-AUTHOR tier as the handle-construction KIT, converging on ONE factory:
 `createHandle({ topic, initial, reduce, items, id, item?, verbs })` — the fold

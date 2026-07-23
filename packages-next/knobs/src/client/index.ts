@@ -19,7 +19,7 @@ export {
   type KnobsClient,
   type KnobsCommandClient,
 } from "./knobs-state-view.js";
-export { knobsHandle, type KnobsHandleView } from "./knobs-handle.js";
+export { knobsHandle, type KnobsHandle } from "./knobs-handle.js";
 
 // Side-effect: contribute `session.knobs` to the client SessionHandle (ADR 87).
 import "./register.js";

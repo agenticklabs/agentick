@@ -88,11 +88,11 @@ describe("session.tasks (ADR 87 registrant)", () => {
     // The slot appears with NO client-core wiring — just importing the client
     // subpath registered it. Non-optional: `session.tasks`, not `session.tasks?`.
     expect(session.tasks).toBeDefined();
-    expect(session.tasks.get()).toEqual({});
+    expect(session.tasks.list()).toEqual([]);
 
     stream.emit(taskInfo("t1", "working"));
-    await waitFor(() => "t1" in session.tasks.get());
-    expect(session.tasks.get().t1?.status).toBe("working");
+    await waitFor(() => session.tasks.list().length > 0);
+    expect(session.tasks.get("t1")?.status).toBe("working");
   });
 
   it("is a stable, cached identity across accesses (lazy getter builds once)", () => {

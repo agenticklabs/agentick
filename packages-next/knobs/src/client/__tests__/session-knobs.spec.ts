@@ -2,9 +2,9 @@
  * ADR 87 integration — importing `@agentick/knobs-next/client` makes
  * `client.session(id).knobs` self-assemble on the generic client's
  * `SessionHandle`, with NO wiring in client-core. The slot is a live
- * `knobsHandle`: the `KnobsState` read view plus `set(key, value)` over
- * `knobs/set`. Proves the full path: register → makeSessionHandle → getter →
- * handle, and the write half round-trips through the channel (CQRS).
+ * `knobsHandle`: the Enumerable descriptor view (`list`/`get`) plus
+ * `set(id, value)` over `knobs/set`. Proves the full path: register →
+ * makeSessionHandle → getter → handle, and the write half round-trips (CQRS).
  */
 
 import { describe, expect, it } from "vitest";
@@ -91,9 +91,14 @@ describe("session.knobs (ADR 87 registrant)", () => {
     // Non-optional slot, no client-core wiring: importing the subpath registered it.
     expect(session.knobs).toBeDefined();
 
-    stream.emit({ kind: "snapshot", version: 1, values: { temperature: 0.7 }, descriptors: [] });
-    await waitFor(() => Object.keys(session.knobs.get()).length > 0);
-    expect(session.knobs.get()).toEqual({ temperature: 0.7 });
+    stream.emit({
+      kind: "snapshot",
+      version: 1,
+      values: { temperature: 0.7 },
+      descriptors: [{ id: "temperature", value: 0.7, valueType: "number" }],
+    });
+    await waitFor(() => session.knobs.list().length > 0);
+    expect(session.knobs.get("temperature")).toMatchObject({ id: "temperature", value: 0.7 });
   });
 
   it("set() issues knobs/set over the transport (write half)", async () => {
@@ -103,6 +108,6 @@ describe("session.knobs (ADR 87 registrant)", () => {
     await session.knobs.set("temperature", 0.9);
 
     expect(captured.method).toBe("knobs/set");
-    expect(captured.params).toEqual({ sessionId: "s1", key: "temperature", value: 0.9 });
+    expect(captured.params).toEqual({ sessionId: "s1", id: "temperature", value: 0.9 });
   });
 });

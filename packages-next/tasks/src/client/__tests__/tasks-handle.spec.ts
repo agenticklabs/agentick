@@ -1,12 +1,12 @@
 /**
  * `tasksHandle` — the client-side tasks resource handle (read + write).
  *
- * Read half: reuses the `pushStream` fake (mirrors `task-status-view.spec.ts`)
- * to seed a snapshot and fold deltas, proving `get`/`subscribe`/`onChange`
- * still work through the handle. Write half: `cancel(taskId, reason)` issues
- * `transport.request("tasks/cancel", ...)` with the wire-shaped params. And the
- * CQRS round-trip: after `cancel`, emitting a matching `cancelled` `task-status`
- * delta re-folds the view — the handle never hand-patches its own read state.
+ * Read half (`ClientHandle` contract): `list()`/`get(taskId)` seeded from the
+ * snapshot frame, folded forward by deltas. Write half: `cancel(taskId, reason)`
+ * issues `transport.request("tasks/cancel", ...)` with the wire-shaped params.
+ * And the CQRS round-trip: after `cancel`, emitting a matching `cancelled`
+ * `task-status` delta re-folds the view — the handle never hand-patches its own
+ * read state.
  *
  * Mirror of `knobs/src/client/__tests__/knobs-handle.spec.ts`.
  */
@@ -116,37 +116,42 @@ describe("tasksHandle", () => {
     expect(captured.params).not.toHaveProperty("reason");
   });
 
-  it("read half: snapshot seeds get(), then a cancel delta re-folds the view (CQRS round-trip)", async () => {
+  it("list()/get(id): snapshot seeds, then a cancel delta re-folds (CQRS round-trip)", async () => {
     const captured: { method?: WireMethod; params?: unknown } = {};
     const stream = pushStream();
     const handle = tasksHandle(fakeCommandClient(stream, captured), "s1");
 
-    // Snapshot seeds the read half.
+    // Snapshot seeds the read half — list() reflects pre-connection tasks.
     stream.emit({ kind: "snapshot", tasks: [taskInfo("t7", "working")] });
-    await waitFor(() => "t7" in handle.get());
-    expect(handle.get().t7?.status).toBe("working");
+    await waitFor(() => handle.list().length > 0);
+    expect(handle.list()).toMatchObject([{ taskId: "t7", status: "working" }]);
+    expect(handle.get("t7")).toMatchObject({ status: "working" });
+    expect(handle.get("nope")).toBeUndefined();
 
     // Write command — no local hand-patch, so the view is still "working" here.
     await handle.cancel("t7");
-    expect(handle.get().t7?.status).toBe("working");
+    expect(handle.get("t7")?.status).toBe("working");
 
     // The cancel's effect returns as a channel delta and re-folds the view.
     stream.emit(taskInfo("t7", "cancelled", { lastUpdatedAt: 5 }));
-    await waitFor(() => handle.get().t7?.status === "cancelled");
-    expect(handle.get().t7?.status).toBe("cancelled");
+    await waitFor(() => handle.get("t7")?.status === "cancelled");
+    expect(handle.get("t7")?.status).toBe("cancelled");
   });
 
-  it("onChange() fires with each folded frame", async () => {
+  it("subscribe(cb) fires on each folded frame; cb receives NO arguments", async () => {
     const stream = pushStream();
     const handle = tasksHandle(fakeCommandClient(stream), "s1");
 
-    const frames: TaskStatusFrame[] = [];
-    handle.onChange((frame) => {
-      frames.push(frame);
+    let fired = 0;
+    let argCount = -1;
+    handle.subscribe((...args: unknown[]) => {
+      fired += 1;
+      argCount = args.length;
     });
 
     stream.emit(taskInfo("t7", "working"));
-    await waitFor(() => frames.length > 0);
-    expect(frames[0]).toEqual(taskInfo("t7", "working"));
+    await waitFor(() => fired > 0);
+    expect(fired).toBeGreaterThan(0);
+    expect(argCount).toBe(0);
   });
 });

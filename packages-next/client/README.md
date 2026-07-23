@@ -13,17 +13,22 @@ import { createClient } from "@agentick/client-next";
 const client = await createClient({ transport });
 const session = client.session(id);
 
-session.tasks.get(); // ChannelView<Record<taskId, TaskInfo>>  — @agentick/tasks-next/client
-session.knobs.get(); // ChannelView<KnobsState>                — @agentick/knobs-next/client
+// Every sub-handle is a ClientHandle: list() / get(id) / subscribe(cb) + verbs.
+session.tasks.list(); // TaskInfo[]                      — @agentick/tasks-next/client
+session.knobs.list(); // WireKnobDescriptor[] (+values)  — @agentick/knobs-next/client
 await session.knobs.set("temperature", 0.7);
-for await (const e of session.elicitations) await e.accept({}); // property — @agentick/elicitation-next/client
+session.timeline.list(); // TimelineEntry[]              — @agentick/timeline-next/client
+session.elicitations.subscribe(() => {  // pending asks  — @agentick/elicitation-next/client
+  for (const e of session.elicitations.list()) void e.accept({});
+});
 
-// Client-handled tools (stage 2 write side) — @agentick/tool-executor-next/client
+// Client-handled tools — @agentick/tool-executor-next/client
 // A client is a declarative tool SOURCE: declare the FULL set; the framework
 // replaces the client slice wholesale (the wire twin of replaceCompilerTools).
-await session.setClientTools([{ name, description, inputSchema }]); // JSON-Schema input, no handler
-await session.setClientTools([]); // clear the client slice
-await session.respondToToolCall(correlationId, [{ type: "text", text: "…" }]);
+const calls = session.clientToolCalls;
+await calls.set([{ name, description, inputSchema }]); // whole-slice replace, no handler
+calls.route({ open_file: async ({ path }) => read(path) }); // dispatch → auto-respond
+calls.confirm("approve"); // policy over tool_confirmation asks
 ```
 
 That's the whole package: three side-effect imports + `export * from
@@ -83,5 +88,5 @@ public `agentick/client` metapackage entry until the v2 cut.
 
 - `src/__tests__/bundle.spec.ts` — importing the bundle registers every built-in
   slot; a session handle self-assembles `.tasks` / `.knobs` / `.elicitations`
-  / `.setClientTools()` / `.respondToToolCall()`
-  with no per-harness imports.
+  / `.clientToolCalls` / `.timeline` (each a `ClientHandle`) with no per-harness
+  imports.

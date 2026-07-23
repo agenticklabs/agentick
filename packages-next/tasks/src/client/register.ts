@@ -8,17 +8,18 @@
  */
 
 import { registerSessionHandleExtension } from "@agentick/client-core-next";
-import { tasksHandle, type TasksHandleView } from "./tasks-handle.js";
+import { tasksHandle, type TasksHandle } from "./tasks-handle.js";
 
 declare module "@agentick/spec-next" {
   interface SessionHandleExtensions {
     /**
-     * The tasks resource handle for this session — the CQRS shape shared by
-     * `session.knobs` (view + `set`): the live `task-status` `ChannelView`
-     * (read: `get`/`subscribe`/`onChange`) PLUS the `cancel(taskId)` write
-     * command (`== tasksHandle(client, id)`).
+     * The tasks resource handle — the `ClientHandle` contract for this session:
+     * `list()`/`get(taskId)` over the live task set (Enumerable — includes tasks
+     * pending before you connected), the zero-arg `subscribe(cb)` store
+     * contract, and `cancel(taskId, reason?)` over `tasks/cancel`
+     * (`== tasksHandle(client, id)`).
      */
-    readonly tasks: TasksHandleView;
+    readonly tasks: TasksHandle;
   }
 }
 

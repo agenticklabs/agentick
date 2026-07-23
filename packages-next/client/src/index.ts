@@ -10,9 +10,12 @@
  * import { createClient } from "@agentick/client-next";
  * const client = await createClient({ transport });
  * const session = client.session(id);
- * session.tasks.get();                       // @agentick/tasks-next/client
+ * session.tasks.list();                      // @agentick/tasks-next/client
  * await session.knobs.set("temperature", 1); // @agentick/knobs-next/client
- * for await (const e of session.elicitations) await e.accept({}); // elicitation (a property)
+ * session.elicitations.subscribe(() => {     // @agentick/elicitation-next/client
+ *   for (const e of session.elicitations.list()) void e.accept({});
+ * });
+ * session.timeline.list();                    // @agentick/timeline-next/client
  * ```
  *
  * This is the client twin of how the public `agentick` metapackage bundles the
@@ -32,6 +35,7 @@ import "@agentick/tasks-next/client";
 import "@agentick/knobs-next/client";
 import "@agentick/elicitation-next/client";
 import "@agentick/tool-executor-next/client";
+import "@agentick/timeline-next/client";
 
 // Re-export the full client-core surface (createClient, handles, channelView,
 // the sub-handle registry, protocol type re-exports, …).

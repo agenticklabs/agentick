@@ -8,12 +8,17 @@
  */
 
 import { registerSessionHandleExtension } from "@agentick/client-core-next";
-import { knobsHandle, type KnobsHandleView } from "./knobs-handle.js";
+import { knobsHandle, type KnobsHandle } from "./knobs-handle.js";
 
 declare module "@agentick/spec-next" {
   interface SessionHandleExtensions {
-    /** Live knobs view + `set(key, value)` for this session (`== knobsHandle(client, id)`). */
-    readonly knobs: KnobsHandleView;
+    /**
+     * The knobs resource handle — the `ClientHandle` contract for this session:
+     * `list()`/`get(id)` over knob descriptors+values (Enumerable), the zero-arg
+     * `subscribe(cb)` store contract, and `set(id, value)` over `knobs/set`
+     * (`== knobsHandle(client, id)`).
+     */
+    readonly knobs: KnobsHandle;
   }
 }
 

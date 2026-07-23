@@ -27,13 +27,7 @@ describe("@agentick/client-bundle-next", () => {
   it("registers every built-in session sub-handle slot on import", () => {
     const names = registeredSessionHandleExtensions();
     expect(names).toEqual(
-      expect.arrayContaining([
-        "tasks",
-        "knobs",
-        "elicitations",
-        "setClientTools",
-        "respondToToolCall",
-      ]),
+      expect.arrayContaining(["tasks", "knobs", "elicitations", "clientToolCalls", "timeline"]),
     );
   });
 
@@ -49,11 +43,13 @@ describe("@agentick/client-bundle-next", () => {
     };
     const session = makeSessionHandle(fakeClient, "s1");
 
-    expect(session.tasks).toBeDefined(); // ChannelView<TaskStatusMap>
-    expect(session.knobs).toBeDefined(); // KnobsHandleView (view + set)
-    expect(typeof session.elicitations.onChange).toBe("function"); // ChannelStream read
-    expect(typeof session.elicitations.respond).toBe("function"); // write command on the handle
-    expect(typeof session.setClientTools).toBe("function"); // client-tool declare verb
-    expect(typeof session.respondToToolCall).toBe("function"); // client-tool relay verb
+    expect(typeof session.tasks.list).toBe("function"); // TasksHandle (Enumerable)
+    expect(typeof session.knobs.list).toBe("function"); // KnobsHandle (Enumerable)
+    expect(typeof session.elicitations.list).toBe("function"); // Enumerable read
+    expect(typeof session.elicitations.respond).toBe("function"); // Respondable by-id
+    expect(typeof session.clientToolCalls.list).toBe("function"); // Enumerable read
+    expect(typeof session.clientToolCalls.set).toBe("function"); // folded declare verb
+    expect(typeof session.clientToolCalls.route).toBe("function"); // folded router verb
+    expect(typeof session.timeline.list).toBe("function"); // TimelineView (Enumerable)
   });
 });

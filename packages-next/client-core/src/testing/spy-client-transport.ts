@@ -25,6 +25,7 @@ import type {
   SubscriptionStream,
   WireMethod,
   WireParams,
+  WireResult,
 } from "@agentick/spec-next";
 import { channelEventName } from "@agentick/spec-next";
 
@@ -49,7 +50,7 @@ export interface SpyClientTransport {
       query?: EventQuery,
       fromCursor?: Cursor,
     ): SubscriptionStream;
-    request<M extends WireMethod>(method: M, params: WireParams<M>): Promise<unknown>;
+    request<M extends WireMethod>(method: M, params: WireParams<M>): Promise<WireResult<M>>;
   };
   /** Every recorded request, oldest first. */
   requests(): readonly RecordedRequest[];
@@ -117,12 +118,14 @@ export function spyClientTransport(opts: SpyClientTransportOptions = {}): SpyCli
         subscribeCall = { scope, query, fromCursor };
         return stream;
       },
-      request<M extends WireMethod>(method: M, params: WireParams<M>): Promise<unknown> {
+      request<M extends WireMethod>(method: M, params: WireParams<M>): Promise<WireResult<M>> {
         requests.push({ method, params });
         if (opts.rejectWith && method in opts.rejectWith) {
           return Promise.reject(opts.rejectWith[method]);
         }
-        return Promise.resolve(opts.respondWith?.[method] ?? null);
+        // Canned answer cast to the method's wire result — the double satisfies
+        // the `ClientTransport` shape the handle command-clients consume.
+        return Promise.resolve((opts.respondWith?.[method] ?? null) as WireResult<M>);
       },
     },
     requests: () => requests,

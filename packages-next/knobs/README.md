@@ -208,62 +208,56 @@ sets every settable knob in that group atomically after a shared type-check.
 
 ### `@agentick/knobs-next/client`
 
-The far side of the `knobs-state` channel: the client-side projection of knob
-state an app frontend subscribes to. It depends on the generic `channelView`
-from `@agentick/client-core-next` — **not** on the knobs harness runtime — so a
-browser bundle never pulls the server harness in. Mirrors the `/react` subpath
-convention.
+`session.knobs` is a `ClientHandle` — `list()`/`get(id)`/`subscribe(cb)` +
+`set(id, value)`. It depends on the generic `channelView` from
+`@agentick/client-core-next` — **not** on the knobs harness runtime — so a
+browser bundle never pulls the server harness in.
 
-- **`knobsStateView(client, sessionId)`** → `ChannelView<KnobsState>` — a live,
-  read-only reactive view of a session's knob state. It is the knobs façade
-  (rung 1) over `channelView`: it hides the channel name, the frame kinds, and
-  the JSON-Patch fold. The subscription opens with the current `snapshot` frame
-  (which seeds the whole store), then folds `knobs-state` `delta` frames (RFC
-  6902 JSON-Patch, one op per changed knob) with `applyJsonPatch`. Two read
-  feeds (the generic `channelView` shape): `subscribe((state) => …)` — the folded
-  STATE, also the `useSyncExternalStore` contract with `get()` — and
-  `onChange((frame) => …)` — the CHANGE feed, each frame it folds. `status`
-  reports readiness (`"loading" | "live" | "closed"`); `close()` tears down. This
-  is the READ half of the knobs resource (CQRS query) — writes are a separate
-  command whose effect returns here as a delta.
-- **`knobsHandle(client, sessionId)`** → `KnobsHandleView` — the read + write
-  resource handle. It composes `knobsStateView` for the read half
-  (`get` / `subscribe` / `onChange` / `status` / `close`) and adds
-  **`set(key, value): Promise<void>`**, the WRITE command over `knobs/set`. The
-  write is deliberately fire-and-observe: `set` issues the RPC and resolves once
-  the gateway accepts it — it does **not** hand-patch the local view. The
-  write's effect returns as a `knobs-state` delta on the same channel and
-  re-folds the view (CQRS: one write path, one read path, state flows through
-  the channel only).
-- Types: **`KnobsState`** (`Readonly<Record<string, KnobPrimitive>>` — the
-  reduced knob store, knob id → current value), **`KnobsClient`** (the read
-  surface — needs only `transport.subscribe`), **`KnobsCommandClient`** (the
-  command surface — needs `subscribe` + `request`; a superset of `KnobsClient`),
-  and **`KnobsHandleView`** (`ChannelView<KnobsState>` plus `set`).
-
-```ts
-import { knobsHandle } from "@agentick/knobs-next/client";
-
-const knobs = knobsHandle(client, sessionId);
-const off = knobs.subscribe(() => render(knobs.get())); // live read
-await knobs.set("verbosity", 3); // write — lands back on the view as a delta
-knobs.close();
-```
-
-**Install-to-appear ([ADR 87](../../docs/proposals/v2/blueprint/87-client-sub-handles.md)).**
-Importing this subpath also registers `knobsHandle` as a self-assembling slot on
-the client `SessionHandle`, so you rarely call it by hand:
+**Render a slider straight off `list()` — 4 lines.** `list()` returns
+DESCRIPTORS+values, so the label, range, and step are right there; no second
+round-trip (friction #1):
 
 ```ts
 import "@agentick/knobs-next/client"; // side-effect: types + registers the slot
 
-client.session(id).knobs.get(); // KnobsState (the folded store)
-await client.session(id).knobs.set("verbosity", 3);
+const knobs = client.session(id).knobs;
+knobs.subscribe(() => render(knobs.list())); // ← re-render on any change
+// each descriptor: { id, value, description?, min?, max?, step?, options?, … }
+const off = () => knobs.close();
 ```
 
+```tsx
+// a render function that needs nothing but list():
+for (const k of knobs.list())
+  slider({ label: k.description ?? k.id, value: k.value, min: k.min, max: k.max });
+```
+
+**Set by id — one name, wire to server (friction #13).** `set(id, value)` is
+fire-and-observe: it issues `knobs/set` and resolves `void`; the new value
+returns as a `knobs-state` delta and re-folds the view (CQRS — no hand-patch):
+
+```ts
+await knobs.set("verbosity", 3); // { sessionId, id: "verbosity", value: 3 } on the wire
+```
+
+- **The contract.** `list(): readonly WireKnobDescriptor[]` and
+  `get(id): WireKnobDescriptor | undefined` (Enumerable — reflects state from
+  BEFORE you connected); `subscribe(cb: () => void)` fires on change, `cb` takes
+  NO arguments (read via `list()`); `close()`; `set(id, value)`. Passes
+  `runClientHandleConformance` (core + Enumerable + the `set` write verb).
+- **`knobsHandle(client, sessionId)`** → `KnobsHandle` is the free factory the
+  slot registers; call it directly for the headless/composition case.
+- **`knobsStateView(client, sessionId)`** → `ChannelView<KnobsState>` remains as
+  the lower-level VALUES-only fold (`Record<id, value>`) for consumers that want
+  the raw store without descriptors.
+- Types: **`KnobsHandle`** (the contract above), **`KnobsState`**
+  (`Readonly<Record<string, KnobPrimitive>>`), **`KnobsClient`** (read surface —
+  `transport.subscribe`), **`KnobsCommandClient`** (command surface — `subscribe`
+  + `request`).
+
 **Two `session.knobs`, one noun — mind the vantage.** The CLIENT slot above
-(`client.session(id).knobs`, a `KnobsHandleView` = the `KnobsState` fold + a
-flat `set(key, value)`) is a read-replica of the SERVER `session.knobs` (the
+(`client.session(id).knobs`, a `KnobsHandle` = the descriptor fold + a flat
+`set(id, value)`) is a read-replica of the SERVER `session.knobs` (the
 curated `KnobsHandle` owned by `@agentick/session-next` — per-knob
 `get(name)` / `set({ id, value })` / `subscribe(name, …)`, the authority). Same
 facet, CQRS split: the server holds truth and rich per-knob ops; the client

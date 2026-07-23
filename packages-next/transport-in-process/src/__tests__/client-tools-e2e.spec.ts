@@ -4,7 +4,7 @@
  *
  * No fakes on the wire path: real client → in-process transport → real gateway
  * → real app → real session → real tool-executor. We drive
- * `client.session(id).setClientTools(...)` and then read the session's live
+ * `client.session(id).clientToolCalls.set(...)` and then read the session's live
  * `toolExecutor.compileForTick(...)` to prove the model-visible tool set
  * reflects the wire mutations — a client is a declarative tool SOURCE that owns
  * the `{ scope: "client", sessionId }` slice.
@@ -17,7 +17,7 @@
  * guarantee (the distinct `client` vs `session` binding).
  */
 
-// ADR 87 — contributes `session.setClientTools` / `.respondToToolCall`.
+// ADR 87 — contributes `session.clientToolCalls` (the folded handle).
 import "@agentick/tool-executor-next/client";
 
 import { describe, expect, it } from "vitest";
@@ -148,13 +148,13 @@ describe("client-tool wire verb — end-to-end (declarative slice-replace)", () 
     try {
       const sess = client.session(session.id);
 
-      const ack1 = await sess.setClientTools([declA, declB]);
+      const ack1 = await sess.clientToolCalls.set([declA, declB]);
       expect(ack1).toEqual({ count: 2 });
       expect(await compiledNames(session)).toEqual(["client_a", "client_b"]);
 
       // Re-declare a DIFFERENT set — A is gone (absent from the new set), C is
       // added, B persists. This is a whole-slice replace, not an accumulate.
-      const ack2 = await sess.setClientTools([declB, declC]);
+      const ack2 = await sess.clientToolCalls.set([declB, declC]);
       expect(ack2).toEqual({ count: 2 });
       expect(await compiledNames(session)).toEqual(["client_b", "client_c"]);
     } finally {
@@ -166,12 +166,12 @@ describe("client-tool wire verb — end-to-end (declarative slice-replace)", () 
     const { client, session, cleanup } = await makeStack();
     try {
       const sess = client.session(session.id);
-      await sess.setClientTools([
+      await sess.clientToolCalls.set([
         { name: "client_x", description: "v1", inputSchema: schema("a") },
       ]);
       // Same name, changed schema — the slice clear-then-reinstall means no
       // collision guard fires.
-      await sess.setClientTools([
+      await sess.clientToolCalls.set([
         { name: "client_x", description: "v2", inputSchema: schema("b") },
       ]);
 
@@ -188,10 +188,10 @@ describe("client-tool wire verb — end-to-end (declarative slice-replace)", () 
     const { client, session, cleanup } = await makeStack();
     try {
       const sess = client.session(session.id);
-      await sess.setClientTools([declA, declB]);
+      await sess.clientToolCalls.set([declA, declB]);
       expect(await compiledNames(session)).toEqual(["client_a", "client_b"]);
 
-      const ack = await sess.setClientTools([]);
+      const ack = await sess.clientToolCalls.set([]);
       expect(ack).toEqual({ count: 0 });
       expect(await compiledNames(session)).toEqual([]);
     } finally {
@@ -207,17 +207,17 @@ describe("client-tool wire verb — end-to-end (declarative slice-replace)", () 
       expect(await compiledTool(session, "app_tool")).toHaveLength(1);
 
       // Declare a client set, then replace it with a different one.
-      await sess.setClientTools([declA, declB]);
+      await sess.clientToolCalls.set([declA, declB]);
       expect(await compiledNames(session)).toEqual(["app_tool", "client_a", "client_b"]);
 
-      await sess.setClientTools([declC]);
+      await sess.clientToolCalls.set([declC]);
       // The client slice was replaced ({A,B} → {C}), but the app's session-bound
       // tool SURVIVES both replaces — proving `{ scope: "client" }` and
       // `{ scope: "session" }` are distinct slices.
       expect(await compiledNames(session)).toEqual(["app_tool", "client_c"]);
 
       // And clearing the client slice leaves the app tool standing.
-      await sess.setClientTools([]);
+      await sess.clientToolCalls.set([]);
       expect(await compiledNames(session)).toEqual(["app_tool"]);
     } finally {
       await cleanup();

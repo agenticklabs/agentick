@@ -14,7 +14,6 @@
 
 import { describe, expect, it } from "vitest";
 import type {
-  ClientProtocol,
   Cursor,
   EventFrame,
   ProtocolEvent,
@@ -22,6 +21,7 @@ import type {
   WireMethod,
   WireParams,
 } from "@agentick/spec-next";
+import type { ElicitationClient } from "@agentick/elicitation-next/client";
 import { ELICITATION_CHANNEL_FQN } from "@agentick/elicitation-next";
 import { waitFor } from "@agentick/utils-next/testing";
 
@@ -77,21 +77,21 @@ interface RequestRecord {
 }
 
 function stubClient(stream: SubscriptionStream): {
-  client: ClientProtocol;
+  client: ElicitationClient;
   seen: RequestRecord[];
 } {
   const seen: RequestRecord[] = [];
-  const client = {
+  const client: ElicitationClient = {
     transport: {
       subscribe(): SubscriptionStream {
         return stream;
       },
-    },
-    request<M extends WireMethod>(method: M, params: WireParams<M>): Promise<unknown> {
-      seen.push({ method, params: params as Record<string, unknown> });
-      return Promise.resolve(null);
-    },
-  } as unknown as ClientProtocol;
+      request<M extends WireMethod>(method: M, params: WireParams<M>): Promise<unknown> {
+        seen.push({ method, params: params as Record<string, unknown> });
+        return Promise.resolve(null);
+      },
+    } as ElicitationClient["transport"],
+  };
   return { client, seen };
 }
 

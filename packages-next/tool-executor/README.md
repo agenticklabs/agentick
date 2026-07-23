@@ -608,8 +608,9 @@ const sub = client.transport.subscribe(
 const { envelope } = (await sub[Symbol.asyncIterator]().next()).value;
 // envelope.payload = { kind: "snapshot", requests: [{ correlationId, replyTo, payload }] }
 for (const call of envelope.payload.requests) {
-  await client.session(sessionId).respondToToolCall(call.correlationId, await run(call.payload));
+  await respondToToolCall(client, sessionId, call.correlationId, await run(call.payload));
 }
+// …or just: client.session(sessionId).clientToolCalls.list() (the snapshot, folded).
 ```
 
 The opening frame is a `ToolCallSnapshotFrame` mirroring the live relay delta;
@@ -617,84 +618,68 @@ fire-and-forget notifies register nothing, so they never appear (there is
 nothing to answer). It carries no top-level `toolCallId`/`name`, so today's
 per-call fold skips it; live relays follow on the same stream.
 
-**Client side.** `@agentick/tool-executor-next/client` contributes the client-tool
-write verbs to the client `SessionHandle` (bundled into `@agentick/client-next`):
+**Client side.** `@agentick/tool-executor-next/client` contributes ONE handle,
+`session.clientToolCalls`, on the `ClientHandle` contract — the pending-call feed
+PLUS the folded control verbs (`.set`/`.route`/`.confirm`/`.respond`). Bundled
+into `@agentick/client-next`; self-assembles on import.
+
+**Declare your tool set — 3 lines.** `.set(...)` is a whole-slice REPLACE (the
+set IS the truth; reconnect = re-declare, drift-free):
 
 ```ts
-const ack = await client.session(id).setClientTools([toolA, toolB]); // → { count: 2 }
-await client.session(id).setClientTools([toolB, toolC]); // whole-slice replace: A gone, C added
-await client.session(id).setClientTools([]); // clear the client slice
-await client.session(id).respondToToolCall(correlationId, result);
+import "@agentick/tool-executor-next/client";
+
+const calls = client.session(id).clientToolCalls;
+const { count } = await calls.set([toolA, toolB]); // → session/set_client_tools
+await calls.set([toolB, toolC]); // A gone, C added   ·   await calls.set([]); // clear
 ```
 
-### The client router + confirmation policy (stage 3)
-
-The write verbs are the primitives; stage 3 adds the CONSUMER on top — the far
-side of `session:channel:tool_call`, plus a policy over tool-confirmation
-elicitations. All three self-assemble onto the client `SessionHandle` by
-importing `@agentick/tool-executor-next/client`.
-
-**`session.clientToolCalls`** — the inbound tool-call feed, a `ChannelStream` of
-`ClientToolCallHandle` (uniform with `session.tasks` / `session.elicitations`).
-Each handle carries the validated `input` + a typed `.respond`. Read it directly
-when you want to render calls yourself; the by-id `.respond(correlationId,
-result)` is the escape hatch for code holding a bare correlationId.
+**Route calls to handlers — dispatch → auto-respond.** `.route(handlers, opts?)`
+runs each inbound call through `handlers[name]` (or `opts.onUnknown`) and relays
+the result; a throw is answered with an error result — a suspended call is never
+left hanging. Returns an `Unsubscribe`:
 
 ```ts
-for await (const call of client.session(id).clientToolCalls) {
-  const result = await runLocally(call.name, call.input);
-  await call.respond(result); // → session/respond_to_tool_call
-}
-```
-
-**`session.routeClientTools(handlers, opts?)`** — the ergonomic router. It
-subscribes to `clientToolCalls`, dispatches each call to `handlers[name]` (or
-`opts.onUnknown`), awaits it, and relays the result. A handler THROW is caught
-and answered with an error result — a suspended call is never left hanging; an
-unknown tool defaults to an error result `no client handler for "<name>"`.
-Returns an `Unsubscribe` that stops routing and closes the subscription.
-
-```ts
-const stop = client.session(id).routeClientTools({
+const stop = calls.route({
+  open_file: async ({ path }) => read(path),
   get_weather: async ({ city }) => `sunny in ${city}`,
-  open_url: (input, { toolCallId }) => {
-    window.open((input as { url: string }).url);
-    return [{ type: "text", text: "opened" }];
-  },
 });
 ```
 
-> **Fire-and-forget.** A stage-1 non-`requiresResponse` client tool is relayed
-> via a one-way notify with NO `correlationId`. Those calls STILL surface on
-> `clientToolCalls` (so the client can render/react) and the router STILL runs
-> their handler — but the handle's `.respond` is a no-op and the router skips the
-> relay, because there is no suspended dispatch to resume. Discriminate on
-> `call.correlationId` presence.
-
-**`session.confirmClientTools(policy)`** — the confirmation policy. Tool
-confirmations arrive as ELICITATIONS with `hints.kind === "tool_confirmation"`
-(the gate publishes them through the ElicitationHarness). This consumes the
-client elicitation stream, FILTERS to confirmations, and applies `"approve"` /
-`"deny"` / a predicate on `{ toolName, toolUseId, arguments, message, preview }`
-(the fields the gate stamps onto `metadata`). Truthy → accept `{ approved: true }`;
-falsy → decline. Returns an `Unsubscribe`.
+**Confirm dangerous tools — one line.** `.confirm(policy)` answers
+`tool_confirmation` elicitations (`"approve"` / `"deny"` / a predicate over
+`{ toolName, toolUseId, arguments, message, preview }`):
 
 ```ts
-client.session(id).confirmClientTools("approve"); // trust everything (dev)
-client.session(id).confirmClientTools((req) => !req.toolName?.startsWith("rm")); // predicate
+calls.confirm("approve"); // trust everything (dev)
+calls.confirm((req) => !req.toolName?.startsWith("rm")); // predicate
 ```
 
-> **Coordination caveat.** If you use `confirmClientTools`, do NOT also answer
-> `tool_confirmation` elicitations in your own `session.elicitations` loop — both
-> would respond to the same `correlationId` (last responder wins /
-> double-respond). `confirmClientTools` subscribes via `onChange` on its own
-> elicitation subscription and IGNORES non-confirmation elicitations, so it never
-> steals an app's other prompts.
+- **The contract.** `list(): readonly ClientToolCallHandle[]` /
+  `get(correlationId)` (Enumerable — the PENDING correlated calls, snapshot-first
+  so a client connecting mid-call sees the outstanding one); each listed item
+  carries a typed `.respond(result)`. `subscribe(cb: () => void)` fires on change
+  (`cb` takes NO arguments). `respond(correlationId, result)` is the Respondable
+  by-id verb (rejects an unknown/answered id). `close()`. Passes
+  `runClientHandleConformance` (core + Enumerable + Respondable + the mid-call
+  listed-item round-trip + the `set` write verb).
+- **Fire-and-forget** calls (non-`requiresResponse`, NO `correlationId`) are NOT
+  pending — they don't enter `list()`; `.route` still dispatches their handler
+  (via an internal frame tap) but skips the reply.
+- **`respondToToolCall(client, sessionId, correlationId, result)`** is the free
+  by-id escape hatch (twin of `respondToElicitation`) — the unguarded raw-wire
+  reply, for code holding a bare `correlationId` outside the pending set.
+- **The once-loose slots are GONE** — `session.setClientTools` /
+  `.routeClientTools` / `.confirmClientTools` / `.respondToToolCall` are folded
+  onto the handle as `.set` / `.route` / `.confirm` / `.respond` (pre-1.0, no
+  deprecation).
 
 **Verified by** `src/__tests__/client-tool-router.spec.ts` (router: correlated
 relay → respond, unknown → error, throw → error, custom `onUnknown`,
-fire-and-forget → no respond) and `src/__tests__/client-tool-confirm.spec.ts`
-(policy approve/deny/predicate; non-confirmation elicitation left untouched).
+fire-and-forget → no respond), `src/__tests__/client-tool-confirm.spec.ts`
+(policy approve/deny/predicate), and
+`src/client/__tests__/client-tool-calls.conformance.spec.ts` (the ClientHandle
+contract).
 
 ## Abort
 
@@ -834,8 +819,8 @@ fixture behaviors into concrete handlers.
   tool registered via `toClientToolRegistration` entering `compileForTick` and
   dispatching through the client path.
 - `../transport-in-process/src/__tests__/client-tools.spec.ts` — the client
-  write verbs (`session.setClientTools` → `session/set_client_tools`,
-  `session.respondToToolCall` → `session/respond_to_tool_call`) issue the right
+  verbs (`session.clientToolCalls.set` → `session/set_client_tools`,
+  `respondToToolCall(...)` → `session/respond_to_tool_call`) issue the right
   wire methods with the right params.
 - `../transport-in-process/src/__tests__/client-tools-e2e.spec.ts` — the
   stage-2 GATEWAY-handler semantics over the real wire: `set_client_tools`

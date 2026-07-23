@@ -96,6 +96,13 @@ export interface TimelineView extends ChannelView<readonly TimelineEntry[], Time
    * module doc).
    */
   append(entries: readonly TimelineEntry[]): void;
+  /**
+   * Reset the window to empty (a LOCAL view reset — §5b trivial gap). Notifies
+   * the STATE feed once with the empty array; the live fold keeps tailing, so a
+   * subsequent server append re-grows the window from empty. Does NOT touch the
+   * server (nothing is deleted) — it clears only this client's held window.
+   */
+  clear(): void;
 }
 
 /**
@@ -158,6 +165,9 @@ export function timelineView(
       const incoming = keep(entries);
       if (incoming.length === 0) return; // no-op: same ref, no notify
       store.set([...store.get(), ...incoming]); // TAIL (optimistic); STATE feed only
+    },
+    clear(): void {
+      store.set([]); // reset the held window; STATE feed only, live fold untouched
     },
   };
 }

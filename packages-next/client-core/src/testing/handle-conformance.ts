@@ -80,13 +80,42 @@ export interface RespondableProbe<H extends ClientHandle, In = unknown> {
   readonly withPendingRequest: () => Promise<{
     readonly handle: H & Respondable<In>;
     readonly id: string;
-    readonly responded: () => readonly { readonly id: string; readonly input: In }[];
+    // The suite asserts only that the reply was ROUTED by id (`toMatchObject
+    // [{ id }]`) — a probe may report more, but need only surface the id.
+    readonly responded: () => readonly { readonly id: string }[];
     readonly teardown?: () => void | Promise<void>;
   }>;
   /** A sample input to respond with. */
   readonly sampleInput: In;
   /** An id known to be unknown (`respond` → rejects). Defaults to a sentinel. */
   readonly unknownId?: string;
+  /**
+   * OPTIONAL — for REQUEST-SHAPED Enumerables whose `list()` yields ITEM HANDLES
+   * (data + bound verbs), not bare data (Ryan 2026-07-22). The canonical
+   * acceptance case: a client connecting MID-ASK sees the pending request via
+   * `list()`, and calling the LISTED item's bound verb (`item.accept(value)` /
+   * `item.respond(result)`) round-trips to the server and resolves the pending
+   * op — proving the item handle is constructed IDENTICALLY whether the request
+   * arrived via the slice-2 snapshot frame or a live delta (one constructor,
+   * both sources). Supplied by `session.elicitations` / `session.clientToolCalls`;
+   * omitted by data-only Enumerables (knobs/tasks).
+   */
+  readonly listedItemRoundTrip?: {
+    /**
+     * Build a handle with ONE pending request seeded via the SNAPSHOT
+     * (pre-connection) path, so `list()`/`get(id)` reflect it before any live
+     * delta. Return the handle, the id addressing the pending request, and a spy
+     * reporting responses routed to the server.
+     */
+    readonly connect: () => Promise<{
+      readonly handle: H & Enumerable<unknown>;
+      readonly id: string;
+      readonly responded: () => readonly { readonly id: string }[];
+      readonly teardown?: () => void | Promise<void>;
+    }>;
+    /** Invoke the LISTED item handle's bound verb (e.g. `item.accept(value)`). */
+    readonly invoke: (item: unknown) => Promise<void>;
+  };
 }
 
 /** Probe for one derived write verb — the derived-from-wire check. */
@@ -257,6 +286,29 @@ function registerRespondableCases<H extends ClientHandle, In>(
       .then(() => "settled")
       .catch(() => "settled");
     expect(settled).toBe("settled");
+    handle.close?.();
+    await teardown?.();
+  });
+
+  // The acceptance case (Ryan 2026-07-22, north-star §1's dialog-button line):
+  // a LISTED item handle carries its bound verbs, and they round-trip the same
+  // whether the item arrived via the snapshot frame (pending, pre-connection) or
+  // a live delta. Runs iff the handle yields item handles from `list()`.
+  if (probe.listedItemRoundTrip) registerListedItemRoundTripCase(probe.listedItemRoundTrip);
+}
+
+function registerListedItemRoundTripCase(
+  probe: NonNullable<RespondableProbe<ClientHandle>["listedItemRoundTrip"]>,
+): void {
+  it("a LISTED pending item's bound verb round-trips (connect mid-ask → item.accept())", async () => {
+    const { handle, id, responded, teardown } = await probe.connect();
+    // list() reflects the PRE-CONNECTION pending ask (snapshot-first).
+    await waitFor(() => handle.list().length > 0);
+    const item = handle.get(id);
+    expect(item).toBeDefined(); // the listed item is a handle addressed by id
+    await probe.invoke(item); // e.g. item.accept(value) — the dialog-button line
+    await waitFor(() => responded().some((r) => r.id === id));
+    expect(responded().some((r) => r.id === id)).toBe(true);
     handle.close?.();
     await teardown?.();
   });

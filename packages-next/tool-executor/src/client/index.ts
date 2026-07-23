@@ -1,38 +1,40 @@
 /**
  * `@agentick/tool-executor-next/client` — the client-side client-tool surface.
  *
- * Two layers, both harness-runtime-free (out of the browser bundle):
+ * ONE handle, `session.clientToolCalls`, on the `ClientHandle` contract — the
+ * inbound tool-call feed (`list()` the pending calls, `subscribe(cb)`, reply by
+ * `respond(id, result)` or a listed item's `.respond(result)`) PLUS the folded
+ * control verbs:
  *
- *   - **Write verbs (stage 2)** — `session.setClientTools(declarations)`
- *     (DECLARE the client's full tool set — a whole-slice replace) and
- *     `session.respondToToolCall(correlationId, result)` (relay a tool-call
- *     result), riding `session/set_client_tools` / `session/respond_to_tool_call`.
- *   - **Consumer + policy (stage 3)** — `session.clientToolCalls` (the inbound
- *     tool-call feed), `session.routeClientTools(handlers, opts?)` (the
- *     ergonomic router: dispatch → auto-respond), and
- *     `session.confirmClientTools(policy)` (approve/deny/predicate over
- *     `tool_confirmation` elicitations).
+ *   - `.set(declarations)` — DECLARE the client's full tool set (a whole-slice
+ *     replace) over `session/set_client_tools`.
+ *   - `.route(handlers, opts?)` — the ergonomic router: dispatch → auto-respond.
+ *   - `.confirm(policy)` — approve/deny/predicate over `tool_confirmation`
+ *     elicitations.
  *
- * Depends on `@agentick/client-core-next` (the sub-handle registry) + spec
- * types (+ `@agentick/elicitation-next/client` for the confirmation stream) —
- * NOT on the tool-executor harness runtime. Mirrors the elicitation/tasks/knobs
- * `/client` convention.
+ * The once-loose session slots (`setClientTools`, `routeClientTools`,
+ * `confirmClientTools`) are GONE — folded onto the handle as `.set`/`.route`/
+ * `.confirm` (Ryan's Q1a, pre-1.0, no deprecation). `respondToToolCall` survives
+ * as the by-id escape-hatch free function (twin of `respondToElicitation`), for
+ * code holding a bare `correlationId` outside the handle's pending set.
  *
- * Importing this subpath contributes all five members to the client
- * `SessionHandle` (ADR 87).
+ * Depends on `@agentick/client-core-next` (the sub-handle registry) + spec types
+ * (+ `@agentick/elicitation-next/client` for `.confirm`) — NOT on the
+ * tool-executor harness runtime. Mirrors the elicitation/tasks/knobs `/client`
+ * convention.
  */
 
 export {
-  clientToolCallStream,
+  clientToolCallsHandle,
   respondToToolCall,
-  routeClientTools,
   type ClientToolCall,
   type ClientToolCallHandle,
+  type ClientToolCallsClient,
   type ClientToolCallsHandle,
   type ClientToolHandler,
   type RouteClientToolsOptions,
 } from "./client-tool-calls.js";
-export { confirmClientTools, type ConfirmPolicy, type ConfirmRequest } from "./confirm.js";
+export { type ConfirmPolicy, type ConfirmRequest } from "./confirm.js";
 
-// Side-effect: type the slots (declare module) + register the runtime factories.
+// Side-effect: type the slot (declare module) + register the runtime factory.
 import "./register.js";

@@ -113,7 +113,7 @@ function fakeHandle(
     },
     set(id: string, value: number): Promise<void> {
       return spy.transport
-        .request("knobs/set" as never, { sessionId, key: id, value } as never)
+        .request("knobs/set" as never, { sessionId, id, value } as never)
         .then(() => undefined);
     },
     respondedLog: () => responded,

@@ -3,9 +3,10 @@
  *
  * The server publishes elicitation prompts on
  * `session:channel:elicitation`. The client receives them as
- * `ClientElicitation` values via the `SessionHandle.elicitations`
- * property (an `ElicitationsHandle`) and replies via
- * `session.elicitations.respond({ correlationId, outcome, value })` — or
+ * `ClientElicitation` item handles via the `SessionHandle.elicitations`
+ * property (an `ElicitationsHandle` — `list()`/`get(id)` the pending asks,
+ * `subscribe(cb)` on change) and replies via
+ * `session.elicitations.respond(correlationId, { outcome, value })` — or
  * per-item `e.accept(value)` / `e.decline()` / `e.cancel()` — which
  * routes through the `session/respond_to_elicitation` wire method to the
  * server's `bridges.elicitation.respond()`.
@@ -103,6 +104,9 @@ export interface ClientElicitationHandle<TValue = unknown> extends ClientElicita
   cancel(reason?: string): Promise<void>;
 }
 
-// The elicitation read surface is a `ChannelStream<ClientElicitationHandle>`
-// (uniform with tasks/knobs) — see `@agentick/elicitation-next/client`. There is
-// no bespoke stream type; that's the point (ADR 33 — one read primitive).
+// The elicitation read surface is an `Enumerable<ClientElicitationHandle>` on
+// the `ClientHandle` contract (uniform with tasks/knobs) — see
+// `@agentick/elicitation-next/client`. `list()` yields item handles (data +
+// `.accept`/`.decline`/`.cancel`), seeded snapshot-first; there is no bespoke
+// stream type and no `AsyncIterable` (client-handles §3 — observe unbounded,
+// iterate bounded).

@@ -55,10 +55,11 @@ export const knobsWireExtension: WireExtension = defineWireExtension({
         throw new AppNotFoundError({ appId: params.sessionId });
       }
 
-      // Map the wire row (`key`/`value`) onto the handle's `KnobsSetInput`
-      // (`id`/`value`). The handle returns void; the write's observable
-      // effect returns to the client as a `knobs-state` delta (CQRS).
-      await session.knobs.set({ id: params.key, value: params.value as KnobPrimitive });
+      // The wire row (`id`/`value`) IS the handle's `KnobsSetInput` shape
+      // (friction #13: one name — `id` — client to server, no rename at the
+      // boundary). The handle returns void; the write's observable effect
+      // returns to the client as a `knobs-state` delta (CQRS).
+      await session.knobs.set({ id: params.id, value: params.value as KnobPrimitive });
       return null;
     },
   },

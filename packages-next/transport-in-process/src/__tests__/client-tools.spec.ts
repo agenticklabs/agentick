@@ -2,21 +2,22 @@
  * Client-side client-tool WRITE verbs — end-to-end smoke.
  *
  * Verifies the stage-2 client/server contract for "client declares its tools +
- * relays a result":
+ * relays a result", now on the `session.clientToolCalls` handle (B2 slice 3):
  *
- *   1. `session.setClientTools(declarations)` routes through the
+ *   1. `session.clientToolCalls.set(declarations)` routes through the
  *      `session/set_client_tools` wire method with the serializable set (the
  *      declarative whole-slice replace).
- *   2. `session.respondToToolCall(correlationId, result)` routes through
- *      `session/respond_to_tool_call` with the correlationId + result.
+ *   2. `respondToToolCall(client, sessionId, correlationId, result)` (the by-id
+ *      escape hatch) routes through `session/respond_to_tool_call`.
  *
  * Mirrors `elicitation.spec.ts`: the dispatcher's real routing is exercised
  * against a stub JSON-RPC handler; the full suspend-resume-through-the-loop
  * flow is covered by the tool-executor harness tests (`client-tools.spec.ts`).
  */
 
-// ADR 87 — contributes `session.setClientTools` / `.respondToToolCall`.
+// ADR 87 — contributes `session.clientToolCalls` (the folded handle).
 import "@agentick/tool-executor-next/client";
+import { respondToToolCall } from "@agentick/tool-executor-next/client";
 
 import { createClient } from "@agentick/client-core-next";
 import type {
@@ -39,7 +40,7 @@ const DECL: ClientToolDeclaration = {
 };
 
 describe("client client-tool surface — wire methods", () => {
-  it("session.setClientTools issues session/set_client_tools with the declaration set", async () => {
+  it("clientToolCalls.set issues session/set_client_tools with the declaration set", async () => {
     const seen: Array<{ method: string; params: unknown }> = [];
     const handler = async (req: JsonRpcRequest): Promise<JsonRpcResponse> => {
       seen.push({ method: req.method, params: req.params });
@@ -56,7 +57,7 @@ describe("client client-tool surface — wire methods", () => {
     const client = await createClient({ transport: inProcessTransport({ handler }) });
     await client.connect();
 
-    const ack = await client.session("sess-1").setClientTools([DECL]);
+    const ack = await client.session("sess-1").clientToolCalls.set([DECL]);
     expect(ack).toEqual({ count: 1 });
 
     const params = seen.find((s) => s.method === "session/set_client_tools")
@@ -68,7 +69,7 @@ describe("client client-tool surface — wire methods", () => {
     await client.close();
   });
 
-  it("session.setClientTools([]) issues the verb with an empty set (clear the slice)", async () => {
+  it("clientToolCalls.set([]) issues the verb with an empty set (clear the slice)", async () => {
     const seen: Array<SessionSetClientToolsParams> = [];
     const handler = async (req: JsonRpcRequest): Promise<JsonRpcResponse> => {
       if (req.method === "session/set_client_tools") {
@@ -85,7 +86,7 @@ describe("client client-tool surface — wire methods", () => {
     const client = await createClient({ transport: inProcessTransport({ handler }) });
     await client.connect();
 
-    const ack = await client.session("sess-clear").setClientTools([]);
+    const ack = await client.session("sess-clear").clientToolCalls.set([]);
     expect(ack).toEqual({ count: 0 });
     expect(seen).toHaveLength(1);
     expect(seen[0]!.declarations).toEqual([]);
@@ -93,7 +94,7 @@ describe("client client-tool surface — wire methods", () => {
     await client.close();
   });
 
-  it("session.respondToToolCall issues session/respond_to_tool_call with correlationId + result", async () => {
+  it("respondToToolCall issues session/respond_to_tool_call with correlationId + result", async () => {
     const seen: Array<SessionRespondToToolCallParams> = [];
     const handler = async (req: JsonRpcRequest): Promise<JsonRpcResponse> => {
       if (req.method === "session/respond_to_tool_call") {
@@ -109,10 +110,9 @@ describe("client client-tool surface — wire methods", () => {
 
     const client = await createClient({ transport: inProcessTransport({ handler }) });
     await client.connect();
-    const sess = client.session("sess-2");
 
     await expect(
-      sess.respondToToolCall("corr:abc", [{ type: "text", text: "sunny, 24C" }]),
+      respondToToolCall(client, "sess-2", "corr:abc", [{ type: "text", text: "sunny, 24C" }]),
     ).resolves.toBeUndefined();
 
     expect(seen).toHaveLength(1);
@@ -123,7 +123,7 @@ describe("client client-tool surface — wire methods", () => {
     await client.close();
   });
 
-  it("exposes both verbs as functions on the SessionHandle", async () => {
+  it("exposes the folded verbs on the clientToolCalls handle", async () => {
     const handler = async (req: JsonRpcRequest): Promise<JsonRpcResponse> => ({
       jsonrpc: "2.0",
       id: req.id,
@@ -131,9 +131,12 @@ describe("client client-tool surface — wire methods", () => {
     });
     const client = await createClient({ transport: inProcessTransport({ handler }) });
     await client.connect();
-    const sess = client.session("sess-3");
-    expect(typeof sess.setClientTools).toBe("function");
-    expect(typeof sess.respondToToolCall).toBe("function");
+    const calls = client.session("sess-3").clientToolCalls;
+    expect(typeof calls.set).toBe("function");
+    expect(typeof calls.route).toBe("function");
+    expect(typeof calls.confirm).toBe("function");
+    expect(typeof calls.respond).toBe("function");
+    calls.close();
     await client.close();
   });
 });
