@@ -16,9 +16,16 @@ import { runServerTransportConformance } from "@agentick/spec-conformance-next";
 import { describe, expect, it } from "vitest";
 
 import { http } from "../client/index.js";
-import { httpServerTransport } from "../server/index.js";
+import { fetchServerTransport, httpServerTransport } from "../server/index.js";
 
 runServerTransportConformance("httpServerTransport", () => httpServerTransport({ port: 0 }));
+
+// The embedded door is the fifth ServerTransport implementor (ADR 84 §2) — it
+// binds/sweeps a host slot + session map instead of a Node port, but the
+// abstract lifecycle contract (id, listen, close, idempotency, re-listen) is
+// identical. The web-standard request/response behavior is proven separately in
+// `embedded-fetch-handler.spec.ts`.
+runServerTransportConformance("fetchServerTransport", () => fetchServerTransport().transport);
 
 /** Grab an ephemeral port, then release it so the transport can claim it. */
 async function freePort(): Promise<number> {

@@ -1,24 +1,59 @@
 /**
  * The EMBEDDED gateway entry door (C4.5) — driven through the ACTUAL
- * `httpFetchHandler` by constructing web-standard `Request` objects and
- * asserting the `Response`. No Node `http.Server`, no port: this is the
- * fetch-native surface an adopter mounts inside Hono / Nitro / Next.js.
+ * `fetchServerTransport` handler by constructing web-standard `Request`
+ * objects and asserting the `Response`. No Node `http.Server`, no port: this
+ * is the fetch-native surface an adopter mounts inside Hono / Nitro / Next.js.
  *
- * Covers the six acceptance proofs: identity round-trip, identity
- * short-circuit, fail-closed default + host-managed opt-out, scope
- * enforcement through the existing authorizeDispatch path, the subscription
- * stream, and a compile-only mount example.
+ * The door is a `ServerTransport`: the handler closes over a host slot that
+ * `transport.listen(host)` fills and `transport.close()` sweeps. Covers the
+ * ten acceptance proofs — identity round-trip, identity short-circuit,
+ * fail-closed default + host-managed opt-out, scope enforcement through the
+ * existing authorizeDispatch path, the subscription stream, a compile-only
+ * mount example, gateway-close sweeps sessions, and the pre-listen refusal.
+ * ServerTransport conformance (the 6 probes) runs in `server-transport.spec.ts`.
  */
 
 import { describe, expect, it } from "vitest";
-import { createGateway, permissiveAuthorizer, staticAuthorizer } from "@agentick/gateway-next";
-import { claimsAuthorizer } from "@agentick/gateway-next";
+import {
+  claimsAuthorizer,
+  createGateway,
+  permissiveAuthorizer,
+  staticAuthorizer,
+  type GatewayHarness,
+} from "@agentick/gateway-next";
+import type { Authorizer } from "@agentick/spec-next";
 import { spyAuthorizer } from "@agentick/transport-next/testing";
 import { waitFor } from "@agentick/utils-next/testing";
 
-import { httpFetchHandler, type FetchHandler, type Identity } from "../server/fetch-handler.js";
+import {
+  fetchServerTransport,
+  type FetchHandler,
+  type FetchHandlerOptions,
+  type Identity,
+} from "../server/fetch-handler.js";
 
 const URL_BASE = "http://127.0.0.1/agentick";
+
+/**
+ * Construct the transport, bind it to a fresh gateway (the ADR 84 §2
+ * `listen(host)` step), and hand back the handler + a teardown.
+ */
+async function bound(
+  authorizer: Authorizer,
+  options: FetchHandlerOptions,
+): Promise<{ gateway: GatewayHarness; handler: FetchHandler; teardown: () => Promise<void> }> {
+  const gateway = await createGateway({ authorizer });
+  const { transport, handler } = fetchServerTransport(options);
+  await transport.listen(gateway);
+  return {
+    gateway,
+    handler,
+    teardown: async () => {
+      await transport.close();
+      await gateway.close();
+    },
+  };
+}
 
 /** Build a POST Request carrying a JSON-RPC frame. Host is loopback so the
  *  default web-security host allow-list admits it. */
@@ -43,8 +78,7 @@ async function body(res: Response): Promise<any> {
 describe("embedded fetch handler — identity round-trip (proof 1)", () => {
   it("a stubbed identity fn supplies a principal; dispatch sees THAT principal", async () => {
     const spy = spyAuthorizer();
-    const gateway = await createGateway({ authorizer: spy.authorizer });
-    const handler = httpFetchHandler(gateway, {
+    const { handler, teardown } = await bound(spy.authorizer, {
       csrf: false,
       identity: () => ({ principal: "alice", scopes: ["gateway:list_apps"] }),
     });
@@ -58,19 +92,21 @@ describe("embedded fetch handler — identity round-trip (proof 1)", () => {
     // The authorizer at the dispatch choke point saw the identity fn's principal.
     expect(spy.seen).toContain("alice");
 
-    await gateway.close();
+    await teardown();
   });
 });
 
 describe("embedded fetch handler — identity short-circuit (proof 2)", () => {
   it("identity fn returning a Response is delivered verbatim; nothing reaches dispatch", async () => {
     const spy = spyAuthorizer();
-    const gateway = await createGateway({ authorizer: spy.authorizer });
     const rejection = new Response(JSON.stringify({ why: "host said no" }), {
       status: 401,
       headers: { "X-Host-Auth": "denied" },
     });
-    const handler = httpFetchHandler(gateway, { csrf: false, identity: () => rejection });
+    const { handler, teardown } = await bound(spy.authorizer, {
+      csrf: false,
+      identity: () => rejection,
+    });
 
     const res = await handler(rpc("gateway/list_apps"));
 
@@ -80,15 +116,14 @@ describe("embedded fetch handler — identity short-circuit (proof 2)", () => {
     // The choke point was never reached — the host's own rejection stopped it.
     expect(spy.seen).toHaveLength(0);
 
-    await gateway.close();
+    await teardown();
   });
 });
 
 describe("embedded fetch handler — fail-closed default + host-managed opt-out (proof 3)", () => {
   it("no identity fn → refused with a typed error (fail closed)", async () => {
     const spy = spyAuthorizer();
-    const gateway = await createGateway({ authorizer: spy.authorizer });
-    const handler = httpFetchHandler(gateway, { csrf: false });
+    const { handler, teardown } = await bound(spy.authorizer, { csrf: false });
 
     const res = await handler(rpc("gateway/list_apps"));
     const payload = await body(res);
@@ -97,13 +132,12 @@ describe("embedded fetch handler — fail-closed default + host-managed opt-out 
     expect(payload.error._tag).toBe("IngressAuthRequired");
     expect(spy.seen).toHaveLength(0);
 
-    await gateway.close();
+    await teardown();
   });
 
   it('security: "host-managed" with no identity fn → proceeds as the local pole', async () => {
     const spy = spyAuthorizer();
-    const gateway = await createGateway({ authorizer: spy.authorizer });
-    const handler = httpFetchHandler(gateway, { security: "host-managed" });
+    const { handler, teardown } = await bound(spy.authorizer, { security: "host-managed" });
 
     const res = await handler(rpc("gateway/list_apps"));
     const payload = await body(res);
@@ -113,39 +147,44 @@ describe("embedded fetch handler — fail-closed default + host-managed opt-out 
     // Local pole: dispatch ran with no principal.
     expect(spy.seen).toContain(undefined);
 
-    await gateway.close();
+    await teardown();
   });
 });
 
 describe("embedded fetch handler — scopes flow through authorizeDispatch (proof 4)", () => {
   it("in-scope method is allowed; out-of-scope method is DENIED by the existing choke point", async () => {
+    // One gateway, two transports bound to it (each with a different scope set).
     const gateway = await createGateway({ authorizer: claimsAuthorizer() });
 
-    const inScope = httpFetchHandler(gateway, {
+    const inScope = fetchServerTransport({
       csrf: false,
       identity: () => ({ principal: "alice", scopes: ["gateway:list_apps"] }),
     });
-    const allowed = await body(await inScope(rpc("gateway/list_apps")));
-    expect(allowed.result).toBeDefined();
-    expect(allowed.error).toBeUndefined();
-
-    const outOfScope = httpFetchHandler(gateway, {
+    const outOfScope = fetchServerTransport({
       csrf: false,
       identity: () => ({ principal: "alice", scopes: ["session:send"] }),
     });
-    const denied = await body(await outOfScope(rpc("gateway/list_apps")));
+    await inScope.transport.listen(gateway);
+    await outOfScope.transport.listen(gateway);
+
+    const allowed = await body(await inScope.handler(rpc("gateway/list_apps")));
+    expect(allowed.result).toBeDefined();
+    expect(allowed.error).toBeUndefined();
+
+    const denied = await body(await outOfScope.handler(rpc("gateway/list_apps")));
     expect(denied.result).toBeUndefined();
     // WireRpcError.forbidden → JSON-RPC Forbidden (-32003).
     expect(denied.error.code).toBe(-32003);
 
+    await inScope.transport.close();
+    await outOfScope.transport.close();
     await gateway.close();
   });
 });
 
 describe("embedded fetch handler — subscription over the handler surface (proof 5)", () => {
   it("GET SSE + sub/subscribe delivers at least one frame, then tears down on cancel", async () => {
-    const gateway = await createGateway({ authorizer: permissiveAuthorizer() });
-    const handler = httpFetchHandler(gateway, {
+    const { gateway, handler, teardown } = await bound(permissiveAuthorizer(), {
       csrf: false,
       identity: () => ({ principal: "alice", scopes: ["*"] }),
     });
@@ -200,14 +239,13 @@ describe("embedded fetch handler — subscription over the handler surface (proo
     await reader.cancel();
     await pump;
 
-    await gateway.close();
+    await teardown();
   });
 });
 
 describe("embedded fetch handler — web-security stays ON by default when embedded", () => {
   it("a cross-site request is rejected (security applies MORE, not less, when embedded)", async () => {
-    const gateway = await createGateway({ authorizer: spyAuthorizer().authorizer });
-    const handler = httpFetchHandler(gateway, {
+    const { handler, teardown } = await bound(spyAuthorizer().authorizer, {
       identity: () => ({ principal: "alice" }),
     });
 
@@ -225,6 +263,78 @@ describe("embedded fetch handler — web-security stays ON by default when embed
     );
 
     expect(res.status).toBe(403);
+    await teardown();
+  });
+});
+
+describe("embedded fetch handler — gateway.close() sweeps live sessions (proof 9)", () => {
+  it("gateway-owned transport: close() closes open SSE streams and unbinds", async () => {
+    // The REAL ownership path — the gateway binds the transport at listen()
+    // and sweeps it at close().
+    const { transport, handler } = fetchServerTransport({
+      csrf: false,
+      identity: () => ({ principal: "alice", scopes: ["*"] }),
+    });
+    const gateway = await createGateway({
+      authorizer: permissiveAuthorizer(),
+      transports: [transport],
+    });
+    await gateway.listen();
+
+    const getRes = await handler(
+      new Request(URL_BASE, {
+        method: "GET",
+        headers: { Accept: "text/event-stream", Host: "127.0.0.1" },
+      }),
+    );
+    const reader = getRes.body!.getReader();
+    // The `: connected` frame proves the stream is live before close.
+    const first = await reader.read();
+    expect(first.done).toBe(false);
+
+    // gateway.close() fans out to transport.close() → sweeps the session →
+    // closeWire() closes the SSE controller. The reader observes end-of-stream.
+    await gateway.close();
+    let done = false;
+    for (let i = 0; i < 50 && !done; i++) {
+      const r = await reader.read();
+      done = r.done;
+    }
+    expect(done).toBe(true);
+
+    // The transport is unbound now — a subsequent request is refused honestly.
+    const after = await handler(rpc("gateway/list_apps"));
+    expect(after.status).toBe(503);
+  });
+});
+
+describe("embedded fetch handler — pre-listen / post-close refusal (proof 10)", () => {
+  it("a request before listen() → honest 503 with a typed JSON-RPC error", async () => {
+    // Constructed but never bound (the handler is mounted at app-setup, before
+    // the gateway exists).
+    const { transport, handler } = fetchServerTransport({
+      csrf: false,
+      identity: () => ({ principal: "alice" }),
+    });
+
+    const res = await handler(rpc("gateway/list_apps"));
+    const payload = await body(res);
+
+    expect(res.status).toBe(503);
+    expect(payload.error.code).toBe(-32600); // InvalidRequest — the gateway-closed mapping
+    expect(payload.error.data.reason).toBe("not-listening");
+
+    // Bind, and the same request now dispatches.
+    const gateway = await createGateway({ authorizer: permissiveAuthorizer() });
+    await transport.listen(gateway);
+    const ok = await handler(rpc("gateway/list_apps"));
+    expect(ok.status).toBe(200);
+
+    // Close, and it refuses again (post-close is the same not-listening state).
+    await transport.close();
+    const afterClose = await handler(rpc("gateway/list_apps"));
+    expect(afterClose.status).toBe(503);
+
     await gateway.close();
   });
 });
@@ -239,10 +349,8 @@ describe("embedded fetch handler — Hono-style mount typechecks (proof 6)", () 
       all(path: string, fn: (c: HonoLikeContext) => Response | Promise<Response>): void;
     }
 
-    const gateway = await createGateway({ authorizer: staticAuthorizer({ grants: {} }) });
-
-    // The drawn adopter code — the identity callback returns the ADR-48 shape.
-    const handler: FetchHandler = httpFetchHandler(gateway, {
+    // The drawn adopter code — construct + mount BEFORE the gateway exists.
+    const { transport, handler } = fetchServerTransport({
       identity: async (req): Promise<Identity | Response> => {
         const token = req.headers.get("authorization");
         if (!token) return new Response(null, { status: 401 });
@@ -262,6 +370,12 @@ describe("embedded fetch handler — Hono-style mount typechecks (proof 6)", () 
     expect(calls).toEqual(["/agentick/*"]);
     expect(typeof handler).toBe("function");
 
+    // …then the gateway owns it.
+    const gateway = await createGateway({
+      authorizer: staticAuthorizer({ grants: {} }),
+      transports: [transport],
+    });
+    await gateway.listen();
     await gateway.close();
   });
 });

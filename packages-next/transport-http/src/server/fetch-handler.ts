@@ -1,14 +1,31 @@
 /**
- * `httpFetchHandler(gateway, options)` — the EMBEDDED gateway entry door
- * (C4.5). A web-standard `(req: Request) => Promise<Response>` that mounts
- * inside any fetch-native HTTP framework (Hono, Nitro, Next.js route
- * handlers, Bun/Deno servers, or Node via a framework's fetch adapter):
+ * `fetchServerTransport(options)` — the EMBEDDED gateway entry door (C4.5).
+ * A {@link ServerTransport} whose wire is a web-standard `(req: Request) =>
+ * Promise<Response>`, mountable inside any fetch-native HTTP framework (Hono,
+ * Nitro, Next.js route handlers, Bun/Deno servers, or Node via a framework's
+ * fetch adapter). It is the FIFTH `ServerTransport` implementor, alongside
+ * in-process / ws / http / unix — so the embedded door participates in the
+ * gateway lifecycle exactly like the others:
  *
  * ```ts
- * import { httpFetchHandler } from "@agentick/transport-http-next/fetch";
- * const handler = httpFetchHandler(gateway, { identity });
- * app.all("/agentick/*", (c) => handler(c.req.raw));
+ * import { fetchServerTransport } from "@agentick/transport-http-next/fetch";
+ *
+ * const { transport, handler } = fetchServerTransport({ identity });
+ * app.all("/agentick/*", (c) => handler(c.req.raw)); // mount at app-setup time
+ *
+ * const gateway = await createGateway({ transports: [transport] });
+ * await gateway.listen(); // binds the transport (fills the host slot)
+ * // …
+ * await gateway.close(); // sweeps every open SSE connection + unbinds
  * ```
+ *
+ * The `handler` is constructed BEFORE the gateway exists (so the adopter can
+ * mount it in their framework's route table at setup time) and closes over a
+ * host slot that `transport.listen(host)` fills — the one thing only the
+ * gateway can supply (ADR 84 §2: wire config binds at construction, the host
+ * at listen). Requests that arrive before `listen()` or after `close()` get an
+ * honest `503` (the gateway enforces `listen()`-before-`createApp`, so
+ * pre-listen traffic is a host-app ordering bug, never a silent queue).
  *
  * It is the same pipeline as {@link httpServer} — {@link dispatchRequest},
  * {@link resolveWebSecurity}, the {@link BaseConnectionContext} fan-out, the
@@ -45,11 +62,13 @@
 import {
   ErrorCode,
   IngressAuthRequired,
+  WireRpcError,
   type IngressIdentity,
   type JsonRpcFrame,
   type JsonRpcId,
   type JsonRpcRequest,
   type JsonRpcResponse,
+  type ServerTransport,
 } from "@agentick/spec-next";
 import {
   BaseConnectionContext,
@@ -73,8 +92,20 @@ import { encodeSseFrame } from "../shared/sse.js";
  */
 export type Identity = IngressIdentity;
 
-/** The web-standard handler {@link httpFetchHandler} returns. */
+/** The web-standard handler {@link fetchServerTransport} returns. */
 export type FetchHandler = (req: Request) => Promise<Response>;
+
+/**
+ * What {@link fetchServerTransport} returns: the {@link ServerTransport} the
+ * gateway owns (`createGateway({ transports: [transport] })`) and the
+ * {@link FetchHandler} the adopter mounts in their framework. The two share
+ * one host slot + session map — `listen`/`close` on the transport bind and
+ * sweep exactly the state the handler serves.
+ */
+export interface FetchServerTransport {
+  readonly transport: ServerTransport;
+  readonly handler: FetchHandler;
+}
 
 export interface FetchHandlerOptions extends WebSecurityOptions {
   /**
@@ -109,24 +140,35 @@ export interface FetchHandlerOptions extends WebSecurityOptions {
 
 const SESSION_ID_HEADER = "mcp-session-id";
 
-export function httpFetchHandler(
-  host: DispatchHost,
-  options: FetchHandlerOptions = {},
-): FetchHandler {
+export function fetchServerTransport(options: FetchHandlerOptions = {}): FetchServerTransport {
   const security = resolveWebSecurity(options);
   const hostManaged = options.security === "host-managed";
   const identityFn = options.identity;
   const heartbeatMs = options.heartbeatIntervalMs ?? 30_000;
   const pathPrefix = options.path;
 
+  // Bound-host slot: null until `listen(host)`, null again after `close()`.
+  // The handler reads it per request; a null slot is the not-listening state.
+  let host: DispatchHost | null = null;
   // Per-session-id fan-out state, keyed exactly like the Node server's map.
   const sessions = new Map<string, FetchSessionConnection>();
 
-  return async function handle(req: Request): Promise<Response> {
+  const handler: FetchHandler = async (req: Request): Promise<Response> => {
     const url = new URL(req.url);
     if (pathPrefix !== undefined && !url.pathname.startsWith(pathPrefix)) {
       return new Response(null, { status: 404 });
     }
+
+    // Not bound (pre-listen / post-close) — refuse honestly with a 503. The
+    // gateway binds this transport at `gateway.listen()` and sweeps it at
+    // `gateway.close()`; a request outside that window is a host-app ordering
+    // bug surfaced, never silently queued.
+    if (!host) return notListening();
+    // Pin the bound host for THIS request: the slot is a closure `let` that a
+    // concurrent `close()` could null between the guard and a later `await`, so
+    // an in-flight request completes against the host it was admitted under
+    // (control-flow narrowing on the captured `let` is otherwise lost at await).
+    const boundHost: DispatchHost = host;
 
     const reqLike = toWebRequestLike(req);
 
@@ -167,11 +209,11 @@ export function httpFetchHandler(
 
     switch (req.method) {
       case "POST":
-        return handlePost(req, sessions, sessionIdHeader, host, identity, respond);
+        return handlePost(req, sessions, sessionIdHeader, boundHost, identity, respond);
       case "GET": {
         const accept = req.headers.get("accept") ?? "";
         if (!accept.includes("text/event-stream")) return new Response(null, { status: 406 });
-        return handleGet(sessions, sessionIdHeader, host, heartbeatMs, respond);
+        return handleGet(sessions, sessionIdHeader, boundHost, heartbeatMs, respond);
       }
       case "DELETE":
         handleDelete(sessions, sessionIdHeader);
@@ -180,6 +222,36 @@ export function httpFetchHandler(
         return new Response(null, { status: 405 });
     }
   };
+
+  const transport: ServerTransport = {
+    id: "http:fetch",
+
+    // Fill the host slot (ADR 84 §2). Idempotent while bound: a second
+    // `listen()` with the same or a different host is a safe no-op.
+    listen(gateway): Promise<void> {
+      if (!host) host = gateway;
+      return Promise.resolve();
+    },
+
+    // Unbind + sweep every live connection: `FetchSessionConnection.close()`
+    // runs `closeWire()` (clears the heartbeat, closes the SSE controller),
+    // then the map is dropped so a re-`listen()` starts fresh. Idempotent:
+    // closing an unbound / already-closed transport resolves without error.
+    async close(): Promise<void> {
+      if (!host) return;
+      host = null;
+      for (const session of sessions.values()) {
+        try {
+          await session.close();
+        } catch {
+          // best effort — one connection's teardown must not block the rest
+        }
+      }
+      sessions.clear();
+    },
+  };
+
+  return { transport, handler };
 }
 
 // ============================================================================
@@ -503,6 +575,29 @@ function toWebRequestLike(req: Request): WebRequestLike {
 
 function newSessionId(): string {
   return `sess-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/**
+ * The not-listening refusal (pre-`listen()` / post-`close()`). `503` at the
+ * transport layer + a typed JSON-RPC error body — the same `InvalidRequest`
+ * code the gateway's own `GatewayClosedError` / `GatewayNotStartedError` map to
+ * on the wire (`agentickErrorToWireCode`), so a closed/not-yet-started gateway
+ * reads identically whether the frame reached dispatch or was refused here.
+ */
+function notListening(): Response {
+  const error = new WireRpcError(
+    ErrorCode.InvalidRequest,
+    "gateway transport is not accepting requests (not listening)",
+    { reason: "not-listening" },
+  );
+  return new Response(
+    JSON.stringify({
+      jsonrpc: "2.0",
+      id: null,
+      error: { code: error.code, message: error.message, data: error.data },
+    }),
+    { status: 503, headers: { "Content-Type": "application/json" } },
+  );
 }
 
 export type { DispatchHost };

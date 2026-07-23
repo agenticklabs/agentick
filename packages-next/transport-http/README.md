@@ -170,17 +170,22 @@ type HttpServerTransportConfig =
 > principals — the per-session connection state deliberately caches no
 > identity.
 
-### `httpFetchHandler(gateway, options): FetchHandler` — the embedded gateway (`@agentick/transport-http-next/fetch`)
+### `fetchServerTransport(options): { transport, handler }` — the embedded gateway (`@agentick/transport-http-next/fetch`)
 
 Mount the gateway INSIDE an existing fetch-native HTTP framework (Hono,
-Nitro, Next.js route handlers, Bun/Deno) instead of owning a port. Same
-pipeline as `httpServer` (`dispatchRequest`, `resolveWebSecurity`, the SSE
-codec) behind a web-standard `(req: Request) => Promise<Response>`:
+Nitro, Next.js route handlers, Bun/Deno) instead of owning a port. The
+embedded door is the **fifth `ServerTransport`** (alongside in-process / ws /
+http / unix): the gateway owns it, so `gateway.listen()` binds it and
+`gateway.close()` sweeps every open SSE connection. Same pipeline as
+`httpServer` (`dispatchRequest`, `resolveWebSecurity`, the SSE codec) behind a
+web-standard `(req: Request) => Promise<Response>`:
 
 ```ts
-import { httpFetchHandler } from "@agentick/transport-http-next/fetch";
+import { fetchServerTransport } from "@agentick/transport-http-next/fetch";
 
-const handler = httpFetchHandler(gateway, {
+// Construct BEFORE the gateway exists, so you can mount the handler in your
+// framework's route table at app-setup time.
+const { transport, handler } = fetchServerTransport({
   // YOUR auth already ran in YOUR middleware — hand us the RESULT, never tokens.
   identity: async (req) => {
     const user = await myAuth(req); // your session/JWT/cookie check
@@ -194,7 +199,18 @@ const handler = httpFetchHandler(gateway, {
 });
 
 app.all("/agentick/*", (c) => handler(c.req.raw)); // Hono
+
+const gateway = await createGateway({ transports: [transport] });
+await gateway.listen(); // binds the transport (fills the host slot)
+// …later: await gateway.close() sweeps open SSE streams + unbinds.
 ```
+
+`transport.listen(host)` fills the handler's host slot (the one thing only the
+gateway can supply, ADR 84 §2 — all other config binds at construction); a
+request that arrives **before `listen()` or after `close()`** gets an honest
+`503` (typed JSON-RPC `InvalidRequest` body — the gateway enforces
+`listen()`-before-`createApp`, so pre-listen traffic is a host-app ordering
+bug, never a silent queue).
 
 `identity` is the ONLY difference from standalone HTTP: the host's existing
 auth piggybacks here per request. Returning a `Response` short-circuits (the
@@ -212,12 +228,6 @@ framework.
 > `allowedHosts` (security applies MORE when embedded, not less). There is no
 > TCP peer on a web `Request`, so `trustProxy` is inert — the adopter's
 > framework terminates the connection and owns the network boundary.
-
-> **Why a free function, not `gateway.handler()`?** `transport-http` sits
-> ABOVE `gateway` in the dependency graph (its tests construct a real
-> gateway). A `gateway.handler()` method would invert that into a build
-> cycle. The handler binds to the gateway by argument instead — one extra
-> token, no cycle.
 
 ## Patterns
 
@@ -269,7 +279,8 @@ under "Roadmap & known gaps" with an explicit marker.
 | Per-request ingress authn — valid/invalid/missing bearer, prototype-key guard, no cross-request identity bleed (two POSTs, one session)                | `src/__tests__/ingress-authn.spec.ts` (`runIngressAuthnConformance`)                                             |
 | `httpServerTransport` — `ServerTransport` conformance + real gateway-owned bind (`gateway.listen()` creates + binds the node server, ping round-trips; `gateway.close()` frees the port) | `src/__tests__/server-transport.spec.ts` (`runServerTransportConformance`)                                       |
 | Security defaults (STATUS A2 §4c) — CSRF bootstrap handshake + missing/invalid-token deny, cross-site `Origin`/`Sec-Fetch-Site` deny, `Host` allow-list deny, non-permissive CORS (allowlisted origin echoed, never `*`), loopback bind default; overrides (`csrf:false`, `allowedOrigins`, `allowedHosts`) | `src/__tests__/security.spec.ts` + policy matrix in `@agentick/transport-next` `src/__tests__/web-security.spec.ts` |
-| Embedded gateway (`httpFetchHandler`) — identity round-trip (dispatch sees the callback's principal), identity `Response` short-circuit, fail-closed default + `security: "host-managed"` local-pole opt-out, scopes denied through the existing `authorizeDispatch` choke point, subscription stream (GET SSE + `sub/subscribe` → frame → teardown), cross-site reject when embedded, Hono-style mount typechecks | `src/__tests__/embedded-fetch-handler.spec.ts` |
+| Embedded gateway (`fetchServerTransport`) — identity round-trip (dispatch sees the callback's principal), identity `Response` short-circuit, fail-closed default + `security: "host-managed"` local-pole opt-out, scopes denied through the existing `authorizeDispatch` choke point, subscription stream (GET SSE + `sub/subscribe` → frame → teardown), cross-site reject when embedded, Hono-style mount typechecks, `gateway.close()` sweeps live SSE sessions, pre-listen / post-close `503` refusal | `src/__tests__/embedded-fetch-handler.spec.ts` |
+| Embedded door `ServerTransport` conformance — stable id (`http:fetch`), `listen`/`close` bind + teardown, idempotent listen + close, re-listen after close | `src/__tests__/server-transport.spec.ts` (`runServerTransportConformance("fetchServerTransport", …)`) |
 
 ## Roadmap & known gaps
 

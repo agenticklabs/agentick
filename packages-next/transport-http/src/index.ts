@@ -10,13 +10,14 @@ export type { ReconnectPolicy } from "./client/transport.js";
 export {
   httpServer,
   httpServerTransport,
-  httpFetchHandler,
+  fetchServerTransport,
   type HttpServerOptions,
   type HttpServerHandle,
   type HttpServerTransportConfig,
   type HttpServerTransportPortConfig,
   type FetchHandler,
   type FetchHandlerOptions,
+  type FetchServerTransport,
   type Identity,
   type DispatchHost,
 } from "./server/index.js";
