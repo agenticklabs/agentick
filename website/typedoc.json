@@ -69,6 +69,7 @@
     "../packages-next/sandbox-docker",
     "../packages-next/sandbox-lambda",
     "../packages-next/credentials",
+    "../packages-next/telemetry-otlp",
     "../packages-next/connector",
     "../packages-next/gateway",
     "../packages-next/utils",

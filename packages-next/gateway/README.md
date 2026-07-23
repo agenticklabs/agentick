@@ -214,6 +214,84 @@ YOUR server (never closing it). Full fetch example (identity seam, fail-closed
 defaults, 503 semantics): `@agentick/transport-http-next` README
 §`fetchServerTransport`.
 
+## Telemetry & observability (ADR 78)
+
+The gateway takes the same strictly-opt-in `telemetry` switch as `createApp`
+(see the app-next README's "Observability & telemetry" for the full form). It
+plays **two** roles at the runtime root:
+
+```ts
+import { createGateway } from "@agentick/gateway-next";
+import { createTelemetry } from "@agentick/app-next";
+import { otlpSink } from "@agentick/telemetry-otlp-next";
+
+const gateway = await createGateway({
+  telemetry: createTelemetry({ serviceName: "fleet" }, otlpSink()),
+});
+```
+
+**1. The gateway's OWN ops export.** The gateway builds an app-scoped Effect
+`ManagedRuntime` from the setting and runs every gateway operation on it, so each
+op's `Effect.withSpan` span exports to your tracer. That covers the gateway's own
+seams: **wire dispatch** (`wire:<method>`), **`authorizer:command:authorize`**,
+and the **lifecycle** ops (`gateway:command:start` / `close` / `create-app` /
+`accept`). App-, session-, and tool-level spans do NOT run on the gateway runtime
+— they export through the app's provider (role 2).
+
+**2. Substrate inheritance — it default-chains to every app beneath.** Every
+`createApp` the gateway hosts inherits this setting **unless** the app supplies
+its own `telemetry`; an app-supplied switch always wins (the app override is
+authoritative, exactly like the substrate `bus`/`inbox`/`journal` inheritance).
+One gateway-level switch therefore lights up the whole deployment:
+
+```ts
+// Inherits the gateway's telemetry → app/session/tool spans export too.
+const app = await gateway.createApp(<Agent />, { options: { compiler, modelExecutor } });
+
+// Overrides — this app's spans go to ITS provider, never the gateway's.
+const isolated = await gateway.createApp(<Agent />, {
+  options: { compiler, modelExecutor, telemetry: createTelemetry({}, myOwnSink()) },
+});
+```
+
+**Tracer-only at the gateway.** The gateway owns no `ctx.metrics` surface, and an
+OTel `MetricReader` binds to exactly one `MeterProvider`. So the gateway's own
+export is **spans-only** — it builds no `MeterProvider`; the metric readers flow
+through to the apps (which DO own `ctx.metrics`) untouched. A gateway hosting
+**zero apps** therefore exports no metrics under an inherited setting — only its
+own op spans.
+
+**Multi-app metric sharing (the recommended pattern).** Two apps inheriting one
+gateway setting share the SAME `MetricReader` instances — and a reader binds to
+exactly one `MeterProvider`. The app-next wiring **materializes the
+`MeterProvider` once per reader set and shares the `MetricSink`** across every
+inheriting app (its `count`/`record`/`gauge` are provider-agnostic, so sharing is
+safe), refcounted so the last app to close flushes + shuts it down. So the
+canonical `createGateway({ telemetry }) → N × createApp` shape does not crash on
+the second app, and every app's metrics reach the sink. Because the sink is
+shared, per-app metrics are kept distinguishable by the low-cardinality **`app`
+ambient label** (the app's `name`) the tool executor stamps on every
+`ctx.metrics.*` emission alongside `{ tool, op }`.
+
+**Known gap — `telemetryNamespace` does not cascade.** The gateway does NOT
+propagate `telemetryNamespace` to inherited apps; each app whitelabels its own
+framework-attribute prefix (default `agentick`). A whole-deployment namespace
+whitelabel is a fiber-context concern (ADR 78 brick #2), not built this slice —
+set `telemetryNamespace` per app if you need a non-default prefix.
+
+**The never-wrap guardrail** is identical to app-next: the framework adds no
+proprietary layer between you and OpenTelemetry — `createTelemetry` merges your
+standard `SpanProcessor` / `MetricReader` sinks and hands the raw objects to the
+SDK. This package declares no OTel exporter deps; those live in
+`@agentick/telemetry-otlp-next`.
+
+> Verified by `src/__tests__/telemetry-inheritance.spec.ts` — gateway-op span
+> export (Half A), app inheritance of the gateway setting, and app-override
+> precedence (Half B); and `src/__tests__/telemetry-multi-app.spec.ts` — two
+> hosted apps sharing one `MeterProvider` without crashing, both apps' metrics
+> reaching the sink distinguished by the `app` label. All end-to-end against real
+> OTel `SpanProcessor` / `MetricReader`s.
+
 ## Wire extensions (ADR 46)
 
 The gateway can host **wire extensions** — extensible JSON-RPC
@@ -827,6 +905,7 @@ socket adapter over it; there is no bespoke per-transport wire logic.
 | `ServerTransport` conformance (spy double)                         | `src/__tests__/server-transports.spec.ts`                    |
 | Client tool-output bounding (block bounder + marker + seam)        | `../spec/src/__tests__/tool-output-bound.spec.ts`            |
 | Bounding at the wire funnel — result + notifications, no straddle  | `../transport/src/__tests__/client-projection.spec.ts`       |
+| Telemetry — gateway-op span export + app inheritance + override    | `src/__tests__/telemetry-inheritance.spec.ts`                |
 
 ## Status
 

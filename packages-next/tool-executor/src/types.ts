@@ -176,6 +176,17 @@ export interface ToolExecutorHarnessOptions {
   readonly telemetryProvider?: TelemetryProvider;
 
   /**
+   * Ambient metric labels seeded UNDER the per-dispatch defaults (`{ tool, op }`)
+   * on every `ctx.metrics.*` emission from this executor's handlers (ADR 78).
+   * The AppHarness passes `{ app: <name> }` when the app is named, so metrics
+   * from apps sharing ONE `MeterProvider` (the gateway multi-app pattern) stay
+   * distinguishable — an app id is low-cardinality (few apps), so it is a safe
+   * ambient label. `tool` / `op` always win on key collision. `undefined` ⇒ just
+   * `{ tool, op }`.
+   */
+  readonly defaultMetricLabels?: import("@agentick/spec-next").MetricLabels;
+
+  /**
    * Resolved interceptor snapshot (ADR 76 tier 3 + ADR 83 amendment) — the
    * session's resolved interceptors (app-inherited + session's own: guards,
    * `.use` transforms, AND declarative `createApp`/`createSession({ hooks })`

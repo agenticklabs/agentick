@@ -69,3 +69,8 @@ export function run<P = unknown>(
 export { AppHarness, type AppHarnessOptions } from "./harness.js";
 export { type CreateAppOptions } from "./create-app.js";
 export { type RunHandle, type RunOptions } from "./run.js";
+export {
+  createTelemetry,
+  buildTelemetryExport,
+  type BuiltTelemetryExport,
+} from "./telemetry-wiring.js";

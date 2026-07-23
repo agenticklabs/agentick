@@ -20,8 +20,8 @@
  *     operation span because the captured runtime's Context carries it.
  *   - **`metrics` is genuinely new.** The span ladder has no metrics half,
  *     so this module adds a minimal {@link MetricSink} (the meter surface)
- *     to the provider seam. `composeProviders` fans one emission out to
- *     several sinks (a track-API meter + an OTel meter, side by side).
+ *     to the provider seam. The app fans emissions out by wiring several
+ *     backends behind one {@link MetricSink} at construction time.
  *
  * ## Off is free (condition-3)
  *
@@ -45,7 +45,7 @@
  * @verifiedBy packages-next/runtime/src/__tests__/observability.spec.ts
  */
 
-import { Effect, Layer, Runtime } from "effect";
+import { Effect, Runtime } from "effect";
 import type { Tracer } from "effect";
 import type { MetricLabels, Metrics, Observability, Span } from "@agentick/spec-next";
 import type { TelemetryLayer } from "@agentick/spec-next";
@@ -61,7 +61,7 @@ import type { TelemetryLayer } from "@agentick/spec-next";
  * concrete (the facet's optional-arg defaulting happens in
  * {@link deriveObservability} before the sink is called). An adopter
  * implements this over their metrics backend (OTel meter, StatsD,
- * track-API, …); {@link composeProviders} fans out to several at once.
+ * track-API, …).
  */
 export interface MetricSink {
   /** Add `n` to a counter (`counter.add`). */
@@ -76,8 +76,9 @@ export interface MetricSink {
  * A telemetry provider — the pluggable sink bundle the app wires under its
  * `telemetry` switch. Both halves optional: a `tracer` Layer (Effect's
  * tracer, where `Effect.withSpan` spans EXPORT) and/or a {@link MetricSink}
- * meter. `{}` is a valid provider (enrichment on, no export). Multiple
- * providers coexist via {@link composeProviders}.
+ * meter. `{}` is a valid provider (enrichment on, no export). The app
+ * merges multiple span processors / metric readers into ONE provider at
+ * construction time (span processors concat, metric readers concat).
  */
 export interface TelemetryProvider {
   /**
@@ -88,40 +89,6 @@ export interface TelemetryProvider {
   readonly tracer?: TelemetryLayer;
   /** The metrics sink. When present, `ctx.metrics.*` emit to it. */
   readonly meter?: MetricSink;
-}
-
-/**
- * Fan one telemetry surface out to several providers (~sugar). Tracer
- * Layers merge (`Layer.mergeAll` — every exporter sees every span);
- * meters compose into a {@link MetricSink} that forwards each emission to
- * all present meters. Zero providers → `{}`; one → returned as-is.
- *
- * ```ts
- * const provider = composeProviders(otelProvider, trackApiProvider);
- * ```
- */
-export function composeProviders(...providers: readonly TelemetryProvider[]): TelemetryProvider {
-  const defined = providers.filter((p) => p.tracer !== undefined || p.meter !== undefined);
-  if (defined.length === 0) return {};
-  if (defined.length === 1) return defined[0];
-
-  const tracers = defined.map((p) => p.tracer).filter((t): t is TelemetryLayer => t !== undefined);
-  const meters = defined.map((p) => p.meter).filter((m): m is MetricSink => m !== undefined);
-
-  const provider: { tracer?: TelemetryLayer; meter?: MetricSink } = {};
-  if (tracers.length === 1) provider.tracer = tracers[0];
-  else if (tracers.length > 1) {
-    provider.tracer = Layer.mergeAll(tracers[0], tracers[1], ...tracers.slice(2)) as TelemetryLayer;
-  }
-  if (meters.length === 1) provider.meter = meters[0];
-  else if (meters.length > 1) {
-    provider.meter = {
-      count: (name, n, labels) => meters.forEach((m) => m.count(name, n, labels)),
-      record: (name, value, labels) => meters.forEach((m) => m.record(name, value, labels)),
-      gauge: (name, value, labels) => meters.forEach((m) => m.gauge(name, value, labels)),
-    };
-  }
-  return provider;
 }
 
 // ============================================================================

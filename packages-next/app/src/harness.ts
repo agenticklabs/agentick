@@ -40,7 +40,13 @@ import type { TaskWakePolicy } from "@agentick/spec-next";
 import { ResourcesHarness } from "@agentick/resources-next";
 import { LoopExecutorHarness } from "@agentick/loop-executor-next";
 import { isLanguageModelAdapter, type LanguageModelAdapter } from "@agentick/model-next";
-import { buildTelemetryInterceptors, normalizeTelemetry } from "./telemetry-defaults.js";
+import {
+  buildTelemetryInterceptors,
+  normalizeTelemetry,
+  type NormalizedTelemetry,
+} from "./telemetry-defaults.js";
+import { buildTelemetryExport } from "./telemetry-wiring.js";
+import type { TelemetryProvider } from "@agentick/runtime-next";
 import { LanguageModelExecutor as TheLanguageModelExecutor } from "@agentick/model-executor-next";
 import {
   SessionHarness,
@@ -807,14 +813,38 @@ export class AppHarness<P = unknown>
   private readonly sessionStore: SessionStore;
 
   /**
-   * App-scoped telemetry runtime (ADR 78). Built ONCE from the adopter's
-   * `telemetry` Layer at construction (`ManagedRuntime.make`) — NOT a per-call
+   * App-scoped telemetry runtime (ADR 78). Built ONCE in {@link initTelemetryExport}
+   * from the adopter's `telemetry` (explicit Effect Layer + de-Effected
+   * `spanProcessor`s, via `@effect/opentelemetry`) — NOT a per-call
    * `Effect.provide`, which would rebuild the Layer (and its exporter) on every
    * command. App-edge operations run on it so the substrate's `Effect.withSpan`
    * annotations flow to the configured tracer; disposed in `closeApp` (flushing
-   * pending spans). `undefined` when no telemetry Layer is supplied.
+   * pending spans). `undefined` when no span export is wired. Set async (before
+   * `appReady`), hence not `readonly`.
    */
-  private readonly telemetryRuntime: ManagedRuntime.ManagedRuntime<never, never> | undefined;
+  private telemetryRuntime: ManagedRuntime.ManagedRuntime<never, never> | undefined;
+  /**
+   * Releases this app's hold on the SHARED metrics `MeterProvider` backing
+   * {@link telemetryProvider}'s meter. Called once in `closeApp`. Refcounted at
+   * the wiring layer — the provider is materialized once per reader set and
+   * shared across apps inheriting the same gateway `telemetry` setting (an OTel
+   * `MetricReader` binds to exactly one `MeterProvider`); the LAST app to
+   * release `shutdown()`s it. `undefined` when no metric export is wired.
+   */
+  private telemetryReleaseMeter: (() => Promise<void>) | undefined;
+  /**
+   * The telemetry provider threaded to each session's tool executor (ADR 64/78).
+   * Presence flips `ctx.trace` / `ctx.metrics` ON in tool handlers; its `meter`
+   * drives `ctx.metrics.*` export. `undefined` when telemetry is OFF (zero
+   * overhead). Set async in {@link initTelemetryExport} (before `appReady`).
+   */
+  private telemetryProvider: TelemetryProvider | undefined;
+  /**
+   * Resolves when the async telemetry export build (autodiscovery + runtime +
+   * meter) completes. Awaited by {@link appReady}, so no session sees a
+   * half-built provider.
+   */
+  private readonly telemetryReady: Promise<void>;
 
   /**
    * Telemetry enrichment interceptors (rung 1) — built ONCE from
@@ -1032,8 +1062,6 @@ export class AppHarness<P = unknown>
     // `{…}` form.
     this.appName = options.name;
     const telemetry = normalizeTelemetry(options.telemetry);
-    this.telemetryRuntime =
-      telemetry.layer !== undefined ? ManagedRuntime.make(telemetry.layer) : undefined;
     this.telemetryMiddleware = telemetry.enabled
       ? buildTelemetryInterceptors(this.telemetryNamespace, {
           ...(this.appName !== undefined ? { appName: this.appName } : {}),
@@ -1041,6 +1069,12 @@ export class AppHarness<P = unknown>
           ...(telemetry.attributes !== undefined ? { attributes: telemetry.attributes } : {}),
         })
       : [];
+    // Export path (tracer runtime + metrics meter) is built ASYNC — env-driven
+    // OTLP autodiscovery lazily imports the optional sink package. Sessions are
+    // only created after `appReady`, which awaits `telemetryReady`, so
+    // `telemetryRuntime` / `telemetryProvider` are always set before the first
+    // session reads them.
+    this.telemetryReady = this.initTelemetryExport(telemetry);
 
     // Cascade: longhand (`options.session.*`) wins over shorthand
     // (`options.defaultMaxTicks` / `options.initialProps` /
@@ -1158,6 +1192,26 @@ export class AppHarness<P = unknown>
         await ext.install(installer);
       }
     })();
+  }
+
+  /**
+   * Build the telemetry EXPORT surface (tracer runtime + metrics meter) from the
+   * normalized switch. Async because env-driven OTLP autodiscovery lazily imports
+   * the optional `@agentick/telemetry-otlp-next` package. The resolved provider
+   * flips `ctx.trace` / `ctx.metrics` ON in tool handlers (threaded to every
+   * session's tool executor); the runtime routes the session's `Effect.withSpan`
+   * tree to the tracer. OFF (`!enabled`) → all three stay `undefined` (zero
+   * overhead). Awaited by {@link appReady}.
+   */
+  private async initTelemetryExport(n: NormalizedTelemetry): Promise<void> {
+    const built = await buildTelemetryExport(n);
+    this.telemetryRuntime = built.runtime;
+    this.telemetryReleaseMeter = built.releaseMeter;
+    // Enabled → hand a provider to the ctx assemblers even when no meter is
+    // wired (enrichment-on-no-export still lights `ctx.trace` on the captured
+    // op runtime — a no-op tracer annotates but does not export). OFF → no
+    // provider (the tool executor takes the shared off-path singletons).
+    this.telemetryProvider = n.enabled ? omitUndefined({ meter: built.meter }) : undefined;
   }
 
   private makeInstaller(): AppInstaller {
@@ -1340,7 +1394,13 @@ export class AppHarness<P = unknown>
     // `ready` getter still work.
     const compilerReady = readyOf(this.compiler);
     const loopReady = readyOf(this.loop);
-    return Promise.all([this.ready, compilerReady, loopReady, this.extensionsReady]).then(() => {});
+    return Promise.all([
+      this.ready,
+      compilerReady,
+      loopReady,
+      this.extensionsReady,
+      this.telemetryReady,
+    ]).then(() => {});
   }
 
   // ──────── AppHarnessProtocol ────────
@@ -1467,6 +1527,16 @@ export class AppHarness<P = unknown>
     // Dispose the telemetry runtime AFTER the close operation ran on it, so its
     // own spans are captured and the exporter flushes pending spans (ADR 78).
     if (this.telemetryRuntime !== undefined) await this.telemetryRuntime.dispose();
+    // Release this app's hold on the shared metrics MeterProvider (the last
+    // holder flushes + shuts it down; a sibling app sharing the readers keeps
+    // exporting). Best-effort — a failing exporter must not block app close.
+    if (this.telemetryReleaseMeter !== undefined) {
+      try {
+        await this.telemetryReleaseMeter();
+      } catch {
+        // best-effort metrics flush — teardown errors don't block app close
+      }
+    }
   }
 
   /**
@@ -1813,6 +1883,19 @@ export class AppHarness<P = unknown>
           tasks,
           resources,
           ...omitUndefined({ ctxExtensions }),
+          // ADR 64/78 — the resolved telemetry provider. Presence lights
+          // `ctx.trace` / `ctx.metrics` in this session's tool handlers; its
+          // `meter` exports metrics. Undefined when telemetry is OFF (the tool
+          // executor takes the shared off-path singletons). Set before appReady,
+          // and sessions are only created after appReady.
+          ...omitUndefined({ telemetryProvider: this.telemetryProvider }),
+          // App-identity ambient metric label — distinguishes this app's
+          // `ctx.metrics.*` from a sibling app sharing the same MeterProvider
+          // (gateway multi-app inheritance). Low-cardinality (few apps); omitted
+          // when the app is unnamed.
+          ...omitUndefined({
+            defaultMetricLabels: this.appName !== undefined ? { app: this.appName } : undefined,
+          }),
           // ADR 76/83 — the ONE resolved interceptor snapshot: `app.use()` /
           // `app.guard()` AND the app+session `onBefore/After/AroundToolDispatch`
           // hooks (as op-scoped middleware) all wrap `tool:dispatch`, which

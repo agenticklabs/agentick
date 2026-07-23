@@ -238,10 +238,13 @@ separate interfaces (`Observability` = `log`/`trace`/`metrics`; `Ops` =
   `executionId`) rides spans + logs, never a default metric label. Overridable
   (capability, not opinion), but safe by construction.
 - **The provider seam** (`TelemetryProvider = { tracer?, meter? }`) bundles the
-  Effect tracer Layer (spans) + a `MetricSink` (metrics). `composeProviders(...)`
-  fans one emission out to several sinks (a track-API meter + an OTel meter side
-  by side). Test with `spyTelemetryProvider()` from
-  `@agentick/runtime-next/testing` — it records spans + metrics for assertion.
+  Effect tracer Layer (spans) + a `MetricSink` (metrics). The app wires it from
+  the adopter's `telemetry` switch — multiple exporters fan out at the
+  standard-OTel edge (span processors / metric readers collect together into one
+  runtime + meter; see `@agentick/app-next`'s `createTelemetry`). Test at the
+  substrate level with `spyTelemetryProvider()` (records via the `MetricSink` +
+  an Effect tracer Layer), or the full app export path with `spyTelemetrySink()`
+  (records at the OTel edge) — both from `@agentick/runtime-next/testing`.
 
 _Verified by `packages-next/runtime/src/__tests__/observability.spec.ts`
 (off-path identity, live span parenting, metric fan-out),

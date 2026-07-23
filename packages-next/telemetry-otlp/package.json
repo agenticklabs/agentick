@@ -1,0 +1,61 @@
+{
+  "name": "@agentick/telemetry-otlp-next",
+  "version": "0.0.0",
+  "private": true,
+  "description": "OTLP exporter sink for Agentick v2 telemetry — `otlpSink()` returns a standard-OpenTelemetry `TelemetrySink` (BatchSpanProcessor + PeriodicExportingMetricReader over the OTLP HTTP/proto/grpc exporters) with `OTEL_EXPORTER_OTLP_*` env auto-fill (explicit-beats-ambient, per-field). The OTel exporter dependencies live HERE so `@agentick/app-next` stays exporter-dep-free; the app lazy-imports this package for env-driven autodiscovery. Optional install, not bundled.",
+  "keywords": [
+    "agentick",
+    "telemetry",
+    "opentelemetry",
+    "otlp",
+    "tracing",
+    "metrics"
+  ],
+  "license": "MIT",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages-next/telemetry-otlp"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
+  },
+  "dependencies": {
+    "@agentick/spec-next": "workspace:*",
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/exporter-metrics-otlp-grpc": "^0.221.0",
+    "@opentelemetry/exporter-metrics-otlp-http": "^0.221.0",
+    "@opentelemetry/exporter-metrics-otlp-proto": "^0.221.0",
+    "@opentelemetry/exporter-trace-otlp-grpc": "^0.221.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.221.0",
+    "@opentelemetry/exporter-trace-otlp-proto": "^0.221.0",
+    "@opentelemetry/sdk-metrics": "^2.0.0",
+    "@opentelemetry/sdk-trace-base": "^2.0.0"
+  }
+}

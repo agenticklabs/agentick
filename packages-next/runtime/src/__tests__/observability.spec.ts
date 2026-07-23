@@ -12,12 +12,7 @@
 
 import { describe, expect, it } from "vitest";
 import { Effect, ManagedRuntime } from "effect";
-import {
-  NOOP_METRICS,
-  OFF_TRACE,
-  composeProviders,
-  deriveObservability,
-} from "../substrate/observability.js";
+import { NOOP_METRICS, OFF_TRACE, deriveObservability } from "../substrate/observability.js";
 import { spyTelemetryProvider } from "../testing/spy-telemetry-provider.js";
 
 const noopLog = (): void => {};
@@ -131,27 +126,5 @@ describe("deriveObservability — live metrics (condition 4: meter seam)", () =>
         labels: { tool: "override", op: "ToolDispatch" },
       },
     ]);
-  });
-});
-
-describe("composeProviders (condition 4: fan-out)", () => {
-  it("empty ⇒ {}", () => {
-    expect(composeProviders()).toEqual({});
-  });
-
-  it("single provider passes through unchanged", () => {
-    const spy = spyTelemetryProvider();
-    const only = { meter: spy.meter };
-    expect(composeProviders(only)).toBe(only);
-  });
-
-  it("fans a metric emission out to every composed meter", () => {
-    const a = spyTelemetryProvider();
-    const b = spyTelemetryProvider();
-    const composed = composeProviders({ meter: a.meter }, { meter: b.meter });
-    composed.meter!.count("acme.hit", 1, { op: "X" });
-    expect(a.metrics).toHaveLength(1);
-    expect(b.metrics).toHaveLength(1);
-    expect(a.metrics[0]).toEqual(b.metrics[0]);
   });
 });

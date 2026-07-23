@@ -10,5 +10,15 @@
 
 export { AppHarness, type AppHarnessOptions } from "./harness.js";
 export { createApp, type CreateAppOptions } from "./create-app.js";
+export {
+  createTelemetry,
+  buildTelemetryExport,
+  type BuiltTelemetryExport,
+} from "./telemetry-wiring.js";
+export {
+  normalizeTelemetry,
+  type NormalizedTelemetry,
+  type TelemetryDefaultsConfig,
+} from "./telemetry-defaults.js";
 export { run, type RunOptions, type RunHandle } from "./run.js";
 export { builtinWireExtensions } from "./builtin-wire.js";

@@ -38,6 +38,8 @@ import {
   type Middleware,
 } from "@agentick/runtime-next";
 import { estimateCost } from "@agentick/model-next";
+import type { SpanProcessor } from "@opentelemetry/sdk-trace-base";
+import type { MetricReader } from "@opentelemetry/sdk-metrics";
 import type {
   ExecutionTarget,
   TelemetryLayer,
@@ -45,6 +47,11 @@ import type {
   TelemetrySetting,
   UsageStats,
 } from "@agentick/spec-next";
+
+/** Coerce a single-or-array optional into a concrete array. */
+function toArray<T>(v: T | readonly T[] | undefined): T[] {
+  return v === undefined ? [] : Array.isArray(v) ? [...v] : [v as T];
+}
 
 /** Normalized form of the {@link TelemetrySetting} switch (rung 1). */
 export interface NormalizedTelemetry {
@@ -54,25 +61,55 @@ export interface NormalizedTelemetry {
   readonly layer?: TelemetryLayer;
   readonly serviceName?: string;
   readonly attributes?: Readonly<Record<string, unknown>>;
+  /** Standard-OTel span processors collected from the config (de-Effected span export). */
+  readonly spanProcessors: readonly SpanProcessor[];
+  /** Standard-OTel metric readers collected from the config (metrics export). */
+  readonly metricReaders: readonly MetricReader[];
+  /**
+   * Env-driven OTLP autodiscovery opt-out (default ON). Only consulted when no
+   * exporter is wired; see {@link TelemetryOptions.autoDiscover}.
+   */
+  readonly autoDiscover: boolean;
 }
 
 /**
  * Normalize the STRICTLY-OPT-IN {@link TelemetrySetting} into its enrichment
- * flag + exporter Layer + config. `undefined` / `false` → off. `true` → on, no
- * exporter. A `Layer` (detected via `Layer.isLayer`) → on + that exporter. A
- * `{ serviceName?, attributes?, layer? }` object → on + its fields.
+ * flag + exporter Layer + standard-OTel processors/readers + config.
+ * `undefined` / `false` → off. `true` → on, no exporter (autodiscovery may
+ * still apply). A `Layer` (detected via `Layer.isLayer`) → on + that exporter.
+ * A {@link TelemetryOptions} object → on + its fields (`spanProcessor` /
+ * `metricReader` single-or-array are flattened here).
  *
  * @verifiedBy packages-next/app/src/__tests__/telemetry.spec.ts
  */
 export function normalizeTelemetry(setting: TelemetrySetting | undefined): NormalizedTelemetry {
-  if (setting === undefined || setting === false) return { enabled: false };
-  if (setting === true) return { enabled: true };
-  if (Layer.isLayer(setting)) return { enabled: true, layer: setting as TelemetryLayer };
+  const off: NormalizedTelemetry = {
+    enabled: false,
+    spanProcessors: [],
+    metricReaders: [],
+    autoDiscover: false,
+  };
+  if (setting === undefined || setting === false) return off;
+  if (setting === true) {
+    return { enabled: true, spanProcessors: [], metricReaders: [], autoDiscover: true };
+  }
+  if (Layer.isLayer(setting)) {
+    return {
+      enabled: true,
+      layer: setting as TelemetryLayer,
+      spanProcessors: [],
+      metricReaders: [],
+      autoDiscover: true,
+    };
+  }
   // Config-object form (`Layer.isLayer` variance markers block negative
   // union-narrowing, so name it explicitly).
   const opts = setting as TelemetryOptions;
   return {
     enabled: true,
+    spanProcessors: toArray(opts.spanProcessor),
+    metricReaders: toArray(opts.metricReader),
+    autoDiscover: opts.autoDiscover ?? true,
     ...(opts.layer !== undefined ? { layer: opts.layer } : {}),
     ...(opts.serviceName !== undefined ? { serviceName: opts.serviceName } : {}),
     ...(opts.attributes !== undefined ? { attributes: opts.attributes } : {}),

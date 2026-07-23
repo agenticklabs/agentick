@@ -139,7 +139,7 @@ override` > `session default`) is empty fails with `NoModelForExecutionError`.
 | `sessions`           | `{ store?, maxActive?, idleTimeout?, maxSpawnDepth? }` | Durable session store + the bounded-registry knobs (PA2/PA3) + the spawn depth ceiling (SP4). See "Bounded live registry" and "Spawn hardening" below.                                                                                                        |
 | `metadata`           | `Record<string, unknown>`                              | Adopter-defined bag carried on the harness instance.                                                                                                                                                                                                          |
 | `name`               | `string`                                               | Logical app name — the telemetry agent-identity dimension. Stamped as `<ns>.app.name` and used as the default `functionId` when telemetry enrichment is on. Otherwise inert.                                                                                   |
-| `telemetry`          | `boolean \| TelemetryLayer \| TelemetryOptions`        | **The one switch** (strictly opt-in). `true` turns on framework enrichment (model/tool/tick/app attrs + token usage + cost on generate terminals); a `Layer` also wires export; `{ serviceName?, attributes?, layer? }` configures both. Off (omitted/`false`) = zero overhead. **Full model: see "Observability" in `@agentick/runtime-next`'s README.** |
+| `telemetry`          | `boolean \| TelemetryLayer \| TelemetryOptions`        | **The one switch** (strictly opt-in). `true` turns on framework enrichment + OTLP autodiscovery; `{ serviceName?, attributes?, spanProcessor?, metricReader?, layer?, autoDiscover? }` (build it with `createTelemetry`) wires standard-OTel export; a raw `Layer` is the Effect escape hatch. Off (omitted/`false`) = zero overhead. **See "Observability & telemetry" below.** |
 | `telemetryNamespace` | `string`                                               | Prefix on every framework attribute (`<ns>.op_id`, `<ns>.app.name`, …). Defaults to `"agentick"`; whitelabels the framework keys. `gen_ai.*` semconv keys stay verbatim (never whitelabeled).                                                                 |
 | `appId`              | `string`                                               | Defaults to `app:${ulid()}`.                                                                                                                                                                                                                                  |
 
@@ -147,6 +147,70 @@ Returns `Promise<AppHarness>` after substrate readiness signals. Not
 exhaustive — see [typedoc](https://agentick.dev) / `AppHarnessOptions`
 in `src/harness.ts` for every slot (`models`, `session`, `toolExecutor`,
 `defaultMaxTicks`, `streaming`, …).
+
+### Observability & telemetry
+
+The `telemetry` switch is strictly opt-in and takes three inline forms, all
+turning framework enrichment on (agent-identity + model/tool/tick attrs, token
+usage + cost on generate terminals) AND threading a provider down to
+`ctx.trace` / `ctx.metrics` in your tool handlers:
+
+- **`telemetry: true`** — enrichment on. With no exporter wired it attempts
+  **env-driven OTLP autodiscovery**: if `OTEL_EXPORTER_OTLP_ENDPOINT` is set it
+  lazily loads `@agentick/telemetry-otlp-next` and exports over OTLP; if that
+  package isn't installed it logs one line and continues (never crashes). This
+  is a deliberate divergence from the OTel SDK's silent-localhost default —
+  autodiscovery fires **only** when the endpoint env is explicitly set, so
+  there's no accidental export spam. With no endpoint env, enrichment still
+  annotates spans on the no-op tracer (annotation on, export off).
+- **`telemetry: createTelemetry(options, ...sinks)`** — the standard-OTel form,
+  no Effect import. A `TelemetrySink = { spanProcessor?, metricReader?, attributes? }`
+  is a destination bundle; a raw object literal IS a valid sink, or use
+  `otlpSink()` from `@agentick/telemetry-otlp-next`. `createTelemetry` merges
+  every sink (span processors concat, metric readers concat, `attributes` merge
+  under the options') and returns the existing `TelemetrySetting` — the slot
+  union does not grow.
+- **`telemetry: { layer }`** — the Effect-native escape hatch (ADR-42
+  dichotomy). Hand in an `@effect/opentelemetry` tracer `Layer` when you already
+  have one. A `layer` and `spanProcessor`s given together compose **additively**
+  (both export); the `layer` is never overridden.
+
+```ts
+import { createApp, createTelemetry } from "@agentick/app-next/react";
+import { otlpSink } from "@agentick/telemetry-otlp-next";
+
+const app = await createApp(<Agent />, {
+  name: "triage-bot",
+  telemetry: createTelemetry({ serviceName: "triage-bot" }, otlpSink()),
+});
+```
+
+**The never-wrap guardrail.** The framework adds **no** proprietary layer between
+you and OpenTelemetry: sampling, filtering, and batching stay expressed as your
+own standard OTel `SpanProcessor` / `MetricReader` instances. `createTelemetry`
+merges destinations and hands the raw objects to the SDK — nothing wraps them.
+Span processors become an Effect tracer runtime (via `@effect/opentelemetry`);
+metric readers back an OTel `MeterProvider` behind the `MetricSink` seam. OTel
+exporter deps live in `@agentick/telemetry-otlp-next`, so this package stays
+exporter-dep-free. `telemetryNamespace` whitelabels the framework's own
+attribute keys (`gen_ai.*` semconv keys stay verbatim).
+
+**Metric labels + multi-app sharing.** Every `ctx.metrics.*` emission carries the
+low-cardinality ambient labels `{ tool, op }`, plus `{ app: <name> }` when the
+app is named. The `app` label matters under a gateway: two apps inheriting one
+gateway `telemetry` setting share the SAME `MetricReader` instances, and a reader
+binds to exactly one `MeterProvider`, so the wiring materializes **one
+`MeterProvider` per `createTelemetry` product** and shares the `MetricSink`
+across every inheriting app (refcounted — the last app to close flushes + shuts
+it down). The `app` label keeps those shared-sink metrics distinguishable. High-
+cardinality identity (`sessionId` / `executionId`) rides spans + logs, never a
+metric label.
+
+> Verified by `src/__tests__/telemetry-e2e.spec.tsx` (the full
+> `createTelemetry` → `ctx.trace`/`ctx.metrics` → sink path),
+> `src/__tests__/telemetry-wiring.spec.ts` (merge + validation + env + build),
+> and `src/__tests__/telemetry.spec.ts` (enrichment on/off). The complete model
+> lives in the [observability guide](../../docs/proposals/v2/guide-observability.md).
 
 ### `app.createSession(opts?)`
 

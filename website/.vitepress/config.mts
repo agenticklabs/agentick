@@ -104,6 +104,7 @@ const PACKAGE_GROUPS: Array<{ label: string; packages: string[] }> = [
       "@agentick/sandbox-docker-next",
       "@agentick/sandbox-lambda-next",
       "@agentick/credentials-next",
+      "@agentick/telemetry-otlp-next",
       "@agentick/connector-next",
       "@agentick/gateway-next",
       "@agentick/pubsub-next",

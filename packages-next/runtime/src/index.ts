@@ -92,7 +92,6 @@ export {
 } from "./substrate/runtime-context.js";
 export {
   deriveObservability,
-  composeProviders,
   NOOP_SPAN,
   OFF_TRACE,
   NOOP_METRICS,

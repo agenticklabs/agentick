@@ -19,7 +19,7 @@
  * @see docs/proposals/v2/V1-GATEWAY-PARITY-TRACKER.md
  */
 
-import { Effect } from "effect";
+import { Effect, type ManagedRuntime } from "effect";
 import {
   BaseHarness,
   busAsyncIterator,
@@ -54,6 +54,7 @@ import type {
   ProtocolEvent,
   ServerTransport,
   SubscribeOptions,
+  TelemetrySetting,
   ToolDeclaration,
   ToolRegistration,
   Unsubscribe,
@@ -82,7 +83,14 @@ import {
   subscriptionsWireExtension,
 } from "./wire/index.js";
 import { mergeLayered } from "@agentick/utils-next";
-import { AppHarness, builtinWireExtensions, type AppHarnessOptions } from "@agentick/app-next";
+import {
+  AppHarness,
+  buildTelemetryExport,
+  builtinWireExtensions,
+  normalizeTelemetry,
+  type AppHarnessOptions,
+  type NormalizedTelemetry,
+} from "@agentick/app-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 
 // ADR 80/83/84 — light up the gateway lifecycle verbs. Both `gateway:start`
@@ -238,6 +246,30 @@ export interface GatewayHarnessOptions extends BaseHarnessOptions {
    * a no-op and `listen()` just flips ready.
    */
   readonly transports?: readonly ServerTransport[];
+
+  /**
+   * Telemetry switch (ADR 78, telemetry rung 1) — STRICTLY OPT-IN. Two roles at
+   * the gateway:
+   *
+   *   1. **Gateway's own ops export.** The gateway builds an app-scoped
+   *      {@link ManagedRuntime} from this setting (exactly as `AppHarness`
+   *      does) and runs every gateway operation (`listen` / `close` /
+   *      `authorize` / `accept` / `create-app` / wire dispatch) on it, so each
+   *      op's `Effect.withSpan` span EXPORTS to the configured tracer.
+   *   2. **Substrate inheritance.** Every app the gateway hosts that does NOT
+   *      specify its own `telemetry` inherits this setting (default-chained
+   *      through `createApp`), so a single gateway-level switch lights up
+   *      telemetry across the whole deployment. An app-supplied `telemetry`
+   *      always wins over the inherited default.
+   *
+   * Accepts the same three forms as `createApp({ telemetry })`: `true`
+   * (enrichment defaults), an Effect `Layer` (BYO OTel backend), or a
+   * `{ serviceName?, attributes?, layer? }` object. Omitted / `false` → OFF:
+   * no runtime, no inheritance, zero overhead.
+   *
+   * @see docs/proposals/v2/blueprint/78-telemetry-via-runtime-substrate.md
+   */
+  readonly telemetry?: TelemetrySetting;
 }
 
 // ============================================================================
@@ -308,6 +340,33 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
    */
   private readonly _wireExtensions: WireExtensionRegistry;
 
+  /**
+   * Raw telemetry setting supplied at construction (ADR 78). Retained for
+   * SUBSTRATE INHERITANCE — {@link createAppBody} default-chains it into every
+   * hosted app that does not specify its own `telemetry`. `undefined` when the
+   * gateway ships no telemetry.
+   */
+  private readonly telemetrySetting: TelemetrySetting | undefined;
+  /**
+   * Gateway-scoped telemetry runtime (ADR 78) — the tracer twin of
+   * `AppHarness.telemetryRuntime`. Built ONCE in {@link initTelemetryExport}
+   * from {@link telemetrySetting}; every gateway operation runs on it (via
+   * {@link runGatewayOp}) so the op's `Effect.withSpan` span exports. Disposed
+   * in {@link close} AFTER the close op ran on it. `undefined` when no span
+   * export is wired. Set async (before `gatewayReady`), hence not `readonly`.
+   *
+   * Tracer-ONLY: the gateway owns no `ctx.metrics` surface, and it inherits its
+   * metric readers to hosted apps (which do). So it builds no `MeterProvider` —
+   * that avoids double-binding a shared `MetricReader` an app also inherits (an
+   * OTel constraint). See the note in the constructor.
+   */
+  private telemetryRuntime: ManagedRuntime.ManagedRuntime<never, never> | undefined;
+  /**
+   * Resolves when the async telemetry export build completes. Awaited by
+   * {@link gatewayReady}, so no gateway op runs on a half-built runtime.
+   */
+  private readonly telemetryReady: Promise<void>;
+
   get id(): string {
     return this.scopeId;
   }
@@ -363,6 +422,22 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     // already bound inside each transport's factory; the gateway only needs to
     // hand them itself as the dispatch host at `listen()` time.
     this.serverTransports = options.transports ?? [];
+
+    // Telemetry (ADR 78) — STRICTLY OPT-IN. Retain the raw setting for
+    // substrate inheritance (createAppBody default-chains it), and build the
+    // gateway's OWN export runtime ASYNC (env-driven OTLP autodiscovery lazily
+    // imports the optional sink package). `gatewayReady` awaits `telemetryReady`,
+    // so `telemetryRuntime` is always set before the first gateway op reads it.
+    this.telemetrySetting = options.telemetry;
+    // The gateway exports SPANS for its own ops (`runGatewayOp`); it owns NO
+    // `ctx.metrics` surface. Metric readers are inherited to hosted apps (which
+    // DO own that surface) and — an OTel constraint — a `MetricReader` binds to
+    // exactly ONE `MeterProvider`. Building a gateway `MeterProvider` from the
+    // same shared reader an app also inherits would double-bind it and throw. So
+    // the gateway's OWN export is tracer-only: metric readers are zeroed here
+    // and flow to apps untouched via `telemetrySetting` inheritance.
+    const normalized = normalizeTelemetry(options.telemetry);
+    this.telemetryReady = this.initTelemetryExport({ ...normalized, metricReaders: [] });
 
     // Distribute the ADR 50 extension surface into its scopes.
     const { gatewayExts, wireFromBundles, cascade } = splitExtensions(options.extensions ?? []);
@@ -447,7 +522,32 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
    * before reading `wireExtensions()` / `bridges`.
    */
   get gatewayReady(): Promise<void> {
-    return Promise.all([this.ready, this.gatewayExtensionsReady]).then(() => {});
+    return Promise.all([this.ready, this.gatewayExtensionsReady, this.telemetryReady]).then(
+      () => {},
+    );
+  }
+
+  /**
+   * Build the telemetry EXPORT surface (tracer runtime + metrics meter) from
+   * the normalized switch — the twin of `AppHarness.initTelemetryExport`. Async
+   * because env-driven OTLP autodiscovery lazily imports the optional
+   * `@agentick/telemetry-otlp-next` package. OFF (`!enabled`) → all three fields
+   * stay `undefined` (zero overhead). Awaited by {@link gatewayReady}.
+   */
+  private async initTelemetryExport(n: NormalizedTelemetry): Promise<void> {
+    const built = await buildTelemetryExport(n);
+    this.telemetryRuntime = built.runtime;
+  }
+
+  /**
+   * Run a gateway operation on the gateway's telemetry runtime (ADR 78). The
+   * SECOND `runHarnessProtocol` arg routes the op's `Effect.withSpan` span to
+   * the configured tracer; `undefined` (no telemetry) falls through to the
+   * default runtime — behavior-preserving. Every gateway op call site uses this
+   * (never bare `runHarnessProtocol`) so spans export uniformly.
+   */
+  private runGatewayOp<R>(eff: Effect.Effect<R, unknown, never>): Promise<R> {
+    return runHarnessProtocol(eff, this.telemetryRuntime);
   }
 
   /**
@@ -556,7 +656,7 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
       scope: { gatewayId: this.scopeId },
       input: params,
     };
-    return runHarnessProtocol(
+    return this.runGatewayOp(
       this.runOperation(op, () =>
         Effect.tryPromise({
           try: run,
@@ -655,7 +755,7 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
       scope: { gatewayId: this.scopeId },
       input,
     };
-    return runHarnessProtocol(
+    return this.runGatewayOp(
       this.runOperation(op, (i) =>
         Effect.tryPromise({
           try: () => this.createAppBody(i),
@@ -714,6 +814,14 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
       ...input.options,
       appId,
       rootElement: input.rootElement,
+      // Telemetry inheritance (ADR 78). The app-supplied `telemetry` (spread
+      // above via `...input.options`) always wins; only when the app omits it
+      // AND the gateway ships one do we default-chain the gateway's setting
+      // down, so a single gateway-level switch lights up telemetry across every
+      // hosted app while a per-app override stays authoritative.
+      ...(input.options.telemetry === undefined && this.telemetrySetting !== undefined
+        ? { telemetry: this.telemetrySetting }
+        : {}),
       // ADR 84 §3 — the CAPSTONE live link: the app registers as a live
       // interceptor child of this gateway. A hook/guard/use registered on the
       // gateway AFTER the app (and its sessions) exist folds down live through
@@ -781,7 +889,7 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
       scope: { gatewayId: this.scopeId },
       input: undefined,
     };
-    return runHarnessProtocol(
+    return this.runGatewayOp(
       this.runOperation(op, () =>
         Effect.tryPromise({
           try: () => this.listenBody(),
@@ -800,9 +908,9 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
    * deliberately NO `destroy()` twin — graceful-vs-forced is a parameter, not a
    * second verb (ADR 84 §1). Idempotent: a second call is a safe no-op.
    */
-  close(opts: { drain?: boolean } = {}): Promise<void> {
+  async close(opts: { drain?: boolean } = {}): Promise<void> {
     if (this.gatewayClosed) {
-      return Promise.resolve();
+      return;
     }
     this.gatewayClosed = true;
     const drain = opts.drain ?? true;
@@ -816,7 +924,7 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
       scope: { gatewayId: this.scopeId },
       input: undefined,
     };
-    return runHarnessProtocol(
+    await this.runGatewayOp(
       this.runOperation(op, () =>
         Effect.tryPromise({
           try: () => this.closeBody(drain),
@@ -829,6 +937,11 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
         }),
       ),
     );
+    // Dispose the telemetry runtime AFTER the close op ran on it, so its own
+    // span is captured and the exporter flushes pending spans (ADR 78) — the
+    // exact ordering `AppHarness.closeApp` uses. (Tracer-only — the gateway
+    // builds no `MeterProvider`, so there is nothing to `shutdown()` here.)
+    if (this.telemetryRuntime !== undefined) await this.telemetryRuntime.dispose();
   }
 
   /**
@@ -853,7 +966,7 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
       scope: { gatewayId: this.scopeId },
       input,
     };
-    return runHarnessProtocol(
+    return this.runGatewayOp(
       this.runOperation(op, (i) =>
         Effect.tryPromise({
           try: () => this.authorizer.authorize(i),
@@ -888,7 +1001,7 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
       scope: { gatewayId: this.scopeId },
       input: info,
     };
-    return runHarnessProtocol(
+    return this.runGatewayOp(
       this.runOperation(op, () =>
         Effect.tryPromise({
           // No body — admission is the `onBeforeGatewayAccept` seam. A throwing

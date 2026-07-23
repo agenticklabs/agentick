@@ -175,6 +175,8 @@ export class ToolExecutorHarness
    * threads a provider here when `telemetry` is on.
    */
   private readonly telemetryProvider: TelemetryProvider | undefined;
+  /** Ambient metric labels seeded under `{ tool, op }`. See the option docs. */
+  private readonly defaultMetricLabels: import("@agentick/spec-next").MetricLabels | undefined;
 
   /**
    * Cancel an in-flight dispatch (ADR 51 / ADR 66). A declared command —
@@ -207,6 +209,7 @@ export class ToolExecutorHarness
     this.resources = options.resources;
     this.ctxExtensions = options.ctxExtensions ?? {};
     this.telemetryProvider = options.telemetryProvider;
+    this.defaultMetricLabels = options.defaultMetricLabels;
 
     // `abort` as a declared command (ADR 51). Canonical verb `tool:abort`
     // (the inbox message type); the derived Operation name is
@@ -792,7 +795,10 @@ export class ToolExecutorHarness
           void Effect.runFork(this.emitLog(dispatchScope, level, data, logger));
         },
         namespace: this.telemetryNamespace,
-        defaultLabels: { tool: input.name, op: "ToolDispatch" },
+        // App-identity ambient label (if any) seeded UNDER the per-dispatch
+        // defaults so `tool` / `op` always win. Keeps multi-app shared-sink
+        // metrics distinguishable (ADR 78).
+        defaultLabels: { ...this.defaultMetricLabels, tool: input.name, op: "ToolDispatch" },
         ...omitUndefined({ telemetry }),
       });
       // Ops facet (ADR 19/83) — `ctx.run` mints ad-hoc operations through THIS

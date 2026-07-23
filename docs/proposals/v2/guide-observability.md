@@ -3,13 +3,11 @@
 > Destination: website docs after the docs sweep. Code-first. Source of truth
 > for the ctx observability + ops facets (ADR 64 / 78 / 19 / 83).
 >
-> **Wiring status (read first).** The ctx facet API in §§2–5, §7 is shipped and
-> tested at the substrate level (`@agentick/runtime-next`, `@agentick/tool-executor-next`).
-> The production EXPORT path in §6 — `telemetry: true` threading a provider down
-> to `ctx.trace`/`ctx.metrics`, and the standard-OTel `createTelemetry` wiring —
-> is a converged design with a landing slice still open (see the boxes in §6).
-> Every code block below compiles against shipped API; §6 marks the two forms
-> that are shipped vs. incoming.
+> The whole path is wired end to end: `telemetry: <anything>` threads a
+> provider down to `ctx.trace` / `ctx.metrics` in your handlers, and the
+> standard-OTel `createTelemetry` + `otlpSink` wiring (§6) exports spans and
+> metrics with no Effect import. Every code block below compiles against shipped
+> API.
 
 ## The whole mental model in one sentence
 
@@ -158,7 +156,9 @@ metrics the FRAMEWORK itself emits live under `${telemetryNamespace}.*` (default
 `agentick.*`), renamable with `createApp({ telemetryNamespace: "acme" })`.
 
 **Labels — low-cardinality only.** The ambient default labels are `{ tool, op }`
-— bounded sets. High-cardinality identity (`sessionId`, `executionId`, a user
+— plus `{ app }` (the app's `name`) when set, so metrics from apps sharing one
+`MeterProvider` under a gateway stay distinguishable — all bounded sets.
+High-cardinality identity (`sessionId`, `executionId`, a user
 id, a free-form message) must **never** be a default metric label: every
 distinct label value mints a new time series, and unbounded label values explode
 cardinality until the metrics backend falls over. High-cardinality identity
@@ -202,57 +202,99 @@ token attribution are just trace queries scoped to a subtree.
 
 ## 6. Sinks & providers — where the spans and metrics go
 
-The framework bundles **no** OTel SDK. Enrichment annotates spans + metrics;
-where they GO is your exporter wiring.
+The framework bundles **no** OTel exporter. Enrichment annotates spans +
+metrics; where they GO is your exporter wiring, expressed as **standard
+OpenTelemetry objects**. `createTelemetry(options, ...sinks)` merges a set of
+destination **sinks** into the app's `telemetry` switch — no Effect import.
 
-**Shipped today — the one switch and the Effect-native hatch:**
+**The primary form — `createTelemetry` + `otlpSink`:**
 
 ```ts
-// (a) enrichment on, export via a globally-registered OTel SDK (if any):
-createApp(<Agent />, { name: "triage-bot", telemetry: true });
+import { createApp, createTelemetry } from "@agentick/app-next/react";
+import { otlpSink } from "@agentick/telemetry-otlp-next";
 
-// (b) escape hatch — hand the app an @effect/opentelemetry tracer Layer:
+const telemetry = createTelemetry({ serviceName: "triage-bot" }, otlpSink());
+createApp(<Agent />, { name: "triage-bot", telemetry });
+```
+
+`otlpSink()` returns a `TelemetrySink` — a `BatchSpanProcessor` +
+`PeriodicExportingMetricReader` over the OTLP HTTP/proto exporters, with
+`OTEL_EXPORTER_OTLP_ENDPOINT` / `_HEADERS` / `_PROTOCOL` env auto-fill (explicit
+options beat env, per field). The OTel exporter deps live in that package, so
+`@agentick/app-next` stays exporter-free.
+
+**Bring your own OTel pieces — a raw sink literal:**
+
+```ts
+import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-base";
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
+import { PeriodicExportingMetricReader } from "@opentelemetry/sdk-metrics";
+import { OTLPMetricExporter } from "@opentelemetry/exporter-metrics-otlp-http";
+
+const telemetry = createTelemetry(
+  { serviceName: "triage-bot" },
+  {
+    spanProcessor: new BatchSpanProcessor(new OTLPTraceExporter()),
+    metricReader: new PeriodicExportingMetricReader({
+      exporter: new OTLPMetricExporter(),
+    }),
+  },
+);
+createApp(<Agent />, { name: "triage-bot", telemetry });
+```
+
+A raw `TelemetrySink = { spanProcessor?, metricReader?, attributes? }` object
+literal IS a valid sink — the escape hatch is the primitive. Sampling,
+filtering, and batching stay expressed as your standard OTel objects; the
+framework adds **no** proprietary layer between you and OTel. `createTelemetry`
+merges every sink (span processors concat, metric readers concat, `attributes`
+merge under the options'), validates eagerly, and returns the existing
+`TelemetrySetting` — the `createApp` slot union does not grow.
+
+**The one switch + autodiscovery:**
+
+```ts
+createApp(<Agent />, { name: "triage-bot", telemetry: true });
+```
+
+`telemetry: true` turns enrichment on. With **no** exporter wired, it attempts
+env-driven autodiscovery: if `OTEL_EXPORTER_OTLP_ENDPOINT` is set, it lazily
+loads `@agentick/telemetry-otlp-next` and exports over OTLP; if that package
+isn't installed, it logs one line naming the install and continues (never
+crashes). This is a deliberate divergence from the OTel SDK's silent-localhost
+default — autodiscovery fires **only** when the endpoint env is explicitly set,
+so there's no accidental export spam. Opt out with
+`createTelemetry({ autoDiscover: false })`. With no exporter and no endpoint env,
+enrichment still annotates spans on the no-op tracer — annotation on, export off.
+
+**The Effect-native escape hatch** (ADR-42 dichotomy — standard-vocabulary
+shorthand above, live-instance hatch here). Prefer the sinks; reach for a raw
+tracer `Layer` only when you already have one:
+
+```ts
 import { NodeSdk } from "@effect/opentelemetry";
 import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 
-const telemetry = NodeSdk.layer(() => ({
+const layer = NodeSdk.layer(() => ({
   resource: { serviceName: "triage-bot" },
   spanProcessor: new BatchSpanProcessor(new OTLPTraceExporter()),
 }));
-createApp(<Agent />, { name: "triage-bot", telemetry });
+createApp(<Agent />, { name: "triage-bot", telemetry: { layer } });
 ```
 
-With `telemetry: true` and **no** exporter wired, enrichment still runs (spans
-are annotated on the no-op tracer) but nothing is exported unless an OTel SDK is
-registered globally or a Layer is supplied — the switch turns on annotation, not
-export.
+A `layer` and `spanProcessor`s given together compose **additively** (both
+export) — the `layer` is never overridden.
 
-> ### Incoming — the standard-OTel wiring (design converged, landing open)
->
-> The Effect Layer in (b) is a substrate leak at the adoption edge. The
-> converged replacement lets you pass **standard OTel pieces** and a
-> `createTelemetry` factory that normalizes them — no Effect import required:
->
-> ```ts
-> // planned surface — see the observability report for the landing slice:
-> const telemetry = createTelemetry(
->   { serviceName: "triage-bot" },
->   { spanProcessor: new BatchSpanProcessor(new OTLPTraceExporter()),
->     metricReader:  new PeriodicExportingMetricReader({ exporter: otlpMetrics }) },
-> );
-> createApp(<Agent />, { name: "triage-bot", telemetry });
-> ```
->
-> `TelemetrySink = { spanProcessor?, metricReader?, attributes? }` is the
-> destination bundle; `createTelemetry(options, ...sinks)` merges sinks
-> (processors concat, readers collect, attributes merge), validates eagerly, and
-> returns the existing `TelemetrySetting` — the `createApp` slot union does not
-> grow, and inline forms (`true` / options / Layer) keep working. The Effect
-> `Layer` form stays as the substrate-native escape hatch (ADR-42 dichotomy:
-> standard-vocabulary shorthand + live-instance hatch, no third form). Landing is
-> gated on an Effect-version bump (`@effect/opentelemetry` needs `effect ^3.22`;
-> the workspace pins `3.21.2`) — see the report.
+### Env precedence (`otlpSink` auto-fill)
+
+| Field | Option | Env var | Precedence |
+| ----- | ------ | ------- | ---------- |
+| endpoint | `otlpSink({ endpoint })` | `OTEL_EXPORTER_OTLP_ENDPOINT` | explicit option wins |
+| headers | `otlpSink({ headers })` | `OTEL_EXPORTER_OTLP_HEADERS` | per-key merge; explicit key wins, env-only kept |
+| protocol | `otlpSink({ protocol })` | `OTEL_EXPORTER_OTLP_PROTOCOL` | explicit option wins; unknown env → `http/protobuf` |
+| serviceName | `createTelemetry({ serviceName })` | `OTEL_SERVICE_NAME` | explicit option wins |
+| attributes | `createTelemetry({ attributes })` | `OTEL_RESOURCE_ATTRIBUTES` | per-key; explicit key wins |
 
 ## 7. Testing your instrumentation
 
@@ -295,6 +337,31 @@ expect(spy.spans.find((s) => s.name === "my.substep")?.parent).toBe("enclosing.o
 > Verified by `packages-next/runtime/src/__tests__/observability.spec.ts` (the
 > spy double is exercised there for parenting + fan-out).
 
+`spyTelemetryProvider` (above) tests instrumentation at the substrate level. To
+test the **full app path** — `createApp({ telemetry })` threading a provider all
+the way to `ctx.trace` / `ctx.metrics` in a real tool handler — wire a
+`spyTelemetrySink()` (from `@agentick/runtime-next/testing`) through
+`createTelemetry`; it records at the standard-OTel edge (proving the whole
+Effect → OTel bridge), exposing `.spans` and `collectMetrics()` for assertions:
+
+```ts
+import { spyTelemetrySink } from "@agentick/runtime-next/testing";
+import { createTelemetry } from "@agentick/app-next";
+
+const spy = spyTelemetrySink();
+const app = await createApp(<Agent />, {
+  name: "triage-bot",
+  telemetry: createTelemetry({}, spy),
+});
+// … drive a send that dispatches a tool calling ctx.trace / ctx.metrics …
+expect(spy.spans.some((s) => s.name === "my.substep")).toBe(true);
+expect(await spy.collectMetrics()).toContainEqual(
+  expect.objectContaining({ name: "acme.search.requests" }),
+);
+```
+
+> Verified by `packages-next/app/src/__tests__/telemetry-e2e.spec.tsx`.
+
 ## 8. Correlation — how `log`, `trace`, and `metrics` join up
 
 `log` is a **bus** event (ADR 64): a structured diagnostic that projections
@@ -305,18 +372,21 @@ coordinates (`sessionId`/`executionId`/`tickId`) and, in a wired backend, the
 active trace/span id, so a log line and its span land on the same trace in your
 backend. Metrics stay low-cardinality and are queried by their bounded labels,
 then pivoted to the matching spans by time + service. (Stamping the active
-trace/span id onto the log envelope is a small follow-up — see the report.)
+trace/span id onto the log envelope is a small follow-up — not yet built.)
 
 ## 9. Where each piece lives
 
 | Piece | Package | Symbol |
 | ----- | ------- | ------ |
 | The facet types | `@agentick/spec-next` | `Observability`, `Ops`, `Span`, `Metrics`, `RunOptions` |
+| The switch + sink types | `@agentick/spec-next` | `TelemetrySetting`, `TelemetryOptions`, `TelemetrySink` |
 | The derivations | `@agentick/runtime-next` | `deriveObservability`, `deriveOps` |
 | The provider seam | `@agentick/runtime-next` | `TelemetryProvider`, `MetricSink` |
-| Testing double | `@agentick/runtime-next/testing` | `spyTelemetryProvider` |
+| Testing doubles | `@agentick/runtime-next/testing` | `spyTelemetryProvider`, `spyTelemetrySink` |
 | Conformance | `@agentick/spec-conformance-next` | `runObservabilityCtxConformance`, `runOpsCtxConformance` |
-| The one switch | `agentick` / `@agentick/app-next` | `createApp({ telemetry })` |
+| The one switch | `@agentick/app-next` | `createApp({ telemetry })` |
+| Sink merge factory | `@agentick/app-next` | `createTelemetry(options, ...sinks)` |
+| OTLP exporter sink | `@agentick/telemetry-otlp-next` | `otlpSink(options?)` |
 
 > The runtime README's "The `ctx` facets" section is the substrate-level
 > companion to this guide.

@@ -16,3 +16,8 @@ export {
   type RecordedMetric,
   type RecordedSpan,
 } from "./spy-telemetry-provider.js";
+export {
+  spyTelemetrySink,
+  type SpyTelemetrySink,
+  type RecordedSinkMetric,
+} from "./spy-telemetry-sink.js";

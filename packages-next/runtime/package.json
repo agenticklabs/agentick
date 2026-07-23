@@ -53,10 +53,13 @@
   "dependencies": {
     "@agentick/spec-next": "workspace:*",
     "@agentick/utils-next": "workspace:*",
+    "@opentelemetry/sdk-metrics": "^2.0.0",
+    "@opentelemetry/sdk-trace-base": "^2.0.0",
     "effect": "^3.22.0"
   },
   "devDependencies": {
     "@agentick/spec-conformance-next": "workspace:*",
-    "@agentick/utils-next": "workspace:*"
+    "@agentick/utils-next": "workspace:*",
+    "@opentelemetry/api": "^1.9.0"
   }
 }

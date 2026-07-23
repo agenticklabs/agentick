@@ -22,6 +22,8 @@
  */
 
 import type { Layer } from "effect";
+import type { SpanProcessor } from "@opentelemetry/sdk-trace-base";
+import type { MetricReader } from "@opentelemetry/sdk-metrics";
 import type { EventQuery, ProtocolEvent } from "../data/events.js";
 import type { SessionStatus } from "./hook-bridges.js";
 import type { SessionRecord, SessionStoreQuery } from "./session-store.js";
@@ -219,8 +221,68 @@ export interface TelemetryOptions {
    * {@link TelemetryLayer} form accepts. Supply it to actually EXPORT spans
    * (e.g. `@effect/opentelemetry`'s `NodeSdk` layer); omit to enrich spans on
    * the default (no-op) tracer while wiring the exporter globally elsewhere.
+   *
+   * The substrate-native escape hatch (ADR-42 dichotomy). Prefer the
+   * standard-OTel {@link spanProcessor} / {@link metricReader} fields — no
+   * Effect import required. When both a `layer` and `spanProcessor`s are
+   * supplied they compose ADDITIVELY (both export); the `layer` is never
+   * overridden.
    */
   readonly layer?: TelemetryLayer;
+  /**
+   * Standard OpenTelemetry span processor(s) — the de-Effected span export
+   * seam. The framework wraps these into a tracer runtime (via
+   * `@effect/opentelemetry`) so `Effect.withSpan` operation spans AND
+   * `ctx.trace` child spans export to them, with NO adopter-facing Effect
+   * import. A raw `new BatchSpanProcessor(new OTLPTraceExporter())` IS the
+   * whole wiring. Sampling / filtering / batching stay expressed as standard
+   * OTel objects — the framework adds no proprietary layer between adopter and
+   * OTel.
+   */
+  readonly spanProcessor?: SpanProcessor | SpanProcessor[];
+  /**
+   * Standard OpenTelemetry metric reader(s) — the metrics export seam. The
+   * framework feeds these to an OTel `MeterProvider` behind the `MetricSink`
+   * seam so `ctx.metrics.*` emissions export to them. Metrics do NOT ride
+   * Effect (no Layer) — a `new PeriodicExportingMetricReader({ exporter })` IS
+   * the whole wiring.
+   */
+  readonly metricReader?: MetricReader | MetricReader[];
+  /**
+   * Opt out of env-driven exporter autodiscovery (default ON when enrichment
+   * is on). When enrichment is on and NO exporter is wired (`layer` /
+   * `spanProcessor` / `metricReader` all absent), the framework attempts an
+   * OTLP exporter from `@agentick/telemetry-otlp-next` — but ONLY when
+   * `OTEL_EXPORTER_OTLP_ENDPOINT` is explicitly set (a deliberate divergence
+   * from the OTel SDK's silent-localhost default: no export spam). Set `false`
+   * to suppress that attempt even when the endpoint env is present.
+   */
+  readonly autoDiscover?: boolean;
+}
+
+/**
+ * A telemetry DESTINATION bundle — standard OpenTelemetry span processor(s)
+ * and/or metric reader(s) plus optional resource attributes. A raw object
+ * literal IS a valid sink (the escape hatch is the primitive):
+ * `{ spanProcessor: new BatchSpanProcessor(exporter) }`. Sink factories
+ * (`otlpSink()`, `spyTelemetrySink()`) return this shape.
+ *
+ * `createTelemetry(options, ...sinks)` merges sinks into one
+ * {@link TelemetryOptions} (span processors concat, metric readers concat,
+ * attributes merge under the options'). The framework wraps NOTHING around the
+ * OTel objects — sampling / filtering / batching are the adopter's standard
+ * OTel objects, passed straight through.
+ */
+export interface TelemetrySink {
+  readonly spanProcessor?: SpanProcessor | SpanProcessor[];
+  readonly metricReader?: MetricReader | MetricReader[];
+  /**
+   * Resource-level attributes contributed by this destination (e.g. an
+   * exporter's `service.name` / deployment tags). Merged under the
+   * `createTelemetry` options' `attributes` (explicit options win on key
+   * collision).
+   */
+  readonly attributes?: Readonly<Record<string, unknown>>;
 }
 
 /**
@@ -232,7 +294,8 @@ export interface TelemetryOptions {
  *   - a {@link TelemetryLayer} — enrichment on + this tracer Layer (the
  *     original form; `telemetry: NodeSdk.layer(...)`).
  *   - a {@link TelemetryOptions} — enrichment on + `serviceName` / `attributes`
- *     / optional `layer`.
+ *     / standard-OTel `spanProcessor` / `metricReader` / optional Effect
+ *     `layer`. Build it ergonomically with `createTelemetry(options, ...sinks)`.
  *
  * `false` / omitted → OFF: no runtime, no interceptors, zero overhead.
  */
