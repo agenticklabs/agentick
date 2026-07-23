@@ -38,6 +38,11 @@
       "types": "./src/server/index.ts",
       "import": "./src/server/index.ts",
       "default": "./src/server/index.ts"
+    },
+    "./fetch": {
+      "types": "./src/server/fetch-handler.ts",
+      "import": "./src/server/fetch-handler.ts",
+      "default": "./src/server/fetch-handler.ts"
     }
   },
   "scripts": {
@@ -55,6 +60,7 @@
     "@agentick/client-core-next": "workspace:*",
     "@agentick/gateway-next": "workspace:*",
     "@agentick/spec-conformance-next": "workspace:*",
+    "@agentick/utils-next": "workspace:*",
     "effect": "^3.21.2",
     "typescript": "^5.7.3",
     "vitest": "^4.0.18"

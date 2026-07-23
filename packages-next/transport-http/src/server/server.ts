@@ -360,10 +360,15 @@ async function handlePost(
       "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
     });
+    // Streaming POST routes progress notifications to THIS response's SSE
+    // body (not the GET channel) — the one sink override on top of the
+    // connection's default (subscriptions / in-flight still land in the
+    // connection's registries).
     const response = await dispatchRequest(
       gateway,
       request,
       {
+        ...session.defaultSink(),
         sendNotification: (n) => {
           try {
             res.write(encodeSseFrame({ jsonrpc: "2.0", method: n.method, params: n.params }));
@@ -371,11 +376,6 @@ async function handlePost(
             /* swallow */
           }
         },
-        registerSubscription: (subId, unsubscribe) =>
-          session.registerSubscription(subId, unsubscribe),
-        unregisterSubscription: (subId) => session.unregisterSubscription(subId),
-        registerInFlight: (id, abort) => session.registerInFlight(id, abort),
-        unregisterInFlight: (id) => session.unregisterInFlight(id),
       },
       identity,
     );
@@ -389,19 +389,7 @@ async function handlePost(
   }
 
   // Non-streaming — single JSON response.
-  const response = await dispatchRequest(
-    gateway,
-    request,
-    {
-      sendNotification: (n) => session.sendNotification(n),
-      registerSubscription: (subId, unsubscribe) =>
-        session.registerSubscription(subId, unsubscribe),
-      unregisterSubscription: (subId) => session.unregisterSubscription(subId),
-      registerInFlight: (id, abort) => session.registerInFlight(id, abort),
-      unregisterInFlight: (id) => session.unregisterInFlight(id),
-    },
-    identity,
-  );
+  const response = await dispatchRequest(gateway, request, session.defaultSink(), identity);
   res.writeHead(200, { "Content-Type": "application/json" });
   res.end(JSON.stringify(response));
 }
@@ -422,19 +410,7 @@ async function dispatchSingle(
     return null;
   }
   if ("id" in frame && "method" in frame) {
-    return dispatchRequest(
-      gateway,
-      frame as JsonRpcRequest,
-      {
-        sendNotification: (n) => session.sendNotification(n),
-        registerSubscription: (subId, unsubscribe) =>
-          session.registerSubscription(subId, unsubscribe),
-        unregisterSubscription: (subId) => session.unregisterSubscription(subId),
-        registerInFlight: (id, abort) => session.registerInFlight(id, abort),
-        unregisterInFlight: (id) => session.unregisterInFlight(id),
-      },
-      identity,
-    );
+    return dispatchRequest(gateway, frame as JsonRpcRequest, session.defaultSink(), identity);
   }
   return null;
 }

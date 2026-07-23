@@ -26,7 +26,7 @@ import type {
 } from "@agentick/spec-next";
 import { intersectScopes, type IngressIdentity } from "@agentick/spec-next";
 
-import { dispatchRequest, type DispatchHost } from "./dispatch.js";
+import { dispatchRequest, type DispatchHost, type DispatchSink } from "./dispatch.js";
 
 export abstract class BaseConnectionContext {
   protected readonly subscriptions = new Map<string, { unsubscribe: () => Promise<void> }>();
@@ -163,6 +163,27 @@ export abstract class BaseConnectionContext {
   }
   unregisterInFlight(id: JsonRpcId): void {
     this.inFlight.delete(id);
+  }
+
+  /**
+   * The connection's canonical {@link DispatchSink} — subscriptions and
+   * in-flight registrations land in this connection's registries, and
+   * notifications route through {@link sendNotification} (which HTTP
+   * overrides to the persistent GET stream). Server adapters that call
+   * `dispatchRequest` directly (HTTP's per-request POST — where a
+   * notification sink cannot be the POST response itself) use this rather
+   * than re-declaring the same five callbacks at every call site. A
+   * streaming POST overrides just `sendNotification` on top of it
+   * (`{ ...conn.defaultSink(), sendNotification }`).
+   */
+  defaultSink(): DispatchSink {
+    return {
+      sendNotification: (n) => this.sendNotification(n),
+      registerSubscription: (subId, unsubscribe) => this.registerSubscription(subId, unsubscribe),
+      unregisterSubscription: (subId) => this.unregisterSubscription(subId),
+      registerInFlight: (id, abort) => this.registerInFlight(id, abort),
+      unregisterInFlight: (id) => this.unregisterInFlight(id),
+    };
   }
 
   /**

@@ -17,3 +17,9 @@ export {
   type HttpServerTransportConfig,
   type HttpServerTransportPortConfig,
 } from "./transport.js";
+export {
+  httpFetchHandler,
+  type FetchHandler,
+  type FetchHandlerOptions,
+  type Identity,
+} from "./fetch-handler.js";

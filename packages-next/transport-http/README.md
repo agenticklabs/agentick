@@ -170,6 +170,55 @@ type HttpServerTransportConfig =
 > principals — the per-session connection state deliberately caches no
 > identity.
 
+### `httpFetchHandler(gateway, options): FetchHandler` — the embedded gateway (`@agentick/transport-http-next/fetch`)
+
+Mount the gateway INSIDE an existing fetch-native HTTP framework (Hono,
+Nitro, Next.js route handlers, Bun/Deno) instead of owning a port. Same
+pipeline as `httpServer` (`dispatchRequest`, `resolveWebSecurity`, the SSE
+codec) behind a web-standard `(req: Request) => Promise<Response>`:
+
+```ts
+import { httpFetchHandler } from "@agentick/transport-http-next/fetch";
+
+const handler = httpFetchHandler(gateway, {
+  // YOUR auth already ran in YOUR middleware — hand us the RESULT, never tokens.
+  identity: async (req) => {
+    const user = await myAuth(req); // your session/JWT/cookie check
+    if (!user) return new Response(null, { status: 401 }); // your rejection, verbatim
+    return {
+      principal: user.id, //           → ADR-48 event stamping
+      user: { tenantId: user.tenantId }, // → RuntimeContextUser (ctx.user everywhere)
+      scopes: user.scopes, //          → the authorizer
+    };
+  },
+});
+
+app.all("/agentick/*", (c) => handler(c.req.raw)); // Hono
+```
+
+`identity` is the ONLY difference from standalone HTTP: the host's existing
+auth piggybacks here per request. Returning a `Response` short-circuits (the
+adopter's 401 / redirect, verbatim); returning an `Identity` (`{ principal?,
+user?, scopes? }` — the same `IngressIdentity` every ingress edge stamps)
+threads straight into dispatch. Token material NEVER crosses into the
+framework.
+
+> **Security is ON by default, even embedded (fail closed).** No `identity`
+> callback → every request is REFUSED (`401`, typed `IngressAuthRequired`).
+> The single documented opt-out is `security: "host-managed"` — the adopter
+> attests their host framework gates access, and requests then run as the
+> trusted local pole. The `Host` / `Origin` / CSRF defenses still run against
+> the request headers, so serving under a real hostname requires configuring
+> `allowedHosts` (security applies MORE when embedded, not less). There is no
+> TCP peer on a web `Request`, so `trustProxy` is inert — the adopter's
+> framework terminates the connection and owns the network boundary.
+
+> **Why a free function, not `gateway.handler()`?** `transport-http` sits
+> ABOVE `gateway` in the dependency graph (its tests construct a real
+> gateway). A `gateway.handler()` method would invert that into a build
+> cycle. The handler binds to the gateway by argument instead — one extra
+> token, no cycle.
+
 ## Patterns
 
 ### Adopter-supplied `fetch` for auth
@@ -220,6 +269,7 @@ under "Roadmap & known gaps" with an explicit marker.
 | Per-request ingress authn — valid/invalid/missing bearer, prototype-key guard, no cross-request identity bleed (two POSTs, one session)                | `src/__tests__/ingress-authn.spec.ts` (`runIngressAuthnConformance`)                                             |
 | `httpServerTransport` — `ServerTransport` conformance + real gateway-owned bind (`gateway.listen()` creates + binds the node server, ping round-trips; `gateway.close()` frees the port) | `src/__tests__/server-transport.spec.ts` (`runServerTransportConformance`)                                       |
 | Security defaults (STATUS A2 §4c) — CSRF bootstrap handshake + missing/invalid-token deny, cross-site `Origin`/`Sec-Fetch-Site` deny, `Host` allow-list deny, non-permissive CORS (allowlisted origin echoed, never `*`), loopback bind default; overrides (`csrf:false`, `allowedOrigins`, `allowedHosts`) | `src/__tests__/security.spec.ts` + policy matrix in `@agentick/transport-next` `src/__tests__/web-security.spec.ts` |
+| Embedded gateway (`httpFetchHandler`) — identity round-trip (dispatch sees the callback's principal), identity `Response` short-circuit, fail-closed default + `security: "host-managed"` local-pole opt-out, scopes denied through the existing `authorizeDispatch` choke point, subscription stream (GET SSE + `sub/subscribe` → frame → teardown), cross-site reject when embedded, Hono-style mount typechecks | `src/__tests__/embedded-fetch-handler.spec.ts` |
 
 ## Roadmap & known gaps
 

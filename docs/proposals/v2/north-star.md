@@ -128,6 +128,16 @@ app.all("/agentick/*", (c) => handler(c.req.raw));
 // streams (SSE): identity binds at connect; req-res re-resolves per request
 ```
 
+**EMBEDDED mode ✓ (B2 slice 5, 2026-07-22).** Shipped as a free function, not a
+`gateway.handler()` method: `transport-http` sits ABOVE `gateway` in the dep graph
+(its tests build a real gateway), so a method would invert that into a build cycle.
+The achieved shape binds the gateway by argument — everything else is exactly as drawn:
+`const handler = httpFetchHandler(gateway, { identity })` from
+`@agentick/transport-http-next/fetch`; `identity: (req) => Identity | Response`
+(Response short-circuits); `security: "host-managed"` opt-out; fail-closed default.
+Verified by `packages-next/transport-http/src/__tests__/embedded-fetch-handler.spec.ts`
+(8 proofs) + README §"the embedded gateway".
+
 **The grouping rule (so this never rots):** a key earns a GROUP when it's one of ≥3
 siblings sharing an axis (lifecycle, operator-security, egress-policy); otherwise it
 stays flat. Axes, not grab-bags. New keys must name their axis in review or justify
