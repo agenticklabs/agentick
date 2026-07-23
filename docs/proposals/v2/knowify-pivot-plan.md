@@ -54,14 +54,27 @@ v2 mapping:
 
 ## 3. The three decisions (Ryan's call)
 
-- **D1 — the CJS/ESM dodge.** Every agentick import in assistant-api is a
-  non-literal dynamic `import()` typed `any` — it switches off the entire
-  typed surface v2 just built (wire-proxy IntelliSense, typo=compile-error).
-  Porting to v2 without fixing it means upgrading to a framework whose main
-  DX wins are invisible. Options: (a) migrate assistant-api to ESM (cleanest;
-  unknown nx blast radius — SPIKE FIRST), (b) esbuild-bundle the v2 module so
-  the boundary disappears at build time, (c) keep the dodge (rejected: `any`
-  at every boundary). **Recommendation: spike (a), fall back (b).**
+- **D1 — the CJS/ESM dodge. RESOLVED 2026-07-23 (verified on `assistant-latest`).**
+  The "migrate to esm" branch (`fafc33b8`, effectively landed on
+  `assistant-latest` via the `assistant` merge + a residual 2-file
+  cherry-pick `b6360836`) does NOT flip to `type: module` — it stays CJS and
+  relies on **Node ≥22.12 unflagged `require(ESM)`**. The dodge is deleted;
+  `gateway.ts`/`module.ts` use static top-level `@agentick/*` imports — the
+  typed boundary (IntelliSense, typo=compile-error) is restored. **Verified
+  empirically on Ryan's machine (Node 24):** `require()` of
+  `@agentick/gateway`, `@agentick/core`, `@knowify/ernesto`, `@knowify/mcp`
+  all succeed (no top-level await in the v1 graph), and
+  `tsc -p tsconfig.app.json --noEmit` yields **3 errors, all one root
+  cause** — duplicate pnpm-hashed `typeorm@0.3.30` instances (peer-set
+  divergence; nine typeorm instances across 0.2.45/0.3.30/0.3.31 exist in the
+  lockfile) making `DataSource` nominally incompatible at 3 call sites.
+  Fix is lockfile hygiene (`pnpm dedupe` — dry-run shows changes available —
+  or a typeorm override pinning one instance), NOT ESM work.
+  **Follow-ups:** (1) tighten `engines` from `>=22.0.0` to `>=22.12` —
+  22.0–22.11 gate `require(ESM)` behind a flag; audit prod images. (2)
+  **agentick v2 obligation:** the strategy only survives the v2 port if
+  packages-next dist stays top-level-await-free — add a "no TLA in published
+  dist" invariant gate to v2 CI (friction-log item, real enabler).
 - **D2 — persistence.** Keep writing the v1 tables via store adapters
   (legacy UI, execution-graph controller, feedback keep working; conformance
   suites verify the adapter). Revisit ownership post-pivot. **Recommendation:
