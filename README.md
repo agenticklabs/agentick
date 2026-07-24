@@ -231,6 +231,44 @@ for await (const event of handle) {
 }
 ```
 
+## Structured results
+
+Ask for a shape; get a typed, validated value back:
+
+```tsx
+const { data } = await (
+  await session.send({
+    messages: [{ role: "user", content: "Summarize this ticket." }],
+    output: z.object({
+      title: z.string(),
+      priority: z.enum(["low", "medium", "high"]),
+      tags: z.array(z.string()),
+    }),
+  })
+).result;
+```
+
+When the turn has tools, agentick does **not** force every token through a
+JSON schema. It injects a **terminal tool** whose input schema _is_ your
+output schema; the model calls it to deliver the final answer, and that
+call ends the execution — **"done" and "shaped" are the same event.**
+Validation is provider-enforced tool-argument constraint (every provider,
+including Anthropic), the model keeps its full voice on intermediate
+ticks, and prose + data ride the same final turn (`response` + `data`,
+`stopReason: "output_delivered"`).
+
+The guarantee ladder is explicit, not hopeful: description-driven natural
+path → one forced wrap-up tick (`tool_choice` forcing — a hard provider
+guarantee) → typed error in the residual sliver. A nonconforming answer
+**rejects** (`ResponseValidationError`); you never receive a malformed
+object.
+
+Tree tier: `<Output schema={...} />` declares "every execution of this
+agent produces this shape"; send-level `output` overrides it per
+execution. Bare sends without tools use provider-native `responseFormat`
+instead — the same machinery behind `generateObject`. Full guide:
+[`docs/proposals/v2/guide-structured-outputs.md`](docs/proposals/v2/guide-structured-outputs.md).
+
 ## The package landscape
 
 v2 is composed of focused `@agentick/*-next` packages (the metapackage will bundle

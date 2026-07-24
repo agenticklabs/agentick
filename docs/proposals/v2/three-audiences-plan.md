@@ -397,6 +397,48 @@ Wire: `skills:run` as an `exposure: "wire"` command comes later (needs the
 declarative `responseFormat` form only — serializable by construction);
 not in this ticket.
 
+### C split (2026-07-24, post-scout — three spec assumptions corrected)
+
+The C terrain scout falsified three assumptions; C splits into C-core
+(now) and C2 (follow-up):
+
+1. **`SkillsHandle`/`SkillsHarness` have ZERO session access** — both are
+   constructed from substrate only; `run` on the handle cannot reach
+   `session.send`. Ruling: **capability injection, not ambient session**
+   (the D principle applied to harnesses): the skills harness gains a
+   late-bound `bindRunner(send)` seam (the `adoptTelemetry` precedent) —
+   injected at install with ONLY the send capability (type lives in
+   spec; no skills→session package edge; dependency graph verified clean
+   both directions). `session.skills.run(...)` then reads exactly as
+   intended. Reentrancy note: `skills.run` during an in-flight execution
+   takes the steer-join path carrying `output` → the existing
+   `SteerCannotCarryStructuredOutput` guard rejects it honestly — no new
+   guard needed; document it.
+2. **`allowed-tools` does not exist** — not on the `Skill` record (only
+   name/description/content/tags/metadata) AND there is no per-execution
+   tool-RESTRICTION seam anywhere (`SendInput.tools` is additive; the
+   loop hardcodes `compileForTick({exposure:"model"})`; `ToolListFilter.
+   nameMatches` is a single string, not an allowlist). **C2**: add the
+   Skill field (align with Agent Skills frontmatter, feeds E1's loader)
+   + a `SendInput` restriction seam threading into `compileForTick` +
+   the `output`×restricted-tools strategy interaction test.
+3. **Fork's missing enabler confirmed**: the session does not retain its
+   own root (`options.agent` forwarded to the compiler, never stored),
+   and `SpawnInput.agent` is required — the app-level fallback is the
+   APP root, wrong for previously-spawned children. **C2**: store the
+   session's agent, make `SpawnInput.agent` optional defaulting to it,
+   then `session.fork()` sugar + `isolate: true`. **C-core is
+   inline-only** — `isolate` rejects with a typed not-yet error naming
+   the follow-up, never silently running inline.
+
+C-core ships: `skills.run(name, { args?, output?, maxTicks?, signal? })`
+on the handle (late-bound runner), default composition = system-role
+skill message + user-role args message (v2 has no structural `system`
+field — deliberately; a `messages` entry with `role: "system"` is the
+path), `composeRun` seam on `withSkills`, `SkillRunResult<T> = { data,
+text (:= SendResult.response), usage, ticks, stopReason, executionId }`,
+riding B2a's `output` end-to-end.
+
 Depends on B. Tests: run-with-schema (typed data), run-without-schema
 (text), `allowed-tools` scoping, `composeRun` seam override, missing skill
 throws, inline timeline effects documented in the spec test.
