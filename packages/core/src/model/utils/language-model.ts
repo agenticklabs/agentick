@@ -190,7 +190,10 @@ function wrapTextWithDelimiter(
  * @returns Content blocks suitable for ModelInput (only supported types)
  */
 function convertUnsupportedBlocksToText(blocks: ContentBlock[]): ContentBlock[] {
-  return blocks.flatMap((block) => {
+  // Explicit callback return type: TS7 infers the branch arrays' union and
+  // rejects it against flatMap's signature; the annotation restores the
+  // (identical) widened intent.
+  return blocks.flatMap((block): ContentBlock[] => {
     // Code blocks → markdown code fences
     if (block.type === "code") {
       const codeBlock = block as any;

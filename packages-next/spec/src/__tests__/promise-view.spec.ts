@@ -14,7 +14,11 @@
  */
 
 import { describe, expect, it } from "vitest";
-import ts from "typescript";
+// TS7's native compiler exposes no programmatic API (language service et al.)
+// until 7.1 — API consumers ride the sanctioned `@typescript/typescript6`
+// compatibility package (the same hybrid Microsoft prescribes for TypeDoc).
+// This is the workspace's ONLY compiler-API consumer outside the website.
+import ts from "@typescript/typescript6";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
