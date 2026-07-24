@@ -13,18 +13,11 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { Effect } from "effect";
 
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
-import type {
-  ExecutorTerminal,
-  LanguageModelExecutionResult,
-  LanguageModelExecutor,
-  RunInput,
-  ToolDeclaration,
-  ToolRegistration,
-} from "@agentick/spec-next";
-import { SPEC_VERSION, jsonSchema } from "@agentick/spec-next";
+import type { ExecutionTarget, ToolDeclaration, ToolRegistration } from "@agentick/spec-next";
+import { jsonSchema } from "@agentick/spec-next";
+import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
 import { ToolExecutorHarness, InMemoryHandlerResolver } from "@agentick/tool-executor-next";
 import { ElicitationHarness } from "@agentick/elicitation-next";
 import { CompilerHarness } from "@agentick/compiler-react-next";
@@ -36,64 +29,20 @@ import { SessionHarness } from "../harness.js";
 // Fixtures
 // ============================================================================
 
-const target = {
-  kind: "language-model" as const,
+const target: ExecutionTarget = {
+  kind: "language-model",
   provider: "fake",
   modelId: "fake-v1",
 };
 
-/**
- * Recording executor — captures the `tools` arg passed to each `run()`
- * so tests can assert what the model would have seen this tick.
- */
-function mkRecordingExecutor(): {
-  readonly executor: LanguageModelExecutor;
-  readonly captured: { runs: Array<readonly ToolDeclaration[]> };
-} {
-  const captured = { runs: [] as Array<readonly ToolDeclaration[]> };
-  const result: LanguageModelExecutionResult = {
-    specVersion: SPEC_VERSION,
-    output: [{ type: "text", text: "ok" }],
-    stopReason: "end",
-    usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
-  };
-  const runFx = (input: RunInput): Effect.Effect<ExecutorTerminal<LanguageModelExecutionResult>> =>
-    Effect.sync(() => {
-      captured.runs.push(input.tools);
-      return { outcome: "succeeded", result };
-    });
-  const executor: LanguageModelExecutor = {
-    family: "language-model",
-    target,
-    ready: Promise.resolve(),
-    fx: {
-      use: () => () => {},
-      run: runFx,
-      project: () => Effect.succeed({ messages: [] }),
-      normalize: () => Effect.succeed(result),
-      executeStream: () => Effect.succeed(result),
-    },
-    async project() {
-      return { messages: [] };
-    },
-    async execute() {
-      return result;
-    },
-    async normalize() {
-      return result;
-    },
-    run(input: RunInput): Promise<ExecutorTerminal<LanguageModelExecutionResult>> {
-      return Effect.runPromise(runFx(input));
-    },
-    async abort() {},
-  };
-  return { executor, captured };
-}
+/** The model-facing tools the fake saw this tick (from its `seenRuns` ledger). */
+const seenTools = (executor: FakeLanguageModelExecutor, tick: number): readonly ToolDeclaration[] =>
+  executor.seenRuns[tick]!.tools ?? [];
 
 async function mkSession(opts: { sessionTools?: readonly ToolRegistration[] }): Promise<{
   session: SessionHarness;
   toolExecutor: ToolExecutorHarness;
-  captured: { runs: Array<readonly ToolDeclaration[]> };
+  executor: FakeLanguageModelExecutor;
 }> {
   const journal = new MemoryJournal();
   const bus = new LocalEventBus();
@@ -103,8 +52,8 @@ async function mkSession(opts: { sessionTools?: readonly ToolRegistration[] }): 
   const resolver = new InMemoryHandlerResolver();
   // Register handlers for every tool the tests use, so dispatch never
   // misses on a `handlerRef` lookup. The handlers don't run in these
-  // tests (the recording executor doesn't emit tool_use), but the
-  // registry's register() path still verifies that handlerRefs resolve.
+  // tests (the fake never emits tool_use), but the registry's register()
+  // path still verifies that handlerRefs resolve.
   for (const name of ["calc", "search", "exec_only"]) {
     resolver.register(`h.${name}`, async () => [{ type: "text", text: "ok" }]);
   }
@@ -114,7 +63,11 @@ async function mkSession(opts: { sessionTools?: readonly ToolRegistration[] }): 
     elicitation,
     ...(opts.sessionTools ? { initialTools: opts.sessionTools } : {}),
   });
-  const { executor, captured } = mkRecordingExecutor();
+  // The canonical fake on the non-streaming `fx.run` path (`defaultStreaming:
+  // false`) records each tick's model-facing `tools` on `seenRuns` — the
+  // seen-input recorder these assertions read. Default "ok" text reply (never
+  // emits tool_use), so no tool handler runs.
+  const executor = new FakeLanguageModelExecutor("test-exec", journal, bus, inbox, { target });
   await Promise.all([
     compiler.ready,
     loop.ready,
@@ -131,10 +84,11 @@ async function mkSession(opts: { sessionTools?: readonly ToolRegistration[] }): 
     modelExecutor: executor,
     toolExecutor,
     target,
+    defaultStreaming: false,
   });
   await session.ready;
   await session.mountReady;
-  return { session, toolExecutor, captured };
+  return { session, toolExecutor, executor };
 }
 
 function tool(name: string, exposure: ToolDeclaration["exposure"] = ["model"]): ToolDeclaration {
@@ -154,19 +108,19 @@ function tool(name: string, exposure: ToolDeclaration["exposure"] = ["model"]): 
 
 describe("SessionHarness — layered tools (#139)", () => {
   it("registers SendInput.tools at execution scope; loop sees them at the tick", async () => {
-    const { session, captured } = await mkSession({});
+    const { session, executor } = await mkSession({});
     const h = await session.send({
       messages: [{ role: "user", content: "go" }],
       tools: [tool("exec_only")],
     });
     await h.result;
-    expect(captured.runs).toHaveLength(1);
-    expect(captured.runs[0]!.map((t) => t.name)).toEqual(["exec_only"]);
+    expect(executor.seenRuns).toHaveLength(1);
+    expect(seenTools(executor, 0).map((t) => t.name)).toEqual(["exec_only"]);
     await session.close();
   });
 
   it("execution-scoped tools are removed when the execution finishes", async () => {
-    const { session, toolExecutor, captured } = await mkSession({});
+    const { session, toolExecutor, executor } = await mkSession({});
     const h = await session.send({
       messages: [{ role: "user", content: "go" }],
       tools: [tool("exec_only")],
@@ -181,7 +135,7 @@ describe("SessionHarness — layered tools (#139)", () => {
     // The next send with no tools sees an empty model view.
     const h2 = await session.send({ messages: [{ role: "user", content: "go again" }] });
     await h2.result;
-    expect(captured.runs[1]!).toEqual([]);
+    expect(seenTools(executor, 1)).toEqual([]);
     await session.close();
   });
 
@@ -198,7 +152,7 @@ describe("SessionHarness — layered tools (#139)", () => {
       handlerRef: "h.calc",
       binding: { scope: "session", sessionId: "test-session" },
     };
-    const { session, captured } = await mkSession({ sessionTools: [sessionTool] });
+    const { session, executor } = await mkSession({ sessionTools: [sessionTool] });
     const h = await session.send({
       messages: [{ role: "user", content: "go" }],
       tools: [
@@ -213,9 +167,9 @@ describe("SessionHarness — layered tools (#139)", () => {
       ],
     });
     await h.result;
-    expect(captured.runs[0]!).toHaveLength(1);
+    expect(seenTools(executor, 0)).toHaveLength(1);
     // Execution binding wins by precedence — model sees the exec one.
-    expect(captured.runs[0]![0]!.description).toBe("exec calc");
+    expect(seenTools(executor, 0)[0]!.description).toBe("exec calc");
     await session.close();
   });
 
@@ -232,13 +186,13 @@ describe("SessionHarness — layered tools (#139)", () => {
       handlerRef: "h.search",
       binding: { scope: "session", sessionId: "test-session" },
     };
-    const { session, captured } = await mkSession({ sessionTools: [sessionTool] });
+    const { session, executor } = await mkSession({ sessionTools: [sessionTool] });
     const h1 = await session.send({ messages: [{ role: "user", content: "1" }] });
     await h1.result;
     const h2 = await session.send({ messages: [{ role: "user", content: "2" }] });
     await h2.result;
-    expect(captured.runs[0]!.map((t) => t.name)).toEqual(["search"]);
-    expect(captured.runs[1]!.map((t) => t.name)).toEqual(["search"]);
+    expect(seenTools(executor, 0).map((t) => t.name)).toEqual(["search"]);
+    expect(seenTools(executor, 1).map((t) => t.name)).toEqual(["search"]);
     await session.close();
   });
 });

@@ -12,11 +12,14 @@
  *
  * The live-schema sugar (`SendInput.output`) + validated `SendResult.data` —
  * the terminal-tool strategy — are covered in `structured-output.spec.ts`
- * (§B2). This file stays scoped to the declarative `responseFormat` directive.
+ * (§B2/§B3). This file stays scoped to the declarative `responseFormat`
+ * directive. Both suites drive the canonical {@link FakeLanguageModelExecutor}
+ * on the non-streaming `fx.run` path (`defaultStreaming: false`), reading the
+ * fake's `seenRuns` ledger for the projected `compiled` config; the gated
+ * variant rides the fake's scripted `holdUntil` knob — no bespoke executors.
  */
 
 import { describe, expect, it } from "vitest";
-import { Effect } from "effect";
 import * as React from "react";
 
 import { FakeLanguageModelExecutor } from "@agentick/model-executor-next";
@@ -26,15 +29,10 @@ import { InMemoryHandlerResolver, ToolExecutorHarness } from "@agentick/tool-exe
 import { LoopExecutorHarness } from "@agentick/loop-executor-next";
 import { CompilerHarness } from "@agentick/compiler-react-next";
 import type {
-  ExecutorFx,
-  ExecutorTerminal,
   ExecutionTarget,
   LanguageModelExecutionResult,
-  LanguageModelExecutor,
-  LanguageModelInput,
   RenderedTree,
   ResponseFormat,
-  RunInput,
   ToolDeclaration,
 } from "@agentick/spec-next";
 import { SPEC_VERSION, jsonSchema } from "@agentick/spec-next";
@@ -45,7 +43,7 @@ const target: ExecutionTarget = {
   kind: "language-model",
   provider: "mock",
   modelId: "mock-v1",
-  capabilities: { supportsTools: true, supportsStreaming: true },
+  capabilities: { supportsTools: true, supportsStreaming: true, supportsJsonSchema: true },
 };
 
 const rf = (name: string): ResponseFormat => ({
@@ -54,65 +52,25 @@ const rf = (name: string): ResponseFormat => ({
   schema: { title: name },
 });
 
-/**
- * Hand-rolled executor that records the `compiled` tree of every `run()`.
- * OMITS a top-level `executeStream` method so the loop takes the
- * non-streaming `run` path (the capability default gates streaming on the
- * method's presence) — that is the path whose `compiled` we observe.
- */
-function mkRecordingExecutor(scripts: readonly LanguageModelExecutionResult[]): {
-  readonly executor: LanguageModelExecutor;
-  readonly captured: { compiled: RenderedTree[] };
-} {
-  const captured = { compiled: [] as RenderedTree[] };
-  let i = 0;
-  const nextResult = (): LanguageModelExecutionResult =>
-    scripts[Math.min(i++, scripts.length - 1)]!;
-  const runFx = (input: RunInput): Effect.Effect<ExecutorTerminal<LanguageModelExecutionResult>> =>
-    Effect.sync(() => {
-      captured.compiled.push(input.compiled);
-      return { outcome: "succeeded", result: nextResult() };
-    });
-  const fx: ExecutorFx<LanguageModelInput, unknown, LanguageModelExecutionResult> = {
-    use: () => () => {},
-    run: runFx,
-    project: () => Effect.succeed({ messages: [] }),
-    normalize: () => Effect.succeed(scripts[0]!),
-    executeStream: () => Effect.succeed(scripts[0]!),
-  };
-  const executor = {
-    family: "language-model" as const,
-    target,
-    ready: Promise.resolve(),
-    fx,
-    async project(): Promise<LanguageModelInput> {
-      return { messages: [] };
-    },
-    async execute(): Promise<unknown> {
-      return scripts[0]!;
-    },
-    async normalize(): Promise<LanguageModelExecutionResult> {
-      return scripts[0]!;
-    },
-    run(input: RunInput): Promise<ExecutorTerminal<LanguageModelExecutionResult>> {
-      return Effect.runPromise(runFx(input));
-    },
-    async abort(): Promise<void> {},
-  } as unknown as LanguageModelExecutor;
-  return { executor, captured };
-}
-
 interface Built {
   readonly session: SessionHarness;
   readonly tools: ToolExecutorHarness;
   readonly resolver: InMemoryHandlerResolver;
+  readonly executor: FakeLanguageModelExecutor;
   dispose(): Promise<void>;
 }
 
-async function mkSession(
-  executor: LanguageModelExecutor,
-  agent: React.ReactElement | null = null,
-): Promise<Built> {
+/**
+ * Build a session driven by the canonical {@link FakeLanguageModelExecutor}.
+ * `defaultStreaming: false` forces the non-streaming `fx.run` path so the
+ * fake records each tick's projected `compiled` on `seenRuns` and the scripted
+ * `holdUntil` gate applies. A `holdUntil` blocks the FIRST run (steer race).
+ */
+async function mkSession(opts: {
+  readonly scripts: readonly LanguageModelExecutionResult[];
+  readonly agent?: React.ReactElement | null;
+  readonly holdUntil?: Promise<void>;
+}): Promise<Built> {
   const journal = new MemoryJournal();
   const bus = new LocalEventBus();
   const inbox = new LocalInbox();
@@ -124,16 +82,24 @@ async function mkSession(
     handlerResolver: resolver,
     elicitation,
   });
+  const executor = new FakeLanguageModelExecutor("ss-exec", journal, bus, inbox, {
+    target,
+    scripted: opts.scripts.map((result, i) => ({
+      result,
+      ...(i === 0 && opts.holdUntil !== undefined ? { holdUntil: opts.holdUntil } : {}),
+    })),
+  });
   await Promise.all([compiler.ready, loop.ready, tools.ready, elicitation.ready, executor.ready]);
 
   const session = new SessionHarness(journal, bus, inbox, {
     sessionId: `s-${Math.random().toString(36).slice(2)}`,
-    agent,
+    agent: opts.agent ?? null,
     compiler,
     loop,
     modelExecutor: executor,
     toolExecutor: tools,
     target,
+    defaultStreaming: false,
   });
   await session.ready;
   await session.mountReady;
@@ -141,6 +107,7 @@ async function mkSession(
     session,
     tools,
     resolver,
+    executor,
     dispose: async () => {
       await session.close();
       await tools.close();
@@ -155,6 +122,13 @@ const okResult: LanguageModelExecutionResult = {
   usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
 };
 
+const textReply = (text: string): LanguageModelExecutionResult => ({
+  specVersion: SPEC_VERSION,
+  output: [{ type: "text", text }],
+  stopReason: "end",
+  usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+});
+
 function seenName(tree: RenderedTree): string | undefined {
   const format = tree.config?.responseFormat;
   return format?.type === "json_schema" ? format.name : undefined;
@@ -162,10 +136,12 @@ function seenName(tree: RenderedTree): string | undefined {
 
 describe("structured send — responseFormat threading + precedence", () => {
   it("send-level responseFormat is threaded to the executor, overriding tree <model responseFormat>", async () => {
-    const { executor, captured } = mkRecordingExecutor([okResult]);
     // Tree declares a config-level responseFormat via <model responseFormat>.
     const Agent = () => React.createElement("model", { responseFormat: rf("from-tree") });
-    const { session, dispose } = await mkSession(executor, React.createElement(Agent));
+    const { session, executor, dispose } = await mkSession({
+      scripts: [okResult],
+      agent: React.createElement(Agent),
+    });
 
     await (
       await session.send({
@@ -174,21 +150,23 @@ describe("structured send — responseFormat threading + precedence", () => {
       })
     ).result;
 
-    expect(captured.compiled).toHaveLength(1);
-    expect(seenName(captured.compiled[0]!)).toBe("from-send");
+    expect(executor.seenRuns).toHaveLength(1);
+    expect(seenName(executor.seenRuns[0]!.compiled)).toBe("from-send");
     await dispose();
   });
 
   it("no send-level responseFormat leaves the tree <model responseFormat> in place", async () => {
-    const { executor, captured } = mkRecordingExecutor([okResult]);
     const Agent = () => React.createElement("model", { responseFormat: rf("from-tree") });
-    const { session, dispose } = await mkSession(executor, React.createElement(Agent));
+    const { session, executor, dispose } = await mkSession({
+      scripts: [okResult],
+      agent: React.createElement(Agent),
+    });
 
     await (
       await session.send({ messages: [{ role: "user", content: "hi" }] })
     ).result;
 
-    expect(seenName(captured.compiled[0]!)).toBe("from-tree");
+    expect(seenName(executor.seenRuns[0]!.compiled)).toBe("from-tree");
     await dispose();
   });
 
@@ -207,8 +185,7 @@ describe("structured send — responseFormat threading + precedence", () => {
       stopReason: "end",
       usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
     };
-    const { executor, captured } = mkRecordingExecutor([toolUse, final]);
-    const { session, resolver, dispose } = await mkSession(executor);
+    const { session, resolver, executor, dispose } = await mkSession({ scripts: [toolUse, final] });
     resolver.register("h.noop", async () => [{ type: "text", text: "ok" }]);
 
     const noopTool: ToolDeclaration = {
@@ -229,17 +206,23 @@ describe("structured send — responseFormat threading + precedence", () => {
       })
     ).result;
 
-    expect(captured.compiled).toHaveLength(2);
-    expect(seenName(captured.compiled[0]!)).toBe("every-tick");
-    expect(seenName(captured.compiled[1]!)).toBe("every-tick");
+    expect(executor.seenRuns).toHaveLength(2);
+    expect(seenName(executor.seenRuns[0]!.compiled)).toBe("every-tick");
+    expect(seenName(executor.seenRuns[1]!.compiled)).toBe("every-tick");
     await dispose();
   });
 });
 
 describe("structured send — steer delivery conflict", () => {
   it("a steer carrying responseFormat is rejected; the same request as followUp works", async () => {
-    const { exec, release } = gatedExec(["first answer", "second answer"]);
-    const { session, dispose } = await mkSession(exec);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const { session, dispose } = await mkSession({
+      scripts: [textReply("first answer"), textReply("second answer")],
+      holdUntil: gate,
+    });
 
     // Start the in-flight (gated) execution.
     const h1 = await session.send({ messages: [{ role: "user", content: "ask" }] });
@@ -268,60 +251,3 @@ describe("structured send — steer delivery conflict", () => {
     await dispose();
   });
 });
-
-/**
- * A FakeLanguageModelExecutor whose FIRST generation is held on a gate, so
- * a concurrent send lands mid-execution (pattern from extended-surface).
- */
-function gatedExec(replies: readonly string[]): {
-  readonly exec: FakeLanguageModelExecutor;
-  release: () => void;
-} {
-  const exec = new FakeLanguageModelExecutor(
-    `exec-gate-${Math.random()}`,
-    new MemoryJournal(),
-    new LocalEventBus(),
-    new LocalInbox(),
-    {
-      scripted: replies.map((text) => ({
-        result: {
-          specVersion: SPEC_VERSION,
-          output: [{ type: "text", text }],
-          stopReason: "end" as const,
-          usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
-        },
-      })),
-    },
-  );
-  let releaseFn!: () => void;
-  const gate = new Promise<void>((r) => {
-    releaseFn = r;
-  });
-  let calls = 0;
-  const baseFx = exec.fx;
-  const patchedFx: ExecutorFx<LanguageModelInput, unknown, LanguageModelExecutionResult> = {
-    ...baseFx,
-    run: (i) => {
-      calls += 1;
-      const inner = baseFx.run(i);
-      return calls === 1
-        ? Effect.zipRight(
-            Effect.promise(() => gate),
-            inner,
-          )
-        : inner;
-    },
-    executeStream: (i, sink) => {
-      calls += 1;
-      const inner = baseFx.executeStream(i, sink);
-      return calls === 1
-        ? Effect.zipRight(
-            Effect.promise(() => gate),
-            inner,
-          )
-        : inner;
-    },
-  };
-  Object.defineProperty(exec, "fx", { configurable: true, get: () => patchedFx });
-  return { exec, release: () => releaseFn() };
-}

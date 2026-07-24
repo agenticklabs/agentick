@@ -107,8 +107,10 @@ import {
   MultipleStructuredOutputs,
   NoModelForExecutionError,
   ProviderRejected,
+  ResponseValidationError,
   StructuredOutputIncomplete,
   TerminalToolNameCollision,
+  parseJsonWithSchema,
   toJsonSchema,
   toRegistration,
 } from "@agentick/spec-next";
@@ -227,7 +229,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
     RunExecutionInput,
     LoopExecutionEvent,
     ExecutionTerminal,
-    LoopExecutorError | NoModelForExecutionError
+    LoopExecutorError | NoModelForExecutionError | ResponseValidationError
   >;
 
   constructor(
@@ -285,7 +287,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
       RunExecutionInput,
       LoopExecutionEvent,
       ExecutionTerminal,
-      LoopExecutorError | NoModelForExecutionError
+      LoopExecutorError | NoModelForExecutionError | ResponseValidationError
     >({
       name: "loop:run-execution",
       exposure: "internal",
@@ -378,7 +380,11 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
   private runExecutionBody(
     input: RunExecutionInput,
     sink: (event: LoopExecutionEvent) => Effect.Effect<void>,
-  ): Effect.Effect<ExecutionTerminal, LoopExecutorError | NoModelForExecutionError, never> {
+  ): Effect.Effect<
+    ExecutionTerminal,
+    LoopExecutorError | NoModelForExecutionError | ResponseValidationError,
+    never
+  > {
     const executionId = input.executionId;
     return Effect.gen(this, function* () {
       // Structured cancellation (Stage 5) — a per-execution controller
@@ -432,6 +438,10 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
       let terminalCapture: { readonly toolName: string; readonly input: unknown } | undefined;
       let terminalStrategy: "tool" | "responseFormat" | undefined;
       let terminalToolName: string | undefined;
+      // §B3 fix #3 — the RESOLVED output schema (send-level OR tree-resolved),
+      // lifted from the tick. The loop validates the structured output against
+      // it at result assembly (the loop is the validation authority).
+      let outputSchema: import("@agentick/spec-next").StandardSchemaV1 | undefined;
 
       // Emit execution-start to the consumer (typed handle iterator).
       // The `useOnExecutionStart` lifecycle projection rides the
@@ -531,6 +541,9 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         }
         if (tickResult.terminalCapture !== undefined) {
           terminalCapture = tickResult.terminalCapture;
+        }
+        if (tickResult.resolvedOutputSchema !== undefined) {
+          outputSchema = tickResult.resolvedOutputSchema;
         }
         const terminalCaptured = terminalCapture !== undefined;
 
@@ -677,6 +690,9 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           accumulateUsage(acc.usage, wr.usage);
           acc.output.push(...wr.output);
           acc.toolResults.push(...wrapResult.toolResults);
+          if (wrapResult.resolvedOutputSchema !== undefined) {
+            outputSchema = wrapResult.resolvedOutputSchema;
+          }
           if (wrapResult.terminalCapture !== undefined) {
             terminalCapture = wrapResult.terminalCapture;
             // §B2 — the forced wrap-up delivered the output.
@@ -693,6 +709,56 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         }
       }
 
+      // §B3 fix #3 — the LOOP is the structured-output validation authority.
+      // The resolved schema (send-level `input.outputSpec` OR the tree-resolved
+      // `<Output>`, lifted from the ticks) is always in loop scope, so validate
+      // HERE — this closes the former tree-data gap: a tree-only `<Output>`
+      // now produces a validated `data`, not just an enforced completion.
+      //   - tool strategy: validate the terminal tool's raw captured input.
+      //   - responseFormat strategy: parse + validate the final assistant text
+      //     (the concatenated `output` — identical to the string the session
+      //     built before). Only when an output directive exists; a bare
+      //     `responseFormat` send WITHOUT `output`/tree-`<Output>` keeps its
+      //     no-validation behavior (no `outputSchema` was lifted).
+      // A supplied schema that isn't met fails the execution with the typed
+      // `ResponseValidationError` (errors over nulls) — same error type + raw +
+      // issues the session raised before, now surfaced loop-side.
+      let data: { readonly value: unknown } | undefined;
+      if (outputSchema !== undefined) {
+        if (terminalCapture !== undefined) {
+          const validated = yield* Effect.promise(() =>
+            Promise.resolve(outputSchema!["~standard"].validate(terminalCapture!.input)),
+          );
+          if (validated.issues !== undefined) {
+            return yield* Effect.fail(
+              new ResponseValidationError({
+                raw: terminalCapture.input,
+                issues: validated.issues,
+              }),
+            );
+          }
+          data = { value: validated.value };
+        } else if (terminalStrategy === "responseFormat") {
+          const finalText = acc.output
+            .filter((b): b is { type: "text"; text: string } => b.type === "text")
+            .map((b) => b.text)
+            .join("");
+          const parsed = yield* Effect.promise(() => parseJsonWithSchema(finalText, outputSchema!));
+          if (!parsed.ok) {
+            return yield* Effect.fail(
+              new ResponseValidationError({
+                raw: parsed.text,
+                issues: parsed.issues,
+                ...(parsed.reason === "invalid-json"
+                  ? { message: "structured output is not valid JSON" }
+                  : {}),
+              }),
+            );
+          }
+          data = { value: parsed.value };
+        }
+      }
+
       const runResult: ExecutionRunResult = {
         executionId,
         ticks: acc.ticks,
@@ -700,8 +766,11 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         stopReason,
         output: acc.output,
         toolResults: acc.toolResults,
-        // §B2 — the raw terminal capture (tool strategy). The SESSION validates
-        // it against the retained `output` schema at result assembly.
+        // §B3 — the VALIDATED structured output (both strategies). The session
+        // lifts it verbatim onto `SendResult.data`.
+        ...(data !== undefined ? { data: data.value } : {}),
+        // §B2 — the raw terminal capture (tool strategy), kept for
+        // observability alongside the validated `data`.
         ...(terminalCapture !== undefined ? { terminalCapture } : {}),
       };
 
@@ -734,18 +803,24 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
       // un-try/caught `await` threw. The two locally-handled failures
       // (streaming `.result`, hard tool throw) are already absorbed in-body.
       Effect.catchAll(
-        (cause): Effect.Effect<never, LoopExecutorError | NoModelForExecutionError> =>
+        (
+          cause,
+        ): Effect.Effect<
+          never,
+          LoopExecutorError | NoModelForExecutionError | ResponseValidationError
+        > =>
           // `NoModelForExecutionError` (raised at the per-tick model resolution),
-          // an already-`ExecutionError` cause, AND the §B2 structured-output
-          // errors (collision / miss / multi-output — the session rejects the
-          // send with the typed error) surface UNWRAPPED; every other uncaught
-          // twin failure folds to `ExecutionError`.
+          // an already-`ExecutionError` cause, AND the §B2/§B3 structured-output
+          // errors (collision / miss / multi-output / validation — the session
+          // rejects the send with the typed error) surface UNWRAPPED; every
+          // other uncaught twin failure folds to `ExecutionError`.
           Effect.fail(
             cause instanceof ExecutionError ||
               cause instanceof NoModelForExecutionError ||
               cause instanceof TerminalToolNameCollision ||
               cause instanceof StructuredOutputIncomplete ||
-              cause instanceof MultipleStructuredOutputs
+              cause instanceof MultipleStructuredOutputs ||
+              cause instanceof ResponseValidationError
               ? cause
               : new ExecutionError({ cause }),
           ),
@@ -887,9 +962,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         terminalStrategy =
           outputSpec.strategy === "tool" || outputSpec.strategy === "responseFormat"
             ? outputSpec.strategy
-            : modelTools.length > 0
-              ? "tool"
-              : "responseFormat";
+            : resolveAutoStrategy(modelTools.length, tickTarget.capabilities);
         if (terminalStrategy === "tool") {
           if (modelTools.some((t) => t.name === outputSpec.toolName)) {
             return yield* Effect.fail(
@@ -1264,6 +1337,12 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           ? { terminalToolName: outputSpec.toolName }
           : {}),
         ...(terminalCapture !== undefined ? { terminalCapture } : {}),
+        // §B3 fix #3 — lift the RESOLVED output schema (send-level OR
+        // tree-resolved) so the run-execution continuation validates the
+        // capture / final text loop-side (the loop is the validation
+        // authority) and surfaces the validated value on
+        // ExecutionRunResult.data.
+        ...(outputSpec !== undefined ? { resolvedOutputSchema: outputSpec.schema } : {}),
       };
 
       // ADR 67 §"flip the tick-end order" — the SETTLE now rides the
@@ -1317,6 +1396,51 @@ function terminalToolDeclaration(spec: OutputSpec): ToolDeclaration {
     inputSchema: spec.schema,
     exposure: ["model"],
   };
+}
+
+/**
+ * Resolve the `"auto"` structured-output strategy against the tick's tool
+ * count + the target's capabilities (three-audiences-plan §B3 fix #1). The
+ * pre-B3 policy keyed ONLY on `modelTools > 0`, so a bare `output` send to a
+ * target WITHOUT native `json_schema` (e.g. Anthropic — its adapter drops
+ * `responseFormat`) resolved to `responseFormat` and reliably failed
+ * validation. The terminal-tool strategy is provider-agnostic (tool arguments
+ * are constrained natively by every provider), so it is the correct default
+ * whenever native structured decoding is absent.
+ *
+ * Truth table (auto only — an explicit `strategy` on the OutputSpec bypasses
+ * this):
+ *
+ * | tools mounted | supportsJsonSchema | supportsTools | → strategy       |
+ * | ------------- | ------------------ | ------------- | ---------------- |
+ * | yes           | any                | not false     | tool             |
+ * | no            | true               | any           | responseFormat   |
+ * | no            | false / unset      | not false     | tool             |
+ * | any (wanted tool) | —              | false         | responseFormat † |
+ *
+ * † The DOUBLE-GAP fallback: the target supports NEITHER native json_schema
+ * NOR tools (a text-only model). A tool strategy the provider cannot honor is
+ * strictly worse than `responseFormat` (validation still catches
+ * non-adherence downstream), so fall back. `supportsTools` and
+ * `supportsJsonSchema` both default to their SAFE assumption when unset:
+ * tools default present (`!== false`), json_schema default ABSENT (`?? false`)
+ * — an unset target is treated as the common tool-capable / no-native-schema
+ * provider, which the terminal tool serves.
+ *
+ * TODO(loop-log): emit a `ctx.log` warning naming the double-gap once the log
+ * facet is threaded into the loop tick body (the loop has no `ctx.log` yet —
+ * the interceptor-ctx log facet is currently tool-executor + session only).
+ */
+function resolveAutoStrategy(
+  modelToolCount: number,
+  capabilities: import("@agentick/spec-next").TargetCapabilities | undefined,
+): "tool" | "responseFormat" {
+  const supportsJsonSchema = capabilities?.supportsJsonSchema ?? false;
+  const supportsTools = capabilities?.supportsTools;
+  const wantsTool = modelToolCount > 0 || !supportsJsonSchema;
+  if (!wantsTool) return "responseFormat";
+  // Double gap — wants a tool strategy but the target cannot do tools at all.
+  return supportsTools === false ? "responseFormat" : "tool";
 }
 
 /**

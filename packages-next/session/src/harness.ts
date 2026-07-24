@@ -94,8 +94,6 @@ import {
   HandlerError,
   isChannelSnapshotProvider,
   isSnapshotCapable,
-  parseJsonWithSchema,
-  ResponseValidationError,
   SteerCannotCarryStructuredOutput,
   supportsTreeInterception,
   SessionClosedError,
@@ -2417,55 +2415,15 @@ export class SessionHarness<P = unknown>
             .filter((b): b is { type: "text"; text: string } => b.type === "text")
             .map((b) => b.text)
             .join("");
-          // §B2 — structured-output validation. The SESSION is the validation
-          // authority: it retains the live `output` schema the wire never
-          // carries. Tool strategy → validate the terminal tool's raw captured
-          // input; responseFormat strategy (no capture) → parse + validate the
-          // final assistant text. A supplied schema that isn't met rejects with
-          // the typed `ResponseValidationError` (errors over nulls) rather than
-          // resolving an unvalidated `data`.
-          // TODO(b2a-tree-data): a TREE-only `<Output>` (no send-level `output`)
-          // still injects the terminal tool + captures on `terminalCapture`, but
-          // this validation gates on `input.output` (the send-level schema the
-          // session retains). Populating `SendResult.data` from a tree-declared
-          // schema needs the session to retain the tree schema (the loop resolves
-          // it per-tick); until then tree-only outputs enforce completion without
-          // a validated `data`.
-          let data: unknown;
-          if (input.output !== undefined) {
-            if (result.terminalCapture !== undefined) {
-              const validated = await input.output["~standard"].validate(
-                result.terminalCapture.input,
-              );
-              if (validated.issues !== undefined) {
-                resultDeferred.reject(
-                  new ResponseValidationError({
-                    raw: result.terminalCapture.input,
-                    issues: validated.issues,
-                  }),
-                );
-                close();
-                return;
-              }
-              data = validated.value;
-            } else {
-              const parsed = await parseJsonWithSchema(response, input.output);
-              if (!parsed.ok) {
-                resultDeferred.reject(
-                  new ResponseValidationError({
-                    raw: parsed.text,
-                    issues: parsed.issues,
-                    ...(parsed.reason === "invalid-json"
-                      ? { message: "structured output is not valid JSON" }
-                      : {}),
-                  }),
-                );
-                close();
-                return;
-              }
-              data = parsed.value;
-            }
-          }
+          // §B3 — structured-output `data`. The LOOP is the validation
+          // authority (it holds the resolved schema — send-level `input.output`
+          // OR a tree-level `<Output>` the session never sees), so it validates
+          // the capture / final text and surfaces the VALIDATED value on
+          // `result.data`; a schema that isn't met fails the execution with the
+          // typed `ResponseValidationError` loop-side (the onRejected branch
+          // below rejects `handle.result`). The session lifts `result.data`
+          // verbatim — present for BOTH the send-level `output` sugar AND a
+          // tree-only `<Output>` (the dedicated-extraction-agent story).
           const sendResult: SendResult = {
             response,
             output: result.output,
@@ -2474,7 +2432,7 @@ export class SessionHarness<P = unknown>
             stopReason: result.stopReason,
             ticks: result.ticks,
             executionId,
-            ...(input.output !== undefined ? { data } : {}),
+            ...(result.data !== undefined ? { data: result.data } : {}),
           };
           emit({ type: "result", tick: 0, result: sendResult });
           resultDeferred.resolve(sendResult);

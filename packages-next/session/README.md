@@ -273,15 +273,25 @@ data; // typed + validated, or the send rejected with ResponseValidationError
 whose `inputSchema` IS the output schema (default name `submit_result`);
 the model calls it to deliver the final answer, and the call is the
 completion event. This ties "done" to "shaped" and makes validation free
-(providers constrain tool arguments natively). On a **bare** send (no
-tools) the loop instead uses a plain `responseFormat` directive
-(`generateObject`'s domain) — resolved automatically per send, overridable
-via `strategy` on a tree-level `<Output>`. The terminal tool is **never
-registered / never dispatched**; the loop captures its raw input and the
-session validates it — a synthesized `tool_result` pairs the call in the
+(providers constrain tool arguments natively). The terminal tool is
+**never registered / never dispatched**; the loop captures its raw input
+and — as the structured-output **validation authority** — validates it
+against the resolved schema, surfacing the validated value on
+`ExecutionRunResult.data` which the session lifts verbatim onto
+`SendResult.data`. A synthesized `tool_result` pairs the call in the
 timeline so the next send is clean. (That synthesized result exists for
 timeline pairing + history only; the model never sees it in the capturing
 execution — there is no next tick, by design.)
+
+**Capability-aware strategy auto.** With `strategy: "auto"` (the default),
+the loop picks the terminal tool whenever real tools are mounted **or** the
+target lacks native `json_schema` (Anthropic and ai-sdk drop
+`responseFormat`) — the terminal tool is provider-agnostic, so it is the
+correct default there. It falls back to a plain `responseFormat` directive
+(`generateObject`'s domain) only on a **bare** send to a target with native
+`json_schema`, or as the honest degradation when the target supports
+NEITHER json_schema NOR tools. Overridable via `strategy` on a tree-level
+`<Output>` or (implicitly) per send.
 
 **`stopReason: "output_delivered"`.** When the answer is delivered via the
 terminal tool (natural OR forced wrap-up path), `SendResult.stopReason` is
@@ -323,16 +333,24 @@ this is plumbing:
 
 A tree-level `<Output schema … />` declares "every execution of this agent
 produces this shape" (dedicated extraction agents, skill-runner children,
-forks); a send-level `output` overrides it. A tree tool that collides with
-the terminal name fails the send with `TerminalToolNameCollision` rather
-than silently shadowing; 2+ tree `<Output>`s fail with
-`MultipleStructuredOutputs`.
+forks); a send-level `output` overrides it. Because the loop is the
+validation authority (the schema is always in loop scope — send-level OR
+tree-resolved), a **tree-only** `<Output>` — no send-level `output` — now
+produces a validated `SendResult.data` too, not merely an enforced
+completion: the dedicated-extraction-agent story is complete. A tree tool
+that collides with the terminal name fails the send with
+`TerminalToolNameCollision` rather than silently shadowing; 2+ tree
+`<Output>`s fail with `MultipleStructuredOutputs`.
 
 > **Verified by** `__tests__/structured-output.spec.ts` (injection / detection /
 > stop / sibling-calls-first / timeline pairing / steer-proof stop / wrap-up /
-> miss / validation / collision / precedence / steer conflict) and
+> miss / validation / collision / precedence / steer conflict / capability-aware
+> strategy auto / the double-gap responseFormat fallback / loop-side validation
+> authority for tree-only `<Output>` → typed `data` + `output_delivered`) and
 > `__tests__/structured-send.spec.ts` (the declarative `responseFormat`
-> directive + threading). The prefix-cache tail-ordering guarantee is verified in
+> directive + threading). Both suites drive the canonical
+> `FakeLanguageModelExecutor` (its `seenRuns` ledger + scripted `holdUntil`) —
+> no bespoke executors. The prefix-cache tail-ordering guarantee is verified in
 > `@agentick/tool-executor-next` (`layered-tools.spec.ts`).
 
 **`session.skills.run` is the flagship consumer** of this `output` path — a

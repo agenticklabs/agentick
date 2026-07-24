@@ -186,6 +186,18 @@ export class FakeLanguageModelExecutor
   readonly family = "language-model" as const;
   readonly target: ExecutionTarget;
 
+  /**
+   * Ledger of every {@link RunInput} the non-streaming `run` path (`fx.run`)
+   * observed, in call order — the canonical seen-input recorder for tests that
+   * assert on the projection's inputs (the model-facing `tools` list, the
+   * `compiled` tree carrying `config.responseFormat` / `config.toolChoice`).
+   * Appended at the top of {@link runBody}. Replaces per-test bespoke recording
+   * executors: drive the non-streaming path (`defaultStreaming: false`, or a
+   * target without `supportsStreaming`) and read `seenRuns[i].compiled` /
+   * `seenRuns[i].tools`. Empty when the loop took the streaming path.
+   */
+  readonly seenRuns: RunInput[] = [];
+
   private readonly scriptedSequence: ReadonlyArray<MockScriptedRun>;
   private scriptIndex = 0;
   private readonly lifecycle = new ExecutorLifecycle();
@@ -544,6 +556,12 @@ export class FakeLanguageModelExecutor
     never
   > {
     return Effect.gen(this, function* () {
+      // Record the observed run input (the canonical seen-input ledger) — the
+      // model-facing `tools` + the `compiled` tree, for tests asserting on the
+      // projection's inputs. Non-streaming path only (the loop's streaming path
+      // rides `executeStream`, not `run`).
+      this.seenRuns.push(input);
+
       // PEEK (don't consume) the scripted entry — the `model:generate`
       // command is the single cursor-advance for the execute step below;
       // run needs the entry only for bus-delta observability + the

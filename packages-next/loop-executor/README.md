@@ -361,6 +361,24 @@ render-tree` — with `parentOpId` auto-linked via `FiberRef`. No manual
   on the `ModelBridge`.
 - **`ExecutionRunResult.outputs`** (Phase 4f `OutputDeclaration`
   extractions) is threaded through the type but not populated by the loop.
+- **Structured output — the loop is the validation authority (§B2/§B3).**
+  When a send carries `output` or a tree renders `<Output>`, the loop
+  resolves the delivery strategy per tick (`"auto"` → terminal tool when
+  tools are mounted OR the target lacks native `json_schema`; else
+  `responseFormat`; the text-only double-gap falls back to `responseFormat`),
+  injects the synthetic terminal tool (tail of the tools list) or a
+  `responseFormat` overlay, captures the terminal call, and **validates the
+  captured value / final text against the resolved schema** — the schema is
+  always in loop scope, so a **tree-only** `<Output>` produces a validated
+  `ExecutionRunResult.data` too. Success surfaces `data`; a schema miss fails
+  the execution with `ResponseValidationError` (unwrapped, alongside the
+  other structured-output errors); a missed required terminal call runs one
+  forced wrap-up tick (`toolChoice: { tool }`), then fails with
+  `StructuredOutputIncomplete`. `terminalCapture` is kept raw for
+  observability beside the validated `data`.
+  - TODO(loop-log): emit a `ctx.log` warning on the double-gap fallback once
+    the log facet is threaded into the loop tick body (the loop has no
+    `ctx.log` yet — it is tool-executor + session only today).
 
 ## Verified by
 
@@ -384,6 +402,12 @@ render-tree` — with `parentOpId` auto-linked via `FiberRef`. No manual
   `@agentick/session-next/__tests__/` (`lifecycle-bridge.spec.tsx`,
   `model-bridge.spec.tsx`) — tests live where their dependencies live
   (ADR 27).
+- The loop's structured-output validation authority (capability-aware
+  strategy auto, tool + responseFormat loop-side validation, tree-only
+  `<Output>` → typed `data`, the typed miss/validation errors) is verified
+  end-to-end in `@agentick/session-next/__tests__/structured-output.spec.ts`
+  (the schema is a live in-process object — the test needs the real session +
+  compiler, so it lives where its dependencies live, ADR 27).
 
 ## See also
 

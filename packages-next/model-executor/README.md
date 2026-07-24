@@ -115,7 +115,16 @@ beneath it — one span per tick).
 normalize, executeStream}` (Effect twins), plus the self-described
   `target` delegated from the adapter.
 - `FakeLanguageModelExecutor` — scripted double (no wire) for tests,
-  examples, and the substrate proof.
+  examples, and the substrate proof. Scripting knobs on `MockScriptedRun`:
+  `result` / `deltas` (the terminal + streamed deltas), `outcome`
+  (`failed`/`vetoed`/`canceled` — drive the loop's failure paths), and
+  `holdUntil` (park a run on a promise for steer-race / mid-run-abort tests).
+  It also records every `fx.run` input on a public `seenRuns: RunInput[]`
+  ledger — the canonical seen-input recorder for tests asserting on the
+  projection's inputs (model-facing `tools`, the `compiled` tree carrying
+  `config.responseFormat` / `config.toolChoice`); drive the non-streaming
+  path (`defaultStreaming: false`) and read `seenRuns[i].tools` /
+  `seenRuns[i].compiled`. It replaces per-test bespoke recording executors.
 - `ExecutorLifecycle` — in-flight entry tracking shared by both.
 
 Optional adapter hooks (`project`, `adapterTransforms`,

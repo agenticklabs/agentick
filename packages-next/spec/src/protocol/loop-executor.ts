@@ -25,6 +25,7 @@ import type { Effect } from "effect";
 import type { CommandOutcome } from "../data/outcomes.js";
 import type { ContentBlock } from "../data/content-blocks.js";
 import type { OutputSpec } from "../data/declarations.js";
+import type { StandardSchemaV1 } from "../data/standard-schema.js";
 import type { ToolChoice } from "../data/rendered-tree.js";
 import type { SubstrateError } from "../data/errors.js";
 import type { ExecutionTarget } from "../data/execution-target.js";
@@ -37,6 +38,7 @@ import type {
 } from "../data/execution-result.js";
 import type { LoopExecutorError } from "../errors/harnesses.js";
 import type { NoModelForExecutionError, StateApplyErrorChannel } from "../errors/lifecycle.js";
+import type { ResponseValidationError } from "../errors/remaining.js";
 import type { FormatterRef } from "../data/formatter.js";
 import type { ExecutorProtocol } from "./executor.js";
 import type { RegisteredModel } from "./hook-bridges.js";
@@ -399,13 +401,26 @@ export interface ExecutionRunResult {
   /** Optional output extractions (Phase 4f `OutputDeclaration`s; not used in 4d). */
   readonly outputs?: Readonly<Record<string, unknown>>;
   /**
+   * The VALIDATED structured-output value (three-audiences-plan §B3 fix #3).
+   * The LOOP is the structured-output validation authority — the schema is
+   * always in loop scope (the send-level `input.outputSpec.schema` OR the
+   * tree-resolved `<Output>` schema). The loop validates the terminal capture
+   * (`"tool"` strategy) or the final assistant text (`"responseFormat"`
+   * strategy) against that schema and surfaces the validated value here; the
+   * session lifts it verbatim onto `SendResult.data`. Present iff an output
+   * directive (send-level `output` OR a tree-level `<Output>`) was supplied
+   * and validation succeeded; a validation failure fails the execution with a
+   * typed `ResponseValidationError` instead (errors over nulls).
+   */
+  readonly data?: unknown;
+  /**
    * RAW capture of the structured-output terminal tool's call
    * (three-audiences-plan §B2 — `"tool"` strategy). Present iff a required
-   * terminal tool was called (naturally or via the forced wrap-up tick). The
-   * SESSION validates {@link input} against the retained `output` schema at
-   * result assembly → `SendResult.data`. Absent on the `responseFormat`
-   * strategy path (the session validates the final assistant text instead) and
-   * when no `output` directive was supplied.
+   * terminal tool was called (naturally or via the forced wrap-up tick). Kept
+   * alongside {@link data} for observability: {@link data} is the validated
+   * value, this is the raw tool input the loop validated. Absent on the
+   * `responseFormat` strategy path (the loop validates the final assistant
+   * text instead) and when no `output` directive was supplied.
    */
   readonly terminalCapture?: {
     readonly toolName: string;
@@ -565,6 +580,17 @@ export interface TickResult extends TickInfo {
     readonly toolName: string;
     readonly input: unknown;
   };
+  /**
+   * The RESOLVED structured-output schema for this tick (three-audiences-plan
+   * §B3 fix #3) — the send-level `input.outputSpec.schema` OR the tree-resolved
+   * `<Output>` schema (send-level wins). Set by the tick body whenever an
+   * {@link OutputSpec} is in play. The run-execution continuation lifts it to
+   * validate the captured value / final text loop-side (the loop is the
+   * validation authority) and surface the validated value on
+   * {@link ExecutionRunResult.data}. Live `StandardSchemaV1`; `loop:tick` is
+   * `exposure: "internal"` (never crosses the wire), so carrying it is legal.
+   */
+  readonly resolvedOutputSchema?: StandardSchemaV1;
 }
 
 /**
@@ -629,7 +655,7 @@ export interface LoopExecutorFx extends HarnessFx {
     sink: LoopExecutionSink,
   ): Effect.Effect<
     ExecutionTerminal,
-    LoopExecutorError | SubstrateError | NoModelForExecutionError,
+    LoopExecutorError | SubstrateError | NoModelForExecutionError | ResponseValidationError,
     never
   >;
 }

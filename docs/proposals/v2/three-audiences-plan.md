@@ -688,6 +688,47 @@ Also codify the law itself in ADR 87 (one paragraph), so the next harness
 can't ship handle-less by accident: the per-harness checklist becomes
 harness + augment + extension + conformance + `/client`.
 
+### Audit outcomes (2026-07-24 — full matrix in the session record)
+
+Table corrections applied by the audit: **gates A2+A3 and resources A1 are
+LANDED** (rows above now historical); skills/prompts rows were misleading —
+routed for MUTATIONS only: **skills has NO wire read at all**
+(register/update/remove only — enumeration wire-unreachable), **prompts
+lacks `prompts:list`** (has single `get` + `invoke`), **state has no read
+command in existence** (and set/delete are exposure-less) — a client state
+handle needs `state:get`/`state:list` AUTHORED, not re-flagged.
+
+**G-prep (new, blocks G):** one PR authoring the missing wire reads +
+grammar alignment before the four client handles:
+
+1. `skills:list` (+`get`/`search`), `prompts:list`, `state:get`+`state:list`
+   + `exposure:"wire"` on state's mutations; wire-augment splits (the
+   `export {}` guard is load-bearing).
+2. Grammar deviations ruled worth fixing while breaking is free:
+   - `GatesHandle` gains `has()` + `subscribe(name,fn)`/`subscribeAll(fn)`
+     (only collection missing the family grammar); gate handle MUTATIONS
+     route through the harness commands (async, journaled) instead of
+     sync-void direct controller calls — aligns the three divergent return
+     contracts AND makes host-side clears journaled.
+   - prompts: `getDeclaration(name)` → `get(name)` (sync, the family
+     convention); async render `get(input)` → `render(input)`.
+   - resources `subscribeListChanged` → `subscribeAll` (MCP vocabulary
+     belongs at the wire projection, not the adopter handle).
+   - `state.list()` returns entries (`{key, value}[]`), not bare keys —
+     same projection depth as siblings.
+3. Ruled DEFENSIBLE, documented not changed: resources' async
+   `list/read` (resolver-backed; `snapshot()` is the sync View read),
+   timeline's single `subscribe` (a log, not a keyed map), tasks'
+   `events(id)` AsyncIterable (richer primitive for task streams).
+
+F additions from the audit: `tool-executor` is NOT in `SESSION_SURFACES`
+(add a surface + `tools:list` + wire-augment split); the client tools
+handle must not collide with the existing `clientToolCalls` slot.
+
+Sequencing: B3 lands → **G-prep** → F + G (parallelizable per package)
+→ C2 → steer-verb extraction → §D naming sweep (knob_set,
+session_tasks_* → task_*).
+
 ---
 
 ## Sequencing & gates
