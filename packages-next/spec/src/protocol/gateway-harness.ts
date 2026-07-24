@@ -30,6 +30,7 @@ import type { OperationJournal, OperationJournalFactory } from "./journal.js";
 import type { MessageInbox, MessageInboxFactory } from "./inbox.js";
 import type { AppHarnessProtocol } from "./app-harness.js";
 import type { WireExtensionRegistry } from "../wire/registry.js";
+import type { WireExtensionContext } from "../wire/extension.js";
 import type { WireMethod } from "../wire/params.js";
 import type { AuthorizeInput, AuthorizeResult, ConnectionInfo } from "../wire/authorizer.js";
 
@@ -304,16 +305,31 @@ export interface GatewayHarnessProtocol {
    * `onBeforeWireSessionSend` fires once at the boundary — two distinct
    * seams, no collision.
    *
+   * The `ctx` handed to the resolved handler is enriched IN-FIBER here with the
+   * gateway's {@link import("../data/observability.js").Observability} +
+   * {@link import("../data/ops.js").Ops} facets (ADR 64/78/19/83), built from
+   * the captured op runtime + the gateway's telemetry provider: the wire
+   * handler's `ctx.trace` then parents under this wire dispatch op and its
+   * `ctx.metrics` reaches the gateway meter with the ambient `{ method }` label.
+   * A stub host that does no telemetry may leave the facets untouched (the
+   * dispatcher pre-seeds off-path no-ops).
+   *
    * Required — the seam is part of the gateway contract, not an optional
    * capability. A stub host implements it as a pass-through
-   * (`(_m, _p, run) => run()`); the reference `GatewayHarness` routes
+   * (`(_m, _p, _ctx, run) => run()`); the reference `GatewayHarness` routes
    * through `runOperation`.
    *
    * @param method - the raw wire method being dispatched (op name).
    * @param params - the request params (the op's input).
+   * @param ctx - the wire-extension handler context to enrich in-fiber with facets.
    * @param run - invokes the resolved handler; its result is the op result.
    */
-  runWireDispatch<R>(method: WireMethod, params: unknown, run: () => Promise<R>): Promise<R>;
+  runWireDispatch<R>(
+    method: WireMethod,
+    params: unknown,
+    ctx: WireExtensionContext,
+    run: () => Promise<R>,
+  ): Promise<R>;
 
   /**
    * Emit the control-plane signal that the gateway's wire-extension

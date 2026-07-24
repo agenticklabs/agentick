@@ -304,7 +304,8 @@ function fakeGateway(
     authorize: () => Promise.resolve({ allowed: true }),
     accept: () => Promise.resolve(),
     events: () => ({ [Symbol.asyncIterator]: async function* () {} }),
-    runWireDispatch: (_m: unknown, _p: unknown, run: () => Promise<unknown>) => run(),
+    runWireDispatch: (_m: unknown, _p: unknown, _ctx: unknown, run: () => Promise<unknown>) =>
+      run(),
     wireExtensions: () => registry,
     ...(opts.clientProjection ? { clientProjection: opts.clientProjection } : {}),
   } as unknown as GatewayHarnessProtocol;

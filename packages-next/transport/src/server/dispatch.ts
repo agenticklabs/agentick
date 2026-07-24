@@ -21,6 +21,10 @@ import {
   WireRpcError,
   ErrorCode,
   isAgentickError,
+  createLog,
+  type Observability,
+  type Ops,
+  type Span,
   type ExtensionsListResult,
   type GatewayHarnessProtocol,
   type HookBridges,
@@ -51,6 +55,40 @@ import { projectClientNotification, projectClientResult } from "./client-project
  * extension wrapper, not here.
  */
 export type DispatchHost = GatewayHarnessProtocol;
+
+/** No-op {@link Span} handed to the off-path `trace` before host enrichment. */
+const NOOP_SPAN: Span = Object.freeze({
+  setAttribute: () => {},
+  setAttributes: () => {},
+  addEvent: () => {},
+  recordException: () => {},
+});
+
+/**
+ * Off-path {@link Observability} + {@link Ops} facets pre-seeded onto every
+ * wire-extension ctx (ADR 64/78) so the ctx satisfies its type BEFORE the host
+ * enriches it. `log` is a no-op callable; `trace`/`metrics` are the frozen
+ * no-op / passthrough; `run`/`runner` THROW — a wire host that routes through
+ * `runWireDispatch` (the real gateway) OVERWRITES all five in-fiber with live
+ * facets, so a surviving throw means a stub host left the ctx un-enriched.
+ * Frozen + shared (referential identity, zero per-request build).
+ */
+const OFF_PATH_FACETS: Observability & Ops = Object.freeze({
+  log: createLog(() => {}),
+  trace: <T>(_name: string, fn: (span: Span) => T | Promise<T>): Promise<T> =>
+    Promise.resolve(fn(NOOP_SPAN)),
+  metrics: Object.freeze({ count: () => {}, record: () => {}, gauge: () => {} }),
+  run: (() => {
+    throw new Error("ctx.run is unavailable: the wire host did not enrich this dispatch context");
+  }) as Ops["run"],
+  runner: Object.freeze({
+    runOperation: () => {
+      throw new Error(
+        "ctx.runner is unavailable: the wire host did not enrich this dispatch context",
+      );
+    },
+  }) as Ops["runner"],
+});
 
 export interface DispatchSink {
   sendNotification(notification: { method: string; params?: unknown }): void;
@@ -158,7 +196,12 @@ export async function dispatchRequest(
           // fires the gateway's interceptor seam (gateway-scoped
           // guards/hooks), keyed by the wire method as op name. Auth
           // (above) stays the un-waivable pre-gate — it runs BEFORE the op.
-          const result = await host.runWireDispatch(req.method as WireMethod, req.params, () =>
+          // The host enriches `ctx` IN-FIBER with its Observability + Ops
+          // facets (ADR 64/78) before the handler runs — the wire op runtime is
+          // only available inside `runWireDispatch`. `ctx` is pre-seeded with
+          // off-path no-op facets (buildWireExtensionContext) so a host that
+          // does no telemetry leaves a valid ctx.
+          const result = await host.runWireDispatch(req.method as WireMethod, req.params, ctx, () =>
             resolution.handler(req.params, ctx),
           );
           // ROADMAP A3 — when opted in, bound oversized tool output on the
@@ -399,6 +442,11 @@ function buildWireExtensionContext(
   const transport = buildTransportSlot(reqId, sink);
 
   return {
+    // ADR 64/78 — off-path facet placeholders (`log`/`trace`/`metrics`/`run`/
+    // `runner`). The host overwrites them IN-FIBER in `runWireDispatch` with
+    // live facets bound to the wire op runtime + its meter. Spread FIRST so the
+    // real fields below (never facets) can't be shadowed.
+    ...OFF_PATH_FACETS,
     gateway: host,
     // Authn happened ONCE at ingress (ADR 51 §4.1); dispatch only
     // carries the stamped identity. The dynamic command lane's

@@ -440,8 +440,16 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
    * `buildInterceptorCtx` reads it per op, so a late assignment is honored.
    */
   protected telemetryProvider: TelemetryProvider | undefined;
-  /** Low-cardinality default metric labels (ADR 78) — see {@link BaseHarnessOptions.defaultMetricLabels}. */
-  protected readonly defaultMetricLabels: Readonly<Record<string, string>> | undefined;
+  /**
+   * Low-cardinality default metric labels (ADR 78) — see
+   * {@link BaseHarnessOptions.defaultMetricLabels}.
+   *
+   * NOT readonly, for the SAME reason as {@link telemetryProvider}: the app's
+   * shared spine harnesses (loop/model/compiler) are constructed BEFORE the
+   * async `telemetry` switch resolves, so the app late-binds both the provider
+   * and the app-identity label together via {@link adoptTelemetry}.
+   */
+  protected defaultMetricLabels: Readonly<Record<string, string>> | undefined;
   /**
    * The parent scope's inherited interceptor layer (ADR 76 tier 3 + ADR 83 §4)
    * as a LIVE holder — no longer a frozen array. Seeded at construction from the
@@ -906,6 +914,29 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
   }
 
   /**
+   * Late-bind the resolved telemetry provider + app-identity metric labels
+   * (ADR 64/78). The app's SHARED spine harnesses (loop / model executor /
+   * compiler) are constructed in the app ctor, BEFORE the app's async
+   * `telemetry` switch resolves its exporter runtime + meter — so unlike a
+   * per-session harness (tool executor, session), they cannot receive the
+   * provider at construction. The app calls this once telemetry is ready.
+   *
+   * {@link buildInterceptorCtx} reads both slots PER OP, so the late assignment
+   * is honored from the next op onward: an interceptor (`.use` / hook / guard)
+   * on one of this harness's ops sees a live `ctx.metrics` that fans out to the
+   * wired meter with the ambient `{ app, op }` labels. No-op-safe — a `provider`
+   * of `undefined` (telemetry off) leaves the off-path singletons in place;
+   * `defaultLabels` omitted leaves the construction value.
+   */
+  adoptTelemetry(
+    provider: TelemetryProvider | undefined,
+    defaultLabels?: Readonly<Record<string, string>>,
+  ): void {
+    this.telemetryProvider = provider;
+    if (defaultLabels !== undefined) this.defaultMetricLabels = defaultLabels;
+  }
+
+  /**
    * Build the {@link StoreCtx} threaded (as the FINAL argument) into every store
    * DATA-method call this harness makes — the explicit runtime-scope carrier
    * across the **Effect→Promise boundary** a Promise-shaped store lives behind
@@ -1158,6 +1189,34 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
     scope: EventScope,
     runtime: Runtime.Runtime<never>,
   ): InterceptorCtx {
+    const ctx = { ...ctxScope };
+    this.defineOperationFacets(ctx, scope, runtime, ctxScope.op);
+    return ctx as InterceptorCtx;
+  }
+
+  /**
+   * Define the LAZY {@link Observability} + {@link Ops} facet getters
+   * (`log` / `trace` / `metrics` / `run` / `runner`) onto `target`, IN-FIBER —
+   * the ONE derivation shared by {@link buildInterceptorCtx} (the interceptor
+   * cascade's ctx) and any surface that hands a facet-bearing ctx to an
+   * off-fiber handler running INSIDE one of this harness's ops (the gateway's
+   * wire-extension dispatch — ADR 64/78).
+   *
+   * `runtime` is the op runtime captured in-fiber (parent span + tracer), so
+   * `trace` child spans + `ctx.run` ops parent under the enclosing op. `op` is
+   * the low-cardinality op-suffix metric label; `extraLabels` merge under it
+   * (the wire passes `{ method }`). The getters are copied by DESCRIPTOR at the
+   * call sites that need laziness preserved (see the gateway wire path) — reading
+   * a facet builds + memoizes its half; an op that never touches telemetry pays
+   * only the two thunks.
+   */
+  protected defineOperationFacets(
+    target: object,
+    scope: EventScope,
+    runtime: Runtime.Runtime<never>,
+    op: string | undefined,
+    extraLabels?: Readonly<Record<string, string>>,
+  ): void {
     const telemetry: TelemetryRuntime | undefined =
       this.telemetryProvider !== undefined
         ? { runtime, ...omitUndefined({ meter: this.telemetryProvider.meter }) }
@@ -1169,8 +1228,9 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
           void Effect.runFork(this.emitLog(scope, level, data, logger, trace));
         },
         namespace: this.telemetryNamespace,
-        // Low-cardinality default labels: app identity (if any) + the op suffix.
-        defaultLabels: omitUndefined({ ...this.defaultMetricLabels, op: ctxScope.op }),
+        // Low-cardinality default labels: app identity (if any) + any surface
+        // extras (the wire's `{ method }`) + the op suffix.
+        defaultLabels: omitUndefined({ ...this.defaultMetricLabels, ...extraLabels, op }),
         ...omitUndefined({ telemetry }),
       }));
     let opsMemo: Ops | undefined;
@@ -1181,24 +1241,13 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
         runOperation: this.operationRunner.runOperation,
         runtime,
       }));
-    return {
-      ...ctxScope,
-      get log() {
-        return obs().log;
-      },
-      get trace() {
-        return obs().trace;
-      },
-      get metrics() {
-        return obs().metrics;
-      },
-      get run() {
-        return ops().run;
-      },
-      get runner() {
-        return ops().runner;
-      },
-    };
+    Object.defineProperties(target, {
+      log: { get: () => obs().log, enumerable: true, configurable: true },
+      trace: { get: () => obs().trace, enumerable: true, configurable: true },
+      metrics: { get: () => obs().metrics, enumerable: true, configurable: true },
+      run: { get: () => ops().run, enumerable: true, configurable: true },
+      runner: { get: () => ops().runner, enumerable: true, configurable: true },
+    });
   }
 
   protected emitLog(

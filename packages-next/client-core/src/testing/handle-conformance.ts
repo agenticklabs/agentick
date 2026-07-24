@@ -217,6 +217,27 @@ export function runClientHandleConformance<
       await teardown?.();
     });
 
+    it("required read members are extraction-safe — bare subscribe/list survive destructuring (no this-dependence)", async () => {
+      const { handle, teardown } = await opts.setup();
+      // A consumer commonly destructures the observe/read surface off the handle
+      // (`const { subscribe, list } = handle`) or hands a method to a framework
+      // as a bare callback. In strict-mode ESM a detached call has
+      // `this === undefined`, so a member that reads `this` throws HERE — this
+      // probe pins this-independence, the property that makes the surface safe to
+      // spread/destructure. Runs for EVERY conformer.
+      const { subscribe } = handle;
+      const un = subscribe(() => {});
+      expect(typeof un).toBe("function");
+      un(); // the returned Unsubscribe is itself this-independent
+      if (isEnumerable(handle)) {
+        const { list, get } = handle;
+        expect(list()).toBeDefined();
+        expect(() => get("id:never-seen" as never)).not.toThrow();
+      }
+      handle.close?.();
+      await teardown?.();
+    });
+
     // ─── Enumerable (iff declared) ────────────────────────────────────────
 
     if (opts.enumerable) registerEnumerableCases(opts.enumerable);

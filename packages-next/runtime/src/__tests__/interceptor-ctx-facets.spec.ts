@@ -40,10 +40,14 @@ class FacetHarness extends BaseHarness<"tool"> {
     return Effect.fail(new HandlerError({ cause: new Error("n/a") }));
   }
 
-  /** Run one probe op through this harness's `runOperation` (so the cascade runs). */
-  probe(): Effect.Effect<number, unknown, never> {
+  /**
+   * Run one probe op through this harness's `runOperation` (so the cascade runs).
+   * `seq` distinguishes the opId — the runner dedups by opId, so a test that
+   * runs two probes on one harness must pass distinct sequence numbers.
+   */
+  probe(seq = 1): Effect.Effect<number, unknown, never> {
     const op: Operation<{ n: number }, number> = {
-      opId: "tool:probe:1",
+      opId: `tool:probe:${seq}`,
       surface: "tool",
       name: "tool:probe",
       scope: { sessionId: "s1" },
@@ -113,6 +117,56 @@ describe("interceptor ctx facets (ADR 64/78/19/83) — the .use/hook/guard surfa
       name: "agentick.mw.hits",
       value: 1,
       labels: { op: "ToolProbe" },
+    });
+  });
+
+  it("adoptTelemetry late-binds the provider: a metric emitted before it hits no meter, after it reaches the sink with { op }", async () => {
+    const spy = spyTelemetryProvider();
+    // Constructed with telemetry OFF — exactly the app-shared spine harness's
+    // state (loop/model/compiler are built before the async telemetry switch
+    // resolves), so its interceptor ctx starts on the off-path singletons.
+    const h = new FacetHarness(undefined);
+    await h.ready;
+    h.use((input, next, ctx) => {
+      ctx.metrics.count("mw.hits", 1);
+      return next(input);
+    });
+
+    // Before adopt: the shared no-op metrics swallow the emission.
+    await Effect.runPromise(h.probe(1));
+    expect(spy.metrics).toHaveLength(0);
+
+    // The exact late-bind the app makes on its spine once telemetry resolves.
+    h.adoptTelemetry(spy);
+
+    // buildInterceptorCtx reads the slot PER OP, so the SAME middleware's metric
+    // now fans out to the wired meter with the ambient op label.
+    await Effect.runPromise(h.probe(2));
+    expect(spy.metrics).toContainEqual({
+      kind: "count",
+      name: "agentick.mw.hits",
+      value: 1,
+      labels: { op: "ToolProbe" },
+    });
+  });
+
+  it("adoptTelemetry's defaultLabels stamp the app-identity ambient label", async () => {
+    const spy = spyTelemetryProvider();
+    const h = new FacetHarness(undefined);
+    await h.ready;
+    h.use((input, next, ctx) => {
+      ctx.metrics.count("mw.hits", 1);
+      return next(input);
+    });
+    // The app passes { app } alongside the provider so a multi-app sink can
+    // attribute spine metrics to the owning app.
+    h.adoptTelemetry(spy, { app: "acme" });
+    await Effect.runPromise(h.probe());
+    expect(spy.metrics).toContainEqual({
+      kind: "count",
+      name: "agentick.mw.hits",
+      value: 1,
+      labels: { app: "acme", op: "ToolProbe" },
     });
   });
 

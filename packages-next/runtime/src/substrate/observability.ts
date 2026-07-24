@@ -41,10 +41,13 @@
  * stored closures in the data. The app's `TelemetryProvider` threads through the
  * runner path (a `BaseHarness` slot) so `ctx.metrics` is live there too.
  *
- * TODO(observability-wire-ctx): the same landing on the wire-extension handler ctx.
- * TODO(observability-runtime-ctx): thread the provider into the remaining spine
- * sub-harnesses (loop/model/compiler) so THEIR interceptor `ctx.metrics` export
- * too — the mechanism is complete; this is the residual meter wiring.
+ * The provider threads the WHOLE spine: per-session harnesses (tool executor,
+ * session) receive it at construction; the app-shared spine (loop/model/compiler)
+ * — constructed before the async `telemetry` switch resolves — receives it late
+ * via `BaseHarness.adoptTelemetry` (`AppHarness.adoptSpineTelemetry`), so their
+ * interceptor `ctx.metrics` export too. The wire-extension handler ctx gets the
+ * same facets: the gateway attaches them in-fiber inside `runWireDispatch` via
+ * `BaseHarness.defineOperationFacets` (ambient label `{ method }`).
  *
  * @see docs/proposals/v2/blueprint/78-telemetry-via-runtime-substrate.md
  * @see ./middleware.ts — the span ladder (`annotateOperationSpan`, `spanMiddleware`)

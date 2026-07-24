@@ -199,7 +199,8 @@ describe("dispatch choke point — one gate, both lanes (review findings)", () =
       authorize: (i: AuthorizeInput) => (authorizer as Authorizer).authorize(i),
       app: () => app,
       apps: () => [app],
-      runWireDispatch: (_m: unknown, _p: unknown, run: () => Promise<unknown>) => run(),
+      runWireDispatch: (_m: unknown, _p: unknown, _ctx: unknown, run: () => Promise<unknown>) =>
+        run(),
       wireExtensions: () => ({
         resolve: (m: string) =>
           m === "session/send"
@@ -272,7 +273,8 @@ describe("scope refinement — downscoping (#198) + session ceiling (#199)", () 
         authorize: (i: AuthorizeInput) => authorizer.authorize(i),
         app: () => app,
         apps: () => [app],
-        runWireDispatch: (_m: unknown, _p: unknown, run: () => Promise<unknown>) => run(),
+        runWireDispatch: (_m: unknown, _p: unknown, _ctx: unknown, run: () => Promise<unknown>) =>
+          run(),
         wireExtensions: () => ({
           resolve: (m: string) =>
             m.startsWith("session/") || m.startsWith("timeline/")
@@ -338,7 +340,8 @@ describe("scope refinement — downscoping (#198) + session ceiling (#199)", () 
       authorize: (i: AuthorizeInput) => authorizer.authorize(i),
       app: () => app,
       apps: () => [app],
-      runWireDispatch: (_m: unknown, _p: unknown, run: () => Promise<unknown>) => run(),
+      runWireDispatch: (_m: unknown, _p: unknown, _ctx: unknown, run: () => Promise<unknown>) =>
+        run(),
       wireExtensions: () => ({
         resolve: () => ({
           extension: { name: "p", namespace: "x", methods: {} },
@@ -384,7 +387,8 @@ describe("scope refinement — review-fix coverage (glob semantics, structural c
       authorize: (i: AuthorizeInput) => authorizer.authorize(i),
       app: () => app,
       apps: () => [app],
-      runWireDispatch: (_m: unknown, _p: unknown, run: () => Promise<unknown>) => run(),
+      runWireDispatch: (_m: unknown, _p: unknown, _ctx: unknown, run: () => Promise<unknown>) =>
+        run(),
       wireExtensions: () => ({
         resolve: () => ({
           extension: { name: "p", namespace: "x", methods: {} },
@@ -416,7 +420,8 @@ describe("scope refinement — review-fix coverage (glob semantics, structural c
       // no authorizer at all
       app: () => app,
       apps: () => [app],
-      runWireDispatch: (_m: unknown, _p: unknown, run: () => Promise<unknown>) => run(),
+      runWireDispatch: (_m: unknown, _p: unknown, _ctx: unknown, run: () => Promise<unknown>) =>
+        run(),
       wireExtensions: () => ({
         resolve: () => ({
           extension: { name: "p", namespace: "x", methods: {} },

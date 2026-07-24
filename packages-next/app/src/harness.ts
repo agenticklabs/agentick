@@ -31,6 +31,7 @@ import {
   LocalInbox,
   MemoryJournal,
   runHarnessProtocol,
+  type TelemetryProvider,
   ulid,
 } from "@agentick/runtime-next";
 import { ElicitationHarness } from "@agentick/elicitation-next";
@@ -1049,6 +1050,14 @@ export class AppHarness<P = unknown>
                 interceptorParent: this,
               },
             );
+            // ADR 64/78 — a `setModel` swap happens at RUNTIME, after telemetry
+            // resolved, so bind the resolved provider onto the freshly-minted
+            // executor immediately (the ctor-time spine late-bind already ran and
+            // won't see this one). `undefined` when telemetry is off — no-op.
+            modelExecutor.adoptTelemetry(
+              this.telemetryProvider,
+              this.appName !== undefined ? { app: this.appName } : undefined,
+            );
             return { modelExecutor, target: modelExecutor.target };
           }
         : undefined;
@@ -1211,6 +1220,37 @@ export class AppHarness<P = unknown>
     // op runtime — a no-op tracer annotates but does not export). OFF → no
     // provider (the tool executor takes the shared off-path singletons).
     this.telemetryProvider = n.enabled ? omitUndefined({ meter: built.meter }) : undefined;
+    // ADR 64/78 — late-bind the resolved provider into the APP-SHARED SPINE
+    // harnesses (loop / model executor / compiler). They were constructed in
+    // the app ctor, BEFORE this async switch resolved, so they missed the
+    // construction-time threading a per-session harness (tool executor,
+    // session) gets. `adoptTelemetry` lights `ctx.metrics` on THEIR interceptor
+    // ctx with the same app-identity label. Feature-detected — a BYO
+    // loop/compiler that isn't a `BaseHarness` silently opts out. Skipped when
+    // telemetry is off (nothing to bind). Swapped-in executors (`setModel`) are
+    // bound at build time in `buildModelExecutor`.
+    if (this.telemetryProvider !== undefined) this.adoptSpineTelemetry();
+  }
+
+  /**
+   * Fan the resolved {@link telemetryProvider} + app-identity metric label into
+   * the shared spine harnesses via {@link BaseHarness.adoptTelemetry}. Called
+   * once telemetry resolves ({@link initTelemetryExport}). Duck-typed so an
+   * external loop/compiler impl that isn't a `BaseHarness` is a no-op.
+   */
+  private adoptSpineTelemetry(): void {
+    const label = this.appName !== undefined ? { app: this.appName } : undefined;
+    for (const h of [this.loop, this.modelExecutor, this.compiler]) {
+      const adopter = h as {
+        adoptTelemetry?: (
+          provider: TelemetryProvider | undefined,
+          defaultLabels?: Readonly<Record<string, string>>,
+        ) => void;
+      };
+      if (typeof adopter?.adoptTelemetry === "function") {
+        adopter.adoptTelemetry(this.telemetryProvider, label);
+      }
+    }
   }
 
   private makeInstaller(): AppInstaller {
@@ -1940,10 +1980,9 @@ export class AppHarness<P = unknown>
       // ADR 64/78 — the resolved provider's `meter` lights `ctx.metrics` on the
       // session's interceptor ctx (a session/app hook or guard reaching
       // metrics). App-identity ambient label keeps multi-app sinks distinct.
-      // TODO(observability-runtime-ctx): thread the same provider into the
-      // loop/model/compiler sub-harnesses so THEIR interceptor ctx metrics are
-      // live too (log/trace/run/runner already are). Mechanism is complete —
-      // this is the remaining meter wiring.
+      // The shared spine harnesses (loop/model/compiler) get the SAME provider
+      // late-bound via `adoptSpineTelemetry` (they predate the async telemetry
+      // switch), so their interceptor ctx metrics are live too.
       ...omitUndefined({ telemetryProvider: this.telemetryProvider }),
       ...omitUndefined({
         defaultMetricLabels: this.appName !== undefined ? { app: this.appName } : undefined,

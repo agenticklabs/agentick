@@ -37,6 +37,14 @@ jobs:
       - name: Build
         run: pnpm build --filter '!agentick-website'
 
+      # Empirical require(ESM) load gate — every publishable package's built
+      # dist must load under CommonJS `require()` (Knowify's assistant-api load
+      # path). A top-level await anywhere in a package's dist graph throws
+      # ERR_REQUIRE_ASYNC_MODULE; this fails the build naming the offender.
+      # Runs after Build (needs dist); the matrix covers Node 22 + 24.
+      - name: No-TLA require(ESM) gate
+        run: pnpm check:no-tla
+
   lint:
     runs-on: ubuntu-latest
 

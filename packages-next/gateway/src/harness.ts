@@ -59,6 +59,7 @@ import type {
   ToolRegistration,
   Unsubscribe,
   WireExtension,
+  WireExtensionContext,
   WireExtensionRegistry,
   WireMethod,
 } from "@agentick/spec-next";
@@ -82,7 +83,7 @@ import {
   sessionWireExtension,
   subscriptionsWireExtension,
 } from "./wire/index.js";
-import { mergeLayered } from "@agentick/utils-next";
+import { mergeLayered, omitUndefined } from "@agentick/utils-next";
 import {
   AppHarness,
   buildTelemetryExport,
@@ -355,12 +356,21 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
    * in {@link close} AFTER the close op ran on it. `undefined` when no span
    * export is wired. Set async (before `gatewayReady`), hence not `readonly`.
    *
-   * Tracer-ONLY: the gateway owns no `ctx.metrics` surface, and it inherits its
-   * metric readers to hosted apps (which do). So it builds no `MeterProvider` —
-   * that avoids double-binding a shared `MetricReader` an app also inherits (an
-   * OTel constraint). See the note in the constructor.
+   * The gateway also owns a `ctx.metrics` surface — the wire-extension handler
+   * ctx (ADR 64/78): `runWireDispatch` attaches the meter behind `ctx.metrics`
+   * from {@link telemetryProvider}. A `MetricReader` an app inherits binds to
+   * exactly one `MeterProvider`, so this is safe against double-binding only
+   * because `buildTelemetryExport` MEMOIZES one `MeterProvider` per reader-set
+   * (multi-app safety) — the gateway and its hosted apps resolve the SAME meter
+   * instance.
    */
   private telemetryRuntime: ManagedRuntime.ManagedRuntime<never, never> | undefined;
+  /**
+   * Releases the gateway's hold on the shared metrics `MeterProvider` (ADR 78),
+   * built alongside {@link telemetryRuntime}. Refcounted in `buildTelemetryExport`
+   * — the last holder out shuts the provider down. Called in {@link close}.
+   */
+  private telemetryReleaseMeter: (() => Promise<void>) | undefined;
   /**
    * Resolves when the async telemetry export build completes. Awaited by
    * {@link gatewayReady}, so no gateway op runs on a half-built runtime.
@@ -429,15 +439,14 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     // imports the optional sink package). `gatewayReady` awaits `telemetryReady`,
     // so `telemetryRuntime` is always set before the first gateway op reads it.
     this.telemetrySetting = options.telemetry;
-    // The gateway exports SPANS for its own ops (`runGatewayOp`); it owns NO
-    // `ctx.metrics` surface. Metric readers are inherited to hosted apps (which
-    // DO own that surface) and — an OTel constraint — a `MetricReader` binds to
-    // exactly ONE `MeterProvider`. Building a gateway `MeterProvider` from the
-    // same shared reader an app also inherits would double-bind it and throw. So
-    // the gateway's OWN export is tracer-only: metric readers are zeroed here
-    // and flow to apps untouched via `telemetrySetting` inheritance.
+    // The gateway exports SPANS for its own ops (`runGatewayOp`) AND owns a
+    // `ctx.metrics` surface: the wire-extension handler ctx (ADR 64/78). It
+    // acquires the SHARED, memoized `MeterProvider` (`buildTelemetryExport` binds
+    // each `MetricReader` to exactly ONE provider, refcounted) — the SAME meter
+    // instance hosted apps resolve from the inherited `telemetrySetting`, so no
+    // reader double-binds.
     const normalized = normalizeTelemetry(options.telemetry);
-    this.telemetryReady = this.initTelemetryExport({ ...normalized, metricReaders: [] });
+    this.telemetryReady = this.initTelemetryExport(normalized);
 
     // Distribute the ADR 50 extension surface into its scopes.
     const { gatewayExts, wireFromBundles, cascade } = splitExtensions(options.extensions ?? []);
@@ -537,6 +546,13 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
   private async initTelemetryExport(n: NormalizedTelemetry): Promise<void> {
     const built = await buildTelemetryExport(n);
     this.telemetryRuntime = built.runtime;
+    this.telemetryReleaseMeter = built.releaseMeter;
+    // ADR 64/78 — hand a provider to the wire-dispatch facet builder even when
+    // no meter is wired (enrichment-on-no-export still lights `ctx.trace` on the
+    // captured op runtime). OFF → no provider (the facets take the shared
+    // off-path singletons). The `meter` (when present) is the SHARED, memoized
+    // instance hosted apps also resolve — no double-bind.
+    this.telemetryProvider = n.enabled ? omitUndefined({ meter: built.meter }) : undefined;
   }
 
   /**
@@ -642,7 +658,13 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
    * returned promise with it — surfacing to the dispatcher's outer
    * try/catch exactly as before.
    */
-  runWireDispatch<R>(method: WireMethod, params: unknown, run: () => Promise<R>): Promise<R> {
+  runWireDispatch<R>(
+    method: WireMethod,
+    params: unknown,
+    ctx: WireExtensionContext,
+    run: () => Promise<R>,
+  ): Promise<R> {
+    const scope = { gatewayId: this.scopeId };
     const op: Operation<unknown, R, unknown> = {
       opId: `wire:${method}:${ulid()}`,
       surface: SURFACE,
@@ -653,14 +675,25 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
       // session op's `onBeforeSessionSend` (which folds down live from the
       // gateway and fires once at the session).
       name: `wire:${method}`,
-      scope: { gatewayId: this.scopeId },
+      scope,
       input: params,
     };
     return this.runGatewayOp(
       this.runOperation(op, () =>
-        Effect.tryPromise({
-          try: run,
-          catch: (cause) => cause,
+        Effect.gen(this, function* () {
+          // ADR 64/78 — attach the Observability + Ops facets to the wire
+          // handler ctx IN-FIBER, so the
+          // captured op runtime (parent span + tracer) is the one `ctx.trace`
+          // nests under and `ctx.metrics` reaches the gateway meter. Ambient
+          // label `{ method }` (low-cardinality — the wire method, NOT a
+          // per-request id). The facet getters are lazy: a handler that never
+          // touches telemetry pays nothing.
+          const runtime = yield* Effect.runtime<never>();
+          this.defineOperationFacets(ctx, scope, runtime, undefined, { method });
+          return yield* Effect.tryPromise({
+            try: run,
+            catch: (cause) => cause,
+          });
         }),
       ),
     );
@@ -939,9 +972,11 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     );
     // Dispose the telemetry runtime AFTER the close op ran on it, so its own
     // span is captured and the exporter flushes pending spans (ADR 78) — the
-    // exact ordering `AppHarness.closeApp` uses. (Tracer-only — the gateway
-    // builds no `MeterProvider`, so there is nothing to `shutdown()` here.)
+    // exact ordering `AppHarness.closeApp` uses. Then release the gateway's hold
+    // on the shared metrics MeterProvider (refcounted — the last holder out
+    // shuts it down); the wire-dispatch `ctx.metrics` surface consumed it.
     if (this.telemetryRuntime !== undefined) await this.telemetryRuntime.dispose();
+    if (this.telemetryReleaseMeter !== undefined) await this.telemetryReleaseMeter();
   }
 
   /**

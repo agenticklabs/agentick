@@ -238,6 +238,13 @@ and the **lifecycle** ops (`gateway:command:start` / `close` / `create-app` /
 `accept`). App-, session-, and tool-level spans do NOT run on the gateway runtime
 — they export through the app's provider (role 2).
 
+The gateway also owns a **`ctx.metrics` / `ctx.trace` surface**: the
+wire-extension handler ctx (ADR 64/78). `runWireDispatch` attaches the flat
+Observability + Ops facets to a handler's `ctx` IN-FIBER, so `ctx.trace(...)`
+opens a child span parented under the `wire:<method>` op and `ctx.metrics.*` fans
+out to the gateway's meter with the low-cardinality **`{ method }`** ambient
+label. Off the telemetry path they collapse to shared frozen no-ops (zero-cost).
+
 **2. Substrate inheritance — it default-chains to every app beneath.** Every
 `createApp` the gateway hosts inherits this setting **unless** the app supplies
 its own `telemetry`; an app-supplied switch always wins (the app override is
@@ -254,24 +261,23 @@ const isolated = await gateway.createApp(<Agent />, {
 });
 ```
 
-**Tracer-only at the gateway.** The gateway owns no `ctx.metrics` surface, and an
-OTel `MetricReader` binds to exactly one `MeterProvider`. So the gateway's own
-export is **spans-only** — it builds no `MeterProvider`; the metric readers flow
-through to the apps (which DO own `ctx.metrics`) untouched. A gateway hosting
-**zero apps** therefore exports no metrics under an inherited setting — only its
-own op spans.
+**The gateway meter is the SHARED, memoized one.** An OTel `MetricReader` binds
+to exactly one `MeterProvider`. The gateway acquires the meter through the same
+`buildTelemetryExport` path the apps use, which **materializes one `MeterProvider`
+per reader set and shares the `MetricSink`** (refcounted). So the gateway's
+wire-ctx metrics and every inheriting app's `ctx.metrics` resolve the SAME meter
+instance — no reader double-binds. A gateway hosting **zero apps** still exports
+its own wire-dispatch metrics through that meter; the last holder (gateway or
+app) to close flushes + shuts the provider down.
 
 **Multi-app metric sharing (the recommended pattern).** Two apps inheriting one
-gateway setting share the SAME `MetricReader` instances — and a reader binds to
-exactly one `MeterProvider`. The app-next wiring **materializes the
-`MeterProvider` once per reader set and shares the `MetricSink`** across every
-inheriting app (its `count`/`record`/`gauge` are provider-agnostic, so sharing is
-safe), refcounted so the last app to close flushes + shuts it down. So the
-canonical `createGateway({ telemetry }) → N × createApp` shape does not crash on
-the second app, and every app's metrics reach the sink. Because the sink is
-shared, per-app metrics are kept distinguishable by the low-cardinality **`app`
+gateway setting share the SAME `MetricReader` instances, so the memoized
+`MeterProvider` above serves the gateway AND both apps without crashing on the
+second `createApp`. Every app's metrics reach the sink; because the sink is
+shared, per-app metrics stay distinguishable by the low-cardinality **`app`
 ambient label** (the app's `name`) the tool executor stamps on every
-`ctx.metrics.*` emission alongside `{ tool, op }`.
+`ctx.metrics.*` emission alongside `{ tool, op }`, while the gateway's own
+wire-ctx metrics carry `{ method }`.
 
 **Known gap — `telemetryNamespace` does not cascade.** The gateway does NOT
 propagate `telemetryNamespace` to inherited apps; each app whitelabels its own
@@ -287,10 +293,13 @@ SDK. This package declares no OTel exporter deps; those live in
 
 > Verified by `src/__tests__/telemetry-inheritance.spec.ts` — gateway-op span
 > export (Half A), app inheritance of the gateway setting, and app-override
-> precedence (Half B); and `src/__tests__/telemetry-multi-app.spec.ts` — two
+> precedence (Half B); `src/__tests__/telemetry-multi-app.spec.ts` — two
 > hosted apps sharing one `MeterProvider` without crashing, both apps' metrics
-> reaching the sink distinguished by the `app` label. All end-to-end against real
-> OTel `SpanProcessor` / `MetricReader`s.
+> reaching the sink distinguished by the `app` label; and
+> `src/__tests__/telemetry-wire-ctx.spec.ts` — a wire handler's `ctx.trace` span
+> parenting under the `wire:<method>` op and `ctx.metrics` reaching the gateway
+> meter with the `{ method }` label. All end-to-end against real OTel
+> `SpanProcessor` / `MetricReader`s.
 
 ## Wire extensions (ADR 46)
 

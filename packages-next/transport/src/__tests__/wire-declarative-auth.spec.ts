@@ -106,7 +106,8 @@ function host(
     // `authorizer` is undefined (the no-authorizer guard returns first).
     authorize: (input: AuthorizeInput) =>
       authorizer ? authorizer.authorize(input) : Promise.resolve({ allowed: true }),
-    runWireDispatch: (_m: unknown, _p: unknown, run: () => Promise<unknown>) => run(),
+    runWireDispatch: (_m: unknown, _p: unknown, _ctx: unknown, run: () => Promise<unknown>) =>
+      run(),
   } as unknown as GatewayHarnessProtocol;
 }
 

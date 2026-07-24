@@ -40,6 +40,8 @@ import type { AppHarnessProtocol } from "../protocol/app-harness.js";
 import type { GatewayHarnessProtocol } from "../protocol/gateway-harness.js";
 import type { HookBridges } from "../protocol/hook-bridges.js";
 import type { SessionHarnessProtocol } from "../protocol/session-harness.js";
+import type { Observability } from "../data/observability.js";
+import type { Ops } from "../data/ops.js";
 import type { WireMethod, WireParams, WireResult } from "./params.js";
 import type { WireNotificationMethod, WireNotificationParams } from "./notifications.js";
 
@@ -202,8 +204,17 @@ export interface WireExtensionTransport {
  * `session` / `app` are populated when the method is scoped to one
  * (resolved from params or session affinity); both are absent for
  * truly gateway-level methods.
+ *
+ * Carries the flat {@link Observability} (`log` / `trace` / `metrics`) +
+ * {@link Ops} (`run` / `runner`) facets (ADR 64/78/19/83) — the SAME surface a
+ * tool handler's ctx and an interceptor ctx carry. The gateway attaches them
+ * IN-FIBER inside `runWireDispatch` (from its captured op runtime + telemetry
+ * provider), so a wire handler's `ctx.trace` span parents under the wire dispatch
+ * op and its `ctx.metrics` reaches the gateway's meter with the ambient
+ * `{ method }` label. Off the telemetry path they collapse to the shared
+ * frozen no-op / passthrough singletons (zero-cost).
  */
-export interface WireExtensionContext {
+export interface WireExtensionContext extends Observability, Ops {
   /**
    * Authenticated caller identity, stamped at ingress (ADR 51 §4.1).
    * Undefined on unauthenticated connections (the local pole). The

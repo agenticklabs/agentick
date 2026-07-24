@@ -28,6 +28,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "typecheck": "turbo typecheck",
+    "check:no-tla": "node scripts/no-tla-gate.mjs",
     "clean": "turbo clean",
     "dev": "turbo dev",
     "lint": "turbo lint",
