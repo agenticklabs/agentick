@@ -440,11 +440,20 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     // so `telemetryRuntime` is always set before the first gateway op reads it.
     this.telemetrySetting = options.telemetry;
     // The gateway exports SPANS for its own ops (`runGatewayOp`) AND owns a
-    // `ctx.metrics` surface: the wire-extension handler ctx (ADR 64/78). It
-    // acquires the SHARED, memoized `MeterProvider` (`buildTelemetryExport` binds
-    // each `MetricReader` to exactly ONE provider, refcounted) — the SAME meter
-    // instance hosted apps resolve from the inherited `telemetrySetting`, so no
-    // reader double-binds.
+    // `ctx.metrics` surface — the wire-extension handler ctx (ADR 64/78). So it
+    // builds BOTH halves of the export from the full setting (readers included),
+    // NOT a tracer-only slice.
+    //
+    // CONSTRAINT that makes this safe: an OTel `MetricReader` binds to exactly
+    // ONE `MeterProvider` (a second `new MeterProvider({ readers })` over the
+    // same reader THROWS "MetricReader can not be bound to a MeterProvider
+    // again"). The gateway and every hosted app that inherits this setting
+    // (`createAppBody` default-chains `telemetrySetting`) share the SAME reader
+    // instances — so N independent `MeterProvider`s would double-bind. The one
+    // thing preventing that: `buildTelemetryExport` MEMOIZES a single
+    // `MeterProvider` per reader-set and refcounts holders (last one out shuts it
+    // down). Gateway + apps therefore resolve the SAME meter — pass the full
+    // `normalized` setting through; do NOT zero the readers here.
     const normalized = normalizeTelemetry(options.telemetry);
     this.telemetryReady = this.initTelemetryExport(normalized);
 

@@ -832,10 +832,10 @@ export class AppHarness<P = unknown>
    * release `shutdown()`s it. `undefined` when no metric export is wired.
    */
   private telemetryReleaseMeter: (() => Promise<void>) | undefined;
-  // NOTE: `telemetryProvider` (ADR 64/78) is now the inherited mutable
-  // BaseHarness slot — presence flips `ctx.trace` / `ctx.metrics` ON in tool
-  // handlers AND on this app's own interceptor ctx; its `meter` drives
-  // `ctx.metrics.*` export. The app resolves it async in
+  // NOTE: `telemetryProvider` (ADR 64/78) is the inherited mutable BaseHarness
+  // slot — presence flips `ctx.trace` / `ctx.metrics` ON in tool handlers AND on
+  // this app's own interceptor ctx; its `meter` drives `ctx.metrics.*` export.
+  // The app resolves it async in
   // {@link initTelemetryExport} (before `appReady`) and assigns the inherited
   // field, so a single source feeds both the tool-executor threading and
   // `BaseHarness.buildInterceptorCtx`. `undefined` when telemetry is OFF.
