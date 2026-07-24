@@ -218,6 +218,49 @@ running is **steering** (ADR 53): the messages append to the timeline
 (visible next tick), and the _in-flight_ handle is returned rather than
 starting a fresh run.
 
+### Structured final turns (`trail-response-format-send`)
+
+A send can constrain its final turn to a typed shape via the declarative,
+wire-safe `responseFormat` directive:
+
+```ts
+await session.send({
+  messages,
+  responseFormat: {
+    type: "json_schema",
+    name: "answer",
+    schema: {
+      /* … */
+    },
+  },
+});
+```
+
+- **`responseFormat`** is the serializable form. It rides `session/send`
+  unchanged, applied on **every tick**, overriding both the tree-level
+  `<model responseFormat>` and a per-tick `<Model>` `parameters` (explicit
+  send-level beats ambient). Wire callers declare `responseFormat` and
+  parse the returned `response` text client-side.
+- **Steer delivery conflict.** A steer (the default delivery, which joins
+  an in-flight turn) that carries `responseFormat` is rejected with the
+  typed `SteerCannotCarryResponseFormat` — a steer injects messages into
+  the running turn and has no final turn of its own to shape. Use
+  `delivery: "followUp"` to run the structured request as a fresh
+  execution.
+
+> **Adapter caveat.** OpenAI and Google honor `responseFormat` natively;
+> the Anthropic and ai-sdk adapters currently DROP it
+> (`TODO(trail-anthropic-structured)` /
+> `TODO(trail-aisdk-experimental-output)`) — on those adapters it is a
+> best-effort generation hint.
+
+> **Deferred:** the live-schema sugar (a `StandardSchemaV1` `output` field)
+>
+> - typed, validated `SendResult.data` are deliberately deferred pending
+>   the multi-tick structured-output strategy design (final-answer-tool
+>   capture — the model calls a synthetic tool whose input schema IS the
+>   output shape, tying "done" to "shaped" and validating on every provider).
+
 ### Injecting a model registry (`models`, #206)
 
 Supply a `ModelRegistry` (provider → prefix → `ModelInfo`, merged over
@@ -380,7 +423,7 @@ eagerly on the supplied substrate when omitted; there is no
 > only the session-specific nesting mechanics.
 >
 > **Per-call identity (rung 2):** `session.send({ telemetry: { functionId,
-> metadata } })` stamps every span the send touches (ticks, model calls, tool
+metadata } })` stamps every span the send touches (ticks, model calls, tool
 > dispatches) via the tier-4 seam; `functionId` defaults to the app `name`.
 > Active only when app-level enrichment is on. Verified in
 > `__tests__/telemetry.spec.ts` ("rung 2").
@@ -838,6 +881,14 @@ their backing.
   `onBeforeSessionSetModel` vetoes the adapter form identically (normalized to
   a `RegisteredModel` before the command). End-to-end through `createApp` in
   `@agentick/app-next`'s `set-model.spec.tsx`.
+- `src/__tests__/structured-send.spec.ts` — structured final turns
+  (`trail-response-format-send`, declarative form): a send-level
+  `responseFormat` is threaded to the executor over a tree
+  `<model responseFormat>` (recording-executor observation); with no
+  send-level directive the tree one stays; multi-tick applies the
+  directive on EVERY tick; and a steer carrying `responseFormat` rejects
+  with `SteerCannotCarryResponseFormat` while the same request as
+  `followUp` runs.
 - `src/__tests__/define-session.spec.ts` — `defineSession` factory wiring.
 - `src/__tests__/model-bridge.spec.tsx` — tree-declared per-tick model,
   real loop resolving the `ModelBridge` (ADR 56); tick-IR precedence over

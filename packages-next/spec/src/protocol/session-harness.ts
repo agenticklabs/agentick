@@ -287,6 +287,29 @@ export interface SendInput<P = unknown> {
    * See "Observability" in `@agentick/runtime-next`'s README for the full model.
    */
   readonly telemetry?: SendTelemetry;
+  /**
+   * Structured final turn — declarative / wire-safe form
+   * (trail-response-format-send). The existing JSON-shaped
+   * {@link import("../data/rendered-tree.js").ResponseFormat} the compiled
+   * tree already carries on `config.responseFormat`.
+   *
+   * Applied on EVERY tick of this send, overriding both the tree-level
+   * `<model responseFormat>` AND a per-tick `<Model>`-declared
+   * `parameters.responseFormat` — explicit-beats-ambient. Fully
+   * serializable: crosses `session/send` unchanged (see
+   * `SessionSendParams.responseFormat`).
+   *
+   * Providers that support tools + response_format together honor it
+   * natively (OpenAI, Google); Anthropic + ai-sdk currently drop it
+   * (`TODO(trail-anthropic-structured)` / `TODO(trail-aisdk-experimental-
+   * output)`).
+   *
+   * NOTE (deferred): the live-schema sugar (a `StandardSchemaV1` `output`
+   * field normalized here) + typed, validated `SendResult.data` are
+   * DEFERRED pending the multi-tick structured-output strategy design
+   * (final-answer-tool capture). This ships the declarative directive only.
+   */
+  readonly responseFormat?: import("../data/rendered-tree.js").ResponseFormat;
 }
 
 /**

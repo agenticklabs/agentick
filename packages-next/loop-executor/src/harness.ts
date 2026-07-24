@@ -461,6 +461,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           resolveRenderContext: input.resolveRenderContext,
           resolveModel: input.resolveModel,
           stream: input.stream,
+          ...(input.responseFormat !== undefined ? { responseFormat: input.responseFormat } : {}),
           narrate: input.narrate,
           toolConcurrency: input.toolConcurrency,
           emit: sink,
@@ -724,17 +725,28 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
       if (tickModelExecutor === undefined || tickTarget === undefined) {
         return yield* Effect.fail(new NoModelForExecutionError());
       }
-      // `decl.parameters` overlay the compiled tree's generation config
-      // for this tick (temperature, maxOutputTokens, …) — the same
-      // knobs RenderedTree.config carries and the executor reads via
-      // buildParameters. Merge IR params over the render's config.
+      // Per-tick config overlay. Two layers fold OVER the render's
+      // `config`, innermost-wins:
+      //   1. `modelDecl.parameters` — a per-tick `<Model>`-declared
+      //      generation-knob patch (temperature, maxOutputTokens, …), the
+      //      same knobs RenderedTree.config carries and the executor reads
+      //      via buildParameters.
+      //   2. `input.responseFormat` — the SEND-level structured-output
+      //      directive (trail-response-format-send). Spread LAST so an
+      //      explicit `SendInput.responseFormat` / `.output` wins over both
+      //      the tree-level `<config responseFormat>` and a model-decl one
+      //      (explicit send-level beats ambient tree/model).
+      const configOverlay: Partial<SpecConfig> = {
+        ...modelDecl?.parameters,
+        ...(input.responseFormat !== undefined ? { responseFormat: input.responseFormat } : {}),
+      };
       const tickCompiled =
-        modelDecl?.parameters !== undefined
+        Object.keys(configOverlay).length > 0
           ? {
               ...renderResult.tree,
               config: {
                 ...renderResult.tree.config,
-                ...modelDecl.parameters,
+                ...configOverlay,
               } as SpecConfig,
             }
           : renderResult.tree;

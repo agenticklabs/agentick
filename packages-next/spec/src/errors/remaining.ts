@@ -522,3 +522,37 @@ export class WireExtensionDefinitionError extends AgentickError {
   }
 }
 registerAgentickError("WireExtensionDefinitionError", WireExtensionDefinitionError);
+
+// ============================================================================
+// Structured final turns (trail-response-format-send) — delivery conflict
+// ============================================================================
+
+/**
+ * Raised when a send that JOINS an in-flight execution (`delivery: "steer"`,
+ * the default) carries a `responseFormat` directive. A steer injects only
+ * its `messages` into the running turn — it does NOT begin a new execution,
+ * so it has no final turn of its own to shape. Rather than silently drop
+ * the directive (a data-loss surprise) or silently auto-upgrade delivery (a
+ * mode-change surprise), the join is rejected: use `delivery: "followUp"` to
+ * run the structured request as its own fresh execution once the session
+ * quiesces.
+ *
+ * A DELIVERY conflict, not a validation error — caught at the steer-join
+ * point, before anything runs. Single-tag — concrete class directly under
+ * {@link AgentickError}.
+ *
+ * @see docs/proposals/v2/three-audiences-plan.md §B
+ */
+export class SteerCannotCarryResponseFormat extends AgentickError {
+  readonly _tag = "SteerCannotCarryResponseFormat" as const;
+  constructor(args?: { readonly cause?: unknown }) {
+    super(
+      `a steering send (delivery: "steer") cannot carry \`responseFormat\`: ` +
+        `a steer injects messages into the in-flight turn and has no final turn of ` +
+        `its own to shape — use delivery: "followUp" to run the structured request ` +
+        `as a fresh execution`,
+      { cause: args?.cause },
+    );
+  }
+}
+registerAgentickError("SteerCannotCarryResponseFormat", SteerCannotCarryResponseFormat);

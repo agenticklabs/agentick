@@ -436,6 +436,14 @@ function toAISDKInput(input: LanguageModelInput, target: ExecutionTarget): AISDK
   if (p?.stopSequences !== undefined) {
     generation.stopSequences = [...p.stopSequences];
   }
+  // TODO(trail-aisdk-experimental-output): map `p.responseFormat` onto the
+  // AI SDK's `experimental_output` (`Output.object({ schema })` for
+  // `json_schema`, `Output.text()` otherwise). Dropped for now — DELIBERATE-
+  // BUT-TRACKED, not an oversight (per the generate-object.ts docblock):
+  // `responseFormat` is a best-effort generation hint on this adapter today.
+  // The robust structured path is the deferred final-answer-tool capture
+  // (trail-response-format-send successor design), which validates via the
+  // tool executor and works on every provider.
   // ┌─ TODO(pass-d): REQUEST HALF — DELIBERATELY NOT MAPPED (no correct seam) ────
   // │ `input.providerTools` is NOT forwarded here — on purpose. Unlike the
   // │ three native adapters (each maps its own `{type,config}` slice onto a

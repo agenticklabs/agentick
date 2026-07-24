@@ -62,6 +62,7 @@ import type {
   ProtocolEvent,
   RegisteredModel,
   RenderContext,
+  ResponseFormat,
   RestoreSnapshotInput,
   SendInput,
   SendMessageInput,
@@ -92,6 +93,7 @@ import {
   HandlerError,
   isChannelSnapshotProvider,
   isSnapshotCapable,
+  SteerCannotCarryResponseFormat,
   supportsTreeInterception,
   SessionClosedError,
   SnapshotVersionMismatch,
@@ -1970,6 +1972,13 @@ export class SessionHarness<P = unknown>
     if (this._closed) {
       throw new SessionClosedError({ attemptedCommand: "send" });
     }
+    // Structured final turn (trail-response-format-send) — the declarative,
+    // wire-safe `responseFormat` directive. Overlaid onto every tick's
+    // compiled config by the loop (explicit-beats-ambient over tree/model
+    // config). The live-schema sugar + validated `SendResult.data` are
+    // deferred (final-answer-tool capture, pending design).
+    const effectiveResponseFormat: ResponseFormat | undefined = input.responseFormat;
+
     // Delivery mode (queue-item 4b). Default `"steer"` = today's ADR 53 §5
     // join behavior; `"followUp"` = wait for the session to fully quiesce,
     // then run a fresh execution (never joins the in-flight turn).
@@ -2002,6 +2011,13 @@ export class SessionHarness<P = unknown>
           // Re-check: the loop may have settled while we awaited the
           // reservation — a dead handle must not be joined.
           if (!this._loopDone) {
+            // A JOIN carries ONLY its messages into the in-flight turn — it
+            // starts no new execution, so it has no final turn of its own to
+            // shape. Reject a `responseFormat`-carrying steer loud rather than
+            // silently dropping the directive or auto-upgrading delivery.
+            if (input.responseFormat !== undefined) {
+              throw new SteerCannotCarryResponseFormat();
+            }
             // ENQUEUE (not append): the steer lands at the next tick boundary,
             // after this tick's tool results, before the next render — the
             // adjacency-safe injection point (queue-item 4b).
@@ -2273,6 +2289,13 @@ export class SessionHarness<P = unknown>
                 // app-level cascade); the projector defaults ON if unset.
                 narrate: this.narrate,
                 stream: streamForCall,
+                // trail-response-format-send — the send-level structured
+                // directive (explicit `responseFormat`, or the normalized live
+                // `output` schema). The loop overlays it onto each tick's
+                // compiled config, spread LAST (explicit-beats-ambient).
+                ...(effectiveResponseFormat !== undefined
+                  ? { responseFormat: effectiveResponseFormat }
+                  : {}),
                 // Stage 5 — per-send tool concurrency (default "unbounded" in
                 // the loop) + optional execution timeout, both opt-in.
                 ...omitUndefined({

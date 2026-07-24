@@ -250,6 +250,69 @@ export function toJsonSchema(schema: StandardSchemaV1): Readonly<Record<string, 
   return { type: "object" };
 }
 
+// ============================================================================
+// Parse + validate (the shared structured-output helper)
+// ============================================================================
+
+/**
+ * Result of {@link parseJsonWithSchema} — a discriminated union.
+ *
+ * `ok: true` carries the validated, typed value. `ok: false` carries the
+ * raw `text` plus a `reason`:
+ *   - `"invalid-json"` — `JSON.parse` threw. `issues` is empty (there is
+ *     no schema-level diagnostic yet); the underlying `SyntaxError` rides
+ *     `cause`.
+ *   - `"schema"` — parsed fine but failed Standard Schema validation.
+ *     `issues` carries the validator's diagnostics.
+ *
+ * The `reason` discriminator is what lets callers reproduce distinct
+ * error messages for the two failure modes without re-parsing.
+ */
+export type ParseJsonWithSchemaResult<T> =
+  | { readonly ok: true; readonly value: T }
+  | {
+      readonly ok: false;
+      readonly reason: "invalid-json" | "schema";
+      readonly issues: readonly StandardSchemaIssue[];
+      readonly text: string;
+      readonly cause?: unknown;
+    };
+
+/**
+ * Parse `text` as JSON, then validate the parsed value against a Standard
+ * Schema. The canonical "text → typed value" step for structured model
+ * output — shared by `generateObject` (model tier) and structured
+ * `session.send` (session tier) so both apply identical semantics.
+ *
+ * Never throws: JSON parse failures and validation failures are returned
+ * as `{ ok: false }` results (the caller decides whether to throw a typed
+ * error, repair, etc.). Async because Standard Schema `validate` may be
+ * async (Effect Schema, remote validators).
+ *
+ * Semantics mirror the historical inline logic in `generateObject`:
+ *   - `JSON.parse` failure → `{ ok: false, reason: "invalid-json",
+ *     issues: [], text, cause }`.
+ *   - validation failure → `{ ok: false, reason: "schema",
+ *     issues: <validator issues>, text }`.
+ *   - success → `{ ok: true, value }`.
+ */
+export async function parseJsonWithSchema<T>(
+  text: string,
+  schema: StandardSchemaV1<unknown, T>,
+): Promise<ParseJsonWithSchemaResult<T>> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (cause) {
+    return { ok: false, reason: "invalid-json", issues: [], text, cause };
+  }
+  const validated = await schema["~standard"].validate(parsed);
+  if (validated.issues) {
+    return { ok: false, reason: "schema", issues: validated.issues, text };
+  }
+  return { ok: true, value: validated.value };
+}
+
 /**
  * Type guard: does `value` satisfy the StandardSchemaV1 contract?
  */

@@ -62,7 +62,14 @@ const { object, result } = await generateObject({
 
 `generateObject` sets `responseFormat: { type: "json_schema" }` from the
 schema, then parses and validates the model's text output (throwing
-`GenerateObjectError` on non-JSON or schema-validation failure).
+`GenerateObjectError` on non-JSON or schema-validation failure). The
+parse+validate step is the shared `parseJsonWithSchema` helper in
+`@agentick/spec-next` — extracted so the eventual session-tier
+structured-output path can reuse the exact same text→typed pipeline (the
+live-schema `SendInput.output` → validated `SendResult.data` sugar is
+deferred pending the multi-tick structured-output design; the declarative
+`SendInput.responseFormat` directive landed in `@agentick/session-next`).
+`generateObject`'s `GenerateObjectError` shape and messages are unchanged.
 `responseFormat` is normative today on **OpenAI + Google** only;
 Anthropic and AI SDK are reopened as #184 (they currently drop the
 canonical `responseFormat` knob — prompt-engineer the JSON contract for

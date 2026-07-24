@@ -162,6 +162,181 @@ model-executor pass-through, e2e with fake adapter.
 
 ---
 
+## B2. Structured execution results — the terminal-tool strategy (SPEC, 2026-07-24)
+
+**Why B alone is not enough (Ryan's challenge, ratified).** `responseFormat`
+is a _generation-time text constraint applied every tick_. In a multi-tick
+agentic execution it (a) strangles interleaved narration on tool ticks,
+(b) only works on providers with native response_format (Anthropic and
+ai-sdk drop it), and (c) decouples "done" from "shaped" — nothing ties
+emitting the conforming JSON to being finished. B therefore landed ONLY
+the canonical plumbing; `SendInput.output` / `SendResult.data` were
+descoped mid-flight into this design.
+
+**The strategy: a terminal tool.** Inject a synthetic tool whose
+`inputSchema` IS the output schema; the model calls it to deliver the
+final answer; the call is the completion event.
+
+- **Validation is free** — providers constrain tool arguments natively
+  (ALL of them, including Anthropic: this erases the provider gap), and
+  the tool executor validates inputs anyway.
+- **Stop is free** — the loop detects the terminal tool's call in the
+  tick's tool calls (by name, from the output spec — loop-side detection,
+  no handler→loop back-channel needed) and ends the execution;
+  `stopAfterTick` semantics already exist on the seam and in the session's
+  tick-end fold.
+- **"Done" and "shaped" become the same event** — the exact property
+  responseFormat lacks.
+
+**Per-execution scoping — the question that shaped this design.** No
+forks required, no context injection required:
+
+- The terminal tool binds through the EXISTING execution-scoped tool
+  mechanism — `SendInput.tools: ToolDeclaration[]` is already "bound into
+  the tool executor's registry for the duration of this execution, and
+  removed when the execution closes" (`session-harness.ts:225-236`, with
+  the ToolBinding precedence ladder). One send in a long session gets the
+  tool; the next send doesn't. This is public API today.
+- **The tool IS the instruction.** Its description carries "when the task
+  is complete, call this with the final answer" — per-execution because
+  the binding is per-execution. No last-message injection, no ephemeral
+  system append; the tool's presence in the tick's tool list is the
+  context. (If evidence shows description-driven compliance is weak, the
+  enforcement rung below is the mechanism — never prompt splicing.)
+- Timeline hygiene: the terminal call + result persist as ordinary
+  history (informative — it shows the final answer); later executions
+  seeing a past call to a no-longer-mounted tool is normal.
+
+**Sources, two tiers (explicit-beats-ambient, as everywhere):**
+
+- **Tree-level: `OutputDeclaration` — ALREADY SEEDED ON THE IR**
+  (`spec/src/data/declarations.ts:547-562`, drawn with exactly the right
+  distinction: "outputs the application wants to extract from the result.
+  Distinct from `SpecConfig.responseFormat`, a generation-time provider
+  directive"). Unconsumed today. `<Output schema={...}/>` compiles to it;
+  it means "every execution of this agent produces this shape" —
+  dedicated extraction agents, skill-runner children, forks. NOT required
+  for the one-off case.
+- **Send-level: `SendInput.output`** (returns, redefined) — "THIS
+  execution produces this shape." Overrides the tree declaration. This is
+  the long-session one-off; `skills.run` composes on it.
+
+**Strategy selection (seam, not hardcode):** auto — tools mounted /
+multi-tick possible → terminal tool; bare single-tick send → plain
+`responseFormat` (constrained decoding is strictly better there; it's
+`generateObject`'s domain). Overridable per output spec
+(`strategy?: "tool" | "responseFormat"`).
+
+**Capture:** `SendResult.data` = the terminal tool's validated input
+(schema-validated by the executor; re-validated via `parseJsonWithSchema`
+only on the responseFormat strategy path). Model ends WITHOUT calling the
+terminal tool → `handle.result` rejects with a typed error (honest
+failure), until the enforcement rung lands.
+
+**Canonical `toolChoice` (RATIFIED + pulled forward — Ryan,
+2026-07-24: "amend the tool params to include tool choice if it is
+sufficiently normalizable and all adapters should then support it").**
+Normalizability verified — the canonical form is
+`toolChoice?: "auto" | "none" | "required" | { tool: string }`:
+
+| Provider  | Translation                                                                                               |
+| --------- | --------------------------------------------------------------------------------------------------------- |
+| OpenAI    | `"auto"/"none"/"required"` verbatim; `{tool}` → `{type:"function", function:{name}}`                      |
+| Anthropic | `auto`→`{type:"auto"}`, `required`→`{type:"any"}`, `none`→`{type:"none"}`, `{tool}`→`{type:"tool", name}` |
+| Google    | `functionCallingConfig.mode` AUTO/NONE/ANY; `{tool}` → ANY + `allowedFunctionNames:[name]`                |
+| ai-sdk    | `"auto"/"none"/"required"` verbatim; `{tool}` → `{type:"tool", toolName}`                                 |
+
+Ships as its own small PR (spec `LanguageModelParameters` +
+`buildParameters` + four adapter translations + per-adapter tests;
+normalize-translate-escape-hatch — `providerOptions` still spreads last).
+Multi-tool restriction (Google's `allowedFunctionNames` plural) stays in
+the provider escape hatch, not the canonical form.
+
+**Enforcement rung (folds into B2a once toolChoice lands):** when the
+model stops without calling the terminal tool and an output spec is
+required, the loop runs ONE forced wrap-up tick
+(`toolChoice: { tool: <terminal> }`). Deterministic loop machinery, not
+prompt hacking. B2b as a separate slice is dissolved by the pull-forward.
+
+**Names:** default terminal tool name `submit_result`, configurable on
+the output spec. NOTE the precedence ladder: a compiler-emitted tool of
+the same name would SHADOW the execution-level binding — document, and
+throw at bind time on collision rather than silently shadowing.
+
+**Prefill-cache interaction (Ryan, 2026-07-24 — the rule this adds).**
+Tools serialize at the head of the provider prompt, so a per-execution
+tool injection is a prefix perturbation. Analysis:
+
+- **Within one execution** the terminal tool is stable across ticks —
+  tick 1 pays the (re)cache, ticks 2..n hit. The cost is bounded to one
+  cold tick per one-off structured send, per provider cache TTL.
+- **Anthropic — survivable with an ordering rule:** cache breakpoints
+  cache the prefix THROUGH the marked block. RULE: execution-scoped tool
+  bindings (the terminal tool included) MUST serialize at the TAIL of the
+  tools list, AFTER any cache breakpoint on the stable tools — then the
+  stable prefix through the breakpoint keeps hitting; only the tail is
+  new. This ordering guarantee belongs to the projection (deterministic:
+  tree tools first, execution bindings last) and gets asserted by the
+  prefix-stability test (§6 item 4 — extend that test's scope to cover
+  execution-scoped appends preserving the stable boundary).
+- **OpenAI/Google:** automatic prefix caching hashes the serialized
+  prompt including tools — the one-off execution busts and re-primes;
+  bounded, unavoidable, documented (not worked around).
+- **Tree-level `OutputDeclaration` is fully cache-stable** (the tool is
+  always present) — one more reason dedicated extraction agents and
+  skill-runner children should declare on the tree, not per-send.
+- **`toolChoice` (B2b):** provider docs note tool_choice changes
+  invalidate downstream cache segments — the forced wrap-up tick pays a
+  partial cache cost on its single tick. Acceptable: it's the terminal
+  tick by construction.
+
+**Terminal-call tick semantics (pinned 2026-07-24).** If the model calls
+the terminal tool ALONGSIDE other tools in one tick: the other calls
+execute first (normal dispatch, results captured), the terminal capture
+processes LAST, then the execution stops. Deterministic and testable; no
+"terminal call cancels sibling work" surprises.
+
+**Guarantees & testing strategy (pinned 2026-07-24 — the anti-flakiness
+contract).** Three tiers:
+
+1. **Mechanism — CI, deterministic** (FakeLanguageModelExecutor scripted
+   runs): execution-scoped binding; tail-append ordering; stop-on-
+   terminal-call; sibling-calls-first semantics; `data` capture +
+   validation; miss → wrap-up tick with `toolChoice: {tool}`; still-no-
+   call → typed error; name-collision throw; tree-vs-send precedence;
+   steer conflict. Every spec claim above maps to a scripted test.
+2. **Provider contract — CI, no network**: the four adapter translation
+   unit tests (toolChoice mapping, schema pass-through).
+3. **Behavioral compliance — EVALS, never CI**: "does the model call the
+   terminal tool unforced" is model behavior, same epistemic category as
+   gate attestation — measured in `@agentick/eval` on demand, reported as
+   numbers, not asserted. B2a's deliverables include the eval suite.
+
+The guarantee chain the docs state honestly: description-driven natural
+path (usually) → forced wrap-up tick (`tool_choice` forcing is a HARD
+provider guarantee — the model cannot respond without calling it, args
+provider-constrained to the schema) → executor validation → typed error
+in the residual sliver. Plain `responseFormat` is strictly weaker
+(Anthropic: none).
+
+**Presentation scoping (Ryan, 2026-07-24).** `skills.run` is the
+flagship consumer; `SendInput.output` is the primitive it composes on —
+documented as plumbing, not marketed as a general "structured output"
+promise until the eval tier produces compliance numbers. Docs carry an
+honest guarantees section (natural path / forced path / failure mode).
+
+Sequencing (ratified 2026-07-24: "land B then go B2a" + toolChoice
+pull-forward): land B (in flight, descoped) → **toolChoice PR** (small,
+independent — overlaps B's files in spec/model/adapters, so sequential
+after B, never parallel with it) → **B2a** (OutputDeclaration consumption
+
+- terminal-tool strategy + `SendInput.output` + `SendResult.data` +
+  typed miss error + the enforcement wrap-up tick, since toolChoice will
+  exist + the compliance eval suite). C (`skills.run`) rides B2a. The B2a
+  delegation scout can run read-only in parallel with the toolChoice PR.
+
+---
+
 ## C. `skills.run(name, opts)` — the model executes, the skill guides
 
 Flue-aligned, line preserved: _skills guide agent work; they do not add

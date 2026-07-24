@@ -17,9 +17,14 @@ import { fakeCompiler } from "@agentick/compiler-next/testing";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import {
   type ContentBlock,
+  type ExecutorFx,
   type JsonRpcId,
   type JsonRpcRequest,
   type JsonRpcResponse,
+  type LanguageModelExecutionResult,
+  type LanguageModelInput,
+  type ResponseFormat,
+  type SessionSendParams,
 } from "@agentick/spec-next";
 import { dispatchRequest, type DispatchSink } from "@agentick/transport-next";
 
@@ -41,6 +46,25 @@ async function makeStack(replyText: string) {
     ],
   });
   await executor.ready;
+
+  // Capture the `responseFormat` the executor sees on each tick's projected
+  // input — the loop overlays `SendInput.responseFormat` onto the compiled
+  // `config` before projecting, so this is where a wire-declared directive
+  // lands after crossing the transport.
+  const seenResponseFormats: (ResponseFormat | undefined)[] = [];
+  const baseFx = executor.fx;
+  const patchedFx: ExecutorFx<LanguageModelInput, unknown, LanguageModelExecutionResult> = {
+    ...baseFx,
+    project: (input) => {
+      seenResponseFormats.push(input.compiled?.config?.responseFormat);
+      return baseFx.project(input);
+    },
+    run: (input) => {
+      seenResponseFormats.push(input.compiled?.config?.responseFormat);
+      return baseFx.run(input);
+    },
+  };
+  Object.defineProperty(executor, "fx", { configurable: true, get: () => patchedFx });
 
   const gateway = await createGateway();
   await gateway.listen();
@@ -77,6 +101,7 @@ async function makeStack(replyText: string) {
     client,
     sessionId: session.id,
     appId: app.id,
+    seenResponseFormats,
     cleanup: async () => {
       await client.close();
       await gateway.close();
@@ -97,6 +122,41 @@ describe("session/send — full client → gateway → executor roundtrip", () =
     expect(result.stopReason).toBe("end");
 
     await cleanup();
+  });
+
+  it("threads a declarative responseFormat across the wire to the executor (trail-response-format-send)", async () => {
+    const { client, sessionId, seenResponseFormats, cleanup } = await makeStack("ok");
+
+    const responseFormat: ResponseFormat = {
+      type: "json_schema",
+      name: "wire-response",
+      schema: { type: "object", properties: { ok: { type: "boolean" } } },
+    };
+
+    await client
+      .session(sessionId)
+      .send({ messages: [{ role: "user", content: "ping" }], responseFormat }).result;
+
+    // The declarative directive crossed client → wire → gateway → session →
+    // loop overlay → executor projection.
+    expect(seenResponseFormats).toHaveLength(1);
+    expect(seenResponseFormats[0]?.type).toBe("json_schema");
+    expect(seenResponseFormats[0]).toMatchObject({ name: "wire-response" });
+
+    await cleanup();
+  });
+
+  it("SessionSendParams is declare-only for structured output — no live `output` field crosses", () => {
+    // Type-level: the wire params carry `responseFormat` (serializable) but
+    // NOT the live `output` Standard Schema. A schema cannot cross the wire.
+    const params: SessionSendParams = {
+      sessionId: "s",
+      responseFormat: { type: "json" },
+    };
+    expect(params.responseFormat).toBeDefined();
+    // @ts-expect-error — `output` is deliberately absent from the wire shape.
+    const bad: SessionSendParams = { sessionId: "s", output: {} };
+    void bad;
   });
 
   it("exposes the right session/app via gateway methods", async () => {

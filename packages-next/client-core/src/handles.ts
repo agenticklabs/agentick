@@ -325,6 +325,10 @@ function createSessionExecutionHandle<P>(
       delivery: input.delivery,
       // Telemetry rung 2 — per-call functionId + metadata (JSON-clean bag).
       telemetry: input.telemetry,
+      // trail-response-format-send — the declarative `responseFormat`
+      // directive (wire-safe JSON). The client parses the returned
+      // `response` text against its own schema.
+      responseFormat: input.responseFormat,
       _meta: { progressToken },
     })
     .then((res) => {

@@ -26,11 +26,18 @@
  * experimental-output) maps to `experimental_output`). Validation
  * catches non-adherence regardless.
  *
+ * The parse+validate step is the shared `parseJsonWithSchema` helper in
+ * `@agentick/spec-next` — extracted so the eventual session-tier
+ * structured-output path can reuse the exact same text→typed pipeline.
+ *
  * // TODO(trail-object-repair): compose a repair strategy (#179's
  * // repair-hook shape) — on parse/validation failure, one cheap-model
  * // repair round before throwing.
- * // TODO(trail-response-format-send): surface responseFormat on the
- * // session tier's SendInput for structured final turns.
+ * // trail-response-format-send: the declarative `SendInput.responseFormat`
+ * // directive landed at the session tier (`@agentick/session-next`). The
+ * // live-schema sugar + validated `SendResult.data` (which would consume
+ * // `parseJsonWithSchema` here) are DEFERRED pending the multi-tick
+ * // structured-output strategy (final-answer-tool capture).
  */
 
 import type {
@@ -38,7 +45,7 @@ import type {
   StandardSchemaIssue,
   StandardSchemaV1,
 } from "@agentick/spec-next";
-import { toJsonSchema } from "@agentick/spec-next";
+import { parseJsonWithSchema, toJsonSchema } from "@agentick/spec-next";
 
 import { generate, type GenerateOptions } from "./generate.js";
 
@@ -95,20 +102,24 @@ export async function generateObject<T, TRaw, TChunk>(
     .map((b) => b.text)
     .join("");
 
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch (cause) {
-    throw new GenerateObjectError("model output is not valid JSON", text, [], { cause });
-  }
-
-  const validated = await schema["~standard"].validate(parsed);
-  if (validated.issues) {
+  // Parse + validate via the shared spec helper — the SAME step the
+  // session tier's structured `send` runs. The `reason` discriminator
+  // reproduces this function's two historical error messages exactly.
+  const parsed = await parseJsonWithSchema(text, schema);
+  if (!parsed.ok) {
+    if (parsed.reason === "invalid-json") {
+      throw new GenerateObjectError(
+        "model output is not valid JSON",
+        parsed.text,
+        [],
+        parsed.cause !== undefined ? { cause: parsed.cause } : undefined,
+      );
+    }
     throw new GenerateObjectError(
-      `model output failed schema validation: ${validated.issues.map((i) => i.message).join("; ")}`,
-      text,
-      validated.issues,
+      `model output failed schema validation: ${parsed.issues.map((i) => i.message).join("; ")}`,
+      parsed.text,
+      parsed.issues,
     );
   }
-  return { object: validated.value, result };
+  return { object: parsed.value, result };
 }

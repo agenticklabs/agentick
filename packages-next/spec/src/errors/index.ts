@@ -220,6 +220,7 @@ export {
   SandboxPermissionDeniedError,
   SandboxResourceLimitError,
   SandboxUnsupportedError,
+  SteerCannotCarryResponseFormat,
   DetachedTaskCannotElicitError,
   TaskHandlerRefRequiredError,
   UnknownTaskError,

@@ -253,6 +253,19 @@ export interface RunExecutionInput {
    * SendInput / CreateSessionInput / AppHarnessOptions cascade.
    */
   readonly stream?: boolean;
+
+  /**
+   * Send-level structured-output directive (trail-response-format-send).
+   * When present, it overlays each tick's compiled `config.responseFormat`
+   * — spread LAST, so it wins over both the tree-level
+   * `<model responseFormat>` and a per-tick `<Model>`-declared
+   * `parameters.responseFormat` (explicit send-level beats ambient
+   * tree/model). Threaded straight from `SendInput.responseFormat`; the loop
+   * stays a dumb conduit — a generation-time directive only, no parse/validate.
+   *
+   * @see docs/proposals/v2/three-audiences-plan.md §B
+   */
+  readonly responseFormat?: import("../data/rendered-tree.js").ResponseFormat;
 }
 
 /**
@@ -436,6 +449,13 @@ export interface TickInput {
   readonly signal?: AbortSignal;
   /** Whether to take the streaming path when the executor supports it. */
   readonly stream?: boolean;
+  /**
+   * Send-level structured-output directive (trail-response-format-send),
+   * forwarded from {@link RunExecutionInput.responseFormat}. Overlaid onto
+   * this tick's compiled `config.responseFormat`, spread LAST so an explicit
+   * send-level directive wins over tree/model config. See that field.
+   */
+  readonly responseFormat?: import("../data/rendered-tree.js").ResponseFormat;
   /** Model-narration switch (default `true`) threaded into `project` / `run`. */
   readonly narrate?: boolean;
   /** Concurrency for this tick's tool-call dispatch (default `"unbounded"`). */

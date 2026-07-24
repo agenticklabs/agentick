@@ -657,6 +657,15 @@ function toAnthropicParams(
   if (p?.stopSequences !== undefined) params.stop_sequences = [...p.stopSequences];
   // Silently drop frequencyPenalty / presencePenalty / responseFormat —
   // Anthropic has no native support (G1 caveat from the skill).
+  // TODO(trail-anthropic-structured): map `responseFormat.type ===
+  // "json_schema"` onto the tool-shaped strategy (a single forced
+  // `output`-named tool whose input_schema IS the response schema +
+  // `tool_choice: { type: "tool", name: "output" }`), per the
+  // generate-object.ts docblock. The drop here is DELIBERATE-BUT-TRACKED,
+  // not an oversight — `responseFormat` is a best-effort generation hint on
+  // this adapter today. The robust structured path is the deferred
+  // final-answer-tool capture (trail-response-format-send successor design),
+  // which validates via the tool executor and works on every provider.
 
   // Adopter escape hatch — spread last so explicit overrides win.
   // `input.providerOptions` (project-time fold of tree over target, #176)

@@ -14,6 +14,7 @@ import type { ToolResultInput } from "../data/tool-result.js";
 import type { EventQuery } from "../data/events.js";
 import type { ExecutionResult } from "../data/execution-result.js";
 import type { ExecutionTarget } from "../data/execution-target.js";
+import type { ResponseFormat } from "../data/rendered-tree.js";
 import type { SessionEntry, SessionFilter } from "../protocol/app-harness.js";
 import type { Cursor } from "../protocol/event-log.js";
 import type { TimelineEntry } from "../protocol/session-harness.js";
@@ -159,6 +160,16 @@ export interface SessionSendParams extends WireRequestParams {
    * {@link SendInput.telemetry} for semantics (incl. the app-name default).
    */
   readonly telemetry?: SendTelemetry;
+  /**
+   * Structured final turn — the declarative / wire-safe `responseFormat`
+   * directive (trail-response-format-send). Fully serializable JSON, so it
+   * threads straight through. A wire caller declares `responseFormat` and
+   * parses the returned `response` text client-side. See
+   * {@link SendInput.responseFormat}. (The live-schema sugar + typed
+   * `SendResult.data` are deferred pending the multi-tick structured-output
+   * design; nothing schema-shaped crosses the wire regardless.)
+   */
+  readonly responseFormat?: ResponseFormat;
 }
 
 /**

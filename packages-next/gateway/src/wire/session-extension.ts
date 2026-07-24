@@ -87,6 +87,10 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
         // Telemetry rung 2 — per-call functionId + metadata. JSON-clean bag,
         // threaded straight through; the session stamps it on every span.
         ...(params.telemetry !== undefined ? { telemetry: params.telemetry } : {}),
+        // trail-response-format-send — the declarative `responseFormat`
+        // directive. Wire-safe JSON; the wire caller parses the returned
+        // `response` text client-side.
+        ...(params.responseFormat !== undefined ? { responseFormat: params.responseFormat } : {}),
       });
 
       // Register cancellation seam — `notifications/cancelled` from

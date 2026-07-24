@@ -364,6 +364,11 @@ Queue/fork/iterator machinery lives once in `runHarnessStream`
   `tool-executor-protocol.spec.ts` — protocol conformance shapes.
 - `src/__tests__/rendered-tree.spec.ts` — `RenderedTree` +
   `mergeProviderOptions` semantics.
+- `src/__tests__/standard-schema.spec.ts` — `parseJsonWithSchema` (the
+  shared structured-output text→typed step): success, JSON-parse failure
+  (`reason: "invalid-json"`, empty issues + `SyntaxError` cause), schema
+  failure (`reason: "schema"` + validator issues), and async validators.
+  Semantics mirror `generateObject`'s historical inline logic.
 - `src/__tests__/wire.spec.ts`, `wire-extension.spec.ts` — wire schema +
   extension registry.
 - `src/__tests__/event-log.spec.ts`, `version.spec.ts` — event log
