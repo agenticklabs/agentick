@@ -13,7 +13,11 @@ import { omitUndefined } from "@agentick/utils-next";
 import { Chunk, Effect, Fiber, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 
-import type { LanguageModelTarget, RenderedTree } from "@agentick/spec-next";
+import type {
+  LanguageModelTarget,
+  LanguageModelToolChoice,
+  RenderedTree,
+} from "@agentick/spec-next";
 import { jsonSchema } from "@agentick/spec-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type {
@@ -1146,5 +1150,35 @@ describe("anthropic() adapter — provenance-half (Pass D document citations)", 
     expect(textBlocks[1]?.citations?.[0]?.sourceId).toBe("s0");
     expect(textBlocks[0]?.sources).toEqual([{ id: "s0", documentIndex: 2, title: "Optics 101" }]);
     expect(textBlocks[1]?.sources).toEqual([{ id: "s0", documentIndex: 2, title: "Optics 101" }]);
+  });
+});
+
+describe("anthropic() adapter — canonical toolChoice", () => {
+  const build = (toolChoice: LanguageModelToolChoice) =>
+    anthropic("claude-3-5-sonnet-latest").prepareRequest({
+      targetInput: {
+        messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+        parameters: { toolChoice },
+      },
+      target: mkTarget(),
+    }) as { tool_choice?: unknown };
+
+  it("translates all four canonical values to Anthropic tool_choice", () => {
+    expect(build("auto").tool_choice).toEqual({ type: "auto" });
+    expect(build("required").tool_choice).toEqual({ type: "any" });
+    expect(build("none").tool_choice).toEqual({ type: "none" });
+    expect(build({ tool: "calc" }).tool_choice).toEqual({ type: "tool", name: "calc" });
+  });
+
+  it("providerOptions.anthropic override wins over canonical toolChoice", () => {
+    const params = anthropic("claude-3-5-sonnet-latest").prepareRequest({
+      targetInput: {
+        messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+        parameters: { toolChoice: "required" },
+        providerOptions: { anthropic: { tool_choice: { type: "none" } } },
+      },
+      target: mkTarget(),
+    }) as { tool_choice?: unknown };
+    expect(params.tool_choice).toEqual({ type: "none" });
   });
 });

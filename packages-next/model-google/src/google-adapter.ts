@@ -603,6 +603,24 @@ function toGoogleParams(
     }
   }
   // Silently drop frequencyPenalty / presencePenalty — Gemini has no native support.
+  // Canonical toolChoice → Google `toolConfig.functionCallingConfig`:
+  // "auto"→AUTO, "none"→NONE, "required"→ANY, `{tool}`→ANY constrained to that
+  // single `allowedFunctionNames` entry. Values are the string-enum members
+  // (FunctionCallingConfigMode). Provider overrides in `providerOptions.google`
+  // still win (spread last, below). The plural allowedFunctionNames multi-tool
+  // restriction stays in the escape hatch — the canonical form is single-tool.
+  if (p?.toolChoice !== undefined) {
+    const tc = p.toolChoice;
+    const functionCallingConfig =
+      tc === "auto"
+        ? { mode: "AUTO" }
+        : tc === "none"
+          ? { mode: "NONE" }
+          : tc === "required"
+            ? { mode: "ANY" }
+            : { mode: "ANY", allowedFunctionNames: [tc.tool] };
+    config.toolConfig = { functionCallingConfig };
+  }
 
   if (systemInstruction !== undefined) config.systemInstruction = systemInstruction;
   if (tools.length > 0) config.tools = tools;

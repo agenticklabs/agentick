@@ -35,6 +35,7 @@ export type ModelProps = Omit<SpecConfig, "model"> & {
 
 type ModelForwarded =
   | "responseFormat"
+  | "toolChoice"
   | "maxOutputTokens"
   | "temperature"
   | "topP"

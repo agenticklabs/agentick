@@ -13,7 +13,11 @@ import { omitUndefined } from "@agentick/utils-next";
 import { Chunk, Effect, Fiber, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 
-import type { LanguageModelTarget, RenderedTree } from "@agentick/spec-next";
+import type {
+  LanguageModelTarget,
+  LanguageModelToolChoice,
+  RenderedTree,
+} from "@agentick/spec-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type { ChatCompletion } from "openai/resources/chat/completions";
 
@@ -641,5 +645,38 @@ describe("openai() adapter — provenance-half (Pass D web-search citations)", (
       { id: "s0", url: "https://example.com/france", title: "France — Overview" },
     ]);
     expect(textBlock?.citations?.map((c) => c.sourceId)).toEqual(["s0", "s0"]);
+  });
+});
+
+describe("openai() adapter — canonical toolChoice", () => {
+  const build = (toolChoice: LanguageModelToolChoice) =>
+    openai("gpt-4o-mini").prepareRequest({
+      targetInput: {
+        messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+        parameters: { toolChoice },
+      },
+      target: mkTarget(),
+    }) as { tool_choice?: unknown };
+
+  it("translates all four canonical values to OpenAI tool_choice", () => {
+    expect(build("auto").tool_choice).toBe("auto");
+    expect(build("none").tool_choice).toBe("none");
+    expect(build("required").tool_choice).toBe("required");
+    expect(build({ tool: "calc" }).tool_choice).toEqual({
+      type: "function",
+      function: { name: "calc" },
+    });
+  });
+
+  it("providerOptions.openai override wins over canonical toolChoice", () => {
+    const params = openai("gpt-4o-mini").prepareRequest({
+      targetInput: {
+        messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+        parameters: { toolChoice: "required" },
+        providerOptions: { openai: { tool_choice: "none" } },
+      },
+      target: mkTarget(),
+    }) as { tool_choice?: unknown };
+    expect(params.tool_choice).toBe("none");
   });
 });

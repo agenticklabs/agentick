@@ -85,6 +85,7 @@ export function buildParameters(tree: RenderedTree): LanguageModelParameters | u
       type: "text" | "json" | "json_schema";
       schema?: Record<string, unknown>;
     };
+    toolChoice?: "auto" | "none" | "required" | { tool: string };
   } = {};
   if (cfg.temperature !== undefined) params.temperature = cfg.temperature;
   if (cfg.maxOutputTokens !== undefined) params.maxOutputTokens = cfg.maxOutputTokens;
@@ -101,6 +102,10 @@ export function buildParameters(tree: RenderedTree): LanguageModelParameters | u
     } else {
       params.responseFormat = { type: cfg.responseFormat.type };
     }
+  }
+  if (cfg.toolChoice !== undefined) {
+    params.toolChoice =
+      typeof cfg.toolChoice === "string" ? cfg.toolChoice : { tool: cfg.toolChoice.tool };
   }
   return Object.keys(params).length > 0 ? (params as LanguageModelParameters) : undefined;
 }

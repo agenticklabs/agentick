@@ -15,7 +15,11 @@ import { omitUndefined } from "@agentick/utils-next";
 import { Chunk, Effect, Fiber, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 
-import type { LanguageModelTarget, RenderedTree } from "@agentick/spec-next";
+import type {
+  LanguageModelTarget,
+  LanguageModelToolChoice,
+  RenderedTree,
+} from "@agentick/spec-next";
 import { jsonSchema } from "@agentick/spec-next";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
 import type {
@@ -23,6 +27,7 @@ import type {
   GenerateContentResponse,
   GroundingMetadata,
 } from "@google/genai";
+import { FunctionCallingConfigMode } from "@google/genai";
 
 import { LanguageModelExecutor } from "@agentick/model-executor-next";
 
@@ -1137,5 +1142,45 @@ describe("google() adapter — provenance-half (Pass D grounding citations)", ()
     ]);
     expect(textBlocks[0]?.citations?.[0]?.sourceId).toBe("s0");
     expect(textBlocks[1]?.citations?.[0]?.sourceId).toBe("s0");
+  });
+});
+
+describe("google() adapter — canonical toolChoice", () => {
+  const buildConfig = (toolChoice: LanguageModelToolChoice) => {
+    const params = google("gemini-2.5-flash").prepareRequest({
+      targetInput: {
+        messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+        parameters: { toolChoice },
+      },
+      target: mkTarget(),
+    }) as { config?: Record<string, unknown> };
+    return (params.config as Record<string, unknown>).toolConfig;
+  };
+
+  it("translates all four canonical values to functionCallingConfig", () => {
+    expect(buildConfig("auto")).toEqual({ functionCallingConfig: { mode: "AUTO" } });
+    expect(buildConfig("none")).toEqual({ functionCallingConfig: { mode: "NONE" } });
+    expect(buildConfig("required")).toEqual({ functionCallingConfig: { mode: "ANY" } });
+    expect(buildConfig({ tool: "calc" })).toEqual({
+      functionCallingConfig: { mode: "ANY", allowedFunctionNames: ["calc"] },
+    });
+  });
+
+  it("providerOptions.google override wins over canonical toolChoice", () => {
+    const params = google("gemini-2.5-flash").prepareRequest({
+      targetInput: {
+        messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+        parameters: { toolChoice: "required" },
+        providerOptions: {
+          google: {
+            toolConfig: { functionCallingConfig: { mode: FunctionCallingConfigMode.NONE } },
+          },
+        },
+      },
+      target: mkTarget(),
+    }) as { config?: Record<string, unknown> };
+    expect((params.config as Record<string, unknown>).toolConfig).toEqual({
+      functionCallingConfig: { mode: "NONE" },
+    });
   });
 });

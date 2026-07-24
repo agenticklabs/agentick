@@ -419,6 +419,26 @@ export interface ProviderToolWire {
   readonly config?: Record<string, unknown>;
 }
 
+/**
+ * Canonical tool-choice knob — how the model MUST treat the tool set on
+ * this request. One normalized value, set once; every adapter TRANSLATES
+ * it into its provider dialect under the normalize-translate-escape-hatch
+ * rule: the canonical value is mapped by each adapter, and the provider
+ * escape hatch (`providerOptions.<ns>`) spreads LAST so a provider-specific
+ * override always wins.
+ *
+ * - `"auto"` — model decides whether to call a tool (the provider default).
+ * - `"none"` — model MUST NOT call a tool this tick.
+ * - `"required"` — model MUST call at least one tool (any of them).
+ * - `{ tool }` — model MUST call THIS tool, named by framework tool name
+ *   (a forced single call).
+ *
+ * The multi-tool restriction some providers support (e.g. Google's plural
+ * `allowedFunctionNames`) is deliberately NOT part of the canonical form —
+ * reach for `providerOptions.<ns>` for that.
+ */
+export type LanguageModelToolChoice = "auto" | "none" | "required" | { readonly tool: string };
+
 export interface LanguageModelParameters {
   readonly temperature?: number;
   readonly maxOutputTokens?: number;
@@ -431,6 +451,12 @@ export interface LanguageModelParameters {
     readonly name?: string;
     readonly schema?: Record<string, unknown>;
   };
+  /**
+   * Canonical tool-choice directive — see {@link LanguageModelToolChoice}.
+   * Normalized once here; each adapter translates it to its dialect before
+   * spreading `providerOptions` (so provider overrides still win).
+   */
+  readonly toolChoice?: LanguageModelToolChoice;
 }
 
 // ============================================================================

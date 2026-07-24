@@ -335,6 +335,18 @@ describe("buildParameters — SpecConfig generation params (#211)", () => {
   it("omits the params object entirely when tree.config carries none of them", () => {
     expect(paramsFor({})).toBeUndefined();
   });
+
+  it("lifts SpecConfig.toolChoice onto parameters.toolChoice — string forms", () => {
+    expect(paramsFor({ toolChoice: "auto" })).toEqual({ toolChoice: "auto" });
+    expect(paramsFor({ toolChoice: "none" })).toEqual({ toolChoice: "none" });
+    expect(paramsFor({ toolChoice: "required" })).toEqual({ toolChoice: "required" });
+  });
+
+  it("lifts SpecConfig.toolChoice onto parameters.toolChoice — forced-tool form", () => {
+    expect(paramsFor({ toolChoice: { tool: "submit_result" } })).toEqual({
+      toolChoice: { tool: "submit_result" },
+    });
+  });
 });
 
 describe("buildMessages — message-level providerMetadata carry (#173)", () => {

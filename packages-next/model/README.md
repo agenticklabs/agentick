@@ -285,9 +285,15 @@ request-level escape hatch — thinking config, seed, safetySettings,
 from `parameters`, which stays pure canonical generation knobs. As of
 #211 `buildParameters` lifts the full cross-provider set off `SpecConfig`
 — `temperature`, `maxOutputTokens`, `topP`, `frequencyPenalty`,
-`presencePenalty`, `stopSequences`, `responseFormat` — so every adapter
-reads them from `parameters` (each drops the knobs its provider lacks:
-Anthropic/Gemini ignore the penalties). Message-level provider knobs
+`presencePenalty`, `stopSequences`, `responseFormat`, `toolChoice` — so
+every adapter reads them from `parameters` (each drops the knobs its
+provider lacks: Anthropic/Gemini ignore the penalties). `toolChoice`
+(`"auto" | "none" | "required" | { tool }`) is normalized once here and
+TRANSLATED by each adapter into its dialect (OpenAI `tool_choice`,
+Anthropic `tool_choice`, Google `functionCallingConfig`, AI SDK
+`toolChoice`) — the multi-tool restriction (Google's plural
+`allowedFunctionNames`) stays in the provider escape hatch, and
+`providerOptions.<ns>` spreads LAST so a provider override still wins. Message-level provider knobs
 carried from `MessageEntry.metadata.providerMetadata` project onto
 `LanguageModelMessage.providerOptions` (the send channel, #173),
 mirroring the per-block `providerMetadata → providerOptions` rule.

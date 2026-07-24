@@ -47,12 +47,38 @@ export type ModelSelection =
   | { readonly kind: "by-ref"; readonly ref: string };
 
 /**
+ * Canonical tool-choice directive — how the model MUST treat the tool set.
+ * Mirrors `LanguageModelToolChoice` on the executor's canonical parameters
+ * (the wire-facing twin); the compiler lifts `SpecConfig.toolChoice` into
+ * `LanguageModelInput.parameters.toolChoice`, and each adapter TRANSLATES
+ * that one normalized value into its provider dialect under the
+ * normalize-translate-escape-hatch rule (`providerOptions.<ns>` spreads
+ * LAST, so a provider-specific override always wins).
+ *
+ * - `"auto"` — model decides whether to call a tool (provider default).
+ * - `"none"` — model MUST NOT call a tool this tick.
+ * - `"required"` — model MUST call at least one tool (any of them).
+ * - `{ tool }` — model MUST call THIS tool, named by framework tool name.
+ *
+ * The multi-tool restriction some providers support (e.g. Google's plural
+ * `allowedFunctionNames`) is deliberately NOT part of the canonical form —
+ * reach for `providerOptions.<ns>`.
+ */
+export type ToolChoice = "auto" | "none" | "required" | { readonly tool: string };
+
+/**
  * Cross-provider generation knobs. Provider-specific escapes go in
  * {@link ProviderOptions}.
  */
 export interface SpecConfig {
   readonly model?: ModelSelection;
   readonly responseFormat?: ResponseFormat;
+  /**
+   * Canonical tool-choice directive — see {@link ToolChoice}. Authorable via
+   * `<config>` AND injectable via the loop's per-tick config overlay (the
+   * injection point a forced wrap-up tick uses).
+   */
+  readonly toolChoice?: ToolChoice;
   readonly maxOutputTokens?: number;
   readonly temperature?: number;
   readonly topP?: number;

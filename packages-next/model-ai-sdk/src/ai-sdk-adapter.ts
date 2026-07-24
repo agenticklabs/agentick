@@ -436,6 +436,16 @@ function toAISDKInput(input: LanguageModelInput, target: ExecutionTarget): AISDK
   if (p?.stopSequences !== undefined) {
     generation.stopSequences = [...p.stopSequences];
   }
+  // Canonical toolChoice → AI SDK `toolChoice` (a call-level field spread onto
+  // generateText/streamText via `generation`): "auto"/"none"/"required" pass
+  // verbatim; `{tool}` → {type:"tool", toolName}. Provider-specific overrides
+  // via `providerOptions` still win (a separate call field, applied last).
+  if (p?.toolChoice !== undefined) {
+    generation.toolChoice =
+      typeof p.toolChoice === "string"
+        ? p.toolChoice
+        : { type: "tool", toolName: p.toolChoice.tool };
+  }
   // TODO(trail-aisdk-experimental-output): map `p.responseFormat` onto the
   // AI SDK's `experimental_output` (`Output.object({ schema })` for
   // `json_schema`, `Output.text()` otherwise). Dropped for now — DELIBERATE-

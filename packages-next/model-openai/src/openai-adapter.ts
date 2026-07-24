@@ -555,6 +555,16 @@ function toOpenAIParams(
       };
     }
   }
+  // Canonical toolChoice → OpenAI `tool_choice`. Overrides the "auto" default
+  // set above: "auto"/"none"/"required" pass verbatim; `{tool}` names a
+  // forced single function call. Provider overrides in `providerOptions.openai`
+  // still win (spread last, below).
+  if (p?.toolChoice !== undefined) {
+    params.tool_choice =
+      typeof p.toolChoice === "string"
+        ? p.toolChoice
+        : { type: "function", function: { name: p.toolChoice.tool } };
+  }
   // Adopter escape hatch — spread provider-specific options after canonical
   // mapping. Lets callers set logprobs, seed, store, n, prediction, etc.
   // without us hardcoding every OpenAI knob. `input.providerOptions` (the

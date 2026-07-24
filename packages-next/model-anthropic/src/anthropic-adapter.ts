@@ -655,6 +655,21 @@ function toAnthropicParams(
   if (p?.temperature !== undefined) params.temperature = p.temperature;
   if (p?.topP !== undefined) params.top_p = p.topP;
   if (p?.stopSequences !== undefined) params.stop_sequences = [...p.stopSequences];
+  // Canonical toolChoice → Anthropic `tool_choice`: "auto"→{type:"auto"},
+  // "required"→{type:"any"}, "none"→{type:"none"}, `{tool}`→{type:"tool",name}
+  // (a forced single call). Provider overrides in `providerOptions.anthropic`
+  // still win (spread last, below).
+  if (p?.toolChoice !== undefined) {
+    const tc = p.toolChoice;
+    params.tool_choice =
+      tc === "auto"
+        ? { type: "auto" }
+        : tc === "required"
+          ? { type: "any" }
+          : tc === "none"
+            ? { type: "none" }
+            : { type: "tool", name: tc.tool };
+  }
   // Silently drop frequencyPenalty / presencePenalty / responseFormat —
   // Anthropic has no native support (G1 caveat from the skill).
   // TODO(trail-anthropic-structured): map `responseFormat.type ===
