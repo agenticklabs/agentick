@@ -100,7 +100,9 @@ export interface SkillsSearchInput {
 /** Migrated to class hierarchy (ADR 41). Re-exports from `../errors/harnesses.js`. */
 export {
   SkillAlreadyExists,
+  SkillIsolationUnavailable,
   SkillNotFound,
+  SkillRunnerUnbound,
   SkillsBackendError,
   SkillsError,
   type SkillsErrorChannel,

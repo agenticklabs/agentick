@@ -73,6 +73,7 @@ import {
   isExecutorFactory,
   isLoopExecutorFactory,
   isCompilerFactory,
+  isRunnerBindable,
   isToolExecutorFactory,
   toRegistration,
 } from "@agentick/spec-next";
@@ -106,6 +107,7 @@ import type {
   RunOnceResult,
   SendInput,
   SendResult,
+  SessionSendCapability,
   ServiceRegistry,
   SessionExtension,
   SessionInstaller,
@@ -2102,6 +2104,22 @@ export class AppHarness<P = unknown>
     // factory-produced impls work transparently.
     await Promise.all([readyOf(tools), session.ready]);
     await session.mountReady;
+
+    // C-core (three-audiences-plan §C) — late-bind the session's `send` into
+    // any session-extension bridge that runs sends on the adopter's behalf but
+    // was constructed WITHOUT session access (`RunnerBindable` — the skills
+    // harness today, for `session.skills.run`). Generic feature-detect over the
+    // extension bridge bag, no hardcoded slot names (ADR 27, uniform with the
+    // `SnapshotCapable` fold). Bound AFTER `mountReady` so the first run reaches
+    // a fully-wired session; the harness gets ONLY the send capability, never
+    // the session itself.
+    if (sessionExtensionBridges.size > 0) {
+      const sendCapability: SessionSendCapability = (sendInput) =>
+        session.send(sendInput as SendInput<P>);
+      for (const bridge of sessionExtensionBridges.values()) {
+        if (isRunnerBindable(bridge)) bridge.bindRunner(sendCapability);
+      }
+    }
 
     // Wire session-extension teardown: handlers registered via the
     // SessionInstaller's `onClose` AND any tool-handler / bus

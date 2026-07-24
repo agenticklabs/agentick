@@ -335,6 +335,14 @@ than silently shadowing; 2+ tree `<Output>`s fail with
 > directive + threading). The prefix-cache tail-ordering guarantee is verified in
 > `@agentick/tool-executor-next` (`layered-tools.spec.ts`).
 
+**`session.skills.run` is the flagship consumer** of this `output` path — a
+`session.send` primed with a skill's content, the model as executor. See
+[`@agentick/skills-next`](../skills/README.md#skillsrun--the-model-executes-the-skill-guides).
+The skills harness reaches `send` through a late-bound `bindRunner(send)`
+capability injected at session install (the App's session-construction fold
+feature-detects the `RunnerBindable` contract — the harness never holds the
+session, only its `send`).
+
 ### Injecting a model registry (`models`, #206)
 
 Supply a `ModelRegistry` (provider → prefix → `ModelInfo`, merged over

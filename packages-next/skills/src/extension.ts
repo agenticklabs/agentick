@@ -40,6 +40,7 @@ import {
 } from "@agentick/spec-next";
 import { omitUndefined } from "@agentick/utils-next";
 import { SkillsHarness } from "./harness.js";
+import type { SkillRunCompose } from "./handle.js";
 import type { SkillLoader } from "./loaders.js";
 
 export interface WithSkillsOptions {
@@ -69,6 +70,14 @@ export interface WithSkillsOptions {
    * adopter-supplied instance brings its own backing).
    */
   readonly store?: Store<Skill, SkillStoreQuery, CollectionMutation<Skill>>;
+  /**
+   * The `skills.run` composition seam (three-audiences-plan §C). A
+   * `(skill, opts) => SendInput` callback the framework calls to prime the
+   * skill's run; the default (system-role skill message + user-role args
+   * message) ships built-in, this seam is the truth. Built-in path only — an
+   * adopter-supplied `use:` instance owns its own composition.
+   */
+  readonly composeRun?: SkillRunCompose;
   /**
    * Adopter-supplied `Skills` instance. The extension uses this as-is
    * across every session — NO per-session construction, NO close on
@@ -110,7 +119,7 @@ export function withSkills(slot: WithSkillsSlot = {}): SessionExtension {
         installer.substrate.journal,
         installer.substrate.bus,
         installer.substrate.inbox,
-        omitUndefined({ store: options.store }),
+        omitUndefined({ store: options.store, composeRun: options.composeRun }),
       );
       await harness.ready;
 

@@ -23,18 +23,27 @@ import type { SkillsHandle } from "./handle.js";
 
 declare module "@agentick/spec-next" {
   interface HookBridges {
-    readonly skills: Skills;
+    /**
+     * Present only when `withSkills` is installed (an OPTIONAL extension,
+     * uniform with `live` / `prompts`) — consumers reading `bridges.skills`
+     * must guard. The SessionHarness exposes it via the dynamic extension-
+     * bridge getter at runtime; typing it optional keeps `SessionHarness`
+     * (which provides it dynamically, not as a declared class member)
+     * structurally assignable to `SessionHarnessProtocol`.
+     */
+    readonly skills?: Skills;
   }
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   interface SessionHarnessProtocol<P> {
     /**
-     * The session's skills library — register, search, retrieve.
-     * Curated subset of `SkillsHarnessProtocol`; the SessionHarness
-     * owns lifecycle and JSX-driven registration if/when a `<Skill>`
-     * component lands.
+     * The session's skills library — register, search, retrieve, run.
+     * Curated subset of `SkillsHarnessProtocol` ({@link SkillsHandle}).
+     * Present only when `withSkills` is installed (optional extension); the
+     * dynamic `session.<name>` extension-bridge getter provides it at
+     * runtime. Optional for the same reason `live` / `prompts` are.
      */
-    readonly skills: SkillsHandle;
+    readonly skills?: SkillsHandle;
   }
 }
 

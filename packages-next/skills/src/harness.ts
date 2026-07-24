@@ -29,6 +29,9 @@ import type {
   MessageHandlerError,
   MessageInbox,
   OperationJournal,
+  RunnerBindable,
+  SendInput,
+  SessionSendCapability,
   Store,
   Skill,
   SkillStoreQuery,
@@ -39,11 +42,19 @@ import type {
   SkillsSearchInput,
   SkillsUpdateInput,
 } from "@agentick/spec-next";
-import { HandlerError, SkillAlreadyExists, SkillNotFound } from "@agentick/spec-next";
+import {
+  HandlerError,
+  SkillAlreadyExists,
+  SkillIsolationUnavailable,
+  SkillNotFound,
+  SkillRunnerUnbound,
+} from "@agentick/spec-next";
 import { View } from "@agentick/store-next";
 import { omitUndefined } from "@agentick/utils-next";
 
 import type { SkillLoader } from "./loaders.js";
+import type { SkillRunCompose, SkillRunOptions, SkillRunResult } from "./handle.js";
+import { defaultComposeRun } from "./compose-run.js";
 import { InMemorySkillStore, matchesSkillQuery } from "./store.js";
 
 function skillContentChanged(existing: Skill, incoming: SkillsRegisterInput): boolean {
@@ -91,9 +102,19 @@ export interface SkillsHarnessOptions {
    * view.
    */
   readonly store?: Store<Skill, SkillStoreQuery, CollectionMutation<Skill>>;
+  /**
+   * The `skills.run` composition seam (three-audiences-plan §C). Maps a
+   * resolved skill + run options to the `SendInput` the runner executes.
+   * Defaults to {@link defaultComposeRun} (system-role skill message +
+   * user-role args message). Threaded from `withSkills({ composeRun })`.
+   */
+  readonly composeRun?: SkillRunCompose;
 }
 
-export class SkillsHarness extends BaseHarness<SkillsSurface> implements SkillsHarnessProtocol {
+export class SkillsHarness
+  extends BaseHarness<SkillsSurface>
+  implements SkillsHarnessProtocol, RunnerBindable
+{
   /**
    * The synchronous {@link View} of the skill store (data-layer plan
    * §3.5 P5) — ONE primitive that collapses the two fields this used to
@@ -120,6 +141,17 @@ export class SkillsHarness extends BaseHarness<SkillsSurface> implements SkillsH
   private loaders: readonly SkillLoader[] = [];
 
   /**
+   * Late-bound send capability (C-core — three-audiences-plan §C). Injected at
+   * session install via {@link bindRunner}; drives `run`. `undefined` on a
+   * harness constructed outside a session — `run` then throws
+   * `SkillRunnerUnbound` rather than dereferencing it.
+   */
+  private runner?: SessionSendCapability;
+
+  /** The run-composition seam. `withSkills({ composeRun })` or the default. */
+  private readonly composeRun: SkillRunCompose;
+
+  /**
    * Declared commands (ADR 51) — pure layer logic in the handlers; the
    * registry owns Operation construction, inbox routing, and
    * enumeration. All three inputs are serializable data, so every
@@ -143,6 +175,7 @@ export class SkillsHarness extends BaseHarness<SkillsSurface> implements SkillsH
     options: SkillsHarnessOptions = {},
   ) {
     super(SURFACE, scopeId, journal, bus, inbox);
+    this.composeRun = options.composeRun ?? defaultComposeRun;
     this.view = View.collection(options.store ?? new InMemorySkillStore(), (s) => s.name);
     const scope = () => ({ sessionId: this.scopeId });
     this.register = this.command({
@@ -178,6 +211,63 @@ export class SkillsHarness extends BaseHarness<SkillsSurface> implements SkillsH
    */
   setLoaders(loaders: readonly SkillLoader[]): void {
     this.loaders = loaders;
+  }
+
+  // ─────────── Runner (late-bound send capability) ───────────
+
+  /**
+   * Inject the session's `send` capability (C-core — three-audiences-plan §C
+   * split, item 1). Called once at session install (the app's
+   * session-construction fold feature-detects `RunnerBindable` and binds). The
+   * harness is constructed from substrate alone — it has NO session access —
+   * so `run` reaches `session.send` only through this late-bound capability
+   * (the `adoptTelemetry` precedent). Handed ONLY the send capability, never
+   * the full session.
+   */
+  bindRunner(send: SessionSendCapability): void {
+    this.runner = send;
+  }
+
+  /**
+   * Run a skill: compose a send from the skill's content, execute it via the
+   * bound runner, project the `SendResult` into a {@link SkillRunResult}. The
+   * skill guides; the MODEL executes (Flue-aligned — skills add no executable
+   * capability). Inline only in C-core.
+   *
+   * @throws {SkillIsolationUnavailable} `opts.isolate: true` (fork is C2).
+   * @throws {SkillRunnerUnbound} no runner bound (harness outside a session).
+   * @throws {SkillNotFound} no skill named `name` (via {@link require}).
+   * @throws Propagated send errors: `SteerCannotCarryStructuredOutput` (an
+   *   `output`-carrying run that joins an in-flight execution),
+   *   `ResponseValidationError` / `StructuredOutputIncomplete` (§B2).
+   */
+  async run<T = unknown>(name: string, opts: SkillRunOptions<T> = {}): Promise<SkillRunResult<T>> {
+    if (opts.isolate === true) {
+      // C-core is inline-only — never silently degrade an isolation request.
+      // TODO(C2): route isolated runs through `session.fork()` (same-image,
+      // copied-state child, disposed after the run) — needs the session to
+      // retain its own agent root so `SpawnInput.agent` can default. See
+      // three-audiences-plan §C split, item 3.
+      throw new SkillIsolationUnavailable({ name });
+    }
+    if (this.runner === undefined) {
+      throw new SkillRunnerUnbound({ name });
+    }
+    // Throws SkillNotFound on a miss — let it propagate (must-exist contract).
+    const skill = await this.require(name);
+    const input: SendInput = this.composeRun(skill, opts as SkillRunOptions);
+    const handle = await this.runner(input);
+    // `.result` may reject (steer-conflict, validation, incomplete) — propagate
+    // the typed error rather than swallowing it into a partial result.
+    const result = await handle.result;
+    return {
+      ...(result.data !== undefined ? { data: result.data as T } : {}),
+      text: result.response,
+      usage: result.usage,
+      ticks: result.ticks,
+      stopReason: result.stopReason,
+      executionId: result.executionId,
+    };
   }
 
   // ─────────── Dynamic surface ───────────

@@ -897,7 +897,57 @@ export class SkillsBackendError extends SkillsError {
 }
 registerAgentickError("SkillsBackendError", SkillsBackendError);
 
-export type SkillsErrorChannel = SkillNotFound | SkillAlreadyExists | SkillsBackendError;
+/**
+ * `skills.run(name, { isolate: true })` — the isolated (fork) execution site
+ * is not yet available. C-core (three-audiences-plan §C split) ships
+ * `skills.run` INLINE only; the fork enabler (`session.fork()` + the session
+ * retaining its own agent root so `SpawnInput.agent` can default) is the C2
+ * follow-up. Thrown eagerly rather than silently degrading to an inline run —
+ * an adopter who asked for isolation must not get non-isolated execution.
+ */
+export class SkillIsolationUnavailable extends SkillsError {
+  readonly _tag = "SkillIsolationUnavailable" as const;
+  readonly name: string;
+  constructor(args: { readonly name: string; readonly cause?: unknown }) {
+    super(
+      `skill ${args.name}: isolated run (isolate: true) is not yet available — ` +
+        `the session.fork() enabler ships in C2 (three-audiences-plan §C split, item 3). ` +
+        `Run inline (omit isolate) for now.`,
+      { cause: args.cause },
+    );
+    this.name = args.name;
+  }
+}
+registerAgentickError("SkillIsolationUnavailable", SkillIsolationUnavailable);
+
+/**
+ * `skills.run` was called on a skills harness with no bound send runner. The
+ * runner is a session capability late-bound at session install (`bindRunner` —
+ * the C-core injection seam); a standalone harness constructed outside a
+ * session has no way to reach `session.send`, so `run` fails loud rather than
+ * dereferencing an undefined runner.
+ */
+export class SkillRunnerUnbound extends SkillsError {
+  readonly _tag = "SkillRunnerUnbound" as const;
+  readonly name: string;
+  constructor(args: { readonly name: string; readonly cause?: unknown }) {
+    super(
+      `skill ${args.name}: this skills harness has no bound send runner — ` +
+        `skills.run needs a session (the runner is late-bound at session install ` +
+        `via bindRunner). A standalone harness cannot run skills.`,
+      { cause: args.cause },
+    );
+    this.name = args.name;
+  }
+}
+registerAgentickError("SkillRunnerUnbound", SkillRunnerUnbound);
+
+export type SkillsErrorChannel =
+  | SkillNotFound
+  | SkillAlreadyExists
+  | SkillsBackendError
+  | SkillIsolationUnavailable
+  | SkillRunnerUnbound;
 
 // ============================================================================
 // KnobsError — knob registry + dispatch failures

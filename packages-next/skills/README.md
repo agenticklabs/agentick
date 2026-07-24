@@ -63,6 +63,7 @@ Skills are first-class data. The harness treats them as opaque content; the agen
 | `remove({ name })`                                           | async  | Delete. Throws `{_tag: "SkillNotFound"}` if missing                                                                                       |
 | `subscribe(name, listener)`                                  | sync   | Listen for a specific skill's mutations                                                                                                   |
 | `subscribeAll(listener)`                                     | sync   | Listen for any mutation                                                                                                                   |
+| `run(name, opts?)`                                           | async  | Run the skill — a `session.send` primed with the skill (see below)                                                                        |
 
 Reads are cheap and synchronous (no envelopes). Mutations go through `runOperation` — every `register` / `update` / `remove` produces `requested → terminal` envelopes on the session's bus that the model, admins, or audit tooling can observe.
 
@@ -72,8 +73,40 @@ Failures are typed:
 type SkillsError =
   | { _tag: "SkillNotFound"; name: string }
   | { _tag: "SkillAlreadyExists"; name: string }
-  | { _tag: "SkillsBackendError"; cause: unknown };
+  | { _tag: "SkillsBackendError"; cause: unknown }
+  | { _tag: "SkillIsolationUnavailable"; name: string } // isolate: true, C2 follow-up
+  | { _tag: "SkillRunnerUnbound"; name: string }; // run on a harness with no session
 ```
+
+## `skills.run` — the model executes, the skill guides
+
+`run` is the flagship consumer of the structured-output path (three-audiences-plan §C, riding §B2). Flue's line holds: **skills guide agent work; they do not add executable capabilities.** A skill run is nothing more than a `session.send` primed with the skill's content — the skill stays inert data, the **model** is the executor.
+
+```ts
+const review = await session.skills.run("review", {
+  args: { change },
+  output: z.object({ approved: z.boolean(), summary: z.string() }),
+});
+review.data; // typed { approved, summary }, validated
+review.text; // the assistant's prose
+review.stopReason; // "output_delivered" (terminal-tool path) | "end" | …
+```
+
+**Mechanics.** `require(name)` → compose a `SendInput` (default: a `system`-role message carrying the skill body + framing, then a `user`-role message carrying the serialized `args`) → `session.send` → project the `SendResult` into `SkillRunResult<T> = { data?, text, usage, ticks, stopReason, executionId }`. With `opts.output`, the send rides the terminal-tool strategy (§B2); `data` is the validated value. No `output` → `data` is absent, `text` still returned.
+
+**`opts`:** `{ args?, output?, maxTicks?, signal?, isolate? }`. `args` serialize into the run's user message; `output` (a `StandardSchemaV1`) drives structured extraction; `maxTicks` / `signal` pass straight to the send.
+
+**Composition seam (seam over setting).** `withSkills({ composeRun })` — a `(skill, opts) => SendInput` callback. The framework ships the default; the seam is the truth. An override fully owns composition (different framing, few-shot priming, tool restriction once C2 lands).
+
+**Honest guarantees (do not read this as a general structured-output promise).** When `output` is set the chain is: description-driven natural path (the model calls the terminal tool) → forced wrap-up tick (`toolChoice` forcing — a hard provider guarantee) → executor validation → typed error in the residual sliver (`StructuredOutputIncomplete` / `ResponseValidationError`). Behavioral compliance ("does the model call it unforced") is the eval tier, never asserted in CI. See three-audiences-plan §B2's guarantees section.
+
+**Reentrancy.** A `run` carrying `output` that **races an in-flight execution** takes the steer-join path and is rejected with `SteerCannotCarryStructuredOutput` — an in-flight join has no final turn of its own to shape. This is the existing send guard, surfaced honestly; not a new one. Quiesce the session (or use `followUp` delivery on the underlying send) before an `output` run.
+
+**Timeline.** An inline run's messages persist as ordinary history (the skill's system message, the args, the assistant turn, any tool calls). Inline runs are conversation work by design.
+
+**Injection (how `run` reaches `session.send`).** The skills harness is constructed from substrate alone — it has **no** session access. The send capability is late-bound at session install via `bindRunner(send)` (the `adoptTelemetry` precedent; the App's session-construction fold feature-detects the `RunnerBindable` contract and injects **only** the send capability, never the session). A harness constructed outside a session throws `SkillRunnerUnbound` on `run`. This keeps `@agentick/skills-next` free of any `session-next` edge.
+
+**`isolate: true` — deferred (C2).** The isolated (fork) execution site is not yet available; `isolate: true` throws `SkillIsolationUnavailable` naming the follow-up rather than silently running inline. C-core is inline-only. The fork enabler (`session.fork()` + the session retaining its own agent root so `SpawnInput.agent` can default) ships in C2, alongside the `allowed-tools` skill field + a per-execution tool-restriction seam.
 
 ## Inbox addressing
 
@@ -216,9 +249,12 @@ const skill = await session.skills.require("must_exist");
 - Store backing — `SkillStore` port (spec-next), bundled `InMemorySkillStore`, `store` slot on `withSkills`
 - Conformance suites — `runSkillsHarnessConformance` (harness) + `runSkillStoreConformance` (store)
 - `/testing` subpath with `stubSkillsHarness`
-- Module augmentation: `session.skills` typed via `SkillsHandle`
+- Module augmentation: `session.skills` typed via `SkillsHandle` (optional slot — uniform with `live` / `prompts`)
+- `skills.run(name, opts)` — inline skill execution on the structured-output path (C-core); `composeRun` seam; late-bound `bindRunner` injection
 
 **Planned:**
+
+- **`skills.run` C2 follow-up.** (1) `isolate: true` → `session.fork()` (same-image, copied-state) execution off to the side, disposed after the run — needs the session to retain its own agent root so `SpawnInput.agent` can default to it; today `isolate` throws `SkillIsolationUnavailable`. (2) An `allowed-tools` frontmatter field on the `Skill` record + a per-execution tool-**restriction** seam threading into `compileForTick` (today `SendInput.tools` is additive-only) so a skill can scope down the model's tools for its run. (3) A `skills:run` `exposure: "wire"` command (needs the declarative `responseFormat` output form — serializable by construction).
 
 - SQLite backend for single-process durability
 - Remote-registry backend (`agentskills.io` compatibility)
@@ -270,6 +306,8 @@ const skill = await session.skills.require("must_exist");
 
 - `src/__tests__/harness.spec.ts` — full conformance suite + sync/async surface + envelope flow + snapshot round-trip + inbox routing
 - `src/__tests__/store-backing.spec.ts` — write-through to the injected store, loaders (`reload` / `resolve`) feed the store, `search` through the projection, `exportSnapshot`↔`hydrate()` round-trip, plus `runSkillStoreConformance` against `InMemorySkillStore`
+- `src/__tests__/run.spec.ts` — `skills.run` harness mechanics (dependency-free, stub runner): default composition (system skill body + serialized args), `composeRun` seam override, `SendResult`→`SkillRunResult` projection (with / without `output`), `isolate: true`→`SkillIsolationUnavailable`, unbound runner→`SkillRunnerUnbound`, missing skill→`SkillNotFound`
+- `@agentick/app-next` `src/__tests__/skills-run-e2e.spec.tsx` — `session.skills.run` end-to-end through `createApp` (proves the C-core `bindRunner` injection site): `output`→validated `data` + `stopReason "output_delivered"`, no-`output`→text, missing skill, and the `SteerCannotCarryStructuredOutput` reentrancy guard
 - Cross-harness integration tests live in adopter packages (`@agentick/session-next`, `@agentick/app-next`)
 
 ## See also

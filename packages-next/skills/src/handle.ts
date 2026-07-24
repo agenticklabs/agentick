@@ -14,13 +14,82 @@
  */
 
 import type {
+  SendInput,
+  SendResult,
   Skill,
   SkillsRegisterInput,
   SkillsRemoveInput,
   SkillsSearchInput,
   SkillsUpdateInput,
+  StandardSchemaV1,
   Unsubscribe,
+  UsageStats,
 } from "@agentick/spec-next";
+
+/**
+ * Options for {@link SkillsHandle.run} (three-audiences-plan §C).
+ *
+ * A skill run is a `session.send` primed with the skill's content — the model
+ * is the executor; the skill stays non-executable data. `output` rides the
+ * structured-output path (§B2): the send derives a synthetic terminal tool (or
+ * a `responseFormat` overlay on a bare send), and the validated value lands in
+ * {@link SkillRunResult.data}.
+ */
+export interface SkillRunOptions<T = unknown> {
+  /**
+   * Arguments handed to the skill. Serialized into the run's user message by
+   * the default composition (JSON). A `composeRun` seam override may shape
+   * them differently.
+   */
+  readonly args?: Record<string, unknown>;
+  /**
+   * Structured-output schema (§B2). A `StandardSchemaV1` (Zod, Valibot,
+   * `jsonSchema()`, …); threaded to `SendInput.output`. The validated value is
+   * returned as {@link SkillRunResult.data}. Omit for a text-only run.
+   *
+   * A run carrying `output` that RACES an in-flight execution takes the
+   * steer-join path and is rejected with `SteerCannotCarryStructuredOutput`
+   * (an in-flight join has no final turn of its own to shape) — the existing
+   * guard, surfaced here honestly, not a new one.
+   */
+  readonly output?: StandardSchemaV1<unknown, T>;
+  /** Override the send's max tick bound. */
+  readonly maxTicks?: number;
+  /** Per-run abort, threaded to the send. */
+  readonly signal?: AbortSignal;
+  /**
+   * Run the skill in isolation (a fork of the current session) instead of
+   * inline. NOT YET AVAILABLE — C-core is inline-only; `true` rejects with
+   * `SkillIsolationUnavailable` naming the C2 fork follow-up, never silently
+   * running inline.
+   */
+  readonly isolate?: boolean;
+}
+
+/**
+ * Result of {@link SkillsHandle.run}. A projection of the underlying
+ * `SendResult`: `text` is the assistant prose (`SendResult.response`), `data`
+ * the validated structured output (present only when `output` was supplied and
+ * a conforming value was delivered).
+ */
+export interface SkillRunResult<T = unknown> {
+  /** The validated structured output — present only when `output` was set. */
+  readonly data?: T;
+  /** Concatenated assistant text (`SendResult.response`). */
+  readonly text: string;
+  readonly usage: UsageStats;
+  readonly ticks: number;
+  readonly stopReason: SendResult["stopReason"];
+  readonly executionId: string;
+}
+
+/**
+ * The run-composition seam (`withSkills({ composeRun })`). Maps a resolved
+ * skill + run options to the `SendInput` the runner executes. The framework
+ * ships a default (system-role skill message + user-role args message); this
+ * seam is the truth — an adopter override fully owns composition.
+ */
+export type SkillRunCompose = (skill: Skill, opts: SkillRunOptions) => SendInput;
 
 export interface SkillsHandle {
   get(name: string): Skill | undefined;
@@ -58,4 +127,25 @@ export interface SkillsHandle {
    * domain case.
    */
   require(name: string): Promise<Skill>;
+
+  /**
+   * Run a skill (three-audiences-plan §C). Sugar composing existing
+   * primitives: `require(name)` → compose a `SendInput` (default: system-role
+   * skill content + user-role serialized args) → `session.send` → project the
+   * `SendResult` into {@link SkillRunResult}. The skill is guidance; the MODEL
+   * executes. With `opts.output`, the run rides the structured-output path and
+   * returns typed, validated `data`.
+   *
+   * Inline only in C-core — `opts.isolate: true` rejects with
+   * `SkillIsolationUnavailable` (the fork enabler is C2). A missing skill
+   * propagates `SkillNotFound` (via `require`). A run with `output` that joins
+   * an in-flight execution propagates `SteerCannotCarryStructuredOutput`.
+   * Called on a harness with no bound runner (constructed outside a session):
+   * `SkillRunnerUnbound`.
+   *
+   * The run's messages persist to the timeline as ordinary history (the
+   * skill's system message + the args, the assistant turn, any tool calls) —
+   * inline runs are conversation work by design.
+   */
+  run<T = unknown>(name: string, opts?: SkillRunOptions<T>): Promise<SkillRunResult<T>>;
 }

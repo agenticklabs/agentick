@@ -74,8 +74,9 @@
     "react": "^19.2.4"
   },
   "devDependencies": {
-    "@agentick/model-executor-next": "workspace:*",
     "@agentick/compiler-react-next": "workspace:*",
+    "@agentick/model-executor-next": "workspace:*",
+    "@agentick/skills-next": "workspace:*",
     "@agentick/spec-conformance-next": "workspace:*",
     "@agentick/timeline-fs-next": "workspace:*",
     "@agentick/timeline-postgres-next": "workspace:*",

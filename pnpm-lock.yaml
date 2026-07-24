@@ -473,6 +473,9 @@ importers:
       '@agentick/model-executor-next':
         specifier: workspace:*
         version: link:../model-executor
+      '@agentick/skills-next':
+        specifier: workspace:*
+        version: link:../skills
       '@types/react':
         specifier: ^19.2.5
         version: 19.2.13
@@ -1477,6 +1480,9 @@ importers:
       '@agentick/model-executor-next':
         specifier: workspace:*
         version: link:../model-executor
+      '@agentick/skills-next':
+        specifier: workspace:*
+        version: link:../skills
       '@agentick/spec-conformance-next':
         specifier: workspace:*
         version: link:../spec-conformance

@@ -438,6 +438,53 @@ export interface SessionExecutionHandle {
 }
 
 // ============================================================================
+// Late-bound send capability — the skills.run injection seam (C-core)
+// ============================================================================
+
+/**
+ * The MINIMAL slice of a session a late-bound runner needs: one `send`.
+ *
+ * `skills.run` (three-audiences-plan §C) is a send primed with a skill's
+ * content, riding the structured-output path. The skills harness is
+ * constructed from substrate ALONE — it has no session access — so the send
+ * capability is injected post-construction via {@link RunnerBindable.bindRunner}
+ * (the `adoptTelemetry` late-bind precedent). Typing the capability as this
+ * narrow function keeps the skills package free of a `session-next` edge: it
+ * speaks only this spec type, never the concrete session.
+ */
+export type SessionSendCapability<P = unknown> = (
+  input: SendInput<P>,
+) => Promise<SessionExecutionHandle>;
+
+/**
+ * Feature contract for a harness that runs sends on behalf of an adopter but
+ * is constructed without session access. The composition root (the App's
+ * session-construction fold) scans the session's extension bridges and, for
+ * any that duck-type to this contract, injects the session's own `send` —
+ * exactly as {@link SnapshotCapable} is feature-detected for snapshot/restore.
+ * No hardcoded slot names, per ADR 27; the skills harness is the first (and,
+ * today, only) consumer.
+ *
+ * `bindRunner` is an INJECTION seam, not a user-facing method — it lives on the
+ * harness, never on the curated `SkillsHandle` the adopter holds.
+ */
+export interface RunnerBindable {
+  bindRunner(send: SessionSendCapability): void;
+}
+
+/**
+ * Runtime feature-detection for {@link RunnerBindable}. Sibling to
+ * {@link import("./hook-bridges.js").isSnapshotCapable}.
+ */
+export function isRunnerBindable(x: unknown): x is RunnerBindable {
+  return (
+    x !== null &&
+    typeof x === "object" &&
+    typeof (x as { bindRunner?: unknown }).bindRunner === "function"
+  );
+}
+
+// ============================================================================
 // State application — implemented by session, consumed by loop
 // ============================================================================
 
