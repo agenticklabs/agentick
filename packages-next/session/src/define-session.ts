@@ -408,6 +408,7 @@ function noopKnobsHandle(): KnobsHandle {
 }
 
 function noopGatesHandle(): GatesHandle {
+  const unsubscribe = () => {};
   return {
     register: () => {
       throw new Error(
@@ -415,8 +416,11 @@ function noopGatesHandle(): GatesHandle {
       );
     },
     get: () => undefined,
+    has: () => false,
     list: () => [],
-    clear: () => {},
+    clear: () => Promise.resolve(),
+    subscribe: () => unsubscribe,
+    subscribeAll: () => unsubscribe,
   };
 }
 

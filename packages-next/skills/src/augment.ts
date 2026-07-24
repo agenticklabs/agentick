@@ -1,4 +1,4 @@
-import type { CommandInfo } from "@agentick/spec-next";
+import type { CommandInfo, Skill, SkillsSearchInput } from "@agentick/spec-next";
 /**
  * Module augmentation — registers the skills slot on two spec
  * interfaces:
@@ -48,12 +48,22 @@ declare module "@agentick/spec-next" {
 }
 
 // ADR 51 slice 5 (#141) — skill-library management from an admin UI is
-// a designed surface; grants gate who.
+// a designed surface; grants gate who. Read rows added by three-audiences-plan
+// G-prep (skills had NO wire read; enumeration was wire-unreachable).
 declare module "@agentick/spec-next" {
   interface WireMethods {
     "skills/register": { params: { sessionId: string; [key: string]: unknown }; result: unknown };
     "skills/update": { params: { sessionId: string; [key: string]: unknown }; result: unknown };
     "skills/remove": { params: { sessionId: string; id: string }; result: unknown };
+    /** Enumerate every skill (wire-safe records — `content` INCLUDED). */
+    "skills/list": { params: { sessionId: string }; result: readonly Skill[] };
+    /** Read one skill by name; `null` on miss. */
+    "skills/get": { params: { sessionId: string; name: string }; result: Skill | null };
+    /** Substring + tag filter (mirrors `SkillsSearchInput`). */
+    "skills/search": {
+      params: { sessionId: string } & SkillsSearchInput;
+      result: readonly Skill[];
+    };
     "skills/commands": {
       params: { sessionId: string };
       result: { commands: readonly CommandInfo[] };

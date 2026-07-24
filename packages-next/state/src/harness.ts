@@ -47,6 +47,7 @@ import type {
   Store,
   StateDeleteInput,
   StateHarnessProtocol,
+  StateListEntry,
   StateSetInput,
   StoreCtx,
 } from "@agentick/spec-next";
@@ -115,6 +116,9 @@ export class StateHarness extends BaseHarness<"state"> implements StateHarnessPr
     const scope = () => ({ sessionId: this.scopeId });
     this.set = this.command({
       name: "state:set",
+      // Wire-reachable (three-audiences-plan G): a client `session.state` handle
+      // mutates through the dynamic lane, deny-by-default like every sibling.
+      exposure: "wire",
       scope,
       // Run B: read the ENRICHED store-ctx inside the fiber (carries the live
       // op's `opId`) and thread it to the mutation.
@@ -125,11 +129,31 @@ export class StateHarness extends BaseHarness<"state"> implements StateHarnessPr
     });
     this.delete = this.command({
       name: "state:delete",
+      exposure: "wire",
       scope,
       handler: (i: StateDeleteInput) =>
         Effect.gen(this, function* () {
           this.applyDelete(i, yield* this.storeCtxEffect());
         }),
+    });
+
+    // ─── Wire read commands (three-audiences-plan G-prep) — the read lane a
+    // client `session.state` handle needs (state had NO read command). Registered
+    // for their side effect (wire-reachability + `commands/list` enumeration);
+    // the SYNC `get`/`list` serve in-process reads, so the callables are
+    // discarded. `state:get` returns the raw value (undefined ⇒ absent-or-unset,
+    // same conflation as `get`); `state:list` returns `{ key, value }` entries.
+    this.command({
+      name: "state:get",
+      exposure: "wire",
+      scope,
+      handler: (i: { key: string }) => Effect.sync(() => this.get(i.key)),
+    });
+    this.command({
+      name: "state:list",
+      exposure: "wire",
+      scope,
+      handler: () => Effect.sync(() => this.list()),
     });
   }
 
@@ -146,8 +170,10 @@ export class StateHarness extends BaseHarness<"state"> implements StateHarnessPr
     return this.view.hasSync(key);
   }
 
-  list(): readonly string[] {
-    return this.view.listSync().map((entry) => entry.key);
+  list(): readonly StateListEntry[] {
+    // Entries (`{ key, value }`), the sibling projection depth — the store cell
+    // IS a `{ key, value }` record, so the sync view list is already the shape.
+    return this.view.listSync();
   }
 
   subscribe(key: string, listener: () => void): Unsubscribe {

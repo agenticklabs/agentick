@@ -20,7 +20,7 @@
  *      structurally (`text` vs `blob`).
  *   7. **`subscribe` → `notifyUpdated` fans** — a per-uri subscriber
  *      fires on `notifyUpdated(uri)` and NOT on an unrelated uri.
- *   8. **`list_changed` on mutation** — a `subscribeListChanged`
+ *   8. **`list_changed` on mutation** — a `subscribeAll`
  *      listener fires on register AND on unregister.
  *
  * Factory contract: the impl constructs its own substrate and exposes a
@@ -186,10 +186,10 @@ export function runResourcesHarnessConformance(
       await close();
     });
 
-    it("subscribeListChanged fires on register and unregister", async () => {
+    it("subscribeAll fires on register and unregister", async () => {
       const { harness, close } = await make();
       let changes = 0;
-      harness.subscribeListChanged(() => {
+      harness.subscribeAll(() => {
         changes += 1;
       });
       const unregister = harness.register("mem://x", () => [text("mem://x", "x")]);

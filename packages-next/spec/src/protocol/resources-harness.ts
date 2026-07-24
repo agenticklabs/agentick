@@ -246,10 +246,13 @@ export interface ResourcesHarnessProtocol {
    */
   subscribe(uri: string, listener: () => void): Unsubscribe;
   /**
-   * Subscribe to registry-topology changes (register / unregister).
-   * Powers the MCP `notifications/resources/list_changed` projection.
+   * Subscribe to registry-topology changes (register / unregister) — the
+   * family-grammar `subscribeAll` (the collection-changed twin of the per-uri
+   * {@link subscribe}). Powers the MCP `notifications/resources/list_changed`
+   * projection; the MCP `list_changed` vocabulary stays at that projection, not
+   * on the adopter handle.
    */
-  subscribeListChanged(listener: () => void): Unsubscribe;
+  subscribeAll(listener: () => void): Unsubscribe;
   /**
    * A provider signals that the content backing `uri` changed. Fans to
    * every {@link subscribe} listener for that uri.
@@ -274,7 +277,7 @@ export function isResourcesInstance(v: unknown): v is Resources {
     typeof obj.read === "function" &&
     typeof obj.snapshot === "function" &&
     typeof obj.subscribe === "function" &&
-    typeof obj.subscribeListChanged === "function" &&
+    typeof obj.subscribeAll === "function" &&
     typeof obj.notifyUpdated === "function"
   );
 }

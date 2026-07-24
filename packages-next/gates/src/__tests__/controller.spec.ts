@@ -61,7 +61,7 @@ describe("GatesController — programmatic latch gate", () => {
     expect(loop.continueCalls).toEqual(["gate:review"]);
 
     // Host clear releases (the equivalent of the model clearing via set_knob).
-    handle.clear();
+    await handle.clear();
     expect(handle.value).toBe("inactive");
     expect(knobs.get("review")).toBe("inactive");
   });
@@ -76,7 +76,7 @@ describe("GatesController — programmatic latch gate", () => {
 
     await controller.handleTickEnd(tickResult({ shouldContinue: true }));
     expect(handle.value).toBe("active");
-    handle.defer();
+    await handle.defer();
     expect(handle.value).toBe("deferred");
 
     activateWhen.mockClear();
@@ -196,7 +196,7 @@ describe("GatesController — host override (verified, audited)", () => {
     expect(handle.value).toBe("active");
 
     // The trusted-host escape releases it AND audits.
-    handle.override("inactive", "manual unblock");
+    await handle.override("inactive", "manual unblock");
     expect(handle.value).toBe("inactive");
     expect(knobs.get("inv")).toBe("inactive");
     expect(audits).toEqual([
@@ -209,13 +209,14 @@ describe("GatesController — host override (verified, audited)", () => {
     ]);
   });
 
-  it("override() throws on a latch gate (use clear there)", () => {
+  it("override() rejects on a latch gate (use clear there)", async () => {
     const { controller } = fakeGatesController();
     const handle = controller.register(
       "latch",
       gate({ description: "x", instructions: "x", activateWhen: () => true }),
     );
-    expect(() => handle.override("inactive")).toThrow(/verified-gate escape/);
+    // Mutations are async now; the verified-only rule surfaces as a rejection.
+    await expect(handle.override("inactive")).rejects.toThrow(/verified-gate escape/);
   });
 });
 

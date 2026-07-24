@@ -55,8 +55,8 @@ describe("PromptsHarness.reload", () => {
 
     const summary = await h.reload();
     expect(summary.updated).toEqual(["x"]);
-    expect(h.getDeclaration("x")?.description).toBe("new description");
-    expect(h.getDeclaration("x")?.template).toBe("t2");
+    expect(h.get("x")?.description).toBe("new description");
+    expect(h.get("x")?.template).toBe("t2");
   });
 
   it("removes declarations gone from sources when pruneMissing: true", async () => {
@@ -125,7 +125,7 @@ describe("PromptsHarness lookup-on-miss in invoke / get", () => {
       fromArray([{ declaration: { name: "greet", description: "g", template: "Hello." } }]),
     ]);
 
-    const result = await h.get({ name: "greet" });
+    const result = await h.render({ name: "greet" });
     expect(result.description).toBe("g");
   });
 

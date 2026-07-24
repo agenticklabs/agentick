@@ -4,7 +4,7 @@
  * The "adopter stash" — typed key-value bag backing the
  * `useSessionState(key, initial)` hook. NOT model-visible: the
  * executor's `set_knob` tool doesn't reach here, and `list()` returns
- * keys for framework / debug use only.
+ * `{ key, value }` entries for framework / debug use only.
  *
  * Per ADR 26, this is a full harness — identity, lifecycle, substrate,
  * inbox addressability, journaled write Operations. Sync reads + async
@@ -35,6 +35,17 @@ export interface StateDeleteInput {
   readonly key: string;
 }
 
+/**
+ * One row of {@link StateHarnessProtocol.list} — a `{ key, value }` entry, the
+ * same projection depth as the sibling collection handles (knobs descriptors,
+ * skills records). `list()` returns entries, not bare keys, so a caller (and the
+ * wire `state:list` projection) sees values without a follow-up `get` per key.
+ */
+export interface StateListEntry {
+  readonly key: string;
+  readonly value: unknown;
+}
+
 /** Snapshot payload — a map of state keys to current values. */
 export type StateHarnessSnapshot = Readonly<Record<string, unknown>>;
 
@@ -59,7 +70,8 @@ export interface StateHarnessProtocol extends SnapshotCapable<StateHarnessSnapsh
 
   get(key: string): unknown;
   has(key: string): boolean;
-  list(): readonly string[];
+  /** Every entry as `{ key, value }` (family projection depth, not bare keys). */
+  list(): readonly StateListEntry[];
 
   /** Notify when the value at `key` changes. */
   subscribe(key: string, listener: () => void): Unsubscribe;

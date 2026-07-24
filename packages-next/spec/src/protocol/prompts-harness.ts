@@ -210,8 +210,11 @@ export interface PromptsHarnessProtocol {
 
   // ─── Sync surface ─────────────────────────────────────────────
 
-  /** Look up a prompt declaration by name. */
-  getDeclaration(name: string): PromptDeclaration | undefined;
+  /**
+   * Look up a prompt declaration by name (the sync family-grammar `get`).
+   * NOT the render — `render(input)` produces messages.
+   */
+  get(name: string): PromptDeclaration | undefined;
   /** True iff a prompt with this name is registered. */
   has(name: string): boolean;
   /** Enumerate every registered prompt declaration. */
@@ -237,10 +240,11 @@ export interface PromptsHarnessProtocol {
    */
   invoke(input: PromptsInvokeInput): Promise<PromptsGetResult>;
   /**
-   * Render WITHOUT queueing. For MCP server `prompts/get`, snapshot
-   * tests, doc generators.
+   * Render WITHOUT queueing. For the MCP server `prompts/get` projection,
+   * snapshot tests, doc generators. (The sync `get(name)` above is the
+   * declaration read — this is the render, hence `render`.)
    */
-  get(input: PromptsGetInput): Promise<PromptsGetResult>;
+  render(input: PromptsGetInput): Promise<PromptsGetResult>;
 
   // ─── Snapshot / restore (SnapshotCapable feature) ──────────────
 

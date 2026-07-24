@@ -241,7 +241,7 @@ export function mockStateHarness(
     ready: Promise.resolve(),
     get: (key) => values.get(key),
     has: (key) => values.has(key),
-    list: () => [...values.keys()],
+    list: () => [...values.entries()].map(([key, value]) => ({ key, value })),
     subscribe: (key, l) => notifier.subscribe(key, l),
     subscribeAll: (l) => notifier.subscribeAll(l),
     set: async ({ key, value }: StateSetInput) => {

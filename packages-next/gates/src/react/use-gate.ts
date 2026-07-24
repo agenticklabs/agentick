@@ -92,8 +92,15 @@ export function useGate(name: string, options: GateDescriptor): GateState {
     useCallback(() => (knobs.get(name) ?? "inactive") as GateValue, [knobs, name]),
   );
 
-  const clear = useCallback(() => controller.get(name)?.clear(), [controller, name]);
-  const defer = useCallback(() => controller.get(name)?.defer(), [controller, name]);
+  // `clear` / `defer` are now async + journaled on the controller; the React
+  // surface stays fire-and-forget (`() => void`) — the value re-reads reactively
+  // off the backing knob subscription above once the transition lands.
+  const clear = useCallback(() => {
+    void controller.get(name)?.clear();
+  }, [controller, name]);
+  const defer = useCallback(() => {
+    void controller.get(name)?.defer();
+  }, [controller, name]);
 
   const active = value === "active";
   const deferred = value === "deferred";

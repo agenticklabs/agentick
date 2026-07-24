@@ -102,7 +102,9 @@ describe("gates end-to-end — client ↔ gateway (dynamic lane) ↔ session", (
 
     // Engage the verified gate host-side (the audited escape), then clear it over
     // the wire. No tick fires, so clear's release sticks (nothing re-engages it).
-    session.gate("inv")?.override("active", "setup");
+    // Override is async + journaled now (routes through `gates:override`); await
+    // the host-side setup escape before asserting the value.
+    await session.gate("inv")?.override("active", "setup");
     expect(session.gate("inv")?.value).toBe("active");
 
     await client.session(sessionId).gates.clear("inv");

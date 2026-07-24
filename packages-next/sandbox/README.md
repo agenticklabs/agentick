@@ -82,7 +82,7 @@ must not cross).
   `requiredScopes` + downscoping.
 - **`subscribeMounts(listener)`**: a mount-topology change stream (fires
   after a successful `add-mount` / `remove-mount`), mirroring
-  `ResourcesHarness.subscribeListChanged`. The `/mcp` adapter binds to it
+  `ResourcesHarness.subscribeAll`. The `/mcp` adapter binds to it
   for live roots sync.
 
 ## The `/mcp` subpath — sandbox ↔ MCP roots + readable files (ADR 65)

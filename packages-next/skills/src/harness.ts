@@ -203,6 +203,34 @@ export class SkillsHarness
           this.applyRemove(i);
         }),
     });
+
+    // ─── Wire read commands (three-audiences-plan G-prep) — skills had
+    // register/update/remove only, NO wire read, so enumeration was
+    // wire-unreachable. These add the read lane a client skills handle needs.
+    // Registered for their side effect (wire-reachability + `commands/list`
+    // enumeration); the SYNC `list`/`get`/`search` serve in-process reads, so the
+    // returned callables are discarded. A `Skill` is fully serializable, so the
+    // wire projection IS the record — content INCLUDED (a client managing skills
+    // needs the body; note the body is unbounded, so `search` should scope large
+    // libraries rather than `list` pulling everything).
+    this.command({
+      name: "skills:list",
+      exposure: "wire",
+      scope,
+      handler: () => Effect.sync(() => this.list()),
+    });
+    this.command({
+      name: "skills:get",
+      exposure: "wire",
+      scope,
+      handler: (i: { name: string }) => Effect.sync(() => this.get(i.name) ?? null),
+    });
+    this.command({
+      name: "skills:search",
+      exposure: "wire",
+      scope,
+      handler: (i: SkillsSearchInput) => Effect.sync(() => this.search(i)),
+    });
   }
 
   /**

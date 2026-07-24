@@ -41,7 +41,7 @@ import type {
   TickResult,
   Unsubscribe,
 } from "@agentick/spec-next";
-import { createNotifier, type Notifier } from "@agentick/pubsub-next";
+import { createKeyedNotifier, type KeyedNotifier } from "@agentick/pubsub-next";
 
 import {
   GATE_OPTIONS,
@@ -110,6 +110,25 @@ export interface GateOverrideAudit {
    * {@link GateHandle.override}'s `origin` argument.
    */
   readonly origin: GateOverrideOrigin;
+}
+
+/**
+ * The journaled-mutation seam a {@link GatesController} routes its public
+ * `clear` / `defer` / `override` verbs through. The {@link GatesHarness} binds
+ * one whose methods dispatch the `gates:clear` / `gates:defer` /
+ * `gates:override` commands (so a host-side release is an audited, journaled
+ * Operation — the sibling contract every other harness mutation already has).
+ * A controller with no bound sink (a bare test controller, no harness) falls
+ * back to the raw synchronous transition — same effect, no journal.
+ *
+ * Admission (journaled command vs. direct) is the ONLY axis this seam selects;
+ * both paths bottom out at the SAME `rawClear` / `rawDefer` / `rawOverride`
+ * transition logic, so there is one mutation implementation, not two.
+ */
+export interface GateMutationSink {
+  clear(name: string): Promise<void>;
+  defer(name: string): Promise<void>;
+  override(name: string, value: GateValue, reason?: string): Promise<void>;
 }
 
 export interface GatesControllerDeps {
@@ -190,13 +209,20 @@ export interface GateHandle {
    * Release the gate — the host-side equivalent of the model clearing a
    * latch via `set_knob`. Transient on verified gates: the predicate
    * re-engages at the next tick end if still unsatisfied.
+   *
+   * Async + journaled: routes through the `gates:clear` command when the
+   * controller is harness-owned (the sibling contract — `knobs.set` /
+   * `state.set` are async journaled Operations too). A bare controller
+   * (no harness) applies the transition directly; the promise still
+   * resolves.
    */
-  clear(): void;
+  clear(): Promise<void>;
   /**
    * Postpone a latch gate (`deferred`) — the model must still face it
-   * before completing. No-op on verified gates.
+   * before completing. No-op on verified gates. Async + journaled (see
+   * {@link clear}).
    */
-  defer(): void;
+  defer(): Promise<void>;
   /**
    * **Verified gates, HOST-ONLY, audited.** Verified gates are cleared
    * by their predicate and their backing knob is read-only to the MODEL
@@ -204,13 +230,14 @@ export interface GateHandle {
    * override is legitimate (the host is trusted) but is an EXPLICIT,
    * auditable escape — it emits a {@link GateOverrideAudit} and does NOT
    * exist as a generic setter that would silently reopen the read-only
-   * protection. Throws on latch gates (use {@link clear} there).
+   * protection. Rejects on latch gates (use {@link clear} there).
    *
-   * `origin` stamps the emitted {@link GateOverrideAudit} — omitted ⇒
-   * `"host"` (a trusted in-process caller); the `GatesHarness`
-   * `gates:override` command passes `"wire"`.
+   * Async + journaled: routes through `gates:override`. The audit's
+   * `origin` is stamped by the command path — `"wire"` when the override
+   * arrived over the dynamic lane, `"host"` for a direct in-process call
+   * — so it is no longer a caller argument.
    */
-  override(value: GateValue, reason?: string, origin?: GateOverrideOrigin): void;
+  override(value: GateValue, reason?: string): Promise<void>;
   /** Subscribe to value changes for this gate. */
   subscribe(listener: () => void): Unsubscribe;
 }
@@ -235,8 +262,6 @@ interface GateEntry {
    * without `activateWhen` are armed from the first tick.
    */
   armed: boolean;
-  /** Per-gate change notifier for handle subscribers. */
-  readonly notifier: Notifier;
   /** Teardown for the knob subscription that keeps `value` in sync. */
   knobUnsub: Unsubscribe;
   /** Stable handle instance. */
@@ -253,14 +278,54 @@ interface GateEntry {
 // transitions already surface on the knobs notify seam (`knobs.onChange`). A
 // gates-owned change stream would DOUBLE-EMIT the same fact. A projection that
 // wants gate transitions subscribes `knobs.onChange` and filters for the
-// gate-backing keys (the `GateEntry.notifier` here is the per-gate render-PING
-// for handle subscribers — the pull twin, not a second delta source).
+// gate-backing keys. The `changes` KeyedNotifier here is the render-PING twin
+// (the family-grammar `subscribe(name)` / `subscribeAll` surface + the per-gate
+// handle subscribers), not a second delta source.
 export class GatesController {
   private readonly deps: GatesControllerDeps;
   private readonly gates = new Map<string, GateEntry>();
 
+  /**
+   * ONE keyed render-ping notifier (name → listeners, plus a wildcard
+   * channel). Fires on every transition and on register / unregister
+   * (topology). Backs the family-grammar `subscribe(name)` / `subscribeAll`
+   * AND each {@link GateHandle}'s own `subscribe(listener)` — the per-gate
+   * notifier is now a bucket on this shared keyed notifier, keyed by name,
+   * so a subscription taken before a gate registers still fires once it does.
+   */
+  private readonly changes: KeyedNotifier = createKeyedNotifier();
+
+  /**
+   * The journaled-mutation admission seam ({@link GateMutationSink}). Defaults
+   * to the raw synchronous transition (a bare controller, no harness); the
+   * {@link GatesHarness} swaps in a sink that routes through its `gates:*`
+   * commands via {@link bindMutations}, so a host-side release journals.
+   */
+  private mutations: GateMutationSink = {
+    clear: async (name) => {
+      this.rawClear(name);
+    },
+    defer: async (name) => {
+      this.rawDefer(name);
+    },
+    override: async (name, value, reason) => {
+      this.rawOverride(name, value, reason, "host");
+    },
+  };
+
   constructor(deps: GatesControllerDeps) {
     this.deps = deps;
+  }
+
+  /**
+   * Bind the journaled-mutation sink — called once by the owning
+   * {@link GatesHarness} after it constructs its commands. From then on
+   * `clear` / `defer` / `override` on this controller (and its handles) route
+   * through the harness's `gates:*` commands (audited, journaled). A controller
+   * never bound keeps the raw-transition default.
+   */
+  bindMutations(sink: GateMutationSink): void {
+    this.mutations = sink;
   }
 
   /**
@@ -290,7 +355,6 @@ export class GatesController {
       verified,
       value: (this.deps.knobs.get(name) ?? "inactive") as GateValue,
       armed: false,
-      notifier: createNotifier(),
       knobUnsub: () => {},
       handle: undefined as unknown as GateHandle,
     };
@@ -306,10 +370,12 @@ export class GatesController {
       const next = (this.deps.knobs.get(name) ?? "inactive") as GateValue;
       if (next !== entry.value) {
         entry.value = next;
-        entry.notifier.notify();
+        this.changes.notify(name);
       }
     });
 
+    // Topology ping: a new gate appeared — `subscribeAll` observers re-read.
+    this.changes.notify(name);
     return entry.handle;
   }
 
@@ -319,6 +385,8 @@ export class GatesController {
     if (!entry) return;
     entry.knobUnsub();
     this.gates.delete(name);
+    // Topology ping: the gate is gone — `subscribeAll` observers re-read.
+    this.changes.notify(name);
   }
 
   /**
@@ -351,9 +419,32 @@ export class GatesController {
     return [...byName.values()];
   }
 
-  /** Release a gate by name (host-side clear). No-op when unknown. */
-  clear(name: string): void {
-    this.gates.get(name)?.handle.clear();
+  /** True iff a gate by this name is registered (self or inherited parent). */
+  has(name: string): boolean {
+    return this.get(name) !== undefined;
+  }
+
+  /**
+   * Release a gate by name (host-side clear). Async + journaled (routes through
+   * `gates:clear` when harness-owned). A bare controller no-ops on an unknown
+   * name; over the wire the `gates:clear` command rejects with `GateNotFound`.
+   */
+  clear(name: string): Promise<void> {
+    return this.mutations.clear(name);
+  }
+
+  /**
+   * Subscribe to a single gate's changes by name — fires on every transition
+   * plus register / unregister of that gate. Works before the gate registers
+   * (the family-grammar contract; the bucket is keyed, lifecycle-independent).
+   */
+  subscribe(name: string, listener: () => void): Unsubscribe {
+    return this.changes.subscribe(name, listener);
+  }
+
+  /** Subscribe to EVERY gate change (transitions + register / unregister). */
+  subscribeAll(listener: () => void): Unsubscribe {
+    return this.changes.subscribeAll(listener);
   }
 
   // ─────────── The single wiring logic (shared by both front-ends) ───────────
@@ -472,32 +563,73 @@ export class GatesController {
       get engaged() {
         return entry.value !== "inactive";
       },
+      // Public mutations route through the admission sink (journaled command
+      // when harness-owned, raw transition otherwise) — one grammar with the
+      // sibling harnesses. The raw transition logic lives in `rawClear` /
+      // `rawDefer` / `rawOverride`, which the harness commands drive.
       clear() {
-        controller.transition(entry, "inactive");
+        return controller.mutations.clear(entry.name);
       },
       defer() {
-        if (!entry.verified) controller.transition(entry, "deferred");
+        return controller.mutations.defer(entry.name);
       },
-      override(value: GateValue, reason?: string, origin: GateOverrideOrigin = "host") {
-        if (!entry.verified) {
-          throw new Error(
-            `override() is a verified-gate escape; gate "${entry.name}" is a latch gate — use clear().`,
-          );
-        }
-        controller.transition(entry, value);
-        controller.deps.audit?.({
-          kind: "gate:override",
-          name: entry.name,
-          value,
-          at: Date.now(),
-          origin,
-          ...(reason !== undefined ? { reason } : {}),
-        });
+      override(value: GateValue, reason?: string) {
+        return controller.mutations.override(entry.name, value, reason);
       },
       subscribe(listener: () => void) {
-        return entry.notifier.subscribe(listener);
+        return controller.changes.subscribe(entry.name, listener);
       },
     };
+  }
+
+  // ─────────── Raw mutations (the transition logic the commands drive) ─────
+
+  /**
+   * Release a gate — the raw synchronous transition. The `gates:clear` command
+   * and the default (unbound) mutation sink both bottom out here. No-op when
+   * the name is unknown (self layer only; parent gates clear via their own
+   * controller's handle).
+   */
+  rawClear(name: string): void {
+    const entry = this.gates.get(name);
+    if (entry) this.transition(entry, "inactive");
+  }
+
+  /** Postpone a latch gate — the raw transition. No-op on verified / unknown. */
+  rawDefer(name: string): void {
+    const entry = this.gates.get(name);
+    if (entry && !entry.verified) this.transition(entry, "deferred");
+  }
+
+  /**
+   * The verified-gate audited override — the raw transition + audit emit. The
+   * `gates:override` command and the default sink drive it. Throws on a latch
+   * gate (the verified-only rule); no-op when the name is unknown. `origin`
+   * distinguishes the wire escape from the trusted in-process caller on the
+   * emitted {@link GateOverrideAudit}.
+   */
+  rawOverride(
+    name: string,
+    value: GateValue,
+    reason: string | undefined,
+    origin: GateOverrideOrigin,
+  ): void {
+    const entry = this.gates.get(name);
+    if (!entry) return;
+    if (!entry.verified) {
+      throw new Error(
+        `override() is a verified-gate escape; gate "${name}" is a latch gate — use clear().`,
+      );
+    }
+    this.transition(entry, value);
+    this.deps.audit?.({
+      kind: "gate:override",
+      name,
+      value,
+      at: Date.now(),
+      origin,
+      ...(reason !== undefined ? { reason } : {}),
+    });
   }
 
   /**
@@ -517,7 +649,7 @@ export class GatesController {
     // wanted client-side, add a `gates-state` snapshot+delta channel here at
     // the notifier, mirroring packages-next/knobs/src/channel.ts.
     void this.deps.knobs.set({ id: entry.name, value: next });
-    entry.notifier.notify();
+    this.changes.notify(entry.name);
   }
 
   private loop(): LoopControlSeam {
@@ -548,8 +680,14 @@ export interface GatesHandle {
   register(name: string, descriptor: GateDescriptor): GateHandle;
   /** The gate's handle, or undefined when unknown. */
   get(name: string): GateHandle | undefined;
+  /** True iff a gate by this name is registered. */
+  has(name: string): boolean;
   /** Unified snapshot over ALL gates — tree-declared and programmatic. */
   list(): readonly GateInfo[];
-  /** Release a gate by name (host-side clear). */
-  clear(name: string): void;
+  /** Release a gate by name (host-side clear). Async + journaled. */
+  clear(name: string): Promise<void>;
+  /** Subscribe to one gate's changes by name (family grammar). */
+  subscribe(name: string, listener: () => void): Unsubscribe;
+  /** Subscribe to every gate change (transitions + topology). */
+  subscribeAll(listener: () => void): Unsubscribe;
 }

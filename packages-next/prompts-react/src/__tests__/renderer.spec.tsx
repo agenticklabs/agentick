@@ -127,7 +127,7 @@ describe("reactPromptRenderer — end-to-end via PromptsHarness", () => {
           ),
       },
     });
-    const result = await h.get({ name: "weekly_status", args: { week: "2026-06-28" } });
+    const result = await h.render({ name: "weekly_status", args: { week: "2026-06-28" } });
     expect(result.messages).toHaveLength(1);
     expect(result.messages[0]!.role).toBe("user");
     expect(
@@ -152,7 +152,7 @@ describe("reactPromptRenderer — end-to-end via PromptsHarness", () => {
         ],
       },
     });
-    const result = await h.get({ name: "qa", args: { q: "What is 2+2?" } });
+    const result = await h.render({ name: "qa", args: { q: "What is 2+2?" } });
     expect(result.messages).toHaveLength(2);
     expect(result.messages[0]!.role).toBe("system");
     expect(result.messages[1]!.role).toBe("user");

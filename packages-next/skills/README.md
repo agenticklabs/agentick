@@ -67,6 +67,19 @@ Skills are first-class data. The harness treats them as opaque content; the agen
 
 Reads are cheap and synchronous (no envelopes). Mutations go through `runOperation` — every `register` / `update` / `remove` produces `requested → terminal` envelopes on the session's bus that the model, admins, or audit tooling can observe.
 
+### Wire surface (`exposure: "wire"`, deny-by-default)
+
+Skills projects both a MUTATION lane and a READ lane onto the dynamic-command wire (three-audiences-plan G-prep — the read lane was added so a client skills handle can enumerate; skills previously had register/update/remove only):
+
+| Wire method                                           | Reads / writes | Result                                                |
+| ----------------------------------------------------- | -------------- | ----------------------------------------------------- |
+| `skills/list`                                         | read           | `Skill[]` — wire-safe records, **`content` included** |
+| `skills/get`                                          | read           | `Skill \| null` (by `name`)                           |
+| `skills/search`                                       | read           | `Skill[]` (mirrors `SkillsSearchInput`)               |
+| `skills/register` · `skills/update` · `skills/remove` | write          | admin-curation lane (#141)                            |
+
+A `Skill` is fully serializable, so the wire projection **is** the record — `content` (the skill body) crosses because a client managing skills needs it; note it is unbounded, so prefer `skills/search` over `skills/list` for large libraries. Every verb is grantable and deny-by-default (an undeclared verb is indistinguishable from an absent method).
+
 Failures are typed:
 
 ```ts
@@ -313,6 +326,7 @@ const skill = await session.skills.require("must_exist");
 - `src/__tests__/store-backing.spec.ts` — write-through to the injected store, loaders (`reload` / `resolve`) feed the store, `search` through the projection, `exportSnapshot`↔`hydrate()` round-trip, plus `runSkillStoreConformance` against `InMemorySkillStore`
 - `src/__tests__/run.spec.ts` — `skills.run` harness mechanics (dependency-free, stub runner): default composition (system skill body + serialized args), `composeRun` seam override, handle pass-through (with / without `output`; failures ride `handle.result`), `isolate: true`→`SkillIsolationUnavailable`, unbound runner→`SkillRunnerUnbound`, missing skill→`SkillNotFound`
 - `@agentick/app-next` `src/__tests__/skills-run-e2e.spec.tsx` — `session.skills.run` end-to-end through `createApp` (proves the C-core `bindRunner` injection site): `output`→validated `data` + `stopReason "output_delivered"`, no-`output`→text, missing skill, and the `SteerCannotCarryStructuredOutput` reentrancy guard
+- `@agentick/transport-in-process-next` `src/__tests__/wire-reads-e2e.spec.ts` — `skills/list` + `skills/get` (`content` included) round-trip over the real gateway + dynamic lane, `commands/list` enumerates them, undeclared verb stays MethodNotFound
 - Cross-harness integration tests live in adopter packages (`@agentick/session-next`, `@agentick/app-next`)
 
 ## See also

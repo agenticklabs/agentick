@@ -101,13 +101,25 @@ const handle = session.gates.register("summary", {
 });
 
 session.gates.list(); // → [{ name: "summary", value, verified, description }, …]
+session.gates.has("summary"); // → true
 session.gate("summary")?.value; // → "inactive" | "active" | "deferred"
 
-handle.clear(); // host-side release (equivalent to the model clearing a latch)
+await handle.clear(); // host-side release (equivalent to the model clearing a latch)
 ```
 
 A tree-declared `useGate` gate and a programmatic gate both appear in
 `session.gates.list()` — one registry.
+
+**Grammar (three-audiences-plan G-prep).** `session.gates` carries the full
+sibling family grammar — sync reads (`get` / `has` / `list`), per-name and
+wildcard subscription (`subscribe(name, fn)` / `subscribeAll(fn)`), and
+**async, journaled** mutations. `clear` / `defer` / `override` now return
+`Promise<void>` and route through the `gates:clear` / `gates:defer` /
+`gates:override` commands (audited Operations) — the same contract as
+`knobs.set` / `state.set`, and the same path the wire and client handles take.
+A host-side release therefore journals just like a wire one. (The React
+`useGate` surface stays fire-and-forget `() => void` — the gate value re-reads
+reactively off the backing knob when the transition lands.)
 
 ### Host `.override()` — the trusted-host escape (verified gates)
 
@@ -117,7 +129,7 @@ escape — never a silent setter that reopens the read-only protection:
 
 ```ts
 const g = session.gate("typecheck");
-g?.override("inactive", "manual unblock: known-flaky check");
+await g?.override("inactive", "manual unblock: known-flaky check");
 ```
 
 `override()` sets the value **and** emits a `session:gate:override` audit
@@ -282,7 +294,8 @@ Every claim above is exercised by a test:
 | Verified arming scope stays dormant until triggered                                                    | `controller.spec.ts`, `gate.spec.tsx`              |
 | Fail-closed: a throwing predicate engages the gate                                                     | `controller.spec.ts`, `gate.spec.tsx`              |
 | Verified knob is read-only — the model's `set_knob` dispatch is refused (adversarial)                  | `controller.spec.ts`, `gate.spec.tsx`              |
-| `.override()` releases a verified gate AND emits an audit envelope; throws on latch; not a model path  | `controller.spec.ts`                               |
+| `.override()` releases a verified gate AND emits an audit envelope; rejects on latch; not a model path | `controller.spec.ts`                               |
+| Host `clear`/`defer`/`override` are async + journaled (route through `gates:*`); the raw transition is the shared body | `controller.spec.ts`, `__tests__/harness.spec.ts`  |
 | Async verified predicates are awaited                                                                  | `gate.spec.tsx`                                    |
 | Layer chain: `list`/`get` unify over a parent, self shadows parent by name                             | `controller.spec.ts`                               |
 | An inherited (parent) gate still evaluates against the child's tick (parent's own knob + loop)         | `controller.spec.ts`                               |

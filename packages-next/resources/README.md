@@ -96,7 +96,7 @@ declaration changed"):
 
 - `subscribe(uri, listener)` fires on `notifyUpdated(uri)` →
   MCP `notifications/resources/updated`.
-- `subscribeListChanged(listener)` fires on register / unregister →
+- `subscribeAll(listener)` fires on register / unregister →
   MCP `notifications/resources/list_changed`.
 
 ## Durable backing (store + loaders)
@@ -315,7 +315,7 @@ substrate (preferred for consumer tests). `stubResources({ contents })`
 
 `id` · `ready` · `backend` · `close()` · `register` · `registerTemplate`
 · `list` · `listTemplates` · `read` · `has` · `subscribe` ·
-`subscribeListChanged` · `notifyUpdated`. Errors:
+`subscribeAll` · `notifyUpdated`. Errors:
 `ResourceNotFound` · `ResourceAlreadyRegistered` ·
 `ResourceResolverFailed` · `ResourcesBackendError`.
 

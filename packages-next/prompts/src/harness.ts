@@ -10,7 +10,8 @@
  *
  * **Invocation (ADR 51)** — every verb is a DECLARED COMMAND
  * (constructor, `this.command()`): `prompts:register`, `prompts:update`,
- * `prompts:remove`, `prompts:invoke`, and `prompts:get`. One canonical
+ * `prompts:remove`, `prompts:invoke`, `prompts:render` (the render),
+ * `prompts:get` (the declaration read), and `prompts:list`. One canonical
  * string per verb is simultaneously the inbox message type over
  * `prompts:{scopeId}`, the op-name root, the authz scope label, and the
  * (matrix-gated) wire method name. Cross-boundary payloads carry
@@ -25,9 +26,9 @@
  *     bindings ship their own renderer + convenience extension.
  *
  * `invoke()` queues to the session timeline via `bridges.timeline.queue`
- * (same channel as explicit user input). `get()` renders without
+ * (same channel as explicit user input). `render()` renders without
  * queueing for external consumers (MCP server `prompts/get`, snapshot
- * tests, doc generators).
+ * tests, doc generators); `get(name)` is the sync declaration read.
  *
  * @see docs/proposals/v2/blueprint/32-extension-shape-spectrum.md
  * @see docs/proposals/v2/blueprint/51-invocation-and-authorization.md
@@ -123,7 +124,7 @@ export interface PromptsHarnessOptions {
    *
    * A view (not async-through-the-store): prompts carries a SYNC
    * `exportSnapshot()` (the generic `captureBridgeSnapshots` calls it un-awaited,
-   * SnapshotCapable) AND a sync `getDeclaration`/`has`/`list` surface — both are
+   * SnapshotCapable) AND a sync `get`/`has`/`list` surface — both are
    * load-bearing sync callers, so a synchronous materialized view is required.
    */
   readonly store?: Store<
@@ -139,7 +140,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
    * §3.5 P5) — ONE primitive that collapses the two fields this used to
    * hand-roll (a `CollectionProjection` for the sync cache + write-through and a
    * `KeyedNotifier` for render pings). Holds the SERIALIZABLE
-   * {@link PromptDeclarationRecord} slice. `getDeclaration` / `has` / `list` read
+   * {@link PromptDeclarationRecord} slice. `get` / `has` / `list` read
    * it during render; `exportSnapshot` materializes it synchronously (records ARE
    * the snapshot — fns are excluded by construction); the mutation helpers write
    * through it (sync cache first, durable store off the critical path via the
@@ -195,7 +196,8 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
   readonly update: (input: PromptsUpdateInput) => Promise<PromptDeclaration>;
   readonly remove: (input: PromptsRemoveInput) => Promise<void>;
   readonly invoke: (input: PromptsInvokeInput) => Promise<PromptsGetResult>;
-  readonly get: (input: PromptsGetInput) => Promise<PromptsGetResult>;
+  /** `prompts:render` — render a prompt to messages WITHOUT queueing. */
+  readonly render: (input: PromptsGetInput) => Promise<PromptsGetResult>;
 
   get id(): string {
     return this.scopeId;
@@ -254,12 +256,43 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
       scope,
       handler: (i: PromptsInvokeInput) => this.applyInvoke(i),
     });
-    this.get = this.command({
-      name: "prompts:get",
+    // `prompts:render` — the RENDER (was `prompts:get`). Renamed so the wire
+    // verb matches the handle method `render(input)`; `prompts:get` is now the
+    // declaration read below.
+    this.render = this.command({
+      name: "prompts:render",
       // VERB-MATRIX ratified wire row (#140/#141) — grantable, deny-by-default.
       exposure: "wire",
       scope,
       handler: (i: PromptsGetInput) => this.applyGet(i),
+    });
+
+    // ─── Wire read commands (three-audiences-plan G-prep) — the enumeration +
+    // read lane a client prompts handle needs. Registered for their side effect
+    // (wire-reachability + `commands/list` enumeration); the SYNC `get`/`list`
+    // methods serve in-process reads, so the returned callables are discarded.
+    // Both project to the SERIALIZABLE `PromptDeclarationRecord` slice (the view
+    // records) — `template`/`render` never cross the wire.
+    //
+    // `prompts:get` — declaration read by name (wire-safe record; null on miss).
+    this.command({
+      name: "prompts:get",
+      exposure: "wire",
+      scope,
+      handler: (i: { name: string }) => Effect.sync(() => this.view.getSync(i.name) ?? null),
+    });
+    // `prompts:list` — every declaration as wire-safe records (name-sorted).
+    this.command({
+      name: "prompts:list",
+      exposure: "wire",
+      scope,
+      handler: () =>
+        Effect.sync(() =>
+          this.view
+            .listSync()
+            .slice()
+            .sort((a, b) => a.name.localeCompare(b.name)),
+        ),
     });
   }
 
@@ -368,7 +401,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
    * serializable record from the {@link projection} + the non-serializable
    * `{ template, render }` from the {@link augmentations} sidecar. The single
    * site the split is re-joined — every read that hands out a full declaration
-   * (`getDeclaration`, `list`, `resolve`, render) goes through here.
+   * (`get`, `list`, `resolve`, render) goes through here.
    * `undefined` when the record is absent (an orphan sidecar entry — which
    * cannot occur, they are written and dropped together — would be ignored).
    */
@@ -379,7 +412,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
     return aug ? { ...record, ...aug } : record;
   }
 
-  getDeclaration(name: string): PromptDeclaration | undefined {
+  get(name: string): PromptDeclaration | undefined {
     return this.declarationOf(name);
   }
 
@@ -426,7 +459,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
     //
     // The augmentation sidecar is CLEARED — `template`/`render` are
     // non-serializable, so a restored prompt has no content until the adopter
-    // re-registers it (invoke/get then throw `PromptMissingContent` until they do).
+    // re-registers it (invoke/render then throw `PromptMissingContent` until they do).
     // The `View` is agnostic to the sidecar; the clear is harness-owned.
     //
     // TODO(store-phase-4): `importSnapshot` is the ACTIVE snapshot-based resume
@@ -461,8 +494,8 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
   // ─────────── Inbox routing ───────────
 
   /**
-   * `prompts:register/update/remove/invoke/get` are declared commands —
-   * routed by the BaseHarness command registry before this fallthrough.
+   * `prompts:register/update/remove/invoke/render/get/list` are declared
+   * commands — routed by the BaseHarness command registry before this fallthrough.
    * Only unknown types land here.
    */
   protected handleMessage(

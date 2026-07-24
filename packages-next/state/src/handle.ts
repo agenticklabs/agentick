@@ -13,15 +13,15 @@
  */
 
 import type { Unsubscribe } from "@agentick/spec-next";
-import type { StateDeleteInput, StateSetInput } from "@agentick/spec-next";
+import type { StateDeleteInput, StateListEntry, StateSetInput } from "@agentick/spec-next";
 
 export interface StateHandle {
   /** Current value at `key`, or undefined. */
   get(key: string): unknown;
   /** True iff a value exists at `key`. */
   has(key: string): boolean;
-  /** Snapshot of every known key. */
-  list(): readonly string[];
+  /** Snapshot of every entry as `{ key, value }`. */
+  list(): readonly StateListEntry[];
   /** Set a value through the harness's Operation envelope. */
   set(input: StateSetInput): Promise<void>;
   /** Delete a key through the harness's Operation envelope. */

@@ -118,7 +118,7 @@ describe("StateHarness — hydrate() from a pre-seeded store", () => {
     expect(harness.get("alpha")).toBe(1);
     expect(harness.get("beta")).toBe("two");
     expect(harness.get("gamma")).toBe(false);
-    expect(new Set(harness.list())).toEqual(new Set(["alpha", "beta", "gamma"]));
+    expect(new Set(harness.list().map((e) => e.key))).toEqual(new Set(["alpha", "beta", "gamma"]));
     await harness.close();
   });
 

@@ -82,7 +82,12 @@ export interface GatesDeferInput {
 export interface GatesOverrideInput {
   readonly name: string;
   readonly value: GateValue;
-  readonly reason: string;
+  /**
+   * Audit reason. Optional so the host handle (`gate.override(value)`) can
+   * route through this command without synthesizing one; wire callers are
+   * expected to supply it (the audited escape should carry a reason).
+   */
+  readonly reason?: string;
 }
 
 export class GatesHarness extends BaseHarness<"gates"> {
@@ -135,11 +140,16 @@ export class GatesHarness extends BaseHarness<"gates"> {
       name: "gates:clear",
       exposure: "wire",
       scope,
+      // Delegate to the controller's RAW transition — NOT the public
+      // `gate.clear()`, which routes back through this command (the sink the
+      // harness binds below) and would recurse. `rawClear` is the shared
+      // transition body both admission paths bottom out at.
       handler: (i: GatesClearInput) =>
         Effect.gen(this, function* () {
-          const gate = this.controller.get(i.name);
-          if (gate === undefined) return yield* Effect.fail(new GateNotFound({ name: i.name }));
-          gate.clear();
+          if (this.controller.get(i.name) === undefined) {
+            return yield* Effect.fail(new GateNotFound({ name: i.name }));
+          }
+          this.controller.rawClear(i.name);
         }),
     });
 
@@ -147,14 +157,14 @@ export class GatesHarness extends BaseHarness<"gates"> {
       name: "gates:defer",
       exposure: "wire",
       scope,
-      // `reason` rides the wire shape for parity with `override`, but the
-      // controller's `defer()` takes no reason (latch defer carries no audit) —
-      // accepted and dropped here; controller behavior is untouched.
+      // `reason` rides the wire shape for parity with `override`, but a latch
+      // defer carries no audit — accepted and dropped here.
       handler: (i: GatesDeferInput) =>
         Effect.gen(this, function* () {
-          const gate = this.controller.get(i.name);
-          if (gate === undefined) return yield* Effect.fail(new GateNotFound({ name: i.name }));
-          gate.defer();
+          if (this.controller.get(i.name) === undefined) {
+            return yield* Effect.fail(new GateNotFound({ name: i.name }));
+          }
+          this.controller.rawDefer(i.name);
         }),
     });
 
@@ -168,13 +178,26 @@ export class GatesHarness extends BaseHarness<"gates"> {
           // on the inbox message; the command manufacture folds it onto the
           // Operation scope, so `getContext` sees it in-fiber). Any non-wire
           // invocation collapses to "host". The verified-only rule + latch throw
-          // stay in `override()`; we only add the audit's authorization identity.
+          // stay in `rawOverride`; we only supply the authorization identity.
           const rc = yield* getContext;
           const origin: GateOverrideOrigin = rc.origin === "wire" ? "wire" : "host";
-          const gate = this.controller.get(i.name);
-          if (gate === undefined) return yield* Effect.fail(new GateNotFound({ name: i.name }));
-          gate.override(i.value, i.reason, origin);
+          if (this.controller.get(i.name) === undefined) {
+            return yield* Effect.fail(new GateNotFound({ name: i.name }));
+          }
+          this.controller.rawOverride(i.name, i.value, i.reason, origin);
         }),
+    });
+
+    // Bind the journaled-mutation sink: from here on, the controller's public
+    // `clear` / `defer` / `override` (and its handles') route through these
+    // `gates:*` commands, so a HOST-side release is an audited, journaled
+    // Operation — the sibling contract. The commands above drive the RAW
+    // transition, so there is no recursion.
+    this.controller.bindMutations({
+      clear: (name) => this.clear({ name }),
+      defer: (name) => this.defer({ name }),
+      override: (name, value, reason) =>
+        this.override({ name, value, ...(reason !== undefined ? { reason } : {}) }),
     });
   }
 

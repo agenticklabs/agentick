@@ -81,7 +81,7 @@ export function stubResources(options: StubResourcesOptions = {}): ResourcesHarn
     subscribe(uri: string, listener: () => void): Unsubscribe {
       return updated.subscribe(uri, listener);
     },
-    subscribeListChanged(listener: () => void): Unsubscribe {
+    subscribeAll(listener: () => void): Unsubscribe {
       return listChanged.subscribe(listener);
     },
     notifyUpdated(uri: string): void {

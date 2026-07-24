@@ -165,7 +165,7 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
 
   /**
    * Mount-topology fan-out — fires after a successful `add-mount` /
-   * `remove-mount`. Mirrors `ResourcesHarness.subscribeListChanged`: a
+   * `remove-mount`. Mirrors `ResourcesHarness.subscribeAll`: a
    * plain notifier is the idiomatic "a mutation happened" seam (the raw
    * bus is a heavier `Stream` substrate for audit/observability). Consumed
    * by the roots↔MCP adapter (`@agentick/sandbox-next/mcp`) to fire
@@ -335,7 +335,7 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
    *
    * This is the "mounts changed" seam the roots↔MCP adapter binds to
    * (ADR 65). It is deliberately NOT the raw event bus: like
-   * `ResourcesHarness.subscribeListChanged`, a notifier is the right
+   * `ResourcesHarness.subscribeAll`, a notifier is the right
    * altitude for "a declaration changed" — the bus stays the audit/
    * observability substrate.
    */

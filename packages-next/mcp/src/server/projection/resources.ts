@@ -184,7 +184,7 @@ export function installResourcesHandlers(
   );
 
   // ─────────── notifications/resources/list_changed ───────────
-  const listChangedUnsub = source.subscribeListChanged(() => {
+  const listChangedUnsub = source.subscribeAll(() => {
     void sdkServer.sendResourceListChanged().catch(() => {
       // Connection probably closed mid-notification — silently drop.
     });

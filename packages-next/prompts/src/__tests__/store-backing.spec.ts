@@ -63,10 +63,10 @@ describe("PromptsHarness — store backing (the augmentation split)", () => {
     expect(persisted).not.toHaveProperty("template");
 
     // The sync projection COMBINES record + sidecar back into the full declaration.
-    const decl = h.getDeclaration("summarize");
+    const decl = h.get("summarize");
     expect(typeof decl?.render).toBe("function");
     // And it renders — the sidecar fn is live.
-    const result = await h.get({ name: "summarize", args: { docId: "42" } });
+    const result = await h.render({ name: "summarize", args: { docId: "42" } });
     expect(result.messages[0]!.content).toEqual([{ type: "text", text: "Summarize 42" }]);
     await h.close();
   });
@@ -83,7 +83,7 @@ describe("PromptsHarness — store backing (the augmentation split)", () => {
     expect((await store.get("p", stubStoreCtx()))?.description).toBe("new");
     expect(await store.get("p", stubStoreCtx())).not.toHaveProperty("render");
     // The sidecar render survives the update (not overwritten by the patch).
-    expect(typeof h.getDeclaration("p")?.render).toBe("function");
+    expect(typeof h.get("p")?.render).toBe("function");
     await h.close();
   });
 
@@ -95,7 +95,7 @@ describe("PromptsHarness — store backing (the augmentation split)", () => {
     await h.remove({ name: "p" });
     expect(await store.get("p", stubStoreCtx())).toBeUndefined();
     expect(h.has("p")).toBe(false);
-    expect(h.getDeclaration("p")).toBeUndefined();
+    expect(h.get("p")).toBeUndefined();
     await h.close();
   });
 
@@ -118,7 +118,7 @@ describe("PromptsHarness — store backing (the augmentation split)", () => {
     ]);
     expect(await store.get("alpha", stubStoreCtx())).not.toHaveProperty("render");
     // But the harness can render alpha — its sidecar has the fn.
-    const result = await h.get({ name: "alpha" });
+    const result = await h.render({ name: "alpha" });
     expect(result.messages[0]!.content).toEqual([{ type: "text", text: "a" }]);
     await h.close();
   });
@@ -168,9 +168,9 @@ describe("PromptsHarness — store backing (the augmentation split)", () => {
     expect(h2.has("p")).toBe(false);
     await h2.hydrate();
     // Record survives; augmentation does not — content is gone until re-register.
-    expect(h2.getDeclaration("p")?.description).toBe("P");
-    expect(h2.getDeclaration("p")?.template).toBeUndefined();
-    await expect(h2.get({ name: "p", args: { x: 1 } })).rejects.toMatchObject({
+    expect(h2.get("p")?.description).toBe("P");
+    expect(h2.get("p")?.template).toBeUndefined();
+    await expect(h2.render({ name: "p", args: { x: 1 } })).rejects.toMatchObject({
       _tag: "PromptMissingContent",
       name: "p",
     });

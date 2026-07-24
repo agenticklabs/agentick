@@ -13,6 +13,9 @@
 // `HookBridges` via TypeScript module augmentation. Per ADR 27, every
 // harness package owns its own slot declaration.
 import "./augment.js";
+// Side-effect import — merges the `state/*` rows into `WireMethods` (split out
+// so a future client subpath can type them without server-bridge code).
+import "./wire-augment.js";
 
 export { StateHarness, type StateHarnessOptions } from "./harness.js";
 export type { StateHandle } from "./handle.js";

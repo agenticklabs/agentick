@@ -11,7 +11,7 @@
  *   2. Run the security pipeline (`evaluateRequestPipeline`).
  *   3. Apply the per-connection `filter` over the canonical declarations.
  *   4. For `prompts/list`, return the projected list.
- *   5. For `prompts/get`, render via `harness.get(...)` and map the
+ *   5. For `prompts/get`, render via `harness.render(...)` and map the
  *      resulting `MessageEntry[]` to MCP's `PromptMessage[]` wire form.
  *
  * MCP `PromptMessage.role` is restricted to `"user" | "assistant"` —
@@ -111,7 +111,7 @@ export function installPromptsHandlers(
         throw Object.assign(new Error(`Unknown prompt: ${request.params.name}`), { code: -32602 });
       }
 
-      const result: PromptsGetResult = await options.source.get({
+      const result: PromptsGetResult = await options.source.render({
         name: request.params.name,
         ...(request.params.arguments ? { args: request.params.arguments } : {}),
       });

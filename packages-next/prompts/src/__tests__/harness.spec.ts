@@ -2,7 +2,7 @@
  * `PromptsHarness` — basic conformance.
  *
  * Pins for the core (non-framework) surface:
- *  - register / has / list / getDeclaration round-trip
+ *  - register / has / list / get round-trip
  *  - typed error on duplicate register / unknown name
  *  - argument validation: missing required, schema mismatch, passthrough of unknowns
  *  - native content dispatch: string → system message; MessageEntry[] passthrough
@@ -42,7 +42,7 @@ describe("PromptsHarness — registration", () => {
       },
     });
     expect(h.has("greet")).toBe(true);
-    expect(h.getDeclaration("greet")?.description).toBe("Greet the user");
+    expect(h.get("greet")?.description).toBe("Greet the user");
     expect(h.list()).toHaveLength(1);
   });
 
@@ -75,7 +75,7 @@ describe("PromptsHarness — invoke + native content", () => {
     await h.register({
       declaration: { name: "greet", description: "Greet", template: "Hello, world." },
     });
-    const result = await h.get({ name: "greet" });
+    const result = await h.render({ name: "greet" });
     expect(result.description).toBe("Greet");
     expect(result.messages).toHaveLength(1);
     expect(result.messages[0]!.role).toBe("system");
@@ -92,7 +92,7 @@ describe("PromptsHarness — invoke + native content", () => {
         render: (args) => `Summarize doc ${String(args.docId)}.`,
       },
     });
-    const result = await h.get({ name: "summarize", args: { docId: "42" } });
+    const result = await h.render({ name: "summarize", args: { docId: "42" } });
     expect(result.messages[0]!.content).toEqual([{ type: "text", text: "Summarize doc 42." }]);
   });
 
@@ -116,14 +116,14 @@ describe("PromptsHarness — invoke + native content", () => {
         ],
       },
     });
-    const result = await h.get({ name: "multi" });
+    const result = await h.render({ name: "multi" });
     expect(result.messages).toHaveLength(2);
     expect(result.messages.map((m) => m.role)).toEqual(["system", "user"]);
   });
 
   it("PromptNotFound on unknown name", async () => {
     const h = await makeHarness();
-    await expect(h.get({ name: "nope" })).rejects.toMatchObject({
+    await expect(h.render({ name: "nope" })).rejects.toMatchObject({
       _tag: "PromptNotFound",
       name: "nope",
     });
@@ -132,7 +132,7 @@ describe("PromptsHarness — invoke + native content", () => {
   it("PromptMissingContent when neither template nor render", async () => {
     const h = await makeHarness();
     await h.register({ declaration: { name: "empty", description: "empty" } });
-    await expect(h.get({ name: "empty" })).rejects.toMatchObject({
+    await expect(h.render({ name: "empty" })).rejects.toMatchObject({
       _tag: "PromptMissingContent",
       name: "empty",
     });
@@ -149,7 +149,7 @@ describe("PromptsHarness — invoke + native content", () => {
         },
       },
     });
-    await expect(h.get({ name: "boom" })).rejects.toMatchObject({
+    await expect(h.render({ name: "boom" })).rejects.toMatchObject({
       _tag: "PromptRenderFailed",
       name: "boom",
     });
@@ -167,7 +167,7 @@ describe("PromptsHarness — argument validation", () => {
         render: (args) => `got ${String(args.x)}`,
       },
     });
-    await expect(h.get({ name: "p" })).rejects.toMatchObject({
+    await expect(h.render({ name: "p" })).rejects.toMatchObject({
       _tag: "PromptArgumentMissing",
       name: "p",
       argument: "x",
@@ -184,7 +184,7 @@ describe("PromptsHarness — argument validation", () => {
         render: (args) => `got ${String(args.x ?? "default")}`,
       },
     });
-    const result = await h.get({ name: "p" });
+    const result = await h.render({ name: "p" });
     expect(result.messages[0]!.content).toEqual([{ type: "text", text: "got default" }]);
   });
 
@@ -210,7 +210,7 @@ describe("PromptsHarness — argument validation", () => {
         render: (args) => `got ${String(args.n)}`,
       },
     });
-    const result = await h.get({ name: "p", args: { n: 42 } });
+    const result = await h.render({ name: "p", args: { n: 42 } });
     expect(result.messages[0]!.content).toEqual([{ type: "text", text: "got 42" }]);
   });
 
@@ -236,7 +236,7 @@ describe("PromptsHarness — argument validation", () => {
         render: (args) => `got ${String(args.n)}`,
       },
     });
-    await expect(h.get({ name: "p", args: { n: "oops" } })).rejects.toMatchObject({
+    await expect(h.render({ name: "p", args: { n: "oops" } })).rejects.toMatchObject({
       _tag: "PromptArgumentInvalid",
       name: "p",
       argument: "n",
@@ -269,7 +269,7 @@ describe("PromptsHarness — custom renderer dispatch", () => {
         render: () => ({ __marker: true }) as unknown,
       },
     });
-    const result = await h.get({ name: "p", args: { x: "hello" } });
+    const result = await h.render({ name: "p", args: { x: "hello" } });
     expect(result.messages[0]!.content).toEqual([{ type: "text", text: "rendered hello" }]);
   });
 
@@ -282,7 +282,7 @@ describe("PromptsHarness — custom renderer dispatch", () => {
         render: () => ({ unknown: "shape" }) as unknown,
       },
     });
-    await expect(h.get({ name: "p" })).rejects.toMatchObject({
+    await expect(h.render({ name: "p" })).rejects.toMatchObject({
       _tag: "PromptRenderFailed",
       name: "p",
     });
@@ -304,7 +304,7 @@ describe("PromptsHarness — snapshot round-trip", () => {
 
     const h2 = await makeHarness();
     h2.importSnapshot(snapshot);
-    const decl = h2.getDeclaration("p");
+    const decl = h2.get("p");
     expect(decl?.name).toBe("p");
     expect(decl?.description).toBe("p-desc");
     expect(decl?.arguments).toEqual([{ name: "x", required: true }]);

@@ -34,11 +34,17 @@ export function runStateHarnessConformance(deps: StateHarnessFactoryDeps): void 
       await h.close();
     });
 
-    it("list() returns current keys", async () => {
+    it("list() returns current entries", async () => {
       const h = await deps.make();
       await h.set({ key: "a", value: 1 });
       await h.set({ key: "b", value: 2 });
-      expect([...h.list()].sort()).toEqual(["a", "b"]);
+      expect([...h.list()].map((e) => e.key).sort()).toEqual(["a", "b"]);
+      expect(new Map(h.list().map((e) => [e.key, e.value]))).toEqual(
+        new Map([
+          ["a", 1],
+          ["b", 2],
+        ]),
+      );
       await h.close();
     });
   });

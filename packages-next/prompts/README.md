@@ -1,6 +1,6 @@
 # @agentick/prompts-next
 
-`PromptsHarness` — durable parameterized prompt library. Adopters register prompts with names, descriptions, optional arguments, and content; agents (or admin tooling) invoke them by name with arguments to produce a sequence of role-bearing messages — either queued onto the session timeline (`invoke`) or returned for caller-managed handling (`get`).
+`PromptsHarness` — durable parameterized prompt library. Adopters register prompts with names, descriptions, optional arguments, and content; agents (or admin tooling) invoke them by name with arguments to produce a sequence of role-bearing messages — either queued onto the session timeline (`invoke`) or returned for caller-managed handling (`render`).
 
 Mirrors MCP's `prompts/*` shape per [ADR 23](../../docs/proposals/v2/blueprint/23-mcp-as-harness.md) so an MCP server harness can project our prompts onto the wire without translation.
 
@@ -142,28 +142,36 @@ The split **composes** rather than being hand-rolled: an eager `View<PromptDecla
 - **`register` / `update`** write the record through the view (`store.mutate`) **and** re-attach `{ template, render }` to the sidecar. **`remove`** drops both.
 - **`render`/`template` can NEVER reach the store** — the `PromptDeclarationRecord` type makes that a _compile-time_ guarantee, not a discipline. (Contrast tasks' hand-rolled `LiveTask` cache, where the record and the live handles are read together at every site AND the snapshot includes the record slice, so splitting would only distort. Prompts is the opposite: `exportSnapshot` and the store want records _without_ the fns, so the split earns its keep.)
 - **Loaders stay _sources_ that FEED the store + sidecar** — not dissolved into them. `reload()` runs each loader's `load()` and registers the results; `resolve(name)` (lookup-on-miss) asks each loader's `lookup()` then registers the hit. `fromModule`/`fromArray` carry `render` fns (→ sidecar); `fromStaticUrl` is template-only.
-- **`getDeclaration` / `has` / `list` are synchronous**, served from the eager projection (write-through on mutation, `hydrate()` on resume). The projection is required, not incidental — the sync `exportSnapshot()` (`SnapshotCapable`, captured synchronously by the compiler) and the sync read surface are both load-bearing sync callers, so a synchronous materialized view is mandatory.
+- **`get` / `has` / `list` are synchronous**, served from the eager projection (write-through on mutation, `hydrate()` on resume). The projection is required, not incidental — the sync `exportSnapshot()` (`SnapshotCapable`, captured synchronously by the compiler) and the sync read surface are both load-bearing sync callers, so a synchronous materialized view is mandatory.
 - **`exportSnapshot` / `importSnapshot` coexist** with the store today (a Phase-4 manifest sweep makes the store the sole snapshot authority later). `exportSnapshot` materializes the projection records directly — the augmentation is dropped **by construction**, not by per-field stripping. A durable adapter (Postgres, a filesystem source) conforms to the same `PromptStore` port.
 
 ## API — `PromptsHandle` on `session.prompts`
 
 | Method                          | Async? | Effect                                                   |
 | ------------------------------- | ------ | -------------------------------------------------------- |
-| `getDeclaration(name)`          | sync   | Read a declaration                                       |
+| `get(name)`                     | sync   | Read a declaration (the sync family-grammar `get`)       |
 | `has(name)`                     | sync   | Existence check                                          |
 | `list()`                        | sync   | All declarations (sorted by name)                        |
 | `register({ declaration })`     | async  | Create. Throws `PromptAlreadyExists` on duplicate        |
 | `update({ name, declaration })` | async  | Partial update. Throws `PromptNotFound` if missing       |
 | `remove({ name })`              | async  | Delete. Idempotent                                       |
 | `invoke({ name, args? })`       | async  | Render + queue to timeline; returns `PromptsGetResult`   |
-| `get({ name, args? })`          | async  | Render only; returns `PromptsGetResult` without queueing |
+| `render({ name, args? })`       | async  | Render only; returns `PromptsGetResult` without queueing |
 | `subscribe(name, listener)`     | sync   | Listen for a specific prompt's mutations                 |
 | `subscribeAll(listener)`        | sync   | Listen for any mutation                                  |
 
-### `invoke` vs `get`
+> **Naming (three-audiences-plan G-prep).** `get(name)` is the SYNC declaration
+> read (family convention, matching `session.knobs.get` / `session.state.get`);
+> the async RENDER is `render(input)`. The wire verbs match: `prompts/get` reads
+> the declaration record, `prompts/render` renders, `prompts/list` enumerates,
+> `prompts/invoke` renders + queues — all `exposure: "wire"`, deny-by-default.
+> The wire read projections are the serializable `PromptDeclarationRecord` slice
+> (`template`/`render` fns never cross).
+
+### `invoke` vs `render`
 
 - **`invoke`** — renders + queues each message onto `bridges.timeline.queue` (same path explicit user input takes). On the next `session.send`, queued messages drain into the durable timeline before the first tick. Use when the prompt is part of the conversation.
-- **`get`** — renders without queueing. Returns `{ description, messages }`. Use for MCP server `prompts/get`, snapshot tests, doc generators, programmatic message construction.
+- **`render`** — renders without queueing. Returns `{ description, messages }`. Use for MCP server `prompts/get`, snapshot tests, doc generators, programmatic message construction.
 
 ### Typed errors
 
@@ -290,7 +298,7 @@ const decl = await session.prompts.require("must_exist");
 // → throws { _tag: "PromptNotFound", name: "must_exist" } if no source has it.
 ```
 
-`reload({ pruneMissing: true })` removes entries that have disappeared from sources — off by default so a runtime `harness.register(...)` isn't clobbered. The lookup-on-miss path is transparent in `invoke()` / `get()`; call `resolve()` directly when you want the declaration without rendering. Loaders may implement an optional `lookup(name)` for fast-path resolution; the built-in `fromX` factories do.
+`reload({ pruneMissing: true })` removes entries that have disappeared from sources — off by default so a runtime `harness.register(...)` isn't clobbered. The lookup-on-miss path is transparent in `invoke()` / `render()`; call `resolve()` directly when you want the declaration without rendering. Loaders may implement an optional `lookup(name)` for fast-path resolution; the built-in `fromX` factories do.
 
 ## Status & roadmap
 
@@ -318,8 +326,9 @@ const decl = await session.prompts.require("must_exist");
 
 ## Verified by
 
-- `src/__tests__/harness.spec.ts` — full surface coverage (register/update/remove, invoke + get, native + custom content dispatch, argument validation, snapshot round-trip, typed errors)
-- `src/__tests__/store-backing.spec.ts` — the record/sidecar split: record written to the store WITHOUT the fns, `update`/`remove` propagation, loaders (`reload` / `resolve`) feed store + sidecar, `invoke`/`get` combine the two halves, `exportSnapshot` drops fns, `hydrate()` restores records-only, plus `runPromptStoreConformance` against `InMemoryPromptStore`
+- `src/__tests__/harness.spec.ts` — full surface coverage (register/update/remove, invoke + render, `get(name)` declaration read, native + custom content dispatch, argument validation, snapshot round-trip, typed errors)
+- `@agentick/transport-in-process-next` `src/__tests__/wire-reads-e2e.spec.ts` — `prompts/list` round-trips as wire-safe records (no `template`/`render` fns) over the real gateway + dynamic lane; `commands/list` enumerates the wire verbs
+- `src/__tests__/store-backing.spec.ts` — the record/sidecar split: record written to the store WITHOUT the fns, `update`/`remove` propagation, loaders (`reload` / `resolve`) feed store + sidecar, `invoke`/`render` combine the two halves, `exportSnapshot` drops fns, `hydrate()` restores records-only, plus `runPromptStoreConformance` against `InMemoryPromptStore`
 
 ## See also
 

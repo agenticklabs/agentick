@@ -52,7 +52,7 @@
  * insert returning an `Unsubscribe`. Two distinct notifier streams:
  *   - `subscribe(uri, listener)`   fires on `notifyUpdated(uri)`
  *     → MCP `notifications/resources/updated`.
- *   - `subscribeListChanged(listener)` fires on register / unregister / reload
+ *   - `subscribeAll(listener)` fires on register / unregister / reload
  *     → MCP `notifications/resources/list_changed`.
  *
  * @see docs/proposals/v2/blueprint/62-resources-harness.md
@@ -461,7 +461,7 @@ export class ResourcesHarness
     return this.updatedNotifier.subscribe(uri, listener);
   }
 
-  subscribeListChanged(listener: () => void): Unsubscribe {
+  subscribeAll(listener: () => void): Unsubscribe {
     return this.listChangedNotifier.subscribe(listener);
   }
 

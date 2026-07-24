@@ -18,14 +18,16 @@ import type {
 } from "@agentick/spec-next";
 
 export interface PromptsHandle {
-  getDeclaration(name: string): PromptDeclaration | undefined;
+  /** Look up a prompt declaration by name (sync family-grammar `get`). */
+  get(name: string): PromptDeclaration | undefined;
   has(name: string): boolean;
   list(): readonly PromptDeclaration[];
   register(input: PromptsRegisterInput): Promise<PromptDeclaration>;
   update(input: PromptsUpdateInput): Promise<PromptDeclaration>;
   remove(input: PromptsRemoveInput): Promise<void>;
   invoke(input: PromptsInvokeInput): Promise<PromptsGetResult>;
-  get(input: PromptsGetInput): Promise<PromptsGetResult>;
+  /** Render a prompt to messages WITHOUT queueing (the async render). */
+  render(input: PromptsGetInput): Promise<PromptsGetResult>;
   subscribe(name: string, listener: () => void): Unsubscribe;
   subscribeAll(listener: () => void): Unsubscribe;
 

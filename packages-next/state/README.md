@@ -80,7 +80,7 @@ Reach for knobs when it should.
 await session.state.set({ key: "draftCount", value: 0 });
 session.state.get("draftCount"); // 0
 session.state.has("draftCount"); // true
-session.state.list(); // ["draftCount"]
+session.state.list(); // [{ key: "draftCount", value: 0 }]
 
 const off = session.state.subscribe("draftCount", () => rerender());
 await session.state.delete({ key: "draftCount" }); // fires the subscriber
@@ -115,12 +115,21 @@ an unmount → remount of the component and a hibernate → resume of the sessio
   `StateHarnessOptions.store` overrides the durable value store (defaults to a
   fresh in-memory `createStateStore()`).
   - Sync reads: `get(key)` · `has(key)` · `list()` · `subscribe(key, fn)` ·
-    `subscribeAll(fn)`.
+    `subscribeAll(fn)`. `list()` returns `{ key, value }` entries (the sibling
+    projection depth — knobs descriptors, skills records), not bare keys.
   - Notify seam (ADR 75): `onChange(fn)` — typed push carrying the delta
     (`ChangeEvent<unknown>`): `set` → add/update, `delete` → remove. The push
     twin of the bare `subscribe` render-ping; the source a future `state`
     snapshot+delta channel projects from.
   - Async commands: `set({ key, value })` · `delete({ key })`.
+- **Wire surface (`exposure: "wire"`, deny-by-default).** All four verbs
+  project onto the dynamic-command lane so a client `session.state` handle can
+  read AND mutate (three-audiences-plan G-prep — state had no read command and
+  its mutations were exposure-less, so nothing was wire-reachable): `state/get`
+  (`{ key }` → value) · `state/list` (→ `{ key, value }` entries) · `state/set`
+  · `state/delete`. The `WireMethods` rows live in a type-only `wire-augment.ts`
+  split (the `export {}` guard is load-bearing) so a future client subpath types
+  them without pulling server-bridge code.
   - Snapshot: `exportSnapshot()` / `importSnapshot(values)`.
   - Store: `hydrate()` reloads the durable store into the sync projection
     (resume seam; not wired into session resume — `importSnapshot` owns that).
@@ -201,7 +210,10 @@ Extracted per ADR 26 Step 3a, modularized per ADR 27. Green.
   persistence across unmount → remount when the bridge is reused, and
   reactivity to external `set` against the real `CompilerHarness`.
 - `src/conformance.ts` — `runStateHarnessConformance` exports the protocol
-  battery for adopter impls.
+  battery for adopter impls (`list()` returns `{ key, value }` entries).
+- `@agentick/transport-in-process-next` `src/__tests__/wire-reads-e2e.spec.ts` —
+  `state/get` + `state/list` + `state/set` round-trip over the real gateway +
+  dynamic lane, `commands/list` enumerates them, deny-by-default preserved.
 
 @see [`docs/proposals/v2/blueprint/26-harness-api-shape.md`](../../docs/proposals/v2/blueprint/26-harness-api-shape.md)
 @see [`docs/proposals/v2/blueprint/27-modular-built-ins.md`](../../docs/proposals/v2/blueprint/27-modular-built-ins.md)
