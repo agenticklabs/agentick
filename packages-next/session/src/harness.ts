@@ -1068,7 +1068,11 @@ export class SessionHarness<P = unknown>
 
   // ──────── SessionHarnessProtocol ────────
 
-  send(input: SendInput<P>): Promise<SessionExecutionHandle> {
+  send<T = unknown>(input: SendInput<P, T>): Promise<SessionExecutionHandle<T>> {
+    // The internal pipeline (sendBody, the deferred, the handle) is erased to
+    // `unknown` data; the boundary cast narrows what the send path's schema
+    // validation guarantees (`data` conforms to `input.output` or `.result`
+    // rejects typed) — the same one-boundary cast skills.run makes.
     return runHarnessProtocol(
       this.sessionOp("send", input, (i) =>
         Effect.tryPromise({
@@ -1076,7 +1080,7 @@ export class SessionHarness<P = unknown>
           catch: (cause): SessionError => coerceSessionError(cause),
         }),
       ),
-    );
+    ) as Promise<SessionExecutionHandle<T>>;
   }
 
   // ──────── Top-level harness handles (ADR 27 augmentations) ────────

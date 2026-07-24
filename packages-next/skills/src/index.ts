@@ -13,7 +13,7 @@
 import "./augment.js";
 
 export { SkillsHarness, type SkillsHarnessOptions } from "./harness.js";
-export type { SkillsHandle, SkillRunCompose, SkillRunOptions, SkillRunResult } from "./handle.js";
+export type { SkillsHandle, SkillRunCompose, SkillRunOptions } from "./handle.js";
 export { defaultComposeRun } from "./compose-run.js";
 export { withSkills, type WithSkillsOptions } from "./extension.js";
 export { runSkillsHarnessConformance } from "./conformance.js";

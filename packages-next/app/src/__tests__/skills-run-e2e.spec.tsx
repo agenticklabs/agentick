@@ -8,8 +8,10 @@
  * (§B2) end-to-end. The skills harness has NO session access of its own; if the
  * injection did not fire, `run` would throw `SkillRunnerUnbound`.
  *
- * Scripted through a recording executor (deterministic — model behavior is the
- * eval tier, never asserted here). An app-level `echo` tool makes the run's
+ * Scripted through the CANONICAL `FakeLanguageModelExecutor`
+ * (`@agentick/model-executor-next`) — never a bespoke executor stub
+ * (deterministic; model behavior is the eval tier, never asserted here).
+ * The steer race rides the fake's scripted `holdUntil` knob. An app-level `echo` tool makes the run's
  * send "tools-mounted", so the auto strategy resolves to the terminal tool.
  *
  * Covers:
@@ -24,18 +26,17 @@
 
 import React from "react";
 import { describe, expect, it } from "vitest";
-import { Effect } from "effect";
 
 import { createApp } from "../react.js";
 import { withSkills } from "@agentick/skills-next";
+import {
+  FakeLanguageModelExecutor,
+  type FakeLanguageModelExecutorOptions,
+} from "@agentick/model-executor-next";
+import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime-next";
 import type {
-  ExecutorFx,
-  ExecutorTerminal,
   ExecutionTarget,
   LanguageModelExecutionResult,
-  LanguageModelExecutor,
-  LanguageModelInput,
-  RunInput,
   StandardSchemaV1,
   ToolDeclaration,
   ToolHandler,
@@ -80,53 +81,17 @@ const textResult = (text: string): LanguageModelExecutionResult => ({
   usage,
 });
 
-/** A scripted executor. `gateFirst` holds the FIRST `run()` on a gate so a
- *  concurrent send lands mid-execution (for the steer test). */
-function mkExecutor(
-  scripts: readonly LanguageModelExecutionResult[],
-  gateFirst = false,
-): { readonly executor: LanguageModelExecutor; release: () => void } {
-  let releaseFn: () => void = () => {};
-  const gate = new Promise<void>((r) => {
-    releaseFn = r;
-  });
-  let i = 0;
-  let calls = 0;
-  const nextResult = (): LanguageModelExecutionResult =>
-    scripts[Math.min(i++, scripts.length - 1)]!;
-  const runFx = (): Effect.Effect<ExecutorTerminal<LanguageModelExecutionResult>> =>
-    Effect.gen(function* () {
-      calls += 1;
-      if (gateFirst && calls === 1) yield* Effect.promise(() => gate);
-      return { outcome: "succeeded", result: nextResult() };
-    });
-  const fx: ExecutorFx<LanguageModelInput, unknown, LanguageModelExecutionResult> = {
-    use: () => () => {},
-    run: runFx as (i: RunInput) => Effect.Effect<ExecutorTerminal<LanguageModelExecutionResult>>,
-    project: () => Effect.succeed({ messages: [] }),
-    normalize: () => Effect.succeed(scripts[0]!),
-    executeStream: () => Effect.succeed(scripts[0]!),
-  };
-  const executor = {
-    family: "language-model" as const,
-    target,
-    ready: Promise.resolve(),
-    fx,
-    async project(): Promise<LanguageModelInput> {
-      return { messages: [] };
-    },
-    async execute(): Promise<unknown> {
-      return scripts[0]!;
-    },
-    async normalize(): Promise<LanguageModelExecutionResult> {
-      return scripts[0]!;
-    },
-    run(): Promise<ExecutorTerminal<LanguageModelExecutionResult>> {
-      return Effect.runPromise(runFx());
-    },
-    async abort(): Promise<void> {},
-  } as unknown as LanguageModelExecutor;
-  return { executor, release: () => releaseFn() };
+/** The canonical fake, on its own local substrate (it is a BaseHarness). */
+function fakeExecutor(
+  scripted: FakeLanguageModelExecutorOptions["scripted"],
+): FakeLanguageModelExecutor {
+  return new FakeLanguageModelExecutor(
+    `fake-${ulid()}`,
+    new MemoryJournal(),
+    new LocalEventBus(),
+    new LocalInbox(),
+    { scripted, target },
+  );
 }
 
 const echoTool: ToolDeclaration = {
@@ -150,7 +115,7 @@ const reviewSkill = {
 
 describe("session.skills!.run — e2e through createApp (C-core injection + §B2)", () => {
   it("run WITH output: the injected runner delivers typed data + text + output_delivered", async () => {
-    const { executor } = mkExecutor([terminalCall({ answer: "approved" })]);
+    const executor = fakeExecutor({ result: terminalCall({ answer: "approved" }) });
     const app = await createApp(React.createElement(Agent), {
       modelExecutor: executor,
       tools: [echoTool],
@@ -159,38 +124,42 @@ describe("session.skills!.run — e2e through createApp (C-core injection + §B2
     });
     const session = await app.createSession({ sessionId: "s-run-1" });
 
-    const r = await session.skills!.run("review", {
+    const handle = await session.skills!.run("review", {
       args: { diff: "a-change" },
       output: answerSchema,
       maxTicks: 5,
     });
+    // The send grammar, verbatim (C1.1): streaming/abort/status on the handle,
+    // the typed outcome on `.result`.
+    expect(typeof handle.events).toBe("function");
+    const r = await handle.result;
 
     expect(r.data).toEqual({ answer: "approved" });
-    expect(r.text).toBe("here is your result");
+    expect(r.response).toBe("here is your result");
     expect(r.stopReason).toBe("output_delivered");
-    expect(typeof r.executionId).toBe("string");
+    expect(r.executionId).toBe(handle.executionId);
     await session.close();
     await app.close();
   });
 
   it("run WITHOUT output: text only, no data", async () => {
-    const { executor } = mkExecutor([textResult("a plain answer")]);
+    const executor = fakeExecutor({ result: textResult("a plain answer") });
     const app = await createApp(React.createElement(Agent), {
       modelExecutor: executor,
       extensions: [withSkills({ initial: [reviewSkill] })],
     });
     const session = await app.createSession({ sessionId: "s-run-2" });
 
-    const r = await session.skills!.run("review", { args: { diff: "x" } });
+    const r = await (await session.skills!.run("review", { args: { diff: "x" } })).result;
 
-    expect(r.text).toBe("a plain answer");
+    expect(r.response).toBe("a plain answer");
     expect("data" in r).toBe(false);
     await session.close();
     await app.close();
   });
 
   it("missing skill → SkillNotFound", async () => {
-    const { executor } = mkExecutor([textResult("noop")]);
+    const executor = fakeExecutor({ result: textResult("noop") });
     const app = await createApp(React.createElement(Agent), {
       modelExecutor: executor,
       extensions: [withSkills({ initial: [reviewSkill] })],
@@ -207,10 +176,14 @@ describe("session.skills!.run — e2e through createApp (C-core injection + §B2
   it("run carrying output that RACES an in-flight execution → SteerCannotCarryStructuredOutput", async () => {
     // First send is gated (in-flight); the skill run with `output` joins it as a
     // steer and is rejected — the existing guard, surfaced honestly.
-    const { executor, release } = mkExecutor(
-      [textResult("in-flight turn"), textResult("would-be skill turn")],
-      true,
-    );
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const executor = fakeExecutor([
+      { result: textResult("in-flight turn"), holdUntil: gate },
+      { result: textResult("would-be skill turn") },
+    ]);
     const app = await createApp(React.createElement(Agent), {
       modelExecutor: executor,
       tools: [echoTool],

@@ -7,7 +7,8 @@
  *
  *   - default composition (system-role skill body + user-role serialized args)
  *   - the `composeRun` seam override
- *   - `SendResult` → `SkillRunResult` projection (with / without `output`)
+ *   - handle pass-through (the run IS a send — one grammar; `data`/`response`
+ *     arrive via `handle.result`, streaming via `handle.events()`)
  *   - `isolate: true` → `SkillIsolationUnavailable` (C2 deferral, never inline)
  *   - missing skill → `SkillNotFound` propagates (via `require`)
  *   - no bound runner → `SkillRunnerUnbound` (not an undefined-crash)
@@ -173,8 +174,8 @@ describe("skills.run — composeRun seam", () => {
   });
 });
 
-describe("skills.run — result projection", () => {
-  it("with output: validated data + text + stopReason + ids project onto SkillRunResult", async () => {
+describe("skills.run — handle pass-through (one grammar with send)", () => {
+  it("with output: the handle's result carries typed data + response + stopReason + ids", async () => {
     const h = await mkHarness();
     await h.register({ name: "extract", description: "x", content: "body" });
     const { send } = stubRunner({
@@ -188,10 +189,16 @@ describe("skills.run — result projection", () => {
     });
     h.bindRunner(send);
 
-    const r = await h.run<{ approved: boolean }>("extract", { output: {} as never });
+    const handle = await h.run<{ approved: boolean }>("extract", { output: {} as never });
+    // The send grammar, verbatim: streaming + abort + status live on the handle
+    // (the stub's handle id; the scripted RESULT carries its own).
+    expect(handle.executionId).toBe("exec-1");
+    expect(typeof handle.events).toBe("function");
+    expect(typeof handle.abort).toBe("function");
 
+    const r = await handle.result;
     expect(r.data).toEqual({ approved: true });
-    expect(r.text).toBe("here you go");
+    expect(r.response).toBe("here you go");
     expect(r.stopReason).toBe("output_delivered");
     expect(r.ticks).toBe(2);
     expect(r.executionId).toBe("exec-xyz");
@@ -199,28 +206,29 @@ describe("skills.run — result projection", () => {
     await h.close();
   });
 
-  it("without output: text is returned, data is absent", async () => {
+  it("without output: response is returned, data is absent", async () => {
     const h = await mkHarness();
     await h.register({ name: "chat", description: "x", content: "body" });
     const { send } = stubRunner({ result: mkSendResult({ response: "just text" }) });
     h.bindRunner(send);
 
-    const r = await h.run("chat");
+    const r = await (await h.run("chat")).result;
 
-    expect(r.text).toBe("just text");
+    expect(r.response).toBe("just text");
     expect("data" in r).toBe(false);
     await h.close();
   });
 
-  it("a send rejection (e.g. validation failure) propagates through run", async () => {
+  it("a send rejection (e.g. validation failure) surfaces on handle.result, not run()", async () => {
     const h = await mkHarness();
     await h.register({ name: "s", description: "x", content: "body" });
     const { send } = stubRunner({ reject: new Error("ResponseValidationError-ish") });
     h.bindRunner(send);
 
-    await expect(h.run("s", { output: {} as never })).rejects.toThrow(
-      "ResponseValidationError-ish",
-    );
+    // run() itself resolves — the handle is the contract; the typed failure
+    // rides `.result`, exactly as it does for session.send.
+    const handle = await h.run("s", { output: {} as never });
+    await expect(handle.result).rejects.toThrow("ResponseValidationError-ish");
     await h.close();
   });
 });

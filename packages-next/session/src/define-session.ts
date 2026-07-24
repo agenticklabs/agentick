@@ -244,7 +244,7 @@ class CallbackSessionHarness<P = unknown>
 
   // ──────── SessionHarnessProtocol — core ────────
 
-  send(input: SendInput<P>): Promise<SessionExecutionHandle> {
+  send<T = unknown>(input: SendInput<P, T>): Promise<SessionExecutionHandle<T>> {
     const op: Operation<SendInput<P>, SessionExecutionHandle> = {
       opId: `session:send:${ulid()}`,
       surface: "session",
@@ -252,6 +252,8 @@ class CallbackSessionHarness<P = unknown>
       scope: { sessionId: this.scopeId },
       input,
     };
+    // Same one-boundary cast as the reference harness: the pipeline is erased
+    // to `unknown` data; the caller's `output` schema is the narrowing truth.
     return runHarnessProtocol(
       this.runOperation(op, (i) =>
         Effect.tryPromise({
@@ -259,7 +261,7 @@ class CallbackSessionHarness<P = unknown>
           catch: (cause): SessionError => coerceSessionError(cause),
         }),
       ),
-    );
+    ) as Promise<SessionExecutionHandle<T>>;
   }
 
   async snapshot(): Promise<SessionSnapshot> {

@@ -41,6 +41,7 @@ import type {
   SkillsRemoveInput,
   SkillsSearchInput,
   SkillsUpdateInput,
+  SessionExecutionHandle,
 } from "@agentick/spec-next";
 import {
   HandlerError,
@@ -53,7 +54,7 @@ import { View } from "@agentick/store-next";
 import { omitUndefined } from "@agentick/utils-next";
 
 import type { SkillLoader } from "./loaders.js";
-import type { SkillRunCompose, SkillRunOptions, SkillRunResult } from "./handle.js";
+import type { SkillRunCompose, SkillRunOptions } from "./handle.js";
 import { defaultComposeRun } from "./compose-run.js";
 import { InMemorySkillStore, matchesSkillQuery } from "./store.js";
 
@@ -230,7 +231,8 @@ export class SkillsHarness
 
   /**
    * Run a skill: compose a send from the skill's content, execute it via the
-   * bound runner, project the `SendResult` into a {@link SkillRunResult}. The
+   * bound runner, and return the execution handle unchanged — one grammar with
+   * `session.send`. The
    * skill guides; the MODEL executes (Flue-aligned — skills add no executable
    * capability). Inline only in C-core.
    *
@@ -241,7 +243,10 @@ export class SkillsHarness
    *   `output`-carrying run that joins an in-flight execution),
    *   `ResponseValidationError` / `StructuredOutputIncomplete` (§B2).
    */
-  async run<T = unknown>(name: string, opts: SkillRunOptions<T> = {}): Promise<SkillRunResult<T>> {
+  async run<T = unknown>(
+    name: string,
+    opts: SkillRunOptions<T> = {},
+  ): Promise<SessionExecutionHandle<T>> {
     if (opts.isolate === true) {
       // C-core is inline-only — never silently degrade an isolation request.
       // TODO(C2): route isolated runs through `session.fork()` (same-image,
@@ -256,18 +261,13 @@ export class SkillsHarness
     // Throws SkillNotFound on a miss — let it propagate (must-exist contract).
     const skill = await this.require(name);
     const input: SendInput = this.composeRun(skill, opts as SkillRunOptions);
-    const handle = await this.runner(input);
-    // `.result` may reject (steer-conflict, validation, incomplete) — propagate
-    // the typed error rather than swallowing it into a partial result.
-    const result = await handle.result;
-    return {
-      ...(result.data !== undefined ? { data: result.data as T } : {}),
-      text: result.response,
-      usage: result.usage,
-      ticks: result.ticks,
-      stopReason: result.stopReason,
-      executionId: result.executionId,
-    };
+    // The run IS a send — the handle passes through untouched (streaming via
+    // `for await (const ev of handle.events())`, `abort()`, `status`, and the
+    // typed `result`: `data` is validated against `opts.output` by the send
+    // path, so the cast narrows what validation already guarantees).
+    // `.result` may reject (steer-conflict, validation, incomplete) — the
+    // typed error propagates to whoever awaits it.
+    return (await this.runner(input)) as SessionExecutionHandle<T>;
   }
 
   // ─────────── Dynamic surface ───────────

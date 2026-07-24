@@ -180,7 +180,7 @@ export interface TurnBoundaryEntry {
  * context without JSX. Deferred to a later phase; JSX is the primary
  * path for v2.
  */
-export interface SendInput<P = unknown> {
+export interface SendInput<P = unknown, T = unknown> {
   readonly messages?: ReadonlyArray<SendMessageInput>;
   readonly props?: P;
   readonly metadata?: Readonly<Record<string, unknown>>;
@@ -328,7 +328,7 @@ export interface SendInput<P = unknown> {
    * (natural path → forced wrap-up tick → typed failure) before framing it as
    * a general structured-output promise.
    */
-  readonly output?: import("../data/standard-schema.js").StandardSchemaV1<unknown, unknown>;
+  readonly output?: import("../data/standard-schema.js").StandardSchemaV1<unknown, T>;
 }
 
 /**
@@ -363,7 +363,7 @@ export interface SendMessageInput {
  *
  * `[V1-INHERITED]` of `SendResult` in `packages/core/src/app/types.ts`.
  */
-export interface SendResult {
+export interface SendResult<T = unknown> {
   /** Concatenated text from all assistant messages produced. */
   readonly response: string;
   /** All content blocks the executor produced (text + tool_use + etc.). */
@@ -394,7 +394,7 @@ export interface SendResult {
    * `ResponseValidationError` rather than resolving an unvalidated `data`. The
    * wire `SendResult` never carries `data` — the schema never crossed.
    */
-  readonly data?: unknown;
+  readonly data?: T;
 }
 
 // ============================================================================
@@ -426,9 +426,9 @@ export interface SendResult {
  * The iterator completes after the final `result` StreamEvent is
  * yielded.
  */
-export interface SessionExecutionHandle {
+export interface SessionExecutionHandle<T = unknown> {
   readonly executionId: string;
-  readonly result: Promise<SendResult>;
+  readonly result: Promise<SendResult<T>>;
   readonly status: "running" | "completed" | "error" | "aborted";
   /**
    * The event stream — `for await (const ev of handle.events())`.
@@ -729,7 +729,7 @@ export interface SessionHarnessProtocol<P = unknown> {
    *
    * @throws {SessionError}
    */
-  send(input: SendInput<P>): Promise<SessionExecutionHandle>;
+  send<T = unknown>(input: SendInput<P, T>): Promise<SessionExecutionHandle<T>>;
 
   /**
    * Capture the current state as a serializable snapshot. Routed through

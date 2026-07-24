@@ -129,6 +129,13 @@ export interface MockScriptedRun {
    * goes through `abort()` / the lifecycle; this is the *scripted* variant.)
    */
   readonly outcome?: "failed" | "vetoed" | "canceled";
+  /**
+   * Hold this run until the promise resolves — the scripted-timing knob for
+   * race tests (an in-flight execution a concurrent send must join, an abort
+   * arriving mid-run). The hold applies before the abort short-circuit, so an
+   * abort during the hold still cancels.
+   */
+  readonly holdUntil?: Promise<void>;
 }
 
 export interface FakeLanguageModelExecutorOptions {
@@ -554,6 +561,13 @@ export class FakeLanguageModelExecutor
         for (const delta of deltas) {
           yield* this.emitDeltaLazy(op, () => delta).pipe(Effect.orDie);
         }
+      }
+
+      // 2b. Scripted hold — park the run until the test releases it (race
+      //     tests: steer-join, mid-run abort). Deliberately BEFORE the abort
+      //     short-circuit so an abort during the hold still cancels.
+      if (next?.holdUntil !== undefined) {
+        yield* Effect.promise(() => next.holdUntil!);
       }
 
       // 3. Pre-execute abort short-circuit.

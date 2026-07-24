@@ -83,16 +83,21 @@ type SkillsError =
 `run` is the flagship consumer of the structured-output path (three-audiences-plan §C, riding §B2). Flue's line holds: **skills guide agent work; they do not add executable capabilities.** A skill run is nothing more than a `session.send` primed with the skill's content — the skill stays inert data, the **model** is the executor.
 
 ```ts
-const review = await session.skills.run("review", {
+const handle = await session.skills.run("review", {
   args: { change },
   output: z.object({ approved: z.boolean(), summary: z.string() }),
 });
+
+// The send grammar, verbatim — stream the run live, abort it, or await it:
+for await (const ev of handle.events()) render(ev);
+
+const review = await handle.result;
 review.data; // typed { approved, summary }, validated
-review.text; // the assistant's prose
+review.response; // the assistant's prose (same turn as the data)
 review.stopReason; // "output_delivered" (terminal-tool path) | "end" | …
 ```
 
-**Mechanics.** `require(name)` → compose a `SendInput` (default: a `system`-role message carrying the skill body + framing, then a `user`-role message carrying the serialized `args`) → `session.send` → project the `SendResult` into `SkillRunResult<T> = { data?, text, usage, ticks, stopReason, executionId }`. With `opts.output`, the send rides the terminal-tool strategy (§B2); `data` is the validated value. No `output` → `data` is absent, `text` still returned.
+**Mechanics.** `require(name)` → compose a `SendInput` (default: a `system`-role message carrying the skill body + framing, then a `user`-role message carrying the serialized `args`) → `session.send` → **the execution handle passes through untouched** (`SessionExecutionHandle<T>` — one grammar with `send`; no projection layer). With `opts.output`, the send rides the terminal-tool strategy (§B2); `handle.result` resolves a `SendResult<T>` whose `data` is the validated value. No `output` → `data` is absent, `response` still returned.
 
 **`opts`:** `{ args?, output?, maxTicks?, signal?, isolate? }`. `args` serialize into the run's user message; `output` (a `StandardSchemaV1`) drives structured extraction; `maxTicks` / `signal` pass straight to the send.
 
@@ -306,7 +311,7 @@ const skill = await session.skills.require("must_exist");
 
 - `src/__tests__/harness.spec.ts` — full conformance suite + sync/async surface + envelope flow + snapshot round-trip + inbox routing
 - `src/__tests__/store-backing.spec.ts` — write-through to the injected store, loaders (`reload` / `resolve`) feed the store, `search` through the projection, `exportSnapshot`↔`hydrate()` round-trip, plus `runSkillStoreConformance` against `InMemorySkillStore`
-- `src/__tests__/run.spec.ts` — `skills.run` harness mechanics (dependency-free, stub runner): default composition (system skill body + serialized args), `composeRun` seam override, `SendResult`→`SkillRunResult` projection (with / without `output`), `isolate: true`→`SkillIsolationUnavailable`, unbound runner→`SkillRunnerUnbound`, missing skill→`SkillNotFound`
+- `src/__tests__/run.spec.ts` — `skills.run` harness mechanics (dependency-free, stub runner): default composition (system skill body + serialized args), `composeRun` seam override, handle pass-through (with / without `output`; failures ride `handle.result`), `isolate: true`→`SkillIsolationUnavailable`, unbound runner→`SkillRunnerUnbound`, missing skill→`SkillNotFound`
 - `@agentick/app-next` `src/__tests__/skills-run-e2e.spec.tsx` — `session.skills.run` end-to-end through `createApp` (proves the C-core `bindRunner` injection site): `output`→validated `data` + `stopReason "output_delivered"`, no-`output`→text, missing skill, and the `SteerCannotCarryStructuredOutput` reentrancy guard
 - Cross-harness integration tests live in adopter packages (`@agentick/session-next`, `@agentick/app-next`)
 

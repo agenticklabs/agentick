@@ -418,10 +418,10 @@ The C terrain scout falsified three assumptions; C splits into C-core
    name/description/content/tags/metadata) AND there is no per-execution
    tool-RESTRICTION seam anywhere (`SendInput.tools` is additive; the
    loop hardcodes `compileForTick({exposure:"model"})`; `ToolListFilter.
-   nameMatches` is a single string, not an allowlist). **C2**: add the
+nameMatches` is a single string, not an allowlist). **C2**: add the
    Skill field (align with Agent Skills frontmatter, feeds E1's loader)
-   + a `SendInput` restriction seam threading into `compileForTick` +
-   the `output`×restricted-tools strategy interaction test.
+   - a `SendInput` restriction seam threading into `compileForTick` +
+     the `output`×restricted-tools strategy interaction test.
 3. **Fork's missing enabler confirmed**: the session does not retain its
    own root (`options.agent` forwarded to the compiler, never stored),
    and `SpawnInput.agent` is required — the app-level fallback is the
@@ -439,9 +439,56 @@ path), `composeRun` seam on `withSkills`, `SkillRunResult<T> = { data,
 text (:= SendResult.response), usage, ticks, stopReason, executionId }`,
 riding B2a's `output` end-to-end.
 
+### C1.1 — run returns the execution handle (LANDED 2026-07-24, simplified)
+
+`run` is a send in a trenchcoat and was swallowing the handle the
+injected `SessionSendCapability` already returns. Ryan started the
+generics (`SendResult<T>`, `SessionExecutionHandle<T>`) and spotted the
+deeper cut: with the handle generic, **`SkillRunResult` should not exist
+at all** — the wrapper's only delta was renaming `response` to `text`.
+Final shape: `SendInput<P, T>` (output: `StandardSchemaV1<unknown, T>`)
+→ `send<T>` / `run<T>` both return `Promise<SessionExecutionHandle<T>>`
+— ONE grammar, zero mapping layer, `data` typed at the call site (this
+also closes B3 fix #2 for the session tier ahead of schedule).
+`SkillRunResult` deleted. Also landed with it: the canonical
+`FakeLanguageModelExecutor` gained a scripted `holdUntil` race knob, and
+the app skills e2e migrated off its bespoke `mkExecutor` (the
+duplicate-helper disease, caught by Ryan).
+
 Depends on B. Tests: run-with-schema (typed data), run-without-schema
 (text), `allowed-tools` scoping, `composeRun` seam override, missing skill
 throws, inline timeline effects documented in the spec test.
+
+---
+
+## B3. Structured-output completion pass (usage-walk punch-list, ratified 2026-07-24)
+
+The C-era usage-walk found three defects; one PR closes all three:
+
+1. **Capability-aware strategy auto.** Today auto keys ONLY on
+   tools-present — a bare send with `output` on a target without native
+   json_schema (Anthropic; its adapter drops responseFormat) reliably
+   fails with ResponseValidationError. Fix: auto = terminal tool when
+   (tools mounted) OR (!target.capabilities.supportsJsonSchema). The
+   signal exists on ExecutionTarget. One-line policy + tests per branch.
+2. **Generic send/result typing.** `skills.run<T>` types `data`; raw
+   `send` leaves `data: unknown` — typing that evaporates at the primary
+   door. Fix: `send` generic over the output schema; `SendInput<P, T>`
+   (output: StandardSchemaV1<unknown, T>) flows to `SendResult<T>.data:
+T | undefined`. Wire shapes untouched.
+3. **Close TODO(b2a-tree-data).** Tree-only `<Output>` injects, captures,
+   stops — but `data` never materializes (session retains only the SEND
+   schema). The loop resolves the tree schema per-tick
+   (OutputDeclaration.schema is StandardSchemaV1, in-band) — so validate
+   tree-tier capture where the schema lives and surface the validated
+   value on ExecutionRunResult for the session to place on `data`.
+   Completes the dedicated-extraction-agent story.
+
+Then: **C2** (fork enabler + `session.fork()` + `isolate: true`;
+`allowed-tools` Skill field + per-execution restriction seam threading
+into `compileForTick`), and the **steer-verb extraction** (pinned
+separately: `session.steer(messages)`, delete `delivery`, both conflict
+errors become type-impossible).
 
 ---
 
