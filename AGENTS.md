@@ -1,217 +1,84 @@
-# Agentick
+# Agentick — Agent Entry Doc
 
-React, but the render target is model context instead of DOM. Build AI applications with the tools you already know.
+React, but the render target is model context instead of DOM. You build the context window with JSX; the framework compiles the component tree into what the model sees. Only what you render reaches the model.
 
-This is a monorepo using pnpm workspaces. The project uses the actual `react-reconciler` package — components, hooks, JSX, and the fiber tree all work like React. The difference is the compile target: instead of DOM elements, the reconciler produces structured context for language models.
+**This repo is mid-rewrite.** The stable v1 line is under `packages/` (maintenance). The v2 rewrite is under `packages-next/` on the `feat/v2` branch and is where work happens. This doc is the v2 entry point. `CLAUDE.md` is the full guide; read it plus the ADRs before touching v2.
 
-## Build & Test
+## Read first (v2)
 
-```bash
-pnpm install                              # Install all dependencies
-pnpm build                                # Build all packages
-pnpm typecheck                            # TypeScript type checking
-pnpm test                                 # Run all tests (vitest)
-pnpm --filter @agentick/core test         # Test a specific package
-pnpm --filter @agentick/kernel typecheck  # Typecheck a specific package
-```
+1. `docs/proposals/v2/STATUS.md` — running progress log. **Update it when you finish work.**
+2. `docs/proposals/v2/IMPLEMENTATION-PLAN.md` — the phased rollout plan.
+3. `docs/proposals/v2/blueprint/` — architectural ADRs. Start with `00-overview.md`, then `26-harness-api-shape.md` ("everything is a harness") and `27-modular-built-ins.md` (foundational).
 
-Always run `pnpm typecheck` after modifying interfaces or types. Structural typing means changes propagate through anonymous object literals — grep for property names, not just type names.
+## v2 modularity model (non-negotiable)
 
-## Codex Project Settings
+- **Everything is a harness.** A harness owns substrate participation (bus/inbox/journal), a typed protocol, augmentation onto `HookBridges`, a `withX()` extension factory, and a conformance suite. Built-ins (timeline, knobs, state, gates, tool) and optionals (sandbox, mcp) follow the **identical** pattern.
+- **Built-ins are bundled, not privileged.** They are private workspace packages the `agentick` metapackage bundles; optionals ship as separate installs. No code-level distinction — the asymmetry is packaging only. Never special-case "foundational" vs "optional."
+- **`HookBridges` in `@agentick/spec-next` is an empty seed.** Every harness augments it via `declare module "@agentick/spec-next"`. Spec hardcodes no slots.
+- **`@agentick/compiler-react-next` has NO harness deps.** It owns the JSX → IR pipeline and the bridge context (`BridgeProvider` / `useBridges`); the reference `InMemoryDataBridge` lives in `@agentick/compiler-next`. Snapshot/restore iterates `HookBridges` generically via `SnapshotCapable` feature detection — no hardcoded slot names. Any harness adds a `/react` subpath depending on compiler-react without a cycle.
+- **Tests live where their deps live.** A "knobs + compiler" test belongs in `@agentick/knobs-next`, not compiler-react. Cross-harness tests live in `@agentick/session-next` or the metapackage.
 
-Migrated Claude permissions guidance: `pnpm build`, `pnpm test`, `pnpm typecheck`, `pnpm lint`, and `pnpm format` are normal project maintenance commands. Never read or write `*.env` files, and never run destructive commands such as `rm -rf` or force pushes unless the user explicitly requests and approves that exact action.
-
-## Package Architecture
+### Per-harness package layout
 
 ```
-Applications (example/express, user apps)
-    ↓
-Framework: @agentick/core, gateway, client, express, devtools, agent
-    ↓
-Adapters: @agentick/openai, google, ai-sdk
-    ↓
-Foundation: @agentick/kernel (Node.js), @agentick/shared (universal)
+@agentick/<harness>/src/
+  harness.ts        — BaseHarness impl        augment.ts    — adds the HookBridges slot
+  extension.ts      — withX() factory         conformance.ts — runXHarnessConformance
+  react/            — optional React surface   testing/      — optional stubXHarness
+  __tests__/  harness.spec.ts · conformance.spec.ts · integration-with-compiler.spec.tsx
 ```
 
-**Core**
-
-| Package            | Path                | Purpose                                        |
-| ------------------ | ------------------- | ---------------------------------------------- |
-| `agentick`         | `packages/agentick` | Convenience re-export of @agentick/core        |
-| `@agentick/core`   | `packages/core`     | Reconciler, hooks, JSX, compiler, session, app |
-| `@agentick/kernel` | `packages/kernel`   | Procedures, execution tracking, ALS context    |
-| `@agentick/shared` | `packages/shared`   | Wire-safe types, blocks, messages, streaming   |
-
-**Agent**
-
-| Package                | Path                  | Purpose                        |
-| ---------------------- | --------------------- | ------------------------------ |
-| `@agentick/agent`      | `packages/agent`      | High-level createAgent factory |
-| `@agentick/guardrails` | `packages/guardrails` | Guard system                   |
-
-**Adapters**
-
-| Package            | Path                       | Purpose               |
-| ------------------ | -------------------------- | --------------------- |
-| `@agentick/openai` | `packages/adapters/openai` | OpenAI adapter        |
-| `@agentick/google` | `packages/adapters/google` | Google Gemini adapter |
-| `@agentick/ai-sdk` | `packages/adapters/ai-sdk` | Vercel AI SDK adapter |
-
-**Server**
-
-| Package             | Path               | Purpose                           |
-| ------------------- | ------------------ | --------------------------------- |
-| `@agentick/gateway` | `packages/gateway` | Multi-session management, methods |
-| `@agentick/server`  | `packages/server`  | Transport server (SSE, WebSocket) |
-| `@agentick/express` | `packages/express` | Express.js integration            |
-| `@agentick/nestjs`  | `packages/nestjs`  | NestJS module                     |
-
-**Client**
-
-| Package                        | Path                          | Purpose                                    |
-| ------------------------------ | ----------------------------- | ------------------------------------------ |
-| `@agentick/client`             | `packages/client`             | Browser/Node client for real-time sessions |
-| `@agentick/react`              | `packages/react`              | React hooks & UI components                |
-| `@agentick/angular`            | `packages/angular`            | Angular services & utilities               |
-| `@agentick/cli`                | `packages/cli`                | Terminal client for agents                 |
-| `@agentick/client-multiplexer` | `packages/client-multiplexer` | Multi-tab connection multiplexer           |
-
-**DevTools**
-
-| Package              | Path                | Purpose                          |
-| -------------------- | ------------------- | -------------------------------- |
-| `@agentick/devtools` | `packages/devtools` | Fiber inspector, timeline viewer |
-
-## Core Concepts
-
-**Session**: Long-lived conversation context with state persistence.
-**Execution**: One user message → model response cycle.
-**Tick**: One model API call. Multi-tick executions happen when the model uses tools.
-
-**Procedure**: Wraps any async function with middleware, execution tracking, and `ProcedurePromise`. Every model call, tool run, and engine operation is a Procedure. `await proc()` gives an ExecutionHandle; `await proc().result` gives the final value.
-
-**Reconciler**: Components define what the model sees. The reconciler diffs the fiber tree between ticks. The compiler transforms it into model-ready format.
+## Package architecture (packages-next)
 
 ```
-User JSX → Fiber Tree → CompiledStructure → Provider Input
+Foundation:  spec-next · runtime-next · pubsub-next · utils-next
+Compiler:    compiler-next (base) → compiler-react-next (JSX harness)
+Harnesses:   timeline · knobs · state · gates · tool · resources · elicitation ·
+             tasks · prompts · skills · subscriptions · live · credentials
+Executors:   tool-executor · model-executor · loop-executor
+Model:       model · model-ai-sdk · model-anthropic · model-openai · model-google
+Session/App: session-next · app-next
+Client:      client-core → client · client-react · client-extensions
+Wire:        transport(-http/-in-process/-unix-socket/-websocket) · gateway · cluster*
+Optional:    sandbox* · mcp · connector · eval · formatters · store · telemetry-otlp
 ```
 
-## Key APIs
+**`-next` naming law:** `<role>-next` for a base/shared/abstract package; `<role>-<discriminator>-next` for a concrete impl (`compiler-next` base, `compiler-react-next` concrete). The role is implicit from the dependency graph — never use a `-base-` suffix.
 
-### Creating an App
+## File locations (v2)
 
-```tsx
-import { createApp } from "agentick";
-import { OpenAIModel } from "@agentick/openai";
+| What                     | Where                                                         |
+| ------------------------ | ------------------------------------------------------------- |
+| Protocol seam (spec)     | `packages-next/spec/src/`                                     |
+| Foundation (bus/journal) | `packages-next/runtime/src/`                                  |
+| JSX compiler harness     | `packages-next/compiler-react/src/`                           |
+| Compiler base + collect  | `packages-next/compiler/src/`                                 |
+| Built-in harnesses       | `packages-next/<harness>/src/`                                |
+| Session / App            | `packages-next/session/src/`, `packages-next/app/src/`        |
+| Gateway / transports     | `packages-next/gateway/src/`, `packages-next/transport*/src/` |
+| Client                   | `packages-next/client*/src/`                                  |
+| Tests                    | `packages-next/*/src/**/*.spec.ts`                            |
+| Examples                 | `example/v2-real/` (canonical), `example/v2*/`                |
 
-const app = createApp(() => (
-  <>
-    <OpenAIModel model="gpt-4o" />
-    <System>You are helpful.</System>
-    <Timeline />
-  </>
-));
-```
+v1 lives under `packages/*/src/` and is stable; don't migrate v1 code into v2 — v2 is a rewrite, not a port.
 
-### Creating a Tool
+## Verification gates
 
-```tsx
-import { createTool } from "agentick";
+- **Tests:** `npx vitest run packages-next` from the repo root. **Never** `pnpm --filter <pkg> test` — that path is a turbo no-op that reports a false green.
+- **Typecheck:** `pnpm typecheck --force` (`--force` defeats stale cache; runs `tsc` including test files).
+- **Format / lint:** `pnpm format` (**oxfmt**) and `pnpm lint` (**oxlint**) — not prettier, not jest. Pre-commit runs `format:check` + `lint`.
+- **No top-level await:** `pnpm check:no-tla`.
 
-const SearchTool = createTool({
-  name: "search",
-  description: "Search the web",
-  input: z.object({ query: z.string() }),
-  handler: async ({ query }) => {
-    /* ... */
-  },
-});
-// Use as JSX: <SearchTool />
-// Or call directly: SearchTool.run({ query: "test" })
-```
+Deleting or renaming any export → run `pnpm typecheck --force` workspace-wide before committing; package-local green proves nothing.
 
-### Model Adapters
+## Test doubles (Meszaros taxonomy)
 
-| Import                                           | Usage                                               |
-| ------------------------------------------------ | --------------------------------------------------- |
-| `import { openai } from "@agentick/openai"`      | Factory: `openai({ model: "gpt-4o" })` → ModelClass |
-| `import { OpenAIModel } from "@agentick/openai"` | JSX: `<OpenAIModel model="gpt-4o" />`               |
-| `import { google } from "@agentick/google"`      | Factory: `google({ model: "gemini-2.0-flash" })`    |
-| `import { GoogleModel } from "@agentick/google"` | JSX: `<GoogleModel model="gemini-2.0-flash" />`     |
+`fake*` for minimal working impls (default), `stub*` for canned answers, `spy*` for call recorders, `mock*` for expectations. Never `test*`. Every layer ships its doubles under a `/testing` subpath, typed against spec interfaces so spec drift breaks them at compile time. Grep `src/` (and `@agentick/utils-next` + `/testing`) for an existing helper before writing one.
 
-Best practice: declare the model as a JSX component in the tree (makes it dynamic/conditional).
+## Skills
 
-### Hooks
+Task-scoped skills in `skills/`: **`create-harness`** and **`create-extension`** (v2); `create-component`, `create-hook`, `create-tool`, `create-adapter` (v1). Invoke the matching skill before building the corresponding artifact.
 
-| Hook              | Signature                                   | When                         |
-| ----------------- | ------------------------------------------- | ---------------------------- | ------------------ |
-| `useOnMount`      | `(ctx) => void`                             | First tick only              |
-| `useOnTickStart`  | `(tickState, ctx) => void`                  | Tick 2+ (after mount)        |
-| `useOnTickEnd`    | `(result, ctx) => void`                     | Every tick end               |
-| `useAfterCompile` | `(compiled, ctx) => void`                   | After each compile           |
-| `useContinuation` | `(result, ctx) => boolean                   | void`                        | Control multi-turn |
-| `useOnMessage`    | `(message, ctx, state) => void`             | On each message              |
-| `useKnob`         | `(name, default, opts?) => [value, setter]` | Model-visible reactive state |
+## Coding standards
 
-### JSX Components
-
-**Structural**: `<System>`, `<Section>`, `<Tool>`, `<Timeline>`, `<Message>`, `<Knobs>`
-
-**Semantic** (`packages/core/src/jsx/components/semantic.tsx`):
-`<H1>`–`<H3>`, `<Header>`, `<Paragraph>`, `<List>`, `<ListItem>`, `<Table>`, `<Row>`, `<Column>`
-
-**Content** (`packages/core/src/jsx/components/content.tsx`):
-`<Text>`, `<Image>`, `<Code>`, `<Json>`, `<Document>`, `<Audio>`, `<Video>`
-
-**Messages** (`packages/core/src/jsx/components/messages.tsx`):
-`<System>`, `<User>`, `<Assistant>`, `<Event>`, `<Ephemeral>`, `<Grounding>`
-
-Use semantic components instead of raw markdown strings in JSX.
-
-### Session Procedures
-
-`session.send`, `session.render`, `session.queue`, and `app.run` are all Procedures.
-
-```tsx
-const handle = await session.send({ messages: [...] });        // ExecutionHandle
-const result = await session.send({ messages: [...] }).result;  // SendResult
-```
-
-## Coding Standards
-
-- No backwards compatibility, no deprecations, no legacy code paths
-- Import from package index, not deep paths
-- Let TypeScript infer types when obvious
-- Remove unused exports, functions, types immediately
-- Throw typed errors, don't return null for failures
-- Single source of truth for types — one canonical definition, re-export elsewhere
-- Use semantic JSX components in examples, not raw strings
-
-## File Locations
-
-| What              | Where                           |
-| ----------------- | ------------------------------- |
-| Kernel primitives | `packages/kernel/src/`          |
-| Shared types      | `packages/shared/src/`          |
-| Core reconciler   | `packages/core/src/reconciler/` |
-| Built-in JSX      | `packages/core/src/jsx/`        |
-| Hooks             | `packages/core/src/hooks/`      |
-| Compiler          | `packages/core/src/compiler/`   |
-| Session & App     | `packages/core/src/app/`        |
-| Tools             | `packages/core/src/tool/`       |
-| Model abstraction | `packages/core/src/model/`      |
-| Testing utilities | `packages/core/src/testing/`    |
-| Tests             | `packages/*/src/**/*.spec.ts`   |
-| Website           | `website/`                      |
-| Examples          | `example/`                      |
-
-## Testing
-
-```tsx
-import { createTestAdapter } from "@agentick/core/testing";
-
-const adapter = createTestAdapter({ defaultResponse: "Hello!" });
-adapter.respondWith([{ tool: { name: "search", input: { q: "test" } } }]);
-```
-
-See `packages/core/src/testing/` for `createMockApp`, `createMockSession`, and `createTestProcedure`.
+No backwards compatibility, no deprecations, no legacy paths — remove old code rather than shim it. One way to do things. Import from package index, not deep paths. Throw typed errors, don't return null. Single source of truth for every type. Check `@agentick/utils-next` before writing any utility.

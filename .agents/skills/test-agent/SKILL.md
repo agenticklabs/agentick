@@ -5,6 +5,10 @@ description: Test an agentick agent with mock model responses. Use when asked to
 
 # Test an Agent
 
+> **v2 (`feat/v2`) — the /testing doubles law.** v2 test doubles follow the Meszaros taxonomy: `fake*` (minimal working impl, the default), `stub*` (canned answers), `spy*` (call recorders), `mock*` (expectations). Never `test*` / `createTest*`. Each layer ships its doubles under a `/testing` subpath typed against the spec (e.g. `@agentick/knobs-next/testing`, `@agentick/compiler-react-next/testing`) — there is no `@agentick/core/testing` in v2. Grep the target package's `src/` and `@agentick/utils-next` (+ its `/testing`) for an existing helper before writing one. Tests run via `npx vitest run packages-next` from the repo root.
+>
+> The examples below use the v1 `@agentick/core/testing` API.
+
 Agentick provides testing utilities in `@agentick/core/testing` for testing agents without real API calls.
 
 ## Test Adapter

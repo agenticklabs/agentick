@@ -170,7 +170,7 @@ other), and it costs only the metadata, not the payload.
 
 - Absent any registered resources, the catalog contributes nothing.
 - Override or suppress it with `<Project projectionKey="resources">` from
-  `@agentick/reconciler-react-next` if you want to render availability yourself.
+  `@agentick/compiler-react-next` if you want to render availability yourself.
 
 This is the crux of pull semantics: the model spends tokens on _knowing what's
 readable_, and spends the content budget only on what it actually reads.

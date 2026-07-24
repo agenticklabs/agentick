@@ -334,7 +334,7 @@ export default defineConfig({
     socialLinks: [{ icon: "github", link: "https://github.com/agenticklabs/agentick" }],
 
     footer: {
-      message: "Released under the ISC License.",
+      message: "Released under the MIT License.",
       copyright: "Copyright 2025-present Ryan Lindgren",
     },
 

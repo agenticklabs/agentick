@@ -1,11 +1,11 @@
 ---
 name: create-extension
-description: Adopter-facing entry skill for extending agentick. Routes to the right path based on what the user is actually trying to build — a new session-scoped or app-scoped harness (knobs/state-style), a reconciler contributor (formatter, content-block parser, semantic component), or a descriptor-only React surface (gates-style). Handles both local-in-app extensions and published `@my-org/agentick-thing` packages. Delegates harness mechanics to `create-harness`.
+description: Adopter-facing entry skill for extending agentick. Routes to the right path based on what the user is actually trying to build — a new session-scoped or app-scoped harness (knobs/state-style), a compiler contributor (formatter, content-block parser, semantic component), or a descriptor-only React surface (gates-style). Handles both local-in-app extensions and published `@my-org/agentick-thing` packages. Delegates harness mechanics to `create-harness`.
 ---
 
 # Create a v2 Extension
 
-This skill helps an adopter add a new capability to agentick — something that extends the reconciler or the session beyond the built-in primitives. "Extension" is the consumer-facing word; depending on what you're building, the implementation might be a harness, a reconciler contributor, or a descriptor-only React surface.
+This skill helps an adopter add a new capability to agentick — something that extends the compiler or the session beyond the built-in primitives. "Extension" is the consumer-facing word; depending on what you're building, the implementation might be a harness, a compiler contributor, or a descriptor-only React surface.
 
 The skill's job is:
 
@@ -32,13 +32,13 @@ Open the conversation by confirming three things. Use `AskUserQuestion` if runni
 
 ### Question 1 — What are you extending?
 
-| Option                                                                                     | When                                                                    | Goes to path                                |
-| ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------- | ------------------------------------------- |
-| "I want new model-visible state or commands the agent can dispatch"                        | Knobs-style: model writes/reads, audit envelopes, optional UI           | **Harness path**                            |
-| "I want a long-lived resource per session (sandbox provider, MCP connection, scheduler)"   | Per-session lifecycle, may need shared app-level pool                   | **Harness path** (with app+session pair)    |
-| "I want to render something new in the model's context (custom format, new content block)" | Reconciler-side: format markdown differently, parse a new content block | **Contributor path**                        |
-| "I want a new React hook that exposes existing state in a different shape"                 | No new state owner — just a different view of existing bridges          | **Hook-only path** (consume `useBridges()`) |
-| "I want a model-visible gate-style descriptor without a backing harness"                   | Gates-style: declare a descriptor, React reads it                       | **Descriptor-only path**                    |
+| Option                                                                                     | When                                                                  | Goes to path                                |
+| ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------- | ------------------------------------------- |
+| "I want new model-visible state or commands the agent can dispatch"                        | Knobs-style: model writes/reads, audit envelopes, optional UI         | **Harness path**                            |
+| "I want a long-lived resource per session (sandbox provider, MCP connection, scheduler)"   | Per-session lifecycle, may need shared app-level pool                 | **Harness path** (with app+session pair)    |
+| "I want to render something new in the model's context (custom format, new content block)" | Compiler-side: format markdown differently, parse a new content block | **Contributor path**                        |
+| "I want a new React hook that exposes existing state in a different shape"                 | No new state owner — just a different view of existing bridges        | **Hook-only path** (consume `useBridges()`) |
+| "I want a model-visible gate-style descriptor without a backing harness"                   | Gates-style: declare a descriptor, React reads it                     | **Descriptor-only path**                    |
 
 If the user can't pick, ask: "Does the thing need to publish audit envelopes, accept inbox messages, or own substrate participation?" If yes → harness path. If no → one of the other three.
 
@@ -109,23 +109,23 @@ The `sideEffects` discipline, dual subpaths, optional react peer dep, and module
 
 ---
 
-## Path B — Reconciler contributor
+## Path B — Compiler contributor
 
 You're adding a render-time capability: a new formatter scope, a new content-block contributor, a semantic component renderer. No substrate. No audit envelopes. No inbox.
 
 ### Required reading
 
-- **`packages@agentick/reconciler-react-next/src/contributors/`** — the existing contributors (semantic HTML, content blocks, formatters)
-- **`packages@agentick/reconciler-react-next/ARCHITECTURE.md`** if present, or the reconciler-react README
-- **`packages@agentick/spec-next/src/protocol/contributor.ts`** — Contributor protocol if it exists at spec level
+- **`packages-next/compiler/src/collect/contributors/`** — the existing contributors (semantic HTML, content blocks, formatters)
+- **`packages-next/compiler-react/README.md`** — the compiler-react surface
+- **`packages-next/spec/src/protocol/contributor.ts`** — Contributor protocol if it exists at spec level
 
 ### Local mode
 
-A contributor is usually just a function or object passed to the reconciler config. For example:
+A contributor is usually just a function or object passed to the compiler config. For example:
 
 ```ts
 // my-app/src/extensions/my-formatter.tsx
-import type { Contributor } from "@agentick/reconciler-next";
+import type { Contributor } from "@agentick/compiler-next";
 
 export const myFormatter: Contributor = {
   name: "my-formatter",
@@ -138,7 +138,7 @@ createApp(<Agent />, {
 });
 ```
 
-The exact shape depends on the contributor type. Read the existing contributors in `packages@agentick/reconciler-react-next/src/contributors/` for the canonical shapes.
+The exact shape depends on the contributor type. Read the existing contributors in `packages-next/compiler/src/collect/contributors/` for the canonical shapes.
 
 ### Published mode
 
@@ -172,7 +172,7 @@ Gates-style. You declare typed descriptors (e.g., feature flags, capability hint
 
 ### Required reading
 
-- **`packages@agentick/gates-next/`** — the canonical reference. Read every file. It's small.
+- **`packages-next/gates/`** — the canonical reference. Read every file. It's small.
   - `src/descriptor.ts` — descriptor type
   - `src/index.ts` — exports
   - `src/react/` — the React hook
@@ -244,7 +244,7 @@ These bite adopters specifically (in addition to the `create-harness` pitfalls):
 
 4. **Forgetting to wait for `harness.ready`.** Local mode's `install` function is the adopter's responsibility. They forget to await; first call drops; nothing happens. Stress this when teaching local mode.
 
-5. **Trying to depend on `@agentick/reconciler-react-next` from a non-React surface.** Per ADR 27, your harness package depends on `@agentick/reconciler-react-next` only via the `/react` subpath. The base package must work without React.
+5. **Trying to depend on `@agentick/compiler-react-next` from a non-React surface.** Per ADR 27, your harness package depends on `@agentick/compiler-react-next` only via the `/react` subpath. The base package must work without React.
 
 6. **Skipping conformance because "it's just my app."** Local mode survives this. Published mode does not — the moment another adopter installs your package, conformance is the contract. Run it from day one.
 

@@ -50,18 +50,18 @@ for the full reasoning. Summary:**
       testing/                     — optional stubXHarness factory
       __tests__/
         harness.spec.ts                       — harness-only tests
-        integration-with-reconciler.spec.ts   — uses real ReconcilerHarness
+        integration-with-compiler.spec.tsx    — uses real CompilerHarness
   ```
-- **`@agentick/reconciler-react-next` has NO dependency on any harness
+- **`@agentick/compiler-react-next` has NO dependency on any harness
   package.** It owns the JSX → IR pipeline and the bridge context
   (`BridgeProvider` / `useBridges`); the reference `InMemoryDataBridge`
-  lives in `@agentick/reconciler-next`. Snapshot/restore iterates `HookBridges`
+  lives in `@agentick/compiler-next`. Snapshot/restore iterates `HookBridges`
   generically via `SnapshotCapable` feature detection — no hardcoded
   slot names. Any harness can add a `/react` subpath that depends on
-  reconciler-react WITHOUT creating a cycle.
+  compiler-react WITHOUT creating a cycle.
 - **Tests live where their dependencies live.** A "knobs work with the
-  reconciler" test belongs in `@agentick/knobs-next/__tests__/`, not in
-  reconciler-react. Reconciler-react's tests test the reconciler
+  compiler" test belongs in `@agentick/knobs-next/__tests__/`, not in
+  compiler-react. Compiler-react's tests test the compiler
   ITSELF, using protocol mocks where bridges are needed. Cross-harness
   integration tests live in `@agentick/session-next` (which depends on all
   the harnesses it integrates) or in the public metapackage.
@@ -217,30 +217,35 @@ const ShellTool = createTool({
 
 **`use()` — render-captured (the escape hatch).** For genuinely *tree-positional* context — a value set by an ancestor provider, reachable only during render (a custom React Context). `use()` runs at render, captures from the component tree, and passes the result to the handler as `deps` (merged with `{ ctx }`). Reserve it for tree-positional context; session/app harnesses belong on `ctx`. Direct `.run()` calls get `undefined` deps.
 
-## Package Architecture
+The workspace has two package trees: **`packages/`** is the v1 published line (stable, maintenance); **`packages-next/`** is the v2 rewrite on `feat/v2` (active). Most work targets v2.
+
+### v2 — `packages-next/` (the `-next` packages)
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                              Applications                               │
-│        (example/express, user apps, CLI tools)                          │
-└────────────────────────────────┬────────────────────────────────────────┘
-                                 │
-┌────────────────────────────────┴────────────────────────────────────────┐
-│                          Framework Layer                                │
-│   @agentick/core     @agentick/gateway     @agentick/client          │
-│   @agentick/express  @agentick/devtools    @agentick/sandbox         │
-└────────────────────────────────┬────────────────────────────────────────┘
-                                 │
-┌────────────────────────────────┴────────────────────────────────────────┐
-│                         Adapter Layer                                   │
-│   @agentick/openai   @agentick/google   @agentick/ai-sdk             │
-└────────────────────────────────┬────────────────────────────────────────┘
-                                 │
-┌────────────────────────────────┴────────────────────────────────────────┐
-│                        Foundation Layer                                 │
-│              @agentick/kernel          @agentick/shared               │
-│              (Node.js only)             (Platform-independent)          │
-└─────────────────────────────────────────────────────────────────────────┘
+Foundation:  spec-next · runtime-next · pubsub-next · utils-next
+Compiler:    compiler-next (base) → compiler-react-next (JSX → IR harness)
+Harnesses:   timeline · knobs · state · gates · tool · resources · elicitation ·
+             tasks · prompts · skills · subscriptions · live · credentials
+Executors:   tool-executor · model-executor · loop-executor
+Model:       model · model-ai-sdk · model-anthropic · model-openai · model-google
+Session/App: session-next · app-next
+Client:      client-core → client · client-react · client-extensions
+Wire:        transport(-http/-in-process/-unix-socket/-websocket) · gateway · cluster*
+Optional:    sandbox* · mcp · connector · eval · formatters · store · telemetry-otlp
+```
+
+Every harness — built-in or optional — follows the per-harness layout in the v2 modularity model above. The `-next` naming law: `<role>-next` for a base, `<role>-<discriminator>-next` for a concrete impl.
+
+### v1 — `packages/` (stable)
+
+```
+Applications (example/express, user apps)
+    ↓
+Framework: @agentick/core · gateway · client · express · devtools · sandbox
+    ↓
+Adapters: @agentick/openai · google · ai-sdk
+    ↓
+Foundation: @agentick/kernel (Node.js) · @agentick/shared (universal)
 ```
 
 See individual package READMEs for detailed documentation.
@@ -355,6 +360,8 @@ It is the canonical home for cross-framework utilities: `extractText`,
   but the implementation must live in shared — not be duplicated
 
 ## Common Patterns
+
+> **v1-era.** This section describes v1 `packages/` APIs (gateway `method()`, kernel `createProcedure`, ALS `Context`). For v2, the equivalent is the harness model — see `docs/proposals/v2/blueprint/26-harness-api-shape.md` and the substrate/Operation primitives in `packages-next/runtime`.
 
 ### Adding a Gateway Method
 
@@ -479,6 +486,23 @@ Context.emit("custom:event", { data: "value" });
 
 ## File Locations
 
+### v2 — `packages-next/`
+
+| What                     | Where                               |
+| ------------------------ | ----------------------------------- |
+| Protocol seam (spec)     | `packages-next/spec/src/`           |
+| Foundation (bus/journal) | `packages-next/runtime/src/`        |
+| JSX compiler harness     | `packages-next/compiler-react/src/` |
+| Compiler base + collect  | `packages-next/compiler/src/`       |
+| Built-in harnesses       | `packages-next/<harness>/src/`      |
+| Session / App            | `packages-next/session/src/`, `packages-next/app/src/` |
+| Gateway / transports     | `packages-next/gateway/src/`, `packages-next/transport*/src/` |
+| Client                   | `packages-next/client*/src/`        |
+| Tests                    | `packages-next/*/src/**/*.spec.ts`  |
+| Canonical example        | `example/v2-real/`                  |
+
+### v1 — `packages/` (stable)
+
 | What              | Where                           |
 | ----------------- | ------------------------------- |
 | Kernel primitives | `packages/kernel/src/`          |
@@ -493,6 +517,8 @@ Context.emit("custom:event", { data: "value" });
 | Tests             | `packages/*/src/**/*.spec.ts`   |
 
 ## Model Adapters
+
+> **v1-era.** `createAdapter()` is the v1 adapter API. In v2, model access is a harness: the `@agentick/model-executor-next` base with concrete `@agentick/model-*-next` packages, plus the Vercel AI SDK path via `@agentick/model-ai-sdk-next`.
 
 See `packages/adapters/README.md` for comprehensive adapter documentation.
 

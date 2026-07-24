@@ -34,13 +34,13 @@ Read these end-to-end before writing code. They are the contract.
 
 4. **`docs/proposals/v2/blueprint/19-foundation.md`** — Substrate primitives (Journal, Bus, Inbox), the `Operation` shape, lifecycle handlers, idempotency, journaling policy. Your async surface composes Operations; you need to understand them.
 
-5. **`packages@agentick/spec-next/src/protocol/app-extension.ts`** — `Extension`, `AppExtension`, `SessionExtension`, `AppInstaller`, `SessionInstaller`, `AppSubstrate`. The integration contract your `withX()` factory implements.
+5. **`packages-next/spec/src/protocol/app-extension.ts`** — `Extension`, `AppExtension`, `SessionExtension`, `AppInstaller`, `SessionInstaller`, `AppSubstrate`. The integration contract your `withX()` factory implements.
 
-6. **`packages@agentick/spec-next/src/protocol/hook-bridges.ts`** — The empty seed interface every harness augments. Read the file even though it's nearly empty; the comments document the augmentation discipline.
+6. **`packages-next/spec/src/protocol/hook-bridges.ts`** — The empty seed interface every harness augments. Read the file even though it's nearly empty; the comments document the augmentation discipline.
 
-7. **`packages@agentick/runtime-next/src/substrate/base-harness.ts`** — `BaseHarness` constructor signature, `HarnessShell`, `runOperation`, `runHarnessProtocol`, `handleMessage`, lifecycle hooks. You will extend this class.
+7. **`packages-next/runtime/src/substrate/base-harness.ts`** — `BaseHarness` constructor signature, `HarnessShell`, `runOperation`, `runHarnessProtocol`, `handleMessage`, lifecycle hooks. You will extend this class.
 
-8. **`packages@agentick/knobs-next/`** — The canonical reference impl. Read every file. This is the shape to copy:
+8. **`packages-next/knobs/`** — The canonical reference impl. Read every file. This is the shape to copy:
    - `src/harness.ts` — `BaseHarness<"knobs">` subclass with sync + async surface
    - `src/augment.ts` — dual augmentation pattern (`HookBridges.knobs` + `SessionHarnessProtocol.knobs`)
    - `src/extension.ts` — `withKnobs()` `SessionExtension` factory
@@ -49,12 +49,12 @@ Read these end-to-end before writing code. They are the contract.
    - `src/react/use-knob.ts` — `useBridges()` + `useSyncExternalStore` pattern
    - `src/testing/index.ts` — `stubKnobsHarness()` factory
    - `src/__tests__/harness.spec.ts` — harness-only tests
-   - `src/__tests__/integration-with-reconciler.spec.tsx` — real-`ReconcilerHarness` integration
+   - `src/__tests__/integration-with-compiler.spec.tsx` — real-`CompilerHarness` integration
    - `package.json` — `sideEffects`, dual subpaths, optional react peer dep
 
-9. **`packages@agentick/state-next/`** — Second reference. Differs from knobs in: persistence layer (state survives `serialize`/`restore`), simpler async surface. Read for the snapshot/restore contract.
+9. **`packages-next/state/`** — Second reference. Differs from knobs in: persistence layer (state survives `serialize`/`restore`), simpler async surface. Read for the snapshot/restore contract.
 
-10. **`packages@agentick/timeline-next/`** — Third reference. Differs in: large async surface (append, projection, two-tier log), strategies file (`strategies.ts`) for pluggable behavior. Read if your harness has compositional internals.
+10. **`packages-next/timeline/`** — Third reference. Differs in: large async surface (append, projection, two-tier log), strategies file (`strategies.ts`) for pluggable behavior. Read if your harness has compositional internals.
 
 11. **`packages/sandbox/`** — Per-session-factory variant. Read if your harness needs per-session instance lifecycle that the bundled installer pattern doesn't directly model.
 
@@ -66,7 +66,7 @@ Answer these before opening an editor. They determine the shape.
 
 ### Q1. Is this really a harness?
 
-A harness owns substrate participation. It publishes envelopes through a bus, appends to a journal, and routes inbox messages. If your "extension" doesn't do any of those — it's just a React hook, a reconciler contributor, a tool, or a formatter — **it is not a harness**. Reference `create-extension` for the right category.
+A harness owns substrate participation. It publishes envelopes through a bus, appends to a journal, and routes inbox messages. If your "extension" doesn't do any of those — it's just a React hook, a compiler contributor, a tool, or a formatter — **it is not a harness**. Reference `create-extension` for the right category.
 
 You are writing a harness if **any** of these are true:
 
@@ -188,8 +188,8 @@ The canonical shape — adapt names + scope.
   "dependencies": {
     "@agentick/spec-next": "workspace:*",
     "@agentick/runtime-next": "workspace:*",
-    "@agentick/reconciler-next": "workspace:*",
-    "@agentick/reconciler-react-next": "workspace:*",
+    "@agentick/compiler-next": "workspace:*",
+    "@agentick/compiler-react-next": "workspace:*",
     "effect": "^3.21.2"
   },
   "devDependencies": {
@@ -259,13 +259,13 @@ packages/my-thing/
       index.ts                            ← stubMyThingHarness()
     __tests__/
       harness.spec.ts                     ← harness-only tests (uses in-memory substrate)
-      integration-with-reconciler.spec.tsx ← integration with real ReconcilerHarness
+      integration-with-compiler.spec.tsx ← integration with real CompilerHarness
       conformance.spec.ts                 ← runs the conformance suite against the default impl
 ```
 
 ## Step-by-step build
 
-### Step 1. Protocol shape (`packages@agentick/spec-next/src/protocol/my-thing-harness.ts`)
+### Step 1. Protocol shape (`packages-next/spec/src/protocol/my-thing-harness.ts`)
 
 The protocol lives in `@agentick/spec-next`. Bundled built-ins do this; published external extensions can either contribute via PR or keep their protocol local (see "Local protocol variant" at the end).
 
@@ -310,7 +310,7 @@ export interface MyThingHarnessProtocol {
 }
 ```
 
-Add an export to `packages@agentick/spec-next/src/protocol/index.ts` and re-export from `packages@agentick/spec-next/src/index.ts`.
+Add an export to `packages-next/spec/src/protocol/index.ts` and re-export from `packages-next/spec/src/index.ts`.
 
 **Design notes:**
 
@@ -600,7 +600,7 @@ export function withMyThingApp(...): AppExtension {
     target: "app",
     install: async (installer: AppInstaller) => {
       // Same shape; AppInstaller has additional methods:
-      // - registerContributor (reconciler-side)
+      // - registerContributor (compiler-side)
       // - registerToolHandler (pre-mount tools)
       // - subscribeBus (telemetry observers)
     },
@@ -724,7 +724,7 @@ export { useMyThing } from "./use-my-thing.js";
 
 ```ts
 import { useCallback, useSyncExternalStore } from "react";
-import { useBridges } from "@agentick/reconciler-react-next";
+import { useBridges } from "@agentick/compiler-react-next";
 
 export function useMyThing(id: string): readonly [string | undefined, (value: string) => void] {
   const { myThing } = useBridges();
@@ -777,7 +777,7 @@ export function stubMyThingHarness(initial: Readonly<Record<string, string>> = {
 }
 ```
 
-Used by downstream tests of components that consume `useMyThing()`. Pair with `@agentick/reconciler-react-next`'s test bridges to render-test a component in isolation.
+Used by downstream tests of components that consume `useMyThing()`. Pair with `@agentick/compiler-react-next`'s test bridges to render-test a component in isolation.
 
 ### Step 9. Package entry (`src/index.ts`)
 
@@ -795,7 +795,7 @@ export { runMyThingHarnessConformance } from "./conformance.js";
 
 ### Step 10. Tests
 
-`src/__tests__/harness.spec.ts` — harness-only tests using the in-memory substrate (NO ReconcilerHarness). Test internals, edge cases, error paths.
+`src/__tests__/harness.spec.ts` — harness-only tests using the in-memory substrate (NO CompilerHarness). Test internals, edge cases, error paths.
 
 `src/__tests__/conformance.spec.ts`:
 
@@ -812,7 +812,7 @@ runMyThingHarnessConformance({
 });
 ```
 
-`src/__tests__/integration-with-reconciler.spec.tsx` — uses `@testing-library/react` + a real `ReconcilerHarness` with the harness installed via `withMyThing()`. Test that the React hook actually re-renders when the harness mutates.
+`src/__tests__/integration-with-compiler.spec.tsx` — uses `@testing-library/react` + a real `CompilerHarness` with the harness installed via `withMyThing()`. Test that the React hook actually re-renders when the harness mutates.
 
 ## Registration checklist (workspace package)
 
@@ -837,7 +837,7 @@ Skip if this is a local module inside an adopter's app — see `create-extension
 
 5. **Hardcoding the slot name in snapshot/restore.** ADR 27 mandates generic iteration with `SnapshotCapable` feature detection. Implement `exportSnapshot`/`importSnapshot` on the harness; the framework finds them. Don't try to hook into snapshot/restore explicitly — the framework iterates `HookBridges` for you.
 
-6. **React subpath depending on the harness package depending on `reconciler-react`.** Cycle. The harness package depends on `@agentick/reconciler-react-next` (for `useBridges`); `@agentick/reconciler-react-next` MUST NOT depend on the harness package. Per ADR 27, reconciler-react has no harness deps.
+6. **React subpath depending on the harness package depending on `compiler-react`.** Cycle. The harness package depends on `@agentick/compiler-react-next` (for `useBridges`); `@agentick/compiler-react-next` MUST NOT depend on the harness package. Per ADR 27, compiler-react has no harness deps.
 
 7. **Skipping `await harness.ready`.** Operations queued before `ready` resolves silently drop. Always `await ready` in your extension's `install`.
 

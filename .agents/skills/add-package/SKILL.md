@@ -5,6 +5,8 @@ description: Add a new package to the agentick monorepo. Use when creating a new
 
 # Add a Package
 
+> **v2.** New v2 packages go in `packages-next/` and follow the **New Package Checklist in `CLAUDE.md`**; a harness package uses the `create-harness` skill. The scaffold below is the v1 `packages/` layout — the v2 layout differs (spec/runtime deps, `-next` naming law, `/testing` + `/react` subpaths, `sideEffects` for the `HookBridges` augmentation).
+
 Agentick is a pnpm workspace monorepo. New packages go in `packages/`.
 
 ## Steps
