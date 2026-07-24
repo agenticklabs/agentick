@@ -36,6 +36,7 @@
   "dependencies": {
     "@agentick/client-core-next": "workspace:*",
     "@agentick/elicitation-next": "workspace:*",
+    "@agentick/gates-next": "workspace:*",
     "@agentick/knobs-next": "workspace:*",
     "@agentick/tasks-next": "workspace:*",
     "@agentick/timeline-next": "workspace:*",

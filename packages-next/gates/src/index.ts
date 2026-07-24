@@ -41,10 +41,19 @@ export type {
   GateKnobs,
   LoopControlSeam,
   GateOverrideAudit,
+  GateOverrideOrigin,
   GateInfo,
   GateHandle,
   GatesHandle,
 } from "./controller.js";
+
+export { GatesHarness } from "./harness.js";
+export type {
+  GatesHarnessDeps,
+  GatesClearInput,
+  GatesDeferInput,
+  GatesOverrideInput,
+} from "./harness.js";
 
 // Side-effect: augment `SessionHarnessProtocol` with `gates` + `gate()`.
 import "./augment.js";

@@ -280,6 +280,13 @@ class OperationRunnerImpl implements OperationRunner {
         sessionId: scope.sessionId,
         executionId: scope.executionId,
         tickId: scope.tickId,
+        // The op's authorization identity (ADR 51) — `"host"` / `"wire"` /
+        // `"model"` / `"inbox"`. `RuntimeContext extends EventScope`, which
+        // declares `origin`; threading it here lets a command handler read
+        // "how was I invoked" via `getContext` (e.g. the gates:override audit's
+        // origin stamp) without unpacking an envelope. Undefined when the op
+        // carries no origin.
+        origin: scope.origin,
         opId: resolvedOp.opId,
         parentOpId: resolvedOp.parentOpId,
         correlationId: resolvedOp.correlationId,

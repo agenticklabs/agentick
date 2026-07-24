@@ -24,7 +24,7 @@ import { KnobsHarness } from "@agentick/knobs-next";
 import { StateHarness } from "@agentick/state-next";
 import { TasksHarness } from "@agentick/tasks-next";
 import { ResourcesHarness } from "@agentick/resources-next";
-import { GatesController, type GateOverrideAudit } from "@agentick/gates-next";
+import { GatesController, GatesHarness, type GateOverrideAudit } from "@agentick/gates-next";
 import { TimelineHarness, type TimelineHarnessOptions } from "@agentick/timeline-next";
 import { type BaseHarness, type Middleware, ulid } from "@agentick/runtime-next";
 import type {
@@ -293,25 +293,39 @@ export function buildSessionBridges(
     ...omitUndefined({ tools: options.toolBridge }),
   } as SessionHookBridges;
 
-  // Gate wiring core (ADR 27 + ADR 67). Injected with the session's
-  // KnobsHarness + a live getter over the LIVE loop bridge + a bus-backed
-  // audit sink for the trusted-host `.override()` escape. NOT a harness
-  // slot — gates own no independent state (a gate's value IS a knob
-  // value). Per ADR 67 the controller is DRIVEN from `session.notifyLifecycle`
-  // (which calls `handleTickEnd` with the settled `TickResult`), NOT from
-  // a compiler-mount tick-end subscription. A held gate calls
-  // `continueAfterTick` on this same loop bridge; the session drains it and
-  // folds the hold into the tick-end `TickEndForwardDecision`.
-  // `parent` (ADR 34 cascade) is absent today — no app-tier gate layer
-  // exists yet; threaded explicitly so a future one drops in with no
-  // rewrite (inherited gates then evaluate through this session's tick).
-  const gates = new GatesController({
-    knobs,
-    loopControl: () => base.loop,
-    audit: makeGateAudit(substrate.bus, store.id),
-    parent: undefined,
-  });
-  (base as { gates: GatesController }).gates = gates;
+  // Gate wiring core (ADR 27 + ADR 67), now OWNED by a slim GatesHarness (the
+  // command surface + inbox address `gates:<sessionId>:gates` the dynamic-command
+  // lane routes to). The harness constructs the ONE controller; we staple that
+  // controller onto `bridges.gates` so every existing consumer (`useGate`,
+  // `session.gates`, `session.notifyLifecycle → handleTickEnd`) keeps resolving
+  // the SAME instance. The controller is injected with the session's KnobsHarness
+  // + a live getter over the LIVE loop bridge + a bus-backed audit sink for the
+  // trusted-host `.override()` escape. NOT a `HookBridges` slot — gates own no
+  // independent state (a gate's value IS a knob value). Per ADR 67 the controller
+  // is DRIVEN from `session.notifyLifecycle` (which calls `handleTickEnd` with the
+  // settled `TickResult`), NOT from a compiler-mount tick-end subscription. A held
+  // gate calls `continueAfterTick` on this same loop bridge; the session drains it
+  // and folds the hold into the tick-end `TickEndForwardDecision`. `parent`
+  // (ADR 34 cascade) is absent today — no app-tier gate layer exists yet;
+  // threaded explicitly so a future one drops in with no rewrite.
+  const gatesHarness = new GatesHarness(
+    `${store.id}:gates`,
+    substrate.journal,
+    substrate.bus,
+    substrate.inbox,
+    {
+      knobs,
+      loopControl: () => base.loop,
+      audit: makeGateAudit(substrate.bus, store.id),
+      parent: undefined,
+    },
+  );
+  (base as { gates: GatesController }).gates = gatesHarness.controller;
+  // Lifecycle: the harness owns an inbox registration; staple it onto the bundle
+  // (a runtime-only, non-typed property — NOT a bridge slot) so the session's
+  // close-loop (which closes any bridge value exposing `.close()`) tears it down.
+  // It is not SnapshotCapable, so the snapshot/restore fan-out skips it.
+  (base as unknown as { gatesHarness: GatesHarness }).gatesHarness = gatesHarness;
 
   if (options.extensionBridges && options.extensionBridges.size > 0) {
     return {

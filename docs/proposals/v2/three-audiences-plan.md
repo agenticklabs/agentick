@@ -25,6 +25,33 @@ model). No command→tool auto-bridge — curation is the point (§D).
 
 Dependency: **B enables C. A and D are independent.**
 
+### Trailhead: value-cell stratification (parked — ratified 2026-07-24)
+
+Gates values living in knobs was challenged ("seems dirty") and ruled
+**deliberate composition, not expediency**: a knob IS v2's primitive for
+"a model-readable/writable value cell with validation, audit, channel
+projection, persistence"; a gate is that cell + loop policy. Building a
+GateStore + `gate_clear` tool + gates channel would duplicate the entire
+model-write subsystem — the actually-dirty outcome. Verified clean at the
+boundary: knobs' `readOnly` is generic (`knobs/harness.ts:527`); knobs
+contains zero gate knowledge; the dependency arrow points one way.
+
+The named right lift, IF the coupling ever needs dissolving, is
+**stratification, not separation**: extract the _value cell_ as its own
+substrate primitive and make BOTH knobs and gates compositions over it
+(knobs = cells presented as config; gates = cell + continuation policy).
+"Gates are knobs under the hood" becomes "gates and knobs share a cell."
+Parked under the three-consumers rule — today the cell has two
+(knobs, gates); a third cell-shaped harness (sampling? roots?) tips it.
+The store fan-out's knobs store is already drifting toward this layer.
+
+Known leaks, tracked (not avoided): (1) gate VALUES still project on the
+knobs channel while gate VERBS ride `gates/*` — resolved when the gates
+delta channel lands with the store fan-out (`controller.ts:483-488`);
+(2) latch attestation via `knob_set` erases "gate" from the model's
+vocabulary — deliberate (one write path), revisit only with evidence the
+model confuses it.
+
 ---
 
 ## A. Gates + resources on the wire
@@ -372,19 +399,19 @@ privileged, same as ADR 27 server-side).
 
 Current inventory vs the law:
 
-| Server handle | Wire surface                                 | Client handle today    | Parity work                                                                         |
-| ------------- | -------------------------------------------- | ---------------------- | ----------------------------------------------------------------------------------- |
-| timeline      | ✓ (`session/timeline_history`, `timeline/*`) | ✓                      | —                                                                                   |
-| knobs         | ✓ (`knobs/*`)                                | ✓                      | —                                                                                   |
-| tasks         | ✓ (`tasks/*`)                                | ✓                      | —                                                                                   |
-| elicitation   | ✓ (`session/respond_to_elicitation`)         | ✓                      | —                                                                                   |
-| tools (F)     | `session/dispatch`; needs `tools:list`       | client-tool-calls only | **F**                                                                               |
-| gates (A2)    | after A                                      | —                      | **A3**                                                                              |
-| resources     | declared, unrouted                           | —                      | **G** (after A1)                                                                    |
-| skills        | ✓ (`skills/*` routed)                        | —                      | **G**                                                                               |
-| prompts       | ✓ (`prompts/*` routed incl. `invoke`)        | —                      | **G**                                                                               |
-| state         | ✓ (`state` in `SESSION_SURFACES`)            | —                      | **G**                                                                               |
-| model         | in-process only                              | —                      | deliberate hold (model swap over the wire is an authz question — decide separately) |
+| Server handle | Wire surface                                                                                                           | Client handle today    | Parity work                                                                         |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------- | ----------------------------------------------------------------------------------- |
+| timeline      | ✓ (`session/timeline_history`, `timeline/*`)                                                                           | ✓                      | —                                                                                   |
+| knobs         | ✓ (`knobs/*`)                                                                                                          | ✓                      | —                                                                                   |
+| tasks         | ✓ (`tasks/*`)                                                                                                          | ✓                      | —                                                                                   |
+| elicitation   | ✓ (`session/respond_to_elicitation`)                                                                                   | ✓                      | —                                                                                   |
+| tools (F)     | `session/dispatch`; needs `tools:list`                                                                                 | client-tool-calls only | **F**                                                                               |
+| gates (A2)    | after A                                                                                                                | —                      | **A3**                                                                              |
+| resources     | declared, unrouted                                                                                                     | —                      | **G** (after A1)                                                                    |
+| skills        | ✓ (`skills/*` routed)                                                                                                  | —                      | **G**                                                                               |
+| prompts       | ✓ (`prompts/*` routed incl. `invoke`)                                                                                  | —                      | **G**                                                                               |
+| state         | surface routed, but `state:set/delete` omit `exposure` → `"addressable"`, NOT wire-reachable (corrected by PR-A scout) | —                      | **G** (+ explicit `exposure: "wire"` on state's commands)                           |
+| model         | in-process only                                                                                                        | —                      | deliberate hold (model swap over the wire is an authz question — decide separately) |
 
 G's scope: `/client` subpaths for **skills, prompts, resources, state** —
 mechanical application of the knobs template (`knobs/src/client/`), read

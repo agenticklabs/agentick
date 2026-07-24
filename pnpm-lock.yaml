@@ -488,6 +488,9 @@ importers:
       '@agentick/elicitation-next':
         specifier: workspace:*
         version: link:../elicitation
+      '@agentick/gates-next':
+        specifier: workspace:*
+        version: link:../gates
       '@agentick/knobs-next':
         specifier: workspace:*
         version: link:../knobs
@@ -851,6 +854,9 @@ importers:
 
   packages-next/gates:
     dependencies:
+      '@agentick/client-core-next':
+        specifier: workspace:*
+        version: link:../client-core
       '@agentick/compiler-next':
         specifier: workspace:*
         version: link:../compiler
@@ -863,16 +869,22 @@ importers:
       '@agentick/pubsub-next':
         specifier: workspace:*
         version: link:../pubsub
+      '@agentick/runtime-next':
+        specifier: workspace:*
+        version: link:../runtime
       '@agentick/spec-next':
         specifier: workspace:*
         version: link:../spec
+      effect:
+        specifier: ^3.22.0
+        version: 3.22.0
       react:
         specifier: ^19.0.0
         version: 19.2.4
     devDependencies:
-      '@agentick/runtime-next':
+      '@agentick/utils-next':
         specifier: workspace:*
-        version: link:../runtime
+        version: link:../utils
       '@types/react':
         specifier: ^19.2.5
         version: 19.2.13
@@ -1887,6 +1899,9 @@ importers:
       '@agentick/elicitation-next':
         specifier: workspace:*
         version: link:../elicitation
+      '@agentick/gates-next':
+        specifier: workspace:*
+        version: link:../gates
       '@agentick/gateway-next':
         specifier: workspace:*
         version: link:../gateway

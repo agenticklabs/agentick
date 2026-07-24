@@ -43,6 +43,8 @@ const SESSION_SURFACES = [
   "state",
   "elicitation",
   "tasks",
+  "gates",
+  "resources",
 ] as const;
 
 interface DynamicParams {

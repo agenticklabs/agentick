@@ -1,12 +1,16 @@
 /**
  * Module augmentation — adds the gates surface to `SessionHarnessProtocol`.
  *
- * Gates is NOT a harness: it owns no independent state (a gate's value
- * IS a knob value), so — unlike knobs/state/timeline — it does NOT
- * augment `HookBridges` with a `gates` slot and is NOT snapshot-capable.
- * The controller travels to the compiler tree inside the existing
- * `BridgeContext` (a runtime, non-typed transport property on the
- * session's bridge bundle), never as a typed `HookBridges` harness slot.
+ * Gates IS now a harness ({@link GatesHarness} — a command surface + inbox
+ * address, so wire clients can reach `gates/list` / `gates:clear` / etc. over
+ * the dynamic lane), but it still deliberately does NOT join `HookBridges`: it
+ * owns no independent state — a gate's value IS a knob value, snapshot-captured
+ * by `KnobsHarness` — so there is nothing for it to snapshot. Unlike
+ * knobs/state/timeline it does NOT augment `HookBridges` with a `gates` slot and
+ * is NOT snapshot-capable. The controller (owned by the harness) travels to the
+ * compiler tree inside the existing `BridgeContext` (a runtime, non-typed
+ * transport property on the session's bridge bundle), never as a typed
+ * `HookBridges` harness slot.
  *
  * What IS declared here: the user-facing session surface, mirroring
  * `session.knobs` / `session.knob(name)`:

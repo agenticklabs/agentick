@@ -766,6 +766,29 @@ export type ResourcesErrorChannel =
   | ResourcesBackendError;
 
 // ============================================================================
+// GatesError — gate registry failures (ADR 27 GatesHarness)
+// ============================================================================
+
+export abstract class GatesError extends AgentickError {}
+
+/**
+ * A gate verb (`gates:clear` / `gates:defer` / `gates:override`) named a gate
+ * that is not registered. Errors-over-nulls: the command rejects rather than
+ * silently no-op'ing, so a wire caller learns the name was wrong.
+ */
+export class GateNotFound extends GatesError {
+  readonly _tag = "GateNotFound" as const;
+  readonly name: string;
+  constructor(args: { readonly name: string; readonly cause?: unknown }) {
+    super(`gate ${args.name} not found`, { cause: args.cause });
+    this.name = args.name;
+  }
+}
+registerAgentickError("GateNotFound", GateNotFound);
+
+export type GatesErrorChannel = GateNotFound;
+
+// ============================================================================
 // SkillsError — skill registry failures
 // ============================================================================
 

@@ -70,8 +70,26 @@ export interface LoopControlSeam {
  * The subset of the knobs harness the controller consumes. Kept
  * structural so the controller works against the real `KnobsHarness`,
  * `fakeKnobsHarness`, or `stubKnobsHarness` interchangeably.
+ *
+ * TODO(value-cell): this Pick IS the "model-writable value cell" seam —
+ * validation, audit, channel projection, persistence — that gates borrow
+ * from knobs. If a third cell-shaped harness appears (sampling? roots?),
+ * extract the cell as its own substrate primitive and make BOTH knobs and
+ * gates compositions over it (stratification, not separation). Ruled
+ * deliberate composition 2026-07-24 — see
+ * docs/proposals/v2/three-audiences-plan.md "value-cell stratification".
  */
 export type GateKnobs = Pick<KnobsHarnessProtocol, "register" | "set" | "get" | "subscribe">;
+
+/**
+ * Where a verified-gate override originated — the audit's authorization
+ * identity. `"host"` is a trusted in-process caller (`session.gate(name)
+ * .override(...)`); `"wire"` is a remote caller that reached the
+ * `gates:override` command over the dynamic lane (both are trusted, but
+ * the trail must distinguish them). Defaults to `"host"` when
+ * {@link GateHandle.override} is called without an explicit origin.
+ */
+export type GateOverrideOrigin = "host" | "wire";
 
 /**
  * Audit record emitted by the trusted-host {@link GateHandle.override}
@@ -85,6 +103,13 @@ export interface GateOverrideAudit {
   readonly value: GateValue;
   readonly reason?: string;
   readonly at: number;
+  /**
+   * The override's authorization identity — `"host"` (default, a trusted
+   * in-process caller) or `"wire"` (the `GatesHarness` `gates:override`
+   * command, reached over the dynamic lane). Stamped by
+   * {@link GateHandle.override}'s `origin` argument.
+   */
+  readonly origin: GateOverrideOrigin;
 }
 
 export interface GatesControllerDeps {
@@ -180,8 +205,12 @@ export interface GateHandle {
    * auditable escape — it emits a {@link GateOverrideAudit} and does NOT
    * exist as a generic setter that would silently reopen the read-only
    * protection. Throws on latch gates (use {@link clear} there).
+   *
+   * `origin` stamps the emitted {@link GateOverrideAudit} — omitted ⇒
+   * `"host"` (a trusted in-process caller); the `GatesHarness`
+   * `gates:override` command passes `"wire"`.
    */
-  override(value: GateValue, reason?: string): void;
+  override(value: GateValue, reason?: string, origin?: GateOverrideOrigin): void;
   /** Subscribe to value changes for this gate. */
   subscribe(listener: () => void): Unsubscribe;
 }
@@ -449,7 +478,7 @@ export class GatesController {
       defer() {
         if (!entry.verified) controller.transition(entry, "deferred");
       },
-      override(value: GateValue, reason?: string) {
+      override(value: GateValue, reason?: string, origin: GateOverrideOrigin = "host") {
         if (!entry.verified) {
           throw new Error(
             `override() is a verified-gate escape; gate "${entry.name}" is a latch gate — use clear().`,
@@ -461,6 +490,7 @@ export class GatesController {
           name: entry.name,
           value,
           at: Date.now(),
+          origin,
           ...(reason !== undefined ? { reason } : {}),
         });
       },
