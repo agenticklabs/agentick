@@ -301,4 +301,37 @@ describe("InMemoryToolRegistry — layered tools (#136)", () => {
       expect(r.get("foo")?.binding.scope).toBe("app");
     });
   });
+
+  // The prefix-cache ordering guarantee (three-audiences-plan §B2). Tools
+  // serialize at the head of the provider prompt, so a per-execution tool
+  // binding is a prefix perturbation. `compileForTick` stably partitions
+  // execution-scoped winners to the TAIL so the cache-stable tree/compiler
+  // prefix keeps hitting; the loop then appends the structured-output terminal
+  // tool after this projection (last of all).
+  describe("compileForTick — execution bindings serialize at the tail", () => {
+    it("execution-scoped tools come after every non-execution tool, stable otherwise", () => {
+      const r = new InMemoryToolRegistry();
+      // Interleave insertion order: exec, compiler, exec, session.
+      r.add(reg("exec_a", { scope: "execution", executionId: "e1" }));
+      r.add(reg("compiler_a", { scope: "compiler", mountId: "m1" }));
+      r.add(reg("exec_b", { scope: "execution", executionId: "e1" }));
+      r.add(reg("session_a", { scope: "session", sessionId: "s1" }));
+
+      const names = r.compileForTick({ exposure: "model" }).map((d) => d.name);
+      // Non-execution winners keep insertion order at the head; execution
+      // winners keep insertion order at the tail.
+      expect(names).toEqual(["compiler_a", "session_a", "exec_a", "exec_b"]);
+    });
+
+    it("an execution winner (over a session sibling of the same name) still sorts to the tail", () => {
+      const r = new InMemoryToolRegistry();
+      r.add(reg("shared", { scope: "session", sessionId: "s1" }));
+      r.add(reg("shared", { scope: "execution", executionId: "e1" })); // higher precedence
+      r.add(reg("compiler_a", { scope: "compiler", mountId: "m1" }));
+
+      const names = r.compileForTick({ exposure: "model" }).map((d) => d.name);
+      // `shared` resolves to its execution binding → tail, after the compiler tool.
+      expect(names).toEqual(["compiler_a", "shared"]);
+    });
+  });
 });

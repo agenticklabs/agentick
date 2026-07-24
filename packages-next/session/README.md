@@ -242,24 +242,98 @@ await session.send({
   send-level beats ambient). Wire callers declare `responseFormat` and
   parse the returned `response` text client-side.
 - **Steer delivery conflict.** A steer (the default delivery, which joins
-  an in-flight turn) that carries `responseFormat` is rejected with the
-  typed `SteerCannotCarryResponseFormat` — a steer injects messages into
-  the running turn and has no final turn of its own to shape. Use
-  `delivery: "followUp"` to run the structured request as a fresh
-  execution.
+  an in-flight turn) that carries `responseFormat` **or** `output` is
+  rejected with the typed `SteerCannotCarryStructuredOutput` — a steer
+  injects messages into the running turn and has no final turn of its own
+  to shape. Use `delivery: "followUp"` to run the structured request as a
+  fresh execution.
 
 > **Adapter caveat.** OpenAI and Google honor `responseFormat` natively;
 > the Anthropic and ai-sdk adapters currently DROP it
 > (`TODO(trail-anthropic-structured)` /
 > `TODO(trail-aisdk-experimental-output)`) — on those adapters it is a
-> best-effort generation hint.
+> best-effort generation hint. The `output` sugar below erases this gap on
+> tool-using turns (the terminal-tool strategy — all providers constrain
+> tool arguments natively).
 
-> **Deferred:** the live-schema sugar (a `StandardSchemaV1` `output` field)
->
-> - typed, validated `SendResult.data` are deliberately deferred pending
->   the multi-tick structured-output strategy design (final-answer-tool
->   capture — the model calls a synthetic tool whose input schema IS the
->   output shape, tying "done" to "shaped" and validating on every provider).
+### Structured execution results — `output` → `data` (§B2)
+
+The live-schema sugar: `SendInput.output` takes a `StandardSchemaV1`
+(Zod, Valibot, `jsonSchema()`), and `SendResult.data` returns the typed,
+**validated** value.
+
+```ts
+const { data } = await (
+  await session.send({ messages, output: answerSchema, tools: [...] })
+).result;
+data; // typed + validated, or the send rejected with ResponseValidationError
+```
+
+**The strategy is a terminal tool.** The loop injects a synthetic tool
+whose `inputSchema` IS the output schema (default name `submit_result`);
+the model calls it to deliver the final answer, and the call is the
+completion event. This ties "done" to "shaped" and makes validation free
+(providers constrain tool arguments natively). On a **bare** send (no
+tools) the loop instead uses a plain `responseFormat` directive
+(`generateObject`'s domain) — resolved automatically per send, overridable
+via `strategy` on a tree-level `<Output>`. The terminal tool is **never
+registered / never dispatched**; the loop captures its raw input and the
+session validates it — a synthesized `tool_result` pairs the call in the
+timeline so the next send is clean. (That synthesized result exists for
+timeline pairing + history only; the model never sees it in the capturing
+execution — there is no next tick, by design.)
+
+**`stopReason: "output_delivered"`.** When the answer is delivered via the
+terminal tool (natural OR forced wrap-up path), `SendResult.stopReason` is
+`"output_delivered"` — the loop stopped because the declared output was
+delivered, not on a pending `tool_use`. The `responseFormat` strategy
+(bare send) keeps the provider's stop reason.
+
+**Prose AND a typed result in one turn.** Providers may emit text
+alongside the terminal call in a single assistant turn. When they do, the
+text lands in `SendResult.response` as usual and the validated answer in
+`data` — a human summary and a typed result, zero extra ticks:
+
+```ts
+const { response, data } = await (
+  await session.send({ messages, output: answerSchema, tools: [...] })
+).result;
+response; // "Here's a short summary for you…"  (prose)
+data; //     { … }  (validated)
+```
+
+**The honest guarantees chain** — do not frame `output` as a blanket
+"structured output" promise; `skills.run` is its flagship consumer, and
+this is plumbing:
+
+1. **Natural path (usually):** the tool's presence + description
+   ("call this when the task is complete with the final answer") elicits
+   the call. Whether the model does so unforced is _model behavior_,
+   measured in `@agentick/eval-next`, reported as numbers — never asserted
+   here. See the compliance eval example.
+2. **Forced path (a hard guarantee):** if the model finishes without
+   calling the terminal tool, the loop runs ONE wrap-up tick with
+   `toolChoice: { tool: submit_result }` — the provider cannot respond
+   without calling it, arguments constrained to the schema.
+3. **Failure mode (the residual sliver):** at the `maxTicks` cap with no
+   room to wrap up, or if the forced tick still misses, the send rejects
+   with the typed `StructuredOutputIncomplete`. A conforming schema that
+   the delivered value fails to satisfy rejects with `ResponseValidationError`
+   (carrying `issues` + `raw`). Errors over nulls.
+
+A tree-level `<Output schema … />` declares "every execution of this agent
+produces this shape" (dedicated extraction agents, skill-runner children,
+forks); a send-level `output` overrides it. A tree tool that collides with
+the terminal name fails the send with `TerminalToolNameCollision` rather
+than silently shadowing; 2+ tree `<Output>`s fail with
+`MultipleStructuredOutputs`.
+
+> **Verified by** `__tests__/structured-output.spec.ts` (injection / detection /
+> stop / sibling-calls-first / timeline pairing / steer-proof stop / wrap-up /
+> miss / validation / collision / precedence / steer conflict) and
+> `__tests__/structured-send.spec.ts` (the declarative `responseFormat`
+> directive + threading). The prefix-cache tail-ordering guarantee is verified in
+> `@agentick/tool-executor-next` (`layered-tools.spec.ts`).
 
 ### Injecting a model registry (`models`, #206)
 
@@ -887,8 +961,13 @@ their backing.
   `<model responseFormat>` (recording-executor observation); with no
   send-level directive the tree one stays; multi-tick applies the
   directive on EVERY tick; and a steer carrying `responseFormat` rejects
-  with `SteerCannotCarryResponseFormat` while the same request as
+  with `SteerCannotCarryStructuredOutput` while the same request as
   `followUp` runs.
+- `src/__tests__/structured-output.spec.ts` — the §B2 terminal-tool
+  strategy: `output` → validated `data`, tool-vs-responseFormat injection,
+  detection + stop, sibling-calls-first, timeline pairing, steer-proof
+  stop, the forced wrap-up tick, and the typed miss / validation /
+  collision / precedence / steer-conflict errors.
 - `src/__tests__/define-session.spec.ts` — `defineSession` factory wiring.
 - `src/__tests__/model-bridge.spec.tsx` — tree-declared per-tick model,
   real loop resolving the `ModelBridge` (ADR 56); tick-IR precedence over

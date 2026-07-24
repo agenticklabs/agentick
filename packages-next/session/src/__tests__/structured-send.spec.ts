@@ -6,14 +6,13 @@
  * `SendInput → loop → project`.
  *
  * A steer (the default delivery, which joins an in-flight turn) that carries
- * `responseFormat` is rejected with the typed `SteerCannotCarryResponseFormat`
+ * `responseFormat` is rejected with the typed `SteerCannotCarryStructuredOutput`
  * — a delivery conflict, not a validation error — while the same request as
  * `followUp` runs as a fresh execution.
  *
- * NOTE: the live-schema sugar (`SendInput.output`) + validated
- * `SendResult.data` are DEFERRED pending the multi-tick structured-output
- * design (final-answer-tool capture), so there are no data/validation cases
- * here.
+ * The live-schema sugar (`SendInput.output`) + validated `SendResult.data` —
+ * the terminal-tool strategy — are covered in `structured-output.spec.ts`
+ * (§B2). This file stays scoped to the declarative `responseFormat` directive.
  */
 
 import { describe, expect, it } from "vitest";
@@ -252,7 +251,7 @@ describe("structured send — steer delivery conflict", () => {
         () => undefined,
         (e: unknown) => e,
       );
-    expect((steerErr as { _tag?: string })._tag).toBe("SteerCannotCarryResponseFormat");
+    expect((steerErr as { _tag?: string })._tag).toBe("SteerCannotCarryStructuredOutput");
 
     // The same request as `followUp` is accepted — it queues until the
     // session quiesces, then runs as a fresh execution.

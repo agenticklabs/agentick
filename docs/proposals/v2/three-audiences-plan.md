@@ -653,6 +653,17 @@ is in the brief, not in agent diligence:
    require a reported justification).
 4. **Architect end-gate** unchanged: diff review + adversarial pass +
    gates before commit; commits stay Ryan's.
+5. **Mid-flight amendments are unreliable — twice bitten (B, B2a).** A
+   mailbox message to a BUSY implementer may sit unread until a later
+   resume: B built the full pre-amendment scope and applied the descope
+   only on resume (crossing the interim landing call); B2a shipped
+   without the stopReason amendment and applied it as a post-report
+   delta. RULE: a scope amendment to a busy agent is not real until
+   acknowledged — either require an explicit ack before relying on it,
+   or (preferred) hold the change and apply it as a judged DELTA after
+   the report, which worked cleanly both times. Also expect the
+   redundant crossed follow-up after any nudge; judge the TREE, not the
+   correspondence.
 
 ## Decisions — RATIFIED (Ryan, 2026-07-24: "i think i am aligned")
 

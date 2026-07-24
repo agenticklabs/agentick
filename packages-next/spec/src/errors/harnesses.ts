@@ -67,11 +67,84 @@ export class MaxTicksExceeded extends LoopExecutorError {
 }
 registerAgentickError("MaxTicksExceeded", MaxTicksExceeded);
 
+/**
+ * Structured-output terminal-tool NAME collision (three-audiences-plan §B2).
+ * The terminal tool binds by NAME; a model-exposed tool (tree/compiler,
+ * precedence ≥ execution) of the same name would silently SHADOW it. Rather
+ * than shadow, the loop fails the send at tick 1. Loop-side because only the
+ * loop sees the precedence-resolved `compileForTick` set.
+ */
+export class TerminalToolNameCollision extends LoopExecutorError {
+  readonly _tag = "TerminalToolNameCollision" as const;
+  readonly toolName: string;
+  constructor(args: { readonly toolName: string; readonly cause?: unknown }) {
+    super(
+      `structured-output terminal tool "${args.toolName}" collides with a ` +
+        `model-exposed tool of the same name — rename the output tool ` +
+        `(\`name\` on the output spec) or the colliding tool`,
+      { cause: args.cause },
+    );
+    this.toolName = args.toolName;
+  }
+}
+registerAgentickError("TerminalToolNameCollision", TerminalToolNameCollision);
+
+/**
+ * A required structured-output terminal tool was never called
+ * (three-audiences-plan §B2). Raised after the natural path AND the forced
+ * wrap-up tick (`toolChoice: { tool }`) fail to elicit the terminal call —
+ * the honest-failure sliver the guarantees chain documents. Loop-side: the
+ * loop owns terminal detection + the wrap-up rung.
+ */
+export class StructuredOutputIncomplete extends LoopExecutorError {
+  readonly _tag = "StructuredOutputIncomplete" as const;
+  readonly toolName: string;
+  readonly reason: "max_ticks" | "no_terminal_call";
+  constructor(args: {
+    readonly toolName: string;
+    readonly reason: "max_ticks" | "no_terminal_call";
+    readonly cause?: unknown;
+  }) {
+    super(
+      `structured output incomplete: the model ended without calling the ` +
+        `terminal tool "${args.toolName}" (${args.reason})`,
+      { cause: args.cause },
+    );
+    this.toolName = args.toolName;
+    this.reason = args.reason;
+  }
+}
+registerAgentickError("StructuredOutputIncomplete", StructuredOutputIncomplete);
+
+/**
+ * More than one tree-level `<Output>` declaration was rendered
+ * (three-audiences-plan §B2). Multi-output extraction is not supported yet —
+ * one execution produces one shape. Fail loud rather than silently picking the
+ * first. (A send-level `SendInput.output` overrides the tree entirely, so this
+ * only fires when the tree alone declares 2+ outputs.)
+ */
+export class MultipleStructuredOutputs extends LoopExecutorError {
+  readonly _tag = "MultipleStructuredOutputs" as const;
+  readonly count: number;
+  constructor(args: { readonly count: number; readonly cause?: unknown }) {
+    super(
+      `${args.count} <Output> declarations rendered — multi-output extraction ` +
+        `is not supported; declare a single output shape`,
+      { cause: args.cause },
+    );
+    this.count = args.count;
+  }
+}
+registerAgentickError("MultipleStructuredOutputs", MultipleStructuredOutputs);
+
 export type LoopExecutorErrorChannel =
   | ExecutionError
   | TickError
   | LoopCanceledError
-  | MaxTicksExceeded;
+  | MaxTicksExceeded
+  | TerminalToolNameCollision
+  | StructuredOutputIncomplete
+  | MultipleStructuredOutputs;
 
 // ============================================================================
 // ReconcileError — compiler render + snapshot failures

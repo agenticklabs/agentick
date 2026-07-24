@@ -304,6 +304,33 @@ A worked end-to-end example lives in
 `example/v2-coding-agent/src/eval/coding.eval.tsx` — executable scoring
 (`t.file` / `t.sh`) + trajectory + budget + judge against a real coding agent.
 
+### Structured-output compliance example (§B2)
+
+`src/__tests__/structured-output-compliance.example.tsx` measures the §B2
+guarantees-contract tier 3: "does the model deliver the structured answer via
+the terminal tool?" — model behavior, run against a real adapter and reported
+as numbers, **never CI-gated**. It is not a `.spec` file (vitest skips it) but
+lives under `__tests__` so it is typechecked and cannot rot.
+
+Run it by importing the exported eval and calling it, swapping the default fake
+executor for your adapter:
+
+```ts
+import { structuredOutputComplianceEval } from "@agentick/eval-next/__tests__/structured-output-compliance.example";
+const result = await structuredOutputComplianceEval({ executor, target });
+// aggregate result.passed across N runs → the unforced-compliance number
+```
+
+> **Honest caveat.** The terminal tool is DELIVERED, not DISPATCHED — it never
+> enters the tool executor's registry (§B2 constraint 1), so it does NOT appear
+> in the dispatch ledger and `t.calledTool("submit_result")` cannot see it. The
+> working compliance signals are `t.completed()` (the structured turn reached a
+> natural terminal stop) plus the framework's validation of the delivered value
+> into `SendResult.data` (a nonconforming answer rejects the send). Observing
+> the terminal call itself would need the ledger to also consume the loop's
+> synthesized terminal `tool-dispatch` stream — tracked as
+> `TODO(b2a-eval-terminal-observability)`.
+
 ## Roadmap & known gaps
 
 - **Shipped:** `t.result` (full run access), `t.expect` / `t.score`, the

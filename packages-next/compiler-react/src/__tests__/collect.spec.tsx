@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import React from "react";
+import { jsonSchema } from "@agentick/spec-next";
+import { Output } from "../react/components/index.js";
 import { createContainer } from "@agentick/compiler-next";
 import { createHostScope } from "@agentick/compiler-next";
 import { createCompiler } from "../react/compiler.js";
@@ -128,6 +130,25 @@ describe("collect — declarations", () => {
     expect(tree.declarations?.resources).toHaveLength(1);
     expect(tree.declarations?.outputs).toHaveLength(1);
     expect(tree.features).toContain("outputs");
+  });
+
+  it("the <Output> component forwards §B2 terminal-tool props (name/description/strategy/schema)", () => {
+    const schema = jsonSchema({ type: "object", properties: { answer: { type: "string" } } });
+    const { tree } = renderAndCollect(
+      React.createElement(Output, {
+        id: "out.answer",
+        name: "deliver_answer",
+        description: "call this when done",
+        strategy: "tool",
+        schema,
+      }),
+    );
+    expect(tree.declarations?.outputs).toHaveLength(1);
+    const decl = tree.declarations!.outputs![0]!;
+    expect(decl.name).toBe("deliver_answer");
+    expect(decl.description).toBe("call this when done");
+    expect(decl.strategy).toBe("tool");
+    expect(decl.schema).toBe(schema);
   });
 
   it("collects MCP declarations", () => {

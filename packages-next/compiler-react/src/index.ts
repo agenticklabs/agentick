@@ -117,6 +117,8 @@ export { Project } from "./react/components/index.js";
 export type { ProjectProps } from "./react/components/index.js";
 export { ProviderTool } from "./react/components/index.js";
 export type { ProviderToolProps } from "./react/components/index.js";
+export { Output } from "./react/components/index.js";
+export type { OutputProps } from "./react/components/index.js";
 export { System, User, Assistant, Paragraph, H1, H2, H3 } from "./react/components/index.js";
 export { ToolGate } from "./react/components/index.js";
 export type { ToolGateProps } from "./react/components/index.js";

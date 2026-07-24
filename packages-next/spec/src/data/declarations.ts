@@ -545,9 +545,31 @@ export interface ResourceDeclaration {
 // ============================================================================
 
 /**
+ * How a structured output is DELIVERED (three-audiences-plan §B2).
+ *
+ *   - `"tool"` — inject a synthetic TERMINAL TOOL whose `inputSchema` IS the
+ *     output schema; the model calls it to deliver the final answer, and the
+ *     call is the completion event. Validation is native (providers constrain
+ *     tool arguments) and "done" == "shaped".
+ *   - `"responseFormat"` — a generation-time `responseFormat` directive on
+ *     every tick; the final assistant text is parsed + validated. Strictly
+ *     weaker on multi-tick / tool-using turns (see the plan) — its domain is
+ *     the bare single-tick send (`generateObject`).
+ *   - `"auto"` (default) — the loop resolves it at tick 1: the terminal tool
+ *     when the tick exposes model tools (multi-tick agentic), plain
+ *     `responseFormat` when the send is bare.
+ */
+export type OutputStrategy = "auto" | "tool" | "responseFormat";
+
+/**
  * Runtime registration for named outputs the application wants to extract
  * from the result. Distinct from {@link SpecConfig.responseFormat} which
  * is a generation-time provider directive.
+ *
+ * `<Output>` compiles to this: "every execution of this agent produces this
+ * shape" (dedicated extraction agents, skill-runner children, forks). The
+ * loop consumes the FIRST entry to derive its {@link OutputSpec}; a
+ * send-level `SendInput.output` overrides it (explicit-beats-ambient).
  */
 export interface OutputDeclaration {
   readonly id: string;
@@ -558,7 +580,38 @@ export interface OutputDeclaration {
    */
   readonly schema?: StandardSchemaV1;
   readonly mode?: "text" | "json" | "json_schema";
+  /**
+   * Terminal-tool NAME for the `"tool"` strategy (three-audiences-plan §B2).
+   * Defaults to `"submit_result"`. A tree tool of the same name SHADOWS the
+   * terminal binding, so the loop throws `TerminalToolNameCollision` rather
+   * than silently shadowing.
+   */
+  readonly name?: string;
+  /** Terminal-tool DESCRIPTION — the "when done, call this" instruction. */
+  readonly description?: string;
+  /** Delivery strategy — see {@link OutputStrategy}. Defaults to `"auto"`. */
+  readonly strategy?: OutputStrategy;
   readonly metadata?: Record<string, unknown>;
+}
+
+/**
+ * The resolved structured-output directive threaded from the session to the
+ * loop for one execution (three-audiences-plan §B2). Carries the LIVE
+ * `StandardSchemaV1` (in-process only — same tolerance as the other
+ * non-serializable `RunExecutionInput` refs; `output` never crosses the wire
+ * by construction). Sourced from `SendInput.output` (send-level, redefined)
+ * OR derived from the tree-level {@link OutputDeclaration} inside the loop;
+ * send-level wins.
+ */
+export interface OutputSpec {
+  /** Terminal-tool name for the `"tool"` strategy. Default `"submit_result"`. */
+  readonly toolName: string;
+  /** Terminal-tool description (the completion instruction). */
+  readonly description?: string;
+  /** The live output-shape validator. */
+  readonly schema: StandardSchemaV1;
+  /** Delivery strategy — see {@link OutputStrategy}. */
+  readonly strategy: OutputStrategy;
 }
 
 // ============================================================================

@@ -79,6 +79,25 @@ which door is reachable:
 The harness enforces exposure at dispatch time (`ToolPermissionError`
 for the wrong door).
 
+### `compileForTick` ordering — execution bindings serialize at the tail
+
+`compileForTick` resolves the per-tick, precedence-resolved model-visible
+set (highest-precedence binding wins per name: `runtime < gateway < app <
+session < execution < client < compiler`). It ALSO carries a **serialization
+guarantee**: **execution-scoped winners are stably partitioned to the TAIL**,
+after every non-execution winner (both keep insertion order otherwise).
+
+This is the prefix-cache guarantee (three-audiences-plan §B2). Tools
+serialize at the head of the provider prompt, so a per-execution tool binding
+(`SendInput.tools`, and the structured-output terminal tool the loop appends
+_after_ this projection) is a prefix perturbation. Keeping the cache-stable
+tree/compiler/session tools at the head and the per-execution bindings at the
+tail means an Anthropic cache breakpoint on the stable prefix keeps hitting —
+only the tail is new.
+
+> **Verified by** `__tests__/layered-tools.spec.ts` ("execution bindings
+> serialize at the tail").
+
 ### Dispatch aliases
 
 `ToolDeclaration.aliases` (a `readonly string[]`) gives a tool alternate dispatch

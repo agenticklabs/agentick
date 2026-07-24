@@ -92,18 +92,24 @@ import type {
   EventBus,
   MessageInbox,
   OperationJournal,
+  OutputSpec,
   RunExecutionInput,
   SpecConfig,
   TickInput,
   TickResult,
   ToolCall,
+  ToolDeclaration,
   UsageStats,
 } from "@agentick/spec-next";
 import {
   ExecutionError,
   HandlerError,
+  MultipleStructuredOutputs,
   NoModelForExecutionError,
   ProviderRejected,
+  StructuredOutputIncomplete,
+  TerminalToolNameCollision,
+  toJsonSchema,
   toRegistration,
 } from "@agentick/spec-next";
 import { mergeAbortSignals } from "@agentick/utils-next";
@@ -416,7 +422,16 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         | "aborted"
         | "vetoed"
         | "executor_failed"
-        | "timeout" = "end";
+        | "timeout"
+        | "output_delivered" = "end";
+
+      // §B2 structured-output run-level state. `terminalCapture` is lifted from
+      // the tick that called the terminal tool onto the ExecutionRunResult;
+      // `terminalStrategy` (last observed) decides whether a MISS warrants the
+      // forced wrap-up tick.
+      let terminalCapture: { readonly toolName: string; readonly input: unknown } | undefined;
+      let terminalStrategy: "tool" | "responseFormat" | undefined;
+      let terminalToolName: string | undefined;
 
       // Emit execution-start to the consumer (typed handle iterator).
       // The `useOnExecutionStart` lifecycle projection rides the
@@ -462,6 +477,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           resolveModel: input.resolveModel,
           stream: input.stream,
           ...(input.responseFormat !== undefined ? { responseFormat: input.responseFormat } : {}),
+          ...(input.outputSpec !== undefined ? { outputSpec: input.outputSpec } : {}),
           narrate: input.narrate,
           toolConcurrency: input.toolConcurrency,
           emit: sink,
@@ -504,6 +520,20 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         acc.toolResults.push(...tickResult.toolResults);
         acc.lastStopReason = result.stopReason;
 
+        // §B2 — record the resolved strategy + any terminal capture from this
+        // tick. Capture forces a STEER-PROOF stop below (a queued steer's
+        // `continue` cannot override a delivered structured answer).
+        if (tickResult.terminalStrategy !== undefined) {
+          terminalStrategy = tickResult.terminalStrategy;
+        }
+        if (tickResult.terminalToolName !== undefined) {
+          terminalToolName = tickResult.terminalToolName;
+        }
+        if (tickResult.terminalCapture !== undefined) {
+          terminalCapture = tickResult.terminalCapture;
+        }
+        const terminalCaptured = terminalCapture !== undefined;
+
         // `provisionalContinue` is the loop's INTRINSIC disposition (tool_use
         // with pending calls → keep ticking), computed inside the tick body and
         // surfaced as `tickResult.shouldContinue`; the DECIDE reads it below.
@@ -528,8 +558,14 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
               }),
             )
           : undefined;
-        const wantsContinue =
-          forward?.kind === "stop" ? false : provisionalContinue || forward?.kind === "continue";
+        // §B2 steer-proof stop: a delivered structured answer terminates the
+        // execution regardless of steering — `terminalCaptured` short-circuits
+        // the fold so a forward `continue` cannot reopen the turn.
+        const wantsContinue = terminalCaptured
+          ? false
+          : forward?.kind === "stop"
+            ? false
+            : provisionalContinue || forward?.kind === "continue";
         const tickStopReason: string = !wantsContinue
           ? result.stopReason
           : acc.ticks >= input.maxTicks
@@ -555,7 +591,9 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         });
 
         if (!wantsContinue) {
-          stopReason = result.stopReason;
+          // §B2 — a delivered structured output reports `output_delivered`, not
+          // the provider's `tool_use`: the loop stopped on the delivery.
+          stopReason = terminalCaptured ? "output_delivered" : result.stopReason;
           break;
         }
 
@@ -581,6 +619,80 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         stopReason = "timeout";
       }
 
+      // §B2 enforcement rung — the forced wrap-up tick. A required terminal
+      // tool (tool strategy) that went uncalled while the model finished
+      // NATURALLY (not aborted / vetoed / executor-failed / timed out) gets ONE
+      // more tick with `toolChoice: { tool: <terminal> }` — a HARD provider
+      // guarantee that the model calls it, args provider-constrained to the
+      // schema. At the maxTicks cap there is no room: skip the wrap-up and
+      // reject. Still no call after the wrap-up (the provider guarantee should
+      // prevent this) → the same typed miss error.
+      if (
+        terminalStrategy === "tool" &&
+        terminalCapture === undefined &&
+        terminalToolName !== undefined &&
+        !this.aborted.has(executionId) &&
+        !timedOut &&
+        stopReason !== "executor_failed" &&
+        stopReason !== "vetoed" &&
+        stopReason !== "aborted" &&
+        stopReason !== "timeout"
+      ) {
+        if (acc.ticks >= input.maxTicks) {
+          return yield* Effect.fail(
+            new StructuredOutputIncomplete({ toolName: terminalToolName, reason: "max_ticks" }),
+          );
+        }
+        const wrapTickId = `tick-${ulid()}`;
+        acc.ticks += 1;
+        const wrapInput: TickInput = {
+          tickId: wrapTickId,
+          tickIndex: acc.ticks,
+          executionId,
+          sessionId: input.sessionId,
+          mountId: input.mountId,
+          ...(input.spawnPath !== undefined ? { spawnPath: input.spawnPath } : {}),
+          compiler: input.compiler,
+          modelExecutor: input.modelExecutor,
+          target: input.target,
+          toolExecutor: input.toolExecutor,
+          stateApplicator: input.stateApplicator,
+          signal: execSignal,
+          resolveRenderContext: input.resolveRenderContext,
+          resolveModel: input.resolveModel,
+          stream: input.stream,
+          ...(input.responseFormat !== undefined ? { responseFormat: input.responseFormat } : {}),
+          ...(input.outputSpec !== undefined ? { outputSpec: input.outputSpec } : {}),
+          toolChoice: { tool: terminalToolName },
+          narrate: input.narrate,
+          toolConcurrency: input.toolConcurrency,
+          emit: sink,
+        };
+        const wrapResult = yield* this.commandEffect<TickInput, TickResult, unknown>(
+          "loop:tick",
+          wrapInput,
+        );
+        if (wrapResult.executorTerminal.outcome === "succeeded") {
+          const wr = wrapResult.executorTerminal.result;
+          accumulateUsage(acc.usage, wr.usage);
+          acc.output.push(...wr.output);
+          acc.toolResults.push(...wrapResult.toolResults);
+          if (wrapResult.terminalCapture !== undefined) {
+            terminalCapture = wrapResult.terminalCapture;
+            // §B2 — the forced wrap-up delivered the output.
+            stopReason = "output_delivered";
+          }
+        }
+        if (terminalCapture === undefined) {
+          return yield* Effect.fail(
+            new StructuredOutputIncomplete({
+              toolName: terminalToolName,
+              reason: "no_terminal_call",
+            }),
+          );
+        }
+      }
+
       const runResult: ExecutionRunResult = {
         executionId,
         ticks: acc.ticks,
@@ -588,6 +700,9 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         stopReason,
         output: acc.output,
         toolResults: acc.toolResults,
+        // §B2 — the raw terminal capture (tool strategy). The SESSION validates
+        // it against the retained `output` schema at result assembly.
+        ...(terminalCapture !== undefined ? { terminalCapture } : {}),
       };
 
       const wasAborted = this.aborted.has(executionId);
@@ -620,11 +735,17 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
       // (streaming `.result`, hard tool throw) are already absorbed in-body.
       Effect.catchAll(
         (cause): Effect.Effect<never, LoopExecutorError | NoModelForExecutionError> =>
-          // `NoModelForExecutionError` (raised at the per-tick model resolution)
-          // and an already-`ExecutionError` cause surface UNWRAPPED; every other
-          // uncaught twin failure folds to `ExecutionError`.
+          // `NoModelForExecutionError` (raised at the per-tick model resolution),
+          // an already-`ExecutionError` cause, AND the §B2 structured-output
+          // errors (collision / miss / multi-output — the session rejects the
+          // send with the typed error) surface UNWRAPPED; every other uncaught
+          // twin failure folds to `ExecutionError`.
           Effect.fail(
-            cause instanceof ExecutionError || cause instanceof NoModelForExecutionError
+            cause instanceof ExecutionError ||
+              cause instanceof NoModelForExecutionError ||
+              cause instanceof TerminalToolNameCollision ||
+              cause instanceof StructuredOutputIncomplete ||
+              cause instanceof MultipleStructuredOutputs
               ? cause
               : new ExecutionError({ cause }),
           ),
@@ -725,20 +846,84 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
       if (tickModelExecutor === undefined || tickTarget === undefined) {
         return yield* Effect.fail(new NoModelForExecutionError());
       }
-      // Per-tick config overlay. Two layers fold OVER the render's
-      // `config`, innermost-wins:
+      // 2. Layered-tools compile (#138).
+      //
+      // The compiler emitted tool declarations in `renderResult.tree
+      // .declarations.tools` (the IR's record of THIS render's
+      // contribution). Sync that into the tool executor's registry
+      // as the compiler-bound slice, then ask the registry for the
+      // precedence-resolved model-visible set — the unification of
+      // every layered seam (gateway/app/session/execution/extension/
+      // compiler). The projection reads that set, not the IR slot.
+      // Both compose in-fiber via `.fx`. Done BEFORE the config overlay
+      // because the structured-output strategy resolution (§B2) reads
+      // `modelTools.length` to resolve `"auto"`.
+      const compilerTools = renderResult.tree.declarations?.tools ?? [];
+      const compilerBinding = { scope: "compiler", mountId: input.mountId } as const;
+      yield* input.toolExecutor.fx.replaceCompilerTools({
+        mountId: input.mountId,
+        registrations: compilerTools.map((d) => toRegistration(d, compilerBinding)),
+      });
+      const modelTools = yield* input.toolExecutor.fx.compileForTick({ exposure: "model" });
+
+      // Structured-output resolution (three-audiences-plan §B2). Merge the
+      // effective spec (send-level `input.outputSpec` wins over the tree-level
+      // `<Output>` declaration), resolve `"auto"` against the model-visible
+      // tool count, and — for the `"tool"` strategy — APPEND the synthetic
+      // terminal tool at the TAIL of `modelTools` (after the cache-stable
+      // prefix; the registry already tail-sorts execution bindings). A
+      // collision with a model-exposed tool of the same name fails loud rather
+      // than shadowing. The `"responseFormat"` strategy synthesizes a
+      // json_schema directive folded into the config overlay below.
+      const treeOutputs = renderResult.tree.declarations?.outputs ?? [];
+      if (input.outputSpec === undefined && treeOutputs.length > 1) {
+        return yield* Effect.fail(new MultipleStructuredOutputs({ count: treeOutputs.length }));
+      }
+      const outputSpec = input.outputSpec ?? outputSpecFromTree(treeOutputs);
+      let terminalStrategy: "tool" | "responseFormat" | undefined;
+      let modelToolsForRun: readonly ToolDeclaration[] = modelTools;
+      let structuredResponseFormat: SpecConfig["responseFormat"] | undefined;
+      if (outputSpec !== undefined) {
+        terminalStrategy =
+          outputSpec.strategy === "tool" || outputSpec.strategy === "responseFormat"
+            ? outputSpec.strategy
+            : modelTools.length > 0
+              ? "tool"
+              : "responseFormat";
+        if (terminalStrategy === "tool") {
+          if (modelTools.some((t) => t.name === outputSpec.toolName)) {
+            return yield* Effect.fail(
+              new TerminalToolNameCollision({ toolName: outputSpec.toolName }),
+            );
+          }
+          modelToolsForRun = [...modelTools, terminalToolDeclaration(outputSpec)];
+        } else {
+          structuredResponseFormat = {
+            type: "json_schema",
+            name: outputSpec.toolName,
+            schema: toJsonSchema(outputSpec.schema) as Record<string, unknown>,
+          };
+        }
+      }
+
+      // Per-tick config overlay. Layers fold OVER the render's `config`,
+      // innermost-wins:
       //   1. `modelDecl.parameters` — a per-tick `<Model>`-declared
       //      generation-knob patch (temperature, maxOutputTokens, …), the
       //      same knobs RenderedTree.config carries and the executor reads
       //      via buildParameters.
-      //   2. `input.responseFormat` — the SEND-level structured-output
-      //      directive (trail-response-format-send). Spread LAST so an
-      //      explicit `SendInput.responseFormat` / `.output` wins over both
-      //      the tree-level `<config responseFormat>` and a model-decl one
-      //      (explicit send-level beats ambient tree/model).
+      //   2. `input.responseFormat` — the SEND-level declarative directive
+      //      (trail-response-format-send) OR (3) the `responseFormat`-strategy
+      //      directive synthesized from `input.outputSpec` above. Spread LAST
+      //      so an explicit send-level directive wins over tree/model config.
+      //   4. `input.toolChoice` — the forced wrap-up tick's `{ tool }` (§B2).
       const configOverlay: Partial<SpecConfig> = {
         ...modelDecl?.parameters,
         ...(input.responseFormat !== undefined ? { responseFormat: input.responseFormat } : {}),
+        ...(structuredResponseFormat !== undefined
+          ? { responseFormat: structuredResponseFormat }
+          : {}),
+        ...(input.toolChoice !== undefined ? { toolChoice: input.toolChoice } : {}),
       };
       const tickCompiled =
         Object.keys(configOverlay).length > 0
@@ -750,24 +935,6 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
               } as SpecConfig,
             }
           : renderResult.tree;
-
-      // 2. Layered-tools compile (#138).
-      //
-      // The compiler emitted tool declarations in `renderResult.tree
-      // .declarations.tools` (the IR's record of THIS render's
-      // contribution). Sync that into the tool executor's registry
-      // as the compiler-bound slice, then ask the registry for the
-      // precedence-resolved model-visible set — the unification of
-      // every layered seam (gateway/app/session/execution/extension/
-      // compiler). The projection reads that set, not the IR slot.
-      // Both compose in-fiber via `.fx`.
-      const compilerTools = renderResult.tree.declarations?.tools ?? [];
-      const compilerBinding = { scope: "compiler", mountId: input.mountId } as const;
-      yield* input.toolExecutor.fx.replaceCompilerTools({
-        mountId: input.mountId,
-        registrations: compilerTools.map((d) => toRegistration(d, compilerBinding)),
-      });
-      const modelTools = yield* input.toolExecutor.fx.compileForTick({ exposure: "model" });
 
       // 2b. Provider-EXECUTED tools (Pass D). Unlike `modelTools`, these
       //     bypass the tool executor entirely — no `replaceCompilerTools`,
@@ -802,7 +969,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           compiled: tickCompiled,
           target: tickTarget,
           scope: { sessionId: input.sessionId, executionId, tickId },
-          tools: modelTools,
+          tools: modelToolsForRun,
           ...(providerTools.length > 0 ? { providerTools } : {}),
           ...(input.narrate !== undefined ? { narrate: input.narrate } : {}),
         });
@@ -841,7 +1008,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           compiled: tickCompiled,
           target: tickTarget,
           scope: { sessionId: input.sessionId, executionId, tickId },
-          tools: modelTools,
+          tools: modelToolsForRun,
           signal: execSignal,
           ...(providerTools.length > 0 ? { providerTools } : {}),
           ...(input.narrate !== undefined ? { narrate: input.narrate } : {}),
@@ -907,7 +1074,23 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
       // deterministic); only the per-tool lifecycle EVENTS interleave.
       // Abort / timeout tears down every in-flight tool fiber — each
       // carries `execSignal`, and `Effect.all` propagates interruption.
-      const toolCalls: readonly ToolCall[] = result.toolCalls ?? [];
+      //
+      // §B2 sibling-calls-first: when the model calls the structured-output
+      // terminal tool ALONGSIDE real tools in one tick, the real calls
+      // dispatch normally (results captured), the terminal call is FILTERED
+      // out of the dispatch set (it was never registered — dispatch would be a
+      // ToolHandlerMissing error), its raw input is captured, and a synthesized
+      // tool_result is emitted LAST so the persisted timeline pairs the
+      // terminal tool_use. Detection is by name, from the resolved spec.
+      const allToolCalls: readonly ToolCall[] = result.toolCalls ?? [];
+      const terminalCall =
+        terminalStrategy === "tool" && outputSpec !== undefined
+          ? allToolCalls.find((tc) => tc.name === outputSpec.toolName)
+          : undefined;
+      const toolCalls: readonly ToolCall[] =
+        terminalCall !== undefined
+          ? allToolCalls.filter((tc) => tc !== terminalCall)
+          : allToolCalls;
       const dispatchOne = (tc: ToolCall): Effect.Effect<LoopToolResult, never, never> =>
         Effect.gen(function* () {
           const startedAt = Date.now();
@@ -1009,6 +1192,33 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           : [];
       const tickToolResults: LoopToolResult[] = [...dispatchedResults];
 
+      // §B2 terminal capture — processed LAST (after sibling dispatch). Capture
+      // the RAW input (the SESSION validates against the retained schema), and
+      // synthesize a succeeded tool_result flowing the SAME apply path as real
+      // results so the persisted timeline pairs the terminal tool_use — a
+      // dangling tool_use with no tool_result breaks the next send on providers
+      // that enforce pairing.
+      let terminalCapture: { readonly toolName: string; readonly input: unknown } | undefined;
+      if (terminalCall !== undefined && outputSpec !== undefined) {
+        terminalCapture = { toolName: outputSpec.toolName, input: terminalCall.input };
+        yield* input.emit({
+          kind: "tool-dispatch",
+          tick: tickIndex,
+          callId: terminalCall.id,
+          name: terminalCall.name,
+          content: TERMINAL_RESULT_CONTENT,
+          succeeded: true,
+          durationMs: 0,
+        });
+        tickToolResults.push({
+          toolCallId: terminalCall.id,
+          toolName: terminalCall.name,
+          succeeded: true,
+          content: TERMINAL_RESULT_CONTENT,
+          durationMs: 0,
+        });
+      }
+
       // 4. State application — the session harness's apply commands,
       // composed in-fiber via `.fx`. NoopStateApplicator records nothing;
       // the real session harness writes timeline entries here so the next
@@ -1044,6 +1254,16 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         toolResults: tickToolResults,
         shouldContinue: provisionalContinue,
         stopReason: result.stopReason,
+        // §B2 — surface the resolved strategy (so the run-execution
+        // continuation can decide the forced wrap-up tick), the resolved
+        // terminal tool name (for the wrap-up `toolChoice`), and the raw
+        // terminal capture (lifted onto the ExecutionRunResult + forcing a
+        // steer-proof stop).
+        ...(terminalStrategy !== undefined ? { terminalStrategy } : {}),
+        ...(terminalStrategy === "tool" && outputSpec !== undefined
+          ? { terminalToolName: outputSpec.toolName }
+          : {}),
+        ...(terminalCapture !== undefined ? { terminalCapture } : {}),
       };
 
       // ADR 67 §"flip the tick-end order" — the SETTLE now rides the
@@ -1061,6 +1281,62 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
 // ============================================================================
 // helpers
 // ============================================================================
+
+/**
+ * Default terminal-tool instruction (§B2). The tool IS the instruction — its
+ * presence in the tick's tool list is the "when the task is complete, call
+ * this with the final answer" context (per-execution because the binding is
+ * per-execution). Overridable on the output spec (`description`).
+ */
+const DEFAULT_TERMINAL_DESCRIPTION =
+  "When the task is complete, call this tool with the final result. Its " +
+  "arguments ARE the required answer shape — provide the final answer here " +
+  "rather than as prose.";
+
+/**
+ * Synthesized content for the terminal tool's `tool_result` (§B2). The call is
+ * the completion event; there is no handler to run, so the result is a fixed
+ * acknowledgement that pairs the tool_use in the persisted timeline.
+ */
+const TERMINAL_RESULT_CONTENT: readonly ContentBlock[] = [
+  { type: "text", text: "Result recorded." },
+];
+
+/**
+ * The synthetic structured-output terminal tool (§B2). Its `inputSchema` IS
+ * the output schema. NEVER registered (no `handlerRef` — the spec firewall,
+ * and dispatch of an unregistered handler is a ToolHandlerMissing error): the
+ * LOOP appends it to the model-facing tools list and filters its call out of
+ * the dispatch set.
+ */
+function terminalToolDeclaration(spec: OutputSpec): ToolDeclaration {
+  return {
+    id: spec.toolName,
+    name: spec.toolName,
+    description: spec.description ?? DEFAULT_TERMINAL_DESCRIPTION,
+    inputSchema: spec.schema,
+    exposure: ["model"],
+  };
+}
+
+/**
+ * Derive an {@link OutputSpec} from the tree-level `<Output>` declaration
+ * (§B2) — the first entry (multi-output is rejected upstream). Returns
+ * undefined when the tree declares no output, or an output with no schema
+ * (nothing to extract).
+ */
+function outputSpecFromTree(
+  outputs: readonly import("@agentick/spec-next").OutputDeclaration[],
+): OutputSpec | undefined {
+  const decl = outputs[0];
+  if (decl?.schema === undefined) return undefined;
+  return {
+    toolName: decl.name ?? "submit_result",
+    ...(decl.description !== undefined ? { description: decl.description } : {}),
+    schema: decl.schema,
+    strategy: decl.strategy ?? "auto",
+  };
+}
 
 /**
  * Build a `TickResult` for a tick whose model executor did NOT succeed

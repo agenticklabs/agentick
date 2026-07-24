@@ -61,6 +61,7 @@ import type {
   OperationJournalFactory,
   ProtocolEvent,
   RegisteredModel,
+  OutputSpec,
   RenderContext,
   ResponseFormat,
   RestoreSnapshotInput,
@@ -93,7 +94,9 @@ import {
   HandlerError,
   isChannelSnapshotProvider,
   isSnapshotCapable,
-  SteerCannotCarryResponseFormat,
+  parseJsonWithSchema,
+  ResponseValidationError,
+  SteerCannotCarryStructuredOutput,
   supportsTreeInterception,
   SessionClosedError,
   SnapshotVersionMismatch,
@@ -1975,9 +1978,21 @@ export class SessionHarness<P = unknown>
     // Structured final turn (trail-response-format-send) — the declarative,
     // wire-safe `responseFormat` directive. Overlaid onto every tick's
     // compiled config by the loop (explicit-beats-ambient over tree/model
-    // config). The live-schema sugar + validated `SendResult.data` are
-    // deferred (final-answer-tool capture, pending design).
+    // config).
     const effectiveResponseFormat: ResponseFormat | undefined = input.responseFormat;
+
+    // Structured final turn — the LIVE-schema `output` sugar (§B2). Derive the
+    // OutputSpec (schema RETAINED here for validation at result assembly — the
+    // wire never carries it) and thread it to the loop, which resolves the
+    // delivery strategy, injects the terminal tool / responseFormat overlay,
+    // and captures the RAW answer. `submit_result` is the default terminal
+    // name; `"auto"` lets the loop pick tool-vs-responseFormat at tick 1. A
+    // tree-level `<Output>` is the fallback (resolved in the loop) — send-level
+    // wins here.
+    const outputSpec: OutputSpec | undefined =
+      input.output !== undefined
+        ? { toolName: "submit_result", schema: input.output, strategy: "auto" }
+        : undefined;
 
     // Delivery mode (queue-item 4b). Default `"steer"` = today's ADR 53 §5
     // join behavior; `"followUp"` = wait for the session to fully quiesce,
@@ -2013,10 +2028,11 @@ export class SessionHarness<P = unknown>
           if (!this._loopDone) {
             // A JOIN carries ONLY its messages into the in-flight turn — it
             // starts no new execution, so it has no final turn of its own to
-            // shape. Reject a `responseFormat`-carrying steer loud rather than
-            // silently dropping the directive or auto-upgrading delivery.
-            if (input.responseFormat !== undefined) {
-              throw new SteerCannotCarryResponseFormat();
+            // shape. Reject a structured-output-carrying steer (`responseFormat`
+            // OR the live `output` schema) loud rather than silently dropping
+            // the directive or auto-upgrading delivery.
+            if (input.responseFormat !== undefined || input.output !== undefined) {
+              throw new SteerCannotCarryStructuredOutput();
             }
             // ENQUEUE (not append): the steer lands at the next tick boundary,
             // after this tick's tool results, before the next render — the
@@ -2296,6 +2312,11 @@ export class SessionHarness<P = unknown>
                 ...(effectiveResponseFormat !== undefined
                   ? { responseFormat: effectiveResponseFormat }
                   : {}),
+                // §B2 — the live-schema `output` sugar. The loop resolves the
+                // strategy + injects the terminal tool / responseFormat
+                // overlay; the raw capture rides `ExecutionRunResult
+                // .terminalCapture`, validated to `data` at result assembly.
+                ...(outputSpec !== undefined ? { outputSpec } : {}),
                 // Stage 5 — per-send tool concurrency (default "unbounded" in
                 // the loop) + optional execution timeout, both opt-in.
                 ...omitUndefined({
@@ -2392,6 +2413,55 @@ export class SessionHarness<P = unknown>
             .filter((b): b is { type: "text"; text: string } => b.type === "text")
             .map((b) => b.text)
             .join("");
+          // §B2 — structured-output validation. The SESSION is the validation
+          // authority: it retains the live `output` schema the wire never
+          // carries. Tool strategy → validate the terminal tool's raw captured
+          // input; responseFormat strategy (no capture) → parse + validate the
+          // final assistant text. A supplied schema that isn't met rejects with
+          // the typed `ResponseValidationError` (errors over nulls) rather than
+          // resolving an unvalidated `data`.
+          // TODO(b2a-tree-data): a TREE-only `<Output>` (no send-level `output`)
+          // still injects the terminal tool + captures on `terminalCapture`, but
+          // this validation gates on `input.output` (the send-level schema the
+          // session retains). Populating `SendResult.data` from a tree-declared
+          // schema needs the session to retain the tree schema (the loop resolves
+          // it per-tick); until then tree-only outputs enforce completion without
+          // a validated `data`.
+          let data: unknown;
+          if (input.output !== undefined) {
+            if (result.terminalCapture !== undefined) {
+              const validated = await input.output["~standard"].validate(
+                result.terminalCapture.input,
+              );
+              if (validated.issues !== undefined) {
+                resultDeferred.reject(
+                  new ResponseValidationError({
+                    raw: result.terminalCapture.input,
+                    issues: validated.issues,
+                  }),
+                );
+                close();
+                return;
+              }
+              data = validated.value;
+            } else {
+              const parsed = await parseJsonWithSchema(response, input.output);
+              if (!parsed.ok) {
+                resultDeferred.reject(
+                  new ResponseValidationError({
+                    raw: parsed.text,
+                    issues: parsed.issues,
+                    ...(parsed.reason === "invalid-json"
+                      ? { message: "structured output is not valid JSON" }
+                      : {}),
+                  }),
+                );
+                close();
+                return;
+              }
+              data = parsed.value;
+            }
+          }
           const sendResult: SendResult = {
             response,
             output: result.output,
@@ -2400,6 +2470,7 @@ export class SessionHarness<P = unknown>
             stopReason: result.stopReason,
             ticks: result.ticks,
             executionId,
+            ...(input.output !== undefined ? { data } : {}),
           };
           emit({ type: "result", tick: 0, result: sendResult });
           resultDeferred.resolve(sendResult);

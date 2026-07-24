@@ -304,12 +304,31 @@ export interface SendInput<P = unknown> {
    * (`TODO(trail-anthropic-structured)` / `TODO(trail-aisdk-experimental-
    * output)`).
    *
-   * NOTE (deferred): the live-schema sugar (a `StandardSchemaV1` `output`
-   * field normalized here) + typed, validated `SendResult.data` are
-   * DEFERRED pending the multi-tick structured-output strategy design
-   * (final-answer-tool capture). This ships the declarative directive only.
+   * For the LIVE-schema sugar + validated `SendResult.data`, use
+   * {@link output} — the terminal-tool strategy that erases the provider gap
+   * (three-audiences-plan §B2).
    */
   readonly responseFormat?: import("../data/rendered-tree.js").ResponseFormat;
+  /**
+   * Structured final turn — LIVE-schema sugar (three-audiences-plan §B2).
+   * "THIS execution produces this shape." A `StandardSchemaV1` (Zod, Valibot,
+   * `jsonSchema()`, …); the session derives an {@link import("../data/declarations.js").OutputSpec}
+   * and threads it to the loop, which delivers the answer via a synthetic
+   * TERMINAL TOOL (its `inputSchema` IS this schema) when the turn exposes
+   * model tools, or a plain `responseFormat` directive on a bare send. The
+   * captured value is validated against this schema into {@link SendResult.data}
+   * (typed `ResponseValidationError` on mismatch — errors over nulls).
+   *
+   * In-process only: a validator is a runtime function and CANNOT cross the
+   * wire, so `output` is rejected at the wire boundary — declare
+   * `responseFormat` there instead and parse client-side. Overrides a
+   * tree-level `<Output>` declaration (explicit-beats-ambient).
+   *
+   * `skills.run` composes on this. See the plan's honest guarantees chain
+   * (natural path → forced wrap-up tick → typed failure) before framing it as
+   * a general structured-output promise.
+   */
+  readonly output?: import("../data/standard-schema.js").StandardSchemaV1<unknown, unknown>;
 }
 
 /**
@@ -358,9 +377,24 @@ export interface SendResult {
     | "aborted"
     | "vetoed"
     | "executor_failed"
-    | "timeout";
+    | "timeout"
+    // §B2 — the declared structured output was delivered via the terminal tool
+    // (natural or forced wrap-up path); `data` carries the validated value.
+    // Reported instead of the provider's `tool_use`. The `responseFormat`
+    // strategy keeps the provider stop reason.
+    | "output_delivered";
   readonly ticks: number;
   readonly executionId: string;
+  /**
+   * The typed, schema-validated structured output (three-audiences-plan §B2).
+   * Present ONLY when a live {@link SendInput.output} schema was supplied and
+   * the execution delivered a conforming value (the terminal tool's validated
+   * input, or the validated final text on the `responseFormat` strategy). A
+   * schema that was supplied but not met rejects `handle.result` with
+   * `ResponseValidationError` rather than resolving an unvalidated `data`. The
+   * wire `SendResult` never carries `data` — the schema never crossed.
+   */
+  readonly data?: unknown;
 }
 
 // ============================================================================

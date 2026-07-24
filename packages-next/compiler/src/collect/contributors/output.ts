@@ -22,7 +22,7 @@ import type { Exhausted, UnhandledSpecKeys } from "./spec-conformance.js";
  */
 export type OutputProps = Omit<OutputDeclaration, "id"> & { readonly id?: string };
 
-type OutputForwarded = "schema" | "mode" | "metadata";
+type OutputForwarded = "schema" | "mode" | "name" | "description" | "strategy" | "metadata";
 type OutputSupplied = "id";
 type _conformance = Exhausted<
   UnhandledSpecKeys<OutputDeclaration, OutputForwarded, OutputSupplied>

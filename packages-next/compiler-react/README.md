@@ -144,15 +144,27 @@ exhaustive prop / option / return types.
 Typed PascalCase wrappers over the host intrinsics — the canonical
 author API (no `JSX.IntrinsicElements` augmentation needed).
 
-| Component                                          | Purpose                                                                                |
-| -------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| `<Section>`                                        | Structured context entry (`id`, `title`, `priority`, …)                                |
-| `<Message role>`                                   | Role-bearing entry; spread a persisted record: `{...entry.message}`                    |
-| `<System>` `<User>` `<Assistant>`                  | Sugar for `<Message role="…">`                                                         |
-| `<Paragraph>` `<H1>` `<H2>` `<H3>`                 | Block-level semantic wrappers                                                          |
-| `<FormatScope>` `<Markdown>` `<XML>` `<PlainText>` | Per-subtree formatter framing                                                          |
-| `<Project projectionKey>`                          | Override a harness's surfacing projection (ADR 63); suppresses that key's default fold |
-| `<ToolGate tool? confirm>`                         | Gate the model's tool calls behind a confirm flow (ADR 89 §4) — the `useGuardToolDispatch` confirm-dialog example |
+| Component                                          | Purpose                                                                                                                                                                                                                                                                 |
+| -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `<Section>`                                        | Structured context entry (`id`, `title`, `priority`, …)                                                                                                                                                                                                                 |
+| `<Message role>`                                   | Role-bearing entry; spread a persisted record: `{...entry.message}`                                                                                                                                                                                                     |
+| `<System>` `<User>` `<Assistant>`                  | Sugar for `<Message role="…">`                                                                                                                                                                                                                                          |
+| `<Paragraph>` `<H1>` `<H2>` `<H3>`                 | Block-level semantic wrappers                                                                                                                                                                                                                                           |
+| `<FormatScope>` `<Markdown>` `<XML>` `<PlainText>` | Per-subtree formatter framing                                                                                                                                                                                                                                           |
+| `<Project projectionKey>`                          | Override a harness's surfacing projection (ADR 63); suppresses that key's default fold                                                                                                                                                                                  |
+| `<ToolGate tool? confirm>`                         | Gate the model's tool calls behind a confirm flow (ADR 89 §4) — the `useGuardToolDispatch` confirm-dialog example                                                                                                                                                       |
+| `<ProviderTool provider name>`                     | Declare a provider-EXECUTED tool (`declarations.providerTools`) — bypasses the tool executor                                                                                                                                                                            |
+| `<Output schema name? description? strategy?>`     | Declare the structured shape THIS agent's every execution produces (§B2) — compiles to `declarations.outputs`; the loop delivers it via the `submit_result` terminal tool (or a `responseFormat` overlay on a bare send). A send-level `SendInput.output` overrides it. |
+
+`<Output>` is the tree-level twin of `SendInput.output` (the honest
+guarantees chain lives in `@agentick/session-next`'s README). `schema`
+is any `StandardSchemaV1`; `strategy` is `"auto"` (default) | `"tool"` |
+`"responseFormat"`. `<Output>` is PascalCase-only — the lowercase
+`<output>` collides with HTML's form element and is omitted from the JSX
+namespace.
+
+> **Verified by** `__tests__/collect.spec.tsx` (`<Output>` forwards
+> `name` / `description` / `strategy` / `schema` to the output declaration).
 
 ### Hooks
 
@@ -205,12 +217,12 @@ forwarder pulls it by `ctx.op` and composes it around the real op — so it
 reaches WHICHEVER executor a per-tick `<Model>` swap resolves, with
 per-mount isolation and unsubscribe-on-unmount for free.
 
-| Hook                                                | Kind        | Registers on                                  |
-| --------------------------------------------------- | ----------- | --------------------------------------------- |
-| `useGuardToolDispatch(decide)`                      | `guard`     | `tool:dispatch`                               |
-| `useTransformToolDispatch(fn)`                      | `transform` | `tool:dispatch`                               |
-| `useTransformModelInput(fn)`                        | `transform` | `model:generate` + `model:generate_stream`    |
-| `useCommandInterceptor(name, kind, fn)`             | any         | ANY command (registry-typed; `string` escape) |
+| Hook                                    | Kind        | Registers on                                  |
+| --------------------------------------- | ----------- | --------------------------------------------- |
+| `useGuardToolDispatch(decide)`          | `guard`     | `tool:dispatch`                               |
+| `useTransformToolDispatch(fn)`          | `transform` | `tool:dispatch`                               |
+| `useTransformModelInput(fn)`            | `transform` | `model:generate` + `model:generate_stream`    |
+| `useCommandInterceptor(name, kind, fn)` | any         | ANY command (registry-typed; `string` escape) |
 
 `useCommandInterceptor` is the primitive; the named hooks are one-line
 typed aliases. At an adopter's app (harness augmentations loaded) the

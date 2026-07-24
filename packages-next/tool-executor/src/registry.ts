@@ -182,11 +182,24 @@ export class InMemoryToolRegistry {
    *
    * Iteration order is the insertion order of the *winning*
    * registration's name — i.e., the order in which the first
-   * registration for that name was added. Adopters who care about
-   * order sort by name in projection.
+   * registration for that name was added, EXCEPT that
+   * EXECUTION-scoped winners are stably partitioned to the TAIL
+   * (after every non-execution winner). This is the prefix-cache
+   * ordering guarantee (three-audiences-plan §B2 "prefix-cache
+   * interaction"): tools serialize at the head of the provider prompt,
+   * so a per-execution tool binding is a prefix perturbation. Keeping
+   * the stable tree/compiler/session tools at the HEAD and the
+   * per-execution bindings at the TAIL means an Anthropic cache
+   * breakpoint on the stable prefix keeps hitting; only the tail is new
+   * (the loop appends the structured-output terminal tool AFTER this
+   * projection, so it lands last of all). Adopters who care about
+   * further ordering sort by name in projection.
+   *
+   * @verifiedBy tool-executor `compileForTick` execution-tail ordering spec
    */
   compileForTick(filter?: ToolListFilter): readonly ToolDeclaration[] {
-    const out: ToolDeclaration[] = [];
+    const stable: ToolDeclaration[] = [];
+    const executionTail: ToolDeclaration[] = [];
     for (const list of this.byName.values()) {
       let best: ToolRegistration | undefined;
       let bestRank = -1;
@@ -198,9 +211,13 @@ export class InMemoryToolRegistry {
           bestRank = r;
         }
       }
-      if (best !== undefined) out.push(best.declaration);
+      if (best !== undefined) {
+        (best.binding.scope === "execution" ? executionTail : stable).push(best.declaration);
+      }
     }
-    return out;
+    // Stable partition: non-execution winners keep insertion order at the
+    // head; execution winners keep insertion order at the tail.
+    return [...stable, ...executionTail];
   }
 
   /**

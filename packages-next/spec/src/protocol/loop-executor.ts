@@ -24,6 +24,8 @@ import type { HarnessFx } from "./middleware.js";
 import type { Effect } from "effect";
 import type { CommandOutcome } from "../data/outcomes.js";
 import type { ContentBlock } from "../data/content-blocks.js";
+import type { OutputSpec } from "../data/declarations.js";
+import type { ToolChoice } from "../data/rendered-tree.js";
 import type { SubstrateError } from "../data/errors.js";
 import type { ExecutionTarget } from "../data/execution-target.js";
 import type { PromiseView } from "./promise-view.js";
@@ -266,6 +268,22 @@ export interface RunExecutionInput {
    * @see docs/proposals/v2/three-audiences-plan.md §B
    */
   readonly responseFormat?: import("../data/rendered-tree.js").ResponseFormat;
+
+  /**
+   * Send-level structured-output directive (three-audiences-plan §B2 — the
+   * live-schema `output` sugar). Carries the LIVE `StandardSchemaV1` (in-process
+   * only, same tolerance as this input's other non-serializable refs; `output`
+   * never crosses the wire by construction). The loop resolves the delivery
+   * strategy at tick 1 ({@link OutputSpec.strategy}: `"auto"` → terminal tool
+   * when the tick exposes model tools, else `responseFormat`), injects the
+   * synthetic terminal tool or the `responseFormat` overlay, and captures the
+   * terminal call's RAW input onto {@link ExecutionRunResult.terminalCapture}.
+   * The SESSION validates that raw against the retained schema at result
+   * assembly — the loop never validates. Overrides the tree-level
+   * {@link OutputDeclaration} (`tickCompiled.declarations.outputs[0]`);
+   * explicit-beats-ambient.
+   */
+  readonly outputSpec?: OutputSpec;
 }
 
 /**
@@ -367,13 +385,33 @@ export interface ExecutionRunResult {
     | "aborted"
     | "vetoed"
     | "executor_failed"
-    | "timeout";
+    | "timeout"
+    // §B2 — the execution stopped because the declared structured output was
+    // DELIVERED via the terminal tool (natural OR forced wrap-up path). Reported
+    // instead of the provider's `tool_use`: the loop stopped on the delivery,
+    // not on a pending tool call. The `responseFormat` strategy keeps the
+    // provider stop reason (no terminal tool involved).
+    | "output_delivered";
   /** Canonical content stream — concatenated `output` from each tick's executor result. */
   readonly output: readonly ContentBlock[];
   /** Tool dispatch results accumulated across ticks. */
   readonly toolResults: readonly LoopToolResult[];
   /** Optional output extractions (Phase 4f `OutputDeclaration`s; not used in 4d). */
   readonly outputs?: Readonly<Record<string, unknown>>;
+  /**
+   * RAW capture of the structured-output terminal tool's call
+   * (three-audiences-plan §B2 — `"tool"` strategy). Present iff a required
+   * terminal tool was called (naturally or via the forced wrap-up tick). The
+   * SESSION validates {@link input} against the retained `output` schema at
+   * result assembly → `SendResult.data`. Absent on the `responseFormat`
+   * strategy path (the session validates the final assistant text instead) and
+   * when no `output` directive was supplied.
+   */
+  readonly terminalCapture?: {
+    readonly toolName: string;
+    /** The terminal tool call's raw, unvalidated input. */
+    readonly input: unknown;
+  };
 }
 
 export interface ExecutionTerminal {
@@ -456,6 +494,22 @@ export interface TickInput {
    * send-level directive wins over tree/model config. See that field.
    */
   readonly responseFormat?: import("../data/rendered-tree.js").ResponseFormat;
+  /**
+   * Resolved structured-output directive (three-audiences-plan §B2), forwarded
+   * from {@link RunExecutionInput.outputSpec} OR derived from this tick's
+   * `compiled.declarations.outputs[0]` by the loop (send-level wins). Drives
+   * terminal-tool injection / `responseFormat` overlay + terminal capture for
+   * this tick. See {@link OutputSpec}.
+   */
+  readonly outputSpec?: OutputSpec;
+  /**
+   * Forced tool-choice for THIS tick (three-audiences-plan §B2 wrap-up rung).
+   * Spread LAST into the tick's compiled `config.toolChoice` — the loop sets
+   * `{ tool: <terminal> }` on the single forced wrap-up tick when a required
+   * terminal tool went uncalled. A hard provider guarantee (the model cannot
+   * respond without calling it); the terminal tick by construction.
+   */
+  readonly toolChoice?: ToolChoice;
   /** Model-narration switch (default `true`) threaded into `project` / `run`. */
   readonly narrate?: boolean;
   /** Concurrency for this tick's tool-call dispatch (default `"unbounded"`). */
@@ -488,6 +542,29 @@ export interface TickResult extends TickInfo {
     | "aborted"
     | "vetoed"
     | "executor_failed";
+  /**
+   * The resolved structured-output delivery strategy for this tick (§B2), set
+   * by the tick body when an {@link OutputSpec} is in play. The run-execution
+   * continuation reads it to decide whether a missed terminal call warrants the
+   * forced wrap-up tick (`"tool"` only).
+   */
+  readonly terminalStrategy?: "tool" | "responseFormat";
+  /**
+   * Resolved terminal-tool NAME for this tick (§B2), set whenever the
+   * `"tool"` strategy is in play (captured or not). The run-execution
+   * continuation reads it to force the wrap-up tick's `toolChoice: { tool }`.
+   */
+  readonly terminalToolName?: string;
+  /**
+   * RAW capture of the terminal tool's call on THIS tick (§B2, `"tool"`
+   * strategy). Set when the model called the terminal tool; the run-execution
+   * continuation lifts it onto {@link ExecutionRunResult.terminalCapture} and
+   * forces a steer-proof stop.
+   */
+  readonly terminalCapture?: {
+    readonly toolName: string;
+    readonly input: unknown;
+  };
 }
 
 /**
