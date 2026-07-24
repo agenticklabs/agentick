@@ -36,6 +36,7 @@ import type {
   Pascal,
   RegistrarsOf,
   Unsubscribe,
+  WireCommandMap,
 } from "@agentick/spec-next";
 import { createLog, parseHookKey } from "@agentick/spec-next";
 import { getContext, type RuntimeContext } from "./runtime-context.js";
@@ -159,13 +160,23 @@ export type AsyncMiddleware<I = unknown, R = unknown> = (
 // `Ctx = RuntimeContext` at each derivation site below.
 
 /**
- * Empty-seed registry (ADR 80 §5) — the single source of truth mapping a
- * command id (`"<who>:<what>"`) to its `{ input; output }`. Each harness
- * package augments it with one line per exposed verb via module augmentation
- * of `@agentick/runtime-next`; {@link CommandHooks} falls out mechanically.
+ * The single source of truth mapping a command id to its `{ input; output }`
+ * (ADR 80 §5); {@link CommandHooks} falls out mechanically. Two population
+ * paths, both zero-per-hook-wiring:
+ *
+ *   - **Domain ops** — each harness package augments this via module
+ *     augmentation of `@agentick/runtime-next` with one line per exposed verb
+ *     (`"tool:dispatch"`, `"gateway:start"`, …), keyed `"<who>:<what>"`.
+ *   - **Wire ops** — the gateway's `wire:<method>` dispatch boundary ops are
+ *     folded in WHOLESALE by extending {@link WireCommandMap} (ADR 83
+ *     §"Wire dispatch through the seam"). Every `WireMethods` row — framework or
+ *     adopter-augmented — thus mints a typed `onBeforeWire<...>` /
+ *     `onAfterWire<...>` gateway hook with NO extra declaration. The extends is
+ *     legal because `WireCommandMap`'s keys are statically known, and it
+ *     re-derives lazily when an adopter augments `WireMethods`.
  */
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
-export interface CommandRegistry {}
+export interface CommandRegistry extends WireCommandMap {}
 
 /**
  * The bare `on<Command>` full-middleware key half of {@link CommandHooks}

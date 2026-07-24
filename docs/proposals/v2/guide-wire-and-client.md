@@ -20,10 +20,16 @@ declare module "@agentick/spec-next" {
   }
 }
 
-// 2. gateway handler (your server logic):
-defineWireExtension("billing/approve", async ({ sessionId, orderId }, ctx) => {
-  return { ok: await myBilling.approve(orderId) };
+// 2. gateway handler (your server logic). One extension is a NAMESPACE of
+//    methods; each method is a bare handler (shorthand) or a rich config (§6).
+const billingExt = defineWireExtension({
+  name: "@my-org/billing",
+  namespace: "billing",
+  methods: {
+    "billing/approve": async ({ orderId }, ctx) => ({ ok: await myBilling.approve(orderId) }),
+  },
 });
+const gateway = await createGateway({ wireExtensions: [billingExt] });
 
 // 3. client — NOTHING. It already exists, fully typed:
 await session.billing.approve({ orderId: "o_1" });   // ✓ typed from the row
@@ -116,6 +122,66 @@ await ask?.accept({ approved: true });     // = the derived respond method, part
    label, so permission scopes map 1:1 onto the client surface a user sees.
 7. **Capability negotiation** — a client can enumerate the server's actual
    methods (`commands()`) and feature-detect per deployment.
+
+## 6. Your method is a command
+
+A wire method is a first-class command, not a second-class RPC. One row + one
+handler earns **four surfaces**, no per-method wiring (ADR 90):
+
+| One `"<ns>/<method>"` row gives you… | …reached as                                                        |
+| ------------------------------------ | ------------------------------------------------------------------ |
+| **client method**                    | `session.<ns>.<method>(params)` — typed, `sessionId` bound         |
+| **authz scope**                      | the verb name IS the scope label (`crm/deleteContact` → `crm:deleteContact`) |
+| **journaled + hookable op**          | a `wire:<method>` operation (requested→terminal on the bus/journal) |
+| **typed gateway hooks**              | `gateway.hook({ onBeforeWireCrmDeleteContact })` — typed from the row |
+
+The hooks are derived, not hand-written — `onBeforeWire<Ns><Method>` /
+`onAfterWire<Ns><Method>`, one pair per row (framework OR your augmentation),
+with the row's params flowing to the before-hook input and its result to the
+after-hook output. A before-hook may **reshape** the params (return a new value)
+— the handler sees the reshaped request, so the wire boundary is a real command,
+not a fire-only seam.
+
+**Per-method config — the rich arm.** A method entry is a bare handler OR a
+flat config object (guard / middleware / spanAttributes / auth), normalized at
+define-time onto the `wire:<method>` op via the existing interceptor + span seams
+(no new tier):
+
+```ts
+defineWireExtension({
+  name: "@my-org/crm",
+  namespace: "crm",
+  methods: {
+    "crm/deleteContact": {
+      handler: async ({ contactId }, ctx) => ({ deleted: await remove(contactId) }),
+      // Admission guard — veto/defer/replace/proceed, honored at the JSON-RPC edge:
+      //   veto → Forbidden, defer → RateLimited (retry-after), replace → success.
+      guard: ({ contactId }) => (locked(contactId) ? { kind: "veto" } : undefined),
+      // Middleware wraps THIS method's dispatch (timing, retry, logging):
+      middleware: async (params, next) => next(params),
+      // Static span attributes on the wire op's span:
+      spanAttributes: { "crm.tier": "premium" },
+      // Per-method authz, merged into the extension's auth map:
+      auth: { required: true, scope: "crm:admin" },
+    },
+  },
+});
+```
+
+> Verified by `packages-next/transport/src/__tests__/wire-command-e2e.spec.ts`
+> (journaled op + typed hook transform + guard veto→Forbidden / defer→RateLimited
+> + middleware + span attrs + live ctx facets, over a real gateway) and the
+> type-level `packages-next/runtime/src/__tests__/wire-command-hooks.type.spec.ts`.
+
+**What full command REGISTRATION (rung 4) still adds.** The typed hooks, guard,
+middleware, span, and authz above make the wire method a command at the GATEWAY
+BOUNDARY. Registering the underlying VERB as a first-class harness command
+(`session:send`, `timeline:compact`, …) additionally buys **inbox
+addressability** (the dynamic-command lane — `commands/list` discovery, ungated
+methods reachable by verb without a porcelain row), and a domain op that **folds
+live** to every sub-harness under construction inheritance. A wire method's
+`wire:<method>` op is the boundary; it may delegate to such a registered command,
+but the two are distinct seams (hence the permanent `wire:` prefix — ADR 83).
 
 ## Open (tracked, not blocking)
 

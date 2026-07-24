@@ -18,6 +18,7 @@ import {
   defineWireExtension,
   WireExtensionDefinitionError,
   type WireExtension,
+  type WireMiddleware,
 } from "../wire/extension.js";
 
 // Set up a test extension declaration that ALL tests reference. The
@@ -143,6 +144,104 @@ describe("defineWireExtension — rejection: clusterRoute references unknown met
         } as Partial<WireExtension["clusterRoute"]>,
       } as WireExtension),
     ).toThrow(/clusterRoute.*references method "subscribe"/);
+  });
+});
+
+describe("defineWireExtension — method dichotomy normalization (ADR 90)", () => {
+  it("normalizes a rich method config to bare handler + ops + merged auth", () => {
+    const mw: WireMiddleware<"gateway/list_apps"> = (p, next) => next(p);
+    const ext = defineWireExtension({
+      name: "test:rich",
+      namespace: "gateway",
+      methods: {
+        "gateway/list_apps": {
+          handler: async () => ({ apps: [] }),
+          guard: () => ({ kind: "veto", reason: "nope" }),
+          middleware: mw,
+          spanAttributes: { "test.tier": "premium" },
+          auth: { required: true, scope: "admin" },
+        },
+      },
+    });
+
+    // The stored method is a BARE handler (single internal representation) — the
+    // registry + dispatcher only ever see a callable.
+    expect(typeof ext.methods["gateway/list_apps"]).toBe("function");
+    // The op config is extracted; middleware is normalized to an array.
+    expect(ext.ops?.["gateway/list_apps"]?.guard).toBeTypeOf("function");
+    expect(ext.ops?.["gateway/list_apps"]?.middleware).toEqual([mw]);
+    expect(ext.ops?.["gateway/list_apps"]?.spanAttributes).toEqual({ "test.tier": "premium" });
+    // The config's auth merged into the extension auth map (single enforcement point).
+    expect(ext.auth?.["gateway/list_apps"]).toEqual({ required: true, scope: "admin" });
+  });
+
+  it("leaves a bare-handler method with no op config (shorthand unchanged)", () => {
+    const ext = defineWireExtension({
+      name: "test:bare",
+      namespace: "gateway",
+      methods: { "gateway/list_apps": async () => ({ apps: [] }) },
+    });
+    expect(typeof ext.methods["gateway/list_apps"]).toBe("function");
+    expect(ext.ops).toBeUndefined();
+  });
+
+  it("accepts a single middleware and normalizes it to a one-element array", () => {
+    const mw: WireMiddleware<"gateway/list_apps"> = (p, next) => next(p);
+    const ext = defineWireExtension({
+      name: "test:single-mw",
+      namespace: "gateway",
+      methods: {
+        "gateway/list_apps": { handler: async () => ({ apps: [] }), middleware: mw },
+      },
+    });
+    expect(ext.ops?.["gateway/list_apps"]?.middleware).toEqual([mw]);
+  });
+});
+
+describe("defineWireExtension — rejection: auth declared in both sites (ADR 90)", () => {
+  it("rejects a method whose `auth` is declared in BOTH the config and the auth map", () => {
+    expect(() =>
+      defineWireExtension({
+        name: "test:double-auth",
+        namespace: "gateway",
+        methods: {
+          "gateway/list_apps": {
+            handler: async () => ({ apps: [] }),
+            auth: { required: true },
+          },
+        },
+        auth: {
+          "gateway/list_apps": { required: false },
+        },
+      }),
+    ).toThrow(WireExtensionDefinitionError);
+  });
+
+  it("the conflict message names the method AND both declaration sites", () => {
+    try {
+      defineWireExtension({
+        name: "test:double-auth-msg",
+        namespace: "gateway",
+        methods: {
+          "gateway/list_apps": {
+            handler: async () => ({ apps: [] }),
+            auth: { required: true },
+          },
+        },
+        auth: { "gateway/list_apps": { required: false } },
+      });
+      expect.fail("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(WireExtensionDefinitionError);
+      const msg = (err as Error).message;
+      // Names the method…
+      expect(msg).toMatch(/gateway\/list_apps/);
+      // …and both sites (the method config AND the auth map)…
+      expect(msg).toMatch(/method config/);
+      expect(msg).toMatch(/auth.*map/);
+      // …and the extension it came from.
+      expect((err as WireExtensionDefinitionError).extensionName).toBe("test:double-auth-msg");
+    }
   });
 });
 

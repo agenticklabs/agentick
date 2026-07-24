@@ -21,11 +21,19 @@
 
 import { Effect, type ManagedRuntime } from "effect";
 import {
+  annotateOperationSpan,
   BaseHarness,
   busAsyncIterator,
   forkBusSubscription,
+  getContext,
+  liftMiddleware,
   runHarnessProtocol,
+  scopeToCommand,
+  signalFromVerdict,
+  tagInterceptor,
   ulid,
+  withCallMiddleware,
+  type AsyncMiddleware,
   type BaseHarnessOptions,
 } from "@agentick/runtime-next";
 import type {
@@ -49,6 +57,7 @@ import type {
   MessageEnvelope,
   MessageHandlerError,
   MessageInbox,
+  Middleware,
   Operation,
   OperationJournal,
   ProtocolEvent,
@@ -61,11 +70,18 @@ import type {
   WireExtension,
   WireExtensionContext,
   WireExtensionRegistry,
+  WireGuard,
   WireMethod,
+  WireMiddleware,
+  WireOpConfig,
+  WireParams,
+  WireResult,
 } from "@agentick/spec-next";
 import {
   AppAlreadyExistsError,
   DEFAULT_JOURNALING_POLICY,
+  deriveHookNames,
+  parseHookKey,
   GATEWAY_CAPABILITIES_CHANGED,
   GatewayBridgeSlotOccupied,
   GatewayClosedError,
@@ -671,41 +687,131 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     method: WireMethod,
     params: unknown,
     ctx: WireExtensionContext,
-    run: () => Promise<R>,
+    run: (params: unknown) => Promise<R>,
   ): Promise<R> {
     const scope = { gatewayId: this.scopeId };
+    // `wire:` prefix (ADR 83 wire section): the wire op name must NOT
+    // collide with the op it delegates to (`session/send` vs `session:send`
+    // both Pascalize to `SessionSend`). Prefixed → `WireSessionSend`, so the
+    // wire boundary hook is `onBeforeWireSessionSend`, distinct from the
+    // session op's `onBeforeSessionSend` (which folds down live from the
+    // gateway and fires once at the session).
+    const opName = `wire:${method}`;
     const op: Operation<unknown, R, unknown> = {
-      opId: `wire:${method}:${ulid()}`,
+      opId: `${opName}:${ulid()}`,
       surface: SURFACE,
-      // `wire:` prefix (ADR 83 wire section): the wire op name must NOT
-      // collide with the op it delegates to (`session/send` vs `session:send`
-      // both Pascalize to `SessionSend`). Prefixed → `WireSessionSend`, so the
-      // wire boundary hook is `onBeforeWireSessionSend`, distinct from the
-      // session op's `onBeforeSessionSend` (which folds down live from the
-      // gateway and fires once at the session).
-      name: `wire:${method}`,
+      name: opName,
       scope,
       input: params,
     };
-    return this.runGatewayOp(
-      this.runOperation(op, () =>
-        Effect.gen(this, function* () {
-          // ADR 64/78 — attach the Observability + Ops facets to the wire
-          // handler ctx IN-FIBER, so the
-          // captured op runtime (parent span + tracer) is the one `ctx.trace`
-          // nests under and `ctx.metrics` reaches the gateway meter. Ambient
-          // label `{ method }` (low-cardinality — the wire method, NOT a
-          // per-request id). The facet getters are lazy: a handler that never
-          // touches telemetry pays nothing.
-          const runtime = yield* Effect.runtime<never>();
-          this.defineOperationFacets(ctx, scope, runtime, undefined, { method });
-          return yield* Effect.tryPromise({
-            try: run,
-            catch: (cause) => cause,
-          });
-        }),
-      ),
+    const opEffect = this.runOperation(op, (input) =>
+      Effect.gen(this, function* () {
+        // ADR 64/78 — attach the Observability + Ops facets to the wire
+        // handler ctx IN-FIBER, so the
+        // captured op runtime (parent span + tracer) is the one `ctx.trace`
+        // nests under and `ctx.metrics` reaches the gateway meter. Ambient
+        // label `{ method }` (low-cardinality — the wire method, NOT a
+        // per-request id). The facet getters are lazy: a handler that never
+        // touches telemetry pays nothing.
+        const runtime = yield* Effect.runtime<never>();
+        this.defineOperationFacets(ctx, scope, runtime, undefined, { method });
+        // `input` is the op's input AFTER the before-hooks in the interceptor
+        // cascade ran — so a `onBeforeWire<...>` hook that RESHAPES the params
+        // is honored: the reshaped value is what reaches the handler.
+        return yield* Effect.tryPromise({
+          try: () => run(input),
+          catch: (cause) => cause,
+        });
+      }),
     );
+    // ADR 42 define-time op config — compose the method's guard + middleware
+    // onto THIS wire op via the existing tier-4 call-scoped seam, and annotate
+    // its span with the static spanAttributes. Each self-scopes to the wire op's
+    // command so they never leak to the nested domain ops the handler triggers.
+    // No config → `withCallMiddleware([], …)` is a pass-through (zero overhead).
+    const interceptors = this.buildWireOpInterceptors(opName, method, ctx);
+    return this.runGatewayOp(withCallMiddleware(interceptors, opEffect));
+  }
+
+  /**
+   * Build the tier-4 call-scoped interceptors for a wire op from its
+   * define-time {@link WireOpConfig} (ADR 42 method dichotomy, normalized by
+   * `defineWireExtension`). The guard desugars to a `guard`-kind interceptor
+   * (raising an {@link import("@agentick/runtime-next").signalFromVerdict}
+   * control-signal on veto/defer/replace); each middleware to a `transform`;
+   * `spanAttributes` to an `observe` that annotates the op span. All three
+   * self-scope to the wire op's command (`ctx.op` — the Pascal of the op name,
+   * e.g. `WireSessionSend`) via {@link scopeToCommand}, so they act ONLY on the
+   * wire op and never on the nested `session:send` / `tool:dispatch` ops the
+   * handler triggers under the same call-scoped fiber. Empty list when the
+   * method declared no op config.
+   */
+  private buildWireOpInterceptors(
+    opName: string,
+    method: WireMethod,
+    ctx: WireExtensionContext,
+  ): Middleware<unknown, unknown, unknown>[] {
+    // Indexing `ops` by the `WireMethod` union yields a union of `WireOpConfig<K>`;
+    // collapse to the base `WireOpConfig` (the fields are read uniformly below).
+    const cfg = this._wireExtensions.resolve(method)?.extension.ops?.[method] as
+      | WireOpConfig
+      | undefined;
+    if (cfg === undefined) return [];
+    // The wire op's command tag — the exact value `runOperation` stamps on
+    // `ctx.op` (`parseHookKey(deriveHookNames(name)[0]).command`). Guards /
+    // middleware compare against it to fire only on this op.
+    const command = parseHookKey(deriveHookNames(opName)[0])?.command as string;
+    const out: Middleware<unknown, unknown, unknown>[] = [];
+
+    if (cfg.guard !== undefined) {
+      const guard = cfg.guard as WireGuard<WireMethod>;
+      const guardMw: AsyncMiddleware = async (input, next) => {
+        const verdict = await guard(input as WireParams<WireMethod>, ctx);
+        // proceed / void → call next; veto/defer/replace → raise the
+        // control-signal the operation runner maps to a terminal.
+        if (verdict && verdict.kind !== "proceed") throw signalFromVerdict(verdict);
+        return next(input);
+      };
+      out.push(
+        tagInterceptor("guard", liftMiddleware(scopeToCommand(command, guardMw))) as Middleware<
+          unknown,
+          unknown,
+          unknown
+        >,
+      );
+    }
+
+    for (const mw of cfg.middleware ?? []) {
+      const userMw = mw as WireMiddleware<WireMethod>;
+      const asyncMw: AsyncMiddleware = (input, next) =>
+        userMw(
+          input as WireParams<WireMethod>,
+          next as (p: WireParams<WireMethod>) => Promise<WireResult<WireMethod>>,
+          ctx,
+        );
+      out.push(
+        tagInterceptor("transform", liftMiddleware(scopeToCommand(command, asyncMw))) as Middleware<
+          unknown,
+          unknown,
+          unknown
+        >,
+      );
+    }
+
+    if (cfg.spanAttributes !== undefined) {
+      const attrs = cfg.spanAttributes;
+      // Effect-native `observe` — annotate the ambient (wire op) span in-fiber.
+      // Self-scopes by `ctx.op` so it never annotates nested op spans.
+      const spanMw: Middleware<unknown, unknown, unknown> = (input, next) =>
+        Effect.gen(function* () {
+          const rc = yield* getContext;
+          if (rc.op === command) yield* annotateOperationSpan(attrs);
+          return yield* next(input);
+        });
+      out.push(tagInterceptor("observe", spanMw));
+    }
+
+    return out;
   }
 
   /**

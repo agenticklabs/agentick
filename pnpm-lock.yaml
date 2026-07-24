@@ -1816,9 +1816,15 @@ importers:
         specifier: workspace:*
         version: link:../utils
     devDependencies:
+      '@agentick/app-next':
+        specifier: workspace:*
+        version: link:../app
       '@agentick/gateway-next':
         specifier: workspace:*
         version: link:../gateway
+      '@agentick/runtime-next':
+        specifier: workspace:*
+        version: link:../runtime
       '@agentick/timeline-next':
         specifier: workspace:*
         version: link:../timeline

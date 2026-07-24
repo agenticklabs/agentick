@@ -364,6 +364,46 @@ const gateway = await createGateway({
 });
 ```
 
+### Per-method op config — the method is a command (ADR 90)
+
+A method entry follows the ADR-42 dichotomy: a bare handler (shorthand, above)
+OR a flat config object. The config attaches define-time seams to THIS method's
+`wire:<method>` op — reusing the existing interceptor + span seams, no new tier:
+
+```ts
+const crmExt = defineWireExtension({
+  name: "@my-org/crm",
+  namespace: "crm",
+  methods: {
+    "crm/deleteContact": {
+      handler: async ({ contactId }, ctx) => ({ deleted: await removeContact(contactId) }),
+      // Admission guard (veto/defer/replace/proceed) — honored at the JSON-RPC
+      // edge: veto → Forbidden, defer → RateLimited (retry-after), replace →
+      // success frame with the supplied result.
+      guard: ({ contactId }) => (locked(contactId) ? { kind: "veto" } : undefined),
+      // Middleware wraps THIS method's dispatch (timing / retry / logging); it
+      // never leaks to the nested session/tool ops the handler triggers.
+      middleware: async (params, next) => next(params),
+      // Static attributes on the `wire:crm/deleteContact` op span.
+      spanAttributes: { "crm.tier": "premium" },
+      // Per-method authz — merged into the extension `auth` map (declaring the
+      // same method's auth in both places is a define-time error).
+      auth: { required: true, scope: "crm:admin" },
+    },
+  },
+});
+```
+
+Every `WireMethods` row also mints TYPED gateway hooks off the row —
+`gateway.hook({ onBeforeWireCrmDeleteContact })` is typed (params → before-hook
+input, result → after-hook output), and a before-hook may RESHAPE the params
+the handler receives. See ADR 90 for the one-row → four-surfaces story.
+
+> **Verified by** `../transport/src/__tests__/wire-command-e2e.spec.ts`
+> (journaled op + typed hook transform + guard veto→Forbidden / defer→RateLimited
+> + middleware + span attrs + live ctx facets) and the type-level
+> `../runtime/src/__tests__/wire-command-hooks.type.spec.ts`.
+
 ### Discovery
 
 The gateway ships a built-in `_extensions/list` wire method that

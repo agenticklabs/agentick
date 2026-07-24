@@ -201,8 +201,16 @@ export async function dispatchRequest(
           // only available inside `runWireDispatch`. `ctx` is pre-seeded with
           // off-path no-op facets (buildWireExtensionContext) so a host that
           // does no telemetry leaves a valid ctx.
-          const result = await host.runWireDispatch(req.method as WireMethod, req.params, ctx, () =>
-            resolution.handler(req.params, ctx),
+          // `params` is the op input AFTER the interceptor cascade's
+          // before-hooks ran — a `onBeforeWire<...>` hook that RESHAPES the
+          // params is honored, so the handler sees the reshaped value (a
+          // pure-observe hook returns the original params). Falls back to
+          // `req.params` for a pass-through stub host that ignores the arg.
+          const result = await host.runWireDispatch(
+            req.method as WireMethod,
+            req.params,
+            ctx,
+            (params) => resolution.handler((params ?? req.params) as never, ctx),
           );
           // ROADMAP A3 — when opted in, bound oversized tool output on the
           // RPC-result paths (session/send, session/dispatch); no-op for
@@ -250,6 +258,24 @@ export async function dispatchRequest(
  */
 function agentickErrorToWireCode(err: { readonly _tag: string }): number {
   switch (err._tag) {
+    case "OperationOutcomeError": {
+      // A guard-raised verdict that reached the wire edge (ADR 42 define-time
+      // wire guard, ADR 83 verdict taxonomy). Honor the verdict on the JSON-RPC
+      // edge rather than collapsing to an opaque InternalError:
+      //   veto → Forbidden (a denial), defer → RateLimited (retry-after; the
+      //   terminal carries `retryAfter`), canceled → RequestCancelled.
+      // A `replace` never reaches here (it resolves the op SUCCESSFULLY). A
+      // `failed` op re-raises its ORIGINAL error, so only a replayed cached
+      // `failed` terminal falls through to InternalError.
+      const outcome = (err as { readonly outcome?: string }).outcome;
+      return outcome === "vetoed"
+        ? ErrorCode.Forbidden
+        : outcome === "deferred"
+          ? ErrorCode.RateLimited
+          : outcome === "canceled"
+            ? ErrorCode.RequestCancelled
+            : ErrorCode.InternalError;
+    }
     case "AppNotFoundError":
       return ErrorCode.AppNotFound;
     case "SessionNotFoundError":

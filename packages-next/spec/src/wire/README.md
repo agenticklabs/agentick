@@ -205,6 +205,35 @@ export const myWireExtension: WireExtension = defineWireExtension({
 //     createGateway({ wireExtensions: [myWireExtension] });
 ```
 
+### The method dichotomy — bare handler OR rich config (ADR 90)
+
+A `methods` entry is a bare handler (above) OR a flat config object that attaches
+define-time seams to the method's `wire:<method>` op. `defineWireExtension`
+normalizes the config down to a bare handler + a merged `auth` entry + the op
+config the gateway composes at dispatch — so the registry and dispatcher only
+ever see bare handlers.
+
+```ts
+methods: {
+  "myext/do_thing": {
+    handler: async (params, ctx) => doSomething(params),
+    // Admission guard — veto/defer/replace/proceed. Honored at the JSON-RPC edge:
+    // veto → Forbidden, defer → RateLimited (retry-after), replace → success.
+    guard: (params, ctx) => (blocked(params) ? { kind: "veto" } : undefined),
+    // Middleware wraps this method's dispatch (timing/retry); scoped to the op.
+    middleware: async (params, next, ctx) => next(params),
+    spanAttributes: { "myext.tier": "premium" },  // static op-span attributes
+    auth: { required: true, scope: "session-user" }, // merged into ext.auth
+  },
+},
+```
+
+Every `WireMethods` row also mints TYPED gateway hooks — `onBeforeWire<Ns><Method>`
+/ `onAfterWire<Ns><Method>`, derived from the row (params → before-hook input,
+result → after-hook output); a before-hook may reshape the params the handler
+sees. `defineWireExtension` accepts a `WireExtensionInput` (the authoring type
+with the method dichotomy) and returns a normalized `WireExtension`.
+
 ---
 
 ## Validation rules
@@ -213,16 +242,17 @@ export const myWireExtension: WireExtension = defineWireExtension({
 time. Violations throw `WireExtensionDefinitionError` (an
 `AgentickError` subclass with `_tag: "WireExtensionDefinitionError"`):
 
-| #   | Rule                                                    | Reason                                               |
-| --- | ------------------------------------------------------- | ---------------------------------------------------- |
-| 1   | At least one method declared                            | Empty extension does nothing                         |
-| 2   | `namespace` non-empty                                   | Required for routing + enumeration                   |
-| 3   | `namespace` doesn't contain `/`                         | Namespaces are bare identifiers                      |
-| 4   | `namespace` doesn't start with `_`                      | Reserved for framework-internal (`_extensions/list`) |
-| 5   | Every method name starts with `${namespace}/`           | Routing relies on the prefix                         |
-| 6   | Every declared notification starts with `${namespace}/` | Same as above                                        |
-| 7   | Every `auth` entry references a declared method         | Prevents orphan policies                             |
-| 8   | Every `clusterRoute` entry references a declared method | Prevents orphan policies                             |
+| #   | Rule                                                            | Reason                                               |
+| --- | --------------------------------------------------------------- | ---------------------------------------------------- |
+| 1   | At least one method declared                                    | Empty extension does nothing                         |
+| 2   | `namespace` non-empty                                           | Required for routing + enumeration                   |
+| 3   | `namespace` doesn't contain `/`                                 | Namespaces are bare identifiers                      |
+| 4   | `namespace` doesn't start with `_`                              | Reserved for framework-internal (`_extensions/list`) |
+| 5   | Every method name starts with `${namespace}/`                   | Routing relies on the prefix                         |
+| 6   | Every declared notification starts with `${namespace}/`         | Same as above                                        |
+| 7   | Every `auth` entry references a declared method                 | Prevents orphan policies                             |
+| 8   | Every `clusterRoute` entry references a declared method         | Prevents orphan policies                             |
+| 9   | No method declares `auth` in BOTH its config and the `auth` map | One enforcement point — ambiguity is rejected        |
 
 Validation order is intentional — empty-methods check fires first
 because it's the most fundamental, then namespace shape, then per-method

@@ -87,6 +87,26 @@ const TYPED_VERBS: ReadonlyArray<readonly [op: string, onBefore: string, onAfter
 ];
 
 /**
+ * GATEWAY wire-dispatch ops (ADR 83 §"Wire dispatch through the seam"). The op
+ * name is `wire:<method>` — NO `:command:` infix — so the derivation splits on
+ * `:` (the `wire` prefix), `/` (the wire namespace separator), AND `_` (snake
+ * method segments). These names are the runtime twin of the type-level
+ * `Pascal<K>` that `WireCommandMap` → `CommandHooks` mints for each `WireMethods`
+ * row (`wire-command-hooks.type.spec.ts` pins the TYPE side). The `wire:` prefix
+ * keeps them distinct from the domain op they delegate to (`wire:session/send` →
+ * `WireSessionSend`, NOT the `session:send` op's `SessionSend`).
+ */
+const WIRE_VERBS: ReadonlyArray<readonly [op: string, onBefore: string, onAfter: string]> = [
+  ["wire:session/send", "onBeforeWireSessionSend", "onAfterWireSessionSend"],
+  ["wire:knobs/set", "onBeforeWireKnobsSet", "onAfterWireKnobsSet"],
+  // snake_case method segment — `run_once` must split on `_` (not mangle to `Run_once`).
+  ["wire:app/run_once", "onBeforeWireAppRunOnce", "onAfterWireAppRunOnce"],
+  // camelCase method segment survives verbatim after its first char caps — the
+  // adopter-augmentation shape the type-level lockstep also pins.
+  ["wire:crm/deleteContact", "onBeforeWireCrmDeleteContact", "onAfterWireCrmDeleteContact"],
+];
+
+/**
  * Verbs NOT augmented (deferred) — the async-seam boundary. Their derived
  * names are pinned so the doc stays honest, but no `CommandRegistry` entry
  * exists (typing them would mint hooks that never fire — see ADR 83
@@ -102,6 +122,14 @@ const DEFERRED_VERBS: ReadonlyArray<readonly [op: string, onBefore: string, onAf
 describe("hook lifecycle — name-derivation lock (ADR 83)", () => {
   describe("typed verbs (hooks fire)", () => {
     for (const [op, onBefore, onAfter] of TYPED_VERBS) {
+      it(`deriveHookNames(${JSON.stringify(op)}) → [${onBefore}, ${onAfter}]`, () => {
+        expect(deriveHookNames(op)).toEqual([onBefore, onAfter]);
+      });
+    }
+  });
+
+  describe("gateway wire ops (hooks fire at the wire-dispatch boundary)", () => {
+    for (const [op, onBefore, onAfter] of WIRE_VERBS) {
       it(`deriveHookNames(${JSON.stringify(op)}) → [${onBefore}, ${onAfter}]`, () => {
         expect(deriveHookNames(op)).toEqual([onBefore, onAfter]);
       });

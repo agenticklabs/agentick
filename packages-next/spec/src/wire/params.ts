@@ -646,3 +646,32 @@ export interface WireMethods {
 export type WireMethod = keyof WireMethods;
 export type WireParams<M extends WireMethod> = WireMethods[M]["params"];
 export type WireResult<M extends WireMethod> = WireMethods[M]["result"];
+
+/**
+ * The GATEWAY's wire-dispatch command map — every `WireMethods` row projected to
+ * its `wire:<method>` operation with `{ input; output }` shaped from the row.
+ * This is the type-level twin of the runtime op the gateway mints at
+ * `runWireDispatch` (op `name: "wire:<method>"`, ADR 83 §"Wire dispatch through
+ * the seam"): folding it into the runtime `CommandRegistry` (which
+ * interface-extends this map) makes `CommandHooks` derive the FULLY-TYPED
+ * gateway wire hooks — `onBeforeWire<Ns><Method>` / `onAfterWire<Ns><Method>` —
+ * for both framework rows AND adopter `WireMethods` augmentations, with zero
+ * per-method wiring. The `wire:` prefix is PERMANENT (ADR 83): it keeps the
+ * gateway boundary op distinct from the domain op it delegates to
+ * (`wire:session/send` → `WireSessionSend`, distinct from `session:send` →
+ * `SessionSend`), so the two seams never collide under live inheritance.
+ *
+ * The keys are statically known (`WireMethod` is a finite literal union over
+ * `keyof WireMethods`), so an `interface CommandRegistry extends WireCommandMap`
+ * fold is legal and re-derives lazily whenever an adopter augments
+ * `WireMethods` — the same statically-known-keys property {@link SessionHandle}
+ * relies on for its wire-proxy surface.
+ *
+ * DISTINCT from the CLIENT's derivation (`@agentick/spec-next` `client/hooks.ts`
+ * `WireAsCommandReg`), which keys each row UNPREFIXED (`session/send` →
+ * `SessionSend`) because the client hook mirrors the session op it INITIATES and
+ * has no colliding op of its own. The `Wire` qualifier belongs to the gateway.
+ */
+export type WireCommandMap = {
+  [K in WireMethod as `wire:${K}`]: { input: WireParams<K>; output: WireResult<K> };
+};

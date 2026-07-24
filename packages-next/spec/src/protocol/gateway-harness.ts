@@ -314,21 +314,27 @@ export interface GatewayHarnessProtocol {
    * A stub host that does no telemetry may leave the facets untouched (the
    * dispatcher pre-seeds off-path no-ops).
    *
+   * `run` receives the op's INPUT — the params AFTER the interceptor cascade's
+   * before-hooks ran, so a `onBeforeWire<...>` hook that RESHAPES the params is
+   * honored: the reshaped value is what reaches the resolved handler. (A hook
+   * that only observes returns `void`, and `run` receives the original params.)
+   *
    * Required — the seam is part of the gateway contract, not an optional
    * capability. A stub host implements it as a pass-through
-   * (`(_m, _p, _ctx, run) => run()`); the reference `GatewayHarness` routes
-   * through `runOperation`.
+   * (`(_m, params, _ctx, run) => run(params)`); the reference `GatewayHarness`
+   * routes through `runOperation`.
    *
    * @param method - the raw wire method being dispatched (op name).
    * @param params - the request params (the op's input).
    * @param ctx - the wire-extension handler context to enrich in-fiber with facets.
-   * @param run - invokes the resolved handler; its result is the op result.
+   * @param run - invokes the resolved handler with the (possibly hook-reshaped)
+   *   params; its result is the op result.
    */
   runWireDispatch<R>(
     method: WireMethod,
     params: unknown,
     ctx: WireExtensionContext,
-    run: () => Promise<R>,
+    run: (params: unknown) => Promise<R>,
   ): Promise<R>;
 
   /**

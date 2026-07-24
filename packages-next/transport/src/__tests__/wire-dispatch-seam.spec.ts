@@ -57,13 +57,11 @@ function req(method: string, params: unknown, id = 1): JsonRpcRequest {
   return { jsonrpc: "2.0", id, method, params: params as Record<string, unknown> };
 }
 
-/**
- * Wire hooks are currently UNTYPED (ADR 83 — the typed wire surface
- * off `WireMethods` is a follow-on); `onBeforeWireProbeRun` is not a
- * `CommandRegistry`-derived `CommandHooks` key, so the config is cast to
- * the parameter type `gw.hook` accepts.
- */
-type HookConfig = Parameters<GatewayHarness["hook"]>[0];
+// Wire hooks are TYPED (ADR 83 §"Wire dispatch through the seam" + the
+// `WireCommandMap` → `CommandRegistry` fold): the `probe/*` rows declared above
+// mint `onBeforeWireProbeRun` / `onBeforeWireProbeOther` as real
+// `CommandHooks` keys, so `gw.hook({ ... })` typechecks WITHOUT a cast — the
+// before-hook input is the row's `params`.
 
 describe("dispatchRequest — wire dispatch through the gateway operation seam", () => {
   it("fires a gateway-scoped wire hook exactly once around the dispatch", async () => {
@@ -76,7 +74,7 @@ describe("dispatchRequest — wire dispatch through the gateway operation seam",
       onBeforeWireProbeRun: () => {
         fired.push("run");
       },
-    } as HookConfig);
+    });
 
     const resp = await dispatchRequest(gw, req("probe/run", { echo: "hi" }), stubSink());
 
@@ -98,7 +96,7 @@ describe("dispatchRequest — wire dispatch through the gateway operation seam",
       onBeforeWireProbeOther: () => {
         fired.push("other");
       },
-    } as HookConfig);
+    });
 
     const resp = await dispatchRequest(gw, req("probe/run", { echo: "hi" }), stubSink());
 
@@ -119,7 +117,7 @@ describe("dispatchRequest — wire dispatch through the gateway operation seam",
       onBeforeWireProbeRun: () => {
         fired.push("run");
       },
-    } as HookConfig);
+    });
 
     const resp = await dispatchRequest(
       gw,

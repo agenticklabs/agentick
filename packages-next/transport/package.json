@@ -62,7 +62,9 @@
     }
   },
   "devDependencies": {
+    "@agentick/app-next": "workspace:*",
     "@agentick/gateway-next": "workspace:*",
+    "@agentick/runtime-next": "workspace:*",
     "@agentick/timeline-next": "workspace:*",
     "typescript": "^5.7.3",
     "vitest": "^4.0.18"

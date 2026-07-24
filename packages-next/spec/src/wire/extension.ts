@@ -42,6 +42,7 @@ import type { HookBridges } from "../protocol/hook-bridges.js";
 import type { SessionHarnessProtocol } from "../protocol/session-harness.js";
 import type { Observability } from "../data/observability.js";
 import type { Ops } from "../data/ops.js";
+import type { HandlerVerdict } from "../data/outcomes.js";
 import type { WireMethod, WireParams, WireResult } from "./params.js";
 import type { WireNotificationMethod, WireNotificationParams } from "./notifications.js";
 
@@ -77,6 +78,88 @@ export interface WireMethodAuth {
    * role's meaning.
    */
   readonly scope?: string;
+}
+
+// ============================================================================
+// Per-method op config (ADR 42 dichotomy) — the define-time seams a wire
+// method carries alongside its handler.
+// ============================================================================
+
+/**
+ * A bare wire-method handler — typed params in, typed result out. The
+ * shorthand arm of the ADR-42 method dichotomy: a method entry that is JUST a
+ * function needs nothing more.
+ */
+export type WireMethodHandler<K extends WireMethod> = (
+  params: WireParams<K>,
+  ctx: WireExtensionContext,
+) => Promise<WireResult<K>>;
+
+/**
+ * A define-time GUARD for one wire method — the admission decider (ADR 83): it
+ * receives the method's params + the handler ctx and returns a
+ * {@link HandlerVerdict} (`veto` / `defer` / `replace` / `proceed`) or `void`
+ * (≡ `proceed`). The gateway desugars it to a `guard`-kind interceptor on the
+ * wire op via the existing tier-4 call-scoped seam — a `veto` terminates the
+ * wire op `vetoed` (→ Forbidden on the JSON-RPC edge), a `defer` `deferred`
+ * (→ RateLimited), a `replace` short-circuits with the supplied result. Pure
+ * function type — no runtime dep; the gateway owns the adaptation.
+ */
+export type WireGuard<K extends WireMethod> = (
+  params: WireParams<K>,
+  ctx: WireExtensionContext,
+) => HandlerVerdict<WireResult<K>> | void | Promise<HandlerVerdict<WireResult<K>> | void>;
+
+/**
+ * A define-time MIDDLEWARE for one wire method — the pure-JS `(params, next,
+ * ctx)` form (ADR 76): call `next(params)` to proceed (returns the handler's
+ * Promise), wrap it for timing/retry/logging, or return a value to
+ * short-circuit. Applied to the wire op via the existing tier-4 call-scoped
+ * seam, scoped to THIS method's op (never leaks to the nested domain ops the
+ * handler triggers). Receives the SAME {@link WireExtensionContext} the handler
+ * does.
+ */
+export type WireMiddleware<K extends WireMethod> = (
+  params: WireParams<K>,
+  next: (params: WireParams<K>) => Promise<WireResult<K>>,
+  ctx: WireExtensionContext,
+) => Promise<WireResult<K>>;
+
+/**
+ * The RICH arm of the ADR-42 method dichotomy — a wire method declared as
+ * `{ handler, auth?, guard?, middleware?, spanAttributes? }`. Flat, no nesting.
+ * {@link defineWireExtension} normalizes it at define-time:
+ *   - `handler` → the bare handler the registry + dispatcher consume unchanged;
+ *   - `auth` → merged into the extension's {@link WireExtension.auth} map (the
+ *     single enforcement point `authorizeDispatch` reads — a conflict with a
+ *     top-level `auth` entry for the same method is a define-time error);
+ *   - `guard` / `middleware` / `spanAttributes` → a {@link WireOpConfig} the
+ *     gateway composes onto the wire op at dispatch (existing seams — no new
+ *     interception tier).
+ */
+export interface WireMethodConfig<K extends WireMethod> {
+  readonly handler: WireMethodHandler<K>;
+  readonly auth?: WireMethodAuth;
+  readonly guard?: WireGuard<K>;
+  readonly middleware?: WireMiddleware<K> | readonly WireMiddleware<K>[];
+  /**
+   * Static span attributes stamped on this method's `wire:<method>` op span
+   * (telemetry rung 3, the per-op-type seam). Dynamic per-call attributes
+   * belong in a `middleware` that annotates in-fiber.
+   */
+  readonly spanAttributes?: Readonly<Record<string, unknown>>;
+}
+
+/**
+ * The NORMALIZED per-method op config {@link defineWireExtension} extracts from
+ * a {@link WireMethodConfig} — the guard / middleware / spanAttributes the
+ * gateway composes onto the wire op at dispatch. `auth` is NOT here (it merged
+ * into {@link WireExtension.auth}); `middleware` is normalized to an array.
+ */
+export interface WireOpConfig<K extends WireMethod = WireMethod> {
+  readonly guard?: WireGuard<K>;
+  readonly middleware?: readonly WireMiddleware<K>[];
+  readonly spanAttributes?: Readonly<Record<string, unknown>>;
 }
 
 // ============================================================================
@@ -346,9 +429,13 @@ export interface WireExtension {
   readonly version?: string;
 
   /**
-   * Method handlers keyed by full method name. Each handler receives
-   * typed params + a {@link WireExtensionContext} and returns the
-   * typed result wrapped in a Promise.
+   * Method handlers keyed by full method name — the NORMALIZED form: always a
+   * bare {@link WireMethodHandler}. The ADR-42 authoring dichotomy (a bare
+   * handler OR a rich {@link WireMethodConfig}) lives on {@link WireExtensionInput};
+   * {@link defineWireExtension} normalizes a config entry down to a bare handler
+   * here + a merged `auth` entry + a {@link WireOpConfig} in {@link ops}, so the
+   * registry + dispatcher (and any code reaching into `.methods`) only ever see
+   * a callable handler.
    *
    * Names MUST appear in `WireMethods` (via this package's or its
    * dependencies' declaration-merge augmentations). Names MUST start
@@ -359,10 +446,22 @@ export interface WireExtension {
    * sync escape hatch had no real consumers.
    */
   readonly methods: {
-    readonly [K in WireMethod]?: (
-      params: WireParams<K>,
-      ctx: WireExtensionContext,
-    ) => Promise<WireResult<K>>;
+    readonly [K in WireMethod]?: WireMethodHandler<K>;
+  };
+
+  /**
+   * Normalized per-method op config (guard / middleware / spanAttributes),
+   * populated by {@link defineWireExtension} from {@link WireMethodConfig}
+   * entries. The gateway reads this at `runWireDispatch` and composes the
+   * guard + middleware onto the `wire:<method>` op via the existing tier-4
+   * call-scoped seam, and annotates the op span with `spanAttributes`. Absent
+   * when no method declared any of the three.
+   *
+   * NOT authored directly — a bare handler leaves it empty; the rich method
+   * config form is the authoring surface.
+   */
+  readonly ops?: {
+    readonly [K in WireMethod]?: WireOpConfig<K>;
   };
 
   /**
@@ -405,6 +504,20 @@ export interface WireExtension {
   };
 }
 
+/**
+ * The AUTHORING shape {@link defineWireExtension} accepts — identical to a
+ * {@link WireExtension} except `methods` follows the ADR-42 dichotomy (a bare
+ * {@link WireMethodHandler} OR a rich {@link WireMethodConfig}) and `ops` is NOT
+ * authored (it is DERIVED from the config entries). `defineWireExtension`
+ * normalizes this into a {@link WireExtension} (bare handlers, merged `auth`,
+ * populated `ops`).
+ */
+export type WireExtensionInput = Omit<WireExtension, "methods" | "ops"> & {
+  readonly methods: {
+    readonly [K in WireMethod]?: WireMethodHandler<K> | WireMethodConfig<K>;
+  };
+};
+
 // ============================================================================
 // defineWireExtension — validating constructor
 // ============================================================================
@@ -444,7 +557,69 @@ export interface WireExtension {
  *     },
  *   });
  */
-export function defineWireExtension(ext: WireExtension): WireExtension {
+export function defineWireExtension(input: WireExtensionInput): WireExtension {
+  // ── Normalize the ADR-42 method dichotomy FIRST (before structural
+  // validation, which then runs against the normalized shape). A bare handler
+  // passes through verbatim; a `{ handler, auth?, guard?, middleware?,
+  // spanAttributes? }` config object is split into (a) the bare handler (so the
+  // registry + dispatcher stay unchanged), (b) an `auth` entry merged into the
+  // extension's `auth` map (single enforcement point), and (c) a WireOpConfig
+  // entry (guard/middleware/spanAttributes) the gateway composes at dispatch.
+  const normalizedMethods: Record<string, WireMethodHandler<WireMethod>> = {};
+  const mergedAuth: Record<string, WireMethodAuth> = { ...(input.auth ?? {}) };
+  const ops: Record<string, WireOpConfig> = {};
+
+  for (const [name, entry] of Object.entries(input.methods)) {
+    if (entry === undefined) continue;
+    if (typeof entry === "function") {
+      normalizedMethods[name] = entry as WireMethodHandler<WireMethod>;
+      continue;
+    }
+    const config = entry as WireMethodConfig<WireMethod>;
+    normalizedMethods[name] = config.handler;
+    if (config.auth !== undefined) {
+      // Conflict: the same method declared `auth` in BOTH its config object AND
+      // the top-level `auth` map — ambiguous, so reject at define-time.
+      if (Object.prototype.hasOwnProperty.call(input.auth ?? {}, name)) {
+        throw new WireExtensionDefinitionError({
+          extensionName: input.name,
+          reason: `method "${name}" declares \`auth\` in BOTH its method config and the extension \`auth\` map — declare it in exactly one place.`,
+        });
+      }
+      mergedAuth[name] = config.auth;
+    }
+    const middleware =
+      config.middleware === undefined
+        ? undefined
+        : Array.isArray(config.middleware)
+          ? (config.middleware as readonly WireMiddleware<WireMethod>[])
+          : [config.middleware as WireMiddleware<WireMethod>];
+    if (
+      config.guard !== undefined ||
+      middleware !== undefined ||
+      config.spanAttributes !== undefined
+    ) {
+      ops[name] = {
+        ...(config.guard !== undefined ? { guard: config.guard } : {}),
+        ...(middleware !== undefined ? { middleware } : {}),
+        ...(config.spanAttributes !== undefined ? { spanAttributes: config.spanAttributes } : {}),
+      };
+    }
+  }
+
+  // The normalized extension the registry + gateway consume: bare handlers,
+  // a merged `auth` map, an `ops` map. Validation below runs against IT — the
+  // `input`'s non-method fields (name / namespace / version / notifications /
+  // clusterRoute) carry through unchanged.
+  const ext: WireExtension = {
+    ...input,
+    methods: normalizedMethods as WireExtension["methods"],
+    ...(Object.keys(mergedAuth).length > 0
+      ? { auth: mergedAuth as WireExtension["auth"] }
+      : { auth: undefined }),
+    ...(Object.keys(ops).length > 0 ? { ops: ops as WireExtension["ops"] } : {}),
+  };
+
   // 1. at least one method (otherwise the extension does nothing).
   const methodNames = Object.keys(ext.methods);
   if (methodNames.length === 0) {
