@@ -1,7 +1,6 @@
 {
   "name": "@agentick/eval-next",
   "version": "0.0.0",
-  "private": true,
   "description": "Testing-shaped eval framework for Agentick v2. `defineEval(...)` returns a callable function with runtime parameterization (model swap, fixture injection, tool stubs); a single eval definition supports matrix runs, A/B sweeps, and CI-vs-prod profiles. Inspired by Eve evals; Agentick twist: defineEval returns a function, not a config. See ADR 37.",
   "keywords": [
     "agentick",
@@ -38,13 +37,26 @@
     }
   },
   "publishConfig": {
+    "access": "public",
     "exports": {
       ".": {
         "types": "./dist/index.d.ts",
         "import": "./dist/index.js",
         "default": "./dist/index.js"
+      },
+      "./plugins/workspace": {
+        "types": "./dist/plugins/workspace.d.ts",
+        "import": "./dist/plugins/workspace.js",
+        "default": "./dist/plugins/workspace.js"
+      },
+      "./plugins/judge": {
+        "types": "./dist/plugins/judge.d.ts",
+        "import": "./dist/plugins/judge.js",
+        "default": "./dist/plugins/judge.js"
       }
-    }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -64,5 +76,8 @@
     "@agentick/runtime-next": "workspace:*",
     "@types/react": "^19.2.5",
     "react": "^19.2.4"
+  },
+  "engines": {
+    "node": ">=20.19"
   }
 }

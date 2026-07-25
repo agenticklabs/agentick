@@ -1,8 +1,7 @@
 {
   "name": "@agentick/gates-next",
   "version": "0.0.0",
-  "private": true,
-  "description": "Gates \u2014 knob-backed continuation conditions. Two species: latch gates (activateWhen, model-cleared via set_knob) and verified gates (satisfied predicate, evaluated every tick, auto-clears, read-only knob). Compiler-agnostic descriptor types + factory at the top level; React hook in /react subpath. Not a harness; gates have no independent state \u2014 the gate's value IS a knob value. Bundled into the agentick metapackage; not published independently.",
+  "description": "Gates — knob-backed continuation conditions. Two species: latch gates (activateWhen, model-cleared via set_knob) and verified gates (satisfied predicate, evaluated every tick, auto-clears, read-only knob). Compiler-agnostic descriptor types + factory at the top level; React hook in /react subpath. Not a harness; gates have no independent state — the gate's value IS a knob value. Bundled into the agentick metapackage; not published independently.",
   "keywords": [
     "agent",
     "agentick",
@@ -69,5 +68,38 @@
     "react": {
       "optional": true
     }
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20.19"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      },
+      "./react": {
+        "types": "./dist/react/index.d.ts",
+        "import": "./dist/react/index.js",
+        "default": "./dist/react/index.js"
+      },
+      "./client": {
+        "types": "./dist/client/index.d.ts",
+        "import": "./dist/client/index.js",
+        "default": "./dist/client/index.js"
+      },
+      "./testing": {
+        "types": "./dist/testing/index.d.ts",
+        "import": "./dist/testing/index.js",
+        "default": "./dist/testing/index.js"
+      }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
   }
 }

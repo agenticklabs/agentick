@@ -46,6 +46,7 @@
     }
   },
   "publishConfig": {
+    "access": "public",
     "exports": {
       ".": {
         "types": "./dist/index.d.ts",
@@ -67,7 +68,9 @@
         "import": "./dist/guards/index.js",
         "default": "./dist/guards/index.js"
       }
-    }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -83,5 +86,8 @@
   },
   "devDependencies": {
     "@typescript/typescript6": "^6.0.2"
+  },
+  "engines": {
+    "node": ">=20.19"
   }
 }

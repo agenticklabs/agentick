@@ -1,7 +1,6 @@
 {
   "name": "@agentick/transport-unix-socket-next",
   "version": "0.0.0",
-  "private": true,
   "description": "Unix-socket transport for agentick — newline-delimited JSON-RPC 2.0 over `net.Server` / `net.Socket`. Required for tentickle-class local-IPC shapes (TUI ↔ same-host daemon). Node-only.",
   "keywords": [
     "agent",
@@ -56,5 +55,33 @@
     "effect": "^3.22.0",
     "typescript": "^5.7.3",
     "vitest": "^4.0.18"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20.19"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      },
+      "./client": {
+        "types": "./dist/client/index.d.ts",
+        "import": "./dist/client/index.js",
+        "default": "./dist/client/index.js"
+      },
+      "./server": {
+        "types": "./dist/server/index.d.ts",
+        "import": "./dist/server/index.js",
+        "default": "./dist/server/index.js"
+      }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
   }
 }

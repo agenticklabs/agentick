@@ -1,7 +1,7 @@
 {
   "name": "@agentick/model-executor-next",
   "version": "0.0.0",
-  "description": "THE executor harness for Agentick v2 (ADR 52). One final LanguageModelExecutor \u2014 BaseHarness plus the Effect execution engine \u2014 consuming a LanguageModelAdapter from @agentick/model-next. Ships FakeLanguageModelExecutor for tests + reference.",
+  "description": "THE executor harness for Agentick v2 (ADR 52). One final LanguageModelExecutor — BaseHarness plus the Effect execution engine — consuming a LanguageModelAdapter from @agentick/model-next. Ships FakeLanguageModelExecutor for tests + reference.",
   "keywords": [
     "agent",
     "agentick",
@@ -29,13 +29,16 @@
     }
   },
   "publishConfig": {
+    "access": "public",
     "exports": {
       ".": {
         "types": "./dist/index.d.ts",
         "import": "./dist/index.js",
         "default": "./dist/index.js"
       }
-    }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -53,5 +56,8 @@
   "devDependencies": {
     "@agentick/spec-conformance-next": "workspace:*",
     "@agentick/utils-next": "workspace:*"
+  },
+  "engines": {
+    "node": ">=20.19"
   }
 }

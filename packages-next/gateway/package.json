@@ -1,8 +1,7 @@
 {
   "name": "@agentick/gateway-next",
   "version": "0.0.0",
-  "private": true,
-  "description": "GatewayHarness \u2014 v2 runtime-root harness (formerly @agentick/gateway/v2). Per ADR 31, hosts apps + owns top-level substrate.",
+  "description": "GatewayHarness — v2 runtime-root harness (formerly @agentick/gateway/v2). Per ADR 31, hosts apps + owns top-level substrate.",
   "type": "module",
   "main": "src/index.ts",
   "exports": {
@@ -35,6 +34,30 @@
   "devDependencies": {
     "@agentick/model-executor-next": "workspace:*",
     "@agentick/compiler-react-next": "workspace:*",
-    "@agentick/spec-conformance-next": "workspace:*"
+    "@agentick/spec-conformance-next": "workspace:*",
+    "@agentick/timeline-next": "workspace:*"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20.19"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      },
+      "./testing": {
+        "types": "./dist/testing/index.d.ts",
+        "import": "./dist/testing/index.js",
+        "default": "./dist/testing/index.js"
+      }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
   }
 }

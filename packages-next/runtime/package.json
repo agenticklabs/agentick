@@ -35,13 +35,21 @@
     }
   },
   "publishConfig": {
+    "access": "public",
     "exports": {
       ".": {
         "types": "./dist/index.d.ts",
         "import": "./dist/index.js",
         "default": "./dist/index.js"
+      },
+      "./testing": {
+        "types": "./dist/testing/index.d.ts",
+        "import": "./dist/testing/index.js",
+        "default": "./dist/testing/index.js"
       }
-    }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -61,5 +69,8 @@
     "@agentick/spec-conformance-next": "workspace:*",
     "@agentick/utils-next": "workspace:*",
     "@opentelemetry/api": "^1.9.0"
+  },
+  "engines": {
+    "node": ">=20.19"
   }
 }

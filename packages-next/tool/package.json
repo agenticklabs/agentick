@@ -34,6 +34,7 @@
     }
   },
   "publishConfig": {
+    "access": "public",
     "exports": {
       ".": {
         "types": "./dist/index.d.ts",
@@ -45,7 +46,9 @@
         "import": "./dist/transforms/index.js",
         "default": "./dist/transforms/index.js"
       }
-    }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -62,5 +65,8 @@
   "devDependencies": {
     "@agentick/spec-conformance-next": "workspace:*",
     "zod": "^4.3.6"
+  },
+  "engines": {
+    "node": ">=20.19"
   }
 }

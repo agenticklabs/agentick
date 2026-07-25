@@ -1,7 +1,6 @@
 {
   "name": "@agentick/transport-http-next",
   "version": "0.0.0",
-  "private": true,
   "description": "Streamable HTTP transport for agentick per MCP 2025-03-26 — JSON-RPC 2.0 over a single endpoint that serves request/response (application/json) and streaming responses (text/event-stream) on the same POST, plus a persistent GET for notification fan-in. Universal `fetch` on the client (Node 22+, browser, Bun, Deno, edge); Node `http.Server` on the server.",
   "keywords": [
     "agent",
@@ -64,5 +63,38 @@
     "effect": "^3.22.0",
     "typescript": "^5.7.3",
     "vitest": "^4.0.18"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20.19"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      },
+      "./client": {
+        "types": "./dist/client/index.d.ts",
+        "import": "./dist/client/index.js",
+        "default": "./dist/client/index.js"
+      },
+      "./server": {
+        "types": "./dist/server/index.d.ts",
+        "import": "./dist/server/index.js",
+        "default": "./dist/server/index.js"
+      },
+      "./fetch": {
+        "types": "./dist/server/fetch-handler.d.ts",
+        "import": "./dist/server/fetch-handler.js",
+        "default": "./dist/server/fetch-handler.js"
+      }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
   }
 }

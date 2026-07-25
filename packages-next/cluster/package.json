@@ -1,7 +1,6 @@
 {
   "name": "@agentick/cluster-next",
   "version": "0.0.0",
-  "private": true,
   "description": "Cluster protocol for Agentick v2 — typed seams (`ClusterTransport`, `ClusterMembership`, `ClusterPartitioning`, `ClusterCodec`, optional `DurableJournal`) + `defineCluster*` adapter-authoring helpers + conformance suite. Sits at the substrate-wrapping seam in `createGateway` / `createApp`; adapters ship separately (`@agentick/cluster-ipc-next`, `@agentick/cluster-redis-next`, etc.). Effect-internal, Promise/callback adapter surface.",
   "keywords": [
     "agentick",
@@ -40,6 +39,7 @@
     }
   },
   "publishConfig": {
+    "access": "public",
     "exports": {
       ".": {
         "types": "./dist/index.d.ts",
@@ -56,7 +56,9 @@
         "import": "./dist/conformance.js",
         "default": "./dist/conformance.js"
       }
-    }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -72,5 +74,8 @@
   },
   "devDependencies": {
     "@agentick/runtime-next": "workspace:*"
+  },
+  "engines": {
+    "node": ">=20.19"
   }
 }

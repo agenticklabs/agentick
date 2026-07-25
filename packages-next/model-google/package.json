@@ -1,7 +1,7 @@
 {
   "name": "@agentick/model-google-next",
   "version": "0.0.0",
-  "description": "Google (Gemini) LanguageModelAdapter for Agentick v2 (ADR 52). google(model?, options?) \u2014 Gemini Developer API + Vertex AI paths. Zero Effect, zero substrate.",
+  "description": "Google (Gemini) LanguageModelAdapter for Agentick v2 (ADR 52). google(model?, options?) — Gemini Developer API + Vertex AI paths. Zero Effect, zero substrate.",
   "keywords": [
     "agent",
     "agentick",
@@ -31,13 +31,16 @@
     }
   },
   "publishConfig": {
+    "access": "public",
     "exports": {
       ".": {
         "types": "./dist/index.d.ts",
         "import": "./dist/index.js",
         "default": "./dist/index.js"
       }
-    }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
   },
   "scripts": {
     "bench": "vitest bench --run",
@@ -58,5 +61,8 @@
     "@agentick/runtime-next": "workspace:*",
     "@agentick/spec-conformance-next": "workspace:*",
     "effect": "^3.22.0"
+  },
+  "engines": {
+    "node": ">=20.19"
   }
 }

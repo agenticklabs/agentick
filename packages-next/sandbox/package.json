@@ -1,7 +1,6 @@
 {
   "name": "@agentick/sandbox-next",
   "version": "0.0.0",
-  "private": true,
   "description": "Base sandbox package (ADR 59) — the SandboxHarness + bridge + ACL, the SandboxProvider construction contract + SandboxHandle interface, the applyEdits transform, and the pure network matcher. Providers dep this base (mirroring model-openai-next → model-next). React bindings ship from /react; the conformance suite + fake from /testing.",
   "type": "module",
   "sideEffects": [
@@ -65,5 +64,38 @@
     "vitest": {
       "optional": true
     }
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20.19"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      },
+      "./react": {
+        "types": "./dist/react/index.d.ts",
+        "import": "./dist/react/index.js",
+        "default": "./dist/react/index.js"
+      },
+      "./mcp": {
+        "types": "./dist/mcp/index.d.ts",
+        "import": "./dist/mcp/index.js",
+        "default": "./dist/mcp/index.js"
+      },
+      "./testing": {
+        "types": "./dist/testing/index.d.ts",
+        "import": "./dist/testing/index.js",
+        "default": "./dist/testing/index.js"
+      }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
   }
 }

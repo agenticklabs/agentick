@@ -1,7 +1,6 @@
 {
   "name": "@agentick/sandbox-local-next",
   "version": "0.0.0",
-  "private": true,
   "description": "Local reference SandboxProvider — spawns commands in a temp workspace, path-confined fs, atomic editFile, dynamic mounts, and a 127.0.0.1 egress proxy (ADR 59).",
   "type": "module",
   "main": "src/index.ts",
@@ -22,5 +21,23 @@
   "dependencies": {
     "@agentick/sandbox-next": "workspace:*",
     "@agentick/utils-next": "workspace:*"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20.19"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
   }
 }

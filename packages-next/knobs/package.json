@@ -1,7 +1,6 @@
 {
   "name": "@agentick/knobs-next",
   "version": "0.0.0",
-  "private": true,
   "description": "KnobsHarness — model-visible reactive state with sync reads + async writes. Per ADR 26, this is a harness (extends BaseHarness), not a 'bridge.' Bundled into the agentick metapackage; not published independently.",
   "keywords": [
     "agent",
@@ -77,5 +76,38 @@
     "react": {
       "optional": true
     }
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20.19"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      },
+      "./react": {
+        "types": "./dist/react/index.d.ts",
+        "import": "./dist/react/index.js",
+        "default": "./dist/react/index.js"
+      },
+      "./client": {
+        "types": "./dist/client/index.d.ts",
+        "import": "./dist/client/index.js",
+        "default": "./dist/client/index.js"
+      },
+      "./testing": {
+        "types": "./dist/testing/index.d.ts",
+        "import": "./dist/testing/index.js",
+        "default": "./dist/testing/index.js"
+      }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
   }
 }

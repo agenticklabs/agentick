@@ -1,7 +1,6 @@
 {
   "name": "@agentick/client-react-next",
   "version": "0.0.0",
-  "private": true,
   "description": "React binding for the agentick wire client. `useHandle(handle)` + `useView(handle, opts)` — thin `useSyncExternalStore` veneers over the framework-agnostic ClientHandle / FilteredView store contract. The BROWSER binding for the wire client (not the server-side JSX surface — that is @agentick/compiler-react-next).",
   "keywords": [
     "agent",
@@ -51,5 +50,23 @@
     "happy-dom": "^17.6.3",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20.19"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
   }
 }

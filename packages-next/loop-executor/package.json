@@ -30,13 +30,16 @@
     }
   },
   "publishConfig": {
+    "access": "public",
     "exports": {
       ".": {
         "types": "./dist/index.d.ts",
         "import": "./dist/index.js",
         "default": "./dist/index.js"
       }
-    }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -56,5 +59,8 @@
     "@agentick/model-executor-next": "workspace:*",
     "@agentick/spec-conformance-next": "workspace:*",
     "@agentick/tool-executor-next": "workspace:*"
+  },
+  "engines": {
+    "node": ">=20.19"
   }
 }

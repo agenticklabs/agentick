@@ -1,7 +1,6 @@
 {
   "name": "@agentick/client-core-next",
   "version": "0.0.0",
-  "private": true,
   "description": "Canonical TypeScript implementation of the agentick `ClientProtocol`. Runs in Node, browser, Bun, Deno, and edge runtimes. Wraps any `ClientTransport` (in-process, WebSocket, Streamable HTTP, Unix socket) and exposes `GatewayHandle` / `AppHandle` / `SessionHandle` views over the wire.",
   "keywords": [
     "agent",
@@ -50,5 +49,28 @@
     "@agentick/spec-conformance-next": "workspace:*",
     "typescript": "^5.7.3",
     "vitest": "^4.0.18"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20.19"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      },
+      "./testing": {
+        "types": "./dist/testing/index.d.ts",
+        "import": "./dist/testing/index.js",
+        "default": "./dist/testing/index.js"
+      }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
   }
 }

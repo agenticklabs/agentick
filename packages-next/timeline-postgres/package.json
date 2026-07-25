@@ -1,7 +1,6 @@
 {
   "name": "@agentick/timeline-postgres-next",
   "version": "0.0.0",
-  "private": true,
   "description": "postgresTimelineStore — Postgres TimelineStore adapter (ADR 49). The shared source of truth across stateless replicas (the cloud pole). BYO pg.Pool; DB-assigned IDENTITY seq; jsonb payloads; full schema escape hatches.",
   "keywords": [
     "agent",
@@ -41,5 +40,23 @@
   },
   "devDependencies": {
     "@types/pg": "^8.11.10"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20.19"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
   }
 }

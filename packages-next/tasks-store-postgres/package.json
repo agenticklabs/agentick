@@ -1,7 +1,6 @@
 {
   "name": "@agentick/tasks-store-postgres-next",
   "version": "0.0.0",
-  "private": true,
   "description": "postgresTaskStore — Postgres TaskStore adapter (ADR 68 pg tier). Durable task records across app-process restart, real interrupted-on-restart orphan accounting, terminal adoption across a fresh harness (the flexible cloud pole). BYO pg.Pool; jsonb payloads; full schema escape hatches.",
   "keywords": [
     "agent",
@@ -43,5 +42,23 @@
     "@agentick/store-next": "workspace:*",
     "@agentick/tasks-next": "workspace:*",
     "@types/pg": "^8.11.10"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20.19"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
   }
 }

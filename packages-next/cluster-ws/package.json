@@ -1,7 +1,6 @@
 {
   "name": "@agentick/cluster-ws-next",
   "version": "0.0.0",
-  "private": true,
   "description": "WebSocket cluster transport for Agentick v2. Concrete wire impl built on `@agentick/cluster-broker-next` + the `ws` library. Mounts on adopter's existing `http.Server` (gateway-level scenario) or owns its own port (app-level fallback). Native WebSocket message framing — no length-prefix wrapping needed. Subprotocol-negotiated for forward-compatible protocol versioning.",
   "keywords": [
     "agentick",
@@ -29,13 +28,16 @@
     }
   },
   "publishConfig": {
+    "access": "public",
     "exports": {
       ".": {
         "types": "./dist/index.d.ts",
         "import": "./dist/index.js",
         "default": "./dist/index.js"
       }
-    }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -53,5 +55,8 @@
   },
   "devDependencies": {
     "@types/ws": "^8.5.10"
+  },
+  "engines": {
+    "node": ">=20.19"
   }
 }

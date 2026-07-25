@@ -41,6 +41,7 @@
     }
   },
   "publishConfig": {
+    "access": "public",
     "exports": {
       ".": {
         "types": "./dist/index.d.ts",
@@ -52,7 +53,9 @@
         "import": "./dist/react/index.js",
         "default": "./dist/react/index.js"
       }
-    }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -78,5 +81,8 @@
     "react": {
       "optional": true
     }
+  },
+  "engines": {
+    "node": ">=20.19"
   }
 }

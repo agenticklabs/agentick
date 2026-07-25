@@ -1,7 +1,6 @@
 {
   "name": "@agentick/cluster-net-next",
   "version": "0.0.0",
-  "private": true,
   "description": "TCP + Unix-socket cluster transport for Agentick v2. Concrete wire impl built on `@agentick/cluster-broker-next` + Node's `net` module. Ships `tcpTransport` / `tcpMembership` / `defineTcpCluster` (Phase 4b), plus `unixTransport` / `unixMembership` / `defineUnixCluster` (Phase 4d). Auto-elect first-to-bind; multiplexed transport+membership over ONE connection per node; length-prefix framing via cluster-broker-next.",
   "keywords": [
     "agentick",
@@ -30,13 +29,16 @@
     }
   },
   "publishConfig": {
+    "access": "public",
     "exports": {
       ".": {
         "types": "./dist/index.d.ts",
         "import": "./dist/index.js",
         "default": "./dist/index.js"
       }
-    }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -50,5 +52,8 @@
     "@agentick/cluster-next": "workspace:*",
     "@agentick/spec-next": "workspace:*",
     "@agentick/utils-next": "workspace:*"
+  },
+  "engines": {
+    "node": ">=20.19"
   }
 }

@@ -1,7 +1,6 @@
 {
   "name": "@agentick/skills-next",
   "version": "0.0.0",
-  "private": true,
   "description": "SkillsHarness — durable library of reusable agent skills. OpenClaw / Hermes style: searchable, shareable, persistent across sessions. Shape 1 harness per ADR 32 (audit + swappable backend + cross-session persistence).",
   "keywords": [
     "agent",
@@ -71,5 +70,43 @@
   "devDependencies": {
     "@agentick/resources-next": "workspace:*",
     "@agentick/spec-conformance-next": "workspace:*"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20.19"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      },
+      "./client": {
+        "types": "./dist/client/index.d.ts",
+        "import": "./dist/client/index.js",
+        "default": "./dist/client/index.js"
+      },
+      "./testing": {
+        "types": "./dist/testing/index.d.ts",
+        "import": "./dist/testing/index.js",
+        "default": "./dist/testing/index.js"
+      },
+      "./loaders": {
+        "types": "./dist/loaders.d.ts",
+        "import": "./dist/loaders.js",
+        "default": "./dist/loaders.js"
+      },
+      "./loaders/node": {
+        "types": "./dist/loaders-node.d.ts",
+        "import": "./dist/loaders-node.js",
+        "default": "./dist/loaders-node.js"
+      }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
   }
 }

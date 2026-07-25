@@ -29,6 +29,7 @@
     "test:coverage": "vitest run --coverage",
     "typecheck": "turbo typecheck",
     "check:no-tla": "node scripts/no-tla-gate.mjs",
+    "verify:publish": "pnpm --filter \"./packages-next/*\" run clean && pnpm turbo build --filter \"./packages-next/*\" && pnpm check:no-tla",
     "clean": "turbo clean",
     "dev": "turbo dev",
     "lint": "turbo lint",
@@ -36,14 +37,11 @@
     "lint:fix": "eslint . --fix --cache --cache-location node_modules/.cache/eslint/",
     "format": "oxfmt --write .",
     "format:check": "turbo format:check",
-    "changeset": "changeset",
-    "version-packages": "changeset version",
-    "publish-packages": "turbo run test build && changeset publish",
+    "publish-packages": "turbo run test build && pnpm publish -r",
     "tui": "tsx --tsconfig packages/tui/tsconfig.json packages/tui/src/bin.ts",
-    "local-publish": "pnpm -r publish --registry http://localhost:4873/ --no-git-checks"
+    "publish-dev": "pnpm build && pnpm publish -r --registry http://localhost:4873/ --no-git-checks --tag next"
   },
   "devDependencies": {
-    "@changesets/cli": "^2.0.0",
     "@commitlint/cli": "^20.4.1",
     "@commitlint/config-conventional": "^20.4.1",
     "@types/node": "^25.0.0",
@@ -55,6 +53,7 @@
     "oxfmt": "^0.28.0",
     "oxlint": "^1.43.0",
     "simple-git-hooks": "^2.13.1",
+    "tsx": "^4.19.2",
     "turbo": "^2.8.3",
     "typescript": "^7.0.2",
     "vitest": "^4.0.18"
@@ -66,9 +65,5 @@
     "pre-commit": "pnpm run format:check && pnpm run lint",
     "commit-msg": "npx --no -- commitlint --config commitlint.config.cjs --edit ${1}"
   },
-  "packageManager": "pnpm@10.25.0",
-  "pnpm": {
-    "overrides": {},
-    "patchedDependencies": {}
-  }
+  "packageManager": "pnpm@11.17.0"
 }

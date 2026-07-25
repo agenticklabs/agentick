@@ -7,8 +7,190 @@ packages:
 
 autoInstallPeers: true
 
-onlyBuiltDependencies:
-  - esbuild
-  - onnxruntime-node
+# pnpm 11 replaced onlyBuiltDependencies / onlyBuiltDependenciesFile with allowBuilds
+# (a package → boolean dependency-build allowlist). https://pnpm.io/settings
+# Only esbuild + onnxruntime-node ran build scripts under pnpm 10 (the old
+# onlyBuiltDependencies allowlist); the rest stay denied to preserve that baseline.
+allowBuilds:
+  esbuild: true
+  onnxruntime-node: true
+  '@nestjs/core': false
+  isolated-vm: false
+  msgpackr-extract: false
+  msw: false
+  protobufjs: false
+  sharp: false
+  simple-git-hooks: false
 
-onlyBuiltDependenciesFile: ""
+# ── Native versioning (pnpm >=11.13) — https://pnpm.io/versioning ─────────────
+# Config is read from HERE, not .changeset/config.json (that file is inert now
+# that @changesets/cli is removed). Intent files (.changeset/*.md, changesets
+# format) + the ledger (.changeset/ledger.yaml) are still read from .changeset/.
+versioning:
+  # Two fixed groups: each releases at one shared version.
+  fixed:
+    # v1 line (packages/*) — stable, ships 0.15.x on the main lane.
+    - - "./packages/agentick"
+      - "@agentick/kernel"
+      - "@agentick/shared"
+      - "@agentick/core"
+      - "@agentick/client"
+      - "@agentick/react"
+      - "@agentick/angular"
+      - "@agentick/gateway"
+      - "@agentick/server"
+      - "@agentick/express"
+      - "@agentick/nestjs"
+      - "@agentick/tui"
+      - "@agentick/sandbox"
+      - "@agentick/sandbox-local"
+      - "@agentick/sandbox-docker"
+      - "@agentick/agent"
+      - "@agentick/cli"
+      - "@agentick/devtools"
+      - "@agentick/guardrails"
+      - "@agentick/client-multiplexer"
+      - "@agentick/openai"
+      - "@agentick/anthropic"
+      - "@agentick/bedrock"
+      - "@agentick/google"
+      - "@agentick/ai-sdk"
+      - "@agentick/apple"
+      - "@agentick/connector"
+      - "@agentick/connector-imessage"
+      - "@agentick/connector-telegram"
+      - "@agentick/huggingface"
+      - "@agentick/sandbox-secure-exec"
+      - "@agentick/scheduler"
+      - "@agentick/secrets"
+      - "@agentick/mcp"
+      - "@agentick/eval"
+    # v2 line (packages-next/*) — every publishable package; on the "next" lane.
+
+    - - "@agentick/app-next"
+      - "@agentick/client-next"
+      - "@agentick/client-core-next"
+      - "@agentick/client-extensions-next"
+      - "@agentick/client-react-next"
+      - "@agentick/cluster-next"
+      - "@agentick/cluster-broker-next"
+      - "@agentick/cluster-net-next"
+      - "@agentick/cluster-redis-next"
+      - "@agentick/cluster-ws-next"
+      - "@agentick/compiler-next"
+      - "@agentick/compiler-react-next"
+      - "@agentick/connector-next"
+      - "@agentick/credentials-next"
+      - "@agentick/elicitation-next"
+      - "@agentick/eval-next"
+      - "@agentick/formatters-next"
+      - "@agentick/gates-next"
+      - "@agentick/gateway-next"
+      - "@agentick/knobs-next"
+      - "@agentick/live-next"
+      - "@agentick/loop-executor-next"
+      - "@agentick/mcp-next"
+      - "@agentick/model-next"
+      - "@agentick/model-ai-sdk-next"
+      - "@agentick/model-anthropic-next"
+      - "@agentick/model-executor-next"
+      - "@agentick/model-google-next"
+      - "@agentick/model-openai-next"
+      - "@agentick/prompts-next"
+      - "@agentick/prompts-react-next"
+      - "@agentick/pubsub-next"
+      - "@agentick/resources-next"
+      - "@agentick/runtime-next"
+      - "@agentick/sandbox-next"
+      - "@agentick/sandbox-docker-next"
+      - "@agentick/sandbox-lambda-next"
+      - "@agentick/sandbox-local-next"
+      - "@agentick/session-next"
+      - "@agentick/skills-next"
+      - "@agentick/spec-next"
+      - "@agentick/state-next"
+      - "@agentick/store-next"
+      - "@agentick/subscriptions-next"
+      - "@agentick/tasks-next"
+      - "@agentick/tasks-store-postgres-next"
+      - "@agentick/telemetry-otlp-next"
+      - "@agentick/timeline-next"
+      - "@agentick/timeline-fs-next"
+      - "@agentick/timeline-postgres-next"
+      - "@agentick/tool-next"
+      - "@agentick/tool-executor-next"
+      - "@agentick/transport-next"
+      - "@agentick/transport-http-next"
+      - "@agentick/transport-in-process-next"
+      - "@agentick/transport-unix-socket-next"
+      - "@agentick/transport-websocket-next"
+      - "@agentick/utils-next"
+  # Prerelease lane: v2 releases X.Y.Z-next.N from the same runs that ship v1
+  # stable on the main lane. Lanes are per-package (pnpm has no group shorthand).
+  lanes:
+    "@agentick/app-next": next
+    "@agentick/client-next": next
+    "@agentick/client-core-next": next
+    "@agentick/client-extensions-next": next
+    "@agentick/client-react-next": next
+    "@agentick/cluster-next": next
+    "@agentick/cluster-broker-next": next
+    "@agentick/cluster-net-next": next
+    "@agentick/cluster-redis-next": next
+    "@agentick/cluster-ws-next": next
+    "@agentick/compiler-next": next
+    "@agentick/compiler-react-next": next
+    "@agentick/connector-next": next
+    "@agentick/credentials-next": next
+    "@agentick/elicitation-next": next
+    "@agentick/eval-next": next
+    "@agentick/formatters-next": next
+    "@agentick/gates-next": next
+    "@agentick/gateway-next": next
+    "@agentick/knobs-next": next
+    "@agentick/live-next": next
+    "@agentick/loop-executor-next": next
+    "@agentick/mcp-next": next
+    "@agentick/model-next": next
+    "@agentick/model-ai-sdk-next": next
+    "@agentick/model-anthropic-next": next
+    "@agentick/model-executor-next": next
+    "@agentick/model-google-next": next
+    "@agentick/model-openai-next": next
+    "@agentick/prompts-next": next
+    "@agentick/prompts-react-next": next
+    "@agentick/pubsub-next": next
+    "@agentick/resources-next": next
+    "@agentick/runtime-next": next
+    "@agentick/sandbox-next": next
+    "@agentick/sandbox-docker-next": next
+    "@agentick/sandbox-lambda-next": next
+    "@agentick/sandbox-local-next": next
+    "@agentick/session-next": next
+    "@agentick/skills-next": next
+    "@agentick/spec-next": next
+    "@agentick/state-next": next
+    "@agentick/store-next": next
+    "@agentick/subscriptions-next": next
+    "@agentick/tasks-next": next
+    "@agentick/tasks-store-postgres-next": next
+    "@agentick/telemetry-otlp-next": next
+    "@agentick/timeline-next": next
+    "@agentick/timeline-fs-next": next
+    "@agentick/timeline-postgres-next": next
+    "@agentick/tool-next": next
+    "@agentick/tool-executor-next": next
+    "@agentick/transport-next": next
+    "@agentick/transport-http-next": next
+    "@agentick/transport-in-process-next": next
+    "@agentick/transport-unix-socket-next": next
+    "@agentick/transport-websocket-next": next
+    "@agentick/utils-next": next
+  # Skip the v1 example apps (private; never published).
+  ignore:
+    - "example-express"
+    - "example-react"
+    - "example-agent"
+  # Changelog composed at publish time into the tarball; no committed CHANGELOG.md.
+  changelog:
+    storage: registry

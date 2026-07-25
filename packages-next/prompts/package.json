@@ -1,7 +1,6 @@
 {
   "name": "@agentick/prompts-next",
   "version": "0.0.0",
-  "private": true,
   "description": "PromptsHarness — durable parameterized prompt library. Renders to MessageEntry[] via pluggable framework renderers (String + MessageEntry[] handled natively in core; framework JSX via @agentick/prompts-react-next).",
   "keywords": [
     "agent",
@@ -57,5 +56,33 @@
     "@agentick/store-next": "workspace:*",
     "@agentick/utils-next": "workspace:*",
     "effect": "^3.22.0"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20.19"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      },
+      "./client": {
+        "types": "./dist/client/index.d.ts",
+        "import": "./dist/client/index.js",
+        "default": "./dist/client/index.js"
+      },
+      "./loaders": {
+        "types": "./dist/loaders.d.ts",
+        "import": "./dist/loaders.js",
+        "default": "./dist/loaders.js"
+      }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
   }
 }

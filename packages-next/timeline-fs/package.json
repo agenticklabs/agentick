@@ -1,7 +1,6 @@
 {
   "name": "@agentick/timeline-fs-next",
   "version": "0.0.0",
-  "private": true,
   "description": "fsTimelineStore — zero-dependency JSONL TimelineStore adapter (ADR 49). One append-only transcript file per session; human-greppable; the local-pole durable shape. Node built-ins only.",
   "keywords": [
     "agent",
@@ -40,5 +39,23 @@
   },
   "devDependencies": {
     "@agentick/store-next": "workspace:*"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20.19"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
   }
 }

@@ -1,7 +1,6 @@
 {
   "name": "@agentick/prompts-react-next",
   "version": "0.0.0",
-  "private": true,
   "description": "React binding for @agentick/prompts-next. Exports `reactPromptRenderer` (ReactNode → MessageEntry[] via compileTemplate) and the `withReactPrompts` convenience extension.",
   "keywords": [
     "agent",
@@ -46,5 +45,23 @@
   },
   "peerDependencies": {
     "react": "^19.0.0"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20.19"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
   }
 }

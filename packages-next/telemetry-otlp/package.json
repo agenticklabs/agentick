@@ -1,7 +1,6 @@
 {
   "name": "@agentick/telemetry-otlp-next",
   "version": "0.0.0",
-  "private": true,
   "description": "OTLP exporter sink for Agentick v2 telemetry — `otlpSink()` returns a standard-OpenTelemetry `TelemetrySink` (BatchSpanProcessor + PeriodicExportingMetricReader over the OTLP HTTP/proto/grpc exporters) with `OTEL_EXPORTER_OTLP_*` env auto-fill (explicit-beats-ambient, per-field). The OTel exporter dependencies live HERE so `@agentick/app-next` stays exporter-dep-free; the app lazy-imports this package for env-driven autodiscovery. Optional install, not bundled.",
   "keywords": [
     "agentick",
@@ -31,13 +30,16 @@
     }
   },
   "publishConfig": {
+    "access": "public",
     "exports": {
       ".": {
         "types": "./dist/index.d.ts",
         "import": "./dist/index.js",
         "default": "./dist/index.js"
       }
-    }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -57,5 +59,8 @@
     "@opentelemetry/exporter-trace-otlp-proto": "^0.221.0",
     "@opentelemetry/sdk-metrics": "^2.0.0",
     "@opentelemetry/sdk-trace-base": "^2.0.0"
+  },
+  "engines": {
+    "node": ">=20.19"
   }
 }

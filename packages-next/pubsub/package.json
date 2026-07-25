@@ -1,7 +1,6 @@
 {
   "name": "@agentick/pubsub-next",
   "version": "0.0.0",
-  "private": true,
   "description": "Local observer / pub-sub primitives for Agentick v2 — `Notifier`, `KeyedNotifier`, and `LocalPubSub`. Consolidates ~16 hand-rolled fan-out implementations across harnesses, bridges, transports, and compiler test doubles into one canonical set. Effect.PubSub-backed for the Stream-flavored variant.",
   "keywords": [
     "agentick",
@@ -35,6 +34,7 @@
     }
   },
   "publishConfig": {
+    "access": "public",
     "exports": {
       ".": {
         "types": "./dist/index.d.ts",
@@ -46,7 +46,9 @@
         "import": "./dist/testing/index.js",
         "default": "./dist/testing/index.js"
       }
-    }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -58,5 +60,8 @@
   "dependencies": {
     "@agentick/utils-next": "workspace:*",
     "effect": "^3.22.0"
+  },
+  "engines": {
+    "node": ">=20.19"
   }
 }

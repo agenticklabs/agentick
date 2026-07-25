@@ -1,7 +1,6 @@
 {
   "name": "@agentick/connector-next",
   "version": "0.0.0",
-  "private": true,
   "description": "Connector base — bind a chat surface (Telegram, iMessage, …) to an agent session as one server-side GatewayExtension. Inbound platform messages → session.send; agent output → platform-native delivery; tool confirmations → the elicitation channel.",
   "keywords": [
     "agent",
@@ -59,6 +58,30 @@
     "@agentick/model-next": "workspace:*",
     "@agentick/compiler-react-next": "workspace:*",
     "@agentick/runtime-next": "workspace:*",
+    "@types/react": "^19.2.5",
     "react": "^19.0.0"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20.19"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      },
+      "./testing": {
+        "types": "./dist/testing/index.d.ts",
+        "import": "./dist/testing/index.js",
+        "default": "./dist/testing/index.js"
+      }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
   }
 }
