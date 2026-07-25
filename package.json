@@ -24,7 +24,7 @@
   "scripts": {
     "prepare": "simple-git-hooks",
     "build": "turbo build",
-    "test": "vitest run && pnpm --filter @agentick/tui test",
+    "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "typecheck": "turbo typecheck",
@@ -38,7 +38,6 @@
     "format": "oxfmt --write .",
     "format:check": "turbo format:check",
     "publish-packages": "turbo run test build && pnpm publish -r",
-    "tui": "tsx --tsconfig packages/tui/tsconfig.json packages/tui/src/bin.ts",
     "publish-dev": "pnpm build && pnpm publish -r --registry http://localhost:4873/ --no-git-checks --tag next"
   },
   "devDependencies": {

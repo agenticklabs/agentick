@@ -21,9 +21,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = resolvePath(dirname(fileURLToPath(import.meta.url)), "..");
 
-/** name → { dir, exports } for every workspace package under packages-next/ and packages/. */
+/** name → { dir, exports } for every workspace package under packages-next/. */
 const workspace = new Map();
-for (const base of ["packages-next", "packages"]) {
+for (const base of ["packages-next"]) {
   const baseDir = join(ROOT, base);
   if (!existsSync(baseDir)) continue;
   for (const name of readdirSync(baseDir)) {

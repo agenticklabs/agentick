@@ -1,6 +1,4 @@
 packages:
-  - packages/*
-  - packages/adapters/*
   - packages-next/*
   - example/*
   - website
@@ -27,46 +25,11 @@ allowBuilds:
 # that @changesets/cli is removed). Intent files (.changeset/*.md, changesets
 # format) + the ledger (.changeset/ledger.yaml) are still read from .changeset/.
 versioning:
-  # Two fixed groups: each releases at one shared version.
+  # One fixed group: releases at one shared version.
+  # (v1 versions/publishes from `master` only — it left the feat/v2 branch
+  #  entirely, so this branch carries no v1 fixed group.)
   fixed:
-    # v1 line (packages/*) — stable, ships 0.15.x on the main lane.
-    - - "./packages/agentick"
-      - "@agentick/kernel"
-      - "@agentick/shared"
-      - "@agentick/core"
-      - "@agentick/client"
-      - "@agentick/react"
-      - "@agentick/angular"
-      - "@agentick/gateway"
-      - "@agentick/server"
-      - "@agentick/express"
-      - "@agentick/nestjs"
-      - "@agentick/tui"
-      - "@agentick/sandbox"
-      - "@agentick/sandbox-local"
-      - "@agentick/sandbox-docker"
-      - "@agentick/agent"
-      - "@agentick/cli"
-      - "@agentick/devtools"
-      - "@agentick/guardrails"
-      - "@agentick/client-multiplexer"
-      - "@agentick/openai"
-      - "@agentick/anthropic"
-      - "@agentick/bedrock"
-      - "@agentick/google"
-      - "@agentick/ai-sdk"
-      - "@agentick/apple"
-      - "@agentick/connector"
-      - "@agentick/connector-imessage"
-      - "@agentick/connector-telegram"
-      - "@agentick/huggingface"
-      - "@agentick/sandbox-secure-exec"
-      - "@agentick/scheduler"
-      - "@agentick/secrets"
-      - "@agentick/mcp"
-      - "@agentick/eval"
     # v2 line (packages-next/*) — every publishable package; on the "next" lane.
-
     - - "@agentick/app-next"
       - "@agentick/client-next"
       - "@agentick/client-core-next"
@@ -186,11 +149,14 @@ versioning:
     "@agentick/transport-unix-socket-next": next
     "@agentick/transport-websocket-next": next
     "@agentick/utils-next": next
-  # Skip the v1 example apps (private; never published).
+  # Skip the example apps. They are private (never published), but pnpm native
+  # versioning still bumps private packages unless they are ignored here, so the
+  # v2 example apps are listed explicitly.
   ignore:
-    - "example-express"
-    - "example-react"
-    - "example-agent"
+    - "example-v2-real"
+    - "example-v2-coding-agent"
+    - "example-v2-otto"
+    - "example-v2-otto-cluster"
   # Changelog composed at publish time into the tarball; no committed CHANGELOG.md.
   changelog:
     storage: registry
