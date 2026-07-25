@@ -38,7 +38,8 @@
     "format": "oxfmt --write .",
     "format:check": "turbo format:check",
     "publish-packages": "turbo run test build && pnpm publish -r",
-    "publish-dev": "pnpm build && pnpm publish -r --registry http://localhost:4873/ --no-git-checks --tag next"
+    "publish-dev": "pnpm build && pnpm publish -r --registry http://localhost:4873/ --no-git-checks --tag next",
+    "registry:local": "verdaccio --config scripts/verdaccio.yaml"
   },
   "devDependencies": {
     "@commitlint/cli": "^20.4.1",

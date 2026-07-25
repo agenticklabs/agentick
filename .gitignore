@@ -64,3 +64,4 @@ packages/*/docs/
 .codex/
 
 .claude/worktrees/*
+.verdaccio/
