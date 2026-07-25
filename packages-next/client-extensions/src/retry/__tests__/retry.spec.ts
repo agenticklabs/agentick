@@ -248,7 +248,6 @@ describe("defaultIdempotencyKey", () => {
     expect(defaultIdempotencyKey("session/send")).toBeDefined();
     expect(defaultIdempotencyKey("app/run_once")).toBeDefined();
     expect(defaultIdempotencyKey("session/dispatch")).toBeDefined();
-    expect(defaultIdempotencyKey("session/queue")).toBeDefined();
   });
 
   it("does NOT emit keys for naturally-idempotent methods", () => {

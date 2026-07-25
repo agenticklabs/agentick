@@ -555,7 +555,7 @@ describe("send concurrency guards (review findings on ADR 53 join)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// STEER vs FOLLOW-UP delivery semantics (queue-item 4b)
+// STEER vs QUEUE busy-send semantics (onBusy)
 // ---------------------------------------------------------------------------
 
 /**
@@ -644,7 +644,7 @@ const userTextsOf = (session: SessionHarnessProtocol): string[] =>
 const boundaryCount = (session: SessionHarnessProtocol): number =>
   session.timeline.readPersisted().filter((e) => e.kind === "boundary").length;
 
-describe("delivery: steer vs followUp (queue-item 4b)", () => {
+describe("onBusy: steer vs queue", () => {
   it("steer (default) lands in the NEXT tick's compiled context — same execution", async () => {
     const { session, tools } = await mkSession();
     const { exec, release, runCalls, seen } = gatedExec(["first answer", "steered answer"]);
@@ -654,7 +654,7 @@ describe("delivery: steer vs followUp (queue-item 4b)", () => {
       messages: [{ role: "user", content: "original ask" }],
       modelExecutor: exec,
     });
-    // Steer while generation 1 is gated — default delivery.
+    // Steer while generation 1 is gated — default onBusy.
     const h2 = await session.send({
       messages: [{ role: "user", content: "STEER-MARKER" }],
     });
@@ -700,7 +700,7 @@ describe("delivery: steer vs followUp (queue-item 4b)", () => {
     const { session } = await mkSession();
     const h = await session.send({
       messages: [{ role: "user", content: "hello there" }],
-      delivery: "steer",
+      onBusy: "steer",
     });
     const result = await h.result;
     expect(result.response).toBe("ok"); // the session-default replyExec("ok")
@@ -709,7 +709,7 @@ describe("delivery: steer vs followUp (queue-item 4b)", () => {
     await session.close();
   });
 
-  it("followUp waits for full settlement, then runs a FRESH execution (never joins)", async () => {
+  it("queue waits for full settlement, then runs a FRESH execution (never joins)", async () => {
     const { session } = await mkSession();
     const { exec, release } = gatedExec(["first answer"]);
     await exec.ready;
@@ -719,10 +719,10 @@ describe("delivery: steer vs followUp (queue-item 4b)", () => {
       modelExecutor: exec,
     });
 
-    // followUp send while A is gated — must NOT join A.
+    // queue send while A is gated — must NOT join A.
     const hBPromise = session.send({
-      messages: [{ role: "user", content: "B-FOLLOWUP" }],
-      delivery: "followUp",
+      messages: [{ role: "user", content: "B-QUEUE" }],
+      onBusy: "queue",
     });
 
     // Give the follow-up a chance to (wrongly) join or start early. It must
@@ -746,7 +746,7 @@ describe("delivery: steer vs followUp (queue-item 4b)", () => {
 
     // Two distinct executions settled: two boundary records.
     expect(boundaryCount(session)).toBe(2);
-    expect(userTextsOf(session)).toEqual(expect.arrayContaining(["A-ASK", "B-FOLLOWUP"]));
+    expect(userTextsOf(session)).toEqual(expect.arrayContaining(["A-ASK", "B-QUEUE"]));
 
     await session.close();
   });
@@ -767,7 +767,7 @@ describe("delivery: steer vs followUp (queue-item 4b)", () => {
     // Steer while generation 1 is gated — enqueued, NOT yet drained.
     const hSteer = await session.send({
       messages: [{ role: "user", content: "DROP-ME" }],
-      delivery: "steer",
+      onBusy: "steer",
     });
     expect(hSteer).toBe(hA);
 

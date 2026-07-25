@@ -35,7 +35,7 @@ export interface OfflineOptions {
    * Example:
    *   {
    *     "session/send":  "queue",
-   *     "session/queue": "queue",
+   *     "session/dispatch": "queue",
    *     "ping":          "never",
    *     // everything else: defaultPolicy
    *   }

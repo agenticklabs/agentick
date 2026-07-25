@@ -5,10 +5,12 @@
  * `<model responseFormat>` and a per-tick `<Model>` `parameters`), threaded
  * `SendInput → loop → project`.
  *
- * A steer (the default delivery, which joins an in-flight turn) that carries
+ * An EXPLICIT `onBusy: "steer"` that joins an in-flight turn while carrying
  * `responseFormat` is rejected with the typed `SteerCannotCarryStructuredOutput`
- * — a delivery conflict, not a validation error — while the same request as
- * `followUp` runs as a fresh execution.
+ * — a join-point fact, not a validation error. The same request with an unset
+ * `onBusy` resolves to `"queue"` under the smart default (a structured send has
+ * no steer turn to shape) and runs as a fresh execution — never reaching the
+ * guard.
  *
  * The live-schema sugar (`SendInput.output`) + validated `SendResult.data` —
  * the terminal-tool strategy — are covered in `structured-output.spec.ts`
@@ -213,8 +215,8 @@ describe("structured send — responseFormat threading + precedence", () => {
   });
 });
 
-describe("structured send — steer delivery conflict", () => {
-  it("a steer carrying responseFormat is rejected; the same request as followUp works", async () => {
+describe("structured send — onBusy conflict", () => {
+  it("an EXPLICIT onBusy:steer carrying responseFormat while racing is rejected; the same request as onBusy:queue works", async () => {
     let release!: () => void;
     const gate = new Promise<void>((r) => {
       release = r;
@@ -227,27 +229,74 @@ describe("structured send — steer delivery conflict", () => {
     // Start the in-flight (gated) execution.
     const h1 = await session.send({ messages: [{ role: "user", content: "ask" }] });
 
-    // A steer (default delivery) that carries `responseFormat` is rejected loud.
+    // An EXPLICIT `onBusy: "steer"` carrying `responseFormat` that joins the
+    // in-flight turn is rejected loud (a join has no final turn to shape).
     const steerErr = await session
-      .send({ messages: [{ role: "user", content: "steer" }], responseFormat: rf("x") })
+      .send({
+        messages: [{ role: "user", content: "steer" }],
+        responseFormat: rf("x"),
+        onBusy: "steer",
+      })
       .then(
         () => undefined,
         (e: unknown) => e,
       );
     expect((steerErr as { _tag?: string })._tag).toBe("SteerCannotCarryStructuredOutput");
 
-    // The same request as `followUp` is accepted — it queues until the
+    // The same request as `onBusy: "queue"` is accepted — it queues until the
     // session quiesces, then runs as a fresh execution.
     const h2p = session.send({
-      messages: [{ role: "user", content: "followup" }],
+      messages: [{ role: "user", content: "queued" }],
       responseFormat: rf("x"),
-      delivery: "followUp",
+      onBusy: "queue",
     });
 
     release();
     await h1.result;
     const r2 = await (await h2p).result;
     expect(r2.response).toBe("second answer");
+    await dispose();
+  });
+
+  it("an IMPLICIT structured send (unset onBusy) racing an in-flight execution QUEUES — no throw, fresh execution", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const { session, executor, dispose } = await mkSession({
+      scripts: [textReply("first answer"), textReply("second answer")],
+      holdUntil: gate,
+    });
+
+    // Start the in-flight (gated) execution.
+    const h1 = await session.send({ messages: [{ role: "user", content: "ask" }] });
+
+    // A structured send with UNSET onBusy resolves to "queue" under the smart
+    // default — no throw. It waits for quiescence, then runs fresh with its
+    // responseFormat applied.
+    const h2p = session.send({
+      messages: [{ role: "user", content: "structured" }],
+      responseFormat: rf("implicit"),
+    });
+
+    // It must NOT have joined h1 (that would resolve immediately with h1's
+    // handle); it is blocked on quiescence.
+    let resolvedEarly = false;
+    void h2p.then(() => {
+      resolvedEarly = true;
+    });
+    await new Promise((r) => setTimeout(r, 25));
+    expect(resolvedEarly).toBe(false);
+
+    release();
+    await h1.result;
+    const h2 = await h2p;
+    expect(h2).not.toBe(h1); // fresh execution, not a join
+    const r2 = await h2.result;
+    expect(r2.response).toBe("second answer");
+
+    // The queued send ran as its OWN tick with its responseFormat applied.
+    expect(seenName(executor.seenRuns[executor.seenRuns.length - 1]!.compiled)).toBe("implicit");
     await dispose();
   });
 });

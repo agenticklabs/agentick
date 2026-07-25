@@ -10,13 +10,13 @@ behaviors via their subpath for tree-shaking + dependency isolation.
 
 ## Prior art
 
-| Library                                         | What it does                                                    | Where we match it                                                                                                                         |
-| ----------------------------------------------- | --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| AWS SDK retry strategies                        | Exponential backoff with full jitter; configurable max attempts | Same backoff formula (`random_uniform(0, min(maxDelay, initial * 2^attempt))`), same default cap (20s)                                    |
-| Google Cloud SDK                                | Deadline-budget retries                                         | We expose `deadlineMs` total budget                                                                                                       |
-| axios-retry / got-retry / undici-retry-fetch    | Configurable retryable predicate                                | `isRetryable: (err) => boolean` overridable                                                                                               |
-| Stripe / GCP / RFC 7231 §4.2.2 idempotency keys | Non-idempotent requests carry a key so the server can dedup     | `params._meta.idempotencyKey` injected on `session/send`, `session/dispatch`, `session/queue`, `app/runOnce`; key survives across retries |
-| Polly / resilience4j                            | Per-policy DSL                                                  | `perMethod` per-method override map                                                                                                       |
+| Library                                         | What it does                                                    | Where we match it                                                                                                        |
+| ----------------------------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| AWS SDK retry strategies                        | Exponential backoff with full jitter; configurable max attempts | Same backoff formula (`random_uniform(0, min(maxDelay, initial * 2^attempt))`), same default cap (20s)                   |
+| Google Cloud SDK                                | Deadline-budget retries                                         | We expose `deadlineMs` total budget                                                                                      |
+| axios-retry / got-retry / undici-retry-fetch    | Configurable retryable predicate                                | `isRetryable: (err) => boolean` overridable                                                                              |
+| Stripe / GCP / RFC 7231 §4.2.2 idempotency keys | Non-idempotent requests carry a key so the server can dedup     | `params._meta.idempotencyKey` injected on `session/send`, `session/dispatch`, `app/runOnce`; key survives across retries |
+| Polly / resilience4j                            | Per-policy DSL                                                  | `perMethod` per-method override map                                                                                      |
 
 ## Quick start
 
@@ -73,7 +73,7 @@ Override via `isRetryable: (err) => boolean`.
 Methods that mutate server state get a fresh UUID per logical call,
 preserved across retries:
 
-- `session/send`, `session/dispatch`, `session/queue`, `app/runOnce`
+- `session/send`, `session/dispatch`, `app/runOnce`
 
 Read-shaped methods get nothing — replaying them is naturally
 idempotent.

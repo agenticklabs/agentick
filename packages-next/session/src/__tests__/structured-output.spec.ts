@@ -593,7 +593,7 @@ describe("structured output — typed failures", () => {
   });
 });
 
-describe("structured output — precedence + delivery", () => {
+describe("structured output — precedence + onBusy", () => {
   it("send-level output overrides a tree-level <Output> (send wins)", async () => {
     // Tree declares an <Output> with a DIFFERENT terminal name.
     const Agent = () =>
@@ -631,7 +631,7 @@ describe("structured output — precedence + delivery", () => {
     await dispose();
   });
 
-  it("a steer carrying output is rejected with SteerCannotCarryStructuredOutput", async () => {
+  it("an EXPLICIT onBusy:steer carrying output while racing is rejected with SteerCannotCarryStructuredOutput", async () => {
     let release!: () => void;
     const gate = new Promise<void>((r) => {
       release = r;
@@ -642,8 +642,14 @@ describe("structured output — precedence + delivery", () => {
     });
 
     const h1 = await session.send({ messages: [{ role: "user", content: "ask" }] });
+    // Only an EXPLICIT `onBusy: "steer"` reaches the join-point guard; an
+    // implicit structured send would queue instead (covered below).
     const err = await session
-      .send({ messages: [{ role: "user", content: "steer" }], output: answerSchema })
+      .send({
+        messages: [{ role: "user", content: "steer" }],
+        output: answerSchema,
+        onBusy: "steer",
+      })
       .then(
         () => undefined,
         (e: unknown) => e,
@@ -651,6 +657,37 @@ describe("structured output — precedence + delivery", () => {
     expect((err as { _tag?: string })._tag).toBe("SteerCannotCarryStructuredOutput");
     release();
     await h1.result;
+    await dispose();
+  });
+
+  it("an EXPLICIT onBusy:steer carrying output on an IDLE session runs fresh (guard is join-point-only)", async () => {
+    const { session, resolver, executor, dispose } = await mkSession({
+      agent: React.createElement(() =>
+        React.createElement("tool", {
+          id: "t.echo",
+          name: "echo",
+          description: "echo",
+          inputSchema: jsonSchema({ type: "object" }),
+          exposure: ["model"],
+          handlerRef: "h.echo",
+        }),
+      ),
+      scripts: [terminalCallResult({ answer: "idle-steer" }, "submit_result")],
+    });
+    resolver.register("h.echo", async () => [{ type: "text", text: "ok" }]);
+
+    // Explicit steer + output, but NO in-flight execution: the steer degrades
+    // to a fresh send, where structured output is legal — no throw, data lands.
+    const r = await (
+      await session.send({
+        messages: [{ role: "user", content: "hi" }],
+        output: answerSchema,
+        onBusy: "steer",
+      })
+    ).result;
+
+    expect(toolNames(executor.seenRuns[0]!.tools)).toContain("submit_result");
+    expect(r.data).toEqual({ answer: "idle-steer" });
     await dispose();
   });
 });

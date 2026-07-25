@@ -67,8 +67,8 @@ export function defaultIsRetryable(err: unknown): boolean {
  * inherently idempotent (POST-like semantics) and need a server-side
  * dedup hint so retries don't cause double-execution.
  *
- * `session/send`, `app/run_once`, `session/dispatch`, `session/queue` are
- * the canonical agentick examples. Read-shaped methods (`gateway/list*`,
+ * `session/send`, `app/run_once`, `session/dispatch` are the canonical
+ * agentick examples. Read-shaped methods (`gateway/list*`,
  * `app/get*`) don't get keys — replaying them is naturally idempotent.
  *
  * Returns the key as a string to attach to `params._meta.idempotencyKey`.
@@ -87,12 +87,7 @@ export function defaultIsRetryable(err: unknown): boolean {
 //      ignore it → no cache bloat). Semantics live at the source, not a client guess.
 // Dumb-safe client + smart server. Kills the non-exhaustive `if`.
 export function defaultIdempotencyKey(method: string): string | undefined {
-  if (
-    method === "session/send" ||
-    method === "session/dispatch" ||
-    method === "session/queue" ||
-    method === "app/run_once"
-  ) {
+  if (method === "session/send" || method === "session/dispatch" || method === "app/run_once") {
     return generateIdempotencyKey();
   }
   return undefined;

@@ -46,10 +46,11 @@ export interface SkillRunOptions<T = unknown> {
    * `jsonSchema()`, …); threaded to `SendInput.output`. The validated value is
    * returned as `SendResult.data`. Omit for a text-only run.
    *
-   * A run carrying `output` that RACES an in-flight execution takes the
-   * steer-join path and is rejected with `SteerCannotCarryStructuredOutput`
-   * (an in-flight join has no final turn of its own to shape) — the existing
-   * guard, surfaced here honestly, not a new one.
+   * A run carrying `output` that RACES an in-flight execution QUEUES: the send
+   * leaves `onBusy` unset, and the smart default resolves a structured send to
+   * `"queue"` (a steer has no final turn of its own to shape), so the run waits
+   * for the session to quiesce, then executes fresh and delivers its structured
+   * result.
    */
   readonly output?: StandardSchemaV1<unknown, T>;
   /** Override the send's max tick bound. */
@@ -120,10 +121,10 @@ export interface SkillsHandle {
    *
    * Inline only in C-core — `opts.isolate: true` rejects with
    * `SkillIsolationUnavailable` (the fork enabler is C2). A missing skill
-   * propagates `SkillNotFound` (via `require`). A run with `output` that joins
-   * an in-flight execution propagates `SteerCannotCarryStructuredOutput`.
-   * Called on a harness with no bound runner (constructed outside a session):
-   * `SkillRunnerUnbound`.
+   * propagates `SkillNotFound` (via `require`). A run with `output` that races
+   * an in-flight execution QUEUES (the smart default resolves a structured send
+   * to `onBusy: "queue"`), running fresh after quiescence. Called on a harness
+   * with no bound runner (constructed outside a session): `SkillRunnerUnbound`.
    *
    * The run's messages persist to the timeline as ordinary history (the
    * skill's system message + the args, the assistant turn, any tool calls) —

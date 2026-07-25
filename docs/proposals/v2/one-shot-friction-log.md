@@ -202,6 +202,9 @@ status-keyed-by-known-id / live-only is a leaky boot story.
 
 ### 10. `session.queue(...)` is a dangling wire stub with no server handler
 **Severity: LOW-MEDIUM (trap).** Confidence: high.
+**RESOLVED (onBusy redesign):** `session/queue` deleted end-to-end; the
+semantic is `send({ onBusy: "queue" })` (`delivery` was renamed `onBusy`,
+`"followUp"` → `"queue"`). Historical text below unchanged.
 
 `session.queue(messages)` exists on the client handle and issues
 `session/queue`, but the method is a **dangling wire stub** — no gateway handler,

@@ -120,7 +120,7 @@ review.stopReason; // "output_delivered" (terminal-tool path) | "end" | …
 
 **Honest guarantees (do not read this as a general structured-output promise).** When `output` is set the chain is: description-driven natural path (the model calls the terminal tool) → forced wrap-up tick (`toolChoice` forcing — a hard provider guarantee) → executor validation → typed error in the residual sliver (`StructuredOutputIncomplete` / `ResponseValidationError`). Behavioral compliance ("does the model call it unforced") is the eval tier, never asserted in CI. See three-audiences-plan §B2's guarantees section.
 
-**Reentrancy.** A `run` carrying `output` that **races an in-flight execution** takes the steer-join path and is rejected with `SteerCannotCarryStructuredOutput` — an in-flight join has no final turn of its own to shape. This is the existing send guard, surfaced honestly; not a new one. Quiesce the session (or use `followUp` delivery on the underlying send) before an `output` run.
+**Reentrancy.** A `run` carrying `output` that **races an in-flight execution** QUEUES — the run leaves `onBusy` unset, and the send's smart default resolves a structured send to `"queue"` (a steer has no final turn of its own to shape). The run waits for the session to quiesce, then executes fresh and delivers its structured result. No error, no manual quiescing needed.
 
 **Timeline.** An inline run's messages persist as ordinary history (the skill's system message, the args, the assistant turn, any tool calls). Inline runs are conversation work by design. An **isolated** run (`isolate: true`) is the opposite: it executes on a disposable fork, so none of its messages land on the calling session's timeline.
 

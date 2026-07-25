@@ -72,7 +72,7 @@ cross-cutting owner):
 | `session.knobs` | get/set/subscribe | values only (no descriptors); `key` vs server `id` |
 | `session.tasks` | collection view | closest to correct |
 | timeline | `timelineView()` FREE FACTORY (window: seed/tail/prepend/append/clientId reconcile) | not a sub-handle; no wire history read; Cursor≠seq |
-| `session.send` | handle: events() + .result (+ delivery steer/followUp, telemetry.functionId) | send handle is GOOD — the model for the rest |
+| `session.send` | handle: events() + .result (+ onBusy steer/queue, telemetry.functionId) | send handle is GOOD — the model for the rest |
 
 React bindings: none first-party (adopters hand-roll useSyncExternalStore).
 

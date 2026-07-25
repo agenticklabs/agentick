@@ -53,7 +53,7 @@ await session.knobs.set("depth", 5); // ✓ (key→id rename pending ○)
 
 // ── the run: the ONE bounded stream, so the ONE for-await ──
 const run = session.send("do the thing", {
-  delivery: "steer", // ✓  ("followUp" | default)
+  onBusy: "steer", // ✓  ("queue" | smart default)
   telemetry: { functionId: "checkout" }, // ✓
 });
 for await (const ev of run.events()) paint(ev); // ✓ a run ENDS — iteration is honest

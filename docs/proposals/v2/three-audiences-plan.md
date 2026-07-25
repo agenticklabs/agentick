@@ -535,9 +535,42 @@ T | undefined`. Wire shapes untouched.
 
 Then: **C2** (fork enabler + `session.fork()` + `isolate: true`;
 `allowed-tools` Skill field + per-execution restriction seam threading
-into `compileForTick`), and the **steer-verb extraction** (pinned
-separately: `session.steer(messages)`, delete `delivery`, both conflict
-errors become type-impossible).
+into `compileForTick` — LANDED, see §C2), and the **onBusy redesign**
+(below — supersedes the earlier "steer-verb extraction" sketch).
+
+### onBusy redesign (LANDED — supersedes steer-verb extraction)
+
+Ryan rejected a separate `session.steer()` verb ("should we just add an
+option to .send() to define steering method"): steering stays an option
+ON the one send grammar, not a second verb. The ratified shape:
+
+- **`SendInput.onBusy?: "steer" | "queue"`** replaces
+  `delivery?: SendDelivery ("steer" | "followUp")`. `"queue"` is
+  today's `"followUp"` semantics (await quiescence, then a fresh
+  execution) under the name callers actually reach for. Type
+  `OnBusy = "steer" | "queue"` replaces `SendDelivery`. No back-compat
+  alias (house rule).
+- **Smart default.** Unset `onBusy` resolves per send shape: a send
+  carrying structured output (`output` or `responseFormat`) defaults to
+  `"queue"` (a steer has no final turn to shape); a plain send defaults
+  to `"steer"` (today's default, ADR 53 §5 join). Both modes remain
+  identical on an idle session.
+- **Conflict errors only for EXPLICIT contradictions.** The join-point
+  guard (`SteerCannotCarryStructuredOutput`) now fires only when the
+  caller EXPLICITLY set `onBusy: "steer"` AND carried
+  `output`/`responseFormat` AND actually joins an in-flight execution.
+  Implicit structured sends never hit it — they queue. Explicit steer
+  on an idle session still degrades to a fresh send (no conflict
+  materialized — the guard is a join-point fact, not input validation).
+- **Behavioral delta (accepted):** `skills.run` with `output` racing an
+  in-flight execution used to throw `SteerCannotCarryStructuredOutput`;
+  under the smart default it now QUEUES and runs after quiescence — the
+  honest semantics the throw was approximating.
+- **Fold the dead wire method.** `session/queue` (wire params + client
+  stub + retry/offline predicates, NO server handler — the TODO(4b)
+  vestige) is DELETED; its semantic is `send({ onBusy: "queue" })`.
+- Wire rename rides along: `SessionSendParams.delivery` → `onBusy`,
+  gateway passthrough, client handle passthrough.
 
 ---
 
@@ -775,8 +808,8 @@ F additions from the audit: `tool-executor` is NOT in `SESSION_SURFACES`
 handle must not collide with the existing `clientToolCalls` slot.
 
 Sequencing: B3 lands → **G-prep** → F + G (parallelizable per package)
-→ C2 → steer-verb extraction → §D naming sweep (knob_set,
-session_tasks_* → task_*).
+→ C2 → onBusy redesign (supersedes steer-verb extraction) → §D naming
+sweep (knob_set, session_tasks_* → task_*).
 
 ---
 

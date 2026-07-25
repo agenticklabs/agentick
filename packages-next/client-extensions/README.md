@@ -45,7 +45,7 @@ const client = await createClient({
   extensions: [
     telemetry({ adapter: noopAdapter }),
     retry(),
-    offline({ methods: { "session/queue": "queue" } }),
+    offline({ methods: { "session/send": "queue" } }),
     cache({ methods: { "gateway/list_apps": { ttlMs: 60_000 } } }),
   ],
 });

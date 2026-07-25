@@ -20,7 +20,7 @@ import type { SessionEntry, SessionFilter } from "../protocol/app-harness.js";
 import type { Cursor } from "../protocol/event-log.js";
 import type { TimelineEntry } from "../protocol/session-harness.js";
 import type {
-  SendDelivery,
+  OnBusy,
   SendMessageInput,
   SendResult,
   SendTelemetry,
@@ -148,13 +148,14 @@ export interface SessionSendParams extends WireRequestParams {
   readonly stream?: boolean;
   readonly target?: ExecutionTarget;
   /**
-   * Delivery semantics for a send that races an in-flight execution
-   * (queue-item 4b). `"steer"` (default) injects into the running turn
-   * at the next tick boundary; `"followUp"` waits for the session to
-   * quiesce then runs a fresh turn. JSON-clean string enum — crosses the
-   * wire trivially. See {@link SendInput.delivery} for full semantics.
+   * Behavior for a send that races an in-flight execution. `"steer"`
+   * injects into the running turn at the next tick boundary; `"queue"`
+   * waits for the session to quiesce then runs a fresh turn. Unset
+   * resolves per send shape (structured sends → `"queue"`, plain →
+   * `"steer"`). JSON-clean string enum — crosses the wire trivially. See
+   * {@link SendInput.onBusy} for full semantics.
    */
-  readonly delivery?: SendDelivery;
+  readonly onBusy?: OnBusy;
   /**
    * Per-call telemetry identity (rung 2). JSON-clean (`functionId` string +
    * `metadata` bag) so it crosses the wire trivially. See
@@ -224,15 +225,6 @@ export interface SessionAbortParams extends WireRequestParams {
 }
 
 export type SessionAbortResult = null;
-
-export interface SessionQueueParams extends WireRequestParams {
-  readonly sessionId: string;
-  readonly messages: ReadonlyArray<SendMessageInput>;
-}
-
-export interface SessionQueueResult {
-  readonly queuedIds: readonly string[];
-}
 
 export interface SessionSnapshotParams extends WireRequestParams {
   readonly sessionId: string;
@@ -607,7 +599,6 @@ export interface WireMethods {
   "session/dispatch": { params: SessionDispatchParams; result: SessionDispatchResult };
   "session/list_tools": { params: SessionListToolsParams; result: SessionListToolsResult };
   "session/abort": { params: SessionAbortParams; result: SessionAbortResult };
-  "session/queue": { params: SessionQueueParams; result: SessionQueueResult };
   "session/snapshot": { params: SessionSnapshotParams; result: SessionSnapshotResult };
   "session/rebind": { params: SessionRebindParams; result: SessionRebindResult };
   "session/close": { params: SessionCloseParams; result: SessionCloseResult };

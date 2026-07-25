@@ -237,20 +237,19 @@ state:
    - `await handle.result` gives the final `SendResult` (`response`, `output`,
      `toolResults`, `usage`, `stopReason`, `ticks`).
 
-4. **Composer: send / steer / follow-up / stop.**
+4. **Composer: send / steer / queue / stop.**
    - **Send** (idle session): normal `session.send({ messages })`.
-   - **Steer** (a run is in flight): `session.send({ messages, delivery: "steer" })`
+   - **Steer** (a run is in flight): `session.send({ messages, onBusy: "steer" })`
      — injected into the *currently running* execution at the next tick boundary
      (after this tick's tool results, before the next model call). Same run, no
      settle wait.
-   - **Follow-up:** `session.send({ messages, delivery: "followUp" })` — waits
+   - **Queue:** `session.send({ messages, onBusy: "queue" })` — waits
      for the session to fully quiesce, then runs as a **new** execution.
    - **Stop:** `handle.abort(reason?)`.
    - Reflect the distinction in the UI (a "steer" chip while running vs a
-     "queue follow-up" affordance). `delivery` defaults to `"steer"`.
-   - Do **not** use a `session.queue(...)` method if you see one — it is a
-     dangling wire stub with no server handler; `delivery: "followUp"` is its
-     real replacement. (Log it if the type surfaces.)
+     "queue" affordance). Unset `onBusy` resolves per send shape: structured
+     sends (`output`/`responseFormat`) default to `"queue"`, plain sends to
+     `"steer"`.
 
 5. **Client tools + confirmation dialogs.**
    - Declare the client's tool set with

@@ -295,9 +295,10 @@ export class SkillsHarness
    *   never bound `bindIsolationRunner`).
    * @throws {SkillRunnerUnbound} no runner bound (harness outside a session).
    * @throws {SkillNotFound} no skill named `name` (via {@link require}).
-   * @throws Propagated send errors: `SteerCannotCarryStructuredOutput` (an
-   *   `output`-carrying run that joins an in-flight execution),
-   *   `ResponseValidationError` / `StructuredOutputIncomplete` (§B2).
+   * @throws Propagated send errors: `ResponseValidationError` /
+   *   `StructuredOutputIncomplete` (§B2). An `output`-carrying run that races an
+   *   in-flight execution does NOT throw — it queues (smart default) and runs
+   *   after quiescence.
    */
   async run<T = unknown>(
     name: string,

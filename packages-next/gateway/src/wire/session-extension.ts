@@ -81,9 +81,9 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
         maxTicks: params.maxTicks,
         stream: params.stream,
         target: params.target,
-        // 4b — steer/follow-up delivery. A JSON-clean string enum threads
-        // straight through; the session owns the semantics.
-        ...(params.delivery !== undefined ? { delivery: params.delivery } : {}),
+        // 4b — busy-send behavior (steer/queue). A JSON-clean string enum
+        // threads straight through; the session owns the semantics.
+        ...(params.onBusy !== undefined ? { onBusy: params.onBusy } : {}),
         // Telemetry rung 2 — per-call functionId + metadata. JSON-clean bag,
         // threaded straight through; the session stamps it on every span.
         ...(params.telemetry !== undefined ? { telemetry: params.telemetry } : {}),

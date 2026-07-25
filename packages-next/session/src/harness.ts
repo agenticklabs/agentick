@@ -665,7 +665,7 @@ export class SessionHarness<P = unknown>
   /** Input entries the running execution has observed (ADR 53 live check). */
   private _inputEntriesSeen = 0;
   /**
-   * Per-execution STEER queue (queue-item 4b). A `send({ delivery: "steer" })`
+   * Per-execution STEER queue (ADR 53 §5). A `send({ onBusy: "steer" })`
    * that joins an in-flight execution pushes its messages here instead of
    * appending them to the timeline immediately; the loop drains them at the
    * next tick boundary (in {@link notifyLifecycle}) — after the tick's tool
@@ -682,7 +682,7 @@ export class SessionHarness<P = unknown>
    * durability barrier (endTurn + flush) AND after the reservation clears and
    * the status returns to idle — NOT at the loop terminal (which fires
    * earlier, inside `_currentExecution`). `whenQuiescent()` and a
-   * `delivery: "followUp"` send await this, so a follow-up never fires in the
+   * `onBusy: "queue"` send await this, so a queued send never fires in the
    * terminal window before the session is truly idle, nor between a run's
    * internal continuations (retry / compaction all live within one loop run).
    * Initialized resolved (idle sessions quiesce immediately).
@@ -1056,7 +1056,7 @@ export class SessionHarness<P = unknown>
    * Used by SP6 child disposal so a parent-abort teardown closes the child
    * only AFTER its aborting loop has drained its tick-end lifecycle (closing
    * mid-tick would unmount the compiler out from under the loop →
-   * `NotMounted`), and by `delivery: "followUp"` sends to wait for the true
+   * `NotMounted`), and by `onBusy: "queue"` sends to wait for the true
    * idle point before starting a fresh execution.
    *
    * Promoted in queue-item 4b from "await the loop terminal" to "await the
@@ -1396,8 +1396,8 @@ export class SessionHarness<P = unknown>
     // `continue` — so a drained `stop` is legitimately a tier-1 halt.
     const loopReq = this.bridges.loop.drainLoopRequests();
 
-    // (b') Drain the per-execution STEER queue (queue-item 4b). Steers
-    // enqueued during THIS tick (by a concurrent `send({ delivery: "steer" })`)
+    // (b') Drain the per-execution STEER queue (ADR 53 §5). Steers
+    // enqueued during THIS tick (by a concurrent `send({ onBusy: "steer" })`)
     // are appended to the timeline NOW — after the tick's tool results applied
     // (loop `tickBody` step 4) and BEFORE the next render — so the next tick's
     // compile sees them positioned AFTER this tick's assistant output +
@@ -2022,13 +2022,21 @@ export class SessionHarness<P = unknown>
         ? { toolName: "submit_result", schema: input.output, strategy: "auto" }
         : undefined;
 
-    // Delivery mode (queue-item 4b). Default `"steer"` = today's ADR 53 §5
-    // join behavior; `"followUp"` = wait for the session to fully quiesce,
-    // then run a fresh execution (never joins the in-flight turn).
-    const delivery = input.delivery ?? "steer";
+    // Busy-send behavior (ADR 53 §5). `"steer"` = join the in-flight turn;
+    // `"queue"` = wait for the session to fully quiesce, then run a fresh
+    // execution (never joins the in-flight turn). SMART DEFAULT when unset: a
+    // send carrying structured output (`output`/`responseFormat`) defaults to
+    // `"queue"` — a steer has no final turn of its own to shape — so it never
+    // reaches the join-point guard below; a plain send defaults to `"steer"`.
+    // Only EXPLICIT `onBusy: "steer"` can carry structured output into the
+    // guard.
+    const explicitSteer = input.onBusy === "steer";
+    const onBusy =
+      input.onBusy ??
+      (input.output !== undefined || input.responseFormat !== undefined ? "queue" : "steer");
 
-    if (delivery === "followUp") {
-      // FOLLOW-UP: block until the session is truly idle (the in-flight
+    if (onBusy === "queue") {
+      // QUEUE: block until the session is truly idle (the in-flight
       // execution AND its durability barrier + reservation clear — the
       // promoted `whenQuiescent`, which reconverges through stacked
       // executions), then fall through to the fresh-execution path below.
@@ -2056,10 +2064,16 @@ export class SessionHarness<P = unknown>
           if (!this._loopDone) {
             // A JOIN carries ONLY its messages into the in-flight turn — it
             // starts no new execution, so it has no final turn of its own to
-            // shape. Reject a structured-output-carrying steer (`responseFormat`
-            // OR the live `output` schema) loud rather than silently dropping
-            // the directive or auto-upgrading delivery.
-            if (input.responseFormat !== undefined || input.output !== undefined) {
+            // shape. Reject an EXPLICIT `onBusy: "steer"` carrying structured
+            // output (`responseFormat` OR the live `output` schema) loud rather
+            // than silently dropping the directive or auto-upgrading the mode.
+            // An implicit structured send never reaches here — the smart
+            // default resolved it to `"queue"` above — so `explicitSteer`
+            // guards the throw (a plain steer-default send carries no output).
+            if (
+              explicitSteer &&
+              (input.responseFormat !== undefined || input.output !== undefined)
+            ) {
               throw new SteerCannotCarryStructuredOutput();
             }
             // ENQUEUE (not append): the steer lands at the next tick boundary,
@@ -2173,9 +2187,9 @@ export class SessionHarness<P = unknown>
       this.runtime.setCurrentExecutionId(null);
       this.runtime.setStatus(durabilityFailed ? "failed" : "idle");
       // 4b — the session is now truly idle. Release quiescence waiters
-      // (`whenQuiescent` / follow-up sends) AFTER the reservation clears.
+      // (`whenQuiescent` / queued sends) AFTER the reservation clears.
       settledResolve();
-      // 4b — re-dispatch any undrained steers as a fresh follow-up turn.
+      // 4b — re-dispatch any undrained steers as a fresh queued turn.
       // Deferred to a microtask so the reservation is observably clear
       // before the new send runs (it would otherwise re-enter the join
       // guard against the dying handle). Dropped if the session is closing.
@@ -2184,7 +2198,7 @@ export class SessionHarness<P = unknown>
         redispatchSteers = null;
         queueMicrotask(() => {
           if (this._closed) return;
-          void this.send({ messages: msgs, delivery: "followUp" }).catch(() => undefined);
+          void this.send({ messages: msgs, onBusy: "queue" }).catch(() => undefined);
         });
       }
     });

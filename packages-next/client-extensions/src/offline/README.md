@@ -27,7 +27,7 @@ const client = await createClient({
   extensions: [
     offline({
       methods: {
-        "session/queue": "queue",   // buffer; replay on reconnect
+        "session/dispatch": "queue",   // buffer; replay on reconnect
         "session/send":  "fail-fast", // never queue; fail immediately
       },
     }),
@@ -67,7 +67,7 @@ import { offline } from "@agentick/client-extensions-next/offline";
 // Order matters: telemetry → retry → offline → transport.
 // retry's idempotency-key injection runs before offline buffers the
 // request, so the queued frame already has its key.
-extensions: [retry(), offline({ methods: { "session/queue": "queue" } })],
+extensions: [retry(), offline({ methods: { "session/send": "queue" } })],
 ```
 
 ## Custom store

@@ -183,11 +183,13 @@ Two forms, one for each side of the wire:
   parse the returned text themselves.
 
 ::: warning Steering can't carry a shape
-A steer (`delivery: "steer"`, the default) joins an **in-flight** turn — it
-has no final turn of its own to shape — so a steer that carries `output`
-or `responseFormat` is rejected with `SteerCannotCarryStructuredOutput`.
-Use `delivery: "followUp"` to run the structured request as its own fresh
-execution.
+A steer (`onBusy: "steer"`) joins an **in-flight** turn — it has no final
+turn of its own to shape. A structured send with an unset `onBusy` resolves
+to `"queue"` under the smart default, so it never steers: it waits for
+quiescence, then runs as its own fresh execution. Only an **explicit**
+`onBusy: "steer"` carrying `output` or `responseFormat` while racing an
+in-flight execution is rejected with `SteerCannotCarryStructuredOutput` —
+omit `onBusy` (or set `onBusy: "queue"`) to queue it instead.
 :::
 
 ## When to reach for it — and when not
@@ -209,7 +211,7 @@ delivery_, it doesn't post-process whatever the model happened to say.
 | `StructuredOutputIncomplete`       | No terminal call and no room to force a wrap-up (hit `maxTicks`).      |
 | `TerminalToolNameCollision`        | A tree tool shares the terminal tool's name (default `submit_result`). |
 | `MultipleStructuredOutputs`        | The tree declares 2+ `<Output>`s — one execution, one shape.           |
-| `SteerCannotCarryStructuredOutput` | A steering send carried `output` / `responseFormat`.                   |
+| `SteerCannotCarryStructuredOutput` | An explicit `onBusy: "steer"` carried `output` / `responseFormat` while racing an in-flight execution. |
 
 ## What it does _not_ do (yet)
 

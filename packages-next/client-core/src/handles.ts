@@ -157,19 +157,6 @@ export function makeSessionHandle(client: InternalClient, sessionId: string): Se
     async abort(reason) {
       await client.request("session/abort", { sessionId, reason });
     },
-    // TODO(4b): `session/queue` is a DANGLING wire method — declared in
-    // wire params + this client stub + the retry predicates, but with NO
-    // server-side gateway handler and no `queue` on SessionHarnessProtocol.
-    // Its intended "enqueue for after the session settles" semantic is now
-    // owned by `send({ delivery: "followUp" })`. Fold this into `send` (or
-    // wire a real `session/queue` handler that delegates to a followUp send)
-    // and drop the redundant method + params in the next wire sweep.
-    async queue(messages) {
-      return client.request("session/queue", {
-        sessionId,
-        messages: (messages ?? []) as readonly SendMessageInput[],
-      });
-    },
     async snapshot(): Promise<unknown> {
       const result = await client.request("session/snapshot", { sessionId });
       return result.snapshot;
@@ -321,8 +308,8 @@ function createSessionExecutionHandle<P>(
       maxTicks: input.maxTicks,
       stream: input.stream,
       target: input.target,
-      // 4b — steer/follow-up delivery rides the send params (JSON enum).
-      delivery: input.delivery,
+      // 4b — busy-send behavior (steer/queue) rides the send params (JSON enum).
+      onBusy: input.onBusy,
       // Telemetry rung 2 — per-call functionId + metadata (JSON-clean bag).
       telemetry: input.telemetry,
       // trail-response-format-send — the declarative `responseFormat`

@@ -154,7 +154,7 @@ Ordered; each beat names its verified anchor.
 4. **The loop is a policy surface.** Ticks; `shouldContinue` folding;
    verified gates are level-triggered and fail-closed; host `clear()` /
    `defer()` / `override()` land on the next tick's decision; steering
-   (`delivery: "steer" | "followUp"`); `maxTicks`; abort. Gates get their
+   (`onBusy: "steer" | "queue"`); `maxTicks`; abort. Gates get their
    moment here — _as the demonstration of external control of a running
    loop_, not as the thesis.
 5. **The graph.** `session.spawn()` (child sessions, send-through or

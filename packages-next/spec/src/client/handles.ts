@@ -126,7 +126,6 @@ export interface SessionHandleBase extends ResourceHandle, HandleSubscriptions {
   send<P = unknown>(input: SendInput<P>): ClientSessionExecutionHandle;
   dispatch(tool: string, input: unknown): Promise<readonly ContentBlock[]>;
   abort(reason?: string): Promise<void>;
-  queue(messages: SendInput["messages"]): Promise<{ readonly queuedIds: readonly string[] }>;
   snapshot(): Promise<unknown>;
   /**
    * Rebind the session to a refreshed auth context. Used when a token

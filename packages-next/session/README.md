@@ -218,6 +218,14 @@ running is **steering** (ADR 53): the messages append to the timeline
 (visible next tick), and the _in-flight_ handle is returned rather than
 starting a fresh run.
 
+The busy-send behavior is the `onBusy?: "steer" | "queue"` option.
+`"steer"` joins the in-flight turn (above); `"queue"` waits for the
+session to fully quiesce, then runs a fresh execution. **Smart default**
+(unset): a send carrying structured output (`output`/`responseFormat`)
+defaults to `"queue"` — a steer has no final turn of its own to shape — so
+it runs as its own execution; a plain send defaults to `"steer"`. Both
+modes are identical on an idle session (fresh execution).
+
 ### Structured final turns (`trail-response-format-send`)
 
 A send can constrain its final turn to a typed shape via the declarative,
@@ -241,12 +249,15 @@ await session.send({
   `<model responseFormat>` and a per-tick `<Model>` `parameters` (explicit
   send-level beats ambient). Wire callers declare `responseFormat` and
   parse the returned `response` text client-side.
-- **Steer delivery conflict.** A steer (the default delivery, which joins
-  an in-flight turn) that carries `responseFormat` **or** `output` is
-  rejected with the typed `SteerCannotCarryStructuredOutput` — a steer
+- **Explicit-steer conflict.** An **explicit** `onBusy: "steer"` (which
+  joins an in-flight turn) that carries `responseFormat` **or** `output`
+  is rejected with the typed `SteerCannotCarryStructuredOutput` — a steer
   injects messages into the running turn and has no final turn of its own
-  to shape. Use `delivery: "followUp"` to run the structured request as a
-  fresh execution.
+  to shape. Omit `onBusy` (structured sends default to `"queue"`) or set
+  `onBusy: "queue"` to run the structured request as a fresh execution.
+  Only an **explicit** steer reaches this guard: an unset `onBusy` on a
+  structured send resolves to `"queue"` under the smart default (below)
+  and never joins.
 
 > **Adapter caveat.** OpenAI and Google honor `responseFormat` natively;
 > the Anthropic and ai-sdk adapters currently DROP it
@@ -1017,9 +1028,9 @@ their backing.
   `responseFormat` is threaded to the executor over a tree
   `<model responseFormat>` (recording-executor observation); with no
   send-level directive the tree one stays; multi-tick applies the
-  directive on EVERY tick; and a steer carrying `responseFormat` rejects
-  with `SteerCannotCarryStructuredOutput` while the same request as
-  `followUp` runs.
+  directive on EVERY tick; and an explicit `onBusy: "steer"` carrying
+  `responseFormat` rejects with `SteerCannotCarryStructuredOutput` while
+  the same request with `onBusy: "queue"` (or unset) runs.
 - `src/__tests__/structured-output.spec.ts` — the §B2 terminal-tool
   strategy: `output` → validated `data`, tool-vs-responseFormat injection,
   detection + stop, sibling-calls-first, timeline pairing, steer-proof

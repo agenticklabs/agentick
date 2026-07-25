@@ -258,8 +258,7 @@ export interface SendInput<P = unknown, T = unknown> {
    */
   readonly timeoutMs?: number;
   /**
-   * Delivery semantics for a send that RACES an in-flight execution
-   * (ADR 53 §5 / queue-item 4b). Default `"steer"`.
+   * Behavior for a send that RACES an in-flight execution (ADR 53 §5).
    *
    *   - `"steer"` — inject into the CURRENTLY RUNNING execution. The
    *     messages are enqueued onto a per-execution steer queue and
@@ -268,15 +267,25 @@ export interface SendInput<P = unknown, T = unknown> {
    *     on the NEXT tick of the SAME execution (no new execution, no
    *     settle wait; the call returns the in-flight handle). With NO
    *     execution running, degrades to a normal fresh send.
-   *   - `"followUp"` — wait for the session to FULLY quiesce (the
+   *   - `"queue"` — wait for the session to FULLY quiesce (the
    *     in-flight execution AND its durability barrier complete and the
    *     session returns to idle), THEN run as a NEW execution. With no
    *     execution running, identical to a normal send.
    *
    * The distinction only matters while an execution is in flight; both
    * modes behave identically on an idle session (fresh execution).
+   *
+   * **Smart default** (unset). Resolves per send shape: a send carrying
+   * structured output ({@link output} or {@link responseFormat}) defaults
+   * to `"queue"` — a steer injects into an execution whose final turn is
+   * already committed, so it has no turn to shape; queueing runs a fresh
+   * execution that can. A plain send defaults to `"steer"` (ADR 53 §5
+   * join). The {@link SteerCannotCarryStructuredOutput} join-point guard
+   * therefore fires ONLY on an EXPLICIT `onBusy: "steer"` carrying
+   * structured output that actually joins an in-flight execution; implicit
+   * structured sends queue instead of erroring.
    */
-  readonly delivery?: SendDelivery;
+  readonly onBusy?: OnBusy;
   /**
    * Per-call telemetry identity (telemetry rung 2 — the "functionId" move).
    * When telemetry enrichment is on (`createApp({ telemetry })`), these stamp
@@ -352,10 +361,10 @@ export interface SendTelemetry {
 }
 
 /**
- * Delivery mode for {@link SendInput.delivery} (queue-item 4b). See that
- * field for the full semantics. `"steer"` is the default.
+ * Busy-send behavior for {@link SendInput.onBusy}. See that field for the
+ * full semantics, including the smart default when unset.
  */
-export type SendDelivery = "steer" | "followUp";
+export type OnBusy = "steer" | "queue";
 
 /**
  * Input shape for a message added to the timeline. The session

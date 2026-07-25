@@ -525,22 +525,25 @@ export class WireExtensionDefinitionError extends AgentickError {
 registerAgentickError("WireExtensionDefinitionError", WireExtensionDefinitionError);
 
 // ============================================================================
-// Structured final turns (trail-response-format-send) — delivery conflict
+// Structured final turns (trail-response-format-send) — onBusy conflict
 // ============================================================================
 
 /**
- * Raised when a send that JOINS an in-flight execution (`delivery: "steer"`,
- * the default) carries a structured-output directive — `responseFormat` OR the
- * live-schema `output` sugar. A steer injects only its `messages` into the
+ * Raised when a send that EXPLICITLY set `onBusy: "steer"` JOINS an in-flight
+ * execution while carrying a structured-output directive — `responseFormat` OR
+ * the live-schema `output` sugar. A steer injects only its `messages` into the
  * running turn — it does NOT begin a new execution, so it has no final turn of
  * its own to shape. Rather than silently drop the directive (a data-loss
- * surprise) or silently auto-upgrade delivery (a mode-change surprise), the
- * join is rejected: use `delivery: "followUp"` to run the structured request as
- * its own fresh execution once the session quiesces.
+ * surprise) or silently auto-upgrade the mode (a mode-change surprise), the
+ * join is rejected: omit `onBusy` (structured sends default to `"queue"`) or
+ * set `onBusy: "queue"` to run the structured request as its own fresh
+ * execution once the session quiesces.
  *
- * A DELIVERY conflict, not a validation error — caught at the steer-join
- * point, before anything runs. Single-tag — concrete class directly under
- * {@link AgentickError}.
+ * Only EXPLICIT `onBusy: "steer"` reaches this guard — an implicit structured
+ * send resolves to `"queue"` under the smart default and never joins. A join-
+ * point fact, not input validation: caught at the steer-join point (an idle
+ * session degrades a steer to a fresh send, where structured output is legal).
+ * Single-tag — concrete class directly under {@link AgentickError}.
  *
  * @see docs/proposals/v2/three-audiences-plan.md §B2
  */
@@ -548,10 +551,10 @@ export class SteerCannotCarryStructuredOutput extends AgentickError {
   readonly _tag = "SteerCannotCarryStructuredOutput" as const;
   constructor(args?: { readonly cause?: unknown }) {
     super(
-      `a steering send (delivery: "steer") cannot carry \`responseFormat\`/\`output\`: ` +
+      `an explicit steering send (onBusy: "steer") cannot carry \`responseFormat\`/\`output\`: ` +
         `a steer injects messages into the in-flight turn and has no final turn of ` +
-        `its own to shape — use delivery: "followUp" to run the structured request ` +
-        `as a fresh execution`,
+        `its own to shape — omit onBusy (structured sends default to queue) or set ` +
+        `onBusy: "queue" to run the structured request as a fresh execution`,
       { cause: args?.cause },
     );
   }

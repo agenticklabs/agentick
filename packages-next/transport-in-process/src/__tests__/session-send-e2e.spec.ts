@@ -146,6 +146,29 @@ describe("session/send — full client → gateway → executor roundtrip", () =
     await cleanup();
   });
 
+  it("threads onBusy across the wire (busy-send behavior is a JSON-clean enum)", async () => {
+    const { client, sessionId, cleanup } = await makeStack("queued reply");
+
+    // `onBusy` is a JSON-clean string enum on SessionSendParams — it crosses
+    // client → wire → gateway → session. On an idle session `"queue"` behaves
+    // identically to a normal send (fresh execution), so the reply delivers.
+    const params: SessionSendParams = {
+      sessionId,
+      messages: [{ role: "user", content: "ping" }],
+      onBusy: "queue",
+    };
+    expect(params.onBusy).toBe("queue");
+
+    const result = await client
+      .session(sessionId)
+      .send({ messages: [{ role: "user", content: "ping" }], onBusy: "queue" }).result;
+
+    expect(result.output[0]).toMatchObject({ type: "text", text: "queued reply" });
+    expect(result.stopReason).toBe("end");
+
+    await cleanup();
+  });
+
   it("SessionSendParams is declare-only for structured output — no live `output` field crosses", () => {
     // Type-level: the wire params carry `responseFormat` (serializable) but
     // NOT the live `output` Standard Schema. A schema cannot cross the wire.

@@ -11,14 +11,15 @@
  * Scripted through the CANONICAL `FakeLanguageModelExecutor`
  * (`@agentick/model-executor-next`) — never a bespoke executor stub
  * (deterministic; model behavior is the eval tier, never asserted here).
- * The steer race rides the fake's scripted `holdUntil` knob. An app-level `echo` tool makes the run's
+ * The busy-send race rides the fake's scripted `holdUntil` knob. An app-level `echo` tool makes the run's
  * send "tools-mounted", so the auto strategy resolves to the terminal tool.
  *
  * Covers:
  *   - run WITH output → typed `data` + `text` + `stopReason "output_delivered"`
  *   - run WITHOUT output → `text` only, no `data`
- *   - run carrying `output` that RACES an in-flight execution →
- *     `SteerCannotCarryStructuredOutput` (the existing steer guard, surfaced)
+ *   - run carrying `output` that RACES an in-flight execution → QUEUES under the
+ *     smart default (unset `onBusy` → `"queue"` for structured sends), then
+ *     delivers its structured result after quiescence
  *
  * @see docs/proposals/v2/three-audiences-plan.md §C
  * @see ../../session/src/__tests__/structured-output.spec.ts (the mechanism tier)
@@ -174,16 +175,18 @@ describe("session.skills!.run — e2e through createApp (C-core injection + §B2
     await app.close();
   });
 
-  it("run carrying output that RACES an in-flight execution → SteerCannotCarryStructuredOutput", async () => {
-    // First send is gated (in-flight); the skill run with `output` joins it as a
-    // steer and is rejected — the existing guard, surfaced honestly.
+  it("run carrying output that RACES an in-flight execution QUEUES, then delivers its structured result", async () => {
+    // First send is gated (in-flight); the skill run carries `output` with an
+    // unset `onBusy`, so the smart default resolves it to "queue" — it waits for
+    // the in-flight execution to quiesce, then runs fresh and delivers its
+    // structured result via the terminal tool.
     let release: () => void = () => {};
     const gate = new Promise<void>((r) => {
       release = r;
     });
     const executor = fakeExecutor([
       { result: textResult("in-flight turn"), holdUntil: gate },
-      { result: textResult("would-be skill turn") },
+      { result: terminalCall({ answer: "queued-verdict" }) },
     ]);
     const app = await createApp(React.createElement(Agent), {
       modelExecutor: executor,
@@ -193,17 +196,30 @@ describe("session.skills!.run — e2e through createApp (C-core injection + §B2
     });
     const session = await app.createSession({ sessionId: "s-run-4" });
 
-    // Start the gated (in-flight) execution.
-    const inflight = await session.send({ messages: [{ role: "user", content: "hold" }] });
-
-    // The skill run joins the in-flight turn (default steer delivery); its
-    // `output` makes the steer illegal.
-    await expect(session.skills!.run("review", { output: answerSchema })).rejects.toMatchObject({
-      _tag: "SteerCannotCarryStructuredOutput",
+    // Start the gated (in-flight) execution. `stream: false` forces the
+    // non-streaming `run` path, where the fake's `holdUntil` gate applies — so
+    // the execution stays genuinely in-flight until `release()`.
+    const inflight = await session.send({
+      messages: [{ role: "user", content: "hold" }],
+      stream: false,
     });
+
+    // The skill run carries `output` — under the smart default it QUEUES rather
+    // than steering. It must not resolve until the in-flight turn quiesces.
+    const runPromise = session.skills!.run("review", { output: answerSchema, maxTicks: 5 });
+    let runResolvedEarly = false;
+    void runPromise.then(() => {
+      runResolvedEarly = true;
+    });
+    await new Promise((r) => setTimeout(r, 25));
+    expect(runResolvedEarly).toBe(false); // blocked on quiescence
 
     release();
     await inflight.result;
+
+    const r = await (await runPromise).result;
+    expect(r.data).toEqual({ answer: "queued-verdict" });
+    expect(r.stopReason).toBe("output_delivered");
     await session.close();
     await app.close();
   });
