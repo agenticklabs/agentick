@@ -1,6 +1,6 @@
 {
   "name": "@agentick/connector",
-  "version": "0.0.0",
+  "version": "1.0.0-next.0",
   "description": "Connector base — bind a chat surface (Telegram, iMessage, …) to an agent session as one server-side GatewayExtension. Inbound platform messages → session.send; agent output → platform-native delivery; tool confirmations → the elicitation channel.",
   "keywords": [
     "agent",
@@ -52,11 +52,11 @@
     "@agentick/utils": "workspace:*"
   },
   "devDependencies": {
+    "@agentick/compiler-react": "workspace:*",
     "@agentick/elicitation": "workspace:*",
-    "@agentick/model-executor": "workspace:*",
     "@agentick/gateway": "workspace:*",
     "@agentick/model": "workspace:*",
-    "@agentick/compiler-react": "workspace:*",
+    "@agentick/model-executor": "workspace:*",
     "@agentick/runtime": "workspace:*",
     "@types/react": "^19.2.5",
     "react": "^19.0.0"

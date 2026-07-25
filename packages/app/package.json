@@ -1,6 +1,6 @@
 {
   "name": "@agentick/app",
-  "version": "0.0.0",
+  "version": "1.0.0-next.0",
   "description": "Reference app harness for Agentick v2. Outermost runtime boundary — owns shared substrate, shared sub-harnesses (compiler, loop, executor), the session registry, and the createApp ergonomic surface. Compiler-agnostic — adopters writing React agents import from `@agentick/app/react` for the React default.",
   "keywords": [
     "agent",
@@ -58,12 +58,6 @@
     "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
   },
   "dependencies": {
-    "@effect/opentelemetry": "^0.64.0",
-    "@effect/platform": "^0.97.0",
-    "@opentelemetry/api": "^1.9.0",
-    "@opentelemetry/resources": "^2.0.0",
-    "@opentelemetry/sdk-metrics": "^2.0.0",
-    "@opentelemetry/sdk-trace-base": "^2.0.0",
     "@agentick/cluster": "workspace:*",
     "@agentick/elicitation": "workspace:*",
     "@agentick/loop-executor": "workspace:*",
@@ -76,6 +70,12 @@
     "@agentick/timeline": "workspace:*",
     "@agentick/tool-executor": "workspace:*",
     "@agentick/utils": "workspace:*",
+    "@effect/opentelemetry": "^0.64.0",
+    "@effect/platform": "^0.97.0",
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/resources": "^2.0.0",
+    "@opentelemetry/sdk-metrics": "^2.0.0",
+    "@opentelemetry/sdk-trace-base": "^2.0.0",
     "effect": "^3.22.0"
   },
   "devDependencies": {

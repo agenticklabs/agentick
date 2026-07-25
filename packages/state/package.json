@@ -1,6 +1,6 @@
 {
   "name": "@agentick/state",
-  "version": "0.0.0",
+  "version": "1.0.0-next.0",
   "description": "StateHarness — session-internal reactive K/V storage. The 'adopter stash' backing useSessionState. Per ADR 26, a full harness (extends BaseHarness). Bundled into the agentick metapackage; not published independently.",
   "keywords": [
     "agent",
@@ -55,9 +55,9 @@
   },
   "dependencies": {
     "@agentick/client-core": "workspace:*",
-    "@agentick/pubsub": "workspace:*",
     "@agentick/compiler": "workspace:*",
     "@agentick/compiler-react": "workspace:*",
+    "@agentick/pubsub": "workspace:*",
     "@agentick/runtime": "workspace:*",
     "@agentick/spec": "workspace:*",
     "@agentick/store": "workspace:*",

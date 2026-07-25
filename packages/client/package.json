@@ -1,6 +1,6 @@
 {
   "name": "@agentick/client",
-  "version": "0.0.0",
+  "version": "1.0.0-next.0",
   "description": "Batteries-included agentick client: re-exports `@agentick/client-core` and side-effect-imports every built-in `/client` subpath (tasks, knobs, elicitation, tool-executor/tools, timeline, gates, skills, prompts, resources, state) so their session sub-handles self-assemble with no per-harness imports. Interim stand-in for the public `agentick/client` metapackage entry until the v2 cut.",
   "keywords": [
     "agent",
@@ -46,10 +46,10 @@
     "@agentick/tool-executor": "workspace:*"
   },
   "devDependencies": {
-    "typescript": "^5.7.3",
-    "vitest": "^4.0.18",
+    "@agentick/spec": "workspace:*",
     "@agentick/transport-in-process": "workspace:*",
-    "@agentick/spec": "workspace:*"
+    "typescript": "^5.7.3",
+    "vitest": "^4.0.18"
   },
   "files": [
     "dist"

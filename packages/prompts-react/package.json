@@ -1,6 +1,6 @@
 {
   "name": "@agentick/prompts-react",
-  "version": "0.0.0",
+  "version": "1.0.0-next.0",
   "description": "React binding for @agentick/prompts. Exports `reactPromptRenderer` (ReactNode → MessageEntry[] via compileTemplate) and the `withReactPrompts` convenience extension.",
   "keywords": [
     "agent",
@@ -34,8 +34,8 @@
     "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
   },
   "dependencies": {
-    "@agentick/prompts": "workspace:*",
     "@agentick/compiler-react": "workspace:*",
+    "@agentick/prompts": "workspace:*",
     "@agentick/spec": "workspace:*",
     "react": "^19.2.4"
   },

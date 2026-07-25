@@ -1,0 +1,4 @@
+"@agentick/spec@1.0.0-next.0":
+  dir: packages/spec
+  intents:
+    - v2-initial-prerelease

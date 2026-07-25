@@ -1,6 +1,6 @@
 {
   "name": "@agentick/subscriptions",
-  "version": "0.0.0",
+  "version": "1.0.0-next.0",
   "description": "Long-lived subscription primitive for Agentick v2 — <Cron>, <Webhook>, <EventListener>. Bridge + JSX + in-process scheduler driver. The foundation that connectors build on.",
   "keywords": [
     "agent",
@@ -65,9 +65,9 @@
     "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
   },
   "dependencies": {
-    "@agentick/pubsub": "workspace:*",
     "@agentick/compiler": "workspace:*",
     "@agentick/compiler-react": "workspace:*",
+    "@agentick/pubsub": "workspace:*",
     "@agentick/runtime": "workspace:*",
     "@agentick/spec": "workspace:*"
   },

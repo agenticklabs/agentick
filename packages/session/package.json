@@ -1,6 +1,6 @@
 {
   "name": "@agentick/session",
-  "version": "0.0.0",
+  "version": "1.0.0-next.0",
   "description": "Reference session harness for Agentick v2. Integration site that wires JSX agent + compiler + loop executor into the user-facing `session.send({ messages })` surface.",
   "keywords": [
     "agent",
@@ -58,13 +58,13 @@
     "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
   },
   "dependencies": {
+    "@agentick/compiler": "workspace:*",
     "@agentick/elicitation": "workspace:*",
     "@agentick/gates": "workspace:*",
     "@agentick/knobs": "workspace:*",
     "@agentick/loop-executor": "workspace:*",
     "@agentick/model": "workspace:*",
     "@agentick/pubsub": "workspace:*",
-    "@agentick/compiler": "workspace:*",
     "@agentick/resources": "workspace:*",
     "@agentick/runtime": "workspace:*",
     "@agentick/spec": "workspace:*",

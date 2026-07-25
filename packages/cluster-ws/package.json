@@ -1,6 +1,6 @@
 {
   "name": "@agentick/cluster-ws",
-  "version": "0.0.0",
+  "version": "1.0.0-next.0",
   "description": "WebSocket cluster transport for Agentick v2. Concrete wire impl built on `@agentick/cluster-broker` + the `ws` library. Mounts on adopter's existing `http.Server` (gateway-level scenario) or owns its own port (app-level fallback). Native WebSocket message framing — no length-prefix wrapping needed. Subprotocol-negotiated for forward-compatible protocol versioning.",
   "keywords": [
     "agentick",
@@ -47,8 +47,8 @@
     "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
   },
   "dependencies": {
-    "@agentick/cluster-broker": "workspace:*",
     "@agentick/cluster": "workspace:*",
+    "@agentick/cluster-broker": "workspace:*",
     "@agentick/spec": "workspace:*",
     "@agentick/utils": "workspace:*",
     "ws": "^8.18.0"
