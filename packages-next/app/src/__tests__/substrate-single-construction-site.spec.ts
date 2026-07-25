@@ -16,7 +16,7 @@
  *      instances `session.tasks` / `session.elicitation` expose. The
  *      `SessionInstaller` surface and the `SessionHarnessProtocol`
  *      surface agree on identity.
- *   3. The `session_tasks_*` model-facing tools `withTasks()`
+ *   3. The `task_*` model-facing tools `withTasks()`
  *      auto-registers reach the SAME tasks instance via `ctx.tasks`
  *      at dispatch time — proving `bridges.tasks` (overlaid via
  *      buildSessionBridges) and `ctx.tasks` (threaded through
@@ -125,7 +125,7 @@ describe("#159 substrate primitives — single construction site", () => {
     await app.close();
   });
 
-  it("session_tasks_* model tools reach the same harness via ctx.tasks (dispatch round-trip)", async () => {
+  it("task_* model tools reach the same harness via ctx.tasks (dispatch round-trip)", async () => {
     // `withTasks()` auto-registers four model-facing tools whose
     // handlers read `ctx.tasks` at call time. If `bridges.tasks` and
     // `ctx.tasks` ever pointed at different instances, this dispatch
@@ -150,10 +150,10 @@ describe("#159 substrate primitives — single construction site", () => {
     // on cancel.
     handle.result.catch(() => undefined);
 
-    // Dispatch `session_tasks_list` — the handler reads ctx.tasks
+    // Dispatch `task_list` — the handler reads ctx.tasks
     // (which the ToolExecutor was wired with). If ctx.tasks !==
     // session.tasks, the submitted task would be invisible.
-    const result = await session.tools.dispatch("session_tasks_list", {});
+    const result = await session.tools.dispatch("task_list", {});
     const text = result.map((b: ContentBlock) => (b.type === "text" ? b.text : "")).join("");
     // The handler returns a JSON payload listing tasks. The exact
     // shape lives in `@agentick/tasks-next/tools`; we only assert

@@ -19,13 +19,13 @@
  *
  * Latch gates (`activateWhen`):
  *   - Edge-triggered arming (consulted only while `inactive`); the model
- *     controls release via `set_knob`. `clear()` / `defer()` are host
+ *     controls release via `knob_set`. `clear()` / `defer()` are host
  *     shortcuts.
  *
  * Verified gates (`satisfied`):
  *   - Level-triggered; auto-clears on pass, re-engages on regression.
  *     Optional `activateWhen` arms the obligation. Backing knob is
- *     read-only — `set_knob` cannot bypass verification. `defer()` is a
+ *     read-only — `knob_set` cannot bypass verification. `defer()` is a
  *     no-op; `clear()` is transient (re-engages next tick if unsatisfied).
  *
  * @see ../controller.ts (the shared wiring)
@@ -85,7 +85,7 @@ export function useGate(name: string, options: GateDescriptor): GateState {
 
   // Reactive value read off the backing knob — the controller keeps the
   // knob and its synchronous mirror aligned, so this reflects both
-  // controller transitions and model `set_knob` clears.
+  // controller transitions and model `knob_set` clears.
   const value = useSyncExternalStore(
     useCallback((listener: () => void) => knobs.subscribe(name, listener), [knobs, name]),
     useCallback(() => (knobs.get(name) ?? "inactive") as GateValue, [knobs, name]),

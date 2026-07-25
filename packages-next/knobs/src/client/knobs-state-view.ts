@@ -9,7 +9,7 @@
  *
  * Read side of the knobs resource (CQRS query). The subscription opens with
  * the current snapshot (slice 2 server seam), then folds JSON-Patch deltas;
- * writes are a separate command (`set_knob` dispatch / a `knobs/set` method),
+ * writes are a separate command (`knob_set` dispatch / a `knobs/set` method),
  * whose effect returns to this view as a delta on the same channel.
  *
  * @verifiedBy packages-next/knobs/src/client/__tests__/knobs-state-view.spec.ts

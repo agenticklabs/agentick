@@ -44,6 +44,15 @@ export interface WithTimelineOptions {
   readonly compact?: CompactStrategy;
 }
 
+// TODO(tools-sweep / three-audiences-plan §D): a `src/tools.ts` shipping
+// model-facing `timeline_*` tools (e.g. `timeline_compact`) would slot in
+// here behind a `registerModelTools` option, same shape as
+// `resources/src/tools.ts` + `skills/src/tools.ts`. DEFERRED: a
+// model-invocable `compact` is a policy question (the guard/attestation
+// story must be told first), so the convention does not launch it as
+// filler. When added: register via `installer.registerToolHandler` +
+// `registerExtensionTool`, reach the harness through a `ctx.timeline` slot
+// (NOT `ctx.session`), and add the `ToolHandlerCtxExtensions` augmentation.
 export function withTimeline(options: WithTimelineOptions = {}): SessionExtension {
   return {
     name: "@agentick/timeline-next",

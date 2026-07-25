@@ -166,7 +166,7 @@ describe("TASK-WAKE integration — unobserved completion wakes via the real sen
     close = () => session.close();
 
     const handle = session.tasks.submit(async () => [{ type: "text", text: "x" }], { wake: true });
-    // Observe in-band (the session_tasks_await path) — consumes the wake.
+    // Observe in-band (the task_await path) — consumes the wake.
     await session.tasks.result(handle.taskId);
 
     await waitForStable(() => session.timeline.read().entries.length, { stableMs: 60 });

@@ -56,7 +56,7 @@ export interface KnobsRegisterInput {
 }
 
 /**
- * Input to `dispatch` — model-equivalent of the `set_knob` tool call.
+ * Input to `dispatch` — model-equivalent of the `knob_set` tool call.
  * Either `name` (set one knob) or `group` (batch-set every knob in
  * the group), not both. Validation pipeline matches v1: exactly-one
  * check → exists → type → options → bounds → length/pattern → custom
@@ -99,7 +99,7 @@ export {
  * The `E` channel is `SubstrateError` — knobs' handlers are pure
  * (`Effect.sync`), so the only failure mode is the substrate's own
  * (vetoed / journaled / lifecycle). Validation failures are NOT `E`:
- * `dispatch` reports them as `ContentBlock[]` (the `set_knob` contract),
+ * `dispatch` reports them as `ContentBlock[]` (the `knob_set` contract),
  * so they ride the success channel.
  */
 export interface KnobsFx extends HarnessFx {
@@ -119,10 +119,10 @@ export interface KnobsFx extends HarnessFx {
   register(input: KnobsRegisterInput): Effect.Effect<void, SubstrateError, never>;
 
   /**
-   * Validated mutation — the model-equivalent of `set_knob`. Runs the
+   * Validated mutation — the model-equivalent of `knob_set`. Runs the
    * full validation pipeline (exactly-one, exists, type, options,
    * bounds, length/pattern, custom validate) before mutating. Returns
-   * the same `ContentBlock[]` the `set_knob` tool would return —
+   * the same `ContentBlock[]` the `knob_set` tool would return —
    * either a success message or an error.
    */
   dispatch(

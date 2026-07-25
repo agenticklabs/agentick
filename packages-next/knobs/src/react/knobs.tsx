@@ -1,16 +1,16 @@
 /**
  * `<Knobs />` — model-facing presentation of registered knobs +
- * the `set_knob` tool that lets the model mutate them.
+ * the `knob_set` tool that lets the model mutate them.
  *
  * Three modes:
  *
  *   1. `<Knobs />`                                       default rendering
- *      Renders the `set_knob` tool declaration + a `<Section id="knobs">`
+ *      Renders the `knob_set` tool declaration + a `<Section id="knobs">`
  *      listing every registered knob (grouped by `group`, omitting any
  *      with `inline: true`).
  *
  *   2. `<Knobs>{(groups) => …}</Knobs>`                  render prop
- *      Renders the `set_knob` tool + caller's custom section.
+ *      Renders the `knob_set` tool + caller's custom section.
  *
  *   3. `<Knobs.Provider>{children}</Knobs.Provider>`    context provider
  *      `<Knobs.Provider>` + `<Knobs.Controls />` + `useKnobsContext()`
@@ -20,7 +20,7 @@
  *
  * Model-facing formatter:
  *
- *   Knobs are adjustable parameters you can modify using the set_knob tool.
+ *   Knobs are adjustable parameters you can modify using the knob_set tool.
  *
  *   verification [select]: "inactive" — Verification pending (options: "inactive", "active", "deferred")
  *
@@ -32,7 +32,7 @@
  * pattern, etc.). Groups become `### group-name` headings; ungrouped
  * knobs print before the first heading.
  *
- * `set_knob` validation pipeline (same order as v1):
+ * `knob_set` validation pipeline (same order as v1):
  *   1. exactly-one(name, group)
  *   2. knob exists / group has members
  *   3. type matches `valueType`
@@ -66,7 +66,7 @@ const h = React.createElement;
 
 /**
  * Read-only snapshot of a knob for rendering. Combines the bridge's
- * `KnobDescriptor` with a derived `semanticType` for set_knob UX.
+ * `KnobDescriptor` with a derived `semanticType` for knob_set UX.
  */
 export interface KnobInfo extends KnobDescriptor {
   readonly semanticType: KnobSemanticType;
@@ -174,7 +174,7 @@ function formatKnobLine(knob: KnobInfo): string {
 
 function formatKnobsForModel(groups: readonly KnobGroup[], hasInlineKnobs: boolean): string {
   const lines: string[] = [
-    "Knobs are adjustable parameters you can modify using the set_knob tool.",
+    "Knobs are adjustable parameters you can modify using the knob_set tool.",
     "",
   ];
   let first = true;
@@ -199,20 +199,20 @@ function formatKnobsForModel(groups: readonly KnobGroup[], hasInlineKnobs: boole
 }
 
 // ============================================================================
-// set_knob — input type re-exported from spec
+// knob_set — input type re-exported from spec
 // ============================================================================
 //
 // The validation pipeline + dispatch live on `KnobsHarness.dispatch(...)`
-// (in `@agentick/knobs-next`). The set_knob tool below just forwards the
+// (in `@agentick/knobs-next`). The knob_set tool below just forwards the
 // validated input to the harness; no duplicate validation logic here.
 
-export type SetKnobInput = KnobsDispatchInput;
+export type KnobSetInput = KnobsDispatchInput;
 
 // ============================================================================
-// set_knob input schema (hand-rolled Standard Schema validator)
+// knob_set input schema (hand-rolled Standard Schema validator)
 // ============================================================================
 
-const setKnobSchema = jsonSchema<SetKnobInput>(
+const knobSetSchema = jsonSchema<KnobSetInput>(
   {
     type: "object",
     properties: {
@@ -236,7 +236,7 @@ const setKnobSchema = jsonSchema<SetKnobInput>(
     vendor: "agentick-knobs",
     validator: (raw) => {
       if (raw === null || typeof raw !== "object") {
-        return { issues: [{ message: "set_knob input must be an object" }] };
+        return { issues: [{ message: "knob_set input must be an object" }] };
       }
       const input = raw as Record<string, unknown>;
       const name = input.name;
@@ -264,19 +264,36 @@ const setKnobSchema = jsonSchema<SetKnobInput>(
   },
 );
 
-const SetKnobTool = createTool({
-  name: "set_knob",
+const KnobSetTool = createTool({
+  name: "knob_set",
   description:
     "Set a knob value by name, or set every knob in a group at once. " +
     "Provide either name or group, not both. " +
     "Use this to adjust agent behavior knobs surfaced in the Knobs section.",
-  inputSchema: setKnobSchema,
+  inputSchema: knobSetSchema,
+  // TODO(tools-sweep / three-audiences-plan §D delta 3): normalize this
+  // onto the ctx-slot rule (`ctx.knobs`, dispatch-resolved) like every
+  // other harness tool, and drop this `use:` render-capture. BLOCKED on
+  // the augmented-ctx-slot population seam not reaching knobs: the
+  // `ctxExtensions` record is filled at the AppHarness single site
+  // (`app/src/harness.ts` ~L1908) by pulling namespaces from
+  // `sessionExtensionBridges`, but the knobs harness is NOT in that bag —
+  // it's a core session bridge constructed inside `buildSessionBridges`
+  // (`session/src/session-bridges.ts` L221) AFTER the ToolExecutor is
+  // built, and it is instance-coupled to `GatesHarness` (same L317) and
+  // interceptor-parented to the SessionHarness (session-bridges.ts
+  // L193-199), which does not exist at the hoist site. `withKnobs` (the
+  // would-be extension-bridge path) is dormant (extension.ts L9-14, Step 8
+  // pending). Riding the seam requires hoisting knobs construction to the
+  // single site (mirroring resources #159) AND re-homing its interceptor
+  // parent — a shared-construction refactor, deferred per the §D discovery
+  // stop rule. Until then this tool keeps the render-capture.
   use: () => {
     const { knobs } = useBridges();
     return { knobs };
   },
   // Delegate validation + mutation to the harness. The harness's
-  // dispatch() runs the same pipeline the v1 set_knob tool ran,
+  // dispatch() runs the same pipeline the v1 knob_set tool ran,
   // emits Operation envelopes for audit, and returns the same
   // ContentBlock[] (success message or error blocks).
   handler: async (input, { use }) => use.knobs.dispatch(input),
@@ -322,13 +339,13 @@ function KnobsImpl(props: KnobsProps): React.ReactElement | null {
   if (descriptors.length === 0) return null;
 
   if (typeof props.children === "function") {
-    return h(React.Fragment, null, h(SetKnobTool.Tool, null), props.children(groups));
+    return h(React.Fragment, null, h(KnobSetTool.Tool, null), props.children(groups));
   }
 
   return h(
     React.Fragment,
     null,
-    h(SetKnobTool.Tool, null),
+    h(KnobSetTool.Tool, null),
     h(Section, { id: "knobs", title: "Knobs" }, formatKnobsForModel(groups, hasInlineKnobs)),
   );
 }
@@ -355,7 +372,7 @@ function KnobsProvider({ children }: { children: React.ReactNode }): React.React
   return h(
     React.Fragment,
     null,
-    h(SetKnobTool.Tool, null),
+    h(KnobSetTool.Tool, null),
     descriptors.length === 0
       ? children
       : h(KnobsContext.Provider, { value: contextValue }, children),

@@ -1905,9 +1905,22 @@ export class AppHarness<P = unknown>
     // contributed by the `@agentick/sandbox-next` augmentation on the far
     // side, and the tool executor spreads the record onto every ctx
     // without inspecting it. Omitted entirely when sandbox isn't mounted.
+    // Each optional harness that ships model tools contributes its ctx
+    // slot here: the namespace it registered on the session bridge bag is
+    // threaded onto `ctx.<slot>` (typed by that package's
+    // `ToolHandlerCtxExtensions` augmentation), resolved at dispatch. Add
+    // one line per tool-shipping harness — a curated projection, NOT the
+    // whole session (three-audiences-plan §D). `skills` rides this because
+    // `withSkills` registers its harness under the `skills` namespace
+    // BEFORE this site runs; `knobs` does NOT (delta 3) — its bridge is a
+    // core session bridge born later, inside `buildSessionBridges`.
+    const ctxExtensionEntries: Record<string, unknown> = {};
     const sandboxNamespace = sessionExtensionBridges.get("sandbox");
+    if (sandboxNamespace !== undefined) ctxExtensionEntries.sandbox = sandboxNamespace;
+    const skillsNamespace = sessionExtensionBridges.get("skills");
+    if (skillsNamespace !== undefined) ctxExtensionEntries.skills = skillsNamespace;
     const ctxExtensions: Readonly<Record<string, unknown>> | undefined =
-      sandboxNamespace !== undefined ? { sandbox: sandboxNamespace } : undefined;
+      Object.keys(ctxExtensionEntries).length > 0 ? ctxExtensionEntries : undefined;
 
     const tools: ToolExecutorProtocol = this.toolFactory
       ? this.toolFactory({

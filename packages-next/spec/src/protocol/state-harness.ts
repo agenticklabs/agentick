@@ -3,7 +3,7 @@
  *
  * The "adopter stash" — typed key-value bag backing the
  * `useSessionState(key, initial)` hook. NOT model-visible: the
- * executor's `set_knob` tool doesn't reach here, and `list()` returns
+ * executor's `knob_set` tool doesn't reach here, and `list()` returns
  * `{ key, value }` entries for framework / debug use only.
  *
  * Per ADR 26, this is a full harness — identity, lifecycle, substrate,

@@ -1,16 +1,15 @@
 /**
- * Model-facing `session_tasks_*` tools — auto-registered by
+ * Model-facing `task_*` tools — auto-registered by
  * {@link withTasks}.
  *
- * **Why the `session_` prefix.** The model doesn't know it's running
- * inside a framework, so the prefix can't be branded (`agentick.*`)
- * or jargon (`runtime.*`). It also can't collide with the broad set
- * of user-provided tools that manage "tasks" in some domain sense
- * (todos, project tasks, kanban). The `session_` prefix claims a
- * namespace for framework-native, model-visible operations scoped to
- * the current conversational session — natural, low-collision, and
- * future-proof for siblings like `session_knobs_*`,
- * `session_timeline_*`, etc.
+ * **Naming: `<harness-noun>_<verb>`** (three-audiences-plan §D). The
+ * tasks harness owns the `task` noun; its model tools sort together in
+ * the model's list under that prefix — `task_list`, `task_get`,
+ * `task_cancel`, `task_await`. The noun is deliberately domain-neutral
+ * prose the model already reasons about ("a background task"), not a
+ * branded (`agentick.*`) or jargon (`runtime.*`) namespace, and the
+ * descriptions below scope it explicitly to FRAMEWORK-spawned tasks so
+ * it never reads as a user-domain todo/kanban verb.
  *
  * **Underscores, not dots.** Some providers historically rejected
  * dots in tool names (OpenAI's function-calling validator).
@@ -23,11 +22,11 @@
  * to finish. The model uses the four tools below to manage the task
  * across subsequent ticks:
  *
- *   - `session_tasks_list`   — discover in-flight + recent tasks.
- *   - `session_tasks_get`    — poll one task's status.
- *   - `session_tasks_cancel` — abort an in-flight task.
- *   - `session_tasks_await`  — block this tick until completion
- *                              (escape hatch back to Pattern A).
+ *   - `task_list`   — discover in-flight + recent tasks.
+ *   - `task_get`    — poll one task's status.
+ *   - `task_cancel` — abort an in-flight task.
+ *   - `task_await`  — block this tick until completion
+ *                    (escape hatch back to Pattern A).
  *
  * Without these, Pattern B is unusable: the model receives the ref
  * but has no way to act on it. With them, the agent can dispatch
@@ -52,10 +51,10 @@ import { omitUndefined } from "@agentick/utils-next";
 // Tool names
 // ============================================================================
 
-export const SESSION_TASKS_LIST = "session_tasks_list";
-export const SESSION_TASKS_GET = "session_tasks_get";
-export const SESSION_TASKS_CANCEL = "session_tasks_cancel";
-export const SESSION_TASKS_AWAIT = "session_tasks_await";
+export const TASK_LIST = "task_list";
+export const TASK_GET = "task_get";
+export const TASK_CANCEL = "task_cancel";
+export const TASK_AWAIT = "task_await";
 
 /**
  * Handler ref namespace. Includes the sessionId so cross-session
@@ -153,7 +152,7 @@ function awaitDeclaration(localName: string, handlerRef: string): ToolDeclaratio
       "(the same shape the original tool would have returned in Pattern A). " +
       "On `failed` / `cancelled`, returns a structured failure block. Does " +
       "NOT cancel the underlying task if this tool itself is aborted — " +
-      "use `session_tasks_cancel` for that.",
+      "use `task_cancel` for that.",
     inputSchema: jsonSchema({
       type: "object",
       properties: { taskId: { type: "string" } },
@@ -323,7 +322,7 @@ export interface SessionTasksToolsBundle {
 }
 
 /**
- * Build the four `session_tasks_*` tool registrations + their
+ * Build the four `task_*` tool registrations + their
  * handlers, scoped to a single session. Returned in a bundle so
  * `withTasks()` can register both surfaces in lockstep.
  *
@@ -353,10 +352,10 @@ export function buildSessionTasksTools(
 
   return {
     registrations: [
-      toRegistration(listDeclaration(SESSION_TASKS_LIST, listRef), binding),
-      toRegistration(getDeclaration(SESSION_TASKS_GET, getRef), binding),
-      toRegistration(cancelDeclaration(SESSION_TASKS_CANCEL, cancelRef), binding),
-      toRegistration(awaitDeclaration(SESSION_TASKS_AWAIT, awaitRef), binding),
+      toRegistration(listDeclaration(TASK_LIST, listRef), binding),
+      toRegistration(getDeclaration(TASK_GET, getRef), binding),
+      toRegistration(cancelDeclaration(TASK_CANCEL, cancelRef), binding),
+      toRegistration(awaitDeclaration(TASK_AWAIT, awaitRef), binding),
     ],
     handlers: [
       { handlerRef: listRef, handler: makeListHandler(getNamespace) },

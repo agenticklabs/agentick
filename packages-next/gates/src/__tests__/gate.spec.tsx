@@ -242,7 +242,7 @@ describe("useGate — element rendering", () => {
       expect(tree.context.entries).toEqual([]);
     }
 
-    // Manually flip the knob to active (simulating the model calling set_knob).
+    // Manually flip the knob to active (simulating the model calling knob_set).
     await knobs.set({ id: "verification", value: "active" });
     await flush();
 
@@ -420,7 +420,7 @@ describe("useGate — verified gates", () => {
     });
   });
 
-  it("the set_knob dispatch pipeline rejects writes to a verified gate's knob", async () => {
+  it("the knob_set dispatch pipeline rejects writes to a verified gate's knob", async () => {
     const { knobs, tick } = await mountGate(
       "invariant",
       gate({

@@ -1,5 +1,5 @@
 /**
- * Tests for the `session_tasks_*` model-facing tools registered by
+ * Tests for the `task_*` model-facing tools registered by
  * `withTasks()` (#157).
  *
  * Tests drive each tool's handler directly with a stub `ToolHandlerCtx`
@@ -16,13 +16,7 @@ import type { ContentBlock, ToolHandlerCtx } from "@agentick/spec-next";
 import { drainRejection } from "@agentick/utils-next/testing";
 
 import { TasksHarness } from "../harness.js";
-import {
-  SESSION_TASKS_LIST,
-  SESSION_TASKS_GET,
-  SESSION_TASKS_CANCEL,
-  SESSION_TASKS_AWAIT,
-  buildSessionTasksTools,
-} from "../tools.js";
+import { TASK_LIST, TASK_GET, TASK_CANCEL, TASK_AWAIT, buildSessionTasksTools } from "../tools.js";
 
 // ---------------------------------------------------------------------------
 // Fixture
@@ -86,14 +80,14 @@ function parseJsonBlock(blocks: readonly ContentBlock[]): Record<string, unknown
 }
 
 // ---------------------------------------------------------------------------
-// session_tasks_list
+// task_list
 // ---------------------------------------------------------------------------
 
-describe("session_tasks_list", () => {
+describe("task_list", () => {
   it("returns an empty list when no tasks are running", async () => {
     const fx = await fixture();
     try {
-      const blocks = await fx.handlerOf(SESSION_TASKS_LIST)({});
+      const blocks = await fx.handlerOf(TASK_LIST)({});
       expect(parseJsonBlock(blocks)).toEqual({ tasks: [] });
     } finally {
       await fx.close();
@@ -105,7 +99,7 @@ describe("session_tasks_list", () => {
     try {
       const a = fx.tasks.submit(async () => [{ type: "text", text: "a" } as ContentBlock]);
       const b = fx.tasks.submit(async () => [{ type: "text", text: "b" } as ContentBlock]);
-      const blocks = await fx.handlerOf(SESSION_TASKS_LIST)({});
+      const blocks = await fx.handlerOf(TASK_LIST)({});
       const payload = parseJsonBlock(blocks) as { tasks: { taskId: string }[] };
       const ids = payload.tasks.map((t) => t.taskId).sort();
       expect(ids).toEqual([a.taskId, b.taskId].sort());
@@ -148,7 +142,7 @@ describe("session_tasks_list", () => {
     const fx = await fixture("test-merge", { getNamespace });
     try {
       const local = fx.tasks.submit(async () => [{ type: "text", text: "L" } as ContentBlock]);
-      const blocks = await fx.handlerOf(SESSION_TASKS_LIST)({});
+      const blocks = await fx.handlerOf(TASK_LIST)({});
       const payload = parseJsonBlock(blocks) as {
         tasks: { taskId: string }[];
         remote: Array<{ serverId: string; tasks?: Array<{ taskId: string }> }>;
@@ -194,7 +188,7 @@ describe("session_tasks_list", () => {
     };
     const fx = await fixture("test-errors", { getNamespace });
     try {
-      const blocks = await fx.handlerOf(SESSION_TASKS_LIST)({});
+      const blocks = await fx.handlerOf(TASK_LIST)({});
       const payload = parseJsonBlock(blocks) as {
         tasks: unknown[];
         remote: Array<{ serverId: string; tasks?: unknown[]; error?: string }>;
@@ -211,7 +205,7 @@ describe("session_tasks_list", () => {
   it("omits `remote` entirely when no MCP bridge is registered", async () => {
     const fx = await fixture("test-no-mcp");
     try {
-      const blocks = await fx.handlerOf(SESSION_TASKS_LIST)({});
+      const blocks = await fx.handlerOf(TASK_LIST)({});
       const payload = parseJsonBlock(blocks);
       expect(payload).toEqual({ tasks: [] });
       expect("remote" in payload).toBe(false);
@@ -224,7 +218,7 @@ describe("session_tasks_list", () => {
     const getNamespace = (name: string): unknown => (name === "mcp" ? { clients: [] } : undefined);
     const fx = await fixture("test-empty-mcp", { getNamespace });
     try {
-      const blocks = await fx.handlerOf(SESSION_TASKS_LIST)({});
+      const blocks = await fx.handlerOf(TASK_LIST)({});
       const payload = parseJsonBlock(blocks);
       expect("remote" in payload).toBe(false);
     } finally {
@@ -234,17 +228,17 @@ describe("session_tasks_list", () => {
 });
 
 // ---------------------------------------------------------------------------
-// session_tasks_get
+// task_get
 // ---------------------------------------------------------------------------
 
-describe("session_tasks_get", () => {
+describe("task_get", () => {
   it("returns the TaskInfo for a known taskId", async () => {
     const fx = await fixture();
     try {
       const handle = fx.tasks.submit(async () => [{ type: "text", text: "ok" } as ContentBlock], {
         statusMessage: "running",
       });
-      const blocks = await fx.handlerOf(SESSION_TASKS_GET)({ taskId: handle.taskId });
+      const blocks = await fx.handlerOf(TASK_GET)({ taskId: handle.taskId });
       const payload = parseJsonBlock(blocks) as { task: { taskId: string } };
       expect(payload.task.taskId).toBe(handle.taskId);
     } finally {
@@ -255,7 +249,7 @@ describe("session_tasks_get", () => {
   it("returns { error: 'unknown_task' } for an unknown taskId", async () => {
     const fx = await fixture();
     try {
-      const blocks = await fx.handlerOf(SESSION_TASKS_GET)({ taskId: "task:nope" });
+      const blocks = await fx.handlerOf(TASK_GET)({ taskId: "task:nope" });
       expect(parseJsonBlock(blocks)).toEqual({ error: "unknown_task", taskId: "task:nope" });
     } finally {
       await fx.close();
@@ -264,10 +258,10 @@ describe("session_tasks_get", () => {
 });
 
 // ---------------------------------------------------------------------------
-// session_tasks_cancel
+// task_cancel
 // ---------------------------------------------------------------------------
 
-describe("session_tasks_cancel", () => {
+describe("task_cancel", () => {
   it("cancels an in-flight task; subsequent get reports cancelled status", async () => {
     const fx = await fixture();
     try {
@@ -277,7 +271,7 @@ describe("session_tasks_cancel", () => {
         });
         return [];
       });
-      const blocks = await fx.handlerOf(SESSION_TASKS_CANCEL)({
+      const blocks = await fx.handlerOf(TASK_CANCEL)({
         taskId: handle.taskId,
         reason: "model_cancel",
       });
@@ -293,7 +287,7 @@ describe("session_tasks_cancel", () => {
   it("returns { error: 'unknown_task' } for an unknown taskId", async () => {
     const fx = await fixture();
     try {
-      const blocks = await fx.handlerOf(SESSION_TASKS_CANCEL)({ taskId: "task:nope" });
+      const blocks = await fx.handlerOf(TASK_CANCEL)({ taskId: "task:nope" });
       expect(parseJsonBlock(blocks)).toEqual({ error: "unknown_task", taskId: "task:nope" });
     } finally {
       await fx.close();
@@ -302,17 +296,17 @@ describe("session_tasks_cancel", () => {
 });
 
 // ---------------------------------------------------------------------------
-// session_tasks_await
+// task_await
 // ---------------------------------------------------------------------------
 
-describe("session_tasks_await", () => {
+describe("task_await", () => {
   it("resolves with the task's content blocks on `completed`", async () => {
     const fx = await fixture();
     try {
       const handle = fx.tasks.submit(async () => [
         { type: "text", text: "finished" } as ContentBlock,
       ]);
-      const blocks = await fx.handlerOf(SESSION_TASKS_AWAIT)({ taskId: handle.taskId });
+      const blocks = await fx.handlerOf(TASK_AWAIT)({ taskId: handle.taskId });
       expect((blocks[0] as { text: string }).text).toBe("finished");
     } finally {
       await fx.close();
@@ -332,7 +326,7 @@ describe("session_tasks_await", () => {
       setTimeout(() => {
         void drainRejection(fx.tasks.cancel(handle.taskId, "outside_cancel"));
       }, 10);
-      const blocks = await fx.handlerOf(SESSION_TASKS_AWAIT)({ taskId: handle.taskId });
+      const blocks = await fx.handlerOf(TASK_AWAIT)({ taskId: handle.taskId });
       const payload = parseJsonBlock(blocks) as { error?: string; status?: string };
       expect(payload.error).toBe("task_failed");
       expect(payload.status).toBe("cancelled");
@@ -344,7 +338,7 @@ describe("session_tasks_await", () => {
   it("returns { error: 'unknown_task' } for an unknown taskId", async () => {
     const fx = await fixture();
     try {
-      const blocks = await fx.handlerOf(SESSION_TASKS_AWAIT)({ taskId: "task:nope" });
+      const blocks = await fx.handlerOf(TASK_AWAIT)({ taskId: "task:nope" });
       expect(parseJsonBlock(blocks)).toEqual({ error: "unknown_task", taskId: "task:nope" });
     } finally {
       await fx.close();
@@ -362,9 +356,7 @@ describe("buildSessionTasksTools (bundle shape)", () => {
     expect(bundle.registrations).toHaveLength(4);
     expect(bundle.handlers).toHaveLength(4);
     const names = bundle.registrations.map((r) => r.declaration.name).sort();
-    expect(names).toEqual(
-      [SESSION_TASKS_LIST, SESSION_TASKS_GET, SESSION_TASKS_CANCEL, SESSION_TASKS_AWAIT].sort(),
-    );
+    expect(names).toEqual([TASK_LIST, TASK_GET, TASK_CANCEL, TASK_AWAIT].sort());
   });
 
   it("handler refs are namespaced by sessionId — zero overlap across sessions", () => {

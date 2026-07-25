@@ -46,7 +46,7 @@ import type { SendInput } from "./session-harness.js";
  *                      the task flips `working → input_required` for the
  *                      duration of the awaited promise, then back to
  *                      `working` when it settles. Observers (the model
- *                      via `session_tasks_*`, a UI, an MCP client) read
+ *                      via `task_*`, a UI, an MCP client) read
  *                      it as "blocked on input, provide it" — distinct
  *                      from actively `working`.
  *   completed        — terminal; result available.
@@ -190,7 +190,7 @@ export interface TaskWorkContext {
    * `working → input_required` (optionally with a `message` statusMessage) for the
    * duration of the pause, then back to `working` when it settles. Wrap ANY
    * external-input await — an elicitation, MCP sampling, a roots request, a webhook —
-   * so observers (the model via `session_tasks_*`, a UI, an MCP client) can tell
+   * so observers (the model via `task_*`, a UI, an MCP client) can tell
    * "blocked on input, provide it" from "actively working". Restores `working` even
    * if `promise` rejects or the task is cancelled (via `finally`), so a throw can't
    * strand the task in `input_required`. Returns the resolved value (or rethrows).
@@ -243,8 +243,8 @@ export interface TaskWorkContext {
  * and carried on the synthesized wake send. **Deliberately bounded** — it
  * carries the task's identity + terminal outcome, NEVER the raw result
  * blocks. A wake nudges the model to react ("your background task finished");
- * the model retrieves the actual output on its own via `session_tasks_get` /
- * `session_tasks_await` if it needs it. Dumping the raw output into the wake
+ * the model retrieves the actual output on its own via `task_get` /
+ * `task_await` if it needs it. Dumping the raw output into the wake
  * would defeat the point (it would be an uncontrolled context injection) and
  * is not offered.
  */
@@ -279,8 +279,8 @@ export interface TaskWakeOutcome {
  *   - `false` / omitted — no wake (today's behavior).
  *
  * **Consume-on-observe.** The wake is CONSUMED (never fires) if the completion
- * is seen in-band first — the model called `session_tasks_await` (a
- * `result(taskId)` read) or `session_tasks_get` / `status(taskId)` and saw the
+ * is seen in-band first — the model called `task_await` (a
+ * `result(taskId)` read) or `task_get` / `status(taskId)` and saw the
  * terminal state, or the task was explicitly cancelled. Exactly-once holds
  * between the in-band and out-of-band paths.
  *
@@ -520,7 +520,7 @@ export interface TasksHarnessProtocol {
    * The returned array is a frozen snapshot; mutations on records
    * after this call don't appear in the returned shape.
    *
-   * Used by the model-facing `session_tasks_list` tool (auto-
+   * Used by the model-facing `task_list` tool (auto-
    * registered by `withTasks()`) and by adopter code that wants to
    * surface in-flight work in a UI.
    */

@@ -91,7 +91,7 @@ async function mkMcpServer(): Promise<{
           description:
             "Lint the whole repository — runs ~2 seconds in the background. " +
             "Returns a task reference immediately; poll / await / cancel via the " +
-            "`session_tasks_*` tools.",
+            "`task_*` tools.",
           inputSchema: z.object({
             strict: z.boolean().optional().describe("If true, treat warnings as errors."),
           }),
@@ -188,7 +188,7 @@ async function main(): Promise<void> {
     extensions: [
       timeExtension(),
       // `withTasks()` — substrate + per-session TasksHarness + auto-
-      // registered `session_tasks_list / get / cancel / await` tools.
+      // registered `task_list / get / cancel / await` tools.
       // Enables the `taskSupport: "required"` annotation on
       // `deploy_branch` (Pattern B — task ref returned to the model)
       // and the transparent task awaiting on `slow_compute` (Pattern A).

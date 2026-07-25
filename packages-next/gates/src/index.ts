@@ -4,7 +4,7 @@
  * A gate blocks loop completion until cleared. Two species:
  *
  *   - **Latch gates** (`activateWhen`) — edge-triggered; the model
- *     clears via `set_knob` (three states: `inactive`/`active`/`deferred`).
+ *     clears via `knob_set` (three states: `inactive`/`active`/`deferred`).
  *   - **Verified gates** (`satisfied`) — level-triggered; a code
  *     predicate evaluated every tick auto-clears on pass and re-engages
  *     on regression. Backing knob is read-only to the model.

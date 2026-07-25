@@ -9,7 +9,7 @@
  * and renders converge on the harness-stored value.
  *
  * Subsequent updates from anywhere (other components, external
- * `harness.set`, the `set_knob` tool dispatch, inbox mutations from
+ * `harness.set`, the `knob_set` tool dispatch, inbox mutations from
  * remote actors) trigger re-renders via the harness's per-id subscribe.
  *
  * Per ADR 26, `useBridges().knobs` is the session's `KnobsHarness` — a
@@ -51,7 +51,7 @@ export interface UseKnobOptions {
   readonly momentary?: boolean;
   readonly inline?: boolean;
   /**
-   * Model-visible but not model-settable — `set_knob` rejects writes;
+   * Model-visible but not model-settable — `knob_set` rejects writes;
    * only application code mutates via the returned setter.
    */
   readonly readOnly?: boolean;

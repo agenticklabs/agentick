@@ -65,10 +65,10 @@ export type {
 } from "@agentick/spec-next";
 export { EXTENSION_NAME as TASKS_EXTENSION_NAME } from "./extension-name.js";
 export {
-  SESSION_TASKS_LIST,
-  SESSION_TASKS_GET,
-  SESSION_TASKS_CANCEL,
-  SESSION_TASKS_AWAIT,
+  TASK_LIST,
+  TASK_GET,
+  TASK_CANCEL,
+  TASK_AWAIT,
   buildSessionTasksTools,
   type SessionTasksToolsBundle,
 } from "./tools.js";

@@ -16,7 +16,7 @@ import { ReadFile, ListDir, Grep, WriteFile, RunShell } from "./tools.js";
 
 export function CodingAgent(): React.ReactElement {
   // A model-visible, model-settable, CLIENT-settable knob. The agent re-renders
-  // when it flips (from the model's set_knob tool OR the client's
+  // when it flips (from the model's knob_set tool OR the client's
   // session.knobs.set(...)), and the system prompt below changes with it.
   const [explainSteps] = useKnob<boolean>("explainSteps", false, {
     description: "When true, narrate the plan before acting and explain each step.",
@@ -50,7 +50,7 @@ export function CodingAgent(): React.ReactElement {
       <WriteFile.Tool />
       <RunShell.Tool />
 
-      {/* set_knob tool + the current knob values, rendered as a Section the
+      {/* knob_set tool + the current knob values, rendered as a Section the
           model sees. The `explainSteps` knob above shows up here. */}
       <Knobs />
 

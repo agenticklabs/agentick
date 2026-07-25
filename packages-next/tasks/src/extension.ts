@@ -10,7 +10,7 @@
  * different instances.
  *
  * What `withTasks()` still does is auto-register the four
- * model-facing `session_tasks_*` tools (list / get / cancel / await)
+ * model-facing `task_*` tools (list / get / cancel / await)
  * so Pattern B (`taskSupport: "required"`) tools are usable
  * out-of-the-box. The handlers reach the host's `TasksHarness` via
  * `ctx.tasks` — the same instance the AppHarness already wired into
@@ -30,7 +30,7 @@ import { buildSessionTasksTools } from "./tools.js";
 
 export interface WithTasksOptions {
   /**
-   * Skip auto-registering the model-facing `session_tasks_*` tools.
+   * Skip auto-registering the model-facing `task_*` tools.
    * Defaults to `false` — by default `withTasks()` registers four
    * tools that let the model list / get / cancel / await framework
    * background tasks (required for Pattern B `taskSupport: "required"`
@@ -51,7 +51,7 @@ export function withTasks(options: WithTasksOptions = {}): SessionExtension {
     install: (installer: SessionInstaller): void => {
       if (!registerModelTools) return;
 
-      // Auto-register the four model-facing `session_tasks_*` tools.
+      // Auto-register the four model-facing `task_*` tools.
       // Handlers read `ctx.tasks` at call time — the AppHarness has
       // already wired its single per-session `TasksHarness` into the
       // ToolExecutor's `ctx.tasks` slot AND into `bridges.tasks`,

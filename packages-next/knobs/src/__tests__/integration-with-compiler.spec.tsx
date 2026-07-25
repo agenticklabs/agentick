@@ -6,7 +6,7 @@
  * suite + concrete behavior). The tests here cover the compiler-side
  * integration: useKnob's descriptor registration, momentary reset
  * semantics via lifecycle, `<Knobs />` section rendering, and the
- * set_knob tool round-trip.
+ * knob_set tool round-trip.
  */
 
 import React from "react";
@@ -218,7 +218,7 @@ describe("<Knobs /> — default rendering", () => {
     expect(tree.context.entries).toEqual([]);
   });
 
-  it("renders the knobs section + set_knob tool when knobs are registered", async () => {
+  it("renders the knobs section + knob_set tool when knobs are registered", async () => {
     const knobs = fakeKnobsHarness();
     const bridges: HookBridges = { ...fakeBridges(), knobs };
     const harness = await makeHarness();
@@ -246,7 +246,7 @@ describe("<Knobs /> — default rendering", () => {
     const section = sectionOf(tree, "knobs");
     expect(section).toBeTruthy();
     const text = textOf(section!.content);
-    expect(text).toContain("set_knob tool");
+    expect(text).toContain("knob_set tool");
     expect(text).toContain("mood [select]");
     expect(text).toContain('"curious"');
     expect(text).toContain("Agent mood");
@@ -254,7 +254,7 @@ describe("<Knobs /> — default rendering", () => {
     expect(text).toContain("### output");
     expect(text).toContain("verbose [toggle]");
 
-    const setKnobDecl = tree.declarations?.tools?.find((t) => t.name === "set_knob");
+    const setKnobDecl = tree.declarations?.tools?.find((t) => t.name === "knob_set");
     expect(setKnobDecl).toBeTruthy();
   });
 
@@ -314,7 +314,7 @@ describe("<Knobs /> — render prop", () => {
     expect(custom).toBeTruthy();
     expect(textOf(custom!.content)).toBe("Got 1 knob(s)");
     expect(sectionOf(tree, "knobs")).toBeUndefined();
-    expect(tree.declarations?.tools?.some((t) => t.name === "set_knob")).toBe(true);
+    expect(tree.declarations?.tools?.some((t) => t.name === "knob_set")).toBe(true);
   });
 });
 
@@ -341,7 +341,7 @@ describe("<Knobs /> — reactivity", () => {
     const r1 = await harness.renderTree({ mountId: "m_dispatch", sessionId: "s" });
     expect(textOf(sectionOf(r1.tree, "knobs")!.content)).toContain('mood [select]: "curious"');
 
-    // Simulate external mutation (set_knob tool firing).
+    // Simulate external mutation (knob_set tool firing).
     await knobs.set({ id: "mood", value: "decisive" });
     await flush();
 

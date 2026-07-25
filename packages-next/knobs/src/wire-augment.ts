@@ -9,7 +9,7 @@
  * it as a side effect pulls no server code.
  *
  * ADR 51 slice 5 (#141) — `knobs/set` is the ratified user-facing wire row
- * (v1 precedent: set_knob + UI).
+ * (v1 precedent: knob_set + UI).
  *
  * @see docs/proposals/v2/blueprint/27-modular-built-ins.md
  */

@@ -1,6 +1,6 @@
 /**
  * Example v2 agent — a small assistant with one inline tool + one
- * runtime knob. The model can flip the knob via `set_knob`; the agent
+ * runtime knob. The model can flip the knob via `knob_set`; the agent
  * re-renders and its system prompt changes accordingly.
  *
  * This file is the canonical user surface — JSX components for
@@ -65,7 +65,7 @@ export function Agent() {
       {/* Tool declaration + handler — registered with the session's tool executor at mount. */}
       <Calculator.Tool />
 
-      {/* Auto-renders the set_knob tool + the current knob values as a Section the model sees. */}
+      {/* Auto-renders the knob_set tool + the current knob values as a Section the model sees. */}
       <Knobs />
 
       {/* THE CONVERSATION. Nothing injects history automatically — the

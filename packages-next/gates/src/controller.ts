@@ -207,7 +207,7 @@ export interface GateHandle {
   readonly engaged: boolean;
   /**
    * Release the gate — the host-side equivalent of the model clearing a
-   * latch via `set_knob`. Transient on verified gates: the predicate
+   * latch via `knob_set`. Transient on verified gates: the predicate
    * re-engages at the next tick end if still unsatisfied.
    *
    * Async + journaled: routes through the `gates:clear` command when the
@@ -226,7 +226,7 @@ export interface GateHandle {
   /**
    * **Verified gates, HOST-ONLY, audited.** Verified gates are cleared
    * by their predicate and their backing knob is read-only to the MODEL
-   * (an unforgeable guarantee — `set_knob` cannot clear them). A HOST
+   * (an unforgeable guarantee — `knob_set` cannot clear them). A HOST
    * override is legitimate (the host is trusted) but is an EXPLICIT,
    * auditable escape — it emits a {@link GateOverrideAudit} and does NOT
    * exist as a generic setter that would silently reopen the read-only
@@ -254,7 +254,7 @@ interface GateEntry {
    * Synchronous source of truth for the gate's value — updated
    * immediately on `transition` (so same-tick logic sees the new value)
    * and re-synced from the knob whenever the knob changes (so a model
-   * `set_knob` clear is observed). Mirrors `useGate`'s `stateRef`.
+   * `knob_set` clear is observed). Mirrors `useGate`'s `stateRef`.
    */
   value: GateValue;
   /**
@@ -364,7 +364,7 @@ export class GatesController {
     void this.deps.knobs.register({ id: name, descriptor: this.knobRegistration(descriptor) });
 
     // Keep the synchronous mirror aligned with the knob so a model
-    // `set_knob` clear (latch) is observed by subsequent ticks + by
+    // `knob_set` clear (latch) is observed by subsequent ticks + by
     // handle subscribers, exactly as `useGate` re-read `state` per render.
     entry.knobUnsub = this.deps.knobs.subscribe(name, () => {
       const next = (this.deps.knobs.get(name) ?? "inactive") as GateValue;

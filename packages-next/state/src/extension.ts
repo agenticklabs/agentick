@@ -37,6 +37,15 @@ export interface WithStateOptions {
   readonly store?: Store<StateEntry, StateStoreQuery, CollectionMutation<StateEntry>>;
 }
 
+// TODO(tools-sweep / three-audiences-plan §D): a `src/tools.ts` shipping
+// model-facing `state_*` tools (e.g. `state_get` / `state_set`) would slot
+// in here behind a `registerModelTools` option, same shape as
+// `resources/src/tools.ts` + `skills/src/tools.ts`. DEFERRED: model-visible
+// session state overlaps knobs (`knob_set`) — whether state gets its own
+// model surface, and how it relates to knobs, is a policy question, so the
+// convention does not launch it as filler. When added: reach the harness
+// through a `ctx.state` slot (NOT `ctx.session`) + augment
+// `ToolHandlerCtxExtensions`.
 export function withState(options: WithStateOptions = {}): SessionExtension {
   return {
     name: "@agentick/state-next",

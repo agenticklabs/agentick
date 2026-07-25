@@ -60,7 +60,7 @@ describe("GatesController — programmatic latch gate", () => {
     expect(knobs.get("review")).toBe("active");
     expect(loop.continueCalls).toEqual(["gate:review"]);
 
-    // Host clear releases (the equivalent of the model clearing via set_knob).
+    // Host clear releases (the equivalent of the model clearing via knob_set).
     await handle.clear();
     expect(handle.value).toBe("inactive");
     expect(knobs.get("review")).toBe("inactive");
@@ -156,7 +156,7 @@ describe("GatesController — programmatic verified gate", () => {
 
   it("registers a read-only two-state knob the MODEL cannot clear (adversarial)", async () => {
     // Share ONE real stub-knobs harness so the dispatch pipeline (the
-    // model's set_knob path) sees the read-only descriptor the controller
+    // model's knob_set path) sees the read-only descriptor the controller
     // registered.
     const knobs = stubKnobsHarness();
     const { controller } = fakeGatesController(knobs);

@@ -78,7 +78,7 @@ describe("KnobsHarness — .fx dual-typed edge", () => {
     expect(harness.get("b")).toBe(2);
   });
 
-  it("fx.dispatch composes and yields the set_knob ContentBlock[]", async () => {
+  it("fx.dispatch composes and yields the knob_set ContentBlock[]", async () => {
     const harness = await makeHarness();
     await Effect.runPromise(
       harness.fx.register({

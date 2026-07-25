@@ -506,7 +506,7 @@ this package):
 
 | Hook                            | Import from                  | Bridge        | Visibility             | Purpose                                                                                                   |
 | ------------------------------- | ---------------------------- | ------------- | ---------------------- | --------------------------------------------------------------------------------------------------------- |
-| `useKnob(id, initial)`          | `@agentick/knobs-next/react` | `KnobBridge`  | **Model-visible**      | Surface in `knobs.list()`; settable via the executor's `set_knob` tool. Agent config the model can tweak. |
+| `useKnob(id, initial)`          | `@agentick/knobs-next/react` | `KnobBridge`  | **Model-visible**      | Surface in `knobs.list()`; settable via the executor's `knob_set` tool. Agent config the model can tweak. |
 | `useSessionState(key, initial)` | `@agentick/state-next/react` | `StateBridge` | **Framework-internal** | Component state that survives mounts / hibernate-resume but is NOT visible to the model.                  |
 
 Both persist through the session's snapshot/restore round-trip.

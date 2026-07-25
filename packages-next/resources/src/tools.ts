@@ -14,12 +14,11 @@
  *     first-class `resource` content blocks (text/blob round-trip, ADR
  *     62 §Resource content block).
  *
- * **Naming.** `resource_read` / `resource_list` are the MCP-native verbs
- * — the model already reasons about "reading a resource." They mirror
- * the `session_tasks_*` convention (framework-native, model-visible,
- * underscore-separated for cross-provider tool-name safety) without the
- * `session_` prefix: a resource read is a standard MCP operation, not a
- * framework-internal bookkeeping verb, so it earns the plain name.
+ * **Naming: `<harness-noun>_<verb>`** (three-audiences-plan §D). The
+ * resources harness owns the `resource` noun; `resource_list` /
+ * `resource_read` sort together under it and happen to be the MCP-native
+ * verbs the model already reasons about ("reading a resource").
+ * Underscore-separated for cross-provider tool-name safety.
  *
  * Both handlers reach the session's single {@link Resources} instance
  * via `ctx.resource` — the same registry the AppHarness wired into

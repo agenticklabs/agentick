@@ -32,7 +32,7 @@
  *      harness's failure path engages and the local task transitions
  *      to `failed`/`cancelled` symmetrically.
  *   6. On local `Fiber.interrupt` (e.g., user cancels via
- *      `session_tasks_cancel`) → `Effect.onInterrupt(sendCancel)`
+ *      `task_cancel`) → `Effect.onInterrupt(sendCancel)`
  *      sends `tasks/cancel(remoteTaskId)`. Best-effort: errors are
  *      swallowed because the local task has already transitioned.
  *

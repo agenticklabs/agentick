@@ -80,6 +80,15 @@ export interface WithPromptsOptions {
  */
 export type WithPromptsSlot = readonly PromptsRegisterInput[] | Prompts | WithPromptsOptions;
 
+// TODO(tools-sweep / three-audiences-plan §D): a `src/tools.ts` shipping
+// model-facing `prompt_*` tools (e.g. `prompt_list` / `prompt_get`) would
+// slot in here behind a `registerModelTools` option, same shape as
+// `resources/src/tools.ts` + `skills/src/tools.ts`. DEFERRED: prompts are
+// USER-controlled (invoked by the human, not model-discovered), so a
+// model-facing surface needs its audience story told first — the
+// convention does not launch it as filler. When added: reach the harness
+// through a `ctx.prompts` slot (NOT `ctx.session`) + augment
+// `ToolHandlerCtxExtensions`.
 export function withPrompts(slot: WithPromptsSlot = {}): SessionExtension {
   const options = resolveSlot(slot);
   return {

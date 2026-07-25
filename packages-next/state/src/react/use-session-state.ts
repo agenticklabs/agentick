@@ -4,7 +4,7 @@
  * v2 analog of v1's `useComState`. Wraps the session's `StateHarness`
  * so component state survives across re-mounts / hibernate-resume.
  * Unlike `useKnob`, the values are NOT visible to the model — the
- * executor's `set_knob` tool does not reach here.
+ * executor's `knob_set` tool does not reach here.
  *
  * Per ADR 26, `set` is an async Operation on the StateHarness; this
  * hook fires it fire-and-forget so the React setter API stays sync.

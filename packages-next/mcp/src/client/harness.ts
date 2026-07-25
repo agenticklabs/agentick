@@ -1063,7 +1063,7 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
   /**
    * Send `tasks/list` and return the server's snapshot of every task
    * it knows about (in-flight + terminal-still-within-TTL). Used by
-   * the framework's `session_tasks_list` model-facing tool (#175) to
+   * the framework's `task_list` model-facing tool (#175) to
    * give the model visibility into remote tasks that may have been
    * spawned by other sessions sharing the server, persisted across a
    * reconnect, or otherwise lack a live local proxy.

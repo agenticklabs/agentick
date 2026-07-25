@@ -1,6 +1,6 @@
 /**
  * Example v2 agent — a small assistant with three inline tools + one
- * runtime knob. The model can flip the knob via `set_knob`; the agent
+ * runtime knob. The model can flip the knob via `knob_set`; the agent
  * re-renders and its system prompt changes accordingly.
  *
  * Tools:
@@ -13,7 +13,7 @@
  *   - `deploy_branch` — submits a task with `taskSupport: "required"`
  *     (Pattern B). The executor returns a `session_task_ref` JSON block
  *     to the model IMMEDIATELY; the model manages the task across ticks
- *     via the auto-registered `session_tasks_list / get / cancel / await`
+ *     via the auto-registered `task_list / get / cancel / await`
  *     tools.
  *
  * No substrate (journal, bus, inbox, FiberRef) appears here.
@@ -94,7 +94,7 @@ const SlowCompute = createTool({
 // `deploy_branch` — Pattern B demo. `taskSupport: "required"` flips
 // the executor into ref-returning mode: the model gets a
 // `session_task_ref` JSON block back and uses
-// `session_tasks_get / cancel / await` to drive the task across ticks.
+// `task_get / cancel / await` to drive the task across ticks.
 // ─────────────────────────────────────────────────────────────────────
 
 const DeployBranch = createTool({
@@ -102,7 +102,7 @@ const DeployBranch = createTool({
   description:
     "Kick off a (simulated) branch deployment that runs ~2s in the background. " +
     "Returns immediately with a session_task_ref — the model receives a task id it can poll, " +
-    "cancel, or await using the session_tasks_* tools. Use this whenever the user wants to " +
+    "cancel, or await using the task_* tools. Use this whenever the user wants to " +
     "deploy or run something that takes meaningful time and they may want to continue the " +
     "conversation while it runs.",
   inputSchema: z.object({
@@ -159,8 +159,8 @@ export function Agent() {
       <System>
         You are a concise, helpful assistant. You have access to a calculator tool — use it whenever
         the user asks for arithmetic. You also have a `deploy_branch` tool that runs deployments in
-        the background and returns a task reference; use the `session_tasks_*` tools to manage
-        in-flight deployments (poll status, await, cancel) when the user asks about them.
+        the background and returns a task reference; use the `task_*` tools to manage in-flight
+        deployments (poll status, await, cancel) when the user asks about them.
         {verbose
           ? " VERBOSE MODE: explain your reasoning step by step and show all intermediate values."
           : " Be terse — give the answer with at most one sentence of context."}
@@ -171,7 +171,7 @@ export function Agent() {
       <SlowCompute.Tool />
       <DeployBranch.Tool />
 
-      {/* Auto-renders the set_knob tool + the current knob values as a Section the model sees. */}
+      {/* Auto-renders the knob_set tool + the current knob values as a Section the model sees. */}
       <Knobs />
 
       {/* THE CONVERSATION — timeline reaches the model only via this render. */}

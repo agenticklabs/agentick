@@ -398,8 +398,8 @@ export interface ToolResultBlock extends BaseContentBlock {
  * Structured reference to a {@link TasksHarnessProtocol} task,
  * emitted by the tool executor when a tool resolves to a task handle
  * rather than a terminal value (Pattern B — the model receives the
- * ref immediately and follows up via `session_tasks_get` /
- * `session_tasks_await` / `session_tasks_cancel`).
+ * ref immediately and follows up via `task_get` /
+ * `task_await` / `task_cancel`).
  *
  * **Why a first-class block type and not text-with-JSON?**
  * The framework's primitives table treats tasks as a foundational

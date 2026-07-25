@@ -34,8 +34,8 @@ export interface KnobsHandle {
   /** Set a knob's value through the harness's Operation envelope. */
   set(input: KnobsSetInput): Promise<void>;
   /**
-   * Run the full set_knob validation pipeline against an input. Returns
-   * the content blocks the `set_knob` tool would return.
+   * Run the full knob_set validation pipeline against an input. Returns
+   * the content blocks the `knob_set` tool would return.
    */
   dispatch(input: KnobsDispatchInput): Promise<readonly ContentBlock[]>;
   /** Notify when the value at `id` changes. */

@@ -5,7 +5,7 @@ adopter state, keyed by string, that survives re-mounts and hibernate-resume,
 with per-key subscription. The v2 analog of v1's `useComState`.
 
 The one thing to hold onto: **state is NOT model-visible.** Unlike knobs,
-nothing here renders into the model's context and the `set_knob` tool does not
+nothing here renders into the model's context and the `knob_set` tool does not
 reach it. State is the adopter's private stash — component-local scratch, a
 counter, a cached fetch result — parallel to the timeline, owned entirely by
 your code.
@@ -63,7 +63,7 @@ to the store cell — `undefined`-valued cells round-trip through write-through,
 |                          | `@agentick/state-next`  | `@agentick/knobs-next`            |
 | ------------------------ | ----------------------- | --------------------------------- |
 | Model can read           | no                      | yes (rendered in `<Knobs />`)     |
-| Model can write          | no                      | yes (`set_knob` tool)             |
+| Model can write          | no                      | yes (`knob_set` tool)             |
 | Value type               | `unknown` (arbitrary)   | `string \| number \| boolean`     |
 | Descriptors / validation | none                    | type, bounds, options, `validate` |
 | Purpose                  | adopter's private stash | model-facing tunable parameters   |

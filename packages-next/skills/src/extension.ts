@@ -42,6 +42,7 @@ import { omitUndefined } from "@agentick/utils-next";
 import { SkillsHarness } from "./harness.js";
 import type { SkillRunCompose } from "./handle.js";
 import type { SkillLoader } from "./loaders.js";
+import { buildSkillsTools } from "./tools.js";
 
 export interface WithSkillsOptions {
   /**
@@ -91,6 +92,16 @@ export interface WithSkillsOptions {
    * tools, getters, and bridges resolve to it.
    */
   readonly use?: Skills;
+  /**
+   * Skip auto-registering the model-facing `skill_*` tools (`skill_list`
+   * / `skill_read`). Defaults to `false` — by default `withSkills()`
+   * registers them so a model can discover + read the session's skills
+   * with zero extra wiring (progressive disclosure). Set `true` for the
+   * harness substrate without the model surface — e.g. skills consumed
+   * exclusively by adopter code (`session.skills`) or over an MCP-server
+   * projection, with no LLM discovering them in-band.
+   */
+  readonly registerModelTools?: boolean;
 }
 
 /**
@@ -105,9 +116,28 @@ export function withSkills(slot: WithSkillsSlot = {}): SessionExtension {
     name: "@agentick/skills-next",
     target: "session",
     install: async (installer: SessionInstaller) => {
+      // Auto-register `skill_list` / `skill_read` (default-on). The
+      // handlers reach the session's `Skills` via `ctx.skills` at dispatch
+      // — the SAME instance registered under the `skills` namespace below,
+      // which the AppHarness threads into `ctx.skills`. Registered in BOTH
+      // the instance and built-in branches: the namespace is present in
+      // both, so the model surface works identically. Same install-time
+      // pattern as `withResources`.
+      const mountModelTools = (): void => {
+        if (options.registerModelTools === false) return;
+        const bundle = buildSkillsTools(installer.sessionId);
+        for (const { handlerRef, handler } of bundle.handlers) {
+          installer.registerToolHandler(handlerRef, handler);
+        }
+        for (const registration of bundle.registrations) {
+          installer.registerExtensionTool(registration);
+        }
+      };
+
       // ──────── Form B (instance) — adopter owns lifecycle ────────
       if (options.use !== undefined) {
         installer.registerNamespace("skills", options.use);
+        mountModelTools();
         // Intentionally NO `onClose(() => harness.close())` — adopter
         // brought the instance, adopter closes it.
         return;
@@ -148,6 +178,7 @@ export function withSkills(slot: WithSkillsSlot = {}): SessionExtension {
 
       installer.registerNamespace("skills", harness);
       installer.onClose(() => harness.close());
+      mountModelTools();
     },
   };
 }

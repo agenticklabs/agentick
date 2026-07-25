@@ -335,6 +335,70 @@ export function stubBridges(options?: StubBridgesOptions): HookBridges {
 
 Adopters who want the convenience use `agentick/testing`; adopters who want minimal imports use per-harness `/testing`.
 
+## Model tools convention
+
+_(Addendum — three-audiences-plan §D. Per-harness model tools are a
+convention, not a mechanism.)_
+
+A harness MAY ship a `src/tools.ts` exposing **hand-authored,
+model-facing tools** for the actions on it that make sense to the model.
+This is a convention layered on the per-harness package pattern above —
+same modular shape as everything else, no new privileged machinery.
+
+- **Layout.** The tools live in `src/tools.ts` and are built by a
+  `buildXTools(sessionId)` bundle (registrations + handler-ref/handler
+  pairs), registered at install time by the harness's `withX()` via
+  `installer.registerToolHandler` + `installer.registerExtensionTool` in
+  lockstep. Template: `resources/src/tools.ts`, `skills/src/tools.ts`.
+- **Naming law: `<harness-noun>_<verb>`.** The harness noun is the
+  namespace so a harness's tools sort together in the model's list:
+  `resource_list` / `resource_read`, `skill_list` / `skill_read`,
+  `task_list` / `task_get` / `task_cancel` / `task_await`, `knob_set`.
+  Singular noun, underscore-separated (cross-provider tool-name safety).
+  The tool noun is independent of the wire namespace — `skill_*` tools
+  sit alongside the `skills:*` wire methods; separate contracts.
+- **`registerModelTools` option (per-harness default).** Each `withX()`
+  carries a uniform `registerModelTools?: boolean`. The default is the
+  harness's own judgment (resources + skills chose ON). Opting out mounts
+  the substrate without the model surface (adopter-only / MCP-projection
+  deployments).
+- **Tools are thin front-ends.** They forward to the harness's
+  command/handle (reusing its validation), carry model-directed naming +
+  descriptions, and **degrade honestly** when the harness isn't mounted
+  (a typed "unavailable" block, never a throw or a silent empty that
+  reads as success).
+- **How a tool reaches its harness — `ctx` slots, NOT `ctx.session`.** A
+  handler resolves its harness through a **curated `ctx` slot**: the
+  substrate harnesses every session has (elicitation, tasks, resources)
+  are hardcoded `ctx` fields; an optional tool-shipping harness
+  contributes `ctx.<slot>` via `ToolHandlerCtxExtensions` augmentation
+  (ADR 66), dispatch-resolved from the live bridge, populated at the
+  AppHarness single construction site. **Two convention obligations:**
+  (1) a harness that ships tools also contributes its ctx slot (skills
+  adds `ctx.skills?: Skills` in `augment.ts`); (2) never expose the whole
+  `SessionHarness` on `ctx` — that would hand every model-triggered
+  handler `send` / `close` / `spawn` / `snapshot` (ambient authority +
+  send-within-tick reentrancy) for zero curation. Adopters who genuinely
+  want the whole session close over it in their own tool definitions;
+  shipped tools never do.
+
+### Rejected: an automatic command→tool bridge
+
+A harness already declares its commands with a `CommandExposure`
+(reachability) and its tools with a `ToolExposure` (audience). It is
+tempting to auto-project every command into a model tool and delete the
+hand-authored `tools.ts`.
+
+**Rejected.** The two axes are deliberately orthogonal — reachability is
+not audience. A mechanical projection gets the model-facing surface
+wrong on every dimension that matters: **naming** (`knobs:set` the wire
+verb vs `knob_set` the model tool), **prose** (a command handler needs
+no model-directed description; a tool's description IS its interface),
+**input shape** (wire params optimized for a typed client vs a schema a
+model reasons about), and **degradation** (a command throws; a tool must
+degrade honestly). Each harness's model surface is small and deserves to
+be authored, not generated. Recorded here so it is not re-litigated.
+
 ## What does NOT change
 
 - ADR 26 (harness shape, substrate, Operation lifecycle, journal/bus/inbox, etc.) is untouched.

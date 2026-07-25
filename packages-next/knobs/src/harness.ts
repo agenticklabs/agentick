@@ -178,7 +178,7 @@ export class KnobsHarness
    * (`before` can veto), middleware wraps, the terminal envelope
    * publishes after — by resolution the value is set, listeners have
    * fired, and the audit envelope is on the bus + journal.
-   * `dispatch` keeps v1 set_knob semantics: the Operation succeeds
+   * `dispatch` keeps v1 knob_set semantics: the Operation succeeds
    * either way; the result blocks distinguish validation failure from
    * successful mutation.
    */
@@ -501,7 +501,7 @@ export class KnobsHarness
   }
 
   /**
-   * Validation + dispatch — matches the v1 `set_knob` tool pipeline
+   * Validation + dispatch — matches the v1 `knob_set` tool pipeline
    * field for field: exactly-one(name, group) → exists → type → options
    * → bounds → length/pattern → custom `validate`. On failure, returns
    * an error ContentBlock array; on success, mutates + returns a

@@ -112,7 +112,7 @@ This is the `useTasks` family source in [ADR 85](../../docs/proposals/v2/bluepri
 | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
 | A      | Substrate primitive — harness, registry, progress, cancel, conformance                                                                                                                                                                                                                                                                                                                                                     | ✅     |
 | A.1    | ToolExecutor integration — `ctx.tasks` on every handler, TaskHandle-return detection, Pattern A vs B branching on `taskSupport` annotation (#156)                                                                                                                                                                                                                                                                          | ✅     |
-| A.2    | Model-facing `session_tasks_*` tools — auto-registered `session_tasks_list / get / cancel / await` so the model can manage Pattern B tasks (#157)                                                                                                                                                                                                                                                                          | ✅     |
+| A.2    | Model-facing `task_*` tools — auto-registered `task_list / get / cancel / await` so the model can manage Pattern B tasks (#157)                                                                                                                                                                                                                                                                          | ✅     |
 | B      | MCP wire codec — `tools/call` task opt-in, `notifications/tasks/status` translation, inbound `tasks/cancel`                                                                                                                                                                                                                                                                                                                | ✅     |
 | 68-A   | Record-as-source-of-truth — `TaskStore` port + `InMemoryTaskStore`, `TaskExecutor` seam + `InProcessTaskExecutor`, `detached` lifetime, `interrupted` on hydration                                                                                                                                                                                                                                                         | ✅     |
 | 68-B   | Child-process executor over IPC (isolation / detached) + executor registry keyed by `.kind`, per-submit selection — conforms to the `TaskExecutor` seam                                                                                                                                                                                                                                                                    | ✅     |
@@ -145,7 +145,7 @@ the AppHarness owns construction via the single-construction-site
 pattern (#159). The harness is reachable as `session.tasks`,
 `bridges.tasks`, and `ctx.tasks` from any tool handler on that
 session. What `withTasks()` does is auto-register the four
-model-facing `session_tasks_*` tools so the model can list / get /
+model-facing `task_*` tools so the model can list / get /
 cancel / await framework tasks.
 
 > The `agentick` metapackage bundles `withTasks()` automatically.
@@ -223,8 +223,8 @@ const refBlocks = await session.dispatch("deploy_branch", input, {
 ```
 
 The `_kind: "session_task_ref"` discriminator matches the `session_*`
-namespace used by the model tools — `session_tasks_get`,
-`session_tasks_cancel`, etc. consume the `taskId` from this ref.
+namespace used by the model tools — `task_get`,
+`task_cancel`, etc. consume the `taskId` from this ref.
 
 ### Task-completion wake (the TASK-WAKE seam)
 
@@ -253,13 +253,13 @@ ctx.tasks.submit(work, {
 
 - **Bounded metadata, never raw output.** The wake carries the task id,
   terminal status, and duration — NOT the result blocks. The model
-  fetches the actual output via `session_tasks_get` / `session_tasks_await`
+  fetches the actual output via `task_get` / `task_await`
   if it needs it. `wake: true` synthesizes a default user-role message;
   provenance (`metadata.source === "task-wake"` + `taskId`) is stamped so
   timelines/clients attribute it as a system wake, not a real user turn.
 - **Consume-on-observe (exactly-once).** The wake is **consumed** — never
   fires — if the completion is seen in-band first: the model called
-  `session_tasks_await` (a `result(taskId)` read) or `session_tasks_get` /
+  `task_await` (a `result(taskId)` read) or `task_get` /
   `status(taskId)` and saw the terminal state, or the task was cancelled.
   Exactly-once holds between the in-band and out-of-band paths. The wake
   is deferred one event-loop turn so a same-turn in-band read wins the
@@ -289,12 +289,12 @@ every session so the model can manage Pattern B (`taskSupport:
 
 | Tool                   | Purpose                                                          |
 | ---------------------- | ---------------------------------------------------------------- |
-| `session_tasks_list`   | List local + remote (MCP) framework background tasks (#175)      |
-| `session_tasks_get`    | Fetch a single task's `TaskInfo` snapshot by id                  |
-| `session_tasks_cancel` | Abort an in-flight task (idempotent)                             |
-| `session_tasks_await`  | Block this tick until a task reaches terminal; return its blocks |
+| `task_list`   | List local + remote (MCP) framework background tasks (#175)      |
+| `task_get`    | Fetch a single task's `TaskInfo` snapshot by id                  |
+| `task_cancel` | Abort an in-flight task (idempotent)                             |
+| `task_await`  | Block this tick until a task reaches terminal; return its blocks |
 
-### Remote-task visibility (`session_tasks_list` → `remote` slot)
+### Remote-task visibility (`task_list` → `remote` slot)
 
 Per #175 the list handler reads `bridges.mcp` at call time and merges
 each connected server's `tasks/list` snapshot into the response. The
@@ -385,7 +385,7 @@ const result = await handle.result; // resolves with ContentBlock[]
 - **`TasksHarness`** — `BaseHarness<"tasks">` impl. Per-session
   registry; cluster-friendly via inbox + bus.
 - **`withTasks()`** — `SessionExtension` factory; auto-registers the
-  four model-facing `session_tasks_*` tools (list / get / cancel /
+  four model-facing `task_*` tools (list / get / cancel /
   await) so Pattern B is usable. Does NOT construct the harness —
   the AppHarness is the single construction site for the per-session
   `TasksHarness` (#159); this extension reads `installer.tasks` and
@@ -461,7 +461,7 @@ ctx.tasks.submit(async (task) => {
   // `askOperator()` returns a Promise that settles when the human answers
   // (an elicit, a webhook, a UI approval — anything external). While it's
   // pending the task shows `input_required` on the bus, the model's
-  // `session_tasks_*` view, and the MCP wire.
+  // `task_*` view, and the MCP wire.
   const answer = await task.awaitingInput(askOperator("Approve deploy to prod?"), {
     message: "awaiting approval",
   });

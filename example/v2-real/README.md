@@ -103,5 +103,5 @@ Add the corresponding env var (`ANTHROPIC_API_KEY`) to `.env`.
 ## Notes
 
 - The `calculator` tool uses `new Function()` for demo simplicity — **do not do this in production**. Wire a real expression parser or sandbox.
-- `useKnob` adds a `verbose` knob to the agent. The model can flip it via the `set_knob` tool (auto-emitted by `<Knobs />`). When flipped, the next render's system prompt changes; the model sees the new prompt on the next tick.
-- The `Knobs />` component auto-renders the knob group + the `set_knob` tool. Adopters who want full control over presentation use `<Knobs render={...}>`.
+- `useKnob` adds a `verbose` knob to the agent. The model can flip it via the `knob_set` tool (auto-emitted by `<Knobs />`). When flipped, the next render's system prompt changes; the model sees the new prompt on the next tick.
+- The `Knobs />` component auto-renders the knob group + the `knob_set` tool. Adopters who want full control over presentation use `<Knobs render={...}>`.

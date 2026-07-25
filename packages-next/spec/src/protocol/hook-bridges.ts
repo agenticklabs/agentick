@@ -271,7 +271,7 @@ export interface DataResolveOptions {
 
 /**
  * Semantic categorization of a knob's value, derived from its `valueType`
- * + constraints. Drives the model-facing `set_knob` tool description
+ * + constraints. Drives the model-facing `knob_set` tool description
  * and the default `<Knobs />` section formatter.
  *
  *   - `toggle`  boolean
@@ -303,9 +303,9 @@ export interface KnobRegistration {
   readonly description?: string;
   readonly defaultValue?: KnobPrimitive;
   readonly valueType?: KnobValueType;
-  /** Logical grouping for batch dispatch via `set_knob(group, value)`. */
+  /** Logical grouping for batch dispatch via `knob_set(group, value)`. */
   readonly group?: string;
-  /** Enum constraint. The model's `set_knob` tool surfaces these as options. */
+  /** Enum constraint. The model's `knob_set` tool surfaces these as options. */
   readonly options?: readonly KnobPrimitive[];
   /** Inclusive lower bound (number knobs). */
   readonly min?: number;
@@ -333,7 +333,7 @@ export interface KnobRegistration {
   /**
    * Model-visible but not model-settable. The knob renders in the
    * `<Knobs />` section (with a `read-only` hint) so the model can read
-   * the state, but the `set_knob` dispatch pipeline rejects writes by
+   * the state, but the `knob_set` dispatch pipeline rejects writes by
    * name and skips it in group writes. Only application code mutates it
    * (via `harness.set` / the `useKnob` setter). Verified gates rely on
    * this to keep their state unforgeable.

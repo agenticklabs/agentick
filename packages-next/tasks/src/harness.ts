@@ -864,7 +864,7 @@ export class TasksHarness
       throw new UnknownTaskError({ taskId });
     }
     // In-band observation point (TASK-WAKE): an awaiter (the model via
-    // `session_tasks_await`) is committed to delivering the outcome in-band,
+    // `task_await`) is committed to delivering the outcome in-band,
     // so consume the wake AT INVOCATION — this pre-empts the terminal
     // transition, so a `result(taskId)` issued while the task is still
     // `working` suppresses the wake before `settle` can schedule it.
@@ -894,7 +894,7 @@ export class TasksHarness
    * this returns immediately, exactly as before.
    */
   private async cancelInternal(live: LiveTask, reason: string): Promise<void> {
-    // The canceller (model `session_tasks_cancel`, ttl reaper, or the close
+    // The canceller (model `task_cancel`, ttl reaper, or the close
     // cascade) is already aware of the outcome — consume the wake BEFORE the
     // terminal transition so a cancelled task never wakes.
     this.markObserved(live);
@@ -1307,7 +1307,7 @@ export class TasksHarness
 /**
  * The default `wake: true` send — a bounded-metadata user-role message that
  * names the task, its terminal status + duration, and points the model at the
- * `session_tasks_*` tools to fetch the actual output. **NO raw output.** Role
+ * `task_*` tools to fetch the actual output. **NO raw output.** Role
  * `"user"` so the send drives a model turn (an `"event"`-role message would
  * not reach the model); the `source: TASK_WAKE_SOURCE` metadata (stamped
  * authoritatively by the session too) attributes it as a system-generated
@@ -1323,7 +1323,7 @@ function buildDefaultWakeSend(outcome: TaskWakeOutcome): SendInput {
   const text =
     `Background task ${outcome.taskId} ${summary} after ${outcome.durationMs}ms.` +
     (outcome.statusMessage ? ` ${outcome.statusMessage}` : "") +
-    " Use session_tasks_get or session_tasks_await to retrieve its result if you need it.";
+    " Use task_get or task_await to retrieve its result if you need it.";
   const metadata = { source: TASK_WAKE_SOURCE, taskId: outcome.taskId };
   return {
     messages: [{ role: "user", content: text, metadata }],

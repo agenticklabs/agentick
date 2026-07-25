@@ -29,7 +29,7 @@ predicate you supply:
 - **Latch gates** (`activateWhen`) — **edge-triggered, model-cleared.** The
   arming predicate is consulted only while the gate is `inactive`; once it
   fires, the gate flips to `active` and stays engaged until the **model**
-  clears it (`set_knob`) or the **host** calls `clear()`. Use when the
+  clears it (`knob_set`) or the **host** calls `clear()`. Use when the
   condition is not checkable in code and the model must attest ("confirm you
   have summarized the findings before finishing").
 
@@ -47,7 +47,7 @@ Values are the three-state `GateValue`: `"inactive" | "active" | "deferred"`
 ### The unforgeable guarantee
 
 A verified gate registers its backing knob **read-only**. The model can
-_read_ the gate's state in the `<Knobs />` section but `set_knob` **rejects**
+_read_ the gate's state in the `<Knobs />` section but `knob_set` **rejects**
 writes to it — the predicate is the only authority. The model cannot knob
 itself past a failing check. This is not advisory; it is enforced by the same
 validation pipeline that guards every read-only knob, and it is covered by an
@@ -135,7 +135,7 @@ await g?.override("inactive", "manual unblock: known-flaky check");
 `override()` sets the value **and** emits a `session:gate:override` audit
 event on the session bus (traceable via `app.events()`); it **throws** on a
 latch gate (use `clear()` there). It is reachable only from host code — the
-model's `set_knob` path stays refused by the read-only knob.
+model's `knob_set` path stays refused by the read-only knob.
 
 ## How the two front-ends converge (architecture)
 
@@ -293,7 +293,7 @@ Every claim above is exercised by a test:
 | Verified engages when unsatisfied, auto-clears on pass, re-engages on regression                       | `controller.spec.ts`, `gate.spec.tsx`              |
 | Verified arming scope stays dormant until triggered                                                    | `controller.spec.ts`, `gate.spec.tsx`              |
 | Fail-closed: a throwing predicate engages the gate                                                     | `controller.spec.ts`, `gate.spec.tsx`              |
-| Verified knob is read-only — the model's `set_knob` dispatch is refused (adversarial)                  | `controller.spec.ts`, `gate.spec.tsx`              |
+| Verified knob is read-only — the model's `knob_set` dispatch is refused (adversarial)                  | `controller.spec.ts`, `gate.spec.tsx`              |
 | `.override()` releases a verified gate AND emits an audit envelope; rejects on latch; not a model path | `controller.spec.ts`                               |
 | Host `clear`/`defer`/`override` are async + journaled (route through `gates:*`); the raw transition is the shared body | `controller.spec.ts`, `__tests__/harness.spec.ts`  |
 | Async verified predicates are awaited                                                                  | `gate.spec.tsx`                                    |

@@ -2,7 +2,7 @@
 
 `KnobsHarness` — **model-visible, model-settable reactive state**. The one
 primitive the model can both _read_ (rendered into its context) and _write_
-(via the `set_knob` tool), with per-value subscription so the UI, the agent
+(via the `knob_set` tool), with per-value subscription so the UI, the agent
 tree, and the model all converge on the same cell.
 
 This package is the flagship example of the v2 thesis that **React is a
@@ -24,7 +24,7 @@ define the primitive:
 
 1. **Model-visible.** Registered knobs render into a `<Knobs />` section so
    the model sees the current values as context.
-2. **Model-settable.** `<Knobs />` also declares a `set_knob` tool; the model
+2. **Model-settable.** `<Knobs />` also declares a `knob_set` tool; the model
    mutates knobs by calling it. Writes run a validation pipeline
    (type → options → bounds → length/pattern → custom `validate`).
 3. **Reactive + subscribable.** Any write — from the model, from adopter
@@ -33,7 +33,7 @@ define the primitive:
 
 `readOnly` knobs are model-**visible** but not model-**settable**: they
 render in the section (with a `read-only` hint) so the model can read the
-state, but `set_knob` rejects writes to them by name and skips them in group
+state, but `knob_set` rejects writes to them by name and skips them in group
 writes. Only application code mutates a read-only knob (via the `useKnob`
 setter or `harness.set`). This is how a verified gate keeps its state
 unforgeable by the model.
@@ -63,7 +63,7 @@ session.knobs.list(); // readonly KnobDescriptor[] (descriptor + current value)
 session.knobs.get("verbosity"); // KnobPrimitive | undefined
 await session.knobs.set({ id: "verbosity", value: 3 }); // async Operation envelope
 
-// The set_knob validation pipeline, invoked directly (returns the same
+// The knob_set validation pipeline, invoked directly (returns the same
 // ContentBlock[] the model would receive):
 await session.knobs.dispatch({ name: "verbosity", value: 3 });
 
@@ -116,7 +116,7 @@ function Agent() {
 
 ## `<Knobs />` — the model surface
 
-`<Knobs />` renders the `set_knob` tool declaration **and** a
+`<Knobs />` renders the `knob_set` tool declaration **and** a
 `<Section id="knobs">` listing every non-`inline` knob, grouped by `group`.
 It returns `null` when no knobs are registered. Three modes:
 
@@ -130,7 +130,7 @@ import { Knobs } from "@agentick/knobs-next/react";
 <Knobs>{(groups) => <MyKnobTable groups={groups} />}</Knobs>
 
 // 3. provider — <Knobs.Provider> + <Knobs.Controls /> + useKnobsContext()
-//    for full custom rendering. The set_knob tool registers unconditionally.
+//    for full custom rendering. The knob_set tool registers unconditionally.
 <Knobs.Provider>
   <Knobs.Controls renderKnob={(k) => <MyKnob knob={k} />} />
 </Knobs.Provider>
@@ -139,7 +139,7 @@ import { Knobs } from "@agentick/knobs-next/react";
 The model-facing formatter emits one line per knob —
 `name [semantic-type]: value — description` followed by parenthesized hints
 (options, range, `step`, `max N chars`, pattern, `required`, `resets after
-use`, `read-only`) — with `### group` headings. `set_knob` delegates
+use`, `read-only`) — with `### group` headings. `knob_set` delegates
 validation + mutation to `harness.dispatch(...)`; there is no duplicate
 validation logic in the tool. Supplying `{ group }` instead of `{ name }`
 sets every settable knob in that group atomically after a shared type-check.
@@ -155,7 +155,7 @@ sets every settable knob in that group atomically after a shared type-check.
   - Notify seam (ADR 75): `onChange(fn)` — typed push carrying the delta
     (`ChangeEvent<KnobPrimitive>`), the source the state-sync channel projects from.
   - Async commands: `set({ id, value })` · `register({ id, descriptor })` ·
-    `dispatch(input)` (the `set_knob` pipeline → `ContentBlock[]`).
+    `dispatch(input)` (the `knob_set` pipeline → `ContentBlock[]`).
   - Snapshot: `exportSnapshot()` / `importSnapshot(values)` round-trip the
     value cells (descriptors are re-declared on remount, not snapshotted).
   - State channel: `stateSnapshotFrame()` returns the current store as a
@@ -277,11 +277,11 @@ signal the model can flip, consumed exactly once per execution.
 **Read-only status projection.** Expose derived application state to the
 model without letting it write:
 `useKnob("budgetRemaining", 100, { readOnly: true })`. Only your setter
-mutates it; `set_knob` rejects the model's writes with an explanatory error
+mutates it; `knob_set` rejects the model's writes with an explanatory error
 block.
 
 **Grouped batch dispatch.** Tag related knobs with the same `group`; the
-model calls `set_knob({ group: "output", value: true })` to flip them all at
+model calls `knob_set({ group: "output", value: true })` to flip them all at
 once. Group writes skip read-only members and type-check the group first.
 
 ## State-sync channel (ADR 73)
@@ -375,7 +375,7 @@ Extracted per ADR 26 Step 2, modularized per ADR 27. Green.
   (`set` / `register` / `dispatch` emit requested + terminal), inbox
   addressability (`knobs:set` / `knobs:register` / `knobs:dispatch` over the
   harness address), snapshot round-trip, read-only enforcement
-  (`dispatch` rejects `set_knob` by name + skips read-only in group writes),
+  (`dispatch` rejects `knob_set` by name + skips read-only in group writes),
   and **layered resolution over a `parentLayer`** — `get` fall-through, self
   shadows parent by id, `set` / `register` write self only, `list` union with
   self-shadowing, and **`exportSnapshot` captures the self layer only** (never

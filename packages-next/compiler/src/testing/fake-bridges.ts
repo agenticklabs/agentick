@@ -198,7 +198,7 @@ export function fakeKnobsHarness(
     },
     dispatch: async (_input: KnobsDispatchInput) => {
       // Mock — accept without validation. Returns minimal content.
-      return [{ type: "text", text: "(mock) set_knob applied" }];
+      return [{ type: "text", text: "(mock) knob_set applied" }];
     },
     exportSnapshot: () => {
       const out: Record<string, KnobPrimitive> = {};

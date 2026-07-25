@@ -339,7 +339,7 @@ with the caller's `DispatchInput.task` option (default `"auto"`):
   with a first-class `{ type: "task_ref", taskId, status, … }` content
   block. Reached when `task === "ref"`, or when `task === "auto"` on the
   model door for a `taskSupport: "required"` tool. The model then manages
-  the task via the `session_tasks_*` tools (see `@agentick/tasks-next`).
+  the task via the `task_*` tools (see `@agentick/tasks-next`).
 
 Contradictory overrides are rejected **before the handler runs** with
 `ToolTaskModeConflictError`: `"ref"` against `taskSupport: "unsupported"`,
@@ -987,5 +987,5 @@ Known gaps / deferred:
 - `@agentick/compiler-react-next` — produces `ToolDeclaration[]` and
   captures `use:` deps at render time; the tool executor consumes them.
 - `@agentick/tasks-next` — the `TaskHandle` primitive and the
-  `session_tasks_*` model tools that manage Pattern B refs.
+  `task_*` model tools that manage Pattern B refs.
 - `docs/proposals/v2/blueprint/07-tool-executor.md` — full design.

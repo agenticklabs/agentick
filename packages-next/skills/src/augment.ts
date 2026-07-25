@@ -50,4 +50,19 @@ declare module "@agentick/spec-next" {
      */
     readonly skills?: SkillsHandle;
   }
+
+  interface ToolHandlerCtxExtensions {
+    /**
+     * The session's skills harness (ADR 66) — the dispatch-resolved ctx
+     * slot the `skill_list` / `skill_read` model tools read. Present iff
+     * `withSkills()` is installed; `undefined` otherwise, so handlers MUST
+     * guard (`ctx.skills?`). Carries the SAME instance as `bridges.skills`
+     * — the AppHarness pulls it from the session's `skills` namespace and
+     * threads it as an opaque `ctxExtensions` value at the tool-executor
+     * construction site, resolved at dispatch rather than captured at
+     * render. A curated projection of the session, never `ctx.session`
+     * (three-audiences-plan §D).
+     */
+    readonly skills?: Skills;
+  }
 }

@@ -7,7 +7,7 @@
  *
  * **Latch gates** (`activateWhen`) — edge-triggered, model-cleared. The
  * predicate arms the gate once (consulted only while `inactive`);
- * release is explicit: the model sets the knob via `set_knob`, or host
+ * release is explicit: the model sets the knob via `knob_set`, or host
  * code calls `clear()`. Use when the condition is not checkable in code
  * and the model must attest.
  *
@@ -16,7 +16,7 @@
  * whenever the predicate fails and clears automatically the moment it
  * passes — including re-engaging if a later tick regresses the
  * condition. The backing knob is registered read-only, so the model
- * cannot `set_knob` past a failing check; the predicate is the only
+ * cannot `knob_set` past a failing check; the predicate is the only
  * authority. Use for invariants code can check. An optional
  * `activateWhen` ARMS the gate (edge-triggered, sticky) so the
  * invariant only applies once something made it relevant — dormant
@@ -92,7 +92,7 @@ export type GateDescriptor = LatchGateDescriptor | VerifiedGateDescriptor;
 
 /**
  * The three known gate values for LATCH gates, surfaced as `options`
- * for the underlying knob descriptor so the model's `set_knob` tool
+ * for the underlying knob descriptor so the model's `knob_set` tool
  * sees the gate as a select with three known values.
  */
 export const GATE_OPTIONS: readonly GateValue[] = ["inactive", "active", "deferred"];

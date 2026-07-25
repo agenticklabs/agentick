@@ -22,8 +22,8 @@
  * The test exercises the integration via `session.tools.dispatch(...)` —
  * the Pattern B branch returns a session_task_ref content block, then
  * we drive the lifecycle to completion via `session.dispatch` of
- * `session_tasks_await`. Cancellation path uses
- * `session_tasks_cancel`.
+ * `task_await`. Cancellation path uses
+ * `task_cancel`.
  */
 
 import React from "react";

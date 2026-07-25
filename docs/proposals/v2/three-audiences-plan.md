@@ -574,7 +574,7 @@ ON the one send grammar, not a second verb. The ratified shape:
 
 ---
 
-## D. Per-harness model tools — convention, not mechanism
+## D. Per-harness model tools — convention, not mechanism (LANDED 2026-07-26 — knobs ctx-slot normalization deferred to the TODO(tools-sweep) hoist trailhead; see STATUS)
 
 Codify in ADR 27 (layout addendum) + this first sweep:
 
