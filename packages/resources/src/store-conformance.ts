@@ -17,7 +17,7 @@
  * `runPromptStoreConformance`. Usage from an adapter package's test file:
  *
  * ```ts
- * import { runResourceStoreConformance } from "@agentick/resources";
+ * import { runResourceStoreConformance } from "@agentick/resources/testing";
  * import { myResourceStore } from "../src/index.js";
  *
  * runResourceStoreConformance({ label: "my-store", factory: () => myResourceStore() });
@@ -27,7 +27,8 @@
 import { expect, it } from "vitest";
 
 import type { ResourceDeclarationRecord, ResourceStore } from "@agentick/spec";
-import { runStoreConformance, stubStoreCtx } from "@agentick/store";
+import { stubStoreCtx } from "@agentick/store";
+import { runStoreConformance } from "@agentick/store/testing";
 
 export interface ResourceStoreConformanceOptions {
   /** Display label for the suite (`describe` block heading). */

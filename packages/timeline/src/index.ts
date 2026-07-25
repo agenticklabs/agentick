@@ -17,7 +17,6 @@ import "./augment.js";
 export { TimelineHarness, type TimelineHarnessOptions } from "./harness.js";
 export type { TimelineHandle } from "./handle.js";
 export { withTimeline, type WithTimelineOptions } from "./extension.js";
-export { runTimelineHarnessConformance } from "./conformance.js";
 
 // Compaction-strategy factories live at the `@agentick/timeline/strategies`
 // subpath (parallel to skills' `/loaders`) — they return CompactStrategy
@@ -39,7 +38,3 @@ export type {
   TimelineEntry,
   TimelineStore,
 } from "@agentick/spec";
-export {
-  runTimelineStoreConformance,
-  type TimelineStoreConformanceOptions,
-} from "./store-conformance.js";

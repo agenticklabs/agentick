@@ -26,13 +26,8 @@ export {
   type SkillReferenceWiring,
 } from "./references.js";
 export { buildSkillsTools, SKILL_LIST, SKILL_READ, type SkillsToolsBundle } from "./tools.js";
-export { runSkillsHarnessConformance } from "./conformance.js";
 // ADR 68-style store archetype (data-layer plan §6-C — the definition-library
 // PURE floor). The bundled in-memory default + its search predicate; the
 // `SkillStore` / `SkillStoreQuery` ports live in `@agentick/spec`. A
 // durable adapter conforms to the SAME port later.
 export { InMemorySkillStore, matchesSkillQuery } from "./store.js";
-export {
-  runSkillStoreConformance,
-  type SkillStoreConformanceOptions,
-} from "./store-conformance.js";

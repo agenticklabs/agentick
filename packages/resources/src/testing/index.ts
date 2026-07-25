@@ -17,3 +17,10 @@ export {
   type FakeResourcesBundle,
 } from "./fake-resources.js";
 export { stubResources, type StubResourcesOptions } from "./stub-resources.js";
+
+// ────────── Conformance suite (imports vitest — testing-only) ──────────
+export { runResourcesHarnessConformance } from "../conformance.js";
+export {
+  runResourceStoreConformance,
+  type ResourceStoreConformanceOptions,
+} from "../store-conformance.js";

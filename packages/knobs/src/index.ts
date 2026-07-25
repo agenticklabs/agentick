@@ -30,4 +30,3 @@ export {
 export { createKnobStore, type KnobEntry, type KnobStoreQuery } from "./store.js";
 export { withKnobs, type WithKnobsOptions } from "./extension.js";
 export { knobsWireExtension } from "./wire.js";
-export { runKnobsHarnessConformance } from "./conformance.js";

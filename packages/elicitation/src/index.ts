@@ -29,7 +29,6 @@ export {
   type BuildSessionElicitOptions,
 } from "./elicit-sugar.js";
 export { assertFlatSchema, checkFlatSchema } from "./flatness.js";
-export { runElicitationHarnessConformance } from "./conformance.js";
 export {
   ELICITATION_CHANNEL,
   ELICITATION_CHANNEL_FQN,

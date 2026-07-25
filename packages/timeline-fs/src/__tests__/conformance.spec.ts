@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach } from "vitest";
-import { runTimelineStoreConformance } from "@agentick/timeline";
+import { runTimelineStoreConformance } from "@agentick/timeline/testing";
 
 import { fsTimelineStore } from "../store.js";
 

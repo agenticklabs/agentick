@@ -32,3 +32,9 @@ export { localClusterMembership } from "./local-cluster-membership.js";
 
 export type { DefineLocalClusterOptions } from "./define-local-cluster.js";
 export { defineLocalCluster } from "./define-local-cluster.js";
+
+// ────────── Conformance suite (imports vitest — testing-only) ──────────
+export {
+  runClusterTransportConformance,
+  type ClusterTransportConformanceConfig,
+} from "../conformance.js";

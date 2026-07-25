@@ -34,3 +34,10 @@ export async function stubSkillsHarness(
   }
   return harness;
 }
+
+// ────────── Conformance suite (imports vitest — testing-only) ──────────
+export { runSkillsHarnessConformance } from "../conformance.js";
+export {
+  runSkillStoreConformance,
+  type SkillStoreConformanceOptions,
+} from "../store-conformance.js";

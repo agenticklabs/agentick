@@ -17,7 +17,7 @@
 
 import { afterAll } from "vitest";
 import { Pool } from "pg";
-import { runTimelineStoreConformance } from "@agentick/timeline";
+import { runTimelineStoreConformance } from "@agentick/timeline/testing";
 
 import { postgresTimelineStore } from "../store.js";
 

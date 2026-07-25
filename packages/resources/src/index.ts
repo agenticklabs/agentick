@@ -31,7 +31,6 @@ export {
   RESOURCE_READ,
 } from "./tools.js";
 export { compileUriTemplate, matchesTemplate } from "./uri-template.js";
-export { runResourcesHarnessConformance } from "./conformance.js";
 
 // ── Durable backing (data-layer plan §6-C, Phase 5 run #9) ──
 export { InMemoryResourceStore, matchesResourceQuery } from "./store.js";
@@ -42,7 +41,3 @@ export {
   type ResourceLoader,
   type ResourceLoaderItem,
 } from "./loaders.js";
-export {
-  runResourceStoreConformance,
-  type ResourceStoreConformanceOptions,
-} from "./store-conformance.js";

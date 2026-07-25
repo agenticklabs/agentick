@@ -60,8 +60,10 @@
   "dependencies": {
     "@agentick/cluster": "workspace:*",
     "@agentick/elicitation": "workspace:*",
+    "@agentick/knobs": "workspace:*",
     "@agentick/loop-executor": "workspace:*",
     "@agentick/model": "workspace:*",
+    "@agentick/model-executor": "workspace:*",
     "@agentick/resources": "workspace:*",
     "@agentick/runtime": "workspace:*",
     "@agentick/session": "workspace:*",
@@ -81,8 +83,6 @@
   "devDependencies": {
     "@agentick/compiler": "workspace:*",
     "@agentick/compiler-react": "workspace:*",
-    "@agentick/knobs": "workspace:*",
-    "@agentick/model-executor": "workspace:*",
     "@agentick/skills": "workspace:*",
     "@types/react": "^19.2.5",
     "react": "^19.2.4"

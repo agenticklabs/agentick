@@ -33,3 +33,6 @@ export function stubKnobsHarness(
   }
   return harness;
 }
+
+// ────────── Conformance suite (imports vitest — testing-only) ──────────
+export { runKnobsHarnessConformance } from "../conformance.js";

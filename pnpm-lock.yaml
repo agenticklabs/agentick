@@ -265,12 +265,18 @@ importers:
       '@agentick/elicitation':
         specifier: workspace:*
         version: link:../elicitation
+      '@agentick/knobs':
+        specifier: workspace:*
+        version: link:../knobs
       '@agentick/loop-executor':
         specifier: workspace:*
         version: link:../loop-executor
       '@agentick/model':
         specifier: workspace:*
         version: link:../model
+      '@agentick/model-executor':
+        specifier: workspace:*
+        version: link:../model-executor
       '@agentick/resources':
         specifier: workspace:*
         version: link:../resources
@@ -323,12 +329,6 @@ importers:
       '@agentick/compiler-react':
         specifier: workspace:*
         version: link:../compiler-react
-      '@agentick/knobs':
-        specifier: workspace:*
-        version: link:../knobs
-      '@agentick/model-executor':
-        specifier: workspace:*
-        version: link:../model-executor
       '@agentick/skills':
         specifier: workspace:*
         version: link:../skills
@@ -471,6 +471,9 @@ importers:
 
   packages/cluster:
     dependencies:
+      '@agentick/runtime':
+        specifier: workspace:*
+        version: link:../runtime
       '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
@@ -480,10 +483,6 @@ importers:
       effect:
         specifier: ^3.22.0
         version: 3.22.0
-    devDependencies:
-      '@agentick/runtime':
-        specifier: workspace:*
-        version: link:../runtime
 
   packages/cluster-broker:
     dependencies:
@@ -1042,6 +1041,9 @@ importers:
       '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
+      '@agentick/utils':
+        specifier: workspace:*
+        version: link:../utils
       effect:
         specifier: ^3.22.0
         version: 3.22.0
@@ -1049,9 +1051,6 @@ importers:
       '@agentick/spec-conformance':
         specifier: workspace:*
         version: link:../spec-conformance
-      '@agentick/utils':
-        specifier: workspace:*
-        version: link:../utils
 
   packages/model-google:
     dependencies:
@@ -1267,6 +1266,9 @@ importers:
       vitest:
         specifier: ^4.0.0
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@25.0.9)(typescript@7.0.2))(tsx@4.21.0)(yaml@2.8.4)
+      zod:
+        specifier: ^4.1.13
+        version: 4.3.6
     devDependencies:
       '@types/react':
         specifier: ^19.2.5
@@ -1308,6 +1310,9 @@ importers:
       '@agentick/compiler':
         specifier: workspace:*
         version: link:../compiler
+      '@agentick/compiler-react':
+        specifier: workspace:*
+        version: link:../compiler-react
       '@agentick/elicitation':
         specifier: workspace:*
         version: link:../elicitation
@@ -1323,6 +1328,9 @@ importers:
       '@agentick/model':
         specifier: workspace:*
         version: link:../model
+      '@agentick/model-executor':
+        specifier: workspace:*
+        version: link:../model-executor
       '@agentick/pubsub':
         specifier: workspace:*
         version: link:../pubsub
@@ -1347,6 +1355,9 @@ importers:
       '@agentick/timeline':
         specifier: workspace:*
         version: link:../timeline
+      '@agentick/tool-executor':
+        specifier: workspace:*
+        version: link:../tool-executor
       '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
@@ -1357,12 +1368,6 @@ importers:
         specifier: ^19.2.4
         version: 19.2.4
     devDependencies:
-      '@agentick/compiler-react':
-        specifier: workspace:*
-        version: link:../compiler-react
-      '@agentick/model-executor':
-        specifier: workspace:*
-        version: link:../model-executor
       '@agentick/skills':
         specifier: workspace:*
         version: link:../skills
@@ -1375,9 +1380,6 @@ importers:
       '@agentick/timeline-postgres':
         specifier: workspace:*
         version: link:../timeline-postgres
-      '@agentick/tool-executor':
-        specifier: workspace:*
-        version: link:../tool-executor
       '@types/pg':
         specifier: ^8.11.10
         version: 8.20.0

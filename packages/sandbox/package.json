@@ -55,10 +55,14 @@
   },
   "peerDependencies": {
     "react": "^19.0.0",
-    "vitest": "^4.0.0"
+    "vitest": "^4.0.0",
+    "zod": "^4.1.13"
   },
   "peerDependenciesMeta": {
     "react": {
+      "optional": true
+    },
+    "zod": {
       "optional": true
     },
     "vitest": {

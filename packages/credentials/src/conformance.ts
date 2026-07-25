@@ -10,7 +10,7 @@
  * Usage from an adapter package's test file:
  *
  * ```ts
- * import { runCredentialsStoreConformance } from "@agentick/credentials";
+ * import { runCredentialsStoreConformance } from "@agentick/credentials/testing";
  * import { myCustomCredentialsStore } from "../src/index.js";
  *
  * runCredentialsStoreConformance({
@@ -27,7 +27,8 @@
 
 import { expect, it } from "vitest";
 
-import { runStoreConformance, stubStoreCtx } from "@agentick/store";
+import { stubStoreCtx } from "@agentick/store";
+import { runStoreConformance } from "@agentick/store/testing";
 
 import type { CredentialsStore } from "./store.js";
 

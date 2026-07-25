@@ -59,11 +59,13 @@
   },
   "dependencies": {
     "@agentick/compiler": "workspace:*",
+    "@agentick/compiler-react": "workspace:*",
     "@agentick/elicitation": "workspace:*",
     "@agentick/gates": "workspace:*",
     "@agentick/knobs": "workspace:*",
     "@agentick/loop-executor": "workspace:*",
     "@agentick/model": "workspace:*",
+    "@agentick/model-executor": "workspace:*",
     "@agentick/pubsub": "workspace:*",
     "@agentick/resources": "workspace:*",
     "@agentick/runtime": "workspace:*",
@@ -72,18 +74,16 @@
     "@agentick/store": "workspace:*",
     "@agentick/tasks": "workspace:*",
     "@agentick/timeline": "workspace:*",
+    "@agentick/tool-executor": "workspace:*",
     "@agentick/utils": "workspace:*",
     "effect": "^3.22.0",
     "react": "^19.2.4"
   },
   "devDependencies": {
-    "@agentick/compiler-react": "workspace:*",
-    "@agentick/model-executor": "workspace:*",
     "@agentick/skills": "workspace:*",
     "@agentick/spec-conformance": "workspace:*",
     "@agentick/timeline-fs": "workspace:*",
     "@agentick/timeline-postgres": "workspace:*",
-    "@agentick/tool-executor": "workspace:*",
     "@types/pg": "^8.11.10",
     "@types/react": "^19.2.5",
     "pg": "^8.13.1"

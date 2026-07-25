@@ -18,7 +18,7 @@
  * `runSkillStoreConformance`. Usage from an adapter package's test file:
  *
  * ```ts
- * import { runPromptStoreConformance } from "@agentick/prompts";
+ * import { runPromptStoreConformance } from "@agentick/prompts/testing";
  * import { myPromptStore } from "../src/index.js";
  *
  * runPromptStoreConformance({ label: "my-store", factory: () => myPromptStore() });
@@ -28,7 +28,8 @@
 import { expect, it } from "vitest";
 
 import type { PromptDeclarationRecord, PromptStore } from "@agentick/spec";
-import { runStoreConformance, stubStoreCtx } from "@agentick/store";
+import { stubStoreCtx } from "@agentick/store";
+import { runStoreConformance } from "@agentick/store/testing";
 
 export interface PromptStoreConformanceOptions {
   /** Display label for the suite (`describe` block heading). */

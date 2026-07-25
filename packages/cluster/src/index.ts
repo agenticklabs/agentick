@@ -89,8 +89,5 @@ export { consistentHashPartitioning } from "./builtins/consistent-hash-partition
 // predicates with no cluster-protocol dependency.
 export { matchesAddressFilter, matchesEventFilter } from "@agentick/utils";
 
-// ────────── Conformance suite (Phase 2 impl) ──────────
-export {
-  runClusterTransportConformance,
-  type ClusterTransportConformanceConfig,
-} from "./conformance.js";
+// Conformance suite ships on the `./testing` subpath — it imports vitest and
+// must never be reachable from the main barrel (a consumer has no test runner).

@@ -30,3 +30,13 @@ export {
 // Re-export the in-memory store as `fakeCredentialsStore` for adopters
 // who want a working-impl store double without the full harness bundle.
 export { inMemoryCredentialsStore as fakeCredentialsStore } from "../stores/in-memory.js";
+
+// ────────── Conformance suite (imports vitest — testing-only) ──────────
+export {
+  runCredentialsStoreConformance,
+  type CredentialsStoreConformanceOptions,
+} from "../conformance.js";
+export {
+  runCredentialsHarnessConformance,
+  type CredentialsHarnessConformanceOptions,
+} from "../harness-conformance.js";

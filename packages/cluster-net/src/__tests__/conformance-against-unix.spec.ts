@@ -14,7 +14,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { runClusterTransportConformance, type ClusterCodec } from "@agentick/cluster";
+import { runClusterTransportConformance } from "@agentick/cluster/testing";
+import type { ClusterCodec } from "@agentick/cluster";
 import { BaseClusterClient } from "@agentick/cluster-broker";
 
 import { createUnixConnector } from "../unix-connector.js";

@@ -47,3 +47,10 @@ export function stubTimelineHarness(
   }
   return harness;
 }
+
+// ────────── Conformance suite (imports vitest — testing-only) ──────────
+export { runTimelineHarnessConformance } from "../conformance.js";
+export {
+  runTimelineStoreConformance,
+  type TimelineStoreConformanceOptions,
+} from "../store-conformance.js";

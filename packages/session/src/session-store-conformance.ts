@@ -17,7 +17,7 @@
  * package's test file:
  *
  * ```ts
- * import { runSessionStoreConformance } from "@agentick/session";
+ * import { runSessionStoreConformance } from "@agentick/session/testing";
  * import { mySessionStore } from "../src/index.js";
  *
  * runSessionStoreConformance({ label: "my-store", factory: () => mySessionStore() });
@@ -27,7 +27,8 @@
 import { expect, it } from "vitest";
 
 import type { SessionRecord, SessionStore } from "@agentick/spec";
-import { runStoreConformance, stubStoreCtx } from "@agentick/store";
+import { stubStoreCtx } from "@agentick/store";
+import { runStoreConformance } from "@agentick/store/testing";
 
 export interface SessionStoreConformanceOptions {
   /** Display label for the suite (`describe` block heading). */

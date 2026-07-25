@@ -28,7 +28,6 @@ export { withTasks, type WithTasksOptions } from "./extension.js";
 // in-process executor. A `@agentick/tasks-store-postgres` store and a
 // child-process executor conform to the SAME spec-next ports later.
 export { InMemoryTaskStore } from "./store.js";
-export { runTaskStoreConformance, type TaskStoreConformanceOptions } from "./store-conformance.js";
 export { InProcessTaskExecutor } from "./executor.js";
 // ADR 68 Build B — the child-process (isolation) executor + its by-ref
 // worker runtime. The transport-agnostic handler registry
@@ -45,12 +44,6 @@ export {
   type TaskHandlerWork,
 } from "./handler-registry.js";
 export { runTaskWorker } from "./worker.js";
-export {
-  runTaskExecutorConformance,
-  type TaskExecutorCase,
-  type TaskExecutorConformanceHarness,
-  type TaskExecutorConformanceOptions,
-} from "./executor-conformance.js";
 // Re-export the ports from the same package as the bundled impls so store
 // / executor adapters get the contract + reference from one dep.
 export type {
@@ -72,12 +65,6 @@ export {
   buildSessionTasksTools,
   type SessionTasksToolsBundle,
 } from "./tools.js";
-export {
-  runTasksHarnessConformance,
-  type TasksConformanceFactory,
-  type TasksConformanceFactoryInput,
-  type TasksConformanceShell,
-} from "./conformance.js";
 export {
   TASK_PROGRESS_CHANNEL,
   TASK_PROGRESS_CHANNEL_FQN,

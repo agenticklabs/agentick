@@ -31,11 +31,6 @@
       "types": "./src/testing/index.ts",
       "import": "./src/testing/index.ts",
       "default": "./src/testing/index.ts"
-    },
-    "./conformance": {
-      "types": "./src/conformance.ts",
-      "import": "./src/conformance.ts",
-      "default": "./src/conformance.ts"
     }
   },
   "publishConfig": {
@@ -50,11 +45,6 @@
         "types": "./dist/testing/index.d.ts",
         "import": "./dist/testing/index.js",
         "default": "./dist/testing/index.js"
-      },
-      "./conformance": {
-        "types": "./dist/conformance.d.ts",
-        "import": "./dist/conformance.js",
-        "default": "./dist/conformance.js"
       }
     },
     "main": "./dist/index.js",
@@ -68,12 +58,10 @@
     "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
   },
   "dependencies": {
+    "@agentick/runtime": "workspace:*",
     "@agentick/spec": "workspace:*",
     "@agentick/utils": "workspace:*",
     "effect": "^3.22.0"
-  },
-  "devDependencies": {
-    "@agentick/runtime": "workspace:*"
   },
   "engines": {
     "node": ">=20.19"

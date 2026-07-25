@@ -51,11 +51,11 @@
     "@agentick/model": "workspace:*",
     "@agentick/runtime": "workspace:*",
     "@agentick/spec": "workspace:*",
+    "@agentick/utils": "workspace:*",
     "effect": "^3.22.0"
   },
   "devDependencies": {
-    "@agentick/spec-conformance": "workspace:*",
-    "@agentick/utils": "workspace:*"
+    "@agentick/spec-conformance": "workspace:*"
   },
   "engines": {
     "node": ">=20.19"

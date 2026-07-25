@@ -13,3 +13,6 @@
 
 export { fakeElicitation, type FakeElicitationOptions } from "./fake-elicitation.js";
 export { stubElicitation, type StubElicitationOptions } from "./stub-elicitation.js";
+
+// ────────── Conformance suite (imports vitest — testing-only) ──────────
+export { runElicitationHarnessConformance } from "../conformance.js";

@@ -22,7 +22,7 @@
  * Usage from an adapter package's test file:
  *
  * ```ts
- * import { runTimelineStoreConformance } from "@agentick/timeline";
+ * import { runTimelineStoreConformance } from "@agentick/timeline/testing";
  * import { myTimelineStore } from "../src/index.js";
  *
  * runTimelineStoreConformance({
@@ -35,7 +35,8 @@
 import { expect, it } from "vitest";
 
 import type { TimelineEntry, TimelineStore } from "@agentick/spec";
-import { runStoreConformance, stubStoreCtx } from "@agentick/store";
+import { stubStoreCtx } from "@agentick/store";
+import { runStoreConformance } from "@agentick/store/testing";
 
 export interface TimelineStoreConformanceOptions {
   /** Display label for the suite (`describe` block heading). */

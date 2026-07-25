@@ -56,10 +56,4 @@ export {
 } from "./log-view.js";
 export { JournalProjectedStore, type JournalProjectedConfig } from "./journal-projected.js";
 export { IdempotentCollectionStore, idempotentWrite } from "./idempotent-write.js";
-export {
-  runStoreConformance,
-  type StoreCapabilities,
-  type StoreConformanceContext,
-  type StoreConformanceOptions,
-} from "./store-conformance.js";
 export { stubStoreCtx } from "./stub-store-ctx.js";

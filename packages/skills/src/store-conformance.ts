@@ -17,7 +17,7 @@
  * adapter package's test file:
  *
  * ```ts
- * import { runSkillStoreConformance } from "@agentick/skills";
+ * import { runSkillStoreConformance } from "@agentick/skills/testing";
  * import { mySkillStore } from "../src/index.js";
  *
  * runSkillStoreConformance({ label: "my-store", factory: () => mySkillStore() });
@@ -27,7 +27,8 @@
 import { expect, it } from "vitest";
 
 import type { Skill, SkillStore } from "@agentick/spec";
-import { runStoreConformance, stubStoreCtx } from "@agentick/store";
+import { stubStoreCtx } from "@agentick/store";
+import { runStoreConformance } from "@agentick/store/testing";
 
 export interface SkillStoreConformanceOptions {
   /** Display label for the suite (`describe` block heading). */

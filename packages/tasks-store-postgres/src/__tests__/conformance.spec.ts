@@ -18,7 +18,7 @@
 
 import { afterAll } from "vitest";
 import { Pool } from "pg";
-import { runTaskStoreConformance } from "@agentick/tasks";
+import { runTaskStoreConformance } from "@agentick/tasks/testing";
 
 import { postgresTaskStore } from "../store.ts";
 

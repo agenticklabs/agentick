@@ -12,7 +12,8 @@
 
 import { createServer } from "node:net";
 
-import { runClusterTransportConformance, type ClusterCodec } from "@agentick/cluster";
+import { runClusterTransportConformance } from "@agentick/cluster/testing";
+import type { ClusterCodec } from "@agentick/cluster";
 import { BaseClusterClient } from "@agentick/cluster-broker";
 
 import { createWsConnector } from "../ws-connector.js";

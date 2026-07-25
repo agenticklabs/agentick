@@ -16,3 +16,9 @@ export {
   runKillResumeAcceptance,
   type KillResumeAcceptanceOptions,
 } from "./kill-resume-acceptance.js";
+
+// ────────── Conformance suite (imports vitest — testing-only) ──────────
+export {
+  runSessionStoreConformance,
+  type SessionStoreConformanceOptions,
+} from "../session-store-conformance.js";

@@ -13,7 +13,8 @@
  * Phase 2/3 in-process simulator.
  */
 
-import { runClusterTransportConformance, type ClusterCodec } from "@agentick/cluster";
+import { runClusterTransportConformance } from "@agentick/cluster/testing";
+import type { ClusterCodec } from "@agentick/cluster";
 import { BaseClusterClient } from "@agentick/cluster-broker";
 
 import { createTcpConnector } from "../tcp-connector.js";

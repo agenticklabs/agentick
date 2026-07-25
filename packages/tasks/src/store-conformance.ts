@@ -18,7 +18,7 @@
  * (`@agentick/timeline`). Usage from an adapter package's test file:
  *
  * ```ts
- * import { runTaskStoreConformance } from "@agentick/tasks";
+ * import { runTaskStoreConformance } from "@agentick/tasks/testing";
  * import { myTaskStore } from "../src/index.js";
  *
  * runTaskStoreConformance({ label: "my-store", factory: () => myTaskStore() });
@@ -28,7 +28,8 @@
 import { expect, it } from "vitest";
 
 import type { TaskRecord, TaskStore } from "@agentick/spec";
-import { runStoreConformance, stubStoreCtx } from "@agentick/store";
+import { stubStoreCtx } from "@agentick/store";
+import { runStoreConformance } from "@agentick/store/testing";
 
 export interface TaskStoreConformanceOptions {
   /** Display label for the suite (`describe` block heading). */

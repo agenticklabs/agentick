@@ -39,6 +39,11 @@
       "types": "./src/loaders.ts",
       "import": "./src/loaders.ts",
       "default": "./src/loaders.ts"
+    },
+    "./testing": {
+      "types": "./src/testing/index.ts",
+      "import": "./src/testing/index.ts",
+      "default": "./src/testing/index.ts"
     }
   },
   "scripts": {
@@ -80,6 +85,11 @@
         "types": "./dist/loaders.d.ts",
         "import": "./dist/loaders.js",
         "default": "./dist/loaders.js"
+      },
+      "./testing": {
+        "types": "./dist/testing/index.d.ts",
+        "import": "./dist/testing/index.js",
+        "default": "./dist/testing/index.js"
       }
     },
     "main": "./dist/index.js",

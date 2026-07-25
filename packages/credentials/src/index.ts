@@ -60,16 +60,6 @@ export {
   type EnvCredentialsStoreOptions,
 } from "./stores/index.js";
 
-export {
-  runCredentialsStoreConformance,
-  type CredentialsStoreConformanceOptions,
-} from "./conformance.js";
-
-export {
-  runCredentialsHarnessConformance,
-  type CredentialsHarnessConformanceOptions,
-} from "./harness-conformance.js";
-
 // Error types re-exported from spec-next for convenience — adopters
 // who only depend on credentials-next get them without a second import.
 export {

@@ -29,7 +29,3 @@ export { isMessageEntryArray, stringToSystemMessage, type PromptRenderer } from 
 // `PromptStoreQuery` ports live in `@agentick/spec`. A durable adapter
 // conforms to the SAME port later.
 export { InMemoryPromptStore, matchesPromptQuery } from "./store.js";
-export {
-  runPromptStoreConformance,
-  type PromptStoreConformanceOptions,
-} from "./store-conformance.js";

@@ -27,3 +27,6 @@ export function stubStateHarness(initial: Readonly<Record<string, unknown>> = {}
   }
   return harness;
 }
+
+// ────────── Conformance suite (imports vitest — testing-only) ──────────
+export { runStateHarnessConformance } from "../conformance.js";

@@ -4,11 +4,8 @@
  * own factory.
  */
 
-import {
-  envCredentialsStore,
-  inMemoryCredentialsStore,
-  runCredentialsStoreConformance,
-} from "../index.js";
+import { envCredentialsStore, inMemoryCredentialsStore } from "../index.js";
+import { runCredentialsStoreConformance } from "../conformance.js";
 
 runCredentialsStoreConformance({
   label: "inMemoryCredentialsStore",

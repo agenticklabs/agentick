@@ -4,7 +4,7 @@
  * satisfies the substrate contract.
  */
 
-import { runCredentialsHarnessConformance } from "../index.js";
+import { runCredentialsHarnessConformance } from "../harness-conformance.js";
 import { fakeCredentialsHarness } from "../testing/index.js";
 
 runCredentialsHarnessConformance({
