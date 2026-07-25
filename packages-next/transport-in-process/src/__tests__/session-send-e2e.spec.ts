@@ -25,6 +25,7 @@ import {
   type LanguageModelInput,
   type ResponseFormat,
   type SessionSendParams,
+  SessionNotFoundError,
 } from "@agentick/spec-next";
 import { dispatchRequest, type DispatchSink } from "@agentick/transport-next";
 
@@ -180,6 +181,29 @@ describe("session/send — full client → gateway → executor roundtrip", () =
     // @ts-expect-error — `output` is deliberately absent from the wire shape.
     const bad: SessionSendParams = { sessionId: "s", output: {} };
     void bad;
+  });
+
+  it("a server-thrown AgentickError rehydrates typed on the client (G2-wire-errors)", async () => {
+    const { client, cleanup } = await makeStack("unused");
+
+    // The gateway throws SessionNotFoundError for an unknown session; the
+    // server dispatch stamps its toJSON() into JSON-RPC error.data, and the
+    // client rehydrates it via spec's codec — SAME class, instanceof holds
+    // across the wire, fields intact.
+    const caught = await client
+      .request("session/send", {
+        sessionId: "no-such-session",
+        messages: [{ role: "user", content: "ping" }],
+      })
+      .then(() => undefined)
+      .catch((e: unknown) => e);
+
+    expect(caught).toBeInstanceOf(SessionNotFoundError);
+    const e = caught as SessionNotFoundError;
+    expect(e._tag).toBe("SessionNotFoundError");
+    expect(e.sessionId).toBe("no-such-session");
+
+    await cleanup();
   });
 
   it("exposes the right session/app via gateway methods", async () => {

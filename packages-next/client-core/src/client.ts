@@ -46,7 +46,12 @@ import type {
   WireParams,
   WireResult,
 } from "@agentick/spec-next";
-import { EMPTY_CLIENT_CAPABILITIES, ErrorCode, parseHookKey } from "@agentick/spec-next";
+import {
+  EMPTY_CLIENT_CAPABILITIES,
+  ErrorCode,
+  deserializeAgentickError,
+  parseHookKey,
+} from "@agentick/spec-next";
 import { onLog as onLogSignal, onProgress as onProgressSignal } from "./signals.js";
 import { channelView as channelViewFn } from "./channel-view.js";
 import { createLocalPubSub, createNotifier, type LocalPubSub } from "@agentick/pubsub-next";
@@ -163,9 +168,26 @@ class AgentickClient implements ClientProtocol {
     // never stall `client.close()`); iterators end via their own
     // `interruptWhen` on `ClientEventStream.close()`.
     this.clientEvents = createLocalPubSub<SequencedClientEvent>({ closeDrainTimeoutMs: 0 });
-    this.composedRequest = composeRequest(this.extensions, (req) =>
+    // G2-wire-errors: rehydrate typed AgentickErrors ABOVE the extension
+    // pipeline. The server's dispatch stamps a thrown AgentickError's
+    // `toJSON()` into JSON-RPC `error.data` ({ _tag, message, ...fields });
+    // the transport surfaces it as the raw `{ kind: "rpc", error }` envelope.
+    // Extensions (retry/offline) keep classifying by the WIRE envelope's
+    // code — that layer speaks JSON-RPC. Everything above (adopter
+    // middleware, handles, application catch blocks) gets the typed error
+    // back: `e instanceof GateNotFound` holds on both sides of the wire.
+    // Protocol-level errors (MethodNotFound, parse errors) carry no `_tag`
+    // and pass through as the envelope.
+    const piped = composeRequest(this.extensions, (req) =>
       this.transport.request(req.method, req.params, req.signal),
     );
+    this.composedRequest = (async (req: Parameters<typeof piped>[0]) => {
+      try {
+        return await piped(req);
+      } catch (e) {
+        throw rehydrateWireError(e);
+      }
+    }) as typeof piped;
 
     for (const ext of this.extensions) {
       this.handlerRegistry.registerFrom(ext);
@@ -688,6 +710,26 @@ function readSessionId(params: unknown): string | undefined {
 /** True when the ClientState value is the failed-object variant. */
 function isFailedState(s: ClientState): boolean {
   return typeof s === "object" && s !== null && "kind" in s && s.kind === "failed";
+}
+
+/**
+ * G2-wire-errors — turn a transport rejection carrying a serialized
+ * AgentickError back into the typed instance (spec's registry-driven codec;
+ * an unknown `_tag` degrades to `UnknownAgentickError`, never data loss).
+ * Anything else — protocol-level rpc envelopes, connection/timeout/cancelled
+ * shapes — is returned untouched.
+ */
+function rehydrateWireError(err: unknown): unknown {
+  if (typeof err !== "object" || err === null) return err;
+  const data = (err as { error?: { data?: unknown } }).error?.data;
+  if (
+    typeof data === "object" &&
+    data !== null &&
+    typeof (data as { _tag?: unknown })._tag === "string"
+  ) {
+    return deserializeAgentickError(data);
+  }
+  return err;
 }
 
 /**

@@ -87,14 +87,16 @@ describe("Streamable HTTP transport — end-to-end with real GatewayHarness", ()
     await client.close();
   });
 
-  it("RPC error → TransportError { kind: 'rpc' }", async () => {
+  it("a server AgentickError propagates TYPED across the wire (G2-wire-errors)", async () => {
     const client = await createClient({
       transport: http({ url: `http://127.0.0.1:${port}` }),
     });
     await client.connect();
+    // The server stamps toJSON() into JSON-RPC error.data; the client
+    // rehydrates it above the extension pipeline — instanceof holds.
     await expect(client.gateway().getApp("missing")).rejects.toMatchObject({
-      kind: "rpc",
-      error: { code: -32011 },
+      _tag: "AppNotFoundError",
+      appId: "missing",
     });
     await client.close();
   });
