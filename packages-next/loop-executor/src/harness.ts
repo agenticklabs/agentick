@@ -488,6 +488,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           stream: input.stream,
           ...(input.responseFormat !== undefined ? { responseFormat: input.responseFormat } : {}),
           ...(input.outputSpec !== undefined ? { outputSpec: input.outputSpec } : {}),
+          ...(input.allowedTools !== undefined ? { allowedTools: input.allowedTools } : {}),
           narrate: input.narrate,
           toolConcurrency: input.toolConcurrency,
           emit: sink,
@@ -676,6 +677,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           stream: input.stream,
           ...(input.responseFormat !== undefined ? { responseFormat: input.responseFormat } : {}),
           ...(input.outputSpec !== undefined ? { outputSpec: input.outputSpec } : {}),
+          ...(input.allowedTools !== undefined ? { allowedTools: input.allowedTools } : {}),
           toolChoice: { tool: terminalToolName },
           narrate: input.narrate,
           toolConcurrency: input.toolConcurrency,
@@ -939,7 +941,26 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         mountId: input.mountId,
         registrations: compilerTools.map((d) => toRegistration(d, compilerBinding)),
       });
-      const modelTools = yield* input.toolExecutor.fx.compileForTick({ exposure: "model" });
+      const compiledModelTools = yield* input.toolExecutor.fx.compileForTick({
+        exposure: "model",
+      });
+
+      // C2 — per-execution tool RESTRICTION (three-audiences-plan §C split).
+      // Filter the MERGED, precedence-resolved model-visible list down to the
+      // allowlisted canonical names. Applied HERE — after the merge, BEFORE
+      // structured-output terminal-tool injection below — so the loop-owned
+      // terminal tool is never filtered, and `resolveAutoStrategy` (which reads
+      // `modelTools.length`) sees the POST-restriction count (an empty result
+      // ⇒ `toolsMounted: false`). Set membership on canonical `name` only;
+      // aliases + dispatch-door tools are unaffected (this scopes the model's
+      // view, not the registry). Absent allowlist ⇒ pass-through.
+      const modelTools: readonly ToolDeclaration[] =
+        input.allowedTools !== undefined
+          ? (() => {
+              const allow = new Set(input.allowedTools);
+              return compiledModelTools.filter((t) => allow.has(t.name));
+            })()
+          : compiledModelTools;
 
       // Structured-output resolution (three-audiences-plan §B2). Merge the
       // effective spec (send-level `input.outputSpec` wins over the tree-level

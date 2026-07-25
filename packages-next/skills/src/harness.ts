@@ -64,6 +64,9 @@ function skillContentChanged(existing: Skill, incoming: SkillsRegisterInput): bo
   const existingTags = existing.tags ? [...existing.tags].sort().join("|") : "";
   const incomingTags = incoming.tags ? [...incoming.tags].sort().join("|") : "";
   if (existingTags !== incomingTags) return true;
+  const existingAllowed = existing.allowedTools ? [...existing.allowedTools].sort().join("|") : "";
+  const incomingAllowed = incoming.allowedTools ? [...incoming.allowedTools].sort().join("|") : "";
+  if (existingAllowed !== incomingAllowed) return true;
   return false;
 }
 
@@ -148,6 +151,16 @@ export class SkillsHarness
    * `SkillRunnerUnbound` rather than dereferencing it.
    */
   private runner?: SessionSendCapability;
+
+  /**
+   * Late-bound ISOLATED send capability (C2 — three-audiences-plan §C split,
+   * item 3). Injected at session install via {@link bindIsolationRunner};
+   * routes a run through `session.fork()` (a same-image, copied-state child
+   * disposed after the run) instead of the current session. `undefined` when
+   * no isolation runner was bound — `run({ isolate: true })` then throws
+   * `SkillIsolationUnavailable` (the pre-C2 behavior).
+   */
+  private isolationRunner?: SessionSendCapability;
 
   /** The run-composition seam. `withSkills({ composeRun })` or the default. */
   private readonly composeRun: SkillRunCompose;
@@ -258,13 +271,28 @@ export class SkillsHarness
   }
 
   /**
+   * Inject the session's ISOLATED send capability (C2 — three-audiences-plan
+   * §C split, item 3). Optional sibling to {@link bindRunner}: where
+   * `bindRunner` runs a send in THIS session, an isolation runner runs it in a
+   * fresh `session.fork()` (a same-image, copied-state child disposed after
+   * the run settles) — the isolation `skills.run({ isolate: true })` needs. The
+   * composition root binds it at session install exactly as it binds
+   * `bindRunner`; a harness with none stays pre-C2 (isolation throws).
+   */
+  bindIsolationRunner(runner: SessionSendCapability): void {
+    this.isolationRunner = runner;
+  }
+
+  /**
    * Run a skill: compose a send from the skill's content, execute it via the
    * bound runner, and return the execution handle unchanged — one grammar with
    * `session.send`. The
    * skill guides; the MODEL executes (Flue-aligned — skills add no executable
    * capability). Inline only in C-core.
    *
-   * @throws {SkillIsolationUnavailable} `opts.isolate: true` (fork is C2).
+   * @throws {SkillIsolationUnavailable} `opts.isolate: true` with no isolation
+   *   runner bound (a harness outside a session, or one whose composition root
+   *   never bound `bindIsolationRunner`).
    * @throws {SkillRunnerUnbound} no runner bound (harness outside a session).
    * @throws {SkillNotFound} no skill named `name` (via {@link require}).
    * @throws Propagated send errors: `SteerCannotCarryStructuredOutput` (an
@@ -275,15 +303,15 @@ export class SkillsHarness
     name: string,
     opts: SkillRunOptions<T> = {},
   ): Promise<SessionExecutionHandle<T>> {
-    if (opts.isolate === true) {
-      // C-core is inline-only — never silently degrade an isolation request.
-      // TODO(C2): route isolated runs through `session.fork()` (same-image,
-      // copied-state child, disposed after the run) — needs the session to
-      // retain its own agent root so `SpawnInput.agent` can default. See
-      // three-audiences-plan §C split, item 3.
+    // C2 — an isolation request routes through the isolation runner (a
+    // `session.fork()`-backed send) when one is bound; with none it STILL
+    // throws (never silently degrade to a same-session run).
+    const isolate = opts.isolate === true;
+    if (isolate && this.isolationRunner === undefined) {
       throw new SkillIsolationUnavailable({ name });
     }
-    if (this.runner === undefined) {
+    const runner = isolate ? this.isolationRunner : this.runner;
+    if (runner === undefined) {
       throw new SkillRunnerUnbound({ name });
     }
     // Throws SkillNotFound on a miss — let it propagate (must-exist contract).
@@ -294,8 +322,10 @@ export class SkillsHarness
     // typed `result`: `data` is validated against `opts.output` by the send
     // path, so the cast narrows what validation already guarantees).
     // `.result` may reject (steer-conflict, validation, incomplete) — the
-    // typed error propagates to whoever awaits it.
-    return (await this.runner(input)) as SessionExecutionHandle<T>;
+    // typed error propagates to whoever awaits it. The isolation runner threads
+    // the same composed send through a forked child and disposes it after the
+    // handle settles.
+    return (await runner(input)) as SessionExecutionHandle<T>;
   }
 
   // ─────────── Dynamic surface ───────────
@@ -328,6 +358,7 @@ export class SkillsHarness
             description: record.description,
             content: record.content,
             ...(record.tags ? { tags: record.tags } : {}),
+            ...(record.allowedTools ? { allowedTools: record.allowedTools } : {}),
             ...(record.metadata ? { metadata: record.metadata } : {}),
           });
           updated.push(name);
@@ -498,7 +529,11 @@ export class SkillsHarness
         name: input.name,
         description: input.description,
         content: input.content,
-        ...omitUndefined({ tags: input.tags, metadata: input.metadata }),
+        ...omitUndefined({
+          tags: input.tags,
+          allowedTools: input.allowedTools,
+          metadata: input.metadata,
+        }),
         createdAt: now,
         updatedAt: now,
       };
@@ -524,6 +559,7 @@ export class SkillsHarness
           description: input.description,
           content: input.content,
           tags: input.tags,
+          allowedTools: input.allowedTools,
         }),
         ...(input.metadata !== undefined
           ? { metadata: { ...(existing.metadata ?? {}), ...input.metadata } }

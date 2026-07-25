@@ -459,6 +459,55 @@ Depends on B. Tests: run-with-schema (typed data), run-without-schema
 (text), `allowed-tools` scoping, `composeRun` seam override, missing skill
 throws, inline timeline effects documented in the spec test.
 
+### C2 — fork + isolate + allowedTools (LANDED 2026-07-25)
+
+All three C-split follow-ups shipped in one slice:
+
+1. **Fork enabler + `session.fork()`.** The session retains its own
+   agent root (`agentRoot` field; `options.agent` still forwarded to the
+   mount unchanged); `SpawnInput.agent` is now OPTIONAL, defaulting to
+   the parent's root (`SpawnContextChildInput.agent` stays required —
+   the session resolves the default before the spawn-context boundary).
+   `fork(input?: ForkInput)` = `snapshot()` → `spawn({})` (unbound,
+   same-image) → `child.restore(snap)`. The scout's key finding held:
+   restore already worked on a never-sent child, so fork is pure
+   composition — the retained root was the ONLY missing primitive.
+   `ForkInput` carries sessionId/metadata/maxTicks only (no agent — a
+   fork is by definition same-image; no send — always returned unbound).
+   Not wire-exposed (later slice, with the client fork story).
+2. **`skills.run({ isolate: true })` works.** `RunnerBindable` gained an
+   OPTIONAL `bindIsolationRunner(SessionSendCapability)` sibling; the
+   APP (which owns the send closure and IS the SpawnContext — the scout
+   map's one wrong anchor: the bind site was never in the session
+   package) binds a closure doing `session.fork()` → `child.send()` →
+   dispose-after-settle (`disposeChildSession`, errors swallowed, never
+   masking the run result). Skills stays capability-dumb: isolate with
+   no runner bound STILL throws `SkillIsolationUnavailable` — never a
+   silent same-session degrade. Isolation invariant e2e-pinned: the
+   parent timeline gains NOTHING from an isolated run; the child is
+   disposed from the live registry after the handle settles.
+3. **`allowedTools` restriction seam.** `Skill.allowedTools` (+
+   register/update inputs) → `composeRun` threads it →
+   `SendInput.allowedTools` → `RunExecutionInput`/`TickInput` → the loop
+   filters the MERGED model-visible list (Set on canonical `name`) after
+   the compiler-tools merge + `compileForTick`, BEFORE terminal-tool
+   injection — so `submit_result` is exempt by construction, and
+   `resolveAutoStrategy` reads the POST-restriction count (empty ⇒
+   `toolsMounted: false` ⇒ responseFormat on capable targets; both
+   interaction cases test-pinned). `ToolListFilter` deliberately
+   untouched — restriction is a loop-assembly concern, not a registry
+   filter (no consumer needs a registry-level names filter yet).
+   Dispatch door unaffected (restriction scopes the MODEL's view only).
+   `TODO(E1)` left at composeRun for the frontmatter `allowed-tools`
+   mapping (loader work). Skill record is the only source in C2 — no
+   opts-level override.
+
+Thirteen tests across skills/session/app pin the invariants (restriction
+reaches the model via `seenRuns`, additive×restriction composition,
+terminal-tool exemption, empty-restriction auto-resolution, fork state
+copy + divergence, isolate e2e, `SkillIsolationUnavailable` without a
+bound runner, `Skill.allowedTools` round-trip).
+
 ---
 
 ## B3. Structured-output completion pass (usage-walk punch-list, ratified 2026-07-24)

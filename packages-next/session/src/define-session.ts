@@ -75,6 +75,7 @@ import type {
   SessionHarnessFactoryDeps,
   SessionHarnessProtocol,
   SessionSnapshot,
+  ForkInput,
   SpawnInput,
   TickEndForwardDecision,
   Unsubscribe,
@@ -122,6 +123,7 @@ export interface DefineSessionInput<P = unknown> {
   readonly spawn?: (
     input: SpawnInput<P>,
   ) => Promise<SessionExecutionHandle | SessionHarnessProtocol<P>>;
+  readonly fork?: (input?: ForkInput) => Promise<SessionHarnessProtocol<P>>;
   /**
    * The session's tools handle (three-audiences-plan §F). Replaces the former
    * `dispatch` callback — a whole `ToolsHandle` (View reads + host-door
@@ -309,6 +311,15 @@ class CallbackSessionHarness<P = unknown>
     return Promise.reject(
       new ExecutionFailed({
         cause: new Error("defineSession: spawn() not configured"),
+      }) satisfies SessionError,
+    );
+  }
+
+  fork(input?: ForkInput): Promise<SessionHarnessProtocol<P>> {
+    if (this.spec.fork) return this.spec.fork(input);
+    return Promise.reject(
+      new ExecutionFailed({
+        cause: new Error("defineSession: fork() not configured"),
       }) satisfies SessionError,
     );
   }

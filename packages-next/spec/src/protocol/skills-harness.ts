@@ -48,6 +48,12 @@ export interface Skill {
   readonly tags?: readonly string[];
   /** Adopter-defined metadata (version, author, source URL, etc.). */
   readonly metadata?: Readonly<Record<string, unknown>>;
+  /**
+   * Allowlist of tool names the model may use during `skills.run` of this
+   * skill. Canonical names (not aliases). Absent = no restriction. Fed into
+   * `SendInput.allowedTools` by the run-composition seam (compose-run).
+   */
+  readonly allowedTools?: readonly string[];
   /** Wall-clock ms timestamp of last update. */
   readonly updatedAt: number;
   /** Wall-clock ms timestamp of first registration. */
@@ -61,6 +67,8 @@ export interface SkillsRegisterInput {
   readonly content: string;
   readonly tags?: readonly string[];
   readonly metadata?: Readonly<Record<string, unknown>>;
+  /** Allowlist of tool names the model may use during `skills.run` of this skill. */
+  readonly allowedTools?: readonly string[];
 }
 
 /** Input shape for {@link SkillsHarnessProtocol.update}. */
@@ -70,6 +78,8 @@ export interface SkillsUpdateInput {
   readonly content?: string;
   readonly tags?: readonly string[];
   readonly metadata?: Readonly<Record<string, unknown>>;
+  /** Allowlist of tool names the model may use during `skills.run` of this skill. */
+  readonly allowedTools?: readonly string[];
 }
 
 /** Input shape for {@link SkillsHarnessProtocol.remove}. */

@@ -2116,8 +2116,34 @@ export class AppHarness<P = unknown>
     if (sessionExtensionBridges.size > 0) {
       const sendCapability: SessionSendCapability = (sendInput) =>
         session.send(sendInput as SendInput<P>);
+      // C2 (three-audiences-plan §C split, item 3) — the ISOLATED send
+      // capability. Each run forks the session (`session.fork()` — a same-image
+      // child with a full copied-state snapshot) and runs the composed send on
+      // that fresh child, so nothing from the isolated run touches THIS
+      // session's timeline/state. The child is disposed after the handle
+      // settles (registry removal + `session.close()` via `disposeChildSession`,
+      // which awaits the child's own quiescence). Disposal rides OFF the
+      // critical path: its errors are swallowed and never mask the run result.
+      const isolationCapability: SessionSendCapability = async (sendInput) => {
+        const child = await session.fork();
+        const handle = await child.send(sendInput as SendInput<P>);
+        void handle.result
+          .then(
+            () => {},
+            () => {},
+          )
+          .finally(() => {
+            void this.disposeChildSession(child.id).catch(() => {});
+          });
+        return handle;
+      };
       for (const bridge of sessionExtensionBridges.values()) {
-        if (isRunnerBindable(bridge)) bridge.bindRunner(sendCapability);
+        if (isRunnerBindable(bridge)) {
+          bridge.bindRunner(sendCapability);
+          // Optional sibling — present only on harnesses that opt into
+          // isolation (skills). Absent ⇒ the harness keeps its pre-C2 behavior.
+          bridge.bindIsolationRunner?.(isolationCapability);
+        }
       }
     }
 

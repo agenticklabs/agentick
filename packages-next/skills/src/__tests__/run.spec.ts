@@ -9,7 +9,10 @@
  *   - the `composeRun` seam override
  *   - handle pass-through (the run IS a send — one grammar; `data`/`response`
  *     arrive via `handle.result`, streaming via `handle.events()`)
- *   - `isolate: true` → `SkillIsolationUnavailable` (C2 deferral, never inline)
+ *   - `isolate: true` with NO isolation runner bound → `SkillIsolationUnavailable`
+ *     (never silently degrade to a same-session run)
+ *   - `isolate: true` WITH an isolation runner bound → routes through it (C2)
+ *   - `Skill.allowedTools` threads into `SendInput.allowedTools` (C2)
  *   - missing skill → `SkillNotFound` propagates (via `require`)
  *   - no bound runner → `SkillRunnerUnbound` (not an undefined-crash)
  *
@@ -174,6 +177,38 @@ describe("skills.run — composeRun seam", () => {
   });
 });
 
+describe("skills.run — allowedTools (C2 per-execution tool restriction)", () => {
+  it("Skill.allowedTools round-trips through register/get and threads into the send", async () => {
+    const h = await mkHarness();
+    await h.register({
+      name: "scoped",
+      description: "a scoped skill",
+      content: "body",
+      allowedTools: ["echo", "search"],
+    });
+    // Record plumbing: the field survives register → get.
+    expect(h.get("scoped")?.allowedTools).toEqual(["echo", "search"]);
+
+    const { send, captured } = stubRunner({ result: mkSendResult() });
+    h.bindRunner(send);
+    await h.run("scoped");
+
+    // compose-run threads the skill's allowlist into the send's restriction seam.
+    expect(captured[0]!.allowedTools).toEqual(["echo", "search"]);
+    await h.close();
+  });
+
+  it("a skill without allowedTools produces a send with no restriction", async () => {
+    const h = await mkHarness();
+    await h.register({ name: "open", description: "no restriction", content: "body" });
+    const { send, captured } = stubRunner({ result: mkSendResult() });
+    h.bindRunner(send);
+    await h.run("open");
+    expect("allowedTools" in captured[0]!).toBe(false);
+    await h.close();
+  });
+});
+
 describe("skills.run — handle pass-through (one grammar with send)", () => {
   it("with output: the handle's result carries typed data + response + stopReason + ids", async () => {
     const h = await mkHarness();
@@ -234,18 +269,38 @@ describe("skills.run — handle pass-through (one grammar with send)", () => {
 });
 
 describe("skills.run — guards", () => {
-  it("isolate: true → SkillIsolationUnavailable (never silently inline)", async () => {
+  it("isolate: true with NO isolation runner bound → SkillIsolationUnavailable", async () => {
     const h = await mkHarness();
     await h.register({ name: "s", description: "x", content: "body" });
     const { send, captured } = stubRunner({ result: mkSendResult() });
+    // Only the non-isolated runner is bound — no `bindIsolationRunner`.
     h.bindRunner(send);
 
     await expect(h.run("s", { isolate: true })).rejects.toMatchObject({
       _tag: "SkillIsolationUnavailable",
       name: "s",
     });
-    // The runner was never invoked — no inline fallback.
+    // Never silently degrade to the same-session runner — it was not invoked.
     expect(captured).toHaveLength(0);
+    await h.close();
+  });
+
+  it("isolate: true WITH an isolation runner bound → routes through it, NOT the plain runner", async () => {
+    const h = await mkHarness();
+    await h.register({ name: "s", description: "x", content: "body" });
+    const plain = stubRunner({ result: mkSendResult({ response: "plain" }) });
+    const isolated = stubRunner({ result: mkSendResult({ response: "isolated" }) });
+    h.bindRunner(plain.send);
+    h.bindIsolationRunner(isolated.send);
+
+    const r = await (await h.run("s", { isolate: true, args: { x: 1 } })).result;
+
+    // The isolation runner answered — the plain (same-session) runner was untouched.
+    expect(r.response).toBe("isolated");
+    expect(isolated.captured).toHaveLength(1);
+    expect(plain.captured).toHaveLength(0);
+    // Same composed send (skill body + serialized args) rides the isolated path.
+    expect(isolated.captured[0]!.messages![0]!.content).toContain("body");
     await h.close();
   });
 

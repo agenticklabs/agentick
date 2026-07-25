@@ -809,6 +809,37 @@ parentId]` — the ancestor chain, root-first. It is stamped on the child's
   `whenQuiescent()` first, so closing never unmounts the compiler mid-tick.
   Children collapse their own sub-trees transitively.
 
+### Same-image children + `session.fork()` (C2)
+
+The session retains its own agent root (`agentRoot`, from `SessionHarnessOptions.agent`),
+so `SpawnInput.agent` is **optional**: `spawn({})` defaults the child to a
+same-image copy of this session (the parent resolves `input.agent ?? this.agentRoot`
+before crossing the `SpawnContext` boundary, which stays required-agent).
+
+`session.fork(input?)` builds on that: it is `spawn` (no send, own agent root) +
+`restore` of the parent's live `snapshot()`. The child copies every
+`SnapshotCapable` bridge's state (timeline, knobs, state, gates) plus the
+tick/usage accounting, gets its **own** `sessionId` and spawn lineage, and is
+**always returned unbound** — a fork never auto-sends. Post-fork the two
+sessions diverge: a knob set or a new send on one is invisible to the other.
+This is the isolation primitive `skills.run(name, { isolate: true })` routes
+through (via the session-installed `bindIsolationRunner` closure:
+`fork → send → dispose-after-settle`). Verified by
+`@agentick/app-next` `src/__tests__/fork.spec.tsx` (copy + lineage + divergence)
+and the spawn-default-agent case in `src/__tests__/extended-surface.spec.ts`.
+
+### Per-execution tool restriction — `SendInput.allowedTools` (C2)
+
+A send may carry `allowedTools?: readonly string[]` (canonical tool names). The
+loop filters the **merged, precedence-resolved** model-visible tool list down to
+that allowlist — applied after the compiler-tools merge, **before**
+structured-output terminal-tool injection (the terminal tool is loop-owned and
+exempt). The post-restriction count feeds `"auto"` strategy resolution, so an
+empty result behaves as `toolsMounted: false`. Composes with `SendInput.tools`
+(additive): an execution-scoped tool still must be named in `allowedTools` to
+reach the model. The **dispatch door is unaffected** — restriction scopes only
+what the model sees. Verified by `src/__tests__/tool-restriction.spec.ts`.
+
 ## API
 
 Full surface in the [typedoc]. The package root exports the thin set an

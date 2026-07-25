@@ -76,6 +76,7 @@ import type {
   SessionStore,
   SnapshotMigration,
   SessionSubstrateParent,
+  ForkInput,
   SpawnContext,
   SpawnInput,
   StateApplyError,
@@ -551,6 +552,14 @@ export class SessionHarness<P = unknown>
    */
   private target: ExecutionTarget | undefined;
   private readonly spawnContext: SpawnContext<P> | undefined;
+  /**
+   * The session's OWN agent root (C2). Retained from
+   * `SessionHarnessOptions.agent` — the same value forwarded to
+   * `compiler.mount` — so `spawn({})` / `fork()` can default a child to a
+   * same-image copy of this session. Opaque here (the bound compiler owns the
+   * type contract); the session only forwards it.
+   */
+  private readonly agentRoot: unknown;
   private readonly parentSessionId: string | undefined;
   /**
    * Spawn lineage (SP5) — ancestor session ids, root-first. `[]` for a root
@@ -847,6 +856,7 @@ export class SessionHarness<P = unknown>
       ...omitUndefined({ buildModelExecutor: options.buildModelExecutor }),
     });
     this.spawnContext = options.spawnContext;
+    this.agentRoot = options.agent;
     this.parentSessionId = options.parentSessionId;
     this.spawnPath = options.spawnPath ?? [];
     // Default 10 — v1 `MAX_SPAWN_DEPTH`.
@@ -1438,7 +1448,10 @@ export class SessionHarness<P = unknown>
     }
     const childInput = {
       parentSessionId: this.runtime.id,
-      agent: input.agent,
+      // C2 — default a child to a same-image copy of this session. The
+      // `SpawnContextChildInput.agent` boundary stays REQUIRED; the session
+      // resolves the default (own agent root) before crossing it.
+      agent: input.agent ?? this.agentRoot,
       // SP5 — extend the lineage: the child's ancestry is ours plus our id.
       spawnPath: [...this.spawnPath, this.runtime.id],
       ...omitUndefined({
@@ -1459,6 +1472,25 @@ export class SessionHarness<P = unknown>
     if (input.send !== undefined) {
       return child.send(input.send);
     }
+    return child;
+  }
+
+  async fork(input: ForkInput = {}): Promise<SessionHarnessProtocol<P>> {
+    // C2 — a fork is spawn(no send, own agent root) + restore(own snapshot).
+    // Capture BEFORE spawning so the child restores this session's state as of
+    // the fork instant. `spawn({})` defaults `agent` to `this.agentRoot`
+    // (same-image child) and returns the unbound child (no `send`). The
+    // restore fans this session's bridge snapshots into the child's matching
+    // bridges + copies the tick/usage accounting, then the child diverges.
+    const snap = await this.snapshot();
+    const child = (await this.spawn({
+      ...omitUndefined({
+        sessionId: input.sessionId,
+        metadata: input.metadata,
+        maxTicks: input.maxTicks,
+      }),
+    })) as SessionHarnessProtocol<P>;
+    await child.restore({ snapshot: snap });
     return child;
   }
 
@@ -2313,6 +2345,10 @@ export class SessionHarness<P = unknown>
                 // overlay; the raw capture rides `ExecutionRunResult
                 // .terminalCapture`, validated to `data` at result assembly.
                 ...(outputSpec !== undefined ? { outputSpec } : {}),
+                // C2 — per-execution tool RESTRICTION. The loop filters the
+                // merged model-visible list to these canonical names BEFORE
+                // terminal-tool injection; dispatch-door tools are unaffected.
+                ...(input.allowedTools !== undefined ? { allowedTools: input.allowedTools } : {}),
                 // Stage 5 — per-send tool concurrency (default "unbounded" in
                 // the loop) + optional execution timeout, both opt-in.
                 ...omitUndefined({

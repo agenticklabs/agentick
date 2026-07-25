@@ -35,13 +35,16 @@ export function defaultComposeRun(skill: Skill, opts: SkillRunOptions): SendInpu
       content: opts.args !== undefined ? JSON.stringify(opts.args, null, 2) : ARGS_FREE_INSTRUCTION,
     },
   ];
-  // TODO(C2): when the `Skill` record gains an `allowed-tools` frontmatter
-  // field AND a per-execution tool-RESTRICTION seam exists (today
-  // `SendInput.tools` is additive-only), thread the skill's allowlist here to
-  // scope down the model's tools for this run. See three-audiences-plan §C
-  // split, item 2.
+  // C2 — thread the skill's tool allowlist into the send's per-execution
+  // RESTRICTION seam (`SendInput.allowedTools`). When present, only these
+  // canonical tool names reach the MODEL for this run; dispatch-door tools are
+  // unaffected. The skill record is the ONLY source in C2 (no `opts`-level
+  // override).
+  // TODO(E1): populate `Skill.allowedTools` from Agent Skills frontmatter
+  // "allowed-tools" in the skill loader.
   return {
     messages,
+    ...(skill.allowedTools !== undefined ? { allowedTools: skill.allowedTools } : {}),
     ...(opts.output !== undefined ? { output: opts.output } : {}),
     ...(opts.maxTicks !== undefined ? { maxTicks: opts.maxTicks } : {}),
     ...(opts.signal !== undefined ? { signal: opts.signal } : {}),

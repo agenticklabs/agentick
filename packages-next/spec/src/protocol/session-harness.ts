@@ -235,6 +235,15 @@ export interface SendInput<P = unknown, T = unknown> {
    */
   readonly tools?: ReadonlyArray<import("../data/declarations.js").ToolDeclaration>;
   /**
+   * Restriction: when present, only tools whose canonical name is listed are
+   * exposed to the MODEL this execution. Dispatch-door tools are unaffected.
+   * Composes with `tools` (additive): an execution-scoped tool still must be
+   * named here to reach the model. The structured-output terminal tool is
+   * exempt (loop-injected after restriction). Canonical names (not aliases).
+   * Absent = no restriction.
+   */
+  readonly allowedTools?: readonly string[];
+  /**
    * Concurrency for dispatching this send's per-tick tool calls (ADR 77
    * Stage 5). `"unbounded"` (default) runs a tick's tool calls
    * concurrently; a positive integer caps them; `1` is sequential.
@@ -471,6 +480,17 @@ export type SessionSendCapability<P = unknown> = (
  */
 export interface RunnerBindable {
   bindRunner(send: SessionSendCapability): void;
+  /**
+   * Optional sibling to {@link bindRunner} — inject an ISOLATED send
+   * capability (three-audiences-plan §C split, item 3). Where `bindRunner`
+   * routes a send into the CURRENT session, an isolation runner routes it
+   * into a fresh {@link SessionHarnessProtocol.fork} (a same-image,
+   * copied-state child) disposed after the run settles. The skills harness
+   * uses it for `skills.run(name, { isolate: true })`. A harness with NO
+   * isolation runner bound falls back to whatever it did before (skills:
+   * throw `SkillIsolationUnavailable`).
+   */
+  bindIsolationRunner?(runner: SessionSendCapability): void;
 }
 
 /**
@@ -809,6 +829,27 @@ export interface SessionHarnessProtocol<P = unknown> {
   spawn(input: SpawnInput<P>): Promise<SessionExecutionHandle | SessionHarnessProtocol<P>>;
 
   /**
+   * Fork this session into a same-image child with a full copy of its state.
+   *
+   * A fork is a {@link spawn} (no send) of the parent's OWN agent root —
+   * `SpawnInput.agent` defaults to the parent's root — followed by a
+   * {@link restore} of the parent's live {@link snapshot}. The child copies
+   * every {@link SnapshotCapable} bridge's state (timeline, knobs, state,
+   * gates), plus the tick + usage accounting, and gets its own `sessionId`
+   * and spawn lineage (`spawnPath`). It is ALWAYS returned unbound — a fork
+   * never auto-sends; the caller drives it.
+   *
+   * Post-fork the two sessions diverge: a mutation on one (a knob set, a new
+   * timeline entry) does NOT reflect on the other. This is the isolation
+   * primitive `skills.run(name, { isolate: true })` routes through.
+   *
+   * @throws {SessionError} — `SessionClosedError` if the parent is shutting
+   *   down; `SpawnDepthExceededError` at the spawn-depth ceiling; impl-specific
+   *   failures otherwise.
+   */
+  fork(input?: ForkInput): Promise<SessionHarnessProtocol<P>>;
+
+  /**
    * The session's tools handle — the curated projection of the tool registry
    * (three-audiences-plan §F). SYNC View reads (`list`/`get`/`has`), the
    * host-door `dispatch(name, input, opts?)` (`via: "dispatch"` — replaces the
@@ -918,11 +959,12 @@ export function isSessionHarnessFactory<P = unknown>(v: unknown): v is SessionHa
 
 export interface SpawnInput<P = unknown> {
   /**
-   * Child agent root. Opaque to the session boundary — forwarded to
+   * Child agent root. Defaults to the parent session's own agent root
+   * (a same-image child). Opaque to the session boundary — forwarded to
    * the bound compiler at mount time. Same type contract as
    * `AppHarnessOptions.rootElement`.
    */
-  readonly agent: unknown;
+  readonly agent?: unknown;
   /**
    * Optional initial send for the child. When supplied, the spawn
    * immediately runs one execution against the child session and
@@ -939,6 +981,20 @@ export interface SpawnInput<P = unknown> {
   /** Initial knob values for the child. */
   readonly initialKnobs?: Readonly<Record<string, unknown>>;
   /** Override the parent's max tick bound for this child. */
+  readonly maxTicks?: number;
+}
+
+/**
+ * Input for {@link SessionHarnessProtocol.fork}. A fork carries no agent
+ * root (a fork is by definition a same-image child of its parent) and no
+ * initial send (a fork is always returned unbound — the caller drives it).
+ */
+export interface ForkInput {
+  /** Stable child session id. Generated if omitted. */
+  readonly sessionId?: string;
+  /** Caller metadata stored on the child's registry entry. */
+  readonly metadata?: Readonly<Record<string, unknown>>;
+  /** Override the parent's max tick bound for the forked child. */
   readonly maxTicks?: number;
 }
 

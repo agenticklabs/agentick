@@ -87,7 +87,7 @@ type SkillsError =
   | { _tag: "SkillNotFound"; name: string }
   | { _tag: "SkillAlreadyExists"; name: string }
   | { _tag: "SkillsBackendError"; cause: unknown }
-  | { _tag: "SkillIsolationUnavailable"; name: string } // isolate: true, C2 follow-up
+  | { _tag: "SkillIsolationUnavailable"; name: string } // isolate: true, no isolation runner bound
   | { _tag: "SkillRunnerUnbound"; name: string }; // run on a harness with no session
 ```
 
@@ -112,19 +112,21 @@ review.stopReason; // "output_delivered" (terminal-tool path) | "end" | …
 
 **Mechanics.** `require(name)` → compose a `SendInput` (default: a `system`-role message carrying the skill body + framing, then a `user`-role message carrying the serialized `args`) → `session.send` → **the execution handle passes through untouched** (`SessionExecutionHandle<T>` — one grammar with `send`; no projection layer). With `opts.output`, the send rides the terminal-tool strategy (§B2); `handle.result` resolves a `SendResult<T>` whose `data` is the validated value. No `output` → `data` is absent, `response` still returned.
 
-**`opts`:** `{ args?, output?, maxTicks?, signal?, isolate? }`. `args` serialize into the run's user message; `output` (a `StandardSchemaV1`) drives structured extraction; `maxTicks` / `signal` pass straight to the send.
+**`opts`:** `{ args?, output?, maxTicks?, signal?, isolate? }`. `args` serialize into the run's user message; `output` (a `StandardSchemaV1`) drives structured extraction; `maxTicks` / `signal` pass straight to the send; `isolate: true` routes through `session.fork()` (see below).
 
-**Composition seam (seam over setting).** `withSkills({ composeRun })` — a `(skill, opts) => SendInput` callback. The framework ships the default; the seam is the truth. An override fully owns composition (different framing, few-shot priming, tool restriction once C2 lands).
+**Tool restriction (`Skill.allowedTools`).** A skill record may carry an `allowedTools?: readonly string[]` allowlist (canonical tool names). When present, `defaultComposeRun` threads it into the run's `SendInput.allowedTools` — the per-execution tool-**restriction** seam (C2): only those tools reach the **model** for this run; the dispatch door is unaffected, and the structured-output terminal tool is exempt (loop-injected after restriction). Absent = no restriction. The skill record is the only source in C2 (no `opts`-level override); the Agent Skills frontmatter `allowed-tools` loader that populates it is E-loader work (`TODO(E1)`).
+
+**Composition seam (seam over setting).** `withSkills({ composeRun })` — a `(skill, opts) => SendInput` callback. The framework ships the default; the seam is the truth. An override fully owns composition (different framing, few-shot priming, or overriding the `allowedTools` restriction).
 
 **Honest guarantees (do not read this as a general structured-output promise).** When `output` is set the chain is: description-driven natural path (the model calls the terminal tool) → forced wrap-up tick (`toolChoice` forcing — a hard provider guarantee) → executor validation → typed error in the residual sliver (`StructuredOutputIncomplete` / `ResponseValidationError`). Behavioral compliance ("does the model call it unforced") is the eval tier, never asserted in CI. See three-audiences-plan §B2's guarantees section.
 
 **Reentrancy.** A `run` carrying `output` that **races an in-flight execution** takes the steer-join path and is rejected with `SteerCannotCarryStructuredOutput` — an in-flight join has no final turn of its own to shape. This is the existing send guard, surfaced honestly; not a new one. Quiesce the session (or use `followUp` delivery on the underlying send) before an `output` run.
 
-**Timeline.** An inline run's messages persist as ordinary history (the skill's system message, the args, the assistant turn, any tool calls). Inline runs are conversation work by design.
+**Timeline.** An inline run's messages persist as ordinary history (the skill's system message, the args, the assistant turn, any tool calls). Inline runs are conversation work by design. An **isolated** run (`isolate: true`) is the opposite: it executes on a disposable fork, so none of its messages land on the calling session's timeline.
 
 **Injection (how `run` reaches `session.send`).** The skills harness is constructed from substrate alone — it has **no** session access. The send capability is late-bound at session install via `bindRunner(send)` (the `adoptTelemetry` precedent; the App's session-construction fold feature-detects the `RunnerBindable` contract and injects **only** the send capability, never the session). A harness constructed outside a session throws `SkillRunnerUnbound` on `run`. This keeps `@agentick/skills-next` free of any `session-next` edge.
 
-**`isolate: true` — deferred (C2).** The isolated (fork) execution site is not yet available; `isolate: true` throws `SkillIsolationUnavailable` naming the follow-up rather than silently running inline. C-core is inline-only. The fork enabler (`session.fork()` + the session retaining its own agent root so `SpawnInput.agent` can default) ships in C2, alongside the `allowed-tools` skill field + a per-execution tool-restriction seam.
+**`isolate: true` — isolated fork execution (C2).** An isolated run executes on a fresh `session.fork()` (a same-image, copied-state child) instead of the current session, and the child is disposed after the run settles. Nothing from the isolated run touches the parent's timeline/state — the isolation invariant. The runner is late-bound at session install via `bindIsolationRunner` (the optional sibling to `bindRunner`; the App's fold binds a `fork → send → dispose-after-settle` closure). A harness with **no** isolation runner bound (a harness outside a session, or a composition root that never bound it) still throws `SkillIsolationUnavailable` on `isolate: true` — never a silent degrade to a same-session run.
 
 ## Inbox addressing
 
@@ -269,10 +271,12 @@ const skill = await session.skills.require("must_exist");
 - `/testing` subpath with `stubSkillsHarness`
 - Module augmentation: `session.skills` typed via `SkillsHandle` (optional slot — uniform with `live` / `prompts`)
 - `skills.run(name, opts)` — inline skill execution on the structured-output path (C-core); `composeRun` seam; late-bound `bindRunner` injection
+- **`skills.run(name, { isolate: true })` (C2)** — routes through `session.fork()` (same-image, copied-state child disposed after the run) via the late-bound `bindIsolationRunner`; unbound ⇒ `SkillIsolationUnavailable`. Verified by `src/__tests__/run.spec.ts` (routing) + `@agentick/app-next` `src/__tests__/skills-run-e2e.spec.tsx` (isolation invariant + dispose).
+- **`Skill.allowedTools` (C2)** — per-execution tool-**restriction** allowlist threaded into `SendInput.allowedTools` by `defaultComposeRun`; applied in the loop on the merged model-visible list. Verified by `src/__tests__/run.spec.ts` (round-trip + threading) + `@agentick/session-next` `src/__tests__/tool-restriction.spec.ts` (loop filter).
 
 **Planned:**
 
-- **`skills.run` C2 follow-up.** (1) `isolate: true` → `session.fork()` (same-image, copied-state) execution off to the side, disposed after the run — needs the session to retain its own agent root so `SpawnInput.agent` can default to it; today `isolate` throws `SkillIsolationUnavailable`. (2) An `allowed-tools` frontmatter field on the `Skill` record + a per-execution tool-**restriction** seam threading into `compileForTick` (today `SendInput.tools` is additive-only) so a skill can scope down the model's tools for its run. (3) A `skills:run` `exposure: "wire"` command (needs the declarative `responseFormat` output form — serializable by construction).
+- **`skills.run` C2 follow-up (remaining).** A `skills:run` `exposure: "wire"` command (needs the declarative `responseFormat` output form — serializable by construction). The `Skill.allowedTools` field is populated from Agent Skills frontmatter `allowed-tools` by the E-loader (`TODO(E1)`).
 
 - SQLite backend for single-process durability
 - Remote-registry backend (`agentskills.io` compatibility)
@@ -324,8 +328,8 @@ const skill = await session.skills.require("must_exist");
 
 - `src/__tests__/harness.spec.ts` — full conformance suite + sync/async surface + envelope flow + snapshot round-trip + inbox routing
 - `src/__tests__/store-backing.spec.ts` — write-through to the injected store, loaders (`reload` / `resolve`) feed the store, `search` through the projection, `exportSnapshot`↔`hydrate()` round-trip, plus `runSkillStoreConformance` against `InMemorySkillStore`
-- `src/__tests__/run.spec.ts` — `skills.run` harness mechanics (dependency-free, stub runner): default composition (system skill body + serialized args), `composeRun` seam override, handle pass-through (with / without `output`; failures ride `handle.result`), `isolate: true`→`SkillIsolationUnavailable`, unbound runner→`SkillRunnerUnbound`, missing skill→`SkillNotFound`
-- `@agentick/app-next` `src/__tests__/skills-run-e2e.spec.tsx` — `session.skills.run` end-to-end through `createApp` (proves the C-core `bindRunner` injection site): `output`→validated `data` + `stopReason "output_delivered"`, no-`output`→text, missing skill, and the `SteerCannotCarryStructuredOutput` reentrancy guard
+- `src/__tests__/run.spec.ts` — `skills.run` harness mechanics (dependency-free, stub runner): default composition (system skill body + serialized args), `composeRun` seam override, handle pass-through (with / without `output`; failures ride `handle.result`), `isolate: true` with no isolation runner→`SkillIsolationUnavailable` / with one bound→routes through it (not the plain runner), `Skill.allowedTools` round-trip + threading into `SendInput.allowedTools`, unbound runner→`SkillRunnerUnbound`, missing skill→`SkillNotFound`
+- `@agentick/app-next` `src/__tests__/skills-run-e2e.spec.tsx` — `session.skills.run` end-to-end through `createApp` (proves the C-core `bindRunner` injection site): `output`→validated `data` + `stopReason "output_delivered"`, no-`output`→text, missing skill, the `SteerCannotCarryStructuredOutput` reentrancy guard, and the **isolation** path (`isolate: true` runs on a fork, leaves the parent timeline untouched, disposes the child after settle)
 - `@agentick/transport-in-process-next` `src/__tests__/wire-reads-e2e.spec.ts` — `skills/list` + `skills/get` (`content` included) round-trip over the real gateway + dynamic lane, `commands/list` enumerates them, undeclared verb stays MethodNotFound
 - Cross-harness integration tests live in adopter packages (`@agentick/session-next`, `@agentick/app-next`)
 

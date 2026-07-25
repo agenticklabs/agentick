@@ -193,6 +193,13 @@ apply → compiler `tick-end`); its output is the settled `TickResult`.
   the verb is `exposure: "internal"` — never inbox/wire-addressable (ADR 51
   §1.2). It lives on the LOOP harness (the loop owns tick orchestration),
   not the model executor (which owns the single model call).
+- **Per-execution tool restriction (`RunExecutionInput.allowedTools`, C2).**
+  When a send carries `allowedTools`, the tick filters the MERGED,
+  precedence-resolved model-visible tool list down to those canonical names —
+  after the compiler-tools merge, **before** structured-output terminal-tool
+  injection (the terminal tool is loop-owned and exempt). The post-restriction
+  count feeds `resolveAutoStrategy`, so an emptied list resolves `"auto"` as
+  `toolsMounted: false`. Dispatch-door tools are untouched.
 
 ### Lifecycle is the projected command-hook system (ADR 89 §4)
 

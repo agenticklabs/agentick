@@ -78,6 +78,7 @@ async function mkSession(
     spawnContext?: SpawnContext;
     parentSessionId?: string;
     tools?: readonly ToolRegistration[];
+    agent?: unknown;
   } = {},
 ) {
   const journal = new MemoryJournal();
@@ -98,7 +99,7 @@ async function mkSession(
 
   const session = new SessionHarness(journal, bus, inbox, {
     sessionId: `s-${Math.random()}`,
-    agent: null,
+    agent: opts.agent ?? null,
     compiler,
     loop,
     modelExecutor: executor,
@@ -379,6 +380,27 @@ describe("SessionHarness — spawn", () => {
     expect(receivedInput?.metadata).toEqual({ tag: "spawned" });
     // The returned value is the child session (no auto-send).
     expect(child).toBeDefined();
+    await session.close();
+  });
+
+  it("defaults the child agent to the parent's OWN root when SpawnInput.agent is omitted (C2)", async () => {
+    // A sentinel agent root the session retains and forwards on a default spawn.
+    const parentRoot = { __agent: "parent-root-jsx" };
+    let receivedInput: SpawnContextChildInput | undefined;
+    const ctx: SpawnContext = {
+      disposeChildSession: async () => undefined,
+      createChildSession: async (input) => {
+        receivedInput = input;
+        return { id: input.sessionId ?? "child-stub" } as unknown as SessionHarnessProtocol;
+      },
+    };
+    const { session } = await mkSession({ spawnContext: ctx, agent: parentRoot });
+
+    // No `agent` on the spawn input → the session resolves the default before
+    // crossing the SpawnContext boundary (which stays REQUIRED-agent).
+    await session.spawn({ sessionId: "child-default" });
+
+    expect(receivedInput?.agent).toBe(parentRoot);
     await session.close();
   });
 });

@@ -286,6 +286,19 @@ export interface RunExecutionInput {
    * explicit-beats-ambient.
    */
   readonly outputSpec?: OutputSpec;
+
+  /**
+   * Per-execution tool RESTRICTION (three-audiences-plan §C split, item 3).
+   * When present, the loop filters the MERGED model-visible tool list down to
+   * tools whose canonical `name` is in this allowlist — applied per tick AFTER
+   * the compiler-tools merge + precedence fold, but BEFORE structured-output
+   * terminal-tool injection (the terminal tool is loop-owned and exempt). The
+   * post-restriction count feeds `"auto"` strategy resolution, so an empty
+   * result behaves as `toolsMounted: false`. Absent = no restriction.
+   * Threaded straight from `SendInput.allowedTools`; dispatch-door tools are
+   * unaffected (this scopes only what the model sees).
+   */
+  readonly allowedTools?: readonly string[];
 }
 
 /**
@@ -517,6 +530,12 @@ export interface TickInput {
    * this tick. See {@link OutputSpec}.
    */
   readonly outputSpec?: OutputSpec;
+  /**
+   * Per-execution tool RESTRICTION forwarded from
+   * {@link RunExecutionInput.allowedTools}. Filters this tick's merged
+   * model-visible tool list before terminal-tool injection. See that field.
+   */
+  readonly allowedTools?: readonly string[];
   /**
    * Forced tool-choice for THIS tick (three-audiences-plan §B2 wrap-up rung).
    * Spread LAST into the tick's compiled `config.toolChoice` — the loop sets

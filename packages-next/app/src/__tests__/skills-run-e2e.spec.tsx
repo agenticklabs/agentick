@@ -34,6 +34,7 @@ import {
   type FakeLanguageModelExecutorOptions,
 } from "@agentick/model-executor-next";
 import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime-next";
+import { waitFor } from "@agentick/utils-next/testing";
 import type {
   ExecutionTarget,
   LanguageModelExecutionResult,
@@ -203,6 +204,70 @@ describe("session.skills!.run — e2e through createApp (C-core injection + §B2
 
     release();
     await inflight.result;
+    await session.close();
+    await app.close();
+  });
+});
+
+describe("session.skills!.run — isolation (C2: routes through session.fork())", () => {
+  it("runs on a forked child, leaves the PARENT timeline untouched, disposes the child after settle", async () => {
+    // Two scripted turns: [0] the parent's own send, [1] the isolated run's turn
+    // (executed on the forked child; the executor is shared/inherited).
+    const executor = fakeExecutor([
+      { result: textResult("parent turn") },
+      { result: textResult("isolated reply") },
+    ]);
+    const app = await createApp(React.createElement(Agent), {
+      modelExecutor: executor,
+      extensions: [withSkills({ initial: [reviewSkill] })],
+    });
+    const session = await app.createSession({ sessionId: "s-iso" });
+
+    // Give the parent a real timeline so the isolation invariant is observable.
+    await (
+      await session.send({ messages: [{ role: "user", content: "hi" }] })
+    ).result;
+    const parentEntriesBefore = session.timeline.read().entries.length;
+    expect(parentEntriesBefore).toBeGreaterThan(0);
+
+    // Isolated run — the composed send executes on a fresh fork, not the parent.
+    const r = await (await session.skills!.run("review", { isolate: true, args: { x: 1 } })).result;
+    expect(r.response).toBe("isolated reply");
+
+    // ISOLATION INVARIANT — the parent's timeline gained NOTHING from the run.
+    expect(session.timeline.read().entries.length).toBe(parentEntriesBefore);
+
+    // The forked child was created (durable record with parent lineage) …
+    const records = await app.listSessions();
+    const childRec = records.find((rec) => rec.parentSessionId === "s-iso");
+    expect(childRec).toBeDefined();
+    // … and disposed from the LIVE registry after the handle settled.
+    await waitFor(() => app.getSession(childRec!.id) === undefined, {
+      description: "isolated fork disposed after settle",
+    });
+
+    await session.close();
+    await app.close();
+  });
+
+  it("isolate: true with no isolation runner reachable still surfaces the skill result path", async () => {
+    // Sanity: a normal (non-isolated) run and an isolated run of the SAME skill
+    // both deliver the skill's result — isolation changes WHERE it runs, not WHAT.
+    const executor = fakeExecutor([
+      { result: textResult("normal") },
+      { result: textResult("isolated") },
+    ]);
+    const app = await createApp(React.createElement(Agent), {
+      modelExecutor: executor,
+      extensions: [withSkills({ initial: [reviewSkill] })],
+    });
+    const session = await app.createSession({ sessionId: "s-iso-2" });
+
+    const normal = await (await session.skills!.run("review")).result;
+    expect(normal.response).toBe("normal");
+    const isolated = await (await session.skills!.run("review", { isolate: true })).result;
+    expect(isolated.response).toBe("isolated");
+
     await session.close();
     await app.close();
   });
